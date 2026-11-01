@@ -185,7 +185,7 @@ public sealed class SubmitSheetHandler(
                 // ⛔ L6-02: структура документа — спільно й першою. Подання не йде
                 // паралельно з переносом версії: перенос або вже зафіксований (і
                 // версію нижче читаємо нову), або чекає на подання.
-                var structure = await sheetGate.EnterStructureAsync(documentId, exclusive: false, innerCt)
+                var structure = await sheetGate.EnterStructureForPeriodAsync(documentId, exclusive: false, key.Value, innerCt)
                     .ConfigureAwait(false);
 
                 // ⛔ AN-36b (рев'ю AN-36, P2-1): склад документа вище перевірено ДО

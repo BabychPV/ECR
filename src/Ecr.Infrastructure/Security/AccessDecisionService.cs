@@ -2709,7 +2709,8 @@ public sealed class AccessDecisionService(
         var scope = await db.Documents
             .AsNoTracking()
             .Where(d => d.Id == documentId)
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (_, p) => new { p.Id, p.TemplateVersionId })
+            // ✎ RPT-STABLE B2: маршрут - версії ПЕРІОДУ аркуша (шкала), не чинної версії проєкту.
+            .Select(d => new { Id = d.ProjectId, TemplateVersionId = EcrDbContext.VersionOf(d.ProjectId, periodKey.Value) })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 

@@ -822,10 +822,20 @@ public sealed class DocumentStore(
     private const string KeyChangedEventType = Application.Documents.ChangeDocumentKeyHandler.EventType;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ✎ RPT-STABLE B2: склад документа тримає аркуші ЧИННОЇ версії, а період до X після переносу «з місяця» - аркуші
+    /// старої версії. Тому аркуш «у складі», якщо в складі є аркуш з ТИМ САМИМ кодом (той самий один запит). Чи належить
+    /// аркуш версії саме цього періоду, перевіряє вже подання під блокуванням (знімок версії періоду).
+    /// </remarks>
     public async Task<bool> HasSheetAsync(long documentId, int sheetDefId, CancellationToken ct)
         => await db.DocumentSheets
             .AsNoTracking()
-            .AnyAsync(s => s.DocumentId == documentId && s.SheetDefId == sheetDefId && s.IsIncluded, ct)
+            .Where(s => s.DocumentId == documentId && s.IsIncluded)
+            .Join(db.SheetDefs, s => s.SheetDefId, d => d.Id, (s, d) => new { s.SheetDefId, d.Code })
+            .AnyAsync(
+                x => x.SheetDefId == sheetDefId
+                     || x.Code == db.SheetDefs.Where(r => r.Id == sheetDefId).Select(r => r.Code).FirstOrDefault(),
+                ct)
             .ConfigureAwait(false);
 
     /// <inheritdoc />
@@ -899,6 +909,27 @@ public sealed class DocumentStore(
             where document.Id == documentId
             join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
             select (int?)project.TemplateVersionId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return found ?? throw new Ecr.Application.Errors.NotFoundException(
+            "ECR-DOC-0404",
+            $"Документ {documentId} не знайдено.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-DOC-0404.document",
+                ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+    }
+
+    /// <inheritdoc />
+    public async Task<int> GetTemplateVersionIdForPeriodAsync(long documentId, int periodKey, CancellationToken ct)
+    {
+        // ✎ RPT-STABLE B2: той самий один запит, але версія - ПЕРІОДУ (doc.fn_VersionOf), а не чинна версія проєкту.
+        var found = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => (int?)EcrDbContext.VersionOf(d.ProjectId, periodKey))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 

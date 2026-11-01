@@ -63,6 +63,15 @@ public sealed partial class DocumentVersionMigrationTests
             .ConfigureAwait(true);   // 202601: Approved
         var months = await AddMonthsAsync(s, 202602, 202603).ConfigureAwait(true);
 
+        // ✎ D-461 × B2: ручне значення замість формули в СТАРОМУ періоді (колонка v1) - перенос «з лютого» його не знімає.
+        await using (var db0 = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            db0.CellFormulaOverrides.Add(new CellFormulaOverride(
+                new CellAddress(new PeriodKey(202601), s.Doc.RowIds[0], s.Doc.ColumnDefIds[1]), s.Doc.TableInstanceId,
+                "manual", s.UserId, DateTime.UtcNow));
+            await db0.SaveChangesAsync().ConfigureAwait(true);
+        }
+
         // Стан періоду ДО X фіксується байт-у-байт (ідентифікатори й значення).
         var jan = await PeriodStateAsync(s, 202601).ConfigureAwait(true);
 
@@ -96,6 +105,13 @@ public sealed partial class DocumentVersionMigrationTests
             .SingleAsync(a => a.DocumentId == s.Doc.DocumentId && a.PeriodKey == 202601).ConfigureAwait(true);
         Assert.Equal(s.Doc.SheetDefId, janState.SheetDefId);
         Assert.Equal(DocumentStatus.Approved, janState.Status);
+
+        // ✎ D-461: позначка ручного значення січня лишилась на СТАРІЙ колонці (не знята як «втрачена» в цільовій версії).
+        var janRow = s.Doc.RowIds[0];
+        var janOverrides = await db.Database
+            .SqlQuery<int>($"SELECT ColumnDefId AS Value FROM doc.CellFormulaOverride WHERE PeriodKey = 202601 AND TableRowId = {janRow}")
+            .ToListAsync().ConfigureAwait(true);
+        Assert.Equal([s.Doc.ColumnDefIds[1]], janOverrides);
 
         // Лютий і березень - на цільовій версії: екземпляр, колонки.
         foreach (var m in months)
@@ -447,6 +463,73 @@ public sealed partial class DocumentVersionMigrationTests
                 [(202601, s.Doc.TemplateVersionId), (202602, s.TargetVersionId)],
                 line.Select(t => (t.FromPeriodKey, t.TemplateVersionId)));
         }
+    }
+
+    /// <summary>
+    /// RPT-STABLE B2: СТАРИЙ період (до X) після переносу «з місяця» - подання, перерахунок і експорт працюють на старій
+    /// версії (стан погодження - на старому аркуші, задачі - Succeeded), черга «До погодження» показує поданий старий аркуш.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "RPT-STABLE")]
+    public async Task Старий_період_після_переносу_з_місяця_подається_перераховується_й_експортується_на_старій_версії()
+    {
+        var s = await ArrangeAsync(Target.AddsC4Only, extraPermission: "Document.View", periodKey: 202609).ConfigureAwait(true);
+        await AddMonthsAsync(s, 202610).ConfigureAwait(true);
+        await OpenForEditingAsync(s).ConfigureAwait(true);   // активує проєкт і відкриває 202609
+        await using (var db0 = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var roleId = await db0.RoleAssignments.Where(a => a.UserId == s.UserId).Select(a => a.RoleId).FirstAsync().ConfigureAwait(true);
+            db0.RolePermissions.Add(new Ecr.Domain.Entities.Security.RolePermission(roleId, "Document.Export"));
+            await db0.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var flag = FromMonthOn();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var moved = await PostRangeAsync(client, s, dryRun: false, "FromMonth", 202610).ConfigureAwait(true);
+        Assert.True(moved.StatusCode == HttpStatusCode.OK, $"{moved.StatusCode}: {await moved.Content.ReadAsStringAsync().ConfigureAwait(true)} {app.ErrorsText}");
+        await Task.Delay(TimeSpan.FromSeconds(2.5)).ConfigureAwait(true);   // кеш маркерів міграції
+
+        // Перерахунок старого періоду - на старій версії, задача завершується успіхом.
+        using (var recalc = await client.PostAsJsonAsync(
+                   new Uri($"/api/v1/documents/{s.Doc.DocumentId}/recalculate", UriKind.Relative), new { periodKey = 202609 })
+               .ConfigureAwait(true))
+        {
+            var body = await recalc.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(recalc.StatusCode == HttpStatusCode.Accepted, $"перерахунок: {recalc.StatusCode}: {body} {app.ErrorsText}");
+            var job = await WaitJobAsync(client, JsonDocument.Parse(body).RootElement.GetProperty("jobId").GetString()!, app).ConfigureAwait(true);
+            Assert.True(job.GetProperty("state").GetString() == "Succeeded", $"перерахунок: {job.GetRawText()}\n{app.ErrorsText}");
+        }
+
+        // Експорт старого періоду - книга будується (структура старої версії).
+        using (var export = await client.PostAsJsonAsync(
+                   new Uri($"/api/v1/documents/{s.Doc.DocumentId}/export", UriKind.Relative),
+                   new { periodKey = 202609, includeFormulas = false, includeStyles = false, language = "en" })
+               .ConfigureAwait(true))
+        {
+            var body = await export.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(export.StatusCode == HttpStatusCode.Accepted, $"експорт: {export.StatusCode}: {body} {app.ErrorsText}");
+            var job = await WaitJobAsync(client, JsonDocument.Parse(body).RootElement.GetProperty("jobId").GetString()!, app).ConfigureAwait(true);
+            Assert.True(job.GetProperty("state").GetString() == "Succeeded", $"експорт: {job.GetRawText()}\n{app.ErrorsText}");
+        }
+
+        // Подання старого аркуша (старий SheetDefId) - проходить, стан на СТАРОМУ аркуші.
+        using (var submit = await client.PostAsJsonAsync(
+                   new Uri($"/api/v1/documents/{s.Doc.DocumentId}/submit", UriKind.Relative),
+                   new { sheetDefId = s.Doc.SheetDefId, periodKey = 202609, acknowledgeWarnings = true })
+               .ConfigureAwait(true))
+        {
+            var body = await submit.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(submit.IsSuccessStatusCode, $"подання: {submit.StatusCode}: {body} {app.ErrorsText}");
+        }
+
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var state = await db.ApprovalStates.AsNoTracking()
+            .SingleAsync(a => a.DocumentId == s.Doc.DocumentId && a.PeriodKey == 202609).ConfigureAwait(true);
+        Assert.Equal(s.Doc.SheetDefId, state.SheetDefId);
+        Assert.Equal(DocumentStatus.Submitted, state.Status);
     }
 
     /// <summary>Вмикає прапор «з місяця» для фабрик, створених у межах області (типово він вимкнений до B2).</summary>

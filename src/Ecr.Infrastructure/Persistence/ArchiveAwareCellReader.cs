@@ -308,10 +308,9 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
         => await db.Database
             .SqlQuery<TableInstanceRef>($"""
                 SELECT t.Id AS TableInstanceId, t.DocumentId, t.TableDefId,
-                       p.TemplateVersionId, t.PeriodKey
+                       doc.fn_VersionOf(d.ProjectId, t.PeriodKey) AS TemplateVersionId, t.PeriodKey
                 FROM arc.TableInstance t
                 JOIN doc.Document d ON d.Id = t.DocumentId
-                JOIN doc.Project p ON p.Id = d.ProjectId
                 WHERE t.DocumentId = {documentId} AND t.PeriodKey = {periodKey.Value}
                 ORDER BY t.Id
                 """)

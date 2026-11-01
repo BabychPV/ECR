@@ -16,7 +16,10 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
                 join v in db.TemplateVersions.AsNoTracking() on p.TemplateVersionId equals v.Id
                 join t in db.Templates.AsNoTracking() on v.TemplateId equals t.Id
                 where p.Status != ProjectStatus.Archived && !p.IsArchiving
-                select new ApprovalQueueProject(p.Id, p.Code, p.TemplateVersionId, t.Code, p.Status, p.IsArchiving))
+                select new ApprovalQueueProject(
+                    p.Id, p.Code, p.TemplateVersionId, t.Code, p.Status, p.IsArchiving,
+                    // ✎ RPT-STABLE B2: проєкт має періоди на інших версіях (шкала) - тим самим запитом, без зайвого звернення.
+                    db.ProjectTemplateVersions.Any(x => x.ProjectId == p.Id && x.TemplateVersionId != p.TemplateVersionId)))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 

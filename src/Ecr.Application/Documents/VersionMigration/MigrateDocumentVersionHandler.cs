@@ -1031,7 +1031,7 @@ public sealed class MigrateDocumentVersionHandler(
 
                 // ✎ D-461: позначки вже переїхали за колонками (діапазони); ті, яких цільова формула не дозволяє, —
                 // знімаються, комірка знову обчислена (перерахунок проєкту нижче), журнал — FormulaRestored.
-                var released = await ReleaseLostOverridesAsync(projectId, target.Id, profile.UserId, innerCt).ConfigureAwait(false);
+                var released = await ReleaseLostOverridesAsync(projectId, target.Id, profile.UserId, plan.FromPeriodKey, innerCt).ConfigureAwait(false);
                 if (released > 0)
                 {
                     formulaTables = Math.Max(formulaTables, 1);
@@ -1139,7 +1139,7 @@ public sealed class MigrateDocumentVersionHandler(
     /// ✎ D-461: після переносу колонок знімає позначки, яких формула ЦІЛЬОВОЇ версії не дозволяє, і пише журнал
     /// (<c>FormulaRestored</c>, причина «Version migration», старе значення). Повертає кількість знятих.
     /// </summary>
-    private async Task<int> ReleaseLostOverridesAsync(int projectId, int targetVersionId, int userId, CancellationToken ct)
+    private async Task<int> ReleaseLostOverridesAsync(int projectId, int targetVersionId, int userId, int fromPeriodKey, CancellationToken ct)
     {
         if (formulaOverrides is null)
         {
@@ -1147,7 +1147,8 @@ public sealed class MigrateDocumentVersionHandler(
         }
 
         var to = await metadata.GetAsync(targetVersionId, ct).ConfigureAwait(false);
-        var marks = await formulaOverrides.ReadProjectAsync(projectId, ct).ConfigureAwait(false);
+        // ✎ RPT-STABLE B2: перенос «з місяця» не чіпає періодів до X - їхні ручні значення лишаються на старій версії.
+        var marks = InScope(await formulaOverrides.ReadProjectAsync(projectId, ct).ConfigureAwait(false), fromPeriodKey);
         Func<int, int?> targetColumnOf = column => to.ColumnsById.ContainsKey(column) ? column : null;
         var lost = FormulaOverrideMigration.Lost(marks, targetColumnOf, to);
 
@@ -1355,6 +1356,10 @@ public sealed class MigrateDocumentVersionHandler(
                         && !string.Equals(f.Code, t.Code, StringComparison.Ordinal))
             .Select(c => (c.SourceColumnDefId, c.TargetColumnDefId))];
 
+    /// <summary>RPT-STABLE B2: позначки ручних значень лише в періодах, які перенос зачіпає (0 - усі).</summary>
+    private static IReadOnlyList<ProjectFormulaOverride> InScope(IReadOnlyList<ProjectFormulaOverride> marks, int fromPeriodKey)
+        => fromPeriodKey == 0 ? marks : [.. marks.Where(m => m.Address.PeriodKey.Value >= fromPeriodKey)];
+
     /// <summary>План переносу разом зі звітом, мапінгами й значеннями шапки, які читав аудит мап Lookup.</summary>
     private sealed record PlannedMigration(
         DocumentVersionMigrationDto Dto,
@@ -1393,7 +1398,7 @@ public sealed class MigrateDocumentVersionHandler(
         var lostOverrides = formulaOverrides is null
             ? []
             : FormulaOverrideMigration.Lost(
-                await formulaOverrides.ReadProjectAsync(projectId, ct).ConfigureAwait(false),
+                InScope(await formulaOverrides.ReadProjectAsync(projectId, ct).ConfigureAwait(false), range.FromPeriodKey),
                 column => overrideMap.TryGetValue(column, out var mapped) ? mapped : to.ColumnsById.ContainsKey(column) ? column : null,
                 to);
         if (lostOverrides.Count > 0)
