@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -130,7 +129,8 @@ describe('summary poll (LIVE-REFRESH A1)', () => {
 
     visibility = 'hidden';
     await act(async () => {
-      document.dispatchEvent(new Event('visibilitychange'));
+      // As the browser fires it: at the document, bubbling (TanStack listens on `window`).
+      document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
       await vi.advanceTimersByTimeAsync(10);
     });
     await tick(120_000);
@@ -139,7 +139,7 @@ describe('summary poll (LIVE-REFRESH A1)', () => {
     unread = 5;
     visibility = 'visible';
     await act(async () => {
-      document.dispatchEvent(new Event('visibilitychange'));
+      document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
       await vi.advanceTimersByTimeAsync(10);
     });
     expect(seen).toHaveLength(2);

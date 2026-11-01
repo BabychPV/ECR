@@ -20,7 +20,7 @@ vi.mock('@/features/documents/api', () => ({ useTableStatus: () => ({ data: [] }
 
 // ⚠ Опитування маркера змін (setInterval 30 с) під `vi.runAllTimers()` крутилося б без кінця; його перевіряє
 // `liveRefresh/__tests__`, тут — лише панель і повний екран.
-vi.mock('../liveRefresh/useSheetChanges', () => ({
+vi.mock('@/features/grid/liveRefresh/useSheetChanges', () => ({
   useSheetChanges: () => ({ change: null, stopped: false, clear: () => undefined, rebase: () => Promise.resolve() }),
 }));
 
