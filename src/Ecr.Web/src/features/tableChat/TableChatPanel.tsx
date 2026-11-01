@@ -370,7 +370,7 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
 
       {newBelow > 0 && (
         <div className="ecr-chat-newpill">
-          <Button size="xs" radius="xl" variant="filled" onClick={showNewest} data-chat-new-pill={String(newBelow)}>
+          <Button size="xs" variant="filled" onClick={showNewest} data-chat-new-pill={String(newBelow)}>
             {t('tableChat.newBelow', { n: newBelow })}
           </Button>
         </div>
