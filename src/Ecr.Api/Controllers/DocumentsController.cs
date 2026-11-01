@@ -398,6 +398,8 @@ public sealed class DocumentsController(
         var mode = request.Mode ?? Application.Documents.VersionMigration.VersionMigrationMode.Safe;
 
         migrateVersion.BackupConfirmation = request.BackupConfirmation;
+        migrateVersion.Range = request.Range ?? Application.Documents.VersionMigration.VersionMigrationRange.WholeProject;
+        migrateVersion.FromPeriodKey = request.FromPeriodKey;
         if (request.Async && !request.DryRun)
         {
             var jobId = await migrateVersion
@@ -770,6 +772,19 @@ public sealed record ChangeDocumentKeyRequest(string? BusinessKey, string? Expec
 /// (<c>migrateLookupLockedDocuments</c>), нічого не записано; їх кількість сухий прогін показує до згоди
 /// (<c>lockedDocumentCount</c>). Не впливає на подані/затверджені аркуші (<c>409 sheetsLocked</c>) і на перенос без мап.
 /// </param>
+/// <param name="Range">
+/// RPT-STABLE Part B. Обсяг переносу: <c>WholeProject</c> (типово; поведінка як раніше — усі періоди проєкту, у будь-який
+/// час) або <c>FromMonth</c> (з періоду <c>fromPeriodKey</c>). Для <c>FromMonth</c> періоди &lt; X лишаються на старих
+/// ідентифікаторах структури, УКЛЮЧНО з поданими/затвердженими; періоди ≥ X переходять на нову версію; нові періоди
+/// проєкту йдуть на нову версію; подані/затверджені перевіряються лише для періодів ≥ X. Якщо у проєкті є таблиця з
+/// місяцями в колонках (Q-17) і X — не січень, увесь рік переходить з ЯНВАРЯ цього року: відповідь несе
+/// <c>effectiveFromPeriodKey</c> і попередження <c>effectiveFromShiftedToJanuary</c>. X мусить бути ≥ початку останнього
+/// сегмента шкали версій проєкту (<c>GET /projects/{id}/template-versions</c>); <c>WholeProject</c> можливий, лише коли
+/// шкала має один сегмент. Помилки (<c>422 ECR-SCHM-0422</c>): <c>migrateFromMonthRequired</c>,
+/// <c>migrateFromMonthInvalid</c>, <c>migrateFromMonthBeforeSegment</c>, <c>migrateWholeProjectMultiVersion</c>,
+/// <c>migrateTargetNotPublished</c>.
+/// </param>
+/// <param name="FromPeriodKey">Період X (<c>Рік*100+№</c>) для <c>Range = FromMonth</c>; для <c>WholeProject</c> ігнорується.</param>
 public sealed record MigrateDocumentVersionRequest(
     int TargetVersionId,
     Application.Documents.VersionMigration.VersionMigrationMode? Mode,
@@ -779,7 +794,9 @@ public sealed record MigrateDocumentVersionRequest(
     bool? AcceptGuardedOverwrite = null,
     IReadOnlyList<Application.Documents.VersionMigration.VersionMigrationLookupRemap>? LookupRemaps = null,
     bool? AllowLockedDocuments = null,
-    string? BackupConfirmation = null);
+    string? BackupConfirmation = null,
+    Application.Documents.VersionMigration.VersionMigrationRange? Range = null,
+    int? FromPeriodKey = null);
 
 /// <summary>Запит на експорт.</summary>
 /// <param name="IncludeFormulas">

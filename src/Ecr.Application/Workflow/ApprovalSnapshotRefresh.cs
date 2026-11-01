@@ -70,7 +70,7 @@ public sealed class ApprovalSnapshotRefresh(
         var instances = await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
         var templateVersionId = instances.Count > 0
             ? instances[0].TemplateVersionId
-            : await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
+            : await Documents.DocumentPeriodVersion.GetAsync(documents, documentId, periodKey.Value, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
 
         var sheetTables = snapshot.Sheets

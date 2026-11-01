@@ -954,7 +954,12 @@ public sealed class AccessDecisionService(
         var scope = await db.Documents
             .AsNoTracking()
             .Where(d => d.Id == documentId)
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.ProjectId, p.TemplateVersionId })
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new
+            {
+                d.ProjectId,
+                p.TemplateVersionId,
+                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId),
+            })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false)
             ?? throw new NotFoundException(
@@ -966,7 +971,7 @@ public sealed class AccessDecisionService(
                     ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
 
-        var snapshot = await metadata.GetAsync(scope.TemplateVersionId, ct).ConfigureAwait(false);
+        var snapshot = await ProjectReadSnapshotAsync(scope.ProjectId, scope.TemplateVersionId, scope.Multi, ct).ConfigureAwait(false);
 
         // ✎ D-443: межі документа з наданнями учасника саме в ньому (лише для профілю-учасника; заборона проєкту
         // перемагає — тоді межі як за ролями, тобто закриті).
@@ -976,6 +981,55 @@ public sealed class AccessDecisionService(
 
         return DocumentReadScope.ForParticipant(
             profile, scope.ProjectId, snapshot, grants.TryGetValue(documentId, out var mine) ? mine : null);
+    }
+
+    /// <summary>
+    /// RPT-STABLE Part B: знімок для ЧИТАННЯ документа проєкту. У проєкті з кількома версіями за періодами (шкала) це
+    /// обʼєднання аркушів/колонок усіх версій шкали: таблиці періоду на старій версії мають свої Id, і знімок лише чинної
+    /// версії не впізнав би їх (читання повертало б порожнє). Проєкт з однією версією - звичайний знімок (+1 малий запит).
+    /// </summary>
+    private async Task<TemplateVersionSnapshot> ProjectReadSnapshotAsync(
+        int projectId, int currentVersionId, bool multiVersion, CancellationToken ct)
+    {
+        var current = await metadata.GetAsync(currentVersionId, ct).ConfigureAwait(false);
+        if (!multiVersion)
+        {
+            return current;   // ознака приїхала у вже наявному запиті документа: зайвого звернення на звичайному шляху немає
+        }
+
+        var others = await db.ProjectTemplateVersions
+            .AsNoTracking()
+            .Where(t => t.ProjectId == projectId && t.TemplateVersionId != currentVersionId)
+            .Select(t => t.TemplateVersionId)
+            .Distinct()
+            .OrderBy(v => v)
+            .Take(200)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (others.Count == 0)
+        {
+            return current;
+        }
+
+        var sheets = new List<Ecr.Domain.Entities.Configuration.SheetDef>(current.Sheets);
+        var columns = new Dictionary<int, Ecr.Domain.Entities.Configuration.ColumnDef>(current.ColumnsById);
+        var rows = new Dictionary<(int TableDefId, string RowKey), Ecr.Domain.Entities.Configuration.RowDef>(current.RowsByKey);
+        foreach (var versionId in others)
+        {
+            var other = await metadata.GetAsync(versionId, ct).ConfigureAwait(false);
+            sheets.AddRange(other.Sheets);
+            foreach (var column in other.ColumnsById)
+            {
+                columns.TryAdd(column.Key, column.Value);
+            }
+
+            foreach (var row in other.RowsByKey)
+            {
+                rows.TryAdd(row.Key, row.Value);
+            }
+        }
+
+        return current with { Sheets = sheets, ColumnsById = columns, RowsByKey = rows };
     }
 
     /// <inheritdoc />
@@ -999,7 +1053,7 @@ public sealed class AccessDecisionService(
         var rows = await db.Documents
             .AsNoTracking()
             .Where(d => ids.Contains(d.Id))
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.Id, d.ProjectId, p.TemplateVersionId })
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.Id, d.ProjectId, p.TemplateVersionId, Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId) })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -1007,13 +1061,13 @@ public sealed class AccessDecisionService(
                 profile, [.. rows.Where(r => !profile.DeniesProject(r.ProjectId)).Select(r => r.Id)], ct)
             .ConfigureAwait(false);
 
-        var snapshots = new Dictionary<int, TemplateVersionSnapshot>();
+        var snapshots = new Dictionary<(int ProjectId, int VersionId), TemplateVersionSnapshot>();
         foreach (var row in rows)
         {
-            if (!snapshots.TryGetValue(row.TemplateVersionId, out var snapshot))
+            if (!snapshots.TryGetValue((row.ProjectId, row.TemplateVersionId), out var snapshot))
             {
-                snapshot = await metadata.GetAsync(row.TemplateVersionId, ct).ConfigureAwait(false);
-                snapshots[row.TemplateVersionId] = snapshot;
+                snapshot = await ProjectReadSnapshotAsync(row.ProjectId, row.TemplateVersionId, row.Multi, ct).ConfigureAwait(false);
+                snapshots[(row.ProjectId, row.TemplateVersionId)] = snapshot;
             }
 
             result[row.Id] = DocumentReadScope.ForParticipant(
@@ -2655,7 +2709,8 @@ public sealed class AccessDecisionService(
         var scope = await db.Documents
             .AsNoTracking()
             .Where(d => d.Id == documentId)
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (_, p) => new { p.Id, p.TemplateVersionId })
+            // ✎ RPT-STABLE B2: маршрут - версії ПЕРІОДУ аркуша (шкала), не чинної версії проєкту.
+            .Select(d => new { Id = d.ProjectId, TemplateVersionId = EcrDbContext.VersionOf(d.ProjectId, periodKey.Value) })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -2739,7 +2794,9 @@ public sealed class AccessDecisionService(
                     d.ProjectId,
                     p.Status,
                     p.IsArchiving,
-                    p.TemplateVersionId,
+
+                    // ✎ RPT-STABLE Part B: структура рішення - версія ПЕРІОДУ (шкала), не чинна версія проєкту.
+                    TemplateVersionId = EcrDbContext.VersionOf(p.Id, periodValue),
 
                     // ⚠ ФВ-1.8: річне вікно — з того самого рядка проєкту, без
                     // окремого звернення (храповик `PatchCellsQueryCountTests`).
@@ -3007,14 +3064,20 @@ public sealed class AccessDecisionService(
     /// <summary>Знімок структури шаблону документа.</summary>
     private async Task<TemplateVersionSnapshot> SnapshotAsync(long documentId, CancellationToken ct)
     {
-        var templateVersionId = await db.Documents
+        var scope = await db.Documents
             .AsNoTracking()
             .Where(d => d.Id == documentId)
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (_, p) => p.TemplateVersionId)
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new
+            {
+                d.ProjectId,
+                p.TemplateVersionId,
+                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId),
+            })
             .FirstAsync(ct)
             .ConfigureAwait(false);
 
-        return await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+        // ✎ RPT-STABLE Part B: проєкт з кількома версіями за періодами - знімок-обʼєднання (колонки старих періодів теж відомі).
+        return await ProjectReadSnapshotAsync(scope.ProjectId, scope.TemplateVersionId, scope.Multi, ct).ConfigureAwait(false);
     }
 }
 

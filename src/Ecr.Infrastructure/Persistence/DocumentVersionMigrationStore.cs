@@ -98,6 +98,16 @@ public sealed partial class DocumentVersionMigrationStore(
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> ListPeriodKeysAsync(int projectId, CancellationToken ct)
+        => await db.Periods
+            .AsNoTracking()
+            .Where(p => p.ProjectId == projectId)
+            .OrderBy(p => p.PeriodKeyValue)
+            .Select(p => p.PeriodKeyValue)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<long>> ListDocumentIdsAsync(int projectId, CancellationToken ct)
         => await db.Documents
             .AsNoTracking()
@@ -108,7 +118,11 @@ public sealed partial class DocumentVersionMigrationStore(
             .ConfigureAwait(false);
 
     /// <inheritdoc />
-    public async Task<VersionMigrationScope> ReadScopeAsync(int projectId, CancellationToken ct)
+    public Task<VersionMigrationScope> ReadScopeAsync(int projectId, CancellationToken ct)
+        => ReadScopeAsync(projectId, 0, ct);
+
+    /// <inheritdoc />
+    public async Task<VersionMigrationScope> ReadScopeAsync(int projectId, int fromPeriodKey, CancellationToken ct)
     {
         // N-3: підрахунок по всіх значеннях проєкту (сотні тисяч) теж довший за глобальний таймаут.
         using var timeout = ExtendTimeout();
@@ -124,6 +138,7 @@ public sealed partial class DocumentVersionMigrationStore(
                 JOIN   doc.TableRow r       ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id
                 JOIN   doc.CellValue cv     ON cv.PeriodKey = r.PeriodKey AND cv.TableRowId = r.Id
                 WHERE  p.ProjectId = {projectId}
+                  AND  p.PeriodKey >= {fromPeriodKey}
                   AND  r.IsDeleted = 0
                   AND  cv.IsEmpty = 0
                 GROUP BY cv.ColumnDefId, r.RowDefId
@@ -145,7 +160,8 @@ public sealed partial class DocumentVersionMigrationStore(
 
         var locked = await db.ApprovalStates
             .AsNoTracking()
-            .Where(a => a.Status == DocumentStatus.Submitted || a.Status == DocumentStatus.Approved)
+            .Where(a => (a.Status == DocumentStatus.Submitted || a.Status == DocumentStatus.Approved)
+                        && a.PeriodKey >= fromPeriodKey)
             .Join(
                 db.Documents.Where(d => d.ProjectId == projectId),
                 a => a.DocumentId,
@@ -327,6 +343,12 @@ public sealed partial class DocumentVersionMigrationStore(
                 .Select(x => new { x.HeaderFieldDefId, x.OldEntryId, x.NewEntryId }),
         });
 
+        // RPT-STABLE Part B: «з місяця» входить у відбиток лише коли задано - відбиток переносу всього проєкту незмінний.
+        if (plan.FromPeriodKey != 0)
+        {
+            payload += "|fp" + plan.FromPeriodKey.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload)))[..32];
     }
     /// <inheritdoc />
@@ -393,6 +415,11 @@ public sealed partial class DocumentVersionMigrationStore(
             List<SqlParameter> list =
             [
                 new("@projectId", projectId),
+                new("@fromPeriod", plan.FromPeriodKey),
+                new("@renames", System.Data.SqlDbType.NVarChar, -1)
+                {
+                    Value = JsonSerializer.Serialize(plan.ColumnRenames.Select(r => new { f = r.FromColumnDefId, t = r.ToColumnDefId })),
+                },
                 new("@targetVersionId", targetVersionId),
                 new("@batch", batchRows),
                 new("@now", System.Data.SqlDbType.DateTime2) { Scale = 3, Value = now },
@@ -1443,7 +1470,7 @@ public sealed partial class DocumentVersionMigrationStore(
         INSERT @docs (Id) SELECT Id FROM doc.Document WHERE ProjectId = @projectId;
 
         DECLARE @periods TABLE (PeriodKey int PRIMARY KEY);
-        INSERT @periods (PeriodKey) SELECT PeriodKey FROM doc.Period WHERE ProjectId = @projectId;
+        INSERT @periods (PeriodKey) SELECT PeriodKey FROM doc.Period WHERE ProjectId = @projectId AND PeriodKey >= @fromPeriod;
 
         DECLARE @sheetMap TABLE (o int PRIMARY KEY, n int NOT NULL);
         INSERT @sheetMap SELECT o, n FROM OPENJSON(@sheets) WITH (o int, n int);
@@ -1725,7 +1752,8 @@ public sealed partial class DocumentVersionMigrationStore(
     private const string ValidationBatchSql = """
         DELETE TOP (@batch) v
         FROM   wf.ValidationResult v
-        JOIN   @docs d ON d.Id = v.DocumentId;
+        JOIN   @docs d ON d.Id = v.DocumentId
+        WHERE  v.PeriodKey >= @fromPeriod;
         """;
 
     /// <summary>Екземпляри таблиць (їх мало: документи × таблиці × періоди) — одним оператором.</summary>
@@ -1815,24 +1843,30 @@ public sealed partial class DocumentVersionMigrationStore(
         DELETE a
         FROM   wf.ApprovalState a
         JOIN   @docs d ON d.Id = a.DocumentId
-        WHERE  NOT EXISTS (SELECT 1 FROM @sheetMap m WHERE m.o = a.SheetDefId);
+        WHERE  a.PeriodKey >= @fromPeriod
+          AND  NOT EXISTS (SELECT 1 FROM @sheetMap m WHERE m.o = a.SheetDefId);
 
         UPDATE a
         SET    a.SheetDefId = m.n
         FROM   wf.ApprovalState a
         JOIN   @docs d     ON d.Id = a.DocumentId
-        JOIN   @sheetMap m ON m.o = a.SheetDefId;
+        JOIN   @sheetMap m ON m.o = a.SheetDefId
+        WHERE  a.PeriodKey >= @fromPeriod;
 
         UPDATE e
         SET    e.SheetDefId = m.n
         FROM   wf.ApprovalEvent e
         JOIN   @docs d     ON d.Id = e.DocumentId
-        JOIN   @sheetMap m ON m.o = e.SheetDefId;
+        JOIN   @sheetMap m ON m.o = e.SheetDefId
+        WHERE  e.PeriodKey >= @fromPeriod;
 
+        -- RPT-STABLE Part B: у режимі «з місяця» склад документа не втрачає аркушів, яких нова версія не має: їх
+        -- ще потребують періоди до X (екземпляри таблиць і стани лишилися на старих Id).
         DELETE s
         FROM   doc.DocumentSheet s
         JOIN   @docs d ON d.Id = s.DocumentId
-        WHERE  NOT EXISTS (SELECT 1 FROM @sheetMap m WHERE m.o = s.SheetDefId);
+        WHERE  @fromPeriod = 0
+          AND  NOT EXISTS (SELECT 1 FROM @sheetMap m WHERE m.o = s.SheetDefId);
 
         UPDATE s
         SET    s.SheetDefId = m.n
@@ -1870,6 +1904,36 @@ public sealed partial class DocumentVersionMigrationStore(
         JOIN   @grantMap m ON m.k = g.ResourceKind AND m.o = g.ResourceId
         WHERE  NOT EXISTS (SELECT 1 FROM sec.ResourceGrant t
                            WHERE t.RoleId = g.RoleId AND t.ResourceKind = g.ResourceKind AND t.ResourceId = m.n);
+
+        -- 6b. RPT-STABLE Part B: збережена мапа перейменувань колонок (псевдонім для SSRS і міжперіодних формул).
+        INSERT cfg.ColumnRename (FromColumnDefId, ToColumnDefId)
+        SELECT r.f, r.t
+        FROM   OPENJSON(@renames) WITH (f int, t int) r
+        WHERE  NOT EXISTS (SELECT 1 FROM cfg.ColumnRename x WHERE x.FromColumnDefId = r.f AND x.ToColumnDefId = r.t);
+
+        -- 6c. RPT-STABLE Part B: часова шкала версій. Перший рядок (поточна версія на першому періоді) засівається, якщо
+        -- його немає; далі рядки з ефективного початку й пізніші замінюються одним (X, нова). Увесь проєкт (@fromPeriod = 0)
+        -- лишає ОДИН рядок - нову версію з першого періоду.
+        DECLARE @firstPeriod int = (SELECT MIN(PeriodKey) FROM doc.Period WHERE ProjectId = @projectId);
+        DECLARE @oldVersion int = (SELECT TemplateVersionId FROM doc.Project WHERE Id = @projectId);
+        IF @firstPeriod IS NOT NULL
+        BEGIN
+            IF @fromPeriod = 0 OR @fromPeriod <= @firstPeriod
+            BEGIN
+                DELETE FROM doc.ProjectTemplateVersion WHERE ProjectId = @projectId;
+                INSERT doc.ProjectTemplateVersion (ProjectId, FromPeriodKey, TemplateVersionId)
+                VALUES (@projectId, @firstPeriod, @targetVersionId);
+            END
+            ELSE
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM doc.ProjectTemplateVersion WHERE ProjectId = @projectId)
+                    INSERT doc.ProjectTemplateVersion (ProjectId, FromPeriodKey, TemplateVersionId)
+                    VALUES (@projectId, @firstPeriod, @oldVersion);
+                DELETE FROM doc.ProjectTemplateVersion WHERE ProjectId = @projectId AND FromPeriodKey >= @fromPeriod;
+                INSERT doc.ProjectTemplateVersion (ProjectId, FromPeriodKey, TemplateVersionId)
+                VALUES (@projectId, @fromPeriod, @targetVersionId);
+            END
+        END
 
         -- 7. Нарешті — версія проєкту.
         -- ⛔ Маркер «міграція в процесі» (`migratingTo`) знімається ТІЄЮ САМОЮ командою, що перемикає версію: інакше

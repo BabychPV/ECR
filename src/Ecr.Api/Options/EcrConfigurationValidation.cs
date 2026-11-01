@@ -154,6 +154,9 @@ public static partial class EcrConfigurationValidation
 
         // ✎ Аудит 31.10 (G5): видаляти зниклі точки й за відповіддю запасної адреси (типово false).
         Ecr.Adapters.PiAf.CollectionRunnerOptions.DeleteMissingOnSecondaryKey,
+
+        // RPT-STABLE Part B: перенос версії «з місяця» (типово вимкнено).
+        Ecr.Application.Documents.VersionMigration.VersionMigrationOptions.FromMonthEnabledKey,
         Ecr.Api.Startup.StaleMapWarmService.EnabledKey,
         "Jobs:NightlyRecalculation:Enabled",
         "Logging:File:Json",

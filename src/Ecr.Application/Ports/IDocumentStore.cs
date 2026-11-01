@@ -428,6 +428,16 @@ public interface IDocumentStore
     /// </remarks>
     public Task<int> GetTemplateVersionIdAsync(long documentId, CancellationToken ct);
 
+    /// <summary>
+    /// RPT-STABLE B2: версія шаблону документа за ПЕРІОД (шкала версій проєкту). Типова реалізація (обгортки у тестах) -
+    /// чинна версія проєкту.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<int> GetTemplateVersionIdForPeriodAsync(long documentId, int periodKey, CancellationToken ct)
+        => GetTemplateVersionIdAsync(documentId, ct);
+
     /// <summary>Версія шаблону ПРОЄКТУ; <c>null</c> — проєкту немає.</summary>
     /// <remarks>
     /// ⛔ `V-11`: версія документа — це версія його проєкту (документ власної

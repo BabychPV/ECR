@@ -34,7 +34,10 @@ public sealed class ListMyApprovalQueueHandler(
     IApprovalQueueStore store,
     IAccessDecisionService access,
     IMetadataCache metadata,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+
+    // ✎ RPT-STABLE B2: версія за періодом подання (шкала версій). `null` (прямий конструктор у тестах) - чинна версія.
+    IProjectVersionTimeline? timeline = null)
 {
     /// <summary>Розмір сторінки за замовчуванням.</summary>
     public const int DefaultLimit = 50;
@@ -94,8 +97,8 @@ public sealed class ListMyApprovalQueueHandler(
         var participatedIds = participations.Keys.ToList();
 
         var snapshots = new Dictionary<int, TemplateVersionSnapshot>();
-        var scopes = new Dictionary<int, DocumentReadScope>();
-        var resolved = new Dictionary<int, ApprovalRoute?>();
+        var scopes = new Dictionary<(int ProjectId, int VersionId), DocumentReadScope>();
+        var resolved = new Dictionary<(int ProjectId, int VersionId), ApprovalRoute?>();
 
         var found = new List<(ApprovalQueueItemDto Item, ApprovalQueueCursor Position)>();
         var scanned = 0;
@@ -125,13 +128,18 @@ public sealed class ListMyApprovalQueueHandler(
                     continue;
                 }
 
-                if (!snapshots.TryGetValue(project.TemplateVersionId, out var snapshot))
+                // ✎ RPT-STABLE B2: аркуш подання належить версії ПЕРІОДУ (після переносу «з місяця» старі періоди - на старих
+                // Id), тож знімок і маршрут - цієї версії, а не чинної версії проєкту.
+                var versionId = timeline is null || !project.MultiVersion
+                    ? project.TemplateVersionId
+                    : await timeline.VersionOfAsync(project.ProjectId, row.PeriodKey, ct).ConfigureAwait(false);
+                if (!snapshots.TryGetValue(versionId, out var snapshot))
                 {
-                    snapshot = await metadata.GetAsync(project.TemplateVersionId, ct).ConfigureAwait(false);
-                    snapshots[project.TemplateVersionId] = snapshot;
+                    snapshot = await metadata.GetAsync(versionId, ct).ConfigureAwait(false);
+                    snapshots[versionId] = snapshot;
                 }
 
-                var item = Evaluate(row, project, snapshot, profile, restricted, routes, scopes, resolved, grants);
+                var item = Evaluate(row, project, versionId, snapshot, profile, restricted, routes, scopes, resolved, grants);
                 if (item is null)
                 {
                     continue;
@@ -170,12 +178,13 @@ public sealed class ListMyApprovalQueueHandler(
     private static ApprovalQueueItemDto? Evaluate(
         ApprovalQueueCandidate row,
         ApprovalQueueProject project,
+        int versionId,
         TemplateVersionSnapshot snapshot,
         AccessProfile profile,
         bool restricted,
         ApprovalQueueRoutes routes,
-        Dictionary<int, DocumentReadScope> scopes,
-        Dictionary<int, ApprovalRoute?> resolved,
+        Dictionary<(int ProjectId, int VersionId), DocumentReadScope> scopes,
+        Dictionary<(int ProjectId, int VersionId), ApprovalRoute?> resolved,
         IReadOnlyList<ParticipationGrant>? grants)
     {
         var sheet = snapshot.Sheets.FirstOrDefault(s => s.Id == row.SheetDefId);
@@ -197,10 +206,10 @@ public sealed class ListMyApprovalQueueHandler(
             {
                 scope = DocumentReadScope.ForParticipant(profile, project.ProjectId, snapshot, grants);
             }
-            else if (!scopes.TryGetValue(project.ProjectId, out scope))
+            else if (!scopes.TryGetValue((project.ProjectId, versionId), out scope))
             {
                 scope = DocumentReadScope.For(profile, project.ProjectId, snapshot);
-                scopes[project.ProjectId] = scope;
+                scopes[(project.ProjectId, versionId)] = scope;
             }
 
             var inPeriod = period is { } p ? scope.InPeriod(p) : scope;
@@ -211,10 +220,10 @@ public sealed class ListMyApprovalQueueHandler(
         }
 
         // Маршрут проєкту (єдиний вибір із затвердженням) і крок, на якому стоїть аркуш.
-        if (!resolved.TryGetValue(project.ProjectId, out var route))
+        if (!resolved.TryGetValue((project.ProjectId, versionId), out var route))
         {
-            route = ApprovalRoute.Resolve(routes.Routes, project.ProjectId, project.TemplateVersionId);
-            resolved[project.ProjectId] = route;
+            route = ApprovalRoute.Resolve(routes.Routes, project.ProjectId, versionId);
+            resolved[(project.ProjectId, versionId)] = route;
         }
 
         var step = route is { Steps.Count: > 0 } ? route.StepAt(row.CurrentStepId) : null;
