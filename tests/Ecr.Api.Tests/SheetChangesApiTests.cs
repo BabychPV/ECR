@@ -207,6 +207,61 @@ public sealed class SheetChangesApiTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// ✎ LIVE-STATUS-304: <c>304</c> — лише на явний <c>If-None-Match</c> зі збігом і лише після перевірки доступу.
+    /// Схований аркуш із «правильним» <c>ETag</c> (чужим, видимого читача) — <c>404</c>, ніколи <c>304</c>; без
+    /// заголовка — завжди <c>200</c>; зміна СХОВАНОЇ таблиці не міняє <c>ETag</c> читача, якому вона не видна, — його
+    /// опитування відповідає <c>304</c> (саме це бачив e2e «a user who does not see the changed table»).
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ: у <c>SheetChangesController.Changes</c> перевірити <c>If-None-Match</c> до виклику обробника
+    /// (304 на збіг із ETag, що прийшов у запиті) → червоне на «схований аркуш із ETag — 404».
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Схований_аркуш_з_If_None_Match_404_без_заголовка_200_зі_збігом_304()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var bob = await SignedInAsync(app, s.Bob.UserName).ConfigureAwait(true);
+        using var denied = await SignedInAsync(app, s.TableDenied.UserName).ConfigureAwait(true);
+        using var sheetDenied = await SignedInAsync(app, s.SheetDenied.UserName).ConfigureAwait(true);
+
+        var (_, bobFirst, bobTag) = await PollAsync(bob, s, since: null, ifNoneMatch: null).ConfigureAwait(true);
+        var bobMarker = bobFirst!.Value.GetProperty("marker").GetString();
+
+        // Схований аркуш: ні ETag видимого читача, ні «*» не дають 304 — та сама 404, що й без заголовка.
+        foreach (var tag in new[] { bobTag!, "*", $"W/{bobTag}" })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, Uri(s, s.DocumentId, s.SheetDefId, bobMarker));
+            request.Headers.TryAddWithoutValidation("If-None-Match", tag);
+            using var hidden = await sheetDenied.SendAsync(request).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.NotFound, hidden.StatusCode);
+            Assert.Null(hidden.Headers.ETag);
+        }
+
+        // Без If-None-Match — 200 з тілом навіть тоді, коли нічого не змінилося; зі збігом — 304, теж no-store.
+        var (plain, _, plainTag) = await PollAsync(bob, s, bobMarker, ifNoneMatch: null).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, plain);
+        Assert.Equal(bobTag, plainTag);
+        using (var conditional = new HttpRequestMessage(HttpMethod.Get, Uri(s, s.DocumentId, s.SheetDefId, bobMarker)))
+        {
+            conditional.Headers.TryAddWithoutValidation("If-None-Match", bobTag);
+            using var notModified = await bob.SendAsync(conditional).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.NotModified, notModified.StatusCode);
+            Assert.Equal("no-store", notModified.Headers.CacheControl?.ToString());
+        }
+
+        // Зміна схованої від Denied таблиці: для Denied ETag той самий (304), для Боба — новий (200, changed).
+        var (_, deniedFirst, deniedTag) = await PollAsync(denied, s, since: null, ifNoneMatch: null).ConfigureAwait(true);
+        var deniedMarker = deniedFirst!.Value.GetProperty("marker").GetString();
+        await ForeignEditAsync(s, s.Table2RowId, s.Table2ColumnId, s.Alice.Id).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotModified, (await PollAsync(denied, s, deniedMarker, deniedTag).ConfigureAwait(true)).Code);
+        var (bobAfter, bobBody, _) = await PollAsync(bob, s, bobMarker, bobTag).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, bobAfter);
+        Assert.True(bobBody!.Value.GetProperty("changed").GetBoolean());
+    }
+
     // ── помічники ───────────────────────────────────────────────────────────────────
 
     private static async Task<(HttpStatusCode Code, JsonElement? Body, string? ETag)> PollAsync(

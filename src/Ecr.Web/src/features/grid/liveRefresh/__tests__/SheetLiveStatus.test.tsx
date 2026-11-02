@@ -234,4 +234,40 @@ describe('Live status (LIVE-STATUS)', () => {
     await tick(30_100);
     expect(new URL(changeRequests[2]?.url ?? '').searchParams.get('since')).toBe('m-r1');
   });
+
+  /*
+   * ✎ LIVE-STATUS-304 (e2e "a user who does not see the changed table": `200,200,304`): a run of `304`s is the normal
+   * idle path — no error, no data banner, no status banner, the poll keeps going with the same `ETag` and still sees
+   * the next real transition. Mutation: `isFinalChangesError` also stops on `304` (or `pollSheetChanges` via plain
+   * `apiFetch`, no `If-None-Match`) → red.
+   */
+  it('a run of 304s keeps polling with the same ETag and still catches the next transition', async () => {
+    answers = [
+      { revision: 'r1', state: 'Draft' },
+      { status: 304, revision: 'r1', state: 'Draft' },
+      { status: 304, revision: 'r1', state: 'Draft' },
+      { revision: 'r2', state: 'Submitted', statusChanged: true },
+    ];
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    mount();
+    await tick(10);
+    await tick(30_100);
+    await tick(30_100);
+
+    expect(changeRequests).toHaveLength(3);
+    expect(changeRequests.slice(1).map((request) => request.headers.get('If-None-Match'))).toEqual(['"e-r1"', '"e-r1"']);
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(statusBanner()).toBeNull();
+    expect(document.querySelector('[data-testid="sheet-live-banner"]')).toBeNull();
+
+    sheetState = 'Submitted';
+    await tick(30_100);
+    expect(changeRequests).toHaveLength(4);
+    expect(invalidate).toHaveBeenCalled();
+    await act(async () => {
+      releaseSummary?.();
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(statusBanner()?.getAttribute('data-live-status')).toBe('Submitted');
+  });
 });
