@@ -694,6 +694,15 @@ public sealed class Parser
         var name = s.Current.Text;
         s.Advance();
 
+        // D-OA (похідні аргументи): `@Name?` — необов'язковий аргумент. Лексер дає маркер лише в діалекті
+        // методологій і лише впритул за іменем `@`, тож тут він може стояти тільки після аргументу.
+        var optional = false;
+        if (kind == SymbolKind.Argument && s.Current.Type == TokenType.OptionalMarker)
+        {
+            optional = true;
+            s.Advance();
+        }
+
         if (s.Dialect == ExpressionDialect.Template)
         {
             var construct = $"{prefix}{name}";
@@ -710,7 +719,7 @@ public sealed class Parser
             ForbidInReport(s, $"{prefix}{name}", position, prefix.Length + name.Length);
         }
 
-        return new SymbolReferenceNode(kind, name) { Position = position };
+        return new SymbolReferenceNode(kind, name) { Position = position, IsOptional = optional };
     }
 
     /// <summary>Відмова для посилання, якого діалект звітів не має (<c>02b</c> §8a).</summary>

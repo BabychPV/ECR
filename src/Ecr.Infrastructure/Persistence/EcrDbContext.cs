@@ -169,6 +169,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     /// <summary>Тести методології: вхід, очікуваний вихід, допуск (ФВ-13.7).</summary>
     public DbSet<MethodologyTestCaseEntity> MethodologyTestCases => Set<MethodologyTestCaseEntity>();
     public DbSet<MethodologySubstance> MethodologySubstances => Set<MethodologySubstance>();
+
+    /// <summary>Перелік категорій констант версії методології (план CONST-CATEGORY).</summary>
+    public DbSet<MethodologyCategory> MethodologyCategories => Set<MethodologyCategory>();
     public DbSet<MethodologyOutput> MethodologyOutputs => Set<MethodologyOutput>();
     public DbSet<MethodologyRule> MethodologyRules => Set<MethodologyRule>();
 

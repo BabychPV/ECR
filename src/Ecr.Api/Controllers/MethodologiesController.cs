@@ -51,6 +51,9 @@ public sealed class MethodologiesController(
     SaveCalculationBindingHandler saveBinding,
     ListMethodologySubstancesHandler listSubstances,
     SaveMethodologySubstancesHandler saveSubstances,
+    ListMethodologyCategoriesHandler listCategories,
+    SaveMethodologyCategoryHandler saveCategory,
+    DeleteMethodologyCategoryHandler deleteCategory,
     MethodologyVersionScope scope) : ControllerBase
 {
     // ⛔ B-07 (UX-прохід, четвертий раунд): кожна дія з `{vid}` спершу
@@ -202,16 +205,106 @@ public sealed class MethodologiesController(
     /// <summary>Константи версії. Право <c>Calculation.View</c>.</summary>
     /// <param name="id">Методологія.</param>
     /// <param name="vid">Версія.</param>
+    /// <param name="category">Точні коди категорій (повторюваний параметр); порожньо — без фільтра.</param>
+    /// <param name="shared">
+    /// <c>true</c> — спільні (без категорії) теж (з <paramref name="category"/>) або лише вони (без нього);
+    /// <c>false</c> — без спільних.
+    /// </param>
+    /// <param name="code">Частина коду константи, без регістру.</param>
+    /// <param name="substanceEntryId">Речовина звуження.</param>
+    /// <param name="sort"><c>Code</c> (типово), <c>Category</c>, <c>ValidFrom</c>.</param>
+    /// <param name="desc">Зворотний порядок першого ключа.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ✎ План CONST-CATEGORY: фільтр і сортування — на сервері; без параметрів відповідь — уся версія за кодом,
+    /// далі категорією і початком дії. Рядок несе <c>category</c> і <c>substanceEntryId</c>.
+    /// </remarks>
     [HttpGet("{id:int}/versions/{vid:int}/constants")]
     [ProducesResponseType<IReadOnlyList<MethodologyConstantDto>>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<MethodologyConstantDto>>> Constants(
-        int id, int vid, CancellationToken ct)
+        int id,
+        int vid,
+        [FromQuery] string[]? category,
+        [FromQuery] bool? shared,
+        [FromQuery] string? code,
+        [FromQuery] long? substanceEntryId,
+        [FromQuery] MethodologyConstantSort? sort,
+        [FromQuery] bool? desc,
+        CancellationToken ct)
     {
         await scope.RequireAsync(id, vid, ListMethodologyConstantsHandler.Permission, ct).ConfigureAwait(false);
 
-        return Ok(await listConstants.HandleAsync(vid, ct).ConfigureAwait(false));
+        var query = new MethodologyConstantsQuery(
+            category ?? [], shared, code, substanceEntryId, sort ?? MethodologyConstantSort.Code, desc ?? false);
+
+        return Ok(await listConstants.HandleAsync(vid, query, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Перелік категорій констант версії з кількістю констант під кожною. Право <c>Calculation.View</c>.
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="vid">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:int}/versions/{vid:int}/categories")]
+    [ProducesResponseType<IReadOnlyList<MethodologyCategoryDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IReadOnlyList<MethodologyCategoryDto>>> Categories(
+        int id, int vid, CancellationToken ct)
+    {
+        await scope.RequireAsync(id, vid, ListMethodologyCategoriesHandler.Permission, ct).ConfigureAwait(false);
+
+        return Ok(await listCategories.HandleAsync(vid, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Заводить категорію в переліку версії-чернетки або змінює її опис, порядок, стан. Право
+    /// <c>Calculation.EditConstant</c>.
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="vid">Версія-чернетка.</param>
+    /// <param name="code">Код категорії — ключ зіставлення, точно як його повертає правило категорії.</param>
+    /// <param name="request">Опис, порядок, виведення з ужитку.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Перейменування немає: код — адреса. Той самий код в іншому регістрі — <c>409 categoryRename</c>; вивести з
+    /// ужитку категорію з константами — <c>409 categoryInUse</c>.
+    /// </remarks>
+    [HttpPut("{id:int}/versions/{vid:int}/categories/{code}")]
+    [ProducesResponseType<MethodologyCategoryDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<MethodologyCategoryDto>> SaveCategory(
+        int id, int vid, string code, [FromBody] SaveMethodologyCategoryRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await scope.RequireAsync(id, vid, SaveMethodologyCategoryHandler.Permission, ct).ConfigureAwait(false);
+
+        return Ok(await saveCategory
+            .HandleAsync(vid, code, request.Description, request.Ordinal, request.IsRetired, ct)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Прибирає категорію з переліку версії-чернетки. Право <c>Calculation.EditConstant</c>.
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="vid">Версія-чернетка.</param>
+    /// <param name="code">Код категорії.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>⛔ Категорію, під якою є константи, не прибирають: <c>409 categoryInUse</c> з кількістю.</remarks>
+    [HttpDelete("{id:int}/versions/{vid:int}/categories/{code}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteCategory(int id, int vid, string code, CancellationToken ct)
+    {
+        await scope.RequireAsync(id, vid, DeleteMethodologyCategoryHandler.Permission, ct).ConfigureAwait(false);
+        await deleteCategory.HandleAsync(vid, code, ct).ConfigureAwait(false);
+
+        return NoContent();
     }
 
     /// <summary>Формули версії, що посилаються на константу (ФВ-8.14). Право <c>Calculation.View</c>.</summary>
@@ -802,13 +895,10 @@ public sealed record CreateMethodologyVersionRequest(
 /// відхиляється: вимір — властивість числа (ФВ-16.6).
 /// </param>
 /// <param name="ArgumentsCsv">
-/// Оголошені аргументи — <c>;</c>-список, як у <c>FInfo_Arguments</c>;
-/// <c>null</c> — списку немає. ⛔ Це **джерело істини про аргументи**, а не
-/// текст виразу (директива ПК-1 №05 §7, пастка 2): збірка підставляє рівно
-/// перелічене, і токен поза списком у вираз не потрапляє — формула рахується з
-/// невизначеним параметром і повертає правдоподібне число, а не помилку.
-/// ⚠ <c>null</c> і порожній рядок — різні стани: перший глушить звірку
-/// (<c>ECR-CALC-0432</c>), другий оголошує «нуль аргументів».
+/// ⚠ ЗАСТАРІЛЕ (похідні аргументи, 2026-11-02; приймається ОДИН реліз, далі — прибрати з запиту). Список
+/// аргументів більше не вводиться: відповідь несе ПОХІДНИЙ від виразу <c>argumentsCsv</c>/<c>arguments</c>.
+/// Із цього поля беруться лише маркери <c>Name?</c> і переносяться у вираз як <c>@Name?</c>; решта ігнорується.
+/// Необов'язковий аргумент пишеться прямо у виразі: <c>@Land_Measure_RunningHours?</c>.
 /// </param>
 /// <param name="Scope">
 /// Область формули (L2-1): <c>Row</c> - раз на рядок, до циклу речовин (саме такі формули бачить правило
@@ -819,8 +909,14 @@ public sealed record SaveMethodologyFormulaRequest(
     string Expression,
     FormulaResultType ResultType,
     int? OutputUnitId,
-    string? ArgumentsCsv,
+    string? ArgumentsCsv = null,
     MethodologyFormulaScope? Scope = null);
+
+/// <summary>Запит на запис категорії переліку версії-чернетки (план CONST-CATEGORY).</summary>
+/// <param name="Description">Опис для методолога; <c>null</c> — зняти. До 400 символів.</param>
+/// <param name="Ordinal">Порядок у переліку; <c>null</c> — нова в кінець, наявна не зсувається.</param>
+/// <param name="IsRetired">Вивести з ужитку; <c>null</c> — не змінювати. Категорію з константами — 409.</param>
+public sealed record SaveMethodologyCategoryRequest(string? Description, int? Ordinal, bool? IsRetired);
 
 /// <summary>Запит на заведення методології-контейнера.</summary>
 /// <param name="Code">

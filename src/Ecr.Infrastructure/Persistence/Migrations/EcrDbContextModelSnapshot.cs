@@ -298,6 +298,41 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("Methodology", "calc");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyCategory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<bool>("IsRetired")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("MethodologyVersionId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MethodologyVersionId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_MethodologyCategory");
+
+                    b.ToTable("MethodologyCategory", "calc");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyCategoryRule", b =>
                 {
                     b.Property<int>("Id")
@@ -6601,6 +6636,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_CStep_Run");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyCategory", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Calculations.MethodologyVersion", null)
+                        .WithMany()
+                        .HasForeignKey("MethodologyVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_MCat_Version");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyCategoryRule", b =>

@@ -340,6 +340,31 @@ public sealed class MethodologyConstantConfiguration : IEntityTypeConfiguration<
     }
 }
 
+/// <summary>Конфігурація <see cref="MethodologyCategory"/> — переліку категорій констант версії.</summary>
+public sealed class MethodologyCategoryConfiguration : IEntityTypeConfiguration<MethodologyCategory>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<MethodologyCategory> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("MethodologyCategory", "calc");
+        builder.HasKey(x => x.Id);
+
+        // ⚠ Та сама межа, що в `calc.MethodologyConstant.Category`: категорія з переліку мусить вміщатися туди.
+        builder.Property(x => x.Code).HasMaxLength(MethodologyCategory.MaxCodeLength).IsRequired();
+        builder.Property(x => x.Description).HasMaxLength(MethodologyCategory.MaxDescriptionLength);
+
+        // ⛔ Унікальність у межах версії за зіставленням бази (без регістру): `Diesel_2754` і `diesel_2754`
+        // в одній версії — пастка (резолвер порівнює з регістром), і перелік її не допускає.
+        builder.HasIndex(x => new { x.MethodologyVersionId, x.Code })
+               .IsUnique().HasDatabaseName("UQ_MethodologyCategory");
+
+        builder.HasOne<MethodologyVersion>().WithMany().HasForeignKey(x => x.MethodologyVersionId)
+               .HasConstraintName("FK_MCat_Version");
+    }
+}
+
 /// <summary>Конфігурація <see cref="MethodologySubstance"/>.</summary>
 public sealed class MethodologySubstanceConfiguration : IEntityTypeConfiguration<MethodologySubstance>
 {

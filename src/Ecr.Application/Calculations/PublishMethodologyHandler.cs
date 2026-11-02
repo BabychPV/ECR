@@ -250,16 +250,22 @@ public sealed class PublishMethodologyHandler(
         foreach (var formula in formulas)
         {
             var resolution = Resolve(formula, byCode, imports, dependencies, problems);
-            // ⛔ Четвертим аргументом — оголошений список. Без нього
-            // звірка пастки 2 отримувала `null` і **мовчала**: вона була
-            // написана, покрита тестами й недосяжна — той самий клас, що
-            // `Q-082`, `Q-086`, `Q-088`.
+
+            // ✎ 2026-11-02 (похідні аргументи): список — ПОХІДНИЙ від виразу і перезаписується тут, у версії,
+            // що публікується: опублікована версія несе рівно той `ArgumentsCsv`, з якого рантайм бере маркери `?`.
+            // Звірка пастки 2 (`ECR-CALC-0432`) лишається ТВЕРДЖЕННЯМ: похідний (з лексем) список і `@`-вузли
+            // дерева розійтися не можуть, а якщо розійдуться — це дефект лексера/парсера, і публікація його назве.
+            var derived = Ecr.Expressions.Binding.ArgumentDeclarationChecker.DeriveCsv(formula.Expression);
+            if (!string.Equals(formula.ArgumentsCsv, derived, StringComparison.Ordinal))
+            {
+                formula.SetArguments(derived);
+            }
+
             parsed.Add(new ParsedFormula(
                 formula.Code,
                 formula.ResultType,
                 resolution.Root,
-                Ecr.Expressions.Binding.ArgumentDeclarationChecker.Declared(
-                    formula.ArgumentsCsv)));
+                Ecr.Expressions.Binding.ArgumentDeclarationChecker.Declared(derived)));
 
             nodes.Add(new FormulaNode(
                 formula.Id,
@@ -311,8 +317,12 @@ public sealed class PublishMethodologyHandler(
         // з кількома категоріями без правила й про Row-формули, що читають категорійні константи.
         var categoryRuleText = await methodologies
             .GetCategoryRuleAsync(methodologyVersionId, ct).ConfigureAwait(false);
+        // ✎ План CONST-CATEGORY: перелік категорій — лише коли правило є (попередження про літерали без категорії).
+        var categoryCodes = string.IsNullOrWhiteSpace(categoryRuleText)
+            ? null
+            : await methodologies.GetCategoryCodesAsync(methodologyVersionId, ct).ConfigureAwait(false);
         var categoryRule = MethodologyCategoryRuleChecks.Check(
-            categoryRuleText, formulaEngine, formulas, parsed, constants, warnings, strings);
+            categoryRuleText, formulaEngine, formulas, parsed, constants, warnings, strings, categoryCodes);
         problems.AddRange(categoryRule.Problems);
 
         // ⛔ Лінія 1 захисту від мовчазного null: аргумент, який формула

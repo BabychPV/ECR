@@ -127,9 +127,9 @@ const Strings = {
   'methodologies.resultTypeHint': 'What the formula produces.',
   'methodologies.resultNumber': 'Number',
   'methodologies.resultText': 'Text',
-  'methodologies.arguments': 'Arguments',
-  'methodologies.argumentsHint': 'Comma-separated.',
-  'methodologies.argumentsOptionalHint': 'Name? marks an optional argument.',
+  'methodologies.derivedArguments': 'Arguments',
+  'methodologies.derivedArgumentsHint': 'Derived from the expression; @Name? marks an optional input.',
+  'methodologies.derivedArgumentsEmpty': 'Nothing yet.',
   'methodologies.outputUnit': 'Output unit',
   'methodologies.outputUnitHint': 'Unit of the result.',
   'methodologies.noUnit': 'No unit',
@@ -285,7 +285,7 @@ describe('MethodologyVersionsPage: синтаксична помилка вир�
     expect(saveButton).toHaveProperty('disabled', false);
   });
 
-  it('поле аргументів підказує маркер необов’язкового аргументу «?» (D-OA)', async () => {
+  it('аргументи — похідний список без поля вводу; підказка називає маркер «@Name?» у виразі (D-OA, 2026-11-02)', async () => {
     mockApi();
     await loadCatalog('en', 'public');
     await loadCatalog('en', 'private');
@@ -298,6 +298,10 @@ describe('MethodologyVersionsPage: синтаксична помилка вир�
 
     const dialog = await screen.findByRole('dialog', { name: 'Formula' });
 
-    expect(within(dialog).getByText(/Name\? marks an optional argument/)).toBeDefined();
+    expect(within(dialog).getByText(/@Name\? marks an optional input/)).toBeDefined();
+
+    // ⛔ Ручного списку аргументів більше немає: у похідному блоці — жодного текстового поля.
+    expect(within(within(dialog).getByTestId('derived-arguments')).queryByRole('textbox')).toBeNull();
+    expect(within(dialog).queryByRole('textbox', { name: /Arguments/ })).toBeNull();
   });
 });
