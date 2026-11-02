@@ -178,6 +178,50 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
     public void Remove(MethodologySubstance substance) => db.MethodologySubstances.Remove(substance);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<MethodologyCategory>> GetCategoriesTrackedAsync(
+        int methodologyVersionId, CancellationToken ct)
+        => await db.MethodologyCategories
+            .Where(c => c.MethodologyVersionId == methodologyVersionId)
+            .OrderBy(c => c.Ordinal)
+            .ThenBy(c => c.Id)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Групування робить база (одне звернення), за її зіставленням — без регістру. Варіантів однієї
+    /// категорії, що різняться лише регістром, усередині версії немає (замір Land, 2026-11-01).
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<string, int>> CountConstantsByCategoryAsync(
+        int methodologyVersionId, CancellationToken ct)
+    {
+        var rows = await db.MethodologyConstants
+            .AsNoTracking()
+            .Where(c => c.MethodologyVersionId == methodologyVersionId && c.Category != null)
+            .GroupBy(c => c.Category!)
+            .Select(g => new { Category = g.Key, Count = g.Count() })
+            .OrderBy(g => g.Category)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
+        {
+            result[row.Category] = result.GetValueOrDefault(row.Category) + row.Count;
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public void Add(MethodologyCategory category) => db.MethodologyCategories.Add(category);
+
+    /// <inheritdoc />
+    public void Remove(MethodologyCategory category) => db.MethodologyCategories.Remove(category);
+
+    /// <inheritdoc />
     public async Task<MethodologyRequiredInput?> FindRequiredInputAsync(
         int methodologyVersionId, int columnDefId, CancellationToken ct)
         => await db.MethodologyRequiredInputs
@@ -432,6 +476,17 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
         {
             db.MethodologySubstances.Add(new MethodologySubstance(
                 targetVersionId, source.SubstanceEntryId, source.Ordinal));
+        }
+
+        // ⛔ План CONST-CATEGORY: перелік категорій — вміст версії. Клон без нього не дав би записати жодної
+        // константи з категорією (422 «категорії немає в переліку») у новій редакції.
+        foreach (var source in await ChildrenAsync(
+                     db.MethodologyCategories.Where(c => c.MethodologyVersionId == sourceVersionId), ct)
+                     .ConfigureAwait(false))
+        {
+            var clone = new MethodologyCategory(targetVersionId, source.Code, source.Ordinal);
+            clone.Describe(source.Description, source.Ordinal, source.IsRetired);
+            db.MethodologyCategories.Add(clone);
         }
 
         foreach (var source in await ChildrenAsync(

@@ -1,5 +1,7 @@
 // src/Ecr.Application/Calculations/Dto/MethodologyDraftDtos.cs
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
+using Ecr.Expressions.Binding;
 
 namespace Ecr.Application.Calculations.Dto;
 
@@ -56,14 +58,16 @@ public sealed record MethodologyDraftVersionDto(
 /// <param name="OutputUnitId">Одиниця результату; <c>null</c> — безрозмірна або текст.</param>
 /// <param name="EvaluationOrder">Позиція в топологічному порядку; нуль до публікації.</param>
 /// <param name="ArgumentsCsv">
-/// Оголошені аргументи — <c>;</c>-список, як у <c>FInfo_Arguments</c>;
-/// <c>null</c> — списку немає. ⛔ Не те саме, що порожній рядок: <c>null</c>
-/// глушить звірку пастки 2 (<c>ECR-CALC-0432</c>), а порожній оголошує «нуль
-/// аргументів», і тоді будь-який токен у виразі є порушенням.
+/// ✎ 2026-11-02 (похідні аргументи): ПОХІДНИЙ від <paramref name="Expression"/> <c>;</c>-список
+/// (<c>@A?;CST.K;!F</c>), лише для читання. Той самий текст, що лежить у <c>calc.MethodologyFormula.ArgumentsCsv</c>;
+/// рантайм бере з нього маркери <c>?</c> (об'єднання по версії).
 /// </param>
 /// <param name="Scope">
 /// Область формули (L2-1): <c>Substance</c> — на кожну речовину (типове), <c>Row</c> — раз на рядок,
 /// до циклу речовин; саме Row-формули бачить правило категорії (<c>!Name</c>).
+/// </param>
+/// <param name="Arguments">
+/// Похідний список структуровано (лише читання): вид, ім'я, маркер «необов'язковий» — у порядку першої появи у виразі.
 /// </param>
 public sealed record MethodologyFormulaDto(
     int Id,
@@ -73,7 +77,44 @@ public sealed record MethodologyFormulaDto(
     int? OutputUnitId,
     int EvaluationOrder,
     string? ArgumentsCsv,
-    MethodologyFormulaScope Scope);
+    MethodologyFormulaScope Scope,
+    IReadOnlyList<MethodologyFormulaArgumentDto> Arguments)
+{
+    /// <summary>DTO формули з похідним списком аргументів.</summary>
+    /// <param name="formula">Формула версії.</param>
+    /// <returns>DTO.</returns>
+    /// <remarks>
+    /// ⚠ Структурований список виводиться з ВИРАЗУ, а не з колонки: навіть рядок, який міграція ще не
+    /// вирівняла, показує методологу те, що справді написано.
+    /// </remarks>
+    public static MethodologyFormulaDto Of(MethodologyFormula formula)
+    {
+        ArgumentNullException.ThrowIfNull(formula);
+
+        return new MethodologyFormulaDto(
+            formula.Id,
+            formula.Code,
+            formula.Expression,
+            formula.ResultType,
+            formula.OutputUnitId,
+            formula.EvaluationOrder,
+            formula.ArgumentsCsv,
+            formula.Scope,
+            [.. ArgumentDeclarationChecker.Derive(formula.Expression)
+                .Select(a => new MethodologyFormulaArgumentDto(a.Kind, a.Name, a.IsOptional, a.Text))]);
+    }
+}
+
+/// <summary>Елемент похідного списку аргументів формули (лише читання).</summary>
+/// <param name="Kind"><c>Argument</c> (<c>@A</c>), <c>Constant</c> (<c>CST.K</c>) чи <c>Formula</c> (<c>!F</c>).</param>
+/// <param name="Name">Ім'я як у виразі, без префікса й маркера.</param>
+/// <param name="IsOptional">Маркер <c>?</c> у виразі (<c>@A?</c>) — аргумент без комірки дає <c>null</c>.</param>
+/// <param name="Text">Запис, як у <c>argumentsCsv</c>: <c>@A?</c>, <c>CST.K</c>, <c>!F</c>.</param>
+public sealed record MethodologyFormulaArgumentDto(
+    DeclaredArgumentKind Kind,
+    string Name,
+    bool IsOptional,
+    string Text);
 
 /// <summary>
 /// Методологія-контейнер, як її бачить конфігуратор — <b>без</b> версій.
@@ -117,6 +158,9 @@ public sealed record MethodologySummaryDto(
 /// <param name="Category">Категорія звуження; <c>null</c> — спільна.</param>
 /// <param name="Source">Звідки взято значення.</param>
 /// <param name="IsResolved">Чи придатна константа до підстановки у вираз.</param>
+/// <param name="SubstanceEntryId">
+/// Речовина звуження (запис довідника); <c>null</c> — спільна. Код речовини — з <c>GET …/substances</c> версії.
+/// </param>
 public sealed record MethodologyConstantDto(
     int Id,
     string Code,
@@ -128,7 +172,23 @@ public sealed record MethodologyConstantDto(
     DateOnly? ValidTo,
     string? Category,
     string? Source,
-    bool IsResolved);
+    bool IsResolved,
+    long? SubstanceEntryId = null);
+
+/// <summary>Категорія констант версії (план CONST-CATEGORY).</summary>
+/// <param name="Id">Ідентифікатор.</param>
+/// <param name="Code">Код — значення <c>category</c> константи і ключ, який повертає правило категорії.</param>
+/// <param name="Description">Опис; <c>null</c> — немає.</param>
+/// <param name="Ordinal">Порядок у переліку.</param>
+/// <param name="IsRetired">Виведена з ужитку: нова константа її не вибирає.</param>
+/// <param name="ConstantCount">Скільки рядків констант версії стоїть під цією категорією.</param>
+public sealed record MethodologyCategoryDto(
+    int Id,
+    string Code,
+    string? Description,
+    int Ordinal,
+    bool IsRetired,
+    int ConstantCount);
 
 /// <summary>Правило відбору рядків документа (ФВ-13.3, ФВ-13.4).</summary>
 /// <param name="Id">Ідентифікатор правила.</param>

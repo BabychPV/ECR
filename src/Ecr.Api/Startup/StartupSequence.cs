@@ -84,6 +84,22 @@ public static partial class StartupSequence
         await new SeedRunner(db, logger).RunAsync(CancellationToken.None).ConfigureAwait(false);
         LogSeedDone(logger);
 
+        // 4c) Похідні аргументи методологій (2026-11-02): старі, введені руками `ArgumentsCsv` → маркери `?` у
+        //     виразах + похідний список. Ідемпотентно, лише версії старого формату; звіт — у журнал. ⚠ Відмова —
+        //     попередження, а не зупинка: рантайм читає маркери зі списку, і старий список рахує так само.
+        try
+        {
+            await new MethodologyArgumentsBackfill(db, logger).RunAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (System.Data.Common.DbException ex)
+        {
+            LogArgumentsBackfillFailed(logger, ex.Message);
+        }
+        catch (Microsoft.EntityFrameworkCore.Storage.RetryLimitExceededException ex)
+        {
+            LogArgumentsBackfillFailed(logger, ex.Message);
+        }
+
         // 4b) Вʼюхи сирих даних rpt.v_* для SSRS (ФВ-10.2, ФВ-10.4) по
         //     кожній таблиці опублікованих версій шаблонів. ⚠ ПІСЛЯ seed і на
         //     кожному старті: так вʼюхи отримують і версії, опубліковані до
@@ -279,6 +295,11 @@ public static partial class StartupSequence
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: seed виконано.")]
     private static partial void LogSeedDone(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Старт: похідні аргументи методологій не вирівняно: {Error}. Старі списки ArgumentsCsv рахують як і раніше; "
+            + "крок повториться на наступному старті.")]
+    private static partial void LogArgumentsBackfillFailed(ILogger logger, string error);
 
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Старт: вʼюхи rpt.v_* не згенеровано: {Error}. SSRS не бачить нових версій шаблонів, "

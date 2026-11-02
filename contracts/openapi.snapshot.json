@@ -5090,6 +5090,14 @@
         ],
         "type": "object"
       },
+      "DeclaredArgumentKind": {
+        "description": "Вид елемента похідного списку аргументів.",
+        "enum": [
+          "Argument",
+          "Constant",
+          "Formula"
+        ]
+      },
       "DeleteRowResponse": {
         "description": "Видалений рядок динамічної таблиці (D3).",
         "properties": {
@@ -9392,6 +9400,50 @@
         ],
         "type": "object"
       },
+      "MethodologyCategoryDto": {
+        "description": "Категорія констант версії (план CONST-CATEGORY).",
+        "properties": {
+          "code": {
+            "description": "Код — значення `category` константи і ключ, який повертає правило категорії.",
+            "type": "string"
+          },
+          "constantCount": {
+            "description": "Скільки рядків констант версії стоїть під цією категорією.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "description": {
+            "description": "Опис; `null` — немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isRetired": {
+            "description": "Виведена з ужитку: нова константа її не вибирає.",
+            "type": "boolean"
+          },
+          "ordinal": {
+            "description": "Порядок у переліку.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "description",
+          "ordinal",
+          "isRetired",
+          "constantCount"
+        ],
+        "type": "object"
+      },
       "MethodologyCategoryRuleDto": {
         "description": "Правило категорії константи версії (L-2, `calc.CategoryRule`): вираз «рядок → ключ категорії».",
         "properties": {
@@ -9451,6 +9503,14 @@
               "string"
             ]
           },
+          "substanceEntryId": {
+            "description": "Речовина звуження (запис довідника); `null` — спільна. Код речовини — з `GET …/substances` версії.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "textValue": {
             "description": "Текст або сирий рядок джерела.",
             "type": [
@@ -9505,6 +9565,14 @@
           "isResolved"
         ],
         "type": "object"
+      },
+      "MethodologyConstantSort": {
+        "enum": [
+          "Code",
+          "Category",
+          "ValidFrom",
+          null
+        ]
       },
       "MethodologyCoverageDto": {
         "description": "Покриття версії: які виходи куди лягають і які колонки чекають на вихід (`BE-25`).",
@@ -9730,11 +9798,46 @@
         ],
         "type": "object"
       },
+      "MethodologyFormulaArgumentDto": {
+        "description": "Елемент похідного списку аргументів формули (лише читання).",
+        "properties": {
+          "isOptional": {
+            "description": "Маркер `?` у виразі (`@A?`) — аргумент без комірки дає `null`.",
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DeclaredArgumentKind",
+            "description": "`Argument` (`@A`), `Constant` (`CST.K`) чи `Formula` (`!F`)."
+          },
+          "name": {
+            "description": "Ім'я як у виразі, без префікса й маркера.",
+            "type": "string"
+          },
+          "text": {
+            "description": "Запис, як у `argumentsCsv`: `@A?`, `CST.K`, `!F`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "isOptional",
+          "text"
+        ],
+        "type": "object"
+      },
       "MethodologyFormulaDto": {
         "description": "Формула версії методології, як її бачить конфігуратор.",
         "properties": {
+          "arguments": {
+            "description": "Похідний список структуровано (лише читання): вид, ім'я, маркер «необов'язковий» — у порядку першої появи у виразі.",
+            "items": {
+              "$ref": "#/components/schemas/MethodologyFormulaArgumentDto"
+            },
+            "type": "array"
+          },
           "argumentsCsv": {
-            "description": "Оголошені аргументи — `;`-список, як у `FInfo_Arguments`;\n`null` — списку немає. ⛔ Не те саме, що порожній рядок: `null`\nглушить звірку пастки 2 (`ECR-CALC-0432`), а порожній оголошує «нуль\nаргументів», і тоді будь-який токен у виразі є порушенням.",
+            "description": "✎ 2026-11-02 (похідні аргументи): ПОХІДНИЙ від Expression`;`-список\n(`@A?;CST.K;!F`), лише для читання. Той самий текст, що лежить у `calc.MethodologyFormula.ArgumentsCsv`;\nрантайм бере з нього маркери `?` (об'єднання по версії).",
             "type": [
               "null",
               "string"
@@ -9783,7 +9886,8 @@
           "outputUnitId",
           "evaluationOrder",
           "argumentsCsv",
-          "scope"
+          "scope",
+          "arguments"
         ],
         "type": "object"
       },
@@ -20733,6 +20837,39 @@
         ],
         "type": "object"
       },
+      "SaveMethodologyCategoryRequest": {
+        "description": "Запит на запис категорії переліку версії-чернетки (план CONST-CATEGORY).",
+        "properties": {
+          "description": {
+            "description": "Опис для методолога; `null` — зняти. До 400 символів.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isRetired": {
+            "description": "Вивести з ужитку; `null` — не змінювати. Категорію з константами — 409.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "ordinal": {
+            "description": "Порядок у переліку; `null` — нова в кінець, наявна не зсувається.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "description",
+          "ordinal",
+          "isRetired"
+        ],
+        "type": "object"
+      },
       "SaveMethodologyCategoryRuleRequest": {
         "description": "Правило категорії константи версії (L-2): вираз діалекту Methodology.",
         "properties": {
@@ -20832,7 +20969,7 @@
         "description": "Запит на запис формули версії-чернетки.",
         "properties": {
           "argumentsCsv": {
-            "description": "Оголошені аргументи — `;`-список, як у `FInfo_Arguments`;\n`null` — списку немає. ⛔ Це **джерело істини про аргументи**, а не\nтекст виразу (директива ПК-1 №05 §7, пастка 2): збірка підставляє рівно\nперелічене, і токен поза списком у вираз не потрапляє — формула рахується з\nневизначеним параметром і повертає правдоподібне число, а не помилку.\n⚠ `null` і порожній рядок — різні стани: перший глушить звірку\n(`ECR-CALC-0432`), другий оголошує «нуль аргументів».",
+            "description": "⚠ ЗАСТАРІЛЕ (похідні аргументи, 2026-11-02; приймається ОДИН реліз, далі — прибрати з запиту). Список\nаргументів більше не вводиться: відповідь несе ПОХІДНИЙ від виразу `argumentsCsv`/`arguments`.\nІз цього поля беруться лише маркери `Name?` і переносяться у вираз як `@Name?`; решта ігнорується.\nНеобов'язковий аргумент пишеться прямо у виразі: `@Land_Measure_RunningHours?`.",
             "type": [
               "null",
               "string"
@@ -20869,8 +21006,7 @@
         "required": [
           "expression",
           "resultType",
-          "outputUnitId",
-          "argumentsCsv"
+          "outputUnitId"
         ],
         "type": "object"
       },
@@ -40224,6 +40360,319 @@
         ]
       }
     },
+    "/api/v1/methodologies/{id}/versions/{vid}/categories": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodologyCategoryDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodologyCategoryDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodologyCategoryDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Перелік категорій констант версії з кількістю констант під кожною. Право `Calculation.View`.",
+        "tags": [
+          "Methodologies"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/categories/{code}": {
+      "delete": {
+        "description": "⛔ Категорію, під якою є константи, не прибирають: `409 categoryInUse` з кількістю.",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код категорії.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає категорію з переліку версії-чернетки. Право `Calculation.EditConstant`.",
+        "tags": [
+          "Methodologies"
+        ]
+      },
+      "put": {
+        "description": "⛔ Перейменування немає: код — адреса. Той самий код в іншому регістрі — `409 categoryRename`; вивести з\nужитку категорію з константами — `409 categoryInUse`.",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код категорії — ключ зіставлення, точно як його повертає правило категорії.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologyCategoryRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologyCategoryRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologyCategoryRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyCategoryDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyCategoryDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyCategoryDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Заводить категорію в переліку версії-чернетки або змінює її опис, порядок, стан. Право\n`Calculation.EditConstant`.",
+        "tags": [
+          "Methodologies"
+        ]
+      }
+    },
     "/api/v1/methodologies/{id}/versions/{vid}/category-rule": {
       "delete": {
         "parameters": [
@@ -40510,6 +40959,7 @@
     },
     "/api/v1/methodologies/{id}/versions/{vid}/constants": {
       "get": {
+        "description": "✎ План CONST-CATEGORY: фільтр і сортування — на сервері; без параметрів відповідь — уся версія за кодом,\nдалі категорією і початком дії. Рядок несе `category` і `substanceEntryId`.",
         "parameters": [
           {
             "description": "Методологія.",
@@ -40531,6 +40981,58 @@
               "format": "int32",
               "pattern": "^-?(?:0|[1-9]\\d*)$",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Точні коди категорій (повторюваний параметр); порожньо — без фільтра.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "`true` — спільні (без категорії) теж (з category) або лише вони (без нього);\n`false` — без спільних.",
+            "in": "query",
+            "name": "shared",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Частина коду константи, без регістру.",
+            "in": "query",
+            "name": "code",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Речовина звуження.",
+            "in": "query",
+            "name": "substanceEntryId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`Code` (типово), `Category`, `ValidFrom`.",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "$ref": "#/components/schemas/MethodologyConstantSort"
+            }
+          },
+          {
+            "description": "Зворотний порядок першого ключа.",
+            "in": "query",
+            "name": "desc",
+            "schema": {
+              "type": "boolean"
             }
           }
         ],

@@ -56,6 +56,15 @@ public interface IMethodologyStore
     public Task<string?> GetCategoryRuleAsync(int methodologyVersionId, CancellationToken ct);
 
     /// <summary>
+    /// Коди переліку категорій констант версії (<c>calc.MethodologyCategory</c>, включно з виведеними з ужитку).
+    /// </summary>
+    /// <remarks>Читає лише публікація (попередження про літерали правила без категорії); прогін — ні.</remarks>
+    /// <param name="methodologyVersionId">Версія методології.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Коди в порядку переліку.</returns>
+    public Task<IReadOnlyList<string>> GetCategoryCodesAsync(int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>
     /// Бібліотеки, видимі виразам версії: оголошені імпорти з версією, чинною
     /// **на дату**, і кодами їхніх формул.
     /// </summary>

@@ -483,6 +483,50 @@ public sealed class MethodologyVersion : Entity<int>
         RequireOwn(rule.MethodologyVersionId, "Правило категорії", "category-rule");
     }
 
+    /// <summary>Заводить категорію констант у переліку версії. Лише для чернетки.</summary>
+    /// <param name="code">Код категорії (ключ зіставлення, регістр значущий).</param>
+    /// <param name="ordinal">Порядок у переліку.</param>
+    /// <returns>Нову категорію (треба додати до сховища).</returns>
+    /// <exception cref="DomainException"><c>ECR-CALC-0409</c> — версія не чернетка.</exception>
+    /// <remarks>
+    /// ⛔ Вхід лише через версію, як і для решти складу: перелік категорій обмежує, які константи можна
+    /// завести, і правка опублікованої версії змінила б її без diff-у й сліду.
+    /// </remarks>
+    public MethodologyCategory AddCategory(string code, int ordinal)
+    {
+        RequireDraft("перелік категорій");
+
+        return new MethodologyCategory(Id, code, ordinal);
+    }
+
+    /// <summary>Змінює опис, порядок і стан категорії. Лише для чернетки.</summary>
+    /// <param name="category">Категорія цієї версії.</param>
+    /// <param name="description">Опис; <c>null</c> — зняти.</param>
+    /// <param name="ordinal">Порядок.</param>
+    /// <param name="isRetired">Виведена з ужитку.</param>
+    /// <exception cref="DomainException"><c>ECR-CALC-0409</c> — версія не чернетка або категорія чужа.</exception>
+    public void EditCategory(MethodologyCategory category, string? description, int ordinal, bool isRetired)
+    {
+        ArgumentNullException.ThrowIfNull(category);
+
+        RequireDraft("перелік категорій");
+        RequireOwn(category.MethodologyVersionId, "Категорію", category.Code);
+
+        category.Describe(description, ordinal, isRetired);
+    }
+
+    /// <summary>Дозволяє прибрати категорію з переліку. Лише для чернетки.</summary>
+    /// <param name="category">Категорія цієї версії.</param>
+    /// <exception cref="DomainException"><c>ECR-CALC-0409</c> — версія не чернетка або категорія чужа.</exception>
+    /// <remarks>Як <see cref="RemoveFormula"/>: сутність лише дозволяє, видаляє сховище. Зайнятість перевіряє обробник.</remarks>
+    public void RemoveCategory(MethodologyCategory category)
+    {
+        ArgumentNullException.ThrowIfNull(category);
+
+        RequireDraft("перелік категорій");
+        RequireOwn(category.MethodologyVersionId, "Категорію", category.Code);
+    }
+
     /// <summary>Додає речовину до складу версії. Лише для чернетки (ФВ-8.8).</summary>
     /// <param name="substanceEntryId">Запис довідника речовин.</param>
     /// <param name="ordinal">Порядок у переліку.</param>

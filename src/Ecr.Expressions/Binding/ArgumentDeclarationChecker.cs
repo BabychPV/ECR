@@ -129,10 +129,19 @@ public static class ArgumentDeclarationChecker
         // вона — `CST.K`-посилання, а не `@`-аргумент. Без цього вона завжди лишалась «невжитою», хоч
         // рахується (4×2=8): хибне попередження публікації.
         var constants = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        CollectConstants(root, constants);
+        CollectSymbols(root, SymbolKind.Constant, constants);
         foreach (var constant in constants)
         {
             usedKeys.Add("CST_" + constant);
+        }
+
+        // Похідні аргументи (2026-11-02): похідний список несе й `!Formula` (як `FInfo_Arguments`), тож
+        // посилання на формулу — теж «вжите», а не хибне «оголошено, не вжито».
+        var formulas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        CollectSymbols(root, SymbolKind.Formula, formulas);
+        foreach (var formula in formulas)
+        {
+            usedKeys.Add("!" + formula);
         }
 
         // ⚠ Перше вживання, а не всі: методолог виправляє СПИСОК, і другий
@@ -254,42 +263,227 @@ public static class ArgumentDeclarationChecker
         return IsOptionalMarker(trimmed) ? trimmed[..^1].TrimEnd() : item;
     }
 
-    /// <summary>Імена констант <c>CST.X</c>, на які посилається вираз (без префікса).</summary>
-    private static void CollectConstants(AstNode node, HashSet<string> found)
+    /// <summary>Імена символів одного виду (<c>CST.X</c>, <c>!F</c>), на які посилається вираз (без префікса).</summary>
+    private static void CollectSymbols(AstNode node, SymbolKind kind, HashSet<string> found)
     {
         // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
         RuntimeHelpers.EnsureSufficientExecutionStack();
 
         switch (node)
         {
-            case SymbolReferenceNode { Kind: SymbolKind.Constant } symbol:
+            case SymbolReferenceNode symbol when symbol.Kind == kind:
                 found.Add(symbol.Name);
                 return;
             case UnaryNode unary:
-                CollectConstants(unary.Operand, found);
+                CollectSymbols(unary.Operand, kind, found);
                 return;
             case BinaryNode binary:
-                CollectConstants(binary.Left, found);
-                CollectConstants(binary.Right, found);
+                CollectSymbols(binary.Left, kind, found);
+                CollectSymbols(binary.Right, kind, found);
                 return;
             case ConditionalNode conditional:
-                CollectConstants(conditional.Condition, found);
-                CollectConstants(conditional.WhenTrue, found);
-                CollectConstants(conditional.WhenFalse, found);
+                CollectSymbols(conditional.Condition, kind, found);
+                CollectSymbols(conditional.WhenTrue, kind, found);
+                CollectSymbols(conditional.WhenFalse, kind, found);
                 return;
             case FunctionNode function:
                 foreach (var argument in function.Arguments)
                 {
-                    CollectConstants(argument, found);
+                    CollectSymbols(argument, kind, found);
                 }
 
                 return;
             case CellReferenceNode { Row: RowSelector.Predicate predicate }:
-                CollectConstants(predicate.Condition, found);
+                CollectSymbols(predicate.Condition, kind, found);
                 return;
             default:
                 return;
         }
+    }
+
+    // ——— Похідні аргументи (2026-11-02): список виводиться з тексту виразу, а не вводиться руками ———
+
+    /// <summary>Лексер діалекту методологій — ті самі правила, що й у розборі публікації.</summary>
+    private static readonly Lexing.Lexer MethodologyLexer = new(DialectSyntax.Of(Ecr.Domain.Enums.ExpressionDialect.Methodology));
+
+    /// <summary>
+    /// Похідний список аргументів формули: <c>@Arg</c> (з маркером <c>?</c>), <c>CST.X</c> і <c>!Formula</c> у порядку
+    /// першої появи в тексті, кожне ім'я — раз.
+    /// </summary>
+    /// <param name="expression">Вираз діалекту методологій; <c>null</c> — порожній список.</param>
+    /// <returns>Похідні елементи.</returns>
+    /// <remarks>
+    /// ⛔ Список більше НЕ вводиться (похідні аргументи, рішення 2026-11-02): методолог пише вираз, а
+    /// <c>ArgumentsCsv</c> зберігається як похідна копія — лише тому, що рантайм (<c>OptionalArguments</c>)
+    /// і публікація читають маркери <c>?</c> звідти, і їхня семантика (об'єднання по ВСІЙ версії) не змінюється.
+    /// <para>
+    /// ⚠ Читає ЛЕКСЕМИ, а не дерево: чернетка зберігає недописаний вираз, і список має бути похідним і від нього.
+    /// Розбіжність лексем із деревом публікація ловить сама: <see cref="Audit"/> порівнює похідний список із
+    /// <c>@</c>-вузлами дерева (<c>ECR-CALC-0432</c> — тепер твердження, а не перевірка вводу).
+    /// </para>
+    /// <para>
+    /// ⚠ Те саме ім'я з маркером і без — один елемент, НЕОБОВ'ЯЗКОВИЙ: рантайм об'єднує маркери по версії, і
+    /// «обов'язковий» там, де його в іншому місці тієї ж формули позначено <c>?</c>, все одно не існував би.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<DeclaredArgument> Derive(string? expression)
+    {
+        var tokens = MethodologyLexer.TokenizePrefix(expression);
+        var result = new List<DeclaredArgument>();
+        var index = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(DeclaredArgumentKind kind, string name, bool optional)
+        {
+            var key = DeclaredArgument.KeyOf(kind, name);
+            if (index.TryGetValue(key, out var at))
+            {
+                if (optional && !result[at].IsOptional)
+                {
+                    result[at] = result[at] with { IsOptional = true };
+                }
+
+                return;
+            }
+
+            index[key] = result.Count;
+            result.Add(new DeclaredArgument(kind, name, optional));
+        }
+
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            var token = tokens[i];
+
+            if (token.Type == Lexing.TokenType.At
+                && i + 1 < tokens.Count && tokens[i + 1].Type == Lexing.TokenType.Identifier)
+            {
+                var optional = i + 2 < tokens.Count && tokens[i + 2].Type == Lexing.TokenType.OptionalMarker;
+                Add(DeclaredArgumentKind.Argument, tokens[i + 1].Text, optional);
+                i += optional ? 2 : 1;
+                continue;
+            }
+
+            // `CST.X` — так само, як його впізнає парсер (`ParseIdentifier`: Identifier, Dot, Identifier).
+            if (token.Type == Lexing.TokenType.Identifier
+                && string.Equals(token.Text, "CST", StringComparison.OrdinalIgnoreCase)
+                && i + 2 < tokens.Count
+                && tokens[i + 1].Type == Lexing.TokenType.Dot
+                && tokens[i + 2].Type == Lexing.TokenType.Identifier)
+            {
+                Add(DeclaredArgumentKind.Constant, tokens[i + 2].Text, optional: false);
+                i += 2;
+                continue;
+            }
+
+            // `!Formula` — як `IsFormulaRef` парсера: ім'я, за яким не відкривається виклик функції.
+            if (token.Type == Lexing.TokenType.Bang
+                && i + 1 < tokens.Count && tokens[i + 1].Type == Lexing.TokenType.Identifier
+                && (i + 2 >= tokens.Count || tokens[i + 2].Type != Lexing.TokenType.LParen))
+            {
+                Add(DeclaredArgumentKind.Formula, tokens[i + 1].Text, optional: false);
+                i += 1;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Похідний <c>;</c>-список для <c>ArgumentsCsv</c>: <c>@A?;CST.K;!F</c>; без елементів — порожній рядок.</summary>
+    /// <param name="arguments">Похідні елементи (<see cref="Derive"/>).</param>
+    /// <returns>Текст колонки.</returns>
+    public static string Format(IEnumerable<DeclaredArgument> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+
+        return string.Join(DeclarationSeparator, arguments.Select(a => a.Text));
+    }
+
+    /// <summary>Похідний <c>ArgumentsCsv</c> виразу — <see cref="Format"/> від <see cref="Derive"/>.</summary>
+    /// <param name="expression">Вираз.</param>
+    /// <returns>Текст колонки.</returns>
+    public static string DeriveCsv(string? expression) => Format(Derive(expression));
+
+    /// <summary>Елементи збереженого (зокрема старого, введеного руками) <c>;</c>-списку.</summary>
+    /// <param name="argumentsCsv">Значення <c>ArgumentsCsv</c>.</param>
+    /// <returns>Елементи; невпізнаний запис — аргумент з іменем як є.</returns>
+    public static IReadOnlyList<DeclaredArgument> FromCsv(string? argumentsCsv)
+    {
+        var result = new List<DeclaredArgument>();
+        foreach (var item in ParseDeclaration(argumentsCsv))
+        {
+            if (item.StartsWith('!'))
+            {
+                result.Add(new DeclaredArgument(DeclaredArgumentKind.Formula, item[1..].Trim(), false));
+            }
+            else if (item.StartsWith("CST.", StringComparison.OrdinalIgnoreCase))
+            {
+                result.Add(new DeclaredArgument(DeclaredArgumentKind.Constant, item[4..].Trim(), false));
+            }
+            else
+            {
+                var optional = IsOptionalMarker(item);
+                var name = StripMarker(item).Trim();
+                if (name.StartsWith('@'))
+                {
+                    name = name[1..];
+                }
+
+                result.Add(new DeclaredArgument(DeclaredArgumentKind.Argument, name, optional));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Ставить маркер <c>?</c> за кожним <c>@Arg</c> виразу, чиє ім'я у множині необов'язкових і ще без маркера.
+    /// </summary>
+    /// <param name="expression">Вираз.</param>
+    /// <param name="optionalNames">Нормалізовані імена (<see cref="NormalizeName"/>), без регістру.</param>
+    /// <returns>Вираз із маркерами; той самий рядок, якщо ставити нічого.</returns>
+    /// <remarks>
+    /// ⚠ Позиції беруться з ЛЕКСЕМ: <c>@A</c> усередині рядкового літерала (<c>'@A'</c>) і довше ім'я з тим самим
+    /// початком (<c>@AB</c>) маркера не отримують. Вживається для переносу старих маркерів зі списку у вираз
+    /// (міграція, пакет AF, застаріле поле запиту).
+    /// </remarks>
+    public static string ApplyOptionalMarkers(string expression, IReadOnlySet<string> optionalNames)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        ArgumentNullException.ThrowIfNull(optionalNames);
+
+        if (optionalNames.Count == 0)
+        {
+            return expression;
+        }
+
+        var tokens = MethodologyLexer.TokenizePrefix(expression);
+        var inserts = new List<int>();
+        for (var i = 0; i + 1 < tokens.Count; i++)
+        {
+            if (tokens[i].Type != Lexing.TokenType.At || tokens[i + 1].Type != Lexing.TokenType.Identifier)
+            {
+                continue;
+            }
+
+            var name = tokens[i + 1];
+            var marked = i + 2 < tokens.Count && tokens[i + 2].Type == Lexing.TokenType.OptionalMarker;
+            if (!marked && optionalNames.Contains(NormalizeName(name.Text)))
+            {
+                inserts.Add(name.Position + name.Length);
+            }
+        }
+
+        if (inserts.Count == 0)
+        {
+            return expression;
+        }
+
+        var text = new System.Text.StringBuilder(expression);
+        for (var k = inserts.Count - 1; k >= 0; k--)
+        {
+            text.Insert(inserts[k], OptionalMarker);
+        }
+
+        return text.ToString();
     }
 
     /// <summary>Обхід дерева зі збиранням <c>@Arg</c>.</summary>
@@ -338,6 +532,45 @@ public static class ArgumentDeclarationChecker
                 return;
         }
     }
+}
+
+/// <summary>Вид елемента похідного списку аргументів.</summary>
+public enum DeclaredArgumentKind : byte
+{
+    /// <summary><c>@Arg</c> — колонка рядка.</summary>
+    Argument = 0,
+
+    /// <summary><c>CST.X</c> — константа версії.</summary>
+    Constant = 1,
+
+    /// <summary><c>!Formula</c> — інша формула.</summary>
+    Formula = 2,
+}
+
+/// <summary>Елемент похідного списку аргументів формули.</summary>
+/// <param name="Kind">Вид.</param>
+/// <param name="Name">Ім'я як у тексті, без префікса й маркера.</param>
+/// <param name="IsOptional">Маркер <c>?</c> (лише для <see cref="DeclaredArgumentKind.Argument"/>).</param>
+public sealed record DeclaredArgument(DeclaredArgumentKind Kind, string Name, bool IsOptional)
+{
+    /// <summary>Запис у <c>;</c>-списку: <c>@A?</c>, <c>CST.K</c>, <c>!F</c>.</summary>
+    public string Text => Kind switch
+    {
+        DeclaredArgumentKind.Argument => "@" + Name + (IsOptional ? "?" : string.Empty),
+        DeclaredArgumentKind.Constant => "CST." + Name,
+        _ => "!" + Name,
+    };
+
+    /// <summary>Ключ порівняння (вид + нормалізоване ім'я); регістр знімає компаратор.</summary>
+    public string Key => KeyOf(Kind, Name);
+
+    /// <summary>Ключ порівняння для виду й імені.</summary>
+    /// <param name="kind">Вид.</param>
+    /// <param name="name">Ім'я.</param>
+    /// <returns>Ключ.</returns>
+    public static string KeyOf(DeclaredArgumentKind kind, string name)
+        => ((byte)kind).ToString(System.Globalization.CultureInfo.InvariantCulture) + ":"
+           + ArgumentDeclarationChecker.NormalizeName(name);
 }
 
 /// <summary>Одне вживання аргументу у виразі.</summary>
