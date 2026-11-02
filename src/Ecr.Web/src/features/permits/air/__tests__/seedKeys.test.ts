@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readSeedSql } from '@/test/seedSql';
 
 /**
  * Ключі каталогу картки лімітів і майстра імпорту (NAE-план N3/N5): усе, що код просить у `t()` під `permits.air.*`
@@ -8,7 +9,7 @@ import { describe, expect, it } from 'vitest';
  * з однаковими підстановками; англійський текст без кирилиці; пар (ключ, мова) без дублів; зайвих ключів у секціях немає.
  */
 const webRoot = process.cwd();
-const seed = readFileSync(path.resolve(webRoot, '..', 'Ecr.Infrastructure', 'Persistence', 'Sql', '09-seed.sql'), 'utf8');
+const seed = readSeedSql();
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {

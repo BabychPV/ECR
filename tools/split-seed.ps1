@@ -370,8 +370,10 @@ function Get-Plan([string]$text) {
 }
 
 function Get-RunOrder($prelude, $features, $epilogue) {
+    # Ordinal by FILE name (with .sql), exactly as SeedScript.Order sorts "features/<name>.sql".
     $names = [string[]]@($features.Keys)
-    [Array]::Sort($names, [StringComparer]::Ordinal)
+    $files = [string[]]@($names | ForEach-Object { $_ + '.sql' })
+    [Array]::Sort($files, $names, [StringComparer]::Ordinal)
     $sb = New-Object Text.StringBuilder
     [void]$sb.Append($prelude)
     foreach ($nm in $names) { [void]$sb.Append($features[$nm]) }

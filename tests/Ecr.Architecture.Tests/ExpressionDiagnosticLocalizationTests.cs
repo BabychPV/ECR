@@ -26,7 +26,7 @@ namespace Ecr.Architecture.Tests;
 /// </remarks>
 public sealed partial class ExpressionDiagnosticLocalizationTests
 {
-    private const string SeedFile = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedFile = SeedSql.DisplayPath;
 
     [GeneratedRegex("\"(?:[^\"\\\\]|\\\\.)*[\\u0400-\\u04FF](?:[^\"\\\\]|\\\\.)*\"")]
     private static partial Regex CyrillicLiteral();
@@ -85,7 +85,7 @@ public sealed partial class ExpressionDiagnosticLocalizationTests
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Кожен_ключ_expr_з_коду_заведено_в_каталозі_англійською()
     {
-        var seed = File.ReadAllText(Path.Combine(SourceTree.Root, SeedFile));
+        var seed = SeedSql.Text;
 
         var missing = SourceTree.Production("Ecr.Expressions", "Ecr.Application")
             .SelectMany(file => ExprKey().Matches(MaskComments(file.Text)).Select(m => (file.Path, Key: m.Groups[1].Value)))

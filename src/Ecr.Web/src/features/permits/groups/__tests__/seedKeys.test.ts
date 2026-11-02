@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readSeedSql } from '@/test/seedSql';
 
 /**
  * Ключі каталогу екрана «Groups» і цілей Lookup із групами: усе, що код просить у `t()` під `permits.groups.*` та
@@ -11,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 const webRoot = process.cwd();
 const groupsDir = path.resolve(webRoot, 'src', 'features', 'permits', 'groups');
 const targetsFile = path.resolve(webRoot, 'src', 'features', 'registries', 'lookupTargets.ts');
-const seed = readFileSync(path.resolve(webRoot, '..', 'Ecr.Infrastructure', 'Persistence', 'Sql', '09-seed.sql'), 'utf8');
+const seed = readSeedSql();
 
 const marker = {
   en: '-- PERMITS: groups-ui ── en:',

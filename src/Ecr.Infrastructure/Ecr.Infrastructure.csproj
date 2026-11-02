@@ -40,10 +40,12 @@
   <ItemGroup>
     <!-- SQL-скрипти йдуть у вихід: їх виконує SQL Agent, а не застосунок (D-66) -->
     <None Update="Persistence\Sql\*.sql" CopyToOutputDirectory="PreserveNewest" />
-    <!-- Виняток: 09-seed.sql виконує САМ застосунок (§14), тому він ще й
-         вбудований у збірку. Інакше застосунок можна було б запустити з
-         чужою копією seed, і розбіжність вилізла б аж на екрані входу. -->
-    <EmbeddedResource Include="Persistence\Sql\09-seed.sql" />
+    <!-- Виняток: seed (Persistence\Sql\seed\: 00-prelude, features\*, 99-epilogue)
+         виконує САМ застосунок (§14), тому він вбудований у збірку. Інакше
+         застосунок можна було б запустити з чужою копією seed, і розбіжність
+         вилізла б аж на екрані входу. Порядок частин — SeedScript.Order;
+         LogicalName без перекодування імен тек, щоб ім'я файла фічі = ім'я ресурсу. -->
+    <EmbeddedResource Include="Persistence\Sql\seed\**\*.sql" LogicalName="EcrSeed/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

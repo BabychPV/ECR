@@ -175,8 +175,7 @@ public sealed partial class RowReportPlaceholderTests
     /// <summary>Шаблони <c>err.*</c> сіду (en): ключ → текст.</summary>
     private static Dictionary<string, string> Templates()
     {
-        var seed = File.ReadAllText(Path.Combine(
-            SourceTree.Root, "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+        var seed = SeedSql.Text;
 
         var templates = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (Match m in SeedTemplate().Matches(seed))

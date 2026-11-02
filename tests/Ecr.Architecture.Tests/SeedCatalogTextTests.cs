@@ -33,7 +33,7 @@ namespace Ecr.Architecture.Tests;
 public sealed partial class SeedCatalogTextTests
 {
     /// <summary>Сід каталогу рядків відносно кореня репозиторію.</summary>
-    private const string SeedFile = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedFile = SeedSql.DisplayPath;
 
     /// <summary>Мова, якою заводяться рядки збірки (ФВ-14.9, <c>D-95</c>).</summary>
     private const string DefaultLanguage = "en";
@@ -153,8 +153,7 @@ public sealed partial class SeedCatalogTextTests
     /// </remarks>
     private static List<(string Key, string Language, string Value)> Rows()
     {
-        var text = File.ReadAllText(
-            Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar)));
+        var text = SeedSql.Text;
 
         // ⚠ Саме `AS t`, а не голе `MERGE sys_ecr.UiString`: на сорок рядків
         // вище стоїть `MERGE sys_ecr.UiStringRevision`, і префікс збігається.
