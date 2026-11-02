@@ -6,6 +6,7 @@ import type {
   AirLimitsPermit,
   AirPreview,
   AirScopeCodes,
+  AirScopeFields,
   ImportProfile,
   ImportProfileSummary,
   NaeTree,
@@ -23,10 +24,14 @@ import type {
 /** Реєстр дерева НАЕ: цілі «створити під вузлом» у кроці розв'язання відсутніх НАЕ. */
 export const NaeRegistryCode = 'NAE_TREE';
 
-function importForm(file: File, options: AirImportOptions): FormData {
+/** Поля області імпорту (`regionEntryId`/`areaEntryId` або `region`/`area`, AIR-ON-AIR): окремими полями форми. */
+export type AirScopeForm = Readonly<Record<string, string>>;
+
+function importForm(file: File, options: AirImportOptions, scope: AirScopeForm = {}): FormData {
   const form = new FormData();
   form.append('file', file);
   form.append('request', JSON.stringify(options));
+  for (const [name, value] of Object.entries(scope)) form.append(name, value);
 
   return form;
 }
@@ -61,10 +66,15 @@ export function analyseAirImport(file: File, options: AirImportOptions): Promise
 }
 
 /** Перегляд імпорту в дозвіл: помилки, відсутні НАЕ, обсяг заміни, diff, відбиток плану. Нічого не пишеться. */
-export function previewAirImport(permitId: number, file: File, options: AirImportOptions): Promise<AirPreview> {
+export function previewAirImport(
+  permitId: number,
+  file: File,
+  options: AirImportOptions,
+  scope: AirScopeForm = {},
+): Promise<AirPreview> {
   return apiFetch<AirPreview>(`/api/v1/permits/${permitId}/air-limits/import/preview`, {
     method: 'POST',
-    body: importForm(file, options),
+    body: importForm(file, options, scope),
   });
 }
 
@@ -72,10 +82,15 @@ export function previewAirImport(permitId: number, file: File, options: AirImpor
  * Застосовує імпорт однією транзакцією («усе або нічого»). Потрібні `confirmedOtherOwners` (якщо замінюються чужі
  * дозволи) і `expectedFingerprint` з перегляду: інакше `422 regReplaceNotConfirmed` / `regPlanChanged`.
  */
-export function applyAirImport(permitId: number, file: File, options: AirImportOptions): Promise<AirImportResult> {
+export function applyAirImport(
+  permitId: number,
+  file: File,
+  options: AirImportOptions,
+  scope: AirScopeForm = {},
+): Promise<AirImportResult> {
   return apiFetch<AirImportResult>(`/api/v1/permits/${permitId}/air-limits/import/apply`, {
     method: 'POST',
-    body: importForm(file, options),
+    body: importForm(file, options, scope),
   });
 }
 
@@ -87,4 +102,9 @@ export function getNaeTree(): Promise<NaeTree> {
 /** Regions and areas of the NAE tree (with group names): the File step picks from them instead of free text. Registry.View. */
 export function getAirScopeCodes(): Promise<AirScopeCodes> {
   return apiFetch<AirScopeCodes>('/api/v1/air-limits/scope-codes');
+}
+
+/** AIR-ON-AIR: REGION / AREA scope columns of the AIR type (Text / Registry / List) with their values. Registry.View. */
+export function getAirScopeFields(): Promise<AirScopeFields> {
+  return apiFetch<AirScopeFields>('/api/v1/air-limits/scope-fields');
 }

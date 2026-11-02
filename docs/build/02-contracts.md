@@ -4711,6 +4711,12 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/entries/{id}/retire` | `Registry.EditData` або грант `Write` на довідник | 8 |
 | `GET` | `/api/v1/registries/{code}/entries/{id}/references` | `Registry.View` або грант `Read` на довідник | 8 |
 | `POST` | `/api/v1/nae-tree/af-import` | `Registry.EditDefinition` + `Registry.EditData` | 8 |
+| `POST` | `/api/v1/nae-tree/roots` | `Registry.EditData`; +`Registry.EditDefinition` і `Registry.Publish`, коли довідник створюється | 8 |
+| `POST` | `/api/v1/nae-tree/seed-roots` | `Registry.EditData`; +`Registry.EditDefinition` і `Registry.Publish`, коли довідник створюється | 8 |
+| `GET` | `/api/v1/nae-tree/import/template` | `Registry.View` | 8 |
+| `POST` | `/api/v1/nae-tree/import/analyse` | `Registry.EditData` | 8 |
+| `POST` | `/api/v1/nae-tree/import/preview` | `Registry.EditData` | 8 |
+| `POST` | `/api/v1/nae-tree/import/apply` | `Registry.EditData`; +`Registry.EditDefinition` і `Registry.Publish`, коли довідник створюється | 8 |
 | `POST` | `/api/v1/air-limits/provision` | `Permit.EditType` + `Permit.PublishType` | 8 |
 | `GET` | `/api/v1/air-limits/import-profiles` | `Registry.View` | 8 |
 | `GET` | `/api/v1/air-limits/import-profiles/{code}` | `Registry.View` | 8 |
@@ -4720,6 +4726,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/permits/{permitId}/air-limits/import/apply` | `Registry.EditData` + грант `Write` на таблиці дозволу | 8 |
 | `GET` | `/api/v1/permits/{permitId}/air-limits` | `Registry.View` або грант `Read` на реєстр шапки | 8 |
 | `GET` | `/api/v1/air-limits/scope-codes` | `Registry.View` | 8 |
+| `GET` | `/api/v1/air-limits/scope-fields` | `Registry.View` | 8 |
 
 Порт NAE N3: `IRegistryImportProfileStore` - збережені профілі імпорту таблиці `AIR_SOURCES` (`cfg.RegistryImportProfile`): список, пошук за кодом, додавання, перевірка `RowVersion` для `PUT …/import-profiles/{code}`.
 | `GET` | `/api/v1/permit-types?category=&status=&q=&limit=&cursor=` | `Registry.View` | 8 |

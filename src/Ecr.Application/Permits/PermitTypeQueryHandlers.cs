@@ -161,7 +161,8 @@ public sealed class ListPermitTypesHandler(
             Tables(type, allTables[type.Id], definitions),
             counts.GetValueOrDefault(type.HeaderRegistryDefId),
             type.UpdatedAt,
-            type.UpdatedByUserId is { } id ? names.GetValueOrDefault(id) : null,
+            // ✎ AIRSYS01: змінено без користувача (дія розгортання, крок старту) — «system», як в історії погодження.
+            type.UpdatedByUserId is { } id ? names.GetValueOrDefault(id) : type.UpdatedAt is null ? null : Workflow.GetWorkflowHistoryHandler.SystemActor,
             used.GetValueOrDefault(type.HeaderRegistryDefId))).ToList();
 
         return new PagedResult<PermitTypeListItemDto>(items, hasMore ? shown[^1].Code : null, null);

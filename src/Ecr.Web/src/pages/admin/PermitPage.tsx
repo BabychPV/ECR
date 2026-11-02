@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, type JSX } from 'react';
 import { Badge, Button, Menu, Skeleton, Stack, Tabs } from '@mantine/core';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { NotFoundPage } from '@/app/NotFoundPage';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -15,7 +15,7 @@ import { capabilities, PermitStatus, type PermitCapabilities } from '@/features/
 import { usePermit, usePermitTypeDefinition, useUnitLabels } from '@/features/permits/permit/permitQueries';
 import { PanelParam } from '@/features/permits/permit/tableParams';
 import { PermitEditorHead, PermitStateStepper } from '@/features/permits/shell/PermitEditorHead';
-import { PermitsPaths } from '@/features/permits/shell/permitPaths';
+import { permitImportPath, PermitsPaths } from '@/features/permits/shell/permitPaths';
 import { PermitStateBadge } from '@/features/permits/ui/PermitStateBadge';
 
 // Діалоги життєвого циклу — окремий чанк: на першому показі `?dialog=` порожній (бюджет маршруту, D-132).
@@ -32,9 +32,10 @@ const LifecycleDialogs = lazy(() =>
 const loadTableTab = () => import('@/features/permits/permit/TableTab');
 const TableTab = lazy(() => loadTableTab().then((module) => ({ default: module.TableTab })));
 
-// Картка лімітів «Air limits» (NAE-план N3) — окремим чанком: потрібна лише дозволу типу `AIR_LIMITS`.
+// «Sources & parameters» (NAE-план N3, AIR-ON-AIR) — окремим чанком: потрібна лише дозволу типу `AIR` (людина 02.11:
+// таблиця параметрів належить дозволу локації й регіону, «а не як окремий тип»).
 const AirLimitsTab = lazy(() => import('@/features/permits/air/AirLimitsTab').then((module) => ({ default: module.AirLimitsTab })));
-const AirTypeCode = 'AIR_LIMITS';
+const AirTypeCode = 'AIR';
 const AirTabId = 'air';
 
 // «Used in» (PERMIT-USAGE): де дозвіл обрано значенням шапки чи колонки документа — окремим чанком, як і інші вкладки.
@@ -48,11 +49,23 @@ const UsagePeriodParam = 'period';
 const OverviewTabId = 'overview';
 const TabParam = 'tab';
 
-function Actions({ caps, open }: { readonly caps: PermitCapabilities; readonly open: (id: string) => void }): JSX.Element | null {
-  if (!caps.renew && !caps.activate && !caps.end && !caps.remove) return null;
+interface ActionsProps {
+  readonly caps: PermitCapabilities;
+  readonly open: (id: string) => void;
+  /** Дозвіл типу AIR, у який можна імпортувати: кнопка «Import parameters…» поруч із Renew/More (як в Excel). */
+  readonly importTo: number | null;
+}
+
+function Actions({ caps, open, importTo }: ActionsProps): JSX.Element | null {
+  if (!caps.renew && !caps.activate && !caps.end && !caps.remove && importTo === null) return null;
 
   return (
     <>
+      {importTo !== null && (
+        <Button variant="default" component={Link} to={permitImportPath(importTo)} data-permit-import>
+          {t('permits.air.import')}
+        </Button>
+      )}
       {caps.renew && (
         <Button variant="default" onClick={() => open('renew')}>
           {t('permits.page.actions.renew')}
@@ -100,6 +113,7 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
 
   const requested = params.get(TabParam) ?? OverviewTabId;
   const hasAir = permit.typeCode === AirTypeCode;
+  const mayImport = mayEdit && permit.status !== PermitStatus.Expired;
   const tab =
     permit.tables.some((table) => table.code === requested) || (hasAir && requested === AirTabId) || requested === UsageTabId
       ? requested
@@ -142,7 +156,7 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
         subtitle={subtitle}
         badge={<PermitStateBadge state={permit.status} />}
         progress={<PermitStateStepper state={permit.status} />}
-        actions={<Actions caps={caps} open={open} />}
+        actions={<Actions caps={caps} open={open} importTo={hasAir && mayImport ? permit.id : null} />}
       />
       <Stack gap="md">
         {permit.status === PermitStatus.Expired && (
@@ -173,7 +187,7 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
           {hasAir && (
             <Tabs.Panel value={AirTabId}>
               <Suspense fallback={<Skeleton height={160} role="status" aria-label={t('common.loading')} />}>
-                <AirLimitsTab permitId={permit.id} mayImport={mayEdit && permit.status !== PermitStatus.Expired} />
+                <AirLimitsTab permitId={permit.id} mayImport={mayImport} />
               </Suspense>
             </Tabs.Panel>
           )}

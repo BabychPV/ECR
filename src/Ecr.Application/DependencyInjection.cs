@@ -65,6 +65,9 @@ public static class DependencyInjection
         services.AddScoped<Permits.AirLimits.AirLimitsImportHandler>();
         services.AddScoped<Permits.AirLimits.GetAirLimitsPermitHandler>();
         services.AddScoped<Permits.AirLimits.GetAirScopeCodesHandler>();
+        services.AddScoped<Permits.AirLimits.AirScopeColumns>();
+        services.AddScoped<Permits.AirLimits.GetAirScopeFieldsHandler>();
+        services.AddScoped<Permits.AirLimits.AirTypeSystemProvisioner>();
         services.AddScoped<PatchPresentationHandler>();
         services.AddScoped<ReplaceHeaderGroupsHandler>();
 
@@ -289,6 +292,8 @@ public static class DependencyInjection
         services.AddScoped<Registries.Nae.ImportNaeFromAfHandler>();
         services.AddScoped<Registries.Nae.GetRegistryEntryReferencesHandler>();
         services.AddScoped<Registries.Nae.NaeTreeProvisioner>();
+        services.AddScoped<Registries.Nae.NaeTreeManualHandler>();
+        services.AddScoped<Registries.Nae.NaeTreeNodeApplier>();
         services.AddScoped<Registries.SwitchRegistrySourceHandler>();
         services.AddScoped<Registries.DeleteRegistryEntryHandler>();
         services.AddScoped<Preferences.ListUserPreferencesHandler>();

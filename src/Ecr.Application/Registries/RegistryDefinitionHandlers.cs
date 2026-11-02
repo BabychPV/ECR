@@ -427,6 +427,25 @@ public sealed class SaveRegistryDefinitionHandler(
             .ConfigureAwait(false);
 
         var userId = RequireUser(currentUser);
+        return await SaveForAuthorAsync(code, dto, userId, profile, ifMatch, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ AIRSYS02: the same direct save for an author already checked by the caller, or for the SYSTEM at start (author 0
+    /// «system», <c>NaeTreeProvisioner.EnsureAsSystemAsync</c>). <c>internal</c>: no controller can reach it.
+    /// </summary>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="dto">Повний стан опису після правки.</param>
+    /// <param name="userId">Автор (0 — система).</param>
+    /// <param name="profile">Профіль автора (заборони довідників).</param>
+    /// <param name="ifMatch"><c>definitionVersion</c>, від якої зберігають.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<int> SaveForAuthorAsync(
+        string code, SaveRegistryDefinitionDto dto, int userId, Security.AccessProfile profile, string? ifMatch, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        ArgumentNullException.ThrowIfNull(profile);
+
         RequireReason(dto.Reason);
         RequireNoEmptyItems(dto.Fields, dto.Rules, dto.Keys);
 

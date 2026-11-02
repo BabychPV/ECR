@@ -311,6 +311,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/air-limits/scope-fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * ✎ AIR-ON-AIR: the import scope columns REGION and AREA as configured on the AIR permit type (`Text`, `Registry`
+         *     or `List`) with the values to pick from, each mapped to the NAE tree. Permission `Registry.View`.
+         * @description A missing registry is not created: `registryFound = false`, no options (empty state).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirScopeFieldsDto"];
+                        "text/json": components["schemas"]["AirScopeFieldsDto"];
+                        "text/plain": components["schemas"]["AirScopeFieldsDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit/cells": {
         parameters: {
             query?: never;
@@ -11092,6 +11134,399 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nae-tree/import/analyse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reads an NAE tree workbook (the template layout) and reports rows, planned nodes and file findings. The database is not
+         *     consulted and nothing is written. Permission `Registry.EditData`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NaeTreeImportReportDto"];
+                        "text/json": components["schemas"]["NaeTreeImportReportDto"];
+                        "text/plain": components["schemas"]["NaeTreeImportReportDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nae-tree/import/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Applies the NAE tree import in ONE transaction: all planned nodes or none. Permission `Registry.EditData` (and
+         *     `Registry.EditDefinition` when the registry does not exist yet).
+         * @description An error finding (`422 naeImportHasErrors`) or a plan that differs from the previewed one (`422 regPlanChanged`)
+         *     writes nothing. Existing nodes are never changed: a second apply of the same file is a no-op (`applied = false`).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    } & {
+                        request?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NaeTreeImportReportDto"];
+                        "text/json": components["schemas"]["NaeTreeImportReportDto"];
+                        "text/plain": components["schemas"]["NaeTreeImportReportDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nae-tree/import/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview of the NAE tree import over the stored tree: nodes to create, nodes already there (left untouched; a differing
+         *     stored name is a warning), conflicts by business key (NAE code + region + area). Nothing is written. Permission
+         *     `Registry.EditData`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    } & {
+                        request?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NaeTreeImportReportDto"];
+                        "text/json": components["schemas"]["NaeTreeImportReportDto"];
+                        "text/plain": components["schemas"]["NaeTreeImportReportDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nae-tree/import/template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Empty Excel template of the NAE tree import: `Region | Area | Site | Equipment | NAE code | Name_En | Name_Ru |
+         *     Name_Kz | On_Offshore`. Permission `Registry.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nae-tree/roots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Creates a region root (and, optionally, one area under it) of the NAE tree by hand — the first node of an empty tree
+         *     without AF. Needs `Registry.EditData`; the call that provisions the registry also needs
+         *     `Registry.EditDefinition`.
+         * @description Idempotent and create-only: a region or area that already exists (technical code `R_&lt;REGION&gt;` /
+         *     `A_&lt;REGION&gt;_&lt;AREA&gt;`, the same as the AF load) is returned as it is, never renamed.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateNaeRootRequest"];
+                    "application/json": components["schemas"]["CreateNaeRootRequest"];
+                    "text/json": components["schemas"]["CreateNaeRootRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NaeRootResultDto"];
+                        "text/json": components["schemas"]["NaeRootResultDto"];
+                        "text/plain": components["schemas"]["NaeRootResultDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nae-tree/seed-roots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Creates one region root per live entry of the `LAND_REGION` registry. Only for an EMPTY tree (otherwise
+         *     `422 naeTreeNotEmpty`); an explicit action, never automatic. Same permissions as `POST nae-tree/roots`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NaeSeedRootsResultDto"];
+                        "text/json": components["schemas"]["NaeSeedRootsResultDto"];
+                        "text/plain": components["schemas"]["NaeSeedRootsResultDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications/channels": {
         parameters: {
             query?: never;
@@ -13550,6 +13985,16 @@ export interface paths {
                         file?: components["schemas"]["IFormFile"];
                     } & {
                         request?: string;
+                    } & {
+                        /** Format: int64 */
+                        regionEntryId?: number;
+                    } & {
+                        /** Format: int64 */
+                        areaEntryId?: number;
+                    } & {
+                        region?: string;
+                    } & {
+                        area?: string;
                     };
                 };
             };
@@ -13627,6 +14072,16 @@ export interface paths {
                         file?: components["schemas"]["IFormFile"];
                     } & {
                         request?: string;
+                    } & {
+                        /** Format: int64 */
+                        regionEntryId?: number;
+                    } & {
+                        /** Format: int64 */
+                        areaEntryId?: number;
+                    } & {
+                        region?: string;
+                    } & {
+                        area?: string;
                     };
                 };
             };
@@ -25657,6 +26112,11 @@ export interface components {
             /** @description Area code. */
             area: string;
             /**
+             * Format: int64
+             * @description Area registry entry; `null` — none.
+             */
+            areaEntryId?: null | number;
+            /**
              * Format: int32
              * @description NAE nodes created in the tree.
              */
@@ -25676,6 +26136,11 @@ export interface components {
             permitNumber: string;
             /** @description Region code. */
             region: string;
+            /**
+             * Format: int64
+             * @description Region registry entry the import was scoped to.
+             */
+            regionEntryId?: null | number;
             /** @description Rows of OTHER permits that were replaced (confirmed), per permit. */
             replacedOthers: components["schemas"]["OwnerReplace"][];
             /**
@@ -25731,6 +26196,11 @@ export interface components {
             area: string;
             /**
              * Format: int64
+             * @description Area registry entry; `null` — none.
+             */
+            areaEntryId?: null | number;
+            /**
+             * Format: int64
              * @description Permit.
              */
             permitId: number;
@@ -25742,6 +26212,16 @@ export interface components {
             profileCode: null | string;
             /** @description Region code the import is scoped to. */
             region: string;
+            /**
+             * Format: int64
+             * @description Region registry entry the import is scoped to (stored on each source row).
+             */
+            regionEntryId?: null | number;
+            /**
+             * @description The region (and area) map to the NAE tree; `false` — «region/area not in NAE tree»: NAE codes are matched without the tree scope.
+             * @default true
+             */
+            scopeInNaeTree: boolean;
         };
         /** @description Result of `POST /api/v1/air-limits/provision`. */
         AirLimitsProvisionReport: {
@@ -25779,10 +26259,60 @@ export interface components {
             /** @description Regions, by code. */
             regions: components["schemas"]["AirRegionCodeDto"][];
         };
+        /** @description One value the import wizard offers for a scope column, with the NAE tree scope it maps to. */
+        AirScopeEntryDto: {
+            /** @description Entry code (`REG_001`, `OFFSHORE`) or the choice text. */
+            code: string;
+            /**
+             * Format: int64
+             * @description Registry entry id (Registry kind: what `regionEntryId`/`areaEntryId` take); `null` for a List choice.
+             */
+            entryId: null | number;
+            /** @description NAE tree area code (AREA column; only where the tree region has areas: `Offshore` → `OFFSHORE`); `null` — match by
+             *     region only. */
+            naeArea: null | string;
+            /** @description NAE tree region code the value maps to (REGION column; by normalised name); `null` — not in the NAE tree. */
+            naeRegion: null | string;
+            /** @description Name (default language) or the choice text. */
+            name: string;
+        };
+        /** @description ✎ AIR-ON-AIR: one scope column of the AIR permit's sources table (REGION or AREA) as configured on the AIR type with the SAME
+         *     column settings as any permit-type column (data type + list scope): `Text` (String), `Registry` (Lookup, shared
+         *     registry), `List` (Lookup, values of the type, entered separated by «;»). */
+        AirScopeFieldDto: {
+            /** @description Column code (`REGION`, `AREA`). */
+            columnCode: string;
+            /** @description `Text`, `Registry` or `List`. */
+            kind: string;
+            /** @description Values to pick from (Registry / List), by code; empty for Text. */
+            options: components["schemas"]["AirScopeEntryDto"][];
+            /** @description Registry the value comes from (Registry: `LAND_REGION`, `AIR_AREA`; List: the type's own list registry). */
+            registryCode: null | string;
+            /** @description The registry exists; `false` — empty state, the import cannot use this column's values. */
+            registryFound: boolean;
+            /** @description A value is required (REGION) or optional (AREA). */
+            required: boolean;
+        };
+        /** @description Result of `GET /api/v1/air-limits/scope-fields`: how the import scope is configured on the AIR type, with values. */
+        AirScopeFieldsDto: {
+            /** @description The AREA scope column. */
+            area: components["schemas"]["AirScopeFieldDto"];
+            /** @description The REGION scope column. */
+            region: components["schemas"]["AirScopeFieldDto"];
+            /** @description Permit type (`AIR`). */
+            typeCode: string;
+        };
         /** @description One source (NAE) of a permit with its substances. */
         AirSourceDto: {
             /** @description Area code (`-` — none). */
             area: null | string;
+            /** @description Its code (`AREA_018`). */
+            areaEntryCode?: null | string;
+            /**
+             * Format: int64
+             * @description Area registry entry; `null` — none.
+             */
+            areaEntryId?: null | number;
             /**
              * Format: decimal
              * @description Diameter, m.
@@ -25821,6 +26351,13 @@ export interface components {
             quantity: null | string;
             /** @description Region code. */
             region: null | string;
+            /** @description Its code (`REG_001`). */
+            regionEntryCode?: null | string;
+            /**
+             * Format: int64
+             * @description Region registry entry of the import block this row came from.
+             */
+            regionEntryId?: null | number;
             /** @description Production / site label from the group row of the file. */
             siteLabel: null | string;
             /** @description Source name. */
@@ -27461,6 +27998,19 @@ export interface components {
             level: components["schemas"]["CalculationLevel"];
             /** @description Номер нової версії; унікальний у межах методології (`UQ_MethodologyVersion`). */
             versionNumber: string;
+        };
+        /** @description Creates a root of the NAE tree by hand (no AF): a region and, optionally, one area under it. */
+        CreateNaeRootRequest: {
+            /** @description Area code (`OFFSHORE`); `null` or empty — only the region. */
+            areaCode: null | string;
+            /** @description English name of the deepest created node; `null` — the code as written. */
+            nameEn: null | string;
+            /** @description Kazakh name of the deepest created node. */
+            nameKz: null | string;
+            /** @description Russian name of the deepest created node. */
+            nameRu: null | string;
+            /** @description Region code (`ATYRAU`); normalised to upper case. */
+            regionCode: string;
         };
         /** @description Тіло створення каналу. */
         CreateNotificationChannelRequest: {
@@ -30978,6 +31528,88 @@ export interface components {
             existing: number;
             /** @description Level code (`REGION`, `AREA`, `SITE`, `EQUIP`, `SRC`). */
             levelCode: string;
+        };
+        /** @description Result of `POST /api/v1/nae-tree/roots`. */
+        NaeRootResultDto: {
+            /**
+             * Format: int64
+             * @description The area node; `null` when no area was asked.
+             */
+            areaEntryId: null | number;
+            /** @description Something was created (`false` — every asked node already existed; nothing was changed). */
+            created: boolean;
+            /**
+             * Format: int64
+             * @description The region node (created or already there).
+             */
+            regionEntryId: number;
+            /** @description Registry (`NAE_TREE`). */
+            registryCode: string;
+            /** @description The registry (fields, key, levels) was created by this call. */
+            registryProvisioned: boolean;
+        };
+        /** @description Result of `POST /api/v1/nae-tree/seed-roots`. */
+        NaeSeedRootsResultDto: {
+            /** @description Region codes created as roots, in order. */
+            created: string[];
+            /** @description Registry (`NAE_TREE`). */
+            registryCode: string;
+            /** @description The registry was created by this call. */
+            registryProvisioned: boolean;
+            /** @description Registry the region list was read from (`LAND_REGION`). */
+            sourceRegistryCode: string;
+        };
+        /** @description One finding of the Excel import of the NAE tree. */
+        NaeTreeImportIssueDto: {
+            /** @description `headerNotFound`, `regionRequired`, `siteRequired`, `badCode`, `areaMismatch` (Area and On_Offshore
+             *             differ), `duplicateInFile`, `existingElsewhere` (the business key belongs to a node under another parent),
+             *             `codeTaken` (the technical code belongs to another node), `nameDiffers` (warning: the stored name differs; names are
+             *             not overwritten). */
+            code: string;
+            /** @description Template column name (`NAE code`), when the finding is about one cell. */
+            column: null | string;
+            /** @description Short explanation (English; the UI shows its own text per `Code`). */
+            detail: string;
+            /** @description Normalised NAE code of the row, when it has one. */
+            naeCode: null | string;
+            /**
+             * Format: int32
+             * @description Excel row (1-based); 0 — the whole file.
+             */
+            row: number;
+            /** @description `error` (blocks the apply) or `warning` (reported, the apply is allowed). */
+            severity: string;
+        };
+        /** @description Result of the NAE tree Excel import (analyse, preview and apply return the same shape). */
+        NaeTreeImportReportDto: {
+            /** @description Something was written (apply only; never when there was nothing new). */
+            applied: boolean;
+            /** @description No error finding (analyse: the file itself is clean; the database is not consulted). */
+            canApply: boolean;
+            /**
+             * Format: int32
+             * @description Findings beyond the limit.
+             */
+            droppedIssues: number;
+            /** @description Hash of the uploaded file. */
+            fileSha256: string;
+            /** @description Hash of the plan; pass it back to apply as `expectedFingerprint`. */
+            fingerprint: string;
+            /** @description Findings, at most 200. */
+            issues: components["schemas"]["NaeTreeImportIssueDto"][];
+            /** @description Per level: nodes to create (applied: created) and nodes already in the tree (left untouched). */
+            levels: components["schemas"]["NaeAfLevelCountDto"][];
+            /** @description Registry (`NAE_TREE`). */
+            registryCode: string;
+            /** @description The registry was created by this call (apply only). */
+            registryProvisioned: boolean;
+            /**
+             * Format: int32
+             * @description Data rows read (empty rows not counted).
+             */
+            rowsRead: number;
+            /** @description Sheet that was read. */
+            sheetName: string;
         };
         /**
          * @description Транспорт каналу сповіщень. Числа зберігаються в базі — не перенумеровувати.

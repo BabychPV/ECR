@@ -1144,7 +1144,9 @@ GO
 -- НАЕ та речовини: ON a.<Дозвіл>_Id = s.PermitId AND a.<НАЕ>_Id = s.NaeId AND a.<Речовина>_Id = s.SubstanceId.
 -- Ідентифікатори вʼюх — це Id записів довідників (ті самі, що `ValueRegistryEntryId` комірок і `<Код>_Id`).
 --   rpt.v_Permit                  — шапка дозволу (один рядок на дозвіл будь-якого опублікованого типу);
---   rpt.v_PermitAirSource         — рядки AIR_SOURCES типу AIR_LIMITS (джерело/НАЕ дозволу);
+--   rpt.v_PermitAirSource         — рядки AIR_SOURCES типу AIR (джерело/НАЕ дозволу; ✎ AIR-ON-AIR: таблиці перенесено з
+--                                    окремого типу AIR_LIMITS у тип AIR; Region/Area — код запису довідника або текст,
+--                                    RegionId/AreaId — Id запису (вид поля Registry/List), NULL для Text);
 --   rpt.v_PermitAirSourceSubstance — рядки AIR_SOURCE_SUBSTANCES (ліміт речовини по НАЕ дозволу).
 -- ⚠ Лише живі (не видалені логічно) записи; чернетки дозволів теж віддаються — відсіює звіт за `IsActive`/датами.
 -- ⚠ `ValidTo` — ПЕРШИЙ НЕчинний день (півінтервал [ValidFrom, ValidTo)), як у застосунку.
@@ -1172,9 +1174,12 @@ GO
 
 CREATE OR ALTER VIEW rpt.v_PermitAirSource
 AS
-SELECT r.Id AS SourceId, a.PermitId, a.NaeId, nc.NaeCode, a.Region, a.Area, a.SiteLabel, a.ProductionCode, a.SourceName,
+SELECT r.Id AS SourceId, a.PermitId, a.NaeId, nc.NaeCode,
+       COALESCE(a.Region, re.Code) AS Region, COALESCE(a.Area, ae.Code) AS Area,
+       a.SiteLabel, a.ProductionCode, a.SourceName,
        a.Quantity, a.HoursPerYear, a.PointName, a.SourceType, a.Height, a.Diameter, a.Velocity, a.Volume, a.Temperature,
-       a.X1, a.Y1, a.X2, a.Y2
+       a.X1, a.Y1, a.X2, a.Y2,
+       a.RegionId, a.AreaId
   FROM cfg.PermitTypeDef AS pt
   JOIN cfg.PermitTypeTable AS ptt ON ptt.PermitTypeDefId = pt.Id AND ptt.Code = N'AIR_SOURCES'
   JOIN dic.RegistryEntry AS r ON r.RegistryDefId = ptt.RegistryDefId AND r.IsDeleted = 0
@@ -1182,6 +1187,8 @@ SELECT r.Id AS SourceId, a.PermitId, a.NaeId, nc.NaeCode, a.Region, a.Area, a.Si
                      MAX(CASE WHEN f.Code = N'NAE' THEN v.ValueRefEntryId END) AS NaeId,
                      MAX(CASE WHEN f.Code = N'REGION' THEN v.ValueString END) AS Region,
                      MAX(CASE WHEN f.Code = N'AREA' THEN v.ValueString END) AS Area,
+                     MAX(CASE WHEN f.Code = N'REGION' THEN v.ValueRefEntryId END) AS RegionId,
+                     MAX(CASE WHEN f.Code = N'AREA' THEN v.ValueRefEntryId END) AS AreaId,
                      MAX(CASE WHEN f.Code = N'SITE_LABEL' THEN v.ValueString END) AS SiteLabel,
                      MAX(CASE WHEN f.Code = N'PRODUCTION_CODE' THEN v.ValueString END) AS ProductionCode,
                      MAX(CASE WHEN f.Code = N'SOURCE_NAME' THEN v.ValueString END) AS SourceName,
@@ -1205,7 +1212,9 @@ SELECT r.Id AS SourceId, a.PermitId, a.NaeId, nc.NaeCode, a.Region, a.Area, a.Si
                 FROM dic.RegistryValue AS nv
                 JOIN cfg.RegistryFieldDef AS nf ON nf.Id = nv.RegistryFieldDefId AND nf.Code = N'NaeCode'
                WHERE nv.RegistryEntryId = a.NaeId) AS nc
- WHERE pt.Code = N'AIR_LIMITS' AND pt.Status = 1;
+  LEFT JOIN dic.RegistryEntry AS re ON re.Id = a.RegionId
+  LEFT JOIN dic.RegistryEntry AS ae ON ae.Id = a.AreaId
+ WHERE pt.Code = N'AIR' AND pt.Status = 1;
 GO
 
 CREATE OR ALTER VIEW rpt.v_PermitAirSourceSubstance
@@ -1229,7 +1238,7 @@ SELECT r.Id AS SourceSubstanceId, a.PermitId, a.SourceId, s.NaeId, s.NaeCode, a.
                 FROM dic.RegistryValue AS sv
                 JOIN cfg.RegistryFieldDef AS sf ON sf.Id = sv.RegistryFieldDefId AND sf.Code = N'SUBSTANCE_CODE'
                WHERE sv.RegistryEntryId = a.SubstanceId) AS sc
- WHERE pt.Code = N'AIR_LIMITS' AND pt.Status = 1;
+ WHERE pt.Code = N'AIR' AND pt.Status = 1;
 GO
 
 -- ⛔ Право читання для ОБЛІКОВОГО ЗАПИСУ SSRS — роль бази `rpt_reader`:

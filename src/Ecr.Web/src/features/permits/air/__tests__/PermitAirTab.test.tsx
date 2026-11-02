@@ -13,7 +13,7 @@ import { permit, permitType } from '../../permit/__tests__/permitFixtures';
 import { card } from './airFixtures';
 
 /**
- * Вкладка «Air limits» на екрані дозволу: є лише в дозволу типу `AIR_LIMITS`; адреса `?tab=air` її відкриває;
+ * Вкладка «Sources & parameters» на екрані дозволу: є лише в дозволу типу `AIR` (AIR-ON-AIR); адреса `?tab=air` її відкриває;
  * інший тип з `?tab=air` падає на Overview (вкладки там немає).
  *
  * Мутаційний доказ: умова `hasAir` замінена на `true` валить «звичайний тип».
@@ -65,16 +65,23 @@ async function open(url: string, typeCode: string, status?: 'Expired'): Promise<
   await screen.findByRole('heading', { level: 1, name: 'KZ-100' });
 }
 
-describe('екран дозволу: вкладка «Air limits»', () => {
-  it('дозвіл AIR_LIMITS: вкладка є, ?tab=air відкриває картку з кнопкою імпорту', async () => {
-    await open('/admin/permits/5?tab=air', 'AIR_LIMITS');
+describe('екран дозволу AIR: вкладка «Sources & parameters» і «Import parameters…»', () => {
+  it('дозвіл AIR: вкладка є, ?tab=air відкриває картку; «Import parameters…» у вкладці і в шапці дозволу', async () => {
+    await open('/admin/permits/5?tab=air', 'AIR');
     expect(screen.getByRole('tab', { name: Catalog['permits.page.tabs.air'] ?? '' }).getAttribute('aria-selected')).toBe('true');
     await screen.findByText('Source 1085');
-    expect(screen.getByRole('link', { name: Catalog['permits.air.import'] ?? '' })).toBeTruthy();
+    const links = screen.getAllByRole('link', { name: Catalog['permits.air.import'] ?? '' });
+    expect(links).toHaveLength(2);
+    expect(links.every((link) => link.getAttribute('href') === '/admin/permits/5/import')).toBe(true);
+  });
+
+  it('кнопка в шапці є й на Overview (поруч із Renew/More)', async () => {
+    await open('/admin/permits/5', 'AIR');
+    expect(screen.getByRole('link', { name: Catalog['permits.air.import'] ?? '' }).getAttribute('href')).toBe('/admin/permits/5/import');
   });
 
   it('закінчений дозвіл: картка читається, кнопки імпорту немає', async () => {
-    await open('/admin/permits/5?tab=air', 'AIR_LIMITS', 'Expired');
+    await open('/admin/permits/5?tab=air', 'AIR', 'Expired');
     await screen.findByText('Source 1085');
     expect(screen.queryByRole('link', { name: Catalog['permits.air.import'] ?? '' })).toBeNull();
   });

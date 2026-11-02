@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type APIResponse, type Browser, t
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { manySources, SmallSources, workbook, type AirSourceRow } from './airFixture';
+import { ensureNaeTree, ensureSubstances, fillScope, prepareScope, removeScopeEntries, type PreparedScope } from './airScope';
 
 /**
  * Air limits (NAE N3 картка + N5 майстер імпорту) - РЕАЛЬНИЙ e2e без підміни відповідей: сервер (provision, профілі, analyse/preview/apply,
@@ -22,7 +23,6 @@ const Area = 'OFFSHORE';
 const ViewerRole = `E2EAIRV${Stamp}`;
 const Viewer = { user: `e2e-air-viewer-${Stamp.toLowerCase()}`, issued: 'E2E-Vi3wer-2026!', password: 'E2E-Vi3wer-Work-2026!' };
 const NaeTree = 'NAE_TREE';
-const Substances = 'LAND_AIR_SUBSTANCE';
 /** Файл з двома НАЕ, яких немає в дереві (0090, 0091): для кроків із відсутніми НАЕ після того, як 0001-0003 уже в дереві. */
 const WithMissing: readonly AirSourceRow[] = [
   ...SmallSources,
@@ -47,6 +47,8 @@ let regionNodeId = 0;
 const extraRegionNodes: number[] = [];
 let viewerUserId = 0;
 let viewerRoleId = 0;
+/** AIR-ON-AIR: the import scope by the kind of the AIR type's REGION/AREA columns (`prepareScope`). */
+let scope: PreparedScope = { regionKind: 'Text', areaKind: 'Text', regionText: '', areaText: '', regionEntryId: null, form: {}, created: [] };
 
 async function ok<T>(response: APIResponse, what: string): Promise<T> {
   const body = await response.text();
@@ -64,58 +66,6 @@ function name(code: string): { values: Record<string, string> } {
   return { values: { en: code } };
 }
 
-/** Реєстр дерева НАЕ - як `NaeTreeProvisioner` (поля, складений ключ, п'ять рівнів), якщо його немає. */
-async function ensureNaeTree(api: APIRequestContext): Promise<number> {
-  const existing = await api.get(`/api/v1/registries/${NaeTree}/definition`);
-  if (existing.status() === 404) {
-    await ok(await api.post('/api/v1/registries', { data: { code: NaeTree, nameL10n: { en: 'NAE structure' }, isTemporal: true } }), 'створення NAE_TREE');
-    const fields = ['NaeCode', 'RegionCode', 'AreaCode', 'AfPath', 'SourceType', 'PointName'].map((code, index) => ({
-      id: null, code, nameL10n: name(code), dataType: 'String', ordinal: index + 1, isRequired: false, isKey: index === 0,
-      lookupRegistryDefId: null, unitId: null,
-    }));
-    await ok(
-      await api.put(`/api/v1/registries/${NaeTree}/definition`, {
-        headers: { 'If-Match': '1' },
-        data: {
-          fields, rules: [], reason: 'e2e fixture: NAE tree',
-          keys: [{ id: null, code: 'NAE_BUSINESS', nameL10n: name('NAE business key'), fieldCodes: ['NaeCode', 'RegionCode', 'AreaCode'], isPrimary: false, ignoreCase: true, isActive: true }],
-        },
-      }),
-      'опис NAE_TREE',
-    );
-    const levels = [['REGION', false], ['AREA', true], ['SITE', false], ['EQUIP', true], ['SRC', false]] as const;
-    await ok(
-      await api.put(`/api/v1/registries/${NaeTree}/hierarchy`, {
-        data: { isHierarchical: true, levels: levels.map(([code, isOptional]) => ({ code, name: name(code), isOptional })) },
-      }),
-      'рівні NAE_TREE',
-    );
-  }
-
-  return (await ok<{ id: number }>(await api.get(`/api/v1/registries/${NaeTree}/definition`), 'NAE_TREE')).id;
-}
-
-/** Довідник речовин (поле SUBSTANCE_CODE, записи E<код>), якщо його немає. */
-async function ensureSubstances(api: APIRequestContext): Promise<void> {
-  if ((await api.get(`/api/v1/registries/${Substances}/definition`)).status() !== 404) return;
-  await ok(await api.post('/api/v1/registries', { data: { code: Substances, nameL10n: { en: 'Air substances' }, isTemporal: false } }), 'створення довідника речовин');
-  await ok(
-    await api.put(`/api/v1/registries/${Substances}/definition`, {
-      headers: { 'If-Match': '1' },
-      data: {
-        fields: [{ id: null, code: 'SUBSTANCE_CODE', nameL10n: name('Code'), dataType: 'String', ordinal: 1, isRequired: true, isKey: true, lookupRegistryDefId: null, unitId: null }],
-        rules: [], reason: 'e2e fixture: substances',
-      },
-    }),
-    'опис довідника речовин',
-  );
-  const items = ['0301', '0337', '0330'].map((code) => ({
-    clientRowId: code, op: 'upsert', id: null, code: `E${String(Number(code))}`, baseVersion: null, values: { SUBSTANCE_CODE: String(Number(code)) },
-  }));
-  const batch = await ok<{ applied: boolean }>(await api.post(`/api/v1/registries/${Substances}/entries/batch?dryRun=false`, { data: { items } }), 'речовини');
-  expect(batch.applied, 'речовини не застосовані').toBe(true);
-}
-
 async function addNode(
   api: APIRequestContext, registryId: number, code: string, parent: number | null, level: string, values: Record<string, string>,
 ): Promise<number> {
@@ -131,7 +81,7 @@ async function addNode(
 
 async function createPermit(api: APIRequestContext, number: string, validFrom = '2026-01-01', validTo = '2031-01-01'): Promise<number> {
   const created = await ok<{ id: number }>(
-    await api.post('/api/v1/permits', { data: { typeCode: 'AIR_LIMITS', number, location: null, issueDate: null, validFrom, validTo, reportingFlags: null } }),
+    await api.post('/api/v1/permits', { data: { typeCode: 'AIR', number, location: null, issueDate: null, validFrom, validTo, reportingFlags: null } }),
     `дозвіл ${number}`,
   );
   createdPermits.push(created.id);
@@ -145,11 +95,13 @@ function importUrl(permitId: number, action: 'preview' | 'apply'): string {
 
 /** Імпорт через API (для великих даних): preview -> усі відсутні НАЕ створити під вузлом -> apply. */
 async function importViaApi(api: APIRequestContext, permitId: number, file: Buffer): Promise<{ sources: number; substances: number }> {
-  const multipart = (request: object): { file: { name: string; mimeType: string; buffer: Buffer }; request: string } => ({
+  // AIR-ON-AIR: the scope travels as form fields (Registry: regionEntryId/areaEntryId; Text/List: region/area).
+  const multipart = (request: object): Record<string, string | { name: string; mimeType: string; buffer: Buffer }> => ({
     file: { name: 'air.xlsx', mimeType: Xlsx, buffer: file },
     request: JSON.stringify(request),
+    ...scope.form,
   });
-  const base = { region: Region, area: Area };
+  const base = {};
   const preview = await ok<{ preview: { missing: { kind: string; code: string }[] } }>(
     await api.post(importUrl(permitId, 'preview'), { multipart: multipart(base), timeout: 300_000 }),
     'preview через API',
@@ -220,16 +172,17 @@ async function pick(page: Page, label: string | RegExp, option: string | RegExp)
   await page.getByRole('option', { name: option }).click();
 }
 
-async function fillFileStep(page: Page, file: Buffer): Promise<void> {
-  await chooseFile(page, file);
-  // Region and area are picked from GET /air-limits/scope-codes (no free text); the area list depends on the region.
-  await pick(page, /^Region/, new RegExp(`^${Region}`));
-  await pick(page, /^Area/, new RegExp(`^${Area}`));
+/** AIR-ON-AIR step 1: Region and Area by the kind of the type's columns, then «Next». */
+async function fillScopeStep(page: Page): Promise<void> {
+  await expect(page.getByRole('heading', { name: 'Region and area', level: 2 })).toBeVisible({ timeout: 30_000 });
+  await fillScope(page, scope);
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'File', level: 2 })).toBeVisible({ timeout: 30_000 });
 }
 
 async function toPreview(page: Page, file: Buffer): Promise<void> {
-  await expect(page.getByRole('heading', { name: 'File', level: 2 })).toBeVisible({ timeout: 30_000 });
-  await fillFileStep(page, file);
+  await fillScopeStep(page);
+  await chooseFile(page, file);
   await page.getByRole('button', { name: /Next: analyse file/ }).click();
   await expect(page.getByRole('heading', { name: 'Mapping', level: 2 })).toBeVisible({ timeout: 30_000 });
   await page.getByRole('button', { name: /Next: preview/ }).click();
@@ -303,6 +256,8 @@ test.describe('Air limits real', () => {
     ids.siteId = await addNode(admin, treeId, `${Region}_S`, areaId, 'SITE', { RegionCode: Region, AreaCode: Area });
     await addNode(admin, treeId, `${Region}_N0001`, ids.siteId, 'SRC', { NaeCode: '0001', RegionCode: Region, AreaCode: Area });
 
+    scope = await prepareScope(admin, Region, Area, Stamp);
+
     ids.p1Number = `E2E-AIR-1-${Stamp}`;
     ids.p2Number = `E2E-AIR-2-${Stamp}`;
     ids.p1 = await createPermit(admin, ids.p1Number);
@@ -310,18 +265,18 @@ test.describe('Air limits real', () => {
     ids.p3 = await createPermit(admin, `E2E-AIR-3-${Stamp}`);
 
     // Користувач лише з переглядом реєстрів: перевіряє режим «тільки читання».
-    const role = await ok<{ id: number }>(
+    const role = await ok<{ roleId: number }>(
       await admin.post('/api/v1/roles', { data: { code: ViewerRole, nameL10n: { en: 'E2E air viewer' }, permissionCodes: ['Registry.View'] } }),
       'роль перегляду',
     );
-    viewerRoleId = role.id;
-    const user = await ok<{ id: number }>(
+    viewerRoleId = role.roleId;
+    const user = await ok<{ userId: number }>(
       await admin.post('/api/v1/users', {
         data: { userName: Viewer.user, provider: 'Local', sid: null, displayName: 'E2E air viewer', initialPassword: Viewer.issued, roleCodes: [ViewerRole] },
       }),
       'користувач перегляду',
     );
-    viewerUserId = user.id;
+    viewerUserId = user.userId;
     const viewerApi = await playwright.request.newContext(baseURL === undefined ? {} : { baseURL });
     await login(viewerApi, { user: Viewer.user, password: Viewer.issued });
     await ok(await viewerApi.post('/api/v1/auth/change-password', { data: { currentPassword: Viewer.issued, newPassword: Viewer.password } }), 'пароль перегляду');
@@ -357,6 +312,8 @@ test.describe('Air limits real', () => {
       }
     }
 
+    problems.push(...(await removeScopeEntries(admin, scope.created)));
+
     // Користувач лишається без ролей (видалити його API не дає), роль видаляється.
     if (viewerUserId !== 0) await admin.put(`/api/v1/users/${String(viewerUserId)}/roles`, { data: { roleCodes: [] } });
     if (viewerRoleId !== 0) {
@@ -378,11 +335,12 @@ test.describe('Air limits real', () => {
 
     await signIn(page, Admin);
     await page.goto(`/admin/permits/${String(ids.p1)}?tab=air`);
-    await expect(page.getByRole('tab', { name: 'Air limits', selected: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('tab', { name: 'Sources & parameters', selected: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('heading', { name: 'Emission sources' })).toBeVisible();
     await expect(page.getByTestId('air-counts')).toHaveText('0 sources · 0 substance rows');
     await expect(page.getByText('No emission sources yet')).toBeVisible();
-    await expect(page.getByRole('link', { name: /Import from Excel/ })).toBeVisible();
+    // AIR-ON-AIR: «Import parameters…» in the tab and next to Renew/More in the permit header.
+    await expect(page.getByRole('link', { name: /Import parameters/ })).toHaveCount(2);
     await expectNoRawKeys(page);
   });
 
@@ -408,32 +366,32 @@ test.describe('Air limits real', () => {
   test('Air limits real: wizard end to end - mapping, issues, missing NAE, apply, counts, card', async ({ page }) => {
     await signIn(page, Admin);
     await page.goto(`/admin/permits/${String(ids.p1)}?tab=air`);
-    await page.getByRole('link', { name: /Import from Excel/ }).click();
+    await page.getByRole('link', { name: /Import parameters/ }).first().click();
     await expect(page).toHaveURL(new RegExp(`/admin/permits/${String(ids.p1)}/import`));
     const file = workbook(SmallSources);
 
-    // 1 File -> 2 Mapping
+    // 1 Region and area (AIR-ON-AIR): Region is required; Area appears for a region with areas, only that region's areas.
+    await expect(page.getByRole('heading', { name: 'Region and area', level: 2 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('textbox', { name: 'Permit number' })).toHaveValue(ids.p1Number);
+    await expect(page.getByRole('textbox', { name: /^Area/ })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+    await expect(page.getByText('Choose the region.')).toBeVisible();
+    if (scope.regionKind !== 'Text' && scope.areaKind !== 'Text') {
+      // Registry/List region: Area offers only the chosen region's areas.
+      await pick(page, /^Region/, new RegExp(`^${Region}`));
+      await page.getByRole('textbox', { name: /^Area/ }).click();
+      await expect(page.getByRole('option')).toHaveText([new RegExp(`^${scope.areaText}`)]);
+      await page.keyboard.press('Escape');
+    }
+    await fillScope(page, scope);
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+
+    // 2 File -> 3 Mapping
     await expect(page.getByRole('heading', { name: 'File', level: 2 })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('combobox', { name: /Import profile/ }).or(page.getByRole('textbox', { name: /Import profile/ }))).toHaveValue(/ERA table 3\.3/);
     await page.getByRole('button', { name: /Next: analyse file/ }).click();
     await expect(page.getByText('Choose a workbook.')).toBeVisible();
-    // Region/area: pickers fed by GET /air-limits/scope-codes; the area depends on the region.
     await chooseFile(page, file);
-    await expect(page.getByRole('textbox', { name: /^Area/ })).toBeDisabled();
-    await page.getByRole('button', { name: /Next: analyse file/ }).click();
-    await expect(page.getByText('Choose the region.')).toBeVisible();
-    await page.getByRole('textbox', { name: /^Region/ }).click();
-    await expect(page.getByRole('option', { name: new RegExp(`^${Region}`) })).toBeVisible();
-    await page.keyboard.press('Escape');
-    await pick(page, /^Region/, new RegExp(`^${Region}`));
-    await page.getByRole('button', { name: /Next: analyse file/ }).click();
-    await expect(page.getByText('Choose the area.')).toBeVisible();
-    await page.getByRole('textbox', { name: /^Area/ }).click();
-    // Areas of this region only, from its AREA nodes (label "OFFSHORE - <AREA node name>"). The REGION group node no longer
-    // adds "-" (No area): every NAE here has an area.
-    await expect(page.getByRole('option')).toHaveText([new RegExp(`^${Area}\\b`)]);
-    await page.keyboard.press('Escape');
-    await pick(page, /^Area/, new RegExp(`^${Area}`));
     await page.getByRole('button', { name: /Next: analyse file/ }).click();
     await expect(page.getByRole('heading', { name: 'Mapping', level: 2 })).toBeVisible({ timeout: 30_000 });
     const matched = page.getByRole('table').first();
@@ -573,10 +531,10 @@ test.describe('Air limits real', () => {
       const page = viewer.page;
       await page.goto(`/admin/permits/${String(ids.p2)}?tab=air`);
       await expect(page.getByTestId('air-counts')).toHaveText('3 sources · 4 substance rows', { timeout: 30_000 });
-      await expect(page.getByRole('link', { name: /Import from Excel/ })).toHaveCount(0);
+      await expect(page.getByRole('link', { name: /Import parameters/ })).toHaveCount(0);
       await page.goto(`/admin/permits/${String(ids.p2)}/import`);
       await expect(page.getByText('View only')).toBeVisible({ timeout: 30_000 });
-      await expect(page.getByRole('button', { name: /Next: analyse file/ })).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
 
       // Сервер теж не пускає: analyse без права EditData -> 403.
       const denied = await viewer.context.request.post('/api/v1/air-limits/import/analyse', {
@@ -592,8 +550,8 @@ test.describe('Air limits real', () => {
     const op = await openAs(browser, Operator, 'light');
     try {
       await op.page.goto(`/admin/permits/${String(ids.p2)}?tab=air`);
-      await expect(op.page.getByRole('button', { name: /Import from Excel/ })).toHaveCount(0);
-      await expect(op.page.getByRole('link', { name: /Import from Excel/ })).toHaveCount(0);
+      await expect(op.page.getByRole('button', { name: /Import parameters/ })).toHaveCount(0);
+      await expect(op.page.getByRole('link', { name: /Import parameters/ })).toHaveCount(0);
       await expect(op.page.getByTestId('air-counts')).toHaveCount(0);
     } finally {
       await op.context.close();
@@ -656,10 +614,12 @@ test.describe('Air limits real', () => {
           await clean('card-totals');
 
           await page.goto(`/admin/permits/${String(ids.p2)}/import`);
-          await expect(page.getByRole('heading', { name: 'File', level: 2 })).toBeVisible({ timeout: 30_000 });
+          await expect(page.getByRole('heading', { name: 'Region and area', level: 2 })).toBeVisible({ timeout: 30_000 });
+          await clean('wizard-scope');
+          await fillScopeStep(page);
           await clean('wizard-file');
           const file = workbook(WithMissing);
-          await fillFileStep(page, file);
+          await chooseFile(page, file);
           await page.getByRole('button', { name: /Next: analyse file/ }).click();
           await expect(page.getByRole('heading', { name: 'Mapping', level: 2 })).toBeVisible({ timeout: 30_000 });
           await clean('wizard-mapping');
@@ -687,12 +647,33 @@ test.describe('Air limits real', () => {
   test('Air limits real: keyboard path through the wizard and focus on every step change', async ({ page }) => {
     await signIn(page, Admin);
     await page.goto(`/admin/permits/${String(ids.p2)}/import`);
-    await expect(page.getByRole('heading', { name: 'File', level: 2 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('heading', { name: 'Region and area', level: 2 })).toBeVisible({ timeout: 30_000 });
     const focusedName = async (): Promise<string> =>
       page.evaluate(() => {
         const el = document.activeElement as HTMLElement | null;
         return `${el?.tagName ?? ''}|${el?.getAttribute('aria-label') ?? ''}|${(el?.innerText ?? '').slice(0, 60)}`;
       });
+
+    // Регіон: пошук у списку - друкуємо, стрілка вниз до першого збігу, Enter; ділянка - стрілка, Enter.
+    const regionInput = page.getByRole('textbox', { name: /^Region/ });
+    await regionInput.focus();
+    await page.keyboard.type(Region);
+    if (scope.regionKind !== 'Text') {
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('Enter');
+    }
+    await expect(regionInput).toHaveValue(new RegExp(`^${Region}`));
+    const areaInput = page.getByRole('textbox', { name: /^Area/ });
+    await areaInput.focus();
+    await page.keyboard.type(scope.areaText);
+    if (scope.areaKind !== 'Text') {
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('Enter');
+    }
+    await expect(areaInput).toHaveValue(new RegExp(`^${scope.areaText}`));
+    await page.getByRole('button', { name: 'Next', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', { name: 'File', level: 2 })).toBeFocused({ timeout: 30_000 });
 
     // Файл: кнопка вибору файлу відкривається з клавіатури.
     const picker = page.getByRole('button', { name: /Excel workbook/ });
@@ -700,17 +681,6 @@ test.describe('Air limits real', () => {
     const chooser = page.waitForEvent('filechooser');
     await page.keyboard.press('Enter');
     await (await chooser).setFiles({ name: 'air.xlsx', mimeType: Xlsx, buffer: workbook(WithMissing) });
-    // Регіон: пошук у списку - друкуємо, стрілка вниз до першого збігу, Enter; ділянка - стрілка, Enter.
-    const regionInput = page.getByRole('textbox', { name: /^Region/ });
-    await regionInput.focus();
-    await page.keyboard.type(Region);
-    await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('Enter');
-    await expect(regionInput).toHaveValue(new RegExp(`^${Region}`));
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('ArrowDown'); // opens the list on the only area of the region (no "-": every NAE has an area)
-    await page.keyboard.press('Enter');
-    await expect(page.getByRole('textbox', { name: /^Area/ })).toHaveValue(new RegExp(`^${Area}`));
     // До «Next» - Tab-ами, без миші; кільце фокуса видно.
     const next = page.getByRole('button', { name: /Next: analyse file/ });
     let steps = 0;
@@ -735,8 +705,13 @@ test.describe('Air limits real', () => {
     const action = page.getByRole('textbox', { name: 'Action for NAE 0091', exact: true });
     await action.focus();
     await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('ArrowDown');
+    // Список відкривається з анімацією: стрілка, натиснута до показу, губиться (локально 1 раз із 2). Тому стрілками - до
+    // підсвіченого «Skip this NAE», а не фіксованою кількістю натискань.
+    const skip = page.getByRole('option', { name: 'Skip this NAE' });
+    await expect(skip).toBeVisible();
+    for (let presses = 0; presses < 6 && (await skip.getAttribute('data-combobox-selected')) === null; presses += 1) {
+      await page.keyboard.press('ArrowDown');
+    }
     await page.keyboard.press('Enter');
     await expect(action).toHaveValue('Skip this NAE');
     // «Back» повертає на попередній крок і теж ставить фокус на заголовок.
