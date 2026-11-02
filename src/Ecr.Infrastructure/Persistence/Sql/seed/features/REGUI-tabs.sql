@@ -19,3 +19,17 @@ OPTION (RECOMPILE);
 GO
 -- REG-UI:tabs ── кінець секції ──
 
+-- REG-UI:tabs ── UI довідників, коміт 2: пояснення вкладок і сторінки конструктора; ru/kz — порцією REG-UI:tabs у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'registries.constructor.description', N'en', N'Fields, relations, rules and change history of this registry. Changes go to a draft and apply only when published.', 1),
+    (N'registries.tabHint.relationsEmpty', N'en', N'Relations are derived from fields. To add one, add a field of type Lookup on the Fields tab.', 1),
+    (N'registries.tabHint.rulesExample', N'en', N'Example: an Expression rule [Limit] > 0 with severity Error refuses entries whose limit is zero or negative; the message is shown to the person entering the entry.', 1),
+    (N'registries.tabHint.mapping', N'en', N'Read only. Shows where the value of each field comes from in an external source. Mappings are edited on the data source screen.', 1),
+    (N'registries.tabHint.history', N'en', N'Who changed the description of this registry, when and why. The reason is written by the author of the change.', 1),
+    (N'registries.tabHint.usage', N'en', N'Templates and columns that depend on this registry. Check this before changing the description.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- REG-UI:tabs ── кінець секції ──

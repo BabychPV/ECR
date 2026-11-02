@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:uidocscope ── кінець секції ──
+-- COLL:uidocscope ── P1 прихований аркуш: видалення документа перевіряє сервер; ru/kz — порцією COLL:uidocscope у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'documents.deleteServerChecks', N'en', N'The server checks every sheet of the document, including sheets you cannot see, and refuses if any of them is not a draft.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:uidocscope ── кінець секції ──

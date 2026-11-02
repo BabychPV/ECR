@@ -97,3 +97,56 @@ OPTION (RECOMPILE);
 GO
 -- REGCTOR816 ── кінець секції ──
 
+-- REGCTOR816 ── ФВ-8.16: композиція в конструкторі довідника і редактор master-detail (`features/registries/rc816`).
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'registries.rc816.title', N'en', N'Master-detail editor', 1),
+    (N'registries.rc816.openEditor', N'en', N'Edit with parts (master-detail)', 1),
+    (N'registries.rc816.openDefinition', N'en', N'Registry design', 1),
+    (N'registries.rc816.hint', N'en', N'Pick a row to edit its parts. The link to the parent is filled in for you; each panel is saved as one batch, so a total rule is checked after all rows are in.', 1),
+    (N'registries.rc816.asOf', N'en', N'As of', 1),
+    (N'registries.rc816.readOnly', N'en', N'Read only: editing entries needs the Registry.EditData permission.', 1),
+    (N'registries.rc816.readOnlyExternal', N'en', N'Read only: this registry is mastered by an external source.', 1),
+    (N'registries.rc816.isPartOf', N'en', N'This registry is part of {parent}: its rows are edited together with their parent.', 1),
+    (N'registries.rc816.openParent', N'en', N'Open the parent editor', 1),
+    (N'registries.rc816.noChain', N'en', N'No other registry is part of this one. To make one, add a lookup field marked "Part of parent" in its design.', 1),
+    (N'registries.rc816.chooseParent', N'en', N'Pick a row on the left to see and edit its parts.', 1),
+    (N'registries.rc816.chooseParts', N'en', N'Which parts to show', 1),
+    (N'registries.rc816.partsOf', N'en', N'{registry} of {parent}', 1),
+    (N'registries.rc816.policyCascade', N'en', N'Deleting the parent deletes its parts', 1),
+    (N'registries.rc816.policyRestrict', N'en', N'A parent with parts cannot be deleted', 1),
+    (N'registries.rc816.rowCount', N'en', N'{count} rows', 1),
+    (N'registries.rc816.unsaved', N'en', N'{count} unsaved', 1),
+    (N'registries.rc816.unsavedTotal', N'en', N'{count} unsaved changes. Save each panel or discard its changes before leaving.', 1),
+    (N'registries.rc816.search', N'en', N'Search by code, name or text', 1),
+    (N'registries.rc816.noRows', N'en', N'No entries yet.', 1),
+    (N'registries.rc816.noParts', N'en', N'No parts yet. Add them one by one.', 1),
+    (N'registries.rc816.actions', N'en', N'Actions', 1),
+    (N'registries.rc816.autoCode', N'en', N'assigned on save', 1),
+    (N'registries.rc816.delete', N'en', N'Delete', 1),
+    (N'registries.rc816.undoDelete', N'en', N'Keep', 1),
+    (N'registries.rc816.more', N'en', N'Show more', 1),
+    (N'registries.rc816.addRow', N'en', N'Add entry', 1),
+    (N'registries.rc816.addPart', N'en', N'Add part', 1),
+    (N'registries.rc816.check', N'en', N'Check', 1),
+    (N'registries.rc816.save', N'en', N'Save {count} changes', 1),
+    (N'registries.rc816.saved', N'en', N'Saved: {count} rows.', 1),
+    (N'registries.rc816.discard', N'en', N'Discard changes', 1),
+    (N'registries.rc816.sum', N'en', N'Σ {field} = {sum}', 1),
+    (N'registries.rc816.sumTarget', N'en', N'target {target} ± {tolerance}', 1),
+    (N'registries.rc816.sumOk', N'en', N'Within tolerance', 1),
+    (N'registries.rc816.sumOff', N'en', N'Out of tolerance', 1),
+    (N'registries.rc816.sumEmpty', N'en', N'No parts yet: the rule does not apply.', 1),
+    (N'registries.rc816.sumSkipped', N'en', N'{count} values are not numbers and are not counted', 1),
+    (N'registries.rc816.partOfParent', N'en', N'Part of parent', 1),
+    (N'registries.rc816.partOfParentHint', N'en', N'Each entry of this registry becomes a part of the chosen entry: visible only with it, and deleted or protected with it. Possible only while this registry has no entries; the field becomes required.', 1),
+    (N'registries.rc816.onParentDelete', N'en', N'When the parent is deleted', 1),
+    (N'registries.rc816.issueMoreThanOne', N'en', N'A registry can be part of only one parent: it already has a "Part of parent" field.', 1),
+    (N'registries.rc816.issueTargetSelf', N'en', N'A registry cannot be part of itself. For a hierarchy within one registry use the parent entry.', 1),
+    (N'registries.rc816.issueTemporal', N'en', N'A part cannot have its own validity window: it is visible exactly when its parent is. This registry is time-bound.', 1),
+    (N'registries.rc816.issueNoTarget', N'en', N'Choose which registry this field looks up.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- REGCTOR816: кінець секції

@@ -17,3 +17,16 @@ OPTION (RECOMPILE);
 GO
 -- PERMITS: permits ── ECR-PRM-4096 ── ru/kz ── кінець секції ──
 
+-- PERMITS: permits ── en: ECR-PRM-4096 і зміна/видалення дозволу (PM-04) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-PRM-4096', N'en', N'Permit state does not allow this', 1),
+    (N'err.ECR-PRM-4096.changed', N'en', N'The permit {id} was changed after you opened it. Reload it and repeat your edit.', 1),
+    (N'err.ECR-PRM-4096.notEditable', N'en', N'The permit {id} has expired and can no longer be edited.', 1),
+    (N'err.ECR-PRM-4096.notDraft', N'en', N'The permit {id} is {status}: this is only possible for a draft.', 1),
+    (N'err.ECR-PRM-4096.inUse', N'en', N'The permit {id} or its rows are referenced from elsewhere ({count}) and cannot be deleted.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: permits ── ECR-PRM-4096 ── кінець секції ──

@@ -36,3 +36,26 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui22tree ── кінець секції ──
+-- COLL:ui22tree ── UI-22: дерево таблиць документа (фільтр, стан кожної таблиці, перемикач); ru/kz — порцією COLL:ui22tree у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'grid.tree.label', N'en', N'Tables of this sheet', 1),
+    (N'grid.tree.filter', N'en', N'Filter tables', 1),
+    (N'grid.tree.errorsOnly', N'en', N'Show only tables with errors', 1),
+    (N'grid.tree.tablesFilled', N'en', N'{filled} of {total} tables filled', 1),
+    (N'grid.tree.issues', N'en', N'Issues: {count}', 1),
+    (N'grid.tree.nothingFound', N'en', N'No tables match the filter.', 1),
+    (N'grid.tree.clearFilter', N'en', N'Clear filter', 1),
+    (N'grid.tree.toggle', N'en', N'Table navigator', 1),
+    (N'grid.tree.state.unknown', N'en', N'Status not loaded yet', 1),
+    (N'grid.tree.state.none', N'en', N'Nothing to fill', 1),
+    (N'grid.tree.state.empty', N'en', N'Not filled', 1),
+    (N'grid.tree.state.partial', N'en', N'Partially filled: {filled} of {total} cells', 1),
+    (N'grid.tree.state.filled', N'en', N'Filled', 1),
+    (N'grid.tree.state.error', N'en', N'Errors: {count}', 1),
+    (N'grid.tree.warnings', N'en', N'Warnings: {count}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui22tree ── кінець секції ──

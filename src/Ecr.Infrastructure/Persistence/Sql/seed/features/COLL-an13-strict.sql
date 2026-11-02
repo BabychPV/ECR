@@ -9,3 +9,13 @@ OPTION (RECOMPILE);
 GO
 -- COLL:an13-strict ── кінець секції ──
 
+-- COLL:an13-strict ── Відмова публікації методології: Strict заднім числом (ФВ-9.9, `PublishMethodologyHandler`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.strictBackdated',         N'en', N'Strict mode is switched on only by an explicit decision from a new effective date, never retroactively: {effectiveFrom} is not later than today ({today}). Choose a future date.', 1)
+    -- ru/kz — окремою порцією `COLL:an13-strict` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an13-strict ── кінець секції ──

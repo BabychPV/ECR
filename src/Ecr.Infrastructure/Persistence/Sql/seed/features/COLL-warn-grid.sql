@@ -9,3 +9,12 @@ OPTION (RECOMPILE);
 GO
 -- COLL:warn-grid ── кінець секції ──
 
+-- COLL:warn-grid ── ФВ-2.16 (D-239): значок «правка поза вікном» на комірці сітки (`DocumentGrid`, `outOfWindowMarks.ts`).
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'grid.outOfWindowHint', N'en', N'Saved after the access window closed (Warn policy); the change is marked in the change log.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:warn-grid: кінець секції

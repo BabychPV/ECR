@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rc15c-recalc ── кінець секції ──
+-- COLL:rc15c-recalc ── перерахунок вимкнений лише коли подані ВСІ аркуші; ru/kz — порцією COLL:rc15c-recalc нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'workflow.recalculateAllSubmitted', N'en', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Return a sheet for edits first (the sheet''s «Return for edits» action).', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc15c-recalc ── кінець секції ──

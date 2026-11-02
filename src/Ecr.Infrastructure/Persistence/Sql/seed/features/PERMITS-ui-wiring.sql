@@ -18,3 +18,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: ui-wiring ── кінець секції ──
+-- PERMITS: ui-wiring ── зведення PM-08b + PM-08c: видалення таблиці, відмова збереження перед відправкою; ru/kz — порцією PERMITS: ui-wiring нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'permits.editor.deleteTable.title', N'en', N'Remove table "{name}"?', 1),
+    (N'permits.editor.deleteTable.verb', N'en', N'Remove table', 1),
+    (N'permits.editor.deleteTable.confirm', N'en', N'The table "{name}", its columns and its checks leave the draft. Nothing changes for permits until you publish.', 1),
+    (N'permits.editor.deleteTable.published', N'en', N'Only tables added in the current draft and not saved yet can be removed in this version.', 1),
+    (N'permits.editor.deleteTable.referenced', N'en', N'The table "{name}" is the source of a list in {columns}. Change those columns first.', 1),
+    (N'permits.editor.dialogs.unsaved', N'en', N'The latest changes could not be saved, so nothing was sent. Fix the problems on the Structure tab or reload the type, then try again.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: ui-wiring ── кінець секції ──

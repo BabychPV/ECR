@@ -10,3 +10,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: ui-p3-small ── кінець секції ──
+-- PERMITS: ui-p3-small ── en: KI-04 підказка мінімальної довжини причини в End early; ru/kz — порцією PERMITS: ui-p3-small нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'permits.endEarly.minLengthHint', N'en', N'Enter at least {min} characters.', 1),
+    (N'permits.endEarly.minLengthReached', N'en', N'The reason is long enough.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: ui-p3-small ── кінець секції ──

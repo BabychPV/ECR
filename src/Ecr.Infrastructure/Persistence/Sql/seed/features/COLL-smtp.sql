@@ -24,3 +24,20 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:smtp ── кінець секції ──
+-- COLL:smtp ── Категорії відмови проби SMTP (`SmtpFailureClassifier`) і подія «період відкрито» (`PeriodStateJob`, `NotificationEventKind.PeriodOpened`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'notifications.test.smtp.dns',     N'en', N'SMTP test failed: the server name could not be resolved (DNS). Check the server (Smtp:Host when the process configuration is in use).', 1),
+    (N'notifications.test.smtp.connect', N'en', N'SMTP test failed: could not connect to the server. Check the server, the port (Smtp:Host and Smtp:Port when the process configuration is in use) and the firewall.', 1),
+    (N'notifications.test.smtp.tls',     N'en', N'SMTP test failed: TLS/STARTTLS error. Check the server certificate and the encryption (Smtp:UseStartTls when the process configuration is in use).', 1),
+    (N'notifications.test.smtp.auth',    N'en', N'SMTP test failed: the server rejected the login. Check the login and the password (Smtp:User and the secret named in Smtp:SecretName when the process configuration is in use).', 1),
+    (N'notifications.test.smtp.relay',   N'en', N'SMTP test failed: the server refused to relay for the sender or a recipient. Check the sender address (Smtp:From when the process configuration is in use) and the recipient addresses.', 1),
+    (N'notifications.test.smtp.timeout', N'en', N'SMTP test failed: the server did not respond in time.', 1),
+    (N'notifications.event.PeriodOpened', N'en', N'Reporting period opened', 1),
+    (N'notifications.periodOpened.subject', N'en', N'ECR: period {period} opened, project {project}', 1),
+    (N'notifications.periodOpened.body', N'en', N'A new reporting period {period} has opened for project {project}. Please fill in your document for this period.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:smtp ── кінець секції ──

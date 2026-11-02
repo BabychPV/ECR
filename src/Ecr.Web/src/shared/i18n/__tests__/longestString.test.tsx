@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import type { JSX, ReactNode } from 'react';
 import { loadCatalog, t } from '@/shared/i18n';
 import { DocumentsPage } from '@/pages/DocumentsPage';
-import { readSeedSql } from '@/test/seedSql';
+import { readSeedEnCatalog } from '@/test/seedSql';
 
 /**
  * Розмітка не ламається від довжини тексту (`ФВ-14.30`).
@@ -24,19 +24,13 @@ import { readSeedSql } from '@/test/seedSql';
  * Візуальна перевірка лишається ручною: `/_kitchen-sink` містить розділ
  * «Довгий рядок» саме для неї.
  */
-const seed = readSeedSql();
-
 /**
- * Усі значення каталогу — лише з блоку MERGE `sys_ecr.UiString`. ⚠ Над ним
- * лежать секції «змінені тексти» (старе значення) і «прибрані ключі» того ж
- * вигляду `(N'key', N'en', N'…'`: без обрізки вони потрапили б у кандидати.
+ * Усі значення каталогу — лише з en-каталогу (порції `#UiEn`). ⚠ Секції
+ * «змінені тексти» (старе значення) і «прибрані ключі» мають той самий
+ * вигляд `(N'key', N'en', N'…'`: без обрізки вони потрапили б у кандидати.
  */
 function catalogValues(): { key: string; lang: string; value: string }[] {
-  const start = seed.indexOf('MERGE sys_ecr.UiString AS t');
-  const end = seed.indexOf(') AS s ([Key], Lang, Val, Scope)', start);
-  if (start < 0 || end < 0) throw new Error('09-seed.sql: не знайдено блоку MERGE sys_ecr.UiString');
-
-  const rows = [...seed.slice(start, end).matchAll(/\(N'([^']+)',\s*N'([a-z]{2})',\s*N'([^']*)'/g)];
+  const rows = [...readSeedEnCatalog().matchAll(/\(N'([^']+)',\s*N'([a-z]{2})',\s*N'([^']*)'/g)];
 
   return rows.map((row) => ({ key: row[1] ?? '', lang: row[2] ?? '', value: row[3] ?? '' }));
 }

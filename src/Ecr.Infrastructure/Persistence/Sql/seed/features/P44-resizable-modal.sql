@@ -16,3 +16,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- P44:resizable-modal ── кінець секції ──
+-- P44:resizable-modal ── кнопки вікна формул і методологій: на весь екран, ручка розміру; власна порція ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'common.modal.fullScreen', N'en', N'Full screen', 1),
+    (N'common.modal.expand', N'en', N'Expand to full screen', 1),
+    (N'common.modal.restore', N'en', N'Restore size', 1),
+    (N'common.modal.resize', N'en', N'Resize window', 1),
+    (N'common.modal.resizeHint', N'en', N'Drag the corner or use the arrow keys; hold Shift for bigger steps.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- P44:resizable-modal ── кінець секції ──

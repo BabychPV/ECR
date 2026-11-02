@@ -10,3 +10,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:a5len ── кінець секції ──
+-- COLL:a5len ── RC5: текст довший за стовпець (1000 символів) — людська відмова в комірці й у перегляді імпорту; ru/kz — порцією COLL:a5len у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'validation.column.maxLength', N'en', N'The text in column "{column}" is longer than {maxLength} characters ({actualLength}).', 1),
+    (N'err.ECR-CELL-0422.importValueTooLong', N'en', N'The text is longer than the column allows (1000 characters).', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:a5len ── кінець секції ──

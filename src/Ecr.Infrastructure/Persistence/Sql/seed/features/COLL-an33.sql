@@ -14,3 +14,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an33 ── кінець секції ──
+-- COLL:an33 ── збір із джерел (AN-33): політика адреси Sql-джерела (L3-05, D-279); ru/kz — порцією COLL:an33 у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption', N'en', N'This connection string option is not allowed for a data source: AttachDBFilename (and its synonyms), User Instance, Enclave Attestation Url, Server SPN, Authentication other than SqlPassword, or a Server Certificate that is not a full local path (X:\…).', 1),
+    (N'err.ECR-INT-0503.endpointForbidden', N'en', N'The address of source "{dataSource}" is refused by the address policy (link-local or cloud metadata address, or a forbidden connection string option): fix the Endpoint field of the source.', 1),
+    -- L3-07: стеля подій вікна після посторінкового читання.
+    (N'coverageEvents.eventsTruncated', N'en', N'The source has more events in the window than were read ({count} in {pages} pages): events after {after} were not synchronized in this run, and removal of missing events was skipped.', 1),
+    -- L4-10: однакові імена елементів PI SQL Client.
+    (N'err.ECR-INT-0422.elementNameAmbiguous', N'en', N'Several source elements share the name used to read them; their values were not read, because a value read by that name could belong to another element. Give the elements unique names or read them through PI Web API.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an33 ── кінець секції ──

@@ -88,3 +88,52 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-methodology ── кінець секції ──
+-- COLL:ui-methodology ── сторінка версії методології: довідка синтаксису формули, межі матриці покриття (lane/integ-methodology-ui); ru/kz — порцією COLL:ui-methodology нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'methodologies.ruleCoveragePeriodMissing', N'en', N'Choose both periods to see the coverage matrix.', 1),
+    (N'methodologies.syntaxHelp.toggle', N'en', N'Syntax help', 1),
+    (N'methodologies.syntaxHelp.intro', N'en', N'Methodology formulas use their own dialect. Below is what the server accepts; it checks the formula again when you save it.', 1),
+    (N'methodologies.syntaxHelp.references', N'en', N'References', 1),
+    (N'methodologies.syntaxHelp.refArgument', N'en', N'An input of the formula: a column of the bound row. The name may contain dots; @Name? marks an optional input.', 1),
+    (N'methodologies.syntaxHelp.refConstant', N'en', N'A constant of this methodology version that is valid in the document period.', 1),
+    (N'methodologies.syntaxHelp.refFormula', N'en', N'The result of another formula of this version. Not followed by a name, "!" means logical NOT: !(…), !@Flag.', 1),
+    (N'methodologies.syntaxHelp.refHeader', N'en', N'A field of the document header.', 1),
+    (N'methodologies.syntaxHelp.refPeriod', N'en', N'The calendar of the current period: {properties}.', 1),
+    (N'methodologies.syntaxHelp.operators', N'en', N'Operators and values', 1),
+    (N'methodologies.syntaxHelp.opArithmetic', N'en', N'Arithmetic; % is the remainder of a division.', 1),
+    (N'methodologies.syntaxHelp.opComparison', N'en', N'Comparison; = and == mean the same, and so do <> and !=.', 1),
+    (N'methodologies.syntaxHelp.opLogic', N'en', N'Logic; the words can be written in any letter case.', 1),
+    (N'methodologies.syntaxHelp.opTernary', N'en', N'If the condition holds, the first value, otherwise the second.', 1),
+    (N'methodologies.syntaxHelp.opLiterals', N'en', N'Numbers use a dot as the decimal separator; text goes in single quotes (a quote inside is doubled); true, false and null.', 1),
+    (N'methodologies.syntaxHelp.functions', N'en', N'Functions', 1),
+    (N'methodologies.syntaxHelp.caseSensitive', N'en', N'Function names are case-sensitive: Pow, not POW.', 1),
+    (N'methodologies.syntaxHelp.functionsEmpty', N'en', N'The server returned no functions for this dialect.', 1),
+    (N'methodologies.syntaxHelp.argsExact', N'en', N'arguments: {count}', 1),
+    (N'methodologies.syntaxHelp.argsRange', N'en', N'arguments: {min}–{max}', 1),
+    (N'methodologies.syntaxHelp.argsAtLeast', N'en', N'arguments: {min} or more', 1),
+    (N'methodologies.syntaxHelp.extension', N'en', N'extension', 1),
+    (N'methodologies.syntaxHelp.extensionHint', N'en', N'Not part of the legacy calculation engine.', 1),
+    (N'methodologies.syntaxHelp.notAllowed', N'en', N'Not in this dialect', 1),
+    (N'methodologies.syntaxHelp.noCaret', N'en', N'"^" is not a power here (in the legacy engine it is bitwise XOR): write Pow(a, b).', 1),
+    (N'methodologies.syntaxHelp.noAmpersand', N'en', N'"&" does not join text; for a logical AND write and.', 1),
+    (N'methodologies.syntaxHelp.noBareName', N'en', N'A name without a prefix is not accepted: write @Name, CST.Name or !Name.', 1),
+    (N'methodologies.syntaxHelp.noCellRef', N'en', N'References to document cells are not allowed: a methodology works with its inputs.', 1),
+    (N'methodologies.syntaxHelp.examples', N'en', N'Examples', 1),
+    (N'methodologies.syntaxHelp.exArgConstant', N'en', N'An input times a constant', 1),
+    (N'methodologies.syntaxHelp.exDotted', N'en', N'An input whose name contains dots', 1),
+    (N'methodologies.syntaxHelp.exFormulaRefs', N'en', N'Results of other formulas', 1),
+    (N'methodologies.syntaxHelp.exTernary', N'en', N'A condition with two outcomes', 1),
+    (N'methodologies.syntaxHelp.exIf', N'en', N'The same choice with if()', 1),
+    (N'methodologies.syntaxHelp.exNot', N'en', N'"!" before @ is logical NOT', 1),
+    (N'methodologies.syntaxHelp.exPow', N'en', N'A power', 1),
+    (N'methodologies.syntaxHelp.exRound', N'en', N'Rounding to 3 digits', 1),
+    (N'methodologies.syntaxHelp.exIn', N'en', N'The value is one of a list', 1),
+    (N'methodologies.syntaxHelp.exPeriod', N'en', N'Hours in the current period', 1),
+    (N'methodologies.syntaxHelp.exModulo', N'en', N'The remainder of a division', 1),
+    (N'methodologies.syntaxHelp.exLogic', N'en', N'Two conditions at once', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-methodology ── кінець секції ──

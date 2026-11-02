@@ -24,3 +24,20 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: add-value ── кінець секції ──
+-- PERMITS: add-value ── en: PM-08e, «Not in the list? Add a value…» у формі рядка дозволу; ru/kz — порцією PERMITS: add-value нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'permits.page.row.addValue', N'en', N'Not in the list? Add a value…', 1),
+    (N'permits.page.addValue.title', N'en', N'Add a value', 1),
+    (N'permits.page.addValue.sharedNote', N'en', N'The value is added to the shared list {name} and is offered to every permit type that uses it.', 1),
+    (N'permits.page.addValue.typeNote', N'en', N'The value is added to the list of this permit type only.', 1),
+    (N'permits.page.addValue.label', N'en', N'Value', 1),
+    (N'permits.page.addValue.submit', N'en', N'Add value', 1),
+    (N'permits.page.addValue.cancel', N'en', N'Cancel', 1),
+    (N'permits.page.addValue.added', N'en', N'Value added', 1),
+    (N'permits.page.addValue.close', N'en', N'Close', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: add-value ── кінець секції ──

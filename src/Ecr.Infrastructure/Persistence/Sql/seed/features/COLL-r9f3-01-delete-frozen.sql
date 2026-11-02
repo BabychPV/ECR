@@ -10,3 +10,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:r9f3-01-delete-frozen ── кінець секції ──
+-- COLL:r9f3-01-delete-frozen ── R9-F3 / F3-01: видалення документа відмовляє в архівованому проєкті й за даних у закритому періоді; ru/kz — порцією COLL:r9f3-01-delete-frozen нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-DOC-0409.deleteProjectArchived', N'en', N'The document cannot be deleted: its project is archived.', 1),
+    (N'err.ECR-DOC-0409.deleteClosedPeriod', N'en', N'The document cannot be deleted: it has data in the closed period {periodKey}. Reopen the period first.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:r9f3-01-delete-frozen ── кінець секції ──

@@ -16,3 +16,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: type-limits ── кінець секції ──
+-- PERMITS: type-limits ── en: межі розміру визначення типу (ECR-PRM-0422 tooMany*, textTooLong; аудит A, PA-A-06); ru/kz — порцією PERMITS: type-limits нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-PRM-0422.tooManyTables', N'en', N'A permit type can have at most {max} tables.', 1),
+    (N'err.ECR-PRM-0422.tooManyColumns', N'en', N'Table "{tableCode}" can have at most {max} columns.', 1),
+    (N'err.ECR-PRM-0422.tooManyColumnsTotal', N'en', N'A permit type can have at most {max} columns in all its tables together.', 1),
+    (N'err.ECR-PRM-0422.textTooLong', N'en', N'The name of "{item}" must not be longer than {max} characters.', 1),
+    (N'err.ECR-PRM-0422.draftTooLarge', N'en', N'The permit type draft is larger than {max} characters and cannot be saved or read. Remove long lists or expressions, or delete the type.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: type-limits ── кінець секції ──

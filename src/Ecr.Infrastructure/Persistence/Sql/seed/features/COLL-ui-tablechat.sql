@@ -77,3 +77,46 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-tablechat ── кінець секції ──
+-- COLL:ui-tablechat ── en: чат таблиці документа, клієнт (кнопка «Discussion», бейдж у назві таблиці, права панель, «My tasks»); ru/kz — порцією COLL:ui-tablechat нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'tableChat.button', N'en', N'Discussion', 1),
+    (N'tableChat.buttonUnread', N'en', N'Discussion, {n} unread', 1),
+    (N'tableChat.buttonTitle', N'en', N'Discussion of the table you are working in', 1),
+    (N'tableChat.buttonMentioned', N'en', N'Discussion — you were mentioned', 1),
+    (N'tableChat.panelTitle', N'en', N'Discussion', 1),
+    (N'tableChat.close', N'en', N'Close discussion', 1),
+    (N'tableChat.periodFilter', N'en', N'Period filter', 1),
+    (N'tableChat.allPeriods', N'en', N'All periods', 1),
+    (N'tableChat.thisPeriod', N'en', N'{period} only', 1),
+    (N'tableChat.messages', N'en', N'Messages', 1),
+    (N'tableChat.loading', N'en', N'Loading messages…', 1),
+    (N'tableChat.empty', N'en', N'No messages yet', 1),
+    (N'tableChat.emptyHint', N'en', N'Start the discussion of this table. Everyone who can see the table can read it.', 1),
+    (N'tableChat.emptyPeriod', N'en', N'No messages in this period', 1),
+    (N'tableChat.emptyPeriodHint', N'en', N'Switch to all periods to see earlier messages.', 1),
+    (N'tableChat.loadOlder', N'en', N'Load older messages', 1),
+    (N'tableChat.edited', N'en', N'edited', 1),
+    (N'tableChat.new', N'en', N'new', 1),
+    (N'tableChat.deleted', N'en', N'Message deleted', 1),
+    (N'tableChat.edit', N'en', N'Edit', 1),
+    (N'tableChat.editLabel', N'en', N'Edit message', 1),
+    (N'tableChat.delete', N'en', N'Delete', 1),
+    (N'tableChat.deleteConfirm', N'en', N'Delete this message?', 1),
+    (N'tableChat.composerLabel', N'en', N'Message · {period}', 1),
+    (N'tableChat.composerHint', N'en', N'Ctrl+Enter to send · plain text · up to {max} characters', 1),
+    (N'tableChat.send', N'en', N'Send', 1),
+    (N'tableChat.tooLong', N'en', N'The message is longer than {max} characters.', 1),
+    (N'tableChat.mentionList', N'en', N'Mention suggestions', 1),
+    (N'tableChat.readOnly', N'en', N'You can read this discussion but cannot write in it.', 1),
+    (N'tableChat.badgeLabel', N'en', N'Open discussion: {total} messages, {unread} new', 1),
+    (N'tableChat.badgeNew', N'en', N'{total} · {unread} new', 1),
+    (N'tableChat.tasksTitle', N'en', N'You were mentioned', 1),
+    (N'tableChat.taskLine', N'en', N'{author} · {table} · {period}', 1),
+    (N'tableChat.taskOpen', N'en', N'Open discussion', 1),
+    (N'tableChat.tasksError', N'en', N'Could not load mentions.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-tablechat ── кінець секції ──

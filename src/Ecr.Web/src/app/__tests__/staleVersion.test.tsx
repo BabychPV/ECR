@@ -14,7 +14,7 @@ import {
   resetPending,
 } from '@/features/grid/pendingStore';
 import type { PendingEdit } from '@/features/grid/useCellPatch';
-import { readSeedSql } from '@/test/seedSql';
+import { readSeedEnCatalog } from '@/test/seedSql';
 
 /**
  * `DAT-08` (клієнтська половина): застарілий чанк після оновлення.
@@ -228,12 +228,8 @@ describe('DAT-08 — незбережене зберігається до про
   });
 
   it('тексти стану збереження є в MERGE каталогу', () => {
-    const seed = readSeedSql();
-    const start = seed.indexOf('MERGE sys_ecr.UiString AS t');
-    const end = seed.indexOf(') AS s ([Key], Lang, Val, Scope)', start);
-    const merge = seed.slice(start, end);
+    const merge = readSeedEnCatalog();
 
-    expect(start).toBeGreaterThan(-1);
     for (const key of ['unsaved.staleSaving', 'unsaved.staleSaved', 'unsaved.staleFailed']) {
       expect(merge, key).toMatch(new RegExp(`\\(N'${key.replace(/\./gu, '\\.')}',\\s*N'en',`, 'u'));
     }

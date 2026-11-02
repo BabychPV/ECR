@@ -21,3 +21,18 @@ OPTION (RECOMPILE);
 GO
 -- EDA:executor-strip ── кінець секції ──
 
+-- EDA:executor-strip ── EA-5b: смуга виконавця над таблицею документа (`ExecutorStrip`); власна порція.
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'editAssign.bar.assigned', N'en', N'Month assigned to you: {slice}', 1),
+    (N'editAssign.bar.returned', N'en', N'{slice} returned by the owner: {reason}', 1),
+    (N'editAssign.bar.returnedNoReason', N'en', N'{slice} returned by the owner', 1),
+    (N'editAssign.bar.filled', N'en', N'{slice}: filled, awaiting the owner''s validation', 1),
+    (N'editAssign.bar.markFilled', N'en', N'Mark as filled', 1),
+    (N'editAssign.bar.confirmFill', N'en', N'After this you can''t edit {slice} until the owner returns it.', 1),
+    (N'editAssign.bar.note', N'en', N'Owner''s note: {note}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- EDA:executor-strip: кінець секції

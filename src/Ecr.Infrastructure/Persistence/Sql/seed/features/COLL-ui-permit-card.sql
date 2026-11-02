@@ -87,3 +87,51 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-permit-card ── кінець секції ──
+-- COLL:ui-permit-card ── en: картка лімітів "Air limits" дозволу (NAE-план N3); ru/kz — порцією COLL:ui-permit-card нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'permits.page.tabs.air', N'en', N'Air limits', 1),
+    (N'permits.air.title', N'en', N'Emission sources', 1),
+    (N'permits.air.counts', N'en', N'{sources} sources · {rows} substance rows', 1),
+    (N'permits.air.import', N'en', N'Import from Excel…', 1),
+    (N'permits.air.empty.title', N'en', N'No emission sources yet', 1),
+    (N'permits.air.empty.text', N'en', N'Import the limits table from an Excel workbook to fill this permit.', 1),
+    (N'permits.air.empty.readOnly', N'en', N'This permit has no sources. You can view it, but not import into it.', 1),
+    (N'permits.air.view.aria', N'en', N'Card view', 1),
+    (N'permits.air.view.sources', N'en', N'Sources', 1),
+    (N'permits.air.view.totals', N'en', N'Totals', 1),
+    (N'permits.air.filter.label', N'en', N'Filter sources', 1),
+    (N'permits.air.filter.placeholder', N'en', N'Filter NAE, source, substance…', 1),
+    (N'permits.air.filter.none', N'en', N'Nothing matches the filter.', 1),
+    (N'permits.air.sources.aria', N'en', N'Emission sources table', 1),
+    (N'permits.air.sources.toggle', N'en', N'Show substances', 1),
+    (N'permits.air.sources.expand', N'en', N'Substances of source {nae}', 1),
+    (N'permits.air.sources.nae', N'en', N'NAE', 1),
+    (N'permits.air.sources.source', N'en', N'Source', 1),
+    (N'permits.air.sources.point', N'en', N'Point', 1),
+    (N'permits.air.sources.type', N'en', N'Type', 1),
+    (N'permits.air.sources.quantity', N'en', N'Qty', 1),
+    (N'permits.air.sources.hours', N'en', N'Hours/yr', 1),
+    (N'permits.air.sources.height', N'en', N'Height, m', 1),
+    (N'permits.air.sources.diameter', N'en', N'Diameter, m', 1),
+    (N'permits.air.sources.velocity', N'en', N'Velocity, m/s', 1),
+    (N'permits.air.sources.volume', N'en', N'Volume, m³/s', 1),
+    (N'permits.air.sources.temperature', N'en', N'Temp, °C', 1),
+    (N'permits.air.sources.substances', N'en', N'Substances', 1),
+    (N'permits.air.type.point', N'en', N'T — point source', 1),
+    (N'permits.air.type.diffuse', N'en', N'P1 — diffuse source', 1),
+    (N'permits.air.type.pointShort', N'en', N'T', 1),
+    (N'permits.air.type.diffuseShort', N'en', N'P1', 1),
+    (N'permits.air.substances.aria', N'en', N'Substances of source {nae}', 1),
+    (N'permits.air.substances.code', N'en', N'Code', 1),
+    (N'permits.air.substances.name', N'en', N'Substance', 1),
+    (N'permits.air.substances.gs', N'en', N'g/s', 1),
+    (N'permits.air.substances.mg', N'en', N'mg/nm³', 1),
+    (N'permits.air.substances.ty', N'en', N't/year', 1),
+    (N'permits.air.totals.aria', N'en', N'Totals per substance', 1),
+    (N'permits.air.totals.sources', N'en', N'Sources', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-permit-card ── кінець секції ──

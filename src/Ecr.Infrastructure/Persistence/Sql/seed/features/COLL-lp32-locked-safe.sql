@@ -12,3 +12,14 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:lp32-locked-safe ── кінець секції ──
+-- COLL:lp32-locked-safe ── LP-32: перенос версії з поданими/затвердженими аркушами; ru/kz — порцією COLL:lp32-locked-safe нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'documents.migrateLockedCarried', N'en', N'Submitted or approved sheets carried over unchanged (status and values stay, formula columns are not recalculated until the sheet is returned to work): {count}.', 1),
+    (N'documents.migrateLockedAffected', N'en', N'The move would change submitted or approved sheets: {count}. Return them to work first, or choose a version that does not change them.', 1),
+    (N'documents.migrateLockedItem', N'en', N'Sheet {sheet}, period {period}: {status}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:lp32-locked-safe ── кінець секції ──

@@ -77,3 +77,47 @@ OPTION (RECOMPILE);
 GO
 -- SEC:effective-access ── кінець секції ──
 
+-- SEC:effective-access ── Розріз «ресурс → рівень → грант якої ролі» (ФВ-6.16, D-220, `EffectiveAccessPanel`, GET /security/users/{id}/effective-access) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.effectiveAccessResource', N'en', N'The resource must be given as a type and a positive number, for example Registry:5 or Project:3.', 1),
+    (N'effectiveAccess.show',            N'en', N'Show effective access', 1),
+    (N'effectiveAccess.hide',            N'en', N'Hide effective access', 1),
+    (N'effectiveAccess.title',           N'en', N'Effective access to a resource', 1),
+    (N'effectiveAccess.kind',            N'en', N'Resource type', 1),
+    (N'effectiveAccess.kindRegistry',    N'en', N'Registry', 1),
+    (N'effectiveAccess.kindProject',     N'en', N'Project', 1),
+    (N'effectiveAccess.resourceId',      N'en', N'Resource ID', 1),
+    (N'effectiveAccess.explain',         N'en', N'Explain', 1),
+    (N'effectiveAccess.level',           N'en', N'Resulting level: {level}', 1),
+    (N'effectiveAccess.denied',          N'en', N'Explicitly denied: a deny wins over any grant and over any global right, so the resource is hidden.', 1),
+    (N'effectiveAccess.noGrant',         N'en', N'No role of this person gives access to this resource.', 1),
+    (N'effectiveAccess.groupsUnknown',   N'en', N'The groups in this person''s sign-in ticket are not known here, so roles that come only through a group are not shown.', 1),
+    (N'effectiveAccess.noContributions', N'en', N'No role has a grant or right for this resource.', 1),
+    (N'effectiveAccess.colSource',       N'en', N'Given by', 1),
+    (N'effectiveAccess.colRole',         N'en', N'Role', 1),
+    (N'effectiveAccess.colVia',          N'en', N'Assigned', 1),
+    (N'effectiveAccess.colLevel',        N'en', N'Level', 1),
+    (N'effectiveAccess.colScope',        N'en', N'Scope', 1),
+    (N'effectiveAccess.colCounted',      N'en', N'Counted', 1),
+    (N'effectiveAccess.sourceGrant',     N'en', N'Resource grant', 1),
+    (N'effectiveAccess.sourcePermission', N'en', N'Right {permission}', 1),
+    (N'effectiveAccess.viaPersonal',     N'en', N'Personally', 1),
+    (N'effectiveAccess.viaGroup',        N'en', N'Via group {sid}', 1),
+    (N'effectiveAccess.deny',            N'en', N'Deny', 1),
+    (N'effectiveAccess.scopeUnscoped',   N'en', N'Everywhere', 1),
+    (N'effectiveAccess.scopeInScope',    N'en', N'Project is in scope', 1),
+    (N'effectiveAccess.scopeNarrowed',   N'en', N'Narrowed to sheets or periods: counted on the sheets of its scope (not counted when narrowed by periods); the level may be higher than the actual one', 1),
+    (N'effectiveAccess.scopeOutOfScope', N'en', N'Outside the assignment scope', 1),
+    (N'effectiveAccess.scopeExpired',    N'en', N'Assignment not in effect', 1),
+    (N'effectiveAccess.counted',         N'en', N'Yes', 1),
+    (N'effectiveAccess.notCounted',      N'en', N'No', 1),
+    (N'effectiveAccess.narrowedBy',      N'en', N'Narrowed by {by}', 1),
+    (N'effectiveAccess.projectNotVisible', N'en', N'No: the project is not visible, so grants below it do not apply', 1),
+    (N'effectiveAccess.mayExceed',       N'en', N'The role is narrowed by sheets or periods: the shown level may be HIGHER than the actual one for a given period. Check the narrowing in the contributions.', 1)
+    -- ru/kz — окремою порцією `I18N` (SEC:effective-access).
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- SEC:effective-access ── кінець секції ──

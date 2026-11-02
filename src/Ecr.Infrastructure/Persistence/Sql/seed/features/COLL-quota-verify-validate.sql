@@ -10,3 +10,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:quota-verify-validate ── кінець секції ──
+-- COLL:quota-verify-validate ── L1-05/P1-08: межа частоти «Перевірити зріз» і «Перевірити документ» на користувача; ru/kz — порцією COLL:quota-verify-validate нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REQ-0429.tooManyVerifications', N'en', N'Too many snapshot verification requests in a short time. Wait a moment and try again.', 1),
+    (N'err.ECR-REQ-0429.tooManyValidations', N'en', N'Too many document validation requests in a short time. Wait a moment and try again.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:quota-verify-validate ── кінець секції ──

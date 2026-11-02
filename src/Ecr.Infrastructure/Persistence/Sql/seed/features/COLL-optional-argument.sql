@@ -10,3 +10,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:optional-argument ── кінець секції ──
+-- COLL:optional-argument ── D-OA: необов'язковий аргумент `Name?`, попередження публікації; ru/kz — порцією COLL:optional-argument нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'publish.warning.optionalArgumentNoColumn', N'en', N'Optional argument {name} has no column in any bound table ({tables}) - it is always null. Most often a typo in the argument name.', 1),
+    (N'methodologies.argumentsOptionalHint', N'en', N'Mark an optional argument with a trailing "?" (for example, Flow;OperatingTime?): a missing cell then counts as empty instead of an error.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:optional-argument ── кінець секції ──

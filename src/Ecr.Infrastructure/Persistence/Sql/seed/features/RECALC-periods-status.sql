@@ -12,3 +12,14 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- RECALC:periods-status ── кінець секції ──
+-- RECALC:periods-status ── Правдивий стан перерахунку проєкту на екранах (P4 ФВ-9.8: «завершено» лише коли M = N і K = 0) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'workflow.recalcDoneWithErrors',          N'en', N'Recalculation is not complete: done {done} of {total} documents, errors {failed}. Figures of the failed documents are not up to date.', 1),
+    (N'status.job.FannedOut',                   N'en', N'Calculating documents', 1),
+    (N'status.job.SucceededWithErrors',         N'en', N'Done with errors', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- RECALC:periods-status ── кінець секції ──

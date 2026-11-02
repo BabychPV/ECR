@@ -36,3 +36,26 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui21units ── кінець секції ──
+-- COLL:ui21units ── UI-21: довідник одиниць на шаблоні переліку (пояснення, смуга, пошук, шторка, діалог перерахунку); ru/kz — порцією COLL:ui21units у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'units.description', N'en', N'Units of measure grouped by dimension. Each unit converts to the base unit of its dimension, so values from sources and cells can be compared safely.', 1),
+    (N'units.statsLabel', N'en', N'Units at a glance', 1),
+    (N'units.statUnits', N'en', N'units', 1),
+    (N'units.statDimensions', N'en', N'dimensions', 1),
+    (N'units.statOffset', N'en', N'with an offset (temperature)', 1),
+    (N'units.search', N'en', N'Search', 1),
+    (N'units.searchPlaceholder', N'en', N'Code or dimension', 1),
+    (N'units.baseUnit', N'en', N'Base unit', 1),
+    (N'units.checkConversion', N'en', N'Check a conversion', 1),
+    (N'units.swap', N'en', N'Swap units', 1),
+    (N'units.conversion', N'en', N'Conversion', 1),
+    (N'units.whereUsed', N'en', N'Where used', 1),
+    (N'units.noMatch', N'en', N'No units match the filters.', 1),
+    (N'units.usedIn', N'en', N'Used in', 1),
+    (N'units.statUnused', N'en', N'not used anywhere', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui21units ── кінець секції ──

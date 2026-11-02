@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:a11y-pass ── кінець секції ──
+-- COLL:a11y-pass ── зауваження успішного PATCH у гріді; 403 у каскаді гранта (A1-05); ru/kz — порцією COLL:a11y-pass у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'grid.patchNoticesTitle', N'en', N'Saved with remarks: {count}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:a11y-pass ── кінець секції ──

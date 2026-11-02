@@ -18,3 +18,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:stale-mytasks ── кінець секції ──
+-- COLL:stale-mytasks ── блок «Needs recalculation» у My tasks і нагадування при виході з документа; ru/kz — порцією COLL:stale-mytasks нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'document.staleResults.leaveReminder', N'en', N'Document #{id} still has out-of-date results. Recalculate it, or find it later in My tasks under "Needs recalculation".', 1),
+    (N'jobs.staleDocuments.title', N'en', N'Needs recalculation', 1),
+    (N'jobs.staleDocuments.hint', N'en', N'Input data in these documents changed after the last calculation. Open a document and press Recalculate.', 1),
+    (N'jobs.staleDocuments.since', N'en', N'Changed {date}', 1),
+    (N'jobs.staleDocuments.open', N'en', N'Open', 1),
+    (N'jobs.staleDocuments.error', N'en', N'Could not load the documents that need recalculation.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:stale-mytasks ── кінець секції ──

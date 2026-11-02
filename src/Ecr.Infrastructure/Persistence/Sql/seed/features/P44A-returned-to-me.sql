@@ -29,3 +29,22 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- P44A:returned-to-me ── кінець секції ──
+-- P44A:returned-to-me ── en: «My tasks» — «Повернуто на доопрацювання» і лічильник задач на кнопці (D-449); ru/kz — порцією P44A:returned-to-me нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'myTasks.returned.title', N'en', N'Returned for rework', 1),
+    (N'myTasks.returned.error', N'en', N'Could not load the sheets returned to you for rework.', 1),
+    (N'myTasks.returned.more', N'en', N'Show more', 1),
+    (N'myTasks.returned.open', N'en', N'Open sheet', 1),
+    (N'myTasks.returned.returnedBy', N'en', N'Returned by {name} · {date}', 1),
+    (N'myTasks.returned.returnedAt', N'en', N'Returned {date}', 1),
+    (N'myTasks.returned.reason', N'en', N'Reason', 1),
+    (N'myTasks.returned.reasonMore', N'en', N'Show full reason', 1),
+    (N'myTasks.returned.reasonLess', N'en', N'Collapse', 1),
+    (N'myTasks.waitingBadge', N'en', N'{n} tasks waiting for you', 1),
+    (N'err.ECR-REQ-0422.returnedSheetsCursorInvalid', N'en', N'The page cursor of returned sheets is not valid. Reload the list.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- P44A:returned-to-me ── кінець секції ──

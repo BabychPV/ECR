@@ -15,3 +15,16 @@ OPTION (RECOMPILE);
 GO
 -- IMPORT:hints ── кінець секції ──
 
+-- IMPORT:hints ── підказки імпорту Excel (P3): застаріла книга, адреса комірки, перерахунок ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-CELL-4221.importCalculatedStale', N'en', N'The system recalculated this cell after the workbook was exported, so the workbook is out of date. Export the document again and repeat your changes in the new workbook.', 1),
+    (N'import.excelCell', N'en', N'Cell in file', 1),
+    (N'import.recalculateTitle', N'en', N'Calculation results are out of date', 1),
+    (N'import.recalculateHint', N'en', N'The import changed inputs of a methodology. Press «{action}» to update the calculation results.', 1)
+    -- ru/kz — окремою порцією `IMPORT:hints` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- IMPORT:hints ── кінець секції ──

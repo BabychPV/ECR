@@ -18,3 +18,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:cellstyle-l6 ── кінець секції ──
+-- COLL:cellstyle-l6 ── CELL-STYLE L6 (12.10): умовне форматування за областю рядків / текстом / статусом рядка; ru/kz — порцією COLL:cellstyle-l6 нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-CFG-0422.condFormatScope', N'en', N'Conditional format rule {index} (column {columnCode}): the scope must be "column" or "row".', 1),
+    (N'err.ECR-CFG-0422.condFormatTable', N'en', N'Conditional format rule {index} (column {columnCode}): the table code is missing or this template version has no such table. A row scope and the "all columns" column both need a table.', 1),
+    (N'err.ECR-CFG-0422.condFormatRowKeys', N'en', N'Conditional format rule {index} (column {columnCode}): a row scope needs 1 to 500 distinct row keys that exist in the table; a column scope must have none.', 1),
+    (N'err.ECR-CFG-0422.condFormatRef', N'en', N'Conditional format rule {index} (column {columnCode}): the column whose value is tested does not exist in this template version or in the table.', 1),
+    (N'err.ECR-CFG-0422.condFormatPattern', N'en', N'Conditional format rule {index} (column {columnCode}): the pattern must be "hatch" or empty.', 1),
+    (N'err.ECR-CFG-0422.condFormatTextOperand', N'en', N'Conditional format rule {index} (column {columnCode}): operator {operator} needs a non-empty text value of up to 64 characters.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:cellstyle-l6 ── кінець секції ──

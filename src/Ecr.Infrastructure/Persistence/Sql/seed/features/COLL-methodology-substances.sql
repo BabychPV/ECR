@@ -16,3 +16,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:methodology-substances ── кінець секції ──
+-- COLL:methodology-substances ── PUT/GET …/versions/{vid}/substances: склад речовин версії; ru/kz — порцією COLL:methodology-substances нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.substancesRequired', N'en', N'The substance list is missing: an empty composition is written as an empty list, not an absent one.', 1),
+    (N'err.ECR-CALC-0422.substancesTooMany', N'en', N'A version cannot have more than {max} substances (sent: {count}).', 1),
+    (N'err.ECR-CALC-0422.substanceDuplicate', N'en', N'Substance {substanceEntryId} is listed twice.', 1),
+    (N'err.ECR-CALC-0422.substanceNotFound', N'en', N'Substance (registry entry) {substanceEntryId} does not exist.', 1),
+    (N'err.ECR-CALC-0409.substanceInUse', N'en', N'The substance cannot be removed: constants {constantCodes} (total: {count}) are narrowed to it. Change those constants first.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:methodology-substances ── кінець секції ──

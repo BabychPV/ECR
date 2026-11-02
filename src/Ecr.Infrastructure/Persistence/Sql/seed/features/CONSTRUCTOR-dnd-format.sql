@@ -73,3 +73,44 @@ OPTION (RECOMPILE);
 GO
 -- CONSTRUCTOR:dnd-format ── кінець секції ──
 
+-- CONSTRUCTOR:dnd-format ── ФВ-2.6/2.7: перестановка колонок (`ReorderControls`) і умовне форматування (`ConditionalFormatPanel`).
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'reorder.column', N'en', N'Order', 1),
+    (N'reorder.handle', N'en', N'Drag to reorder', 1),
+    (N'reorder.moveUp', N'en', N'Move {name} up', 1),
+    (N'reorder.moveDown', N'en', N'Move {name} down', 1),
+    (N'reorder.moved', N'en', N'{name} is now in position {position} of {count}.', 1),
+    (N'conditionalFormat.title', N'en', N'Conditional formatting', 1),
+    (N'conditionalFormat.rule', N'en', N'Rule {position}', 1),
+    (N'conditionalFormat.column', N'en', N'Column', 1),
+    (N'conditionalFormat.operator', N'en', N'Condition', 1),
+    (N'conditionalFormat.value', N'en', N'Value', 1),
+    (N'conditionalFormat.valueTo', N'en', N'Up to', 1),
+    (N'conditionalFormat.op.gt', N'en', N'Greater than', 1),
+    (N'conditionalFormat.op.ge', N'en', N'Greater than or equal to', 1),
+    (N'conditionalFormat.op.lt', N'en', N'Less than', 1),
+    (N'conditionalFormat.op.le', N'en', N'Less than or equal to', 1),
+    (N'conditionalFormat.op.eq', N'en', N'Equal to', 1),
+    (N'conditionalFormat.op.ne', N'en', N'Not equal to', 1),
+    (N'conditionalFormat.op.between', N'en', N'Between', 1),
+    (N'conditionalFormat.op.empty', N'en', N'Is empty', 1),
+    (N'conditionalFormat.op.notEmpty', N'en', N'Is not empty', 1),
+    (N'conditionalFormat.blocker.Value', N'en', N'Enter a value; comparisons need a number.', 1),
+    (N'conditionalFormat.blocker.ValueTo', N'en', N'Enter a number.', 1),
+    (N'conditionalFormat.blocker.Range', N'en', N'The upper bound must not be less than the lower one.', 1),
+    (N'conditionalFormat.blocker.Style', N'en', N'Choose a fill color, text color or bold, otherwise the rule changes nothing.', 1),
+    (N'conditionalFormat.remove', N'en', N'Remove rule {position}', 1),
+    (N'conditionalFormat.add', N'en', N'Add rule', 1),
+    (N'conditionalFormat.preview', N'en', N'Check on a value', 1),
+    (N'conditionalFormat.sample', N'en', N'Sample value', 1),
+    (N'conditionalFormat.sampleEmpty', N'en', N'(empty cell)', 1),
+    (N'conditionalFormat.noMatch', N'en', N'No rule applies to this value.', 1),
+    (N'conditionalFormat.matched', N'en', N'Rule {position} applies.', 1),
+    (N'conditionalFormat.save', N'en', N'Save rules', 1),
+    (N'err.ECR-TMPL-0422.ordinalInvalid', N'en', N'Order must be a whole number from 0 to 1000000, got "{value}".', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- CONSTRUCTOR:dnd-format: кінець секції

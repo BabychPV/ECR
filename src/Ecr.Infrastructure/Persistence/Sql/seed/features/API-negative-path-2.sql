@@ -15,3 +15,16 @@ OPTION (RECOMPILE);
 GO
 -- API:negative-path-2 ── кінець секції ──
 
+-- API:negative-path-2 ── відмови замість 500 у нових ендпоінтах (прохід по відмовах 2) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.patchChangeInvalid', N'en', N'Every patch change needs entityType, entityId and field.', 1),
+    (N'err.ECR-TMPL-0422.presentationValueInvalid', N'en', N'The value of {entityType}.{field} has a form this field does not accept.', 1),
+    (N'err.ECR-REG-0422.definitionItemMissing', N'en', N'The definition contains an empty item among its fields, rules or keys.', 1),
+    (N'err.ECR-REG-0422.switchCodeEmpty', N'en', N'The set of registries contains an empty code.', 1)
+    -- ru/kz — окремою порцією `API:negative-path-2` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- API:negative-path-2 ── кінець секції ──

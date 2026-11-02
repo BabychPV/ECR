@@ -10,3 +10,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:mkeys ── кінець секції ──
+-- COLL:mkeys ── D1: перенос проєкту відмовляє, коли правила/обов'язкові входи методології посилаються на колонки іншої версії шаблону; ru/kz — порцією COLL:mkeys нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-SCHM-0422.migrateMethodologyKeysNotMapped', N'en', N'Rules or required inputs of a methodology bound to the target version refer to sheets, tables or columns that the target version does not have (the code was lost or renamed; see methodologyKeys). After the move those rules would match no rows, so nothing would be calculated, and a blocking required input could never be satisfied. Restore or rename the missing item in the target version, or publish a methodology version that points to the items the target version has, then move the project.', 1),
+    (N'documents.migrateRefusalMethodologyKeysNotMapped', N'en', N'Methodology rules or required inputs refer to sheets, tables or columns missing from the target template version (lost or renamed); after the move they would match nothing.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:mkeys ── кінець секції ──

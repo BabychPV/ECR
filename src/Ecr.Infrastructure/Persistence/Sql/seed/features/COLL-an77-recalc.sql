@@ -11,3 +11,13 @@ OPTION (RECOMPILE);
 GO
 -- COLL:an77-recalc ── кінець секції ──
 
+-- COLL:an77-recalc ── N1-06/L8-12: перерахунок усього документа без повного читання; перерахунок на поданому аркуші; ru/kz — порцією COLL:an77-recalc нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-AUTH-0403.recalcNeedsFullRead', N'en', N'Recalculating the whole document needs read access to all of its sheets. Recalculate a single sheet instead, or ask for full read access.', 1),
+    (N'workflow.recalculateSheetSubmitted', N'en', N'Sheet {sheet} is submitted or approved and cannot be recalculated. Return it for edits first (the sheet''s «Return for edits» action).', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an77-recalc ── кінець секції ──

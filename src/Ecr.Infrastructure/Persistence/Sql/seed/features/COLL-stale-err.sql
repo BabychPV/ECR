@@ -10,3 +10,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:stale-err ── кінець секції ──
+-- COLL:stale-err ── resultsStale у переліку документів: відмови параметрів; ru/kz — порцією COLL:stale-err нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'en', N'Filtering by stale results needs a period: staleness belongs to a period.', 1),
+    (N'err.ECR-REQ-0422.staleBy', N'en', N'staleBy accepts only "me" and only together with resultsStale=true.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:stale-err ── кінець секції ──

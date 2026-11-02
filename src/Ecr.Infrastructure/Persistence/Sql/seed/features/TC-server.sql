@@ -25,3 +25,20 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- TC:server ── кінець секції ──
+-- TC:server ── en: чат таблиці документа, права й відмови сервера (клієнтські підписи панелі — секція UI-lane) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'permission.Document.Discuss', N'en', N'Write in the chat of a table the user can see', 1),
+    (N'permission.Document.DiscussModerate', N'en', N'Delete other people''s messages in table chats', 1),
+    (N'err.ECR-REQ-0422.discussionBodyInvalid', N'en', N'The message must contain text, no longer than {max} characters, and reference at most {maxMentions} people. Check the period too.', 1),
+    (N'err.ECR-REQ-0422.discussionEditWindowClosed', N'en', N'A message can be edited only within {minutes} minutes after it was written.', 1),
+    (N'err.ECR-REQ-0422.discussionMessageDeleted', N'en', N'This message was deleted and can no longer be edited.', 1),
+    (N'err.ECR-ACCS-0403.discussionEditForbidden', N'en', N'Only the author can edit a message.', 1),
+    (N'err.ECR-ACCS-0403.discussionDeleteForbidden', N'en', N'Only the author or a moderator can delete a message.', 1),
+    (N'err.ECR-ACCS-0403.discussionPeriodForbidden', N'en', N'Your access does not cover this period, so you cannot write in this chat for it.', 1),
+    (N'err.ECR-PRD-0409.projectArchivedNoChat', N'en', N'The project of document {documentId} is archived: its table chats are read-only.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- TC:server ── кінець секції ──

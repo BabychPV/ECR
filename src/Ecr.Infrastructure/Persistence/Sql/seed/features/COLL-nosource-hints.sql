@@ -9,3 +9,13 @@ OPTION (RECOMPILE);
 GO
 -- COLL:nosource-hints ── кінець секції ──
 
+-- COLL:nosource-hints ── порожній стан списку з'єднань: що робити й де в документації (UI, DataSourcesTable) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'sources.notConfiguredHint', N'en', N'To connect PI, an administrator adds a connection here: the PI Web API address, the secret and the authentication. Until then data is entered by hand. See docs/admin/admin-guide.md, section 5, and docs/admin/operations-runbook.md, section 15.', 1)
+    -- ru/kz — окремою порцією `I18N` (COLL:nosource-hints).
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:nosource-hints ── кінець секції ──

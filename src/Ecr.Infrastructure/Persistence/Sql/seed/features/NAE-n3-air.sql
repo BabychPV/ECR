@@ -29,3 +29,21 @@ OPTION (RECOMPILE);
 GO
 -- NAE:n3-air ── кінець секції ──
 
+-- NAE:n3-air ── "Air Limits Import" permits (provisioning, profiles, wizard backend); ru/kz in the section NAE:n3-air below.
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-IMP-0422.airRequestInvalid',     N'en', N'The import request cannot be read. Reload the page and try again.', 1),
+    (N'err.ECR-IMP-0422.airNotProvisioned',     N'en', N'The Air Limits Import permit type is not set up yet. Ask an administrator to provision it.', 1),
+    (N'err.ECR-IMP-0422.airScopeInvalid',       N'en', N'Choose the region of the import.', 1),
+    (N'err.ECR-IMP-0422.airNotAirPermit',       N'en', N'This permit is not an Air Limits Import permit.', 1),
+    (N'err.ECR-IMP-0422.airCreateUnderInvalid', N'en', N'NAE {key} cannot be created under the chosen node. Choose a site or equipment group.', 1),
+    (N'err.ECR-IMP-0422.airWriteRejected',      N'en', N'The import was refused at {key} ({reason}). Nothing was imported.', 1),
+    (N'err.ECR-IMP-0422.airProfileUnknown',     N'en', N'The import profile {code} does not exist.', 1),
+    (N'err.ECR-REG-0409.profileChanged',        N'en', N'The import profile {code} was changed after you opened it. Reload it and try again.', 1),
+    (N'err.ECR-REG-0404.importProfile',         N'en', N'The import profile {code} does not exist.', 1),
+    (N'registryAudit.airLimitsImport',          N'en', N'Air limits imported: {sources} sources, {substances} substance rows.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- NAE:n3-air ── кінець секції ──

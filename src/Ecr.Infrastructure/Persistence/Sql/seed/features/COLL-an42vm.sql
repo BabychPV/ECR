@@ -18,3 +18,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an42vm ── кінець секції ──
+-- COLL:an42vm ── T2-07/T3-03/T4-06: повідомлення валідації зберігаються ключем + підстановками, текст — мовою читача; ru/kz — порцією COLL:an42vm у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'validation.check.mismatch', N'en', N'Check: {left} = {leftValue} does not match {right} = {rightValue}: deviation {deviation}, allowed {allowed} ({kind}).', 1),
+    (N'validation.column.required', N'en', N'Column "{column}" is required.', 1),
+    (N'validation.column.scale', N'en', N'Column "{column}" allows at most {scale} decimal places.', 1),
+    (N'validation.column.precision', N'en', N'The value does not fit the precision of column "{column}" ({precision} digits).', 1),
+    (N'validation.rule.parseError', N'en', N'Rule ''{rule}'' does not parse: {detail}', 1),
+    (N'validation.rule.notLogical', N'en', N'Rule ''{rule}'' did not return a logical answer: {reason}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an42vm ── кінець секції ──

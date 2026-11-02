@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: p3-backlog ── кінець секції ──
+-- PERMITS: p3-backlog ── en: PUI-4, значення списку вже прибране/змінене деінде; ru/kz — порцією PERMITS: p3-backlog нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'permits.lists.drawer.gone', N'en', N'This value is no longer in the list: it was changed elsewhere. The list has been refreshed.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: p3-backlog ── кінець секції ──

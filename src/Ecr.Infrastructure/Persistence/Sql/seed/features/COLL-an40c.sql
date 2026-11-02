@@ -10,3 +10,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an40c ── кінець секції ──
+-- COLL:an40c ── AN-40 контрактний хвіст (L9-06 версія мапінгу подій, L9-27 шлях чужого каталогу); ru/kz — порцією COLL:an40c у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-INT-0409.eventMapConcurrency',     N'en', N'Event mapping {eventMapId} was changed after you read it. Reload it and apply your changes again.', 1),
+    (N'err.ECR-REQ-0422.sourceEntityPathForeign', N'en', N'Path {path} does not belong to the catalog of connection {dataSource} (its AF database: {database}). Open this connection''s catalog and choose the entity again.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an40c ── кінець секції ──

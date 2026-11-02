@@ -19,3 +19,17 @@ OPTION (RECOMPILE);
 GO
 -- IMP:rounding ── кінець секції ──
 
+-- IMP:rounding ── ФВ-9.16b: імпорт .xlsx округлює до Scale колонки; позначка й перелік у перегляді (`ImportPanel`), точність після округлення (`ImportDiffBuilder`).
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'import.rounded', N'en', N'{count} rounded', 1),
+    (N'import.roundedMark', N'en', N'rounded from {value}', 1),
+    (N'import.roundedTitle', N'en', N'Numbers rounded to the column''s decimal places', 1),
+    (N'import.roundedHint', N'en', N'These numbers in the file have more decimal places than the column allows. They are rounded half away from zero, and the rounded value is the one that will be saved. Check them against the file before applying.', 1),
+    (N'import.inFile', N'en', N'In the file', 1),
+    (N'err.ECR-CELL-0422.importPrecision', N'en', N'The number has more digits than the column allows, even after rounding to the column''s decimal places.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- IMP:rounding: кінець секції

@@ -30,3 +30,23 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui38audit ── кінець секції ──
+-- COLL:ui38audit ── UI-38: журнал змін у формі макета (Was → becomes, Δ, Late, походження словом) і ім'я кнопки очищення дати; ru/kz — порцією COLL:ui38audit у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'audit.documentCell', N'en', N'Document · cell', 1),
+    (N'audit.wasBecomes', N'en', N'Was → becomes', 1),
+    (N'audit.lateMark', N'en', N'Late', 1),
+    (N'audit.lateHint', N'en', N'Made after the data entry deadline', 1),
+    (N'audit.newValue', N'en', N'new', 1),
+    (N'audit.delta', N'en', N'Difference', 1),
+    (N'audit.originLabel.UserEdit', N'en', N'Typed by a user', 1),
+    (N'audit.originLabel.Import', N'en', N'Excel import', 1),
+    (N'audit.originLabel.Recalculation', N'en', N'Recalculation', 1),
+    (N'audit.originLabel.Migration', N'en', N'Migration', 1),
+    (N'dates.clear', N'en', N'Clear the date', 1),
+    (N'dates.clearNamed', N'en', N'Clear {field}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui38audit ── кінець секції ──

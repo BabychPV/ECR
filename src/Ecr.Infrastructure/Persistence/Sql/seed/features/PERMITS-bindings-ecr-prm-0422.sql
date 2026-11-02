@@ -49,3 +49,43 @@ OPTION (RECOMPILE);
 GO
 -- PERMITS: bindings ── ECR-PRM-0422 ── кінець секції ──
 
+-- PERMITS: bindings ── en: відмови прив'язок аркуша до дозволу (ECR-PRM-0422 binding*, PM-09) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-PRM-0422.bindingTypeNotPublished', N'en', N'The permit type is not published yet, so a sheet cannot be bound to it.', 1),
+    (N'err.ECR-PRM-0422.bindingSheetNotInVersion', N'en', N'Table {tableDefId} does not exist in this template version.', 1),
+    (N'err.ECR-PRM-0422.bindingHeaderFieldUnknown', N'en', N'The header field {headerFieldDefId} that should hold the permit does not exist in this template version.', 1),
+    (N'err.ECR-PRM-0422.bindingHeaderFieldNotLookup', N'en', N'Header field "{headerField}" does not refer to a registry, so it cannot hold a permit.', 1),
+    (N'err.ECR-PRM-0422.bindingHeaderFieldUnexpected', N'en', N'A header field is set only for the rule "permit from a header field".', 1),
+    (N'err.ECR-PRM-0422.bindingFacilityFieldMissing', N'en', N'To pick a permit by facility the template header must have the field "{fieldCode}".', 1),
+    (N'err.ECR-PRM-0422.bindingFacilityFieldType', N'en', N'Header field "{fieldCode}" is {dataType}; it must be text or a registry reference.', 1),
+    (N'err.ECR-PRM-0422.bindingFormulasHaveColumns', N'en', N'In formulas mode no columns are mapped: the formulas read the permit themselves.', 1),
+    (N'err.ECR-PRM-0422.bindingRowsNeedDynamic', N'en', N'Table "{tableCode}" has fixed rows, so permit rows cannot be added to it.', 1),
+    (N'err.ECR-PRM-0422.bindingColumnNotInSheet', N'en', N'Column {columnId} does not exist in table "{tableCode}".', 1),
+    (N'err.ECR-PRM-0422.bindingPermitFieldUnknown', N'en', N'The permit table has no field "{fieldCode}".', 1),
+    (N'err.ECR-PRM-0422.bindingDuplicateField', N'en', N'Permit field "{fieldCode}" is mapped twice.', 1),
+    (N'err.ECR-PRM-0422.bindingDuplicateColumn', N'en', N'Column "{columnCode}" is mapped twice.', 1),
+    (N'err.ECR-PRM-0422.bindingNoRowKey', N'en', N'At least one column must be the row key, otherwise a sheet row cannot be tied to a permit row.', 1),
+    (N'err.ECR-PRM-0422.bindingManyLimits', N'en', N'Only one column can have the role "limit".', 1),
+    (N'err.ECR-PRM-0422.bindingTypeMismatch', N'en', N'Field "{fieldCode}" ({permitType}) does not fit column "{columnCode}" ({columnType}): types are not converted.', 1),
+    (N'err.ECR-PRM-0422.bindingLookupMismatch', N'en', N'Field "{fieldCode}" and column "{columnCode}" refer to different registries.', 1),
+    (N'err.ECR-PRM-0422.bindingUnitMismatch', N'en', N'Units of field "{fieldCode}" and column "{columnCode}" differ: units are not converted.', 1),
+    (N'err.ECR-PRM-0422.bindingPrecisionMismatch', N'en', N'Precision or scale of field "{fieldCode}" and column "{columnCode}" differ: values would have to be rounded.', 1),
+    (N'err.ECR-PRM-0422.bindingNotReadOnly', N'en', N'Column "{columnCode}" must be read-only: its value is written by the system.', 1),
+    (N'err.ECR-PRM-0422.bindingTooManyRows', N'en', N'The permit has {count} rows but table "{tableCode}" holds at most {max}.', 1),
+    (N'err.ECR-PRM-0422.bindingTypeUnknown', N'en', N'The permit type "{typeCode}" does not exist.', 1),
+    (N'err.ECR-PRM-0422.bindingPermitTableUnknown', N'en', N'The permit type "{typeCode}" has no table "{tableCode}".', 1),
+    (N'err.ECR-PRM-0422.bindingEnumUnknown', N'en', N'Value "{value}" of "{field}" is not known.', 1),
+    (N'err.ECR-PRM-0422.bindingIdentityChanged', N'en', N'Binding "{bindingCode}" cannot be pointed at another table or type: delete it and create a new one.', 1),
+    (N'err.ECR-PRM-0422.bindingPreviewPeriodRequired', N'en', N'Previewing from a document needs the period (periodKey).', 1),
+    (N'err.ECR-PRM-0422.bindingPreviewPeriodUnknown', N'en', N'The project of the document has no period {periodKey}.', 1),
+    (N'err.ECR-PRM-0404.binding', N'en', N'Permit binding "{bindingCode}" does not exist in this template version.', 1),
+    (N'err.ECR-PRM-4101', N'en', N'Permit binding already exists', 1),
+    (N'err.ECR-PRM-4101.sheet', N'en', N'Table {tableDefId} of this version is already bound ("{bindingCode}"): one sheet table takes one permit.', 1),
+    (N'err.ECR-PRM-4101.code', N'en', N'Binding code "{bindingCode}" is already taken (codes are unique across the whole system).', 1),
+    (N'err.ECR-SCHM-0409.permitBindingBreaking', N'en', N'Deleting the permit binding "{bindingCode}" is a breaking change: documents are already attached to this version and their rows were created from the permit.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: bindings ── кінець секції ──

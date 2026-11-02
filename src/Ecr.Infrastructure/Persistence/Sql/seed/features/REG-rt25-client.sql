@@ -51,3 +51,33 @@ OPTION (RECOMPILE);
 GO
 -- REG:rt25-client ── кінець секції ──
 
+-- REG:rt25-client ── сторінка впливу довідника і банер застарілості (RT-25, клієнт) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'registries.impact.open', N'en', N'Affected documents', 1),
+    (N'registries.impact.title', N'en', N'Registry impact', 1),
+    (N'registries.impact.hint', N'en', N'Documents in open periods whose results were calculated by a methodology that reads this registry. Closed periods are never recalculated and are not listed.', 1),
+    (N'registries.impact.empty', N'en', N'No affected documents', 1),
+    (N'registries.impact.emptyHint', N'en', N'No open-period results depend on this registry.', 1),
+    (N'registries.impact.count', N'en', N'Shown {shown} of {total}', 1),
+    (N'registries.impact.truncated', N'en', N'The list reached the server limit: more documents are affected than shown.', 1),
+    (N'registries.impact.select', N'en', N'Select', 1),
+    (N'registries.impact.selectDocument', N'en', N'Select {document}', 1),
+    (N'registries.impact.document', N'en', N'Document', 1),
+    (N'registries.impact.period', N'en', N'Period', 1),
+    (N'registries.impact.via', N'en', N'Methodologies', 1),
+    (N'registries.impact.recalculateAll', N'en', N'Recalculate affected', 1),
+    (N'registries.impact.recalculateSelected', N'en', N'Recalculate selected ({count})', 1),
+    (N'registries.impact.recalculateTitle', N'en', N'Recalculate affected documents', 1),
+    (N'registries.impact.recalculateHint', N'en', N'The recalculation is queued; each document is recalculated by its own job.', 1),
+    (N'registries.impact.recalculateConfirm', N'en', N'Queue recalculation', 1),
+    (N'registries.impact.jobQueued', N'en', N'Recalculation job {jobId}', 1),
+    (N'registries.impact.jobUnreadable', N'en', N'The job state cannot be read with your rights.', 1),
+    (N'registries.impact.progress', N'en', N'Recalculation progress', 1),
+    (N'registries.impact.openJob', N'en', N'Open in the job queue', 1),
+    (N'calculation.staleRegistry', N'en', N'Registry "{name}" was changed after the calculation', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- REG:rt25-client ── кінець секції ──

@@ -23,3 +23,19 @@ OPTION (RECOMPILE);
 GO
 -- PERMITS: permits ── ECR-PRM-4095 ── ru/kz ── кінець секції ──
 
+-- PERMITS: permits ── en: ECR-PRM-4095 і випадки 0404/0422 екземплярів дозволів (PM-04) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-PRM-0404.permit', N'en', N'Permit {id} does not exist.', 1),
+    (N'err.ECR-PRM-0422.numberRequired', N'en', N'The permit number is required.', 1),
+    (N'err.ECR-PRM-0422.numberTooLong', N'en', N'The permit number must not be longer than {max} characters.', 1),
+    (N'err.ECR-PRM-0422.locationTooLong', N'en', N'The location must not be longer than {max} characters.', 1),
+    (N'err.ECR-PRM-0422.validityOrder', N'en', N'The permit must end after it starts: {from} - {to}. The end date is the first day it is no longer valid.', 1),
+    (N'err.ECR-PRM-0422.typeNotPublished', N'en', N'The permit type "{typeCode}" is not published yet, so a permit cannot be created for it.', 1),
+    (N'err.ECR-PRM-4095', N'en', N'Permit already exists', 1),
+    (N'err.ECR-PRM-4095.number', N'en', N'A permit "{number}" of type "{typeCode}" valid from {validFrom} already exists (id {id}).', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: permits ── ECR-PRM-4095 ── кінець секції ──

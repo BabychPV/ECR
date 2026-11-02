@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:l4norule ── кінець секції ──
+-- COLL:l4norule ── L-4 Land Demo: рядок без жодного правила не рахується мовчки; ru/kz — порцією COLL:l4norule нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'jobs.recalcNoMatchingRule', N'en', N'No matching rule for {count} row(s) (rows: {rows}). These rows were not calculated; the other rows were.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:l4norule ── кінець секції ──

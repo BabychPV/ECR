@@ -37,3 +37,26 @@ OPTION (RECOMPILE);
 GO
 -- COLL:rc16mig ── кінець секції ──
 
+-- COLL:rc16mig ── D-2 RC15B: перенос версії шаблону фоновою задачею (прогрес стадій, підсумок, друга людина вже запустила перенос); ru/kz — порцією COLL:rc16mig нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'jobs.kind.migrateDocumentVersion', N'en', N'Template version migration', 1),
+    (N'jobs.migrateStarted', N'en', N'Migration started', 1),
+    (N'jobs.migratePlanning', N'en', N'Checking the project and planning the transfer', 1),
+    (N'jobs.migrateCells', N'en', N'Moving cell values and rows ({rows} changed so far)', 1),
+    (N'jobs.migrateInstances', N'en', N'Moving table instances', 1),
+    (N'jobs.migrateNewRows', N'en', N'Adding new rows of the target version ({rows} added so far)', 1),
+    (N'jobs.migrateHeader', N'en', N'Moving document headers', 1),
+    (N'jobs.migrateIndex', N'en', N'Rebuilding the search index ({rows} rows so far)', 1),
+    (N'jobs.migrateWorkflow', N'en', N'Moving document composition and workflow', 1),
+    (N'jobs.migrateValidation', N'en', N'Moving validation results ({rows} rows so far)', 1),
+    (N'jobs.migrateFinish', N'en', N'Switching the project to the new version', 1),
+    (N'jobs.migrateDone', N'en', N'Migrated to version {version}: documents {documents}, values moved {values}', 1),
+    (N'err.ECR-JOB-0409.migrationInProgress', N'en', N'A migration of this project is already running (started by another user). Wait for it to finish.', 1),
+    (N'documents.migrateRunning', N'en', N'The migration runs in the background: {percent}%. You can close this window; progress stays in My tasks.', 1),
+    (N'documents.migrateJobFailed', N'en', N'The migration did not finish, nothing was changed: {reason}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc16mig ── кінець секції ──

@@ -11,3 +11,14 @@ OPTION (RECOMPILE);
 GO
 -- COLL:rawhealth ── кінець секції ──
 
+-- COLL:rawhealth ── Розмір ext.RawDataPoint у картці `db` (R2-rescope, `RawDataPointHealth`, поріг Health:RawDataPointWarnRows) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'health.collection.rawPointsApproaching', N'en', N'ext.RawDataPoint holds about {rows} rows and is approaching the R2 review threshold of {threshold}.', 1),
+    (N'health.collection.rawPointsOverThreshold', N'en', N'ext.RawDataPoint holds about {rows} rows: the R2 review threshold of {threshold} is exceeded. See docs/build/perf/R2-rawdatapoint-plan.md.', 1)
+    -- ru/kz — окремою порцією COLL:rawhealth у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:rawhealth ── кінець секції ──

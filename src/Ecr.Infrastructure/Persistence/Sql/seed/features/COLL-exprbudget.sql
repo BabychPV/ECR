@@ -12,3 +12,14 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:exprbudget ── кінець секції ──
+-- COLL:exprbudget ── RC5: видима відмова за межею вкладеності (96) і кроків (20 000) замість мовчазного #BUDGET: публікація/редактор (expr.tooDeep, publish.problem.formulaTooDeep) і експлуатація (validation.rule.budget); ru/kz — порцією COLL:exprbudget у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'expr.tooDeep', N'en', N'The formula is too complex: nesting depth {depth}, allowed {max}. Split it into several calculated columns.', 1),
+    (N'publish.problem.formulaTooDeep', N'en', N'Formula {formula} is too complex: nesting depth {depth}, allowed {max}. Split it into several calculated columns.', 1),
+    (N'validation.rule.budget', N'en', N'Rule ''{rule}'' could not be evaluated: the formula is too large for one calculation (more than 20,000 steps or 96 nesting levels). Split it into several calculated columns.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:exprbudget ── кінець секції ──

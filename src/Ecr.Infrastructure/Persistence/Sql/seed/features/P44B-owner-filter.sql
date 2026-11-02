@@ -31,3 +31,23 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- P44B:owner-filter ── кінець секції ──
+-- P44B:owner-filter ── en: колонка «Власник» і фільтр переліку за конкретною людиною (D-450); ru/kz — порцією P44B:owner-filter нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'documents.owner', N'en', N'Owner', 1),
+    (N'documents.ownerOf', N'en', N'Owner: {name}', 1),
+    (N'documents.ownerUnknown', N'en', N'Owner not shown', 1),
+    (N'documents.ownerSearch', N'en', N'Find a person…', 1),
+    (N'documents.ownerSelected', N'en', N'Selected person', 1),
+    (N'documents.ownerCount', N'en', N'{count} doc.', 1),
+    (N'documents.ownerNothingFound', N'en', N'No one found among the documents you can see', 1),
+    (N'documents.ownerLoading', N'en', N'Loading people…', 1),
+    (N'documents.ownerLoadFailed', N'en', N'Could not load the list of people', 1),
+    (N'documents.ownerPeople', N'en', N'People', 1),
+    (N'err.ECR-REQ-0422.ownerUserId', N'en', N'The owner filter needs a valid person.', 1),
+    (N'err.ECR-REQ-0422.ownerWithMine', N'en', N'Choose either «Mine» or a specific person, not both.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- P44B:owner-filter ── кінець секції ──

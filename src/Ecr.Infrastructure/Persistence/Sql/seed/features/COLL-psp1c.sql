@@ -21,3 +21,19 @@ OPTION (RECOMPILE);
 GO
 -- COLL:psp1c ── кінець секції ──
 
+-- COLL:psp1c ── Місяць колонки (PS-P1C, D-PS-1): відмови 422 і підписи поля «Місяць колонки» в панелі колонки ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.monthColumnWithoutMonth', N'en', N'Column "{columnCode}" is marked as a month column but no month is set.', 1),
+    (N'err.ECR-TMPL-0422.monthOutOfRange',         N'en', N'The month of column "{columnCode}" must be from 1 to 12, got "{monthNumber}".', 1),
+    (N'err.ECR-TMPL-0422.monthWithoutFlag',        N'en', N'Column "{columnCode}" has a month set but is not marked as a month column.', 1),
+    (N'columns.month',                             N'en', N'Column month', 1),
+    (N'columns.monthHint',                         N'en', N'The calendar month this column holds data for. Period rules (source window, outside the permit window) use it; empty means the column is not tied to a month.', 1),
+    (N'columns.monthNone',                         N'en', N'Not tied to a month', 1),
+    (N'columns.errMonth',                          N'en', N'The month must be a whole number from 1 to 12.', 1)
+    -- ru/kz — окремою порцією `COLL:psp1c` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:psp1c ── кінець секції ──

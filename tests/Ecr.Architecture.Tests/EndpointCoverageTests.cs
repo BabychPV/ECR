@@ -1007,11 +1007,11 @@ public sealed partial class EndpointCoverageTests
 
         // ⚠ Лише блок MERGE: секція змінених текстів над ним законно називає
         // ті самі ключі вдруге (старе → нове), і MERGE вона не валить.
-        var start = seed.IndexOf("MERGE sys_ecr.UiString AS t", StringComparison.Ordinal);
-        var end = start < 0 ? -1 : seed.IndexOf("WHEN NOT MATCHED", start, StringComparison.Ordinal);
-        Assert.True(end > start, "У 09-seed.sql немає блоку MERGE sys_ecr.UiString AS t — сторож дивиться не туди.");
+        // ✎ en-каталог — порції INSERT INTO #UiEn файлів seed/features (дубль впаде на PRIMARY KEY #UiEn).
+        var block = SeedSql.EnCatalogOf(seed);
+        Assert.True(block.Length > 0, "У сіді немає порцій en-каталогу (INSERT INTO #UiEn) — сторож дивиться не туди.");
 
-        var keys = SeedKeyRegex.Matches(seed[start..end]).Select(m => m.Groups[1].Value).ToList();
+        var keys = SeedKeyRegex.Matches(block).Select(m => m.Groups[1].Value).ToList();
         Assert.NotEmpty(keys);
 
         var duplicates = keys

@@ -52,3 +52,34 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui33periods ── кінець секції ──
+-- COLL:ui33periods ── UI-33: Periods — плитки періодів року, «All projects · current period», смуга показників; ru/kz — порцією COLL:ui33periods у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'periods.tile.closesToday', N'en', N'closes today', 1),
+    (N'periods.tile.closesIn.one', N'en', N'closes in {count} day', 1),
+    (N'periods.tile.closesIn.other', N'en', N'closes in {count} days', 1),
+    (N'periods.tile.closesIn.few', N'en', N'closes in {count} days', 1),
+    (N'periods.tile.closesIn.many', N'en', N'closes in {count} days', 1),
+    (N'periods.tile.reopened', N'en', N'reopened until {date} · edits are late', 1),
+    (N'periods.tile.grace', N'en', N'grace period until {date} · edits are late', 1),
+    (N'periods.tile.opens', N'en', N'opens {date}', 1),
+    (N'periods.tile.readOnly', N'en', N'read-only', 1),
+    (N'periods.tile.now', N'en', N'now', 1),
+    (N'periods.year.title', N'en', N'{project} · {year}', 1),
+    (N'periods.overview.title', N'en', N'All projects · current period', 1),
+    (N'periods.overview.hint', N'en', N'select a project to show its calendar above', 1),
+    (N'periods.overview.project', N'en', N'Project', 1),
+    (N'periods.overview.current', N'en', N'Current period', 1),
+    (N'periods.overview.state', N'en', N'State', 1),
+    (N'periods.overview.closes', N'en', N'Closes', 1),
+    (N'periods.overview.inGrace', N'en', N'for {period}', 1),
+    (N'periods.overview.stats', N'en', N'Periods of all projects', 1),
+    (N'periods.overview.stat.open', N'en', N'open', 1),
+    (N'periods.overview.stat.grace', N'en', N'in grace period', 1),
+    (N'periods.overview.stat.soon', N'en', N'closing in ≤ 3 days', 1),
+    (N'periods.overview.noMatch', N'en', N'No project matches this filter', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui33periods ── кінець секції ──

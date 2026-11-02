@@ -31,3 +31,23 @@ OPTION (RECOMPILE);
 GO
 -- COLL:r6x5-windows-sid ── кінець секції ──
 
+-- COLL:r6x5-windows-sid ── R6-X5 / X5-01: Windows-вхід з ім'ям, зайнятим записом з іншим SID, — 409 замість 500; перевірка SID у POST /users; виправлення непідтвердженого SID; ru/kz — порцією COLL:r6x5-windows-sid нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-USR-0409.windowsSidMismatch', N'en', N'The ECR account "{userName}" is linked to a different Windows SID, so sign-in was refused. Ask your administrator to correct the SID of this account to {sid}.', 0),
+    (N'err.ECR-USR-0409.windowsSidMismatch.title', N'en', N'Account is linked to a different SID', 0),
+    (N'err.ECR-USR-0409.windowsSidTaken', N'en', N'SID {sid} is already linked to the account "{userName}".', 1),
+    (N'err.ECR-USR-0409.windowsSidTaken.title', N'en', N'SID already in use', 1),
+    (N'err.ECR-USR-0422.windowsSidMalformed', N'en', N'"{sid}" is not a SID. Enter it in the form S-1-5-21-….', 1),
+    (N'err.ECR-USR-0422.windowsSidNotDomain', N'en', N'"{userName}" is not a domain account: it has no SID.', 1),
+    (N'err.ECR-SEC-0409.windowsSidConfirmed', N'en', N'"{userName}" has already signed in: the domain has confirmed its SID, so it cannot be corrected.', 1),
+    (N'security.correctSid', N'en', N'Correct SID', 1),
+    (N'security.correctSidNamed', N'en', N'Correct SID of {userName}', 1),
+    (N'security.correctSidHint', N'en', N'This domain account has not signed in yet, so its SID can still be corrected. Enter the SID of the account in the domain; the sign-in refusal shown to the person contains it.', 1),
+    (N'security.sidLabel', N'en', N'SID', 1),
+    (N'security.sidCorrected', N'en', N'SID corrected', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:r6x5-windows-sid ── кінець секції ──

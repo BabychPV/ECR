@@ -78,3 +78,47 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui36ctor ── кінець секції ──
+-- COLL:ui36ctor ── UI-36: конструктор версії шаблону (дерево, вкладки, стан версії); ru/kz — порцією COLL:ui36ctor у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'ctor.structure', N'en', N'Structure', 1),
+    (N'ctor.treeLabel', N'en', N'Sheets and tables', 1),
+    (N'ctor.findTable', N'en', N'Find a table', 1),
+    (N'ctor.toggleTree', N'en', N'Show or hide the structure', 1),
+    (N'ctor.versionNode', N'en', N'Version {version}', 1),
+    (N'ctor.versionMeta', N'en', N'Sheets: {sheets} · tables: {tables}', 1),
+    (N'ctor.sheetMeta', N'en', N'Sheet {no} of {total} · tables: {count}', 1),
+    (N'ctor.tablesCount', N'en', N'Tables: {count}', 1),
+    (N'ctor.sheets', N'en', N'Sheets', 1),
+    (N'ctor.sheetsHint', N'en', N'Pick a sheet or table to edit it', 1),
+    (N'ctor.sheet', N'en', N'Sheet', 1),
+    (N'ctor.tables', N'en', N'Tables', 1),
+    (N'ctor.tablesHint', N'en', N'In the order operators see them', 1),
+    (N'ctor.visibility', N'en', N'In documents', 1),
+    (N'ctor.visible', N'en', N'Shown', 1),
+    (N'ctor.sheetEmpty', N'en', N'This sheet has no tables. A sheet without tables cannot be published: add a table or hide the sheet.', 1),
+    (N'ctor.no', N'en', N'No.', 1),
+    (N'ctor.table', N'en', N'Table', 1),
+    (N'ctor.tableProperties', N'en', N'Table properties', 1),
+    (N'ctor.tab.columns', N'en', N'Columns', 1),
+    (N'ctor.tab.rows', N'en', N'Rows', 1),
+    (N'ctor.tab.formulas', N'en', N'Formulas', 1),
+    (N'ctor.tab.rules', N'en', N'Validation rules', 1),
+    (N'ctor.tab.preview', N'en', N'Preview', 1),
+    (N'ctor.columnsHint', N'en', N'Columns in the order operators see them. Edit changes names, type and unit; Appearance changes only the look and is allowed after publication.', 1),
+    (N'ctor.rowsDynamic', N'en', N'Rows of this table are added by operators while filling in a document; the template defines none.', 1),
+    (N'ctor.formulasHint', N'en', N'Calculated columns and rows of this table. Expressions are checked when you save; anything that does not compile blocks publishing.', 1),
+    (N'ctor.formulasEmpty', N'en', N'This table has no formulas yet. Add one with the Formula button on a column or row.', 1),
+    (N'ctor.formulaTarget', N'en', N'Target', 1),
+    (N'ctor.formulaExpression', N'en', N'Expression', 1),
+    (N'ctor.formulaRow', N'en', N'Row', 1),
+    (N'ctor.rulesHint', N'en', N'Rules are checked when operators save and submit. Errors block submission; warnings only inform.', 1),
+    (N'ctor.addRule', N'en', N'Add rule', 1),
+    (N'ctor.cloneToDraft', N'en', N'Clone to new draft', 1),
+    (N'ctor.stepper', N'en', N'Version lifecycle: {state}, stage {no} of {total}', 1),
+    (N'ctor.saved', N'en', N'Saved {time}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui36ctor ── кінець секції ──

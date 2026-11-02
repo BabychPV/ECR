@@ -9,3 +9,12 @@ OPTION (RECOMPILE);
 GO
 -- COLL:an121-calendar-offset ── кінець секції ──
 
+-- COLL:an121-calendar-offset ── AN-121 / C1-03: календарний контекст іншого періоду ([Period:-1].Days) не підтримується; ru/kz — порцією COLL:an121-calendar-offset нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'expr.calendarContextOffset', N'en', N'The calendar context of another period is not supported: write "[Period].Property".', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an121-calendar-offset ── кінець секції ──

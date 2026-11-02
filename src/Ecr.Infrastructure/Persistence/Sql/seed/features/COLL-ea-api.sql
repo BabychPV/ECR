@@ -66,3 +66,41 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ea-api ── кінець секції ──
+-- COLL:ea-api ── EA-C: передача місяця виконавцям (керування, переходи, відмови); ru/kz — порцією COLL:ea-api нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-ACCS-0403.notEditAssignmentManager', N'en', N'Only the document author or a project manager can manage month assignments.', 1),
+    (N'err.ECR-ACCS-0403.editAssignmentReadOnly', N'en', N'The document is read-only now (archive or simulation).', 1),
+    (N'err.ECR-DOC-0409.editAssignmentStale', N'en', N'The assignment was changed after you opened it. Reload and repeat the action.', 1),
+    (N'err.ECR-DOC-0409.editAssignmentState', N'en', N'This action is not possible in the current state of the assignment.', 1),
+    (N'err.ECR-REQ-0422.editAssignmentBaseVersion', N'en', N'The request must say which version of the assignment it started from (baseVersion).', 1),
+    (N'err.ECR-REQ-0422.editAssignmentSliceInvalid', N'en', N'The assignment slice is not valid.', 1),
+    (N'err.ECR-REQ-0422.editAssignmentNoteTooLong', N'en', N'The instruction is longer than 500 characters.', 1),
+    (N'err.ECR-REQ-0422.editAssignmentRecipientInvalid', N'en', N'One of the executors cannot be assigned to this document.', 1),
+    (N'err.ECR-REQ-0422.editAssignmentTooManyRecipients', N'en', N'Too many executors in one assignment.', 1),
+    (N'err.ECR-REQ-0422.editAssignmentDelegationExceedsOwnRights', N'en', N'You can assign only cells you can edit yourself. Narrow the slice to sheets you can write.', 1),
+    (N'err.ECR-REQ-0422.editAssignmentUnknownSlice', N'en', N'The document has no such slice.', 1),
+    (N'err.ECR-REQ-0422.editAssignmentTooManyAssignments', N'en', N'Too many assignments in the document.', 1),
+    (N'err.ECR-REQ-0422.editAssignmentNotAllFilled', N'en', N'Validation is possible only after all executors have filled the slice.', 1),
+    (N'err.ECR-REQ-0422.editAssignmentReasonRequired', N'en', N'State the reason for returning.', 1),
+    (N'err.ECR-REQ-0422.editAssignmentReasonTooLong', N'en', N'The reason is longer than 500 characters.', 1),
+    (N'err.ECR-REQ-0422.editAssignmentQueryTooShort', N'en', N'Enter at least two characters to search.', 1),
+    (N'err.ECR-REQ-0422.editAssignmentRoleInvalid', N'en', N'Unknown role filter.', 1),
+    (N'err.ECR-DOC-0409.editorSetStale', N'en', N'The executor set was changed after you opened it. Reload and repeat the action.', 1),
+    (N'err.ECR-REQ-0422.editorSetNotFound', N'en', N'The executor set was not found.', 1),
+    (N'err.ECR-REQ-0422.editorSetTooMany', N'en', N'Too many executor sets.', 1),
+    (N'err.ECR-REQ-0422.editorSetNameTaken', N'en', N'A set with this name already exists.', 1),
+    (N'err.ECR-REQ-0422.editorSetNameInvalid', N'en', N'The set name must be 1 to 100 characters without control characters.', 1),
+    (N'err.ECR-REQ-0422.editorSetTooManyMembers', N'en', N'Too many executors in the set.', 1),
+    (N'err.ECR-REQ-0422.editorSetMemberInvalid', N'en', N'One of the executors cannot be added to the set.', 1),
+    (N'err.ECR-REQ-0422.editorSetBaseVersion', N'en', N'The request must say which version of the set it started from (baseVersion).', 1),
+    (N'err.ECR-REQ-0422.editAssignmentTooManySlices', N'en', N'Specify from 1 to 12 slices per request.', 1),
+    (N'err.ECR-DOC-0404.editorSet', N'en', N'The executor set was not found.', 1),
+    (N'err.ECR-DOC-0404.editAssignment', N'en', N'The assignment was not found.', 1),
+    (N'err.ECR-DOC-4091.editAssignmentBusy', N'en', N'The assignment is busy with another action. Nothing was saved; try again in a moment.', 1),
+    (N'err.ECR-ACCS-0403.editorSetsForbidden', N'en', N'Executor sets are available to users who can write to a project.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ea-api ── кінець секції ──

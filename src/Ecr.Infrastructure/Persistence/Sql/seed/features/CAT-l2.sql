@@ -26,3 +26,21 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- CAT:l2 ── кінець секції ──
+-- CAT:l2 ── L-2: правило категорії константи (calc.CategoryRule); ru/kz — порцією CAT:l2 нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.categoryRuleEmpty', N'en', N'The category rule needs an expression; to have no rule, delete it.', 1),
+    (N'err.ECR-CALC-0422.categoryRuleFailed', N'en', N'The category rule "{expression}" gave no category for this row: {reason}. The row is not calculated.', 1),
+    (N'err.ECR-CALC-0422.categoryRuleInvalid', N'en', N'The category rule expression is invalid: {reason}.', 1),
+    (N'err.ECR-CALC-0422.categoryRuleNotText', N'en', N'The category rule must return text (the category key, for example "Diesel"), not a number.', 1),
+    (N'publish.problem.categoryRuleInvalid', N'en', N'The category rule does not parse: {reason}', 1),
+    (N'publish.problem.categoryRuleNotText', N'en', N'The category rule returns {type}, but the category key must be text (for example "Diesel").', 1),
+    (N'publish.problem.categoryRuleUnknownConstant', N'en', N'The category rule references constant CST.{code}, which this version does not define.', 1),
+    (N'publish.problem.categoryRuleBadFormula', N'en', N'The category rule references !{formula}: it can only read Row formulas of the version (it runs once per row, before the substance loop).', 1),
+    (N'publish.warning.categoryRuleMissing', N'en', N'{count} constant(s) have more than one category ({constants}), but the version has no category rule: each of them is ambiguous at calculation time.', 1),
+    (N'publish.warning.categoryRuleRowConstant', N'en', N'Row formula {formula} reads constant {constant}, which has several categories. The Row phase runs before the category rule, so the constant is ambiguous there: make the formula a substance formula.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- CAT:l2 ── кінець секції ──

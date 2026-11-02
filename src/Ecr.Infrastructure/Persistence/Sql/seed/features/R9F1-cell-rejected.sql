@@ -9,3 +9,13 @@ OPTION (RECOMPILE);
 GO
 -- R9F1:cellRejected ── кінець секції ──
 
+-- R9F1:cellRejected ── F1-03: значення комірки збору відхилив обробник запису, решту полів записано (`CoverageDetails.CellRejected`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'coverageEvents.cellRejected',            N'en', N'Cell {cell}: the collected value was rejected on write ({code}) and was not written; the other fields were written. The next run will try again.', 1)
+    -- ru/kz — окремою порцією `R9F1:cellRejected` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- R9F1:cellRejected ── кінець секції ──

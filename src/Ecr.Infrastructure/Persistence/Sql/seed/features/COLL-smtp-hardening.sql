@@ -9,3 +9,12 @@ OPTION (RECOMPILE);
 GO
 -- COLL:smtp-hardening ── кінець секції ──
 
+-- COLL:smtp-hardening ── Межа частоти проб транспорту (рекомендація безпекового рев'ю D-263) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REQ-0429.tooManySmtpTests', N'en', N'Too many test messages in a short time. Wait a moment and try again.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:smtp-hardening ── кінець секції ──

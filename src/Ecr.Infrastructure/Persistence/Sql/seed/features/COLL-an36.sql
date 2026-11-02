@@ -14,3 +14,15 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an36 ── кінець секції ──
+-- COLL:an36 ── AN-36 (L6-02, L6-06): блокування структури й шапки документа; ru/kz — порцією COLL:an36 у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-DOC-4091.structureChanged',      N'en', N'The document was moved to another template version while your changes were being saved. Nothing was saved; reload the page and try again.', 1),
+    (N'err.ECR-DOC-4091.structureChanging',     N'en', N'The document is being moved to another template version right now. Your changes were not saved; try again in a moment.', 1),
+    (N'err.ECR-DOC-4091.documentBeingEdited',   N'en', N'The document is being edited right now. The template version was not changed; try again in a moment.', 1),
+    (N'err.ECR-DOC-4091.headerBeingEdited',     N'en', N'The document header is being saved right now. The sheet was not submitted; try again in a moment.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an36 ── кінець секції ──

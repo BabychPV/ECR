@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:a2chk ── кінець секції ──
+-- COLL:a2chk ── A2-04: знахідка Check називає рядок джерела (кілька рядків джерела проти одного рядка приймача); ru/kz — порцією COLL:a2chk у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'validation.check.mismatchRow', N'en', N'Check: {left} = {leftValue} (source row {sourceRow}) does not match {right} = {rightValue}: deviation {deviation}, allowed {allowed} ({kind}).', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:a2chk ── кінець секції ──

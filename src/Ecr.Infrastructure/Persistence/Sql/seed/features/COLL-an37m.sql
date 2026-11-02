@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an37m ── кінець секції ──
+-- COLL:an37m ── AN-37 L7-08: гонка двох публікацій на одну дату (версію-суперника база не називає); ru/kz — порцією COLL:an37m у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-CALC-0409.effectiveDateTakenNoVersion', N'en', N'Another version of this methodology was published with effective date {effectiveFrom} at the same moment. Two published versions with the same start date make the methodology choice ambiguous: reload the methodology and publish with another date.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an37m ── кінець секції ──

@@ -12,3 +12,14 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: type-usage ── кінець секції ──
+-- PERMITS: type-usage ── en: PM-03b2, кількості дозволів і рядків у діалозі «Remove table»; ru/kz — порцією PERMITS: type-usage нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'permits.editor.deleteTable.checking', N'en', N'Checking what this table holds…', 1),
+    (N'permits.editor.deleteTable.usagePublished', N'en', N'Permits of this type: {permits}. Rows in this published table: {rows}. They stay untouched: a published table cannot be removed.', 1),
+    (N'permits.editor.deleteTable.usageDraftOnly', N'en', N'This table is not published yet: none of the {permits} permits of this type holds rows in it.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: type-usage ── кінець секції ──

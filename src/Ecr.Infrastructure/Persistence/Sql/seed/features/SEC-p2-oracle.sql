@@ -9,3 +9,13 @@ OPTION (RECOMPILE);
 GO
 -- SEC:p2-oracle ── кінець секції ──
 
+-- SEC:p2-oracle ── відмова без номера невидимого проєкту (S18, `ColumnProjectGrants`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-AUTH-0403.columnUsedInHiddenProjects', N'en', N'The column is used by projects you have no Manage grant on.', 1)
+    -- ru/kz — окремою порцією `I18N` (SEC:p2-oracle).
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- SEC:p2-oracle ── кінець секції ──

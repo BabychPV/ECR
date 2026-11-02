@@ -10,3 +10,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:migrate-rename-map ── кінець секції ──
+-- COLL:migrate-rename-map ── перенос версії: мапа «було → стало» кодів таблиць/колонок; ru/kz — порцією COLL:migrate-rename-map нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-SCHM-0422.migrateRenameConflict', N'en', N'The rename map leads into a table or column that already has a counterpart by code in the version being moved from, or two entries lead into the same one. Nothing was moved, so values are not merged into one place. Fix the map (or the target version) and retry; the report lists each conflicting pair.', 1),
+    (N'err.ECR-SCHM-0422.migrateRenameMapInvalid', N'en', N'The table rename map is malformed: codes must be non-empty (up to 64 characters), a source table may be listed once, and at most {maxTableRenames} tables with at most {maxColumnRenames} column renames each are allowed.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:migrate-rename-map ── кінець секції ──

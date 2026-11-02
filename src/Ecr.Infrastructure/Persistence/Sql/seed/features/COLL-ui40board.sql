@@ -24,3 +24,20 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui40board ── кінець секції ──
+-- COLL:ui40board ── UI-40: подання Board переліку документів (перемикач Table/Board, стовпці за станом); ru/kz — порцією COLL:ui40board у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'documents.view', N'en', N'View', 1),
+    (N'documents.viewTable', N'en', N'Table', 1),
+    (N'documents.viewBoard', N'en', N'Board', 1),
+    (N'documents.board.draft', N'en', N'Draft', 1),
+    (N'documents.board.waiting', N'en', N'Waiting for approval', 1),
+    (N'documents.board.rework', N'en', N'Returned or rejected', 1),
+    (N'documents.board.approved', N'en', N'Approved', 1),
+    (N'documents.board.noState', N'en', N'No state for this period', 1),
+    (N'documents.board.nothingHere', N'en', N'Nothing here', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui40board ── кінець секції ──

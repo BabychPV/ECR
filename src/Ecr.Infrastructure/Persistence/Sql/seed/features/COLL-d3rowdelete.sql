@@ -32,3 +32,24 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d3rowdelete ── кінець секції ──
+-- COLL:d3rowdelete ── D3-A: видалення динамічного рядка документа (кнопка, підтвердження, відмови); ru/kz — порцією COLL:d3rowdelete нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'grid.deleteRow', N'en', N'Delete row', 1),
+    (N'grid.deleteRowHint', N'en', N'Select a cell of a row you added to delete it.', 1),
+    (N'grid.deleteRowTitle', N'en', N'Delete row “{row}”?', 1),
+    (N'grid.deleteRowConsequence', N'en', N'The row disappears from the table, totals and reports. Its values are kept in the audit trail.', 1),
+    (N'grid.deleteRowNote', N'en', N'There is no undo for this action. Only a row you added can be deleted, and only while the sheet is a draft or rejected.', 1),
+    (N'grid.deleteRowVerb', N'en', N'Delete row', 1),
+    (N'grid.deleteRowOrdinalLabel', N'en', N'row #{n}', 1),
+    (N'err.ECR-ACCS-0403.deleteRowDenied', N'en', N'A row cannot be deleted from this table: {reason}.', 1),
+    (N'err.ECR-ACCS-0403.deleteRowValuesDenied', N'en', N'This row cannot be deleted: it holds values you are not allowed to clear.', 1),
+    (N'err.ECR-ACCS-0403.deleteRowOutOfWindow', N'en', N'This row cannot be deleted: some of its values are outside the period access window.', 1),
+    (N'err.ECR-ROW-0404.rowNotFound', N'en', N'The row was not found in this table. It may have been deleted already.', 1),
+    (N'err.ECR-ROW-0409.templateRowNotDeletable', N'en', N'This row comes from the template and cannot be deleted.', 1),
+    (N'err.ECR-ROW-0409.sourceRowNotDeletable', N'en', N'This row holds data loaded by an integration, import or collection (or is maintained by a source event) and cannot be deleted by hand.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:d3rowdelete ── кінець секції ──

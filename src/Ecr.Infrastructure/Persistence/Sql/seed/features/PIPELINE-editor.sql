@@ -74,3 +74,46 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PIPELINE:editor ── кінець секції ──
+-- PIPELINE:editor ── редактор конвеєра даних (ФВ-14.3, область 9; `PipelinePage.tsx`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'nav.pipeline',                  N'en', N'Data pipeline', 1),
+    (N'pipeline.title',                N'en', N'Data pipeline', 1),
+    (N'pipeline.pickHint',             N'en', N'Pick a source entity above to see its pipeline: the steps the system runs for it, real rows after each step and the step where the data runs out.', 1),
+    (N'pipeline.intro',                N'en', N'The steps the system runs for this source entity, with real collected rows of the last {days} days after each step. The step that narrows the data to zero is highlighted.', 1),
+    (N'pipeline.points',               N'en', N'Rows out: {points}', 1),
+    (N'pipeline.narrowedTitle',        N'en', N'The data narrows to zero at this step', 1),
+    (N'pipeline.step.source',          N'en', N'Source', 1),
+    (N'pipeline.step.schedule',        N'en', N'Collection schedule', 1),
+    (N'pipeline.step.collect',         N'en', N'Collection', 1),
+    (N'pipeline.step.map',             N'en', N'Mapping', 1),
+    (N'pipeline.step.emit',            N'en', N'Write to documents', 1),
+    (N'pipeline.stepHint.source',      N'en', N'The connection and the source entity the data is read from.', 1),
+    (N'pipeline.stepHint.schedule',    N'en', N'When the collection runs and how many days back each run re-reads.', 1),
+    (N'pipeline.stepHint.collect',     N'en', N'Rows already collected from the source in the preview window.', 1),
+    (N'pipeline.stepHint.map',         N'en', N'Collected rows that fall under an active mapping to a document cell.', 1),
+    (N'pipeline.stepHint.emit',        N'en', N'Rows that land in a document cell.', 1),
+    (N'pipeline.zero.collect',         N'en', N'Nothing was collected in the window. Check the connection, the schedule and the last run of this entity.', 1),
+    (N'pipeline.zero.map',             N'en', N'Collected rows fall under no active mapping. Add a mapping or resume a paused one.', 1),
+    (N'pipeline.zero.emit',            N'en', N'No mapped row lands in a document cell. The gaps below name the missing rows and columns.', 1),
+    (N'pipeline.state.ok',             N'en', N'Passes data', 1),
+    (N'pipeline.state.zero',           N'en', N'Narrows to zero', 1),
+    (N'pipeline.state.idle',           N'en', N'No data reaches it', 1),
+    (N'pipeline.state.warn',           N'en', N'Check', 1),
+    (N'pipeline.state.off',            N'en', N'Off', 1),
+    (N'pipeline.state.error',          N'en', N'Failed', 1),
+    (N'pipeline.connection',           N'en', N'Connection', 1),
+    (N'pipeline.transport',            N'en', N'Transport', 1),
+    (N'pipeline.collection',           N'en', N'Collection', 1),
+    (N'pipeline.collectionOn',         N'en', N'On', 1),
+    (N'pipeline.collectionOff',        N'en', N'Off', 1),
+    (N'pipeline.lastRun',              N'en', N'Last run', 1),
+    (N'pipeline.noRun',                N'en', N'No runs yet', 1),
+    (N'pipeline.retrieved',            N'en', N'{points} rows received', 1),
+    (N'pipeline.openSources',          N'en', N'Open connections', 1)
+    -- ru/kz — окремою порцією `PIPELINE:editor` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PIPELINE:editor ── кінець секції ──
