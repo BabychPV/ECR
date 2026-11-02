@@ -174,9 +174,13 @@ describe('Д: формат комірки — доповнення нулями 
 
   it('20 значущих цифр доповнюються без втрати — не Number().toFixed()', () => {
     // ⛔ Мутаційна межа: `Number(x).toFixed(18)` дав би інші останні цифри.
-    const data = slice({ C1: Twenty }, [column({ scale: 18 })]);
+    // ✎ 02.11: доповнення — лише до `MaxPaddedScale` (6); `scale` 18 — точність
+    // сховища, тож показується найкоротший точний запис (`numberFormat.test.ts`).
+    const long = '12345678901234567.5';
+    const data = slice({ C1: long }, [column({ scale: 6 })]);
 
-    expect(norm(shownValue(data, Twenty))).toBe('1,234.123456789012345600');
+    expect(norm(shownValue(data, long))).toBe('12,345,678,901,234,567.500000');
+    expect(norm(shownValue(slice({ C1: Twenty }, [column({ scale: 18 })]), Twenty))).toBe('1,234.1234567890123456');
   });
 
   it('від\'ємне, нуль, мова з комою', () => {
