@@ -239,101 +239,140 @@ public sealed class DocumentStore(
     {
         ArgumentNullException.ThrowIfNull(page);
 
-        var after = Cursor.Decode(page.Cursor);
-
         // Масив, а не `IReadOnlyCollection`: `Contains` над масивом EF
         // перекладає в `IN (...)`, над інтерфейсом — не гарантовано.
         var allowedProjects = visibleProjectIds?.ToArray();
 
-        var documents = VisibleDocuments(projectId, after, filter, allowedProjects);
+        // ✎ Версія шаблону (фільтр і сортування): версія — властивість ПРОЄКТУ за період, тож групи проєктів за версією
+        // рахуються один раз (3 легкі запити, лише коли параметр задано), а сам перелік лишається запитом по Id в межах
+        // групи: видимість (`VisibleDocuments`) і решта фільтрів діють ПЕРШИМИ, групи лише звужують проєкти.
+        var versionPlan = filter.TemplateVersions is not null || filter.VersionSort is not null
+            ? await PlanVersionsAsync(period, filter, ct).ConfigureAwait(false)
+            : null;
 
-        // BE-09b: фільтри — у ЗАПИТІ, до `Take`; межа грантів вище лишається.
-        if (filter.MineUserId is { } me)
-        {
-            documents = documents.Where(d => d.CreatedByUserId == me
-                                             || db.ApprovalStates.Any(a => a.DocumentId == d.Id && a.SubmittedByUserId == me));
-        }
-
-        // ✎ D-450: власник — теж ЗАПИТОМ до `Take`, і лише серед документів, де ім'я власника читачеві віддається
-        // (`WhereOwnerDisclosed`): інакше фільтр підтверджував би власника документа, у рядку якого стоїть «—».
-        if (filter.OwnerUserId is { } owner)
-        {
-            documents = WhereOwnerDisclosed(documents, filter).Where(d => d.CreatedByUserId == owner);
-        }
-
-        if (filter.State is { } state && period.Value is { } periodKey)
-        {
-            documents = WhereState(documents, state, periodKey, filter.HiddenSheetDefIds, filter.Participation?.HiddenSheets);
-        }
-
-        // BE-09b: та сама умова, що дає позначку в рядку (`LateEditDocumentIds`),
-        // застосована ЗАПИТОМ до стелі сторінки — не друге визначення «пізньої
-        // правки». Без періоду діє за БУДЬ-ЯКИЙ, як і сама позначка.
-        if (filter.HasLateEdits is { } wantLate)
-        {
-            var lateIds = LateEditDocumentIds(period, filter);
-            documents = wantLate
-                ? documents.Where(d => lateIds.Contains(d.Id))
-                : documents.Where(d => !lateIds.Contains(d.Id));
-        }
-
-        // resultsStale: той самий предикат, що дає позначку в рядку (`StaleResultsQuery`), - підзапитом ДО `Take`.
-        // ⛔ Проєкти зі звуженням виключаються в обох напрямках (`false` теж): інакше «не застарілі» = решта,
-        // тобто те саме знання навиворіт. Без періоду фільтр не діє (застарілість належить періоду).
-        // ✎ D-446: документ-надання, видимий учасникові ЦІЛКОМ, — у фільтрі як звичайний; частково схований — поза ним.
-        // LP-45 / D-432: карта «*» береться ОДИН раз на запит переліку - фільтр і позначка рядків бачать одну й ту саму
-        // карту (без другого читання відбитка й без гонки з фоновим оновленням між двома зверненнями).
+        // LP-45: карта «*» береться ОДИН раз на запит (також для позначки в рядках нижче).
         var starFetched = false;
         IReadOnlyDictionary<long, DateTime?>? starMap = null;
-        if (filter.ResultsStale is { } wantStale && period.Value is { } staleBy)
+        IReadOnlyDictionary<long, DateTime?>? staleMap = null;
+        if (filter.ResultsStale is not null && period.Value is { } staleByPeriod)
         {
-            var narrowed = filter.NarrowedProjectIds?.ToArray() ?? [];
             // LP-45 (етап 2): ідентифікатори беруться з карти періоду (кеш), а не підзапитом по журналу правок.
-            var staleMap = (await StaleMap.GetAsync(staleBy, [filter.StaleByUserId], ct).ConfigureAwait(false))[0];
+            staleMap = (await StaleMap.GetAsync(staleByPeriod, [filter.StaleByUserId], ct).ConfigureAwait(false))[0];
             if (filter.StaleByUserId is null)
             {
                 starFetched = true;
                 starMap = staleMap;
             }
-
-            // ✎ D-446: так само документи-надання, де учасник не бачить хоч щось: застарілість — по ВСЬОМУ документу,
-            // тож для нього вона не визначена (рядок — `null`), і «не застарілі» без них не стають знанням навиворіт.
-            var narrowedDocuments = filter.Participation?.NarrowedDocumentIds?.ToArray() ?? [];
-            documents = documents.Where(d => !narrowed.Contains(d.ProjectId));
-            if (narrowedDocuments.Length > 0)
-            {
-                documents = documents.Where(d => !narrowedDocuments.Contains(d.Id));
-            }
-
-            if (staleMap is null)
-            {
-                // Карта переповнена: підзапитом по журналу, як у 1885c2c77 (без кешу).
-                var staleSubquery = StaleResultsQuery.Documents(db, staleBy, filter.StaleByUserId).Select(r => r.DocumentId);
-                documents = wantStale
-                    ? documents.Where(d => staleSubquery.Contains(d.Id))
-                    : documents.Where(d => !staleSubquery.Contains(d.Id));
-            }
-            else
-            {
-                var staleIds = staleMap.Keys.ToArray();
-                documents = wantStale
-                    ? documents.Where(d => staleIds.Contains(d.Id))
-                    : documents.Where(d => !staleIds.Contains(d.Id));
-            }
         }
 
-        // UI-18: пошук — теж у ЗАПИТІ до `Take`, ПОРУЧ із межею проєктів вище (а не
-        // постфільтр: той дав би хибні `NextCursor`/`TotalCount`). Лише поля самого
-        // документа — аркуші й таблиці не чіпаються, тож приховане не підтверджується.
-        if (filter.Query is { Length: > 0 } term)
+        IQueryable<Document> Build(long after, int[]? onlyProjects)
         {
-            var matched = DocumentIdsMatching(term);
-            documents = documents.Where(d => matched.Contains(d.Id));
+            var documents = VisibleDocuments(projectId, after, filter, allowedProjects);
+
+            if (onlyProjects is not null)
+            {
+                documents = documents.Where(d => onlyProjects.Contains(d.ProjectId));
+            }
+
+            // BE-09b: фільтри — у ЗАПИТІ, до `Take`; межа грантів вище лишається.
+            if (filter.MineUserId is { } me)
+            {
+                documents = documents.Where(d => d.CreatedByUserId == me
+                                                 || db.ApprovalStates.Any(a => a.DocumentId == d.Id && a.SubmittedByUserId == me));
+            }
+
+            // ✎ D-450: власник — теж ЗАПИТОМ до `Take`, і лише серед документів, де ім'я власника читачеві віддається
+            // (`WhereOwnerDisclosed`): інакше фільтр підтверджував би власника документа, у рядку якого стоїть «—».
+            if (filter.OwnerUserId is { } owner)
+            {
+                documents = WhereOwnerDisclosed(documents, filter).Where(d => d.CreatedByUserId == owner);
+            }
+
+            if (filter.State is { } state && period.Value is { } periodKey)
+            {
+                documents = WhereState(documents, state, periodKey, filter.HiddenSheetDefIds, filter.Participation?.HiddenSheets);
+            }
+
+            // BE-09b: та сама умова, що дає позначку в рядку (`LateEditDocumentIds`),
+            // застосована ЗАПИТОМ до стелі сторінки — не друге визначення «пізньої
+            // правки». Без періоду діє за БУДЬ-ЯКИЙ, як і сама позначка.
+            if (filter.HasLateEdits is { } wantLate)
+            {
+                var lateIds = LateEditDocumentIds(period, filter);
+                documents = wantLate
+                    ? documents.Where(d => lateIds.Contains(d.Id))
+                    : documents.Where(d => !lateIds.Contains(d.Id));
+            }
+
+            // resultsStale: той самий предикат, що дає позначку в рядку (`StaleResultsQuery`), - підзапитом ДО `Take`.
+            // ⛔ Проєкти зі звуженням виключаються в обох напрямках (`false` теж): інакше «не застарілі» = решта,
+            // тобто те саме знання навиворіт. Без періоду фільтр не діє (застарілість належить періоду).
+            // ✎ D-446: документ-надання, видимий учасникові ЦІЛКОМ, — у фільтрі як звичайний; частково схований — поза ним.
+            // LP-45 / D-432: карта «*» береться ОДИН раз на запит переліку - фільтр і позначка рядків бачать одну й ту саму
+            // карту (без другого читання відбитка й без гонки з фоновим оновленням між двома зверненнями).
+            if (filter.ResultsStale is { } wantStale && period.Value is { } staleBy)
+            {
+                var narrowed = filter.NarrowedProjectIds?.ToArray() ?? [];
+
+                // ✎ D-446: так само документи-надання, де учасник не бачить хоч щось: застарілість — по ВСЬОМУ документу,
+                // тож для нього вона не визначена (рядок — `null`), і «не застарілі» без них не стають знанням навиворіт.
+                var narrowedDocuments = filter.Participation?.NarrowedDocumentIds?.ToArray() ?? [];
+                documents = documents.Where(d => !narrowed.Contains(d.ProjectId));
+                if (narrowedDocuments.Length > 0)
+                {
+                    documents = documents.Where(d => !narrowedDocuments.Contains(d.Id));
+                }
+
+                if (staleMap is null)
+                {
+                    // Карта переповнена: підзапитом по журналу, як у 1885c2c77 (без кешу).
+                    var staleSubquery = StaleResultsQuery.Documents(db, staleBy, filter.StaleByUserId).Select(r => r.DocumentId);
+                    documents = wantStale
+                        ? documents.Where(d => staleSubquery.Contains(d.Id))
+                        : documents.Where(d => !staleSubquery.Contains(d.Id));
+                }
+                else
+                {
+                    var staleIds = staleMap.Keys.ToArray();
+                    documents = wantStale
+                        ? documents.Where(d => staleIds.Contains(d.Id))
+                        : documents.Where(d => !staleIds.Contains(d.Id));
+                }
+            }
+
+            // UI-18: пошук — теж у ЗАПИТІ до `Take`, ПОРУЧ із межею проєктів вище (а не
+            // постфільтр: той дав би хибні `NextCursor`/`TotalCount`). Лише поля самого
+            // документа — аркуші й таблиці не чіпаються, тож приховане не підтверджується.
+            if (filter.Query is { Length: > 0 } term)
+            {
+                var matched = DocumentIdsMatching(term);
+                documents = documents.Where(d => matched.Contains(d.Id));
+            }
+
+            return documents;
         }
 
-        var rows = await documents
-            .OrderBy(d => d.Id)
-            .Take(page.Limit + 1)
+        List<DocumentRow> rows;
+        if (versionPlan is { Sorted: true } plan)
+        {
+            // Сортування за версією: групи проєктів у порядку версій, усередині групи - за Id (детермінований другий ключ).
+            // Курсор несе групу (її версію) і Id останнього рядка; сторінка добирається з наступних груп.
+            var (groupIndex, after) = plan.Resume(page.Cursor);
+            rows = [];
+            for (var g = groupIndex; g < plan.Groups.Count && rows.Count < page.Limit + 1; g++)
+            {
+                var fromId = g == groupIndex ? after : 0;
+                rows.AddRange(await ProjectRows(Build(fromId, plan.Groups[g].ProjectIds).OrderBy(d => d.Id).Take(page.Limit + 1 - rows.Count))
+                    .ToListAsync(ct).ConfigureAwait(false));
+            }
+        }
+        else
+        {
+            var documents = Build(Cursor.Decode(page.Cursor), versionPlan?.WantedProjects);
+            rows = await ProjectRows(documents.OrderBy(d => d.Id).Take(page.Limit + 1)).ToListAsync(ct).ConfigureAwait(false);        }
+
+        IQueryable<DocumentRow> ProjectRows(IQueryable<Document> documents)
+            => documents
             .Select(d => new DocumentRow(
                 d.Id,
                 d.ProjectId,
@@ -372,9 +411,7 @@ public sealed class DocumentStore(
                     .FirstOrDefault(),
                 // ✎ RPT-STABLE Part B: ознака «у проєкті кілька версій за періодами» - у тому самому запиті сторінки.
                 db.ProjectTemplateVersions.Any(t => t.ProjectId == d.ProjectId
-                    && t.TemplateVersionId != db.Projects.Where(p => p.Id == d.ProjectId).Select(p => p.TemplateVersionId).FirstOrDefault())))
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+                    && t.TemplateVersionId != db.Projects.Where(p => p.Id == d.ProjectId).Select(p => p.TemplateVersionId).FirstOrDefault())));
 
         var hasMore = rows.Count > page.Limit;
         var page1 = rows.Take(page.Limit).ToList();
@@ -427,8 +464,138 @@ public sealed class DocumentStore(
                 TemplateVersionByPeriod: versionByPeriod.GetValueOrDefault(d.ProjectId)));
         }
 
-        return new PagedResult<DocumentSummary>(
-            items, hasMore ? Cursor.Encode(items[^1].Id) : null, TotalCount: null);
+        var next = !hasMore
+            ? null
+            : versionPlan is { Sorted: true } sortedPlan
+                ? sortedPlan.Encode(items[^1].ProjectId, items[^1].Id)
+                : Cursor.Encode(items[^1].Id);
+        return new PagedResult<DocumentSummary>(items, next, TotalCount: null);
+    }
+
+    /// <summary>
+    /// Групи проєктів за версією шаблону ДЛЯ ПЕРІОДУ (та сама логіка, що в колонці «Version»: версія періоду або типова
+    /// версія проєкту) — основа фільтра <see cref="DocumentListFilter.TemplateVersions"/> і сортування
+    /// <see cref="DocumentListFilter.VersionSort"/>. Лише метадані шаблону (не секрет); перелік документів з них не береться.
+    /// </summary>
+    private async Task<VersionPlan> PlanVersionsAsync(PeriodKeyFilter period, DocumentListFilter filter, CancellationToken ct)
+    {
+        var projects = await db.Projects.AsNoTracking()
+            .Select(p => new { p.Id, p.TemplateVersionId })
+            .ToListAsync(ct).ConfigureAwait(false);
+        var timeline = (await db.ProjectTemplateVersions.AsNoTracking()
+                .Select(t => new { t.ProjectId, t.FromPeriodKey, t.TemplateVersionId })
+                .ToListAsync(ct).ConfigureAwait(false))
+            .GroupBy(t => t.ProjectId)
+            .ToDictionary(g => g.Key, g => g.OrderBy(t => t.FromPeriodKey).ToList());
+        var labels = await db.TemplateVersions.AsNoTracking()
+            .Select(v => new { v.Id, v.Version })
+            .ToDictionaryAsync(v => v.Id, v => v.Version, ct).ConfigureAwait(false);
+
+        var byLabel = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        var unversioned = new List<int>();
+        foreach (var project in projects)
+        {
+            // Як у `VersionByPeriodAsync`: версія періоду береться лише для проєкту з кількома сегментами шкали.
+            var versionId = period.Value is { } key && timeline.TryGetValue(project.Id, out var line) && line.Count > 1
+                ? ProjectVersionTimeline.VersionOf(
+                    [.. line.Select(e => new TimelineEntry(e.FromPeriodKey, e.TemplateVersionId))], key, project.TemplateVersionId)
+                : project.TemplateVersionId;
+            if (labels.TryGetValue(versionId, out var label) && !string.IsNullOrWhiteSpace(label))
+            {
+                if (!byLabel.TryGetValue(label, out var ids))
+                {
+                    byLabel[label] = ids = [];
+                }
+
+                ids.Add(project.Id);
+            }
+            else
+            {
+                unversioned.Add(project.Id);
+            }
+        }
+
+        var wanted = filter.TemplateVersions is null ? null : filter.TemplateVersions.ToHashSet(StringComparer.Ordinal);
+        var kept = byLabel.Where(e => wanted is null || wanted.Contains(e.Key)).ToList();
+
+        var descending = filter.VersionSort == DocumentVersionSort.Descending;
+        var ordered = kept
+            .OrderBy(e => e.Key, Comparer<string>.Create((a, b) => descending ? VersionOrder.Compare(b, a) : VersionOrder.Compare(a, b)))
+            .Select(e => new VersionGroup(e.Key, [.. e.Value]))
+            .ToList();
+
+        // Без версії - в кінці в обох напрямках (як у колонці); фільтр за версією їх виключає.
+        if (wanted is null && unversioned.Count > 0)
+        {
+            ordered.Add(new VersionGroup(null, [.. unversioned]));
+        }
+
+        return new VersionPlan(
+            filter.VersionSort is not null, descending, ordered,
+            [.. ordered.SelectMany(g => g.ProjectIds)]);
+    }
+
+    /// <summary>Група проєктів з однією версією (<c>null</c> — без версії).</summary>
+    private sealed record VersionGroup(string? Label, int[] ProjectIds);
+
+    /// <summary>План переліку за версією: групи у порядку сортування і курсор «група + Id».</summary>
+    private sealed record VersionPlan(bool Sorted, bool Descending, List<VersionGroup> Groups, int[] WantedProjects)
+    {
+        /// <summary>Курсор: <c>V{id}|{версія}</c> або <c>N{id}</c> (група без версії); непрозорий для клієнта.</summary>
+        public string Encode(int projectId, long id)
+        {
+            var group = Groups.FirstOrDefault(g => g.ProjectIds.Contains(projectId));
+            var text = group?.Label is { } label
+                ? $"V{id.ToString(CultureInfo.InvariantCulture)}|{label}"
+                : $"N{id.ToString(CultureInfo.InvariantCulture)}";
+            return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(text));
+        }
+
+        /// <summary>Група і Id, з яких продовжувати; зіпсований курсор - початок. Версія, якої вже немає, - наступна за нею група.</summary>
+        public (int GroupIndex, long AfterId) Resume(string? cursor)
+        {
+            if (string.IsNullOrWhiteSpace(cursor))
+            {
+                return (0, 0);
+            }
+
+            Span<byte> buffer = stackalloc byte[256];
+            if (!Convert.TryFromBase64String(cursor, buffer, out var written) || written < 2)
+            {
+                return (0, 0);
+            }
+
+            var text = System.Text.Encoding.UTF8.GetString(buffer[..written]);
+            var bar = text.IndexOf('|', StringComparison.Ordinal);
+            var digits = text[0] switch
+            {
+                'V' when bar > 1 => text[1..bar],
+                'N' => text[1..],
+                _ => null,
+            };
+            if (digits is null || !long.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var id))
+            {
+                return (0, 0);
+            }
+
+            if (text[0] == 'N')
+            {
+                var tail = Groups.FindIndex(g => g.Label is null);
+                return tail < 0 ? (Groups.Count, 0) : (tail, id);
+            }
+
+            var label = text[(bar + 1)..];
+            var exact = Groups.FindIndex(g => string.Equals(g.Label, label, StringComparison.Ordinal));
+            if (exact >= 0)
+            {
+                return (exact, id);
+            }
+
+            // Версії вже немає серед груп (змінились дані між сторінками): перша група, що йде ПІСЛЯ неї в порядку сортування.
+            var next = Groups.FindIndex(g => g.Label is null
+                || (Descending ? VersionOrder.Compare(g.Label, label) < 0 : VersionOrder.Compare(g.Label, label) > 0));
+            return (next < 0 ? Groups.Count : next, 0);
+        }
     }
 
     /// <summary>
