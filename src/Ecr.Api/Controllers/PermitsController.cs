@@ -23,7 +23,8 @@ public sealed class PermitsController(
     DeletePermitHandler delete,
     ActivatePermitHandler activate,
     EndPermitHandler end,
-    RenewPermitHandler renew) : ControllerBase
+    RenewPermitHandler renew,
+    GetPermitUsagesHandler usages) : ControllerBase
 {
     /// <summary>Перелік дозволів (усі доступні типи). Право <c>Registry.View</c>.</summary>
     /// <param name="type">Код типу.</param>
@@ -64,6 +65,22 @@ public sealed class PermitsController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PermitDto>> Get(long id, [FromQuery] DateOnly? asOf, CancellationToken ct)
         => Ok(await get.HandleAsync(id, asOf, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// «Де використано»: документи, період, аркуш-таблиця-рядок чи поле шапки, де дозвіл обрано значенням. Право
+    /// <c>Registry.View</c>; у відповідь потрапляють лише документи проєктів, які читач бачить (<c>Document.View</c>).
+    /// </summary>
+    /// <param name="id">Ідентифікатор дозволу.</param>
+    /// <param name="periodKey">Лише цей період (<c>YYYYNN</c>): комірки періоду й шапки документів з таблицями в ньому.</param>
+    /// <param name="limit">Розмір переліку 1..500 (типово 200); лічильники рахують усе.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:long}/usages")]
+    [ProducesResponseType<PermitUsageDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PermitUsageDto>> Usages(
+        long id, [FromQuery] int? periodKey, [FromQuery] int? limit, CancellationToken ct)
+        => Ok(await usages.HandleAsync(id, periodKey, limit, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Змінює шапку чернетки чи чинного дозволу (не закінченого). Право <c>Registry.EditData</c>. Токен

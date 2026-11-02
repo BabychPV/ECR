@@ -13773,6 +13773,12 @@
               "string"
             ]
           },
+          "usedInDocumentCount": {
+            "default": 0,
+            "description": "У скількох документах (проєктів, що читач бачить) дозвіл обраний значенням шапки чи комірки; 0 - ніде.",
+            "format": "int32",
+            "type": "integer"
+          },
           "validFrom": {
             "description": "Перший чинний день.",
             "format": "date",
@@ -14556,6 +14562,157 @@
         "required": [
           "instanceCount",
           "tables"
+        ],
+        "type": "object"
+      },
+      "PermitUsageDto": {
+        "description": "«Де використано» дозвіл: документи, у яких він обраний значенням поля шапки чи колонки таблиці. Лише документи\nпроєктів, які читач бачить (`Document.View`); решта не рахується й не називається.",
+        "properties": {
+          "documentCount": {
+            "description": "Скільки різних документів посилаються на дозвіл (під фільтром періоду).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "items": {
+            "description": "Місця посилань: за документом, періодом, шапка перед таблицями.",
+            "items": {
+              "$ref": "#/components/schemas/PermitUsageItemDto"
+            },
+            "type": "array"
+          },
+          "linkCount": {
+            "description": "Скільки місць (полів шапки й комірок) посилаються на дозвіл.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "permitId": {
+            "description": "Дозвіл.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "truncated": {
+            "description": "`true`, якщо Items обрізано лімітом `limit`.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "permitId",
+          "documentCount",
+          "linkCount",
+          "truncated",
+          "items"
+        ],
+        "type": "object"
+      },
+      "PermitUsageItemDto": {
+        "description": "Одне місце, де дозвіл стоїть значенням: поле шапки або комірка рядка таблиці документа.",
+        "properties": {
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "documentKey": {
+            "description": "Бізнес-ключ документа.",
+            "type": "string"
+          },
+          "fieldCode": {
+            "description": "Код поля шапки або колонки.",
+            "type": "string"
+          },
+          "fieldLabelL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Підпис поля шапки або заголовок колонки мовами каталогу.",
+            "type": "object"
+          },
+          "kind": {
+            "description": "`header` або `cell` (PermitUsageKinds).",
+            "type": "string"
+          },
+          "periodKey": {
+            "description": "Період комірки (`YYYYMM`-подібний ключ); `null` для шапки - вона належить документу цілком.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "projectCode": {
+            "description": "Код проєкту.",
+            "type": "string"
+          },
+          "projectId": {
+            "description": "Проєкт документа.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rowKey": {
+            "description": "Бізнес-ключ рядка; `null` для шапки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rowOrdinal": {
+            "description": "Порядок рядка на екрані; `null` для шапки.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sheetCode": {
+            "description": "Код аркуша; `null` для шапки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sheetNameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва аркуша мовами каталогу; `null` для шапки.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "tableCode": {
+            "description": "Код таблиці; `null` для шапки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableNameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва таблиці мовами каталогу; `null` для шапки.",
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "documentId",
+          "documentKey",
+          "projectId",
+          "projectCode",
+          "periodKey",
+          "sheetCode",
+          "sheetNameL10n",
+          "tableCode",
+          "tableNameL10n",
+          "rowKey",
+          "rowOrdinal",
+          "fieldCode",
+          "fieldLabelL10n"
         ],
         "type": "object"
       },
@@ -46137,6 +46294,107 @@
           }
         },
         "summary": "Поновлює дозвіл: нова чернетка з копією шапки й усіх рядків; початок = кінець поточного. Право\n`Registry.EditData`. Тіло необов'язкове.",
+        "tags": [
+          "Permits"
+        ]
+      }
+    },
+    "/api/v1/permits/{id}/usages": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Ідентифікатор дозволу.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Лише цей період (`YYYYNN`): комірки періоду й шапки документів з таблицями в ньому.",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Розмір переліку 1..500 (типово 200); лічильники рахують усе.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitUsageDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitUsageDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitUsageDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "«Де використано»: документи, період, аркуш-таблиця-рядок чи поле шапки, де дозвіл обрано значенням. Право\n`Registry.View`; у відповідь потрапляють лише документи проєктів, які читач бачить (`Document.View`).",
         "tags": [
           "Permits"
         ]
