@@ -1,6 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JSX } from 'react';
-import { createRoot } from 'react-dom/client';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -172,23 +171,18 @@ const where = (): string => (globalThis as { __where?: string }).__where ?? '';
 // Лінива шторка (`lazy(GroupDrawer)`): якщо ПЕРШИЙ рендер файлу - глибоке посилання `?panel=…`, синхронний `act` у
 // `render` крутить корінь без кінця, доки `lazy` не розв'язався, а розв'язатися йому нема коли - воркер vitest
 // виснажує пам'ять і падає (nightly `shuffle`, seed 18965: першим випав тест «недопустимий код»). У звичайному порядку
-// `lazy` встигав розв'язатися в тестах переліку. Тож розв'язуємо його один раз поза `act` (звичайний планувальник
-// React); холодне завантаження шторки окремо перевіряє `GroupsPage.lazyFocus.test.tsx`.
+// `lazy` встигав розв'язатися в тестах переліку: там шторка `?panel=<код>` монтується лише після приїзду переліку,
+// тобто оновленням поза `act`. Асинхронний `act` не рятує (перевірено: так само висне), тож розв'язуємо `lazy` один
+// раз саме таким шляхом; холодне завантаження шторки окремо перевіряє `GroupsPage.lazyFocus.test.tsx`.
 beforeAll(async () => {
-  const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean | undefined };
-  const actEnvironment = env.IS_REACT_ACT_ENVIRONMENT;
-  env.IS_REACT_ACT_ENVIRONMENT = false;
-  stub([]);
-  const host = document.body.appendChild(document.createElement('div'));
-  const root = createRoot(host);
+  session.permissions = ['Registry.View', 'Permit.EditType'];
+  stub([group({ code: 'WARM', nameL10n: { en: 'Warm-up' }, rowVersion: 'x1' })]);
   try {
-    root.render(page('/admin/permits/groups?panel=_new', new QueryClient({ defaultOptions: { queries: { retry: false } } })));
-    await waitFor(() => expect(host.ownerDocument.querySelector('[data-group-drawer="new"]')).not.toBeNull());
+    show('/admin/permits/groups?panel=WARM');
+    await waitFor(() => expect(document.querySelector('[data-group-drawer="edit"]')).not.toBeNull());
   } finally {
-    root.unmount();
-    host.remove();
+    cleanup();
     vi.unstubAllGlobals();
-    env.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
   }
 });
 
