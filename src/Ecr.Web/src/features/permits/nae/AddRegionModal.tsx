@@ -1,7 +1,9 @@
 import { useState, type JSX } from 'react';
 import { Button, Group, Modal, NativeSelect, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import type { components } from '@/api/schema';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { lookupLabel, useLookupOptions } from '@/features/registries/rc812/data';
 import { t } from '@/shared/i18n';
@@ -17,6 +19,17 @@ export interface AddRegionModalProps {
   readonly onClose: () => void;
   /** Вузол, який варто вибрати в дереві: найглибший із створених (район, якщо його просили). */
   readonly onAdded: (nodeId: number, result: NaeRootResult) => void;
+}
+
+/**
+ * ⚠ Сервер приймає в regionCode АНГЛІЙСЬКУ НАЗВУ регіону (`Atyrau`; верхній регістр і код вузла `R_ATYRAU` він
+ * будує сам), а не код запису довідника: назву читаємо з картки запису, а не з `display` (це мова користувача).
+ */
+async function englishName(rowId: number, fallback: string): Promise<string> {
+  if (rowId === 0) return fallback;
+  const entry = await apiFetch<components['schemas']['RegistryEntryDetailDto']>(`/api/v1/registries/${RegionRegistryCode}/entries/${String(rowId)}`);
+
+  return entry.displayL10n?.values?.['en'] ?? fallback;
 }
 
 const orNull = (value: string): string | null => (value.trim() === '' ? null : value.trim());
@@ -39,7 +52,8 @@ export function AddRegionModal({ opened, onClose, onAdded }: AddRegionModalProps
   const chosen = regionCode === '' ? (options[0]?.value ?? '') : regionCode;
 
   const create = useMutation({
-    mutationFn: (body: CreateNaeRootRequest) => createNaeRoot(body),
+    mutationFn: async (args: { readonly rowId: number; readonly fallback: string; readonly body: Omit<CreateNaeRootRequest, 'regionCode'> }) =>
+      createNaeRoot({ ...args.body, regionCode: await englishName(args.rowId, args.fallback) }),
     onSuccess: async (result) => {
       showDone(result.created ? t('permits.nae.manual.added') : t('permits.nae.manual.existed'));
       // Довідник міг з'явитися: визначення, рівні й дерево читаються заново.
@@ -57,12 +71,16 @@ export function AddRegionModal({ opened, onClose, onAdded }: AddRegionModalProps
       return;
     }
     setError(null);
+    const row = (regions.data?.items ?? []).find((item) => item.code === chosen);
     create.mutate({
-      regionCode: chosen,
+      rowId: row?.id ?? 0,
+      fallback: row?.display ?? chosen,
+      body: {
       areaCode: orNull(areaCode),
       nameEn: orNull(nameEn),
       nameRu: orNull(nameRu),
       nameKz: orNull(nameKz),
+      },
     });
   };
 
