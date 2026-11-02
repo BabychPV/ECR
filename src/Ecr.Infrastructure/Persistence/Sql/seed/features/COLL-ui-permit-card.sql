@@ -91,10 +91,10 @@ GO
 INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
-    (N'permits.page.tabs.air', N'en', N'Air limits', 1),
+    (N'permits.page.tabs.air', N'en', N'Sources & parameters', 1),
     (N'permits.air.title', N'en', N'Emission sources', 1),
     (N'permits.air.counts', N'en', N'{sources} sources · {rows} substance rows', 1),
-    (N'permits.air.import', N'en', N'Import from Excel…', 1),
+    (N'permits.air.import', N'en', N'Import parameters…', 1),
     (N'permits.air.empty.title', N'en', N'No emission sources yet', 1),
     (N'permits.air.empty.text', N'en', N'Import the limits table from an Excel workbook to fill this permit.', 1),
     (N'permits.air.empty.readOnly', N'en', N'This permit has no sources. You can view it, but not import into it.', 1),

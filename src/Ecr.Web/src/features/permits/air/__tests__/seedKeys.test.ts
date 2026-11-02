@@ -95,10 +95,10 @@ describe('ключі permits.air.* у сіді', () => {
   });
 
   it('ключі не зустрічаються в сіді поза своїми секціями', () => {
-    // Рядки «старе → нове» секції «Змінені тексти наявних ключів» (AIR-ON-AIR перейменування) — не каталог, а оновлення.
+    // Рядки «старе → нове» (порції `#UiChanged` файлів фіч, AIR-ON-AIR перейменування) — не каталог, а оновлення.
     const outside = seed
       .replace(/-- COLL:(ui-permit-card|ui-air-import|ui-air-params) ── (?:en|ru\/kz):[\s\S]*?-- COLL:\1 ── кінець секції ──/g, '')
-      .replace(/-- ── Змінені тексти наявних ключів[\s\S]*?SET @textUpdates = @@ROWCOUNT;/, '');
+      .replace(/INSERT INTO #UiChanged[\s\S]*?\nGO/g, '');
     expect(outside).not.toMatch(/N'permits\.air\./);
     expect(outside).not.toMatch(/N'permits\.page\.tabs\.air'/);
   });

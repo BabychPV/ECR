@@ -223,7 +223,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'permits.editor.choices.tableHint', N'en', N'Users can pick only rows that this permit has in that table.', 1),
     (N'permits.editor.choices.type', N'en', N'A list only for this permit type', 1),
     (N'permits.editor.choices.values', N'en', N'Values, one per line', 1),
-    (N'permits.editor.choices.valuesHint', N'en', N'Only this type sees these values. They can also be edited on the Lists page.', 1),
+    (N'permits.editor.choices.valuesHint', N'en', N'One per line or separated by ";". Only this type sees these values. They can also be edited on the Lists page.', 1),
     (N'permits.editor.cols.code', N'en', N'Code', 1),
     (N'permits.editor.cols.column', N'en', N'Column', 1),
     (N'permits.editor.cols.empty', N'en', N'No columns yet', 1),
