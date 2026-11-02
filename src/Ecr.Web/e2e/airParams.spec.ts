@@ -9,6 +9,7 @@ import {
   ensureSubstances,
   RegionRegistry,
   removeScopeEntries,
+  scopeFields,
 } from './airScope';
 
 /**
@@ -236,6 +237,33 @@ test.describe('Air params', () => {
       'card',
     );
     expect(card.sources.every((s) => s.regionEntryId === scopeEntries[0]?.id)).toBe(true);
+  });
+
+  test('Air params: REGION/AREA are ordinary AIR_SOURCES columns in the permit type editor, with their kind', async ({ page }) => {
+    // The kind is configured in the existing column editor (String = Text; Lookup + shared registry = Registry; Lookup + type
+    // list = List); the wizard reads the same columns through scope-fields. Read-only here: the live AIR type is not changed.
+    const fields = await scopeFields(admin);
+    await signIn(page, Admin);
+    for (const field of [fields.region, fields.area]) {
+      await page.goto(`/admin/permits/types/AIR?t=AIR_SOURCES&panel=${field.columnCode}`);
+      const inspector = page.getByTestId('column-inspector');
+      await expect(inspector).toBeVisible({ timeout: 30_000 });
+      await expect(inspector.getByRole('textbox', { name: 'Code' })).toHaveValue(field.columnCode);
+      const type = inspector.getByRole('textbox', { name: 'Type', exact: true });
+      if (field.kind === 'Text') {
+        await expect(type).toHaveValue('Text');
+        continue;
+      }
+      await expect(type).toHaveValue('Pick from a list');
+      const from = inspector.getByRole('textbox', { name: 'Choices come from' });
+      if (field.kind === 'Registry') {
+        await expect(from).toHaveValue('A shared registry (used by many types)');
+        await expect(inspector.getByRole('textbox', { name: 'Registry' })).toHaveValue(new RegExp(field.registryCode ?? '-'));
+      } else {
+        await expect(from).toHaveValue('A list only for this permit type');
+        await expect(inspector.getByLabel('Values, one per line')).not.toHaveValue('');
+      }
+    }
   });
 
   test('Air params: a viewer sees the tab but no Import parameters…', async ({ browser }) => {
