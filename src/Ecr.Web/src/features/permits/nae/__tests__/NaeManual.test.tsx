@@ -19,7 +19,7 @@ vi.mock('@/shared/i18n', async (importOriginal) => ({
   t: (key: string, params?: Record<string, unknown>) => (params === undefined ? key : `${key} ${JSON.stringify(params)}`),
 }));
 
-const session = { permissions: ['Registry.View', 'Registry.EditData', 'Registry.EditDefinition'] };
+const session = { permissions: ['Registry.View', 'Registry.EditData', 'Registry.EditDefinition', 'Registry.Publish'] };
 vi.mock('@/shared/session/useSession', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/session/useSession')>()),
   useSession: () => ({ data: { permissions: session.permissions } }),
@@ -52,7 +52,7 @@ const calls = (path: string) =>
   vi.mocked(apiFetch).mock.calls.filter(([p]) => p === path).map(([, init]) => init as RequestInit | undefined);
 
 beforeEach(() => {
-  session.permissions = ['Registry.View', 'Registry.EditData', 'Registry.EditDefinition'];
+  session.permissions = ['Registry.View', 'Registry.EditData', 'Registry.EditDefinition', 'Registry.Publish'];
   treeBody = emptyTree;
   definitionError = null;
   seedError = null;
@@ -101,7 +101,27 @@ describe('порожнє дерево НВ', () => {
     expect(document.querySelector('[data-nae-empty-add]')).not.toBeNull();
   });
 
-  it('довідник ще не створено (404): ті самі три шляхи, якщо є EditDefinition', async () => {
+  it('довідник створюється викликом (404), є EditDefinition, але немає Publish: підказка, без дій створення', async () => {
+    session.permissions = ['Registry.View', 'Registry.EditData', 'Registry.EditDefinition'];
+    definitionError = problem(404, 'no');
+    mountPage();
+
+    expect(await screen.findByText('permits.nae.import.hintAskAdmin')).toBeTruthy();
+    expect(document.querySelector('[data-nae-seed-roots]')).toBeNull();
+    expect(document.querySelector('[data-nae-add-region-open]')).toBeNull();
+  });
+
+  it('довідник уже є: досить EditData - «Додати регіон» і Excel доступні без EditDefinition/Publish', async () => {
+    session.permissions = ['Registry.View', 'Registry.EditData'];
+    mountPage();
+
+    expect(await screen.findByText('permits.nae.manual.emptyTitle')).toBeTruthy();
+    expect(document.querySelector('[data-nae-add-region-open]')).not.toBeNull();
+    expect(document.querySelector('[data-nae-excel-open]')).not.toBeNull();
+    expect(document.querySelector('[data-nae-seed-roots]')).not.toBeNull();
+  });
+
+  it('довідник ще не створено (404): ті самі три шляхи, якщо є EditDefinition і Publish', async () => {
     definitionError = problem(404, 'no');
     mountPage();
 
