@@ -81,7 +81,10 @@
   top: calc(100% + 4px);
   left: 0;
   z-index: var(--mantine-z-index-popover);
-  width: 18.75rem;
+  /* ⛔ Ніколи ширше за вікно: зсув уліво робить `PeriodMonthGrid` (колізія з краєм). */
+  width: min(18.75rem, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
   border: 1px solid var(--ecr-border);
   border-radius: var(--mantine-radius-sm);
   background: var(--ecr-raised);
@@ -104,7 +107,15 @@
   padding: 4px;
 }
 
+/* Вузьке вікно: 2 стовпці, щоб назви місяців не обрізались (стрілки ↑/↓ рахують стовпці з розкладки). */
+@media (max-width: 360px) {
+  .ecr-period-months {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 .ecr-period-months button {
+  min-width: 0;
   height: 1.875rem;
   border: 1px solid transparent;
   border-radius: var(--mantine-radius-xs);
