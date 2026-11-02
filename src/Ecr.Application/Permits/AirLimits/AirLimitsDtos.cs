@@ -55,11 +55,19 @@ public sealed record SaveImportProfileRequest(Dictionary<string, string> NameL10
 /// </summary>
 /// <param name="ProfileCode">Stored profile; <c>null</c> — <c>ERA_TABLE_33</c> unless <paramref name="Spec"/> is given.</param>
 /// <param name="Spec">An unsaved specification (the mapping editor's live preview); wins over <paramref name="ProfileCode"/>.</param>
-/// <param name="Region">Region code (<c>ATYRAU</c>, <c>MANGISTAU</c>): with the area it scopes the NAE lookup and the replace.</param>
-/// <param name="Area">Area code (<c>ONSHORE</c>, <c>OFFSHORE</c>); empty — a region without areas.</param>
+/// <param name="Region">
+/// ✎ AIR-ON-AIR: value of the REGION scope column when it is configured as Text or as a List (a choice, by text). For a Registry
+/// column use <paramref name="RegionEntryId"/>. Form field <c>region</c> overrides it.
+/// </param>
+/// <param name="Area">Value of the AREA scope column (Text / List); optional. Form field <c>area</c> overrides it.</param>
 /// <param name="Resolutions">Decisions about NAE codes missing in the tree: skip, or create under a node (<c>createUnder</c> = node entry id).</param>
 /// <param name="ConfirmedOtherOwners">Permits (<c>ownerKey</c> = permit id) whose rows the human agreed to replace; apply only.</param>
 /// <param name="ExpectedFingerprint">Fingerprint the preview showed; apply refuses a different plan (<c>regPlanChanged</c>).</param>
+/// <param name="RegionEntryId">
+/// ✎ AIR-ON-AIR (human 02.11): entry of the registry the REGION scope column points at (Registry kind; default <c>LAND_REGION</c>);
+/// also the form field <c>regionEntryId</c>. 422 when it is not an entry of that registry.
+/// </param>
+/// <param name="AreaEntryId">Entry of the registry of the AREA scope column (default <c>AIR_AREA</c>); optional; form field <c>areaEntryId</c>.</param>
 public sealed record AirLimitsImportOptions(
     string? ProfileCode,
     RegistryImportSpec? Spec,
@@ -67,7 +75,45 @@ public sealed record AirLimitsImportOptions(
     string? Area,
     IReadOnlyList<MissingResolution>? Resolutions,
     IReadOnlyList<string>? ConfirmedOtherOwners,
-    string? ExpectedFingerprint);
+    string? ExpectedFingerprint,
+    long? RegionEntryId = null,
+    long? AreaEntryId = null);
+
+/// <summary>One value the import wizard offers for a scope column, with the NAE tree scope it maps to.</summary>
+/// <param name="EntryId">Registry entry id (Registry kind: what <c>regionEntryId</c>/<c>areaEntryId</c> take); <c>null</c> for a List choice.</param>
+/// <param name="Code">Entry code (<c>REG_001</c>, <c>OFFSHORE</c>) or the choice text.</param>
+/// <param name="Name">Name (default language) or the choice text.</param>
+/// <param name="NaeRegion">NAE tree region code the value maps to (REGION column; by normalised name); <c>null</c> — not in the NAE tree.</param>
+/// <param name="NaeArea">
+/// NAE tree area code (AREA column; only where the tree region has areas: <c>Offshore</c> → <c>OFFSHORE</c>); <c>null</c> — match by
+/// region only.
+/// </param>
+public sealed record AirScopeEntryDto(long? EntryId, string Code, string Name, string? NaeRegion, string? NaeArea);
+
+/// <summary>
+/// ✎ AIR-ON-AIR: one scope column of the AIR permit's sources table (REGION or AREA) as configured on the AIR type with the SAME
+/// column settings as any permit-type column (data type + list scope): <c>Text</c> (String), <c>Registry</c> (Lookup, shared
+/// registry), <c>List</c> (Lookup, values of the type, entered separated by «;»).
+/// </summary>
+/// <param name="ColumnCode">Column code (<c>REGION</c>, <c>AREA</c>).</param>
+/// <param name="Kind"><c>Text</c>, <c>Registry</c> or <c>List</c>.</param>
+/// <param name="RegistryCode">Registry the value comes from (Registry: <c>LAND_REGION</c>, <c>AIR_AREA</c>; List: the type's own list registry).</param>
+/// <param name="Required">A value is required (REGION) or optional (AREA).</param>
+/// <param name="RegistryFound">The registry exists; <c>false</c> — empty state, the import cannot use this column's values.</param>
+/// <param name="Options">Values to pick from (Registry / List), by code; empty for Text.</param>
+public sealed record AirScopeFieldDto(
+    string ColumnCode,
+    string Kind,
+    string? RegistryCode,
+    bool Required,
+    bool RegistryFound,
+    IReadOnlyList<AirScopeEntryDto> Options);
+
+/// <summary>Result of <c>GET /api/v1/air-limits/scope-fields</c>: how the import scope is configured on the AIR type, with values.</summary>
+/// <param name="TypeCode">Permit type (<c>AIR</c>).</param>
+/// <param name="Region">The REGION scope column.</param>
+/// <param name="Area">The AREA scope column.</param>
+public sealed record AirScopeFieldsDto(string TypeCode, AirScopeFieldDto Region, AirScopeFieldDto Area);
 
 /// <summary>Result of <c>POST /api/v1/air-limits/import/analyse</c>: layout of the file, no database.</summary>
 /// <param name="ProfileCode">Profile used; <c>null</c> for an unsaved specification.</param>
@@ -81,13 +127,21 @@ public sealed record AirLimitsAnalysisDto(string? ProfileCode, ImportAnalysis An
 /// <param name="Area">Area code (<c>-</c> — none).</param>
 /// <param name="ProfileCode">Profile used; <c>null</c> for an unsaved specification.</param>
 /// <param name="Preview">Counts, findings (errors block, warnings do not), missing NAE and substances, replace scope, fingerprint.</param>
+/// <param name="RegionEntryId">Region registry entry the import is scoped to (stored on each source row).</param>
+/// <param name="AreaEntryId">Area registry entry; <c>null</c> — none.</param>
+/// <param name="ScopeInNaeTree">
+/// The region (and area) map to the NAE tree; <c>false</c> — «region/area not in NAE tree»: NAE codes are matched without the tree scope.
+/// </param>
 public sealed record AirLimitsPreviewDto(
     long PermitId,
     string PermitNumber,
     string Region,
     string Area,
     string? ProfileCode,
-    RegistryImportPreview Preview);
+    RegistryImportPreview Preview,
+    long? RegionEntryId = null,
+    long? AreaEntryId = null,
+    bool ScopeInNaeTree = true);
 
 /// <summary>Result of <c>POST /api/v1/permits/{permitId}/air-limits/import/apply</c>.</summary>
 /// <param name="PermitId">Permit.</param>
@@ -102,6 +156,8 @@ public sealed record AirLimitsPreviewDto(
 /// <param name="Diff">New / changed / unchanged / removed counts.</param>
 /// <param name="Fingerprint">Fingerprint of the applied plan (equals the preview's).</param>
 /// <param name="FileSha256">Hash of the uploaded file.</param>
+/// <param name="RegionEntryId">Region registry entry the import was scoped to.</param>
+/// <param name="AreaEntryId">Area registry entry; <c>null</c> — none.</param>
 public sealed record AirLimitsImportResultDto(
     long PermitId,
     string PermitNumber,
@@ -114,7 +170,9 @@ public sealed record AirLimitsImportResultDto(
     IReadOnlyList<OwnerReplace> ReplacedOthers,
     ImportDiffCounts Diff,
     string Fingerprint,
-    string FileSha256);
+    string FileSha256,
+    long? RegionEntryId = null,
+    long? AreaEntryId = null);
 
 /// <summary>One substance limit of a source.</summary>
 /// <param name="Id">Row id in <c>AIR_SOURCE_SUBSTANCES</c>.</param>
@@ -156,6 +214,10 @@ public sealed record AirSubstanceDto(
 /// <param name="X2">Coordinate X2.</param>
 /// <param name="Y2">Coordinate Y2.</param>
 /// <param name="Substances">Substances, by code.</param>
+/// <param name="RegionEntryId">Region registry entry of the import block this row came from.</param>
+/// <param name="RegionEntryCode">Its code (<c>REG_001</c>).</param>
+/// <param name="AreaEntryId">Area registry entry; <c>null</c> — none.</param>
+/// <param name="AreaEntryCode">Its code (<c>AREA_018</c>).</param>
 public sealed record AirSourceDto(
     long Id,
     long NaeEntryId,
@@ -178,7 +240,11 @@ public sealed record AirSourceDto(
     decimal? Y1,
     decimal? X2,
     decimal? Y2,
-    IReadOnlyList<AirSubstanceDto> Substances);
+    IReadOnlyList<AirSubstanceDto> Substances,
+    long? RegionEntryId = null,
+    string? RegionEntryCode = null,
+    long? AreaEntryId = null,
+    string? AreaEntryCode = null);
 
 /// <summary>Total of one substance over all sources of the permit (computed, never stored).</summary>
 /// <param name="SubstanceEntryId">Entry in the substance registry.</param>
