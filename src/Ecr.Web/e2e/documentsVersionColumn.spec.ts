@@ -328,8 +328,9 @@ test.describe('Documents list: Version column', () => {
     expect(requests[0]).toContain(`periodKey=${PeriodKey}`);
 
     await page.locator('[data-version-filter]').click();
-    const shown = await page.getByRole('option').allTextContents();
-    expect(shown.map((text) => text.replace(/^v/, '').trim()), 'варіанти фільтра ≠ версії сервера').toEqual(versions);
+    // Лише варіанти версій («v<версія>»): на сторінці є й інші списки (проєкт, власник) з власними пунктами.
+    const shown = (await page.getByRole('option').allTextContents()).map((text) => text.trim()).filter((text) => /^v\d/.test(text));
+    expect(shown.map((text) => text.replace(/^v/, '')), 'варіанти фільтра ≠ версії сервера').toEqual(versions);
   });
 
   for (const scheme of ['light', 'dark'] as const) {
