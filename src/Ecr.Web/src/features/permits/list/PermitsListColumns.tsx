@@ -6,6 +6,7 @@ import { formatDate } from '@/shared/format';
 import type { DataTableColumn } from '@/shared/ui/DataTable';
 import { TwoLine } from '@/shared/ui/TwoLine';
 import type { PermitListItem } from '../api/types';
+import { permitSheetBindingsEnabled } from '../permitFeatures';
 import { PermitStateBadge } from '../ui/PermitStateBadge';
 import {
   actionLabel,
@@ -15,6 +16,7 @@ import {
   permitTypeName,
   readByText,
   rowsText,
+  usedInText,
   type PermitAction,
 } from './permitsListModel';
 
@@ -137,12 +139,23 @@ export function permitColumns(
       sortValue: (item) => item.rowCount,
       render: (item) => rowsText(item),
     },
-    {
-      key: 'readBy',
-      label: t('permits.list.col.readBy'),
-      sortValue: (item) => item.boundSheetCount,
-      render: (item) => readByText(item),
-    },
+    // PERMIT-USAGE: «Read by» (аркуші з прив'язкою) сховано разом із прив'язками; на його місці — у скількох документах
+    // дозвіл обрано значенням (`usedInDocumentCount`). Колонок лишається ≤ 7 (`L5`).
+    permitSheetBindingsEnabled()
+      ? {
+          key: 'readBy',
+          label: t('permits.list.col.readBy'),
+          sortValue: (item) => item.boundSheetCount,
+          render: (item) => readByText(item),
+        }
+      : {
+          key: 'usedIn',
+          label: t('permits.usage.listColumn'),
+          title: t('permits.usage.listColumnHint'),
+          num: true,
+          sortValue: (item) => item.usedInDocumentCount,
+          render: (item) => usedInText(item),
+        },
     {
       key: 'state',
       label: t('permits.list.col.state'),

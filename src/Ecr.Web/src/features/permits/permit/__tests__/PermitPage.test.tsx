@@ -12,6 +12,7 @@ import { Catalog } from '@/test/__tests__/a11yFixtures';
 import { TestProviders } from '@/test/render';
 import * as permitsApi from '../../api/permitsApi';
 import * as typesApi from '../../api/typesApi';
+import { PermitSheetBindingsFlag } from '../../permitFeatures';
 import { LimitsRegistry, page, permit, permitType, rowsFor } from './permitFixtures';
 
 /**
@@ -265,12 +266,23 @@ describe('вкладки', () => {
     expect(title.tagName).toBe('H2');
   });
 
-  it('Overview: підсумки таблиць, Read by без листів, смуга чернетки', async () => {
+  it('Overview: підсумки таблиць, смуга чернетки; «Read by» (прив’язки) сховано прапорцем', async () => {
     await open();
     expect(screen.getByText('Draft - sheets do not read this permit yet')).toBeTruthy();
-    expect(screen.getByText('No sheet reads this permit yet.')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Read by' })).toBeNull();
+    expect(screen.queryByText('No sheet reads this permit yet.')).toBeNull();
     expect(screen.getByText('30')).toBeTruthy();
     expect(screen.getByText('2 rows')).toBeTruthy();
+  });
+
+  it('Overview з увімкненим прапорцем прив’язок: «Read by» без листів', async () => {
+    localStorage.setItem(PermitSheetBindingsFlag, 'on');
+    try {
+      await open();
+      expect(screen.getByText('No sheet reads this permit yet.')).toBeTruthy();
+    } finally {
+      localStorage.removeItem(PermitSheetBindingsFlag);
+    }
   });
 });
 

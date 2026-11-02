@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
@@ -7,6 +7,7 @@ import { PermitEditorHead, PermitStateStepper } from '../PermitEditorHead';
 import { PermitsSubnav, type PermitsSection } from '../PermitsSubnav';
 import { isPermitState, permitStateLabel, permitStateStep, permitStateTone, permitStates } from '../permitStatus';
 import { PermitStateBadge } from '../../ui/PermitStateBadge';
+import { PermitSheetBindingsFlag } from '../../permitFeatures';
 
 /**
  * Каркас Permits (PM-06): смуга розділів, шапка редактора, стани.
@@ -36,8 +37,25 @@ function show(node: ReactNode): void {
   );
 }
 
+describe('PermitsSubnav — «Sheet bindings» за прапорцем (PERMIT-USAGE п. 1)', () => {
+  it('типово (прапорець вимкнено) посилання на прив’язки немає', () => {
+    show(<PermitsSubnav current="permits" />);
+    const hrefs = screen.getAllByRole('link').map((a) => a.getAttribute('href'));
+    expect(hrefs).toEqual(['/admin/permits', '/admin/permits/types', '/admin/permits/lists', '/admin/permits/groups', '/admin/permits/nae']);
+  });
+
+  it('на самому розділі прив’язок (прийшли адресою) його посилання лишається поточним', () => {
+    show(<PermitsSubnav current="bindings" />);
+    expect(screen.getByRole('link', { name: 'text of permits.bindings.title' }).getAttribute('aria-current')).toBe('page');
+  });
+});
+
 describe('PermitsSubnav', () => {
   const sections: PermitsSection[] = ['permits', 'types', 'lists', 'groups', 'bindings', 'nae'];
+
+  // Решта перевірок — про смугу з УСІМА розділами, тобто з увімкненим прапорцем прив'язок.
+  beforeEach(() => localStorage.setItem(PermitSheetBindingsFlag, 'on'));
+  afterEach(() => localStorage.removeItem(PermitSheetBindingsFlag));
 
   it('шість посилань на свої адреси, в області з імʼям', () => {
     show(<PermitsSubnav current="permits" />);

@@ -108,7 +108,8 @@ describe('PermitsPage: дані', () => {
       'permits.list.col.type',
       'permits.list.col.validity',
       'permits.list.col.rows',
-      'permits.list.col.readBy',
+      // PERMIT-USAGE: «Read by» (прив'язки) сховано прапорцем; на його місці — «Used in documents».
+      'permits.usage.listColumn',
       'permits.list.col.state',
       'permits.list.col.actions',
     ]);
@@ -117,7 +118,10 @@ describe('PermitsPage: дані', () => {
     expect(first.textContent).toContain('Central processing facility');
     expect(first.textContent).toContain('Air emission permit');
     expect(first.textContent).toContain('permits.list.rowsMany {"rows":43,"tables":2}');
-    expect(first.textContent).toContain('permits.list.readByMany {"count":3}');
+    expect(first.textContent).not.toContain('permits.list.readByMany');
+    expect(within(first).getAllByRole('cell')[4]?.textContent).toBe('12');
+    // Ніде не використаний дозвіл — порожня клітинка, а не «0» (D15-06).
+    expect(within(bodyRows()[1]!).getAllByRole('cell')[4]?.textContent).toBe('');
     expect(first.textContent).toContain('permits.list.endsIn {"days":40}');
     expect(first.textContent).toContain('permits.state.Active');
 
