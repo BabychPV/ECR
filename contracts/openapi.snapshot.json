@@ -1885,6 +1885,14 @@
               }
             ]
           },
+          "columnScale": {
+            "description": "Масштаб колонки (`cfg.ColumnDef.Scale`): клієнт показує число з НЕ МЕНШЕ стількома знаками після коми, як\nсітка (U-05); `null` — масштабу не задано або колонки вже немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "documentBusinessKey": {
             "description": "Бізнес-ключ документа; `null` — документа вже немає.",
             "type": [
@@ -22066,6 +22074,14 @@
                 "$ref": "#/components/schemas/LocalizedText",
                 "description": "Лише правка: заголовок колонки."
               }
+            ]
+          },
+          "columnScale": {
+            "description": "Лише правка: масштаб колонки — значення показується з НЕ МЕНШЕ стількома знаками після коми, як у сітці (U-05);\n`null` — масштабу немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "fromState": {

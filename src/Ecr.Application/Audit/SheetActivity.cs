@@ -30,6 +30,10 @@ namespace Ecr.Application.Audit;
 /// <param name="FromState">Лише процес: стан до.</param>
 /// <param name="ToState">Лише процес: стан після.</param>
 /// <param name="Reason">Лише процес: коментар (причина відхилення, повернення, відкликання); звичайний текст.</param>
+/// <param name="ColumnScale">
+/// Лише правка: масштаб колонки — значення показується з НЕ МЕНШЕ стількома знаками після коми, як у сітці (U-05);
+/// <c>null</c> — масштабу немає.
+/// </param>
 public sealed record SheetActivityItem(
     string Kind,
     DateTime At,
@@ -49,7 +53,8 @@ public sealed record SheetActivityItem(
     string? Action,
     string? FromState,
     string? ToState,
-    string? Reason);
+    string? Reason,
+    int? ColumnScale = null);
 
 /// <summary>Сторінка журналу дій аркуша.</summary>
 /// <param name="Items">Рядки, найновіші перші.</param>
@@ -206,7 +211,7 @@ public sealed class SheetActivityQuery(
                     : c.ChangedByDisplayName ?? "#" + c.ChangedByUserId.ToString(CultureInfo.InvariantCulture),
                 c.Origin, c.PeriodKey, c.RowKey, c.RowLabelL10n, c.ColumnDefId, c.ColumnCode, c.ColumnHeaderL10n,
                 c.ColumnDataType, c.TableCode, c.TableNameL10n, c.OldValue, c.NewValue,
-                Action: null, FromState: null, ToState: null, Reason: null)))
+                Action: null, FromState: null, ToState: null, Reason: null, ColumnScale: c.ColumnScale)))
             .ToList();
 
         return (rows, result.NextCursor is not null);
