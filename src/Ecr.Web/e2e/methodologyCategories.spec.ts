@@ -139,7 +139,10 @@ test.describe('Methodology categories: list dialog, pick-list, filter, derived a
         data: { code: EditorRole, nameL10n: { en: 'E2E methodology editor' }, permissionCodes: EditorPermissions },
       });
       expect(role.ok(), `роль методолога: ${String(role.status())} ${await role.text()}`).toBe(true);
-      editorRoleId = ((await role.json()) as { id: number }).id;
+      // ⚠ Відповідь — `RoleIdResponse { roleId }`, не `{ id }`: інакше прибирання йшло б на `/roles/undefined`,
+      // і «404 = уже немає» мовчки лишало б роль на стенді.
+      editorRoleId = ((await role.json()) as { roleId: number }).roleId;
+      expect(Number.isInteger(editorRoleId) && editorRoleId > 0, `roleId ролі методолога: ${String(editorRoleId)}`).toBe(true);
       const user = await admin.request.post('/api/v1/users', {
         data: {
           userName: Editor.userName,
@@ -151,7 +154,9 @@ test.describe('Methodology categories: list dialog, pick-list, filter, derived a
         },
       });
       expect(user.ok(), `методолог: ${String(user.status())} ${await user.text()}`).toBe(true);
-      editorUserId = ((await user.json()) as { id: number }).id;
+      // ⚠ `UserIdResponse { userId }` (прогін 41395698466: `{ id }` дав `/users/undefined/roles` → 404).
+      editorUserId = ((await user.json()) as { userId: number }).userId;
+      expect(Number.isInteger(editorUserId) && editorUserId > 0, `userId методолога: ${String(editorUserId)}`).toBe(true);
       const first = await signedIn(browser, { userName: Editor.userName, password: Editor.issued });
       try {
         const changed = await first.request.post('/api/v1/auth/change-password', {
@@ -216,7 +221,8 @@ test.describe('Methodology categories: list dialog, pick-list, filter, derived a
     if (editorUserId !== 0) {
       try {
         const editor = await signedIn(browser, Editor);
-        await editor.request.put('/api/v1/me/preferences/theme', { headers: { 'Content-Type': 'application/json' }, data: JSON.stringify('light') });
+        const theme = await editor.request.put('/api/v1/me/preferences/theme', { headers: { 'Content-Type': 'application/json' }, data: JSON.stringify('light') });
+        if (!theme.ok()) problems.push(`тема методолога: ${String(theme.status())} ${(await theme.text()).slice(0, 300)}`);
         await editor.close();
       } catch (error) {
         problems.push(`тема методолога: ${String(error)}`);
@@ -232,11 +238,20 @@ test.describe('Methodology categories: list dialog, pick-list, filter, derived a
       // Користувач лишається без ролей (видалити його API не дає), тимчасова роль видаляється.
       if (editorUserId !== 0) {
         const stripped = await admin.request.put(`/api/v1/users/${String(editorUserId)}/roles`, { data: { roleCodes: [] } });
-        if (!stripped.ok()) problems.push(`ролі методолога: ${String(stripped.status())} ${(await stripped.text()).slice(0, 300)}`);
+        // 404 — користувача вже немає: прибирати нічого.
+        if (!stripped.ok() && stripped.status() !== 404) problems.push(`ролі методолога: ${String(stripped.status())} ${(await stripped.text()).slice(0, 300)}`);
       }
+      // ⚠ Роль — ПІСЛЯ зняття з користувача: роль із призначенням сервер не видаляє (409 ECR-SEC-0409).
       if (editorRoleId !== 0) {
         const removedRole = await admin.request.delete(`/api/v1/roles/${String(editorRoleId)}`);
         if (removedRole.status() >= 300 && removedRole.status() !== 404) problems.push(`роль: ${String(removedRole.status())} ${(await removedRole.text()).slice(0, 300)}`);
+      }
+      // Доказ, а не віра коду відповіді: тимчасової ролі в переліку більше немає.
+      const roles = await admin.request.get('/api/v1/roles');
+      if (!roles.ok()) {
+        problems.push(`перелік ролей: ${String(roles.status())}`);
+      } else if (((await roles.json()) as { code: string }[]).some((r) => r.code === EditorRole)) {
+        problems.push(`роль ${EditorRole} лишилась на стенді`);
       }
     } finally {
       await admin.close();
