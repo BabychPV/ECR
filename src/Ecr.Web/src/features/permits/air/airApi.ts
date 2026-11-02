@@ -6,6 +6,7 @@ import type {
   AirLimitsPermit,
   AirPreview,
   AirScopeCodes,
+  AirScopeFields,
   ImportProfile,
   ImportProfileSummary,
   NaeTree,
@@ -87,4 +88,9 @@ export function getNaeTree(): Promise<NaeTree> {
 /** Regions and areas of the NAE tree (with group names): the File step picks from them instead of free text. Registry.View. */
 export function getAirScopeCodes(): Promise<AirScopeCodes> {
   return apiFetch<AirScopeCodes>('/api/v1/air-limits/scope-codes');
+}
+
+/** AIR-ON-AIR: REGION / AREA scope columns of the AIR type (Text / Registry / List) with their values. Registry.View. */
+export function getAirScopeFields(): Promise<AirScopeFields> {
+  return apiFetch<AirScopeFields>('/api/v1/air-limits/scope-fields');
 }

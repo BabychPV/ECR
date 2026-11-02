@@ -19,7 +19,8 @@ public sealed class AirLimitsController(
     AirImportProfileHandler profiles,
     AirLimitsImportHandler import,
     GetAirLimitsPermitHandler permit,
-    GetAirScopeCodesHandler scopeCodes) : ControllerBase
+    GetAirScopeCodesHandler scopeCodes,
+    GetAirScopeFieldsHandler scopeFields) : ControllerBase
 {
     /// <summary>Largest accepted request body (the workbook is capped separately by the safety gate).</summary>
     public const long MaxImportBodyBytes = 30_000_000;
@@ -54,6 +55,17 @@ public sealed class AirLimitsController(
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<AirScopeCodesDto>> ScopeCodes(CancellationToken ct)
         => Ok(await scopeCodes.HandleAsync(ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// ✎ AIR-ON-AIR: the import scope columns REGION and AREA as configured on the AIR permit type (<c>Text</c>, <c>Registry</c>
+    /// or <c>List</c>) with the values to pick from, each mapped to the NAE tree. Permission <c>Registry.View</c>.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <remarks>A missing registry is not created: <c>registryFound = false</c>, no options (empty state).</remarks>
+    [HttpGet("air-limits/scope-fields")]
+    [ProducesResponseType<AirScopeFieldsDto>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<AirScopeFieldsDto>> ScopeFields(CancellationToken ct)
+        => Ok(await scopeFields.HandleAsync(ct).ConfigureAwait(false));
 
     /// <summary>Import profiles of the sources table. Permission <c>Registry.View</c>.</summary>
     /// <param name="ct">Cancellation token.</param>
@@ -114,6 +126,10 @@ public sealed class AirLimitsController(
     /// <param name="permitId">Permit (header registry entry id).</param>
     /// <param name="file">The <c>.xlsx</c> workbook.</param>
     /// <param name="request">JSON <see cref="AirLimitsImportOptions"/>: profile, region, area, decisions.</param>
+    /// <param name="regionEntryId">REGION scope value when the column is a Registry: entry id (422 if not in the registry).</param>
+    /// <param name="areaEntryId">AREA scope value when the column is a Registry: entry id; optional.</param>
+    /// <param name="region">REGION scope value when the column is Text or List (422 if not one of the List values).</param>
+    /// <param name="area">AREA scope value when the column is Text or List; optional.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <remarks>
     /// Errors block the apply (<c>canApply = false</c>); warnings (for example an empty <c>tonsPerYear</c>) are listed per row and do
@@ -126,10 +142,17 @@ public sealed class AirLimitsController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<AirLimitsPreviewDto>> Preview(
-        long permitId, IFormFile file, [FromForm] string? request, CancellationToken ct)
+        long permitId,
+        IFormFile file,
+        [FromForm] string? request,
+        [FromForm] long? regionEntryId,
+        [FromForm] long? areaEntryId,
+        [FromForm] string? region,
+        [FromForm] string? area,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
-        var options = ParseOptions(request);
+        var options = WithScope(ParseOptions(request), regionEntryId, areaEntryId, region, area);
         await using var stream = file.OpenReadStream();
         return Ok(await import.PreviewAsync(permitId, stream, options, ct).ConfigureAwait(false));
     }
@@ -141,6 +164,10 @@ public sealed class AirLimitsController(
     /// <param name="permitId">Permit (header registry entry id).</param>
     /// <param name="file">The same <c>.xlsx</c> workbook as in the preview.</param>
     /// <param name="request">JSON <see cref="AirLimitsImportOptions"/> with <c>confirmedOtherOwners</c> and <c>expectedFingerprint</c>.</param>
+    /// <param name="regionEntryId">REGION scope value (Registry column): entry id.</param>
+    /// <param name="areaEntryId">AREA scope value (Registry column): entry id; optional.</param>
+    /// <param name="region">REGION scope value (Text / List column).</param>
+    /// <param name="area">AREA scope value (Text / List column); optional.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <remarks>
     /// All or nothing: an error row, an unconfirmed replacement of another permit (<c>regReplaceNotConfirmed</c>) or a plan that
@@ -153,10 +180,17 @@ public sealed class AirLimitsController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<AirLimitsImportResultDto>> Apply(
-        long permitId, IFormFile file, [FromForm] string? request, CancellationToken ct)
+        long permitId,
+        IFormFile file,
+        [FromForm] string? request,
+        [FromForm] long? regionEntryId,
+        [FromForm] long? areaEntryId,
+        [FromForm] string? region,
+        [FromForm] string? area,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
-        var options = ParseOptions(request);
+        var options = WithScope(ParseOptions(request), regionEntryId, areaEntryId, region, area);
         await using var stream = file.OpenReadStream();
         return Ok(await import.ApplyAsync(permitId, stream, options, ct).ConfigureAwait(false));
     }
@@ -172,6 +206,20 @@ public sealed class AirLimitsController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AirLimitsPermitDto>> GetPermit(long permitId, CancellationToken ct)
         => Ok(await permit.HandleAsync(permitId, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// ✎ AIR-ON-AIR: the scope form fields (<c>regionEntryId</c>/<c>areaEntryId</c> for a Registry column, <c>region</c>/<c>area</c>
+    /// for Text/List) win over the same fields of the JSON part.
+    /// </summary>
+    private static AirLimitsImportOptions WithScope(
+        AirLimitsImportOptions options, long? regionEntryId, long? areaEntryId, string? region, string? area)
+        => options with
+        {
+            RegionEntryId = regionEntryId ?? options.RegionEntryId,
+            AreaEntryId = areaEntryId ?? options.AreaEntryId,
+            Region = string.IsNullOrWhiteSpace(region) ? options.Region : region,
+            Area = string.IsNullOrWhiteSpace(area) ? options.Area : area,
+        };
 
     private static AirLimitsImportOptions ParseOptions(string? json)
     {
