@@ -311,6 +311,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/air-limits/scope-fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * ✎ AIR-ON-AIR: the import scope columns REGION and AREA as configured on the AIR permit type (`Text`, `Registry`
+         *     or `List`) with the values to pick from, each mapped to the NAE tree. Permission `Registry.View`.
+         * @description A missing registry is not created: `registryFound = false`, no options (empty state).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirScopeFieldsDto"];
+                        "text/json": components["schemas"]["AirScopeFieldsDto"];
+                        "text/plain": components["schemas"]["AirScopeFieldsDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit/cells": {
         parameters: {
             query?: never;
@@ -13538,6 +13580,16 @@ export interface paths {
                         file?: components["schemas"]["IFormFile"];
                     } & {
                         request?: string;
+                    } & {
+                        /** Format: int64 */
+                        regionEntryId?: number;
+                    } & {
+                        /** Format: int64 */
+                        areaEntryId?: number;
+                    } & {
+                        region?: string;
+                    } & {
+                        area?: string;
                     };
                 };
             };
@@ -13615,6 +13667,16 @@ export interface paths {
                         file?: components["schemas"]["IFormFile"];
                     } & {
                         request?: string;
+                    } & {
+                        /** Format: int64 */
+                        regionEntryId?: number;
+                    } & {
+                        /** Format: int64 */
+                        areaEntryId?: number;
+                    } & {
+                        region?: string;
+                    } & {
+                        area?: string;
                     };
                 };
             };
@@ -25645,6 +25707,11 @@ export interface components {
             /** @description Area code. */
             area: string;
             /**
+             * Format: int64
+             * @description Area registry entry; `null` — none.
+             */
+            areaEntryId?: null | number;
+            /**
              * Format: int32
              * @description NAE nodes created in the tree.
              */
@@ -25664,6 +25731,11 @@ export interface components {
             permitNumber: string;
             /** @description Region code. */
             region: string;
+            /**
+             * Format: int64
+             * @description Region registry entry the import was scoped to.
+             */
+            regionEntryId?: null | number;
             /** @description Rows of OTHER permits that were replaced (confirmed), per permit. */
             replacedOthers: components["schemas"]["OwnerReplace"][];
             /**
@@ -25719,6 +25791,11 @@ export interface components {
             area: string;
             /**
              * Format: int64
+             * @description Area registry entry; `null` — none.
+             */
+            areaEntryId?: null | number;
+            /**
+             * Format: int64
              * @description Permit.
              */
             permitId: number;
@@ -25730,6 +25807,16 @@ export interface components {
             profileCode: null | string;
             /** @description Region code the import is scoped to. */
             region: string;
+            /**
+             * Format: int64
+             * @description Region registry entry the import is scoped to (stored on each source row).
+             */
+            regionEntryId?: null | number;
+            /**
+             * @description The region (and area) map to the NAE tree; `false` — «region/area not in NAE tree»: NAE codes are matched without the tree scope.
+             * @default true
+             */
+            scopeInNaeTree: boolean;
         };
         /** @description Result of `POST /api/v1/air-limits/provision`. */
         AirLimitsProvisionReport: {
@@ -25767,10 +25854,60 @@ export interface components {
             /** @description Regions, by code. */
             regions: components["schemas"]["AirRegionCodeDto"][];
         };
+        /** @description One value the import wizard offers for a scope column, with the NAE tree scope it maps to. */
+        AirScopeEntryDto: {
+            /** @description Entry code (`REG_001`, `OFFSHORE`) or the choice text. */
+            code: string;
+            /**
+             * Format: int64
+             * @description Registry entry id (Registry kind: what `regionEntryId`/`areaEntryId` take); `null` for a List choice.
+             */
+            entryId: null | number;
+            /** @description NAE tree area code (AREA column; only where the tree region has areas: `Offshore` → `OFFSHORE`); `null` — match by
+             *     region only. */
+            naeArea: null | string;
+            /** @description NAE tree region code the value maps to (REGION column; by normalised name); `null` — not in the NAE tree. */
+            naeRegion: null | string;
+            /** @description Name (default language) or the choice text. */
+            name: string;
+        };
+        /** @description ✎ AIR-ON-AIR: one scope column of the AIR permit's sources table (REGION or AREA) as configured on the AIR type with the SAME
+         *     column settings as any permit-type column (data type + list scope): `Text` (String), `Registry` (Lookup, shared
+         *     registry), `List` (Lookup, values of the type, entered separated by «;»). */
+        AirScopeFieldDto: {
+            /** @description Column code (`REGION`, `AREA`). */
+            columnCode: string;
+            /** @description `Text`, `Registry` or `List`. */
+            kind: string;
+            /** @description Values to pick from (Registry / List), by code; empty for Text. */
+            options: components["schemas"]["AirScopeEntryDto"][];
+            /** @description Registry the value comes from (Registry: `LAND_REGION`, `AIR_AREA`; List: the type's own list registry). */
+            registryCode: null | string;
+            /** @description The registry exists; `false` — empty state, the import cannot use this column's values. */
+            registryFound: boolean;
+            /** @description A value is required (REGION) or optional (AREA). */
+            required: boolean;
+        };
+        /** @description Result of `GET /api/v1/air-limits/scope-fields`: how the import scope is configured on the AIR type, with values. */
+        AirScopeFieldsDto: {
+            /** @description The AREA scope column. */
+            area: components["schemas"]["AirScopeFieldDto"];
+            /** @description The REGION scope column. */
+            region: components["schemas"]["AirScopeFieldDto"];
+            /** @description Permit type (`AIR`). */
+            typeCode: string;
+        };
         /** @description One source (NAE) of a permit with its substances. */
         AirSourceDto: {
             /** @description Area code (`-` — none). */
             area: null | string;
+            /** @description Its code (`AREA_018`). */
+            areaEntryCode?: null | string;
+            /**
+             * Format: int64
+             * @description Area registry entry; `null` — none.
+             */
+            areaEntryId?: null | number;
             /**
              * Format: decimal
              * @description Diameter, m.
@@ -25809,6 +25946,13 @@ export interface components {
             quantity: null | string;
             /** @description Region code. */
             region: null | string;
+            /** @description Its code (`REG_001`). */
+            regionEntryCode?: null | string;
+            /**
+             * Format: int64
+             * @description Region registry entry of the import block this row came from.
+             */
+            regionEntryId?: null | number;
             /** @description Production / site label from the group row of the file. */
             siteLabel: null | string;
             /** @description Source name. */

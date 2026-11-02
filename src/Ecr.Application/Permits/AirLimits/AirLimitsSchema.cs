@@ -7,7 +7,13 @@ namespace Ecr.Application.Permits.AirLimits;
 /// <summary>Registry codes the air-limits permit points at (configurable; tests use their own).</summary>
 /// <param name="NaeRegistryCode">NAE tree registry.</param>
 /// <param name="SubstanceRegistryCode">Substance registry (records <c>E&lt;code&gt;</c> with field <c>SUBSTANCE_CODE</c>).</param>
-public sealed record AirLimitsSettings(string NaeRegistryCode, string SubstanceRegistryCode)
+/// <param name="RegionRegistryCode">✎ AIR-ON-AIR: default registry of the REGION scope column (Land bootstrap: <c>LAND_REGION</c>).</param>
+/// <param name="AreaRegistryCode">Default registry of the AREA scope column (created by provisioning: <c>AIR_AREA</c>).</param>
+public sealed record AirLimitsSettings(
+    string NaeRegistryCode,
+    string SubstanceRegistryCode,
+    string RegionRegistryCode = AirLimitsSchema.DefaultRegionRegistry,
+    string AreaRegistryCode = AirLimitsSchema.DefaultAreaRegistry)
 {
     /// <summary>Production defaults.</summary>
     public static AirLimitsSettings Default { get; } = new(NaeTreeSchema.RegistryCode, AirLimitsSchema.DefaultSubstanceRegistry);
@@ -18,6 +24,21 @@ public static class AirLimitsSchema
 {
     /// <summary>Permit type code.</summary>
     public const string TypeCode = "AIR_LIMITS";
+
+    /// <summary>✎ AIR-ON-AIR: default Region registry (Land bootstrap; not created by us).</summary>
+    public const string DefaultRegionRegistry = "LAND_REGION";
+
+    /// <summary>✎ AIR-ON-AIR: default Area registry (OFFSHORE / ONSHORE), created by provisioning when absent.</summary>
+    public const string DefaultAreaRegistry = "AIR_AREA";
+
+    /// <summary>Scope kind: free text (String column).</summary>
+    public const string KindText = "Text";
+
+    /// <summary>Scope kind: entry of a shared registry (Lookup column, <c>SharedRegistry</c>).</summary>
+    public const string KindRegistry = "Registry";
+
+    /// <summary>Scope kind: one of the type's own values (Lookup column, <c>TypeOnly</c>; entered separated by «;»).</summary>
+    public const string KindList = "List";
 
     /// <summary>Table of sources (one row per NAE in the permit).</summary>
     public const string SourcesTable = "AIR_SOURCES";

@@ -120,6 +120,7 @@ export function preview(patch: Partial<AirPreview['preview']> = {}): AirPreview 
     permitNumber: 'KZ87VCZ14622157',
     region: 'ATYRAU',
     area: 'OFFSHORE',
+    scopeInNaeTree: true,
     profileCode: 'ERA_TABLE_33',
     preview: {
       canApply: true,

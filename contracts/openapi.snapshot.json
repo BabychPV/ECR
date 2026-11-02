@@ -318,6 +318,14 @@
             "description": "Area code.",
             "type": "string"
           },
+          "areaEntryId": {
+            "description": "Area registry entry; `null` — none.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "createdNae": {
             "description": "NAE nodes created in the tree.",
             "format": "int32",
@@ -347,6 +355,14 @@
           "region": {
             "description": "Region code.",
             "type": "string"
+          },
+          "regionEntryId": {
+            "description": "Region registry entry the import was scoped to.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "replacedOthers": {
             "description": "Rows of OTHER permits that were replaced (confirmed), per permit.",
@@ -458,6 +474,14 @@
             "description": "Area code (`-` — none).",
             "type": "string"
           },
+          "areaEntryId": {
+            "description": "Area registry entry; `null` — none.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "permitId": {
             "description": "Permit.",
             "format": "int64",
@@ -481,6 +505,19 @@
           "region": {
             "description": "Region code the import is scoped to.",
             "type": "string"
+          },
+          "regionEntryId": {
+            "description": "Region registry entry the import is scoped to (stored on each source row).",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "scopeInNaeTree": {
+            "default": true,
+            "description": "The region (and area) map to the NAE tree; `false` — «region/area not in NAE tree»: NAE codes are matched without the tree scope.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -587,6 +624,116 @@
         ],
         "type": "object"
       },
+      "AirScopeEntryDto": {
+        "description": "One value the import wizard offers for a scope column, with the NAE tree scope it maps to.",
+        "properties": {
+          "code": {
+            "description": "Entry code (`REG_001`, `OFFSHORE`) or the choice text.",
+            "type": "string"
+          },
+          "entryId": {
+            "description": "Registry entry id (Registry kind: what `regionEntryId`/`areaEntryId` take); `null` for a List choice.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "naeArea": {
+            "description": "NAE tree area code (AREA column; only where the tree region has areas: `Offshore` → `OFFSHORE`); `null` — match by\nregion only.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "naeRegion": {
+            "description": "NAE tree region code the value maps to (REGION column; by normalised name); `null` — not in the NAE tree.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "name": {
+            "description": "Name (default language) or the choice text.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entryId",
+          "code",
+          "name",
+          "naeRegion",
+          "naeArea"
+        ],
+        "type": "object"
+      },
+      "AirScopeFieldDto": {
+        "description": "✎ AIR-ON-AIR: one scope column of the AIR permit's sources table (REGION or AREA) as configured on the AIR type with the SAME\ncolumn settings as any permit-type column (data type + list scope): `Text` (String), `Registry` (Lookup, shared\nregistry), `List` (Lookup, values of the type, entered separated by «;»).",
+        "properties": {
+          "columnCode": {
+            "description": "Column code (`REGION`, `AREA`).",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`Text`, `Registry` or `List`.",
+            "type": "string"
+          },
+          "options": {
+            "description": "Values to pick from (Registry / List), by code; empty for Text.",
+            "items": {
+              "$ref": "#/components/schemas/AirScopeEntryDto"
+            },
+            "type": "array"
+          },
+          "registryCode": {
+            "description": "Registry the value comes from (Registry: `LAND_REGION`, `AIR_AREA`; List: the type's own list registry).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "registryFound": {
+            "description": "The registry exists; `false` — empty state, the import cannot use this column's values.",
+            "type": "boolean"
+          },
+          "required": {
+            "description": "A value is required (REGION) or optional (AREA).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "columnCode",
+          "kind",
+          "registryCode",
+          "required",
+          "registryFound",
+          "options"
+        ],
+        "type": "object"
+      },
+      "AirScopeFieldsDto": {
+        "description": "Result of `GET /api/v1/air-limits/scope-fields`: how the import scope is configured on the AIR type, with values.",
+        "properties": {
+          "area": {
+            "$ref": "#/components/schemas/AirScopeFieldDto",
+            "description": "The AREA scope column."
+          },
+          "region": {
+            "$ref": "#/components/schemas/AirScopeFieldDto",
+            "description": "The REGION scope column."
+          },
+          "typeCode": {
+            "description": "Permit type (`AIR`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "typeCode",
+          "region",
+          "area"
+        ],
+        "type": "object"
+      },
       "AirSourceDto": {
         "description": "One source (NAE) of a permit with its substances.",
         "properties": {
@@ -595,6 +742,21 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "areaEntryCode": {
+            "description": "Its code (`AREA_018`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "areaEntryId": {
+            "description": "Area registry entry; `null` — none.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "diameter": {
@@ -662,6 +824,21 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "regionEntryCode": {
+            "description": "Its code (`REG_001`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "regionEntryId": {
+            "description": "Region registry entry of the import block this row came from.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "siteLabel": {
@@ -28425,6 +28602,37 @@
         ]
       }
     },
+    "/api/v1/air-limits/scope-fields": {
+      "get": {
+        "description": "A missing registry is not created: `registryFound = false`, no options (empty state).",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirScopeFieldsDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirScopeFieldsDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirScopeFieldsDto"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "✎ AIR-ON-AIR: the import scope columns REGION and AREA as configured on the AIR permit type (`Text`, `Registry`\nor `List`) with the values to pick from, each mapped to the NAE tree. Permission `Registry.View`.",
+        "tags": [
+          "AirLimits"
+        ]
+      }
+    },
     "/api/v1/audit/cells": {
       "get": {
         "description": "Таблиця партиційована за `ChangedAt`, а не за періодом: місяць\nзміни і звітний період — різні осі (зміна за січень може статися в\nберезні). Тому запит **обов'язково** обмежений вікном часу — інакше він\nпіде по всіх партиціях.\n\n⚠ Одна дія, ДВА рівні доступу (D15-16). `documentId + rowKey +\ncolumnDefId` разом — це історія ОДНІЄЇ комірки, і її бачить той, хто\nбачить документ (`Document.View` плюс грант на проєкт). Будь-який\nширший запит — загальний журнал, і для нього поріг лишається\n`Security.ViewAudit`. Розділяти це на два маршрути означало б\nдублювати вікно, курсор і всі п'ять фільтрів заради різниці, яка\nвиражається самим фільтром.\n\n⚠ `rowKey`/`columnDefId` без `documentId` —\n`422 ECR-REQ-0422`: ключ рядка унікальний у межах екземпляра\nтаблиці, а не системи, тож без документа він не адресує нічого.\nРодина `REQ`, а не `AUD`/`CELL`: суб'єкт відмови —\nпараметр запиту, і саме так тут уже відмовляють обидві перевірки вікна.",
@@ -47221,6 +47429,40 @@
                       }
                     },
                     "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "regionEntryId": {
+                        "format": "int64",
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "areaEntryId": {
+                        "format": "int64",
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "region": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "area": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
                   }
                 ],
                 "type": "object"
@@ -47330,6 +47572,40 @@
                   {
                     "properties": {
                       "request": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "regionEntryId": {
+                        "format": "int64",
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "areaEntryId": {
+                        "format": "int64",
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "region": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "area": {
                         "type": "string"
                       }
                     },

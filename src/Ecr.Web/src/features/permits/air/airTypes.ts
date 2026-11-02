@@ -60,6 +60,8 @@ export interface SaveImportProfileRequest {
 /** Вузол плоского дерева НАЕ (`GET /registries/NAE_TREE/tree`). */
 export type AirScopeCodes = Schemas['AirScopeCodesDto'];
 export type AirRegionCode = Schemas['AirRegionCodeDto'];
+/** AIR-ON-AIR: REGION / AREA scope columns as configured on the AIR type (`GET /air-limits/scope-fields`). */
+export type AirScopeFields = Schemas['AirScopeFieldsDto'];
 
 export type NaeTreeNode = Schemas['RegistryTreeNodeDto'];
 export type NaeTree = Schemas['RegistryTreeDto'];
