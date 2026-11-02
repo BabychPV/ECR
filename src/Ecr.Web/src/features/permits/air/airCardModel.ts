@@ -85,3 +85,16 @@ export function filterSources(sources: readonly AirSource[], query: string): rea
 export function sourceKey(source: AirSource): string {
   return String(source.id);
 }
+
+/**
+ * AIR-ON-AIR: область рядка — код запису Region (Area) з імпорту (`regionEntryCode`/`areaEntryCode`), інакше текст REGION/AREA;
+ * ділянка `-` (без ділянки) не показується. Порожньо — прочерк.
+ */
+export function scopeLabel(source: AirSource): string {
+  const region = source.regionEntryCode ?? source.region;
+  const areaText = source.areaEntryCode ?? source.area;
+  const area = areaText === null || areaText === undefined || areaText === '' || areaText === '-' ? null : areaText;
+  if (region === null || region === undefined || region === '') return cell(area);
+
+  return area === null ? region : `${region} / ${area}`;
+}
