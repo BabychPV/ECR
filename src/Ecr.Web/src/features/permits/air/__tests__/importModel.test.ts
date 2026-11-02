@@ -26,8 +26,8 @@ const base: ImportDraft = { ...EmptyDraft, file: xlsx(), region: ' atyrau ', are
 const missing = preview().preview.missing;
 
 describe('buildOptions', () => {
-  it('регіон у верхньому регістрі, порожня ділянка - "-", профіль без специфікації', () => {
-    expect(buildOptions(base)).toEqual({ profileCode: 'ERA_TABLE_33', region: 'ATYRAU', area: '-' });
+  it('профіль без специфікації; область сюди не входить (AIR-ON-AIR: окремі поля форми)', () => {
+    expect(buildOptions(base)).toEqual({ profileCode: 'ERA_TABLE_33' });
   });
 
   it('незбережена специфікація перемагає профіль', () => {
@@ -120,13 +120,11 @@ describe('previewSignature', () => {
 });
 
 describe('крок 1', () => {
-  it('файл, розширення, регіон', () => {
+  it('файл і розширення (область перевіряє крок «Region and area»)', () => {
     expect(fileStepProblem(EmptyDraft)).toBe('file');
     expect(fileStepProblem({ ...base, file: xlsx('a.xls') })).toBe('extension');
-    expect(fileStepProblem({ ...base, region: '  ' })).toBe('region');
-    expect(fileStepProblem({ ...base, area: '' })).toBe('area');
-    expect(fileStepProblem({ ...base, area: '-' })).toBeNull(); // «-» - регіон без ділянок, вибір зі списку scope-codes
-    expect(fileStepProblem({ ...base, area: 'OFFSHORE' })).toBeNull();
+    expect(fileStepProblem({ ...base, region: '' })).toBeNull();
+    expect(fileStepProblem(base)).toBeNull();
   });
 
   it('нормалізація ділянки', () => {

@@ -5,7 +5,7 @@ import { readSeedSql } from '@/test/seedSql';
 
 /**
  * Ключі каталогу картки лімітів і майстра імпорту (NAE-план N3/N5): усе, що код просить у `t()` під `permits.air.*`
- * (і вкладка `permits.page.tabs.air`), є в секціях `COLL:ui-permit-card` / `COLL:ui-air-import` сіду трьома мовами,
+ * (і вкладка `permits.page.tabs.air`), є в секціях `COLL:ui-permit-card` / `COLL:ui-air-import` / `COLL:ui-air-params` сіду трьома мовами,
  * з однаковими підстановками; англійський текст без кирилиці; пар (ключ, мова) без дублів; зайвих ключів у секціях немає.
  */
 const webRoot = process.cwd();
@@ -34,7 +34,7 @@ for (const file of files) {
   }
 }
 
-const sectionNames = ['ui-permit-card', 'ui-air-import'];
+const sectionNames = ['ui-permit-card', 'ui-air-import', 'ui-air-params'];
 
 /** Рядки секцій за мовою: ключ -> тексти (кілька = дубль). */
 function rows(lang: 'en' | 'ru' | 'kz'): Map<string, string[]> {
@@ -95,8 +95,10 @@ describe('ключі permits.air.* у сіді', () => {
   });
 
   it('ключі не зустрічаються в сіді поза своїми секціями', () => {
+    // Рядки «старе → нове» секції «Змінені тексти наявних ключів» (AIR-ON-AIR перейменування) — не каталог, а оновлення.
     const outside = seed
-      .replace(/-- COLL:(ui-permit-card|ui-air-import) ── (?:en|ru\/kz):[\s\S]*?-- COLL:\1 ── кінець секції ──/g, '');
+      .replace(/-- COLL:(ui-permit-card|ui-air-import|ui-air-params) ── (?:en|ru\/kz):[\s\S]*?-- COLL:\1 ── кінець секції ──/g, '')
+      .replace(/-- ── Змінені тексти наявних ключів[\s\S]*?SET @textUpdates = @@ROWCOUNT;/, '');
     expect(outside).not.toMatch(/N'permits\.air\./);
     expect(outside).not.toMatch(/N'permits\.page\.tabs\.air'/);
   });

@@ -41,9 +41,6 @@ export interface MissingResolutionRequest {
 export interface AirImportOptions {
   readonly profileCode?: string;
   readonly spec?: ImportSpec;
-  readonly region?: string;
-  /** Код ділянки; `-` — регіон без ділянок. */
-  readonly area?: string;
   readonly resolutions?: readonly MissingResolutionRequest[];
   /** `ownerKey` (id дозволу текстом) дозволів, чиї рядки людина погодилась замінити; лише `apply`. */
   readonly confirmedOtherOwners?: readonly string[];
@@ -62,6 +59,8 @@ export type AirScopeCodes = Schemas['AirScopeCodesDto'];
 export type AirRegionCode = Schemas['AirRegionCodeDto'];
 /** AIR-ON-AIR: REGION / AREA scope columns as configured on the AIR type (`GET /air-limits/scope-fields`). */
 export type AirScopeFields = Schemas['AirScopeFieldsDto'];
+export type AirScopeField = Schemas['AirScopeFieldDto'];
+export type AirScopeEntry = Schemas['AirScopeEntryDto'];
 
 export type NaeTreeNode = Schemas['RegistryTreeNodeDto'];
 export type NaeTree = Schemas['RegistryTreeDto'];
