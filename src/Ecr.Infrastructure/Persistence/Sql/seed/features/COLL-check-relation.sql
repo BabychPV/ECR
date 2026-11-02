@@ -9,3 +9,12 @@ OPTION (RECOMPILE);
 GO
 -- COLL:check-relation ── кінець секції ──
 
+-- COLL:check-relation ── Підказка MapJson для виду зв'язку Check: поле обов'язкове (RelationSpecParser.ParseCheck) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'tables.mapJsonCheckHint', N'en', N'Required for Check: a JSON object with "left" (source column) and "right" (target column); optional "tolerance", "toleranceKind" (abs or rel) and "severity" (Warn, Block or Info).', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:check-relation ── кінець секції ──

@@ -22,3 +22,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:cellstyle ── кінець секції ──
+-- COLL:cellstyle ── CELL-STYLE L3a (12.10): користувацька заливка/колір тексту/жирність комірок; ru/kz — порцією COLL:cellstyle нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-CELL-4224', N'en', N'Invalid cell formatting', 1),
+    (N'err.ECR-CELL-4224.tooManyItems', N'en', N'Too many cells in one request: {count} (the limit is {max}). Apply the formatting in smaller parts.', 1),
+    (N'err.ECR-CELL-4224.unknownCell', N'en', N'Some cells are not in this table or are not available to you: {cellCount}. Reload the table and try again.', 1),
+    (N'err.ECR-CELL-4224.duplicateCell', N'en', N'The same cell is listed twice: row {rowKey}, column {columnCode}.', 1),
+    (N'err.ECR-CELL-4224.invalidColor', N'en', N'The color must be written as #rrggbb (row {rowKey}, column {columnCode}).', 1),
+    (N'err.ECR-CELL-4224.emptyChange', N'en', N'Nothing to apply for row {rowKey}, column {columnCode}: set a fill, a text color or bold, or reset the formatting.', 1),
+    (N'audit.eventLabel.CellStyleSet', N'en', N'Cell formatting set', 1),
+    (N'audit.eventLabel.CellStyleReset', N'en', N'Cell formatting reset', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:cellstyle ── кінець секції ──

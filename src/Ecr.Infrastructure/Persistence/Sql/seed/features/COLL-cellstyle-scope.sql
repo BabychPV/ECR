@@ -17,3 +17,16 @@ OPTION (RECOMPILE);
 GO
 -- COLL:cellstyle-scope ── кінець секції ──
 
+-- COLL:cellstyle-scope ── CELL-STYLE «область»: фарбування рядків × колонок одним запитом; ru/kz — порцією COLL:cellstyle-scope нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-CELL-4224.scopeRows', N'en', N'Formatting by area: pass either a list of row keys or "all rows", not both and not neither.', 1),
+    (N'err.ECR-CELL-4224.scopeColumns', N'en', N'Formatting by area: pass either a list of column codes or "all columns", not both and not neither.', 1),
+    (N'err.ECR-CELL-4224.scopeInvalidColor', N'en', N'Formatting by area: the color must be written as #rrggbb.', 1),
+    (N'err.ECR-CELL-4224.scopeEmptyChange', N'en', N'Formatting by area: nothing to apply. Set a fill, a text color or bold, or reset the formatting.', 1),
+    (N'err.ECR-CELL-4224.tooManyCells', N'en', N'The area covers {count} cells; one request can format at most {max}. Format the table in parts.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:cellstyle-scope ── кінець секції ──

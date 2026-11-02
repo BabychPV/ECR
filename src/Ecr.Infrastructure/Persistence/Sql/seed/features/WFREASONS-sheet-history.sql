@@ -38,3 +38,27 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- WFREASONS:sheet-history ── кінець секції ──
+-- WFREASONS:sheet-history ── en: Inspector → History без вибраної комірки показує журнал погодження аркуша; ru/kz — порцією WFREASONS:sheet-history нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'inspector.sheetHistoryTitle', N'en', N'Sheet log', 1),
+    (N'inspector.sheetHistoryHint', N'en', N'Select a cell to enable “This cell”.', 1),
+    (N'inspector.sheetHistoryEmpty', N'en', N'No edits or approval actions on this sheet yet.', 1),
+    (N'inspector.history.modeLabel', N'en', N'What the history shows', 1),
+    (N'inspector.history.modeSheet', N'en', N'Sheet log', 1),
+    (N'inspector.history.modeCell', N'en', N'This cell', 1),
+    (N'inspector.history.scopeSheet', N'en', N'Sheet: {sheet} · {period}', 1),
+    (N'inspector.history.scopeCell', N'en', N'Cell: {cell} · {column}', 1),
+    (N'inspector.history.includeSystem', N'en', N'Include system changes', 1),
+    (N'inspector.history.loadMore', N'en', N'Load more', 1),
+    (N'workflow.eventAction.Submit', N'en', N'Submitted', 1),
+    (N'workflow.eventAction.Approve', N'en', N'Approved', 1),
+    (N'workflow.eventAction.ApproveStep', N'en', N'Approved a step', 1),
+    (N'workflow.eventAction.Reject', N'en', N'Rejected', 1),
+    (N'workflow.eventAction.Reopen', N'en', N'Returned for edits', 1),
+    (N'workflow.eventAction.Recall', N'en', N'Recalled', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- WFREASONS:sheet-history ── кінець секції ──

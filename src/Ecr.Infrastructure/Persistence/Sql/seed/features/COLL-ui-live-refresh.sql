@@ -21,3 +21,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-live-refresh ── кінець секції ──
+-- COLL:ui-live-refresh ── en: живе оновлення (LIVE-REFRESH): «N нових» у чаті таблиці, «Refresh»/Shift+F5 і банер «Updated by» над аркушем; ru/kz — порцією COLL:ui-live-refresh нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'tableChat.newBelow', N'en', N'New messages: {n}', 1),
+    (N'liveRefresh.refresh', N'en', N'Refresh', 1),
+    (N'liveRefresh.refreshTitle', N'en', N'Re-read the tables of this sheet from the server (Shift+F5). Your unsaved edits are kept.', 1),
+    (N'liveRefresh.updatedBy', N'en', N'Updated by {user} at {time}', 1),
+    (N'liveRefresh.updatedByOther', N'en', N'Updated by another user at {time}', 1),
+    (N'liveRefresh.updatedNoTime', N'en', N'This sheet was updated by another user', 1),
+    (N'grid.keys.refresh', N'en', N'Re-read the tables from the server', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-live-refresh ── кінець секції ──

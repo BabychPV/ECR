@@ -12,3 +12,14 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: lookup-prm ── кінець секції ──
+-- PERMITS: lookup-prm ── en: шапка типу дозволу як ціль Lookup поля шапки й колонки шаблону; ru/kz — порцією PERMITS: lookup-prm нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'registries.permitHeaderOption', N'en', N'Permits: {name} ({code})', 1),
+    (N'registries.lookupGroup.permits', N'en', N'Permits', 1),
+    (N'registries.lookupGroup.dictionaries', N'en', N'Dictionaries', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: lookup-prm ── кінець секції ──

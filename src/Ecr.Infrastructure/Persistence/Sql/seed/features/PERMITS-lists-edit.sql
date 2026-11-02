@@ -34,3 +34,25 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: lists-edit ── кінець секції ──
+-- PERMITS: lists-edit ── en: PM-08e, запис значень списків: шторка екрана «Lists» і «Add a value» у формі рядка дозволу; ru/kz — порцією PERMITS: lists-edit нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'permits.lists.editable', N'en', N'Open a list to add, rename or remove its values. A value of a shared list that permits still use cannot be removed.', 1),
+    (N'permits.lists.drawer.note.typeEditable', N'en', N'Only {owner} sees these values. A change applies at once to the published type and to its open draft.', 1),
+    (N'permits.lists.drawer.add.label', N'en', N'New value', 1),
+    (N'permits.lists.drawer.add.submit', N'en', N'Add value', 1),
+    (N'permits.lists.drawer.edit.label', N'en', N'Value', 1),
+    (N'permits.lists.drawer.edit.save', N'en', N'Save', 1),
+    (N'permits.lists.drawer.edit.cancel', N'en', N'Cancel', 1),
+    (N'permits.lists.drawer.rename', N'en', N'Rename', 1),
+    (N'permits.lists.drawer.renameAria', N'en', N'Rename {value}', 1),
+    (N'permits.lists.drawer.remove', N'en', N'Remove', 1),
+    (N'permits.lists.drawer.removeAria', N'en', N'Remove {value}', 1),
+    (N'permits.lists.drawer.added', N'en', N'Value added', 1),
+    (N'permits.lists.drawer.renamed', N'en', N'Value renamed', 1),
+    (N'permits.lists.drawer.removed', N'en', N'Value removed', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: lists-edit ── кінець секції ──

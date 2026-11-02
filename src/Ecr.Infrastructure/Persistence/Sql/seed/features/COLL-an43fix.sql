@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an43fix ── кінець секції ──
+-- COLL:an43fix ── D-285: окремий текст відмови подання (reasonKey deny.InsufficientGrantLevel.Submit); ru/kz — порцією COLL:an43fix у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'deny.InsufficientGrantLevel.Submit', N'en', N'Your access level is too low to submit this sheet: you need the Submit level, or the Write level together with the Submit documents right in this project. Ask an administrator to raise the level or grant the right.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an43fix ── кінець секції ──

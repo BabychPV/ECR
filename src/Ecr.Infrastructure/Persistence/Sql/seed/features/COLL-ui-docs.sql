@@ -37,3 +37,26 @@ OPTION (RECOMPILE);
 GO
 -- COLL:ui-docs ── кінець секції ──
 
+-- COLL:ui-docs ── UI-19/UI-29/UI-18: колонки переліку документів, смужка аркушів, швидкий перегляд, Clear filters; ru/kz — порцією COLL:ui-docs у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'segments.approvedOf', N'en', N'{done} of {total} approved', 1),
+    (N'documents.document', N'en', N'Document', 1),
+    (N'documents.issues', N'en', N'Issues', 1),
+    (N'documents.issuesHint', N'en', N'Open validation errors: {count}', 1),
+    (N'documents.updated', N'en', N'Updated', 1),
+    (N'documents.quickLookColumn', N'en', N'Quick look', 1),
+    (N'documents.quickLook', N'en', N'Quick look at {key}', 1),
+    (N'documents.quickLookClose', N'en', N'Close quick look', 1),
+    (N'documents.openDocument', N'en', N'Open document', 1),
+    (N'documents.quickLookNoPeriod', N'en', N'Choose a period to see sheet states and filled tables.', 1),
+    (N'documents.quickLookResponsible', N'en', N'Responsible', 1),
+    (N'documents.lastChangedBy', N'en', N'Last changed by', 1),
+    (N'documents.quickLookTablesFilled', N'en', N'{filled} of {total} tables filled', 1),
+    (N'documents.quickLookLatestChanges', N'en', N'Latest changes', 1),
+    (N'documents.clearFilters', N'en', N'Clear filters', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-docs ── кінець секції ──

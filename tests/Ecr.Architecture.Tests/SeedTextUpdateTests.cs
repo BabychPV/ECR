@@ -142,17 +142,14 @@ public sealed partial class SeedTextUpdateTests
         return row.Matches(text[start..end]);
     }
 
-    /// <summary>Рядки <c>MERGE sys_ecr.UiString AS t</c>: (ключ, мова) → значення.</summary>
+    /// <summary>Рядки en-каталогу (порції <c>INSERT INTO #UiEn</c>) і перекладів: (ключ, мова) → значення.</summary>
     private static Dictionary<(string, string), string> CatalogRows(string text)
     {
-        var start = text.IndexOf("MERGE sys_ecr.UiString AS t", StringComparison.Ordinal);
-        Assert.True(start >= 0, $"У {SeedFile} немає блоку MERGE sys_ecr.UiString AS t.");
-
-        var end = text.IndexOf("WHEN NOT MATCHED", start, StringComparison.Ordinal);
-        Assert.True(end > start, $"Блок MERGE sys_ecr.UiString AS t у {SeedFile} не закінчується.");
+        var block = SeedSql.EnCatalogOf(text);
+        Assert.True(block.Length > 0, $"У {SeedFile} немає порцій en-каталогу ({SeedSql.EnCatalogInsert}).");
 
         var rows = new Dictionary<(string, string), string>();
-        foreach (Match m in CatalogRow().Matches(text[start..end]))
+        foreach (Match m in CatalogRow().Matches(block))
         {
             rows[(Unquote(m.Groups[1].Value), m.Groups[2].Value)] = Unquote(m.Groups[3].Value);
         }

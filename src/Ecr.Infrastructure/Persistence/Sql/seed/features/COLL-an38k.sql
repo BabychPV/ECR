@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an38k ── кінець секції ──
+-- COLL:an38k ── L4-06/L5-03: первинний ключ на записах без значення частини; ru/kz — порцією COLL:an38k у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REG-0422.primaryKeyEmptyParts', N'en', N'Primary key {key} cannot be enabled: {entries} entries have no value in a part of the key. Fill it in or delete those entries first.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an38k ── кінець секції ──

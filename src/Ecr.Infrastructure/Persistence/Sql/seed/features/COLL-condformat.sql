@@ -16,3 +16,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:condformat ── кінець секції ──
+-- COLL:condformat ── Правила умовного форматування версії шаблону: відмови PUT …/conditional-formats (ФВ-2.6/2.7, `ConditionalFormatRule`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-CFG-0422.condFormatOperator', N'en', N'Conditional format rule {index} (column {columnCode}): unknown operator {operator}.', 1),
+    (N'err.ECR-CFG-0422.condFormatOperand', N'en', N'Conditional format rule {index} (column {columnCode}): operator {operator} needs numeric value(s) up to 64 characters.', 1),
+    (N'err.ECR-CFG-0422.condFormatColor', N'en', N'Conditional format rule {index} (column {columnCode}): colour must be #rrggbb.', 1),
+    (N'err.ECR-CFG-0422.condFormatColumn', N'en', N'Conditional format rule {index}: column {columnCode} does not exist in this template version.', 1),
+    (N'err.ECR-CFG-0422.condFormatLimit', N'en', N'Too many conditional format rules: at most {max} per template version.', 1)
+    -- ru/kz — окремою порцією `COLL:condformat` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:condformat ── кінець секції ──

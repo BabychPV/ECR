@@ -9,3 +9,12 @@ OPTION (RECOMPILE);
 GO
 -- COLL:r7y5-02-ambiguous-date ── кінець секції ──
 
+-- COLL:r7y5-02-ambiguous-date ── R7-Y5 / Y5-02: неоднозначна слеш-дата (4/1/2024) у CSV довідника — відмова з порадою РРРР-ММ-ДД, а не переставлені день і місяць; ru/kz — порцією COLL:r7y5-02-ambiguous-date нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REG-0422.valueAmbiguousDate', N'en', N'The date "{value}" is ambiguous: its day and month can be swapped (Excel writes dates in the format of your regional settings). Write the date as YYYY-MM-DD.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y5-02-ambiguous-date ── кінець секції ──

@@ -9,3 +9,13 @@ OPTION (RECOMPILE);
 GO
 -- COLL:fv812-ifmatch ── кінець секції ──
 
+-- COLL:fv812-ifmatch ── обов'язковий If-Match на PUT опису довідника ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.definitionVersionRequired', N'en', N'Saving a registry definition needs an If-Match header carrying the definition version you read. Reload the definition and save again.', 1)
+    -- ru/kz — окремою порцією COLL:fv812-ifmatch у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:fv812-ifmatch ── кінець секції ──

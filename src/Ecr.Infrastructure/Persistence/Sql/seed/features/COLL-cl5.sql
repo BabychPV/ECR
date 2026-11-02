@@ -9,3 +9,12 @@ OPTION (RECOMPILE);
 GO
 -- COLL:cl5 ── кінець секції ──
 
+-- COLL:cl5 ── CL-5: картка jobs жовтіє, коли останнє зведення збоїв нікому не доставлено; ru/kz — порцією COLL:cl5 у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'health.jobs.notificationsUndelivered', N'en', N'The last failure digest reached no one: {count} failures, 0 sent. Check the mail server settings, notification channels and alert recipients.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:cl5 ── кінець секції ──

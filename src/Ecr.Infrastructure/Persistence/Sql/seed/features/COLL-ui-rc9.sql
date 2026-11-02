@@ -52,3 +52,34 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-rc9 ── кінець секції ──
+-- COLL:ui-rc9 ── UI RC9: пошук/проєкт/автори у Documents; назви розмірностей (en); ru/kz — порцією COLL:ui-rc9 нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'documents.search', N'en', N'Search', 1),
+    (N'documents.searchPlaceholder', N'en', N'Document name or key', 1),
+    (N'documents.projectAll', N'en', N'All projects', 1),
+    (N'documents.ownersAll', N'en', N'Everyone’s documents', 1),
+    (N'units.dim.Mass', N'en', N'Mass', 1),
+    (N'units.dim.Volume', N'en', N'Volume', 1),
+    (N'units.dim.Energy', N'en', N'Energy', 1),
+    (N'units.dim.Time', N'en', N'Time', 1),
+    (N'units.dim.Temperature', N'en', N'Temperature', 1),
+    (N'units.dim.Amount', N'en', N'Amount of substance', 1),
+    (N'units.dim.Dimensionless', N'en', N'Dimensionless', 1),
+    (N'units.dim.MassFlow', N'en', N'Mass flow', 1),
+    (N'units.dim.MassPerMass', N'en', N'Mass per mass', 1),
+    (N'units.dim.MassPerEnergy', N'en', N'Mass per energy', 1),
+    (N'units.dim.MassPerVolume', N'en', N'Mass per volume', 1),
+    (N'units.dim.StdVolume', N'en', N'Standard volume', 1),
+    (N'units.dim.StdVolumeFlow', N'en', N'Standard volume flow', 1),
+    (N'units.dim.Velocity', N'en', N'Velocity', 1),
+    (N'units.dim.Area', N'en', N'Area', 1),
+    (N'units.dim.MassPerStdVolume', N'en', N'Mass per standard volume', 1),
+    (N'units.dim.EnergyPerStdVolume', N'en', N'Energy per standard volume', 1),
+    (N'units.dim.EnergyPerMass', N'en', N'Energy per mass', 1),
+    (N'units.dim.MassPerAmount', N'en', N'Mass per amount of substance', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-rc9 ── кінець секції ──

@@ -9,3 +9,12 @@ OPTION (RECOMPILE);
 GO
 -- COLL:an120-snapshot-ceiling ── кінець секції ──
 
+-- COLL:an120-snapshot-ceiling ── AN-120 / L1-01: рядків зрізу (після правил відбору) більше за стелю — відмова, а не обрізання; ru/kz — порцією COLL:an120-snapshot-ceiling нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-RPT-0422.snapshotTooLarge', N'en', N'The snapshot of project {projectId} for period {periodKey} has more than {limit} rows after the selection rules. It was not built, because a partial snapshot would look complete; the previous snapshot stays current. Narrow the report with its selection rules or build it per period.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an120-snapshot-ceiling ── кінець секції ──

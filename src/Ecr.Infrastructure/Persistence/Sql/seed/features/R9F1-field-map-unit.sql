@@ -9,3 +9,13 @@ OPTION (RECOMPILE);
 GO
 -- R9F1:fieldMapUnit ── кінець секції ──
 
+-- R9F1:fieldMapUnit ── F1-02: ціль мапінгу у колонку з одиницею — одиниця колонки (`CreateEntityFieldMapHandler.ApplyUnitsAsync`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.fieldMapTargetNotColumnUnit', N'en', N'The target unit of the mapping must be the unit of the column: the cell stores its value in that unit.', 1)
+    -- ru/kz — окремою порцією `R9F1:fieldMapUnit` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- R9F1:fieldMapUnit ── кінець секції ──

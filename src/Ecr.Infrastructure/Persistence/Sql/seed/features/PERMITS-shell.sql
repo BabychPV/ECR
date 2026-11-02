@@ -99,3 +99,57 @@ OPTION (RECOMPILE);
 GO
 -- PERMITS: shell ── кінець секції ──
 
+-- PERMITS: shell ── PM-06: каркас розділу Permits (меню, смуга розділів, порожні стани, широка таблиця); ru/kz — порцією PERMITS: shell нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'nav.permits', N'en', N'Permits', 1),
+    (N'nav.permits.description', N'en', N'Environmental permits with their limits, volumes and storage places. Sheets read the permit directly, so limits are never retyped.', 1),
+    (N'permits.nav.aria', N'en', N'Permits sections', 1),
+    (N'permits.types.title', N'en', N'Permit types', 1),
+    (N'permits.types.description', N'en', N'A type says what a permit contains: its fields and its tables with their columns.', 1),
+    (N'permits.lists.title', N'en', N'Lists', 1),
+    (N'permits.lists.description', N'en', N'The pick-lists behind permit columns: shared by many types, for one type only, or a table of the permit itself.', 1),
+    (N'permits.bindings.title', N'en', N'Sheet bindings', 1),
+    (N'permits.bindings.description', N'en', N'Tell a sheet table which permit table to read. Its rows and limits then come from the permit valid in the period.', 1),
+    (N'permits.typeEditor.title', N'en', N'Permit type', 1),
+    (N'permits.binding.title', N'en', N'Sheet binding', 1),
+    (N'permits.detail.title', N'en', N'Permit', 1),
+    (N'permits.state.Draft', N'en', N'Draft', 1),
+    (N'permits.state.Active', N'en', N'Active', 1),
+    (N'permits.state.Expired', N'en', N'Expired', 1),
+    (N'permits.state.aria', N'en', N'Permit state', 1),
+    (N'permits.empty.title', N'en', N'No permits yet', 1),
+    (N'permits.empty.hint', N'en', N'Add the first permit by hand or import the yearly Excel report your team keeps today.', 1),
+    (N'permits.empty.new', N'en', N'New permit', 1),
+    (N'permits.empty.import', N'en', N'Import from Excel', 1),
+    (N'permits.types.empty.title', N'en', N'No permit types yet', 1),
+    (N'permits.types.empty.hint', N'en', N'Create a type, add its tables and columns, publish it. Then permits of that type can be entered.', 1),
+    (N'permits.types.new', N'en', N'New type', 1),
+    (N'permits.lists.empty.title', N'en', N'No lists yet', 1),
+    (N'permits.lists.empty.hint', N'en', N'Lists appear when a permit column is set to pick from a registry or a list.', 1),
+    (N'permits.bindings.empty.title', N'en', N'No bindings yet', 1),
+    (N'permits.bindings.empty.hint', N'en', N'A binding connects a sheet table to a permit table. Create one to see limits next to the figures people enter.', 1),
+    (N'permits.bindings.new', N'en', N'New binding', 1),
+    (N'permits.unavailable', N'en', N'These actions need the permits service, which is not connected to this system yet.', 1),
+    (N'permits.detail.emptyTitle', N'en', N'This permit cannot be shown yet', 1),
+    (N'permits.detail.emptyHint', N'en', N'Permit details need the permits service, which is not connected to this system yet.', 1),
+    (N'permits.typeEditor.emptyTitle', N'en', N'This permit type cannot be shown yet', 1),
+    (N'permits.typeEditor.emptyHint', N'en', N'The type constructor needs the permits service, which is not connected to this system yet.', 1),
+    (N'permits.binding.emptyTitle', N'en', N'This binding cannot be shown yet', 1),
+    (N'permits.binding.emptyHint', N'en', N'Sheet bindings need the permits service, which is not connected to this system yet.', 1),
+    (N'permits.back.permits', N'en', N'Back to Permits', 1),
+    (N'permits.back.types', N'en', N'Back to Permit types', 1),
+    (N'permits.back.bindings', N'en', N'Back to Sheet bindings', 1),
+    (N'permits.table.columns', N'en', N'Columns', 1),
+    (N'permits.table.grouped', N'en', N'Grouped', 1),
+    (N'permits.table.allColumns', N'en', N'All columns', 1),
+    (N'permits.table.required', N'en', N'Required', 1),
+    (N'permits.table.yes', N'en', N'Yes', 1),
+    (N'permits.table.no', N'en', N'No', 1),
+    (N'permits.table.sumOf', N'en', N'Σ of {count}', 1),
+    (N'permits.table.groupCount', N'en', N'Columns: {count}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: shell ── кінець секції ──

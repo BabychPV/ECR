@@ -41,3 +41,29 @@ OPTION (RECOMPILE);
 GO
 -- COLL:d212-ui ── кінець секції ──
 
+-- COLL:d212-ui ── Форма політики синку довідника з AF і позначка «зникло з джерела» (D-212 PR-8, `RegistrySyncPolicyModal`, `RegistryExternalKeysPanel`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'sources.syncPolicy',                     N'en', N'Sync policy', 1),
+    (N'sources.syncPolicyTitle',                N'en', N'Registry sync policy: {entity}', 1),
+    (N'sources.syncPolicyHint',                 N'en', N'How registry sync treats elements of this entity that disappear from the source, and which element attributes carry the validity dates of a record.', 1),
+    (N'sources.syncPolicyMissing',              N'en', N'When an element disappears from the source', 1),
+    (N'sources.syncPolicyMarkOrphaned',         N'en', N'Mark as missing', 1),
+    (N'sources.syncPolicyMarkOrphanedHint',     N'en', N'The record stays active; its link is marked missing in source since the run date, and an event is written.', 1),
+    (N'sources.syncPolicyIgnore',               N'en', N'Only report', 1),
+    (N'sources.syncPolicyIgnoreHint',           N'en', N'Neither the record nor its link change; only an event is written.', 1),
+    (N'sources.syncPolicyDeactivate',           N'en', N'Deactivate the record', 1),
+    (N'sources.syncPolicyDeactivateHint',       N'en', N'The record is deactivated and its link is marked missing. If the element comes back, a registry mastered by the source is reactivated automatically; a hybrid one waits for a person.', 1),
+    (N'sources.syncPolicyAttributeHint',        N'en', N'Validity dates: names of element attributes in the source. Leave empty to not synchronize the date.', 1),
+    (N'sources.syncPolicyValidFrom',            N'en', N'Valid-from attribute', 1),
+    (N'sources.syncPolicyValidTo',              N'en', N'Valid-to attribute', 1),
+    (N'sources.syncPolicyValidToInclusive',     N'en', N'The end date in the source is the last valid day (inclusive)', 1),
+    (N'sources.syncPolicySaved',                N'en', N'Sync policy saved', 1),
+    (N'registries.externalKeyMissing',          N'en', N'Missing in source', 1),
+    (N'registries.externalKeyMissingSince',     N'en', N'Since {date}', 1)
+    -- ru/kz — окремою порцією `COLL:d212-ui` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:d212-ui ── кінець секції ──

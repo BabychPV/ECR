@@ -32,3 +32,24 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui41keys ── кінець секції ──
+-- COLL:ui41keys ── UI-41: підказка клавіш під таблицею і довідка Keyboard shortcuts; ru/kz — порцією COLL:ui41keys у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'grid.keys.hint', N'en', N'Arrow keys move · Enter or F2 edits · Ctrl+V pastes from Excel · F9 recalculates', 1),
+    (N'grid.keys.hintReadOnly', N'en', N'Arrow keys move · Ctrl+C copies', 1),
+    (N'grid.keys.help', N'en', N'Keyboard shortcuts', 1),
+    (N'grid.keys.move', N'en', N'Move between cells', 1),
+    (N'grid.keys.edit', N'en', N'Edit the cell; Enter again saves', 1),
+    (N'grid.keys.tab', N'en', N'Save and move to the next cell', 1),
+    (N'grid.keys.cancel', N'en', N'Cancel editing', 1),
+    (N'grid.keys.copy', N'en', N'Copy the selected cells', 1),
+    (N'grid.keys.paste', N'en', N'Paste from Excel', 1),
+    (N'grid.keys.undo', N'en', N'Undo or redo the last change', 1),
+    (N'grid.keys.save', N'en', N'Save now', 1),
+    (N'grid.keys.recalc', N'en', N'Recalculate this sheet', 1),
+    (N'grid.keys.palette', N'en', N'Search or run a command', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui41keys ── кінець секції ──

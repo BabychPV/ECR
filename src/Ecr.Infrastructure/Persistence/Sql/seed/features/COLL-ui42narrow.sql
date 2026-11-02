@@ -10,3 +10,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui42narrow ── кінець секції ──
+-- COLL:ui42narrow ── UI-42: документ лише для читання на вузькому екрані (банер docs-narrow-note); ru/kz — порцією COLL:ui42narrow у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'document.narrow.title', N'en', N'Read-only on a narrow screen', 1),
+    (N'document.narrow.text', N'en', N'Values can be viewed here but not changed. To enter or correct data, open this document on a wider screen.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui42narrow ── кінець секції ──

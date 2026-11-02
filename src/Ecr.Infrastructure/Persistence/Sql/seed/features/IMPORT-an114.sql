@@ -25,3 +25,20 @@ OPTION (RECOMPILE);
 GO
 -- IMPORT:an114 ── кінець секції ──
 
+-- IMPORT:an114 ── D-338: явний перезапис рядків, змінених після експорту книги; ru/kz — порцією IMPORT:an114 у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'import.overwriteTitle', N'en', N'Rows changed by someone else after export', 1),
+    (N'import.overwriteHint', N'en', N'Someone changed these rows after the workbook was exported. Your values from the file replace theirs only in the rows you mark. Unmarked rows keep the current values; the rest of the file is applied.', 1),
+    (N'import.overwriteRow', N'en', N'Overwrite their values with mine', 1),
+    (N'import.overwriteSkip', N'en', N'Apply the rest of the file and keep the current values in unmarked rows', 1),
+    (N'import.overwriteRows', N'en', N'{count} row(s) changed after export', 1),
+    (N'import.theirs', N'en', N'Current value', 1),
+    (N'import.mine', N'en', N'Value in file', 1),
+    (N'err.ECR-IMP-0422.overwriteNotConflict', N'en', N'Only rows changed by someone else after the workbook was exported can be overwritten. Build the import preview again.', 1),
+    (N'audit.originLabel.ImportOverwrite', N'en', N'Excel import, overwrote a later change', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- IMPORT:an114 ── кінець секції ──

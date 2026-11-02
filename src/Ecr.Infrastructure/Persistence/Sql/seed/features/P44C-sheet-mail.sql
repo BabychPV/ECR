@@ -29,3 +29,22 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- P44C:sheet-mail ── кінець секції ──
+-- P44C:sheet-mail ── en: листи «Аркуш подано» / «Аркуш повернуто» (D-451, `SheetWorkflowNotifier`, `NotificationEventKind.SheetSubmitted/SheetReturned`); підстановки {document} {sheet} {period} {by} {at} {link} (+ {reason}); ru/kz — порцією P44C:sheet-mail нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'notifications.event.SheetSubmitted', N'en', N'Sheet submitted for approval', 1),
+    (N'notifications.event.SheetReturned', N'en', N'Sheet returned for edits', 1),
+    (N'notifications.sheetSubmitted.subject', N'en', N'ECR: {document}, sheet {sheet}, period {period} submitted for approval', 1),
+    (N'notifications.sheetSubmitted.body', N'en', N'{by} submitted sheet {sheet} of document {document} for period {period} on {at}. It is waiting for your approval. Open the sheet: {link}', 1),
+    (N'notifications.sheetReturned.subject', N'en', N'ECR: {document}, sheet {sheet}, period {period} returned', 1),
+    (N'notifications.sheetReturned.body', N'en', N'{by} returned sheet {sheet} of document {document} for period {period} on {at}. Reason: {reason}. Open the sheet: {link}', 1),
+    (N'notificationTemplates.recipientsSheetSubmitted', N'en', N'Sent to the people who can approve the sheet at its current route step and can see it. The person who submitted it gets nothing.', 1),
+    (N'notificationTemplates.recipientsSheetReturned', N'en', N'Sent to the document owner and to participants who fill in or submit the sheet, if they can see it. The person who returned it gets nothing.', 1),
+    (N'notificationTemplates.recipientsTransportOnly', N'en', N'turns the email on; its own addresses and roles are not used', 1),
+    (N'notificationTemplates.recipientsTeamsIgnored', N'en', N'not used: this message goes only by email', 1),
+    (N'jobs.kind.outboxFlush', N'en', N'Send sheet notifications', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- P44C:sheet-mail ── кінець секції ──

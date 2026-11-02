@@ -48,3 +48,32 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui34tpl ── кінець секції ──
+-- COLL:ui34tpl ── UI-34: перелік шаблонів за макетом (поточна версія, чернетка, стан, смуга, фільтри); ru/kz — порцією COLL:ui34tpl у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'templates.subtitle', N'en', N'A template is the structure of a report: sheets, tables, columns, formulas and rules. Documents are created from a published version and stay on it.', 1),
+    (N'templates.stats', N'en', N'Template summary', 1),
+    (N'templates.stat.all', N'en', N'templates', 1),
+    (N'templates.stat.published', N'en', N'with a published version', 1),
+    (N'templates.stat.publishedHint', N'en', N'Show templates that have a published version', 1),
+    (N'templates.stat.drafts', N'en', N'drafts in progress', 1),
+    (N'templates.stat.draftsHint', N'en', N'Show templates with an open draft', 1),
+    (N'templates.search', N'en', N'Search', 1),
+    (N'templates.searchPlaceholder', N'en', N'Template name or code', 1),
+    (N'templates.currentVersion', N'en', N'Current version', 1),
+    (N'templates.noCurrentVersion', N'en', N'no current version', 1),
+    (N'templates.notPublished', N'en', N'Not published yet', 1),
+    (N'templates.draft', N'en', N'Draft', 1),
+    (N'templates.state', N'en', N'State', 1),
+    (N'templates.noMatch', N'en', N'No templates match the filters', 1),
+    (N'templates.draftBy', N'en', N'{name} is editing', 1),
+    (N'templates.documents', N'en', N'Documents', 1),
+    (N'templates.documentsHint', N'en', N'Documents in the projects you can see that use this template', 1),
+    (N'templates.updated', N'en', N'Updated', 1),
+    (N'templates.stat.documents', N'en', N'documents using them', 1),
+    (N'templates.stat.documentsHint', N'en', N'Show templates that documents depend on', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui34tpl ── кінець секції ──

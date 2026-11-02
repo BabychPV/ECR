@@ -69,3 +69,42 @@ OPTION (RECOMPILE);
 GO
 -- COLL:smtp-admin ── кінець секції ──
 
+-- COLL:smtp-admin ── Адмін-налаштування SMTP і ролі-адресати каналу (D-263, SmtpSettingsPanel, GET/PUT /notifications/smtp) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.smtpSettingsInvalid', N'en', N'The SMTP settings are not valid: check the field "{name}".', 1),
+    (N'err.ECR-REQ-0422.smtpTestRecipientInvalid', N'en', N'The test recipient is not an email address.', 1),
+    (N'err.ECR-REQ-0422.notificationChannelRoleInvalid', N'en', N'Recipient roles can be set only on an email channel, and every role must exist.', 1),
+    (N'smtp.title', N'en', N'SMTP (outgoing mail)', 1),
+    (N'smtp.hint', N'en', N'Server, sender and login of the mail that sends notifications. While the settings are disabled, the process configuration (Smtp:*) is used. The password is write-only: it is never shown again.', 1),
+    (N'smtp.source.database', N'en', N'In use: the settings below.', 1),
+    (N'smtp.source.configuration', N'en', N'In use: the process configuration (Smtp:*).', 1),
+    (N'smtp.source.none', N'en', N'Mail is not configured: events stay queued.', 1),
+    (N'smtp.host', N'en', N'Server', 1),
+    (N'smtp.port', N'en', N'Port', 1),
+    (N'smtp.encryption', N'en', N'Encryption', 1),
+    (N'smtp.encryption.None', N'en', N'None', 1),
+    (N'smtp.encryption.StartTls', N'en', N'STARTTLS', 1),
+    (N'smtp.from', N'en', N'Sender address', 1),
+    (N'smtp.fromName', N'en', N'Sender name', 1),
+    (N'smtp.auth', N'en', N'Authentication', 1),
+    (N'smtp.auth.None', N'en', N'None', 1),
+    (N'smtp.auth.Password', N'en', N'Login and password', 1),
+    (N'smtp.user', N'en', N'Login', 1),
+    (N'smtp.password', N'en', N'Password', 1),
+    (N'smtp.passwordStored', N'en', N'A password is stored. Leave empty to keep it.', 1),
+    (N'smtp.passwordNone', N'en', N'No password stored yet.', 1),
+    (N'smtp.clearPassword', N'en', N'Remove the stored password', 1),
+    (N'smtp.enabled', N'en', N'Use these settings', 1),
+    (N'smtp.save', N'en', N'Save SMTP settings', 1),
+    (N'smtp.saved', N'en', N'SMTP settings saved.', 1),
+    (N'smtp.testTo', N'en', N'Send a test message to', 1),
+    (N'smtp.testSend', N'en', N'Send test message', 1),
+    (N'notifications.channelRoles', N'en', N'Recipient roles', 1),
+    (N'notifications.channelRolesHint', N'en', N'Active users of these roles who have an email address get the message in their own language.', 1),
+    (N'notifications.channelRolesUnavailable', N'en', N'The role list needs the right to manage roles; roles already set on the channel are kept.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:smtp-admin ── кінець секції ──

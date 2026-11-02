@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { matchesStat, publishedCount, type TemplateListRow } from '@/features/templates/templateListModel';
-import { readSeedSql } from '@/test/seedSql';
+import { readSeedEnCatalog, readSeedSql } from '@/test/seedSql';
 
 /**
  * AN-96: плитка `templates.stat.published` рахує ШАБЛОНИ з опублікованою версією (`publishedCount` =
@@ -14,8 +14,8 @@ import { readSeedSql } from '@/test/seedSql';
 const seed = readSeedSql();
 
 function mergeText(lang: 'en' | 'ru'): string {
-  const start = seed.indexOf('MERGE sys_ecr.UiString AS t');
-  const merge = seed.slice(start);
+  // ✎ en — порції `#UiEn` (readSeedEnCatalog); ru — порції `#I18N` (після спільних «змінених текстів» прологу).
+  const merge = lang === 'en' ? readSeedEnCatalog() : seed.slice(seed.indexOf('INSERT INTO #I18N'));
   const row = new RegExp(String.raw`\(N'templates\.stat\.published',\s*N'${lang}',\s*N'([^']*)'`).exec(merge);
   expect(row, `09-seed.sql: немає templates.stat.published (${lang}) після MERGE`).not.toBeNull();
 

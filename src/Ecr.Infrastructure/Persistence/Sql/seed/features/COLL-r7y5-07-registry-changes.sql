@@ -15,3 +15,15 @@ OPTION (RECOMPILE);
 GO
 -- COLL:r7y5-07-registry-changes ── кінець секції ──
 
+-- COLL:r7y5-07-registry-changes ── R7-Y5 / Y5-07: перевірка CSV довідника показує старе й нове значення кожного зміненого поля наявних записів; ru/kz — порцією COLL:r7y5-07-registry-changes нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'registry.import.changesTitle', N'en', N'Changes in existing entries ({count}). Excel may change values when saving a CSV (leading zeros, long numbers, dates), so check them before applying.', 1),
+    (N'registry.import.changesTruncated', N'en', N'Only the first {count} changes are shown.', 1),
+    (N'registry.import.oldValue', N'en', N'Current value', 1),
+    (N'registry.import.newValue', N'en', N'Value from file', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y5-07-registry-changes ── кінець секції ──

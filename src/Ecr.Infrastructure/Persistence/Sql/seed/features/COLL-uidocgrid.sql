@@ -32,3 +32,24 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:uidocgrid ── кінець секції ──
+-- COLL:uidocgrid ── UI-23/24/26: рядок стану сітки й банер стану аркуша (хто, коли, що далі); ru/kz — порцією COLL:uidocgrid у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'grid.status.size', N'en', N'Rows: {rows} · columns: {columns}', 1),
+    (N'grid.status.average', N'en', N'Average', 1),
+    (N'grid.status.count', N'en', N'Count', 1),
+    (N'grid.status.sum', N'en', N'Sum', 1),
+    (N'document.banner.submitted', N'en', N'Submitted for approval', 1),
+    (N'document.banner.submittedBy', N'en', N'Submitted {date} by {name}', 1),
+    (N'document.banner.submittedDecide', N'en', N'Waiting for your decision: check the figures, then approve or reject with a reason.', 1),
+    (N'document.banner.submittedWait', N'en', N'Waiting for the approver''s decision.', 1),
+    (N'document.banner.approved', N'en', N'Approved', 1),
+    (N'document.banner.approvedBy', N'en', N'Approved {date} by {name}', 1),
+    (N'document.banner.rejected', N'en', N'Returned for corrections', 1),
+    (N'document.banner.rejectedBy', N'en', N'Rejected {date} by {name}', 1),
+    (N'document.banner.rejectedNext', N'en', N'Correct the figures, validate the sheet and submit it again.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:uidocgrid ── кінець секції ──

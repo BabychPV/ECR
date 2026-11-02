@@ -4,7 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SheetActions } from '../SheetActions';
-import { readSeedSql } from '@/test/seedSql';
+import { readSeedEnCatalog } from '@/test/seedSql';
 
 /**
  * F-05 (коміти `d62b3065`, `4d1259ca`): сервер відмовляє в поданні аркуша із
@@ -39,17 +39,9 @@ const RawHandlerMessage =
 
 const GenericTitle = 'Submission is blocked';
 
-/** Блок MERGE каталогу — той самий прийом, що в `sheet-fill-summary.label.test.ts`. */
+/** en-каталог (порції `#UiEn`) — той самий прийом, що в `sheet-fill-summary.label.test.ts`. */
 function seedMergeBlock(): string {
-  const seed = readSeedSql();
-
-  const start = seed.indexOf('MERGE sys_ecr.UiString AS t');
-  const end = seed.indexOf(') AS s ([Key], Lang, Val, Scope)', start);
-
-  expect(start, '09-seed.sql: не знайдено блоку MERGE sys_ecr.UiString').toBeGreaterThan(-1);
-  expect(end, '09-seed.sql: не знайдено кінця блоку MERGE').toBeGreaterThan(start);
-
-  return seed.slice(start, end);
+  return readSeedEnCatalog();
 }
 
 /** Текст `en` за ключем у MERGE; `null` — ключа немає. */

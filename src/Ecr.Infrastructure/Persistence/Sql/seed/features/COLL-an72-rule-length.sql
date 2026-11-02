@@ -9,3 +9,12 @@ OPTION (RECOMPILE);
 GO
 -- COLL:an72-rule-length ── кінець секції ──
 
+-- COLL:an72-rule-length ── AN-72: правило категорії довше за межу формули (MethodologyCategoryRule.Normalize); ru/kz — порцією COLL:an72-rule-length нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.categoryRuleTooLong', N'en', N'The category rule is longer than {max} characters ({length}): shorten the expression or move part of the logic into a Row formula.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an72-rule-length ── кінець секції ──

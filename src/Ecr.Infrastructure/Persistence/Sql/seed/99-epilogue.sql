@@ -1,3 +1,44 @@
+-- SEED-UIEN ── en catalog: MERGE of #UiEn (rows from seed/features/*.sql) ──
+-- Same statement as the former en MERGE of 00-prelude.sql, now reading the temp table the feature
+-- files filled. Runs BEFORE the #I18N MERGE below: that one takes the Scope of a translation from
+-- its en row.
+DECLARE @textUpdates int, @removed int, @inserted int;
+SELECT @textUpdates = TextUpdates, @removed = Removed FROM #UiEnCounts;
+MERGE sys_ecr.UiString AS t
+USING (SELECT [Key], Lang, Val, Scope FROM #UiEn) AS s
+   ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
+WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
+     VALUES (s.[Key], s.Lang, s.Val, s.Scope, SYSUTCDATETIME());
+
+-- ⛔ Без цього нові ключі, додані СЮДИ (а не через
+-- `PUT /api/v1/ui-strings/{lang}/{key}`), лишають Revision незмінним:
+-- `SetUiStringHandler` інкрементує його сам (R-B7), а цей MERGE — ні. Клієнт
+-- із чинним ETag (`uiStrings:{lang}:{scope}:{revision}` у localStorage)
+-- отримує 304 на СТАРУ версію каталогу — свіжі рядки лежать у таблиці, але
+-- ніколи не доїжджають до екрана, доки хтось не відкриє `/admin/ui-strings`
+-- і не збереже той самий ключ вручну. Живий доказ: `methodologies.*` з
+-- директиви «обов'язкові вхідні колонки» (Q-306) — у базі є, на екрані досі
+-- `⟦methodologies.requiredInputs⟧`.
+--
+-- ⚠ Умовно, а не завжди: `SeedRunner` виконується на КОЖНОМУ старті
+-- застосунку (`02-contracts.md` §14), і безумовний інкремент означав би
+-- зайве validation-round-trip для кожного клієнта на кожному рестарті, навіть
+-- коли жодного нового рядка не додалося. `@@ROWCOUNT` після `MERGE` — це
+-- кількість щойно вставлених рядків (клаузи `WHEN MATCHED` тут немає).
+-- `@textUpdates` і `@removed` — те саме для секцій над MERGE: без інкременту
+-- кеш `ui:{lang}:{scope}:{revision}` і ETag клієнта тримали б старий каталог.
+SET @inserted = @@ROWCOUNT;
+IF @inserted > 0 OR @textUpdates > 0 OR @removed > 0
+BEGIN
+    UPDATE sys_ecr.UiStringRevision
+    SET Revision = Revision + 1, ModifiedAt = SYSUTCDATETIME()
+    WHERE Id = 1;
+END
+DROP TABLE #UiEn;
+DROP TABLE #UiEnCounts;
+GO
+-- SEED-UIEN ── кінець секції ──
+
 -- SEED-SPLIT ── changed and removed texts from seed/features files ──
 -- Same condition as the shared lists in 00-prelude.sql: a row is updated/deleted only while it still holds
 -- the old value (an administrator edit from /admin/ui-strings is kept). Revision is bumped only if a row

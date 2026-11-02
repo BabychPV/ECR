@@ -73,3 +73,44 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- D461:formula-override-ui ── кінець секції ──
+-- D461:formula-override-ui ── en: клієнт «ручне значення замість формули» (D-461): сітка, редактор шаблону, журнал, імпорт, перенос; ru/kz — порцією D461:formula-override-ui нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'grid.formulaOverride.hint', N'en', N'Manual value · {reason} · {author}, {when}', 1),
+    (N'grid.formulaOverride.unknownAuthor', N'en', N'deleted user', 1),
+    (N'grid.formulaOverride.restoreOnly', N'en', N'This formula no longer allows manual values. You can only restore the formula (Delete).', 1),
+    (N'grid.formulaOverride.dialogTitle', N'en', N'Manual value instead of the formula', 1),
+    (N'grid.formulaOverride.dialogBody', N'en', N'The formula will stop calculating this cell; recalculation will not overwrite your value. To restore the formula, delete the value.', 1),
+    (N'grid.formulaOverride.dialogBodyMany', N'en', N'The formula will stop calculating {count} cells; one reason applies to all of them. To restore the formula, delete the value.', 1),
+    (N'grid.formulaOverride.reasonLabel', N'en', N'Reason', 1),
+    (N'grid.formulaOverride.reasonHint', N'en', N'Required, up to {max} characters. Shown in the cell tooltip and in the change log.', 1),
+    (N'grid.formulaOverride.reasonTooLong', N'en', N'The reason is longer than {max} characters.', 1),
+    (N'grid.formulaOverride.save', N'en', N'Save value', 1),
+    (N'grid.formulaOverride.restore', N'en', N'Restore formula', 1),
+    (N'grid.formulaOverride.restoreMany', N'en', N'Restore formula ({count})', 1),
+    (N'grid.formulaOverride.overridableHint', N'en', N'Calculated by a formula. You can replace it with a manual value (a reason is required).', 1),
+    (N'formulas.allowManualOverride', N'en', N'Allow manual value', 1),
+    (N'formulas.allowManualOverrideHint', N'en', N'Users with the permission can replace the formula result with their own value and a reason. Applies to all documents of this version at once, without a new version.', 1),
+    (N'formulas.manualOverrideColumn', N'en', N'Manual value', 1),
+    (N'formulas.cellTarget', N'en', N'Cell', 1),
+    (N'formulas.disableManualOverrideTitle', N'en', N'Forbid manual values for this formula?', 1),
+    (N'formulas.disableManualOverrideBody', N'en', N'Documents with manual values: {documents}; manual values: {cells}. They will stay and can be restored to the formula; new ones will be forbidden.', 1),
+    (N'formulas.disableManualOverrideVerb', N'en', N'Forbid new manual values', 1),
+    (N'audit.reasonExcelImport', N'en', N'Excel import', 1),
+    (N'audit.reasonVersionMigration', N'en', N'Template version migration', 1),
+    (N'audit.reasonVersionMigrationNoFormula', N'en', N'Template version migration: the cell has no formula in the new version; the value stays as entered data', 1),
+    (N'import.replacesFormula', N'en', N'Replaces formula', 1),
+    (N'import.replacesFormulaHint', N'en', N'The value will be saved as a manual value instead of the formula (reason in the log: "Excel import"). Recalculation will not overwrite it.', 1),
+    (N'import.restoresFormula', N'en', N'Restores formula', 1),
+    (N'import.restoresFormulaHint', N'en', N'The cell is empty in the file: the manual value will be removed and the formula will calculate the cell again.', 1),
+    (N'documents.migrateKindOverrideLost', N'en', N'Manual value replaced by formula', 1),
+    (N'documents.migrateLostFormulaOverrides', N'en', N'Manual values instead of formulas that will not carry over (the target version does not allow them there; the formula will calculate these cells again): {count}.', 1),
+    (N'grid.formulaOverride.filterManual', N'en', N'Only rows with manual values', 1),
+    (N'grid.formulaOverride.manualCount', N'en', N'Manual: {count}', 1),
+    (N'grid.formulaOverride.previousManual', N'en', N'Previous manual value', 1),
+    (N'grid.formulaOverride.nextManual', N'en', N'Next manual value', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- D461:formula-override-ui ── кінець секції ──

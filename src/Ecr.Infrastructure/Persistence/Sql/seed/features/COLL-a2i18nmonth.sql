@@ -34,3 +34,25 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:a2i18nmonth ── кінець секції ──
+-- COLL:a2i18nmonth ── A2-10: місяць підпису періоду з каталогу (у Chrome немає ICU kk), «помилок не знайдено» на нуль; ru/kz — порцією COLL:a2i18nmonth у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'periods.monthOf', N'en', N'{month} {year}', 1),
+    (N'periods.month.1', N'en', N'January', 1),
+    (N'periods.month.2', N'en', N'February', 1),
+    (N'periods.month.3', N'en', N'March', 1),
+    (N'periods.month.4', N'en', N'April', 1),
+    (N'periods.month.5', N'en', N'May', 1),
+    (N'periods.month.6', N'en', N'June', 1),
+    (N'periods.month.7', N'en', N'July', 1),
+    (N'periods.month.8', N'en', N'August', 1),
+    (N'periods.month.9', N'en', N'September', 1),
+    (N'periods.month.10', N'en', N'October', 1),
+    (N'periods.month.11', N'en', N'November', 1),
+    (N'periods.month.12', N'en', N'December', 1),
+    (N'document.validationNoErrors', N'en', N'No errors found', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:a2i18nmonth ── кінець секції ──

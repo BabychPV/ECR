@@ -26,3 +26,22 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- CONDFMT:client ── кінець секції ──
+-- CONDFMT:client ── ФВ-2.7: збереження правил умовного форматування (`ConditionalFormatPanel`, If-Match) і підсвітка в сітці ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'conditionalFormat.none', N'en', N'This table has no rules yet.', 1),
+    (N'conditionalFormat.saved', N'en', N'Conditional formatting rules saved.', 1),
+    (N'conditionalFormat.incomplete', N'en', N'Complete or remove the rules marked above before saving.', 1),
+    (N'conditionalFormat.readOnly', N'en', N'Rules can be changed only in a draft version and only with the right to edit templates.', 1),
+    (N'conditionalFormat.conflictTitle', N'en', N'Someone else changed the rules', 1),
+    (N'conditionalFormat.conflict', N'en', N'The rules of this template version were saved by someone else after you opened them. Your changes are kept here: Save replaces their rules with yours, Discard shows theirs.', 1),
+    (N'conditionalFormat.discard', N'en', N'Discard my changes', 1),
+    (N'conditionalFormat.blocker.Color', N'en', N'A colour must be written as #rrggbb.', 1),
+    (N'err.ECR-REQ-0422.condFormatIfMatch', N'en', N'This request needs an If-Match header carrying the ETag of the conditional formatting rules you read.', 1),
+    (N'err.ECR-TMPL-0409.condFormatChanged', N'en', N'The conditional formatting rules of this template version were changed after you read them. Reload them and repeat your change.', 1)
+    -- ru/kz — окремою порцією `CONDFMT:client` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- CONDFMT:client ── кінець секції ──

@@ -17,3 +17,17 @@ OPTION (RECOMPILE);
 GO
 -- REGSRV:rt15-16 ── кінець секції ──
 
+-- REGSRV:rt15-16 ── серверні ендпоінти довідників: фільтр id рядків, назва й вікно нового запису в пакеті, експорт (RT-16), код одиниці в імпорті CSV ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.registryRowsIdsTooMany', N'en', N'The id filter can name at most {max} entries; this one names {count}.', 1),
+    (N'err.ECR-REQ-0422.batchItemNewOnly', N'en', N'Batch row "{clientRowId}": a name and a validity window can be given only for a new entry. Change them for an existing entry in its form.', 1),
+    (N'err.ECR-REQ-0422.registryExportFormatUnknown', N'en', N'There is no registry export format "{format}": use csv or xlsx.', 1),
+    (N'err.ECR-REQ-0422.registryExportTooLarge', N'en', N'Registry "{registryCode}" has {total} entries to export, the limit is {max}.', 1),
+    (N'err.ECR-REG-0422.unitCodeUnknown', N'en', N'There is no unit with this code.', 1)
+    -- ru/kz — окремою порцією `REGSRV:rt15-16` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- REGSRV:rt15-16 ── кінець секції ──

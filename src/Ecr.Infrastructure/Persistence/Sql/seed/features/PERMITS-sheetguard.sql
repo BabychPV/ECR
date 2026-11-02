@@ -21,3 +21,18 @@ OPTION (RECOMPILE);
 GO
 -- PERMITS: sheetguard ── ECR-PRM-4102 ── кінець секції ──
 
+-- PERMITS: sheetguard ── ECR-PRM-4102 ── правку аркуша тримає прив'язка (PM-09b); en ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-PRM-4102', N'en', N'A permit binding holds this sheet change', 1),
+    (N'err.ECR-PRM-4102.rowMode', N'en', N'Table "{tableCode}" takes permit rows through binding "{bindingCode}": fixed rows cannot accept them. Delete the binding first.', 1),
+    (N'err.ECR-PRM-4102.table', N'en', N'Table "{tableCode}" is used by permit binding "{bindingCode}": delete the binding first.', 1),
+    (N'err.ECR-PRM-4102.column', N'en', N'Column "{columnCode}" is mapped by permit binding "{bindingCode}": change or delete the binding first.', 1),
+    (N'err.ECR-PRM-4102.maxRows', N'en', N'Table "{tableCode}" takes permit rows through binding "{bindingCode}": the row limit cannot be lowered (was {previousMax}, requested {newMax}). Delete the binding first.', 1),
+    (N'err.ECR-PRM-4102.maxRowsUnlimited', N'en', N'Table "{tableCode}" takes permit rows through binding "{bindingCode}": the table had no row limit, so a limit ({newMax}) cannot be set. Delete the binding first.', 1),
+    (N'err.ECR-PRM-4102.sheet', N'en', N'Sheet "{sheetCode}" holds table "{tableCode}" bound to permit binding "{bindingCode}": delete the binding first.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: sheetguard ── кінець секції ──

@@ -19,3 +19,18 @@ OPTION (RECOMPILE);
 GO
 -- UI:dead-buttons ── кінець секції ──
 
+-- UI:dead-buttons ── причини недоступних дій і порожній стан полів довідника (клієнт) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'reportDefs.addBlocked', N'en', N'Fill in the code, the name, the version and a code for every column first.', 1),
+    (N'reportDefs.removeColumnBlocked', N'en', N'A report needs at least one column.', 1),
+    (N'registries.rc816.selectionLocked', N'en', N'Save or discard the changes in the levels below first.', 1),
+    (N'methodologies.importApplyBlocked', N'en', N'Check the package first: importing becomes available after a check that would create the methodology.', 1),
+    (N'registries.noFields', N'en', N'This registry has no fields yet', 1),
+    (N'reportDefs.newVersionBlocked', N'en', N'Enter the number of the new version first.', 1)
+    -- ru/kz — окремою порцією `UI:dead-buttons` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- UI:dead-buttons ── кінець секції ──

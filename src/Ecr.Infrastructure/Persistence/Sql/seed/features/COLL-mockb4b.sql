@@ -30,3 +30,23 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:mockb4b ── кінець секції ──
+-- COLL:mockb4b ── b4b: сторінки 403/404, «← Back» документа й шаблону за макетом; ru/kz — порцією COLL:mockb4b у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'nav.accessDenied.crumb', N'en', N'Access denied', 1),
+    (N'nav.accessDenied.title', N'en', N'You don’t have access to this page', 1),
+    (N'nav.accessDenied.text', N'en', N'Nothing was changed. Ask a system administrator for a role that includes this permission.', 1),
+    (N'nav.accessDenied.copy', N'en', N'Copy request details', 1),
+    (N'nav.accessDenied.copied', N'en', N'Request details copied — paste them into your message', 1),
+    (N'nav.accessDenied.myAccess', N'en', N'See my access', 1),
+    (N'nav.backToDocuments', N'en', N'Back to Documents', 1),
+    (N'nav.backToTemplates', N'en', N'Back to Templates', 1),
+    (N'nav.goToDocuments', N'en', N'Go to Documents', 1),
+    (N'nav.notFound.didYouMean', N'en', N'Did you mean:', 1),
+    (N'nav.notFound.search', N'en', N'Search screens and documents', 1),
+    (N'templates.continueDraft', N'en', N'Continue draft {version}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:mockb4b ── кінець секції ──

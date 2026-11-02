@@ -21,3 +21,19 @@ OPTION (RECOMPILE);
 GO
 -- COLL:a6-api ── кінець секції ──
 
+-- COLL:a6-api ── API подій джерела: мапінг подій, проба, синхронізація (HSE301 A6, FEATURE-HSE301-VIEW §4.7) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-INT-0404.eventMap',                        N'en', N'Event mapping {eventMapId} does not exist.', 1),
+    (N'err.ECR-INT-0405.registryEntry',                   N'en', N'Registry entry {registryEntryId} does not exist or does not belong to the registry of column "{targetColumn}".', 1),
+    (N'err.ECR-INT-0409.eventMapExists',                  N'en', N'An event mapping for this source entity, document and table already exists: edit it instead of creating a second one.', 1),
+    (N'err.ECR-INT-0409.eventMapHasLinks',                N'en', N'{links} source events have already been synchronized through this event mapping. Deleting it would leave their rows without an explanation. Pause the mapping instead.', 1),
+    (N'err.ECR-INT-0422.eventMapTableNotInDocument',      N'en', N'Table {tableDefId} does not belong to the template version of the project of document {documentId}, so events could not be written there.', 1),
+    (N'err.ECR-INT-0422.eventSyncNoMap',                  N'en', N'Source entity {sourceEntityId} has no active event mapping: there is nothing to synchronize.', 1),
+    (N'err.ECR-REQ-0422.probeEventsInvalid',              N'en', N'An event probe needs a template name, a window that starts before it ends (at most 92 days) and a limit of 1 to 100 events.', 1)
+    -- ru/kz — окремою порцією `COLL:a6-api` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:a6-api ── кінець секції ──

@@ -10,3 +10,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an37-l610 ── кінець секції ──
+-- COLL:an37-l610 ── AN-37 (L6-10): дубль рядка чи колонки в батчі запису комірок — 422, а не 500; ru/kz — порцією COLL:an37-l610 у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.patchDuplicateRowKey',  N'en', N'The change lists row {rowKeys} more than once. Nothing was saved; send each row once.', 1),
+    (N'err.ECR-REQ-0422.patchDuplicateCell',    N'en', N'The change sets column {columnCodes} of row {rowKey} more than once. Nothing was saved; send each cell once.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an37-l610 ── кінець секції ──

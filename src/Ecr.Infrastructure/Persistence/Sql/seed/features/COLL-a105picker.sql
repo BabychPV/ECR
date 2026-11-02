@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:a105picker ── кінець секції ──
+-- COLL:a105picker ── A1-05: вибір аркуша/таблиці/колонки в гранті без права Template.View називає причину; ru/kz — порцією COLL:a105picker у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'grants.pickerForbidden', N'en', N'You cannot list templates: picking a sheet, table or column needs the Template.View permission (for example the TemplateAdministrator role). Ask a role administrator to add it to your account, then reopen the list.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:a105picker ── кінець секції ──

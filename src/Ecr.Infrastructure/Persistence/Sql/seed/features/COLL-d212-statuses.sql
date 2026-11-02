@@ -20,3 +20,17 @@ OPTION (RECOMPILE);
 GO
 -- COLL:d212-statuses ── кінець секції ──
 
+-- COLL:d212-statuses ── Статуси подій синку довідника з AF (D-212 PR-3, `CollectionCoverage.RegistryStatuses`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'status.coverage.RegistryAutoCreated',        N'en', N'Created from source', 1),
+    (N'status.coverage.RegistryDeactivated',        N'en', N'Deactivated: missing in source', 1),
+    (N'status.coverage.RegistryReactivated',        N'en', N'Reactivated: back in source', 1),
+    (N'status.coverage.RegistryRuleViolation',      N'en', N'Violates a registry rule', 1),
+    (N'status.coverage.RegistryExternalKeyRelinked', N'en', N'Relinked by source path', 1)
+    -- ru/kz — окремою порцією `COLL:d212-statuses` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:d212-statuses ── кінець секції ──

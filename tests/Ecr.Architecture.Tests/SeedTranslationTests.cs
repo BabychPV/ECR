@@ -69,13 +69,13 @@ public sealed partial class SeedTranslationTests
 
         var problems = new List<string>();
 
-        // Саме та форма, що й коштувала 4.8 с: переклади в батчі з en-MERGE.
-        var catalog = batches.Single(b => b.Contains("MERGE sys_ecr.UiString AS t", StringComparison.Ordinal)
-                                          && b.Contains("N'en'", StringComparison.Ordinal)
-                                          && !b.Contains("#I18N", StringComparison.Ordinal));
-        if (catalog.Contains(TranslationTail, StringComparison.Ordinal))
+        // Саме та форма, що й коштувала 4.8 с: переклади в батчі з en-каталогом
+        // (✎ тепер — порції INSERT INTO #UiEn файлів seed/features, MERGE з #UiEn — в епілозі).
+        var catalog = batches.Where(b => b.Contains(SeedSql.EnCatalogInsert, StringComparison.Ordinal)).ToList();
+        Assert.NotEmpty(catalog);
+        if (catalog.Any(b => b.Contains(TranslationTail, StringComparison.Ordinal) || b.Contains("#I18N", StringComparison.Ordinal)))
         {
-            problems.Add("  блок перекладів у батчі з en-MERGE — винеси його в порції #I18N нижче.");
+            problems.Add("  блок перекладів у батчі з en-каталогом (#UiEn) — винеси його в порцію #I18N окремим батчем.");
         }
 
         for (var i = 0; i < chunks.Count; i++)
@@ -288,17 +288,14 @@ public sealed partial class SeedTranslationTests
     private static string SeedText()
         => SeedSql.Text;
 
-    /// <summary>Англійський каталог: <c>MERGE sys_ecr.UiString AS t</c> до першого <c>WHEN NOT MATCHED</c>.</summary>
+    /// <summary>Англійський каталог: порції <c>INSERT INTO #UiEn</c> (<see cref="SeedSql.EnCatalogOf"/>).</summary>
     private static Dictionary<string, string> CatalogRows(string text)
     {
-        var start = text.IndexOf("MERGE sys_ecr.UiString AS t", StringComparison.Ordinal);
-        Assert.True(start >= 0, $"У {SeedFile} немає блоку MERGE sys_ecr.UiString AS t.");
-
-        var end = text.IndexOf("WHEN NOT MATCHED", start, StringComparison.Ordinal);
-        Assert.True(end > start, $"Блок MERGE sys_ecr.UiString AS t у {SeedFile} не закінчується.");
+        var block = SeedSql.EnCatalogOf(text);
+        Assert.True(block.Length > 0, $"У {SeedFile} немає порцій en-каталогу ({SeedSql.EnCatalogInsert}).");
 
         var rows = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (Match m in CatalogRow().Matches(text[start..end]))
+        foreach (Match m in CatalogRow().Matches(block))
         {
             if (string.Equals(m.Groups[2].Value, "en", StringComparison.Ordinal))
             {

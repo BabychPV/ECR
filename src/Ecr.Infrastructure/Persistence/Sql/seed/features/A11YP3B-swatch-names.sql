@@ -57,3 +57,36 @@ OPTION (RECOMPILE);
 GO
 -- A11Y-P3B:swatch-names ── кінець секції ──
 
+-- A11Y-P3B:swatch-names ── CL-23 (B-9): назви кольорів палітри для читалки; ru/kz - порцією A11Y-P3B:swatch-names нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'grid.cellColor.name.white', N'en', N'White', 1),
+    (N'grid.cellColor.name.black', N'en', N'Black', 1),
+    (N'grid.cellColor.name.lightGray', N'en', N'Light gray', 1),
+    (N'grid.cellColor.name.blueGray', N'en', N'Blue-gray', 1),
+    (N'grid.cellColor.name.blue', N'en', N'Blue', 1),
+    (N'grid.cellColor.name.orangeHue', N'en', N'Orange', 1),
+    (N'grid.cellColor.name.gray', N'en', N'Gray', 1),
+    (N'grid.cellColor.name.amber', N'en', N'Amber', 1),
+    (N'grid.cellColor.name.skyBlue', N'en', N'Sky blue', 1),
+    (N'grid.cellColor.name.mediumGreen', N'en', N'Medium green', 1),
+    (N'grid.cellColor.name.darkRed', N'en', N'Dark red', 1),
+    (N'grid.cellColor.name.redHue', N'en', N'Red', 1),
+    (N'grid.cellColor.name.yellow', N'en', N'Yellow', 1),
+    (N'grid.cellColor.name.lightGreen', N'en', N'Light green', 1),
+    (N'grid.cellColor.name.green', N'en', N'Green', 1),
+    (N'grid.cellColor.name.cyan', N'en', N'Cyan', 1),
+    (N'grid.cellColor.name.strongBlue', N'en', N'Strong blue', 1),
+    (N'grid.cellColor.name.darkBlue', N'en', N'Dark blue', 1),
+    (N'grid.cellColor.name.purple', N'en', N'Purple', 1),
+    (N'grid.cellColor.shade.lighter80', N'en', N'lighter 80%', 1),
+    (N'grid.cellColor.shade.lighter60', N'en', N'lighter 60%', 1),
+    (N'grid.cellColor.shade.lighter40', N'en', N'lighter 40%', 1),
+    (N'grid.cellColor.shade.darker25', N'en', N'darker 25%', 1),
+    (N'grid.cellColor.shade.darker50', N'en', N'darker 50%', 1),
+    (N'grid.cellColor.shadeName', N'en', N'{name}, {shade}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- A11Y-P3B:swatch-names ── кінець секції ──

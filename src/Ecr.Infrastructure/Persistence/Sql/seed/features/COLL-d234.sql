@@ -17,3 +17,17 @@ OPTION (RECOMPILE);
 GO
 -- COLL:d234 ── кінець секції ──
 
+-- COLL:d234 ── Ширина колонки (D-234): відмова 422 і підписи форми колонки / скидання ширин у сітці ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.widthOutOfRange', N'en', N'Column width must be a whole number from 40 to 800 px, got "{widthPx}".', 1),
+    (N'columns.width',                     N'en', N'Default width, px', 1),
+    (N'columns.widthHint',                 N'en', N'From 40 to 800; empty means the default for the data type. A width a user sets in the grid overrides it.', 1),
+    (N'columns.errWidth',                  N'en', N'Width must be a whole number from 40 to 800.', 1),
+    (N'grid.columnWidths.reset',           N'en', N'Reset column widths', 1)
+    -- ru/kz — окремою порцією `COLL:d234` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:d234 ── кінець секції ──

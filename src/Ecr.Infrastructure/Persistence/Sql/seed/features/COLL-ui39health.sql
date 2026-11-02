@@ -22,3 +22,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui39health ── кінець секції ──
+-- COLL:ui39health ── UI-39: сторінка Health за макетом (банер, «Check now», «Copy diagnostics»); ru/kz — порцією COLL:ui39health у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'health.subtitle', N'en', N'Is ECR working right now? Each part is checked automatically; a warning appears only when there is something to do.', 1),
+    (N'health.checkNow', N'en', N'Check now', 1),
+    (N'health.checkedNow', N'en', N'Checked just now.', 1),
+    (N'health.copyDiagnostics', N'en', N'Copy diagnostics', 1),
+    (N'health.diagnosticsCopied', N'en', N'Diagnostics copied to the clipboard. They contain no passwords or personal data.', 1),
+    (N'health.banner.title', N'en', N'{check} needs attention', 1),
+    (N'health.durationMs', N'en', N'{ms} ms response', 1),
+    (N'health.checkedAt', N'en', N'Checked', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui39health ── кінець секції ──

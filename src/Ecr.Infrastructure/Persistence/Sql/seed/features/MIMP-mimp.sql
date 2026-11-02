@@ -45,3 +45,31 @@ OPTION (RECOMPILE);
 GO
 -- MIMP ── кінець секції ──
 
+-- MIMP: імпорт пакета методологій з AF (`ImportMethodologyPackageHandler`, `MethodologyPackageImport.tsx`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.methodologyImportBlocked', N'en', N'The package was not imported: blockers found — {count}. Nothing was written; see the report.', 1),
+    (N'err.ECR-CALC-0409.methodologyImportConflict', N'en', N'The package was not imported: versions that already exist with different content — {count}. Nothing was written; give changed versions a new number.', 1),
+    (N'err.ECR-CALC-0422.methodologyImportTimeZone', N'en', N'Unknown time zone {timeZone}: an IANA identifier is required, e.g. Asia/Atyrau.', 1),
+    (N'methodologies.importPackage', N'en', N'Import package', 1),
+    (N'methodologies.importTitle', N'en', N'Import methodology package', 1),
+    (N'methodologies.importHint', N'en', N'Check the package first: checking writes nothing. Import creates draft versions only; publishing stays a separate step by another person.', 1),
+    (N'methodologies.importFile', N'en', N'Package file (ecr-methodology-package, JSON)', 1),
+    (N'methodologies.importInvalidFile', N'en', N'The file is not valid JSON.', 1),
+    (N'methodologies.importCheck', N'en', N'Check', 1),
+    (N'methodologies.importApply', N'en', N'Import', 1),
+    (N'methodologies.importOutcomeCreated', N'en', N'Ready to import', 1),
+    (N'methodologies.importOutcomeUnchanged', N'en', N'Nothing to import: the package is already in the system', 1),
+    (N'methodologies.importOutcomeBlocked', N'en', N'The package has blockers and cannot be imported', 1),
+    (N'methodologies.importOutcomeConflict', N'en', N'Some versions already exist with different content', 1),
+    (N'methodologies.importTotals', N'en', N'New methodologies: {methodologies}; new draft versions: {versions}; unchanged versions: {unchanged}; formulas: {formulas}; constant values: {constants}; imports between methodologies: {imports}.', 1),
+    (N'methodologies.importBlockers', N'en', N'Blockers', 1),
+    (N'methodologies.importConflicts', N'en', N'Conflicts', 1),
+    (N'methodologies.importWarnings', N'en', N'Warnings', 1),
+    (N'methodologies.importDone', N'en', N'Package imported: draft versions created — {versions}.', 1)
+    -- ru/kz — окремою порцією `MIMP` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- MIMP: кінець секції ──

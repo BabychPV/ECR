@@ -43,3 +43,30 @@ OPTION (RECOMPILE);
 GO
 -- COLL:auditreason ── кінець секції ──
 
+-- COLL:auditreason ── Причина зміни налаштувань збору конвертом (`IntegrationConfigAudit.Reason`, `structureChangeReason.ts`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'integrationAudit.scheduleCreated', N'en', N'Collection schedule {id} created for entity "{entity}".', 1),
+    (N'integrationAudit.scheduleChanged', N'en', N'Collection schedule {id} of entity "{entity}" changed.', 1),
+    (N'integrationAudit.scheduleDeleted', N'en', N'Collection schedule {id} of entity "{entity}" deleted.', 1),
+    (N'integrationAudit.fieldMapCreated', N'en', N'Field mapping "{field}" of entity {entity} created.', 1),
+    (N'integrationAudit.fieldMapPaused', N'en', N'Field mapping "{field}" paused.', 1),
+    (N'integrationAudit.fieldMapResumed', N'en', N'Field mapping "{field}" returned to collection.', 1),
+    (N'integrationAudit.fieldMapUnitAccepted', N'en', N'Field mapping "{field}": the new source unit was accepted.', 1),
+    (N'integrationAudit.fieldMapDeleted', N'en', N'Field mapping "{field}" of entity {entity} deleted.', 1),
+    (N'integrationAudit.rowWindowCreated', N'en', N'Row window binding to column "{column}" created.', 1),
+    (N'integrationAudit.rowWindowChanged', N'en', N'Row window binding {id} changed.', 1),
+    (N'integrationAudit.rowWindowDeleted', N'en', N'Row window binding {id} deleted.', 1),
+    (N'integrationAudit.sourceEntityCreated', N'en', N'Collection entity "{entity}" added to connection "{connection}".', 1),
+    (N'integrationAudit.sourceEntityBound', N'en', N'Collection entity "{entity}" bound to registry {registry}.', 1),
+    (N'integrationAudit.sourceEntityUnbound', N'en', N'Collection entity "{entity}" unbound from the registry.', 1),
+    (N'integrationAudit.eventMapCreated', N'en', N'Event mapping of entity {entity} to document {document} created.', 1),
+    (N'integrationAudit.eventMapChanged', N'en', N'Event mapping {id} of entity {entity} changed.', 1),
+    (N'integrationAudit.eventMapDeleted', N'en', N'Event mapping {id} of entity {entity} deleted.', 1),
+    (N'integrationAudit.registryPolicyChanged', N'en', N'Sync policy of registry {registry} from entity "{entity}" changed.', 1)
+    -- ru/kz — окремою порцією `COLL:auditreason` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:auditreason ── кінець секції ──

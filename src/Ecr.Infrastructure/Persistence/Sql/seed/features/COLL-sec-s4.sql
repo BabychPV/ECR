@@ -14,3 +14,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:sec-s4 ── кінець секції ──
+-- COLL:sec-s4 ── Напрям пошти: порти й хост SMTP (рев'ю ent6 S4; `SaveSmtpSettingsHandler`, `SmtpEndpointPolicy`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.smtpPortNotAllowed', N'en', N'This SMTP port is not allowed. Use 25, 465, 587 or 2525, or ask the administrator to list the port in the Smtp:AllowedPorts configuration key.', 1),
+    (N'err.ECR-REQ-0422.smtpHostForbidden', N'en', N'This SMTP server is not allowed. Check that the server name resolves in DNS; loopback, link-local and cloud metadata addresses (including names that resolve to them) are forbidden.', 1),
+    (N'notifications.test.smtp.probeFailed', N'en', N'SMTP test failed: the server is not reachable or did not answer. Check the server name, the port and the firewall.', 1),
+    (N'notifications.test.smtp.endpointForbidden', N'en', N'SMTP test refused: the port or the server is not allowed. Allowed ports are 25, 465, 587, 2525 and those in Smtp:AllowedPorts; loopback, link-local and cloud metadata servers are forbidden.', 1)
+    -- ru/kz — окремою порцією COLL:sec-s4 у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:sec-s4 ── кінець секції ──

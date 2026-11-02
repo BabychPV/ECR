@@ -64,3 +64,40 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui35registries ── кінець секції ──
+-- COLL:ui35registries ── UI-35: перелік довідників зі смугою показників і шторкою; ru/kz — порцією COLL:ui35registries у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'registries.list.subtitle', N'en', N'Reference lists that cells, formulas and mappings pick values from: sources, substances, fuels, limits.', 1),
+    (N'registries.list.stats', N'en', N'Registry summary', 1),
+    (N'registries.list.statAll', N'en', N'registries', 1),
+    (N'registries.list.statExternal', N'en', N'synced from PI AF', 1),
+    (N'registries.list.registry', N'en', N'Registry', 1),
+    (N'registries.list.traits', N'en', N'Properties', 1),
+    (N'registries.list.source', N'en', N'Master source', 1),
+    (N'registries.list.sourceKind.Local', N'en', N'Kept in ECR', 1),
+    (N'registries.list.sourceKind.External', N'en', N'Synced from PI AF', 1),
+    (N'registries.list.sourceKind.Hybrid', N'en', N'PI AF and ECR', 1),
+    (N'registries.list.usedIn', N'en', N'Used in', 1),
+    (N'registries.list.manage', N'en', N'Entries and validity', 1),
+    (N'registries.list.back', N'en', N'All registries', 1),
+    (N'registries.list.searchPlaceholder', N'en', N'Registry name or code', 1),
+    (N'registries.list.noMatches', N'en', N'No registries match these filters.', 1),
+    (N'registries.list.entries', N'en', N'Entries', 1),
+    (N'registries.list.entriesHint', N'en', N'Valid today; closed entries are kept for old documents.', 1),
+    (N'registries.list.usedInHint', N'en', N'Template columns that pick values from this registry', 1),
+    (N'registries.list.usedInValue', N'en', N'columns: {columns} · templates: {templates}', 1),
+    (N'registries.list.updated', N'en', N'Entries changed', 1),
+    (N'registries.list.state', N'en', N'State', 1),
+    (N'registries.list.statEntries', N'en', N'entries', 1),
+    (N'registries.list.statChanged', N'en', N'changed this month', 1),
+    (N'registries.list.statUsedIn', N'en', N'template columns use them', 1),
+    (N'registries.list.definition', N'en', N'Definition', 1),
+    (N'registries.list.definitionValue', N'en', N'v{version} published', 1),
+    (N'registries.list.definitionDraft', N'en', N'v{version} published · draft in progress', 1),
+    (N'registries.list.draftTitle', N'en', N'The definition has unpublished changes', 1),
+    (N'registries.list.draftText', N'en', N'Entries keep working with the published definition until the draft is published.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui35registries ── кінець секції ──

@@ -41,3 +41,28 @@ OPTION (RECOMPILE);
 GO
 -- L4:cellcolor ── кінець секції ──
 
+-- L4:cellcolor ── Колір комірки «як в Excel» (L4); ru/kz — порцією L4:cellcolor нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'grid.cellColor.group', N'en', N'Cell colour', 1),
+    (N'grid.cellColor.fill', N'en', N'Fill', 1),
+    (N'grid.cellColor.text', N'en', N'Text colour', 1),
+    (N'grid.cellColor.noFill', N'en', N'No fill', 1),
+    (N'grid.cellColor.autoText', N'en', N'Automatic', 1),
+    (N'grid.cellColor.theme', N'en', N'Theme colours', 1),
+    (N'grid.cellColor.standard', N'en', N'Standard colours', 1),
+    (N'grid.cellColor.more', N'en', N'More colours…', 1),
+    (N'grid.cellColor.noSelection', N'en', N'Select cells you can edit to colour them', 1),
+    (N'grid.cellColor.readOnly', N'en', N'The sheet is locked for editing, colour cannot be changed', 1),
+    (N'grid.cellColor.conflict', N'en', N'The table changed while you were colouring. The current state is shown; please repeat the colour.', 1),
+    (N'grid.cellColor.scopeLabel', N'en', N'Apply to', 1),
+    (N'grid.cellColor.scope.selection', N'en', N'Selection', 1),
+    (N'grid.cellColor.scope.row', N'en', N'Whole row', 1),
+    (N'grid.cellColor.scope.column', N'en', N'Whole column', 1),
+    (N'grid.cellColor.scope.table', N'en', N'Whole table', 1),
+    (N'grid.cellColor.partial', N'en', N'{count} cells were not changed (reason: {reasons}); the rest were coloured.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- L4:cellcolor ── кінець секції ──

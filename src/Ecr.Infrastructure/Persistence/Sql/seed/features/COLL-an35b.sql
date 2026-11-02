@@ -12,3 +12,14 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an35b ── кінець секції ──
+-- COLL:an35b ── AN-35 (L5-11): імпорт CSV: незакрита лапка і не-UTF-8; ru/kz — порцією COLL:an35b у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REG-0422.entriesCsvUnterminatedQuote', N'en', N'The file ends inside quotation marks: a closing quote is missing. Nothing was imported.', 1),
+    (N'err.ECR-REG-0422.entriesCsvNotUtf8',   N'en', N'The file is not UTF-8 text (it may be saved in a Windows code page). Save it as CSV UTF-8 and try again.', 1),
+    (N'err.ECR-REQ-0422.uiStringCsvUnterminatedQuote', N'en', N'The file ends inside quotation marks: a closing quote is missing. Nothing was imported.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an35b ── кінець секції ──

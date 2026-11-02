@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an34m ── кінець секції ──
+-- COLL:an34m ── AN-34 L4-01: довідник тримає одна сутність збору на з'єднання; ru/kz — порцією COLL:an34m у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-INT-0409.registryAlreadyBound', N'en', N'Registry {registryDefId} is already bound to another collection entity of this connection. A connection takes one entity per registry: unbind the other entity first.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an34m ── кінець секції ──

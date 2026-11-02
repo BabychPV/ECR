@@ -14,3 +14,15 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an128 ── кінець секції ──
+-- COLL:an128 ── D-441 (AN-128): подання ще не відкритого (Scheduled) періоду — окремий текст відмови (reasonKey deny.PeriodNotOpenYet.Submit); ru/kz — порцією COLL:an128 у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'deny.PeriodNotOpenYet.Submit', N'en', N'This period is not open yet: a sheet can be submitted only for a period that is Open or in the Grace period.', 1),
+    (N'workflow.submitPeriod', N'en', N'Submit: {period}', 1),
+    (N'workflow.pickSubmitPeriod', N'en', N'Choose the period to submit', 1),
+    (N'workflow.submitNextPeriod', N'en', N'Next to submit: {period}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an128 ── кінець секції ──

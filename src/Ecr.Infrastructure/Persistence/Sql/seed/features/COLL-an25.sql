@@ -12,3 +12,14 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an25 ── кінець секції ──
+-- COLL:an25 ── L7-01 (аудит 2026-10-03): межі виразу проти переповнення стека; ru/kz — порцією COLL:an25 у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.expressionTooLong', N'en', N'The expression is too long: {length} characters, at most {max} are allowed. Shorten it or split it into several.', 1),
+    (N'expr.chainTooLong',                   N'en', N'The expression has more than {max} operators chained together. Split it into several formulas.', 1),
+    (N'expr.tooComplex',                     N'en', N'The expression is too complex to check. Split it into several formulas.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an25 ── кінець секції ──

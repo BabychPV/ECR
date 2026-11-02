@@ -40,3 +40,28 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui28jobs ── кінець секції ──
+-- COLL:ui28jobs ── екран задач на шаблоні переліку (UI-28); ru/kz — порцією COLL:ui28jobs у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'jobs.description', N'en', N'Exports, imports, recalculations and nightly checks run in the background. A failed job says why and can be restarted.', 1),
+    (N'jobs.statsLabel', N'en', N'Jobs at a glance', 1),
+    (N'jobs.statRunning', N'en', N'running', 1),
+    (N'jobs.statQueued', N'en', N'queued', 1),
+    (N'jobs.statFailed', N'en', N'failed in 24 h', 1),
+    (N'jobs.statLatency', N'en', N'Average start delay over the last 24 hours: {seconds} s', 1),
+    (N'jobs.search', N'en', N'Search', 1),
+    (N'jobs.searchPlaceholder', N'en', N'Job, document or person', 1),
+    (N'jobs.filterType', N'en', N'Types', 1),
+    (N'jobs.filterState', N'en', N'States', 1),
+    (N'jobs.noMatch', N'en', N'No jobs match the filters.', 1),
+    (N'jobs.progress', N'en', N'Progress', 1),
+    (N'jobs.stoppedAt', N'en', N'stopped at {percent} %', 1),
+    (N'jobs.refresh', N'en', N'Refresh', 1),
+    (N'jobs.findById', N'en', N'Find a job by id', 1),
+    (N'jobs.whyFailed', N'en', N'Why it failed', 1),
+    (N'jobs.attempts', N'en', N'Attempts', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui28jobs ── кінець секції ──

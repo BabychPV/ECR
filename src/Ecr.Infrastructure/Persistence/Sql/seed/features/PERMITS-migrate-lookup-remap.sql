@@ -46,3 +46,14 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: migrate-lookup-remap ── кінець секції ──
+-- PERMITS: migrate-lookup-remap ── перенос версії: мапа записів Lookup шапки (ECR-SCHM-0422 migrateLookup*); ru/kz — порцією PERMITS: migrate-lookup-remap нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-SCHM-0422.migrateLookupRemapInvalid', N'en', N'The Lookup remap map is malformed: only header fields are supported (kind "header"), the field code must be non-empty, entry ids must be positive, a source entry may be listed once, and every source entry must belong to the registry of the version being moved from. At most {maxTargets} fields with at most {maxPairs} pairs each are allowed.', 1),
+    (N'err.ECR-SCHM-0422.migrateLookupNotMapped', N'en', N'Nothing was moved: some header values point to entries that the Lookup remap map does not cover with a usable counterpart (the entry is not in the map, or its target is missing from the new registry, inactive, deleted or not valid in the project window). The report lists the entry ids; extend the map and retry.', 1),
+    (N'err.ECR-SCHM-0422.migrateLookupLockedDocuments', N'en', N'Nothing was moved: the Lookup remap would rewrite header values in documents that have submitted or approved sheets ({lockedDocumentCount}). The dry run reports their number; confirm with allowLockedDocuments = true and retry.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: migrate-lookup-remap ── кінець секції ──

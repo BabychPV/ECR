@@ -87,3 +87,51 @@ OPTION (RECOMPILE);
 GO
 -- PERMITS: ui-lists ── кінець секції ──
 
+-- PERMITS: ui-lists ── PM-08d: екран «Lists» (списки вибору пермітів), варіант A без окремого ендпоінта; ru/kz — порцією PERMITS: ui-lists нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'permits.lists.openRegistries', N'en', N'Open Registries', 1),
+    (N'permits.lists.readOnly', N'en', N'This screen only shows the lists. Values kept in one permit type are edited in that type''s builder; shared lists are edited in Registries.', 1),
+    (N'permits.lists.registriesFailed', N'en', N'Registries could not be read, so shared lists are shown by code and without value counts.', 1),
+    (N'permits.lists.stats.aria', N'en', N'Pick-lists summary', 1),
+    (N'permits.lists.stat.all', N'en', N'lists', 1),
+    (N'permits.lists.stat.shared', N'en', N'shared', 1),
+    (N'permits.lists.stat.type', N'en', N'one type only', 1),
+    (N'permits.lists.stat.permit', N'en', N'from a permit table', 1),
+    (N'permits.lists.search.label', N'en', N'Search lists', 1),
+    (N'permits.lists.search.placeholder', N'en', N'List or permit type', 1),
+    (N'permits.lists.filter.kind', N'en', N'Kinds', 1),
+    (N'permits.lists.kind.shared', N'en', N'Shared registry', 1),
+    (N'permits.lists.kind.type', N'en', N'This permit type only', 1),
+    (N'permits.lists.kind.permit', N'en', N'Table of the same permit', 1),
+    (N'permits.lists.col.list', N'en', N'List', 1),
+    (N'permits.lists.col.kind', N'en', N'Kind', 1),
+    (N'permits.lists.col.values', N'en', N'Values', 1),
+    (N'permits.lists.col.used', N'en', N'Used by', 1),
+    (N'permits.lists.keptIn.registries', N'en', N'Kept in Registries', 1),
+    (N'permits.lists.keptIn.type', N'en', N'Kept in {owner}', 1),
+    (N'permits.lists.values.permit', N'en', N'rows of each permit', 1),
+    (N'permits.lists.noMatches', N'en', N'No lists match the search', 1),
+    (N'permits.lists.drawer.close', N'en', N'Close list details', 1),
+    (N'permits.lists.drawer.kind', N'en', N'Kind', 1),
+    (N'permits.lists.drawer.kept', N'en', N'Kept in', 1),
+    (N'permits.lists.drawer.usedBy', N'en', N'Used by', 1),
+    (N'permits.lists.drawer.values', N'en', N'Values', 1),
+    (N'permits.lists.drawer.noValues', N'en', N'No values yet', 1),
+    (N'permits.lists.drawer.more', N'en', N'and {count} more', 1),
+    (N'permits.lists.drawer.usedColumn', N'en', N'{type} · {table} · {column}', 1),
+    (N'permits.lists.drawer.usedHeader', N'en', N'{type} · permit details · {column}', 1),
+    (N'permits.lists.drawer.note.shared', N'en', N'Shared lists are registries. Every permit type that picks from this list sees the same values, and they can be used in sheets and formulas too.', 1),
+    (N'permits.lists.drawer.note.type', N'en', N'Only {owner} sees these values. They are edited in the permit type builder; here they are read-only.', 1),
+    (N'permits.lists.drawer.note.permit', N'en', N'The choices are the rows of a table inside each permit. Each permit offers only its own rows, so the list differs from permit to permit.', 1),
+    (N'permits.lists.action.registries', N'en', N'Open in Registries', 1),
+    (N'permits.lists.action.openType', N'en', N'Open the permit type', 1),
+    (N'permits.lists.used.none', N'en', N'No column yet', 1),
+    (N'permits.lists.used.one', N'en', N'1 column', 1),
+    (N'permits.lists.used.other', N'en', N'{count} columns', 1),
+    (N'permits.lists.typesFailed', N'en', N'{count} permit type(s) could not be read, so their lists are missing here. Reload the page to try again.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: ui-lists ── кінець секції ──

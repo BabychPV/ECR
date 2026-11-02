@@ -14,3 +14,15 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- ARC:audit-reader ── кінець секції ──
+-- ARC:audit-reader ── НФ-8.9.6: журнал змін комірок читає й архів аудиту (arc.AuditCellChange): позначка рядка й вибір періоду старше гарячого вікна; ru/kz — порцією ARC:audit-reader нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'audit.fromArchive', N'en', N'Archive', 1),
+    (N'audit.fromArchiveHint', N'en', N'Read from the audit archive: this change is older than 24 months and was moved out of the working journal. Values and access rules are the same.', 1),
+    (N'audit.archiveWindow', N'en', N'Archive (older than 24 months)', 1),
+    (N'audit.archiveWindowHint', N'en', N'Sets the date range to the 90 days before the archive boundary. Older changes are read from the audit archive and marked "Archive".', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- ARC:audit-reader ── кінець секції ──

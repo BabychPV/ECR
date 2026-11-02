@@ -72,3 +72,44 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:inspector ── кінець секції ──
+-- COLL:inspector ── UI-25: інспектор документа (Issues / History / Info); ru/kz — порцією COLL:inspector у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'inspector.title', N'en', N'Inspector', 1),
+    (N'inspector.close', N'en', N'Close inspector', 1),
+    (N'inspector.tabsLabel', N'en', N'Inspector sections', 1),
+    (N'inspector.tabIssues', N'en', N'Issues', 1),
+    (N'inspector.tabHistory', N'en', N'History', 1),
+    (N'inspector.tabInfo', N'en', N'Info', 1),
+    (N'inspector.noIssues', N'en', N'No issues', 1),
+    (N'inspector.issuesCount', N'en', N'{count} issue(s)', 1),
+    (N'inspector.issuesTitle', N'en', N'{errors} error(s), {warnings} warning(s) — open the list', 1),
+    (N'inspector.historyButton', N'en', N'History of the selected cell', 1),
+    (N'inspector.notValidatedTitle', N'en', N'Not validated yet', 1),
+    (N'inspector.notValidatedHint', N'en', N'Run “Validate” to check the document for this period.', 1),
+    (N'inspector.noIssuesTitle', N'en', N'No issues found', 1),
+    (N'inspector.noIssuesHint', N'en', N'The last validation run found nothing to fix for this period.', 1),
+    (N'inspector.noCellTitle', N'en', N'No cell selected', 1),
+    (N'inspector.noCellHint', N'en', N'Select a cell in a table to see its history and details.', 1),
+    (N'inspector.loading', N'en', N'Loading…', 1),
+    (N'inspector.noHistoryTitle', N'en', N'No history', 1),
+    (N'inspector.noHistoryHint', N'en', N'This cell has not been changed in this period during the last 12 months.', 1),
+    (N'inspector.unknownAuthor', N'en', N'User #{id}', 1),
+    (N'inspector.lateEdit', N'en', N'Late edit', 1),
+    (N'inspector.info.cell', N'en', N'Cell', 1),
+    (N'inspector.info.row', N'en', N'Row', 1),
+    (N'inspector.info.column', N'en', N'Column', 1),
+    (N'inspector.info.type', N'en', N'Type', 1),
+    (N'inspector.info.input', N'en', N'Input', 1),
+    (N'inspector.info.inputCalculated', N'en', N'Calculated on the server', 1),
+    (N'inspector.info.inputReadOnly', N'en', N'Read-only', 1),
+    (N'inspector.info.inputManual', N'en', N'Manual · paste · import', 1),
+    (N'inspector.info.value', N'en', N'Stored value', 1),
+    (N'inspector.info.table', N'en', N'Table', 1),
+    (N'inspector.info.tableIssues', N'en', N'Issues in this table', 1),
+    (N'inspector.info.tableIssuesValue', N'en', N'{errors} error(s), {warnings} warning(s)', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:inspector ── кінець секції ──

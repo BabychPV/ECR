@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:dps-required-header ── кінець секції ──
+-- COLL:dps-required-header ── D-PS: подання з порожнім обов'язковим полем шапки (SubmitSheetHandler); ru/kz — порцією COLL:dps-required-header у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-HDR-0422.requiredAtSubmit', N'en', N'The sheet cannot be submitted: required header field(s) are empty: {headerFieldCodes}. Fill them in the document header and submit again.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:dps-required-header ── кінець секції ──

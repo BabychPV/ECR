@@ -23,3 +23,20 @@ OPTION (RECOMPILE);
 GO
 -- COLL:ssrf ── кінець секції ──
 
+-- COLL:ssrf ── Політика адреси джерела PI Web API: схема, заборонений хост, allowlist (`DataSourceEndpointPolicy`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.dataSourceEndpointScheme',       N'en', N'The data source address must use http or https.', 1),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'en', N'This host is not allowed for a data source: loopback, link-local, metadata and unspecified addresses are always refused. A source without a secret authenticates with Windows (Negotiate), and in that mode private IP-address literals are refused too: use the host name.', 1),
+    (N'err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed', N'en', N'This host is not in the list of allowed data source hosts (PiWebApi:AllowedHosts).', 1),
+    (N'err.ECR-REQ-0422.dataSourceEndpointMalformed',    N'en', N'The data source address is empty or malformed: use a full http(s) address without a user name.', 1),
+    (N'err.ECR-INT-0503.piWebApiResponseTooLarge',       N'en', N'PI Web API returned a response for {path} larger than {limitBytes} bytes: collection rejected.', 1),
+    (N'health.sources.negotiateNoAllowlist',             N'en', N'Sources with Windows authentication and no allowed-hosts list: {count}. Set PiWebApi:AllowedHosts in the EcrApi configuration and restart EcrApi.', 1),
+    (N'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed', N'en', N'The address of data source "{code}" uses Windows authentication (the service account): confirm the address change explicitly.', 1),
+    (N'sources.confirmEndpointChange',                   N'en', N'I confirm that the service account may connect to the new address', 1)
+    -- ru/kz — окремою порцією `COLL:ssrf` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ssrf ── кінець секції ──
