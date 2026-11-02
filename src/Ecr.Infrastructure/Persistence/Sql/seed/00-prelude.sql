@@ -1301,6 +1301,10 @@ UPDATE t
     (N'permits.air.import.scope.empty', N'kz', N'НАЕ ағашында аймақтар жоқ', N'Анықтамалық табылмады'),
     (N'permits.air.import.scope.emptyHint', N'en', N'Load or create NAE nodes first: the region and area lists come from the NAE tree.', N'The registry {registry} set for the {column} column of the AIR permit type does not exist. Create it or change the column in the permit type editor.'),
     (N'permits.air.import.scope.emptyHint', N'ru', N'Сначала загрузите или создайте узлы НАЕ: списки регионов и участков берутся из дерева НАЕ.', N'Справочник {registry}, заданный для колонки {column} типа разрешения AIR, не существует. Создайте его или измените колонку в редакторе типа разрешения.'),
+    -- COLL:ui-air-params: значення списку типу — по рядку АБО через «;» (людина 02.11: «через крапку з комою»).
+    (N'permits.editor.choices.valuesHint', N'en', N'Only this type sees these values. They can also be edited on the Lists page.', N'One per line or separated by ";". Only this type sees these values. They can also be edited on the Lists page.'),
+    (N'permits.editor.choices.valuesHint', N'ru', N'Эти значения видит только этот тип. Их также можно править на странице «Списки».', N'По одному в строке или через «;». Эти значения видит только этот тип. Их также можно править на странице «Списки».'),
+    (N'permits.editor.choices.valuesHint', N'kz', N'Бұл мәндерді тек осы түр көреді. Оларды «Тізімдер» бетінде де өңдеуге болады.', N'Әр жолда біреуден немесе «;» арқылы. Бұл мәндерді тек осы түр көреді. Оларды «Тізімдер» бетінде де өңдеуге болады.'),
     (N'permits.air.import.scope.emptyHint', N'kz', N'Алдымен НАЕ түйіндерін жүктеңіз немесе жасаңыз: аймақ пен учаске тізімі НАЕ ағашынан алынады.', N'AIR рұқсат түрінің {column} бағаны үшін берілген {registry} анықтамалығы жоқ. Оны жасаңыз немесе рұқсат түрінің редакторында бағанды өзгертіңіз.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -8535,7 +8539,7 @@ USING (VALUES
     ,(N'permits.editor.choices.tableHint', N'en', N'Users can pick only rows that this permit has in that table.', 1)
     ,(N'permits.editor.choices.type', N'en', N'A list only for this permit type', 1)
     ,(N'permits.editor.choices.values', N'en', N'Values, one per line', 1)
-    ,(N'permits.editor.choices.valuesHint', N'en', N'Only this type sees these values. They can also be edited on the Lists page.', 1)
+    ,(N'permits.editor.choices.valuesHint', N'en', N'One per line or separated by ";". Only this type sees these values. They can also be edited on the Lists page.', 1)
     ,(N'permits.editor.cols.code', N'en', N'Code', 1)
     ,(N'permits.editor.cols.column', N'en', N'Column', 1)
     ,(N'permits.editor.cols.empty', N'en', N'No columns yet', 1)

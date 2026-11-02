@@ -274,4 +274,9 @@ describe('choicesFromText', () => {
     expect(choicesFromText(' a \r\n\r\n b\n')).toEqual(['a', 'b']);
     expect(choicesFromText('')).toEqual([]);
   });
+
+  it('через «;» теж (AIR-ON-AIR, людина 02.11), і разом із рядками', () => {
+    expect(choicesFromText('a; b;c')).toEqual(['a', 'b', 'c']);
+    expect(choicesFromText('Offshore;Onshore\nBautino base;;\r\n')).toEqual(['Offshore', 'Onshore', 'Bautino base']);
+  });
 });
