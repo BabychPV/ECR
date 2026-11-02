@@ -116,7 +116,7 @@ public sealed partial class ReportViewStableTests
         // Шапка дозволу у вʼюсі: поля, півінтервал чинності, розташування.
         var header = (await ScalarRowsAsync(
             $"SELECT TypeCode, PermitNumber, Location, ValidFrom, ValidTo FROM rpt.v_Permit WHERE PermitId = {p1}"))[0];
-        Assert.Equal("AIR_LIMITS", (string)header[0]!);
+        Assert.Equal("AIR", (string)header[0]!);
         Assert.Equal(($"№ P1 {tag}", "Tengiz"), ((string)header[1]!, (string)header[2]!));
         Assert.Equal((new DateTime(2026, 1, 1), new DateTime(2027, 1, 1)), ((DateTime)header[3]!, (DateTime)header[4]!));
 
@@ -184,20 +184,20 @@ public sealed partial class ReportViewStableTests
         int HeaderDef, int SourcesDef, int SubstancesDef, int NaeDef, int SubstanceDef,
         int NaeCodeField, int SubstanceCodeField, Dictionary<string, int> Field);
 
-    /// <summary>Тип AIR_LIMITS і його реєстри: беремо наявні (спільна база живе між прогонами) або створюємо.</summary>
+    /// <summary>Тип AIR (✎ AIR-ON-AIR: таблиці джерел перенесено з AIR_LIMITS) і його реєстри: беремо наявні або створюємо.</summary>
     private async Task<AirKit> EnsureAirLimitsAsync(string tag)
     {
         await using var db = sql.CreateContext();
-        var type = await db.PermitTypeDefs.SingleOrDefaultAsync(t => t.Code == "AIR_LIMITS");
+        var type = await db.PermitTypeDefs.SingleOrDefaultAsync(t => t.Code == "AIR");
         int header, sources, substances;
         if (type is null)
         {
-            var h = new RegistryDef(EcrCode.Create("PRM_AIR_LIMITS"), Name("Air limits"), isTemporal: true);
-            var s = new RegistryDef(EcrCode.Create("PRM_AIR_LIMITS_AIR_SOURCES"), Name("Sources"), isTemporal: false);
-            var u = new RegistryDef(EcrCode.Create("PRM_AIR_LIMITS_AIR_SOURCE_SUBSTANCES"), Name("Substances"), isTemporal: false);
+            var h = new RegistryDef(EcrCode.Create("PRM_AIR"), Name("Air limits"), isTemporal: true);
+            var s = new RegistryDef(EcrCode.Create("PRM_AIR_AIR_SOURCES"), Name("Sources"), isTemporal: false);
+            var u = new RegistryDef(EcrCode.Create("PRM_AIR_AIR_SOURCE_SUBSTANCES"), Name("Substances"), isTemporal: false);
             db.RegistryDefs.AddRange(h, s, u);
             await db.SaveChangesAsync();
-            type = new PermitTypeDef(EcrCode.Create("AIR_LIMITS"), Name("Air limits"), PermitCategory.Air, h.Id);
+            type = new PermitTypeDef(EcrCode.Create("AIR"), Name("Air limits"), PermitCategory.Air, h.Id);
             db.PermitTypeDefs.Add(type);
             await db.SaveChangesAsync();
             db.PermitTypeTables.AddRange(

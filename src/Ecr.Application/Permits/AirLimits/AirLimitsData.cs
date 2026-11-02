@@ -171,10 +171,11 @@ internal sealed class AirLimitsData(IRegistryStore registries, IRegistryRowsQuer
     }
 
     /// <summary>
-    /// NAE tree nodes of the given codes inside a region and area: normalised code → entry id (the first live one).
+    /// NAE tree nodes of the given codes inside a region and area: normalised code → entry id (the first live one). ✎ AIR-ON-AIR:
+    /// <c>null</c> region or area = any (scope value not in the NAE tree, or an area matched by region only).
     /// </summary>
     public async Task<Dictionary<string, long>> NaeByCodeAsync(
-        AirTables tables, IReadOnlyCollection<string> codes, string region, string area, CancellationToken ct)
+        AirTables tables, IReadOnlyCollection<string> codes, string? region, string? area, CancellationToken ct)
     {
         var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         if (codes.Count == 0)
@@ -194,7 +195,7 @@ internal sealed class AirLimitsData(IRegistryStore registries, IRegistryRowsQuer
         {
             var rowRegion = AirLimitsSchema.NormalizeScope(row.Text(NaeTreeSchema.RegionField), "");
             var rowArea = AirLimitsSchema.NormalizeScope(row.Text(NaeTreeSchema.AreaField), AirLimitsSchema.NoArea);
-            if (rowRegion != region || rowArea != area)
+            if ((region is not null && rowRegion != region) || (area is not null && rowArea != area))
             {
                 continue;
             }

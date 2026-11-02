@@ -39,11 +39,11 @@ public sealed class AirLimitsImportTarget(
         ImportScope scope, IReadOnlyCollection<string> parentKeys, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(scope);
-        var (region, area) = AirScope.Parse(scope.ScopeKey);
+        var air = AirImportScope.Parse(scope.ScopeKey);
         var permitId = long.Parse(scope.OwnerKey, CultureInfo.InvariantCulture);
         var tables = await Data.TablesAsync(ct).ConfigureAwait(false);
 
-        var stored = await StoredAsync(tables, permitId, region, area, parentKeys, ct).ConfigureAwait(false);
+        var stored = await StoredAsync(tables, permitId, air, parentKeys, ct).ConfigureAwait(false);
         return [.. stored.Select(s => s.Parent)];
     }
 
@@ -51,7 +51,7 @@ public sealed class AirLimitsImportTarget(
     public async Task ApplyAsync(ImportApplyPlan plan, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        var (region, area) = AirScope.Parse(plan.Scope.ScopeKey);
+        var air = AirImportScope.Parse(plan.Scope.ScopeKey);
         var permitId = long.Parse(plan.Scope.OwnerKey, CultureInfo.InvariantCulture);
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
@@ -72,12 +72,12 @@ public sealed class AirLimitsImportTarget(
                 }
 
                 // 1. Missing NAE nodes first: the sources point at them.
-                await CreateNaeAsync(tables, plan, region, area, token).ConfigureAwait(false);
+                await CreateNaeAsync(tables, plan, air.NaeRegionForCreate, air.NaeAreaForCreate, token).ConfigureAwait(false);
                 Data.Invalidate();
 
                 // 2. The replaced rows (substances first: a source with substances is referenced).
                 var keys = plan.Delete.Select(d => d.Key).ToList();
-                var doomed = (await StoredAsync(tables, permitId, region, area, keys, token).ConfigureAwait(false))
+                var doomed = (await StoredAsync(tables, permitId, air, keys, token).ConfigureAwait(false))
                     .Where(s => plan.Delete.Any(d => d.OwnerKey == s.Parent.OwnerKey && d.Key == s.Parent.Key))
                     .ToList();
                 // Set-based: substances first (a source with substances is referenced), then the sources, one batch each.
@@ -87,7 +87,7 @@ public sealed class AirLimitsImportTarget(
                 Data.Invalidate();
 
                 // 3. The new rows.
-                var inserted = await InsertAsync(tables, plan, permitId, region, area, token).ConfigureAwait(false);
+                var inserted = await InsertAsync(tables, plan, permitId, air, token).ConfigureAwait(false);
 
                 await audit.WriteStructureChangeAsync(
                     new StructureChangeRecord(
@@ -104,8 +104,10 @@ public sealed class AirLimitsImportTarget(
                             sources = inserted.Sources,
                             substances = inserted.Substances,
                             createdNae = plan.CreateReferences.Count,
-                            region,
-                            area,
+                            region = air.Region.Code,
+                            area = air.Area?.Code,
+                            naeRegion = air.NaeRegion,
+                            naeArea = air.NaeArea,
                             file = plan.FileSha256,
                             profile = plan.ProfileCode,
                             fingerprint = plan.Fingerprint,
@@ -130,20 +132,20 @@ public sealed class AirLimitsImportTarget(
 
     /// <summary>The permit's rows in the scope plus the rows of OTHER permits for the same NAE.</summary>
     private async Task<List<StoredSource>> StoredAsync(
-        AirTables tables, long permitId, string region, string area, IReadOnlyCollection<string> parentKeys, CancellationToken ct)
+        AirTables tables, long permitId, AirImportScope air, IReadOnlyCollection<string> parentKeys, CancellationToken ct)
     {
-        var naeIds = await Data.NaeByCodeAsync(tables, parentKeys, region, area, ct).ConfigureAwait(false);
+        var naeIds = await Data.NaeByCodeAsync(tables, parentKeys, air.NaeRegion, air.NaeArea, ct).ConfigureAwait(false);
         var permitField = PermitHeaderFields.PermitFieldCode;
 
         var own = await Data.EntriesPointingAtAsync(tables.Sources, permitField, [permitId], ct).ConfigureAwait(false);
         var sameNae = await Data.EntriesPointingAtAsync(tables.Sources, AirLimitsSchema.Nae, [.. naeIds.Values], ct).ConfigureAwait(false);
         var sources = await Data.ReadAsync(tables.Sources, [.. own, .. sameNae], ct).ConfigureAwait(false);
 
-        // Own rows only inside the scope; other permits' rows are matched by NAE (which already carries region and area).
+        // ✎ AIR-ON-AIR: own rows only inside the scope (the same region / area VALUES stored on the rows — one AIR permit holds
+        // several region/area blocks); other permits' rows are matched by NAE (which already carries region and area), Q2.
         var chosen = sources.Values
             .Where(r => r.Ref(permitField) == permitId
-                ? AirLimitsSchema.NormalizeScope(r.Text(AirLimitsSchema.Region), "") == region
-                  && AirLimitsSchema.NormalizeScope(r.Text(AirLimitsSchema.Area), AirLimitsSchema.NoArea) == area
+                ? air.Holds(r)
                 : r.Ref(AirLimitsSchema.Nae) is { } n && naeIds.ContainsValue(n))
             .ToList();
         if (chosen.Count == 0)
@@ -329,14 +331,15 @@ public sealed class AirLimitsImportTarget(
     // ---------- insert ----------
 
     private async Task<(int Sources, int Substances)> InsertAsync(
-        AirTables tables, ImportApplyPlan plan, long permitId, string region, string area, CancellationToken ct)
+        AirTables tables, ImportApplyPlan plan, long permitId, AirImportScope air, CancellationToken ct)
     {
         if (plan.Insert.Count == 0)
         {
             return (0, 0);
         }
 
-        var naeIds = await Data.NaeByCodeAsync(tables, [.. plan.Insert.Select(p => p.Key)], region, area, ct).ConfigureAwait(false);
+        // The same NAE scope the resolver used (null = any); nodes just created lie inside it by construction.
+        var naeIds = await Data.NaeByCodeAsync(tables, [.. plan.Insert.Select(p => p.Key)], air.NaeRegion, air.NaeArea, ct).ConfigureAwait(false);
         var substanceIds = await Data.SubstancesByCodeAsync(
             tables, [.. plan.Insert.SelectMany(p => p.Children).Select(c => c.Key).Distinct()], ct).ConfigureAwait(false);
 
@@ -352,8 +355,8 @@ public sealed class AirLimitsImportTarget(
             {
                 [PermitHeaderFields.PermitFieldCode] = permitId,
                 [AirLimitsSchema.Nae] = naeId,
-                [AirLimitsSchema.Region] = region,
-                [AirLimitsSchema.Area] = area,
+                [AirLimitsSchema.Region] = air.Region.Stored,
+                [AirLimitsSchema.Area] = air.Area?.Stored,
                 [AirLimitsSchema.SiteLabel] = parent.GroupLabel,
             };
             foreach (var (field, column) in AirLimitsSchema.ParentColumns)

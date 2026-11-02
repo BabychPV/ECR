@@ -29,11 +29,21 @@ public sealed class GetAirScopeFieldsHandler(
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
-        var tree = (await naeScopes.HandleAsync(ct).ConfigureAwait(false)).Regions;
+        IReadOnlyList<AirRegionCodeDto> tree;
+        try
+        {
+            tree = (await naeScopes.ReadAsync(ct).ConfigureAwait(false)).Regions;
+        }
+        catch (Errors.BusinessRuleException)
+        {
+            // Not provisioned yet (or no NAE tree): the values are still listed, just without a NAE mapping.
+            tree = [];
+        }
         var (region, area) = await columns.ReadAsync(ct).ConfigureAwait(false);
 
+        // REGION is always required for an import (it scopes the replace); AREA as configured on the type.
         var regionField = await FieldAsync(region, required: true, tree, ct).ConfigureAwait(false);
-        var areaField = await FieldAsync(area, required: false, tree, ct).ConfigureAwait(false);
+        var areaField = await FieldAsync(area, area.Required, tree, ct).ConfigureAwait(false);
         return new AirScopeFieldsDto(AirLimitsSchema.TypeCode, regionField, areaField);
     }
 
