@@ -990,6 +990,11 @@ DECLARE @a int; EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = 12, @Added = @
 
 `09-seed.sql` виконує застосунок на старті. Скрипти запускати не треба.
 
+⚠ ✎ 2026-11-02 (`DB-1`): служба під логіном без `db_owner` потребує перед стартом нової версії трьох нових
+`EXECUTE` — на `doc.fn_VersionOf`, `rpt.usp_GenerateTemplateViews`, `rpt.usp_GenerateStableViews` (скрипт —
+абзац «Права облікового запису служби» в п. 7, нотатка `docs/release-notes/db-service-account-grants.md`). Без
+першого падає кожен запис рядка й комірки.
+
 ⛔ ✎ 2026-10-09 (S2-04, HU-13 Q3): **копія і зупинка служб.** Без `-SkipSchema` крок 2/7:
 
 1. **Вимагає свіжу копію бази.** Скрипт читає `msdb.dbo.backupset` інстансу: остання повна чи
@@ -2227,7 +2232,29 @@ powershell -File tools\setup-dev-db.ps1 -Server localhost -Database EcrDev -View
 
 ⚠ Через DENY на стовпці члени `ecr_viewer` отримають відмову на `SELECT * FROM sec.[User]` — перелічуйте стовпці явно (без `PasswordHash`, `SecurityStamp`; висновок із семантики column-DENY SQL Server, тестом не перевірено). Зашифровані секрети каналів сповіщень і пароль SMTP роль читає лише як шифротекст: ключі Data Protection їй закриті.
 
-**Права облікового запису служби** в базі скрипти **не** видають — це робить DBA (`deploy-ecr.ps1` виконує DDL під обліковим записом DBA, не під `-ServiceAccount`; у службі DDL немає, `D-66`). За кодом потрібні: `SELECT/INSERT/UPDATE/DELETE` на таблицях (сід виконується на кожному старті), `UPDATE` на послідовностях, `EXECUTE` на TVP-типах `doc.CellValueTvp`, `aud.CellChangeTvp` і на `arc.usp_ArchiveYear`, `arc.usp_EnsureAuditPartitions`, `arc.usp_ArchiveAudit` (п. 7, 7.3–7.4; усі три — `WITH EXECUTE AS OWNER`, DDL-прав служба не потребує). Чи досить `db_datareader` + `db_datawriter` + `EXECUTE`, не перевірено (відкрите питання DBA, `DB-1`).
+**Права облікового запису служби** в базі скрипти **не** видають — це робить DBA (`deploy-ecr.ps1` виконує DDL під обліковим записом DBA, не під `-ServiceAccount`; у службі DDL немає, `D-66`). За кодом потрібні: `SELECT/INSERT/UPDATE/DELETE` на таблицях (сід виконується на кожному старті), `UPDATE` на послідовностях, `EXECUTE` на TVP-типах `doc.CellValueTvp`, `aud.CellChangeTvp`, на процедурах `arc.usp_ArchiveYear`, `arc.usp_EnsureAuditPartitions`, `arc.usp_ArchiveAudit` (п. 7, 7.3–7.4), `rpt.usp_GenerateTemplateViews`, `rpt.usp_GenerateStableViews` (вʼюхи SSRS на старті й після публікації версії; усі п'ять — `WITH EXECUTE AS OWNER`, DDL-прав служба не потребує) і на скалярній функції `doc.fn_VersionOf` (версія шаблону за період у запитах запису й читання; `db_datareader` права EXECUTE на скалярні функції не дає). `db_datareader` + `db_datawriter` + ці `GRANT` — достатньо: перевірено тестом `ServiceAccountLeastPrivilegeTests` (користувач без входу рівно з цими правами проходить старт, сід, додавання й видалення рядка, правку комірки, подання, нічну перевірку партицій і читання `rpt.v_DocumentCells`; `DB-1` закрито). Без права на `doc.fn_VersionOf` падає кожен запис рядка й комірки («The EXECUTE permission was denied on the object 'fn_VersionOf'»), без прав на `rpt.usp_Generate*` — генерація вʼюх (`reportviews` = Degraded). Скрипт прав нижче (той самий — у `docs/build/11-install-guide.md`, п. 2.3, крок перед першим стартом служби): `[<DB>]` — база ECR, `[<SERVICE_ACCOUNT>]` — логін служби (напр. `DOMAIN\ecr-svc$`). ⛔ Блок **генерується** з `ServiceAccountGrants` (`powershell -File tools\gen-install-docs.ps1`) — руками не правити; сторож `ServiceAccountGrantsRunbookTests` червоніє, якщо будь-яка копія розійшлася з переліком.
+
+<!-- generated:grants -->
+```sql
+USE [<DB>];
+IF DATABASE_PRINCIPAL_ID(N'<SERVICE_ACCOUNT>') IS NULL
+    CREATE USER [<SERVICE_ACCOUNT>] FOR LOGIN [<SERVICE_ACCOUNT>];
+ALTER ROLE db_datareader ADD MEMBER [<SERVICE_ACCOUNT>];
+ALTER ROLE db_datawriter ADD MEMBER [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::doc.TableInstanceSeq TO [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::doc.TableRowSeq TO [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::calc.CalculationResultSeq TO [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::dic.RegistryEntryCodeSeq TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON TYPE::doc.CellValueTvp TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON TYPE::aud.CellChangeTvp TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::arc.usp_ArchiveYear TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::arc.usp_EnsureAuditPartitions TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::arc.usp_ArchiveAudit TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::rpt.usp_GenerateTemplateViews TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::rpt.usp_GenerateStableViews TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::doc.fn_VersionOf TO [<SERVICE_ACCOUNT>];
+```
+<!-- /generated:grants -->
 
 Перевірка:
 

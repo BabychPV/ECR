@@ -187,9 +187,12 @@ public sealed class SchemaValidator(
 
             if (missing.Count > 0)
             {
+                // ⚠ DB-1: без права на об'єкт OBJECT_ID теж дає NULL, а таблицю-канарку служба бачить через db_datareader,
+                // тож «немає процедури» і «немає EXECUTE на неї» звідси не розрізнити — текст називає обидві причини.
                 _warnings.Add(
-                    $"Відсутні процедури, що створюються лише скриптами Sql ({missing.Count}): {string.Join(", ", missing)}. " +
-                    "Базу оновлено без кроку схеми deploy-ecr.ps1 — виконайте його без -SkipSchema (runbook §8); " +
+                    $"Відсутні процедури, що створюються лише скриптами Sql, або обліковий запис служби не має на них EXECUTE ({missing.Count}): {string.Join(", ", missing)}. " +
+                    "Або базу оновлено без кроку схеми deploy-ecr.ps1 — виконайте його без -SkipSchema (runbook §8), " +
+                    "або DBA не видав GRANT EXECUTE (runbook, «Права облікового запису служби»); " +
                     "доти вʼюхи rpt.* для SSRS не генеруються.");
             }
         }
