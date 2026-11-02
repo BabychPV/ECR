@@ -450,16 +450,15 @@ $scripts = @(
 # бо перелік тут писався руками. База при цьому піднімалася без RCSI, і
 # єдиним слідом був рядок `RCSI False` у логу старту.
 #
-# ⚠ `09-seed.sql` виконує сам застосунок (це DML, `02-contracts.md` §14),
-# тому він єдиний легальний виняток.
-    # ⚠ Два винятки, і обидва названі. `09-seed.sql` виконує сам застосунок
-# (це DML, `02-contracts.md` §14). `14-agent-jobs.sql` чіпає `msdb`, а не
+# ⚠ Сід (`seed/`, колишній `09-seed.sql`) виконує сам застосунок (це DML,
+# `02-contracts.md` §14); він у підкаталозі, і `-Filter '*.sql'` його не бачить.
+    # ⚠ Виняток у переліку один і названий: `14-agent-jobs.sql` чіпає `msdb`, а не
 # базу застосунку: він створює завдання обслуговування під окремим
 # principal (`D-66`) і виконується DBA один раз, а не при кожній перевірці
 # розгортання.
 $onDisk = Get-ChildItem -Path $sql -Filter '*.sql' | Select-Object -ExpandProperty Name
 $missed = $onDisk | Where-Object {
-    $_ -notin $scripts -and $_ -ne '09-seed.sql' -and $_ -ne '14-agent-jobs.sql'
+    $_ -notin $scripts -and $_ -ne '14-agent-jobs.sql'
 }
 
 if ($missed) {

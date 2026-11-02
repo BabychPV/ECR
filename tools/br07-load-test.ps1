@@ -114,6 +114,7 @@ function Invoke-NativeStep {
 }
 
 $root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'seed-sql.ps1')
 $sql = Join-Path $root 'src/Ecr.Infrastructure/Persistence/Sql'
 $artifacts = Join-Path $root 'artifacts'
 $migration = Join-Path $artifacts 'migration.sql'
@@ -287,7 +288,7 @@ EXEC sys.sp_addextendedproperty @name = N'Ecr_Br07_Temp', @value = 1;
         '05-rpt-views.sql'
         '15-cell-tvp.sql'
         '10-triggers.sql'
-        '09-seed.sql'
+        '<seed>'
         '06-rcsi.sql'
     )
 
@@ -307,6 +308,14 @@ EXEC sys.sp_addextendedproperty @name = N'Ecr_Br07_Temp', @value = 1;
         if ($name -eq '<migration>') {
             Write-Host '  migration.sql'
             Invoke-Sql -Db $Database -File $migration
+        }
+        elseif ($name -eq '<seed>') {
+            # Сід — частини seed/ (пролог → фічі → епілог) ОДНИМ файлом: вони ділять
+            # тимчасові таблиці (#I18N), а кожен виклик sqlcmd — окрема сесія.
+            $seedFile = Join-Path $artifacts 'seed.sql'
+            Write-SeedSql -SqlDir $sql -Path $seedFile
+            Write-Host '  seed/ (00-prelude → features → 99-epilogue)'
+            Invoke-Sql -Db $Database -File $seedFile
         }
         else {
             Write-Host "  $name"

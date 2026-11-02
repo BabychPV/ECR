@@ -38,15 +38,7 @@ public sealed class RegistryImportPlaceholderGuardTests
 
     private static string EnglishText(string key)
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Ecr.sln")))
-        {
-            dir = dir.Parent;
-        }
-
-        Assert.NotNull(dir);
-        var seed = File.ReadAllText(Path.Combine(
-            dir.FullName, "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+        var seed = SeedSql.Text;
         var match = Regex.Match(seed, $@"N'{Regex.Escape(key)}',\s*N'en',\s*N'((?:[^']|'')*)'");
         Assert.True(match.Success, $"У сіді немає en-тексту ключа {key}.");
         return match.Groups[1].Value;

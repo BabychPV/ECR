@@ -1,6 +1,4 @@
 import type { JSX } from 'react';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -16,6 +14,7 @@ import {
   resetPending,
 } from '@/features/grid/pendingStore';
 import type { PendingEdit } from '@/features/grid/useCellPatch';
+import { readSeedSql } from '@/test/seedSql';
 
 /**
  * `DAT-08` (клієнтська половина): застарілий чанк після оновлення.
@@ -229,10 +228,7 @@ describe('DAT-08 — незбережене зберігається до про
   });
 
   it('тексти стану збереження є в MERGE каталогу', () => {
-    const seed = readFileSync(
-      path.resolve(process.cwd(), '../../src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql'),
-      'utf8',
-    );
+    const seed = readSeedSql();
     const start = seed.indexOf('MERGE sys_ecr.UiString AS t');
     const end = seed.indexOf(') AS s ([Key], Lang, Val, Scope)', start);
     const merge = seed.slice(start, end);

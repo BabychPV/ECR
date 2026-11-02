@@ -1,12 +1,11 @@
-﻿import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { vi, beforeEach, afterEach } from 'vitest';
+﻿import { vi, beforeEach, afterEach } from 'vitest';
 import type { JSX, ReactNode } from 'react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { act } from '@testing-library/react';
 import { mantineProviderProps } from '@/shared/theme/provider';
+import { readSeedSql } from '@/test/seedSql';
 
 /**
  * Спільні прилади для розбитого набору перевірки доступності (`ФВ-14.16`,
@@ -222,10 +221,7 @@ export const Themes: readonly ('light' | 'dark')[] =
  * файлу — див. коментар там-таки в git-історії).
  */
 function seededStrings(): Record<string, string> {
-  const seed = readFileSync(
-    path.resolve(process.cwd(), '../../src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql'),
-    'utf8',
-  );
+  const seed = readSeedSql();
 
   // Лише блок MERGE: секції «змінені тексти»/«прибрані ключі» над ним мають
   // той самий вигляд рядка і несуть старі значення та видалені ключі.

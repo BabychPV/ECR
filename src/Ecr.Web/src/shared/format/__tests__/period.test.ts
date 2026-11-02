@@ -1,8 +1,7 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadCatalog, resetMissingReports, setLanguage } from '@/shared/i18n';
 import { formatMonthYear, formatPeriodKey } from '@/shared/format';
+import { readSeedSql } from '@/test/seedSql';
 
 /**
  * `A2-10`: підпис місяця періоду — з каталогу рядків, а не з `Intl`.
@@ -16,10 +15,7 @@ import { formatMonthYear, formatPeriodKey } from '@/shared/format';
  * перекладу, а не те, що отримає замовник.
  */
 
-const Seed = readFileSync(
-  path.resolve(process.cwd(), '../../src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql'),
-  'utf8',
-);
+const Seed = readSeedSql();
 
 /** Усі рядки сіду мовою `lang` з ключем, що починається на `periods.month`. */
 function seedStrings(lang: string): Record<string, string> {

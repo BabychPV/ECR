@@ -1,11 +1,10 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import type { ReactNode } from 'react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { loadCatalog, resetMissingReports, t } from '@/shared/i18n';
 import { theme } from '@/shared/theme/theme';
+import { readSeedSql } from '@/test/seedSql';
 import {
   StatusBadge,
   badgeLook,
@@ -44,10 +43,7 @@ import {
  * у значеннях каталогу дефіси трапляються (`ECR-AUTH-0401`), і вирізання
  * всього після першого `--` з'їло б їх разом із рядком.
  */
-const seed = readFileSync(
-  path.resolve(process.cwd(), '..', 'Ecr.Infrastructure', 'Persistence', 'Sql', '09-seed.sql'),
-  'utf8',
-)
+const seed = readSeedSql()
   .split('\n')
   .filter((line) => !/^\s*--/.test(line))
   .join('\n');

@@ -13,7 +13,7 @@ namespace Ecr.Architecture.Tests;
 /// </summary>
 public sealed partial class ErrorTitleOverrideKeysTests
 {
-    private const string SeedFile = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedFile = SeedSql.DisplayPath;
 
     private static readonly string[] Allowed =
     [
@@ -33,7 +33,7 @@ public sealed partial class ErrorTitleOverrideKeysTests
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Ключі_err_title_у_сіді_лише_з_переліку()
     {
-        var text = File.ReadAllText(Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar)));
+        var text = SeedSql.Text;
 
         var found = TitleOverrideKey().Matches(text)
             .Select(m => m.Groups[1].Value)

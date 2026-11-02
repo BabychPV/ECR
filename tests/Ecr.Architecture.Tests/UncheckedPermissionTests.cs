@@ -25,7 +25,7 @@ namespace Ecr.Architecture.Tests;
 /// </remarks>
 public sealed partial class UncheckedPermissionTests
 {
-    private const string SeedFile = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedFile = SeedSql.DisplayPath;
 
     /// <summary>
     /// Права з сіду, яких станом на 2026-09-21 не перевіряє жоден обробник.
@@ -116,8 +116,7 @@ public sealed partial class UncheckedPermissionTests
 
     private static HashSet<string> SeedPermissions()
     {
-        var text = File.ReadAllText(
-            Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar)));
+        var text = SeedSql.Text;
 
         var start = text.IndexOf("MERGE sec.Permission AS t", StringComparison.Ordinal);
         Assert.True(start >= 0, $"У {SeedFile} немає блоку MERGE sec.Permission AS t — сторож дивиться не туди.");

@@ -70,8 +70,7 @@ public sealed partial class LandUnitsModelTests
     {
         // Секція `-- LAND:units` (G8, e95947fbe) уже в сіді цієї бази: тест суворий, її зникнення - червоне
         // (раніше без секції він мовчки нічого не перевіряв).
-        var seed = File.ReadAllText(Path.Combine(
-            SourceTree.Root, "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+        var seed = SeedSql.Text;
         var start = seed.IndexOf("-- LAND:units", StringComparison.Ordinal);
         Assert.True(start >= 0, "У 09-seed.sql немає секції '-- LAND:units' (G8): units.new моделі нема з чим звіряти.");
 

@@ -1,6 +1,5 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readSeedSql } from '@/test/seedSql';
 
 /**
  * `U-17`, друга половина: самі ТЕКСТИ в каталозі.
@@ -16,10 +15,7 @@ import { describe, expect, it } from 'vitest';
  * старе значення тут і шукається як помилка.
  */
 function mergeBlock(): string {
-  const seed = readFileSync(
-    path.resolve(process.cwd(), '../../src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql'),
-    'utf8',
-  );
+  const seed = readSeedSql();
 
   const start = seed.indexOf('MERGE sys_ecr.UiString AS t');
   const end = seed.indexOf(') AS s ([Key], Lang, Val, Scope)', start);

@@ -32,7 +32,7 @@ namespace Ecr.Architecture.Tests;
 /// </remarks>
 public sealed partial class SeedTranslationTests
 {
-    private const string SeedFile = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedFile = SeedSql.DisplayPath;
 
     /// <summary>Хвіст блоку перекладів: джерело без області.</summary>
     private const string TranslationTail = ") AS v ([Key], Lang, Val)";
@@ -286,7 +286,7 @@ public sealed partial class SeedTranslationTests
     }
 
     private static string SeedText()
-        => File.ReadAllText(Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar)));
+        => SeedSql.Text;
 
     /// <summary>Англійський каталог: <c>MERGE sys_ecr.UiString AS t</c> до першого <c>WHEN NOT MATCHED</c>.</summary>
     private static Dictionary<string, string> CatalogRows(string text)

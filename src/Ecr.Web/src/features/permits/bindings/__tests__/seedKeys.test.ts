@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readSeedSql } from '@/test/seedSql';
 
 /**
  * Каталог прив'язки аркуша до дозволу (PM-11): усе, що код просить у `t()` (`permits.sheetBinding.*` плюс
@@ -12,8 +13,7 @@ import { describe, expect, it } from 'vitest';
 
 const root = path.resolve(process.cwd(), 'src', 'features', 'permits', 'bindings');
 const workspace = path.resolve(process.cwd(), 'src', 'features', 'templates', 'ctor', 'TableWorkspace.tsx');
-const seedPath = path.resolve(process.cwd(), '..', 'Ecr.Infrastructure', 'Persistence', 'Sql', '09-seed.sql');
-const seed = readFileSync(seedPath, 'utf8');
+const seed = readSeedSql();
 
 const marker = {
   en: '-- PERMITS: sheet-binding-ui ── PM-11',

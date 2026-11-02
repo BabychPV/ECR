@@ -1,14 +1,13 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SourceEventStatuses, statusColor, statusExplanation, statusLabel } from '../sourceEventStatus';
+import { readSeedSql } from '@/test/seedSql';
 
 /**
  * Вісім станів зв'язку події (`SourceEventLinkStatus`): кожен має назву й пояснення в каталозі всіма трьома
  * мовами продукту — інакше бейдж у таблиці подій показав би позначений ключ.
  */
 describe('sourceEventStatus', () => {
-  const seed = readFileSync(path.resolve(process.cwd(), '../Ecr.Infrastructure/Persistence/Sql/09-seed.sql'), 'utf8');
+  const seed = readSeedSql();
 
   it('вісім станів — рівно ті, що в контракті', () => {
     expect(SourceEventStatuses).toEqual([

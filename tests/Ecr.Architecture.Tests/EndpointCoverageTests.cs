@@ -849,8 +849,7 @@ public sealed partial class EndpointCoverageTests
 
     private static HashSet<string> SeedCatalogKeys()
     {
-        var seed = File.ReadAllText(
-            Path.Combine(SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+        var seed = SeedSql.Text;
 
         var seeded = SeedKeyRegex.Matches(seed)
             .Select(m => m.Groups[1].Value)
@@ -983,8 +982,7 @@ public sealed partial class EndpointCoverageTests
         // ⚠ Перевіряється ФАЙЛ, а не база: тестова база спільна, і сусідній
         // тест, який заводить маршрут для власного проєкту, зробив би цю
         // перевірку то зеленою, то червоною залежно від порядку прогону.
-        var seed = File.ReadAllText(Path.Combine(
-            SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+        var seed = SeedSql.Text;
 
         Assert.DoesNotContain("wf.ApprovalRoute", seed, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("wf.ApprovalStep", seed, StringComparison.OrdinalIgnoreCase);
@@ -1005,8 +1003,7 @@ public sealed partial class EndpointCoverageTests
         // `deny.OutsidePermitWindow`, я вставив її двома скриптами в два
         // місця. Помітив випадково — жодна перевірка цього не ловила, а
         // ціна помилки максимальна: чиста база не піднімається взагалі.
-        var seed = File.ReadAllText(Path.Combine(
-            SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+        var seed = SeedSql.Text;
 
         // ⚠ Лише блок MERGE: секція змінених текстів над ним законно називає
         // ті самі ключі вдруге (старе → нове), і MERGE вона не валить.
@@ -1035,8 +1032,7 @@ public sealed partial class EndpointCoverageTests
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Роль_і_право_bootstrap_адміністратора_існують_у_seed()
     {
-        var seed = File.ReadAllText(
-            Path.Combine(SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+        var seed = SeedSql.Text;
 
         // ⛔ Тест дивиться на SEED, а не на фікстуру. До `A7-13` обробник
         // видавав роль `Administrator`, якої seed не створює; фікстура
@@ -1093,8 +1089,7 @@ public sealed partial class EndpointCoverageTests
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Кожне_право_яке_вимагає_обробник_існує_в_каталозі()
     {
-        var seed = File.ReadAllText(
-            Path.Combine(SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+        var seed = SeedSql.Text;
 
         var catalogue = Blocks(seed, "MERGE sec.Permission").Single();
 
