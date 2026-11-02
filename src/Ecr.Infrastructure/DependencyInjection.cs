@@ -151,6 +151,9 @@ public static class DependencyInjection
         services.AddSingleton(new Application.Permits.AirLimits.AirLimitsSettings(
             configuration["AirLimits:NaeRegistryCode"] is { Length: > 0 } nae ? nae : Application.Permits.AirLimits.AirLimitsSettings.Default.NaeRegistryCode,
             configuration["AirLimits:SubstanceRegistryCode"] is { Length: > 0 } substances ? substances : Application.Permits.AirLimits.AirLimitsSettings.Default.SubstanceRegistryCode));
+        services.AddSingleton(new Application.Registries.Nae.NaeTreeSettings(
+            configuration["AirLimits:NaeRegistryCode"] is { Length: > 0 } naeTree ? naeTree : Application.Registries.Nae.NaeTreeSettings.Default.RegistryCode,
+            configuration["NaeTree:RegionSourceRegistryCode"] is { Length: > 0 } regions ? regions : Application.Registries.Nae.NaeTreeSettings.Default.RegionSourceRegistryCode));
         services.AddScoped<Application.Permits.AirLimits.AirLimitsSettingsAccessor>();
         services.AddScoped<Application.RegistryImport.IRegistryImportTarget, Application.Permits.AirLimits.AirLimitsImportTarget>();
         services.AddScoped<Application.RegistryImport.IReferenceResolver, Application.Permits.AirLimits.NaeReferenceResolver>();
