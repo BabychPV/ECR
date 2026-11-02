@@ -17,7 +17,7 @@ vi.mock('@/shared/i18n', async (importOriginal) => ({
   t: (key: string, params?: Record<string, unknown>) => (params === undefined ? key : `${key} ${JSON.stringify(params)}`),
 }));
 
-const session = { permissions: ['Registry.View', 'Registry.EditData', 'Registry.EditDefinition'] };
+const session = { permissions: ['Registry.View', 'Registry.EditData', 'Registry.EditDefinition', 'Registry.Publish'] };
 vi.mock('@/shared/session/useSession', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/session/useSession')>()),
   useSession: () => ({ data: { permissions: session.permissions } }),
@@ -58,7 +58,7 @@ const imports = () =>
 let reply: (body: Record<string, unknown>) => AfImportReport;
 
 beforeEach(() => {
-  session.permissions = ['Registry.View', 'Registry.EditData', 'Registry.EditDefinition'];
+  session.permissions = ['Registry.View', 'Registry.EditData', 'Registry.EditDefinition', 'Registry.Publish'];
   reply = (body) => report({ dryRun: body['dryRun'] === true, applied: body['dryRun'] !== true });
   vi.mocked(apiFetch).mockReset();
   vi.mocked(apiFetch).mockImplementation((path: string, init?: RequestInit) => {
