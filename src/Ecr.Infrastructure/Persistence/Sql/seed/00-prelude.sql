@@ -10251,6 +10251,7 @@ USING (VALUES
     ,(N'permits.air.import.text.placeholder', N'en', N'Type the value', 1)
     ,(N'permits.air.import.scope.nothingFound', N'en', N'Nothing found', 1)
     ,(N'permits.air.import.scope.notInTreeTitle', N'en', N'Region or area not in the NAE tree', 1)
+    ,(N'permits.air.sources.scope', N'en', N'Region / area', 1)
     ,(N'permits.air.import.scope.notInTreeText', N'en', N'NAE codes of the file will be matched without the region. Check the region or add it to the NAE tree.', 1)
     -- COLL:ui-air-params ── кінець секції ──
     -- D16: кінець секції
