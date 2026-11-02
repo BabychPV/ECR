@@ -43,3 +43,29 @@ OPTION (RECOMPILE);
 GO
 -- CONSTRUCTOR:preview ── кінець секції ──
 
+-- CONSTRUCTOR:preview ── попередній перегляд таблиці шаблону (ФВ-2.6) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'tablePreview.open', N'en', N'Preview', 1),
+    (N'tablePreview.title', N'en', N'Table preview: {name}', 1),
+    (N'tablePreview.hint', N'en', N'How the table will look in a document: current order of columns and rows, data types, units and conditional formatting rules. Nothing is saved here.', 1),
+    (N'tablePreview.sample', N'en', N'Sample value', 1),
+    (N'tablePreview.sampleHint', N'en', N'Every cell shows this value and is formatted by the first matching rule of its column.', 1),
+    (N'tablePreview.tableLabel', N'en', N'Table preview', 1),
+    (N'tablePreview.row', N'en', N'Row', 1),
+    (N'tablePreview.required', N'en', N'required', 1),
+    (N'tablePreview.readOnly', N'en', N'read-only', 1),
+    (N'tablePreview.noRules', N'en', N'No rules', 1),
+    (N'tablePreview.newRow', N'en', N'New row', 1),
+    (N'tablePreview.noColumns', N'en', N'The table has no visible columns yet.', 1),
+    (N'tablePreview.noRows', N'en', N'The table has no predefined rows: rows are added in the document.', 1),
+    (N'tablePreview.hiddenColumns', N'en', N'Hidden columns not shown: {count}', 1),
+    (N'tablePreview.truncated', N'en', N'Only the first {shown} rows are shown; {more} more are not.', 1),
+    (N'tablePreview.ignoredRules', N'en', N'Rules of this table not shown (hidden column, unknown operator or incomplete rule): {count}', 1),
+    (N'tablePreview.monthsInColumns', N'en', N'In a document these columns repeat for every month of the period.', 1),
+    (N'tablePreview.monthsInRows', N'en', N'In a document these rows repeat for every month of the period.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- CONSTRUCTOR:preview ── кінець секції ──

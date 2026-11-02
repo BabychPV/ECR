@@ -9,3 +9,12 @@ OPTION (RECOMPILE);
 GO
 -- COLL:p3-ent7c ── кінець секції ──
 
+-- COLL:p3-ent7c ── число грантів, що блокують перенос версії (ent7 P3-4); лише кількість, без переліку ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'documents.migrateGrantsNotMappedCount', N'en', N'Blocked: {count} permission(s) on sheets, tables or columns have no counterpart in the new version. Remove them or recreate them afterwards.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:p3-ent7c ── кінець секції ──

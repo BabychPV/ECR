@@ -90,3 +90,53 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-treeeditor ── кінець секції ──
+-- COLL:ui-treeeditor ── загальний редактор дерева (shared/ui/TreeEditor, NAE plan N1/N2): пошук, клавіатура, перенос, виведення; ru/kz — порцією COLL:ui-treeeditor нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'treeEditor.searchLabel', N'en', N'Search the tree', 1),
+    (N'treeEditor.searchPlaceholder', N'en', N'Search by code or name', 1),
+    (N'treeEditor.clearSearch', N'en', N'Clear search', 1),
+    (N'treeEditor.showRetired', N'en', N'Retired', 1),
+    (N'treeEditor.addRoot', N'en', N'Add top-level node', 1),
+    (N'treeEditor.keyboardHint', N'en', N'Arrow keys move through the tree, Right and Left expand and collapse, Enter selects, Delete retires, Alt+M moves, Alt+Up and Alt+Down reorder, Insert adds a child.', 1),
+    (N'treeEditor.matches', N'en', N'{count} matches', 1),
+    (N'treeEditor.loading', N'en', N'Loading the tree…', 1),
+    (N'treeEditor.updating', N'en', N'Updating…', 1),
+    (N'treeEditor.nothingFound', N'en', N'Nothing found.', 1),
+    (N'treeEditor.empty', N'en', N'The tree is empty.', 1),
+    (N'treeEditor.retiredTag', N'en', N'Retired', 1),
+    (N'treeEditor.childCount', N'en', N'{count} direct children', 1),
+    (N'treeEditor.reordered', N'en', N'{name} moved to position {position} of {total}', 1),
+    (N'treeEditor.moved', N'en', N'Moved “{name}”.', 1),
+    (N'treeEditor.retiredDone', N'en', N'Retired “{name}”.', 1),
+    (N'treeEditor.addChild', N'en', N'Add child', 1),
+    (N'treeEditor.retire.action', N'en', N'Retire', 1),
+    (N'treeEditor.retire.title', N'en', N'Retire “{name}”?', 1),
+    (N'treeEditor.retire.text', N'en', N'The node stays in history and in documents that already use it, and disappears from new choices.', 1),
+    (N'treeEditor.retire.cascade', N'en', N'It has {count} direct children; they and everything below are retired too.', 1),
+    (N'treeEditor.retire.verb', N'en', N'Retire', 1),
+    (N'treeEditor.move.action', N'en', N'Move to…', 1),
+    (N'treeEditor.move.title', N'en', N'Move “{name}”', 1),
+    (N'treeEditor.move.hint', N'en', N'Pick the new parent. Only places allowed by the level order are listed.', 1),
+    (N'treeEditor.move.search', N'en', N'Find the new parent', 1),
+    (N'treeEditor.move.groupLabel', N'en', N'New parent', 1),
+    (N'treeEditor.move.none', N'en', N'There is no allowed place for this node.', 1),
+    (N'treeEditor.move.root', N'en', N'Top level (no parent)', 1),
+    (N'treeEditor.move.current', N'en', N'(current)', 1),
+    (N'treeEditor.move.limited', N'en', N'Showing the first {count} places. Narrow the search to see others.', 1),
+    (N'treeEditor.move.confirm', N'en', N'Move', 1),
+    (N'treeEditor.panel.empty', N'en', N'Select a node to see its details.', 1),
+    (N'treeEditor.panel.code', N'en', N'Code', 1),
+    (N'treeEditor.panel.level', N'en', N'Level', 1),
+    (N'treeEditor.panel.path', N'en', N'Path', 1),
+    (N'treeEditor.panel.validity', N'en', N'Valid', 1),
+    (N'treeEditor.panel.children', N'en', N'Direct children', 1),
+    (N'treeEditor.panel.fromTo', N'en', N'from {from} until {to}', 1),
+    (N'treeEditor.panel.from', N'en', N'from {from}', 1),
+    (N'treeEditor.panel.until', N'en', N'until {to}', 1),
+    (N'treeEditor.panel.retiredNote', N'en', N'This node is retired: it is hidden from new choices.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-treeeditor ── кінець секції ──

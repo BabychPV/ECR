@@ -79,3 +79,47 @@ OPTION (RECOMPILE);
 GO
 -- DOC:migrate-version ── кінець секції ──
 
+-- DOC:migrate-version ── ФВ-7.5: перенос документів на нову версію шаблону (`MigrateDocumentVersionHandler`, `VersionMigrationAction`).
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-DOC-0409.migrateProjectArchived', N'en', N'The project is archived: documents of an archived project are not moved to another template version.', 1),
+    (N'err.ECR-DOC-0409.migrateSheetsLocked', N'en', N'Submitted or approved sheets: {lockedSheets}. Return them to work before moving the documents to another template version.', 1),
+    (N'err.ECR-SCHM-0422.migrateDataLoss', N'en', N'Mode {mode} cannot move these documents: {lostValues} entered value(s) would be lost and {guardedValues} would change meaning.', 1),
+    (N'err.ECR-SCHM-0422.migrateStructural', N'en', N'Mode {mode} only moves documents between versions that differ in appearance; these versions differ in structure.', 1),
+    (N'err.ECR-TMPL-0422.migrateOtherTemplate', N'en', N'Template version {versionId} belongs to another template: a document moves only between versions of its own template.', 1),
+    (N'err.ECR-TMPL-0422.migrateSameVersion', N'en', N'The document is already on template version {versionId}.', 1),
+    (N'err.ECR-TMPL-0422.migrateTargetNotPublished', N'en', N'Documents can only be moved to a published template version; version {version} is {status}.', 1),
+    (N'documents.migrateVersion', N'en', N'Move to another template version', 1),
+    (N'documents.migrateVersionTitle', N'en', N'Move documents to another template version', 1),
+    (N'documents.migrateCurrentVersion', N'en', N'Current template version of the project: {version}', 1),
+    (N'documents.migrateNoTargets', N'en', N'There is no other published version of this template.', 1),
+    (N'documents.migrateTarget', N'en', N'Target version', 1),
+    (N'documents.migrateModeSafe', N'en', N'Safe', 1),
+    (N'documents.migrateModePresentation', N'en', N'Appearance only', 1),
+    (N'documents.migrateModeSafeHint', N'en', N'The new version may add or remove structure, but no entered value may be lost or change meaning.', 1),
+    (N'documents.migrateModePresentationHint', N'en', N'The new version may differ only in labels, order, formats and visibility.', 1),
+    (N'documents.migrateDryRun', N'en', N'Preview', 1),
+    (N'documents.migrateApply', N'en', N'Move documents', 1),
+    (N'documents.migrateDone', N'en', N'Documents moved to template version {version}: {count}.', 1),
+    (N'documents.migrateDocuments', N'en', N'The template version belongs to the project, so all its documents move together. Documents: {count}.', 1),
+    (N'documents.migrateCounts', N'en', N'Values moved: {transferred}. Lost: {lost}. Change meaning: {guarded}.', 1),
+    (N'documents.migrateCanApply', N'en', N'The move is possible: no entered value is lost.', 1),
+    (N'documents.migrateRefusalStructural', N'en', N'The versions differ in structure, not only in appearance.', 1),
+    (N'documents.migrateRefusalDataLoss', N'en', N'Entered values would be lost: the new version has no place for them.', 1),
+    (N'documents.migrateRefusalGuarded', N'en', N'Entered values would change meaning: type, unit, reference list or precision differs.', 1),
+    (N'documents.migrateRefusalSheetsLocked', N'en', N'Some sheets are submitted or approved: return them to work first.', 1),
+    (N'documents.migrateRefusalArchived', N'en', N'The project is archived.', 1),
+    (N'documents.migrateKindAdded', N'en', N'Added', 1),
+    (N'documents.migrateKindRemoved', N'en', N'Removed, no data', 1),
+    (N'documents.migrateKindLost', N'en', N'Removed with data', 1),
+    (N'documents.migrateKindModified', N'en', N'Meaning changes', 1),
+    (N'documents.migrateKindPresentation', N'en', N'Appearance', 1),
+    (N'documents.migrateItemPath', N'en', N'Element', 1),
+    (N'documents.migrateItemKind', N'en', N'Change', 1),
+    (N'documents.migrateItemValues', N'en', N'Entered values', 1),
+    (N'documents.migrateMoreItems', N'en', N'More differences not shown: {count}.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- DOC:migrate-version: кінець секції

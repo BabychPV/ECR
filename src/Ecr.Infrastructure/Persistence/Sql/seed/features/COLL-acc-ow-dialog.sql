@@ -20,3 +20,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:acc-ow-dialog ── кінець секції ──
+-- COLL:acc-ow-dialog ── CL-8: діалог «Перезаписати значення» при переносі версії; ru/kz — порцією COLL:acc-ow-dialog
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'documents.migrateGuardedOverwriteTitle', N'en', N'Overwrite {count} derived values?', 1),
+    (N'documents.migrateGuardedOverwriteBody', N'en', N'The target version puts a new cell formula on cells that already hold entered values. After the move the recalculation replaces these values with the formula result. Cells (entered values):', 1),
+    (N'documents.migrateGuardedOverwriteItem', N'en', N'{sheet} / {table} / {row} / {column}: {values}', 1),
+    (N'documents.migrateGuardedOverwriteMore', N'en', N'More cells not shown.', 1),
+    (N'documents.migrateGuardedOverwriteConfirm', N'en', N'Yes, overwrite', 1),
+    (N'documents.migrateGuardedOverwriteCancel', N'en', N'No', 1),
+    (N'documents.migrateGuardedOverwriteAccepted', N'en', N'Overwrite confirmed: {count} derived values will be replaced by formulas.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:acc-ow-dialog ── кінець секції ──

@@ -46,3 +46,31 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: groups-api ── кінець секції ──
+-- PERMITS: groups-api ── en: відмови груп типів дозволів (ECR-PRM-0405/4097/4098/4099, ECR-PRM-0422 group*; PRMG); ru/kz — порцією PERMITS: groups-api нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-PRM-0405', N'en', N'Permit group not found', 1),
+    (N'err.ECR-PRM-0405.group', N'en', N'Permit group "{code}" does not exist.', 1),
+    (N'err.ECR-PRM-4097', N'en', N'Permit group already exists', 1),
+    (N'err.ECR-PRM-4097.code', N'en', N'Permit group "{code}" already exists.', 1),
+    (N'err.ECR-PRM-4097.registryCode', N'en', N'The registry code "{registryCode}" needed by the group is already taken.', 1),
+    (N'err.ECR-PRM-4098', N'en', N'Permit group is in use', 1),
+    (N'err.ECR-PRM-4098.inUse', N'en', N'Permit group "{code}" is used by templates ({templates}) and cannot be deleted. Deactivate it instead.', 1),
+    (N'err.ECR-PRM-4098.referencedByHistory', N'en', N'Permit group "{code}" cannot be deleted: it is still referenced by historical (soft-deleted) template columns or fields. Deactivate it instead.', 1),
+    (N'err.ECR-PRM-4099', N'en', N'Permit group was changed', 1),
+    (N'err.ECR-PRM-4099.changed', N'en', N'Permit group "{code}" was changed after you opened it. Reload it and repeat your edit.', 1),
+    (N'err.ECR-PRM-0422.permitGroupNameRequired', N'en', N'The permit group name is required in at least one language.', 1),
+    (N'err.ECR-PRM-0422.permitGroupCodeInvalid', N'en', N'The group code "{code}" is not valid: use letters, digits and underscore, starting with a letter, up to 59 characters.', 1),
+    (N'err.ECR-PRM-0422.permitGroupTextTooLong', N'en', N'The group {item} is longer than {max} characters.', 1),
+    (N'err.ECR-PRM-0422.permitGroupMemberDuplicate', N'en', N'The permit type "{typeCode}" is listed in the group more than once.', 1),
+    (N'err.ECR-PRM-0422.permitGroupMemberUnknown', N'en', N'The permit type "{typeCode}" does not exist.', 1),
+    (N'err.ECR-PRM-0422.permitGroupMemberNotPublished', N'en', N'The permit type "{typeCode}" is not published yet: only published types can be in a group.', 1),
+    (N'err.ECR-PRM-0422.permitGroupRegistryManaged', N'en', N'The registry "{registryCode}" belongs to a permit group and can only be changed through the group.', 1),
+    (N'err.ECR-PRM-4097.registryReserved', N'en', N'The code prefix "{prefix}" is reserved for permit groups: the registry code "{registryCode}" cannot be used.', 1),
+    (N'err.ECR-CALC-0422.rowActivityFilterPermitGroup', N'en', N'The row activity filter cannot point to the permit group "{registryCode}": a group has no entries.', 1),
+    (N'err.ECR-TMPL-0422.lookupGroupNoRegistryForms', N'en', N'Column {columnCode} uses a permit group as its list: REG* functions over it are not supported yet.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: groups-api ── кінець секції ──

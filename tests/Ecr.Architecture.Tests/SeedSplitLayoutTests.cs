@@ -12,7 +12,7 @@ namespace Ecr.Architecture.Tests;
 /// <remarks>
 /// ⛔ Порядок файлів фіч — за іменем (ordinal), тобто випадковий щодо змісту. Це
 /// безпечно лише доти, доки файл фічі ЛИШЕ наповнює тимчасові таблиці прологу
-/// (<c>#I18N</c>, <c>#UiChanged</c>, <c>#UiRemoved</c>), а застосовує їх епілог:
+/// (<c>#UiEn</c> — en-каталог, <c>#I18N</c>, <c>#UiChanged</c>, <c>#UiRemoved</c>), а застосовує їх епілог:
 /// вставки в таблицю з ключем комутують. Файл, що пише в справжню таблицю чи
 /// читає її, зробив би результат залежним від імені файла — тому сторож нижче.
 /// Фіча, якій потрібен порядок (роздача прав ролі, одиниці з UPDATE), іде в
@@ -89,9 +89,41 @@ public sealed partial class SeedSplitLayoutTests
 
         Assert.True(
             problems.Count == 0,
-            "Файл фічі виконується в довільному порядку (за іменем), тому лише наповнює #I18N / #UiChanged / "
+            "Файл фічі виконується в довільному порядку (за іменем), тому лише наповнює #UiEn / #I18N / #UiChanged / "
             + "#UiRemoved порціями `INSERT INTO #… ` + GO. Що залежить від порядку — у 00-prelude.sql або "
             + "99-epilogue.sql на своє місце:" + Environment.NewLine + string.Join(Environment.NewLine, problems));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void En_рядки_каталогу_лише_у_файлах_фіч()
+    {
+        // ⛔ Причина поділу en-каталогу (lane integ-seed-uien): поки en-рядки жили одним VALUES
+        // en-MERGE прологу, кожна lane з en-текстом правила ті самі рядки й конфліктувала з іншою.
+        // Тепер en-рядок — порція `INSERT INTO #UiEn` свого файла фічі (поруч із ru/kz тієї ж
+        // секції), а пролог і епілог en-рядків не несуть: пролог лише створює #UiEn, епілог MERGE-ить.
+        var parts = SeedScript.ReadDirectoryParts(SeedSql.SeedDirectory());
+        var shared = parts
+            .Where(p => p.Key is SeedScript.PreludeFile or SeedScript.EpilogueFile)
+            .Where(p => SeedSql.EnCatalogOf(p.Value).Length > 0)
+            .Select(p => p.Key)
+            .ToList();
+        Assert.True(
+            shared.Count == 0,
+            "en-рядки каталогу — лише порціями `INSERT INTO #UiEn ([Key], Lang, Val, Scope) … OPTION (RECOMPILE);` + GO "
+            + $"у {SeedSql.DisplayPath}{SeedScript.FeaturesFolder}/<AREA>-<slug>.sql (поруч із ru/kz своєї секції), "
+            + "не в пролозі/епілозі: " + string.Join(", ", shared));
+
+        var inFeatures = parts
+            .Where(p => p.Key.StartsWith(SeedScript.FeaturesFolder + "/", StringComparison.Ordinal))
+            .Sum(p => EnRow().Count(SeedSql.EnCatalogOf(p.Value)));
+        Assert.True(inFeatures > 1000, $"У файлах фіч лише {inFeatures} en-рядків — сторож дивиться не туди.");
+
+        // Доказ, що сторож уміє червоніти: en-порція, дописана в пролог.
+        var prelude = parts[SeedScript.PreludeFile] + "\nINSERT INTO #UiEn ([Key], Lang, Val, Scope)\nSELECT v.[Key], v.Lang, v.Val, v.Scope\n"
+                      + "  FROM (VALUES\n    (N'x.y', N'en', N'z', 1)\n       ) AS v ([Key], Lang, Val, Scope)\nOPTION (RECOMPILE);\nGO\n";
+        Assert.True(SeedSql.EnCatalogOf(prelude).Length > 0);
     }
 
     [Fact]
@@ -104,6 +136,11 @@ public sealed partial class SeedSplitLayoutTests
                             + "  FROM (VALUES\n    (N'a', N'ru', N'b')\n       ) AS v ([Key], Lang, Val)\nOPTION (RECOMPILE);\nGO\n"
                             + "-- X:y ── кінець секції ──\n";
         Assert.Empty(FeatureProblems(good));
+        const string goodEn = "-- X:y ── en ──\nINSERT INTO #UiEn ([Key], Lang, Val, Scope)\nSELECT v.[Key], v.Lang, v.Val, v.Scope\n"
+                              + "  FROM (VALUES\n    (N'a', N'en', N'b', 1)\n       ) AS v ([Key], Lang, Val, Scope)\nOPTION (RECOMPILE);\nGO\n"
+                              + "-- X:y ── кінець секції ──\n";
+        Assert.Empty(FeatureProblems(goodEn));
+        Assert.NotEmpty(FeatureProblems(goodEn.Replace("INSERT INTO #UiEn", "INSERT INTO #UiEnCounts", StringComparison.Ordinal)));
         Assert.NotEmpty(FeatureProblems(good.Replace("INSERT INTO #I18N", "INSERT INTO sys_ecr.UiString", StringComparison.Ordinal)));
         Assert.NotEmpty(FeatureProblems(good.Replace("OPTION (RECOMPILE);\n", "OPTION (RECOMPILE);\nUPDATE sec.Role SET Code = Code;\n", StringComparison.Ordinal)));
         Assert.NotEmpty(FeatureProblems(good.Replace("GO\n-- X:y ── кінець", "-- X:y ── кінець", StringComparison.Ordinal)));
@@ -122,8 +159,8 @@ public sealed partial class SeedSplitLayoutTests
         Assert.True(CatalogRows(SeedSql.Text).Count > 1000, "Розібрано підозріло мало рядків каталогу — сторож дивиться не туди.");
         Assert.True(
             duplicates.Count == 0,
-            "Пара (ключ, мова) заведена в сіді більше одного разу (en-MERGE прологу + порції #I18N усіх файлів): "
-            + "MERGE вставив би одну, решта мовчки зникла б або впала б на PRIMARY KEY #I18N:"
+            "Пара (ключ, мова) заведена в сіді більше одного разу (порції #UiEn і #I18N усіх файлів): "
+            + "сід упав би на PRIMARY KEY #UiEn / #I18N:"
             + Environment.NewLine + string.Join(Environment.NewLine, duplicates));
 
         // Доказ, що сторож уміє червоніти: перший рядок каталогу, повторений порцією #I18N.
@@ -182,7 +219,7 @@ public sealed partial class SeedSplitLayoutTests
 
             if (!AllowedInsert().IsMatch(lines[0]))
             {
-                problems.Add($"батч починається не з INSERT INTO #I18N|#UiChanged|#UiRemoved: «{lines[0]}»");
+                problems.Add($"батч починається не з INSERT INTO #UiEn|#I18N|#UiChanged|#UiRemoved: «{lines[0]}»");
                 continue;
             }
 
@@ -196,16 +233,14 @@ public sealed partial class SeedSplitLayoutTests
         return problems;
     }
 
-    /// <summary>en-рядки MERGE каталогу (пролог) і рядки всіх порцій <c>#I18N</c>.</summary>
+    /// <summary>en-рядки порцій <c>#UiEn</c> і рядки всіх порцій <c>#I18N</c>.</summary>
     private static List<(string Key, string Lang)> CatalogRows(string text)
     {
         var rows = new List<(string Key, string Lang)>();
 
-        var start = text.IndexOf("MERGE sys_ecr.UiString AS t", StringComparison.Ordinal);
-        Assert.True(start >= 0, $"У {SeedSql.DisplayPath} немає блоку MERGE sys_ecr.UiString AS t.");
-        var end = text.IndexOf("WHEN NOT MATCHED", start, StringComparison.Ordinal);
-        Assert.True(end > start, "Блок MERGE sys_ecr.UiString AS t не закінчується.");
-        rows.AddRange(EnRow().Matches(text[start..end]).Select(m => (m.Groups[1].Value, m.Groups[2].Value)));
+        var block = SeedSql.EnCatalogOf(text);
+        Assert.True(block.Length > 0, $"У {SeedSql.DisplayPath} немає порцій en-каталогу ({SeedSql.EnCatalogInsert}).");
+        rows.AddRange(EnRow().Matches(block).Select(m => (m.Groups[1].Value, m.Groups[2].Value)));
 
         var pos = 0;
         while ((pos = text.IndexOf("INSERT INTO #I18N", pos, StringComparison.Ordinal)) >= 0)
@@ -228,7 +263,7 @@ public sealed partial class SeedSplitLayoutTests
     [GeneratedRegex(@"^[A-Z0-9]+-[a-z0-9-]+\.sql$")]
     private static partial Regex FeatureName();
 
-    [GeneratedRegex(@"^INSERT\s+INTO\s+#(?:I18N|UiChanged|UiRemoved)\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^INSERT\s+INTO\s+#(?:UiEn|I18N|UiChanged|UiRemoved)\b", RegexOptions.IgnoreCase)]
     private static partial Regex AllowedInsert();
 
     [GeneratedRegex(@"^(?:;\s*)?(?:MERGE|UPDATE|DELETE|INSERT|DROP|CREATE|ALTER|EXEC|EXECUTE|TRUNCATE|DECLARE|SET|IF|BEGIN|WITH|GRANT|DENY|REVOKE|USE|PRINT|RAISERROR|THROW)\b", RegexOptions.IgnoreCase)]

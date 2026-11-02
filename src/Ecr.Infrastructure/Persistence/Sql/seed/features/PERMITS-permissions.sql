@@ -13,3 +13,14 @@ OPTION (RECOMPILE);
 GO
 -- PERMITS: permissions ── ru/kz ── кінець секції ──
 
+-- PERMITS: permissions ── en: підписи прав типів дозволів ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'permission.Permit.EditType', N'en', N'Edit permit types', 1),
+    (N'permission.Permit.PublishType', N'en', N'Publish permit types', 1),
+    (N'security.domain.Permit', N'en', N'Permits', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: permissions ── en ── кінець секції ──

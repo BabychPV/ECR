@@ -19,3 +19,18 @@ OPTION (RECOMPILE);
 GO
 -- COLL:fv812-relations ── кінець секції ──
 
+-- COLL:fv812-relations ── редагування зв'язків полів у конструкторі довідників (ФВ-8.12, порція 1) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REG-0422.lookupRetargetInUse', N'en', N'The link of field "{fieldCode}" cannot be changed: records already hold values pointing to the current target. Clear or change those values first, then change the link.', 1),
+    (N'err.ECR-REG-0422.lookupTargetUnknown', N'en', N'The target registry of field "{fieldCode}" does not exist.', 1),
+    (N'registries.relationTargetFor', N'en', N'Link target of field {field}', 1),
+    (N'registries.relationsEditHint', N'en', N'The target of a link can be changed to another registry while no record holds a value in that field; otherwise the server refuses it.', 1),
+    (N'err.ECR-REG-0422.lookupRetargetUsedByRules', N'en', N'The link of field "{fieldCode}" cannot be changed: {total} rule(s), formula(s) or methodology version(s) read attributes through it: {usedBy}. Change or disable them first.', 1),
+    (N'err.ECR-REG-0409.definitionChanged', N'en', N'The definition of registry "{registryCode}" was changed after you opened it. Reload it and repeat your changes.', 1)
+    -- ru/kz — окремою порцією COLL:fv812-relations у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:fv812-relations ── кінець секції ──

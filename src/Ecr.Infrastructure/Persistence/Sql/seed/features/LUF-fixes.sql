@@ -12,3 +12,14 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- LUF:fixes ── кінець секції ──
+-- LUF:fixes ── приймальна Land 12.10 (D4/D11): текст відмови затвердження без права; лічильники таблиць із підписом області; ru/kz — порцією LUF:fixes нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'deny.approve.NoRight', N'en', N'you cannot approve or reject this sheet right now: you lack the approval right, or the current workflow step is for another role', 1),
+    (N'grid.tree.tablesFilledSheet', N'en', N'{filled} of {total} tables filled on this sheet', 1),
+    (N'document.tablesFilledInDocument', N'en', N'Tables filled completely in the whole document: {filled} of {total}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- LUF:fixes ── кінець секції ──

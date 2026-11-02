@@ -12,3 +12,14 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:a201pub ── кінець секції ──
+-- COLL:a201pub ── A2-01: перелік проблем публікації шаблону читабельний (ключі діагностик 4224/4225 + заголовок переліку); ru/kz — порцією COLL:a201pub у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-TMPL-4224.severityConflict', N'en', N'Rules {ruleCode} ({severity}) and {otherRuleCode} ({otherSeverity}) apply to the same area of table {tableCode} with different severity levels. Give them the same level or narrow the scope of one of them.', 1),
+    (N'err.ECR-TMPL-4225.requiredNotCovered', N'en', N'Column {tableCode}.{columnCode} is required, but no rule checks it and no formula fills it: an empty value would go unnoticed. Add a rule for it or make the column optional.', 1),
+    (N'version.publishProblems', N'en', N'The version was not published. Problems to fix: {count}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:a201pub ── кінець секції ──

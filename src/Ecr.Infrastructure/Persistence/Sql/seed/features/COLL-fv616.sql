@@ -27,3 +27,21 @@ OPTION (RECOMPILE);
 GO
 -- COLL:fv616 ── кінець секції ──
 
+-- COLL:fv616 ── Розріз ефективного доступу на аркуші, таблиці й колонці (ФВ-6.16, `EffectiveAccessPanel`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.effectiveAccessProject', N'en', N'A sheet, table or column is looked at inside one project: pass projectId.', 1),
+    (N'err.ECR-TMPL-0404.effectiveAccessResource', N'en', N'{resource} was not found.', 1),
+    (N'err.ECR-TMPL-0404.effectiveAccessNotInProject', N'en', N'{resource} is not part of the template of project {projectId}.', 1),
+    (N'effectiveAccess.hintAll', N'en', N'Pick a registry, a project, or a sheet, table or column inside a project, to see the resulting level and which grant of which role gives it. This only explains the decision; it changes nothing.', 1),
+    (N'effectiveAccess.kindSheet', N'en', N'Sheet', 1),
+    (N'effectiveAccess.kindTable', N'en', N'Table', 1),
+    (N'effectiveAccess.kindColumn', N'en', N'Column', 1),
+    (N'effectiveAccess.projectId', N'en', N'Project ID', 1),
+    (N'effectiveAccess.caveat', N'en', N'Document state (submitted, approved, closed period) and assignment narrowing by periods are not taken into account here. This shows what the grants give along the chain project, sheet, table, column, not whether a cell can be edited right now.', 1),
+    (N'effectiveAccess.inheritedFrom', N'en', N'Inherited from {resource}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:fv616 ── кінець секції ──

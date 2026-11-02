@@ -40,3 +40,28 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-colgroups ── кінець секції ──
+-- COLL:ui-colgroups ── групові заголовки колонок (до 3 рівнів): конструктор шаблону; ru/kz — порцією COLL:ui-colgroups нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'colgroups.manage', N'en', N'Column groups…', 1),
+    (N'colgroups.title', N'en', N'Column groups', 1),
+    (N'colgroups.hint', N'en', N'Put neighbouring columns under a shared header, up to 3 levels. Columns of one group must be adjacent. Removing a group releases its columns.', 1),
+    (N'colgroups.add', N'en', N'Add group', 1),
+    (N'colgroups.addChild', N'en', N'Add subgroup', 1),
+    (N'colgroups.remove', N'en', N'Remove group', 1),
+    (N'colgroups.moveUp', N'en', N'Move up', 1),
+    (N'colgroups.moveDown', N'en', N'Move down', 1),
+    (N'colgroups.label', N'en', N'Group name', 1),
+    (N'colgroups.empty', N'en', N'No groups yet.', 1),
+    (N'colgroups.maxDepth', N'en', N'A group tree has at most 3 levels.', 1),
+    (N'colgroups.needName', N'en', N'Every group needs a name in at least one language.', 1),
+    (N'colgroups.save', N'en', N'Save groups', 1),
+    (N'colgroups.saved', N'en', N'Column groups saved (revision {revision}).', 1),
+    (N'colgroups.field', N'en', N'Header group', 1),
+    (N'colgroups.fieldHint', N'en', N'Columns that share a group are shown under one header. Only neighbouring columns can share a group.', 1),
+    (N'colgroups.none', N'en', N'No group', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-colgroups ── кінець секції ──

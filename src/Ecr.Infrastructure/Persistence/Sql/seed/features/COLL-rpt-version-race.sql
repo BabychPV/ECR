@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rpt-version-race ── кінець секції ──
+-- COLL:rpt-version-race ── гонка двох створень версії звіту (UQ_ReportVersion) -> 409; ru/kz - порцією COLL:rpt-version-race нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-RPT-4091.versionConcurrent', N'en', N'Someone else has just created a version with this number in this report definition. Reload the definition and pick another version number.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:rpt-version-race ── кінець секції ──

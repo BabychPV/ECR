@@ -44,3 +44,30 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:uishell ── кінець секції ──
+-- COLL:uishell ── UI-11/UI-12: групи бічного меню й пояснення екранів під заголовком (макет docs/design/hybrid); ru/kz — порцією COLL:uishell у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'nav.group.work', N'en', N'Work', 1),
+    (N'nav.group.configure', N'en', N'Configure', 1),
+    (N'nav.group.access', N'en', N'Access', 1),
+    (N'nav.group.operate', N'en', N'Operate', 1),
+    (N'nav.documents.description', N'en', N'Reports of your projects for one period. Open a document to work in it.', 1),
+    (N'nav.myGroups.description', N'en', N'Where your access comes from: directory groups give you roles, roles give you permissions and projects. Nothing here can be edited; an administrator changes it for you.', 1),
+    (N'nav.templates.description', N'en', N'A template is the structure of a report: sheets, tables, columns, formulas and rules. Documents are created from a published version and stay on it.', 1),
+    (N'nav.registries.description', N'en', N'Reference lists that cells, formulas and mappings pick values from: sources, substances, fuels, limits.', 1),
+    (N'nav.methodologies.description', N'en', N'How emissions are calculated: formulas, constants and the rules that bind them to table rows. A published version is what documents calculate with.', 1),
+    (N'nav.units.description', N'en', N'Units of measure grouped by dimension. Each unit converts to the base unit of its dimension, so values from sources and cells can be compared safely.', 1),
+    (N'nav.sources.description', N'en', N'Where collected values come from: the PI System and SQL databases. Each source runs on its own schedule.', 1),
+    (N'nav.mapping.description', N'en', N'Which source attribute fills which cell, shown on real values, so a wrong unit or a wrong row is visible before it reaches a report.', 1),
+    (N'nav.periods.description', N'en', N'A period is one reporting month of a project. While it is open, data can be entered; after the deadline it closes, and later it is archived.', 1),
+    (N'nav.jobs.description', N'en', N'Exports, imports, recalculations and nightly checks run in the background. A failed job shows why it failed.', 1),
+    (N'nav.snapshots.description', N'en', N'A snapshot is the exact copy of a report at the moment it was made. It never changes, even if the documents are edited later.', 1),
+    (N'nav.audit.description', N'en', N'Every change of every number: who, when, what it was and what it became. Nothing here can be edited or deleted.', 1),
+    (N'nav.consistency.description', N'en', N'Every night ECR compares numbers that must agree with each other across sheets, documents and registries. Each finding is listed here.', 1),
+    (N'nav.uiStrings.description', N'en', N'Every label, message and button text of ECR. English is the source; missing translations fall back to English.', 1),
+    (N'nav.health.description', N'en', N'Is ECR working right now? Warnings appear only when there is something to do.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:uishell ── кінець секції ──

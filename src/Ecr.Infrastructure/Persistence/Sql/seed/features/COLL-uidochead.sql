@@ -36,3 +36,26 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:uidochead ── кінець секції ──
+-- COLL:uidochead ── UI-14/15/16: стан збереження словами, чип аркуша, число зауважень у шапці документа; ru/kz — порцією COLL:uidochead у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'document.saveState.allSaved', N'en', N'All changes saved', 1),
+    (N'document.saveState.savedAt', N'en', N'Saved {time}', 1),
+    (N'document.saveState.readOnly', N'en', N'Read-only', 1),
+    (N'document.saveState.notSaved', N'en', N'not saved', 1),
+    (N'document.saveState.show', N'en', N'Show', 1),
+    (N'document.saveState.unsaved.one', N'en', N'{count} unsaved change', 1),
+    (N'document.saveState.unsaved.few', N'en', N'{count} unsaved changes', 1),
+    (N'document.saveState.unsaved.many', N'en', N'{count} unsaved changes', 1),
+    (N'document.saveState.unsaved.other', N'en', N'{count} unsaved changes', 1),
+    (N'document.sheetStateLabel', N'en', N'Sheet:', 1),
+    (N'document.noIssues', N'en', N'No issues', 1),
+    (N'document.issuesCount.one', N'en', N'{count} issue', 1),
+    (N'document.issuesCount.few', N'en', N'{count} issues', 1),
+    (N'document.issuesCount.many', N'en', N'{count} issues', 1),
+    (N'document.issuesCount.other', N'en', N'{count} issues', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:uidochead ── кінець секції ──

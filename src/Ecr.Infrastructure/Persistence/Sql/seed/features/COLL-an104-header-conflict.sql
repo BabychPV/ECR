@@ -23,3 +23,19 @@ OPTION (RECOMPILE);
 GO
 -- COLL:an104-header-conflict ── кінець секції ──
 
+-- COLL:an104-header-conflict ── AN-104 / D1-04: 409 на шапці не стирає чернетку — «ваше / чинне»; ru/kz — порцією COLL:an104-header-conflict нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'document.header.conflictTitle', N'en', N'Someone else changed the header', 1),
+    (N'document.header.conflictHint', N'en', N'These fields were changed by someone else while you were editing. Your values are still in the form: keep yours to overwrite theirs, or use the current values.', 1),
+    (N'document.header.conflictItem', N'en', N'{field}: yours {yours}, current {value}', 1),
+    (N'document.header.conflictKeepMine', N'en', N'Keep mine', 1),
+    (N'document.header.conflictUseCurrent', N'en', N'Use current', 1),
+    (N'document.header.conflictNoValue', N'en', N'(no value)', 1),
+    (N'document.header.conflictYes', N'en', N'yes', 1),
+    (N'document.header.conflictNo', N'en', N'no', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an104-header-conflict ── кінець секції ──

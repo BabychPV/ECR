@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:a2s ── кінець секції ──
+-- COLL:a2s ── A2-03: підказка (Info) для Check без ключів; ru/kz — порцією COLL:a2s у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'validation.check.noKeys', N'en', N'A Check without keys compares only when the receiving table has exactly one row; it has {targetRows}, so nothing was compared. Unknown row matching fields are ignored.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:a2s ── кінець секції ──

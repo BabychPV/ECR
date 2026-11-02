@@ -10,3 +10,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:p3-t1 ── кінець секції ──
+-- COLL:p3-t1 ── тестувальний прохід №1, пакет P3 (T1-04…); ru/kz — порцією COLL:p3-t1 у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-USR-0422.emailInvalid', N'en', N'"{email}" is not a valid email address. Use the form name@example.com.', 1),
+    (N'err.ECR-SEC-0409.grantsStale', N'en', N'The role''s grants were changed after you opened them. Reload the grants and repeat your changes.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:p3-t1 ── кінець секції ──

@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:l104 ── кінець секції ──
+-- COLL:l104 ── L1-04: небезпечний запит з чужого сайту (CSRF, Origin / Sec-Fetch-Site); ru/kz — порцією COLL:l104 у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-AUTH-0403.csrfOrigin', N'en', N'This request came from another website and was rejected. Open the application at its own address and repeat the action.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:l104 ── кінець секції ──

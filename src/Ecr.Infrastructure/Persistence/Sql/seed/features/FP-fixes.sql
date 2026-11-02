@@ -36,3 +36,26 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- FP:fixes ── кінець секції ──
+-- FP:fixes ── прохід «від першого обличчя» 2026-10-11 (P2/P3): тексти en; ru/kz — порцією FP:fixes нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'documents.noProjects', N'en', N'You have no access to any project', 1),
+    (N'documents.noProjectsHint', N'en', N'Documents are shown per project, and your account has not been granted access to any project yet. Ask an administrator to grant you access; "My groups" shows which roles you have.', 1),
+    (N'methodologies.emptyDraftWarning', N'en', N'An empty draft has no formulas, constants, rules or outputs: nothing is copied. To change an existing version, choose it in "Copy from".', 1),
+    (N'err.ECR-REG-0422.entriesCsvNoFields', N'en', N'Registry "{registryCode}" has no fields yet, so column "{column}" cannot be imported. Add the fields in the registry constructor and publish it first: the file columns are field codes, plus "code".', 1),
+    (N'password.changed', N'en', N'Password changed. Use the new password the next time you sign in.', 1),
+    (N'registryAudit.entryValidityRescanned', N'en', N'Rows recalculated: {count}.', 1),
+    (N'jobs.kind.archive', N'en', N'Year archiving', 1),
+    (N'jobs.kind.notification', N'en', N'Notification delivery', 1),
+    (N'jobs.kind.partitionCheck', N'en', N'Partition reserve check', 1),
+    (N'jobs.kind.periodState', N'en', N'Period state update', 1),
+    (N'jobs.kind.registrySync', N'en', N'Registry sync from source', 1),
+    (N'jobs.kind.reportRetention', N'en', N'Report snapshot retention', 1),
+    (N'jobs.kind.reportSnapshotFormat', N'en', N'Report snapshot format upgrade', 1),
+    (N'jobs.kind.submissionSnapshotRetention', N'en', N'Submission snapshot retention', 1),
+    (N'jobs.kind.rowWindowRefetch', N'en', N'Row window refetch', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- FP:fixes ── кінець секції ──

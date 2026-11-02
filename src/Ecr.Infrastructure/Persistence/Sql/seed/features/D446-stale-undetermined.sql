@@ -11,3 +11,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- D446:stale-undetermined ── кінець секції ──
+-- D446:stale-undetermined ── en: позначка «актуальність результатів не визначається» — частина документа читачеві закрита (D-446, `resultsStaleUndetermined`); ru/kz — порцією D446:stale-undetermined нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'documents.staleUndetermined', N'en', N'Freshness unknown', 1),
+    (N'documents.staleUndeterminedHint', N'en', N'Some of the data is hidden from you, so result freshness can''t be determined', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- D446:stale-undetermined ── кінець секції ──

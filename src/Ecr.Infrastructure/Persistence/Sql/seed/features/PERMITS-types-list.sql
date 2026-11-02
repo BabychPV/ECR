@@ -115,3 +115,65 @@ OPTION (RECOMPILE);
 GO
 -- PERMITS: types-list ── кінець секції ──
 
+-- PERMITS: types-list ── PM-08a: перелік типів пермітів і майстер «New permit type»; ru/kz — порцією PERMITS: types-list нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'permits.types.subtitle', N'en', N'A type says what a permit contains: which fields it has and which tables, with which columns. Add a type here and permits of that type work everywhere — no code, no release.', 1),
+    (N'permits.types.stats.aria', N'en', N'Permit types summary', 1),
+    (N'permits.types.stat.all', N'en', N'types', 1),
+    (N'permits.types.stat.tables', N'en', N'tables', 1),
+    (N'permits.types.stat.draft', N'en', N'with unpublished changes', 1),
+    (N'permits.types.search.label', N'en', N'Search permit types', 1),
+    (N'permits.types.search.placeholder', N'en', N'Type name', 1),
+    (N'permits.types.filter.category', N'en', N'Categories', 1),
+    (N'permits.category.Air', N'en', N'Air', 1),
+    (N'permits.category.Water', N'en', N'Water', 1),
+    (N'permits.category.Waste', N'en', N'Waste', 1),
+    (N'permits.category.Other', N'en', N'Other', 1),
+    (N'permits.types.col.type', N'en', N'Type', 1),
+    (N'permits.types.col.category', N'en', N'Category', 1),
+    (N'permits.types.col.tables', N'en', N'Tables', 1),
+    (N'permits.types.col.permits', N'en', N'Permits', 1),
+    (N'permits.types.col.updated', N'en', N'Updated', 1),
+    (N'permits.types.col.state', N'en', N'State', 1),
+    (N'permits.types.state.published', N'en', N'v{version}', 1),
+    (N'permits.types.state.draft', N'en', N'Draft changes', 1),
+    (N'permits.types.noMatches', N'en', N'No permit types match the filters', 1),
+    (N'permits.types.wizard.title', N'en', N'New permit type', 1),
+    (N'permits.types.wizard.basics', N'en', N'Basics', 1),
+    (N'permits.types.wizard.basicsHint', N'en', N'Name the kind of permit the way your team says it.', 1),
+    (N'permits.types.wizard.name', N'en', N'Name', 1),
+    (N'permits.types.wizard.namePlaceholder', N'en', N'Noise permit', 1),
+    (N'permits.types.wizard.code', N'en', N'Code: {code}', 1),
+    (N'permits.types.wizard.category', N'en', N'Category', 1),
+    (N'permits.types.wizard.categoryHint', N'en', N'Used to group types in lists and reports.', 1),
+    (N'permits.types.wizard.start', N'en', N'Start from', 1),
+    (N'permits.types.wizard.startBlank', N'en', N'An empty type', 1),
+    (N'permits.types.wizard.startCopy', N'en', N'A copy of “{name}”', 1),
+    (N'permits.types.wizard.nameRequired', N'en', N'Enter a name', 1),
+    (N'permits.types.wizard.nameRequiredText', N'en', N'A type needs a name.', 1),
+    (N'permits.types.wizard.nameTaken', N'en', N'A type with this name exists', 1),
+    (N'permits.types.wizard.nameTakenText', N'en', N'Choose another name.', 1),
+    (N'permits.types.wizard.codeInvalid', N'en', N'Start with a Latin letter', 1),
+    (N'permits.types.wizard.codeInvalidText', N'en', N'The code is made from the name, so the name needs Latin letters and digits and must start with a letter.', 1),
+    (N'permits.types.wizard.codeTaken', N'en', N'A type with this code exists', 1),
+    (N'permits.types.wizard.codeTakenText', N'en', N'Another type already uses the code {code}. Change the name.', 1),
+    (N'permits.types.wizard.sumName', N'en', N'Name', 1),
+    (N'permits.types.wizard.sumCategory', N'en', N'Category', 1),
+    (N'permits.types.wizard.sumFields', N'en', N'Fields', 1),
+    (N'permits.types.wizard.sumStarts', N'en', N'Starts as', 1),
+    (N'permits.types.wizard.sumStartsValue', N'en', N'Draft — no permits can be entered until it is published', 1),
+    (N'permits.types.wizard.fieldNumber', N'en', N'Permit number', 1),
+    (N'permits.types.wizard.fieldLocation', N'en', N'Location', 1),
+    (N'permits.types.wizard.fieldIssued', N'en', N'Issue date', 1),
+    (N'permits.types.wizard.fieldValidFrom', N'en', N'Valid from', 1),
+    (N'permits.types.wizard.fieldValidTo', N'en', N'Valid to', 1),
+    (N'permits.types.wizard.fieldActualEnd', N'en', N'Actual end', 1),
+    (N'permits.types.wizard.review', N'en', N'Every type has the same permit header. Tables and extra fields are added next.', 1),
+    (N'permits.types.wizard.apply', N'en', N'Create type', 1),
+    (N'permits.types.created', N'en', N'Type created — add tables, then publish', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: types-list ── кінець секції ──

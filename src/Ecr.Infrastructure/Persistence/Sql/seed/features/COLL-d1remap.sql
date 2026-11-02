@@ -12,3 +12,14 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d1remap ── кінець секції ──
+-- COLL:d1remap ── D-1 RC20: перенос мапінгів збору разом із версією шаблону; ru/kz — порцією COLL:d1remap нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-SCHM-0422.migrateMappingsNotMapped', N'en', N'An active collection, source-event or row-window mapping points to a column or table that the target version does not have, or its place in the target version is already taken (the items are listed in mappingColumns). After the move, collection would read points and write nothing. Pause that mapping (or add the column to the target version and clone again), then move the project. Mappings with a matching column move automatically.', 1),
+    (N'documents.migrateRefusalMappingsNotMapped', N'en', N'Active collection, source-event or row-window mappings point to columns or tables that the target version does not have (or whose place is taken); nothing would be written there. Pause those mappings first.', 1),
+    (N'documents.migrateOtherProjectsWarning', N'en', N'Collection, source-event and row-window mappings are shared: after this move, {projects} other project(s) ({documents} document(s)) still on the old version will not collect until they are moved too.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:d1remap ── кінець секції ──

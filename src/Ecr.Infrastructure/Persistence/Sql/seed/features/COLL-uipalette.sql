@@ -28,3 +28,22 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:uipalette ── кінець секції ──
+-- COLL:uipalette ── UI-30 командна палітра: екрани й дії; ru/kz — порцією COLL:uipalette у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'palette.title', N'en', N'Command palette', 1),
+    (N'palette.screens', N'en', N'Screens', 1),
+    (N'palette.actions', N'en', N'Actions', 1),
+    (N'palette.hintMove', N'en', N'move', 1),
+    (N'palette.hintOpen', N'en', N'open', 1),
+    (N'palette.action.themeDark', N'en', N'Switch to dark theme', 1),
+    (N'palette.action.themeLight', N'en', N'Switch to light theme', 1),
+    (N'palette.action.densityCompact', N'en', N'Use compact rows', 1),
+    (N'palette.action.densityComfortable', N'en', N'Use comfortable rows', 1),
+    (N'palette.action.collapseMenu', N'en', N'Collapse menu to icons', 1),
+    (N'palette.action.expandMenu', N'en', N'Expand menu', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:uipalette ── кінець секції ──

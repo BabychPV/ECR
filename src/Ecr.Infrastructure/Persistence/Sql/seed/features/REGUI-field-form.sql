@@ -45,3 +45,30 @@ OPTION (RECOMPILE);
 GO
 -- REG-UI:field-form ── кінець секції ──
 
+-- REG-UI:field-form ── UI довідників, коміт 1: форма поля довідника (підписи й підказки до властивостей); ru/kz — порцією REG-UI:field-form у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'registries.fieldForm.title', N'en', N'New field', 1),
+    (N'registries.fieldForm.intro', N'en', N'A field is one column of every entry in this registry. The code and the name identify it, the type decides what can be entered. After the description is published, the code and the type cannot be changed.', 1),
+    (N'registries.fieldForm.codeHint', N'en', N'Short unique identifier, for example VOLUME. Formulas, imports and mappings refer to the field by it.', 1),
+    (N'registries.fieldForm.nameHint', N'en', N'What people see in the column header and in forms.', 1),
+    (N'registries.fieldForm.type.String', N'en', N'Text of any content.', 1),
+    (N'registries.fieldForm.type.Int', N'en', N'Whole number.', 1),
+    (N'registries.fieldForm.type.Decimal', N'en', N'Number with a fractional part; a unit of measure can be set.', 1),
+    (N'registries.fieldForm.type.Bool', N'en', N'Yes or no.', 1),
+    (N'registries.fieldForm.type.Date', N'en', N'A calendar date.', 1),
+    (N'registries.fieldForm.type.Lookup', N'en', N'A choice of an entry from another registry; choose which one below.', 1),
+    (N'registries.fieldForm.type.Unit', N'en', N'A choice of a unit of measure for each entry.', 1),
+    (N'registries.fieldForm.requiredHint', N'en', N'Every entry must have a value. Possible only while the registry has no entries.', 1),
+    (N'registries.fieldForm.requiredLocked', N'en', N'Not available: the registry already has entries and none of them has a value for a new field.', 1),
+    (N'registries.fieldForm.keyHint', N'en', N'Part of the business key that identifies an entry. Access rights can be narrowed by key fields.', 1),
+    (N'registries.fieldForm.lookupHint', N'en', N'The registry whose entries this field offers to choose from.', 1),
+    (N'registries.fieldForm.unitHint', N'en', N'Unit of measure in which the number is entered. Optional.', 1),
+    (N'registries.fieldForm.errCode', N'en', N'Enter a code.', 1),
+    (N'registries.fieldForm.errName', N'en', N'Enter a name.', 1),
+    (N'registries.fieldForm.errLookup', N'en', N'Choose the registry this field picks from.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- REG-UI:field-form ── кінець секції ──

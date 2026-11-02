@@ -16,3 +16,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an124-rule-refs ── кінець секції ──
+-- COLL:an124-rule-refs ── AN-124 / A1-02, A1-03: посилання правил доступу до періоду й валідації — на свою версію/таблицю; ru/kz — порцією COLL:an124-rule-refs нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.tableNotInSheet', N'en', N'Table {tableDefId} is not on sheet {sheetDefId}: a rule with this pair would not cover a single cell.', 1),
+    (N'err.ECR-TMPL-0422.sourceColumnNotInRuleTarget', N'en', N'Source column {sourceColumnDefId} is not a lookup column of the rule''s table in template version {versionId}. Such a rule would never find a window and would block nothing.', 1),
+    (N'err.ECR-TMPL-0422.cloneAccessRuleForeignRef', N'en', N'Period access rule {ruleId} of version {versionId} refers to a sheet, table or column outside that version. The version cannot be cloned until the rule is fixed.', 1),
+    (N'err.ECR-TMPL-0422.validationColumnNotInTable', N'en', N'Column {columnDefId} is not in table {tableCode}. Choose a column of this table.', 1),
+    (N'err.ECR-TMPL-0422.cloneValidationRuleForeignColumn', N'en', N'Validation rule {ruleCode} of table {tableCode} refers to column {columnDefId} outside that table; the clone would apply it to all columns. The version cannot be cloned until the rule is fixed.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an124-rule-refs ── кінець секції ──

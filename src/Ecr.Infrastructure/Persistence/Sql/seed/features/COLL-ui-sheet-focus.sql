@@ -24,3 +24,20 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-sheet-focus ── кінець секції ──
+-- COLL:ui-sheet-focus ── панель таблиць (Hide/Show), таблиця на весь екран, стрілки й список аркушів, згортання результатів; ru/kz — порцією COLL:ui-sheet-focus у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'grid.tree.hide', N'en', N'Hide', 1),
+    (N'grid.tree.show', N'en', N'Show tables list', 1),
+    (N'grid.full.enter', N'en', N'Full screen', 1),
+    (N'grid.full.exit', N'en', N'Exit full screen', 1),
+    (N'grid.keys.fullscreen', N'en', N'Table full screen on / off', 1),
+    (N'documents.sheets.prev', N'en', N'Previous sheet', 1),
+    (N'documents.sheets.next', N'en', N'Next sheet', 1),
+    (N'documents.sheets.all', N'en', N'All sheets', 1),
+    (N'documents.calculationResultsNone', N'en', N'none', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-sheet-focus ── кінець секції ──

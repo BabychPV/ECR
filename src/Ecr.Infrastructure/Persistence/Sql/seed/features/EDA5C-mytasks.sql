@@ -28,3 +28,30 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- EDA-5c:mytasks ── кінець секції ──
+-- EDA-5c:mytasks ── секції «Assigned to me» / «Awaiting my validation» у My tasks; ru/kz — порцією EDA-5c:mytasks нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'myTasks.assignToFill', N'en', N'Assigned to me', 1),
+    (N'myTasks.awaitingValidation', N'en', N'Awaiting my validation', 1),
+    (N'myTasks.edit.error', N'en', N'Could not load the months assigned to you.', 1),
+    (N'myTasks.edit.filledAt', N'en', N'Filled {date}', 1),
+    (N'myTasks.edit.returnedBy', N'en', N'Returned by owner: {reason}', 1),
+    (N'myTasks.edit.validate', N'en', N'Validate…', 1),
+    (N'myTasks.edit.open', N'en', N'Open', 1),
+    (N'myTasks.edit.pendingBadge', N'en', N'{n} assigned months need your action', 1),
+    (N'myTasks.edit.status.Assigned', N'en', N'Assigned', 1),
+    (N'myTasks.edit.status.Filled', N'en', N'Filled, awaiting validation', 1),
+    (N'myTasks.edit.status.Returned', N'en', N'Returned for edits', 1),
+    -- ФВ-12.5:approval-queue ── блок «До погодження» у My tasks ──
+    (N'myTasks.approval.title', N'en', N'Awaiting my approval', 1),
+    (N'myTasks.approval.error', N'en', N'Could not load the sheets awaiting your approval.', 1),
+    (N'myTasks.approval.more', N'en', N'Show more', 1),
+    (N'myTasks.approval.open', N'en', N'Review', 1),
+    (N'myTasks.approval.submittedAt', N'en', N'Submitted {date}', 1),
+    (N'myTasks.approval.submittedBy', N'en', N'Submitted by {name} · {date}', 1),
+    (N'myTasks.approval.step', N'en', N'Step {n} of {count}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- EDA-5c:mytasks ── кінець секції ──

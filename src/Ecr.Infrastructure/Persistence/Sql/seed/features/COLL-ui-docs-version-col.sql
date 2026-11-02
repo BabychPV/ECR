@@ -25,3 +25,20 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-docs-version-col ── кінець секції ──
+-- COLL:ui-docs-version-col ── en: колонка «Version» переліку документів (версія шаблону за період; фільтр, сортування); ru/kz — порцією COLL:ui-docs-version-col нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'documents.versionColumn', N'en', N'Version', 1),
+    (N'documents.versionValue', N'en', N'v{version}', 1),
+    (N'documents.versionUnknown', N'en', N'Template version not shown', 1),
+    (N'documents.versionForPeriod', N'en', N'Template version for {period}', 1),
+    (N'documents.versionSortBy', N'en', N'Sort by version (documents on this page)', 1),
+    (N'documents.versionSortedAsc', N'en', N'sorted ascending', 1),
+    (N'documents.versionSortedDesc', N'en', N'sorted descending', 1),
+    (N'documents.versionAll', N'en', N'All versions', 1),
+    (N'documents.versionFilterHint', N'en', N'Filters the documents loaded on this page', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-docs-version-col ── кінець секції ──

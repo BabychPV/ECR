@@ -21,3 +21,18 @@ OPTION (RECOMPILE);
 GO
 -- COLL:rt25 ── кінець секції ──
 
+-- COLL:rt25 ── перерахунок документів, зачеплених правкою довідника (RT-25) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'jobs.kind.registryImpactRecalculation', N'en', N'Recalculation of documents affected by a registry edit', 1),
+    (N'jobs.registryImpactReading', N'en', N'Finding documents affected by the registry', 1),
+    (N'jobs.registryImpactDone', N'en', N'Queued for recalculation: {queued}; skipped: {skipped}; no longer affected: {gone}', 1),
+    (N'err.ECR-REQ-0422.impactReasonRequired', N'en', N'Recalculating affected documents requires a reason.', 1),
+    (N'err.ECR-REQ-0422.impactReasonTooLong', N'en', N'The reason is longer than {max} characters.', 1),
+    (N'err.ECR-REG-0422.impactDocumentNotAffected', N'en', N'Document {documentId} is not among the open-period documents affected by this registry.', 1),
+    (N'err.ECR-REG-0422.impactNothingToRecalculate', N'en', N'There are no affected open-period documents that can be recalculated.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:rt25 ── кінець секції ──

@@ -9,3 +9,12 @@ OPTION (RECOMPILE);
 GO
 -- COLL:an80-carryover ── кінець секції ──
 
+-- COLL:an80-carryover ── AN-80 / N2-04: перенос результатів поданих аркушів більший за стелю; ru/kz — порцією COLL:an80-carryover нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.carryOverTooLarge', N'en', N'Carrying over the results of the submitted sheets of document {documentId} for period {periodKey} would copy {count} rows, more than the limit of {max}. The run was not applied and the previous results stay current: narrow the binding to the right table.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an80-carryover ── кінець секції ──

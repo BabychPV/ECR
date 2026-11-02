@@ -32,3 +32,24 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui31wizard ── кінець секції ──
+-- COLL:ui31wizard ── UI-31: майстер створення документа (кроки, підсумок, підписи Back/Next/Review); ru/kz — порцією COLL:ui31wizard у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'wizard.back', N'en', N'Back', 1),
+    (N'wizard.next', N'en', N'Next', 1),
+    (N'wizard.review', N'en', N'Review', 1),
+    (N'documents.createApply', N'en', N'Create document', 1),
+    (N'documents.createReviewText', N'en', N'Nothing is created until you confirm. The document starts empty, as a draft.', 1),
+    (N'documents.createProjectHint', N'en', N'Which site is this report for?', 1),
+    (N'documents.createTemplateHint', N'en', N'The project decides the template version.', 1),
+    (N'documents.createPeriodHint', N'en', N'The document opens in this period. Periods not opened yet are not listed.', 1),
+    (N'documents.createNoOpenPeriod', N'en', N'No period of this project is open. The document can be created, but data can be entered only after a period administrator opens a period.', 1),
+    (N'documents.createClosedPeriod', N'en', N'This period is closed. The document will be created, but its data can be changed only after the period is reopened.', 1),
+    (N'documents.createSheetsHint', N'en', N'Leave out sheets that do not apply to this site. All are included by default.', 1),
+    (N'documents.createNoSheets', N'en', N'Include at least one sheet: a document without sheets cannot be filled in.', 1),
+    (N'documents.createSheetsCount', N'en', N'{included} of {total}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui31wizard ── кінець секції ──

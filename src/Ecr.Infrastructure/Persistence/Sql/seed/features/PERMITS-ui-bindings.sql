@@ -121,3 +121,68 @@ OPTION (RECOMPILE);
 GO
 -- PERMITS: ui-bindings ── кінець секції ──
 
+-- PERMITS: ui-bindings ── en: перелік і екран прив'язок аркушів до пермітів (читання); ru/kz — порцією PERMITS: ui-bindings нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'permits.bindingsList.createHint', N'en', N'Bindings belong to a template version. They are created and changed on the Permit tab of the template version; this page only lists them.', 1),
+    (N'permits.bindingsList.stats.aria', N'en', N'Binding totals', 1),
+    (N'permits.bindingsList.stat.all', N'en', N'bindings', 1),
+    (N'permits.bindingsList.stat.rows', N'en', N'fill rows', 1),
+    (N'permits.bindingsList.stat.draft', N'en', N'in a draft template', 1),
+    (N'permits.bindingsList.search.label', N'en', N'Search bindings', 1),
+    (N'permits.bindingsList.search.placeholder', N'en', N'Code, sheet table, permit type or template', 1),
+    (N'permits.bindingsList.filter.mode', N'en', N'Modes', 1),
+    (N'permits.bindingsList.col.target', N'en', N'Sheet table', 1),
+    (N'permits.bindingsList.col.reads', N'en', N'Reads', 1),
+    (N'permits.bindingsList.col.how', N'en', N'How', 1),
+    (N'permits.bindingsList.col.pick', N'en', N'Which permit', 1),
+    (N'permits.bindingsList.col.template', N'en', N'Template', 1),
+    (N'permits.bindingsList.col.state', N'en', N'Version', 1),
+    (N'permits.bindingsList.mode.Rows', N'en', N'Rows from the permit', 1),
+    (N'permits.bindingsList.mode.Formulas', N'en', N'Formulas only', 1),
+    (N'permits.bindingsList.rule.ByFacilityPeriodEnd', N'en', N'Permit valid at period end, same location', 1),
+    (N'permits.bindingsList.rule.FromHeaderLookup', N'en', N'Chosen in a header cell on the sheet', 1),
+    (N'permits.bindingsList.inactive', N'en', N'Inactive', 1),
+    (N'permits.bindingsList.empty.title', N'en', N'No bindings yet', 1),
+    (N'permits.bindingsList.empty.hint', N'en', N'None of the checked template versions binds a sheet table to a permit. Open a template version and add a binding on its Permit tab.', 1),
+    (N'permits.bindingsList.noMatches', N'en', N'No bindings match the filters', 1),
+    (N'permits.bindingsList.noAccess.title', N'en', N'Bindings are not available to you', 1),
+    (N'permits.bindingsList.noAccess.hint', N'en', N'Reading bindings needs the Template.View permission. Ask an administrator to grant it.', 1),
+    (N'permits.bindingsList.scan.progress', N'en', N'Checked {checked} of {total} templates. Read {settled} of {versions} template versions so far.', 1),
+    (N'permits.bindingsList.scan.done', N'en', N'Checked {checked} of {total} templates ({versions} published or draft versions).', 1),
+    (N'permits.bindingsList.scan.truncated', N'en', N'The server lists only the first 100 templates.', 1),
+    (N'permits.bindingsList.scan.more', N'en', N'Check {count} more templates', 1),
+    (N'permits.bindingsList.failed.title', N'en', N'{count} template versions could not be read, so their bindings are missing from the list', 1),
+    (N'permits.bindingsList.failed.retry', N'en', N'Try again', 1),
+    (N'permits.bindingView.incomplete.title', N'en', N'This link is incomplete', 1),
+    (N'permits.bindingView.incomplete.hint', N'en', N'A binding is found by its code inside a template version. Open it from the list of sheet bindings.', 1),
+    (N'permits.bindingView.readOnly', N'en', N'This page only shows the binding. Change it on the Permit tab of the template version.', 1),
+    (N'permits.bindingView.openTemplate', N'en', N'Open the template', 1),
+    (N'permits.bindingView.reads', N'en', N'reads', 1),
+    (N'permits.bindingView.fact.template', N'en', N'Template', 1),
+    (N'permits.bindingView.fact.version', N'en', N'Version', 1),
+    (N'permits.bindingView.fact.mode', N'en', N'How', 1),
+    (N'permits.bindingView.fact.pick', N'en', N'Which permit', 1),
+    (N'permits.bindingView.fact.header', N'en', N'Header field', 1),
+    (N'permits.bindingView.fact.active', N'en', N'State', 1),
+    (N'permits.bindingView.active.true', N'en', N'Active', 1),
+    (N'permits.bindingView.active.false', N'en', N'Inactive', 1),
+    (N'permits.bindingView.mapping.title', N'en', N'Column mapping', 1),
+    (N'permits.bindingView.mapping.empty', N'en', N'No columns are mapped.', 1),
+    (N'permits.bindingView.col.sheet', N'en', N'Sheet column', 1),
+    (N'permits.bindingView.col.permit', N'en', N'Permit column', 1),
+    (N'permits.bindingView.col.role', N'en', N'Role', 1),
+    (N'permits.bindingView.col.onSheet', N'en', N'On the sheet', 1),
+    (N'permits.bindingView.role.RowKey', N'en', N'Row key', 1),
+    (N'permits.bindingView.role.Limit', N'en', N'Limit', 1),
+    (N'permits.bindingView.role.Info', N'en', N'Info', 1),
+    (N'permits.bindingView.roleNote.RowKey', N'en', N'Locked, one sheet row per permit row', 1),
+    (N'permits.bindingView.roleNote.Limit', N'en', N'Locked, actuals are compared with it', 1),
+    (N'permits.bindingView.roleNote.Info', N'en', N'Locked, shown for reference', 1),
+    (N'permits.bindingView.formulas.title', N'en', N'Formulas the sheet can use', 1),
+    (N'permits.bindingView.formulas.note', N'en', N'Cells of this table call the permit with the same functions used for registries. The permit that applies is chosen in a header cell of the sheet.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: ui-bindings ── кінець секції ──

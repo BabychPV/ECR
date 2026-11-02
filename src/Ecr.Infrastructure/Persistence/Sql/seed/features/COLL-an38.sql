@@ -10,3 +10,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an38 ── кінець секції ──
+-- COLL:an38 ── AN-38 (аудит 2026-10-03, L7): розрахунки й методології; ru/kz — порцією COLL:an38 у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'expr.ampersandNotConcat', N'en', N'"&" in the methodology dialect does not join text: it is bitwise AND, and "6 & 3" equals 2. Use "and" for a logical AND.', 1),
+    (N'expr.rangeNotAccepted', N'en', N'{function} takes a single value, not a range of rows. Wrap the range in SUM, AVERAGE, MIN or MAX.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an38 ── кінець секції ──

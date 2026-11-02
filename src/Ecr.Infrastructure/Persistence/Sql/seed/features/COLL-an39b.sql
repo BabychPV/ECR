@@ -14,3 +14,15 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an39b ── кінець секції ──
+-- COLL:an39b ── хвіст сітки після AN-39 (AN-28 P2-1/P2-2, L8-11/17/20); ru/kz — власна порція нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'document.heldEditBlocksAction', N'en', N'A change in the highlighted cell was rejected, so the action was not performed. Fix or undo it and try again.', 1),
+    (N'document.unsavedNotIncluded', N'en', N'Some changes in the grid are not saved and are not included: the action uses the last saved values.', 1),
+    (N'app.languageAfterSave', N'en', N'The page is still in the previous language: unsaved changes would be lost. Save or undo them, then press Switch now.', 1),
+    (N'app.languageSwitchNow', N'en', N'Switch now', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an39b ── кінець секції ──

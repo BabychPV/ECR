@@ -84,3 +84,49 @@ OPTION (RECOMPILE);
 GO
 -- COLL:ui-methodology-categories ── кінець секції ──
 
+-- COLL:ui-methodology-categories ── сторінка версії методології: категорії констант зі списку, похідні аргументи (lane/integ-methodology-rc); ru/kz — порцією COLL:ui-methodology-categories нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'methodologies.categoryShared', N'en', N'Shared', 1),
+    (N'methodologies.categoryFilter', N'en', N'Filter by category', 1),
+    (N'methodologies.categoryFilterAll', N'en', N'All categories', 1),
+    (N'methodologies.categoryFilterNoMatch', N'en', N'No constants match this category.', 1),
+    (N'methodologies.categoryPickHint', N'en', N'Pick a category from the list of this version: the category rule returns exactly this code. Leave empty for a constant shared by all categories.', 1),
+    (N'methodologies.categorySharedOption', N'en', N'Shared (no category)', 1),
+    (N'methodologies.categoryNothingFound', N'en', N'No such category in the list', 1),
+    (N'methodologies.constCategories.manage', N'en', N'Categories', 1),
+    (N'methodologies.constCategories.title', N'en', N'Constant categories', 1),
+    (N'methodologies.constCategories.intro', N'en', N'The category rule returns one of these codes, and a constant with exactly that category is used instead of the shared one. Codes are not renamed: add a new category, move the constants to it and retire the old one.', 1),
+    (N'methodologies.constCategories.description', N'en', N'Description', 1),
+    (N'methodologies.constCategories.constantCount', N'en', N'Constants', 1),
+    (N'methodologies.constCategories.state', N'en', N'State', 1),
+    (N'methodologies.constCategories.actions', N'en', N'Actions', 1),
+    (N'methodologies.constCategories.retired', N'en', N'retired', 1),
+    (N'methodologies.constCategories.notInList', N'en', N'not in the list', 1),
+    (N'methodologies.constCategories.editAria', N'en', N'Edit category {code}', 1),
+    (N'methodologies.constCategories.retire', N'en', N'Retire', 1),
+    (N'methodologies.constCategories.restore', N'en', N'Restore', 1),
+    (N'methodologies.constCategories.confirmDelete', N'en', N'Confirm removal', 1),
+    (N'methodologies.constCategories.inUseHint', N'en', N'Used by {count} constant(s): move them to another category first.', 1),
+    (N'methodologies.constCategories.empty', N'en', N'The list is empty. Add the category codes that the category rule returns.', 1),
+    (N'methodologies.constCategories.add', N'en', N'Add category', 1),
+    (N'methodologies.constCategories.cancelEdit', N'en', N'Cancel', 1),
+    (N'methodologies.constCategories.saved', N'en', N'Category saved', 1),
+    (N'methodologies.constCategories.deleted', N'en', N'Category removed', 1),
+    (N'methodologies.constCategories.readOnly', N'en', N'The list is read-only here: the version is published, or you have no right to edit constants.', 1),
+    (N'methodologies.derivedArguments', N'en', N'Arguments', 1),
+    (N'methodologies.derivedArgumentsHint', N'en', N'Derived from the expression when the formula is saved. Mark an optional input right in the expression: @Name? (a missing cell then counts as empty).', 1),
+    (N'methodologies.derivedArgumentsEmpty', N'en', N'Nothing yet: the list appears after the formula is saved.', 1),
+    (N'methodologies.derivedArgumentName', N'en', N'Name', 1),
+    (N'methodologies.derivedArgumentKind', N'en', N'Kind', 1),
+    (N'methodologies.derivedArgumentText', N'en', N'In the expression', 1),
+    (N'methodologies.derivedArgumentOptional', N'en', N'optional', 1),
+    (N'methodologies.derivedArgumentOptionalHint', N'en', N'Marked with ? in the expression: a missing cell counts as empty instead of an error.', 1),
+    (N'methodologies.argumentKind.input', N'en', N'Input', 1),
+    (N'methodologies.argumentKind.constant', N'en', N'Constant', 1),
+    (N'methodologies.argumentKind.formula', N'en', N'Formula', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-methodology-categories ── кінець секції ──

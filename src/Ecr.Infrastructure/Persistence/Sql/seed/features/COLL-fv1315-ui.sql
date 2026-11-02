@@ -17,3 +17,17 @@ OPTION (RECOMPILE);
 GO
 -- COLL:fv1315-ui ── кінець секції ──
 
+-- COLL:fv1315-ui ── Залежність розкладу збору: select у формі, подія покриття пропуску (ФВ-13.15, клієнт) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'schedule.dependsOn', N'en', N'Depends on schedule', 1),
+    (N'schedule.dependsOnHint', N'en', N'Scheduled runs wait for a successful run of the chosen schedule of the same connection. Manual and catch-up runs are not blocked.', 1),
+    (N'schedule.dependsOnNone', N'en', N'No dependency', 1),
+    (N'status.coverage.SkippedDependency', N'en', N'Waiting for dependency', 1),
+    (N'coverageEvents.skippedDependency', N'en', N'Entity {sourceEntityId}: the scheduled run was skipped, waiting for a successful run of schedule {dependsOn}. The data is delayed, not lost: the next run or the catch-up collects it.', 1)
+    -- ru/kz — окремою порцією `I18N` (COLL:fv1315-ui).
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:fv1315-ui ── кінець секції ──

@@ -10,3 +10,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- Q17b: anchorRows ── кінець секції ──
+-- Q17b: anchorRows ── Q-17/D-457: рядки таблиці «місяці в колонках» додаються й видаляються в періоді-якорі; ru/kz — порцією Q17b нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-ACCS-0403.addRowAnchorPeriod', N'en', N'Rows of this table are added in period {anchorPeriod}; your role has no access to it.', 1),
+    (N'err.ECR-ACCS-0403.deleteRowAnchorPeriod', N'en', N'Rows of this table are deleted in period {anchorPeriod}; your role has no access to it.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- Q17b: anchorRows ── кінець секції ──

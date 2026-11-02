@@ -5,7 +5,7 @@
     seed/00-prelude.sql -> seed/features/*.sql (ordinal by name) -> seed/99-epilogue.sql.
 
 .DESCRIPTION
-    The parts share temp tables (#I18N, #UiChanged, #UiRemoved) created by the prelude and
+    The parts share temp tables (#UiEn, #UiEnCounts, #I18N, #UiChanged, #UiRemoved) created by the prelude and
     applied by the epilogue, so they must run in ONE session: sqlcmd -i per part would lose
     them. Tools that run the seed through sqlcmd write the composed file with Write-SeedSql
     and run that single file. Works on bytes (no Get-Content/Set-Content: they corrupt

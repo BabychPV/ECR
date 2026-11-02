@@ -1,4 +1,4 @@
--- COLL:ui-permit-usage ── ru/kz: «Used in» картки дозволу і колонка переліку (PERMIT-USAGE); власна порція; en — у MERGE 00-prelude.sql ──
+-- COLL:ui-permit-usage ── ru/kz: «Used in» картки дозволу і колонка переліку (PERMIT-USAGE); власна порція; en — порція #UiEn нижче ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -49,6 +49,37 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.usage.typeListUsedIn', N'ru', N'Используются в документах: {count}'),
     (N'permits.usage.typeListUsedIn', N'kz', N'Құжаттарда қолданылады: {count}')
        ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-permit-usage ── кінець секції ──
+-- COLL:ui-permit-usage ── en: «Used in» картки дозволу і колонка переліку (PERMIT-USAGE, lane/integ-permit-usage-rc); ru/kz — seed/features/COLL-ui-permit-usage.sql ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'permits.page.tabs.usage', N'en', N'Used in', 1),
+    (N'permits.usage.title', N'en', N'Where this permit is used', 1),
+    (N'permits.usage.note', N'en', N'Documents where a header field or a table column holds this permit. Only projects you can open are counted.', 1),
+    (N'permits.usage.summary', N'en', N'Documents: {documents} · places: {links}', 1),
+    (N'permits.usage.period', N'en', N'Period', 1),
+    (N'permits.usage.allPeriods', N'en', N'All periods', 1),
+    (N'permits.usage.truncatedTitle', N'en', N'Not every place is listed', 1),
+    (N'permits.usage.truncatedText', N'en', N'The list shows the first {shown} of {links} places. Choose a period to narrow it.', 1),
+    (N'permits.usage.emptyTitle', N'en', N'Not used in any document yet', 1),
+    (N'permits.usage.emptyHint', N'en', N'Pick this permit in a document header field or in a table column that lists permits, and the place appears here.', 1),
+    (N'permits.usage.noMatchTitle', N'en', N'Not used in this period', 1),
+    (N'permits.usage.noMatchHint', N'en', N'Choose another period or show all periods.', 1),
+    (N'permits.usage.showAll', N'en', N'Show all periods', 1),
+    (N'permits.usage.caption', N'en', N'Places where the permit is used', 1),
+    (N'permits.usage.col.document', N'en', N'Document', 1),
+    (N'permits.usage.col.period', N'en', N'Period', 1),
+    (N'permits.usage.col.where', N'en', N'Where', 1),
+    (N'permits.usage.col.field', N'en', N'Field or column', 1),
+    (N'permits.usage.header', N'en', N'Document header', 1),
+    (N'permits.usage.row', N'en', N'Row {row}', 1),
+    (N'permits.usage.listColumn', N'en', N'Used in documents', 1),
+    (N'permits.usage.listColumnHint', N'en', N'Documents whose header or table holds this permit', 1),
+    (N'permits.usage.typeListUsedIn', N'en', N'Used in documents: {count}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-permit-usage ── кінець секції ──

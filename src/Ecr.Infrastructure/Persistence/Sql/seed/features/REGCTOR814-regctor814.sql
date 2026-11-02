@@ -42,3 +42,30 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- REGCTOR814 ── кінець секції ──
+-- REGCTOR814 ── ФВ-8.14: «Де використовується» запис довідника (`features/registries/rc814`).
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'registries.entryUsage.column', N'en', N'Usage', 1),
+    (N'registries.entryUsage.action', N'en', N'Where used', 1),
+    (N'registries.entryUsage.actionFor', N'en', N'Where entry {code} is used', 1),
+    (N'registries.entryUsage.title', N'en', N'Where entry "{code}" is used', 1),
+    (N'registries.entryUsage.noneNamed', N'en', N'No references to this entry were found by name. The kinds listed at the bottom are not checked here.', 1),
+    (N'registries.entryUsage.fieldsTitle', N'en', N'Registry entries that refer to it', 1),
+    (N'registries.entryUsage.asOfNote', N'en', N'Entries are read as of {date}: valid, active and not deleted on that day.', 1),
+    (N'registries.entryUsage.noFields', N'en', N'No registry field refers to this registry.', 1),
+    (N'registries.entryUsage.fieldCount', N'en', N'Entries: {count}', 1),
+    (N'registries.entryUsage.fieldShown', N'en', N'Shown {shown} of {total}', 1),
+    (N'registries.entryUsage.none', N'en', N'None found', 1),
+    (N'registries.entryUsage.childrenTitle', N'en', N'Child entries', 1),
+    (N'registries.entryUsage.substancesTitle', N'en', N'Methodologies that declare it as a substance', 1),
+    (N'registries.entryUsage.substanceLink', N'en', N'Methodology versions', 1),
+    (N'registries.entryUsage.columnsTitle', N'en', N'Template columns that take values from this registry', 1),
+    (N'registries.entryUsage.columnsHint', N'en', N'These columns can hold this entry; which documents actually hold it is not listed per entry.', 1),
+    (N'registries.entryUsage.truncated', N'en', N'The registry-level list is cut short by the server: some referring fields, columns or substances may be missing here.', 1),
+    (N'registries.entryUsage.notListed', N'en', N'Not listed here per entry: document cells and headers, methodology constants and cascade links. Deleting the entry reports how many of them there are, by kind.', 1)
+    -- ru/kz — окремою порцією `REGCTOR814` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- REGCTOR814 ── кінець секції ──

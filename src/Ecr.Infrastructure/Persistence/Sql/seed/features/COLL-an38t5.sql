@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an38t5 ── кінець секції ──
+-- COLL:an38t5 ── T5-04: вставка неоднозначного числа — власний вступ вікна відмови, не «лише для читання»; ru/kz — порцією COLL:an38t5 у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'grid.rejectedAmbiguousHint', N'en', N'Nothing from this paste was saved. In English a comma separates thousands, so a number such as 4,125 is ambiguous: enter 4125 or 4.125.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an38t5 ── кінець секції ──

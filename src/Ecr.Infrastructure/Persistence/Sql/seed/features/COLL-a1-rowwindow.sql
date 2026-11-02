@@ -17,3 +17,17 @@ OPTION (RECOMPILE);
 GO
 -- COLL:a1-rowwindow ── кінець секції ──
 
+-- COLL:a1-rowwindow ── підтягування значень PI за вікном рядка: прогрес і вид задачі (HSE301 A1, FEATURE-HSE301-VIEW §4.4) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'jobs.kind.rowWindowFetch',       N'en', N'PI row-window fetch', 1),
+    (N'jobs.rowWindowSkipped',          N'en', N'Nothing to fetch: the table instance, the open period or an active binding is missing', 1),
+    (N'jobs.rowWindowReading',          N'en', N'Reading row windows from the source', 1),
+    (N'jobs.rowWindowDone',             N'en', N'Fetched {fetched}, partial {partial}, no data {noData}, kept manual {keptManual}, failed {failed}, invalid window {invalid}, no source {notApplicable}', 1),
+    (N'jobs.rowWindowRefetchDone',      N'en', N'Table instances queued for re-fetch: {instances}', 1)
+    -- ru/kz — окремою порцією `COLL:a1-rowwindow` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:a1-rowwindow ── кінець секції ──

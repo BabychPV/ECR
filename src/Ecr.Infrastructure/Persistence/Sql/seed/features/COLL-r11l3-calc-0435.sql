@@ -9,3 +9,12 @@ OPTION (RECOMPILE);
 GO
 -- COLL:r11l3-calc-0435 ── кінець секції ──
 
+-- COLL:r11l3-calc-0435 ── R11-L3: заголовок коду ECR-CALC-0435; ru/kz — порцією COLL:r11l3-calc-0435 нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-CALC-0435', N'en', N'Formula reference is ambiguous', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:r11l3-calc-0435 ── кінець секції ──

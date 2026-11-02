@@ -32,3 +32,24 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- CAT:l2ui ── кінець секції ──
+-- CAT:l2ui ── RC14-F: панель правила категорії в конфігураторі; ru/kz — порцією CAT:l2ui нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'methodologies.categoryRule', N'en', N'Category rule', 1),
+    (N'methodologies.categoryRuleSet', N'en', N'Set rule', 1),
+    (N'methodologies.categoryRuleEdit', N'en', N'Edit rule', 1),
+    (N'methodologies.categoryRuleDelete', N'en', N'Delete rule', 1),
+    (N'methodologies.categoryRuleDeleteHint', N'en', N'Without the rule, constants that have several categories become ambiguous and rows are refused at calculation time. Delete the rule?', 1),
+    (N'methodologies.categoryRuleNone', N'en', N'This version has no category rule', 1),
+    (N'methodologies.categoryRuleNoneHint', N'en', N'The rule picks the category (for example Diesel) of each document row, so constants with several categories resolve to one value.', 1),
+    (N'methodologies.categoryRuleExpression', N'en', N'Expression', 1),
+    (N'methodologies.categoryRuleExpressionHint', N'en', N'Must return text: the category key. You can use @Argument, !RowFormula, CST.Constant, if(...) and in(...).', 1),
+    (N'methodologies.categoryRuleErrorHint', N'en', N'Put text values in single quotes, for example ''Diesel''.', 1),
+    (N'methodologies.categoryRuleUpdatedAt', N'en', N'Last changed', 1),
+    (N'methodologies.categoryRuleSaved', N'en', N'The category rule has been saved.', 1),
+    (N'methodologies.categoryRuleDeleted', N'en', N'The category rule has been deleted.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- CAT:l2ui ── кінець секції ──

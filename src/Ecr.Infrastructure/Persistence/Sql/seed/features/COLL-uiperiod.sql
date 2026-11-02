@@ -23,3 +23,19 @@ OPTION (RECOMPILE);
 GO
 -- COLL:uiperiod ── кінець секції ──
 
+-- COLL:uiperiod ── UI-13: PeriodPicker за макетом (сітка періодів, стан, «closes in»); ru/kz — порцією COLL:uiperiod у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'period.group', N'en', N'Reporting period', 1),
+    (N'period.choose', N'en', N'Choose a period', 1),
+    (N'period.gridTitle', N'en', N'Reporting period · {year}', 1),
+    (N'period.closesIn.one', N'en', N'closes in {count} day', 1),
+    (N'period.closesIn.few', N'en', N'closes in {count} days', 1),
+    (N'period.closesIn.many', N'en', N'closes in {count} days', 1),
+    (N'period.closesIn.other', N'en', N'closes in {count} days', 1),
+    (N'period.stateInProjects', N'en', N'{state} in {count} of {total} projects', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:uiperiod ── кінець секції ──

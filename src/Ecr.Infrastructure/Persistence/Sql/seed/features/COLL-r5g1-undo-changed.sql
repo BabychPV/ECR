@@ -9,3 +9,12 @@ OPTION (RECOMPILE);
 GO
 -- COLL:r5g1-undo-changed ── кінець секції ──
 
+-- COLL:r5g1-undo-changed ── R5-G1 / G1-05: Undo/Redo не затирає комірки, змінені після кроку; ru/kz — порцією COLL:r5g1-undo-changed нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'grid.undoChangedSince', N'en', N'{count} cell(s) changed after this step (by another user, an import or a recalculation). Undo/Redo left them as they are; enter the value manually if needed.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:r5g1-undo-changed ── кінець секції ──

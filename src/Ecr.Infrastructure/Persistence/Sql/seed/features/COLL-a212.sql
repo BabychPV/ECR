@@ -14,3 +14,15 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:a212 ── кінець секції ──
+-- COLL:a212 ── A2-12: поля шапки документа в експорті (аркуш «Header» у xlsx); ru/kz — порцією COLL:a212 у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'export.header.sheet', N'en', N'Header', 1),
+    (N'export.header.field', N'en', N'Field', 1),
+    (N'export.header.code', N'en', N'Code', 1),
+    (N'export.header.value', N'en', N'Value', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:a212 ── кінець секції ──

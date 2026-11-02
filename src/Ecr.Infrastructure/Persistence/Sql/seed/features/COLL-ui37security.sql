@@ -101,3 +101,58 @@ OPTION (RECOMPILE);
 GO
 -- COLL:ui37security ── кінець секції ──
 
+-- COLL:ui37security ── UI-37: Security — ролі master-detail, порівняння ролей, шкала рівня гранта, смуга й пошук грантів; ru/kz — порцією COLL:ui37security у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'security.viewLabel', N'en', N'View', 1),
+    (N'security.viewOne', N'en', N'One role', 1),
+    (N'security.viewCompare', N'en', N'Compare roles', 1),
+    (N'security.custom', N'en', N'custom', 1),
+    (N'security.customReadOnly', N'en', N'The permissions of a role are set when it is created. For a different set of permissions, create a new role.', 1),
+    (N'security.builtInReadOnlyTitle', N'en', N'Built-in role — read-only', 1),
+    (N'security.builtInReadOnlyText', N'en', N'Built-in roles ship with the product and change only with a product update, so their meaning is the same in every installation. For a different set of permissions, create a new role or clone this one.', 1),
+    (N'security.cloneAsCustom', N'en', N'Clone as custom role', 1),
+    (N'security.roleMore', N'en', N'More', 1),
+    (N'security.groupSummary', N'en', N'{granted} of {total} granted', 1),
+    (N'security.groupDangerous', N'en', N'{count} dangerous', 1),
+    (N'security.dangerousMark', N'en', N'Dangerous', 1),
+    (N'security.granted', N'en', N'granted', 1),
+    (N'security.notGranted', N'en', N'not granted', 1),
+    (N'security.domainOther', N'en', N'Other', 1),
+    (N'security.onlyDiff', N'en', N'Only differences', 1),
+    (N'security.compareHint', N'en', N'Permissions are rows, roles are columns — read across to see who can do one thing. Showing {shown} of {total} permissions for {roles} roles.', 1),
+    (N'security.identicalRoles', N'en', N'These roles are identical: they grant exactly the same permissions.', 1),
+    (N'security.permissionColumn', N'en', N'Permission', 1),
+    (N'security.matrixLabel', N'en', N'Role comparison matrix', 1),
+    (N'security.subtitle.roles', N'en', N'A role is a set of permissions. Built-in roles cannot be changed. Dangerous permissions are marked with a shield.', 1),
+    (N'security.subtitle.grants', N'en', N'Which projects, sheets, tables, columns and registries a role can reach, and at what level. The role says what a person may do; the grant says where.', 1),
+    (N'security.subtitle.users', N'en', N'People and service accounts: their roles, alerts and sign-in state.', 1),
+    (N'security.domain.Template', N'en', N'Templates', 1),
+    (N'security.domain.Registry', N'en', N'Registries', 1),
+    (N'security.domain.Document', N'en', N'Documents', 1),
+    (N'security.domain.Project', N'en', N'Projects', 1),
+    (N'security.domain.Period', N'en', N'Periods', 1),
+    (N'security.domain.Calculation', N'en', N'Calculations', 1),
+    (N'security.domain.Report', N'en', N'Reports', 1),
+    (N'security.domain.Integration', N'en', N'Data collection', 1),
+    (N'security.domain.Uom', N'en', N'Units of measure', 1),
+    (N'security.domain.Security', N'en', N'Security', 1),
+    (N'security.domain.System', N'en', N'System', 1),
+    (N'grants.stats', N'en', N'Grants of the role', 1),
+    (N'grants.stat.all', N'en', N'grants', 1),
+    (N'grants.stat.deny', N'en', N'deny rules', 1),
+    (N'grants.stat.manage', N'en', N'at Manage level', 1),
+    (N'grants.stat.unresolved', N'en', N'resources not found', 1),
+    (N'grants.search', N'en', N'Search', 1),
+    (N'grants.searchPlaceholder', N'en', N'Resource, kind or level', 1),
+    (N'grants.noMatch', N'en', N'No grants match the filter.', 1),
+    (N'grants.levelHint.Read', N'en', N'Can open and export, cannot change anything.', 1),
+    (N'grants.levelHint.Write', N'en', N'Can enter and import data.', 1),
+    (N'grants.levelHint.Submit', N'en', N'Can enter data and submit sheets for approval.', 1),
+    (N'grants.levelHint.Approve', N'en', N'Can approve, reject and return submitted sheets.', 1),
+    (N'grants.levelHint.Manage', N'en', N'Can change the settings of the resource.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui37security ── кінець секції ──

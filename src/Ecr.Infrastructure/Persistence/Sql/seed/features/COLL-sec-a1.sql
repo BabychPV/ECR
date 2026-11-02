@@ -9,3 +9,13 @@ OPTION (RECOMPILE);
 GO
 -- COLL:sec-a1 ── кінець секції ──
 
+-- COLL:sec-a1 ── Перенос версії: заборона на аркуші/таблиці/колонці, якої нема в новій версії (`MigrateDocumentVersionHandler`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'en', N'The target version has no sheet, table or column with the code of a resource that has an access grant (deny or a restricting Read), so the grant cannot be carried over and access could widen. Remove or re-create that grant deliberately before moving the project.', 1)
+    -- ru/kz — окремою порцією `COLL:sec-a1` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:sec-a1 ── кінець секції ──

@@ -8,3 +8,12 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- AN32:L2-11 ── кінець секції ──
+-- AN32:L2-11 ── черга: перезапуск, коли на ціль уже чекає інша задача; ru/kz — порцією AN32:L2-11 у блоці I18N нижче
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-JOB-0409.restartCoveredBy', N'en', N'Job {jobId} was not restarted: job {coveredBy} is already queued for the same target and will do this work.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- AN32:L2-11 ── кінець секції ──

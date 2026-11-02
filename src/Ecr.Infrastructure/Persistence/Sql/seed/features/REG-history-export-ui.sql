@@ -60,3 +60,39 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- REG:history-export-ui ── кінець секції ──
+-- REG:history-export-ui ── журнал змін запису і експорт довідника (RT-15/RT-16, клієнт) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'registries.entryHistory.title', N'en', N'Change log', 1),
+    (N'registries.entryHistory.when', N'en', N'When', 1),
+    (N'registries.entryHistory.author', N'en', N'Author', 1),
+    (N'registries.entryHistory.change', N'en', N'What changed', 1),
+    (N'registries.entryHistory.before', N'en', N'Before', 1),
+    (N'registries.entryHistory.after', N'en', N'After', 1),
+    (N'registries.entryHistory.unknownAuthor', N'en', N'Unknown (background job)', 1),
+    (N'registries.entryHistory.empty', N'en', N'No changes recorded for this entry.', 1),
+    (N'registries.entryHistory.loadMore', N'en', N'Show earlier changes', 1),
+    (N'registries.entryHistory.openEnded', N'en', N'open', 1),
+    (N'registries.entryHistory.yes', N'en', N'Yes', 1),
+    (N'registries.entryHistory.no', N'en', N'No', 1),
+    (N'registries.entryHistory.kind.created', N'en', N'Entry created', 1),
+    (N'registries.entryHistory.kind.name', N'en', N'Name', 1),
+    (N'registries.entryHistory.kind.validity', N'en', N'Validity', 1),
+    (N'registries.entryHistory.kind.active', N'en', N'Active', 1),
+    (N'registries.entryHistory.kind.deleted', N'en', N'Entry deleted', 1),
+    (N'registries.export.button', N'en', N'Export', 1),
+    (N'registries.export.csv', N'en', N'CSV (can be imported back)', 1),
+    (N'registries.export.xlsx', N'en', N'Excel workbook (XLSX)', 1),
+    (N'registries.export.asOfHint', N'en', N'Entries effective on {date}.', 1),
+    (N'registries.export.includeChildren', N'en', N'With child parts (composition)', 1),
+    (N'registries.export.includeChildrenUnavailable', N'en', N'Not available yet: the server does not export composition parts.', 1),
+    (N'registries.export.failed', N'en', N'Export failed', 1),
+    (N'registries.export.forbidden', N'en', N'You do not have read access to this registry, so it cannot be exported. Ask the security administrator for read access.', 1),
+    (N'registries.export.tooLarge', N'en', N'The registry has more entries than one export allows.', 1),
+    (N'registries.export.tooLargeHint', N'en', N'The file is not cut short. Ask the administrator to raise the export limit (Registries:ExportMaxRows).', 1)
+    -- ru/kz — окремою порцією `I18N` (REG:history-export-ui).
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- REG:history-export-ui ── кінець секції ──

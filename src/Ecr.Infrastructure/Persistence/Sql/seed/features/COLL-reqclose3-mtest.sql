@@ -9,3 +9,13 @@ OPTION (RECOMPILE);
 GO
 -- COLL:reqclose3-mtest ── кінець секції ──
 
+-- COLL:reqclose3-mtest ── див. ключі нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.testCaseJsonInvalid', N'en', N'Test "{testCode}": field {field} is not valid JSON of the expected shape ({reason}).', 1)
+    -- ru/kz — окремою порцією $Section у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:reqclose3-mtest ── кінець секції ──

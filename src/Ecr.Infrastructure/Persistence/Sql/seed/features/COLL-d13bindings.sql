@@ -10,3 +10,13 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d13bindings ── кінець секції ──
+-- COLL:d13bindings ── D-13: перенос проєкту на версію шаблону відмовляє, якщо активна прив'язка методології не має відповідника в цільовій; ru/kz — порцією COLL:d13bindings нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-SCHM-0422.migrateBindingsNotMapped', N'en', N'The target version has no active binding of a methodology output on the matching column (or the column itself is missing), so after the move that column would stay empty without any error. Clone the version again from the one being moved from (a clone now carries bindings), or switch the binding off deliberately, then move the project.', 1),
+    (N'documents.migrateRefusalBindingsNotMapped', N'en', N'Methodology outputs are bound to columns that have no matching binding in the target version; those columns would be left empty.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:d13bindings ── кінець секції ──

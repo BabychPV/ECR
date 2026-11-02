@@ -13,3 +13,15 @@ OPTION (RECOMPILE);
 GO
 -- COLL:d212-dates ── кінець секції ──
 
+-- COLL:d212-dates ── Вікно дії запису з дат AF (D-212 PR-7, `RegistrySyncValidity`, PUT /sources/{id}/registry/policy) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REG-0422.validityDateInvalid',          N'en', N'The source value is not an ISO 8601 date: the validity window of the entry is left unchanged.', 1),
+    (N'err.ECR-REG-0422.validityWindowEmptyInSource',  N'en', N'The source dates give an empty validity window (the end is not later than the start): the window is left unchanged.', 1),
+    (N'err.ECR-REQ-0422.registrySyncPolicyNotTemporal', N'en', N'Registry {registry} is not temporal: validity date attributes cannot be synced into it.', 1)
+    -- ru/kz — окремою порцією `COLL:d212-dates` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:d212-dates ── кінець секції ──

@@ -9,3 +9,12 @@ OPTION (RECOMPILE);
 GO
 -- COLL:r7y5-01-layout-changed ── кінець секції ──
 
+-- COLL:r7y5-01-layout-changed ── R7-Y5 / Y5-01: рядки чи колонки таблиці в Excel відсортовано, вставлено чи видалено — відмова таблиці, а не значення в чужих рядках; ru/kz — порцією COLL:r7y5-01-layout-changed нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-IMP-0422.importLayoutChanged', N'en', N'Rows or columns of this table were sorted, inserted, deleted or relabelled in Excel after export, so the values no longer match their rows. The table was not imported. Download the workbook again and edit values in place without sorting or inserting rows and columns.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y5-01-layout-changed ── кінець секції ──

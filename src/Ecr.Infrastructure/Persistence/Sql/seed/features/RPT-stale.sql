@@ -11,3 +11,14 @@ OPTION (RECOMPILE);
 GO
 -- RPT:stale ── кінець секції ──
 
+-- RPT:stale ── позначка застарілого зрізу в переліку (ФВ-10.5, `SnapshotStaleBadge.tsx`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'snapshots.stale',                   N'en', N'Outdated', 1),
+    (N'snapshots.staleHint',               N'en', N'The project and period were recalculated after this snapshot was built. Its numbers are kept exactly as they were; build a new snapshot to see the current ones.', 1)
+    -- ru/kz — окремою порцією `RPT:stale` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- RPT:stale ── кінець секції ──

@@ -81,3 +81,48 @@ OPTION (RECOMPILE);
 GO
 -- REGCTOR812 ── кінець секції ──
 
+-- REGCTOR812 ── ФВ-8.12: табличний редактор даних довідника (`features/registries/rc812`).
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'registries.data.title', N'en', N'Registry data', 1),
+    (N'registries.data.open', N'en', N'Open data', 1),
+    (N'registries.data.back', N'en', N'Back to registries', 1),
+    (N'registries.data.asOf', N'en', N'As of', 1),
+    (N'registries.data.unsaved', N'en', N'{count} unsaved changes', 1),
+    (N'registries.data.saved', N'en', N'Saved {time}', 1),
+    (N'registries.data.saveChanges', N'en', N'Save {count} changes', 1),
+    (N'registries.data.readOnly', N'en', N'Read only: editing needs the Registry.EditData permission.', 1),
+    (N'registries.data.readOnlyExternal', N'en', N'Read only: this registry is mastered by an external source.', 1),
+    (N'registries.data.dupInBatch', N'en', N'Same key {key} as row {row}.', 1),
+    (N'registries.data.emptyTitle', N'en', N'No entries yet', 1),
+    (N'registries.data.emptyText', N'en', N'Add entries one by one or paste a block of cells from Excel.', 1),
+    (N'registries.data.unmatchedPaste', N'en', N'{count} pasted cells could not be matched and were left unchanged.', 1),
+    (N'registries.data.autoCode', N'en', N'Assigned on save', 1),
+    (N'registries.data.newRow', N'en', N'New row {row}', 1),
+    (N'registries.data.newCode', N'en', N'Code of new row {row}', 1),
+    (N'registries.data.edited', N'en', N'edited', 1),
+    (N'registries.data.openEntry', N'en', N'Open entry', 1),
+    (N'registries.data.deleteRow', N'en', N'Delete row', 1),
+    (N'registries.data.restoreRow', N'en', N'Keep row', 1),
+    (N'registries.data.no', N'en', N'No', 1),
+    (N'registries.data.required', N'en', N'A value is required.', 1),
+    (N'registries.data.notInteger', N'en', N'Enter a whole number.', 1),
+    (N'registries.data.notNumber', N'en', N'Enter a number with a dot as the decimal separator.', 1),
+    (N'registries.data.decimalDot', N'en', N'Use a dot, not a comma, as the decimal separator.', 1),
+    (N'registries.data.notDate', N'en', N'Enter a date as YYYY-MM-DD.', 1),
+    (N'registries.data.notBool', N'en', N'Choose Yes or No.', 1),
+    (N'registries.data.checkOk', N'en', N'Check passed', 1),
+    (N'registries.data.checkSummary', N'en', N'{errors} errors, {warnings} warnings', 1),
+    (N'registries.data.loadMore', N'en', N'Show more ({shown} of {total})', 1),
+    (N'registries.data.keyboardHint', N'en', N'Arrow keys move between cells. Enter or F2 edits a cell, Escape cancels, Ctrl+S saves, Ctrl+Enter adds a row, Ctrl+Shift+Delete marks a row for deletion, Ctrl+. opens the entry.', 1),
+    (N'registries.data.details', N'en', N'Details', 1),
+    (N'registries.data.valuesAsOf', N'en', N'Values as of', 1),
+    (N'registries.data.valuesAsOfHint', N'en', N'Pick a day to see the values this entry had at the end of it.', 1),
+    (N'registries.data.notYetThen', N'en', N'The entry did not exist on {date}.', 1),
+    (N'registries.data.now', N'en', N'Now', 1),
+    (N'registries.data.changedSince', N'en', N'changed', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- REGCTOR812: кінець секції

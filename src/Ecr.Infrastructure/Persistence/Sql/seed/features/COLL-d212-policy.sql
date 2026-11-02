@@ -11,3 +11,14 @@ OPTION (RECOMPILE);
 GO
 -- COLL:d212-policy ── кінець секції ──
 
+-- COLL:d212-policy ── Політика синку довідника з AF (D-212 PR-2, `SourceEntity.ConfigureRegistrySync`, PUT /sources/{id}/registry/policy) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.registrySyncPolicyInvalid', N'en', N'Sync policy: unknown value, or an attribute name is empty or longer than {max} characters; an inclusive end requires an end attribute.', 1),
+    (N'err.ECR-REQ-0422.registrySyncPolicyNotBound', N'en', N'Collection entity {id} is not bound to a registry: the sync policy has nothing to apply to.', 1)
+    -- ru/kz — окремою порцією `COLL:d212-policy` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:d212-policy ── кінець секції ──

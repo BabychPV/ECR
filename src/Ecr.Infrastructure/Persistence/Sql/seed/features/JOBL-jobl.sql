@@ -13,3 +13,14 @@ OPTION (RECOMPILE);
 GO
 -- JOBL ── кінець секції ──
 
+-- JOBL ── людські назви видів фонових задач, яких бракувало в jobLabel.ts (KindKeys) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'jobs.kind.sourceEventSync',  N'en', N'Source event sync', 1),
+    (N'jobs.kind.consistencyCheck', N'en', N'Consistency check', 1),
+    (N'jobs.kind.orphanScan',       N'en', N'Orphaned data scan', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- JOBL ── кінець секції ──

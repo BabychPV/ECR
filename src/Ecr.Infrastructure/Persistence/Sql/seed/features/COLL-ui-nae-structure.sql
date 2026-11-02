@@ -120,3 +120,68 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-nae-structure ── кінець секції ──
+-- COLL:ui-nae-structure ── сторінка «Структура NAE» (/admin/permits/nae, NAE plan N2): дерево, форма атрибутів, «Де використовується»; ru/kz — порцією COLL:ui-nae-structure нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'permits.nae.title', N'en', N'NAE structure', 1),
+    (N'permits.nae.description', N'en', N'The tree of regions, districts, sites, equipment and NAE items that permits refer to.', 1),
+    (N'permits.nae.sourceNote', N'en', N'This structure is a registry: permits and imports refer to its nodes by code. Retire a node instead of deleting it.', 1),
+    (N'permits.nae.readOnly', N'en', N'You can browse the structure, but changing it needs the right to edit registry data.', 1),
+    (N'permits.nae.treeLabel', N'en', N'NAE structure tree', 1),
+    (N'permits.nae.form.newNode', N'en', N'New node', 1),
+    (N'permits.nae.form.createTitle', N'en', N'New {level}', 1),
+    (N'permits.nae.form.editTitle', N'en', N'Node attributes', 1),
+    (N'permits.nae.form.parent', N'en', N'Parent: {path}', 1),
+    (N'permits.nae.form.parentRoot', N'en', N'top level', 1),
+    (N'permits.nae.form.codeRequired', N'en', N'Enter a code.', 1),
+    (N'permits.nae.form.codeTaken', N'en', N'This code is already used in the structure.', 1),
+    (N'permits.nae.form.codeAutomatic', N'en', N'The code of this registry is assigned automatically.', 1),
+    (N'permits.nae.form.nameRequired', N'en', N'Enter a name.', 1),
+    (N'permits.nae.form.fieldRequired', N'en', N'Fill in this field.', 1),
+    (N'permits.nae.used.title', N'en', N'Where it is used', 1),
+    (N'permits.nae.used.permit', N'en', N'Permit', 1),
+    (N'permits.nae.used.type', N'en', N'Type', 1),
+    (N'permits.nae.used.valid', N'en', N'Valid', 1),
+    (N'permits.nae.used.substances', N'en', N'Substances', 1),
+    (N'permits.nae.used.empty', N'en', N'No permit refers to this node yet.', 1),
+    (N'permits.nae.form.keyTaken', N'en', N'A node with this NAE code, region and area already exists.', 1),
+    (N'permits.nae.form.keyTakenBy', N'en', N'This NAE code, region and area are already used by the node {holder}.', 1),
+    (N'permits.nae.form.areaHint', N'en', N'Leave empty when there is no area: it is saved as “-”.', 1),
+    (N'permits.nae.import.open', N'en', N'Load from PI AF', 1),
+    (N'permits.nae.import.hintNotProvisioned', N'en', N'The NAE structure has not been loaded yet. Load it once from PI AF; after that ECR owns the tree.', 1),
+    (N'permits.nae.import.hintAskAdmin', N'en', N'The NAE structure has not been loaded yet. Ask an administrator to load it from PI AF.', 1),
+    (N'permits.nae.import.title', N'en', N'Load the structure from PI AF', 1),
+    (N'permits.nae.import.description', N'en', N'Reads the equipment tree from PI AF and creates the missing nodes. Existing nodes are never changed or moved.', 1),
+    (N'permits.nae.import.source', N'en', N'Data source', 1),
+    (N'permits.nae.import.noSources', N'en', N'There is no active data source to load from.', 1),
+    (N'permits.nae.import.root', N'en', N'AF root element', 1),
+    (N'permits.nae.import.rootHint', N'en', N'Leave empty to use ECR_01_Air Equipment.', 1),
+    (N'permits.nae.import.preview', N'en', N'Preview (dry run)', 1),
+    (N'permits.nae.import.apply', N'en', N'Load', 1),
+    (N'permits.nae.import.close', N'en', N'Close', 1),
+    (N'permits.nae.import.stale', N'en', N'The source or root changed: run the preview again.', 1),
+    (N'permits.nae.import.previewDone', N'en', N'Preview only: nothing was written.', 1),
+    (N'permits.nae.import.applied', N'en', N'Loaded: the nodes were written.', 1),
+    (N'permits.nae.import.nothingNew', N'en', N'Nothing new to load: every node already exists.', 1),
+    (N'permits.nae.import.willProvision', N'en', N'The NAE registry will be created with its levels and fields.', 1),
+    (N'permits.nae.import.didProvision', N'en', N'The NAE registry was created with its levels and fields.', 1),
+    (N'permits.nae.import.incomplete', N'en', N'The AF listing may be incomplete: some elements may be missing from this report.', 1),
+    (N'permits.nae.import.read', N'en', N'{count} AF elements read', 1),
+    (N'permits.nae.import.level', N'en', N'Level', 1),
+    (N'permits.nae.import.create', N'en', N'To create', 1),
+    (N'permits.nae.import.existing', N'en', N'Already exist', 1),
+    (N'permits.nae.import.skipped', N'en', N'{count} elements skipped', 1),
+    (N'permits.nae.import.issues', N'en', N'Findings', 1),
+    (N'permits.nae.import.severity.warning', N'en', N'Warning', 1),
+    (N'permits.nae.import.severity.skipped', N'en', N'Skipped', 1),
+    (N'permits.nae.import.issue.noCode', N'en', N'The element has no NAE code.', 1),
+    (N'permits.nae.import.issue.noRegion', N'en', N'The element has no Region attribute.', 1),
+    (N'permits.nae.import.issue.duplicateBusinessKey', N'en', N'The same NAE code, region and area occur twice in AF.', 1),
+    (N'permits.nae.import.issue.pathFlattened', N'en', N'More than two grouping levels under the area: the path was flattened.', 1),
+    (N'permits.nae.import.issue.existingElsewhere', N'en', N'This NAE key already belongs to another node.', 1),
+    (N'permits.nae.import.issue.sourceIncomplete', N'en', N'The AF listing may be truncated.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-nae-structure ── кінець секції ──

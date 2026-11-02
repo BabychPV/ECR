@@ -19,3 +19,18 @@ OPTION (RECOMPILE);
 GO
 -- COLL:transport-health ── кінець секції ──
 
+-- COLL:transport-health ── Перевірка `transport` на /health/ready (D14-08, `TransportHealthCheck`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'health.check.transport',                 N'en', N'Transport (HTTPS)', 1),
+    (N'health.transport.secure',                N'en', N'The session cookie requires HTTPS (Auth:RequireHttps = true).', 1),
+    (N'health.transport.notProduction',         N'en', N'Auth:RequireHttps = false outside Production (development or test): the session cookie is not Secure.', 1),
+    (N'health.transport.httpNoSecureCookie',    N'en', N'Transport: HTTP - the session cookie is not Secure (Auth:RequireHttps = false). Use this only on a stand; on a production site enable HTTPS (install guide, section HTTPS).', 1),
+    (N'health.transport.certificateExpiresSoon', N'en', N'The HTTPS certificate expires in {days} day(s) ({date}). Install a renewed certificate and repeat deploy-ecr.ps1 with the new -HttpsThumbprint.', 1),
+    (N'health.transport.certificateExpired',    N'en', N'The HTTPS certificate expired on {date}: browsers refuse to open the application. Install a renewed certificate and repeat deploy-ecr.ps1 with the new -HttpsThumbprint.', 1)
+    -- ru/kz — окремою порцією `COLL:transport-health` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:transport-health ── кінець секції ──

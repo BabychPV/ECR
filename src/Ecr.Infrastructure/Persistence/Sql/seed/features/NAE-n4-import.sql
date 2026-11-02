@@ -44,3 +44,31 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- NAE:n4-import ── кінець секції ──
+-- NAE:n4-import ── generic registry import engine (Excel with a header block, groups, two levels); ru/kz in the section NAE:n4-import below.
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-IMP-0422.regSpecInvalid',        N'en', N'The import profile is not valid ({where}): {reason}.', 1),
+    (N'err.ECR-IMP-0422.regHeaderNotFound',     N'en', N'The header of the table was not found in the file. Set the header rows in the import profile.', 1),
+    (N'err.ECR-IMP-0422.regRejected',           N'en', N'The file has {errorCount} error(s). Nothing was imported: fix them and upload the file again.', 1),
+    (N'err.ECR-IMP-0422.regReplaceNotConfirmed', N'en', N'The import replaces rows of other permits ({owners}). Confirm the replacement to continue.', 1),
+    (N'err.ECR-IMP-0422.regPlanChanged',        N'en', N'The data changed since the preview. Nothing was imported: build the preview again.', 1),
+    (N'err.ECR-IMP-0422.regColumnMissing',      N'en', N'The column for "{field}" was not found in the file header.', 1),
+    (N'err.ECR-IMP-0422.regColumnAmbiguous',    N'en', N'Several columns match "{field}": {columns}. Make the header pattern more specific.', 1),
+    (N'err.ECR-IMP-0422.regColumnClaimed',      N'en', N'Column {column} is already used by "{other}" and cannot also be "{field}".', 1),
+    (N'err.ECR-IMP-0422.regValueInvalid',       N'en', N'"{field}": the value "{value}" cannot be read.', 1),
+    (N'err.ECR-IMP-0422.regValueRequired',      N'en', N'"{field}" must not be empty.', 1),
+    (N'err.ECR-IMP-0422.regValueNegative',      N'en', N'"{field}" must not be negative ("{value}").', 1),
+    (N'err.ECR-IMP-0422.regValueAmbiguous',     N'en', N'"{field}": "{value}" was read with the comma as the decimal separator. Check that it is not a thousands separator.', 1),
+    (N'err.ECR-IMP-0422.regDuplicateParent',    N'en', N'Source {key} appears twice: rows {firstRow} and {row}.', 1),
+    (N'err.ECR-IMP-0422.regDuplicateChild',     N'en', N'Substance {key} appears twice under source {parent}.', 1),
+    (N'err.ECR-IMP-0422.regReferenceMissing',   N'en', N'{kind} {key} does not exist in the system. Create it or skip it.', 1),
+    (N'err.ECR-IMP-0422.regReferenceUnchecked', N'en', N'Codes of kind {kind} were not checked against the system.', 1),
+    (N'err.ECR-IMP-0422.regChildWithoutParent', N'en', N'Row {row}: a substance row has no source above it.', 1),
+    (N'err.ECR-IMP-0422.regParentWithoutChildren', N'en', N'Source {key} has no substance rows.', 1),
+    (N'err.ECR-IMP-0422.regNoRows',             N'en', N'The file has no data rows.', 1),
+    (N'err.ECR-IMP-0422.regValueEmpty',         N'en', N'"{field}" is empty. The row is imported without it.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- NAE:n4-import ── кінець секції ──

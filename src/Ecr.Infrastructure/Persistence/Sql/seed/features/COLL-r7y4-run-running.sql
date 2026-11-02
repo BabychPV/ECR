@@ -9,3 +9,12 @@ OPTION (RECOMPILE);
 GO
 -- COLL:r7y4-run-running ── кінець секції ──
 
+-- COLL:r7y4-run-running ── R7-Y4 / Y4-03: прогін збору, що ще триває, на /admin/sources; ru/kz — порцією COLL:r7y4-run-running у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'status.collectionRun.Running', N'en', N'Running', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y4-run-running ── кінець секції ──

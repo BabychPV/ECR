@@ -9,3 +9,13 @@ OPTION (RECOMPILE);
 GO
 -- COLL:defer-health ── кінець секції ──
 
+-- COLL:defer-health ── Вичерпана стеля відкладень у перевірці `jobs` (Д-2 огляду O1, `JobsHealthCheck`) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'health.jobs.deferralExhausted',          N'en', N'Background jobs stopped on the deferral limit in the last 24 hours: {count}. See the job list for the held resource.', 1)
+    -- ru/kz — окремою порцією `COLL:defer-health` у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:defer-health ── кінець секції ──

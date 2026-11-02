@@ -55,3 +55,35 @@ OPTION (RECOMPILE);
 GO
 -- CL6:notification-templates ── кінець секції ──
 
+-- CL6:notification-templates ── Шаблони повідомлень і адресати події (CL-6, NotificationTemplatesPanel, /admin/notifications) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'notificationTemplates.title', N'en', N'Message templates', 1),
+    (N'notificationTemplates.hint', N'en', N'What is sent for each event and to whom. Each recipient gets the message in their own language; an empty translation falls back to the default language.', 1),
+    (N'notificationTemplates.noPermission', N'en', N'Editing message templates requires the right to manage interface strings.', 1),
+    (N'notificationTemplates.noLanguages', N'en', N'No interface languages are registered.', 1),
+    (N'notificationTemplates.notInCatalog', N'en', N'The template of this event is not in the string catalog. Re-run the database deployment so that the seed adds it.', 1),
+    (N'notificationTemplates.event', N'en', N'Event', 1),
+    (N'notificationTemplates.language', N'en', N'Language', 1),
+    (N'notificationTemplates.subject', N'en', N'Subject', 1),
+    (N'notificationTemplates.body', N'en', N'Message text', 1),
+    (N'notificationTemplates.reference', N'en', N'Default language: {text}', 1),
+    (N'notificationTemplates.untranslated', N'en', N'There is no translation in this language yet: recipients get the default-language text.', 1),
+    (N'notificationTemplates.placeholders', N'en', N'Placeholders filled in by the system: {names}.', 1),
+    (N'notificationTemplates.problemEmpty', N'en', N'The default-language text cannot be empty.', 1),
+    (N'notificationTemplates.problemUnknownPlaceholder', N'en', N'Unknown placeholders: {names}. The system fills in only {allowed}.', 1),
+    (N'notificationTemplates.save', N'en', N'Save template', 1),
+    (N'notificationTemplates.saved', N'en', N'Message template saved', 1),
+    (N'notificationTemplates.unsaved', N'en', N'Template changes are not saved', 1),
+    (N'notificationTemplates.recipients', N'en', N'Who gets it', 1),
+    (N'notificationTemplates.recipientsNone', N'en', N'No rule is enabled for this event: nobody gets the message. Enable it in the rules matrix above.', 1),
+    (N'notificationTemplates.recipientsRoles', N'en', N'roles: {roles}', 1),
+    (N'notificationTemplates.recipientsRoleCount', N'en', N'recipient roles: {count}', 1),
+    (N'notificationTemplates.recipientsNoRoles', N'en', N'no recipient roles', 1),
+    (N'notificationTemplates.recipientsFiltered', N'en', N'the severity threshold is above Info, so this event does not pass', 1),
+    (N'notificationTemplates.recipientsNoTransport', N'en', N'the channel has no delivery transport configured', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- CL6:notification-templates ── кінець секції ──

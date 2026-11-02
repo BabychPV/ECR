@@ -25,3 +25,22 @@ OPTION (RECOMPILE);
 GO
 -- COLL:reqclose3-tmplkeys ── кінець секції ──
 
+-- COLL:reqclose3-tmplkeys ── див. ключі нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-TMPL-4228.fixedTableWithoutRows', N'en', N'Table {tableCode} is fixed (its rows are defined in the template) but has no rows. In the published form it would be an empty table the operator cannot enter anything into.', 1),
+    -- CG:colgroups ── групи заголовків колонок (ECR-TMPL-4229); ru/kz — у блоці I18N нижче.
+    (N'err.ECR-TMPL-4229',  N'en', N'Invalid column header groups', 1),
+    (N'err.ECR-TMPL-4229.duplicateGroupCode', N'en', N'Header group {groupCode} of table {tableCode} appears more than once: group codes must be unique within a table.', 1),
+    (N'err.ECR-TMPL-4229.parentNotFound', N'en', N'Parent group {parentCode} of group {groupCode} does not exist in table {tableCode}: a group can only be nested in a group of the same table.', 1),
+    (N'err.ECR-TMPL-4229.cycle', N'en', N'Header group {groupCode} of table {tableCode} is part of a cycle: a group cannot be nested in itself.', 1),
+    (N'err.ECR-TMPL-4229.depthExceeded', N'en', N'Header group {groupCode} of table {tableCode} is nested deeper than {maxDepth} levels.', 1),
+    (N'err.ECR-TMPL-4229.unknownGroup', N'en', N'Column {columnCode} of table {tableCode} refers to header group {groupCode}, which does not exist in this table.', 1),
+    (N'err.ECR-TMPL-4229.notContiguous', N'en', N'The columns of header group {groupCode} in table {tableCode} must be adjacent: another column sits between them. Reorder the columns so the group is contiguous.', 1),
+    (N'err.ECR-TMPL-4226.calculatedWithoutSource', N'en', N'Column {tableCode}.{columnCode} has type {dataType}, so it must be computed by a template formula, but this version has none. In the published form it would be an empty cell the operator may not fill in.', 1)
+    -- ru/kz — окремою порцією $Section у блоці I18N нижче.
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:reqclose3-tmplkeys ── кінець секції ──

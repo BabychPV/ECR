@@ -11,3 +11,13 @@ OPTION (RECOMPILE);
 GO
 -- IMPORT:an118 ── кінець секції ──
 
+-- IMPORT:an118 ── R1-02: попередження перегляду імпорту про книгу, вивантажену до версій рядків і відбитків комірок; ru/kz — порцією IMPORT:an118 у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'import.warningsTitle', N'en', N'Check before applying', 1),
+    (N'import.outdatedWorkbook', N'en', N'This workbook was exported by an earlier version of the system. Values you did not change in it can still replace newer values entered by others or by integrations after the export, and they will be recorded as your changes. Check the list of changes, or export the document again and repeat your changes in the new workbook.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- IMPORT:an118 ── кінець секції ──
