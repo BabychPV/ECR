@@ -94,14 +94,18 @@ public sealed class PermitConstraintsTests(SqlServerFixture sql)
 
     // ---------- PermitTypeDef ----------
 
+    /// <summary>
+    /// ✎ AIRSYS01 (координатор 02.11): опублікований тип вимагає <c>PublishedAt</c>; автор (<c>PublishedByUserId</c>) може бути
+    /// NULL — це СИСТЕМА (крок старту, дія розгортання), у читачів — «system».
+    /// </summary>
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Опублікований_тип_вимагає_PublishedAt_і_PublishedBy()
+    public async Task Опублікований_тип_вимагає_PublishedAt_а_автор_NULL_означає_систему()
     {
         var c = Uid();
         await Violates("CK_PermitType_Published", Type(c, status: 1));
-        await Violates("CK_PermitType_Published", Type(c, status: 1, at: Now));
         await Violates("CK_PermitType_Published", Type(c, status: 1, by: "1"));
+        await Valid(Type(c, status: 1, at: Now));
         await Valid(Type(c, status: 1, at: Now, by: "1"));
         await Valid(Type(c, status: 0));
     }
