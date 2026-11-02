@@ -146,7 +146,8 @@ public static class AirLimitsSchema
 
     /// <summary>The published definition of the type.</summary>
     /// <param name="settings">Registries the lookups point at.</param>
-    public static PermitTypeContent Content(AirLimitsSettings settings)
+    /// <param name="regionAsText">✎ AIR-ON-AIR: the Region registry does not exist — REGION is a Text column (fallback with a warning).</param>
+    public static PermitTypeContent Content(AirLimitsSettings settings, bool regionAsText = false)
     {
         ArgumentNullException.ThrowIfNull(settings);
         var sources = new PermitTypeTableDto(
@@ -156,7 +157,9 @@ public static class AirLimitsSchema
             [
                 Lookup(Nae, "NAE", "НАЕ", "НАЕ", "SharedRegistry", settings.NaeRegistryCode, null, key: true, 1),
                 // ✎ AIR-ON-AIR: import scope columns; kind (Text / Registry / List) is editable on the type like any column.
-                Lookup(Region, "Region", "Регион", "Аймақ", "SharedRegistry", settings.RegionRegistryCode, null, key: false, 2),
+                regionAsText
+                    ? Text(Region, "Region", "Регион", required: true, 2)
+                    : Lookup(Region, "Region", "Регион", "Аймақ", "SharedRegistry", settings.RegionRegistryCode, null, key: false, 2),
                 Lookup(Area, "Area", "Район", "Аудан", "SharedRegistry", settings.AreaRegistryCode, null, key: false, 3, required: false),
                 Text(SiteLabel, "Site / production", "Площадка / производство", false, 4),
                 Text(ProductionCode, "Production code", "Код производства", false, 5),
@@ -220,11 +223,12 @@ public static class AirLimitsSchema
     /// <summary>Content of the AIR type with the two sources tables appended (when absent); other tables and rules untouched.</summary>
     /// <param name="current">Current content of the type.</param>
     /// <param name="settings">Registries the lookups point at.</param>
+    /// <param name="regionAsText">The Region registry does not exist: REGION as a Text column.</param>
     /// <returns>The merged content, or <c>null</c> when both tables are already there.</returns>
-    public static PermitTypeContent? WithSourcesTables(PermitTypeContent current, AirLimitsSettings settings)
+    public static PermitTypeContent? WithSourcesTables(PermitTypeContent current, AirLimitsSettings settings, bool regionAsText = false)
     {
         ArgumentNullException.ThrowIfNull(current);
-        var ours = Content(settings).Tables;
+        var ours = Content(settings, regionAsText).Tables;
         var missing = ours
             .Where(t => !current.Tables.Any(c => string.Equals(c.Code, t.Code, StringComparison.OrdinalIgnoreCase)))
             .ToList();
