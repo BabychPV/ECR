@@ -53,7 +53,7 @@ function column(code: string, label: string, order: number, over: Record<string,
   };
 }
 
-const Decimal = { dataType: 'Decimal', precision: 18, scale: 3, group: 'Limits by year' };
+const Decimal = { dataType: 'Decimal', precision: 18, scale: 3, group: 'LimitsByYear' };
 
 async function arrange(api: APIRequestContext): Promise<number> {
   const created = await ok<{ rowVersion: string; nameL10n: Record<string, string> }>(
@@ -267,8 +267,10 @@ test.describe('Registry table header', () => {
   test.afterAll(async ({ browser }) => {
     test.setTimeout(120_000);
     // Тема адміністратора зберігається на сервері: повернути світлу, щоб не вплинути на інші спеки.
-    const { page, context } = await openTable(browser, 1440, 'light');
-    await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', 'light');
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+    await signIn(page);
+    await ensureScheme(page, 'light');
     await context.close();
     const problems: string[] = [];
     if (permitId !== 0) {
