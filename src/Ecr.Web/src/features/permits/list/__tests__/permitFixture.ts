@@ -29,7 +29,7 @@ export function makePermit(id: number, patch: Partial<PermitListItem> = {}): Per
  * Два типи: повітряний і водний.
  */
 export const FixturePermits: readonly PermitListItem[] = [
-  makePermit(1, { number: 'KZ06VCZ14825472', endsInDays: 40, boundSheetCount: 3, rowCount: 43 }),
+  makePermit(1, { number: 'KZ06VCZ14825472', endsInDays: 40, boundSheetCount: 3, rowCount: 43, usedInDocumentCount: 12 }),
   makePermit(2, {
     number: 'KZ14VCZ14523270',
     typeCode: 'WaterDischarge',

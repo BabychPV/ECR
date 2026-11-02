@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PermitSheetBindingsFlag } from '@/features/permits/permitFeatures';
 import { fireEvent, screen } from '@testing-library/react';
 import { renderWithQuery } from '@/test/render';
 import type { TemplateTable } from '../ctorModel';
@@ -56,7 +57,26 @@ function mount(canEditStructure: boolean, onTab = vi.fn(), tab: 'columns' | 'per
   return { onTab };
 }
 
-describe('TableWorkspace — вкладка «Permit binding»', () => {
+describe('TableWorkspace — «Permit binding» сховано прапорцем (PERMIT-USAGE п. 1)', () => {
+  it('типово вкладки в смузі немає', () => {
+    mount(true, vi.fn(), 'columns');
+
+    expect(screen.getByRole('tab', { name: /⟦ctor\.tab\.columns⟧/ })).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: '⟦ctor.tab.permit⟧' })).toBeNull();
+  });
+
+  it('адреса ?tab=permit показує «Columns», панель прив’язки не монтується', () => {
+    mount(true);
+
+    expect(screen.getByRole('tab', { name: /⟦ctor\.tab\.columns⟧/ }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.queryByTestId('panel-stub')).toBeNull();
+  });
+});
+
+describe('TableWorkspace — вкладка «Permit binding» (прапорець увімкнено)', () => {
+  beforeEach(() => localStorage.setItem(PermitSheetBindingsFlag, 'on'));
+  afterEach(() => localStorage.removeItem(PermitSheetBindingsFlag));
+
   it('адреса ?tab=permit розпізнається, невідома вкладка — «columns»', () => {
     expect(parseTab('permit')).toBe('permit');
     expect(parseTab('unknown')).toBe('columns');
