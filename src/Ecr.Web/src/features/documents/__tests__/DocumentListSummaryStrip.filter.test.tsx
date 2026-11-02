@@ -40,6 +40,9 @@ function mockFetch(): void {
         return json(Summary);
       }
 
+      // Варіанти фільтра «Version» - не запит переліку (у `listed` не потрапляє).
+      if (url.includes('/api/v1/documents/template-versions')) return json({ items: [], withoutVersionCount: 0 });
+
       if (url.includes('/api/v1/documents')) {
         listed.push(url);
         return json({ items: [Row], nextCursor: null, totalCount: 1 });
