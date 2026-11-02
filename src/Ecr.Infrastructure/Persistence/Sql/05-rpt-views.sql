@@ -766,7 +766,7 @@ BEGIN
     DECLARE @routedGroup bit, @routed bit, @layoutOk bit, @monthMask int, @needAnchor bit, @ownerRows nvarchar(max), @ownerCells nvarchar(max);
     DECLARE @agg nvarchar(max), @aggBody nvarchar(max), @aggList nvarchar(max), @ownerNo int, @famAgg nvarchar(max), @pkExpr nvarchar(16), @fromSql nvarchar(max), @rowApply nvarchar(max);
     DECLARE @selectRv nvarchar(max), @selectTextRv nvarchar(max), @rvIds nvarchar(max), @rvApply nvarchar(max), @rvAgg nvarchar(max), @rvPack nvarchar(max), @rvExprs nvarchar(max);
-    DECLARE @rvPred bit, @rvRef nvarchar(8), @conflictCodes nvarchar(1500), @hasText bit;
+    DECLARE @rvPred bit, @rvRef nvarchar(8), @conflictCodes nvarchar(1500), @hasText bit, @hasId bit, @extra int;
     DECLARE @pv TABLE (OwnerNo int NOT NULL, ColNo int NOT NULL, Agg nvarchar(max) NOT NULL);
 
     -- Columns of one group: one row per ColumnDef (all versions), then one row per code.
@@ -785,7 +785,7 @@ BEGIN
     BEGIN
         SELECT @select = N'', @selectText = N'', @joins = N'', @n = 0, @plainCnt = 0, @plainAgg = N'', @ownerRows = N'', @ownerCells = N'',
                @monthMask = 0, @needAnchor = 0, @famAgg = N'', @selectRv = N'', @selectTextRv = N'', @rvIds = N'', @rvApply = N'',
-               @rvAgg = N'', @rvPack = N'', @rvExprs = N'', @rowApply = N'', @conflictCodes = N'';
+               @rvAgg = N'', @rvPack = N'', @rvExprs = N'', @rowApply = N'', @conflictCodes = N'', @extra = 0;
         DELETE FROM @pv;
         DELETE FROM @ci;
         DELETE FROM @cols;
@@ -929,14 +929,27 @@ BEGIN
             END
             SET @selectRv = @selectRv + N',
        ' + @valueColRv + N' AS ' + QUOTENAME(@colCode);
+            -- PERMUSE: a Lookup column also exposes its record id under the explicit name <Code>_Id (the id is what SSRS joins on:
+            -- permit id, NAE id, substance id). <Code> itself is unchanged (the same id), so existing reports keep working and the
+            -- join key keeps its name if <Code> ever becomes the readable value. Skipped when the template already has a <Code>_Id
+            -- column or the column is a type-conflict nvarchar column (@colType was reset to 0 above).
+            SET @hasId = CASE WHEN @colType = 5 AND NOT EXISTS (SELECT 1 FROM @cols WHERE Code = @colCode + N'_Id') THEN 1 ELSE 0 END;
+            IF @hasId = 1
+            BEGIN
+                SET @selectText = @selectText + N',
+       ' + @valueCol + N' AS ' + QUOTENAME(@colCode + N'_Id');
+                SET @selectTextRv = @selectTextRv + N',
+       ' + @valueColRv + N' AS ' + QUOTENAME(@colCode + N'_Id');
+                SET @extra = @extra + 1;
+            END
             SET @seq = (SELECT MIN(Seq) FROM @cols WHERE Seq > @seq);
         END
         SET @select = @select + @selectText;
         SET @selectRv = @selectRv + @selectTextRv;
 
-        IF @n > 1000
+        IF @n + @extra > 1000
         BEGIN
-            SET @failure = COALESCE(@failure, CONCAT(N'rpt.usp_GenerateStableViews: ', @header, N' has ', @n,
+            SET @failure = COALESCE(@failure, CONCAT(N'rpt.usp_GenerateStableViews: ', @header, N' has ', @n + @extra,
                                   N' columns, the view holds at most 1000.'));
             GOTO next_group;
         END
@@ -1123,6 +1136,100 @@ next_group:
 
     SELECT ViewName, Action, Warning FROM @result ORDER BY ViewName;
 END;
+GO
+
+-- ══ PERMUSE: стабільні вʼюхи ДАНИХ ДОЗВОЛІВ для SSRS ═══════════════════════════
+-- Дозвіл звʼязується з даними документів ЗНАЧЕННЯМ (поле шапки чи колонка Lookup → довідник дозволів). SSRS поєднує
+-- «факт» (стабільна вʼюха таблиці документа, колонка `<Код>_Id`) з «лімітом» (вʼюхи нижче) за ідентифікатором дозволу,
+-- НАЕ та речовини: ON a.<Дозвіл>_Id = s.PermitId AND a.<НАЕ>_Id = s.NaeId AND a.<Речовина>_Id = s.SubstanceId.
+-- Ідентифікатори вʼюх — це Id записів довідників (ті самі, що `ValueRegistryEntryId` комірок і `<Код>_Id`).
+--   rpt.v_Permit                  — шапка дозволу (один рядок на дозвіл будь-якого опублікованого типу);
+--   rpt.v_PermitAirSource         — рядки AIR_SOURCES типу AIR_LIMITS (джерело/НАЕ дозволу);
+--   rpt.v_PermitAirSourceSubstance — рядки AIR_SOURCE_SUBSTANCES (ліміт речовини по НАЕ дозволу).
+-- ⚠ Лише живі (не видалені логічно) записи; чернетки дозволів теж віддаються — відсіює звіт за `IsActive`/датами.
+-- ⚠ `ValidTo` — ПЕРШИЙ НЕчинний день (півінтервал [ValidFrom, ValidTo)), як у застосунку.
+CREATE OR ALTER VIEW rpt.v_Permit
+AS
+SELECT e.Id AS PermitId, pt.Code AS TypeCode, e.Code AS EntryCode,
+       COALESCE(h.PermitNumber, e.Code) AS PermitNumber, h.Location, h.IssueDate,
+       e.ValidFrom, e.ValidTo, h.ActualEnd, e.IsActive,
+       h.Form300, h.Form301, h.Form302, h.Tox
+  FROM cfg.PermitTypeDef AS pt
+  JOIN dic.RegistryEntry AS e ON e.RegistryDefId = pt.HeaderRegistryDefId AND e.IsDeleted = 0
+ OUTER APPLY (SELECT MAX(CASE WHEN f.Code = N'Permit_Number' THEN v.ValueString END) AS PermitNumber,
+                     MAX(CASE WHEN f.Code = N'Location' THEN v.ValueString END) AS Location,
+                     CAST(MAX(CASE WHEN f.Code = N'Issue_Date' THEN v.ValueDate END) AS date) AS IssueDate,
+                     CAST(MAX(CASE WHEN f.Code = N'Actual_End_Date' THEN v.ValueDate END) AS date) AS ActualEnd,
+                     CAST(MAX(CASE WHEN f.Code = N'Form_300' THEN CAST(v.ValueBool AS tinyint) END) AS bit) AS Form300,
+                     CAST(MAX(CASE WHEN f.Code = N'Form_301' THEN CAST(v.ValueBool AS tinyint) END) AS bit) AS Form301,
+                     CAST(MAX(CASE WHEN f.Code = N'Form_302' THEN CAST(v.ValueBool AS tinyint) END) AS bit) AS Form302,
+                     CAST(MAX(CASE WHEN f.Code = N'TOx' THEN CAST(v.ValueBool AS tinyint) END) AS bit) AS Tox
+                FROM dic.RegistryValue AS v
+                JOIN cfg.RegistryFieldDef AS f ON f.Id = v.RegistryFieldDefId
+               WHERE v.RegistryEntryId = e.Id) AS h
+ WHERE pt.Status = 1;   -- Published
+GO
+
+CREATE OR ALTER VIEW rpt.v_PermitAirSource
+AS
+SELECT r.Id AS SourceId, a.PermitId, a.NaeId, nc.NaeCode, a.Region, a.Area, a.SiteLabel, a.ProductionCode, a.SourceName,
+       a.Quantity, a.HoursPerYear, a.PointName, a.SourceType, a.Height, a.Diameter, a.Velocity, a.Volume, a.Temperature,
+       a.X1, a.Y1, a.X2, a.Y2
+  FROM cfg.PermitTypeDef AS pt
+  JOIN cfg.PermitTypeTable AS ptt ON ptt.PermitTypeDefId = pt.Id AND ptt.Code = N'AIR_SOURCES'
+  JOIN dic.RegistryEntry AS r ON r.RegistryDefId = ptt.RegistryDefId AND r.IsDeleted = 0
+ OUTER APPLY (SELECT MAX(CASE WHEN f.Code = N'PERMIT' THEN v.ValueRefEntryId END) AS PermitId,
+                     MAX(CASE WHEN f.Code = N'NAE' THEN v.ValueRefEntryId END) AS NaeId,
+                     MAX(CASE WHEN f.Code = N'REGION' THEN v.ValueString END) AS Region,
+                     MAX(CASE WHEN f.Code = N'AREA' THEN v.ValueString END) AS Area,
+                     MAX(CASE WHEN f.Code = N'SITE_LABEL' THEN v.ValueString END) AS SiteLabel,
+                     MAX(CASE WHEN f.Code = N'PRODUCTION_CODE' THEN v.ValueString END) AS ProductionCode,
+                     MAX(CASE WHEN f.Code = N'SOURCE_NAME' THEN v.ValueString END) AS SourceName,
+                     MAX(CASE WHEN f.Code = N'QUANTITY' THEN v.ValueNumeric END) AS Quantity,
+                     MAX(CASE WHEN f.Code = N'HOURS_PER_YEAR' THEN v.ValueNumeric END) AS HoursPerYear,
+                     MAX(CASE WHEN f.Code = N'POINT_NAME' THEN v.ValueString END) AS PointName,
+                     MAX(CASE WHEN f.Code = N'SOURCE_TYPE' THEN v.ValueString END) AS SourceType,
+                     MAX(CASE WHEN f.Code = N'HEIGHT' THEN v.ValueNumeric END) AS Height,
+                     MAX(CASE WHEN f.Code = N'DIAMETER' THEN v.ValueNumeric END) AS Diameter,
+                     MAX(CASE WHEN f.Code = N'VELOCITY' THEN v.ValueNumeric END) AS Velocity,
+                     MAX(CASE WHEN f.Code = N'VOLUME' THEN v.ValueNumeric END) AS Volume,
+                     MAX(CASE WHEN f.Code = N'TEMPERATURE' THEN v.ValueNumeric END) AS Temperature,
+                     MAX(CASE WHEN f.Code = N'X1' THEN v.ValueNumeric END) AS X1,
+                     MAX(CASE WHEN f.Code = N'Y1' THEN v.ValueNumeric END) AS Y1,
+                     MAX(CASE WHEN f.Code = N'X2' THEN v.ValueNumeric END) AS X2,
+                     MAX(CASE WHEN f.Code = N'Y2' THEN v.ValueNumeric END) AS Y2
+                FROM dic.RegistryValue AS v
+                JOIN cfg.RegistryFieldDef AS f ON f.Id = v.RegistryFieldDefId
+               WHERE v.RegistryEntryId = r.Id) AS a
+ OUTER APPLY (SELECT MAX(nv.ValueString) AS NaeCode
+                FROM dic.RegistryValue AS nv
+                JOIN cfg.RegistryFieldDef AS nf ON nf.Id = nv.RegistryFieldDefId AND nf.Code = N'NaeCode'
+               WHERE nv.RegistryEntryId = a.NaeId) AS nc
+ WHERE pt.Code = N'AIR_LIMITS' AND pt.Status = 1;
+GO
+
+CREATE OR ALTER VIEW rpt.v_PermitAirSourceSubstance
+AS
+SELECT r.Id AS SourceSubstanceId, a.PermitId, a.SourceId, s.NaeId, s.NaeCode, a.SubstanceId, sc.SubstanceCode,
+       a.GramsPerSecond, a.MgPerNm3, a.TonsPerYear
+  FROM cfg.PermitTypeDef AS pt
+  JOIN cfg.PermitTypeTable AS ptt ON ptt.PermitTypeDefId = pt.Id AND ptt.Code = N'AIR_SOURCE_SUBSTANCES'
+  JOIN dic.RegistryEntry AS r ON r.RegistryDefId = ptt.RegistryDefId AND r.IsDeleted = 0
+ OUTER APPLY (SELECT MAX(CASE WHEN f.Code = N'PERMIT' THEN v.ValueRefEntryId END) AS PermitId,
+                     MAX(CASE WHEN f.Code = N'SOURCE' THEN v.ValueRefEntryId END) AS SourceId,
+                     MAX(CASE WHEN f.Code = N'SUBSTANCE' THEN v.ValueRefEntryId END) AS SubstanceId,
+                     MAX(CASE WHEN f.Code = N'GRAMS_PER_SECOND' THEN v.ValueNumeric END) AS GramsPerSecond,
+                     MAX(CASE WHEN f.Code = N'MG_PER_NM3' THEN v.ValueNumeric END) AS MgPerNm3,
+                     MAX(CASE WHEN f.Code = N'TONS_PER_YEAR' THEN v.ValueNumeric END) AS TonsPerYear
+                FROM dic.RegistryValue AS v
+                JOIN cfg.RegistryFieldDef AS f ON f.Id = v.RegistryFieldDefId
+               WHERE v.RegistryEntryId = r.Id) AS a
+  LEFT JOIN rpt.v_PermitAirSource AS s ON s.SourceId = a.SourceId
+ OUTER APPLY (SELECT MAX(COALESCE(sv.ValueString, CONVERT(nvarchar(64), sv.ValueNumeric))) AS SubstanceCode
+                FROM dic.RegistryValue AS sv
+                JOIN cfg.RegistryFieldDef AS sf ON sf.Id = sv.RegistryFieldDefId AND sf.Code = N'SUBSTANCE_CODE'
+               WHERE sv.RegistryEntryId = a.SubstanceId) AS sc
+ WHERE pt.Code = N'AIR_LIMITS' AND pt.Status = 1;
 GO
 
 -- ⛔ Право читання для ОБЛІКОВОГО ЗАПИСУ SSRS — роль бази `rpt_reader`:
