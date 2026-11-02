@@ -2839,6 +2839,8 @@ export interface paths {
                     resultsStale?: boolean;
                     staleBy?: string;
                     ownerUserId?: number;
+                    sort?: string;
+                    templateVersions?: string;
                 };
                 header?: never;
                 path?: never;

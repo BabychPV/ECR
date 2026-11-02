@@ -131,7 +131,7 @@ export function DocumentListFilterBar({
         )}
 
         {/* ✎ Колонка «Version»: мультивибір різних версій, що є на завантаженій сторінці (+ вже обрані з адреси,
-            яких на цій сторінці немає, — щоб їх було чим зняти). Фільтр клієнтський (`filters.versions`). */}
+            яких на цій сторінці немає, — щоб їх було чим зняти). Фільтр серверний (`filters.versions` → `templateVersions`). */}
         {(versionOptions.length > 0 || filters.versions.length > 0) && (
           <MultiSelect
             size="xs"
