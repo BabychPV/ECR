@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { useReturnFocusOnUnmount } from '@/shared/a11y/focus';
-import { Alert, Button, Group, Modal, Progress, SegmentedControl, Select, Stack, Table, Text, TextInput } from '@mantine/core';
+import { Alert, Button, Group, Modal, Progress, Radio, SegmentedControl, Select, Stack, Table, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { PeriodPicker } from '@/shared/ui/PeriodPicker';
+import { formatPeriodKey } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { useSettledAction } from '@/features/grid/settleEdits';
 import { isActiveJob } from '@/features/jobs/myTasks';
@@ -13,6 +15,7 @@ import {
   migrateDocumentVersion,
   startMigrateDocumentVersion,
   type VersionMigrationMode,
+  type VersionMigrationRangeChoice,
   type VersionMigrationReport,
 } from './versionMigrationApi';
 
@@ -110,7 +113,11 @@ export function VersionMigrationDialog({
   const [mode, setMode] = useState<VersionMigrationMode>('Safe');
   // AN-39/L8-09: звіт несе ключ вибору, для якого його отримано; показується лише за збігу.
   const [reportState, setReportState] = useState<{ key: string; result: VersionMigrationReport } | null>(null);
-  const selectionKey = `${targetId ?? ''}|${mode}`;
+  // RPT-STABLE Part B: «увесь проєкт» / «з місяця X». Зміна обсягу чи X знецінює звіт, як і версія з режимом.
+  const [range, setRange] = useState<VersionMigrationRangeChoice>('WholeProject');
+  const [fromPeriod, setFromPeriod] = useState<number | null>(null);
+  const fromMonth = range === 'FromMonth';
+  const selectionKey = `${targetId ?? ''}|${mode}|${range}|${fromMonth ? String(fromPeriod ?? '') : ''}`;
   const report = reportState !== null && reportState.key === selectionKey ? reportState.result : null;
   // ACC-OW: людина відмовилася від перезапису для цього вибору (скидається разом зі звітом).
   const [overwriteDeclined, setOverwriteDeclined] = useState(false);
@@ -150,6 +157,8 @@ export function VersionMigrationDialog({
         mode,
         dryRun: true,
         acceptGuardedOverwrite: args.accept,
+        range,
+        fromPeriodKey: fromPeriod,
       }).then((result) => ({ key: args.key, result })),
     onSuccess: (done) => setReportState(done),
   });
@@ -166,6 +175,8 @@ export function VersionMigrationDialog({
         mode,
         acceptGuardedOverwrite: args.accept,
         backupConfirmation: args.backup,
+        range,
+        fromPeriodKey: fromPeriod,
       }),
     onSuccess: (accepted) => onJobChange(accepted.jobId),
   });
@@ -188,7 +199,7 @@ export function VersionMigrationDialog({
     // Підтвердження копії належить саме цьому вибору «версія × режим»: не переносити його в інший.
     setBackupConfirmation('');
     resetApply();
-  }, [targetId, mode, resetApply]);
+  }, [targetId, mode, range, fromPeriod, resetApply]);
 
   const options = (targets.data?.targets ?? []).map((v) => ({ value: String(v.id), label: v.version }));
   // AN-28 P2-2: зайнятість і на час збереження набраного перед Apply.
@@ -251,6 +262,41 @@ export function VersionMigrationDialog({
         <Text size="xs" c="dimmed">
           {mode === 'Safe' ? t('documents.migrateModeSafeHint') : t('documents.migrateModePresentationHint')}
         </Text>
+
+        {targets.data?.fromMonthEnabled === true && (
+          <Stack gap="xs" data-migrate-range-block="">
+            <Radio.Group
+              label={t('documents.migrateRangeLabel')}
+              value={range}
+              onChange={(value) => {
+                setRange(value as VersionMigrationRangeChoice);
+                onJobChange(null);
+              }}
+              data-testid="migrate-range"
+            >
+              <Group gap="md" mt="xs">
+                <Radio value="WholeProject" label={t('documents.migrateRangeWhole')} disabled={busy} />
+                <Radio value="FromMonth" label={t('documents.migrateRangeFromMonth')} disabled={busy} />
+              </Group>
+            </Radio.Group>
+            {fromMonth && (
+              <>
+                <PeriodPicker
+                  label={t('documents.migrateFromMonthLabel')}
+                  value={fromPeriod}
+                  onChange={(value) => {
+                    setFromPeriod(value);
+                    onJobChange(null);
+                  }}
+                  disabled={busy}
+                />
+                <Text size="xs" c="dimmed">
+                  {t('documents.migrateFromMonthHint')}
+                </Text>
+              </>
+            )}
+          </Stack>
+        )}
 
         {dryRun.error !== null && <ErrorAlert error={dryRun.error} />}
 
@@ -325,7 +371,7 @@ export function VersionMigrationDialog({
           <Button
             ref={dryRunButtonRef}
             variant="default"
-            disabled={targetId === null || busy}
+            disabled={targetId === null || (fromMonth && fromPeriod === null) || busy}
             loading={dryRun.isPending}
             onClick={() => {
               // «Ні» не липке: новий сухий прогін знову пропонує перезапис.
@@ -444,6 +490,22 @@ function MigrationReport({ report }: { readonly report: VersionMigrationReport }
           guarded: report.guardedValues,
         })}
       </Text>
+
+      {report.range === 'FromMonth' && report.effectiveFromPeriodKey != null && (
+        <Text size="sm" data-migrate-effective={String(report.effectiveFromPeriodKey)}>
+          {t('documents.migrateEffectiveFrom', { period: formatPeriodKey(report.effectiveFromPeriodKey) })}
+        </Text>
+      )}
+
+      {(report.warnings ?? []).some((w) => w.code === 'effectiveFromShiftedToJanuary') && (
+        // Q-17 «рік-сімейство»: запитаний X не збігається з реальним початком - людина мусить це побачити ДО застосування.
+        <Alert color="statusWarning" data-migrate-warn-january="">
+          {t('documents.migrateWarnEffectiveFromJanuary', {
+            requested: report.fromPeriodKey != null ? formatPeriodKey(report.fromPeriodKey) : '',
+            effective: report.effectiveFromPeriodKey != null ? formatPeriodKey(report.effectiveFromPeriodKey) : '',
+          })}
+        </Alert>
+      )}
 
       {report.otherProjectsOnSourceVersion > 0 && (
         <Alert color="statusWarning" data-migrate-other-projects="">

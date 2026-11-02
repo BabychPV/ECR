@@ -10205,6 +10205,10 @@ USING (VALUES
     ,(N'permits.usage.listColumnHint', N'en', N'Documents whose header or table holds this permit', 1)
     ,(N'permits.usage.typeListUsedIn', N'en', N'Used in documents: {count}', 1)
     -- COLL:ui-permit-usage ── кінець секції ──
+    -- COLL:ui-version-migration-range ── en: діалог переносу версії «увесь проєкт / з місяця» (RPT-STABLE Part B, lane/integ-version-migration-ui); ru/kz — seed/features/COLL-ui-version-migration-range.sql ──
+    ,(N'documents.migrateFromMonthHint', N'en', N'Earlier months stay on the old version; this month and later move to the new one.', 1)
+    ,(N'documents.migrateEffectiveFrom', N'en', N'The move takes effect from period {period}.', 1)
+    -- COLL:ui-version-migration-range ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
