@@ -713,6 +713,13 @@ public sealed partial class PatchCellsHandler
             {
                 creating[i].Applied = WithRealRowIds(creating[i].Context, creating[i].Planned, newIds[i]);
             }
+
+            // ⛔ Журнал рядків — у транзакції книги: відкат будь-якого аркуша забирає й «додано рядок».
+            await WriteRowAuditAsync(
+                [.. creating.SelectMany((x, i) => RowAddedRecords(
+                    x.Request, x.Context.Instance, x.Context.PeriodKey, x.Context.Creations, newIds[i], userId, now,
+                    x.Context.ApproverEdit, AuditCorrelationId()))],
+                ct).ConfigureAwait(false);
         }
 
         // ✎ Q-17: комірки колонок з іншим власником (за прапором) йдуть в екземпляри власників. Набори ОДНОГО

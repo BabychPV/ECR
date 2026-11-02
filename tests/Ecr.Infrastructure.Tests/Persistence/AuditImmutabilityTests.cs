@@ -28,6 +28,8 @@ public sealed class AuditImmutabilityTests(SqlServerFixture sql)
     [InlineData("aud.SecurityEvent", "DELETE FROM aud.SecurityEvent WHERE Id = {0}")]
     [InlineData("aud.PublicationEvent", "UPDATE aud.PublicationEvent SET ChangeReason = N'x' WHERE Id = {0}")]
     [InlineData("aud.PublicationEvent", "DELETE FROM aud.PublicationEvent WHERE Id = {0}")]
+    [InlineData("aud.RowChange", "UPDATE aud.RowChange SET Action = 2 WHERE Id = {0}")]
+    [InlineData("aud.RowChange", "DELETE FROM aud.RowChange WHERE Id = {0}")]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-5.21")]
@@ -79,16 +81,16 @@ public sealed class AuditImmutabilityTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-5.21")]
-    public async Task П_ять_тригерів_незмінності_створені_і_ввімкнені()
+    public async Task Шість_тригерів_незмінності_створені_і_ввімкнені()
     {
         var enabled = await ScalarAsync("""
             SELECT COUNT(*) FROM sys.triggers
             WHERE name IN (N'TR_CellChange_Immutable', N'TR_StructureChange_Immutable',
                            N'TR_SecurityEvent_Immutable', N'TR_PublicationEvent_Immutable',
-                           N'TR_SimulationSession_Immutable')
+                           N'TR_SimulationSession_Immutable', N'TR_RowChange_Immutable')
               AND is_disabled = 0
             """);
-        Assert.Equal(5, enabled);
+        Assert.Equal(6, enabled);
     }
 
     private async Task<long> InsertAsync(string table)
@@ -99,6 +101,7 @@ public sealed class AuditImmutabilityTests(SqlServerFixture sql)
             "aud.StructureChange" => "INSERT INTO aud.StructureChange (ChangedAt, TemplateVersionId, EntityType, EntityId, ChangeClass, Operation, ChangedByUserId) OUTPUT INSERTED.Id VALUES (SYSUTCDATETIME(), 1, N'T', 1, 0, N'Add', 42)",
             "aud.SecurityEvent" => "INSERT INTO aud.SecurityEvent (ChangedAt, EventType, ChangedByUserId) OUTPUT INSERTED.Id VALUES (SYSUTCDATETIME(), N'Test', 42)",
             "aud.PublicationEvent" => "INSERT INTO aud.PublicationEvent (ChangedAt, EntityType, EntityId, ChangeReason, ChangedByUserId) OUTPUT INSERTED.Id VALUES (SYSUTCDATETIME(), N'TemplateVersion', 1, N'r', 42)",
+            "aud.RowChange" => "INSERT INTO aud.RowChange (ChangedAt, DocumentId, PeriodKey, TableInstanceId, TableDefId, TableRowId, RowKey, Action, ChangedByUserId, Origin) OUTPUT INSERTED.Id VALUES (SYSUTCDATETIME(), 1, 202601, 1, 1, 1, N'R', 1, 42, N'UserEdit')",
             _ => throw new ArgumentOutOfRangeException(nameof(table), table, null),
         };
 

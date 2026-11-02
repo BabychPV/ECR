@@ -119,6 +119,7 @@ public static class DependencyInjection
             ReadInt(configuration, "Database:RecalcCommandTimeoutSeconds", 180)));
         services.AddScoped<IRecalcCommandTimeout, Jobs.RecalcCommandTimeout>();
         services.AddScoped<IAuditWriter, AuditWriter>();
+        services.AddScoped<IRowChangeAudit, RowChangeAudit>();
         services.AddScoped<IWorkflowStore, WorkflowStore>();
         services.AddScoped<ISheetEditGate, SheetEditGate>();
         services.AddSingleton(new SheetEditGatePolicy(TimeSpan.FromSeconds(Math.Clamp(
