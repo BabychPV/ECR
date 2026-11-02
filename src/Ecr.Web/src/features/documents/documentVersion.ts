@@ -64,45 +64,16 @@ export function compareVersions(a: string, b: string): number {
 }
 
 /**
- * Рядки відсортовані за версією періоду; РІВНІ й безверсійні лишаються в порядку сервера (стабільно).
- * Безверсійні (`null`) завжди в кінці — в обох напрямках, щоб «—» не затуляли справжні версії.
- *
- * ⚠ Сортується лише ЗАВАНТАЖЕНА сторінка: сервер не має параметра сортування за версією (контракт не міняли).
+ * Параметр `sort` переліку документів для колонки «Version» (`sort=templateVersion` / `sort=-templateVersion`);
+ * `null` — без сортування (порядок сервера). ✎ Сортування і фільтр версії - СЕРВЕРНІ: сторінка приходить уже впорядкованою.
  */
-export function sortByVersion<T extends VersionSource>(
-  items: readonly T[],
-  sort: VersionSort | null,
-  periodKey: number | null,
-): readonly T[] {
-  if (sort === null) return items;
-
-  const sign = sort === 'asc' ? 1 : -1;
-  return items
-    .map((item, index) => ({ item, index, version: resolveTemplateVersion(item, periodKey).version }))
-    .sort((x, y) => {
-      if (x.version === null || y.version === null) {
-        if (x.version === y.version) return x.index - y.index;
-        return x.version === null ? 1 : -1;
-      }
-      const byVersion = compareVersions(x.version, y.version) * sign;
-      return byVersion !== 0 ? byVersion : x.index - y.index;
-    })
-    .map((entry) => entry.item);
+export function versionSortParam(sort: VersionSort | null): string | null {
+  return sort === null ? null : sort === 'asc' ? 'templateVersion' : '-templateVersion';
 }
 
-/** Лише рядки, версія періоду яких — одна з обраних (точний збіг). Порожній вибір — без фільтра. */
-export function filterByVersions<T extends VersionSource>(
-  items: readonly T[],
-  versions: readonly string[],
-  periodKey: number | null,
-): readonly T[] {
-  if (versions.length === 0) return items;
-
-  const wanted = new Set(versions);
-  return items.filter((item) => {
-    const { version } = resolveTemplateVersion(item, periodKey);
-    return version !== null && wanted.has(version);
-  });
+/** Варіанти фільтра: версії сторінки плюс уже обрані (під серверним фільтром на сторінці лишаються лише вони). */
+export function mergeVersionOptions(onPage: readonly string[], selected: readonly string[]): readonly string[] {
+  return [...new Set([...onPage, ...selected])].sort(compareVersions);
 }
 
 /** Різні версії, що є на сторінці, від меншої до більшої. */

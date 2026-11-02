@@ -75,12 +75,14 @@ export interface DocumentListFilters {
   /**
    * Колонка «Version»: лише документи з цими версіями шаблону (точний збіг; `versions=1.0,2.3` в адресі).
    *
-   * ⚠ КЛІЄНТСЬКИЙ фільтр однієї завантаженої сторінки: сервер параметра не має (контракт RPT-STABLE віддає лише
-   * `templateVersion`/`templateVersionByPeriod`), тому в запит і ключ кешу він НЕ йде.
+   * ✎ СЕРВЕРНИЙ фільтр: іде в запит як `templateVersions` і в ключ кешу; зміна скидає `cursor`.
    */
   readonly versions: readonly string[];
 
-  /** Колонка «Version»: напрямок сортування сторінки (`vsort=asc|desc`); `null` — порядок сервера. Не фільтр. */
+  /**
+   * Колонка «Version»: напрямок сортування (`vsort=asc|desc` в адресі → `sort=±templateVersion` у запиті); `null` — за Id.
+   * Не фільтр. ✎ Серверне: порядок рахується по всьому набору, зміна скидає `cursor`.
+   */
   readonly versionSort: VersionSort | null;
 
   /** Чи звужує перелік хоч один фільтр — те, що відрізняє «нічого не знайшлося» від «немає». */
@@ -135,15 +137,16 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
 
   const setVersions = useCallback(
     (next: readonly string[]) => {
-      // Клієнтський фільтр: курсор не міняється - сторінка та сама, звужується лише її показ.
-      setParams({ versions: versionsToParam(next) });
+      // Серверний фільтр: курсор належить попередньому набору.
+      setParams({ versions: versionsToParam(next), cursor: null });
     },
     [setParams],
   );
 
   const setVersionSort = useCallback(
     (next: VersionSort | null) => {
-      setParams({ vsort: next });
+      // Серверне сортування: курсор несе позицію в старому порядку.
+      setParams({ vsort: next, cursor: null });
     },
     [setParams],
   );

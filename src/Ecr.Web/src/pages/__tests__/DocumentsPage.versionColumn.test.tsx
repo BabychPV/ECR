@@ -10,7 +10,8 @@ import { testTheme } from '@/test/render';
 
 /**
  * Колонка «Version» переліку документів: версія шаблону за обраний період
- * (`templateVersionByPeriod[період] ?? templateVersion`), сортування й фільтр - клієнтські, в адресі.
+ * (`templateVersionByPeriod[період] ?? templateVersion`); сортування й фільтр - СЕРВЕРНІ (`sort`, `templateVersions`),
+ * в адресі `vsort`/`versions`. Клієнт порядку не міняє: показує сторінку так, як її віддав сервер.
  */
 const SlowEnvTimeout = 400_000;
 
@@ -29,7 +30,15 @@ const item = (id: number, templateVersion: string | null, templateVersionByPerio
 // Порядок сервера: 1 (2.0), 2 (1.0 → 3.0 за 202609), 3 (без версії), 4 (1.0)
 const Items = [item(1, '2.0', null), item(2, '1.0', { '202609': '3.0' }), item(3, null, null), item(4, '1.0', null)];
 
-function mockFetch(): void {
+/** Запити переліку документів у порядку виклику (повні адреси). */
+let listed: string[] = [];
+
+/**
+ * `answer` - що віддає сервер на запит переліку (за його адресою); типово - усі рядки в порядку сервера. ⛔ Порядок і
+ * склад відповіді задає ТІЛЬКИ вона: тести доводять, що клієнт нічого не пересортовує й не відфільтровує сам.
+ */
+function mockFetch(answer: (params: URLSearchParams) => typeof Items = () => Items): void {
+  listed = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -41,13 +50,19 @@ function mockFetch(): void {
         return json({ denies: [], grants: {}, isSimulation: false, language: 'en', mustChangePassword: false, permissions: [], simulatedForUserId: null, userId: 1, userName: 'tester' });
       }
       if (url.includes('/api/v1/documents/summary')) return json({ draft: 4, submitted: 0, approved: 0, rejected: 0, withIssues: 0 });
-      if (url.includes('/api/v1/documents')) return json({ items: Items, nextCursor: null, totalCount: Items.length });
+      if (url.includes('/api/v1/documents')) {
+        listed.push(url);
+        const items = answer(new URL(url, 'http://localhost').searchParams);
+        return json({ items, nextCursor: null, totalCount: items.length });
+      }
       if (url.includes('/api/v1/projects')) return json({ items: [{ id: 1, code: 'ATR', status: 'Active' }], nextCursor: null, totalCount: 1 });
 
       return json(null);
     }),
   );
 }
+
+const lastListed = (): URLSearchParams => new URL(listed[listed.length - 1] ?? '/', 'http://localhost').searchParams;
 
 function LocationProbe(): JSX.Element {
   const location = useLocation();
@@ -113,9 +128,29 @@ describe('DocumentsPage: колонка «Version»', () => {
   );
 
   it(
-    'клік по заголовку сортує сторінку (asc → desc → без), `aria-sort` і адреса оновлюються, безверсійний - в кінці',
+    'без сортування і фільтра в запиті немає ні sort, ні templateVersions',
     async () => {
       mockFetch();
+      show('/?periodKey=202609');
+
+      await screen.findByText('DOC-000001', {}, { timeout: SlowEnvTimeout });
+      expect(lastListed().has('sort')).toBe(false);
+      expect(lastListed().has('templateVersions')).toBe(false);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'клік по заголовку шле sort на сервер (asc → desc → без), `aria-sort` і адреса оновлюються; порядок - з відповіді сервера',
+    async () => {
+      // «Сервер» навмисно віддає порядок, якого клієнтське сортування не дало б: 3, 4, 1, 2.
+      mockFetch((params) =>
+        params.get('sort') === 'templateVersion'
+          ? [Items[2]!, Items[3]!, Items[0]!, Items[1]!]
+          : params.get('sort') === '-templateVersion'
+            ? [Items[1]!, Items[0]!, Items[3]!, Items[2]!]
+            : Items,
+      );
       show('/?periodKey=202609');
       const user = userEvent.setup();
 
@@ -126,56 +161,82 @@ describe('DocumentsPage: колонка «Version»', () => {
       expect(sortButton).not.toBeNull();
 
       await user.click(sortButton!);
-      await waitFor(() => expect(rowKeys()).toEqual(['DOC-000004', 'DOC-000001', 'DOC-000002', 'DOC-000003']), {
+      await waitFor(() => expect(lastListed().get('sort')).toBe('templateVersion'), { timeout: SlowEnvTimeout });
+      await waitFor(() => expect(rowKeys()).toEqual(['DOC-000003', 'DOC-000004', 'DOC-000001', 'DOC-000002']), {
         timeout: SlowEnvTimeout,
       });
       expect(screen.getByTestId('location').textContent).toContain('vsort=asc');
       expect(document.querySelector('[data-column="version"]')?.getAttribute('aria-sort')).toBe('ascending');
 
       await user.click(document.querySelector<HTMLButtonElement>('[data-version-sort]')!);
+      await waitFor(() => expect(lastListed().get('sort')).toBe('-templateVersion'), { timeout: SlowEnvTimeout });
       await waitFor(() => expect(rowKeys()).toEqual(['DOC-000002', 'DOC-000001', 'DOC-000004', 'DOC-000003']), {
         timeout: SlowEnvTimeout,
       });
       expect(document.querySelector('[data-column="version"]')?.getAttribute('aria-sort')).toBe('descending');
+
+      await user.click(document.querySelector<HTMLButtonElement>('[data-version-sort]')!);
+      await waitFor(() => expect(lastListed().has('sort')).toBe(false), { timeout: SlowEnvTimeout });
     },
     SlowEnvTimeout,
   );
 
   it(
-    'сортування з адреси читається при відкритті (посилання відтворює порядок)',
+    'сортування з адреси читається при відкритті і йде в перший же запит; зміна скидає cursor',
     async () => {
       mockFetch();
-      show('/?periodKey=202609&vsort=desc');
+      show('/?periodKey=202609&vsort=desc&cursor=abc');
 
       await screen.findByText('DOC-000001', {}, { timeout: SlowEnvTimeout });
-      expect(rowKeys()).toEqual(['DOC-000002', 'DOC-000001', 'DOC-000004', 'DOC-000003']);
+      expect(listed[0]).toContain('sort=-templateVersion');
+
+      const user = userEvent.setup();
+      await user.click(document.querySelector<HTMLButtonElement>('[data-version-sort]')!);
+      await waitFor(() => expect(screen.getByTestId('location').textContent).not.toContain('cursor='), {
+        timeout: SlowEnvTimeout,
+      });
     },
     SlowEnvTimeout,
   );
 
   it(
-    'фільтр за версіями (з адреси) лишає точні збіги за версією періоду; «Clear filters» його знімає',
+    'фільтр за версіями (з адреси) йде на сервер як templateVersions; клієнт відповідь не відфільтровує; «Clear filters» його знімає',
     async () => {
-      mockFetch();
+      // «Сервер» віддає лише документи 2 і 4; клієнтський фільтр залишив би ті самі, а ось 1 і 3 у відповіді немає.
+      mockFetch((params) => (params.get('templateVersions') === '1.0,3.0' ? [Items[1]!, Items[3]!] : Items));
       show('/?periodKey=202609&versions=1.0,3.0');
       const user = userEvent.setup();
 
       await screen.findByText('DOC-000002', {}, { timeout: SlowEnvTimeout });
+      expect(listed[0]).toContain('templateVersions=1.0%2C3.0');
       expect(rowKeys()).toEqual(['DOC-000002', 'DOC-000004']);
 
       await user.click(
         await screen.findByRole('button', { name: '⟦documents.clearFilters⟧' }, { timeout: SlowEnvTimeout }),
       );
       await waitFor(() => expect(rowKeys()).toHaveLength(4), { timeout: SlowEnvTimeout });
+      expect(lastListed().has('templateVersions')).toBe(false);
       expect(screen.getByTestId('location').textContent).toBe('?periodKey=202609');
     },
     SlowEnvTimeout,
   );
 
   it(
-    'фільтр, що нічого не лишив, дає «нічого не знайшлося», а не порожню таблицю',
+    'сервер повернув рядки, яких клієнтський фільтр не пропустив би, - вони показуються (фільтр не дублюється на клієнті)',
     async () => {
-      mockFetch();
+      mockFetch(() => [Items[2]!]);
+      show('/?periodKey=202609&versions=9.9');
+
+      await screen.findByText('DOC-000003', {}, { timeout: SlowEnvTimeout });
+      expect(rowKeys()).toEqual(['DOC-000003']);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'фільтр, за яким сервер нічого не віддав, дає «нічого не знайшлося», а не порожню таблицю',
+    async () => {
+      mockFetch((params) => (params.has('templateVersions') ? [] : Items));
       show('/?periodKey=202609&versions=9.9');
 
       await screen.findByText('⟦documents.noMatch⟧', {}, { timeout: SlowEnvTimeout });

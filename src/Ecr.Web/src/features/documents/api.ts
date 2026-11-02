@@ -1,6 +1,7 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
+import { versionSortParam, versionsToParam, type VersionSort } from './documentVersion';
 
 /**
  * Заповненість однієї таблиці документа (`BE-10`).
@@ -134,6 +135,10 @@ interface DocumentListParams {
   projectId?: number | null;
   /** `'me'` - застарілість через правки поточного користувача; ⚠ лише разом із `resultsStale`. */
   staleBy?: 'me';
+  /** Колонка «Version»: лише документи цих версій шаблону (за період; `templateVersions=1.0,2.3`); порожньо — без фільтра. */
+  templateVersions?: readonly string[];
+  /** Колонка «Version»: сортування за версією (`sort=templateVersion` / `sort=-templateVersion`); `null` — за Id. */
+  versionSort?: VersionSort | null;
 }
 
 /**
@@ -156,6 +161,10 @@ export function listDocuments(params: DocumentListParams): Promise<DocumentListP
   if (params.q) query.set('q', params.q);
   if (params.projectId) query.set('projectId', String(params.projectId));
   if (params.staleBy) query.set('staleBy', params.staleBy);
+  const templateVersions = versionsToParam(params.templateVersions ?? []);
+  if (templateVersions !== null) query.set('templateVersions', templateVersions);
+  const sort = versionSortParam(params.versionSort ?? null);
+  if (sort !== null) query.set('sort', sort);
 
   return apiFetch<DocumentListPage>(`/api/v1/documents?${query.toString()}`);
 }

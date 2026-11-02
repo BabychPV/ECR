@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   compareVersions,
   distinctVersions,
-  filterByVersions,
+  mergeVersionOptions,
   nextVersionSort,
   parseVersionSort,
   parseVersionsParam,
   resolveTemplateVersion,
-  sortByVersion,
+  versionSortParam,
   versionsToParam,
 } from '@/features/documents/documentVersion';
 
@@ -15,7 +15,7 @@ import {
  * Колонка «Version» переліку документів: версія періоду = `templateVersionByPeriod[період] ?? templateVersion`.
  *
  * ⛔ Мутаційний доказ: у `resolveTemplateVersion` поміняй пріоритет (спершу `templateVersion`, потім карта) -
- * тести «карта перекриває типову» і «сортування за версією періоду» почервоніють.
+ * тест «карта перекриває типову» почервоніє. (Сортування й фільтр версії тепер серверні: `DocumentTemplateVersionListApiTests`.)
  */
 const doc = (id: number, templateVersion: string | null, byPeriod?: Record<string, string> | null) => ({
   id,
@@ -68,44 +68,20 @@ describe('compareVersions', () => {
   });
 });
 
-describe('sortByVersion', () => {
-  const rows = [doc(1, '2.0'), doc(2, '1.0'), doc(3, null), doc(4, '2.0'), doc(5, '10.0'), doc(6, '1.0', { '202609': '3.0' })];
-
-  it('за зростанням: безверсійні в кінці, рівні лишаються в порядку сервера', () => {
-    expect(sortByVersion(rows, 'asc', 202610).map((r) => r.id)).toEqual([2, 6, 1, 4, 5, 3]);
+describe('серверні параметри колонки «Version»', () => {
+  it('versionSortParam: asc → templateVersion, desc → -templateVersion, без сортування — null', () => {
+    expect(versionSortParam('asc')).toBe('templateVersion');
+    expect(versionSortParam('desc')).toBe('-templateVersion');
+    expect(versionSortParam(null)).toBeNull();
   });
 
-  it('за спаданням: безверсійні все одно в кінці, рівні — у порядку сервера', () => {
-    expect(sortByVersion(rows, 'desc', 202610).map((r) => r.id)).toEqual([5, 1, 4, 2, 6, 3]);
-  });
-
-  it('сортує за версією ОБРАНОГО періоду, а не типовою', () => {
-    expect(sortByVersion(rows, 'asc', 202609).map((r) => r.id)).toEqual([2, 1, 4, 6, 5, 3]);
-  });
-
-  it('без сортування — той самий масив', () => {
-    expect(sortByVersion(rows, null, 202609)).toBe(rows);
-  });
-});
-
-describe('filterByVersions / distinctVersions', () => {
-  const rows = [doc(1, '1.0'), doc(2, '2.0'), doc(3, null), doc(4, '1.0', { '202609': '2.0' })];
-
-  it('точний збіг за версією періоду', () => {
-    expect(filterByVersions(rows, ['2.0'], 202609).map((r) => r.id)).toEqual([2, 4]);
-    expect(filterByVersions(rows, ['2.0'], 202610).map((r) => r.id)).toEqual([2]);
-  });
-
-  it('кілька версій — об’єднання; безверсійний рядок не проходить жодного фільтра', () => {
-    expect(filterByVersions(rows, ['1.0', '2.0'], 202610).map((r) => r.id)).toEqual([1, 2, 4]);
-  });
-
-  it('порожній вибір — без фільтра (той самий масив)', () => {
-    expect(filterByVersions(rows, [], 202609)).toBe(rows);
-  });
-
-  it('різні версії сторінки — впорядковані, без дублів і порожніх', () => {
+  it('distinctVersions: різні версії сторінки — впорядковані, без дублів і порожніх', () => {
     expect(distinctVersions([doc(1, '2.10'), doc(2, '2.9'), doc(3, '2.9'), doc(4, null)], null)).toEqual(['2.9', '2.10']);
+  });
+
+  it('mergeVersionOptions: обрані версії, яких немає на сторінці, лишаються у виборі (їх є чим зняти)', () => {
+    expect(mergeVersionOptions(['2.9'], ['2.10', '2.9'])).toEqual(['2.9', '2.10']);
+    expect(mergeVersionOptions([], [])).toEqual([]);
   });
 });
 

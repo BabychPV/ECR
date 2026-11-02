@@ -10,12 +10,7 @@ import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSumma
 import { useDocumentListFilters } from '@/features/documents/documentListFilters';
 import { EyeIcon, IssueCount } from '@/features/documents/DocumentListMarks';
 import { documentState, hasSheetStates, sheetLabels } from '@/features/documents/documentSheets';
-import {
-  distinctVersions,
-  filterByVersions,
-  nextVersionSort,
-  sortByVersion,
-} from '@/features/documents/documentVersion';
+import { distinctVersions, mergeVersionOptions, nextVersionSort } from '@/features/documents/documentVersion';
 import { DocumentVersionCell, DocumentVersionTh } from '@/features/documents/DocumentVersionColumn';
 import { parseDocumentsView } from '@/features/documents/documentsBoardModel';
 import '@/features/documents/documentsList.css';
@@ -117,6 +112,8 @@ export function DocumentsPage(): JSX.Element {
 
   // `UI-18`: пошук іде в запит після паузи в наборі; поле й адреса оновлюються одразу.
   const appliedQ = useDebouncedFilter(filters.q.trim());
+  // Версії - масив; у ключ кешу іде рядок, щоб новий масив з тими ж версіями не давав новий запит.
+  const versionsKey = filters.versions.join(',');
 
   const query = useQuery({
     queryKey: [
@@ -130,6 +127,8 @@ export function DocumentsPage(): JSX.Element {
       appliedQ,
       filters.projectId,
       filters.owner,
+      versionsKey,
+      filters.versionSort,
     ],
     queryFn: () =>
       listDocuments({
@@ -138,6 +137,8 @@ export function DocumentsPage(): JSX.Element {
         state: filters.state,
         mine: filters.mine,
         ownerUserId: filters.owner,
+        templateVersions: filters.versions,
+        versionSort: filters.versionSort,
         hasLateEdits: filters.hasLateEdits,
         resultsStale: filters.resultsStale,
         q: appliedQ,
@@ -350,7 +351,8 @@ export function DocumentsPage(): JSX.Element {
         periodKey={periodKey}
         filters={filters}
         projects={projects.data?.items ?? []}
-        versionOptions={distinctVersions(query.data?.items ?? [], periodKey)}
+        // Фільтр серверний: після вибору на сторінці лишаються лише обрані версії, тож обрані додаються до тих, що на сторінці.
+        versionOptions={mergeVersionOptions(distinctVersions(query.data?.items ?? [], periodKey), filters.versions)}
         staleOnPage={query.data?.items.filter((d) => d.resultsStale === true).length ?? 0}
         // ✎ D-450: під фільтром за людиною кожен рядок сторінки — її документ, тож ім'я вже є без окремого запиту.
         ownerName={
@@ -405,8 +407,7 @@ export function DocumentsPage(): JSX.Element {
         isPending={query.isPending}
         error={query.error}
         data={query.data}
-        // Клієнтський фільтр версії може спорожнити сторінку - тоді це «нічого не знайшлося», а не порожня таблиця.
-        isEmpty={(page) => filterByVersions(page.items, filters.versions, periodKey).length === 0}
+        isEmpty={(page) => page.items.length === 0}
         emptyTitle={
           filters.active
             ? t('documents.noMatch')
@@ -432,9 +433,8 @@ export function DocumentsPage(): JSX.Element {
         onRetry={() => void query.refetch()}
       >
         {(page) => {
-          // Колонка «Version»: фільтр і сортування - клієнтські, над ЗАВАНТАЖЕНОЮ сторінкою (сервер їх не має).
-          const filtered = filterByVersions(page.items, filters.versions, periodKey);
-          const rows = sortByVersion(filtered, filters.versionSort, periodKey);
+          // Колонка «Version»: фільтр і сортування - СЕРВЕРНІ (`templateVersions`, `sort`), сторінка вже в потрібному порядку.
+          const rows = page.items;
 
           return (
           <>
@@ -464,7 +464,7 @@ export function DocumentsPage(): JSX.Element {
             {view === 'board' ? (
               <Suspense fallback={<Skeleton height={240} />}>
                 <DocumentsBoard
-                  documents={filtered}
+                  documents={rows}
                   documentHref={documentHref}
                   projectCode={(projectId) => projects.data?.items.find((project) => project.id === projectId)?.code}
                   onQuickLook={(documentId, opener) => {
