@@ -84,7 +84,7 @@ describe('DeleteTableDialog з кількостями', () => {
   });
 
   it('опублікована таблиця: відмова сервера, числа дозволів і рядків, вимкнена кнопка', async () => {
-    usage.mockResolvedValue({ instanceCount: 3, tables: [{ code: 'Discharge', rowCount: 4 }, { code: 'Storage', rowCount: 12 }] });
+    usage.mockResolvedValue({ instanceCount: 3, tables: [{ code: 'Discharge', rowCount: 4 }, { code: 'Storage', rowCount: 12 }], usedInDocumentCount: 0 });
     const { onRemove } = mount(published());
 
     const dialog = await screen.findByRole('dialog');
@@ -96,7 +96,7 @@ describe('DeleteTableDialog з кількостями', () => {
   });
 
   it('таблиці немає серед опублікованих: видалення можна, сказано, що рядків у ній немає', async () => {
-    usage.mockResolvedValue({ instanceCount: 3, tables: [{ code: 'Discharge', rowCount: 4 }] });
+    usage.mockResolvedValue({ instanceCount: 3, tables: [{ code: 'Discharge', rowCount: 4 }], usedInDocumentCount: 0 });
     const { onRemove } = mount(published());
 
     expect(await screen.findByText(/not published yet: none of the 3 permits of this type holds rows in it\./)).toBeTruthy();

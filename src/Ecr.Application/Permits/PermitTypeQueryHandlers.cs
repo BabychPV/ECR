@@ -82,7 +82,10 @@ public sealed class ListPermitTypesHandler(
     IPermitTypeStore permits,
     IRegistryStore registries,
     Security.IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+
+    // «Використано в документах»: контейнер передає завжди; null — прямі конструктори тестів (лічильник 0).
+    IPermitStore? stats = null)
 {
     /// <summary>Право на читання довідників (типи — надбудова над ними).</summary>
     public const string Permission = "Registry.View";
@@ -138,6 +141,16 @@ public sealed class ListPermitTypesHandler(
             .GetUserDisplayNamesAsync([.. shown.Where(t => t.UpdatedByUserId is not null).Select(t => t.UpdatedByUserId!.Value).Distinct()], ct)
             .ConfigureAwait(false);
 
+        // «Використано в N документах» — лише показана сторінка, одним викликом, лише проєкти з Document.View.
+        IReadOnlyDictionary<int, int> used = new Dictionary<int, int>();
+        var readable = Documents.ListDocumentsHandler.ReadableProjects(profile, GetPermitUsagesHandler.DocumentPermission);
+        if (stats is not null && shown.Count > 0 && readable.Count > 0)
+        {
+            used = await stats
+                .CountTypeUsedInDocumentsAsync([.. shown.Select(t => t.HeaderRegistryDefId)], readable, ct)
+                .ConfigureAwait(false);
+        }
+
         var items = shown.Select(type => new PermitTypeListItemDto(
             type.Code,
             PermitTypeReader.Copy(type.NameL10n.Values),
@@ -148,7 +161,8 @@ public sealed class ListPermitTypesHandler(
             Tables(type, allTables[type.Id], definitions),
             counts.GetValueOrDefault(type.HeaderRegistryDefId),
             type.UpdatedAt,
-            type.UpdatedByUserId is { } id ? names.GetValueOrDefault(id) : null)).ToList();
+            type.UpdatedByUserId is { } id ? names.GetValueOrDefault(id) : null,
+            used.GetValueOrDefault(type.HeaderRegistryDefId))).ToList();
 
         return new PagedResult<PermitTypeListItemDto>(items, hasMore ? shown[^1].Code : null, null);
     }

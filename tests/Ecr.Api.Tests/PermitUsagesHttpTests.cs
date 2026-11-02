@@ -154,6 +154,35 @@ public sealed class PermitUsagesHttpTests(SqlServerFixture sql)
         Assert.All(blind.GetProperty("items").EnumerateArray(), i => Assert.Equal(0, i.GetProperty("usedInDocumentCount").GetInt32()));
     }
 
+    /// <remarks>
+    /// Мутації: у <c>PermitStore.CountTypeUsedInDocumentsAsync</c> прибрати фінальний <c>.Distinct()</c> пар (тип, документ) —
+    /// writer отримує 2 замість 1 (шапка + комірки одного документа); у обробниках прибрати умову <c>readable.Count &gt; 0</c>
+    /// разом із фільтром проєктів — outsider бачить 1.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PERMUSE")]
+    public async Task Тип_дозволу_віддає_у_скількох_видимих_документах_використано_його_дозволи()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+
+        // Один документ: шапка (active), комірки active/expired у двох періодах — рахується ОДИН документ.
+        using var writer = await SignedInAsync(app, s.Writer).ConfigureAwait(true);
+        var usage = await GetAsync(writer, app, $"/api/v1/permit-types/{s.TypeCode}/usage").ConfigureAwait(true);
+        Assert.Equal(1, usage.GetProperty("usedInDocumentCount").GetInt32());
+        var list = await GetAsync(writer, app, $"/api/v1/permit-types?q={s.TypeCode}").ConfigureAwait(true);
+        var item = Assert.Single(list.GetProperty("items").EnumerateArray(), i => i.GetProperty("code").GetString() == s.TypeCode);
+        Assert.Equal(1, item.GetProperty("usedInDocumentCount").GetInt32());
+
+        // Читач без Document.View у проєкті бачить 0: лічильник не розкриває чужі документи.
+        using var outsider = await SignedInAsync(app, s.Outsider).ConfigureAwait(true);
+        var blind = await GetAsync(outsider, app, $"/api/v1/permit-types/{s.TypeCode}/usage").ConfigureAwait(true);
+        Assert.Equal(0, blind.GetProperty("usedInDocumentCount").GetInt32());
+        var blindList = await GetAsync(outsider, app, $"/api/v1/permit-types?q={s.TypeCode}").ConfigureAwait(true);
+        Assert.All(blindList.GetProperty("items").EnumerateArray(), i => Assert.Equal(0, i.GetProperty("usedInDocumentCount").GetInt32()));
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "PERMUSE")]
