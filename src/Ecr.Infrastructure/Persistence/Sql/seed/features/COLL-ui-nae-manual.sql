@@ -159,3 +159,14 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-nae-manual ── кінець секції ──
+-- COLL:ui-nae-manual ── прибрані ключі: порожній стан дерева НВ (три шляхи) замінив підказку «завантажте з PI AF»; ключ більше ніде не читається ──
+INSERT INTO #UiRemoved ([Key], Lang, OldVal)
+SELECT v.[Key], v.Lang, v.OldVal
+  FROM (VALUES
+    (N'permits.nae.import.hintNotProvisioned', N'en', N'The NAE structure has not been loaded yet. Load it once from PI AF; after that ECR owns the tree.'),
+    (N'permits.nae.import.hintNotProvisioned', N'ru', N'Структура NAE ещё не загружена. Загрузите её один раз из PI AF; дальше деревом владеет ECR.'),
+    (N'permits.nae.import.hintNotProvisioned', N'kz', N'NAE құрылымы әлі жүктелмеген. Оны PI AF-тен бір рет жүктеңіз; одан әрі ағашты ECR басқарады.')
+       ) AS v ([Key], Lang, OldVal)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-nae-manual ── кінець секції ──
