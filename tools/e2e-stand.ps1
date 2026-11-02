@@ -601,6 +601,9 @@ try {
             'Permit.EditType', 'Permit.PublishType',
             'Document.View', 'Document.Create', 'Document.Export', 'Document.Import',
             'Document.Reopen',
+            # ✎ audit-rows-polish: `Document.Delete` — специфікації прибирають власні чернетки документів (DELETE
+            # /documents/{id}, лише Draft). Лише тестова роль стенда; ролі продукту не змінюються.
+            'Document.Delete',
             # ✎ TC: чат таблиці — e2e UI-lane на двох користувачах (написати, згадати, видалити чуже). Лише тестова роль.
             'Document.Discuss', 'Document.DiscussModerate',
             # ✎ D-461: ручне значення замість формули — e2e UI-lane (замінити, повернути формулу). Лише тестова роль.
