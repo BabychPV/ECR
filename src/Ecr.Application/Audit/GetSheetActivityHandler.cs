@@ -79,8 +79,13 @@ public sealed class GetSheetActivityHandler(
             throw NotFound(documentId);
         }
 
+        // ⛔ Журнал рядків — лише таблиці, які читач бачить у цьому періоді (схована таблиця «не існує», D-6).
+        var tables = readable.VisibleTableIdsOfSheet(sheetDefId) ?? [];
+
         return await query
-            .ReadAsync(new SheetActivityScope(documentId, periodKey, sheetCode, columns, byUserId, includeSystem), size, cursor, ct)
+            .ReadAsync(
+                new SheetActivityScope(documentId, periodKey, sheetCode, columns, byUserId, includeSystem, tables),
+                size, cursor, ct)
             .ConfigureAwait(false);
     }
 

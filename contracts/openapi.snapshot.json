@@ -22017,10 +22017,10 @@
         "type": "object"
       },
       "SheetActivityItem": {
-        "description": "Рядок журналу дій на аркуші: правка комірки (людини) або дія робочого процесу.",
+        "description": "Рядок журналу дій на аркуші: правка комірки (людини), додавання/видалення рядка або дія робочого процесу.",
         "properties": {
           "action": {
-            "description": "Лише процес: `Submit`, `Approve`, `ApproveStep`, `Reject`, `Reopen`, `Recall`.",
+            "description": "Процес: `Submit`, `Approve`, `ApproveStep`, `Reject`, `Reopen`, `Recall`;\nрядок: `RowAdded`, `RowDeleted`.",
             "type": [
               "null",
               "string"
@@ -22076,7 +22076,7 @@
             ]
           },
           "kind": {
-            "description": "`CellEdit` або `Workflow` (SheetActivityKinds).",
+            "description": "`CellEdit`, `RowChange` або `Workflow` (SheetActivityKinds).",
             "type": "string"
           },
           "newValue": {
@@ -22094,7 +22094,7 @@
             ]
           },
           "origin": {
-            "description": "Лише правка: `UserEdit`, `Import`, `ImportOverwrite`, `ApproverEdit`.",
+            "description": "Правка й рядок: `UserEdit`, `Import`, `ImportOverwrite`, `ApproverEdit`.",
             "type": [
               "null",
               "string"
@@ -22113,7 +22113,7 @@
             ]
           },
           "rowKey": {
-            "description": "Лише правка: ключ рядка.",
+            "description": "Правка й рядок: ключ рядка.",
             "type": [
               "null",
               "string"
@@ -22131,7 +22131,7 @@
             ]
           },
           "tableCode": {
-            "description": "Лише правка: код таблиці.",
+            "description": "Правка й рядок: код таблиці.",
             "type": [
               "null",
               "string"
@@ -22144,7 +22144,7 @@
               },
               {
                 "$ref": "#/components/schemas/LocalizedText",
-                "description": "Лише правка: назва таблиці."
+                "description": "Правка й рядок: назва таблиці."
               }
             ]
           },
