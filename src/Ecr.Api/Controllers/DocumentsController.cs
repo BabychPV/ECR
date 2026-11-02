@@ -120,6 +120,20 @@ public sealed class DocumentsController(
         [FromQuery] int? projectId, [FromQuery] int? periodKey, [FromQuery] string? q, CancellationToken ct)
         => Ok(await listDocuments.HandleOwnersAsync(projectId, periodKey, q, ct).ConfigureAwait(false));
 
+    /// <summary>
+    /// Усі версії шаблону серед документів, які користувач бачить, — для вибору у фільтрі переліку «Version». Право
+    /// <c>Document.View</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Та сама межа видимості, що й перелік: версія, наявна лише в невидимих документах, не називається. Версія — за
+    /// <c>periodKey</c> (без нього — чинна версія проєкту), як у колонці «Version». Не більше 200 версій.
+    /// </remarks>
+    [HttpGet("template-versions")]
+    [ProducesResponseType<DocumentTemplateVersionsResponse>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> TemplateVersions(
+        [FromQuery] int? projectId, [FromQuery] int? periodKey, CancellationToken ct)
+        => Ok(await listDocuments.HandleTemplateVersionsAsync(projectId, periodKey, ct).ConfigureAwait(false));
+
     /// <summary>Зведення переліку за період (<c>BE-09</c>). Право <c>Document.View</c>.</summary>
     /// <remarks>
     /// ⚠ Лічить лише документи, які користувач БАЧИТЬ, — тією самою межею

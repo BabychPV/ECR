@@ -5870,6 +5870,47 @@
         ],
         "type": "object"
       },
+      "DocumentTemplateVersionOption": {
+        "description": "Версія шаблону серед видимих читачеві документів — варіант фільтра «Version».",
+        "properties": {
+          "count": {
+            "description": "Скільки видимих читачеві документів мають цю версію.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "version": {
+            "description": "Версія (як у колонці переліку).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "count"
+        ],
+        "type": "object"
+      },
+      "DocumentTemplateVersionsResponse": {
+        "description": "Усі версії шаблону серед видимих читачеві документів — варіанти фільтра переліку «Version».",
+        "properties": {
+          "items": {
+            "description": "Версії за природним порядком (2.9 перед 2.10) з кількістю документів; не більше 200.",
+            "items": {
+              "$ref": "#/components/schemas/DocumentTemplateVersionOption"
+            },
+            "type": "array"
+          },
+          "withoutVersionCount": {
+            "description": "Скільки видимих документів без версії.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "withoutVersionCount"
+        ],
+        "type": "object"
+      },
       "DocumentVersionDto": {
         "description": "Версія документа — зріз подання аркуша (ФВ-5.22).",
         "properties": {
@@ -32263,6 +32304,55 @@
           }
         },
         "summary": "Зведення переліку за період (`BE-09`). Право `Document.View`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/template-versions": {
+      "get": {
+        "description": "⛔ Та сама межа видимості, що й перелік: версія, наявна лише в невидимих документах, не називається. Версія — за\n`periodKey` (без нього — чинна версія проєкту), як у колонці «Version». Не більше 200 версій.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "projectId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentTemplateVersionsResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentTemplateVersionsResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentTemplateVersionsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Усі версії шаблону серед документів, які користувач бачить, — для вибору у фільтрі переліку «Version». Право\n`Document.View`.",
         "tags": [
           "Documents"
         ]
