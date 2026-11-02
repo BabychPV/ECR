@@ -1409,6 +1409,10 @@ public sealed partial class EndpointCoverageTests
         // has a screen (admin action on the permit types page; not part of N3/N5 UI).
         "POST /api/v1/air-limits/provision",
 
+        // PERMUSE: «де використано» дозвіл - сервер і контракт першими; споживач - секція «Використано» картки дозволу
+        // (сесія Permites, `features/permits`). ⚠ TEMPORARY: прибрати в коміті, що додає виклик у `features/permits`.
+        "GET /api/v1/permits/{p}/usages",
+
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було
         // НЕПРАВДОЮ: жодне місце клієнта нічого не конвертувало.

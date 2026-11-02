@@ -13384,6 +13384,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/permits/{id}/usages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** «Де використано»: документи, період, аркуш-таблиця-рядок чи поле шапки, де дозвіл обрано значенням. Право
+         *     `Registry.View`; у відповідь потрапляють лише документи проєктів, які читач бачить (`Document.View`). */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Лише цей період (`YYYYNN`): комірки періоду й шапки документів з таблицями в ньому. */
+                    periodKey?: number;
+                    /** @description Розмір переліку 1..500 (типово 200); лічильники рахують усе. */
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор дозволу. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitUsageDto"];
+                        "text/json": components["schemas"]["PermitUsageDto"];
+                        "text/plain": components["schemas"]["PermitUsageDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/permits/{permitId}/air-limits": {
         parameters: {
             query?: never;
@@ -32022,6 +32091,12 @@ export interface components {
             /** @description Хто змінив. */
             updatedByDisplayName: null | string;
             /**
+             * Format: int32
+             * @description У скількох документах (проєктів, що читач бачить) дозвіл обраний значенням шапки чи комірки; 0 - ніде.
+             * @default 0
+             */
+            usedInDocumentCount: number;
+            /**
              * Format: date
              * @description Перший чинний день.
              */
@@ -32360,6 +32435,78 @@ export interface components {
             instanceCount: number;
             /** @description Опубліковані таблиці з кількістю рядків; таблиць, що лише в чернетці, тут немає. */
             tables: components["schemas"]["PermitTypeTableUsageDto"][];
+        };
+        /** @description «Де використано» дозвіл: документи, у яких він обраний значенням поля шапки чи колонки таблиці. Лише документи
+         *     проєктів, які читач бачить (`Document.View`); решта не рахується й не називається. */
+        PermitUsageDto: {
+            /**
+             * Format: int32
+             * @description Скільки різних документів посилаються на дозвіл (під фільтром періоду).
+             */
+            documentCount: number;
+            /** @description Місця посилань: за документом, періодом, шапка перед таблицями. */
+            items: components["schemas"]["PermitUsageItemDto"][];
+            /**
+             * Format: int32
+             * @description Скільки місць (полів шапки й комірок) посилаються на дозвіл.
+             */
+            linkCount: number;
+            /**
+             * Format: int64
+             * @description Дозвіл.
+             */
+            permitId: number;
+            /** @description `true`, якщо Items обрізано лімітом `limit`. */
+            truncated: boolean;
+        };
+        /** @description Одне місце, де дозвіл стоїть значенням: поле шапки або комірка рядка таблиці документа. */
+        PermitUsageItemDto: {
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /** @description Бізнес-ключ документа. */
+            documentKey: string;
+            /** @description Код поля шапки або колонки. */
+            fieldCode: string;
+            /** @description Підпис поля шапки або заголовок колонки мовами каталогу. */
+            fieldLabelL10n: {
+                [key: string]: string;
+            };
+            /** @description `header` або `cell` (PermitUsageKinds). */
+            kind: string;
+            /**
+             * Format: int32
+             * @description Період комірки (`YYYYMM`-подібний ключ); `null` для шапки - вона належить документу цілком.
+             */
+            periodKey: null | number;
+            /** @description Код проєкту. */
+            projectCode: string;
+            /**
+             * Format: int32
+             * @description Проєкт документа.
+             */
+            projectId: number;
+            /** @description Бізнес-ключ рядка; `null` для шапки. */
+            rowKey: null | string;
+            /**
+             * Format: int32
+             * @description Порядок рядка на екрані; `null` для шапки.
+             */
+            rowOrdinal: null | number;
+            /** @description Код аркуша; `null` для шапки. */
+            sheetCode: null | string;
+            /** @description Назва аркуша мовами каталогу; `null` для шапки. */
+            sheetNameL10n: null | {
+                [key: string]: string;
+            };
+            /** @description Код таблиці; `null` для шапки. */
+            tableCode: null | string;
+            /** @description Назва таблиці мовами каталогу; `null` для шапки. */
+            tableNameL10n: null | {
+                [key: string]: string;
+            };
         };
         /** @description Атрибут події: що прочитано з PI, що записав би синк, що в комірці. */
         PiEventAttributeView: {
