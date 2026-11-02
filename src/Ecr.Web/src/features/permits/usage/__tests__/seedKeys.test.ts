@@ -27,6 +27,7 @@ function sources(dir: string): string[] {
 const files = [
   ...sources(path.resolve(webRoot, 'src', 'features', 'permits', 'usage')),
   path.resolve(webRoot, 'src', 'features', 'permits', 'list', 'PermitsListColumns.tsx'),
+  path.resolve(webRoot, 'src', 'features', 'permits', 'types', 'TypesListColumns.tsx'),
   path.resolve(webRoot, 'src', 'pages', 'admin', 'PermitPage.tsx'),
 ];
 
