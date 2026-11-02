@@ -247,6 +247,124 @@ ORDER BY [Ts];
 мають іти неспадно, інакше адаптер відмовляє помилкою `ECR-INT-0422`
 (`timestampsOutOfOrder`) замість мовчазного сортування в пам'яті.
 
+### Усі ключі конфігурації {#2-ключі-конфігурації}
+
+<!-- generated:config -->
+Таблиця згенерована `tools/gen-install-docs.ps1` з `src/Ecr.Api/Options/EcrConfigurationValidation.cs` (що службі перевіряється на старті) і `src/Ecr.Api/appsettings.json` (типові значення). Руками не правити: `powershell -File tools/gen-install-docs.ps1`. «—» у «Типово» означає, що значення за замовчуванням задає код, а не `appsettings.json`. Порожнє значення будь-якого ключа — «не задано» (дефолт коду).
+
+| Ключ | Обов'язковий | Типово | Значення |
+|---|---|---|---|
+| `AirLimits:NaeRegistryCode` | ні | `NAE_TREE` | Значення на старті не перевіряється. |
+| `AirLimits:SubstanceRegistryCode` | ні | `LAND_AIR_SUBSTANCE` | Значення на старті не перевіряється. |
+| `AllowedHosts` | ні | `*` | Значення на старті не перевіряється. |
+| `Audit:ExportMaxRows` | ні | `100000` | Ціле число, не менше 1. |
+| `Auth:CookieName` | ні | `ecr.auth` | Значення на старті не перевіряється. |
+| `Auth:DataProtection:AllowUnprotectedKeys` | ні | — | `true` або `false`. |
+| `Auth:EnableNegotiate` | ні | `true` | `true` або `false`. |
+| `Auth:RequireHttps` | ні | `true` | `true` або `false`. |
+| `Auth:SlidingHours` | ні | `8` | Ціле число, не менше 1. |
+| `Auth:StampCacheSeconds` | ні | `5` | Ціле число, не менше 0. |
+| `Cache:AccessProfileSlidingMinutes` | ні | `60` | Ціле число, не менше 1. |
+| `Cache:MetadataSlidingMinutes` | ні | `240` | Ціле число, не менше 1. |
+| `Cache:SchemaName` | ні | `dbo` | Значення на старті не перевіряється. |
+| `Cache:TableName` | ні | `Cache` | Значення на старті не перевіряється. |
+| `Calculations:FullYearWarnSeconds` | ні | `600` | Ціле число, не менше 1. |
+| `Calculations:MaxInputCellsPerBinding` | ні | `300000` | Ціле число, не менше 1. |
+| `Calculations:MaxParallelism` | ні | `4` | Ціле число, не менше 1. |
+| `Calculations:SupersededPurge:BatchSize` | ні | `500` | Ціле число, не менше 1. |
+| `Calculations:SupersededPurge:CheckpointEveryBatches` | ні | `50` | Ціле число, не менше 1. |
+| `Calculations:SupersededPurge:DeleteEnabled` | ні | `false` | `true` або `false`. |
+| `Calculations:SupersededPurge:Enabled` | ні | `false` | `true` або `false`. |
+| `Calculations:SupersededPurge:IncludeTrace` | ні | `true` | `true` або `false`. |
+| `Calculations:SupersededPurge:LogPauseSeconds` | ні | `30` | Ціле число, не менше 0. |
+| `Calculations:SupersededPurge:LogPauseThresholdPercent` | ні | `60` | Ціле число, не менше 1. |
+| `Calculations:SupersededPurge:MaxBatchesPerRun` | ні | `2000` | Ціле число, не менше 1. |
+| `Calculations:SupersededPurge:MaxLogPauses` | ні | `20` | Ціле число, не менше 0. |
+| `Calculations:SupersededPurge:PauseMilliseconds` | ні | `50` | Ціле число, не менше 0. |
+| `Calculations:SupersededPurge:RebuildAfter` | ні | `false` | `true` або `false`. |
+| `Campaign:AtRiskDays` | ні | `3` | Ціле число, не менше 0. |
+| `Collection:ChunkDays` | ні | `7` | Ціле число, не менше 0. |
+| `Collection:DeleteMissingOnSecondary` | ні | `false` | `true` або `false`. |
+| `Collection:DeleteMissingPoints` | ні | `true` | `true` або `false`. |
+| `Collection:MaxEventPages` | ні | — | Ціле число, не менше 1. |
+| `Collection:MonthColumnRouting` | ні | `false` | `true` або `false`. |
+| `ConnectionStrings:Ecr` | так (секрет: лише змінна оточення `ECR_ConnectionStrings__Ecr`) | *порожньо* | Значення на старті не перевіряється. |
+| `Database:BulkBatchSize` | ні | `50000` | Ціле число, не менше 1. |
+| `Database:CommandTimeoutSeconds` | ні | `60` | Ціле число, не менше 0. |
+| `Database:EditionMode` | ні | `Auto` | Одне з: Auto, Standard, Enterprise. |
+| `Database:MaxPoolSize` | ні | `200` | Ціле число, не менше 1. |
+| `Database:RecalcCommandTimeoutSeconds` | ні | `180` | Ціле число, не менше 30. |
+| `Database:SheetLockTimeoutSeconds` | ні | `30` | Ціле число, не менше 0. |
+| `Documents:StaleMapWarm:Enabled` | ні | `true` | `true` або `false`. |
+| `Documents:StaleMapWarm:HotPeriodLimit` | ні | `2` | Ціле число, не менше 1. |
+| `Documents:StaleMapWarm:IntervalSeconds` | ні | `60` | Ціле число, не менше 10. |
+| `Documents:StaleMapWarm:RingIntervalSeconds` | ні | `600` | Ціле число, не менше 60. |
+| `Documents:VersionMigration:FromMonthEnabled` | ні | `false` | `true` або `false`. |
+| `Health:RawDataPointWarnRows` | ні | `20000000` | Ціле число, не менше 0. |
+| `Health:WarmupOnStart` | ні | `true` | `true` або `false`. |
+| `Integration:AfTimeZoneId` | ні | — | Формат перевіряється на старті (див. текст відмови служби). |
+| `Integration:CatalogTimeoutSeconds` | ні | `10` | Ціле число, не менше 1. |
+| `Integration:RawDataExportMaxRows` | ні | `100000` | Ціле число, не менше 1. D-463: нуль — кожен експорт «Даних з PI» відмовою, а не «без стелі». |
+| `Jobs:Excel:MaxConcurrency` | ні | `2` | Ціле число, не менше 1. |
+| `Jobs:NightlyRecalculation:Enabled` | ні | `false` | `true` або `false`. |
+| `Jobs:Quartz:ThreadCount` | ні | `16` | Ціле число, не менше 1. |
+| `Jobs:Queue:Mode` | ні | `Quartz` | Одне з: Quartz, Database. |
+| `Jobs:QueueDepth:RefreshSeconds` | ні | `15` | Ціле число, не менше 5. |
+| `Jobs:Recalculation:Executor` | ні | `InProcess` | Одне з: InProcess, Worker. |
+| `Jobs:Recalculation:FanOutMaxConcurrency` | ні | — | Ціле число, не менше 1. |
+| `Jobs:ShutdownTimeoutSeconds` | ні | `120` | Ціле число, не менше 1. |
+| `Localization:ImportMaxBytes` | ні | `1048576` | Ціле число, не менше 1. |
+| `Logging:File:Directory` | ні | `%ProgramData%\ECR\logs` | Значення на старті не перевіряється. |
+| `Logging:File:FileSizeLimitMb` | ні | `100` | Ціле число, не менше 1. |
+| `Logging:File:Json` | ні | `true` | `true` або `false`. |
+| `Logging:File:RetainedFiles` | ні | `30` | Ціле число, не менше 1. |
+| `Logging:LogLevel:Default` | ні | `Information` | Значення на старті не перевіряється. |
+| `Logging:LogLevel:Microsoft.AspNetCore` | ні | `Warning` | Значення на старті не перевіряється. |
+| `Logging:LogLevel:Microsoft.EntityFrameworkCore.Database.Command` | ні | `Warning` | Значення на старті не перевіряється. |
+| `Notifications:PublicBaseUrl` | ні | *порожньо* | Значення на старті не перевіряється. |
+| `Notifications:WebhookAllowedHostSuffixes` | ні | `.webhook.office.com;.logic.azure.com;.powerplatform.com` | Значення на старті не перевіряється. |
+| `PiSqlClient:CommandTimeoutSeconds` | ні | — | Ціле число, не менше 1. |
+| `PiSqlClient:EventQueryChunk` | ні | — | Одне з: None, Month. |
+| `PiSqlClient:EventQueryTimeoutSeconds` | ні | — | Ціле число, не менше 1. |
+| `PiWebApi:AllowedHosts` | ні | `[]` | Значення на старті не перевіряється. |
+| `Registries:ExportMaxRows` | ні | `50000` | Ціле число, не менше 1. |
+| `Registries:ImportMaxBytes` | ні | `1048576` | Ціле число, не менше 1. |
+| `Retention:SubmissionSnapshots:BatchSize` | ні | `10` | Ціле число, не менше 1. |
+| `Retention:SubmissionSnapshots:DeleteEnabled` | ні | `false` | `true` або `false`. |
+| `Retention:SubmissionSnapshots:Enabled` | ні | `true` | `true` або `false`. |
+| `Retention:SubmissionSnapshots:MaxBatchesPerRun` | ні | `200` | Ціле число, не менше 1. |
+| `Retention:SubmissionSnapshots:PauseMilliseconds` | ні | `500` | Ціле число, не менше 0. |
+| `Retention:SubmissionSnapshots:RetainSnapshots` | ні | `5` | Ціле число, не менше 2. |
+| `Schema:StartupMode` | ні | `Validate` | Одне з: Validate, Migrate. |
+| `Security:Csp:Enforce` | ні | `false` | `true` або `false`. |
+| `Security:Csp:ReportOnly` | ні | `true` | `true` або `false`. |
+| `Security:Csp:ReportUri` | ні | `/api/v1/csp-report` | Формат перевіряється на старті (див. текст відмови служби). |
+| `Security:RateLimit:ChangePasswordPermitPerMinute` | ні | — | Ціле число, не менше 1. |
+| `Security:RateLimit:CspReportPermitPerMinute` | ні | `120` | Ціле число, не менше 1. |
+| `Security:RateLimit:HealthReadyPermitPerMinute` | ні | `60` | Ціле число, не менше 1. |
+| `Security:RateLimit:ImportPreviewConcurrency` | ні | `2` | Ціле число, не менше 1. |
+| `Security:RateLimit:ImportPreviewQueueLimit` | ні | `4` | Ціле число, не менше 0. |
+| `Security:RateLimit:KnownProxies` | ні | *порожньо* | Формат перевіряється на старті (див. текст відмови служби). |
+| `Security:RateLimit:LoginPermitPerMinute` | ні | `60` | Ціле число, не менше 1. |
+| `Security:RateLimit:RecalculatePermitPerMinute` | ні | `6` | Ціле число, не менше 1. |
+| `Security:RateLimit:RecalculateUserPermitPerMinute` | ні | `30` | Ціле число, не менше 1. |
+| `Security:RateLimit:SearchPermit` | ні | `30` | Ціле число, не менше 1. |
+| `Security:RateLimit:SearchWindowSeconds` | ні | `10` | Ціле число, не менше 1. |
+| `Security:RateLimit:SmtpTestPermitPerMinute` | ні | `5` | Ціле число, не менше 1. |
+| `Security:RateLimit:SmtpTestSystemPermitPerHour` | ні | `30` | Ціле число, не менше 1. |
+| `Security:RateLimit:TrustForwardedFor` | ні | `false` | `true` або `false`. |
+| `Security:RateLimit:ValidatePermitPerMinute` | ні | `100` | Ціле число, не менше 1. |
+| `Security:RateLimit:VerifyPermitPerMinute` | ні | `100` | Ціле число, не менше 1. |
+| `Smtp:AllowedPorts` | ні | `[]` | Формат перевіряється на старті (див. текст відмови служби). |
+| `Telemetry:Enabled` | ні | `false` | `true` або `false`. |
+| `Telemetry:ExportIntervalSeconds` | ні | `60` | Ціле число, не менше 5. |
+| `Telemetry:OtlpEndpoint` | так, якщо `Telemetry:Enabled` = true | *порожньо* | Формат перевіряється на старті (див. текст відмови служби). |
+| `Telemetry:OtlpProtocol` | ні | `Grpc` | Одне з: значення переліку OtlpExportProtocol (зовнішня бібліотека). |
+| `Telemetry:ServiceName` | ні | `ecr-api` | Значення на старті не перевіряється. |
+| `Transport:Https:CertificateThumbprint` | ні | *порожньо* | Значення на старті не перевіряється. |
+| `Transport:Https:Port` | ні | `0` | Ціле число, не менше 0. |
+<!-- /generated:config -->
+
 ## 3. Моніторинг і логи
 
 ### 3.1. Health-ендпоінти

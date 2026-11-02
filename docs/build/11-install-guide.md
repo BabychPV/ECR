@@ -116,6 +116,22 @@
 буде нічого з переліку вище — сервер отримує РІВНО один готовий `.exe`,
 більше нічого.
 
+**Версії (генеруються з репозиторію):**
+
+<!-- generated:prereqs -->
+Версії згенеровано `tools/gen-install-docs.ps1` з репозиторію (`global.json`, `Directory.Build.props`, `Directory.Packages.props`, `tools/deploy-ecr.ps1`, `tools/build-msi.ps1`, `installer/Ecr.Installer/Package.wxs`, `.github/workflows/ci.yml`). Руками не правити.
+
+| Що | Де потрібне | Версія |
+|---|---|---|
+| .NET Runtime | сервер, куди ставиться MSI | не потрібен: публікація self-contained, рантайм усередині пакета |
+| Windows | сервер, куди ставиться MSI | Windows 8.1 / Server 2012 R2 і новіша, x64 (NT 6.3) |
+| SQL Server | сервер БД | не нижче 2016 SP1 (`13.0.4001`), редакція зі SQL Server Agent (Standard і вище) |
+| .NET SDK | лише машина збірки | `10.0.100` (`rollForward`: `latestFeature`), цільова платформа `net10.0` |
+| WiX CLI | лише машина збірки | `5.0.2` |
+| dotnet-ef | лише машина збірки (генерує `migration.sql`) | `10.0.13` |
+| Node.js | лише розробка й збірка клієнта; на сервері з MSI НЕ потрібен | `22` |
+<!-- /generated:prereqs -->
+
 ---
 
 ## 1. Збірка інсталятора {#1-збірка}
@@ -414,6 +430,30 @@ Invoke-WebRequest 'https://<ім''я з сертифіката HTTPS>/health/liv
 
 Якщо потрібно, щоб `deploy-ecr.ps1` сам довів справу до працюючої
 служби за один виклик, без ручного `Start-Service` — дивись 2.3.
+
+#### Порядок SQL-скриптів (для DBA, який накочує вручну) {#2-2-порядок-sql}
+
+<!-- generated:sql-order -->
+Порядок розгортання SQL-скриптів згенеровано `tools/gen-install-docs.ps1` з `$scripts` у `tools/deploy-ecr.ps1` і `tools/setup-dev-db.ps1` (вони мусять збігатися). Руками не правити. Кожен файл виконується окремою транзакцією `sqlcmd`; DBA, що накочує вручну, дотримується цього порядку:
+
+1. `01-filegroups.sql`
+2. `02-partitions.sql`
+3. `migration.sql` — міграції EF (ідемпотентний скрипт `dotnet ef migrations script --idempotent`)
+4. `11-audit-tables.sql`
+5. `07-partition-tables.sql`
+6. `08-system-tables.sql`
+7. `12-archive-tables.sql`
+8. `13-cache-table.sql`
+9. `03-archive-proc.sql`
+10. `04-partition-maintenance.sql`
+11. `05-rpt-views.sql`
+12. `15-cell-tvp.sql`
+13. `10-triggers.sql`
+14. `06-rcsi.sql`
+15. `14-agent-jobs.sql` — лише з `-FirstDeployment` (одноразово, завдання SQL Agent у `msdb`)
+
+Сід (`Sql/seed/**`) у цей перелік не входить: його виконує сам застосунок при першому старті.
+<!-- /generated:sql-order -->
 
 ### 2.3 Якщо служба має працювати під окремим обліковим записом {#2-3-обліковий-запис}
 
