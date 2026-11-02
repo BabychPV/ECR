@@ -7,23 +7,26 @@ using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Audit;
 
-/// <summary>Рядок журналу дій на аркуші: правка комірки (людини) або дія робочого процесу.</summary>
-/// <param name="Kind"><c>CellEdit</c> або <c>Workflow</c> (<see cref="SheetActivityKinds"/>).</param>
+/// <summary>Рядок журналу дій на аркуші: правка комірки (людини), додавання/видалення рядка або дія робочого процесу.</summary>
+/// <param name="Kind"><c>CellEdit</c>, <c>RowChange</c> або <c>Workflow</c> (<see cref="SheetActivityKinds"/>).</param>
 /// <param name="At">Момент дії, UTC.</param>
 /// <param name="ByDisplayName">Ім'я виконавця; <c>system</c> — системний перехід; зниклий користувач — <c>#id</c>.</param>
-/// <param name="Origin">Лише правка: <c>UserEdit</c>, <c>Import</c>, <c>ImportOverwrite</c>, <c>ApproverEdit</c>.</param>
+/// <param name="Origin">Правка й рядок: <c>UserEdit</c>, <c>Import</c>, <c>ImportOverwrite</c>, <c>ApproverEdit</c>.</param>
 /// <param name="PeriodKey">Звітний період.</param>
-/// <param name="RowKey">Лише правка: ключ рядка.</param>
+/// <param name="RowKey">Правка й рядок: ключ рядка.</param>
 /// <param name="RowLabelL10n">Лише правка: підпис фіксованого рядка; <c>null</c> — динамічний.</param>
 /// <param name="ColumnDefId">Лише правка: колонка.</param>
 /// <param name="ColumnCode">Лише правка: код колонки.</param>
 /// <param name="ColumnHeaderL10n">Лише правка: заголовок колонки.</param>
 /// <param name="ColumnDataType">Лише правка: тип колонки (для показу значення за правилом показу).</param>
-/// <param name="TableCode">Лише правка: код таблиці.</param>
-/// <param name="TableNameL10n">Лише правка: назва таблиці.</param>
+/// <param name="TableCode">Правка й рядок: код таблиці.</param>
+/// <param name="TableNameL10n">Правка й рядок: назва таблиці.</param>
 /// <param name="OldValue">Лише правка: значення до.</param>
 /// <param name="NewValue">Лише правка: значення після.</param>
-/// <param name="Action">Лише процес: <c>Submit</c>, <c>Approve</c>, <c>ApproveStep</c>, <c>Reject</c>, <c>Reopen</c>, <c>Recall</c>.</param>
+/// <param name="Action">
+/// Процес: <c>Submit</c>, <c>Approve</c>, <c>ApproveStep</c>, <c>Reject</c>, <c>Reopen</c>, <c>Recall</c>;
+/// рядок: <c>RowAdded</c>, <c>RowDeleted</c>.
+/// </param>
 /// <param name="FromState">Лише процес: стан до.</param>
 /// <param name="ToState">Лише процес: стан після.</param>
 /// <param name="Reason">Лише процес: коментар (причина відхилення, повернення, відкликання); звичайний текст.</param>
@@ -61,6 +64,18 @@ public static class SheetActivityKinds
 
     /// <summary>Подання, погодження, відхилення, повернення в роботу, відкликання.</summary>
     public const string Workflow = "Workflow";
+
+    /// <summary>Додавання або видалення рядка таблиці (<c>aud.RowChange</c>); дія — у <c>Action</c>.</summary>
+    public const string RowChange = "RowChange";
+
+    /// <summary><c>Action</c> рядка <see cref="RowChange"/>: рядок додано.</summary>
+    public const string RowAdded = "RowAdded";
+
+    /// <summary><c>Action</c> рядка <see cref="RowChange"/>: рядок видалено.</summary>
+    public const string RowDeleted = "RowDeleted";
+
+    /// <summary><c>Action</c> рядка <see cref="RowChange"/>: рядок відновлено (зарезервовано).</summary>
+    public const string RowRestored = "RowRestored";
 }
 
 /// <summary>Вже авторизований запит до <see cref="SheetActivityQuery"/>: що саме читач має право бачити.</summary>
@@ -75,12 +90,16 @@ public static class SheetActivityKinds
 /// людина - <c>UserEdit</c>, <c>Import</c>, <c>ImportOverwrite</c>, <c>ApproverEdit</c> (імпорт - дія людини);
 /// решта - система. Дії процесу (подання, погодження...) показуються завжди.
 /// </param>
+/// <param name="VisibleTableIds">
+/// Таблиці аркуша, які читач бачить (<c>DocumentReadScope.VisibleTableIdsOfSheet</c>) — межі журналу рядків
+/// (<c>aud.RowChange</c>); <c>null</c> або порожньо — рядків «додано/видалено» немає (закрито за замовчуванням).
+/// </param>
 public sealed record SheetActivityScope(
     long DocumentId, int PeriodKey, string SheetCode, IReadOnlyList<int> VisibleColumnIds, int? ByUserId = null,
-    bool IncludeSystem = false);
+    bool IncludeSystem = false, IReadOnlyList<int>? VisibleTableIds = null);
 
 /// <summary>
-/// Спільний шар читання журналу дій на аркуші: злиття двох джерел в один потік, найновіші перші.
+/// Спільний шар читання журналу дій на аркуші: злиття трьох джерел в один потік, найновіші перші.
 /// </summary>
 /// <remarks>
 /// ⛔ Тут НЕМАЄ перевірки доступу: вхід — <see cref="SheetActivityScope"/>, який складає обробник після права,
@@ -89,9 +108,9 @@ public sealed record SheetActivityScope(
 ///
 /// <para>
 /// Порядок — <c>(At спадно, тег джерела зростно, Id спадно)</c>; тег: <c>0</c> — правка комірки
-/// (<c>aud.CellChange</c>), <c>1</c> — дія процесу (<c>wf.ApprovalEvent</c>). Кожне джерело читається
-/// ОДНИМ запитом з власним keyset (<c>TOP @limit</c> за кластерним ключем), після чого сторінка береться
-/// двостороннім злиттям: ≤ <c>2 × limit</c> рядків у пам'яті, вартість не росте з обсягом журналу.
+/// (<c>aud.CellChange</c>), <c>1</c> — дія процесу (<c>wf.ApprovalEvent</c>), <c>2</c> — додавання/видалення рядка
+/// (<c>aud.RowChange</c>). Кожне джерело читається ОДНИМ запитом з власним keyset (<c>TOP</c> за ключем порядку),
+/// після чого сторінка береться злиттям: ≤ <c>3 × limit + 1</c> рядків у пам'яті, вартість не росте з обсягом журналу.
 /// Курсор — позиція ОСТАННЬОГО виданого рядка <c>(At, тег, Id)</c>; кожне джерело виводить із неї свою
 /// умову «строго після», тож рівні <c>At</c> не губляться і не дублюються на межі сторінок.
 /// </para>
@@ -102,7 +121,8 @@ public sealed record SheetActivityScope(
 /// Старіше за вікно у списку не з'явиться — це журнал «що щойно відбувалось», не архів аудиту.
 /// </para>
 /// </remarks>
-public sealed class SheetActivityQuery(IAuditReader audit, IWorkflowStore workflow, TimeProvider? clock = null)
+public sealed class SheetActivityQuery(
+    IAuditReader audit, IWorkflowStore workflow, TimeProvider? clock = null, IRowChangeAudit? rowChanges = null)
 {
     /// <summary>Скільки днів назад читаються правки комірок (як вікно історії однієї комірки).</summary>
     public static readonly TimeSpan CellWindow = TimeSpan.FromDays(396);
@@ -115,6 +135,10 @@ public sealed class SheetActivityQuery(IAuditReader audit, IWorkflowStore workfl
 
     private const int CellTag = 0;
     private const int WorkflowTag = 1;
+    private const int RowTag = 2;
+
+    /// <summary>Найбільший тег джерела (межа декодування курсора).</summary>
+    internal const int MaxTag = RowTag;
 
     /// <summary>Повертає сторінку журналу.</summary>
     /// <param name="scope">Авторизований запит.</param>
@@ -131,14 +155,17 @@ public sealed class SheetActivityQuery(IAuditReader audit, IWorkflowStore workfl
 
         var cells = await ReadCellsAsync(scope, limit, after, ct).ConfigureAwait(false);
         var events = await ReadWorkflowAsync(scope, after, ct).ConfigureAwait(false);
+        var rows = await ReadRowsAsync(scope, limit, after, ct).ConfigureAwait(false);
 
-        var merged = cells.Items.Concat(events)
+        var merged = cells.Items.Concat(events).Concat(rows)
             .OrderByDescending(x => x.At)
             .ThenBy(x => x.Tag)
             .ThenByDescending(x => x.Id)
             .ToList();
 
         var page = merged.Take(limit).ToList();
+
+        // Журнал рядків читається з `limit + 1`: зайвий рядок сам дає `merged.Count > limit`.
         var hasMore = merged.Count > limit || cells.HasMore;
 
         return new SheetActivityPage(
@@ -205,6 +232,51 @@ public sealed class SheetActivityQuery(IAuditReader audit, IWorkflowStore workfl
                 NewValue: null, e.Action.ToString(), e.FromStatus.ToString(), e.ToStatus.ToString(), e.Reason)))];
     }
 
+    /// <summary>
+    /// Третє джерело (тег 2): додавання й видалення рядків (<c>aud.RowChange</c>) — лише таблиць, які читач бачить
+    /// (<see cref="SheetActivityScope.VisibleTableIds"/>, у SQL до <c>TOP</c>).
+    /// </summary>
+    /// <remarks>
+    /// Курсор: після рядка з тегом 0/1 того самого <c>At</c> рядки журналу рядків ще НЕ видано (тег 2 — останній),
+    /// тож «строго після» = <c>(At, Id ≤ max)</c>; після тегу 2 — звичайне <c>(At, Id)</c>.
+    /// </remarks>
+    private async Task<IReadOnlyList<Row>> ReadRowsAsync(
+        SheetActivityScope scope, int limit, (DateTime At, int Tag, long Id)? after, CancellationToken ct)
+    {
+        if (rowChanges is null || scope.VisibleTableIds is not { Count: > 0 } tables)
+        {
+            return [];
+        }
+
+        var now = (clock ?? TimeProvider.System).GetUtcNow().UtcDateTime;
+        (DateTime, long)? position = after is { } a ? (a.At, a.Tag == RowTag ? a.Id : long.MaxValue) : null;
+
+        var items = await rowChanges
+            .ReadRowChangesAsync(
+                new RowChangeFilter(
+                    now - CellWindow, now.AddDays(1), scope.DocumentId, scope.PeriodKey, tables, scope.ByUserId,
+                    HumanOnly: !scope.IncludeSystem),
+                limit + 1,
+                position,
+                ct)
+            .ConfigureAwait(false);
+
+        return [.. items.Select(r => new Row(r.ChangedAt, RowTag, r.Id, new SheetActivityItem(
+            SheetActivityKinds.RowChange, r.ChangedAt,
+            !Documents.CellChangeOrigins.IsHuman(r.Origin)
+                ? SystemActor
+                : r.ChangedByDisplayName ?? "#" + r.ChangedByUserId.ToString(CultureInfo.InvariantCulture),
+            r.Origin, r.PeriodKey, r.RowKey, RowLabelL10n: null, ColumnDefId: null, ColumnCode: null,
+            ColumnHeaderL10n: null, ColumnDataType: null, r.TableCode, r.TableNameL10n, OldValue: null, NewValue: null,
+            Action: r.Action switch
+            {
+                RowChangeAction.Added => SheetActivityKinds.RowAdded,
+                RowChangeAction.Deleted => SheetActivityKinds.RowDeleted,
+                _ => SheetActivityKinds.RowRestored,
+            },
+            FromState: null, ToState: null, Reason: null)))];
+    }
+
     private sealed record Row(DateTime At, int Tag, long Id, SheetActivityItem Item);
 }
 
@@ -235,7 +307,7 @@ public static class ActivityCursor
         if (parts.Length != 3
             || !long.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var ticks)
             || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var tag)
-            || tag > 1
+            || tag > SheetActivityQuery.MaxTag
             || !long.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var id)
             || ticks > DateTime.MaxValue.Ticks)
         {

@@ -82,7 +82,11 @@ public sealed partial class PatchCellsHandler(
 
     // ✎ D-461: позначки «ручне значення замість формули». `null` (прямий конструктор у тестах) — ручних значень немає:
     // запис у комірку формули без позначки не обробляється (доступ однаково відмовляє без права).
-    IFormulaOverrideStore? formulaOverrides = null)
+    IFormulaOverrideStore? formulaOverrides = null,
+
+    // ✎ Журнал рядків (`aud.RowChange`): нові рядки батчу (сітка, імпорт, книга) — «додано рядок» у журналі аркуша,
+    // тією самою транзакцією. `null` — лише прямі конструктори тестів.
+    IRowChangeAudit? rowAudit = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -1482,7 +1486,7 @@ public sealed partial class PatchCellsHandler(
     /// бачити тимчасові адреси, а не вже підмінені першою.
     /// </remarks>
     private async Task<CellChangeLists> MaterializeNewRowsAsync(
-        PatchCellsRequest request, RequestContext context, CellChangeLists planned, CancellationToken ct)
+        PatchCellsRequest request, RequestContext context, CellChangeLists planned, DateTime now, CancellationToken ct)
     {
         if (context.Creations.Count == 0)
         {
@@ -1494,6 +1498,14 @@ public sealed partial class PatchCellsHandler(
                 request.TableInstanceId, context.PeriodKey,
                 [.. context.Creations.Select(row => RowKey.Create(row.RowKey))], ordinal: 0, ct)
             .ConfigureAwait(false);
+
+        // ⛔ Журнал рядків — у ЦІЙ транзакції (відкат батчу забирає й «додано рядок»); `ApproverEdit` уже
+        // вирішено під блокуванням аркуша (`EnsureSheetStillEditableAsync` іде раніше).
+        await WriteRowAuditAsync(
+            RowAddedRecords(
+                request, context.Instance, context.PeriodKey, context.Creations, newIds, context.UserId, now,
+                context.ApproverEdit, AuditCorrelationId()),
+            ct).ConfigureAwait(false);
 
         return WithRealRowIds(context, planned, newIds);
     }
@@ -2656,7 +2668,7 @@ public sealed partial class PatchCellsHandler(
 
             // ⛔ `DAT-04` п. 1: рядки — ПІСЛЯ блокування аркуша й усіх відмов,
             // у цій самій транзакції. Див. <see cref="MaterializeNewRowsAsync"/>.
-            var changes = await MaterializeNewRowsAsync(request, context, planned, innerCt).ConfigureAwait(false);
+            var changes = await MaterializeNewRowsAsync(request, context, planned, now, innerCt).ConfigureAwait(false);
 
             // ✎ D-461: позначки ручних значень — тією самою транзакцією, і ПЕРЕД значеннями: перерахунок бере
             // блокування позначок (`IFormulaOverrideStore.LockKeysAsync`) до свого MERGE, тож або він чекає на коміт
@@ -3515,6 +3527,41 @@ public sealed partial class PatchCellsHandler(
                     ["columnCode"] = code,
                 });
 
+    /// <summary>
+    /// Походження батчу в журналі: D-442/D-445 — правка або імпорт погоджувача на поданому аркуші пишеться як
+    /// <see cref="CellChangeOrigins.ApproverEdit"/>; інакше — походження запиту.
+    /// </summary>
+    internal static string BatchOrigin(string requestOrigin, bool approverEdit)
+        => approverEdit
+           && (string.Equals(requestOrigin, UserEditOrigin, StringComparison.Ordinal)
+               || string.Equals(requestOrigin, CellChangeOrigins.Import, StringComparison.Ordinal))
+            ? CellChangeOrigins.ApproverEdit
+            : requestOrigin;
+
+    /// <summary>
+    /// Записи журналу рядків (<c>aud.RowChange</c>) для нових рядків батчу: по одному на створений рядок, з тим самим
+    /// походженням, що й значення цих рядків у <c>aud.CellChange</c> (<see cref="BatchOrigin"/>).
+    /// </summary>
+    internal static List<RowChangeRecord> RowAddedRecords(
+        PatchCellsRequest request, TableInstanceRef instance, PeriodKey periodKey, IReadOnlyList<PatchRow> creations,
+        IReadOnlyList<long> newIds, int userId, DateTime now, bool approverEdit, string? correlationId)
+    {
+        var origin = BatchOrigin(request.Origin, approverEdit);
+        var records = new List<RowChangeRecord>(creations.Count);
+        for (var i = 0; i < creations.Count; i++)
+        {
+            records.Add(new RowChangeRecord(
+                now, instance.DocumentId, periodKey.Value, instance.TableInstanceId, instance.TableDefId, newIds[i],
+                creations[i].RowKey, RowChangeAction.Added, userId, origin, correlationId));
+        }
+
+        return records;
+    }
+
+    /// <summary>Записує журнал рядків; без сховища (прямі конструктори тестів) — нічого.</summary>
+    private Task WriteRowAuditAsync(List<RowChangeRecord> records, CancellationToken ct)
+        => rowAudit is null || records.Count == 0 ? Task.CompletedTask : rowAudit.WriteRowChangesAsync(records, ct);
+
     /// <summary>Записи аудиту для застосованого батчу.</summary>
     /// <remarks>
     /// ⛔ Три поля тут стояли константами і робили журнал непридатним рівно
@@ -3552,11 +3599,7 @@ public sealed partial class PatchCellsHandler(
         // ✎ D-442: правка погоджувача на поданому аркуші — позначка «правка погоджувача» в журналі
         // (`Origin = ApproverEdit`). Замість `UserEdit` (сітка) і, ✎ D-445, замість `Import` (книга Excel):
         // D-442 вимагає позначки на КОЖНІЙ правці погоджувача, хоч би яким шляхом вона прийшла.
-        var batchOrigin = approverEdit
-                          && (string.Equals(request.Origin, UserEditOrigin, StringComparison.Ordinal)
-                              || string.Equals(request.Origin, CellChangeOrigins.Import, StringComparison.Ordinal))
-            ? CellChangeOrigins.ApproverEdit
-            : request.Origin;
+        var batchOrigin = BatchOrigin(request.Origin, approverEdit);
 
         // ✎ AN-114 (D-338): свідомий перезапис чужої правки (рядок змінено після
         // експорту книги, людина позначила «перезаписати») — власним походженням

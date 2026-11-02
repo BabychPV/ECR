@@ -58,7 +58,11 @@ public sealed class DeleteRowHandler(
     // ✎ Q-17: дзеркальне видалення рядків таблиць «місяці в колонках» (`Collection:MonthColumnRouting`) і перевірка
     // «Closed» місяця. `null` або вимкнений прапор — поведінка до Q-17.
     IMonthColumnRouter? monthRouter = null,
-    IPeriodStore? periods = null)
+    IPeriodStore? periods = null,
+
+    // ✎ Журнал рядків (`aud.RowChange`): «видалено рядок» у журналі аркуша — тією самою транзакцією, що й видалення
+    // (поруч зі складом у `aud.StructureChange`, який журнал аркуша не читає). `null` — лише прямі конструктори тестів.
+    IRowChangeAudit? rowAudit = null)
 {
     /// <summary>Тип сутності запису аудиту (<c>aud.StructureChange.EntityType</c>).</summary>
     public const string AuditEntityType = "doc.TableRow";
@@ -467,16 +471,29 @@ public sealed class DeleteRowHandler(
             throw RowNotFound();
         }
 
+        var journal = new List<RowChangeRecord>
+        {
+            RowDeletedRecord(now, instance.DocumentId, instance.PeriodKey, instance.TableInstanceId, instance.TableDefId, row.Id, key.Value, profile.UserId),
+        };
+
         // ✎ Q-17: дзеркала в решті екземплярів — м'яко видаляються тією ж транзакцією.
         foreach (var other in mirrorInstances.Where(i => i.TableInstanceId != instance.TableInstanceId))
         {
             var mirrorRow = await rowStore
                 .FindLiveRowAsync(other.TableInstanceId, new PeriodKey(other.PeriodKey), key.Value, ct)
                 .ConfigureAwait(false);
-            if (mirrorRow is not null)
+            if (mirrorRow is not null
+                && await rowStore.SoftDeleteRowAsync(mirrorRow.Id, new PeriodKey(other.PeriodKey), ct).ConfigureAwait(false))
             {
-                await rowStore.SoftDeleteRowAsync(mirrorRow.Id, new PeriodKey(other.PeriodKey), ct).ConfigureAwait(false);
+                journal.Add(RowDeletedRecord(
+                    now, instance.DocumentId, other.PeriodKey, other.TableInstanceId, instance.TableDefId, mirrorRow.Id, key.Value, profile.UserId));
             }
+        }
+
+        // ⛔ Журнал рядків — у ЦІЙ транзакції: відкат видалення забирає і запис «видалено рядок».
+        if (rowAudit is not null)
+        {
+            await rowAudit.WriteRowChangesAsync(journal, ct).ConfigureAwait(false);
         }
 
         // ⛔ Видалення рядка — зміна документа (`H-23d`), як і додавання.
@@ -486,6 +503,13 @@ public sealed class DeleteRowHandler(
 
         return [.. columns.Select(c => new RecalculationSeed(row.Id, c.Id))];
     }
+
+    /// <summary>Запис «рядок видалено» для журналу рядків; походження — правка людини.</summary>
+    private static RowChangeRecord RowDeletedRecord(
+        DateTime now, long documentId, int periodKey, long tableInstanceId, int tableDefId, long rowId, string rowKey, int userId)
+        => new(
+            now, documentId, periodKey, tableInstanceId, tableDefId, rowId, rowKey, RowChangeAction.Deleted, userId,
+            CellChangeOrigins.UserEdit, CorrelationId: null);
 
     /// <summary>Передача зрізу під блокуванням аркуша (дзеркало `CreateRowHandler.EnsureAssignmentsHoldAsync`).</summary>
     private async Task EnsureAssignmentsHoldAsync(

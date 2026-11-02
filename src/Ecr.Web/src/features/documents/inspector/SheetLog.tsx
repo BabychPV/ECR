@@ -42,7 +42,8 @@ export interface SheetLogProps {
  * додумує. Системні зміни (перерахунок, інтеграція) - лише за прапорцем; імпорт - дія людини. Коментар і значення
  * рендеряться як текст (React екранує), довгий коментар обрізається.
  *
- * ⚠ Рядків «додано/видалено рядок» тут немає: сервер їх не веде в аудиті (немає джерела) - не вигадуємо.
+ * Додавання й видалення рядків (`kind: RowChange`, `action: RowAdded | RowDeleted`) сервер веде в `aud.RowChange`
+ * лише для таблиць, які читач бачить; клієнт лише показує їх (таблиця · ключ рядка), без значень комірок.
  */
 export function SheetLog({ documentId, periodKey, sheet, onOpenCell }: SheetLogProps): JSX.Element {
   const [includeSystem, setIncludeSystem] = useState(false);
@@ -117,9 +118,57 @@ function SheetLogRow({
   sheetCode: string;
   onOpenCell: ((target: SheetLogTarget) => void) | undefined;
 }): JSX.Element {
-  return item.kind === 'CellEdit'
-    ? <CellEditRow item={item} sheetCode={sheetCode} onOpenCell={onOpenCell} />
-    : <WorkflowRow item={item} />;
+  if (item.kind === 'CellEdit') {
+    return <CellEditRow item={item} sheetCode={sheetCode} onOpenCell={onOpenCell} />;
+  }
+
+  return item.kind === 'RowChange' ? <RowChangeRow item={item} /> : <WorkflowRow item={item} />;
+}
+
+/** Додано / видалено рядок: дія, час, виконавець, таблиця · ключ рядка, походження. */
+function RowChangeRow({ item }: { item: SheetActivityItem }): JSX.Element {
+  const where = [localized(item.tableNameL10n) || (item.tableCode ?? ''), item.rowKey ?? '']
+    .filter((part) => part.length > 0)
+    .join(' · ');
+
+  return (
+    <div role="listitem" className="ecr-insp-hist" data-inspector-sheet-event={item.action ?? 'RowChange'}>
+      <Group justify="space-between" gap="xs" wrap="nowrap">
+        <Text size="sm" fw={500}>
+          {rowActionLabel(item.action ?? '')}
+        </Text>
+        <Text size="xs" c="dimmed">
+          <Timestamp value={item.at} />
+        </Text>
+      </Group>
+      <Text size="xs" c="dimmed" data-inspector-author="">
+        {actorOf(item)}
+      </Text>
+      <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere' }} data-inspector-row-where="">
+        {where}
+      </Text>
+      <Group gap="xs">
+        <Badge size="xs" variant="default" radius="sm" tt="none">
+          {`${t('audit.origin')}: ${item.origin ?? ''}`}
+        </Badge>
+      </Group>
+    </div>
+  );
+}
+
+/**
+ * Літеральні ключі для сторожа каталогу. Наявні тексти «Row added» / «Row deleted» (ru/kz у каталозі) — ті самі
+ * слова, що й тут; окремих ключів інспектора не заводимо. Невідома дія — сирий код.
+ */
+function rowActionLabel(action: string): string {
+  switch (action) {
+    case 'RowAdded':
+      return t('permits.page.row.added');
+    case 'RowDeleted':
+      return t('permits.page.row.deleted');
+    default:
+      return action;
+  }
 }
 
 /** Імʼя виконавця: людина - імʼя, система - локалізований підпис. */

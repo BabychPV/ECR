@@ -2221,6 +2221,19 @@ public interface IAuditWriter
 }
 ```
 
+#### `IRowChangeAudit`
+
+Журнал додавання й видалення рядків таблиць документа (`aud.RowChange`, `11-audit-tables.sql`): запис — у ТІЙ САМІЙ транзакції, що й зміна рядка (POST row, DELETE row, нові рядки PATCH і книги Excel); читання — третє джерело журналу аркуша (`SheetActivityQuery`, тег 2) з межами читання за видимими таблицями до `TOP`. Окремий порт, а не метод `IAuditWriter`, щоб обгортки того порту в тестах не мусили знати про новий журнал. `Action` 3 (`Restored`) зарезервовано — шляху відновлення рядка ще немає.
+
+```csharp
+public interface IRowChangeAudit
+{
+    public Task WriteRowChangesAsync(IReadOnlyList<RowChangeRecord> changes, CancellationToken ct);
+    public Task<IReadOnlyList<RowChangeView>> ReadRowChangesAsync(
+        RowChangeFilter filter, int take, (DateTime At, long Id)? after, CancellationToken ct);
+}
+```
+
 #### `ICalculationRunner`
 
 Виконавець прогону розрахунку.
