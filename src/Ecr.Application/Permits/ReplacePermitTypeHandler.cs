@@ -42,6 +42,16 @@ public sealed class ReplacePermitTypeHandler(
 
         var profile = await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         var userId = SaveRegistryDefinitionHandler.RequireUser(currentUser);
+        return await ApplyAsync(code, request, new PermitTypeActor(userId, profile, currentUser.CorrelationId), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>✎ AIRSYS01: те саме без перевірки прав (автора перевірив викликач або це система); доменні перевірки ті самі.</summary>
+    internal async Task<PermitTypeDto> ApplyAsync(string code, ReplacePermitTypeRequest request, PermitTypeActor actor, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(actor);
+        var profile = actor.Profile;
+        var userId = actor.UserId;
 
         var type = await permits.FindByCodeAsync(code, ct).ConfigureAwait(false);
         if (type is null || RegistryAccess.IsDenied(profile, type.HeaderRegistryDefId))
@@ -124,6 +134,15 @@ public sealed class OpenPermitTypeVersionHandler(
     {
         var profile = await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         var userId = SaveRegistryDefinitionHandler.RequireUser(currentUser);
+        return await ApplyAsync(code, new PermitTypeActor(userId, profile, currentUser.CorrelationId), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>✎ AIRSYS01: те саме без перевірки прав (автора перевірив викликач або це система).</summary>
+    internal async Task<PermitTypeDto> ApplyAsync(string code, PermitTypeActor actor, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        var profile = actor.Profile;
+        var userId = actor.UserId;
 
         var type = await permits.FindByCodeAsync(code, ct).ConfigureAwait(false);
         if (type is null || RegistryAccess.IsDenied(profile, type.HeaderRegistryDefId))

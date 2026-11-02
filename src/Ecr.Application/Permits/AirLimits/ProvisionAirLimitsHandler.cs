@@ -47,9 +47,18 @@ public sealed partial class ProvisionAirLimitsHandler(
     public async Task<AirLimitsProvisionReport> HandleAsync(CancellationToken ct)
     {
         // Both permissions up front: an already provisioned type must not answer an unprivileged caller.
-        await Security.PermissionCheck.RequireAsync(access, currentUser, CreatePermitTypeHandler.Permission, ct).ConfigureAwait(false);
+        var profile = await Security.PermissionCheck.RequireAsync(access, currentUser, CreatePermitTypeHandler.Permission, ct).ConfigureAwait(false);
         await Security.PermissionCheck.RequireAsync(access, currentUser, PublishPermitTypeHandler.Permission, ct).ConfigureAwait(false);
+        var userId = currentUser.UserId ?? throw new InvalidOperationException("No user.");
+        return await ProvisionAsync(new PermitTypeActor(userId, profile, currentUser.CorrelationId), ct).ConfigureAwait(false);
+    }
 
+    /// <summary>
+    /// ✎ AIRSYS01: the same provisioning for an author already checked by the caller, or for the SYSTEM (deploy-time, like the
+    /// seed — only <see cref="AirTypeSystemProvisioner"/>, which only the startup step calls).
+    /// </summary>
+    internal async Task<AirLimitsProvisionReport> ProvisionAsync(PermitTypeActor actor, CancellationToken ct)
+    {
         // Prerequisites FIRST (Permites, fresh stand): the shared registries the tables point at. Before this check a missing
         // registry failed inside the replace step and left a draft type behind. The Area registry AIR_AREA is ours (created below
         // when absent).
@@ -85,14 +94,14 @@ public sealed partial class ProvisionAirLimitsHandler(
             {
                 created = false;
                 profileCreated = false;
-                await EnsureAreaRegistryAsync(token).ConfigureAwait(false);
+                await EnsureAreaRegistryAsync(actor, token).ConfigureAwait(false);
                 type = await permits.FindByCodeAsync(AirLimitsSchema.TypeCode, token).ConfigureAwait(false);
 
                 if (type is null)
                 {
                     // A stand without the Land «Air emission permit» type: AIR is created with the sources tables only.
-                    _ = await create.HandleAsync(
-                        new CreatePermitTypeRequest(AirLimitsSchema.TypeCode, content.NameL10n, content.Category), token).ConfigureAwait(false);
+                    _ = await create.ApplyAsync(
+                        new CreatePermitTypeRequest(AirLimitsSchema.TypeCode, content.NameL10n, content.Category), actor, token).ConfigureAwait(false);
                     created = true;
                     type = (await permits.FindByCodeAsync(AirLimitsSchema.TypeCode, token).ConfigureAwait(false))!;
                 }
@@ -102,7 +111,7 @@ public sealed partial class ProvisionAirLimitsHandler(
                     // Never published: its draft (if any) is the base; the sources tables are appended, nothing else changes.
                     var draft = type.DraftJson is { Length: > 0 } json ? PermitTypeCodec.Parse(json) : null;
                     var merged = draft is null ? content : AirLimitsSchema.WithSourcesTables(draft, settings, regionAsText) ?? draft;
-                    await ReplaceAndPublishAsync(type, merged, token).ConfigureAwait(false);
+                    await ReplaceAndPublishAsync(type, merged, actor, token).ConfigureAwait(false);
                 }
                 else
                 {
@@ -124,9 +133,9 @@ public sealed partial class ProvisionAirLimitsHandler(
                             return;
                         }
 
-                        _ = await openVersion.HandleAsync(AirLimitsSchema.TypeCode, token).ConfigureAwait(false);
+                        _ = await openVersion.ApplyAsync(AirLimitsSchema.TypeCode, actor, token).ConfigureAwait(false);
                         type = (await permits.FindByCodeAsync(AirLimitsSchema.TypeCode, token).ConfigureAwait(false))!;
-                        await ReplaceAndPublishAsync(type, merged, token).ConfigureAwait(false);
+                        await ReplaceAndPublishAsync(type, merged, actor, token).ConfigureAwait(false);
                     }
                 }
 
@@ -137,7 +146,7 @@ public sealed partial class ProvisionAirLimitsHandler(
 
                 if (await profiles.FindAsync(sources.Id, AirLimitsSchema.ProfileCode, token).ConfigureAwait(false) is null)
                 {
-                    var userId = currentUser.UserId ?? throw new InvalidOperationException("No user.");
+                    var userId = actor.AuditUserId;
                     profiles.Add(new RegistryImportProfile(
                         sources.Id,
                         EcrCode.Create(AirLimitsSchema.ProfileCode),
@@ -167,14 +176,15 @@ public sealed partial class ProvisionAirLimitsHandler(
             profileCreated);
     }
 
-    private async Task ReplaceAndPublishAsync(PermitTypeDef type, PermitTypeContent content, CancellationToken ct)
+    private async Task ReplaceAndPublishAsync(PermitTypeDef type, PermitTypeContent content, PermitTypeActor actor, CancellationToken ct)
     {
-        var saved = await replace.HandleAsync(
+        var saved = await replace.ApplyAsync(
             AirLimitsSchema.TypeCode,
             new ReplacePermitTypeRequest(Convert.ToBase64String(type.RowVersion), content.NameL10n, content.Category, content.Tables, content.Rules),
+            actor,
             ct).ConfigureAwait(false);
-        _ = await publish.HandleAsync(
-            AirLimitsSchema.TypeCode, new PublishPermitTypeRequest("Air emission parameters: provisioning", saved.RowVersion), ct).ConfigureAwait(false);
+        _ = await publish.ApplyAsync(
+            AirLimitsSchema.TypeCode, new PublishPermitTypeRequest("Air emission parameters: provisioning", saved.RowVersion), actor, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -185,7 +195,7 @@ public sealed partial class ProvisionAirLimitsHandler(
     /// ⚠ Here and not in <c>seed/features/*.sql</c>: a feature seed file may hold only UI strings (<c>#I18N</c>/<c>#UiChanged</c>/
     /// <c>#UiRemoved</c>), and registry data of a permit type is created by its provisioning, like the type's own registries.
     /// </remarks>
-    private async Task EnsureAreaRegistryAsync(CancellationToken ct)
+    private async Task EnsureAreaRegistryAsync(PermitTypeActor actor, CancellationToken ct)
     {
         if (settings.AreaRegistryCode != AirLimitsSchema.DefaultAreaRegistry
             || await registries.FindDefinitionAsync(settings.AreaRegistryCode, ct).ConfigureAwait(false) is not null)
@@ -193,7 +203,7 @@ public sealed partial class ProvisionAirLimitsHandler(
             return;
         }
 
-        var userId = currentUser.UserId ?? throw new InvalidOperationException("No user.");
+        var userId = actor.AuditUserId;
         var def = new RegistryDef(
             EcrCode.Create(settings.AreaRegistryCode),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Air permit areas", ["ru"] = "Районы разрешений на выбросы", ["kz"] = "Шығарынды рұқсаттарының аудандары" }),

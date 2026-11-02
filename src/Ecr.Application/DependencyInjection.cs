@@ -67,6 +67,7 @@ public static class DependencyInjection
         services.AddScoped<Permits.AirLimits.GetAirScopeCodesHandler>();
         services.AddScoped<Permits.AirLimits.AirScopeColumns>();
         services.AddScoped<Permits.AirLimits.GetAirScopeFieldsHandler>();
+        services.AddScoped<Permits.AirLimits.AirTypeSystemProvisioner>();
         services.AddScoped<PatchPresentationHandler>();
         services.AddScoped<ReplaceHeaderGroupsHandler>();
 
