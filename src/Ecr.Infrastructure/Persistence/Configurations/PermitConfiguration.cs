@@ -22,11 +22,12 @@ public sealed class PermitTypeDefConfiguration : IEntityTypeConfiguration<Permit
             t.HasCheckConstraint("CK_PermitType_Category", "Category BETWEEN 0 AND 3");
             t.HasCheckConstraint("CK_PermitType_Status", "Status BETWEEN 0 AND 1");
 
-            // Публікація без моменту й автора — стан, якого не має бути ніколи
-            // (за зразком CK_TV_Published).
+            // Публікація без моменту — стан, якого не має бути ніколи (за зразком CK_TV_Published).
+            // ✎ AIRSYS01 (координатор 02.11): автор може бути відсутній — це СИСТЕМА (дія розгортання, як сід: крок старту
+            // AirTypeStartupStep), у читачів — «system». FK на sec.User лишаються й допускають NULL.
             t.HasCheckConstraint(
                 "CK_PermitType_Published",
-                "Status <> 1 OR (PublishedAt IS NOT NULL AND PublishedByUserId IS NOT NULL)");
+                "Status <> 1 OR PublishedAt IS NOT NULL");
         });
         builder.HasKey(x => x.Id).HasName("PK_PermitTypeDef");
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();

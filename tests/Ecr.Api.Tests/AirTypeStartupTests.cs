@@ -97,16 +97,77 @@ public sealed class AirTypeStartupTests
             var areas = await AreaEntriesAsync(database);
             Assert.Equal(["OFFSHORE|Offshore|Морской|Теңіздегі", "ONSHORE|Onshore|Наземный|Құрлықтағы"], areas);
 
-            // 4. Twice in a row: the second start changes nothing.
+            // ✎ AIRSYS01: the new version is the SYSTEM's — no user on the type row, 0 «system» in the audit trail, «system» in
+            // the type list; no real user id for this publication.
+            var (publishedBy, updatedBy, publishAudit) = await AuthorsAsync(database);
+            Assert.Null(publishedBy);
+            Assert.Null(updatedBy);
+            Assert.Equal(0, publishAudit[^1]);
+            using (var app = new EcrApiFactory(database))
+            {
+                using var admin = await SignedInAsync(app, database);
+                var list = await ReadAsync(app, await admin.GetAsync(new Uri("/api/v1/permit-types?limit=50", UriKind.Relative)));
+                var air = list.GetProperty("items").EnumerateArray().Single(t => t.GetProperty("code").GetString() == "AIR");
+                Assert.Equal("system", air.GetProperty("updatedByDisplayName").GetString());
+
+                // The HTTP fallback keeps both permissions.
+                using var reader = await SignedInAsync(app, database, ["Registry.View"]);
+                Assert.Equal(HttpStatusCode.Forbidden, (await reader.PostAsync(new Uri("/api/v1/air-limits/provision", UriKind.Relative), null)).StatusCode);
+            }
+
+            // 4. Twice in a row: the second start changes nothing (the version is appended once, the Land table stays).
             var again = await StartAndReadAirAsync(database);
             Assert.Equal(provisioned.GetProperty("version").GetInt32(), again.GetProperty("version").GetInt32());
+            Assert.Equal(afterDraft.GetProperty("version").GetInt32() + 2, again.GetProperty("version").GetInt32());
+            Assert.Contains("EMISSION_LIMITS", Tables(again));
             Assert.Equal(areas, await AreaEntriesAsync(database));
+            Assert.Equal(publishAudit.Count, (await AuthorsAsync(database)).PublishAudit.Count);
         }
         finally
         {
             await database.DisposeAsync();
             await DropAsync(database);
         }
+    }
+
+    /// <summary>✎ AIRSYS01: the system path is reachable from the startup step only — no controller takes it.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public void No_controller_reaches_the_system_provisioner()
+    {
+        var controllers = typeof(Program).Assembly.GetTypes()
+            .Where(t => typeof(Microsoft.AspNetCore.Mvc.ControllerBase).IsAssignableFrom(t) && !t.IsAbstract);
+        var offenders = controllers
+            .Where(c => c.GetConstructors().SelectMany(k => k.GetParameters())
+                .Any(p => p.ParameterType == typeof(AirTypeSystemProvisioner)))
+            .Select(c => c.Name)
+            .ToList();
+
+        Assert.NotEmpty(controllers);
+        Assert.Empty(offenders);
+    }
+
+    /// <summary>Authors of the AIR type row and the audit authors of its publications (oldest first).</summary>
+    private static async Task<(int? PublishedBy, int? UpdatedBy, List<int> PublishAudit)> AuthorsAsync(SqlServerFixture database)
+    {
+        await using var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(database.ConnectionString).Options);
+        var type = await db.PermitTypeDefs.AsNoTracking().SingleAsync(t => t.Code == "AIR");
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(database.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT ChangedByUserId FROM aud.StructureChange WHERE EntityType = N'cfg.PermitTypeDef' AND EntityId = @id AND Operation = N'PublishPermitType' ORDER BY ChangedAt, Id";
+        command.Parameters.AddWithValue("@id", type.Id);
+        var ids = new List<int>();
+        await using (var reader = await command.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                ids.Add(Convert.ToInt32(reader.GetValue(0), System.Globalization.CultureInfo.InvariantCulture));
+            }
+        }
+
+        return (type.PublishedByUserId, type.UpdatedByUserId, ids);
     }
 
     private static object LimitsTable() => new
@@ -146,7 +207,7 @@ public sealed class AirTypeStartupTests
             .Order(StringComparer.Ordinal)];
     }
 
-    private static async Task<HttpClient> SignedInAsync(EcrApiFactory app, SqlServerFixture database)
+    private static async Task<HttpClient> SignedInAsync(EcrApiFactory app, SqlServerFixture database, string[]? permissions = null)
     {
         var name = $"airs_{Guid.NewGuid():N}"[..20];
         await using (var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(database.ConnectionString).Options))
@@ -158,7 +219,7 @@ public sealed class AirTypeStartupTests
             var role = new Role(EcrCode.Create($"R{Guid.NewGuid():N}"[..12]), new LocalizedText(new Dictionary<string, string> { ["en"] = "Air startup test" }));
             db.Roles.Add(role);
             await db.SaveChangesAsync();
-            foreach (var permission in Admin)
+            foreach (var permission in permissions ?? Admin)
             {
                 db.RolePermissions.Add(new RolePermission(role.Id, permission));
             }
