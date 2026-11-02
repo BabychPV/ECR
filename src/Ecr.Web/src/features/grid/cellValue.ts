@@ -6,7 +6,7 @@ import { formatDate, formatLocale, normalizeDecimal } from '@/shared/format';
 // переліком дозволених на запис, бо його того ж дня правила сусідня сесія.
 // Правило теки дотримано по суті: `Intl` лишився всередині `shared/format`,
 // сюди приходить готова функція. Рядок у бар'єл — перший пункт «далі».
-import { formatDecimal } from '@/shared/format/number';
+import { displayPaddingOf, formatDecimal } from '@/shared/format/number';
 
 /**
  * Значення комірки, коли `decimal` приходить РЯДКОМ (коміт `e470777a`).
@@ -252,9 +252,7 @@ export function cellDisplay(value: unknown, column: ColumnDto): string {
 
   if (!isNumericColumn(column)) return String(value);
 
-  const scale = displayScaleOf(column);
-
-  return formatDecimal(value, undefined, undefined, scale ?? 0) ?? String(value);
+  return formatDecimal(value, undefined, undefined, displayPaddingOf(column.scale)) ?? String(value);
 }
 
 /**
@@ -292,23 +290,6 @@ export function cellDisplayMemo(column: ColumnDto): (value: unknown) => string {
 }
 
 const DisplayMemoLimit = 8192;
-
-/**
- * Скільки знаків після коми ПОКАЗУВАТИ щонайменше — формат комірки, як у Excel:
- * `1.5` при `scale = 4` → `1.5000`.
- *
- * ⛔ Лише показ. Значення в рядку, редактор, `pendingStore`, тіло PATCH і буфер
- * (`cellText`) нулів не отримують — вони йдуть від сирого значення, не від
- * цього шаблону.
- *
- * ⚠ Колонка без масштабу — `null`: доповнення немає. Довший дріб НЕ
- * обрізається (`U-05`, коментар `cellDisplay`): `scale` — нижня межа подачі.
- */
-function displayScaleOf(column: ColumnDto): number | null {
-  const scale = column.scale;
-
-  return typeof scale === 'number' && Number.isInteger(scale) && scale >= 0 ? scale : null;
-}
 
 /**
  * Календарна дата `yyyy-MM-dd` із запису комірки `Date`; `null` — не дата або

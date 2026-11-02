@@ -1,4 +1,4 @@
-import { formatDate, formatDecimal } from '@/shared/format';
+import { displayPaddingOf, formatDate, formatDecimal } from '@/shared/format';
 
 /** Типи колонок, чиє значення — число (`U-05`: одне правило подачі числа). */
 export const NumericTypes: readonly string[] = ['Decimal', 'Int', 'Formula', 'Calculated'];
@@ -29,9 +29,7 @@ export function auditValueText(
   if (dataType === null || dataType === undefined) return value;
 
   if (NumericTypes.includes(dataType)) {
-    const minimum = typeof scale === 'number' && Number.isInteger(scale) && scale >= 0 ? scale : 0;
-
-    return formatDecimal(value, undefined, undefined, minimum) ?? value;
+    return formatDecimal(value, undefined, undefined, displayPaddingOf(scale)) ?? value;
   }
 
   if (dataType === 'Date') {

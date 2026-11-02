@@ -16,7 +16,7 @@
 export { formatLocale } from './locale';
 export { formatDate, formatDateTime, formatTime, type DateLike } from './datetime';
 export { formatDateOnly, parseDateOnly, todayDateOnly } from './dateOnly';
-export { formatDecimal, formatNumber } from './number';
+export { displayPaddingOf, formatDecimal, formatNumber, MaxPaddedScale } from './number';
 export { formatCount, pluralCategory, type PluralCategory } from './plural';
 export { formatMonthName, formatMonthYear } from './period';
 export { formatPeriodKey } from './periodKey';
