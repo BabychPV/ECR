@@ -1711,7 +1711,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_PermitType_Category", "Category BETWEEN 0 AND 3");
 
-                            t.HasCheckConstraint("CK_PermitType_Published", "Status <> 1 OR (PublishedAt IS NOT NULL AND PublishedByUserId IS NOT NULL)");
+                            t.HasCheckConstraint("CK_PermitType_Published", "Status <> 1 OR PublishedAt IS NOT NULL");
 
                             t.HasCheckConstraint("CK_PermitType_Status", "Status BETWEEN 0 AND 1");
                         });
