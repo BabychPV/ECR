@@ -1,0 +1,10 @@
+-- COLL:p2-t2 ── ru/kz тестувального проходу №2 (T2-03); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0409.relationCodeTaken', N'ru', N'Связь таблиц с кодом «{relationCode}» уже существует. Коды связей уникальны во всех шаблонах и версиях: выберите другой код.'),
+    (N'err.ECR-TMPL-0409.relationCodeTaken', N'kz', N'«{relationCode}» кодты кесте байланысы бұрыннан бар. Байланыс кодтары барлық үлгілер мен нұсқалар бойынша бірегей: басқа код таңдаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:p2-t2 ── кінець секції ──
