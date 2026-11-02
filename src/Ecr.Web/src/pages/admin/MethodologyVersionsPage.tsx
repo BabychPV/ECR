@@ -44,6 +44,7 @@ import {
   type FormulaDraft,
 } from '@/features/methodologies/draft';
 import { useDeleteVersionAction } from '@/features/methodologies/DeleteVersionAction';
+import { DerivedArguments } from '@/features/methodologies/DerivedArguments';
 import { MethodologySection } from '@/features/methodologies/MethodologySection';
 import { VersionDiffModal } from '@/features/methodologies/VersionDiffModal';
 import { showPublishError } from '@/features/methodologies/publishError';
@@ -532,7 +533,7 @@ export function MethodologyVersionsPage(): JSX.Element {
                     expression: '',
                     resultType: 'Number',
                     outputUnitId: null,
-                    argumentsCsv: '',
+                    arguments: [],
                     isNew: true,
                   });
                   setExpressionErrors(null);
@@ -592,7 +593,7 @@ export function MethodologyVersionsPage(): JSX.Element {
                                   expression: formula.expression,
                                   resultType: formula.resultType,
                                   outputUnitId: formula.outputUnitId,
-                                  argumentsCsv: formula.argumentsCsv ?? '',
+                                  arguments: formula.arguments,
                                   isNew: false,
                                 });
                                 setExpressionErrors(null);
@@ -893,18 +894,9 @@ export function MethodologyVersionsPage(): JSX.Element {
               }
             />
 
-            {/* ⛔ Оголошений список аргументів. Доти його не було чим
-                заповнити, і звірка пастки 2 (`ECR-CALC-0432`) отримувала
-                `null` на кожній формулі й мовчала: перевірка була написана,
-                покрита тестами й недосяжна. */}
-            <TextInput
-              label={t('methodologies.arguments')}
-              description={`${t('methodologies.argumentsHint')} ${t('methodologies.argumentsOptionalHint')}`}
-              value={editing.argumentsCsv}
-              onChange={(event) =>
-                setEditing({ ...editing, argumentsCsv: event.currentTarget.value })
-              }
-            />
+            {/* ✎ 2026-11-02 (похідні аргументи): поля «Declared arguments» більше немає — список
+                виводить сервер із виразу; необов'язковий аргумент — `@Name?` у самому виразі. */}
+            <DerivedArguments items={editing.arguments} />
 
             {/*
              * ⛔ `GET /api/v1/units` збирався через `?? []`, і його відмова

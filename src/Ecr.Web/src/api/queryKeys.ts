@@ -162,6 +162,9 @@ const methodologies = {
   /** Константи версії (`ФВ-16.1`). */
   constants: (versionId: number) => ['methodologies', 'constants', versionId] as const,
 
+  /** Перелік категорій констант версії (план CONST-CATEGORY). */
+  categories: (versionId: number) => ['methodologies', 'categories', versionId] as const,
+
   /** Правила відбору рядків (`ФВ-13.3`). */
   rules: (versionId: number) => ['methodologies', 'rules', versionId] as const,
 

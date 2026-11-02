@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import { loadCatalog } from '@/shared/i18n';
 import { testTheme } from '@/test/render';
 
@@ -159,7 +160,10 @@ async function show(panel: Panel): Promise<void> {
 
   render(
     <MantineProvider theme={testTheme}>
-      <QueryClientProvider client={client}>{body}</QueryClientProvider>
+      <QueryClientProvider client={client}>
+        {/* План CONST-CATEGORY: фільтр категорії констант живе в адресі — потрібен роутер. */}
+        <MemoryRouter>{body}</MemoryRouter>
+      </QueryClientProvider>
     </MantineProvider>,
   );
 }

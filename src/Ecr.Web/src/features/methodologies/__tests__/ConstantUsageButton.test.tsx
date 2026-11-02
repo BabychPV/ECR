@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import { testTheme } from '@/test/render';
 
 /**
@@ -56,6 +57,10 @@ function mockApi(usageTotal: number): void {
         return json([Constant]);
       }
 
+      if (url.includes('/api/v1/methodologies/1/versions/2/categories')) {
+        return json([]);
+      }
+
       throw new Error(`Немає мока для ${url}`);
     }),
   );
@@ -68,7 +73,10 @@ async function show(editable: boolean): Promise<void> {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
-        <panels.MethodologyConstantsPanel methodologyId={1} versionId={2} editable={editable} />
+        {/* План CONST-CATEGORY: фільтр категорії живе в адресі — панелі потрібен роутер. */}
+        <MemoryRouter>
+          <panels.MethodologyConstantsPanel methodologyId={1} versionId={2} editable={editable} />
+        </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   );

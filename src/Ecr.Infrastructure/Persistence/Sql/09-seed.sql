@@ -795,6 +795,10 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- COLL:ui-methodology-categories: похідні аргументи (2026-11-02) — «оголошеного аргументу» більше немає, необов'язковий вхід пишеться @Name?.
+    (N'methodologies.syntaxHelp.refArgument', N'en', N'An input of the formula: a column of the bound row or a declared argument. The name may contain dots.', N'An input of the formula: a column of the bound row. The name may contain dots; @Name? marks an optional input.'),
+    (N'methodologies.syntaxHelp.refArgument', N'ru', N'Входное значение формулы: колонка связанной строки или объявленный аргумент. Имя может содержать точки.', N'Входное значение формулы: колонка связанной строки. Имя может содержать точки; @Name? помечает необязательное входное значение.'),
+    (N'methodologies.syntaxHelp.refArgument', N'kz', N'Формуланың кіріс мәні: байланысқан жолдың бағаны немесе жарияланған аргумент. Атауда нүктелер болуы мүмкін.', N'Формуланың кіріс мәні: байланысқан жолдың бағаны. Атауда нүктелер болуы мүмкін; @Name? міндетті емес кіріс мәнін белгілейді.'),
     -- NAE: вивід з ужитку лише закриває validTo - повторне використання бізнес-ключа вимагає НОВОГО вузла з вікном ПІСЛЯ старого.
     (N'err.ECR-REG-4092.keyTaken', N'en', N'Another entry ({entryCode}) already has {key} = {keyText}.', N'Another entry ({entryCode}) already has {key} = {keyText}. If that entry is retired, create a NEW entry whose validity window starts AFTER the old one ends.'),
     (N'err.ECR-REG-4092.keyTaken', N'ru', N'У другой записи ({entryCode}) уже есть {key} = {keyText}.', N'У другой записи ({entryCode}) уже есть {key} = {keyText}. Если она выведена из употребления, создайте НОВУЮ запись, срок действия которой начинается ПОСЛЕ окончания срока старой.'),
@@ -10089,7 +10093,7 @@ USING (VALUES
     ,(N'methodologies.syntaxHelp.toggle', N'en', N'Syntax help', 1)
     ,(N'methodologies.syntaxHelp.intro', N'en', N'Methodology formulas use their own dialect. Below is what the server accepts; it checks the formula again when you save it.', 1)
     ,(N'methodologies.syntaxHelp.references', N'en', N'References', 1)
-    ,(N'methodologies.syntaxHelp.refArgument', N'en', N'An input of the formula: a column of the bound row or a declared argument. The name may contain dots.', 1)
+    ,(N'methodologies.syntaxHelp.refArgument', N'en', N'An input of the formula: a column of the bound row. The name may contain dots; @Name? marks an optional input.', 1)
     ,(N'methodologies.syntaxHelp.refConstant', N'en', N'A constant of this methodology version that is valid in the document period.', 1)
     ,(N'methodologies.syntaxHelp.refFormula', N'en', N'The result of another formula of this version. Not followed by a name, "!" means logical NOT: !(…), !@Flag.', 1)
     ,(N'methodologies.syntaxHelp.refHeader', N'en', N'A field of the document header.', 1)
@@ -10127,6 +10131,46 @@ USING (VALUES
     ,(N'methodologies.syntaxHelp.exModulo', N'en', N'The remainder of a division', 1)
     ,(N'methodologies.syntaxHelp.exLogic', N'en', N'Two conditions at once', 1)
     -- COLL:ui-methodology ── кінець секції ──
+    -- COLL:ui-methodology-categories ── сторінка версії методології: категорії констант зі списку, похідні аргументи (lane/integ-methodology-rc); ru/kz — порцією COLL:ui-methodology-categories нижче ──
+    ,(N'methodologies.categoryShared', N'en', N'Shared', 1)
+    ,(N'methodologies.categoryFilter', N'en', N'Filter by category', 1)
+    ,(N'methodologies.categoryFilterAll', N'en', N'All categories', 1)
+    ,(N'methodologies.categoryFilterNoMatch', N'en', N'No constants match this category.', 1)
+    ,(N'methodologies.categoryPickHint', N'en', N'Pick a category from the list of this version: the category rule returns exactly this code. Leave empty for a constant shared by all categories.', 1)
+    ,(N'methodologies.categorySharedOption', N'en', N'Shared (no category)', 1)
+    ,(N'methodologies.categoryNothingFound', N'en', N'No such category in the list', 1)
+    ,(N'methodologies.constCategories.manage', N'en', N'Categories', 1)
+    ,(N'methodologies.constCategories.title', N'en', N'Constant categories', 1)
+    ,(N'methodologies.constCategories.intro', N'en', N'The category rule returns one of these codes, and a constant with exactly that category is used instead of the shared one. Codes are not renamed: add a new category, move the constants to it and retire the old one.', 1)
+    ,(N'methodologies.constCategories.description', N'en', N'Description', 1)
+    ,(N'methodologies.constCategories.constantCount', N'en', N'Constants', 1)
+    ,(N'methodologies.constCategories.state', N'en', N'State', 1)
+    ,(N'methodologies.constCategories.actions', N'en', N'Actions', 1)
+    ,(N'methodologies.constCategories.retired', N'en', N'retired', 1)
+    ,(N'methodologies.constCategories.notInList', N'en', N'not in the list', 1)
+    ,(N'methodologies.constCategories.editAria', N'en', N'Edit category {code}', 1)
+    ,(N'methodologies.constCategories.retire', N'en', N'Retire', 1)
+    ,(N'methodologies.constCategories.restore', N'en', N'Restore', 1)
+    ,(N'methodologies.constCategories.confirmDelete', N'en', N'Confirm removal', 1)
+    ,(N'methodologies.constCategories.inUseHint', N'en', N'Used by {count} constant(s): move them to another category first.', 1)
+    ,(N'methodologies.constCategories.empty', N'en', N'The list is empty. Add the category codes that the category rule returns.', 1)
+    ,(N'methodologies.constCategories.add', N'en', N'Add category', 1)
+    ,(N'methodologies.constCategories.cancelEdit', N'en', N'Cancel', 1)
+    ,(N'methodologies.constCategories.saved', N'en', N'Category saved', 1)
+    ,(N'methodologies.constCategories.deleted', N'en', N'Category removed', 1)
+    ,(N'methodologies.constCategories.readOnly', N'en', N'The list is read-only here: the version is published, or you have no right to edit constants.', 1)
+    ,(N'methodologies.derivedArguments', N'en', N'Arguments', 1)
+    ,(N'methodologies.derivedArgumentsHint', N'en', N'Derived from the expression when the formula is saved. Mark an optional input right in the expression: @Name? (a missing cell then counts as empty).', 1)
+    ,(N'methodologies.derivedArgumentsEmpty', N'en', N'Nothing yet: the list appears after the formula is saved.', 1)
+    ,(N'methodologies.derivedArgumentName', N'en', N'Name', 1)
+    ,(N'methodologies.derivedArgumentKind', N'en', N'Kind', 1)
+    ,(N'methodologies.derivedArgumentText', N'en', N'In the expression', 1)
+    ,(N'methodologies.derivedArgumentOptional', N'en', N'optional', 1)
+    ,(N'methodologies.derivedArgumentOptionalHint', N'en', N'Marked with ? in the expression: a missing cell counts as empty instead of an error.', 1)
+    ,(N'methodologies.argumentKind.input', N'en', N'Input', 1)
+    ,(N'methodologies.argumentKind.constant', N'en', N'Constant', 1)
+    ,(N'methodologies.argumentKind.formula', N'en', N'Formula', 1)
+    -- COLL:ui-methodology-categories ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -26693,8 +26737,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.syntaxHelp.intro', N'kz', N'Әдістеме формулаларының өз диалектісі бар. Төменде сервер қабылдайтыны көрсетілген; сақтаған кезде ол формуланы қайта тексереді.'),
     (N'methodologies.syntaxHelp.references', N'ru', N'Ссылки'),
     (N'methodologies.syntaxHelp.references', N'kz', N'Сілтемелер'),
-    (N'methodologies.syntaxHelp.refArgument', N'ru', N'Входное значение формулы: колонка связанной строки или объявленный аргумент. Имя может содержать точки.'),
-    (N'methodologies.syntaxHelp.refArgument', N'kz', N'Формуланың кіріс мәні: байланысқан жолдың бағаны немесе жарияланған аргумент. Атауда нүктелер болуы мүмкін.'),
+    (N'methodologies.syntaxHelp.refArgument', N'ru', N'Входное значение формулы: колонка связанной строки. Имя может содержать точки; @Name? помечает необязательное входное значение.'),
+    (N'methodologies.syntaxHelp.refArgument', N'kz', N'Формуланың кіріс мәні: байланысқан жолдың бағаны. Атауда нүктелер болуы мүмкін; @Name? міндетті емес кіріс мәнін белгілейді.'),
     (N'methodologies.syntaxHelp.refConstant', N'ru', N'Константа этой версии методологии, действующая в периоде документа.'),
     (N'methodologies.syntaxHelp.refConstant', N'kz', N'Құжат кезеңінде әрекет ететін осы әдістеме нұсқасының тұрақтысы.'),
     (N'methodologies.syntaxHelp.refFormula', N'ru', N'Результат другой формулы этой версии. Если сразу за ним нет имени, «!» означает логическое НЕ: !(…), !@Flag.'),
@@ -26771,6 +26815,91 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-methodology ── кінець секції ──
+-- COLL:ui-methodology-categories ── ru/kz: категорії констант зі списку, похідні аргументи; власна порція ──
+-- ⚠ kz — робочий переклад, на звірку термінологу.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'methodologies.categoryShared', N'ru', N'Общая'),
+    (N'methodologies.categoryShared', N'kz', N'Ортақ'),
+    (N'methodologies.categoryFilter', N'ru', N'Фильтр по категории'),
+    (N'methodologies.categoryFilter', N'kz', N'Санат бойынша сүзгі'),
+    (N'methodologies.categoryFilterAll', N'ru', N'Все категории'),
+    (N'methodologies.categoryFilterAll', N'kz', N'Барлық санаттар'),
+    (N'methodologies.categoryFilterNoMatch', N'ru', N'Нет констант с этой категорией.'),
+    (N'methodologies.categoryFilterNoMatch', N'kz', N'Бұл санатта константалар жоқ.'),
+    (N'methodologies.categoryPickHint', N'ru', N'Выберите категорию из перечня этой версии: правило категории возвращает именно этот код. Пусто — константа общая для всех категорий.'),
+    (N'methodologies.categoryPickHint', N'kz', N'Осы нұсқаның тізімінен санатты таңдаңыз: санат ережесі дәл осы кодты қайтарады. Бос болса — константа барлық санаттарға ортақ.'),
+    (N'methodologies.categorySharedOption', N'ru', N'Общая (без категории)'),
+    (N'methodologies.categorySharedOption', N'kz', N'Ортақ (санатсыз)'),
+    (N'methodologies.categoryNothingFound', N'ru', N'Такой категории в перечне нет'),
+    (N'methodologies.categoryNothingFound', N'kz', N'Тізімде мұндай санат жоқ'),
+    (N'methodologies.constCategories.manage', N'ru', N'Категории'),
+    (N'methodologies.constCategories.manage', N'kz', N'Санаттар'),
+    (N'methodologies.constCategories.title', N'ru', N'Категории констант'),
+    (N'methodologies.constCategories.title', N'kz', N'Константа санаттары'),
+    (N'methodologies.constCategories.intro', N'ru', N'Правило категории возвращает один из этих кодов, и константа именно с этой категорией используется вместо общей. Коды не переименовываются: добавьте новую категорию, перенесите в неё константы и выведите старую из употребления.'),
+    (N'methodologies.constCategories.intro', N'kz', N'Санат ережесі осы кодтардың бірін қайтарады, және дәл сол санаттағы константа ортақтың орнына қолданылады. Кодтар қайта аталмайды: жаңа санат қосып, константаларды соған ауыстырыңыз да, ескісін қолданыстан шығарыңыз.'),
+    (N'methodologies.constCategories.description', N'ru', N'Описание'),
+    (N'methodologies.constCategories.description', N'kz', N'Сипаттама'),
+    (N'methodologies.constCategories.constantCount', N'ru', N'Константы'),
+    (N'methodologies.constCategories.constantCount', N'kz', N'Константалар'),
+    (N'methodologies.constCategories.state', N'ru', N'Состояние'),
+    (N'methodologies.constCategories.state', N'kz', N'Күйі'),
+    (N'methodologies.constCategories.actions', N'ru', N'Действия'),
+    (N'methodologies.constCategories.actions', N'kz', N'Әрекеттер'),
+    (N'methodologies.constCategories.retired', N'ru', N'выведена из употребления'),
+    (N'methodologies.constCategories.retired', N'kz', N'қолданыстан шығарылған'),
+    (N'methodologies.constCategories.notInList', N'ru', N'нет в перечне'),
+    (N'methodologies.constCategories.notInList', N'kz', N'тізімде жоқ'),
+    (N'methodologies.constCategories.editAria', N'ru', N'Изменить категорию {code}'),
+    (N'methodologies.constCategories.editAria', N'kz', N'{code} санатын өңдеу'),
+    (N'methodologies.constCategories.retire', N'ru', N'Вывести из употребления'),
+    (N'methodologies.constCategories.retire', N'kz', N'Қолданыстан шығару'),
+    (N'methodologies.constCategories.restore', N'ru', N'Вернуть'),
+    (N'methodologies.constCategories.restore', N'kz', N'Қайтару'),
+    (N'methodologies.constCategories.confirmDelete', N'ru', N'Подтвердить удаление'),
+    (N'methodologies.constCategories.confirmDelete', N'kz', N'Жоюды растау'),
+    (N'methodologies.constCategories.inUseHint', N'ru', N'Используется {count} константами: сначала перенесите их в другую категорию.'),
+    (N'methodologies.constCategories.inUseHint', N'kz', N'{count} константа қолданады: алдымен оларды басқа санатқа ауыстырыңыз.'),
+    (N'methodologies.constCategories.empty', N'ru', N'Перечень пуст. Добавьте коды категорий, которые возвращает правило категории.'),
+    (N'methodologies.constCategories.empty', N'kz', N'Тізім бос. Санат ережесі қайтаратын санат кодтарын қосыңыз.'),
+    (N'methodologies.constCategories.add', N'ru', N'Добавить категорию'),
+    (N'methodologies.constCategories.add', N'kz', N'Санат қосу'),
+    (N'methodologies.constCategories.cancelEdit', N'ru', N'Отмена'),
+    (N'methodologies.constCategories.cancelEdit', N'kz', N'Болдырмау'),
+    (N'methodologies.constCategories.saved', N'ru', N'Категория сохранена'),
+    (N'methodologies.constCategories.saved', N'kz', N'Санат сақталды'),
+    (N'methodologies.constCategories.deleted', N'ru', N'Категория удалена'),
+    (N'methodologies.constCategories.deleted', N'kz', N'Санат жойылды'),
+    (N'methodologies.constCategories.readOnly', N'ru', N'Здесь перечень только для чтения: версия опубликована или у вас нет права изменять константы.'),
+    (N'methodologies.constCategories.readOnly', N'kz', N'Мұнда тізімді тек оқуға болады: нұсқа жарияланған немесе константаларды өзгертуге құқығыңыз жоқ.'),
+    (N'methodologies.derivedArguments', N'ru', N'Аргументы'),
+    (N'methodologies.derivedArguments', N'kz', N'Аргументтер'),
+    (N'methodologies.derivedArgumentsHint', N'ru', N'Выводятся из выражения при сохранении формулы. Необязательное входное значение помечается прямо в выражении: @Name? (отсутствующая ячейка тогда считается пустой).'),
+    (N'methodologies.derivedArgumentsHint', N'kz', N'Формула сақталғанда өрнектен шығарылады. Міндетті емес кіріс мәні өрнектің өзінде белгіленеді: @Name? (ұяшық болмаса, ол бос деп саналады).'),
+    (N'methodologies.derivedArgumentsEmpty', N'ru', N'Пока пусто: перечень появится после сохранения формулы.'),
+    (N'methodologies.derivedArgumentsEmpty', N'kz', N'Әзірге бос: тізім формула сақталғаннан кейін пайда болады.'),
+    (N'methodologies.derivedArgumentName', N'ru', N'Имя'),
+    (N'methodologies.derivedArgumentName', N'kz', N'Атауы'),
+    (N'methodologies.derivedArgumentKind', N'ru', N'Вид'),
+    (N'methodologies.derivedArgumentKind', N'kz', N'Түрі'),
+    (N'methodologies.derivedArgumentText', N'ru', N'В выражении'),
+    (N'methodologies.derivedArgumentText', N'kz', N'Өрнекте'),
+    (N'methodologies.derivedArgumentOptional', N'ru', N'необязательный'),
+    (N'methodologies.derivedArgumentOptional', N'kz', N'міндетті емес'),
+    (N'methodologies.derivedArgumentOptionalHint', N'ru', N'Помечен ? в выражении: отсутствующая ячейка считается пустой, а не ошибкой.'),
+    (N'methodologies.derivedArgumentOptionalHint', N'kz', N'Өрнекте ? белгісі бар: ұяшық болмаса, ол қате емес, бос деп саналады.'),
+    (N'methodologies.argumentKind.input', N'ru', N'Входное значение'),
+    (N'methodologies.argumentKind.input', N'kz', N'Кіріс мәні'),
+    (N'methodologies.argumentKind.constant', N'ru', N'Константа'),
+    (N'methodologies.argumentKind.constant', N'kz', N'Константа'),
+    (N'methodologies.argumentKind.formula', N'ru', N'Формула'),
+    (N'methodologies.argumentKind.formula', N'kz', N'Формула')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-methodology-categories ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
