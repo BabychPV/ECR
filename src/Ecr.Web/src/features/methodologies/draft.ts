@@ -1,8 +1,12 @@
+import type { components } from '@/api/schema';
 import type {
   FormulaResultType,
   MethodologyDraftVersionDto,
   SaveMethodologyFormulaRequest,
 } from '@/api/types';
+
+/** Елемент похідного списку аргументів формули (лише читання). */
+export type MethodologyFormulaArgumentDto = components['schemas']['MethodologyFormulaArgumentDto'];
 
 /**
  * Рішення конфігуратора методологій, які **не є розміткою** (`ФВ-9.15`).
@@ -30,18 +34,13 @@ export interface FormulaDraft {
   readonly outputUnitId: number | null;
 
   /**
-   * Оголошені аргументи — `;`-список, як у `FInfo_Arguments`.
+   * Аргументи формули — ПОХІДНІ від виразу, лише для показу (✎ 2026-11-02, похідні аргументи).
    *
-   * ⛔ Це **джерело істини про аргументи**, а не текст виразу (директива ПК-1
-   * №05 §7, пастка 2): збірка підставляє рівно перелічене, і токен поза
-   * списком у вираз не потрапляє — формула рахується з невизначеним
-   * параметром і повертає правдоподібне число, а не помилку.
-   *
-   * ⚠ Порожній рядок форми означає «списку немає» (`null` на сервері), а не
-   * «нуль аргументів»: другий стан оголошував би порушенням КОЖЕН токен
-   * виразу, і жодна формула корпусу не опублікувалася б.
+   * ⛔ Ручного списку більше немає: він розходився з виразом (7 формул Land з невжитими аргументами).
+   * Сервер виводить список із виразу на кожному записі; необов'язковий аргумент пишеться у виразі
+   * `@Name?`. Нова формула має тут порожній масив — список з'явиться після збереження.
    */
-  readonly argumentsCsv: string;
+  readonly arguments: readonly MethodologyFormulaArgumentDto[];
 
   /** Чи формула нова. */
   readonly isNew: boolean;
@@ -98,11 +97,7 @@ export function formulaBody(draft: FormulaDraft): SaveMethodologyFormulaRequest 
     resultType: draft.resultType,
     outputUnitId: draft.resultType === 'Text' ? null : draft.outputUnitId,
 
-    // ⛔ Порожнє поле форми — це `null`, «списку немає», а НЕ порожній список.
-    // Різниця не косметична: порожній список означає «формула не приймає
-    // нічого», і тоді кожен токен виразу стає порушенням (`ECR-CALC-0432`).
-    // Людина, яка просто не заповнила поле, отримала б відмову публікації на
-    // цілком робочій формулі.
-    argumentsCsv: draft.argumentsCsv.trim() === '' ? null : draft.argumentsCsv.trim(),
+    // ⛔ `argumentsCsv` НЕ надсилається: поле запиту застаріле (приймається один реліз лише заради
+    // маркерів `Name?` старих клієнтів), список аргументів сервер виводить із виразу сам.
   };
 }

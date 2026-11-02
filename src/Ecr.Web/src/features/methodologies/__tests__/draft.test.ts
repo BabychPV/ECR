@@ -77,7 +77,7 @@ describe('Конфігуратор методологій', () => {
       expression: "'Сверхнорматив'",
       resultType: 'Text',
       outputUnitId: 3,
-      argumentsCsv: '',
+      arguments: [],
       isNew: false,
     } as const;
 
@@ -92,30 +92,28 @@ describe('Конфігуратор методологій', () => {
     expect(formulaBody({ ...draft, resultType: 'Number' }).outputUnitId).toBe(3);
   });
 
-  it('пастка 2: порожнє поле аргументів — це «списку немає», а не «нуль аргументів»', () => {
+  it('похідні аргументи: тіло запиту НЕ несе argumentsCsv, хоч би що показував діалог', () => {
     const draft = {
       versionId: 5,
       code: 'gsec',
-      expression: '@Flow * CST.k1',
+      expression: '@Flow? * CST.k1',
       resultType: 'Number',
       outputUnitId: 3,
-      argumentsCsv: '',
-      isNew: true,
+      arguments: [
+        { kind: 'Argument', name: 'Flow', isOptional: true, text: '@Flow?' },
+        { kind: 'Constant', name: 'k1', isOptional: false, text: 'CST.k1' },
+      ],
+      isNew: false,
     } as const;
 
-    // ⛔ Порожній список означав би «формула не приймає нічого», і тоді КОЖЕН
-    // токен виразу є порушенням (`ECR-CALC-0432`). Людина, яка просто не
-    // заповнила поле, дістала б відмову публікації на цілком робочій формулі —
-    // і так було б із кожною формулою корпусу, бо колонка з'явилася порожньою
-    // в усіх рядків.
-    expect(formulaBody(draft).argumentsCsv).toBeNull();
+    // ⛔ ✎ 2026-11-02: список аргументів виводить сервер із виразу. Поле запиту застаріле й лишене
+    // ОДИН реліз заради маркерів `Name?` старих клієнтів; надіслати сюди показаний список означало б
+    // знову зробити ручний список джерелом істини — тим, що розходилося з виразом.
+    const body = formulaBody(draft);
+    expect('argumentsCsv' in body).toBe(false);
 
-    // ⚠ Пробіли по краях знімаються, а сам список іде як написано: заміну `.`
-    // на `_` і зняття регістру робить звірка на сервері, а не форма — інакше
-    // методолог бачив би в редакторі не те, що набрав.
-    expect(formulaBody({ ...draft, argumentsCsv: '  Flow;Land.Category ' }).argumentsCsv).toBe(
-      'Flow;Land.Category',
-    );
+    // Необов'язковість живе у ВИРАЗІ (`@Flow?`), і вираз іде як є.
+    expect(body.expression).toBe('@Flow? * CST.k1');
   });
 });
 
@@ -151,7 +149,7 @@ describe('Звернення конфігуратора методологій',
       expression: '@Flow * CST.k1',
       resultType: 'Number',
       outputUnitId: 3,
-      argumentsCsv: 'Flow',
+      arguments: [],
       isNew: false,
     });
 
@@ -167,7 +165,6 @@ describe('Звернення конфігуратора методологій',
       expression: '@Flow * CST.k1',
       resultType: 'Number',
       outputUnitId: 3,
-      argumentsCsv: 'Flow',
     });
   });
 

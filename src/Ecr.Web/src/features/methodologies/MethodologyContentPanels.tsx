@@ -37,6 +37,7 @@ import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import {
   calculationBindings,
+  methodologyCategories,
   methodologyConstants,
   methodologyOutputs,
   methodologyRequiredInputs,
@@ -54,10 +55,24 @@ import { ColumnDefPicker, savedColumnLabel } from './ColumnDefPicker';
 import { MethodologyConstantUsage } from './ConstantUsage';
 import { MethodologySection } from './MethodologySection';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
+import { useUrlState } from '@/shared/ui/useUrlState';
+import {
+  CategoriesDialogParam,
+  CategoryFilterParam,
+  categoryFilterOptions,
+  categoryOptions,
+  constantCategoryLabel,
+  filterConstantsByCategory,
+} from './constantCategories';
 
 /** A1-02: поле дати — за `import()` (`D-132`), той самий прийом, що `DocumentHeaderPanel`. */
 const DateOnlyInput = lazy(async () => ({
   default: (await import('@/shared/dates/DateInputWithStyles')).DateOnlyInput,
+}));
+
+/** План CONST-CATEGORY: діалог переліку категорій — власний чанк, відкривається рідко. */
+const MethodologyCategoriesDialog = lazy(async () => ({
+  default: (await import('./MethodologyCategoriesDialog')).MethodologyCategoriesDialog,
 }));
 
 /**
@@ -204,9 +219,20 @@ export function MethodologyConstantsPanel({
   // афордансу — на відміну від рядків без даних деінде).
   const [usageFor, setUsageFor] = useState<string | null>(null);
 
+  // План CONST-CATEGORY: фільтр категорії й відкритий діалог переліку — в адресі (`ФВ-14.29`).
+  const [categoryFilter, setCategoryFilter] = useUrlState(CategoryFilterParam);
+  const [categoriesDialog, setCategoriesDialog] = useUrlState(CategoriesDialogParam);
+
   const constants = useQuery({
     queryKey: queryKeys.methodologies.constants(versionId),
     queryFn: () => methodologyConstants(methodologyId, versionId),
+  });
+
+  // ⚠ Перелік категорій — і для фільтра, і для вибору в діалозі константи. Його відмова не ховає
+  // таблицю: фільтр бере коди й із самих констант, а діалог показує причину замість вибору.
+  const categories = useQuery({
+    queryKey: queryKeys.methodologies.categories(versionId),
+    queryFn: () => methodologyCategories(methodologyId, versionId),
   });
 
   const units = useQuery({
@@ -239,6 +265,8 @@ export function MethodologyConstantsPanel({
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.constants(versionId) });
+      // ⚠ Кількість констант під категорією змінилась — від неї залежить, чи можна її прибрати.
+      await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.categories(versionId) });
       setEditing(null);
       showDone(t('methodologies.constantSaved'));
     },
@@ -253,13 +281,39 @@ export function MethodologyConstantsPanel({
       sectionId="constants"
       title={t('methodologies.constants')}
       actions={
-        editable && (
-          <Button size="xs" variant="default" onClick={() => setEditing(emptyConstant)}>
-            {t('methodologies.addConstant')}
+        <Group gap="xs" wrap="wrap" justify="flex-end">
+          {/* План CONST-CATEGORY: перелік категорій бачить кожен, хто бачить версію; правити — лише чернетку. */}
+          <Button
+            size="xs"
+            variant="subtle"
+            data-testid="methodology-constants-categories"
+            onClick={() => setCategoriesDialog('1')}
+          >
+            {t('methodologies.constCategories.manage')}
           </Button>
-        )
+          {editable && (
+            <Button size="xs" variant="default" onClick={() => setEditing(emptyConstant)}>
+              {t('methodologies.addConstant')}
+            </Button>
+          )}
+        </Group>
       }
     >
+
+      {(constants.data?.length ?? 0) > 0 && (
+        <Select
+          id="methodology-constants-category-filter"
+          label={t('methodologies.categoryFilter')}
+          placeholder={t('methodologies.categoryFilterAll')}
+          clearable
+          searchable
+          size="xs"
+          maw={280}
+          value={categoryFilter}
+          data={categoryFilterOptions(categories.data ?? [], constants.data ?? [])}
+          onChange={(value) => setCategoryFilter(value)}
+        />
+      )}
 
       <AsyncBoundary<MethodologyConstantDto[]>
         isPending={constants.isPending}
@@ -271,11 +325,20 @@ export function MethodologyConstantsPanel({
         skeleton="table"
         onRetry={() => void constants.refetch()}
       >
-        {(list) => (
-          <Table striped withTableBorder>
+        {(all) => {
+          const list = filterConstantsByCategory(all, categoryFilter);
+          return list.length === 0 ? (
+            <Text size="sm" c="dimmed" data-testid="constants-filter-empty">
+              {t('methodologies.categoryFilterNoMatch')}
+            </Text>
+          ) : (
+          // ⚠ Сім колонок на 500 px не вміщаються: прокрутка — усередині таблиці, не сторінки.
+          <Table.ScrollContainer minWidth={720}>
+          <Table striped withTableBorder data-testid="methodology-constants">
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>{t('methodologies.code')}</Table.Th>
+                <Table.Th>{t('methodologies.category')}</Table.Th>
                 <Table.Th>{t('methodologies.constantKind')}</Table.Th>
                 <Table.Th>{t('methodologies.value')}</Table.Th>
                 <Table.Th>{t('methodologies.validFrom')}</Table.Th>
@@ -285,8 +348,17 @@ export function MethodologyConstantsPanel({
             </Table.Thead>
             <Table.Tbody>
               {list.map((constant) => (
-                <Table.Tr key={constant.id}>
+                <Table.Tr key={constant.id} data-constant-category={constant.category ?? ''}>
                   <Table.Td>{constant.code}</Table.Td>
+                  {/* План CONST-CATEGORY: рядки одного коду розрізняються категорією; порожня — «Shared». */}
+                  <Table.Td>
+                    <Text
+                      size="sm"
+                      {...(constant.category === null || constant.category === '' ? { c: 'dimmed' } : {})}
+                    >
+                      {constantCategoryLabel(constant.category)}
+                    </Text>
+                  </Table.Td>
                   {/* ⚠ F-29: вид — тим самим підписом, що й у діалозі («Number»),
                       а не сирим значенням переліку («Numeric»). */}
                   <Table.Td>{constantKindLabel(constant.kind)}</Table.Td>
@@ -353,8 +425,22 @@ export function MethodologyConstantsPanel({
               ))}
             </Table.Tbody>
           </Table>
-        )}
+          </Table.ScrollContainer>
+          );
+        }}
       </AsyncBoundary>
+
+      {categoriesDialog !== null && (
+        <Suspense fallback={null}>
+          <MethodologyCategoriesDialog
+            methodologyId={methodologyId}
+            versionId={versionId}
+            editable={editable}
+            opened
+            onClose={() => setCategoriesDialog(null)}
+          />
+        </Suspense>
+      )}
 
       <ResizableModal
         sizeKey="methodology.constant"
@@ -450,12 +536,29 @@ export function MethodologyConstantsPanel({
               />
             </Suspense>
 
-            <TextInput
-              label={t('methodologies.category')}
-              description={t('methodologies.categoryHint')}
-              value={editing.category}
-              onChange={(event) => setEditing({ ...editing, category: event.currentTarget.value })}
-            />
+            {/* ⛔ План CONST-CATEGORY: категорія — вибір із переліку версії, не вільний текст. Описка в
+                категорії тихо робила константу мертвою (правило повертає точний код). Порожньо = спільна. */}
+            <ChoiceField
+              error={categories.error}
+              isPending={categories.isPending}
+              onRetry={() => void categories.refetch()}
+            >
+              {(disabled) => (
+                <Select
+                  id="methodology-constant-category"
+                  label={t('methodologies.category')}
+                  description={t('methodologies.categoryPickHint')}
+                  placeholder={t('methodologies.categorySharedOption')}
+                  clearable
+                  searchable
+                  disabled={disabled}
+                  value={editing.category === '' ? null : editing.category}
+                  data={categoryOptions(categories.data ?? [], editing.category)}
+                  nothingFoundMessage={t('methodologies.categoryNothingFound')}
+                  onChange={(value) => setEditing({ ...editing, category: value ?? '' })}
+                />
+              )}
+            </ChoiceField>
 
             <TextInput
               label={t('methodologies.sourceRef')}
