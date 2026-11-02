@@ -15,14 +15,37 @@ import { axeViolations } from './axeRule';
  *   4. справжній axe `color-contrast` у світлій і темній темі на 1440 і 500 px, без горизонтальної
  *      прокрутки на 500 px; знімки в `ECR_E2E_SHOTS_DIR`.
  *
- * ⚠ Дані — свої: методологія `E2E_MCAT_<час>`, чернетка з двома константами й формулою. `afterAll`
- * видаляє чернетку (з нею — перелік категорій, константи й формулу) і повертає тему `e2e-admin` до
- * світлої; саму методологію API не видаляє — порожній залишок на одноразовому стенді (як
+ * ⚠ Дані — свої: методологія `E2E_MCAT_<час>`, чернетка з двома константами й формулою, тимчасові роль
+ * і користувач-методолог. `afterAll` повертає тему методолога до світлої, видаляє чернетку (з нею —
+ * перелік категорій, константи й формулу), знімає роль із користувача і видаляє роль; саму методологію API не видаляє — порожній залишок на одноразовому стенді (як
  * `methodologyUi.spec.ts`).
  *
  * Запуск (стенд — `tools/e2e-stand.ps1`): `npx playwright test -g "Methodology categories"`.
  */
 const Admin = { userName: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
+
+/**
+ * ⚠ Роль стенда `E2EAdmin` не має `Calculation.EditConstant` (запис констант і переліку категорій), а
+ * роль продукту/стенда тут не змінюється. Тому — свій методолог (той самий прийом, що
+ * `airLimitsReal.spec.ts`): тимчасова роль із правами методології й користувач із нею; `afterAll`
+ * знімає з нього роль і видаляє роль (користувача API не видаляє).
+ */
+const Stamp = Date.now().toString(36).toUpperCase().slice(-6);
+const EditorRole = `E2EMCAT${Stamp}`;
+const Editor = {
+  userName: `e2e-mcat-${Stamp.toLowerCase()}`,
+  issued: 'E2E-Meth0d-2026!',
+  password: 'E2E-Meth0d-Work-2026!',
+};
+const EditorPermissions = [
+  'Calculation.View',
+  'Calculation.EditFormula',
+  'Calculation.EditConstant',
+  'Calculation.EditRule',
+  'Template.View',
+];
+let editorRoleId = 0;
+let editorUserId = 0;
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
 const ShotsDir = process.env['ECR_E2E_SHOTS_DIR'] ?? '';
 
@@ -38,10 +61,15 @@ interface Seed {
 
 let seed: Seed | null = null;
 
-async function signedIn(browser: Browser): Promise<BrowserContext> {
+async function signedIn(
+  browser: Browser,
+  who: { readonly userName: string; readonly password: string } = Admin,
+): Promise<BrowserContext> {
   const context = await browser.newContext();
-  const login = await context.request.post('/api/v1/login/local', { data: Admin });
-  expect(login.ok(), `вхід: ${String(login.status())} ${await login.text()}`).toBe(true);
+  const login = await context.request.post('/api/v1/login/local', {
+    data: { userName: who.userName, password: who.password },
+  });
+  expect(login.ok(), `вхід ${who.userName}: ${String(login.status())} ${await login.text()}`).toBe(true);
   return context;
 }
 
@@ -50,8 +78,9 @@ async function signIn(page: Page, scheme: 'light' | 'dark'): Promise<void> {
   await page.evaluate((colour: string) => localStorage.setItem('mantine-color-scheme-value', colour), scheme);
   await page.reload();
   await expect(page.getByRole('heading').first(), 'сторінка входу не відрендерилася').toBeVisible({ timeout: 30_000 });
-  await page.getByLabel(/User name|Ім'я/i).fill(Admin.userName);
-  await page.getByRole('textbox', { name: /Password|Пароль/i }).fill(Admin.password);
+  // Сторінку веде методолог із `Calculation.EditConstant` (див. `Editor` угорі).
+  await page.getByLabel(/User name|Ім'я/i).fill(Editor.userName);
+  await page.getByRole('textbox', { name: /Password|Пароль/i }).fill(Editor.password);
   await page.keyboard.press('Enter');
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
 
@@ -105,6 +134,34 @@ test.describe('Methodology categories: list dialog, pick-list, filter, derived a
 
     const admin = await signedIn(browser);
     try {
+      // Тимчасовий методолог: роль із правами методології і користувач із нею (пароль — одразу змінений).
+      const role = await admin.request.post('/api/v1/roles', {
+        data: { code: EditorRole, nameL10n: { en: 'E2E methodology editor' }, permissionCodes: EditorPermissions },
+      });
+      expect(role.ok(), `роль методолога: ${String(role.status())} ${await role.text()}`).toBe(true);
+      editorRoleId = ((await role.json()) as { id: number }).id;
+      const user = await admin.request.post('/api/v1/users', {
+        data: {
+          userName: Editor.userName,
+          provider: 'Local',
+          sid: null,
+          displayName: 'E2E methodology editor',
+          initialPassword: Editor.issued,
+          roleCodes: [EditorRole],
+        },
+      });
+      expect(user.ok(), `методолог: ${String(user.status())} ${await user.text()}`).toBe(true);
+      editorUserId = ((await user.json()) as { id: number }).id;
+      const first = await signedIn(browser, { userName: Editor.userName, password: Editor.issued });
+      try {
+        const changed = await first.request.post('/api/v1/auth/change-password', {
+          data: { currentPassword: Editor.issued, newPassword: Editor.password },
+        });
+        expect(changed.ok(), `пароль методолога: ${String(changed.status())} ${await changed.text()}`).toBe(true);
+      } finally {
+        await first.close();
+      }
+
       const stamp = String(Date.now());
       const created = await admin.request.post('/api/v1/methodologies', {
         data: { code: `E2E_MCAT_${stamp}`, group: null, kind: 'DataDriven', nameL10n: { en: `E2E methodology categories ${stamp}` } },
@@ -120,8 +177,10 @@ test.describe('Methodology categories: list dialog, pick-list, filter, derived a
       const base = `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}`;
 
       // Дві спільні константи одного виду (текст — без одиниці); категорію першій дає тест через UI.
+      // ⚠ Від імені методолога: `Calculation.EditConstant` є лише в нього.
+      const editor = await signedIn(browser, Editor);
       for (const code of [Categorised, SharedOne]) {
-        const constant = await admin.request.put(`${base}/constants/${code}`, {
+        const constant = await editor.request.put(`${base}/constants/${code}`, {
           data: {
             kind: 'Text',
             value: null,
@@ -136,6 +195,7 @@ test.describe('Methodology categories: list dialog, pick-list, filter, derived a
         });
         expect(constant.ok(), `константа ${code}: ${await constant.text()}`).toBe(true);
       }
+      await editor.close();
 
       // Формула з необов'язковим аргументом — маркер `?` у самому виразі.
       const formula = await admin.request.put(`${base}/formulas/E2E_F1`, {
@@ -150,16 +210,38 @@ test.describe('Methodology categories: list dialog, pick-list, filter, derived a
   });
 
   test.afterAll(async ({ browser }) => {
+    const problems: string[] = [];
+
+    // Тема методолога — назад на світлу, поки в нього ще є роль (вподобання на сервері).
+    if (editorUserId !== 0) {
+      try {
+        const editor = await signedIn(browser, Editor);
+        await editor.request.put('/api/v1/me/preferences/theme', { headers: { 'Content-Type': 'application/json' }, data: JSON.stringify('light') });
+        await editor.close();
+      } catch (error) {
+        problems.push(`тема методолога: ${String(error)}`);
+      }
+    }
+
     const admin = await signedIn(browser);
     try {
-      await admin.request.put('/api/v1/me/preferences/theme', { headers: { 'Content-Type': 'application/json' }, data: JSON.stringify('light') });
       if (seed !== null) {
         const removed = await admin.request.delete(`/api/v1/methodologies/${String(seed.methodologyId)}/versions/${String(seed.versionId)}`);
-        expect([200, 204, 404], `видалення чернетки: ${String(removed.status())}`).toContain(removed.status());
+        if (![200, 204, 404].includes(removed.status())) problems.push(`видалення чернетки: ${String(removed.status())}`);
+      }
+      // Користувач лишається без ролей (видалити його API не дає), тимчасова роль видаляється.
+      if (editorUserId !== 0) {
+        const stripped = await admin.request.put(`/api/v1/users/${String(editorUserId)}/roles`, { data: { roleCodes: [] } });
+        if (!stripped.ok()) problems.push(`ролі методолога: ${String(stripped.status())} ${(await stripped.text()).slice(0, 300)}`);
+      }
+      if (editorRoleId !== 0) {
+        const removedRole = await admin.request.delete(`/api/v1/roles/${String(editorRoleId)}`);
+        if (removedRole.status() >= 300 && removedRole.status() !== 404) problems.push(`роль: ${String(removedRole.status())} ${(await removedRole.text()).slice(0, 300)}`);
       }
     } finally {
       await admin.close();
     }
+    expect(problems, 'прибирання після набору').toEqual([]);
   });
 
   test('categories dialog adds a category; the constant picks it from the list; the table filters by category', async ({ page }) => {
