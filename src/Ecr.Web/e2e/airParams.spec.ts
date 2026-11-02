@@ -1,15 +1,13 @@
 import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
 import { SmallSources, workbook } from './airFixture';
 import {
-  addScopeEntry,
-  AreaRegistry,
-  ensureAreaEntry,
   ensureNaeTree,
-  ensureRegionRegistry,
   ensureSubstances,
-  RegionRegistry,
+  fillScope,
+  prepareScope,
   removeScopeEntries,
   scopeFields,
+  type PreparedScope,
 } from './airScope';
 
 /**
@@ -30,9 +28,9 @@ const ViewerRole = `E2EAPV${Stamp}`;
 const Viewer = { user: `e2e-ap-viewer-${Stamp.toLowerCase()}`, issued: 'E2E-Ap-Vi3wer-2026!', password: 'E2E-Ap-Vi3wer-Work-2026!' };
 const Xlsx = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-const state = { permitId: 0, permitNumber: `E2E-AP-${Stamp}`, regionNodeId: 0, areaName: '', roleId: 0, userId: 0 };
+const state = { permitId: 0, permitNumber: `E2E-AP-${Stamp}`, regionNodeId: 0, roleId: 0, userId: 0 };
 const createdPermits: number[] = [];
-const scopeEntries: { registry: string; id: number }[] = [];
+let scope: PreparedScope | null = null;
 
 async function ok<T>(response: APIResponse, what: string): Promise<T> {
   const body = await response.text();
@@ -87,11 +85,6 @@ async function axe(page: Page): Promise<string[]> {
   });
 }
 
-async function pick(page: Page, label: RegExp, option: RegExp): Promise<void> {
-  await page.getByRole('textbox', { name: label }).click();
-  await page.getByRole('option', { name: option }).click();
-}
-
 test.describe('Air params', () => {
   test.describe.configure({ mode: 'serial', timeout: 300_000 });
   let admin: APIRequestContext;
@@ -104,7 +97,7 @@ test.describe('Air params', () => {
 
     const treeId = await ensureNaeTree(admin);
     await ensureSubstances(admin);
-    await ensureRegionRegistry(admin);
+    // Ідемпотентне (fbec26fee; старт стенда вже провізіонував тип AIR від імені системи).
     await ok(await admin.post('/api/v1/air-limits/provision'), 'provision');
 
     // Своє дерево регіону з усіма НАЕ файлу: перегляд без відсутніх НАЕ.
@@ -115,11 +108,8 @@ test.describe('Air params', () => {
       await addNode(admin, treeId, `${Region}_N${source.nae}`, site, 'SRC', { NaeCode: source.nae, RegionCode: Region, AreaCode: Area });
     }
 
-    // Region - запис довідника, чия назва зіставляється з регіоном дерева НАЕ; Area - ділянка OFFSHORE.
-    scopeEntries.push({ registry: RegionRegistry, id: await addScopeEntry(admin, RegionRegistry, `E2EAPR_${Stamp}`, Region) });
-    const area = await ensureAreaEntry(admin, Area, `P${Stamp}`);
-    state.areaName = area.name;
-    if (area.created) scopeEntries.push({ registry: AreaRegistry, id: area.id });
+    // Region/Area за видом колонок типу AIR: Text — код регіону дерева НАЕ; Registry — запис із такою назвою; Area — OFFSHORE.
+    scope = await prepareScope(admin, Region, Area, `P${Stamp}`);
 
     const permit = await ok<{ id: number }>(
       await admin.post('/api/v1/permits', {
@@ -174,7 +164,7 @@ test.describe('Air params', () => {
         if (response.status() >= 300 && response.status() !== 404) problems.push(`node ${node.code}: ${String(response.status())}`);
       }
     }
-    problems.push(...(await removeScopeEntries(admin, scopeEntries)));
+    problems.push(...(await removeScopeEntries(admin, scope?.created ?? [])));
     if (state.userId !== 0) await admin.put(`/api/v1/users/${String(state.userId)}/roles`, { data: { roleCodes: [] } });
     if (state.roleId !== 0) {
       const response = await admin.delete(`/api/v1/roles/${String(state.roleId)}`);
@@ -199,14 +189,13 @@ test.describe('Air params', () => {
     await page.getByRole('link', { name: 'Import parameters…' }).first().click();
     await expect(page).toHaveURL(new RegExp(`/admin/permits/${String(state.permitId)}/import`));
 
-    // 1 Region and area: номер дозволу, Region (довідник), Area лише після регіону і лише його ділянки.
+    // 1 Region and area: номер дозволу, Region за видом колонки, Area — лише після регіону.
+    const prepared = scope;
+    if (prepared === null) throw new Error('scope not prepared');
     await expect(page.getByRole('heading', { name: 'Region and area', level: 2 })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('textbox', { name: 'Permit number' })).toHaveValue(state.permitNumber);
     await expect(page.getByRole('textbox', { name: /^Area/ })).toHaveCount(0);
-    await pick(page, /^Region/, new RegExp(`^${Region}`));
-    await page.getByRole('textbox', { name: /^Area/ }).click();
-    await expect(page.getByRole('option')).toHaveText([new RegExp(`^${state.areaName}`)]);
-    await page.getByRole('option', { name: new RegExp(`^${state.areaName}`) }).click();
+    await fillScope(page, prepared);
     await expect(page.getByText('Region or area not in the NAE tree')).toHaveCount(0);
     await page.getByRole('button', { name: 'Next', exact: true }).click();
 
@@ -230,13 +219,16 @@ test.describe('Air params', () => {
     await expect(page.getByRole('tab', { name: 'Sources & parameters', selected: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId('air-counts')).toHaveText('3 sources · 4 substance rows', { timeout: 30_000 });
     await expect(page.getByTestId('air-source-row')).toHaveCount(3);
+    // Колонка «Region / area» картки — область імпорту рядка.
+    await expect(page.getByTestId('air-source-scope').first()).toContainText(prepared.regionKind === 'Text' ? Region : 'E2ER_');
 
-    // Сервер записав область імпорту на рядках (запис Region).
-    const card = await ok<{ sources: { regionEntryId?: number | null }[] }>(
+    // Сервер записав область імпорту на рядках (запис Region, коли колонка — довідник).
+    const card = await ok<{ sources: { region?: string | null; regionEntryId?: number | null }[] }>(
       await admin.get(`/api/v1/permits/${String(state.permitId)}/air-limits`),
       'card',
     );
-    expect(card.sources.every((s) => s.regionEntryId === scopeEntries[0]?.id)).toBe(true);
+    expect(card.sources).toHaveLength(3);
+    if (prepared.regionEntryId !== null) expect(card.sources.every((s) => s.regionEntryId === prepared.regionEntryId)).toBe(true);
   });
 
   test('Air params: REGION/AREA are ordinary AIR_SOURCES columns in the permit type editor, with their kind', async ({ page }) => {
@@ -297,7 +289,7 @@ test.describe('Air params', () => {
 
           await page.goto(`/admin/permits/${String(state.permitId)}/import`);
           await expect(page.getByRole('heading', { name: 'Region and area', level: 2 })).toBeVisible({ timeout: 30_000 });
-          await pick(page, /^Region/, new RegExp(`^${Region}`));
+          if (scope !== null) await fillScope(page, scope);
           await expect(page.getByRole('textbox', { name: /^Area/ })).toBeVisible();
           expect.soft(await axe(page), `scope step ${scheme} ${String(width)}`).toEqual([]);
         } finally {
