@@ -27,10 +27,13 @@ public static class ServiceAccountGrants
 
     /// <summary>Процедури (<c>WITH EXECUTE AS OWNER</c>) — право <c>EXECUTE</c>.</summary>
     public static readonly IReadOnlyList<string> Procedures =
-        ["arc.usp_ArchiveYear", "arc.usp_EnsureAuditPartitions", "arc.usp_ArchiveAudit"];
+    [
+        "arc.usp_ArchiveYear", "arc.usp_EnsureAuditPartitions", "arc.usp_ArchiveAudit",
+        "rpt.usp_GenerateTemplateViews", "rpt.usp_GenerateStableViews",
+    ];
 
     /// <summary>Скалярні функції, які застосунок викликає у власних запитах (не через вʼюху) — право <c>EXECUTE</c>.</summary>
-    public static readonly IReadOnlyList<string> Functions = [];
+    public static readonly IReadOnlyList<string> Functions = ["doc.fn_VersionOf"];
 
     /// <summary>Скрипт видачі прав користувачу бази <paramref name="principal"/> — без будь-чого понад перелік.</summary>
     /// <param name="principal">Ім'я користувача бази (без дужок).</param>
@@ -62,5 +65,29 @@ public static class ServiceAccountGrants
         }
 
         return sql.ToString();
+    }
+
+    /// <summary>Заповнювач бази в скрипті встановлення.</summary>
+    public const string DatabasePlaceholder = "<DB>";
+
+    /// <summary>Заповнювач облікового запису служби (логін SQL Server, напр. <c>DOMAIN\ecr-svc$</c>).</summary>
+    public const string ServiceAccountPlaceholder = "<SERVICE_ACCOUNT>";
+
+    /// <summary>
+    /// Повний скрипт для DBA з інструкцій встановлення: користувач бази для логіну служби (якщо його ще немає) і рівно
+    /// перелік прав. Рядки — через <c>\n</c> (документи в репозиторії, незалежно від ОС збірки).
+    /// </summary>
+    /// <returns>T-SQL із заповнювачами <see cref="DatabasePlaceholder"/> і <see cref="ServiceAccountPlaceholder"/>.</returns>
+    public static string InstallScript()
+    {
+        var lines = new List<string>
+        {
+            $"USE [{DatabasePlaceholder}];",
+            $"IF DATABASE_PRINCIPAL_ID(N'{ServiceAccountPlaceholder}') IS NULL",
+            $"    CREATE USER [{ServiceAccountPlaceholder}] FOR LOGIN [{ServiceAccountPlaceholder}];",
+        };
+        lines.AddRange(Script(ServiceAccountPlaceholder)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        return string.Join("\n", lines) + "\n";
     }
 }

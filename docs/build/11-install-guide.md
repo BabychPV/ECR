@@ -437,6 +437,42 @@ $svcPass = Read-Host -AsSecureString -Prompt 'Пароль облікового 
 **і** `EcrWorker` (блок «Далі вручну» в 2.2), і лише якщо `LocalSystem` має доступ до SQL Server
 (Windows-автентифікація комп'ютера). Робочий контур — з `-ServiceAccount`.
 
+#### DBA: виконати скрипт прав облікового запису служби (перед першим стартом служби) {#2-3-права-служби}
+
+`deploy-ecr.ps1` і MSI прав служби в базі **не видають** (`D-66`): логін служби (`-ServiceAccount`, напр.
+`DOMAIN\ecr-svc$`) має бути на SQL Server (`CREATE LOGIN … FROM WINDOWS` — DBA), а в базі ECR — користувачем рівно з
+правами нижче. `db_owner` не потрібен; достатність перевіряє тест `ServiceAccountLeastPrivilegeTests` (старт, сід,
+рядки, комірки, подання, нічні задачі). Скрипт посилається на об'єкти, які створює крок 2 (схема) `deploy-ecr.ps1`:
+на чистій базі — виконати одразу після кроку 2 і до старту служб; якщо служба вже стартувала й упала на правах
+(«The EXECUTE permission was denied…»), — після скрипту стартувати `EcrApi` і `EcrWorker` повторно. Повторне
+виконання безпечне. `[<DB>]` — база ECR, `[<SERVICE_ACCOUNT>]` — логін служби. Під `LocalSystem` (стенд) —
+логін комп'ютера `DOMAIN\<ім'я>$` або `NT AUTHORITY\SYSTEM`.
+
+⛔ Блок **генерується** з переліку `ServiceAccountGrants` (`powershell -File tools\gen-install-docs.ps1`) — руками не
+правити; той самий скрипт — у `docs/admin/operations-runbook.md` (абзац «Права облікового запису служби»).
+
+<!-- generated:grants -->
+```sql
+USE [<DB>];
+IF DATABASE_PRINCIPAL_ID(N'<SERVICE_ACCOUNT>') IS NULL
+    CREATE USER [<SERVICE_ACCOUNT>] FOR LOGIN [<SERVICE_ACCOUNT>];
+ALTER ROLE db_datareader ADD MEMBER [<SERVICE_ACCOUNT>];
+ALTER ROLE db_datawriter ADD MEMBER [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::doc.TableInstanceSeq TO [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::doc.TableRowSeq TO [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::calc.CalculationResultSeq TO [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::dic.RegistryEntryCodeSeq TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON TYPE::doc.CellValueTvp TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON TYPE::aud.CellChangeTvp TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::arc.usp_ArchiveYear TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::arc.usp_EnsureAuditPartitions TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::arc.usp_ArchiveAudit TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::rpt.usp_GenerateTemplateViews TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::rpt.usp_GenerateStableViews TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::doc.fn_VersionOf TO [<SERVICE_ACCOUNT>];
+```
+<!-- /generated:grants -->
+
 ⚠ **Кілька екземплярів на одному хості.** Дві служби ECR **однієї ролі**
 (дві Api чи перекритий рецикл пулу; два воркери) на **ту саму** базу на одній
 машині не ставити: старт другого процесу закриває як покинуті всі
@@ -736,6 +772,18 @@ Windows-обліковий запис: є звичайна форма логін
 ---
 
 ## 4. Оновлення на нову версію {#4-оновлення}
+
+⚠ ✎ 2026-11-02 (`DB-1`): **служба під логіном без `db_owner` — три нові права до старту нової версії.** Без
+першого падає кожен запис рядка й комірки, без двох інших не генеруються вʼюхи SSRS (`reportviews` = Degraded).
+Виконати після кроку 2 (схема) `deploy-ecr.ps1` і до старту служб; повний перелік — п. 2.3, нотатка —
+`docs/release-notes/db-service-account-grants.md`:
+
+```sql
+USE [<DB>];
+GRANT EXECUTE ON OBJECT::doc.fn_VersionOf TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::rpt.usp_GenerateTemplateViews TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::rpt.usp_GenerateStableViews TO [<SERVICE_ACCOUNT>];
+```
 
 ⛔ **Перед оновленням на цю версію (S11, 2026-09-29) — один раз, до запуску
 оновлення.** Відтепер служба в Production не стартує, доки ключі кільця

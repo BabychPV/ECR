@@ -25,7 +25,7 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// <summary>
 /// DB-1: застосунок працює під обліковим записом служби, який має РІВНО права з runbook
 /// (<see cref="ServiceAccountGrants"/>: <c>db_datareader</c> + <c>db_datawriter</c>, <c>UPDATE</c> на послідовностях,
-/// <c>EXECUTE</c> на TVP-типах і трьох процедурах <c>arc.*</c>) — і нічого понад.
+/// <c>EXECUTE</c> на TVP-типах, процедурах <c>arc.*</c>/<c>rpt.*</c> і функції <c>doc.fn_VersionOf</c>) — і нічого понад.
 /// </summary>
 /// <remarks>
 /// ⛔ Решта тестів ганяє застосунок від імені власника бази, тож бракуюче право не бачив жоден. Тут реальні
@@ -198,6 +198,29 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
         var details = await database.AdminScalarAsync<string>(
             $"SELECT TOP (1) DetailsJson FROM itg.MaintenanceRun WHERE JobCode = N'{PartitionCheckJob.Code}' ORDER BY Id DESC");
         Assert.DoesNotContain("Failed", details, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Без EXECUTE на процедуру <c>rpt.*</c> перевірка старту не бачить її (OBJECT_ID = NULL) — попередження мусить назвати
+    /// і цю причину, а не лише «базу оновлено без кроку схеми». Мутація: повернути старий текст у
+    /// <c>SchemaValidator.ValidateSqlOnlyProceduresAsync</c> — тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Без_EXECUTE_на_процедуру_rpt_попередження_старту_називає_брак_права()
+    {
+        await using var db = Database.Context(database.NoStableViewsConnectionString);
+        var capabilities = new SqlCapabilitiesProbe();
+        await capabilities.ProbeAsync(database.NoStableViewsConnectionString, SqlEditionMode.Auto, CancellationToken.None);
+        var validator = new SchemaValidator(db, capabilities, new FixedClock(DateTime.UtcNow));
+
+        await validator.ValidateAsync("Validate", CancellationToken.None);
+
+        var warning = Assert.Single(validator.Warnings, w => w.Contains("usp_", StringComparison.Ordinal));
+        Assert.Contains("rpt.usp_GenerateStableViews", warning, StringComparison.Ordinal);
+        Assert.DoesNotContain("rpt.usp_GenerateTemplateViews", warning, StringComparison.Ordinal);
+        Assert.Contains("не має на них EXECUTE", warning, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -404,6 +427,9 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
         /// <summary>Той самий перелік без <c>EXECUTE</c> на <c>aud.CellChangeTvp</c>.</summary>
         private const string NoCellChangeUser = "ecr_lowpriv_nocellchange";
 
+        /// <summary>Той самий перелік без <c>EXECUTE</c> на <c>rpt.usp_GenerateStableViews</c>.</summary>
+        private const string NoStableViewsUser = "ecr_lowpriv_nostableviews";
+
         private readonly SqlServerFixture _sql = SqlServerFixture.WithOwnDatabase("_lowpriv");
 
         /// <summary>Рядок, кожен сеанс якого — від імені <see cref="ServiceUser"/>.</summary>
@@ -412,13 +438,20 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
         /// <summary>Рядок, кожен сеанс якого — від імені користувача без гранту на <c>aud.CellChangeTvp</c>.</summary>
         public string NoCellChangeConnectionString { get; private set; } = string.Empty;
 
+        /// <summary>Рядок, кожен сеанс якого — від імені користувача без гранту на <c>rpt.usp_GenerateStableViews</c>.</summary>
+        public string NoStableViewsConnectionString { get; private set; } = string.Empty;
+
         /// <inheritdoc />
         public async Task InitializeAsync()
         {
             await _sql.InitializeAsync();
             await using var connection = new SqlConnection(_sql.ConnectionString);
             await connection.OpenAsync();
-            foreach (var (user, except) in new[] { (ServiceUser, (string?)null), (NoCellChangeUser, "aud.CellChangeTvp") })
+            foreach (var (user, except) in new[]
+                     {
+                         (ServiceUser, (string?)null), (NoCellChangeUser, "aud.CellChangeTvp"),
+                         (NoStableViewsUser, "rpt.usp_GenerateStableViews"),
+                     })
             {
                 await using var command = connection.CreateCommand();
                 command.CommandText = $"CREATE USER [{user}] WITHOUT LOGIN;" + Environment.NewLine + ServiceAccountGrants.Script(user, except);
@@ -427,6 +460,7 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
 
             LowPrivConnectionString = SqlImpersonation.ConnectionStringFor(_sql.ConnectionString, ServiceUser);
             NoCellChangeConnectionString = SqlImpersonation.ConnectionStringFor(_sql.ConnectionString, NoCellChangeUser);
+            NoStableViewsConnectionString = SqlImpersonation.ConnectionStringFor(_sql.ConnectionString, NoStableViewsUser);
         }
 
         /// <inheritdoc />

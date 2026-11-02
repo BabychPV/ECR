@@ -46,6 +46,89 @@ public sealed partial class ServiceAccountGrantsRunbookTests
 
         Assert.Contains("UPDATE` на послідовностях", paragraph, StringComparison.Ordinal);
         Assert.Contains("ServiceAccountLeastPrivilegeTests", paragraph, StringComparison.Ordinal);
+        Assert.DoesNotContain("не перевірено", paragraph, StringComparison.Ordinal);
+    }
+
+    /// <summary>Документи, де DBA мусить знайти ПОВНИЙ скрипт прав (рішення людини 02.11: «у інструкцію встановлення»).</summary>
+    private static readonly string[] InstallDocs =
+    [
+        "docs/admin/operations-runbook.md",
+        "docs/build/11-install-guide.md",
+        "docs/delivery/QUICKSTART-FIRST-TEST.md",
+    ];
+
+    private const string BlockStart = "<!-- generated:grants -->";
+
+    private const string BlockEnd = "<!-- /generated:grants -->";
+
+    private const string FixCommand = "powershell -File tools/gen-install-docs.ps1";
+
+    /// <summary>
+    /// Скрипт прав в інструкціях встановлення ГЕНЕРУЄТЬСЯ з <see cref="ServiceAccountGrants"/> (між маркерами) і тут
+    /// звіряється з переліком у пам'яті. Розбіжність — червоне з командою виправлення.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Режим генерації: змінна <c>ECR_REGENERATE_DOCS=1</c> (її ставить <c>tools/gen-install-docs.ps1</c>) — тест
+    /// переписує блоки між маркерами замість звірки. У CI змінної немає — лише звірка.
+    /// ⛔ Будь-яка копія повного скрипту ПОЗА маркерами в <c>docs/**</c> (крім <c>docs/release-notes</c>, де лише нові
+    /// права) — теж червоне: ручна копія старіє першою.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Скрипт_прав_в_інструкціях_встановлення_згенеровано_з_переліку_прав()
+    {
+        var regenerate = Environment.GetEnvironmentVariable("ECR_REGENERATE_DOCS") == "1";
+        var expected = $"{BlockStart}\n```sql\n{ServiceAccountGrants.InstallScript()}```\n{BlockEnd}";
+        var root = SolutionRoot();
+        var docs = Directory.EnumerateFiles(Path.Combine(root, "docs"), "*.md", SearchOption.AllDirectories)
+            .Select(f => Path.GetRelativePath(root, f).Replace('\\', '/'))
+            .ToList();
+
+        var problems = new List<string>();
+        foreach (var doc in docs.Where(d => InstallDocs.Contains(d, StringComparer.Ordinal)
+                                            || File.ReadAllText(Path.Combine(root, d)).Contains(BlockStart, StringComparison.Ordinal)))
+        {
+            var path = Path.Combine(root, doc);
+            var text = File.ReadAllText(path);
+            var crlf = text.Contains("\r\n", StringComparison.Ordinal);
+            var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+            var start = normalized.IndexOf(BlockStart, StringComparison.Ordinal);
+            var end = normalized.IndexOf(BlockEnd, StringComparison.Ordinal);
+            if (start < 0 || end < start || normalized.IndexOf(BlockStart, start + 1, StringComparison.Ordinal) >= 0)
+            {
+                problems.Add($"{doc}: має бути рівно один блок {BlockStart} … {BlockEnd}");
+                continue;
+            }
+
+            var actual = normalized[start..(end + BlockEnd.Length)];
+            if (actual == expected)
+            {
+                continue;
+            }
+
+            if (regenerate)
+            {
+                var updated = normalized[..start] + expected + normalized[(end + BlockEnd.Length)..];
+                File.WriteAllText(path, crlf ? updated.Replace("\n", "\r\n", StringComparison.Ordinal) : updated);
+                continue;
+            }
+
+            problems.Add($"{doc}: скрипт прав між маркерами розійшовся з ServiceAccountGrants");
+        }
+
+        // Ручні копії повного скрипту поза маркерами.
+        foreach (var doc in docs.Where(d => !d.StartsWith("docs/release-notes/", StringComparison.Ordinal)))
+        {
+            var normalized = File.ReadAllText(Path.Combine(root, doc)).Replace("\r\n", "\n", StringComparison.Ordinal);
+            var outside = Regex.Replace(normalized, Regex.Escape(BlockStart) + "[\\s\\S]*?" + Regex.Escape(BlockEnd), string.Empty);
+            if (ScriptLineCopy().IsMatch(outside))
+            {
+                problems.Add($"{doc}: ручна копія скрипту прав поза маркерами — замінити на {BlockStart} {BlockEnd}");
+            }
+        }
+
+        Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems) + Environment.NewLine + "Виправлення: " + FixCommand);
     }
 
     [Fact]
@@ -123,6 +206,10 @@ public sealed partial class ServiceAccountGrantsRunbookTests
 
         return directory?.FullName ?? throw new InvalidOperationException("Немає Ecr.sln.");
     }
+
+    /// <summary>Рядок СКРИПТУ (не згадка в тексті): повна копія прав починається з ролей і TVP.</summary>
+    [GeneratedRegex(@"^\s*(GRANT EXECUTE ON TYPE::|ALTER ROLE db_datawriter ADD MEMBER)", RegexOptions.Multiline)]
+    private static partial Regex ScriptLineCopy();
 
     [GeneratedRegex(@"`(\w+\.(?:\w+Tvp|usp_\w+|fn_?\w+))`")]
     private static partial Regex BacktickedObject();
