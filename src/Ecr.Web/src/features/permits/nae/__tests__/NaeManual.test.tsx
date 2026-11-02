@@ -45,8 +45,8 @@ let treeBody: unknown;
 let definitionError: Error | null;
 let seedError: Error | null;
 
-const problem = (status: number, detail: string): EcrApiError =>
-  new EcrApiError({ type: 'about:blank', title: 'x', status, detail, code: 'naeTreeNotEmpty' } as never);
+const problem = (status: number, detail: string, messageKey = 'err.ECR-REG-0422.naeTreeNotEmpty'): EcrApiError =>
+  new EcrApiError({ type: 'about:blank', title: 'x', status, detail, extensions2: { messageKey } } as never);
 
 const calls = (path: string) =>
   vi.mocked(apiFetch).mock.calls.filter(([p]) => p === path).map(([, init]) => init as RequestInit | undefined);
@@ -63,7 +63,12 @@ beforeEach(() => {
       return seedError === null ? Promise.resolve({ created: ['ATYRAU', 'MANGYSTAU'], registryCode: 'NAE_TREE', registryProvisioned: false, sourceRegistryCode: 'LAND_REGION' }) : Promise.reject(seedError);
     }
     if (path.includes('/registries/LAND_REGION/rows')) {
-      return Promise.resolve({ items: [{ id: 1, code: 'ATYRAU', display: 'Atyrau' }, { id: 2, code: 'MANGYSTAU', display: 'Mangystau' }], nextCursor: null, totalCount: 2 });
+      return Promise.resolve({ items: [{ id: 1, code: 'KZ-ATY', display: 'Атырау' }, { id: 2, code: 'KZ-MAN', display: 'Мангистау' }], nextCursor: null, totalCount: 2 });
+    }
+    if (/\/registries\/LAND_REGION\/entries\/\d+$/.test(path)) {
+      const id = Number(path.split('/').pop());
+
+      return Promise.resolve({ id, code: id === 2 ? 'KZ-MAN' : 'KZ-ATY', displayL10n: { values: { en: id === 2 ? 'Mangystau' : 'Atyrau', ru: 'x' } } });
     }
     if (path.endsWith('/definition')) return definitionError === null ? Promise.resolve(definition) : Promise.reject(definitionError);
     if (path.endsWith('/hierarchy')) return Promise.resolve({ registryCode: 'NAE_TREE', isHierarchical: true, maxDepth: 6, levels });
@@ -141,21 +146,21 @@ describe('порожнє дерево НВ', () => {
 });
 
 describe('AddRegionModal', () => {
-  it('шле регіон, район і назви тілом POST /nae-tree/roots', async () => {
+  it('шле АНГЛІЙСЬКУ НАЗВУ регіону (не код запису), район і назви тілом POST /nae-tree/roots', async () => {
     const user = userEvent.setup();
     const onAdded = vi.fn();
     renderWithQuery(<AddRegionModal opened onClose={vi.fn()} onAdded={onAdded} />);
 
     const select = (await screen.findByLabelText(/permits\.nae\.manual\.region/)) as HTMLSelectElement;
     await waitFor(() => expect(select.options.length).toBe(2));
-    await user.selectOptions(select, 'MANGYSTAU');
+    await user.selectOptions(select, 'KZ-MAN');
     await user.type(screen.getByLabelText(/permits\.nae\.manual\.area$/), 'OFFSHORE');
     await user.type(screen.getByLabelText('permits.nae.manual.nameEn'), 'Mangystau shelf');
     await user.click(screen.getByText('permits.nae.manual.addRegionSubmit'));
 
     await waitFor(() => expect(calls('/api/v1/nae-tree/roots')).toHaveLength(1));
     expect(JSON.parse(String(calls('/api/v1/nae-tree/roots')[0]?.body))).toEqual({
-      regionCode: 'MANGYSTAU',
+      regionCode: 'Mangystau',
       areaCode: 'OFFSHORE',
       nameEn: 'Mangystau shelf',
       nameRu: null,
@@ -239,8 +244,23 @@ describe('NaeExcelImportPanel', () => {
     expect((document.querySelector('[data-nae-excel-apply]') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('відбиток не збігся: застосування відхилене, перегляд скинуто з підказкою повторити', async () => {
-    applyError = problem(409, 'fingerprint changed');
+  it('інше 422 застосування (ECR-REG-0422): підказки «перегляд застарів» немає, перегляд лишається', async () => {
+    applyError = problem(422, 'registry refused', 'err.ECR-REG-0422.other');
+    const user = userEvent.setup();
+    renderWithQuery(<NaeExcelImportPanel onClose={vi.fn()} />);
+    await upload(user);
+    await user.click(screen.getByText('permits.nae.manual.excel.preview'));
+    const applyButton = document.querySelector('[data-nae-excel-apply]') as HTMLButtonElement;
+    await waitFor(() => expect(applyButton.disabled).toBe(false));
+    await user.click(applyButton);
+
+    await waitFor(() => expect(calls('/api/v1/nae-tree/import/apply')).toHaveLength(1));
+    expect(screen.queryByText('permits.nae.manual.excel.stale')).toBeNull();
+    expect(document.querySelector('[data-nae-excel-report="preview"]')).not.toBeNull();
+  });
+
+  it('відбиток не збігся (422 regPlanChanged): перегляд скинуто з підказкою повторити', async () => {
+    applyError = problem(422, 'plan changed', 'err.ECR-IMP-0422.regPlanChanged');
     const user = userEvent.setup();
     renderWithQuery(<NaeExcelImportPanel onClose={vi.fn()} />);
     await upload(user);

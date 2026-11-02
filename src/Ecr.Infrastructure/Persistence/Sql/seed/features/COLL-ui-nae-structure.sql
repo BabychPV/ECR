@@ -52,8 +52,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.nae.form.areaHint', N'kz', N'Аудан жоқ болса, бос қалдырыңыз: «-» болып сақталады.'),
     (N'permits.nae.import.open', N'ru', N'Загрузить из PI AF'),
     (N'permits.nae.import.open', N'kz', N'PI AF-тен жүктеу'),
-    (N'permits.nae.import.hintNotProvisioned', N'ru', N'Структура NAE ещё не загружена. Загрузите её один раз из PI AF; дальше деревом владеет ECR.'),
-    (N'permits.nae.import.hintNotProvisioned', N'kz', N'NAE құрылымы әлі жүктелмеген. Оны PI AF-тен бір рет жүктеңіз; одан әрі ағашты ECR басқарады.'),
     (N'permits.nae.import.hintAskAdmin', N'ru', N'Структура NAE ещё не загружена. Попросите администратора загрузить её из PI AF.'),
     (N'permits.nae.import.hintAskAdmin', N'kz', N'NAE құрылымы әлі жүктелмеген. Әкімшіден оны PI AF-тен жүктеуін сұраңыз.'),
     (N'permits.nae.import.title', N'ru', N'Загрузка структуры из PI AF'),

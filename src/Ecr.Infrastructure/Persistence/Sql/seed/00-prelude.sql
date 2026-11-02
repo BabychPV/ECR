@@ -1285,6 +1285,10 @@ SET @textUpdates = @@ROWCOUNT;
 DELETE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
+    -- COLL:ui-nae-manual: порожній стан дерева НВ (три шляхи) замінив підказку «завантажте з PI AF»; ключ більше ніде не читається.
+    (N'permits.nae.import.hintNotProvisioned',     N'en', N'The NAE structure has not been loaded yet. Load it once from PI AF; after that ECR owns the tree.'),
+    (N'permits.nae.import.hintNotProvisioned',     N'ru', N'Структура NAE ещё не загружена. Загрузите её один раз из PI AF; дальше деревом владеет ECR.'),
+    (N'permits.nae.import.hintNotProvisioned',     N'kz', N'NAE құрылымы әлі жүктелмеген. Оны PI AF-тен бір рет жүктеңіз; одан әрі ағашты ECR басқарады.'),
     -- COLL:an43fix: мертвий ключ F-17 (кнопку Submit більше не сірять; відмову дає сервер). Два значення: початкове й D-285.
     (N'workflow.submitNeedsGrant',                 N'en', N'Submitting needs the Submit access level on this project or sheet; yours is {level}. Ask an administrator to raise it.'),
     (N'workflow.submitNeedsGrant',                 N'ru', N'Для подачи нужен уровень доступа «Подача» к этому проекту или листу; у вас — {level}. Попросите администратора повысить его.'),
@@ -9639,7 +9643,6 @@ USING (VALUES
     ,(N'permits.nae.form.keyTakenBy', N'en', N'This NAE code, region and area are already used by the node {holder}.', 1)
     ,(N'permits.nae.form.areaHint', N'en', N'Leave empty when there is no area: it is saved as “-”.', 1)
     ,(N'permits.nae.import.open', N'en', N'Load from PI AF', 1)
-    ,(N'permits.nae.import.hintNotProvisioned', N'en', N'The NAE structure has not been loaded yet. Load it once from PI AF; after that ECR owns the tree.', 1)
     ,(N'permits.nae.import.hintAskAdmin', N'en', N'The NAE structure has not been loaded yet. Ask an administrator to load it from PI AF.', 1)
     ,(N'permits.nae.import.title', N'en', N'Load the structure from PI AF', 1)
     ,(N'permits.nae.import.description', N'en', N'Reads the equipment tree from PI AF and creates the missing nodes. Existing nodes are never changed or moved.', 1)
