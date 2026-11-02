@@ -6216,6 +6216,9 @@ export interface paths {
          * @description `changed = true` — після `since` дані видимих таблиць аркуша змінив хтось інший; власні записи
          *     викликача лише пересувають маркер. Схована таблиця не потрапляє в `changedTables`; невидимий документ і
          *     схований аркуш — `404 ECR-DOC-0404`. Зіпсований маркер — як перше опитування. `Cache-Control: no-store`.
+         *     ✎ LIVE-STATUS: `sheetStatus`/`statusRevision` — стан погодження аркуша; `statusChanged` — він
+         *     змінився після `since` (будь-який перехід). Відповідь несе `ETag` (усе, крім маркера); `If-None-Match`
+         *     зі збігом — `304` без тіла (стан і дані аркуша для читача ті самі; маркер лишається попередній).
          */
         get: {
             parameters: {
@@ -6246,6 +6249,13 @@ export interface paths {
                         "text/json": components["schemas"]["SheetChangesDto"];
                         "text/plain": components["schemas"]["SheetChangesDto"];
                     };
+                };
+                /** @description Not Modified */
+                304: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
                 };
                 /** @description Not Found */
                 404: {
@@ -35918,6 +35928,15 @@ export interface components {
             /** @description Непрозорий маркер; наступне опитування передає його в `since`. Без `since` (перше опитування) — лише
              *     маркер, `changed = false`. */
             marker: string;
+            /** @description ✎ LIVE-STATUS: поточний стан погодження аркуша за період (`Draft`, якщо подань не було). */
+            sheetStatus: components["schemas"]["DocumentStatus"];
+            /** @description Після `since` стан погодження аркуша змінився (будь-ким, і самим викликачем теж — сторінка іншої вкладки має
+             *     оновитися). Окремо від `changed` (дані): клієнт розрізняє зміну стану й зміну комірок. */
+            statusChanged: boolean;
+            /** @description Ревізія стану погодження (непрозора, hex): змінюється на КОЖНОМУ переході — подання, відхилення, затвердження й
+             *     крок маршруту (стан той самий, кнопки — інші), повернення в роботу, відкликання. Інша ревізія — перечитати стан
+             *     аркуша (банер, кнопки дій); дані комірок від цього не змінюються. */
+            statusRevision: string;
         };
         SheetDto: {
             /** @description Код — ідентичність аркуша й адреса в `PUT …/sheets/{code}`. */

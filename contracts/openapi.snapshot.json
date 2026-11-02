@@ -22447,6 +22447,18 @@
           "marker": {
             "description": "Непрозорий маркер; наступне опитування передає його в `since`. Без `since` (перше опитування) — лише\nмаркер, `changed = false`.",
             "type": "string"
+          },
+          "sheetStatus": {
+            "$ref": "#/components/schemas/DocumentStatus",
+            "description": "✎ LIVE-STATUS: поточний стан погодження аркуша за період (`Draft`, якщо подань не було)."
+          },
+          "statusChanged": {
+            "description": "Після `since` стан погодження аркуша змінився (будь-ким, і самим викликачем теж — сторінка іншої вкладки має\nоновитися). Окремо від `changed` (дані): клієнт розрізняє зміну стану й зміну комірок.",
+            "type": "boolean"
+          },
+          "statusRevision": {
+            "description": "Ревізія стану погодження (непрозора, hex): змінюється на КОЖНОМУ переході — подання, відхилення, затвердження й\nкрок маршруту (стан той самий, кнопки — інші), повернення в роботу, відкликання. Інша ревізія — перечитати стан\nаркуша (банер, кнопки дій); дані комірок від цього не змінюються.",
+            "type": "string"
           }
         },
         "required": [
@@ -22455,7 +22467,10 @@
           "lastChangedByUserId",
           "lastChangedBy",
           "lastChangedAt",
-          "changedTables"
+          "changedTables",
+          "sheetStatus",
+          "statusRevision",
+          "statusChanged"
         ],
         "type": "object"
       },
@@ -37033,7 +37048,7 @@
     },
     "/api/v1/documents/{id}/sheets/{sheetDefId}/changes": {
       "get": {
-        "description": "`changed = true` — після `since` дані видимих таблиць аркуша змінив хтось інший; власні записи\nвикликача лише пересувають маркер. Схована таблиця не потрапляє в `changedTables`; невидимий документ і\nсхований аркуш — `404 ECR-DOC-0404`. Зіпсований маркер — як перше опитування. `Cache-Control: no-store`.",
+        "description": "`changed = true` — після `since` дані видимих таблиць аркуша змінив хтось інший; власні записи\nвикликача лише пересувають маркер. Схована таблиця не потрапляє в `changedTables`; невидимий документ і\nсхований аркуш — `404 ECR-DOC-0404`. Зіпсований маркер — як перше опитування. `Cache-Control: no-store`.\n✎ LIVE-STATUS: `sheetStatus`/`statusRevision` — стан погодження аркуша; `statusChanged` — він\nзмінився після `since` (будь-який перехід). Відповідь несе `ETag` (усе, крім маркера); `If-None-Match`\nзі збігом — `304` без тіла (стан і дані аркуша для читача ті самі; маркер лишається попередній).",
         "parameters": [
           {
             "description": "Документ.",
@@ -37095,6 +37110,9 @@
               }
             },
             "description": "OK"
+          },
+          "304": {
+            "description": "Not Modified"
           },
           "404": {
             "content": {
