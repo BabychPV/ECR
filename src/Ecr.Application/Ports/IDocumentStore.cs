@@ -205,6 +205,12 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// у фільтр не потрапляють: ім'я власника там не віддається, і фільтр за ним був би оракулом «чий це документ».
 /// З <paramref name="MineUserId"/> не поєднується (обробник відмовляє 422).
 /// </param>
+/// <param name="TemplateVersions">
+/// ✎ Версія шаблону у списку: лише документи, версія шаблону яких (за період, як у колонці «Version» — типова або з
+/// <see cref="DocumentSummary.TemplateVersionByPeriod"/>) дорівнює одній з перелічених (точний збіг); <c>null</c> — без
+/// фільтра. Діє ЗАПИТОМ до <c>Take</c>, поруч з межею видимості, а не постфільтром: видимість документів не змінює.
+/// </param>
+/// <param name="VersionSort">✎ Сортування за версією шаблону (за період); <c>null</c> — за <c>Id</c>. Другий ключ — завжди <c>Id</c>.</param>
 public readonly record struct DocumentListFilter(
     DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null,
     IReadOnlyCollection<(int ProjectId, int Id)>? HiddenSheetDefIds = null,
@@ -215,7 +221,19 @@ public readonly record struct DocumentListFilter(
     int? StaleByUserId = null,
     IReadOnlyCollection<int>? NarrowedProjectIds = null,
     DocumentParticipationFilter? Participation = null,
-    int? OwnerUserId = null);
+    int? OwnerUserId = null,
+    IReadOnlyCollection<string>? TemplateVersions = null,
+    DocumentVersionSort? VersionSort = null);
+
+/// <summary>Напрямок сортування переліку документів за версією шаблону.</summary>
+public enum DocumentVersionSort
+{
+    /// <summary>Від меншої версії до більшої; документи без версії — в кінці.</summary>
+    Ascending,
+
+    /// <summary>Від більшої до меншої; документи без версії — в кінці.</summary>
+    Descending,
+}
 
 /// <summary>✎ D-450: власник документів для вибору у фільтрі переліку.</summary>
 /// <param name="UserId">Користувач (<c>Document.CreatedByUserId</c>).</param>

@@ -32071,6 +32071,20 @@
               "format": "int32",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "templateVersions",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
