@@ -60,6 +60,28 @@ public sealed class CreateRegistryHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
+        return await ApplyAsync(code, name, isTemporal, profile, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ AIRSYS02: the same creation for an author already checked by the caller, or for the SYSTEM at start
+    /// (<c>NaeTreeProvisioner.EnsureAsSystemAsync</c>). <c>internal</c>: no controller can reach it (Ecr.Api does not see internals).
+    /// </summary>
+    /// <param name="code">Код, унікальний серед довідників.</param>
+    /// <param name="name">Назва мовами каталогу.</param>
+    /// <param name="isTemporal">Чи мають майбутні записи вікно дії.</param>
+    /// <param name="profile">Профіль автора (заборони довідників); у системи — без заборон.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<RegistryDefDto> ApplyAsync(
+        string code,
+        IReadOnlyDictionary<string, string> name,
+        bool isTemporal,
+        Security.AccessProfile profile,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(profile);
+
         var registryCode = EcrCode.Create(code);
 
         // PRMG: префікс `PRMG_` зарезервований за прихованими реєстрами груп типів дозволів.

@@ -23,7 +23,8 @@ public sealed class NaeTreeProvisioner(
     IRegistryHierarchyStore hierarchy,
     CreateRegistryHandler create,
     SaveRegistryDefinitionHandler saveDefinition,
-    Hierarchy.SaveRegistryHierarchyHandler saveHierarchy)
+    Hierarchy.SaveRegistryHierarchyHandler saveHierarchy,
+    IUnitOfWork uow)
 {
     internal const string IncompatibleKey = "err.ECR-REG-0422.naeTreeIncompatible";
 
@@ -57,38 +58,8 @@ public sealed class NaeTreeProvisioner(
         var created = false;
         if (definition is null)
         {
-            _ = await create.HandleAsync(
-                code, new Dictionary<string, string> { ["en"] = "NAE structure", ["ru"] = "Структура НАЕ" }, isTemporal: true, ct)
-                .ConfigureAwait(false);
+            definition = await CreateAsync(code, system: null, ct).ConfigureAwait(false);
             created = true;
-
-            var fields = Fields.Select((f, i) => new RegistryFieldSaveDto(
-                null, f.Code, Name(f.En, f.Ru), "String", i + 1, false, f.IsKey, null, null)).ToList();
-            var keys = new List<RegistryKeySaveDto>
-            {
-                new(
-                    null,
-                    NaeTreeSchema.BusinessKeyCode,
-                    Name("NAE business key", "Бизнес-ключ НАЕ"),
-                    [NaeTreeSchema.NaeCodeField, NaeTreeSchema.RegionField, NaeTreeSchema.AreaField],
-                    IsPrimary: false,
-                    IgnoreCase: true,
-                    IsActive: true),
-            };
-            await saveDefinition.HandleAsync(
-                code,
-                new SaveRegistryDefinitionDto(fields, [], "NAE tree: one-time provisioning", keys),
-                ct,
-                (await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false))!.DefinitionVersion.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
-
-            await saveHierarchy.HandleAsync(
-                code,
-                new Hierarchy.SaveRegistryHierarchyRequest(
-                    true, [.. Levels.Select(l => new Hierarchy.RegistryLevelInput(l.Code, Name(l.En, l.Ru), l.Optional))]),
-                ct).ConfigureAwait(false);
-
-            definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
-                         ?? throw new InvalidOperationException($"Registry {code} vanished after creation.");
         }
 
         var haveFields = definition.Fields.Select(f => f.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -111,6 +82,100 @@ public sealed class NaeTreeProvisioner(
         }
 
         return (definition, byCode, created);
+    }
+
+    /// <summary>
+    /// ✎ AIRSYS02 (live-copy check 02.11: live has no NAE tree, so the AIR startup step refused and the AIR sources tables were never
+    /// created): creates the registry EMPTY as the SYSTEM — the same definition, fields, business key and levels as
+    /// <see cref="EnsureAsync"/>, no entries, author 0 «system» — in one transaction. An existing registry (compatible or not) is
+    /// left exactly as it is and not validated here. Idempotent.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>internal</c>: only <see cref="Permits.AirLimits.AirTypeSystemProvisioner"/> (start) calls it; Ecr.Api does not see
+    /// internals, so no controller can reach it (guard — <c>AirTypeStartupTests.No_controller_reaches_the_system_provisioner</c>).
+    /// </remarks>
+    /// <param name="code">Registry code.</param>
+    /// <param name="system">The system actor (<see cref="Permits.PermitTypeActor.System"/>).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Whether this call created the registry.</returns>
+    internal async Task<bool> EnsureAsSystemAsync(string code, Permits.PermitTypeActor system, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(system);
+        if (await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false) is not null)
+        {
+            return false;
+        }
+
+        var created = false;
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                created = false;
+                if (await registries.FindDefinitionAsync(code, token).ConfigureAwait(false) is not null)
+                {
+                    return;
+                }
+
+                _ = await CreateAsync(code, system, token).ConfigureAwait(false);
+                created = true;
+            },
+            ct).ConfigureAwait(false);
+        return created;
+    }
+
+    /// <summary>Creates the registry with its fields, key and levels: as the request's user (<paramref name="system"/> null — the
+    /// permission-checked handlers) or as the system (the author-taking methods, no permission check).</summary>
+    private async Task<RegistryDef> CreateAsync(string code, Permits.PermitTypeActor? system, CancellationToken ct)
+    {
+        var registryName = new Dictionary<string, string> { ["en"] = "NAE structure", ["ru"] = "Структура НАЕ" };
+        if (system is null)
+        {
+            _ = await create.HandleAsync(code, registryName, isTemporal: true, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            _ = await create.ApplyAsync(code, registryName, isTemporal: true, system.Profile, ct).ConfigureAwait(false);
+        }
+
+        var fields = Fields.Select((f, i) => new RegistryFieldSaveDto(
+            null, f.Code, Name(f.En, f.Ru), "String", i + 1, false, f.IsKey, null, null)).ToList();
+        var keys = new List<RegistryKeySaveDto>
+        {
+            new(
+                null,
+                NaeTreeSchema.BusinessKeyCode,
+                Name("NAE business key", "Бизнес-ключ НАЕ"),
+                [NaeTreeSchema.NaeCodeField, NaeTreeSchema.RegionField, NaeTreeSchema.AreaField],
+                IsPrimary: false,
+                IgnoreCase: true,
+                IsActive: true),
+        };
+        var definitionDto = new SaveRegistryDefinitionDto(fields, [], "NAE tree: one-time provisioning", keys);
+        var version = (await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false))!.DefinitionVersion.ToString(CultureInfo.InvariantCulture);
+        if (system is null)
+        {
+            await saveDefinition.HandleAsync(code, definitionDto, ct, version).ConfigureAwait(false);
+        }
+        else
+        {
+            _ = await saveDefinition.SaveForAuthorAsync(code, definitionDto, system.AuditUserId, system.Profile, version, ct).ConfigureAwait(false);
+        }
+
+        var hierarchyRequest = new Hierarchy.SaveRegistryHierarchyRequest(
+            true, [.. Levels.Select(l => new Hierarchy.RegistryLevelInput(l.Code, Name(l.En, l.Ru), l.Optional))]);
+        if (system is null)
+        {
+            await saveHierarchy.HandleAsync(code, hierarchyRequest, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            var tracked = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
+                          ?? throw new InvalidOperationException($"Registry {code} vanished after creation.");
+            _ = await saveHierarchy.SaveForAuthorAsync(tracked, hierarchyRequest, system.AuditUserId, ct).ConfigureAwait(false);
+        }
+
+        return await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
+               ?? throw new InvalidOperationException($"Registry {code} vanished after creation.");
     }
 
     private static LocalizedText Name(string en, string ru)

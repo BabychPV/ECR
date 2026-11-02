@@ -1,5 +1,6 @@
 // src/Ecr.Application/Permits/AirLimits/AirTypeSystemProvisioner.cs
 using Ecr.Application.Common;
+using Ecr.Application.Registries.Nae;
 
 namespace Ecr.Application.Permits.AirLimits;
 
@@ -15,8 +16,28 @@ namespace Ecr.Application.Permits.AirLimits;
 /// ⚠ The scope's actor is the system (Id 0, the job convention of <c>PeriodStateJob.SystemUserId</c>): code below that reads
 /// <see cref="ICurrentUser"/> (correlation, registry history) has no HTTP request at start and would otherwise throw.
 /// </remarks>
-public sealed class AirTypeSystemProvisioner(ProvisionAirLimitsHandler provision, JobActorScope actorScope)
+public sealed class AirTypeSystemProvisioner(
+    ProvisionAirLimitsHandler provision,
+    NaeTreeProvisioner naeTree,
+    AirLimitsSettings settings,
+    JobActorScope actorScope)
 {
+    /// <summary>
+    /// ✎ AIRSYS02 (live-copy check 02.11: live has no NAE tree → the AIR prerequisite refused on every start): the NAE tree registry
+    /// the AIR tables point at (<see cref="AirLimitsSettings.NaeRegistryCode"/>) is created EMPTY as the system when missing —
+    /// definition, fields, business key and the five levels, no entries. An existing registry is left untouched. Runs BEFORE
+    /// <see cref="RunAsync"/>.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The registry code and whether this call created it.</returns>
+    public async Task<(string RegistryCode, bool Created)> EnsureNaeTreeAsync(CancellationToken ct)
+    {
+        var actor = PermitTypeActor.System();
+        using var _ = actorScope.Enter(new JobActor(PermitTypeActor.SystemUserId, "system", "en", [], actor.CorrelationId));
+        var created = await naeTree.EnsureAsSystemAsync(settings.NaeRegistryCode, actor, ct).ConfigureAwait(false);
+        return (settings.NaeRegistryCode, created);
+    }
+
     /// <summary>Provisions as the system.</summary>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AirLimitsProvisionReport> RunAsync(CancellationToken ct)

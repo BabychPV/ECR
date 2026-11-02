@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Ecr.Application.Permits.AirLimits;
+using Ecr.Application.Ports;
 using Ecr.Application.Registries.Nae;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
@@ -11,6 +12,7 @@ using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -44,11 +46,15 @@ public sealed class AirTypeStartupTests
         await database.InitializeAsync();
         try
         {
-            // 1. A publisher, the NAE tree and the substance registry; NO LAND_REGION. AIR as on live: published with its own table.
+            // 0. ✎ AIRSYS02: an NAE_TREE that already exists BEFORE the first start (here a flat, empty one — not a tree) is left
+            //    exactly as it is by every start below; AIR provisioning still goes ahead as before.
+            var preExisting = await AddFlatRegistryAsync(database, NaeTreeSchema.RegistryCode);
+
+            // 1. A publisher and the substance registry; NO LAND_REGION. AIR as on live: published with its own table.
             using (var app = new EcrApiFactory(database))
             {
                 using var admin = await SignedInAsync(app, database);
-                foreach (var code in new[] { NaeTreeSchema.RegistryCode, AirLimitsSchema.DefaultSubstanceRegistry })
+                foreach (var code in new[] { AirLimitsSchema.DefaultSubstanceRegistry })
                 {
                     await ReadAsync(app, await admin.PostAsJsonAsync(
                         new Uri("/api/v1/registries", UriKind.Relative),
@@ -122,12 +128,151 @@ public sealed class AirTypeStartupTests
             Assert.Contains("EMISSION_LIMITS", Tables(again));
             Assert.Equal(areas, await AreaEntriesAsync(database));
             Assert.Equal(publishAudit.Count, (await AuthorsAsync(database)).PublishAudit.Count);
+
+            // The pre-existing NAE_TREE: untouched by four starts.
+            Assert.Equal(preExisting, await NaeStateAsync(database));
         }
         finally
         {
             await database.DisposeAsync();
             await DropAsync(database);
         }
+    }
+
+    /// <summary>
+    /// ✎ AIRSYS02 (live-copy check 02.11): live has NO NAE tree, so the AIR prerequisite refused on every start and the
+    /// «Import parameters…» UI was dead. Now the start creates NAE_TREE EMPTY as the system (definition, fields, business key, five
+    /// levels, no entries, author 0 «system»), and AIR provisioning goes ahead in the same start. A second start changes nothing.
+    /// </summary>
+    /// <remarks>
+    /// Mutation proof (local, not committed): make <c>NaeTreeProvisioner.EnsureAsSystemAsync</c> re-save the levels of an existing
+    /// registry instead of returning → the second start writes a history row and the test fails on the unchanged state.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Start_without_NAE_TREE_creates_it_empty_as_system_then_provisions_AIR_and_a_second_start_changes_nothing()
+    {
+        var database = SqlServerFixture.WithOwnDatabase("_airnae");
+        await database.InitializeAsync();
+        try
+        {
+            // Live-like: the substance registry exists, NAE_TREE does not, AIR not provisioned.
+            _ = await AddFlatRegistryAsync(database, AirLimitsSchema.DefaultSubstanceRegistry);
+
+            var first = await StartAndReadAirAsync(database);
+            Assert.Contains(AirLimitsSchema.SourcesTable, Tables(first));
+            Assert.Contains(AirLimitsSchema.SubstancesTable, Tables(first));
+
+            var created = await NaeStateAsync(database);
+            Assert.True(created.IsHierarchical, created.ToString());
+            Assert.Equal(["REGION", "AREA", "SITE", "EQUIP", "SRC"], created.Levels);
+            Assert.Equal(0, created.Entries);
+            Assert.Equal(
+                new[] { NaeTreeSchema.NaeCodeField, NaeTreeSchema.RegionField, NaeTreeSchema.AreaField, NaeTreeSchema.AfPathField, NaeTreeSchema.SourceTypeField, NaeTreeSchema.PointNameField }
+                    .Order(StringComparer.Ordinal).ToArray(),
+                created.Fields.ToArray());
+            Assert.Equal(1, created.BusinessKeys);
+            Assert.Equal(0, created.UpdatedBy);
+            Assert.NotEmpty(created.HistoryAuthors);
+            Assert.All(created.HistoryAuthors, a => Assert.Equal(0, a));
+
+            // Second start: nothing new — no definition version, no history row, no AIR version.
+            var second = await StartAndReadAirAsync(database);
+            Assert.Equal(created, await NaeStateAsync(database));
+            Assert.Equal(first.GetProperty("version").GetInt32(), second.GetProperty("version").GetInt32());
+
+            // The HTTP paths keep their permission checks: a reader cannot create, describe or re-level a registry.
+            using var app = new EcrApiFactory(database);
+            using var reader = await SignedInAsync(app, database, ["Registry.View"]);
+            var code = NaeTreeSchema.RegistryCode;
+            Assert.Equal(HttpStatusCode.Forbidden, (await reader.PostAsJsonAsync(
+                new Uri("/api/v1/registries", UriKind.Relative),
+                new { code = "AIRNAE_X", nameL10n = new Dictionary<string, string> { ["en"] = "x" }, isTemporal = false })).StatusCode);
+            using var definition = new HttpRequestMessage(HttpMethod.Put, new Uri($"/api/v1/registries/{code}/definition", UriKind.Relative))
+            {
+                Content = JsonContent.Create(new { fields = Array.Empty<object>(), rules = Array.Empty<object>(), reason = "x" }),
+            };
+            definition.Headers.TryAddWithoutValidation("If-Match", created.DefinitionVersion.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            Assert.Equal(HttpStatusCode.Forbidden, (await reader.SendAsync(definition)).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await reader.PutAsJsonAsync(
+                new Uri($"/api/v1/registries/{code}/hierarchy", UriKind.Relative),
+                new { isHierarchical = false, levels = Array.Empty<object>() })).StatusCode);
+            Assert.Equal(created, await NaeStateAsync(database));
+
+            // The AF import fills the EMPTY system-created tree (no second provisioning, user = author of the nodes).
+            using var withAf = new EcrApiFactory(database) { ExtraServices = s => s.AddSingleton<INaeAfReader>(new OneSourceAf()) };
+            using var importer = await SignedInAsync(withAf, database);
+            var import = await ReadAsync(withAf, await importer.PostAsJsonAsync(
+                new Uri("/api/v1/nae-tree/af-import", UriKind.Relative),
+                new { dataSourceId = 1, rootPath = OneSourceAf.Root, registryCode = code, dryRun = false }));
+            Assert.True(import.GetProperty("applied").GetBoolean(), import.ToString());
+            Assert.False(import.GetProperty("registryProvisioned").GetBoolean());
+            var tree = await ReadAsync(withAf, await importer.GetAsync(new Uri($"/api/v1/registries/{code}/tree", UriKind.Relative)));
+            Assert.Single(tree.GetProperty("nodes").EnumerateArray(), n => n.GetProperty("levelCode").GetString() == "SRC");
+        }
+        finally
+        {
+            await database.DisposeAsync();
+            await DropAsync(database);
+        }
+    }
+
+    /// <summary>AF with one NAE source under Atyrau / Offshore / Island_A.</summary>
+    private sealed class OneSourceAf : INaeAfReader
+    {
+        public const string Root = @"\\AF\ECR\ECR_01_Air Equipment";
+
+        public Task<NaeAfSnapshot> ReadAsync(int dataSourceId, string rootPath, CancellationToken ct)
+            => Task.FromResult(new NaeAfSnapshot(
+            [
+                new NaeAfElement($@"{Root}\Atyrau_Air", "Atyrau_Air", null, null, null, null, null),
+                new NaeAfElement($@"{Root}\Atyrau_Air\Offshore\Island_A", "Island_A", null, null, null, null, null),
+                new NaeAfElement($@"{Root}\Atyrau_Air\Offshore\Island_A\9001", "9001", "Start NAE", null, null, "Atyrau", "Offshore"),
+            ], true));
+    }
+
+    /// <summary>A flat, empty registry inserted before any start (no HTTP, no author).</summary>
+    private static async Task<NaeState?> AddFlatRegistryAsync(SqlServerFixture database, string code)
+    {
+        await using (var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(database.ConnectionString).Options))
+        {
+            db.RegistryDefs.Add(new Ecr.Domain.Entities.Configuration.RegistryDef(
+                EcrCode.Create(code), new LocalizedText(new Dictionary<string, string> { ["en"] = code }), isTemporal: false));
+            await db.SaveChangesAsync();
+        }
+
+        return code == NaeTreeSchema.RegistryCode ? await NaeStateAsync(database) : null;
+    }
+
+    /// <summary>Everything a start could change on NAE_TREE: shape, version, author, entries and its history rows.</summary>
+    private sealed record NaeState(
+        bool IsHierarchical, int DefinitionVersion, int? UpdatedBy, int Entries, int BusinessKeys,
+        IReadOnlyList<string> Fields, IReadOnlyList<string> Levels, IReadOnlyList<int> HistoryAuthors)
+    {
+        public bool Equals(NaeState? other)
+            => other is not null && (IsHierarchical, DefinitionVersion, UpdatedBy, Entries, BusinessKeys) == (other.IsHierarchical, other.DefinitionVersion, other.UpdatedBy, other.Entries, other.BusinessKeys)
+               && Fields.SequenceEqual(other.Fields) && Levels.SequenceEqual(other.Levels) && HistoryAuthors.SequenceEqual(other.HistoryAuthors);
+
+        public override int GetHashCode() => HashCode.Combine(IsHierarchical, DefinitionVersion, UpdatedBy, Entries);
+
+        public override string ToString()
+            => $"hier={IsHierarchical} v={DefinitionVersion} by={UpdatedBy} entries={Entries} keys={BusinessKeys} fields=[{string.Join(",", Fields)}] levels=[{string.Join(",", Levels)}] history=[{string.Join(",", HistoryAuthors)}]";
+    }
+
+    private static async Task<NaeState> NaeStateAsync(SqlServerFixture database)
+    {
+        await using var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(database.ConnectionString).Options);
+        var def = await db.RegistryDefs.AsNoTracking().Include(d => d.Fields).SingleAsync(d => d.Code == NaeTreeSchema.RegistryCode);
+        var levels = await db.RegistryLevelDefs.AsNoTracking().Where(l => l.RegistryDefId == def.Id).OrderBy(l => l.Ordinal).Select(l => l.Code).ToListAsync();
+        var entries = await db.RegistryEntries.AsNoTracking().CountAsync(e => e.RegistryDefId == def.Id);
+        var keys = await db.RegistryKeyDefs.AsNoTracking().CountAsync(k => k.RegistryDefId == def.Id && k.Code == NaeTreeSchema.BusinessKeyCode && k.IsActive);
+        var history = await db.Database
+            .SqlQuery<int>($"SELECT ChangedByUserId AS Value FROM aud.StructureChange WHERE EntityType = N'cfg.RegistryDef' AND EntityId = {def.Id} ORDER BY ChangedAt, Id")
+            .ToListAsync();
+        return new NaeState(
+            def.IsHierarchical, def.DefinitionVersion, def.DefinitionUpdatedByUserId, entries, keys,
+            [.. def.Fields.Select(f => f.Code).Order(StringComparer.Ordinal)], levels, history);
     }
 
     /// <summary>✎ AIRSYS01: the system path is reachable from the startup step only — no controller takes it.</summary>
@@ -145,6 +290,23 @@ public sealed class AirTypeStartupTests
 
         Assert.NotEmpty(controllers);
         Assert.Empty(offenders);
+
+        // ✎ AIRSYS02: the author-taking (permission-free) methods the system path uses stay invisible to Ecr.Api — a public one
+        // would let a controller call it with a handler it legitimately takes.
+        var systemMethods = new (Type Type, string Method)[]
+        {
+            (typeof(NaeTreeProvisioner), "EnsureAsSystemAsync"),
+            (typeof(Ecr.Application.Registries.CreateRegistryHandler), "ApplyAsync"),
+            (typeof(Ecr.Application.Registries.SaveRegistryDefinitionHandler), "SaveForAuthorAsync"),
+            (typeof(Ecr.Application.Registries.Hierarchy.SaveRegistryHierarchyHandler), "SaveForAuthorAsync"),
+        };
+        foreach (var (type, method) in systemMethods)
+        {
+            var found = type.GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
+                .Where(m => m.Name == method).ToList();
+            Assert.True(found.Count > 0, $"{type.Name}.{method} is gone — update the guard.");
+            Assert.All(found, m => Assert.True(m.IsAssembly, $"{type.Name}.{method} must stay internal."));
+        }
     }
 
     /// <summary>Authors of the AIR type row and the audit authors of its publications (oldest first).</summary>

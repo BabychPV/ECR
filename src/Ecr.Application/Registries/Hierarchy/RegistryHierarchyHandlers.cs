@@ -101,6 +101,23 @@ public sealed class SaveRegistryHierarchyHandler(
         var userId = HierarchyHandlerSupport.RequireUser(currentUser);
         var definition = await lookup.RequireAsync(ct).ConfigureAwait(false);
 
+        return await SaveForAuthorAsync(definition, request, userId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ AIRSYS02: the same save for an author already checked by the caller, or for the SYSTEM at start (author 0 «system»,
+    /// <c>NaeTreeProvisioner.EnsureAsSystemAsync</c>). <c>internal</c>: no controller can reach it.
+    /// </summary>
+    /// <param name="definition">Tracked registry.</param>
+    /// <param name="request">New settings.</param>
+    /// <param name="userId">Author (0 — system).</param>
+    /// <param name="ct">Cancellation token.</param>
+    internal async Task<RegistryHierarchyDto> SaveForAuthorAsync(
+        RegistryDef definition, SaveRegistryHierarchyRequest request, int userId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(request);
+
         var input = request.Levels ?? [];
         if (request.IsHierarchical)
         {
