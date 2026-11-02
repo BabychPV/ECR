@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Alert, Button, FileInput, Group, Stack, Text, Title } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
+import { EcrApiError } from '@/api/client';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -43,6 +44,12 @@ function issueText(issue: NaeTreeImportIssue): string {
     default:
       return issue.detail.length > 0 ? `${issue.code}: ${issue.detail}` : issue.code;
   }
+}
+
+const PlanChangedKey = 'err.ECR-IMP-0422.regPlanChanged';
+
+function isPlanChanged(error: unknown): boolean {
+  return error instanceof EcrApiError && error.problem.extensions2?.['messageKey'] === PlanChangedKey;
 }
 
 /** Є що застосовувати: нові вузли (рівні з `create > 0`) і жодної помилки. */
@@ -96,9 +103,14 @@ export function NaeExcelImportPanel({ onClose }: NaeExcelImportPanelProps): JSX.
       await queryClient.invalidateQueries({ queryKey: queryKeys.registries.all() });
     },
     onError: (error: unknown) => {
-      // Відбиток не збігся (дерево чи файл змінилися) або файл відхилено: перегляд застарів, показуємо причину й просимо повторити.
-      setReport(null);
-      setStale(true);
+      // Відбиток не збігся (дерево чи файл змінилися): 422 ECR-IMP-0422 з ключем regPlanChanged - перегляд застарів.
+      // ⛔ Лише за цим ключем: інші 422 застосування (напр. ECR-REG-0422) показують власний текст сервера.
+      if (isPlanChanged(error)) {
+        setReport(null);
+        setStale(true);
+
+        return;
+      }
       showApiError(error);
     },
   });
@@ -142,7 +154,6 @@ export function NaeExcelImportPanel({ onClose }: NaeExcelImportPanelProps): JSX.
             setFile(chosen);
             setStale(false);
           }}
-          clearable
           data-nae-excel-file=""
         />
         <Group gap="xs">

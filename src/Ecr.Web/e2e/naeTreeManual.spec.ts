@@ -170,7 +170,7 @@ test.describe('NAE tree manual', () => {
     // Тимчасова роль і користувач: редагування даних і опису реєстрів (створення довідника НВ, якщо його ще немає).
     const role = await ok<{ id: number }>(
       await admin.post('/api/v1/roles', {
-        data: { code: RoleCode, nameL10n: { en: 'E2E NAE manual' }, permissionCodes: ['Registry.View', 'Registry.EditData', 'Registry.EditDefinition'] },
+        data: { code: RoleCode, nameL10n: { en: 'E2E NAE manual' }, permissionCodes: ['Registry.View', 'Registry.EditData', 'Registry.EditDefinition', 'Registry.Publish'] },
       }),
       'роль',
     );
@@ -237,9 +237,17 @@ test.describe('NAE tree manual', () => {
     if (initialEmpty) {
       await expect(page.getByText('The NAE tree is empty')).toBeVisible();
       for (const way of [/Sync from PI AF/, /Import from Excel:/, /By hand/]) await expect(page.getByText(way)).toBeVisible();
+      const seeded = page.waitForResponse((response) => response.url().includes('/nae-tree/seed-roots'));
       await page.locator('[data-nae-seed-roots]').click();
-      await expect(page.getByText(Region).first()).toBeVisible({ timeout: 30_000 });
-      expect((await treeNodes(admin)).some((node) => node.display.includes(Region)), 'корінь створеного регіону').toBe(true);
+      const seedResponse = await seeded;
+      expect(seedResponse.status(), `seed-roots: ${(await seedResponse.text()).slice(0, 800)}`).toBeLessThan(300);
+      // Корені створюються з усіх живих записів LAND_REGION: порожній стан зникає, у дереві з'являються вузли REGION.
+      await expect
+        .poll(async () => (await treeNodes(admin)).filter((node) => node.levelCode === 'REGION' && node.parentEntryId === null).length, {
+          message: 'корені регіонів', timeout: 30_000,
+        })
+        .toBeGreaterThan(0);
+      await expect(page.locator('[data-nae-empty]')).toHaveCount(0, { timeout: 30_000 });
     } else {
       // Дерево не порожнє: пропозиції немає, а сервер відмовляє 422.
       await expect(page.locator('[data-nae-add-region-open]')).toBeVisible();
