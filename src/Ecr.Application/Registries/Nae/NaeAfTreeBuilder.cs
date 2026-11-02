@@ -277,7 +277,8 @@ public static class NaeAfTreeBuilder
     private static List<string> Segments(string? path)
         => (path ?? "").Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
-    private static string Upper(string? text)
+    /// <summary>Upper-case code text: letters and digits kept, anything else <c>_</c> (the code part of technical codes).</summary>
+    internal static string Upper(string? text)
     {
         var sb = new StringBuilder();
         foreach (var ch in NaeCodeNormalizer.Clean(text).ToUpperInvariant())
