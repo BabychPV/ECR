@@ -539,6 +539,8 @@ $env:ECR_Auth__DataProtection__AllowUnprotectedKeys = 'true'
 # (DataGen: `PerPeriodInstance`) нею не зачеплений. Потрібна `anchorTextSubmittedLive.spec.ts`: вона збирає таку
 # таблицю через API і перевіряє правку тексту якоря в поданому році.
 $env:ECR_Collection__MonthColumnRouting = 'true'
+# RPT-STABLE Part B: перенос версії «з місяця» (на живому стенді прапор увімкнено; типово false) - потрібен versionMigrationRange.spec.ts.
+$env:ECR_Documents__VersionMigration__FromMonthEnabled = 'true'
 
 Step 'старт застосунку'
 $startArgs = @{

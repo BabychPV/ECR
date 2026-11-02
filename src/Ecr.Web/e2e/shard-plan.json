@@ -58,6 +58,7 @@
       "permitPage.spec.ts",
       "permitsList.spec.ts",
       "versionMigrationOverwrite.spec.ts",
+      "versionMigrationRange.spec.ts",
       "permitsP3Backlog.spec.ts",
       "tableTree.spec.ts",
       "registryEntryDrawer.spec.ts",
