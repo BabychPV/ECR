@@ -69,9 +69,13 @@ public sealed class GetSheetChangesHandler(
         var now = clock.UtcNow;
         var previous = SheetChangeMarker.Decode(since);
 
+        // ✎ LIVE-STATUS: стан погодження — окремо від даних і на КОЖНОМУ шляху відповіді (і без змін комірок).
+        var status = await store.SheetStatusAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false);
+        var statusChanged = previous?.StatusRevision is { } seen && seen != status.Revision;
+
         if (previous is null || view.Tables.Count == 0)
         {
-            return Unchanged(await store.CurrentMarkerAsync(ct).ConfigureAwait(false), now);
+            return Unchanged(await store.CurrentMarkerAsync(ct).ConfigureAwait(false), now, status, statusChanged);
         }
 
         var probe = await store
@@ -80,7 +84,7 @@ public sealed class GetSheetChangesHandler(
 
         if (probe.Rows.Count == 0)
         {
-            return Unchanged(probe.Marker, now);
+            return Unchanged(probe.Marker, now, status, statusChanged);
         }
 
         var issued = previous.Value.IssuedAtUtc < now ? previous.Value.IssuedAtUtc : now;
@@ -95,7 +99,7 @@ public sealed class GetSheetChangesHandler(
 
         if (!probe.Rows.Any(Foreign))
         {
-            return Unchanged(probe.Marker, now);
+            return Unchanged(probe.Marker, now, status, statusChanged);
         }
 
         // Таблиці з чужими змінами — і ті, де слідом за ними щось перерахувалося (похідні клітинки теж застаріли).
@@ -109,16 +113,23 @@ public sealed class GetSheetChangesHandler(
             .ToList();
 
         return new SheetChangesDto(
-            SheetChangeMarker.Encode(probe.Marker, now),
+            SheetChangeMarker.Encode(probe.Marker, now, status.Revision),
             Changed: true,
             attribution.LastForeignUserId,
             attribution.LastForeignDisplayName,
             attribution.LastForeignAt is { } at ? DateTime.SpecifyKind(at, DateTimeKind.Utc) : null,
-            tables);
+            tables,
+            status.Status,
+            Revision(status.Revision),
+            statusChanged);
     }
 
-    private static SheetChangesDto Unchanged(ulong marker, DateTime now)
-        => new(SheetChangeMarker.Encode(marker, now), Changed: false, null, null, null, []);
+    private static SheetChangesDto Unchanged(ulong marker, DateTime now, SheetStatusSnapshot status, bool statusChanged)
+        => new(
+            SheetChangeMarker.Encode(marker, now, status.Revision), Changed: false, null, null, null, [],
+            status.Status, Revision(status.Revision), statusChanged);
+
+    private static string Revision(ulong revision) => revision.ToString("x16", CultureInfo.InvariantCulture);
 
     private static NotFoundException NotFound(long documentId)
         => new(

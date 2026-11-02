@@ -22,10 +22,41 @@ public sealed record SheetChangedTableDto(string TableCode, long TableInstanceId
 /// Видимі таблиці з чужими змінами (і перерахованими слідом за ними); порожньо, коли <c>changed = false</c>.
 /// Схована від викликача таблиця сюди не потрапляє ніколи.
 /// </param>
+/// <param name="SheetStatus">✎ LIVE-STATUS: поточний стан погодження аркуша за період (<c>Draft</c>, якщо подань не було).</param>
+/// <param name="StatusRevision">
+/// Ревізія стану погодження (непрозора, hex): змінюється на КОЖНОМУ переході — подання, відхилення, затвердження й
+/// крок маршруту (стан той самий, кнопки — інші), повернення в роботу, відкликання. Інша ревізія — перечитати стан
+/// аркуша (банер, кнопки дій); дані комірок від цього не змінюються.
+/// </param>
+/// <param name="StatusChanged">
+/// Після <c>since</c> стан погодження аркуша змінився (будь-ким, і самим викликачем теж — сторінка іншої вкладки має
+/// оновитися). Окремо від <c>changed</c> (дані): клієнт розрізняє зміну стану й зміну комірок.
+/// </param>
 public sealed record SheetChangesDto(
     string Marker,
     bool Changed,
     int? LastChangedByUserId,
     string? LastChangedBy,
     DateTime? LastChangedAt,
-    IReadOnlyList<SheetChangedTableDto> ChangedTables);
+    IReadOnlyList<SheetChangedTableDto> ChangedTables,
+    Ecr.Domain.Enums.DocumentStatus SheetStatus,
+    string StatusRevision,
+    bool StatusChanged)
+{
+    /// <summary>
+    /// <c>ETag</c> відповіді — з усього, ОКРІМ маркера (маркер несе глобальну межу <c>rowversion</c> і момент видачі,
+    /// тож змінюється між опитуваннями й без жодних змін аркуша). Той самий стан і ті самі зміни — той самий <c>ETag</c>
+    /// і <c>304</c> на <c>If-None-Match</c>; будь-який перехід погодження міняє ревізію, отже й <c>ETag</c>.
+    /// </summary>
+    public string ETag()
+    {
+        var canonical = string.Join(
+            "|",
+            Changed ? Marker : "-",
+            StatusRevision,
+            ((int)SheetStatus).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            StatusChanged ? "1" : "0");
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(canonical));
+        return "\"" + Convert.ToHexStringLower(hash.AsSpan(0, 12)) + "\"";
+    }
+}

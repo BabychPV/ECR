@@ -30,6 +30,15 @@ public sealed record SheetChangeAttribution(
     string? LastForeignDisplayName,
     DateTime? LastForeignAt);
 
+/// <summary>Стан погодження аркуша за період і його ревізія.</summary>
+/// <param name="Status">Стан (<c>Draft</c>, коли рядка <c>wf.ApprovalState</c> ще немає).</param>
+/// <param name="Revision">
+/// <c>rowversion</c> рядка <c>wf.ApprovalState</c> (0 — рядка немає). Росте на КОЖНОМУ переході — подання, відхилення,
+/// затвердження (й крок маршруту без зміни стану), повернення в роботу, відкликання — бо будь-який <c>UPDATE</c> рядка
+/// дає нову версію, хоч би хто й як його писав (EF чи сирий SQL).
+/// </param>
+public sealed record SheetStatusSnapshot(Ecr.Domain.Enums.DocumentStatus Status, ulong Revision);
+
 /// <summary>
 /// Дешевий маркер змін даних аркуша за період (живе оновлення сітки): «чи змінив хтось дані, відколи я читав».
 /// </summary>
@@ -58,4 +67,7 @@ public interface ISheetChangeStore
     public Task<SheetChangeAttribution> AttributeAsync(
         long documentId, IReadOnlyCollection<long> rowIds, IReadOnlyCollection<int> hiddenColumnIds, DateTime fromUtc,
         int viewerUserId, CancellationToken ct);
+
+    /// <summary>Стан погодження аркуша <paramref name="sheetDefId"/> документа за період і ревізія цього стану.</summary>
+    public Task<SheetStatusSnapshot> SheetStatusAsync(long documentId, int sheetDefId, int periodKey, CancellationToken ct);
 }

@@ -77,6 +77,30 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
          WHERE r.Rn = 1;
         """;
 
+    /// <summary>Стан погодження аркуша й <c>rowversion</c> його рядка (пошук за <c>UQ_ApprovalState</c>).</summary>
+    internal const string SheetStatusSql = """
+        SET NOCOUNT ON;
+        SELECT CAST(a.Status AS int), CAST(a.RowVersion AS binary(8))
+          FROM wf.ApprovalState a
+         WHERE a.DocumentId = @doc AND a.SheetDefId = @sheet AND a.PeriodKey = @period;
+        """;
+
+    /// <inheritdoc />
+    public Task<SheetStatusSnapshot> SheetStatusAsync(long documentId, int sheetDefId, int periodKey, CancellationToken ct)
+        => RunAsync(
+            SheetStatusSql,
+            parameters =>
+            {
+                parameters.Add("@doc", SqlDbType.BigInt).Value = documentId;
+                parameters.Add("@sheet", SqlDbType.Int).Value = sheetDefId;
+                parameters.Add("@period", SqlDbType.Int).Value = periodKey;
+            },
+            static async (reader, token) =>
+                await reader.ReadAsync(token).ConfigureAwait(false)
+                    ? new SheetStatusSnapshot((Domain.Enums.DocumentStatus)reader.GetInt32(0), ToVersion((byte[])reader.GetValue(1)))
+                    : new SheetStatusSnapshot(Domain.Enums.DocumentStatus.Draft, 0),
+            ct);
+
     /// <inheritdoc />
     public Task<ulong> CurrentMarkerAsync(CancellationToken ct)
         => RunAsync(

@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Ecr.Domain.Entities.Security;
+using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Security;
@@ -139,7 +140,113 @@ public sealed class SheetChangesApiTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.UnprocessableEntity, badPeriod.StatusCode);
     }
 
+    /// <summary>
+    /// ✎ LIVE-STATUS: КОЖЕН перехід погодження (подання, крок маршруту без зміни стану, відхилення, повторне подання,
+    /// затвердження, повернення в роботу, відкликання) змінює маркер, ревізію і <c>ETag</c> і несе новий стан —
+    /// для ІНШОГО користувача з відкритою сторінкою; без змін — той самий <c>ETag</c> і <c>304</c>.
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ: у <c>SheetChangeStore.SheetStatusSql</c> віддати замість <c>RowVersion</c> сам стан
+    /// (<c>CAST(a.Status AS binary(8))</c>) → крок маршруту (стан лишається <c>Submitted</c>) не міняє ні ревізії, ні
+    /// <c>ETag</c> — тест червоний на кроці «ApproveStep».
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Кожен_перехід_погодження_міняє_маркер_ревізію_й_ETag_а_без_змін_304()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var bob = await SignedInAsync(app, s.Bob.UserName).ConfigureAwait(true);
+
+        var (code, first, etag) = await PollAsync(bob, s, since: null, ifNoneMatch: null).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, code);
+        Assert.Equal("Draft", first!.Value.GetProperty("sheetStatus").GetString());
+        Assert.False(first.Value.GetProperty("statusChanged").GetBoolean());
+        var marker = first.Value.GetProperty("marker").GetString()!;
+        var revision = first.Value.GetProperty("statusRevision").GetString()!;
+
+        // Нічого не змінилося — той самий ETag, 304 без тіла.
+        var (idle, _, idleTag) = await PollAsync(bob, s, marker, etag).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotModified, idle);
+        Assert.Equal(etag, idleTag);
+
+        var now = DateTime.UtcNow;
+        (string Name, Action<ApprovalState> Act, string Expected)[] transitions =
+        [
+            ("Submit", a => a.Submit(s.Alice.Id, now, firstStepId: 1), "Submitted"),
+            ("ApproveStep", a => a.ApproveStep(s.Alice.Id, now, nextStepId: 2), "Submitted"),
+            ("Reject", a => a.Reject(s.Alice.Id, "fix it", now), "Rejected"),
+            ("Resubmit", a => a.Submit(s.Alice.Id, now), "Submitted"),
+            ("Approve", a => a.Approve(s.Alice.Id, now), "Approved"),
+            ("Reopen", a => a.Reopen(s.Alice.Id, "late correction", now), "Draft"),
+            ("Submit again", a => a.Submit(s.Alice.Id, now), "Submitted"),
+            ("Recall", a => a.Recall("withdrawn", firstStepId: null), "Draft"),
+        ];
+
+        foreach (var (name, act, expected) in transitions)
+        {
+            await TransitionAsync(s, act).ConfigureAwait(true);
+
+            var (changedCode, after, afterTag) = await PollAsync(bob, s, marker, etag).ConfigureAwait(true);
+            Assert.True(changedCode == HttpStatusCode.OK, $"{name}: {changedCode} — перехід не змінив ETag");
+            Assert.Equal(expected, after!.Value.GetProperty("sheetStatus").GetString());
+            Assert.True(after.Value.GetProperty("statusChanged").GetBoolean(), $"{name}: statusChanged");
+            Assert.False(after.Value.GetProperty("changed").GetBoolean(), $"{name}: дані комірок не змінювались");
+            Assert.NotEqual(revision, after.Value.GetProperty("statusRevision").GetString());
+            Assert.NotEqual(marker, after.Value.GetProperty("marker").GetString());
+            Assert.NotEqual(etag, afterTag);
+
+            (marker, revision, etag) = (after.Value.GetProperty("marker").GetString()!, after.Value.GetProperty("statusRevision").GetString()!, afterTag);
+
+            // Підхопив новий маркер — далі тиша: statusChanged = false, а з тим самим ETag — 304.
+            var (calm, calmBody, calmTag) = await PollAsync(bob, s, marker, ifNoneMatch: null).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.OK, calm);
+            Assert.False(calmBody!.Value.GetProperty("statusChanged").GetBoolean(), $"{name}: повторне опитування");
+            Assert.Equal(HttpStatusCode.NotModified, (await PollAsync(bob, s, marker, calmTag).ConfigureAwait(true)).Code);
+            (marker, etag) = (calmBody.Value.GetProperty("marker").GetString()!, calmTag);
+        }
+    }
+
     // ── помічники ───────────────────────────────────────────────────────────────────
+
+    private static async Task<(HttpStatusCode Code, JsonElement? Body, string? ETag)> PollAsync(
+        HttpClient client, Scenario s, string? since, string? ifNoneMatch)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, Uri(s, s.DocumentId, s.SheetDefId, since));
+        if (ifNoneMatch is not null)
+        {
+            request.Headers.TryAddWithoutValidation("If-None-Match", ifNoneMatch);
+        }
+
+        using var response = await client.SendAsync(request).ConfigureAwait(false);
+        var tag = response.Headers.ETag?.ToString();
+        if (response.StatusCode == HttpStatusCode.NotModified)
+        {
+            return (response.StatusCode, null, tag);
+        }
+
+        var text = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {text}");
+        Assert.False(string.IsNullOrEmpty(tag), "відповідь без ETag");
+        return (response.StatusCode, JsonDocument.Parse(text).RootElement.Clone(), tag);
+    }
+
+    /// <summary>Перехід погодження аркуша тим самим методом домену, що й обробники workflow, і збереження через EF.</summary>
+    private async Task TransitionAsync(Scenario s, Action<ApprovalState> act)
+    {
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var state = await db.ApprovalStates
+            .FirstOrDefaultAsync(a => a.DocumentId == s.DocumentId && a.SheetDefId == s.SheetDefId && a.PeriodKey == s.Period)
+            .ConfigureAwait(false);
+        if (state is null)
+        {
+            state = new ApprovalState(s.DocumentId, s.SheetDefId, s.Period);
+            db.ApprovalStates.Add(state);
+        }
+
+        act(state);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+    }
 
     private static string Num(long value) => value.ToString(CultureInfo.InvariantCulture);
 
