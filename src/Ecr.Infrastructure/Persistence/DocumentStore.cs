@@ -479,32 +479,29 @@ public sealed class DocumentStore(
     /// </summary>
     private async Task<VersionPlan> PlanVersionsAsync(PeriodKeyFilter period, DocumentListFilter filter, CancellationToken ct)
     {
+        // ⛔ Версію за період дає ЛИШЕ `doc.fn_VersionOf` (`ProjectTemplateVersionReadGuardTests`): без періоду - за
+        // найпізніший можливий період (YYYY12 далекого року), тобто чинна версія проєкту. Проєкти без документів у групи
+        // не потрапляють (їм нічого сортувати).
+        var key = period.Value ?? MaxPeriodKey;
         var projects = await db.Projects.AsNoTracking()
-            .Select(p => new { p.Id, p.TemplateVersionId })
+            .Where(p => db.Documents.Any(d => d.ProjectId == p.Id))
+            .Select(p => new { p.Id, VersionId = EcrDbContext.VersionOf(p.Id, key) })
             .ToListAsync(ct).ConfigureAwait(false);
-        var timeline = (await db.ProjectTemplateVersions.AsNoTracking()
-                .Select(t => new { t.ProjectId, t.FromPeriodKey, t.TemplateVersionId })
-                .ToListAsync(ct).ConfigureAwait(false))
-            .GroupBy(t => t.ProjectId)
-            .ToDictionary(g => g.Key, g => g.OrderBy(t => t.FromPeriodKey).ToList());
+        var versionIds = projects.Select(p => p.VersionId).Distinct().ToArray();
         var labels = await db.TemplateVersions.AsNoTracking()
+            .Where(v => versionIds.Contains(v.Id))
             .Select(v => new { v.Id, v.Version })
             .ToDictionaryAsync(v => v.Id, v => v.Version, ct).ConfigureAwait(false);
 
-        var byLabel = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        var byVersion = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         var unversioned = new List<int>();
         foreach (var project in projects)
         {
-            // Як у `VersionByPeriodAsync`: версія періоду береться лише для проєкту з кількома сегментами шкали.
-            var versionId = period.Value is { } key && timeline.TryGetValue(project.Id, out var line) && line.Count > 1
-                ? ProjectVersionTimeline.VersionOf(
-                    [.. line.Select(e => new TimelineEntry(e.FromPeriodKey, e.TemplateVersionId))], key, project.TemplateVersionId)
-                : project.TemplateVersionId;
-            if (labels.TryGetValue(versionId, out var label) && !string.IsNullOrWhiteSpace(label))
+            if (labels.TryGetValue(project.VersionId, out var version) && !string.IsNullOrWhiteSpace(version))
             {
-                if (!byLabel.TryGetValue(label, out var ids))
+                if (!byVersion.TryGetValue(version, out var ids))
                 {
-                    byLabel[label] = ids = [];
+                    byVersion[version] = ids = [];
                 }
 
                 ids.Add(project.Id);
@@ -516,7 +513,7 @@ public sealed class DocumentStore(
         }
 
         var wanted = filter.TemplateVersions is null ? null : filter.TemplateVersions.ToHashSet(StringComparer.Ordinal);
-        var kept = byLabel.Where(e => wanted is null || wanted.Contains(e.Key)).ToList();
+        var kept = byVersion.Where(e => wanted is null || wanted.Contains(e.Key)).ToList();
 
         var descending = filter.VersionSort == DocumentVersionSort.Descending;
         var ordered = kept
@@ -535,6 +532,9 @@ public sealed class DocumentStore(
             [.. ordered.SelectMany(g => g.ProjectIds)]);
     }
 
+    /// <summary>Найпізніший можливий ключ періоду (YYYYMM): версія за нього = чинна версія проєкту.</summary>
+    private const int MaxPeriodKey = 999912;
+
     /// <summary>Група проєктів з однією версією (<c>null</c> — без версії).</summary>
     private sealed record VersionGroup(string? Label, int[] ProjectIds);
 
@@ -545,9 +545,8 @@ public sealed class DocumentStore(
         public string Encode(int projectId, long id)
         {
             var group = Groups.FirstOrDefault(g => g.ProjectIds.Contains(projectId));
-            var text = group?.Label is { } label
-                ? $"V{id.ToString(CultureInfo.InvariantCulture)}|{label}"
-                : $"N{id.ToString(CultureInfo.InvariantCulture)}";
+            var number = id.ToString(CultureInfo.InvariantCulture);
+            var text = group?.Label is { } version ? string.Concat("V", number, "|", version) : string.Concat("N", number);
             return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(text));
         }
 
