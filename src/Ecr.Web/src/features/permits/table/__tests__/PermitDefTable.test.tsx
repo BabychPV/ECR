@@ -255,3 +255,39 @@ describe('PermitDefTable: рядок', () => {
     expect(onRowClick).not.toHaveBeenCalled();
   });
 });
+
+describe('PermitDefTable: шапка над стовпцями при липкому першому стовпці (дефект 02.11)', () => {
+  it('у рядку шапки стільки комірок, скільки в кожному рядку тіла, і вміст решти стовпців липне за першим', () => {
+    show({ initialMode: 'all' });
+    const table = screen.getByRole('table', { name: 'Discharge volumes' });
+    expect(table.querySelector('thead tr.pm-grp'), 'має бути рядок груп').not.toBeNull();
+    const header = Array.from(table.querySelectorAll<HTMLElement>('thead tr.pm-cols > *'));
+    const bodyRows = Array.from(table.querySelectorAll<HTMLElement>('tbody tr'));
+    expect(bodyRows.length).toBeGreaterThan(0);
+    for (const row of bodyRows) expect(row.children).toHaveLength(header.length);
+
+    const groupCells = Array.from(table.querySelectorAll<HTMLTableCellElement>('thead tr.pm-grp > *'));
+    expect(groupCells.reduce((sum, cell) => sum + cell.colSpan, 0)).toBe(header.length);
+
+    header.slice(1).forEach((th) => expect(th.querySelector(':scope > .pm-stick'), th.textContent ?? '').not.toBeNull());
+    for (const row of bodyRows) {
+      Array.from(row.children)
+        .slice(1)
+        .forEach((cell) => expect(cell.querySelector(':scope > .pm-stick')).not.toBeNull());
+    }
+    expect(header[0]!.querySelector('.pm-stick'), 'перший стовпець липне сам').toBeNull();
+  });
+
+  it('ширина першого стовпця пишеться в --pm-first-w таблиці', () => {
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { width: this.classList.contains('pm-first') ? 173 : 50 } as DOMRect;
+    });
+    try {
+      show();
+      const table = screen.getByRole('table', { name: 'Discharge volumes' });
+      expect(table.style.getPropertyValue('--pm-first-w')).toBe('173px');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

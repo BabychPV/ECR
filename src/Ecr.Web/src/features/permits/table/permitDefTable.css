@@ -61,6 +61,22 @@
   top: 0;
 }
 
+/*
+ * Вміст стовпців після першого липне до правого краю липкого першого стовпця (`--pm-first-w` міряє
+ * `PermitDefTable`): стовпець, що частково заїхав під перший, лишає видимими і підпис шапки, і початок тексту
+ * комірки, а не порожню шапку над хвостом тексту. Межа липкості — сама комірка, тож вирівнювання стовпців не
+ * змінюється (дефект 02.11, «Emission limits»).
+ */
+.pm-t .pm-stick,
+.pm-t .pm-gbtn {
+  position: sticky;
+  left: var(--pm-first-w, 0px);
+}
+
+.pm-t .pm-stick {
+  display: inline-block;
+}
+
 .pm-gbtn {
   display: inline-flex;
   align-items: center;
