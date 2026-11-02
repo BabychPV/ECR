@@ -6,7 +6,7 @@ import { describe as describeViolations, findViolations } from '@/test/a11y';
 import * as airApi from '@/features/permits/air/airApi';
 import { AirLimitsTab } from '../AirLimitsTab';
 import { AirImportWizard } from '../import/AirImportWizard';
-import { analysis, card, preview, profile, profiles, result, scopeCodes, tree, xlsx } from './airFixtures';
+import { analysis, card, preview, profile, profiles, result, scopeCodes, scopeFields, tree, xlsx } from './airFixtures';
 
 /**
  * Доступність картки лімітів і майстра імпорту в обох темах (`ФВ-14.16`): картка (згорнута, розкрита, підсумки) і
@@ -32,6 +32,7 @@ vi.mock('@/features/permits/air/airApi', () => ({
   applyAirImport: vi.fn(),
   getNaeTree: vi.fn(),
   getAirScopeCodes: vi.fn(),
+  getAirScopeFields: vi.fn(),
 }));
 
 const api = vi.mocked(airApi);
@@ -46,6 +47,7 @@ beforeEach(() => {
   api.applyAirImport.mockResolvedValue(result());
   api.getNaeTree.mockResolvedValue(tree());
   api.getAirScopeCodes.mockResolvedValue(scopeCodes());
+  api.getAirScopeFields.mockResolvedValue(scopeFields());
 });
 afterEach(() => {
   cleanup();
@@ -79,19 +81,24 @@ describe('Air limits - доступність', { timeout: 300_000 }, () => {
     it(`${colorScheme}: майстер - файл, відповідність, перегляд, результат`, async () => {
       const { container } = render(
         <Shell colorScheme={colorScheme}>
-          <AirImportWizard permitId={5} mayImport mayEditProfile />
+          <AirImportWizard permitId={5} permitNumber="KZ87VCZ14622157" mayImport mayEditProfile />
         </Shell>,
       );
       await screen.findByRole('textbox', { name: new RegExp('^' + text('permits.air.import.region.label')) });
       await clean(container);
 
+      await userEvent.click(screen.getByRole('textbox', { name: new RegExp('^' + text('permits.air.import.region.label')) }));
+      await userEvent.click(await screen.findByRole('option', { name: /^Atyrau/ }));
+      await userEvent.click(screen.getByRole('textbox', { name: new RegExp('^' + text('permits.air.import.area.label')) }));
+      await userEvent.click(await screen.findByRole('option', { name: /^Offshore/ }));
+      await clean(container);
+      fireEvent.click(screen.getByRole('button', { name: text('wizard.next') }));
+      await screen.findByRole('heading', { name: text('permits.air.import.step.file') });
+      await clean(container);
+
       const input = document.querySelector<HTMLInputElement>('input[type="file"]');
       if (input === null) throw new Error('file input');
       await userEvent.upload(input, xlsx());
-      await userEvent.click(screen.getByRole('textbox', { name: new RegExp('^' + text('permits.air.import.region.label')) }));
-      await userEvent.click(await screen.findByRole('option', { name: /^ATYRAU/ }));
-      await userEvent.click(screen.getByRole('textbox', { name: new RegExp('^' + text('permits.air.import.area.label')) }));
-      await userEvent.click(await screen.findByRole('option', { name: /^OFFSHORE/ }));
       fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.analyse') }));
       await screen.findByTestId('air-header-report');
       await clean(container);

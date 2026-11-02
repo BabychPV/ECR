@@ -13,8 +13,8 @@ import type {
  * побудова `request`, розв'язання відсутніх НАЕ, підтвердження заміни чужих дозволів, «застарілий» перегляд.
  */
 
-export type ImportStep = 'file' | 'mapping' | 'preview' | 'apply';
-export const ImportSteps: readonly ImportStep[] = ['file', 'mapping', 'preview', 'apply'];
+export type ImportStep = 'scope' | 'file' | 'mapping' | 'preview' | 'apply';
+export const ImportSteps: readonly ImportStep[] = ['scope', 'file', 'mapping', 'preview', 'apply'];
 
 /** Регіон без ділянок: код `-` (контракт). */
 export const NoArea = '-';
@@ -31,7 +31,9 @@ export const UnsetResolution: Resolution = { choice: 'unset', createUnder: '' };
 
 export interface ImportDraft {
   readonly file: File | null;
+  /** Значення пікера REGION (`scopeModel`): Registry — id запису, List — текст вибору, Text — введений текст. */
   readonly region: string;
+  /** Значення пікера AREA, так само; порожньо — без ділянки. */
   readonly area: string;
   readonly profileCode: string;
   /** Редагована специфікація; `null` — працює збережений профіль як є. */
@@ -103,8 +105,8 @@ export function unresolved(
 }
 
 /**
- * Тіло `request`. Незбережена специфікація (`spec`) перемагає профіль; регіон/ділянка нормалізуються.
- * `preview` — відбиток і рішення для `apply`; для `analyse` їх не передають.
+ * Тіло `request`. Незбережена специфікація (`spec`) перемагає профіль. Регіон/ділянка сюди не входять: їх несуть
+ * окремі поля форми (`scopeFormFields`, AIR-ON-AIR). `preview` — відбиток і рішення для `apply`; для `analyse` їх не передають.
  */
 export function buildOptions(
   draft: ImportDraft,
@@ -122,20 +124,16 @@ export function buildOptions(
         ? {}
         : { profileCode: draft.profileCode }
       : { spec: draft.spec }),
-    region: normalizeCode(draft.region),
-    area: normalizeArea(draft.area),
     ...(resolutions.length > 0 ? { resolutions } : {}),
     ...(extra.ownerKeys !== undefined && extra.ownerKeys.length > 0 ? { confirmedOtherOwners: extra.ownerKeys } : {}),
     ...(extra.fingerprint === undefined ? {} : { expectedFingerprint: extra.fingerprint }),
   };
 }
 
-/** Перший крок можна завершити: є файл `.xlsx`, регіон і ділянка (обидва - вибір зі списку `scope-codes`, `-` = без ділянки). */
-export function fileStepProblem(draft: ImportDraft): 'file' | 'region' | 'area' | 'extension' | null {
+/** Крок «Файл» можна завершити: є файл `.xlsx` (область перевіряє крок «Регіон і ділянка», `scopeProblem`). */
+export function fileStepProblem(draft: ImportDraft): 'file' | 'extension' | null {
   if (draft.file === null) return 'file';
   if (!/\.xlsx$/i.test(draft.file.name)) return 'extension';
-  if (normalizeCode(draft.region) === '') return 'region';
-  if (draft.area === '') return 'area';
 
   return null;
 }

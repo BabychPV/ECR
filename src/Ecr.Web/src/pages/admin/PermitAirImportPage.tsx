@@ -12,7 +12,8 @@ import { usePermit } from '@/features/permits/permit/permitQueries';
 import { PermitEditorHead } from '@/features/permits/shell/PermitEditorHead';
 import { PermitsPaths } from '@/features/permits/shell/permitPaths';
 
-const AirTypeCode = 'AIR_LIMITS';
+// AIR-ON-AIR (людина 02.11: «а не як окремий тип»): таблиці параметрів належать типу AIR.
+const AirTypeCode = 'AIR';
 const EditDefinition = 'Registry.EditDefinition';
 
 function ImportScreen({ permit }: { readonly permit: Permit }): JSX.Element {
@@ -33,13 +34,13 @@ function ImportScreen({ permit }: { readonly permit: Permit }): JSX.Element {
       {!supported && <Banner tone="warning" title={t('permits.air.import.unsupported.title')} text={t('permits.air.import.unsupported.text')} />}
       {supported && expired && <Banner tone="info" title={t('permits.air.import.expired.title')} text={t('permits.air.import.expired.text')} />}
       {supported && !mayEdit && <Banner tone="info" title={t('permits.air.import.readOnly.title')} text={t('permits.air.import.readOnly.text')} />}
-      {supported && <AirImportWizard permitId={permit.id} mayImport={mayImport} mayEditProfile={mayEditProfile} />}
+      {supported && <AirImportWizard permitId={permit.id} permitNumber={permit.number} mayImport={mayImport} mayEditProfile={mayEditProfile} />}
     </>
   );
 }
 
 /**
- * Майстер імпорту лімітів із Excel для дозволу «Air Limits Import» (`/admin/permits/:id/import`, NAE-план N5).
+ * Майстер «Import parameters…» для дозволу типу AIR (`/admin/permits/:id/import`, NAE-план N5, AIR-ON-AIR).
  * Без права `Registry.EditData` (або для закінченого дозволу) кроки лише читаються: «Next»/«Apply» вимкнено.
  */
 export function PermitAirImportPage(): JSX.Element {

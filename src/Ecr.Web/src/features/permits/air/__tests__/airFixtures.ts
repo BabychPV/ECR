@@ -4,6 +4,7 @@ import type {
   AirLimitsPermit,
   AirPreview,
   AirScopeCodes,
+  AirScopeFields,
   AirSource,
   ImportProfile,
   ImportProfileSummary,
@@ -54,7 +55,7 @@ export function card(patch: Partial<AirLimitsPermit> = {}): AirLimitsPermit {
   return {
     permitId: 5,
     permitNumber: 'KZ87VCZ14622157',
-    typeCode: 'AIR_LIMITS',
+    typeCode: 'AIR',
     validFrom: '2024-01-01',
     validTo: '2027-01-01',
     sources: [source(1, '1085'), source(2, '6001', { sourceType: 'P1', sourceName: 'Wellheads', substances: [substance(21, '0333', 'Hydrogen sulphide')] })],
@@ -202,6 +203,45 @@ export function xlsx(name = 'limits.xlsx'): File {
   return new File([new Uint8Array([80, 75, 3, 4])], name, {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
+}
+
+type ScopeKindName = 'Registry' | 'List' | 'Text';
+
+/**
+ * AIR-ON-AIR scope columns (GET /air-limits/scope-fields). Region: Atyrau (NAE ATYRAU, has areas), Mangistau (no areas), Nowhere (not
+ * in the NAE tree). Area: Offshore/Onshore complex (NAE areas of Atyrau), Bautino base (a work area, no NAE counterpart).
+ */
+export function scopeFields(regionKind: ScopeKindName = 'Registry', areaKind: ScopeKindName = 'Registry', patch: { regionFound?: boolean; areaFound?: boolean; areaRequired?: boolean } = {}): AirScopeFields {
+  const entry = (kind: ScopeKindName, id: number, code: string, name: string, naeRegion: string | null, naeArea: string | null) => ({
+    entryId: kind === 'Registry' ? id : null,
+    code: kind === 'Registry' ? code : name,
+    name,
+    naeRegion,
+    naeArea,
+  });
+  const regions = regionKind === 'Text' ? [] : [
+    entry(regionKind, 11, 'REG_001', 'Atyrau', 'ATYRAU', null),
+    entry(regionKind, 12, 'REG_002', 'Mangistau', 'MANGISTAU', null),
+    entry(regionKind, 13, 'REG_003', 'Nowhere', null, null),
+  ];
+  const areas = areaKind === 'Text' ? [] : [
+    entry(areaKind, 21, 'AREA_OFF', 'Offshore complex', null, 'OFFSHORE'),
+    entry(areaKind, 22, 'AREA_ON', 'Onshore complex', null, 'ONSHORE'),
+    entry(areaKind, 23, 'AREA_BAU', 'Bautino base', null, null),
+  ];
+  const found = (value: boolean | undefined): boolean => value ?? true;
+
+  return {
+    typeCode: 'AIR',
+    region: {
+      columnCode: 'REGION', kind: regionKind, registryCode: regionKind === 'Text' ? null : 'LAND_REGION', required: true,
+      registryFound: found(patch.regionFound), options: found(patch.regionFound) ? regions : [],
+    },
+    area: {
+      columnCode: 'AREA', kind: areaKind, registryCode: areaKind === 'Text' ? null : 'AIR_AREA', required: patch.areaRequired ?? false,
+      registryFound: found(patch.areaFound), options: found(patch.areaFound) ? areas : [],
+    },
+  };
 }
 
 /** Scope codes of the NAE tree (GET /air-limits/scope-codes): two regions, one with a no-area code. */
