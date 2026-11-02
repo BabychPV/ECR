@@ -106,6 +106,14 @@ async function notReloaded(page: Page): Promise<void> {
 
 /** The sheet back to `Draft` (stand baseline): rejected is already editable; submitted/approved — reopen. */
 async function toDraft(api: APIRequestContext): Promise<void> {
+  // Draft/Rejected are already editable: reopen there is a business-rule refusal (403), not a no-op.
+  const summary = await ok<{ sheetStates: Record<string, string> }>(
+    await api.get(`/api/v1/documents/${DocumentId}?periodKey=${PeriodKey}`),
+    'стан документа',
+  );
+  const state = summary.sheetStates[sheetCode] ?? 'Draft';
+  if (state !== 'Submitted' && state !== 'Approved') return;
+
   const reopen = await api.post(`/api/v1/documents/${DocumentId}/reopen`, {
     data: { sheetDefId, periodKey: Number(PeriodKey), reason: 'e2e: Live status, базова лінія' },
   });
@@ -200,6 +208,13 @@ test.describe('Live status: sheet state reaches the other open page without relo
       if (response.status() >= 300) problems.push(`user ${String(id)}: ${String(response.status())}`);
     }
     if (roleId !== 0) {
+      // A role with grants is "in use" (409): the grant set goes first.
+      const grants = await admin.get(`/api/v1/roles/${String(roleId)}/grants`);
+      const cleared = await admin.put(`/api/v1/roles/${String(roleId)}/grants`, {
+        headers: { 'If-Match': grants.headers()['etag'] ?? '' },
+        data: { grants: [] },
+      });
+      if (cleared.status() >= 300) problems.push(`grants: ${String(cleared.status())} ${(await cleared.text()).slice(0, 300)}`);
       const response = await admin.delete(`/api/v1/roles/${String(roleId)}`);
       if (response.status() >= 300 && response.status() !== 404) problems.push(`role: ${String(response.status())} ${(await response.text()).slice(0, 300)}`);
     }
