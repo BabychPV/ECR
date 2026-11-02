@@ -6,7 +6,7 @@ import { formatNumber } from '@/shared/format/number';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Banner } from '@/shared/ui/Banner';
 import { permitImportPath } from '../shell/permitPaths';
-import { cell, filterSources, num, sourceKey, sourceTypeLabel, sourceTypeShort } from './airCardModel';
+import { cell, filterSources, num, scopeLabel, sourceKey, sourceTypeLabel, sourceTypeShort } from './airCardModel';
 import type { AirLimitsPermit, AirSource, AirTotal } from './airTypes';
 import { useAirLimits } from './useAirLimits';
 import './air.css';
@@ -67,6 +67,7 @@ function SourcesTable({ sources }: { readonly sources: readonly AirSource[] }): 
               <span className="pa-sr">{t('permits.air.sources.toggle')}</span>
             </th>
             <th scope="col">{t('permits.air.sources.nae')}</th>
+            <th scope="col">{t('permits.air.sources.scope')}</th>
             <th scope="col">{t('permits.air.sources.source')}</th>
             <th scope="col">{t('permits.air.sources.point')}</th>
             <th scope="col">{t('permits.air.sources.type')}</th>
@@ -120,6 +121,9 @@ function SourcesTable({ sources }: { readonly sources: readonly AirSource[] }): 
                   <th scope="row" className="pa-code">
                     {source.naeCode}
                   </th>
+                  <td className="pa-code" data-testid="air-source-scope">
+                    {scopeLabel(source)}
+                  </td>
                   <td>{cell(source.sourceName)}</td>
                   <td>{cell(source.emissionPointName)}</td>
                   <td title={sourceTypeLabel(source.sourceType)}>{sourceTypeShort(source.sourceType)}</td>
@@ -135,7 +139,7 @@ function SourcesTable({ sources }: { readonly sources: readonly AirSource[] }): 
                 {expanded && (
                   <tr className="pa-subrow">
                     <td />
-                    <td colSpan={12}>
+                    <td colSpan={13}>
                       <SubstancesTable source={source} id={panel} />
                     </td>
                   </tr>

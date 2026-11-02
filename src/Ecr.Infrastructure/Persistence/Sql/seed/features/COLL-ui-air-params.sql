@@ -7,6 +7,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.air.import.step.scope', N'kz', N'Аймақ және учаске'),
     (N'permits.air.import.hint.scope', N'ru', N'Выберите, к чему относятся параметры: регион (и участок) расположения разрешения.'),
     (N'permits.air.import.hint.scope', N'kz', N'Параметрлер неге жататынын таңдаңыз: рұқсат орналасқан аймақ (және учаске).'),
+    (N'permits.air.sources.scope', N'ru', N'Регион / участок'),
+    (N'permits.air.sources.scope', N'kz', N'Аймақ / учаске'),
     (N'permits.air.import.permitNumber', N'ru', N'Номер разрешения'),
     (N'permits.air.import.permitNumber', N'kz', N'Рұқсат нөмірі'),
     (N'permits.air.import.text.placeholder', N'ru', N'Введите значение'),

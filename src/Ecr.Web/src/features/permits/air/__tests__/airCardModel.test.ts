@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Catalog } from '@/test/__tests__/a11yFixtures';
-import { cell, Dash, filterSources, num, sourceTypeLabel, sourceTypeShort } from '../airCardModel';
+import { cell, Dash, filterSources, num, scopeLabel, sourceTypeLabel, sourceTypeShort } from '../airCardModel';
 import { nodeOptions } from '../import/naeNodes';
 import { card, tree } from './airFixtures';
 
@@ -10,6 +10,13 @@ vi.mock('@/shared/i18n', async (importOriginal) => ({
 }));
 
 describe('airCardModel', () => {
+  it('область рядка: коди записів Region/Area, інакше текст; «-» (без ділянки) не показується', () => {
+    const base = card().sources[0]!;
+    expect(scopeLabel({ ...base, region: 'ATYRAU', area: 'OFFSHORE', regionEntryCode: 'REG_001', areaEntryCode: 'AREA_018' })).toBe('REG_001 / AREA_018');
+    expect(scopeLabel({ ...base, region: 'Atyrau', area: '-', regionEntryCode: null, areaEntryCode: null })).toBe('Atyrau');
+    expect(scopeLabel({ ...base, region: null, area: null, regionEntryCode: null, areaEntryCode: null })).toBe(Dash);
+  });
+
   it('тип джерела: латинські T/P1 з сервера -> підписи каталогу; невідомий показується як є', () => {
     expect(sourceTypeLabel('T')).toBe(Catalog['permits.air.type.point']);
     expect(sourceTypeLabel('P1')).toBe(Catalog['permits.air.type.diffuse']);
