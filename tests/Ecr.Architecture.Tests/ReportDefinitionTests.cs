@@ -101,8 +101,11 @@ public sealed partial class ReportDefinitionTests
         Assert.NotEmpty(snapshotViews);
     }
 
+    // PERMUSE: шар сирих даних для SSRS - це ще й вʼюхи даних дозволів (`rpt.v_Permit`, `rpt.v_PermitAir*`), що читають записи
+    // довідників `dic.RegistryValue`: у них немає ні зрізу, ні статусу подання. Правило «жодного `rpt.Report*`» на них діє так само.
     private static bool IsRawDocumentView(string body) =>
-        body.Contains("doc.CellValue", StringComparison.Ordinal);
+        body.Contains("doc.CellValue", StringComparison.Ordinal)
+        || body.Contains("dic.RegistryValue", StringComparison.Ordinal);
 
     private static string SolutionRoot()
     {
