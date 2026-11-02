@@ -46,14 +46,16 @@ public static class AirScopeMatcher
             return new AirScopeMatch(region.Code, null);
         }
 
-        var area = Normalize(areaName);
-        if (area.EndsWith(Complex, StringComparison.Ordinal) && area.Length > Complex.Length)
-        {
-            area = area[..^Complex.Length];
-        }
-
+        var area = AreaKey(areaName);
         var hit = realAreas.FirstOrDefault(a => Normalize(a.Code) == area || Normalize(a.Name) == area);
         return new AirScopeMatch(region.Code, hit?.Code);
+    }
+
+    /// <summary>Normalised area name with a trailing «complex» dropped (<c>Offshore complex</c> → <c>OFFSHORE</c>).</summary>
+    public static string AreaKey(string areaName)
+    {
+        var area = Normalize(areaName);
+        return area.EndsWith(Complex, StringComparison.Ordinal) && area.Length > Complex.Length ? area[..^Complex.Length] : area;
     }
 
     /// <summary>NAE tree area code an Area value maps to in ANY tree region that has areas; <c>null</c> — none (region only).</summary>

@@ -61,21 +61,45 @@ public sealed class GetAirLimitsPermitHandler(
                 c.Number(AirLimitsSchema.GramsPerSecond), c.Number(AirLimitsSchema.MgPerNm3), c.Number(AirLimitsSchema.TonsPerYear));
         }
 
+        // ✎ AIR-ON-AIR: REGION / AREA hold an entry (Registry / List kind) or a text (Text kind); the answer carries both forms.
+        var scopeIds = sources.Values
+            .SelectMany(s => new[] { s.Ref(AirLimitsSchema.Region), s.Ref(AirLimitsSchema.Area) })
+            .OfType<long>()
+            .Distinct()
+            .ToList();
+        var scopeCodes = new Dictionary<long, string>();
+        foreach (var id in scopeIds)
+        {
+            if (await registries.FindEntryAsync(id, ct).ConfigureAwait(false) is { } scopeEntry)
+            {
+                scopeCodes[id] = scopeEntry.Code;
+            }
+        }
+
+        string? ScopeText(AirRow s, string column)
+            => s.Ref(column) is { } id ? scopeCodes.GetValueOrDefault(id) : s.Text(column);
+
         var list = new List<AirSourceDto>();
         foreach (var s in sources.Values.Where(s => s.Ref(AirLimitsSchema.Nae) is { } n && naeCodes.ContainsKey(n)))
         {
             var nae = s.Ref(AirLimitsSchema.Nae)!.Value;
+            var regionId = s.Ref(AirLimitsSchema.Region);
+            var areaId = s.Ref(AirLimitsSchema.Area);
             list.Add(new AirSourceDto(
-                s.Entry.Id, nae, naeCodes[nae], s.Text(AirLimitsSchema.Region), s.Text(AirLimitsSchema.Area),
+                s.Entry.Id, nae, naeCodes[nae], ScopeText(s, AirLimitsSchema.Region), ScopeText(s, AirLimitsSchema.Area),
                 s.Text(AirLimitsSchema.SiteLabel), s.Text(AirLimitsSchema.ProductionCode), s.Text(AirLimitsSchema.SourceName),
                 s.Number(AirLimitsSchema.Quantity), s.Number(AirLimitsSchema.HoursPerYear), s.Text(AirLimitsSchema.PointName),
                 s.Text(AirLimitsSchema.SourceType), s.Number(AirLimitsSchema.Height), s.Number(AirLimitsSchema.Diameter),
                 s.Number(AirLimitsSchema.Velocity), s.Number(AirLimitsSchema.Volume), s.Number(AirLimitsSchema.Temperature),
                 s.Number(AirLimitsSchema.X1), s.Number(AirLimitsSchema.Y1), s.Number(AirLimitsSchema.X2), s.Number(AirLimitsSchema.Y2),
-                [.. childrenBySource[s.Entry.Id].Select(Substance).OrderBy(x => x.SubstanceCode, StringComparer.Ordinal)]));
+                [.. childrenBySource[s.Entry.Id].Select(Substance).OrderBy(x => x.SubstanceCode, StringComparer.Ordinal)],
+                regionId,
+                regionId is { } r ? scopeCodes.GetValueOrDefault(r) : null,
+                areaId,
+                areaId is { } a ? scopeCodes.GetValueOrDefault(a) : null));
         }
 
-        list = [.. list.OrderBy(s => s.Region, StringComparer.Ordinal).ThenBy(s => s.Area, StringComparer.Ordinal)
+        list = [.. list.OrderBy(s => s.Region ?? string.Empty, StringComparer.Ordinal).ThenBy(s => s.Area ?? string.Empty, StringComparer.Ordinal)
             .ThenBy(s => s.NaeCode, StringComparer.Ordinal)];
 
         var totals = list.SelectMany(s => s.Substances)
