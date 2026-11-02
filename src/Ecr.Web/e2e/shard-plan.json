@@ -57,6 +57,7 @@
       "sheetFocus.spec.ts",
       "permitPage.spec.ts",
       "permitsList.spec.ts",
+      "permitsSubnav500.spec.ts",
       "versionMigrationOverwrite.spec.ts",
       "versionMigrationRange.spec.ts",
       "permitsP3Backlog.spec.ts",
