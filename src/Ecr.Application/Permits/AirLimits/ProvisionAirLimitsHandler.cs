@@ -17,7 +17,7 @@ namespace Ecr.Application.Permits.AirLimits;
 /// profile exists. Idempotent: a type that already has both tables is not edited by this call. Permissions
 /// <c>Permit.EditType</c> and <c>Permit.PublishType</c> (checked by the permit-type handlers it drives).
 /// </summary>
-public sealed class ProvisionAirLimitsHandler(
+public sealed partial class ProvisionAirLimitsHandler(
     IPermitTypeStore permits,
     IRegistryStore registries,
     IRegistryImportProfileStore profiles,
@@ -29,8 +29,19 @@ public sealed class ProvisionAirLimitsHandler(
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock,
-    AirLimitsSettings settings)
+    AirLimitsSettings settings,
+    Microsoft.Extensions.Logging.ILogger<ProvisionAirLimitsHandler>? logger = null)
 {
+    [Microsoft.Extensions.Logging.LoggerMessage(
+        Level = Microsoft.Extensions.Logging.LogLevel.Warning,
+        Message = "AIR provisioning: the Region registry {RegistryCode} does not exist; the REGION column is published as Text (free text). Create the registry and switch the column in a new version of the AIR type if needed.")]
+    private static partial void LogRegionAsText(Microsoft.Extensions.Logging.ILogger logger, string registryCode);
+
+    [Microsoft.Extensions.Logging.LoggerMessage(
+        Level = Microsoft.Extensions.Logging.LogLevel.Warning,
+        Message = "AIR provisioning skipped: permit type {TypeCode} has an open draft; the sources tables are added once the draft is published or discarded (POST /api/v1/air-limits/provision).")]
+    private static partial void LogDraftOpen(Microsoft.Extensions.Logging.ILogger logger, string typeCode);
+
     /// <summary>Provisions the type and the profile.</summary>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AirLimitsProvisionReport> HandleAsync(CancellationToken ct)
@@ -40,13 +51,12 @@ public sealed class ProvisionAirLimitsHandler(
         await Security.PermissionCheck.RequireAsync(access, currentUser, PublishPermitTypeHandler.Permission, ct).ConfigureAwait(false);
 
         // Prerequisites FIRST (Permites, fresh stand): the shared registries the tables point at. Before this check a missing
-        // registry failed inside the replace step and left a draft type behind. ✎ AIR-ON-AIR: the Region registry belongs to the
-        // Land bootstrap and is NOT created here (missing → 422); the Area registry AIR_AREA is ours (created below when absent).
+        // registry failed inside the replace step and left a draft type behind. The Area registry AIR_AREA is ours (created below
+        // when absent).
         foreach (var (column, registryCode) in new[]
                  {
                      (AirLimitsSchema.Nae, settings.NaeRegistryCode),
                      (AirLimitsSchema.Substance, settings.SubstanceRegistryCode),
-                     (AirLimitsSchema.Region, settings.RegionRegistryCode),
                  })
         {
             if (await registries.FindDefinitionAsync(registryCode, ct).ConfigureAwait(false) is null)
@@ -55,7 +65,16 @@ public sealed class ProvisionAirLimitsHandler(
             }
         }
 
-        var content = AirLimitsSchema.Content(settings);
+        // ✎ AIR-ON-AIR (coordinator 02.11): the Region registry belongs to the Land bootstrap and is NOT created here. Missing →
+        // the REGION column is published as Text (free text, still editable later through a new type version) with a warning,
+        // not a refusal.
+        var regionAsText = await registries.FindDefinitionAsync(settings.RegionRegistryCode, ct).ConfigureAwait(false) is null;
+        if (regionAsText && logger is not null)
+        {
+            LogRegionAsText(logger, settings.RegionRegistryCode);
+        }
+
+        var content = AirLimitsSchema.Content(settings, regionAsText);
         var created = false;
         var profileCreated = false;
         PermitTypeDef? type = null;
@@ -82,20 +101,27 @@ public sealed class ProvisionAirLimitsHandler(
                 {
                     // Never published: its draft (if any) is the base; the sources tables are appended, nothing else changes.
                     var draft = type.DraftJson is { Length: > 0 } json ? PermitTypeCodec.Parse(json) : null;
-                    var merged = draft is null ? content : AirLimitsSchema.WithSourcesTables(draft, settings) ?? draft;
+                    var merged = draft is null ? content : AirLimitsSchema.WithSourcesTables(draft, settings, regionAsText) ?? draft;
                     await ReplaceAndPublishAsync(type, merged, token).ConfigureAwait(false);
                 }
                 else
                 {
                     // ✎ AIR-ON-AIR: the live AIR type (with «Emission limits») gets a NEW VERSION with the sources tables appended;
                     // its other tables and rules are untouched. Already there → nothing to do (an admin may have reconfigured
-                    // REGION / AREA; that is respected). An open draft of someone else is not published under them.
+                    // REGION / AREA; that is respected).
                     var published = await new PermitTypeReader(registries, permits).ReadPublishedAsync(type, token).ConfigureAwait(false);
-                    if (AirLimitsSchema.WithSourcesTables(published, settings) is { } merged)
+                    if (AirLimitsSchema.WithSourcesTables(published, settings, regionAsText) is { } merged)
                     {
                         if (type.HasDraft)
                         {
-                            throw PermitTypeErrors.DraftExists(type.Code);
+                            // An open draft of someone else is neither published under them nor overwritten: skipped with a clear
+                            // log line (coordinator 02.11); the call is repeated once the draft is published or discarded.
+                            if (logger is not null)
+                            {
+                                LogDraftOpen(logger, type.Code);
+                            }
+
+                            return;
                         }
 
                         _ = await openVersion.HandleAsync(AirLimitsSchema.TypeCode, token).ConfigureAwait(false);

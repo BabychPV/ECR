@@ -1292,16 +1292,33 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
 
             // ✎ AIR-ON-AIR: as on live, the «Air emission permit» type AIR exists BEFORE provisioning, published, with its own
             // «Emission limits» table: provisioning must append the sources tables as a new version and leave that table alone.
-            if ((await client.GetAsync(new Uri("/api/v1/permit-types/AIR", UriKind.Relative))).StatusCode == HttpStatusCode.NotFound)
+            // ⚠ The startup step (AirTypeStartupStep) may have provisioned AIR already in this shared database (another class made the
+            // NAE tree, the substances and a publisher): then the Land table is added as a new version, so the type looks like live.
+            var existing = await client.GetAsync(new Uri("/api/v1/permit-types/AIR", UriKind.Relative));
+            var limitsMissing = existing.StatusCode == HttpStatusCode.OK
+                                && !(await ReadAsync(app, existing)).GetProperty("tables").EnumerateArray()
+                                    .Any(t => t.GetProperty("code").GetString() == EmissionLimitsTable);
+            if (existing.StatusCode == HttpStatusCode.NotFound || limitsMissing)
             {
                 var name = new Dictionary<string, string> { ["en"] = "Air emission permit" };
-                var created = await ReadAsync(app, await client.PostAsJsonAsync(
-                    new Uri("/api/v1/permit-types", UriKind.Relative), new { code = "AIR", nameL10n = name, category = "Air" }));
+                JsonElement created;
+                List<object> tablesNow = [];
+                if (limitsMissing)
+                {
+                    created = await ReadAsync(app, await client.PostAsync(new Uri("/api/v1/permit-types/AIR/new-version", UriKind.Relative), null));
+                    tablesNow.AddRange(created.GetProperty("tables").EnumerateArray().Select(t => (object)t));
+                }
+                else
+                {
+                    created = await ReadAsync(app, await client.PostAsJsonAsync(
+                        new Uri("/api/v1/permit-types", UriKind.Relative), new { code = "AIR", nameL10n = name, category = "Air" }));
+                }
+
                 var limits = new
                 {
                     code = EmissionLimitsTable,
                     nameL10n = new Dictionary<string, string> { ["en"] = "Emission limits" },
-                    order = 1,
+                    order = 99,
                     columns = new object[]
                     {
                         new
@@ -1315,7 +1332,7 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
                 };
                 var draft = await ReadAsync(app, await client.PutAsJsonAsync(
                     new Uri("/api/v1/permit-types/AIR", UriKind.Relative),
-                    new { rowVersion = created.GetProperty("rowVersion").GetString(), nameL10n = name, category = "Air", tables = new[] { limits }, rules = Array.Empty<object>() }));
+                    new { rowVersion = created.GetProperty("rowVersion").GetString(), nameL10n = name, category = "Air", tables = tablesNow.Append(limits).ToArray(), rules = Array.Empty<object>() }));
                 await ReadAsync(app, await client.PostAsJsonAsync(
                     new Uri("/api/v1/permit-types/AIR/publish", UriKind.Relative),
                     new { reason = "Land-like AIR type", rowVersion = draft.GetProperty("rowVersion").GetString() }));

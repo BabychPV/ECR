@@ -158,6 +158,10 @@ public static partial class StartupSequence
 
         LogBootstrapOutcome(logger, bootstrap.LastOutcome);
 
+        // 4d) ✎ AIR-ON-AIR: the AIR permit type's sources tables and the Area registry — idempotent, after the bootstrap admin
+        //     (a fresh database gets a publisher here), never stops the start.
+        await AirTypeStartupStep.RunAsync(app.Services, logger, CancellationToken.None).ConfigureAwait(false);
+
         // 5) ПОКИНУТІ фонові задачі. ⛔ Задача, яку виконував процес, що
         //     впав, лишається `Running`/`Queued` у базі НАЗАВЖДИ — процеса,
         //     який мав позначити її `Failed`, уже немає. Без цього кроку така
