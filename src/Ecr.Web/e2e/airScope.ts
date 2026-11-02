@@ -115,6 +115,14 @@ async function ensureRegistry(api: APIRequestContext, code: string, name: string
   return (await ok<{ id: number }>(await api.get(`/api/v1/registries/${code}/definition`), code)).id;
 }
 
+/**
+ * The Region registry (`LAND_REGION`, Land bootstrap; absent on a fresh stand). ⚠ Before `POST /air-limits/provision`: provisioning
+ * refuses (422) when the Region registry is missing; `AIR_AREA` it creates itself (OFFSHORE / ONSHORE).
+ */
+export async function ensureRegionRegistry(api: APIRequestContext): Promise<void> {
+  await ensureRegistry(api, RegionRegistry, 'Regions');
+}
+
 /** Adds an entry named `name` (English display) to `registry`; returns its id. */
 export async function addScopeEntry(api: APIRequestContext, registry: string, code: string, name: string): Promise<number> {
   const defId = await ensureRegistry(api, registry, registry === RegionRegistry ? 'Regions' : 'Areas');
