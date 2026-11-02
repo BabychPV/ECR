@@ -4702,12 +4702,12 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/entries/{id}/retire` | `Registry.EditData` або грант `Write` на довідник | 8 |
 | `GET` | `/api/v1/registries/{code}/entries/{id}/references` | `Registry.View` або грант `Read` на довідник | 8 |
 | `POST` | `/api/v1/nae-tree/af-import` | `Registry.EditDefinition` + `Registry.EditData` | 8 |
-| `POST` | `/api/v1/nae-tree/roots` | `Registry.EditData` (+ `Registry.EditDefinition`, коли довідника ще немає) | 8 |
-| `POST` | `/api/v1/nae-tree/seed-roots` | `Registry.EditData` (+ `Registry.EditDefinition`, коли довідника ще немає) | 8 |
+| `POST` | `/api/v1/nae-tree/roots` | `Registry.EditData`; +`Registry.EditDefinition` і `Registry.Publish`, коли довідник створюється | 8 |
+| `POST` | `/api/v1/nae-tree/seed-roots` | `Registry.EditData`; +`Registry.EditDefinition` і `Registry.Publish`, коли довідник створюється | 8 |
 | `GET` | `/api/v1/nae-tree/import/template` | `Registry.View` | 8 |
 | `POST` | `/api/v1/nae-tree/import/analyse` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/nae-tree/import/preview` | `Registry.EditData` | 8 |
-| `POST` | `/api/v1/nae-tree/import/apply` | `Registry.EditData` (+ `Registry.EditDefinition`, коли довідника ще немає) | 8 |
+| `POST` | `/api/v1/nae-tree/import/apply` | `Registry.EditData`; +`Registry.EditDefinition` і `Registry.Publish`, коли довідник створюється | 8 |
 | `POST` | `/api/v1/air-limits/provision` | `Permit.EditType` + `Permit.PublishType` | 8 |
 | `GET` | `/api/v1/air-limits/import-profiles` | `Registry.View` | 8 |
 | `GET` | `/api/v1/air-limits/import-profiles/{code}` | `Registry.View` | 8 |
