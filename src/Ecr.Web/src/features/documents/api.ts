@@ -194,6 +194,38 @@ export function listDocumentOwners(params: {
   );
 }
 
+/** Варіанти фільтра «Version»: усі версії видимих документів у природному порядку і кількість документів без версії. */
+export interface DocumentTemplateVersionOptions {
+  readonly versions: readonly string[];
+  readonly withoutVersionCount: number;
+}
+
+/**
+ * Усі версії шаблону серед документів, які я бачу (та сама межа видимості, що й перелік), — варіанти фільтра «Version».
+ * Версія — за `periodKey` (без нього — чинна версія проєкту), як у колонці.
+ *
+ * ⚠ Адреса — через `URLSearchParams` у шаблоні з одним літералом, як у `listDocumentOwners`.
+ */
+export function listDocumentTemplateVersions(params: {
+  readonly projectId: number | null;
+  readonly periodKey: number | null;
+}): Promise<DocumentTemplateVersionOptions> {
+  const query = new URLSearchParams();
+  if (params.projectId !== null) query.set('projectId', String(params.projectId));
+  if (params.periodKey !== null) query.set('periodKey', String(params.periodKey));
+
+  return apiFetch<components['schemas']['DocumentTemplateVersionsResponse']>(
+    `/api/v1/documents/template-versions?${query.toString()}`,
+  ).then((response) => {
+    // Відповідь не за контрактом (немає рядкових версій) - це відмова: сторінка лишається на версіях завантаженого переліку.
+    if (!Array.isArray(response.items) || response.items.some((item) => typeof item.version !== 'string')) {
+      throw new Error('template-versions: unexpected response');
+    }
+
+    return { versions: response.items.map((item) => item.version), withoutVersionCount: response.withoutVersionCount };
+  });
+}
+
 /** Лічильники над переліком документів (`BE-09`); тип — зі згенерованої схеми. */
 type DocumentListSummary = components['schemas']['DocumentListSummaryResponse'];
 

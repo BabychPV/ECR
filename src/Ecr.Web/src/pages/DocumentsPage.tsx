@@ -4,7 +4,7 @@ import { useQueries, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { PeriodCalendarDto } from '@/api/types';
-import { listDocuments, type DocumentListPage } from '@/features/documents/api';
+import { listDocuments, listDocumentTemplateVersions, type DocumentListPage } from '@/features/documents/api';
 import { DocumentListFilterBar } from '@/features/documents/DocumentListFilterBar';
 import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSummaryStrip';
 import { useDocumentListFilters } from '@/features/documents/documentListFilters';
@@ -144,6 +144,12 @@ export function DocumentsPage(): JSX.Element {
         q: appliedQ,
         projectId: filters.projectId,
       }),
+  });
+
+  // Варіанти фільтра «Version»: усі версії видимих документів (за проєктом і періодом), а не лише сторінки.
+  const versionOptionsQuery = useQuery({
+    queryKey: ['documents', 'template-versions', filters.projectId, periodKey],
+    queryFn: () => listDocumentTemplateVersions({ projectId: filters.projectId, periodKey }),
   });
 
   // ⛔ Аудит-пас 5: колонка «Project» показувала голий числовий `projectId`
@@ -351,8 +357,12 @@ export function DocumentsPage(): JSX.Element {
         periodKey={periodKey}
         filters={filters}
         projects={projects.data?.items ?? []}
-        // Фільтр серверний: після вибору на сторінці лишаються лише обрані версії, тож обрані додаються до тих, що на сторінці.
-        versionOptions={mergeVersionOptions(distinctVersions(query.data?.items ?? [], periodKey), filters.versions)}
+        // Варіанти — УСІ версії видимих документів (`GET /documents/template-versions`); обрані, яких сервер уже не
+        // віддає, лишаються (їх є чим зняти). Поки відповіді немає (або вона відмовила) — версії поточної сторінки.
+        versionOptions={mergeVersionOptions(
+          versionOptionsQuery.data?.versions ?? distinctVersions(query.data?.items ?? [], periodKey),
+          filters.versions,
+        )}
         staleOnPage={query.data?.items.filter((d) => d.resultsStale === true).length ?? 0}
         // ✎ D-450: під фільтром за людиною кожен рядок сторінки — її документ, тож ім'я вже є без окремого запиту.
         ownerName={
