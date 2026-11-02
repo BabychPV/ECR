@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { JSX } from 'react';
+import { createRoot } from 'react-dom/client';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -146,8 +148,8 @@ function Where(): null {
   return null;
 }
 
-function show(entry = '/admin/permits/groups', client = new QueryClient({ defaultOptions: { queries: { retry: false } } })): void {
-  render(
+function page(entry: string, client: QueryClient): JSX.Element {
+  return (
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={[entry]}>
         <QueryClientProvider client={client}>
@@ -157,11 +159,38 @@ function show(entry = '/admin/permits/groups', client = new QueryClient({ defaul
           </Routes>
         </QueryClientProvider>
       </MemoryRouter>
-    </MantineProvider>,
+    </MantineProvider>
   );
 }
 
+function show(entry = '/admin/permits/groups', client = new QueryClient({ defaultOptions: { queries: { retry: false } } })): void {
+  render(page(entry, client));
+}
+
 const where = (): string => (globalThis as { __where?: string }).__where ?? '';
+
+// Лінива шторка (`lazy(GroupDrawer)`): якщо ПЕРШИЙ рендер файлу - глибоке посилання `?panel=…`, синхронний `act` у
+// `render` крутить корінь без кінця, доки `lazy` не розв'язався, а розв'язатися йому нема коли - воркер vitest
+// виснажує пам'ять і падає (nightly `shuffle`, seed 18965: першим випав тест «недопустимий код»). У звичайному порядку
+// `lazy` встигав розв'язатися в тестах переліку. Тож розв'язуємо його один раз поза `act` (звичайний планувальник
+// React); холодне завантаження шторки окремо перевіряє `GroupsPage.lazyFocus.test.tsx`.
+beforeAll(async () => {
+  const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean | undefined };
+  const actEnvironment = env.IS_REACT_ACT_ENVIRONMENT;
+  env.IS_REACT_ACT_ENVIRONMENT = false;
+  stub([]);
+  const host = document.body.appendChild(document.createElement('div'));
+  const root = createRoot(host);
+  try {
+    root.render(page('/admin/permits/groups?panel=_new', new QueryClient({ defaultOptions: { queries: { retry: false } } })));
+    await waitFor(() => expect(host.ownerDocument.querySelector('[data-group-drawer="new"]')).not.toBeNull());
+  } finally {
+    root.unmount();
+    host.remove();
+    vi.unstubAllGlobals();
+    env.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+  }
+});
 
 beforeEach(() => {
   session.permissions = ['Registry.View', 'Permit.EditType'];
