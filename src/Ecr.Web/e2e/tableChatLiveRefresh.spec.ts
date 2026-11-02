@@ -280,8 +280,11 @@ test.describe('Live refresh: two users on the stand', () => {
       try {
         const { page } = operator;
         const polls: number[] = [];
+        let lastETag: string | null = null;
         page.on('response', (response) => {
-          if (/\/sheets\/\d+\/changes/.test(response.url())) polls.push(response.status());
+          if (!/\/sheets\/\d+\/changes/.test(response.url())) return;
+          polls.push(response.status());
+          lastETag = response.headers()['etag'] ?? lastETag;
         });
         await page.goto(`${DocumentUrl}&sheet=${encodeURIComponent(table.sheetCode)}`);
         await expect(page.getByTestId('sheet-refresh')).toBeVisible({ timeout: 90_000 });
@@ -293,11 +296,19 @@ test.describe('Live refresh: two users on the stand', () => {
         // At least one marker poll AFTER the write (the next 30 s tick), and still no banner.
         const afterWrite = polls.length;
         await expect.poll(() => polls.length, { timeout: SlowPoll }).toBeGreaterThan(afterWrite);
-        expect(polls.every((status) => status === 200), `marker answers: ${polls.join(',')}`).toBe(true);
+        // ✎ LIVE-STATUS-304: the poll sends `If-None-Match` with the last `ETag`; a write to a table this user cannot
+        // see changes nothing for them, so `304` (unchanged) is the expected idle answer next to `200`.
+        expect(polls.length).toBeGreaterThan(0);
+        expect(polls.every((status) => status === 200 || status === 304), `marker answers: ${polls.join(',')}`).toBe(true);
+        expect(polls[0], `first poll has no ETag yet: ${polls.join(',')}`).toBe(200);
         await expect(page.getByTestId('sheet-live-banner')).toHaveCount(0);
 
-        // A sheet the user cannot see (no such sheet in the document): 404, the poll would stop.
-        const hidden = await page.request.get(`/api/v1/documents/${DocumentId}/sheets/987654/changes?periodKey=${PeriodKey}`);
+        // A sheet the user cannot see (no such sheet in the document): 404, the poll would stop — also with the
+        // `ETag` of a visible sheet in `If-None-Match` (visibility is checked before the conditional answer).
+        expect(lastETag, 'the visible-sheet poll carried an ETag').not.toBeNull();
+        const hidden = await page.request.get(`/api/v1/documents/${DocumentId}/sheets/987654/changes?periodKey=${PeriodKey}`, {
+          headers: { 'If-None-Match': lastETag ?? '' },
+        });
         expect(hidden.status()).toBe(404);
         // A period the sheet does not accept: 422.
         const bad = await page.request.get(`/api/v1/documents/${DocumentId}/sheets/${String(table.sheetDefId)}/changes?periodKey=1`);

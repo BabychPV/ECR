@@ -10205,6 +10205,10 @@ USING (VALUES
     ,(N'permits.usage.listColumnHint', N'en', N'Documents whose header or table holds this permit', 1)
     ,(N'permits.usage.typeListUsedIn', N'en', N'Used in documents: {count}', 1)
     -- COLL:ui-permit-usage ── кінець секції ──
+    -- COLL:ui-live-status ── en: банер «стан аркуша змінив інший користувач» (LIVE-STATUS, lane/integ-live-status-ui); ru/kz — seed/features/COLL-ui-live-status.sql ──
+    ,(N'liveStatus.changedBy', N'en', N'Status changed by {user}: {status}', 1)
+    ,(N'liveStatus.changedByOther', N'en', N'Status changed by another user: {status}', 1)
+    -- COLL:ui-live-status ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang

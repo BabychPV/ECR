@@ -1,4 +1,4 @@
-import { apiFetch, EcrApiError } from '@/api/client';
+import { apiFetch, apiFetchIfChanged, EcrApiError, type Conditional } from '@/api/client';
 import type { components } from '@/api/schema';
 
 /** LIVE-REFRESH B1: answer of the change marker of a sheet (`SheetChangesController`). */
@@ -26,6 +26,25 @@ export function getSheetChanges(
 
   return apiFetch<SheetChanges>(
     `/api/v1/documents/${String(documentId)}/sheets/${String(sheetDefId)}/changes?periodKey=${String(periodKey)}${tail}`,
+  );
+}
+
+/**
+ * ✎ LIVE-STATUS: the same marker as a conditional request — `If-None-Match` with the previous `ETag`; `null` is
+ * `304` (neither the data nor the approval state changed for this reader: keep the previous marker, do nothing).
+ */
+export function pollSheetChanges(
+  documentId: number,
+  sheetDefId: number,
+  periodKey: number,
+  since: string | null,
+  etag: string | null,
+): Promise<Conditional<SheetChanges> | null> {
+  const tail = since === null ? '' : `&since=${encodeURIComponent(since)}`;
+
+  return apiFetchIfChanged<SheetChanges>(
+    `/api/v1/documents/${String(documentId)}/sheets/${String(sheetDefId)}/changes?periodKey=${String(periodKey)}${tail}`,
+    etag,
   );
 }
 
