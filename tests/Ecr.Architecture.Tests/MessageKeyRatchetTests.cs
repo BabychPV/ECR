@@ -281,8 +281,7 @@ public sealed partial class MessageKeyRatchetTests
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Кожен_плейсхолдер_шаблону_має_підстановку_в_кидку()
     {
-        var seed = File.ReadAllText(Path.Combine(
-            SourceTree.Root, "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+        var seed = SeedSql.Text;
 
         var templates = SeedTemplate().Matches(seed).ToDictionary(
             m => m.Groups[1].Value, m => m.Groups[2].Value, StringComparer.Ordinal);

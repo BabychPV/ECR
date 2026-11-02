@@ -36,7 +36,7 @@ public sealed partial class ErrorTitleCatalogTests
     private const string CatalogFile = "src/Ecr.Domain/Errors/ErrorCodes.cs";
 
     /// <summary>Сід каталогу рядків відносно кореня репозиторію.</summary>
-    private const string SeedFile = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedFile = SeedSql.DisplayPath;
 
     /// <summary>Мова, якою заводяться рядки збірки (ФВ-14.9, <c>D-95</c>).</summary>
     /// <remarks>
@@ -247,7 +247,7 @@ public sealed partial class ErrorTitleCatalogTests
     /// <summary>Усі ключі <c>err.*</c>, заведені сідом (будь-якою формою).</summary>
     private static HashSet<string> SeededKeys()
     {
-        var text = File.ReadAllText(Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar)));
+        var text = SeedSql.Text;
 
         return SeedKey().Matches(text)
             .Select(m => m.Groups[1].Value)
@@ -294,7 +294,7 @@ public sealed partial class ErrorTitleCatalogTests
     /// </remarks>
     private static List<(string Key, string Value)> TitleRows()
     {
-        var text = File.ReadAllText(Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar)));
+        var text = SeedSql.Text;
 
         return SeedRow().Matches(text)
             .Select(m => (Key: m.Groups[1].Value, Value: m.Groups[2].Value))

@@ -1,0 +1,50 @@
+-- COLL:ui34tpl ── ru/kz UI-34: перелік шаблонів за макетом; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'templates.subtitle', N'ru', N'Шаблон — это структура отчёта: листы, таблицы, колонки, формулы и правила. Документы создаются из опубликованной версии и остаются на ней.'),
+    (N'templates.subtitle', N'kz', N'Үлгі — есептің құрылымы: парақтар, кестелер, бағандар, формулалар мен ережелер. Құжаттар жарияланған нұсқадан жасалады және сол нұсқада қалады.'),
+    (N'templates.stats', N'ru', N'Сводка по шаблонам'),
+    (N'templates.stats', N'kz', N'Үлгілер бойынша жиынтық'),
+    (N'templates.stat.all', N'ru', N'шаблонов'),
+    (N'templates.stat.all', N'kz', N'үлгі'),
+    (N'templates.stat.published', N'ru', N'с опубликованной версией'),
+    (N'templates.stat.published', N'kz', N'жарияланған нұсқа'),
+    (N'templates.stat.publishedHint', N'ru', N'Показать шаблоны с опубликованной версией'),
+    (N'templates.stat.publishedHint', N'kz', N'Жарияланған нұсқасы бар үлгілерді көрсету'),
+    (N'templates.stat.drafts', N'ru', N'черновиков в работе'),
+    (N'templates.stat.drafts', N'kz', N'жұмыстағы нобай'),
+    (N'templates.stat.draftsHint', N'ru', N'Показать шаблоны с открытым черновиком'),
+    (N'templates.stat.draftsHint', N'kz', N'Ашық нобайы бар үлгілерді көрсету'),
+    (N'templates.search', N'ru', N'Поиск'),
+    (N'templates.search', N'kz', N'Іздеу'),
+    (N'templates.searchPlaceholder', N'ru', N'Название или код шаблона'),
+    (N'templates.searchPlaceholder', N'kz', N'Үлгі атауы немесе коды'),
+    (N'templates.currentVersion', N'ru', N'Текущая версия'),
+    (N'templates.currentVersion', N'kz', N'Ағымдағы нұсқа'),
+    (N'templates.noCurrentVersion', N'ru', N'текущей версии нет'),
+    (N'templates.noCurrentVersion', N'kz', N'ағымдағы нұсқа жоқ'),
+    (N'templates.notPublished', N'ru', N'Ещё не опубликован'),
+    (N'templates.notPublished', N'kz', N'Әлі жарияланбаған'),
+    (N'templates.draft', N'ru', N'Черновик'),
+    (N'templates.draft', N'kz', N'Нобай'),
+    (N'templates.state', N'ru', N'Состояние'),
+    (N'templates.state', N'kz', N'Күйі'),
+    (N'templates.noMatch', N'ru', N'Нет шаблонов по этим фильтрам'),
+    (N'templates.noMatch', N'kz', N'Сүзгілерге сәйкес үлгілер жоқ'),
+    (N'templates.draftBy', N'ru', N'Редактирует {name}'),
+    (N'templates.draftBy', N'kz', N'{name} өңдеп жатыр'),
+    (N'templates.documents', N'ru', N'Документы'),
+    (N'templates.documents', N'kz', N'Құжаттар'),
+    (N'templates.documentsHint', N'ru', N'Документы в доступных вам проектах, которые используют этот шаблон'),
+    (N'templates.documentsHint', N'kz', N'Сізге көрінетін жобалардағы осы үлгіні пайдаланатын құжаттар'),
+    (N'templates.updated', N'ru', N'Обновлён'),
+    (N'templates.updated', N'kz', N'Жаңартылды'),
+    (N'templates.stat.documents', N'ru', N'документов на них'),
+    (N'templates.stat.documents', N'kz', N'оларды пайдаланатын құжат'),
+    (N'templates.stat.documentsHint', N'ru', N'Показать шаблоны, на которые опираются документы'),
+    (N'templates.stat.documentsHint', N'kz', N'Құжаттар сүйенетін үлгілерді көрсету')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui34tpl ── кінець секції ──

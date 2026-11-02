@@ -21,7 +21,7 @@ public sealed partial class JobKindLabelTests
 {
     private const string LabelFile = "src/Ecr.Web/src/features/workflow/jobLabel.ts";
 
-    private const string SeedFile = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedFile = SeedSql.DisplayPath;
 
     private static readonly string[] Languages = ["en", "ru", "kz"];
 
@@ -64,7 +64,7 @@ public sealed partial class JobKindLabelTests
             .ToList();
         Assert.NotEmpty(keys);
 
-        var seed = File.ReadAllText(Path.Combine(SourceTree.Root, SeedFile));
+        var seed = SeedSql.Text;
 
         var missing = keys
             .SelectMany(key => Languages.Select(lang => (Key: key, Lang: lang)))

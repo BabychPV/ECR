@@ -7,8 +7,7 @@ namespace Ecr.Architecture.Tests;
 public sealed partial class SeedTextUpdateTests
 {
     private static Dictionary<(string, string), string> Catalog()
-        => CatalogRows(File.ReadAllText(
-            Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar))));
+        => CatalogRows(SeedSql.Text);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]

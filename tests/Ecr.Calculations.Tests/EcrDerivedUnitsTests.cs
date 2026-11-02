@@ -23,7 +23,7 @@ namespace Ecr.Calculations.Tests;
 /// </remarks>
 public sealed class EcrDerivedUnitsTests
 {
-    private const string SeedPath = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedPath = SeedSql.DisplayPath;
     private const string SectionStart = "-- UNITS:ecr-derived ── похідні";
     private const string SectionEnd = "-- UNITS:ecr-derived ── кінець секції";
 
@@ -103,7 +103,7 @@ public sealed class EcrDerivedUnitsTests
 
     private static Dictionary<string, Row> SectionRows()
     {
-        var text = File.ReadAllText(Path.Combine(SolutionRoot(), SeedPath.Replace('/', Path.DirectorySeparatorChar)));
+        var text = SeedSql.Text;
         var start = text.IndexOf(SectionStart, StringComparison.Ordinal);
         var end = text.IndexOf(SectionEnd, StringComparison.Ordinal);
         Assert.True(start >= 0 && end > start, "Секції `-- UNITS:ecr-derived` у 09-seed.sql немає.");

@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readSeedSql } from '@/test/seedSql';
 
 /**
  * Ключі каталогу діалогів і вкладок конструктора типу (PM-08c): усе, що код просить у `t()`,
@@ -12,8 +13,7 @@ import { describe, expect, it } from 'vitest';
  */
 
 const root = path.resolve(process.cwd(), 'src', 'features', 'permits', 'typeEditor');
-const seedPath = path.resolve(process.cwd(), '..', 'Ecr.Infrastructure', 'Persistence', 'Sql', '09-seed.sql');
-const seed = readFileSync(seedPath, 'utf8');
+const seed = readSeedSql();
 
 /*
  * Каталоги PM-08c: діалоги, вкладки Checks і Versions. Сторінка редактора (PM-08b) має власну секцію

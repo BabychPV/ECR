@@ -15,7 +15,7 @@ namespace Ecr.Architecture.Tests;
 /// </remarks>
 public sealed partial class ValidationTemplateSeedTests
 {
-    private const string SeedFile = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedFile = SeedSql.DisplayPath;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -23,7 +23,7 @@ public sealed partial class ValidationTemplateSeedTests
     [Trait("Requirement", "T2-07")]
     public void Кожен_шаблон_коду_є_в_сіді_всіма_трьома_мовами_з_тим_самим_текстом()
     {
-        var text = File.ReadAllText(Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar)));
+        var text = SeedSql.Text;
 
         var seed = new Dictionary<(string Key, string Lang), string>();
         foreach (Match row in SeedRow().Matches(text))

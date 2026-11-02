@@ -309,19 +309,10 @@ public sealed partial class MainPathLocalizedErrorTests
         return detail;
     }
 
-    /// <summary>Рядки <c>err.*</c> мовою збірки — прямо з <c>09-seed.sql</c>.</summary>
+    /// <summary>Рядки <c>err.*</c> мовою збірки — прямо з сіду (<see cref="SeedSql"/>).</summary>
     private static FakeUiStringCatalog SeedCatalog()
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Ecr.sln")))
-        {
-            dir = dir.Parent;
-        }
-
-        Assert.NotNull(dir);
-
-        var seed = File.ReadAllText(Path.Combine(
-            dir.FullName, "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+        var seed = SeedSql.Text;
 
         var catalog = new FakeUiStringCatalog();
         foreach (Match row in SeedRow().Matches(seed))

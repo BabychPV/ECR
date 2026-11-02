@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { matchesStat, publishedCount, type TemplateListRow } from '@/features/templates/templateListModel';
+import { readSeedSql } from '@/test/seedSql';
 
 /**
  * AN-96: плитка `templates.stat.published` рахує ШАБЛОНИ з опублікованою версією (`publishedCount` =
@@ -12,10 +11,7 @@ import { matchesStat, publishedCount, type TemplateListRow } from '@/features/te
  * ⚠ Підпис читається з САМОГО сіду (тести клієнта показують ключі `⟦…⟧`, не тексти) — той самий прийом, що в
  * `sheet-fill-summary.label.test.ts`.
  */
-const seed = readFileSync(
-  path.resolve(process.cwd(), '../../src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql'),
-  'utf8',
-);
+const seed = readSeedSql();
 
 function mergeText(lang: 'en' | 'ru'): string {
   const start = seed.indexOf('MERGE sys_ecr.UiString AS t');

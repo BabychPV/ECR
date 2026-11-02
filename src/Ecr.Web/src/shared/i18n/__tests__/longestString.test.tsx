@@ -1,6 +1,4 @@
-﻿import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { describe, it, expect, vi, afterEach } from 'vitest';
+﻿import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -8,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import type { JSX, ReactNode } from 'react';
 import { loadCatalog, t } from '@/shared/i18n';
 import { DocumentsPage } from '@/pages/DocumentsPage';
+import { readSeedSql } from '@/test/seedSql';
 
 /**
  * Розмітка не ламається від довжини тексту (`ФВ-14.30`).
@@ -25,10 +24,7 @@ import { DocumentsPage } from '@/pages/DocumentsPage';
  * Візуальна перевірка лишається ручною: `/_kitchen-sink` містить розділ
  * «Довгий рядок» саме для неї.
  */
-const seed = readFileSync(
-  path.resolve(process.cwd(), '../../src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql'),
-  'utf8',
-);
+const seed = readSeedSql();
 
 /**
  * Усі значення каталогу — лише з блоку MERGE `sys_ecr.UiString`. ⚠ Над ним

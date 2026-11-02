@@ -21,7 +21,7 @@ namespace Ecr.Architecture.Tests;
 /// </remarks>
 public sealed partial class E2eStandPermissionsCoverageTests
 {
-    private const string SeedFile = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedFile = SeedSql.DisplayPath;
     private const string StandFile = "tools/e2e-stand.ps1";
 
     /// <summary>
@@ -164,8 +164,7 @@ public sealed partial class E2eStandPermissionsCoverageTests
 
     private static HashSet<string> CatalogPermissions()
     {
-        var text = File.ReadAllText(
-            Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar)));
+        var text = SeedSql.Text;
 
         var start = text.IndexOf("MERGE sec.Permission AS t", StringComparison.Ordinal);
         Assert.True(start >= 0, $"У {SeedFile} немає блоку MERGE sec.Permission AS t - сторож дивиться не туди.");
