@@ -5,6 +5,7 @@ import {
   AreaRegistry,
   ensureAreaEntry,
   ensureNaeTree,
+  ensureRegionRegistry,
   ensureSubstances,
   RegionRegistry,
   removeScopeEntries,
@@ -102,6 +103,7 @@ test.describe('Air params', () => {
 
     const treeId = await ensureNaeTree(admin);
     await ensureSubstances(admin);
+    await ensureRegionRegistry(admin);
     await ok(await admin.post('/api/v1/air-limits/provision'), 'provision');
 
     // Своє дерево регіону з усіма НАЕ файлу: перегляд без відсутніх НАЕ.
