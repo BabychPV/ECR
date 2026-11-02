@@ -174,6 +174,9 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
             await db.SaveChangesAsync();
         }
 
+        // Журнал рядків — до/після (Id документів у спільній тестовій базі можуть повторюватися між прогонами).
+        var journalBefore = await ScalarAsync<int>("SELECT COUNT(*) FROM aud.RowChange");
+
         var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => DeleteHandler(doc).Handler.HandleAsync(
             doc.DocumentId, doc.TableInstanceId, RowKeyOf(doc, 2), Profile(), default));
 
@@ -183,7 +186,7 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
         Assert.Equal(0, await ScalarAsync<int>(
             $"SELECT COUNT(*) FROM doc.TableRow WHERE PeriodKey = {doc.PeriodKey.Value} AND TableInstanceId = {doc.TableInstanceId} AND IsDeleted = 1"));
         Assert.Equal(0, await ScalarAsync<int>("SELECT COUNT(*) FROM aud.StructureChange WHERE EntityType = N'doc.TableRow' AND OldJson LIKE N'%" + RowKeyOf(doc, 2) + "%'"));
-        Assert.Equal(0, await ScalarAsync<int>($"SELECT COUNT(*) FROM aud.RowChange WHERE DocumentId = {doc.DocumentId}"));
+        Assert.Equal(journalBefore, await ScalarAsync<int>("SELECT COUNT(*) FROM aud.RowChange"));
     }
 
     [Fact]
@@ -221,6 +224,7 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
     public async Task Додавання_і_видалення_рядка_лишають_запис_у_журналі_рядків()
     {
         var doc = await ArrangeAsync();
+        var since = await JournalTipAsync();
         var deletedKey = RowKeyOf(doc, 2);
         var deletedId = doc.RowIds[1];
 
@@ -237,7 +241,7 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
                 $"1|{created.Value}|{createdId}|UserEdit",
                 $"2|{deletedKey}|{deletedId}|UserEdit",
             }.Order(StringComparer.Ordinal),
-            await RowJournalAsync(doc));
+            await RowJournalAsync(doc, since));
     }
 
     [Fact]
@@ -247,6 +251,7 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
     public async Task Відкат_додавання_рядка_забирає_і_запис_журналу_рядків()
     {
         var doc = await ArrangeAsync();
+        var since = await JournalTipAsync();
 
         // Падіння ПІСЛЯ вставки рядка й запису журналу (дотик документа — останній крок транзакції).
         var documents = Substitute.For<IDocumentStore>();
@@ -258,11 +263,15 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
 
         Assert.Equal(0, await ScalarAsync<int>(
             $"SELECT COUNT(*) FROM doc.TableRow WHERE PeriodKey = {doc.PeriodKey.Value} AND RowKey = N'AUDROW_RB'"));
-        Assert.Empty(await RowJournalAsync(doc));
+        Assert.Empty(await RowJournalAsync(doc, since));
     }
 
-    /// <summary>Журнал рядків документа: дія|ключ|рядок|походження (автор і момент — перевірено в умові).</summary>
-    private async Task<List<string>> RowJournalAsync(TestDocument doc)
+    /// <summary>Найбільший Id журналу рядків до дії: спільна тестова база може мати записи з тими самими Id документів.</summary>
+    private async Task<long> JournalTipAsync()
+        => await ScalarAsync<long>("SELECT ISNULL(MAX(Id), 0) FROM aud.RowChange");
+
+    /// <summary>Журнал рядків документа після <paramref name="since"/>: дія|ключ|рядок|походження (автор і момент — в умові).</summary>
+    private async Task<List<string>> RowJournalAsync(TestDocument doc, long since)
     {
         var lines = new List<string>();
         await using var connection = new SqlConnection(sql.ConnectionString);
@@ -270,7 +279,7 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
         await using var command = connection.CreateCommand();
         command.CommandText =
             "SELECT Action, RowKey, TableRowId, Origin FROM aud.RowChange " +
-            $"WHERE DocumentId = {doc.DocumentId} AND PeriodKey = {doc.PeriodKey.Value} AND TableInstanceId = {doc.TableInstanceId} " +
+            $"WHERE Id > {since} AND DocumentId = {doc.DocumentId} AND PeriodKey = {doc.PeriodKey.Value} AND TableInstanceId = {doc.TableInstanceId} " +
             $"AND TableDefId = {doc.TableDefId} AND ChangedByUserId = {UserId} " +
             "AND ChangedAt = '" + Now.ToString("yyyy-MM-ddTHH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "'";
         await using var reader = await command.ExecuteReaderAsync();
