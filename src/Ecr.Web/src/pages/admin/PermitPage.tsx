@@ -37,6 +37,14 @@ const AirLimitsTab = lazy(() => import('@/features/permits/air/AirLimitsTab').th
 const AirTypeCode = 'AIR_LIMITS';
 const AirTabId = 'air';
 
+// «Used in» (PERMIT-USAGE): де дозвіл обрано значенням шапки чи колонки документа — окремим чанком, як і інші вкладки.
+const PermitUsageTab = lazy(() =>
+  import('@/features/permits/usage/PermitUsageTab').then((module) => ({ default: module.PermitUsageTab })),
+);
+const UsageTabId = 'usage';
+// = `UsagePeriodParam` з `usageModel.ts` (літерал, щоб модель не їхала в чанк сторінки): фільтр належить вкладці.
+const UsagePeriodParam = 'period';
+
 const OverviewTabId = 'overview';
 const TabParam = 'tab';
 
@@ -93,7 +101,9 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
   const requested = params.get(TabParam) ?? OverviewTabId;
   const hasAir = permit.typeCode === AirTypeCode;
   const tab =
-    permit.tables.some((table) => table.code === requested) || (hasAir && requested === AirTabId) ? requested : OverviewTabId;
+    permit.tables.some((table) => table.code === requested) || (hasAir && requested === AirTabId) || requested === UsageTabId
+      ? requested
+      : OverviewTabId;
   const dialog = readLifecycleDialog(params.get(DialogParam));
 
   const update = (change: (next: URLSearchParams) => void): void => {
@@ -107,6 +117,7 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
       // Шторка й діалог належать вкладці; на іншій вони не мають лишатись в адресі.
       next.delete(PanelParam);
       next.delete(DialogParam);
+      next.delete(UsagePeriodParam);
       if (value === null || value === OverviewTabId) next.delete(TabParam);
       else next.set(TabParam, value);
     });
@@ -154,6 +165,7 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
                 {localName(table.nameL10n) || table.code}
               </Tabs.Tab>
             ))}
+            <Tabs.Tab value={UsageTabId}>{t('permits.page.tabs.usage')}</Tabs.Tab>
           </Tabs.List>
           <Tabs.Panel value={OverviewTabId}>
             <OverviewTab permit={permit} caps={caps} onActivate={() => open('activate')} onRenew={() => open('renew')} />
@@ -178,6 +190,11 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
               )}
             </Tabs.Panel>
           ))}
+          <Tabs.Panel value={UsageTabId}>
+            <Suspense fallback={<Skeleton height={160} role="status" aria-label={t('common.loading')} />}>
+              <PermitUsageTab permitId={permit.id} />
+            </Suspense>
+          </Tabs.Panel>
         </Tabs>
       </Stack>
       {dialog !== null && allowedDialog(dialog, caps) && (

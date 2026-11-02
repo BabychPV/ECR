@@ -44,13 +44,13 @@ describe('Remove table з кількостями — доступність', { 
       await expectClean();
       cleanup();
 
-      usage.mockResolvedValueOnce({ instanceCount: 3, tables: [{ code: 'Storage', rowCount: 12 }] });
+      usage.mockResolvedValueOnce({ instanceCount: 3, tables: [{ code: 'Storage', rowCount: 12 }], usedInDocumentCount: 0 });
       mount(scheme);
       await screen.findByText(/Rows in this published table: 12/);
       await expectClean();
       cleanup();
 
-      usage.mockResolvedValueOnce({ instanceCount: 3, tables: [] });
+      usage.mockResolvedValueOnce({ instanceCount: 3, tables: [], usedInDocumentCount: 0 });
       mount(scheme);
       await screen.findByText(/not published yet/);
       await expectClean();

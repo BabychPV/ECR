@@ -7,6 +7,7 @@ import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { cellFormulasOf, formulasOf, type CtorTab, type FormulaTarget, type LocatedTable } from './ctorModel';
 import { FormulaManualOverrideToggle } from '@/features/templates/FormulaManualOverrideToggle';
+import { permitSheetBindingsEnabled } from '@/features/permits/permitFeatures';
 import { sheetNameOf, tableNameOf } from './CtorTree';
 
 // ⚠ Обидві вкладки — окремі чанки (бюджет маршруту 250 КБ, `D-132`): той самий модуль
@@ -62,7 +63,10 @@ export interface TableWorkspaceProps {
  * плюс одна таблиця замінює стос згорток (`LazyTableSlots` тут більше не потрібен).
  */
 export function TableWorkspace(props: TableWorkspaceProps): JSX.Element {
-  const { templateVersionId, located, tab, onTab, canEditStructure } = props;
+  const { templateVersionId, located, onTab, canEditStructure } = props;
+  // PERMIT-USAGE п. 1 (людина 30.10): вкладку «Permit binding» сховано прапорцем; `?tab=permit` тоді показує «Columns».
+  const permitTab = permitSheetBindingsEnabled();
+  const tab: CtorTab = props.tab === 'permit' && !permitTab ? 'columns' : props.tab;
   const { table, sheet, no } = located;
   const formulas = formulasOf(table);
   const cellFormulas = cellFormulasOf(table);
@@ -127,7 +131,7 @@ export function TableWorkspace(props: TableWorkspaceProps): JSX.Element {
               {count(rules.data?.length)}
             </Tabs.Tab>
             <Tabs.Tab value="preview">{t('ctor.tab.preview')}</Tabs.Tab>
-            <Tabs.Tab value="permit">{t('ctor.tab.permit')}</Tabs.Tab>
+            {permitTab && <Tabs.Tab value="permit">{t('ctor.tab.permit')}</Tabs.Tab>}
           </Tabs.List>
 
           <Tabs.Panel value="columns">
@@ -275,12 +279,14 @@ export function TableWorkspace(props: TableWorkspaceProps): JSX.Element {
             </Suspense>
           </Tabs.Panel>
 
-          <Tabs.Panel value="permit">
-            <p className="ecr-ctor-hint">{t('ctor.permitHint')}</p>
-            <Suspense fallback={<Skeleton height={160} radius="sm" />}>
-              <PermitBindingPanel templateVersionId={templateVersionId} table={table} canEdit={canEditStructure} />
-            </Suspense>
-          </Tabs.Panel>
+          {permitTab && (
+            <Tabs.Panel value="permit">
+              <p className="ecr-ctor-hint">{t('ctor.permitHint')}</p>
+              <Suspense fallback={<Skeleton height={160} radius="sm" />}>
+                <PermitBindingPanel templateVersionId={templateVersionId} table={table} canEdit={canEditStructure} />
+              </Suspense>
+            </Tabs.Panel>
+          )}
         </Tabs>
       </div>
     </section>

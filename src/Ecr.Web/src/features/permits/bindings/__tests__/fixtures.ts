@@ -104,6 +104,7 @@ export function airTypeItem(over: Partial<PermitTypeListItem> = {}): PermitTypeL
     version: 1,
     hasUnpublishedChanges: false,
     permitCount: 2,
+    usedInDocumentCount: 0,
     updatedAt: null,
     updatedByDisplayName: null,
     tables: [{ code: 'AirEmissions', columnCount: 4, nameL10n: { en: 'Air emissions' } }],

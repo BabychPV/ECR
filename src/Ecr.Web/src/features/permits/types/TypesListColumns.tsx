@@ -1,6 +1,7 @@
 import { useId, type JSX } from 'react';
 import { ActionIcon, Anchor, Badge, Menu } from '@mantine/core';
 import { Link } from 'react-router-dom';
+import { formatNumber } from '@/shared/format/number';
 import { language, t } from '@/shared/i18n';
 import type { DataTableColumn } from '@/shared/ui/DataTable';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -139,7 +140,18 @@ export function typeColumns(
       label: t('permits.types.col.permits'),
       num: true,
       sortValue: (item) => item.permitCount,
-      render: (item) => String(item.permitCount),
+      // PERMIT-USAGE: у скількох документах обрано дозволи типу — другим рядком, а не восьмою колонкою (`L5`, ≤ 7);
+      // ніде — рядка немає (D15-06), як і порожня клітинка «Used in documents» переліку дозволів.
+      render: (item) => (
+        <TwoLine
+          primary={String(item.permitCount)}
+          secondary={
+            item.usedInDocumentCount > 0
+              ? t('permits.usage.typeListUsedIn', { count: formatNumber(item.usedInDocumentCount) })
+              : null
+          }
+        />
+      ),
     },
     {
       key: 'updated',

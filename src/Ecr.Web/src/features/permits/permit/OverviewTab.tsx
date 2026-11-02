@@ -6,6 +6,7 @@ import { formatNumber } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import type { Permit } from '../api/types';
+import { permitSheetBindingsEnabled } from '../permitFeatures';
 import { PermitsPaths } from '../shell/permitPaths';
 import { HeaderForm } from './HeaderForm';
 import { expiringIn, PermitStatus, type PermitCapabilities } from './permitRules';
@@ -179,7 +180,9 @@ export function OverviewTab({ permit, caps, onActivate, onRenew }: OverviewTabPr
         <Validity permit={permit} />
       </div>
       <Totals permit={permit} />
-      <ReadBy permit={permit} />
+      {/* «Read by» — аркуші з прив'язкою (PM-09): разом із прив'язками сховано прапорцем (PERMIT-USAGE п. 1); де дозвіл
+          обрано значенням, показує вкладка «Used in». */}
+      {permitSheetBindingsEnabled() && <ReadBy permit={permit} />}
     </div>
   );
 }

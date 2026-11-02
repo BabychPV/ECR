@@ -139,6 +139,14 @@ public sealed class ListPermitsHandler(
             shown.RemoveAt(shown.Count - 1);
         }
 
+        // «Використано в N документах» - лише для показаної сторінки, одним запитом, і лише по проєктах, документи яких читач бачить.
+        var readable = Documents.ListDocumentsHandler.ReadableProjects(profile, GetPermitUsagesHandler.DocumentPermission);
+        if (shown.Count > 0 && readable.Count > 0)
+        {
+            var used = await stats.CountUsedInDocumentsAsync([.. shown.Select(i => i.Id)], readable, ct).ConfigureAwait(false);
+            shown = [.. shown.Select(i => used.TryGetValue(i.Id, out var n) ? i with { UsedInDocumentCount = n } : i)];
+        }
+
         return new PagedResult<PermitListItemDto>(
             shown, hasMore ? shown[^1].Id.ToString(CultureInfo.InvariantCulture) : null, matched.Count);
     }

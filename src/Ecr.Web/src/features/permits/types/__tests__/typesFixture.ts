@@ -12,6 +12,7 @@ export function makeType(code: string, patch: Partial<PermitTypeListItem> = {}):
     tables: [],
     updatedAt: '2026-10-01T08:00:00Z',
     updatedByDisplayName: 'A. Operator',
+    usedInDocumentCount: 0,
     version: 1,
     ...patch,
   };

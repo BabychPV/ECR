@@ -22,7 +22,10 @@ namespace Ecr.Application.Permits;
 public sealed class GetPermitTypeUsageHandler(
     IPermitTypeStore permits,
     Security.IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+
+    // «Використано в документах»: контейнер передає завжди; null — прямі конструктори тестів (лічильник 0).
+    IPermitStore? stats = null)
 {
     /// <summary>Право на читання довідників.</summary>
     public const string Permission = "Registry.View";
@@ -46,8 +49,18 @@ public sealed class GetPermitTypeUsageHandler(
             .CountPermitsAsync([type.HeaderRegistryDefId, .. tables.Select(t => t.RegistryDefId)], ct)
             .ConfigureAwait(false);
 
+        // Документи — лише проєктів, де читач має Document.View (як «використано в документах» у переліку дозволів).
+        var used = 0;
+        var readable = Documents.ListDocumentsHandler.ReadableProjects(profile, GetPermitUsagesHandler.DocumentPermission);
+        if (stats is not null && readable.Count > 0)
+        {
+            used = (await stats.CountTypeUsedInDocumentsAsync([type.HeaderRegistryDefId], readable, ct).ConfigureAwait(false))
+                .GetValueOrDefault(type.HeaderRegistryDefId);
+        }
+
         return new PermitTypeUsageDto(
             counts.GetValueOrDefault(type.HeaderRegistryDefId),
-            [.. tables.Select(t => new PermitTypeTableUsageDto(t.Code, counts.GetValueOrDefault(t.RegistryDefId)))]);
+            [.. tables.Select(t => new PermitTypeTableUsageDto(t.Code, counts.GetValueOrDefault(t.RegistryDefId)))],
+            used);
     }
 }

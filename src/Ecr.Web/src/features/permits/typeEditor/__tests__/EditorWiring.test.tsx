@@ -208,7 +208,7 @@ describe('видалення таблиці', () => {
   });
 
   it('опублікований тип: збережену таблицю не видалити, текст — з каталогу відмови сервера', async () => {
-    vi.mocked(typesApi.getPermitTypeUsage).mockResolvedValue({ instanceCount: 2, tables: [{ code: 'Storage', rowCount: 5 }] });
+    vi.mocked(typesApi.getPermitTypeUsage).mockResolvedValue({ instanceCount: 2, tables: [{ code: 'Storage', rowCount: 5 }], usedInDocumentCount: 0 });
     await open(opened, permitType({ status: 'Published', version: 2, draftVersion: 3 }));
     const dialog = await screen.findByRole('dialog', { name: 'Remove table "Storage"?' });
     expect(await within(dialog).findByText(/Table "Storage" is published and cannot be removed\./)).toBeTruthy();
