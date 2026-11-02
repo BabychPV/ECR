@@ -61,6 +61,17 @@ public interface IPermitStore
     /// <returns>Дозвіл → кількість документів; дозвіл без посилань у словнику відсутній.</returns>
     public Task<IReadOnlyDictionary<long, int>> CountUsedInDocumentsAsync(
         IReadOnlyCollection<long> permitIds, IReadOnlyCollection<int>? projectIds, CancellationToken ct);
+
+    /// <summary>
+    /// У скількох різних документах обраний значенням (шапка або комірка) БУДЬ-ЯКИЙ дозвіл типу; тип — реєстр його шапки.
+    /// Один документ із кількома дозволами типу рахується один раз; логічно видалені дозволи й рядки не рахуються.
+    /// </summary>
+    /// <param name="headerRegistryDefIds">Реєстри шапок типів.</param>
+    /// <param name="projectIds">Лише документи цих проєктів; <c>null</c> - усіх.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Реєстр шапки → кількість документів; тип без посилань у словнику відсутній.</returns>
+    public Task<IReadOnlyDictionary<int, int>> CountTypeUsedInDocumentsAsync(
+        IReadOnlyCollection<int> headerRegistryDefIds, IReadOnlyCollection<int>? projectIds, CancellationToken ct);
 }
 
 /// <summary>Підсумок рядків однієї таблиці одного дозволу.</summary>

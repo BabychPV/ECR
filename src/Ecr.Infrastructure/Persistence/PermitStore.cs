@@ -179,6 +179,50 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, int>> CountTypeUsedInDocumentsAsync(
+        IReadOnlyCollection<int> headerRegistryDefIds, IReadOnlyCollection<int>? projectIds, CancellationToken ct)
+    {
+        var types = headerRegistryDefIds.Distinct().ToList();
+        if (types.Count == 0)
+        {
+            return new Dictionary<int, int>();
+        }
+
+        var projects = projectIds?.ToList();
+
+        // Той самий предикат «де обрано значенням», що в CountUsedInDocumentsAsync, але дозвіл → його тип (реєстр шапки).
+        var fromHeaders = await (
+                from v in db.DocumentHeaderValues.AsNoTracking()
+                where v.ValueRegistryEntryId != null
+                join e in db.RegistryEntries.AsNoTracking() on v.ValueRegistryEntryId equals e.Id
+                where !e.IsDeleted && types.Contains(e.RegistryDefId)
+                join d in db.Documents.AsNoTracking() on v.DocumentId equals d.Id
+                where projects == null || projects.Contains(d.ProjectId)
+                select new { Type = e.RegistryDefId, Document = d.Id })
+            .Distinct().ToListAsync(ct).ConfigureAwait(false);
+
+        var fromCells = await (
+                from c in db.CellValues.AsNoTracking()
+                where c.ValueRegistryEntryId != null
+                join e in db.RegistryEntries.AsNoTracking() on c.ValueRegistryEntryId equals e.Id
+                where !e.IsDeleted && types.Contains(e.RegistryDefId)
+                join r in db.TableRows.AsNoTracking()
+                    on new { c.PeriodKeyValue, Id = c.TableRowId } equals new { r.PeriodKeyValue, r.Id }
+                where !r.IsDeleted
+                join ti in db.TableInstances.AsNoTracking()
+                    on new { r.PeriodKeyValue, Id = r.TableInstanceId } equals new { ti.PeriodKeyValue, ti.Id }
+                join d in db.Documents.AsNoTracking() on ti.DocumentId equals d.Id
+                where projects == null || projects.Contains(d.ProjectId)
+                select new { Type = e.RegistryDefId, Document = d.Id })
+            .Distinct().ToListAsync(ct).ConfigureAwait(false);
+
+        return fromHeaders.Concat(fromCells)
+            .Distinct()
+            .GroupBy(x => x.Type)
+            .ToDictionary(g => g.Key, g => g.Count());
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⚠ Власник - транзакція (<c>@LockOwner = 'Transaction'</c>): замок знімає коміт чи відкат, забути
     /// <c>sp_releaseapplock</c> неможливо; поза транзакцією <c>sp_getapplock</c> відмовляє - викликач мусить її відкрити.

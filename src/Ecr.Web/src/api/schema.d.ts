@@ -32366,6 +32366,13 @@ export interface components {
             updatedByDisplayName: null | string;
             /**
              * Format: int32
+             * @description У скількох документах (проєктів, документи яких читач бачить) обрано значенням шапки чи комірки бодай один дозвіл
+             *     типу; 0 — ніде (або читач не бачить жодного проєкту).
+             * @default 0
+             */
+            usedInDocumentCount: number;
+            /**
+             * Format: int32
              * @description Версія: опублікована, а для ніколи не опублікованого типу — майбутня перша.
              */
             version: number;
@@ -32435,6 +32442,13 @@ export interface components {
             instanceCount: number;
             /** @description Опубліковані таблиці з кількістю рядків; таблиць, що лише в чернетці, тут немає. */
             tables: components["schemas"]["PermitTypeTableUsageDto"][];
+            /**
+             * Format: int32
+             * @description У скількох документах (проєктів, документи яких читач бачить) обрано значенням шапки чи комірки бодай один дозвіл
+             *     типу; 0 — ніде (або читач не бачить жодного проєкту).
+             * @default 0
+             */
+            usedInDocumentCount: number;
         };
         /** @description «Де використано» дозвіл: документи, у яких він обраний значенням поля шапки чи колонки таблиці. Лише документи
          *     проєктів, які читач бачить (`Document.View`); решта не рахується й не називається. */

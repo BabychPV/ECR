@@ -73,6 +73,10 @@ public sealed record PermitTypeTableSummaryDto(string Code, Dictionary<string, s
 /// <param name="PermitCount">Скільки екземплярів дозволів (живих записів шапки).</param>
 /// <param name="UpdatedAt">Остання зміна чернетки чи публікація, UTC.</param>
 /// <param name="UpdatedByDisplayName">Хто змінив.</param>
+/// <param name="UsedInDocumentCount">
+/// У скількох документах (проєктів, документи яких читач бачить) обрано значенням шапки чи комірки бодай один дозвіл
+/// типу; 0 — ніде (або читач не бачить жодного проєкту).
+/// </param>
 public sealed record PermitTypeListItemDto(
     string Code,
     Dictionary<string, string> NameL10n,
@@ -83,7 +87,8 @@ public sealed record PermitTypeListItemDto(
     IReadOnlyList<PermitTypeTableSummaryDto> Tables,
     int PermitCount,
     DateTime? UpdatedAt,
-    string? UpdatedByDisplayName);
+    string? UpdatedByDisplayName,
+    int UsedInDocumentCount = 0);
 
 /// <summary>Повне визначення типу: опубліковане або чернетка, якщо вона є.</summary>
 /// <param name="Code">Код типу.</param>
