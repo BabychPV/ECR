@@ -1,5 +1,5 @@
 // Споживач: PM-07 (сторінки пермітів: рядок-форма, вставка з Excel, широка таблиця).
-import { useMemo, useState, type JSX, type KeyboardEvent, type ReactNode } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { SegmentedControl, VisuallyHidden } from '@mantine/core';
 import { formatDate } from '@/shared/format/datetime';
 import { formatNumber } from '@/shared/format/number';
@@ -72,6 +72,33 @@ function Chevron(): JSX.Element {
   );
 }
 
+/**
+ * Ширина липкого першого стовпця → `--pm-first-w` на таблиці. Підписи решти стовпців (`.pm-stick`) липнуть до
+ * ЦІЄЇ межі, а не до краю області: інакше при горизонтальній прокрутці стовпець, що наполовину заїхав під перший,
+ * показує в тілі хвіст тексту, а в шапці — порожнє місце (підпис сховано під першим стовпцем). Дефект 02.11.
+ */
+function useFirstColumnWidth(layout: unknown): RefObject<HTMLTableElement | null> {
+  const ref = useRef<HTMLTableElement | null>(null);
+  useLayoutEffect(() => {
+    const table = ref.current;
+    const first = table?.querySelector<HTMLElement>('thead tr.pm-cols > .pm-first');
+    if (table === null || first === null || first === undefined) return undefined;
+    // Рядок груп може бути вищим за 30 px (кнопка групи): тоді липкий рядок стовпців заїжджав би під нього.
+    const groups = table.querySelector<HTMLElement>('thead tr.pm-grp');
+    const apply = (): void => {
+      table.style.setProperty('--pm-first-w', `${String(first.getBoundingClientRect().width)}px`);
+      if (groups !== null) table.style.setProperty('--pm-grp-height', `${String(groups.getBoundingClientRect().height)}px`);
+    };
+    apply();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(apply);
+    observer.observe(first);
+    if (groups !== null) observer.observe(groups);
+    return () => observer.disconnect();
+  }, [layout]);
+  return ref;
+}
+
 function summaryHeader(item: Extract<VisibleItem, { kind: 'summary' }>): string {
   return item.columns.every((column) => column.type === 'number')
     ? t('permits.table.sumOf', { count: item.columns.length })
@@ -107,6 +134,7 @@ export function PermitDefTable({
   const items = useMemo(() => visibleItems(columns, collapsed), [columns, collapsed]);
   const hasGroups = useMemo(() => groupNames(columns).length > 0, [columns]);
   const spans = useMemo(() => groupSpans(items), [items]);
+  const tableRef = useFirstColumnWidth(items);
 
   function onKeyDown(event: KeyboardEvent<HTMLTableRowElement>, row: PermitRow): void {
     if (event.target !== event.currentTarget) return;
@@ -138,7 +166,7 @@ export function PermitDefTable({
       )}
 
       <div className="pm-tw" role="region" aria-label={caption} tabIndex={0}>
-        <table className="pm-t">
+        <table className="pm-t" ref={tableRef}>
           <caption className="mantine-visually-hidden">{caption}</caption>
           <thead>
             {hasGroups && (
@@ -173,18 +201,13 @@ export function PermitDefTable({
                 if (item.kind === 'summary') {
                   return (
                     <th key={`s-${item.group}`} scope="col" className="num">
-                      {summaryHeader(item)}
+                      <span className="pm-stick">{summaryHeader(item)}</span>
                     </th>
                   );
                 }
                 const { column } = item;
-                return (
-                  <th
-                    key={column.code}
-                    scope="col"
-                    className={`${column.type === 'number' ? 'num' : ''} ${index === 0 ? 'pm-first' : ''}`.trim()}
-                    title={column.code}
-                  >
+                const label = (
+                  <>
                     {column.label}
                     {column.unit !== undefined && <span className="pm-faint">{` ${column.unit}`}</span>}
                     {column.required === true && column.derived !== true && (
@@ -193,6 +216,16 @@ export function PermitDefTable({
                         <VisuallyHidden>{`, ${t('permits.table.required')}`}</VisuallyHidden>
                       </>
                     )}
+                  </>
+                );
+                return (
+                  <th
+                    key={column.code}
+                    scope="col"
+                    className={`${column.type === 'number' ? 'num' : ''} ${index === 0 ? 'pm-first' : ''}`.trim()}
+                    title={column.code}
+                  >
+                    {index === 0 ? label : <span className="pm-stick">{label}</span>}
                   </th>
                 );
               })}
@@ -213,9 +246,9 @@ export function PermitDefTable({
                     return (
                       <td key={`s-${item.group}`} className="num">
                         {sum === null ? (
-                          <span className="pm-faint">…</span>
+                          <span className="pm-faint pm-stick">…</span>
                         ) : (
-                          formatNumber(sum, { maximumFractionDigits: FractionDigits.normal })
+                          <span className="pm-stick">{formatNumber(sum, { maximumFractionDigits: FractionDigits.normal })}</span>
                         )}
                       </td>
                     );
@@ -252,7 +285,7 @@ export function PermitDefTable({
                       data-required-empty={missing ? 'true' : undefined}
                       title={warning ?? undefined}
                     >
-                      {content}
+                      {index === 0 ? content : <span className="pm-stick">{content}</span>}
                       {warning !== null && <VisuallyHidden>{`. ${warning}`}</VisuallyHidden>}
                     </Cell>
                   );
@@ -275,7 +308,7 @@ export function PermitDefTable({
                   const sum = totals.sums[item.column.code];
                   return (
                     <td key={item.column.code} className="num">
-                      {sum === undefined ? null : formatNumber(sum, { maximumFractionDigits: 5 })}
+                      {sum === undefined ? null : <span className="pm-stick">{formatNumber(sum, { maximumFractionDigits: 5 })}</span>}
                     </td>
                   );
                 })}
