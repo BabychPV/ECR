@@ -125,12 +125,9 @@ public sealed class ImportNaeFromAfHandler(
     INaeAfReader afReader,
     IRegistryStore registries,
     NaeTreeProvisioner provisioner,
-    RegistryEntryWriter writer,
-    IUnitOfWork uow,
-    IAuditWriter audit,
+    NaeTreeNodeApplier applier,
     IAccessDecisionService access,
-    ICurrentUser currentUser,
-    IClock clock)
+    ICurrentUser currentUser)
 {
     /// <summary>Most issues returned in the report.</summary>
     public const int MaxIssues = 200;
@@ -215,82 +212,19 @@ public sealed class ImportNaeFromAfHandler(
 
         var (definition, levels, provisioned) = await provisioner.EnsureAsync(code, ct).ConfigureAwait(false);
         ExternalRegistryGuard.EnsureManualEditAllowed(definition);
-        var ids = existingByCode.ToDictionary(kv => kv.Key, kv => kv.Value.Id, StringComparer.OrdinalIgnoreCase);
-        var codeByKey = plan.Nodes.ToDictionary(n => n.Key, n => n.Code, StringComparer.Ordinal);
+        var existingIdByKey = plan.Nodes
+            .Where(n => existingByCode.ContainsKey(n.Code))
+            .ToDictionary(n => n.Key, n => existingByCode[n.Code].Id, StringComparer.Ordinal);
 
-        await uow.ExecuteInTransactionAsync(
-            async token =>
-            {
-                foreach (var level in NaeTreeSchema.LevelCodes)
-                {
-                    var batchNodes = toCreate.Where(n => n.LevelCode == level).ToList();
-                    if (batchNodes.Count == 0)
-                    {
-                        continue;
-                    }
-
-                    var batch = new RegistryEntryWriteBatch(
-                        definition.Id,
-                        [.. batchNodes.Select(n => new RegistryEntryWrite(
-                            n.Code, n.Fields.ToDictionary(f => f.Key, f => (object?)f.Value, StringComparer.Ordinal))
-                        {
-                            DisplayName = n.Display["en"],
-                        })])
-                    {
-                        CreateOnly = true,
-                    };
-                    var result = await writer.WriteAsync(batch, token).ConfigureAwait(false);
-                    if (result.Errors.Count > 0)
-                    {
-                        var first = result.Errors[0];
-                        throw new BusinessRuleException(
-                            "ECR-REG-0422",
-                            $"NAE load rejected at {first.Key}: {first.MessageKey}.",
-                            new Dictionary<string, object?>
-                            {
-                                ["messageKey"] = RejectedKey,
-                                ["code"] = first.Key,
-                                ["reason"] = first.MessageKey,
-                            });
-                    }
-
-                    foreach (var row in result.Rows.Where(r => r.IsNew))
-                    {
-                        var node = batchNodes[row.Row - 1];
-                        row.Entry.Rename(new LocalizedText(new Dictionary<string, string>(node.Display, StringComparer.OrdinalIgnoreCase)));
-                        row.Entry.SetLevel(levels[node.LevelCode].Id);
-                        var parentId = node.ParentKey is { } parentKey ? ids[codeByKey[parentKey]] : 0L;
-                        row.Entry.SetOrdinal(node.Ordinal + maxOrdinalByParent.GetValueOrDefault(parentId));
-                        if (parentId != 0)
-                        {
-                            row.Entry.SetParent(parentId);
-                        }
-
-                        ids[node.Code] = row.Entry.Id;
-                    }
-
-                    await uow.SaveChangesAsync(token).ConfigureAwait(false);
-                }
-
-                await audit.WriteStructureChangeAsync(
-                    new StructureChangeRecord(
-                        ChangedAt: clock.UtcNow,
-                        TemplateVersionId: 0,
-                        EntityType: "cfg.RegistryDef",
-                        EntityId: definition.Id,
-                        ChangeClass: ChangeClass.Guarded,
-                        Operation: "NaeAfImport",
-                        OldJson: null,
-                        NewJson: JsonSerializer.Serialize(new { created = toCreate.Count, existing = existing.Values.Sum(), skipped }),
-                        ChangeReason: JsonSerializer.Serialize(new
-                        {
-                            k = "registryAudit.naeAfImport",
-                            p = new { count = toCreate.Count.ToString(CultureInfo.InvariantCulture) },
-                        }),
-                        ChangedByUserId: userId,
-                        CorrelationId: currentUser.CorrelationId),
-                    token).ConfigureAwait(false);
-            },
+        _ = await applier.WriteAsync(
+            definition,
+            levels,
+            toCreate,
+            existingIdByKey,
+            maxOrdinalByParent,
+            new NaeWriteAudit(
+                "NaeAfImport", "registryAudit.naeAfImport", new { created = toCreate.Count, existing = existing.Values.Sum(), skipped }),
+            userId,
             ct).ConfigureAwait(false);
 
         return Report(code, false, true, provisioned, snapshot, counts, skipped, issues);
