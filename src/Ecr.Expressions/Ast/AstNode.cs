@@ -46,7 +46,14 @@ public sealed record CellReferenceNode(
 }
 
 /// <summary>Посилання діалекту Methodology: <c>@Arg</c>, <c>CST.X</c>, <c>!Formula</c>, <c>HDR.Y</c>.</summary>
-public sealed record SymbolReferenceNode(SymbolKind Kind, string Name) : AstNode;
+public sealed record SymbolReferenceNode(SymbolKind Kind, string Name) : AstNode
+{
+    /// <summary>
+    /// Аргумент позначено необов'язковим маркером <c>@Name?</c> (лише <see cref="SymbolKind.Argument"/>
+    /// діалекту методологій). Рантайм бере маркер не звідси, а з похідного <c>ArgumentsCsv</c> версії.
+    /// </summary>
+    public bool IsOptional { get; init; }
+}
 
 /// <summary>Календарний контекст: <c>[Period].Days</c> тощо.</summary>
 public sealed record PeriodPropertyNode(string Property, int PeriodOffset) : AstNode;

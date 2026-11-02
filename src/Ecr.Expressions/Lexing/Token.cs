@@ -16,7 +16,13 @@ public enum TokenType : byte
     Plus, Minus, Star, Slash, Percent, Caret,
     Equal, NotEqual, Less, LessOrEqual, Greater, GreaterOrEqual,
     And, Or, Not,
-    EndOfInput
+    EndOfInput,
+
+    /// <summary>
+    /// <c>?</c> упритул за іменем <c>@Arg</c> у діалекті методологій — маркер «необов'язковий аргумент»
+    /// (<see cref="DialectSyntax.OptionalArgumentMarker"/>), а не тернарний оператор.
+    /// </summary>
+    OptionalMarker
 }
 
 /// <summary>

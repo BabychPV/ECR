@@ -142,6 +142,28 @@ public interface IMethodologyDraftStore
     /// <param name="substance">Запис, дозволений <c>MethodologyVersion.RemoveSubstance</c>.</param>
     public void Remove(MethodologySubstance substance);
 
+    /// <summary>Перелік категорій констант версії — відстежувані записи, за порядком.</summary>
+    /// <param name="methodologyVersionId">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Категорії в порядку <c>Ordinal</c>, далі <c>Id</c>.</returns>
+    public Task<IReadOnlyList<MethodologyCategory>> GetCategoriesTrackedAsync(
+        int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>Скільки констант версії стоїть під кожною категорією (одним запитом).</summary>
+    /// <param name="methodologyVersionId">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Категорія → кількість рядків констант; спільні (без категорії) не входять.</returns>
+    public Task<IReadOnlyDictionary<string, int>> CountConstantsByCategoryAsync(
+        int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>Ставить категорію в чергу на вставку; зберігає <c>IUnitOfWork</c>.</summary>
+    /// <param name="category">Запис, створений <c>MethodologyVersion.AddCategory</c>.</param>
+    public void Add(MethodologyCategory category);
+
+    /// <summary>Ставить категорію в чергу на видалення; зберігає <c>IUnitOfWork</c>.</summary>
+    /// <param name="category">Запис, дозволений <c>MethodologyVersion.RemoveCategory</c>.</param>
+    public void Remove(MethodologyCategory category);
+
     /// <summary>Вимога версії за колонкою — відстежувана; <c>null</c>, якщо її немає.</summary>
     /// <param name="methodologyVersionId">Версія.</param>
     /// <param name="columnDefId">Колонка документа.</param>

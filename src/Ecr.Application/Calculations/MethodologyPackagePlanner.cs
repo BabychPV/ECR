@@ -12,7 +12,7 @@ namespace Ecr.Application.Calculations;
 /// <summary>Формула версії так, як її порівнює імпорт.</summary>
 /// <param name="Code">Код.</param>
 /// <param name="Expression">Вираз.</param>
-/// <param name="ArgumentsCsv">Оголошені аргументи як є.</param>
+/// <param name="ArgumentsCsv">Похідний від виразу список аргументів (✎ 2026-11-02).</param>
 /// <param name="ResultType">Тип результату; пакет без позначки — <see cref="FormulaResultType.Number"/>.</param>
 /// <param name="Scope">Область формули (L2-1); пакет без позначки — <see cref="MethodologyFormulaScope.Substance"/>.</param>
 public sealed record ImportFormulaContent(
@@ -464,9 +464,22 @@ public static class MethodologyPackagePlanner
                         $"{fromLibrary.Count} констант ({copied} рядків) скопійовано з {libraryCode}: {string.Join(", ", fromLibrary)}."));
                 }
 
+                // ✎ 2026-11-02 (похідні аргументи): маркери `Name?` списку AF переходять у вираз по всій версії,
+                // а список — похідний від виразу. Так і запис, і звірка «без змін» з уже імпортованою версією
+                // (у базі — похідні списки) порівнюють однакові форми.
+                var derived = MethodologyDerivedArguments.Normalize(
+                    [.. formulas.Select(f => new MethodologyDerivedArguments.Input(
+                        0, f.Name.Trim(), f.Text ?? string.Empty, f.Arguments))]);
+
+                foreach (var tooLong in derived.Formulas.Where(f => f.Expression.Length > MethodologyFormula.MaxExpressionLength))
+                {
+                    blockers.Add(new("formulaTooLong", m.Name, v.Version, tooLong.Code,
+                        $"Вираз із маркерами необов'язкових аргументів довший за {MethodologyFormula.MaxExpressionLength} символів."));
+                }
+
                 var content = new ImportVersionContent(
-                    [.. formulas.Select(f => new ImportFormulaContent(
-                        f.Name.Trim(), f.Text ?? string.Empty, f.Arguments,
+                    [.. formulas.Select((f, i) => new ImportFormulaContent(
+                        f.Name.Trim(), derived.Formulas[i].Expression, derived.Formulas[i].ArgumentsCsv,
                         string.Equals(f.ResultType?.Trim(), "Text", StringComparison.OrdinalIgnoreCase)
                             ? FormulaResultType.Text
                             : FormulaResultType.Number,
@@ -497,6 +510,13 @@ public static class MethodologyPackagePlanner
                     }
                 }
 
+                if (action == Create && Categories(content) is { Count: > 0 } added)
+                {
+                    warnings.Add(new("categoriesAdded", m.Name, v.Version, null,
+                        $"До переліку категорій версії додано {added.Count}: {string.Join(", ", added.Take(20))}"
+                        + (added.Count > 20 ? ", …" : string.Empty) + "."));
+                }
+
                 versions.Add(new PlannedMethodologyVersion(v.Version, action, match?.Id, content, copied));
             }
 
@@ -515,6 +535,22 @@ public static class MethodologyPackagePlanner
         }
 
         return new MethodologyImportPlan(planned, blockers, conflicts, warnings);
+    }
+
+    /// <summary>
+    /// Категорії констант версії пакета в порядку першої появи — перелік <c>calc.MethodologyCategory</c> нової чернетки.
+    /// </summary>
+    /// <param name="content">Вміст версії.</param>
+    /// <returns>Різні коди (точно, з регістром; без регістру — перша поява).</returns>
+    public static IReadOnlyList<string> Categories(ImportVersionContent content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+
+        return [.. content.Constants
+            .Select(c => c.Category)
+            .OfType<string>()
+            .Where(c => c.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)];
     }
 
     /// <summary>Область формули з рядка пакета (L2-1): порожнє - <c>Substance</c>, імена - без регістру.</summary>

@@ -174,27 +174,21 @@ public sealed class MethodologyDependencyGraphTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "ФВ-9.14")]
-    public async Task Оголошений_список_аргументів_доходить_від_сутності_до_перевірки()
+    public async Task Похідний_список_аргументів_замінює_старий_при_публікації()
     {
-        // ⛔ Стережеться ЛАНКА, а не звірка. Звірка була написана й
-        // покрита дванадцятьма мутаціями — і мовчала у продуктиві: колонки
-        // під `FInfo_Arguments` не існувало, тож `DeclaredArguments` завжди був
-        // `null`, а на `null` звірка за домовленістю мовчить (`Q-091`).
-        //
-        // ⚠ Тест йде через СПРАВЖНІЙ обробник публікації навмисно:
-        // виклик `MethodologyPublishChecks.Check` напряму доводить лише, що
-        // звірка вміє відмовляти, і нічого — про те, чи є єй що читати.
+        // ✎ 2026-11-02 (похідні аргументи): раніше тут стерігся шлях «оголошений руками список → звірка
+        // `ECR-CALC-0432`». Список більше не вводиться: публікація виводить його з ВИРАЗУ і записує в
+        // опубліковану версію — старий (`Duration`, якого у виразі немає) не валить публікацію і не доживає до
+        // рантайму. Тест йде через СПРАВЖНІЙ обробник: саме він записує похідний список.
         var declared = Formula(ShortNameId, "k1", "@FuelConsumption * 2");
         declared.SetArguments("Duration");
 
         _store.GetFormulasAsync(VersionId, Arg.Any<CancellationToken>())
               .Returns(new List<MethodologyFormula> { declared });
 
-        var error = await Assert.ThrowsAsync<Ecr.Application.Errors.BusinessRuleException>(
-            () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
+        await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
 
-        Assert.Equal("ECR-CALC-0432", error.ErrorCode);
-        Assert.Contains("FuelConsumption", error.Message, StringComparison.Ordinal);
+        Assert.Equal("@FuelConsumption", declared.ArgumentsCsv);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

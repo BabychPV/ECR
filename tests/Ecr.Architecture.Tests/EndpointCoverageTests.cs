@@ -1388,6 +1388,13 @@ public sealed partial class EndpointCoverageTests
         "GET /api/v1/methodologies/{p}/versions/{p}/substances",
         "PUT /api/v1/methodologies/{p}/versions/{p}/substances",
 
+        // План CONST-CATEGORY (lane integ-methodology, 2026-11-02): контракт першим, екран «Категорії» і вибір
+        // категорії константи зі списку — клієнтська lane (Permites) над запушеним контрактом.
+        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклики у `features/methodologies`.
+        "GET /api/v1/methodologies/{p}/versions/{p}/categories",
+        "PUT /api/v1/methodologies/{p}/versions/{p}/categories/{p}",
+        "DELETE /api/v1/methodologies/{p}/versions/{p}/categories/{p}",
+
         // D-425 (Land «лише Running»): прапорець фільтра активності рядків ставить скрипт розгортання шаблону
         // (`tools/land/Build-LandTemplate.ps1`, етап RowFilter) за переліком `tools/land/land-row-filter.json`;
         // екрана налаштувань методології для цього прапорця ще немає — це рідкісна адмін-дія, що змінює числа.

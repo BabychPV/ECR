@@ -44,6 +44,10 @@ public static class MethodologyCategoryRuleChecks
     /// <param name="constants">Усі константи версії.</param>
     /// <param name="warnings">Куди складати попередження; <c>null</c> — нікуди.</param>
     /// <param name="strings">Каталог рядків мовою читача; <c>null</c> — англійський запас.</param>
+    /// <param name="categoryCodes">
+    /// Перелік категорій версії (план CONST-CATEGORY); <c>null</c> — звірку літералів правила з переліком пропустити
+    /// (збереження правила).
+    /// </param>
     /// <returns>Проблеми й розібране правило.</returns>
     public static Outcome Check(
         string? ruleText,
@@ -52,7 +56,8 @@ public static class MethodologyCategoryRuleChecks
         IReadOnlyList<ParsedFormula> parsed,
         IReadOnlyList<MethodologyConstant> constants,
         ICollection<string>? warnings,
-        UiStringCatalog? strings)
+        UiStringCatalog? strings,
+        IReadOnlyCollection<string>? categoryCodes = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(formulas);
@@ -166,7 +171,68 @@ public static class MethodologyCategoryRuleChecks
             }
         }
 
+        // ✎ План CONST-CATEGORY: літерал, який правило може ПОВЕРНУТИ, без категорії в переліку — попередження, а не
+        // відмова (ключ, під яким немає жодної константи, дає спільну константу, і так буває свідомо). Динамічні
+        // гілки (`@Land_NAE`, конкатенації, `!ECW_Location`) не звіряються: їхнього значення з тексту не видно.
+        if (categoryCodes is not null && warnings is not null)
+        {
+            var listed = categoryCodes.ToHashSet(StringComparer.Ordinal);
+            foreach (var literal in ResultLiterals(result.Expression.Root)
+                         .Where(l => l.Length > 0 && !listed.Contains(l))
+                         .Distinct(StringComparer.Ordinal)
+                         .Order(StringComparer.Ordinal))
+            {
+                Warn(
+                    warnings,
+                    strings,
+                    "publish.warning.categoryRuleLiteralNoCategory",
+                    "The category rule can return \"{category}\", but the version's category list has no such category: "
+                    + "no constant can be narrowed to it.",
+                    ("category", literal));
+            }
+        }
+
         return new Outcome(problems, new ParsedFormula(RuleCode, FormulaResultType.Text, result.Expression.Root));
+    }
+
+    /// <summary>
+    /// Текстові літерали, які правило може ПОВЕРНУТИ: гілки <c>?:</c>/<c>if(…)</c>, а не умови (<c>in(@NAE,'6640')</c>).
+    /// </summary>
+    /// <param name="root">Корінь правила.</param>
+    /// <returns>Літерали гілок результату; динамічні гілки пропускаються.</returns>
+    public static IReadOnlyList<string> ResultLiterals(AstNode root)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+
+        var found = new List<string>();
+        var pending = new Stack<AstNode>();
+        pending.Push(root);
+
+        while (pending.Count > 0)
+        {
+            switch (pending.Pop())
+            {
+                case LiteralNode { Type: ExpressionValueType.Text, Value: string text }:
+                    found.Add(text);
+                    break;
+
+                case ConditionalNode conditional:
+                    pending.Push(conditional.WhenFalse);
+                    pending.Push(conditional.WhenTrue);
+                    break;
+
+                case FunctionNode { Arguments.Count: 3 } function
+                    when string.Equals(function.Name, "if", StringComparison.OrdinalIgnoreCase):
+                    pending.Push(function.Arguments[2]);
+                    pending.Push(function.Arguments[1]);
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        return found;
     }
 
     /// <summary>
