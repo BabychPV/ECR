@@ -69,7 +69,8 @@ INSERT @map (SchemaName, TableName, SchemeName, PartColumn, CompressPk) VALUES
     (N'aud',  N'CellChange',        N'ps_AuditByMonth', N'ChangedAt', 1),
     (N'aud',  N'StructureChange',   N'ps_AuditByMonth', N'ChangedAt', 0),
     (N'aud',  N'SecurityEvent',     N'ps_AuditByMonth', N'ChangedAt', 0),
-    (N'aud',  N'PublicationEvent',  N'ps_AuditByMonth', N'ChangedAt', 0);
+    (N'aud',  N'PublicationEvent',  N'ps_AuditByMonth', N'ChangedAt', 0),
+    (N'aud',  N'RowChange',         N'ps_AuditByMonth', N'ChangedAt', 0);
 
 -- Схема партиціонування має існувати: без 02-partitions.sql далі нема сенсу.
 IF NOT EXISTS (SELECT 1 FROM sys.partition_schemes WHERE name = N'ps_ByPeriodKey')
@@ -295,7 +296,7 @@ IF EXISTS
       AND SCHEMA_NAME(t.schema_id) IN (N'doc', N'calc', N'aud', N'ext')
       AND t.name IN (N'TableInstance', N'TableRow', N'CellValue',
                      N'CalculationResult', N'CalculationInput', N'CalculationStep',
-                     N'CellChange', N'StructureChange', N'SecurityEvent', N'PublicationEvent',
+                     N'CellChange', N'StructureChange', N'SecurityEvent', N'PublicationEvent', N'RowChange',
                      N'RowWindowValue', N'CellStyle', N'CellFormulaOverride')
       AND ds.type_desc <> N'PARTITION_SCHEME'   -- type_desc, а не type: у type код 'PS'
 )

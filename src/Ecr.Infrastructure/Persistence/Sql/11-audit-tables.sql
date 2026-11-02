@@ -223,6 +223,47 @@ BEGIN
 END
 GO
 
+-- Додавання/видалення РЯДКА таблиці документа (журнал аркуша, вкладка History). Значень комірок тут
+-- немає (вони в aud.CellChange під фільтром видимості); лише адреса рядка. Пишеться в ТІЙ САМІЙ транзакції,
+-- що й зміна рядка (RowChangeAudit): POST row, DELETE row, нові рядки PATCH і книги Excel; відкат не лишає
+-- запису. Action 3 (Restored) зарезервовано: шляху відновлення рядка документа в продукті ще немає.
+-- Історія — вперед від розгортання, без заповнення минулого. Дзеркала arc.* немає (архівація відкладена: журнал
+-- аркуша читає вікно в 396 діб, а `arc.usp_ArchiveAudit` її не торкається, доки в 04-partition-maintenance.sql
+-- немає пари aud.RowChange -> arc.AuditRowChange).
+IF OBJECT_ID(N'aud.RowChange', N'U') IS NULL
+BEGIN
+    CREATE TABLE aud.RowChange
+    (
+        Id              bigint         IDENTITY(1,1) NOT NULL,
+        ChangedAt       datetime2(3)   NOT NULL,   -- партиційний ключ
+        DocumentId      bigint         NOT NULL,
+        PeriodKey       int            NOT NULL,
+        TableInstanceId bigint         NOT NULL,
+        TableDefId      int            NOT NULL,   -- межі читання (видима таблиця) без join на партиційні doc.*
+        TableRowId      bigint         NOT NULL,
+        RowKey          nvarchar(100)  NOT NULL,
+        Action          tinyint        NOT NULL,   -- 1 Added | 2 Deleted | 3 Restored (зарезервовано)
+        ChangedByUserId int            NOT NULL,   -- НЕ SID (R-A2)
+        Origin          nvarchar(32)   NOT NULL,   -- UserEdit | Import | ApproverEdit | ...
+        CorrelationId   nvarchar(64)   NULL,
+        CONSTRAINT PK_RowChange PRIMARY KEY CLUSTERED (ChangedAt, Id) ON ps_AuditByMonth(ChangedAt),
+        CONSTRAINT CK_RowChange_Action CHECK (Action IN (1, 2, 3))
+    ) ON ps_AuditByMonth(ChangedAt);
+END
+GO
+
+-- Журнал аркуша: «документ + період, найновіші першими» (keyset за (ChangedAt, Id)). Вирівняний по
+-- ps_AuditByMonth, як решта індексів (перевірка THROW 50031 у 07).
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_RowChange_Document'
+               AND object_id = OBJECT_ID(N'aud.RowChange'))
+BEGIN
+    CREATE INDEX IX_RowChange_Document
+        ON aud.RowChange (DocumentId, PeriodKey, ChangedAt DESC, Id DESC)
+        INCLUDE (TableDefId, ChangedByUserId, Origin)
+        ON ps_AuditByMonth(ChangedAt);
+END
+GO
+
 IF OBJECT_ID(N'aud.ConsistencyIssue', N'U') IS NULL
 BEGIN
     CREATE TABLE aud.ConsistencyIssue
@@ -329,6 +370,16 @@ AS
 BEGIN
     SET NOCOUNT ON;
     THROW 50060, N'Журнал aud.SecurityEvent незмінний: UPDATE і DELETE заборонені (ФВ-5.21).', 1;
+END;
+GO
+
+CREATE OR ALTER TRIGGER aud.TR_RowChange_Immutable
+ON aud.RowChange
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    THROW 50060, N'Журнал aud.RowChange незмінний: UPDATE і DELETE заборонені (ФВ-5.21).', 1;
 END;
 GO
 
