@@ -1,0 +1,11 @@
+-- COLL:an28 ── ru/kz AN-28/L8-01; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.unsavedBlocksAction', N'ru', N'Несохранённые изменения в таблице не удалось сохранить, поэтому действие не выполнено. Исправьте ошибки в ячейках или повторите попытку.'),
+    (N'document.unsavedBlocksAction', N'kz', N'Кестедегі сақталмаған өзгерістерді сақтау мүмкін болмады, сондықтан әрекет орындалмады. Ұяшықтардағы қателерді түзетіңіз немесе әрекетті қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an28 ── кінець секції ──
+
