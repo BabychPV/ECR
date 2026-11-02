@@ -2,16 +2,7 @@ import { expect, test, type APIRequestContext, type APIResponse, type Browser, t
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { manySources, SmallSources, workbook, type AirSourceRow } from './airFixture';
-import {
-  addScopeEntry,
-  AreaRegistry,
-  ensureAreaEntry,
-  ensureNaeTree,
-  ensureRegionRegistry,
-  ensureSubstances,
-  RegionRegistry,
-  removeScopeEntries,
-} from './airScope';
+import { ensureNaeTree, ensureSubstances, fillScope, prepareScope, removeScopeEntries, type PreparedScope } from './airScope';
 
 /**
  * Air limits (NAE N3 картка + N5 майстер імпорту) - РЕАЛЬНИЙ e2e без підміни відповідей: сервер (provision, профілі, analyse/preview/apply,
@@ -56,9 +47,8 @@ let regionNodeId = 0;
 const extraRegionNodes: number[] = [];
 let viewerUserId = 0;
 let viewerRoleId = 0;
-/** AIR-ON-AIR: Region/Area registry entries of the import scope (the Region entry's name = the NAE region code). */
-const scope = { regionEntryId: 0, areaEntryId: 0, areaName: '' };
-const scopeEntries: { registry: string; id: number }[] = [];
+/** AIR-ON-AIR: the import scope by the kind of the AIR type's REGION/AREA columns (`prepareScope`). */
+let scope: PreparedScope = { regionKind: 'Text', areaKind: 'Text', regionText: '', areaText: '', regionEntryId: null, form: {}, created: [] };
 
 async function ok<T>(response: APIResponse, what: string): Promise<T> {
   const body = await response.text();
@@ -105,14 +95,13 @@ function importUrl(permitId: number, action: 'preview' | 'apply'): string {
 
 /** Імпорт через API (для великих даних): preview -> усі відсутні НАЕ створити під вузлом -> apply. */
 async function importViaApi(api: APIRequestContext, permitId: number, file: Buffer): Promise<{ sources: number; substances: number }> {
-  // AIR-ON-AIR: the scope travels as form fields (Registry columns: entry ids).
+  // AIR-ON-AIR: the scope travels as form fields (Registry: regionEntryId/areaEntryId; Text/List: region/area).
   const multipart = (request: object): Record<string, string | { name: string; mimeType: string; buffer: Buffer }> => ({
     file: { name: 'air.xlsx', mimeType: Xlsx, buffer: file },
     request: JSON.stringify(request),
-    regionEntryId: String(scope.regionEntryId),
-    areaEntryId: String(scope.areaEntryId),
+    ...scope.form,
   });
-  const base = { region: Region, area: Area };
+  const base = {};
   const preview = await ok<{ preview: { missing: { kind: string; code: string }[] } }>(
     await api.post(importUrl(permitId, 'preview'), { multipart: multipart(base), timeout: 300_000 }),
     'preview через API',
@@ -183,11 +172,10 @@ async function pick(page: Page, label: string | RegExp, option: string | RegExp)
   await page.getByRole('option', { name: option }).click();
 }
 
-/** AIR-ON-AIR step 1: Region (registry entry named like the NAE region) and its Area, then «Next». */
+/** AIR-ON-AIR step 1: Region and Area by the kind of the type's columns, then «Next». */
 async function fillScopeStep(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'Region and area', level: 2 })).toBeVisible({ timeout: 30_000 });
-  await pick(page, /^Region/, new RegExp(`^${Region}`));
-  await pick(page, /^Area/, new RegExp(`^${scope.areaName}`));
+  await fillScope(page, scope);
   await page.getByRole('button', { name: 'Next', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'File', level: 2 })).toBeVisible({ timeout: 30_000 });
 }
@@ -261,7 +249,6 @@ test.describe('Air limits real', () => {
 
     const treeId = await ensureNaeTree(admin);
     await ensureSubstances(admin);
-    await ensureRegionRegistry(admin);
     await ok(await admin.post('/api/v1/air-limits/provision'), 'provision');
 
     regionNodeId = await addNode(admin, treeId, `${Region}_R`, null, 'REGION', { RegionCode: Region });
@@ -269,12 +256,7 @@ test.describe('Air limits real', () => {
     ids.siteId = await addNode(admin, treeId, `${Region}_S`, areaId, 'SITE', { RegionCode: Region, AreaCode: Area });
     await addNode(admin, treeId, `${Region}_N0001`, ids.siteId, 'SRC', { NaeCode: '0001', RegionCode: Region, AreaCode: Area });
 
-    scope.regionEntryId = await addScopeEntry(admin, RegionRegistry, `E2ER_${Stamp}`, Region);
-    scopeEntries.push({ registry: RegionRegistry, id: scope.regionEntryId });
-    const area = await ensureAreaEntry(admin, Area, Stamp);
-    scope.areaEntryId = area.id;
-    scope.areaName = area.name;
-    if (area.created) scopeEntries.push({ registry: AreaRegistry, id: area.id });
+    scope = await prepareScope(admin, Region, Area, Stamp);
 
     ids.p1Number = `E2E-AIR-1-${Stamp}`;
     ids.p2Number = `E2E-AIR-2-${Stamp}`;
@@ -330,7 +312,7 @@ test.describe('Air limits real', () => {
       }
     }
 
-    problems.push(...(await removeScopeEntries(admin, scopeEntries)));
+    problems.push(...(await removeScopeEntries(admin, scope.created)));
 
     // Користувач лишається без ролей (видалити його API не дає), роль видаляється.
     if (viewerUserId !== 0) await admin.put(`/api/v1/users/${String(viewerUserId)}/roles`, { data: { roleCodes: [] } });
@@ -394,11 +376,14 @@ test.describe('Air limits real', () => {
     await expect(page.getByRole('textbox', { name: /^Area/ })).toHaveCount(0);
     await page.getByRole('button', { name: 'Next', exact: true }).click();
     await expect(page.getByText('Choose the region.')).toBeVisible();
-    await pick(page, /^Region/, new RegExp(`^${Region}`));
-    await page.getByRole('textbox', { name: /^Area/ }).click();
-    await expect(page.getByRole('option')).toHaveText([new RegExp(`^${scope.areaName}`)]);
-    await page.keyboard.press('Escape');
-    await pick(page, /^Area/, new RegExp(`^${scope.areaName}`));
+    if (scope.regionKind !== 'Text' && scope.areaKind !== 'Text') {
+      // Registry/List region: Area offers only the chosen region's areas.
+      await pick(page, /^Region/, new RegExp(`^${Region}`));
+      await page.getByRole('textbox', { name: /^Area/ }).click();
+      await expect(page.getByRole('option')).toHaveText([new RegExp(`^${scope.areaText}`)]);
+      await page.keyboard.press('Escape');
+    }
+    await fillScope(page, scope);
     await page.getByRole('button', { name: 'Next', exact: true }).click();
 
     // 2 File -> 3 Mapping
@@ -673,14 +658,19 @@ test.describe('Air limits real', () => {
     const regionInput = page.getByRole('textbox', { name: /^Region/ });
     await regionInput.focus();
     await page.keyboard.type(Region);
-    await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('Enter');
+    if (scope.regionKind !== 'Text') {
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('Enter');
+    }
     await expect(regionInput).toHaveValue(new RegExp(`^${Region}`));
     const areaInput = page.getByRole('textbox', { name: /^Area/ });
     await areaInput.focus();
-    await page.keyboard.press('ArrowDown'); // opens the list on the only area of the region
-    await page.keyboard.press('Enter');
-    await expect(areaInput).toHaveValue(new RegExp(`^${scope.areaName}`));
+    await page.keyboard.type(scope.areaText);
+    if (scope.areaKind !== 'Text') {
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('Enter');
+    }
+    await expect(areaInput).toHaveValue(new RegExp(`^${scope.areaText}`));
     await page.getByRole('button', { name: 'Next', exact: true }).focus();
     await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { name: 'File', level: 2 })).toBeFocused({ timeout: 30_000 });

@@ -1,4 +1,4 @@
-import { expect, type APIRequestContext, type APIResponse } from '@playwright/test';
+import { expect, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
 
 /**
  * AIR-ON-AIR e2e fixture: the import scope (REGION / AREA columns of the AIR type, `GET /air-limits/scope-fields`). By default both
@@ -105,14 +105,6 @@ async function ensureRegistry(api: APIRequestContext, code: string, name: string
   return (await ok<{ id: number }>(await api.get(`/api/v1/registries/${code}/definition`), code)).id;
 }
 
-/**
- * The Region registry (`LAND_REGION`, Land bootstrap; absent on a fresh stand). ⚠ Before `POST /air-limits/provision`: provisioning
- * refuses (422) when the Region registry is missing; `AIR_AREA` it creates itself (OFFSHORE / ONSHORE).
- */
-export async function ensureRegionRegistry(api: APIRequestContext): Promise<void> {
-  await ensureRegistry(api, RegionRegistry, 'Regions');
-}
-
 /** Adds an entry named `name` (English display) to `registry`; returns its id. */
 export async function addScopeEntry(api: APIRequestContext, registry: string, code: string, name: string): Promise<number> {
   const defId = await ensureRegistry(api, registry, registry === RegionRegistry ? 'Regions' : 'Areas');
@@ -130,16 +122,83 @@ export async function scopeFields(api: APIRequestContext): Promise<ScopeFields> 
   return ok<ScopeFields>(await api.get('/api/v1/air-limits/scope-fields'), 'scope-fields');
 }
 
-/**
- * The Area entry that maps to NAE area `naeArea` (OFFSHORE): an existing one (provisioning may have created `AIR_AREA`), else a new
- * one named like the area («Offshore» normalises to OFFSHORE). Returns its id and whether the spec created it.
- */
-export async function ensureAreaEntry(api: APIRequestContext, naeArea: string, stamp: string): Promise<{ id: number; created: boolean; name: string }> {
-  const existing = (await scopeFields(api)).area.options.find((option) => option.naeArea === naeArea && option.entryId !== null);
-  if (existing !== undefined && existing.entryId !== null) return { id: existing.entryId, created: false, name: existing.name };
-  const name = naeArea.charAt(0) + naeArea.slice(1).toLowerCase();
+/** How the spec fills the scope step and the scope form fields, by the kind the AIR type has (`scope-fields`). */
+export interface PreparedScope {
+  readonly regionKind: string;
+  readonly areaKind: string;
+  /** Region: the text typed (Text) or the option name picked (Registry/List). */
+  readonly regionText: string;
+  /** Area option name (Registry/List) or the text typed (Text). */
+  readonly areaText: string;
+  /** Registry entry id of the Region value; `null` — not a Registry column. */
+  readonly regionEntryId: number | null;
+  /** Form fields of preview/apply (`regionEntryId`/`areaEntryId` or `region`/`area`). */
+  readonly form: Readonly<Record<string, string>>;
+  /** Entries the spec created (removed in afterAll). */
+  readonly created: readonly { registry: string; id: number }[];
+}
 
-  return { id: await addScopeEntry(api, AreaRegistry, `E2EA_${stamp}`, name), created: true, name };
+/**
+ * Scope values for NAE region `region` and NAE area `naeArea`, after provisioning (call it AFTER the NAE nodes exist: the
+ * mapping to the tree is computed against them). ✎ fbec26fee: provisioning is idempotent and makes REGION a Text column when
+ * `LAND_REGION` is missing (fresh stand), AREA a Registry column on `AIR_AREA` (OFFSHORE / ONSHORE).
+ * Region Text → the region code is typed; Registry → an entry named like the region is added; Area Registry → the existing
+ * entry mapped to `naeArea` (else one is added); Text → typed.
+ */
+export async function prepareScope(api: APIRequestContext, region: string, naeArea: string, stamp: string): Promise<PreparedScope> {
+  const fields = await scopeFields(api);
+  const created: { registry: string; id: number }[] = [];
+  const form: Record<string, string> = {};
+  let regionEntryId: number | null = null;
+
+  if (fields.region.kind === 'Registry') {
+    const registry = fields.region.registryCode ?? RegionRegistry;
+    regionEntryId = await addScopeEntry(api, registry, `E2ER_${stamp}`, region);
+    created.push({ registry, id: regionEntryId });
+    form['regionEntryId'] = String(regionEntryId);
+  } else {
+    expect(fields.region.kind, 'REGION as a type list cannot be prepared by the spec').toBe('Text');
+    form['region'] = region;
+  }
+
+  let areaText = naeArea;
+  if (fields.area.kind === 'Text') {
+    form['area'] = naeArea;
+  } else {
+    const after = await scopeFields(api);
+    let option = after.area.options.find((item) => item.naeArea === naeArea);
+    if (option === undefined && fields.area.kind === 'Registry') {
+      const registry = fields.area.registryCode ?? AreaRegistry;
+      const name = naeArea.charAt(0) + naeArea.slice(1).toLowerCase();
+      const id = await addScopeEntry(api, registry, `E2EA_${stamp}`, name);
+      created.push({ registry, id });
+      option = { entryId: id, code: `E2EA_${stamp}`, name, naeRegion: null, naeArea };
+    }
+    expect(option, `no AREA value maps to ${naeArea}`).toBeDefined();
+    areaText = option?.name ?? naeArea;
+    if (fields.area.kind === 'Registry') form['areaEntryId'] = String(option?.entryId ?? '');
+    else form['area'] = areaText;
+  }
+
+  return { regionKind: fields.region.kind, areaKind: fields.area.kind, regionText: region, areaText, regionEntryId, form, created };
+}
+
+/** UI: fills Region and Area of the «Region and area» step by kind (does not press «Next»). */
+export async function fillScope(page: Page, scope: PreparedScope): Promise<void> {
+  const regionBox = page.getByRole('textbox', { name: /^Region/ });
+  if (scope.regionKind === 'Text') {
+    await regionBox.fill(scope.regionText);
+  } else {
+    await regionBox.click();
+    await page.getByRole('option', { name: new RegExp(`^${scope.regionText}`) }).click();
+  }
+  const areaBox = page.getByRole('textbox', { name: /^Area/ });
+  if (scope.areaKind === 'Text') {
+    await areaBox.fill(scope.areaText);
+  } else {
+    await areaBox.click();
+    await page.getByRole('option', { name: new RegExp(`^${scope.areaText}`) }).click();
+  }
 }
 
 /** Removes the entries the spec created (problems are returned, not thrown: cleanup continues). */
