@@ -222,7 +222,7 @@ describe('вкладки', () => {
   it('Overview, по вкладці на таблицю з лічильником; перемикання міняє ?tab=', async () => {
     await open();
     const tabs = within(screen.getByRole('tablist', { name: 'Permit sections' })).getAllByRole('tab');
-    expect(tabs.map((tab) => tab.textContent)).toEqual(['Overview', 'Limits2', 'Places1']);
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Overview', 'Limits2', 'Places1', 'Used in']);
     expect(url()).toBe('/admin/permits/5');
 
     fireEvent.click(tabs[1]!);
