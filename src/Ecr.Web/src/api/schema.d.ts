@@ -35304,9 +35304,10 @@ export interface components {
              */
             to: null | string;
         };
-        /** @description Рядок журналу дій на аркуші: правка комірки (людини) або дія робочого процесу. */
+        /** @description Рядок журналу дій на аркуші: правка комірки (людини), додавання/видалення рядка або дія робочого процесу. */
         SheetActivityItem: {
-            /** @description Лише процес: `Submit`, `Approve`, `ApproveStep`, `Reject`, `Reopen`, `Recall`. */
+            /** @description Процес: `Submit`, `Approve`, `ApproveStep`, `Reject`, `Reopen`, `Recall`;
+             *     рядок: `RowAdded`, `RowDeleted`. */
             action: null | string;
             /**
              * Format: date-time
@@ -35327,13 +35328,13 @@ export interface components {
             columnHeaderL10n: null | components["schemas"]["LocalizedText"];
             /** @description Лише процес: стан до. */
             fromState: null | string;
-            /** @description `CellEdit` або `Workflow` (SheetActivityKinds). */
+            /** @description `CellEdit`, `RowChange` або `Workflow` (SheetActivityKinds). */
             kind: string;
             /** @description Лише правка: значення після. */
             newValue: null | string;
             /** @description Лише правка: значення до. */
             oldValue: null | string;
-            /** @description Лише правка: `UserEdit`, `Import`, `ImportOverwrite`, `ApproverEdit`. */
+            /** @description Правка й рядок: `UserEdit`, `Import`, `ImportOverwrite`, `ApproverEdit`. */
             origin: null | string;
             /**
              * Format: int32
@@ -35342,10 +35343,10 @@ export interface components {
             periodKey: number;
             /** @description Лише процес: коментар (причина відхилення, повернення, відкликання); звичайний текст. */
             reason: null | string;
-            /** @description Лише правка: ключ рядка. */
+            /** @description Правка й рядок: ключ рядка. */
             rowKey: null | string;
             rowLabelL10n: null | components["schemas"]["LocalizedText"];
-            /** @description Лише правка: код таблиці. */
+            /** @description Правка й рядок: код таблиці. */
             tableCode: null | string;
             tableNameL10n: null | components["schemas"]["LocalizedText"];
             /** @description Лише процес: стан після. */

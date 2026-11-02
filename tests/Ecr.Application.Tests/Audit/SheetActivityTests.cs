@@ -253,6 +253,112 @@ public sealed class SheetActivityTests
             () => handler.HandleAsync(DocumentId, SheetId, PeriodValue, null, false, limit, null, CancellationToken.None));
     }
 
+    // ───────────── журнал рядків (aud.RowChange, тег 2) ─────────────
+
+    /// <remarks>
+    /// ⛔ Мутація: у <c>ReadRowsAsync</c> замінити позицію після тегу 0/1 (<c>long.MaxValue</c>) на <c>a.Id</c> або в
+    /// декодері лишити <c>tag &gt; 1</c> — губляться або дублюються рядки на межі сторінок, тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Сторінки_трьох_джерел_склеюються_без_втрат_і_дублів_на_однакових_моментах()
+    {
+        for (var seed = 1; seed <= 150; seed++)
+        {
+            var random = new Random(seed);
+            var cells = Enumerable.Range(1, random.Next(0, 10))
+                .Select(i => (Id: (long)i * 3, At: Base.AddSeconds(random.Next(0, 4)))).ToList();
+            var events = Enumerable.Range(1, random.Next(0, 6))
+                .Select(i => (Id: (long)i * 5, At: Base.AddSeconds(random.Next(0, 4)))).ToList();
+            var rows = Enumerable.Range(1, random.Next(0, 10))
+                .Select(i => (Id: (long)i * 7, At: Base.AddSeconds(random.Next(0, 4)))).ToList();
+            var limit = random.Next(1, 6);
+
+            var query = new SheetActivityQuery(FakeAudit(cells), FakeWorkflow(events), rowChanges: FakeRows(rows));
+            var scope = new SheetActivityScope(DocumentId, PeriodValue, "SA", [301], VisibleTableIds: [VisibleTable]);
+
+            var seen = new List<string>();
+            string? cursor = null;
+            for (var guard = 0; guard < 200; guard++)
+            {
+                var page = await query.ReadAsync(scope, limit, cursor, CancellationToken.None);
+                Assert.True(page.Items.Count <= limit);
+                seen.AddRange(page.Items.Select(Name));
+                cursor = page.NextCursor;
+                if (cursor is null)
+                {
+                    break;
+                }
+            }
+
+            var expected = cells.Select(c => (c.At, Tag: 0, c.Id, Name: "c" + c.Id.ToString(CultureInfo.InvariantCulture)))
+                .Concat(events.Select(e => (e.At, Tag: 1, e.Id, Name: "w" + e.Id.ToString(CultureInfo.InvariantCulture))))
+                .Concat(rows.Select(r => (r.At, Tag: 2, r.Id, Name: "r" + r.Id.ToString(CultureInfo.InvariantCulture))))
+                .OrderByDescending(x => x.At).ThenBy(x => x.Tag).ThenByDescending(x => x.Id)
+                .Select(x => x.Name).ToList();
+
+            Assert.True(expected.SequenceEqual(seen), $"seed {seed}, limit {limit}: {string.Join(',', seen)} != {string.Join(',', expected)}");
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Журнал_рядків_читається_лише_для_видимих_таблиць_аркуша_і_людських_дій_за_замовчуванням()
+    {
+        var rows = FakeRows([(7, Base)]);
+        var handler = Handler(Reader().Deny(ResourceKind.Table, HiddenTable), FakeAudit([]), FakeWorkflow([]), rows);
+
+        var page = await handler.HandleAsync(DocumentId, SheetId, PeriodValue, 9, false, 0, null, CancellationToken.None);
+
+        // Закрита таблиця (202) не потрапляє в SQL-фільтр навіть ідентифікатором; автор і «лише людина» — у фільтрі.
+        await rows.Received(1).ReadRowChangesAsync(
+            Arg.Is<RowChangeFilter>(f => f.DocumentId == DocumentId && f.PeriodKey == PeriodValue && f.HumanOnly
+                && f.ChangedByUserId == 9 && f.VisibleTableIds.SequenceEqual(OnlyVisibleTable)),
+            GetSheetActivityHandler.DefaultLimit + 1, null, Arg.Any<CancellationToken>());
+        var item = Assert.Single(page.Items);
+        Assert.Equal((SheetActivityKinds.RowChange, SheetActivityKinds.RowDeleted, "ROW7"), (item.Kind, item.Action, item.RowKey));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Закритий_аркуш_не_читає_журнал_рядків()
+    {
+        var rows = FakeRows([(7, Base)]);
+        var handler = Handler(Reader().Deny(ResourceKind.Sheet, SheetId), FakeAudit([]), FakeWorkflow([]), rows);
+
+        await Assert.ThrowsAsync<NotFoundException>(
+            () => handler.HandleAsync(DocumentId, SheetId, PeriodValue, null, false, 0, null, CancellationToken.None));
+
+        await rows.DidNotReceiveWithAnyArgs().ReadRowChangesAsync(default!, default, default, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Курсор_рядка_журналу_рядків_тег_2_декодується()
+        => Assert.Equal((Base, 2, 7L), ActivityCursor.Decode(ActivityCursor.Encode(Base, 2, 7))!.Value);
+
+    private static readonly int[] OnlyVisibleTable = [VisibleTable];
+
+    private static IRowChangeAudit FakeRows(IReadOnlyList<(long Id, DateTime At)> rows)
+    {
+        var fake = Substitute.For<IRowChangeAudit>();
+        fake.ReadRowChangesAsync(Arg.Any<RowChangeFilter>(), Arg.Any<int>(), Arg.Any<(DateTime, long)?>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var take = call.ArgAt<int>(1);
+                var after = call.ArgAt<(DateTime At, long Id)?>(2);
+                IReadOnlyList<RowChangeView> page = [.. rows
+                    .OrderByDescending(r => r.At).ThenByDescending(r => r.Id)
+                    .Where(r => after is not { } a || r.At < a.At || (r.At == a.At && r.Id < a.Id))
+                    .Take(take)
+                    .Select(r => new RowChangeView(
+                        r.Id, r.At, PeriodValue, "ROW" + r.Id.ToString(CultureInfo.InvariantCulture), RowChangeAction.Deleted,
+                        UserId, "User 7", "UserEdit", "T201", Text("T")))];
+                return Task.FromResult(page);
+            });
+        return fake;
+    }
+
     // ───────────── збірка ─────────────
 
     private static readonly int[] TwoColumns = [301, 302];
@@ -263,7 +369,12 @@ public sealed class SheetActivityTests
     private const int HiddenColumn = 302;
 
     private static string Name(SheetActivityItem item)
-        => item.Kind == SheetActivityKinds.CellEdit ? "c" + item.NewValue : "w" + item.Reason;
+        => item.Kind switch
+        {
+            SheetActivityKinds.CellEdit => "c" + item.NewValue,
+            SheetActivityKinds.RowChange => "r" + item.RowKey?["ROW".Length..],
+            _ => "w" + item.Reason,
+        };
 
     private static ApprovalEventRecord Event(string sheet, long id, int by, string action, string? reason)
         => new(sheet, DocumentStatus.Submitted, DocumentStatus.Rejected, Enum.Parse<ApprovalAction>(action), by, "User " + by.ToString(CultureInfo.InvariantCulture),
@@ -323,7 +434,8 @@ public sealed class SheetActivityTests
             .Permission("Document.View")
             .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read);
 
-    private static GetSheetActivityHandler Handler(AccessBuilder profile, IAuditReader audit, IWorkflowStore workflow)
+    private static GetSheetActivityHandler Handler(
+        AccessBuilder profile, IAuditReader audit, IWorkflowStore workflow, IRowChangeAudit? rows = null)
     {
         var access = Substitute.For<IAccessDecisionService>();
         access.BuildProfileAsync(UserId, Arg.Any<CancellationToken>()).Returns(profile.Build());
@@ -341,7 +453,7 @@ public sealed class SheetActivityTests
                 DocumentId, AccessBuilder.ProjectId, "DOC-500", Base, 1, new Dictionary<string, string>(StringComparer.Ordinal)));
 
         return new GetSheetActivityHandler(
-            new GetDocumentHandler(documents, access, user), new SheetActivityQuery(audit, workflow), access, user);
+            new GetDocumentHandler(documents, access, user), new SheetActivityQuery(audit, workflow, rowChanges: rows), access, user);
     }
 
     private static TemplateVersionSnapshot BuildSnapshot()

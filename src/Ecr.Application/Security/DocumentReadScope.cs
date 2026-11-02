@@ -353,6 +353,21 @@ public sealed class DocumentReadScope
         return [.. tables.SelectMany(t => _columnsOfTable[t]).Where(CanReadColumn).Order()];
     }
 
+    /// <summary>
+    /// Таблиці аркуша, які профіль БАЧИТЬ (<see cref="CanReadTable"/>), — за зростанням (журнал рядків аркуша, SQL-фільтр
+    /// до <c>TOP</c>); <c>null</c> — аркуша немає в знімку або він закритий цілком.
+    /// </summary>
+    /// <param name="sheetDefId">Аркуш версії шаблону.</param>
+    public IReadOnlyList<int>? VisibleTableIdsOfSheet(int sheetDefId)
+    {
+        if (!_tablesOfSheet.TryGetValue(sheetDefId, out var tables) || !CanReadSheet(sheetDefId))
+        {
+            return null;
+        }
+
+        return [.. tables.Where(CanReadTable).Order()];
+    }
+
     /// <summary>Чи бачить профіль таблицю, якій належить колонка.</summary>
     /// <param name="columnDefId">Колонка версії шаблону.</param>
     /// <remarks>
