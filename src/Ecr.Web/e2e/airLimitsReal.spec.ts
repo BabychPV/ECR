@@ -705,8 +705,13 @@ test.describe('Air limits real', () => {
     const action = page.getByRole('textbox', { name: 'Action for NAE 0091', exact: true });
     await action.focus();
     await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('ArrowDown');
+    // Список відкривається з анімацією: стрілка, натиснута до показу, губиться (локально 1 раз із 2). Тому стрілками - до
+    // підсвіченого «Skip this NAE», а не фіксованою кількістю натискань.
+    const skip = page.getByRole('option', { name: 'Skip this NAE' });
+    await expect(skip).toBeVisible();
+    for (let presses = 0; presses < 6 && (await skip.getAttribute('data-combobox-selected')) === null; presses += 1) {
+      await page.keyboard.press('ArrowDown');
+    }
     await page.keyboard.press('Enter');
     await expect(action).toHaveValue('Skip this NAE');
     // «Back» повертає на попередній крок і теж ставить фокус на заголовок.
