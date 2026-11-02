@@ -257,6 +257,9 @@ export function PreviewStep(props: PreviewStepProps): JSX.Element {
           text={t('permits.air.import.stale.text')}
         />
       )}
+      {!preview.scopeInNaeTree && (
+        <Banner tone="warning" title={t('permits.air.import.scope.notInTreeTitle')} text={t('permits.air.import.scope.notInTreeText')} />
+      )}
       <div className="pi-stats">
         <div className="pi-stat">
           {t('permits.air.import.stats.parents')}

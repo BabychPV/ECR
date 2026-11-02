@@ -1270,7 +1270,38 @@ UPDATE t
     -- D-440 (AN-127): чотири очі скасовано — свій запит може підтвердити сам ініціатор із грантом Manage.
     (N'recalcApprovals.requestHint', N'en', N'Another person with Manage access to the project must confirm the request. The approval is valid for 24 hours, can be used once, and only by you.', N'A user with Manage access to the project must confirm the request; if you have that access, you can confirm it yourself. The approval is valid for 24 hours, can be used once, and only by you.'),
     (N'recalcApprovals.requestHint', N'ru', N'Запрос должен подтвердить другой человек с уровнем доступа «Управление» к проекту. Согласование действует 24 часа, его можно использовать один раз и только вам.', N'Запрос должен подтвердить пользователь с уровнем доступа «Управление» к проекту; если у вас есть этот доступ, вы можете подтвердить его сами. Согласование действует 24 часа, его можно использовать один раз и только вам.'),
-    (N'recalcApprovals.requestHint', N'kz', N'Сұрауды жобаға «Басқару» қолжетімділігі бар басқа адам растауы тиіс. Келісім 24 сағат жарамды, оны бір рет және тек Сіз ғана пайдалана аласыз.', N'Сұрауды жобаға «Басқару» қолжетімділігі бар пайдаланушы растауы тиіс; егер сізде бұл қолжетімділік болса, оны өзіңіз растай аласыз. Келісім 24 сағат жарамды, оны бір рет және тек Сіз ғана пайдалана аласыз.')
+    (N'recalcApprovals.requestHint', N'kz', N'Сұрауды жобаға «Басқару» қолжетімділігі бар басқа адам растауы тиіс. Келісім 24 сағат жарамды, оны бір рет және тек Сіз ғана пайдалана аласыз.', N'Сұрауды жобаға «Басқару» қолжетімділігі бар пайдаланушы растауы тиіс; егер сізде бұл қолжетімділік болса, оны өзіңіз растай аласыз. Келісім 24 сағат жарамды, оны бір рет және тек Сіз ғана пайдалана аласыз.'),
+    -- COLL:ui-air-params (AIR-ON-AIR, людина 02.11): таблиця параметрів — вкладка дозволу AIR «Sources & parameters», кнопка «Import parameters…», перший крок — Region і Area з довідників типу AIR.
+    (N'permits.page.tabs.air', N'en', N'Air limits', N'Sources & parameters'),
+    (N'permits.page.tabs.air', N'ru', N'Лимиты выбросов', N'Источники и параметры'),
+    (N'permits.page.tabs.air', N'kz', N'Шығарынды лимиттері', N'Көздер мен параметрлер'),
+    (N'permits.air.import', N'en', N'Import from Excel…', N'Import parameters…'),
+    (N'permits.air.import', N'ru', N'Импорт из Excel…', N'Импорт параметров…'),
+    (N'permits.air.import', N'kz', N'Excel-ден импорттау…', N'Параметрлерді импорттау…'),
+    (N'permits.air.import.title', N'en', N'Import from Excel', N'Import parameters'),
+    (N'permits.air.import.title', N'ru', N'Импорт из Excel', N'Импорт параметров'),
+    (N'permits.air.import.title', N'kz', N'Excel-ден импорттау', N'Параметрлерді импорттау'),
+    (N'permits.air.import.unsupported.title', N'en', N'Not an Air Limits permit', N'Not an AIR permit'),
+    (N'permits.air.import.unsupported.title', N'ru', N'Это не разрешение «Air Limits Import»', N'Это не разрешение типа AIR'),
+    (N'permits.air.import.unsupported.title', N'kz', N'Бұл «Air Limits Import» рұқсаты емес', N'Бұл AIR түріндегі рұқсат емес'),
+    (N'permits.air.import.unsupported.text', N'en', N'The Excel import works only for permits of type Air Limits Import.', N'Parameters can be imported only into permits of type AIR.'),
+    (N'permits.air.import.unsupported.text', N'ru', N'Импорт из Excel работает только для разрешений типа Air Limits Import.', N'Параметры можно импортировать только в разрешения типа AIR.'),
+    (N'permits.air.import.unsupported.text', N'kz', N'Excel-ден импорттау тек Air Limits Import түріндегі рұқсаттарға жұмыс істейді.', N'Параметрлерді тек AIR түріндегі рұқсаттарға импорттауға болады.'),
+    (N'permits.air.import.hint.file', N'en', N'Choose the workbook, the region and the area the limits belong to.', N'Choose the workbook and the import profile.'),
+    (N'permits.air.import.hint.file', N'ru', N'Выберите книгу, регион и участок, к которым относятся лимиты.', N'Выберите книгу и профиль импорта.'),
+    (N'permits.air.import.hint.file', N'kz', N'Лимиттер қатысты кітапты, аймақты және учаскені таңдаңыз.', N'Кітапты және импорт профилін таңдаңыз.'),
+    (N'permits.air.import.region.hint', N'en', N'Regions that have NAE sources in the NAE tree.', N'Region of the permit location; the values come from the REGION column of the AIR permit type.'),
+    (N'permits.air.import.region.hint', N'ru', N'Регионы, для которых в дереве НАЕ есть источники.', N'Регион расположения разрешения; значения берутся из колонки REGION типа разрешения AIR.'),
+    (N'permits.air.import.region.hint', N'kz', N'НАЕ ағашында көздері бар аймақтар.', N'Рұқсат орналасқан аймақ; мәндер AIR рұқсат түрінің REGION бағанынан алынады.'),
+    (N'permits.air.import.area.hint', N'en', N'Areas of the chosen region; "No area" if the region has none.', N'Area of the chosen region; shown only when the region has areas.'),
+    (N'permits.air.import.area.hint', N'ru', N'Участки выбранного региона; «Без участка», если у региона их нет.', N'Участок выбранного региона; показывается, только если у региона есть участки.'),
+    (N'permits.air.import.area.hint', N'kz', N'Таңдалған аймақтың учаскелері; жоқ болса «Учаскесіз».', N'Таңдалған аймақтың учаскесі; аймақта учаскелер болса ғана көрсетіледі.'),
+    (N'permits.air.import.scope.empty', N'en', N'No regions in the NAE tree', N'Registry not found'),
+    (N'permits.air.import.scope.empty', N'ru', N'В дереве НАЕ нет регионов', N'Справочник не найден'),
+    (N'permits.air.import.scope.empty', N'kz', N'НАЕ ағашында аймақтар жоқ', N'Анықтамалық табылмады'),
+    (N'permits.air.import.scope.emptyHint', N'en', N'Load or create NAE nodes first: the region and area lists come from the NAE tree.', N'The registry {registry} set for the {column} column of the AIR permit type does not exist. Create it or change the column in the permit type editor.'),
+    (N'permits.air.import.scope.emptyHint', N'ru', N'Сначала загрузите или создайте узлы НАЕ: списки регионов и участков берутся из дерева НАЕ.', N'Справочник {registry}, заданный для колонки {column} типа разрешения AIR, не существует. Создайте его или измените колонку в редакторе типа разрешения.'),
+    (N'permits.air.import.scope.emptyHint', N'kz', N'Алдымен НАЕ түйіндерін жүктеңіз немесе жасаңыз: аймақ пен учаске тізімі НАЕ ағашынан алынады.', N'AIR рұқсат түрінің {column} бағаны үшін берілген {registry} анықтамалығы жоқ. Оны жасаңыз немесе рұқсат түрінің редакторында бағанды өзгертіңіз.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -9886,10 +9917,10 @@ USING (VALUES
     ,(N'audit.eventLabel.PiEventDataExported', N'en', N'PI event data exported', 1)
     -- D465:pi-events ── кінець секції ──
     -- COLL:ui-permit-card ── en: картка лімітів "Air limits" дозволу (NAE-план N3); ru/kz — порцією COLL:ui-permit-card нижче ──
-    ,(N'permits.page.tabs.air', N'en', N'Air limits', 1)
+    ,(N'permits.page.tabs.air', N'en', N'Sources & parameters', 1)
     ,(N'permits.air.title', N'en', N'Emission sources', 1)
     ,(N'permits.air.counts', N'en', N'{sources} sources · {rows} substance rows', 1)
-    ,(N'permits.air.import', N'en', N'Import from Excel…', 1)
+    ,(N'permits.air.import', N'en', N'Import parameters…', 1)
     ,(N'permits.air.empty.title', N'en', N'No emission sources yet', 1)
     ,(N'permits.air.empty.text', N'en', N'Import the limits table from an Excel workbook to fill this permit.', 1)
     ,(N'permits.air.empty.readOnly', N'en', N'This permit has no sources. You can view it, but not import into it.', 1)
@@ -9928,10 +9959,10 @@ USING (VALUES
     ,(N'permits.air.totals.sources', N'en', N'Sources', 1)
     -- COLL:ui-permit-card ── кінець секції ──
     -- COLL:ui-air-import ── en: майстер імпорту лімітів із Excel (NAE-план N5); ru/kz — порцією COLL:ui-air-import нижче ──
-    ,(N'permits.air.import.title', N'en', N'Import from Excel', 1)
+    ,(N'permits.air.import.title', N'en', N'Import parameters', 1)
     ,(N'permits.air.import.back', N'en', N'Back to {permit}', 1)
-    ,(N'permits.air.import.unsupported.title', N'en', N'Not an Air Limits permit', 1)
-    ,(N'permits.air.import.unsupported.text', N'en', N'The Excel import works only for permits of type Air Limits Import.', 1)
+    ,(N'permits.air.import.unsupported.title', N'en', N'Not an AIR permit', 1)
+    ,(N'permits.air.import.unsupported.text', N'en', N'Parameters can be imported only into permits of type AIR.', 1)
     ,(N'permits.air.import.expired.title', N'en', N'The permit has expired', 1)
     ,(N'permits.air.import.expired.text', N'en', N'Data of an expired permit is read-only; the steps below can be viewed but not applied.', 1)
     ,(N'permits.air.import.readOnly.title', N'en', N'View only', 1)
@@ -9941,7 +9972,7 @@ USING (VALUES
     ,(N'permits.air.import.step.mapping', N'en', N'Mapping', 1)
     ,(N'permits.air.import.step.preview', N'en', N'Preview', 1)
     ,(N'permits.air.import.step.apply', N'en', N'Result', 1)
-    ,(N'permits.air.import.hint.file', N'en', N'Choose the workbook, the region and the area the limits belong to.', 1)
+    ,(N'permits.air.import.hint.file', N'en', N'Choose the workbook and the import profile.', 1)
     ,(N'permits.air.import.hint.mapping', N'en', N'Check how the columns of the file are matched to fields. Nothing is saved yet.', 1)
     ,(N'permits.air.import.hint.preview', N'en', N'Resolve missing NAE codes, read the findings and confirm what will be replaced.', 1)
     ,(N'permits.air.import.hint.apply', N'en', N'The import was applied in one transaction.', 1)
@@ -9957,14 +9988,14 @@ USING (VALUES
     ,(N'permits.air.import.profile.label', N'en', N'Import profile', 1)
     ,(N'permits.air.import.profile.hint', N'en', N'Describes where the header and the columns are in the file.', 1)
     ,(N'permits.air.import.region.label', N'en', N'Region', 1)
-    ,(N'permits.air.import.region.hint', N'en', N'Regions that have NAE sources in the NAE tree.', 1)
+    ,(N'permits.air.import.region.hint', N'en', N'Region of the permit location; the values come from the REGION column of the AIR permit type.', 1)
     ,(N'permits.air.import.region.required', N'en', N'Choose the region.', 1)
     ,(N'permits.air.import.area.label', N'en', N'Area', 1)
-    ,(N'permits.air.import.area.hint', N'en', N'Areas of the chosen region; "No area" if the region has none.', 1)
+    ,(N'permits.air.import.area.hint', N'en', N'Area of the chosen region; shown only when the region has areas.', 1)
     ,(N'permits.air.import.area.required', N'en', N'Choose the area.', 1)
     ,(N'permits.air.import.area.none', N'en', N'No area', 1)
-    ,(N'permits.air.import.scope.empty', N'en', N'No regions in the NAE tree', 1)
-    ,(N'permits.air.import.scope.emptyHint', N'en', N'Load or create NAE nodes first: the region and area lists come from the NAE tree.', 1)
+    ,(N'permits.air.import.scope.empty', N'en', N'Registry not found', 1)
+    ,(N'permits.air.import.scope.emptyHint', N'en', N'The registry {registry} set for the {column} column of the AIR permit type does not exist. Create it or change the column in the permit type editor.', 1)
     ,(N'permits.air.import.scopeNote', N'en', N'The import replaces the rows of this permit for the chosen region and area, and the rows of other permits for the same NAE (with your confirmation).', 1)
     ,(N'permits.air.import.stats.parents', N'en', N'NAE in file', 1)
     ,(N'permits.air.import.stats.children', N'en', N'Substance rows', 1)
@@ -10209,6 +10240,15 @@ USING (VALUES
     ,(N'liveStatus.changedBy', N'en', N'Status changed by {user}: {status}', 1)
     ,(N'liveStatus.changedByOther', N'en', N'Status changed by another user: {status}', 1)
     -- COLL:ui-live-status ── кінець секції ──
+    -- COLL:ui-air-params ── en: крок «Region and area» майстра «Import parameters…» дозволу AIR (AIR-ON-AIR, lane/integ-air-params-ui); ru/kz — seed/features/COLL-ui-air-params.sql ──
+    ,(N'permits.air.import.step.scope', N'en', N'Region and area', 1)
+    ,(N'permits.air.import.hint.scope', N'en', N'Choose where the parameters belong: the region (and area) of the permit location.', 1)
+    ,(N'permits.air.import.permitNumber', N'en', N'Permit number', 1)
+    ,(N'permits.air.import.text.placeholder', N'en', N'Type the value', 1)
+    ,(N'permits.air.import.scope.nothingFound', N'en', N'Nothing found', 1)
+    ,(N'permits.air.import.scope.notInTreeTitle', N'en', N'Region or area not in the NAE tree', 1)
+    ,(N'permits.air.import.scope.notInTreeText', N'en', N'NAE codes of the file will be matched without the region. Check the region or add it to the NAE tree.', 1)
+    -- COLL:ui-air-params ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
