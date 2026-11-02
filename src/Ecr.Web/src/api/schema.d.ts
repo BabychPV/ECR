@@ -26448,6 +26448,12 @@ export interface components {
              */
             columnDefId: number;
             columnHeaderL10n?: null | components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Масштаб колонки (`cfg.ColumnDef.Scale`): клієнт показує число з НЕ МЕНШЕ стількома знаками після коми, як
+             *     сітка (U-05); `null` — масштабу не задано або колонки вже немає.
+             */
+            columnScale?: null | number;
             /** @description Бізнес-ключ документа; `null` — документа вже немає. */
             documentBusinessKey?: null | string;
             /**
@@ -35840,6 +35846,12 @@ export interface components {
              */
             columnDefId: null | number;
             columnHeaderL10n: null | components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Лише правка: масштаб колонки — значення показується з НЕ МЕНШЕ стількома знаками після коми, як у сітці (U-05);
+             *     `null` — масштабу немає.
+             */
+            columnScale?: null | number;
             /** @description Лише процес: стан до. */
             fromState: null | string;
             /** @description `CellEdit`, `RowChange` або `Workflow` (SheetActivityKinds). */

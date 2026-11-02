@@ -35,7 +35,7 @@ public sealed partial class E2eStandPermissionsCoverageTests
     /// </remarks>
     private static readonly Dictionary<string, string> NotGrantedToE2e = new(StringComparer.Ordinal)
     {
-        ["Document.Delete"] = "e2e не видаляє документи; руйнівне право не потрібне стенду",
+        // ✎ audit-rows-polish: `Document.Delete` перенесено в E2EAdmin — специфікації прибирають власні чернетки.
         ["Document.ChangeKey"] = "небезпечне (IsDangerous); зміна бізнес-ключа e2e не перевіряє",
         ["Document.Submit"] = "e2e подає аркуш рівнем Write через наявні гранти; окремий e2e на право не існує",
         // ✎ P44: `Calculation.EditFormula` перенесено в E2EAdmin — `resizableModal.spec.ts` заводить методологію

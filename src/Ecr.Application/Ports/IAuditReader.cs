@@ -52,6 +52,10 @@ namespace Ecr.Application.Ports;
 /// ✎ D-461: причина ручного значення замість формули (<c>aud.CellChange.Reason</c>, <c>Origin = FormulaOverride</c>);
 /// <c>null</c> — інші походження.
 /// </param>
+/// <param name="ColumnScale">
+/// Масштаб колонки (<c>cfg.ColumnDef.Scale</c>): клієнт показує число з НЕ МЕНШЕ стількома знаками після коми, як
+/// сітка (U-05); <c>null</c> — масштабу не задано або колонки вже немає.
+/// </param>
 public sealed record CellChangeView(
     DateTime ChangedAt,
     int PeriodKey,
@@ -78,7 +82,8 @@ public sealed record CellChangeView(
     bool FromArchive = false,
     bool IsOverwrite = false,
     [property: System.Text.Json.Serialization.JsonIgnore] long Id = 0,
-    string? Reason = null);
+    string? Reason = null,
+    int? ColumnScale = null);
 
 /// <summary>Підсумок журналу змін комірок за вікном (UI-38, C2) — лише те, що читач бачить.</summary>
 /// <param name="Total">Усього змін у вікні й за фільтром.</param>

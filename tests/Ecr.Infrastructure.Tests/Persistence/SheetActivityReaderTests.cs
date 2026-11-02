@@ -82,6 +82,35 @@ public sealed class SheetActivityReaderTests(SqlServerFixture sql)
         Assert.DoesNotContain(withSystem, i => i.NewValue is "HIDDEN" or "OTHERPERIOD" or "OTHERDOC");
     }
 
+    /// <remarks>Мутація: прибрати <c>c.Scale</c> з <c>AuditReader.PageWithNames</c> (або присвоєння ColumnScale) — червоне.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Правка_несе_масштаб_колонки_для_показу_як_у_сітці()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(columnCount: 3, rowCount: 1, ct: CancellationToken.None);
+        await using var db = builder.CreateContext();
+
+        var scaled = doc.ColumnDefIds[1];
+        var plain = doc.ColumnDefIds[2];
+        await using (var connection = new Microsoft.Data.SqlClient.SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"UPDATE cfg.ColumnDef SET Scale = 3 WHERE Id = {scaled}; UPDATE cfg.ColumnDef SET Scale = NULL WHERE Id = {plain};";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await Write(db, doc, scaled, T0, "1.5", "UserEdit");
+        await Write(db, doc, plain, T0.AddMinutes(1), "2.5", "UserEdit");
+
+        var query = new SheetActivityQuery(new AuditReader(db), Substitute.For<IWorkflowStore>(), new FixedClock(T0.AddDays(30)));
+        var walked = await Walk(query, new SheetActivityScope(doc.DocumentId, Period, "SA", [scaled, plain]), limit: 5);
+
+        Assert.Equal([("2.5", (int?)null), ("1.5", 3)], walked.Select(i => (i.NewValue, i.ColumnScale)));
+    }
+
     internal static async Task<List<SheetActivityItem>> Walk(SheetActivityQuery query, SheetActivityScope scope, int limit)
     {
         var items = new List<SheetActivityItem>();

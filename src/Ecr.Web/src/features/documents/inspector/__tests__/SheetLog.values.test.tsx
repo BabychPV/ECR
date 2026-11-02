@@ -65,6 +65,15 @@ describe('SheetLog: значення комірок', () => {
     expect(screen.queryByText('437.6311000000000000')).toBeNull();
   });
 
+  it('масштаб колонки: не менше columnScale знаків після коми — як у сітці (cellDisplay)', async () => {
+    mount([{ ...Item, oldValue: '12.5000000000000000', newValue: '3.0000000000000000', columnScale: 2 }]);
+
+    // Без масштабу журнал показував «12.5» і «3», а сітка тієї ж колонки — «12.50» і «3.00».
+    expect((await screen.findByText('12.50')).getAttribute('title')).toBe('12.5000000000000000');
+    expect(screen.getByText('3.00')).toBeTruthy();
+    expect(screen.queryByText('12.5')).toBeNull();
+  });
+
   it('нечислова колонка й порожні значення лишаються як є', async () => {
     mount([{ ...Item, columnDataType: 'String', oldValue: null, newValue: '12.5000' }]);
 

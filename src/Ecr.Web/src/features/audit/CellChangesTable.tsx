@@ -128,14 +128,14 @@ function WasBecomes({ change }: { readonly change: CellChange }): JSX.Element {
         td={first ? undefined : 'line-through'}
         data-audit-was=""
       >
-        {auditValueText(change.oldValue, change.columnDataType)}
+        {auditValueText(change.oldValue, change.columnDataType, change.columnScale)}
       </Text>
       <Box component="span" c="var(--ecr-faint)" display="inline-flex">
         <Glyph d={ArrowPath} />
       </Box>
       <VisuallyHidden>{t('import.becomes')}</VisuallyHidden>
       <Text span inherit fw={500} data-audit-becomes="">
-        {auditValueText(change.newValue, change.columnDataType)}
+        {auditValueText(change.newValue, change.columnDataType, change.columnScale)}
       </Text>
       {first ? (
         <Badge size="xs" variant="light" color="brand" data-audit-new="">

@@ -159,7 +159,10 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                     reader.GetBoolean(23),
                     reader.GetBoolean(24),
                     reader.GetInt64(0),
-                    StringOrNull(reader, 25))));
+                    StringOrNull(reader, 25),
+
+                    // Масштаб колонки — щоб клієнт показав значення за правилом сітки (не менше Scale знаків, U-05).
+                    reader.IsDBNull(26) ? null : Convert.ToInt32(reader.GetValue(26), CultureInfo.InvariantCulture))));
         }
 
         return rows;
@@ -330,7 +333,7 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                    a.OldValue, a.NewValue, a.ChangedByUserId, a.Origin, a.IsLateEdit,
                    u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType,
                    a.IsOutOfWindow, sd.Code, sd.NameL10n, td.Code, td.NameL10n, rd.LabelL10n,
-                   {fromArchive}, a.IsOverwrite, a.Reason
+                   {fromArchive}, a.IsOverwrite, a.Reason, c.Scale
               FROM (
                     {pageSource}
                    ) AS a

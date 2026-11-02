@@ -25,6 +25,10 @@ describe('auditValueText', () => {
   it('Int, Formula і Calculated форматуються як число', () => {
     expect(auditValueText('1000', 'Int')).toBe('1,000');
     expect(auditValueText('3.1400000000000000', 'Formula')).toBe('3.14');
+    // Масштаб колонки — нижня межа знаків (як cellDisplay сітки); довший дріб не обрізається.
+    expect(auditValueText('7.0000000000000000', 'Decimal', 3)).toBe('7.000');
+    expect(auditValueText('1.23456', 'Decimal', 2)).toBe('1.23456');
+    expect(auditValueText('7.5', 'Decimal', null)).toBe('7.5');
     expect(auditValueText('2.5000000000000000', 'Calculated')).toBe('2.5');
   });
 
