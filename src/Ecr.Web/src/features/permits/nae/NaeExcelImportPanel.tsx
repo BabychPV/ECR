@@ -121,6 +121,7 @@ export function NaeExcelImportPanel({ onClose }: NaeExcelImportPanelProps): JSX.
   });
   const busyPreview = usePendingLoading(preview.isPending);
   const busyApply = usePendingLoading(apply.isPending);
+  const busyTemplate = usePendingLoading(template.isPending);
 
   const current = report !== null && report.file === file ? report.value : null;
   const previewed = current !== null && !current.applied;
@@ -139,7 +140,7 @@ export function NaeExcelImportPanel({ onClose }: NaeExcelImportPanelProps): JSX.
           <Button
             variant="default"
             size="xs"
-            loading={template.isPending}
+            loading={busyTemplate}
             onClick={() => template.mutate()}
             data-nae-excel-template=""
           >
