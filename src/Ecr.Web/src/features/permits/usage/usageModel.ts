@@ -55,10 +55,13 @@ export function wherePrimary(item: PermitUsageItem): string {
   return [sheet, table].filter((part) => part !== '').join(' · ');
 }
 
-/** Другий рядок «де»: номер рядка на екрані (`Row 3`); для шапки - нічого. */
+/**
+ * Другий рядок «де»: номер рядка, як його рахує людина (`Row 1` для першого); для шапки - нічого.
+ * ⚠ `rowOrdinal` сервера рахується від 0 (живий стенд: перший рядок динамічної таблиці - 0), тож показується +1.
+ */
 export function whereSecondary(item: PermitUsageItem): string | null {
   if (item.kind !== UsageKind.Cell) return null;
-  if (item.rowOrdinal !== null) return t('permits.usage.row', { row: item.rowOrdinal });
+  if (item.rowOrdinal !== null) return t('permits.usage.row', { row: item.rowOrdinal + 1 });
 
   return item.rowKey;
 }

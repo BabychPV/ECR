@@ -43,6 +43,10 @@ describe('usageModel', () => {
     expect(whereSecondary(cellItem())).toBe('Row 3');
   });
 
+  it('порядок рядка від 0: перший рядок — «Row 1»', () => {
+    expect(whereSecondary(cellItem({ rowOrdinal: 0 }))).toBe('Row 1');
+  });
+
   it('без назв аркуша й таблиці — коди; без номера рядка — ключ рядка', () => {
     const bare = cellItem({ sheetNameL10n: null, tableNameL10n: { en: '' }, rowOrdinal: null });
     expect(wherePrimary(bare)).toBe('WATER · USE');
@@ -55,7 +59,7 @@ describe('usageModel', () => {
   });
 
   it('два рядки однієї колонки — різні ключі; шапка і комірка того самого документа — теж', () => {
-    const keys = new Set([usageKey(cellItem()), usageKey(cellItem({ rowKey: 'R4', rowOrdinal: 4 })), usageKey(headerItem())]);
+    const keys = new Set([usageKey(cellItem()), usageKey(cellItem({ rowKey: 'R4', rowOrdinal: 3 })), usageKey(headerItem())]);
     expect(keys.size).toBe(3);
   });
 

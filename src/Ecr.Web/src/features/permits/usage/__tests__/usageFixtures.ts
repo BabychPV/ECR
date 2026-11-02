@@ -35,7 +35,8 @@ export function cellItem(over: Partial<PermitUsageItem> = {}): PermitUsageItem {
     tableCode: 'USE',
     tableNameL10n: { en: 'Water use' },
     rowKey: 'R3',
-    rowOrdinal: 3,
+    // Порядок від 0 (як віддає сервер): третій рядок на екрані - «Row 3».
+    rowOrdinal: 2,
     fieldCode: 'PCOL',
     fieldLabelL10n: { en: 'Permit' },
     ...over,
