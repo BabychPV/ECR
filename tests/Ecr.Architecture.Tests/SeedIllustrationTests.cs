@@ -34,7 +34,7 @@ namespace Ecr.Architecture.Tests;
 public sealed class SeedIllustrationTests
 {
     /// <summary>Джерело істини для рядків інтерфейсу.</summary>
-    private const string SeedPath = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedPath = SeedSql.DisplayPath;
 
     /// <summary>Документ з ілюстративною копією.</summary>
     private const string DocPath = "docs/build/02a-db-schema.md";
@@ -49,7 +49,7 @@ public sealed class SeedIllustrationTests
     public void Кожен_ключ_з_ілюстрації_у_схемі_існує_в_сіді()
     {
         var root = SolutionRoot();
-        var seed = File.ReadAllText(Path.Combine(root, SeedPath.Replace('/', Path.DirectorySeparatorChar)));
+        var seed = SeedSql.Text;
         var doc = File.ReadAllText(Path.Combine(root, DocPath.Replace('/', Path.DirectorySeparatorChar)));
 
         var seedKeys = KeyLiteral.Matches(seed)

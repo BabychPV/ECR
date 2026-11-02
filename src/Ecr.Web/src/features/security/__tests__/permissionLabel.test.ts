@@ -1,8 +1,7 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { loadCatalog } from '@/shared/i18n';
 import { permissionLabel, permissionLabelKey } from '@/features/security/permissionLabel';
+import { readSeedSql } from '@/test/seedSql';
 
 /**
  * `U-11`: 41 колонка матриці прав була підписана сирим кодом сервера.
@@ -80,10 +79,7 @@ describe('Назва права проти коду права (U-11)', () => {
  * колонка знову підписана кодом, і жодна перевірка не червона.
  */
 describe('Сід покриває ВЕСЬ каталог прав (U-11)', () => {
-  const seed = readFileSync(
-    path.resolve(process.cwd(), '../Ecr.Infrastructure/Persistence/Sql/09-seed.sql'),
-    'utf8',
-  );
+  const seed = readSeedSql();
 
   /** Блок `MERGE sec.Permission` — саме він є каталогом прав. */
   const start = seed.indexOf('MERGE sec.Permission');

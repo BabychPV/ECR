@@ -92,10 +92,9 @@ public sealed class AuthScenarios(SqlServerFixture sql)
     {
         var root = RepoRoot();
         var layoutPath = Path.Combine(root, "src", "Ecr.Web", "src", "app", "routes.ts");
-        var seedPath = Path.Combine(root, "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql");
+        const string seedPath = SeedSql.DisplayPath;
 
         Assert.True(File.Exists(layoutPath), $"Не знайдено {layoutPath}");
-        Assert.True(File.Exists(seedPath), $"Не знайдено {seedPath}");
 
         var layoutText = File.ReadAllText(layoutPath);
         var menuPermissions = Regex.Matches(layoutText, @"permission:\s*'([^']+)'")
@@ -106,7 +105,7 @@ public sealed class AuthScenarios(SqlServerFixture sql)
 
         Assert.NotEmpty(menuPermissions);
 
-        var seedText = File.ReadAllText(seedPath);
+        var seedText = SeedSql.Text;
         var blockStart = seedText.IndexOf("MERGE sec.Permission AS t", StringComparison.Ordinal);
         Assert.True(blockStart >= 0, $"У {seedPath} немає блока MERGE sec.Permission — seed змінив форму, звірку треба переглянути.");
         var blockEnd = seedText.IndexOf("\nGO", blockStart, StringComparison.Ordinal);

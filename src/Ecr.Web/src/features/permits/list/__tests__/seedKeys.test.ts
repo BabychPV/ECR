@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readSeedSql } from '@/test/seedSql';
 
 /**
  * Ключі каталогу переліку дозволів (PM-07): усе, що код просить у `t()` під `permits.list.*`, є в секції
@@ -14,8 +15,7 @@ import { describe, expect, it } from 'vitest';
 const webRoot = process.cwd();
 const listDir = path.resolve(webRoot, 'src', 'features', 'permits', 'list');
 const pageFile = path.resolve(webRoot, 'src', 'pages', 'admin', 'PermitsPage.tsx');
-const seedPath = path.resolve(webRoot, '..', 'Ecr.Infrastructure', 'Persistence', 'Sql', '09-seed.sql');
-const seed = readFileSync(seedPath, 'utf8');
+const seed = readSeedSql();
 
 const marker = {
   en: '-- PERMITS: ui-list ── PM-07',

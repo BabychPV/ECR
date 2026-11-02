@@ -100,13 +100,8 @@ public sealed partial class SeedErrorTitleReachesClientTests
     /// </remarks>
     private static FakeUiStringCatalog SeedCatalog()
     {
-        var path = Path.Combine(
-            RepoRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql");
-
-        Assert.True(File.Exists(path), $"Не знайдено {path}");
-
         var catalog = new FakeUiStringCatalog();
-        var rows = SeedRow().Matches(File.ReadAllText(path));
+        var rows = SeedRow().Matches(SeedSql.Text);
 
         // ⛔ Порожній розбір означав би, що сід змінив форму рядка, а тест про
         // це мовчить: далі він годував би конвеєр порожнім каталогом і
@@ -129,19 +124,6 @@ public sealed partial class SeedErrorTitleReachesClientTests
     [GeneratedRegex(
         @"\(\s*N'(err\.ECR-[A-Z]{3,4}-\d{4})'\s*,\s*N'(\w+)'\s*,\s*N'((?:[^']|'')*)'\s*,\s*([01])\s*\)")]
     private static partial Regex SeedRow();
-
-    private static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Ecr.sln")))
-        {
-            dir = dir.Parent;
-        }
-
-        return dir?.FullName
-            ?? throw new InvalidOperationException(
-                $"Корінь репозиторію (Ecr.sln) не знайдено від {AppContext.BaseDirectory}.");
-    }
 
     /// <summary>Проганяє відмову крізь конвеєр і повертає тіло <c>problem+json</c>.</summary>
     private static async Task<JsonElement> ProblemAsync(IUiStringCatalog catalog)

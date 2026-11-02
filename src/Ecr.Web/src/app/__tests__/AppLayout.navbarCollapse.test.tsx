@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -9,6 +7,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { theme } from '@/shared/theme/theme';
 import { AppLayout } from '@/app/AppLayout';
 import { setNavbarCollapsed } from '@/shared/theme/navbarCollapse';
+import { readSeedSql } from '@/test/seedSql';
 
 // Фокус на пункті меню прогріває чанк сторінки (`useRoutePrefetch`); справжній
 // імпорт доїхав би вже після кінця файла.
@@ -275,10 +274,7 @@ describe('AppLayout: бічне меню згортається до іконо�
 });
 
 describe('тексти кнопки згортання в сіді', () => {
-  const seed = readFileSync(
-    path.resolve(process.cwd(), '../../src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql'),
-    'utf8',
-  );
+  const seed = readSeedSql();
 
   it.each(['nav.collapse', 'nav.expand'])('%s є для en, ru і kz', (key) => {
     for (const lang of ['en', 'ru', 'kz']) {

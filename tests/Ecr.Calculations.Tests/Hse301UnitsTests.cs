@@ -25,7 +25,7 @@ namespace Ecr.Calculations.Tests;
 /// </remarks>
 public sealed class Hse301UnitsTests
 {
-    private const string SeedPath = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedPath = SeedSql.DisplayPath;
 
     private static readonly UnitTable Mirror = UnitTable.Seed();
 
@@ -380,7 +380,7 @@ public sealed class Hse301UnitsTests
     /// </remarks>
     private static (Dictionary<string, SeedUnit> Units, Dictionary<string, SeedDimension> Dimensions) LoadSeed()
     {
-        var text = File.ReadAllText(Path.Combine(SolutionRoot(), SeedPath.Replace('/', Path.DirectorySeparatorChar)));
+        var text = SeedSql.Text;
         var units = new Dictionary<string, SeedUnit>(StringComparer.Ordinal);
 
         foreach (Match block in UnitBlock.Matches(text))
