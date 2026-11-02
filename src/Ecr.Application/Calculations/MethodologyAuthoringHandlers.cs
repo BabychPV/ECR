@@ -130,16 +130,31 @@ public sealed class ListMethodologyConstantsHandler(
     /// <param name="methodologyVersionId">Версія методології.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Константи в порядку коду.</returns>
-    public async Task<IReadOnlyList<MethodologyConstantDto>> HandleAsync(
+    public Task<IReadOnlyList<MethodologyConstantDto>> HandleAsync(
         int methodologyVersionId, CancellationToken ct)
+        => HandleAsync(methodologyVersionId, MethodologyConstantsQuery.All, ct);
+
+    /// <summary>Читає константи версії з фільтром і сортуванням на сервері (план CONST-CATEGORY).</summary>
+    /// <param name="methodologyVersionId">Версія методології.</param>
+    /// <param name="query">Фільтр і сортування.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Відфільтровані константи в заданому порядку.</returns>
+    /// <remarks>
+    /// ⚠ Фільтр і сортування — у пам'яті над тим самим ОДНИМ читанням констант версії (до ~900 рядків на Land):
+    /// жодного додаткового звернення до бази.
+    /// </remarks>
+    public async Task<IReadOnlyList<MethodologyConstantDto>> HandleAsync(
+        int methodologyVersionId, MethodologyConstantsQuery query, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(query);
+
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var constants = await methodologies
             .GetConstantsAsync(methodologyVersionId, ct)
             .ConfigureAwait(false);
 
-        return [.. constants.Select(MethodologyAuthoringMap.Constant)];
+        return [.. query.Apply(constants).Select(MethodologyAuthoringMap.Constant)];
     }
 }
 
@@ -258,6 +273,12 @@ public sealed class SaveMethodologyConstantHandler(
 
         var existing = candidates.Count == 1 ? candidates[0] : null;
 
+        // ✎ План CONST-CATEGORY: категорія — з переліку версії (або порожня = спільна). Описка в категорії доти
+        // тихо означала «ніколи не збігається»: константа мертва, рахує спільна.
+        var category = string.IsNullOrWhiteSpace(request.Category) ? null : request.Category;
+        var categories = await drafts.GetCategoriesTrackedAsync(methodologyVersionId, ct).ConfigureAwait(false);
+        MethodologyCategoryChecks.RequireListed(constantCode.Value, category, existing?.Category, categories);
+
         MethodologyConstant constant;
 
         if (existing is null)
@@ -279,7 +300,7 @@ public sealed class SaveMethodologyConstantHandler(
         // повторний `PUT` без категорії має прибрати ту, що стояла, — інакше
         // «зняти звуження» неможливо взагалі, і константа лишається чинною
         // лише для однієї установки без жодного сліду в запиті.
-        constant.SetScope(request.Category, request.SubstanceEntryId);
+        constant.SetScope(category, request.SubstanceEntryId);
         constant.SetValidity(request.ValidFrom, request.ValidTo);
         constant.SetSource(request.Source);
 
@@ -1505,7 +1526,8 @@ public static class MethodologyAuthoringMap
             constant.ValidTo,
             constant.Category,
             constant.Source,
-            constant.IsResolved);
+            constant.IsResolved,
+            constant.SubstanceEntryId);
     }
 
     /// <summary>Складає DTO правила.</summary>
@@ -1572,6 +1594,82 @@ public static class MethodologyAuthoringMap
             binding.OutputCode,
             binding.MatchJson,
             binding.IsActive);
+    }
+}
+
+/// <summary>Порядок переліку констант версії.</summary>
+public enum MethodologyConstantSort : byte
+{
+    /// <summary>Код, далі категорія (спільна — першою), далі початок дії.</summary>
+    Code = 0,
+
+    /// <summary>Категорія (спільна — першою), далі код, далі початок дії.</summary>
+    Category = 1,
+
+    /// <summary>Початок дії (без межі — першим), далі код, далі категорія.</summary>
+    ValidFrom = 2,
+}
+
+/// <summary>Фільтр і сортування переліку констант версії (план CONST-CATEGORY).</summary>
+/// <param name="Categories">Точні коди категорій (з регістром); порожньо — без фільтра за категорією.</param>
+/// <param name="Shared">
+/// <c>true</c> — спільні (без категорії) теж/лише: разом із <paramref name="Categories"/> додає спільні, без них —
+/// лише спільні; <c>false</c> — без спільних; <c>null</c> — без фільтра.
+/// </param>
+/// <param name="Code">Частина коду константи без регістру; <c>null</c> — без фільтра.</param>
+/// <param name="SubstanceEntryId">Речовина звуження; <c>null</c> — без фільтра.</param>
+/// <param name="Sort">Порядок.</param>
+/// <param name="Descending">Зворотний порядок першого ключа.</param>
+public sealed record MethodologyConstantsQuery(
+    IReadOnlyList<string>? Categories = null,
+    bool? Shared = null,
+    string? Code = null,
+    long? SubstanceEntryId = null,
+    MethodologyConstantSort Sort = MethodologyConstantSort.Code,
+    bool Descending = false)
+{
+    /// <summary>Без фільтра, за кодом.</summary>
+    public static MethodologyConstantsQuery All { get; } = new();
+
+    /// <summary>Застосовує фільтр і сортування.</summary>
+    /// <param name="constants">Константи версії.</param>
+    /// <returns>Відібрані константи в заданому порядку.</returns>
+    public IEnumerable<MethodologyConstant> Apply(IEnumerable<MethodologyConstant> constants)
+    {
+        ArgumentNullException.ThrowIfNull(constants);
+
+        var categories = (Categories ?? [])
+            .Where(c => !string.IsNullOrEmpty(c))
+            .ToHashSet(StringComparer.Ordinal);
+        var code = string.IsNullOrWhiteSpace(Code) ? null : Code.Trim();
+
+        var filtered = constants.Where(c =>
+            (c.Category is null
+                ? Shared != false && (categories.Count == 0 || Shared == true)
+                : (categories.Count == 0 ? Shared != true : categories.Contains(c.Category)))
+            && (code is null || c.Code.Contains(code, StringComparison.OrdinalIgnoreCase))
+            && (SubstanceEntryId is null || c.SubstanceEntryId == SubstanceEntryId));
+
+        static string CategoryKey(MethodologyConstant c) => c.Category ?? string.Empty;
+        static DateOnly FromKey(MethodologyConstant c) => c.ValidFrom ?? DateOnly.MinValue;
+
+        IOrderedEnumerable<MethodologyConstant> ordered = (Sort, Descending) switch
+        {
+            (MethodologyConstantSort.Category, false) => filtered.OrderBy(CategoryKey, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(c => c.Code, StringComparer.OrdinalIgnoreCase),
+            (MethodologyConstantSort.Category, true) => filtered.OrderByDescending(CategoryKey, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(c => c.Code, StringComparer.OrdinalIgnoreCase),
+            (MethodologyConstantSort.ValidFrom, false) => filtered.OrderBy(FromKey)
+                .ThenBy(c => c.Code, StringComparer.OrdinalIgnoreCase).ThenBy(CategoryKey, StringComparer.OrdinalIgnoreCase),
+            (MethodologyConstantSort.ValidFrom, true) => filtered.OrderByDescending(FromKey)
+                .ThenBy(c => c.Code, StringComparer.OrdinalIgnoreCase).ThenBy(CategoryKey, StringComparer.OrdinalIgnoreCase),
+            (_, true) => filtered.OrderByDescending(c => c.Code, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(CategoryKey, StringComparer.OrdinalIgnoreCase),
+            _ => filtered.OrderBy(c => c.Code, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(CategoryKey, StringComparer.OrdinalIgnoreCase),
+        };
+
+        return ordered.ThenBy(FromKey).ThenBy(c => c.Id);
     }
 }
 

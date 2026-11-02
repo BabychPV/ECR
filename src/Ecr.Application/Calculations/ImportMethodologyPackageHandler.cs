@@ -247,6 +247,14 @@ public sealed class ImportMethodologyPackageHandler(
                     drafts.Add(constant);
                 }
 
+                // ✎ План CONST-CATEGORY: категорії констант пакета стають переліком нової чернетки (звіт плану —
+                // `categoriesAdded`). Без цього перший же запис константи в конфігураторі давав би 422.
+                var ordinal = 0;
+                foreach (var category in MethodologyPackagePlanner.Categories(v.Content))
+                {
+                    drafts.Add(draft.AddCategory(category, ++ordinal));
+                }
+
                 foreach (var imported in v.Content.Imports)
                 {
                     drafts.Add(new MethodologyImport(versionId, methodologyIds[imported], methodologyId));

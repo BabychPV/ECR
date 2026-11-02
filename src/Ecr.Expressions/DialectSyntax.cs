@@ -58,8 +58,19 @@ public enum ExpressionParseMode : byte
 /// тихо ламає ЧИСЛА, тому мусить бути явною властивістю діалекту, а не
 /// константою, закопаною в лексер.
 /// </remarks>
+/// <param name="OptionalArgumentMarker">
+/// Чи означає <c>?</c>, що стоїть ВПРИТУЛ за іменем <c>@Arg</c> (<c>@Land_Measure_RunningHours?</c>), маркер
+/// «необов'язковий аргумент» (D-OA, похідні аргументи 2026-11-02). Лише діалект методологій: у шаблонах і
+/// звітах <c>?</c> лишається тернарним оператором. ⚠ Тернарний оператор над голим аргументом у діалекті
+/// методологій пишеться з пробілом (<c>@A ? 1 : 2</c>): <c>@A?1:2</c> тепер — маркер і відмова розбору, а не
+/// тихо інша формула (у корпусі AF такого запису немає — перевірено по <c>af-land-package.json</c>).
+/// </param>
 public sealed record DialectSyntax(
-    char ArgumentSeparator, bool CaretIsPower, bool BareNameIsArgument = false, bool AmpersandIsConcat = true)
+    char ArgumentSeparator,
+    bool CaretIsPower,
+    bool BareNameIsArgument = false,
+    bool AmpersandIsConcat = true,
+    bool OptionalArgumentMarker = false)
 {
     // Діалект шаблонів: `^` — степінь, і саме на цьому тримається чинний тест
     // `Степінь_правоасоціативний_2_у_3_у_2_дорівнює_512`. Тут нічого не
@@ -79,7 +90,8 @@ public sealed record DialectSyntax(
     //
     // ⛔ `&` тут теж не конкатенація: у NCalc 1.3.8 `6 & 3` = 2 (побітове AND,
     // замір `tests/Ecr.Legacy.Probe`, аудит L7-04) — той самий клас, що й `^`.
-    private static readonly DialectSyntax MethodologySyntax = new(',', CaretIsPower: false, AmpersandIsConcat: false);
+    private static readonly DialectSyntax MethodologySyntax =
+        new(',', CaretIsPower: false, AmpersandIsConcat: false, OptionalArgumentMarker: true);
 
     // Той самий діалект очима МІГРАЦІЇ. Різниця лише в голому імені: решта
     // граматики спільна, інакше імпортер розбирав би не ту мову, яку потім

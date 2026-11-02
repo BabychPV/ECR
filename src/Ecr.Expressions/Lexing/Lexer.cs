@@ -38,7 +38,43 @@ public sealed class Lexer(DialectSyntax syntax)
         ArgumentNullException.ThrowIfNull(expression);
 
         var tokens = new List<Token>();
+        Scan(expression, tokens);
+        tokens.Add(new Token(TokenType.EndOfInput, string.Empty, expression.Length, 0));
+        return tokens;
+    }
 
+    /// <summary>
+    /// Лексеми до першої лексичної помилки — без винятку (похідні аргументи чернетки).
+    /// </summary>
+    /// <param name="expression">Текст виразу; <c>null</c> — порожньо.</param>
+    /// <returns>Лексеми, прочитані до помилки (без <see cref="TokenType.EndOfInput"/>).</returns>
+    /// <remarks>
+    /// ⚠ Чернетка зберігає НЕДОПИСАНИЙ вираз (<c>SaveMethodologyFormulaHandler</c> синтаксис не перевіряє), а
+    /// список аргументів похідний від тексту на кожному записі. Тому похідний список читає ті самі правила
+    /// лексера, що й публікація, але не падає на незакритому рядку: бере все, що вже прочиталося.
+    /// </remarks>
+    public IReadOnlyList<Token> TokenizePrefix(string? expression)
+    {
+        var tokens = new List<Token>();
+        if (string.IsNullOrEmpty(expression))
+        {
+            return tokens;
+        }
+
+        try
+        {
+            Scan(expression, tokens);
+        }
+        catch (LexicalException)
+        {
+            // Префікс уже в `tokens`: решта тексту не розбирається, і похідний список її не бачить.
+        }
+
+        return tokens;
+    }
+
+    private void Scan(string expression, List<Token> tokens)
+    {
         // ⚠ Глибина дужок — не оптимізація, а вимога граматики. Усередині
         // `[...]` живуть RowKey (`7001001`), які починаються з цифри й містять
         // дефіси; поза дужками таке — недопустимий ідентифікатор (R-B6).
@@ -112,6 +148,15 @@ public sealed class Lexer(DialectSyntax syntax)
                     if (i < expression.Length && (char.IsLetter(expression[i]) || expression[i] == '_'))
                     {
                         tokens.Add(ReadDottedName(expression, ref i));
+
+                        // D-OA (похідні аргументи): `?` УПРИТУЛ за іменем — маркер «необов'язковий», а не
+                        // тернарний оператор. Лише там, де діалект це дозволяє (методології); пробіл перед
+                        // `?` лишає тернарний оператор (`@A ? 1 : 2`).
+                        if (syntax.OptionalArgumentMarker && i < expression.Length && expression[i] == '?')
+                        {
+                            tokens.Add(new Token(TokenType.OptionalMarker, "?", i, 1));
+                            i++;
+                        }
                     }
 
                     continue;
@@ -137,9 +182,6 @@ public sealed class Lexer(DialectSyntax syntax)
             throw new LexicalException(
                 "Unclosed square bracket.", expression.Length, "expr.lex.unclosedBracket");
         }
-
-        tokens.Add(new Token(TokenType.EndOfInput, string.Empty, expression.Length, 0));
-        return tokens;
     }
 
     /// <summary>Рядковий літерал; подвоєний апостроф дає один символ.</summary>

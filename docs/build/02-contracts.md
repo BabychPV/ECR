@@ -4170,6 +4170,12 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-REQ-0422.rawDataBuckets` | 422 | D-463: кількість кошиків графіка поза 1..`max` (2000) |
 | `err.ECR-REQ-0422.piEventFilter` | 422 | D-465: фільтр назви чи елемента подій довший за `max` (200) символів |
 | `err.ECR-INT-0422.eventMapMonthColumn` | 422 | D-465: поле мапінгу подій цілить у колонку місяця (`IsMonthColumn`) — подія EF записується окремим рядком, місячні підсумки рахують формули шаблону; `targetColumn`, `columnDefId` |
+| `err.ECR-CALC-0404.category` | 404 | `DELETE …/methodologies/{id}/versions/{vid}/categories/{code}`: категорії з цим кодом (точно, з регістром) у переліку версії немає; деталі `category` |
+| `err.ECR-CALC-0409.categoryInUse` | 409 | перелік категорій версії: категорію, під якою є константи, прибирають (`DELETE`) або виводять з ужитку (`isRetired=true`) — код є ключем зіставлення констант; деталі `category`, `count` |
+| `err.ECR-CALC-0409.categoryRename` | 409 | `PUT …/categories/{code}`: той самий код уже є в іншому регістрі — коди категорій не перейменовуються; деталі `category`, `existing` |
+| `err.ECR-CALC-0422.categoryCodeInvalid` | 422 | `PUT …/categories/{code}`: код порожній, довший за 64 або з пробілами по краях, чи опис довший за 400; деталі `category`, `maxLength` |
+| `err.ECR-CALC-0422.constantCategoryUnknown` | 422 | `PUT …/constants/{code}`: категорії константи немає в переліку версії (порівняння точне, з регістром, як у резолвері); порожня категорія = спільна; деталі `constantCode`, `category` |
+| `err.ECR-CALC-0422.constantCategoryRetired` | 422 | `PUT …/constants/{code}`: категорію виведено з ужитку; деталі `constantCode`, `category` |
 | `err.ECR-CALC-0422.methodologyImportBlocked` | 422 | пакет методологій має блокери (нерезолвні посилання тощо) — запис не виконується (`POST /methodologies/import`) |
 | `err.ECR-CALC-0422.methodologyImportTimeZone` | 422 | пояс дат AF в імпорті пакета невідомий |
 | `err.ECR-CALC-0409.methodologyImportConflict` | 409 | пакет змінює вже наявну версію методології без нового номера версії |
@@ -4469,6 +4475,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/category-rule` | `Calculation.EditRule` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/substances` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/substances` | `Calculation.EditFormula` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/categories` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/categories/{code}` | `Calculation.EditConstant` | 7 |
+| `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/categories/{code}` | `Calculation.EditConstant` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs/{columnDefId}` | `Calculation.ManageRequiredInputs` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/outputs` | `Calculation.View` | 7 |
@@ -4675,6 +4684,22 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/registries/{code}/external-keys?entryId=&dataSourceId=&cursor=&limit=` | `Registry.View` | 8 |
 | `POST` | `/api/v1/registries/{code}/external-keys` | `Registry.EditData` | 8 |
 | `DELETE` | `/api/v1/registries/{code}/external-keys/{id}` | `Registry.EditData` | 8 |
+
+> ✎ 2026-11-02 (методології, похідні аргументи + перелік категорій; lane `integ-methodology`). **Формула:**
+> список аргументів більше не вводиться. Необов'язковий аргумент пишеться у виразі маркером упритул за іменем —
+> `@Land_Measure_RunningHours?` (лише діалект методологій; тернарний оператор над голим аргументом — з пробілом,
+> `@A ? 1 : 2`). Відповіді `GET …/formulas` і `PUT …/formulas/{code}` несуть похідний `argumentsCsv`
+> (`@A?;CST.K;!F`, лише читання) і структурований `arguments[]` (`kind` = `Argument`/`Constant`/`Formula`, `name`,
+> `isOptional`, `text`). Поле запиту `argumentsCsv` — **застаріле, приймається один реліз**: з нього беруться лише
+> маркери `Name?` і переносяться у вираз, решта ігнорується. Рантайм не змінено: маркери читаються з похідного
+> `ArgumentsCsv` і об'єднуються по версії (`OptionalArguments`). Старі списки вирівнює крок старту
+> `MethodologyArgumentsBackfill` (звіт — у журнал старту). **Категорії:** `GET …/categories` → `[{ id, code,
+> description, ordinal, isRetired, constantCount }]`; `PUT …/categories/{code}` з тілом `{ description?, ordinal?,
+> isRetired? }` створює або змінює (код не перейменовується); `DELETE` — лише невживаної. Категорія константи
+> (`PUT …/constants/{code}`) — з переліку або порожня (= спільна). `GET …/constants` приймає `category` (повторюваний),
+> `shared`, `code`, `substanceEntryId`, `sort` (`Code`/`Category`/`ValidFrom`), `desc`; рядок несе
+> `substanceEntryId`. Публікація попереджає (`publish.warning.categoryRuleLiteralNoCategory`) про літерал, який
+> правило категорії може повернути, без категорії в переліку.
 
 > ✎ 2026-10-22 (Permits PRMG, групи типів дозволів): група («Вода» = `WATER_DISCHARGE` + `WATER_INTAKE` + `WATER_GENERAL`) є ціллю Lookup колонки шаблону чи поля шапки. Ціль зберігається як `LookupRegistryDefId` ПРИХОВАНОГО реєстру `PRMG_<код>` (без полів і записів; префікс зарезервований); значення в комірці — id запису реєстру шапки `PRM_<TYPE>` типу зі складу групи. `GET /permit-groups` → `PermitGroupDto[]` (`code`, `nameL10n`, `descriptionL10n`, `isActive`, `registryCode`, `registryDefId`, `types[]`, `usedInColumns`, `usedInTemplates`, `rowVersion`, `updatedAt`); `POST` створює групу разом із реєстром (склад необов'язковий), `PUT {code}` змінює назву, опис і `isActive` (деактивація; `rowVersion` обов'язковий, `409 ECR-PRM-4099`), `PUT {code}/types` замінює склад цілком — коди ОПУБЛІКОВАНИХ типів у порядку показу (`422 ECR-PRM-0422`, `messageKey` `permitGroupMemberUnknown`/`permitGroupMemberNotPublished`/`permitGroupMemberDuplicate`; тип може бути в кількох групах), `DELETE {code}` лише для невикористаної групи (`409 ECR-PRM-4098` — тоді лише деактивація). Інші `422 ECR-PRM-0422`: `permitGroupNameRequired`, `permitGroupCodeInvalid` (код ≤ 59 символів), `permitGroupTextTooLong`. Права: читання `Registry.View` (+ заборона S18 на реєстр групи → `404 ECR-PRM-0405`), зміна `Permit.EditType`. Склад змінюється ЛИШЕ через `PUT {code}/types`. `RegistryDefDto` (`GET /registries`) отримав `descriptionL10n` (опис групи; для решти `null`) і `kind` (`Dictionary` / `PermitHeader` / `PermitGroup`) — вид цілі визначає сервер, клієнт не розпізнає його за префіксом коду; ту саму ознаку віддає `GET /registries/{code}/definition` (опція «unlisted» для цілі поза переліком). `GET /registries?includePermitHeaders=true` додатково віддає групи (без прапора їх немає). `RegistryEntryDto` отримав `typeCode` і `typeName` (піклер групи: підпис «номер — тип»; для решти `null`). Правила чекають значення: уже обрані значення лишаються в комірці при виході типу з групи, PATCH перевіряє лише змінені; неактивна група не приймає нових значень (відмова — та сама «немає запису», `ECR-CELL-4223`/`ECR-HDR-4223`). **Неоднозначність номера:** номер унікальний лише в межах типу, тому при імпорті Excel номер, що збігається у кількох типах групи, ВІДХИЛЯЄТЬСЯ з переліком кандидатів (тип + номер), без пріоритету типу й без вгадування. Порт для споживачів — `IPermitGroupResolver` (він же `ILookupTargetResolver`): `EnsureFreshAsync`, `IsGroup`, `Accepts(target, entryRegistryId)`, `AcceptsFor(profile, …)`, `MemberRegistryIds`, `ExpandRegistryIds`; порівняння `entry.RegistryDefId == target` лишається першим, порт кличеться лише при незбігу.
 

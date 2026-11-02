@@ -8777,6 +8777,200 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/versions/{vid}/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Перелік категорій констант версії з кількістю констант під кожною. Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyCategoryDto"][];
+                        "text/json": components["schemas"]["MethodologyCategoryDto"][];
+                        "text/plain": components["schemas"]["MethodologyCategoryDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/categories/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Заводить категорію в переліку версії-чернетки або змінює її опис, порядок, стан. Право
+         *     `Calculation.EditConstant`.
+         * @description ⛔ Перейменування немає: код — адреса. Той самий код в іншому регістрі — `409 categoryRename`; вивести з
+         *     ужитку категорію з константами — `409 categoryInUse`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія-чернетка. */
+                    vid: number;
+                    /** @description Код категорії — ключ зіставлення, точно як його повертає правило категорії. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveMethodologyCategoryRequest"];
+                    "application/json": components["schemas"]["SaveMethodologyCategoryRequest"];
+                    "text/json": components["schemas"]["SaveMethodologyCategoryRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyCategoryDto"];
+                        "text/json": components["schemas"]["MethodologyCategoryDto"];
+                        "text/plain": components["schemas"]["MethodologyCategoryDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Прибирає категорію з переліку версії-чернетки. Право `Calculation.EditConstant`.
+         * @description ⛔ Категорію, під якою є константи, не прибирають: `409 categoryInUse` з кількістю.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія-чернетка. */
+                    vid: number;
+                    /** @description Код категорії. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/versions/{vid}/category-rule": {
         parameters: {
             query?: never;
@@ -8959,10 +9153,28 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Константи версії. Право `Calculation.View`. */
+        /**
+         * Константи версії. Право `Calculation.View`.
+         * @description ✎ План CONST-CATEGORY: фільтр і сортування — на сервері; без параметрів відповідь — уся версія за кодом,
+         *     далі категорією і початком дії. Рядок несе `category` і `substanceEntryId`.
+         */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Точні коди категорій (повторюваний параметр); порожньо — без фільтра. */
+                    category?: string[];
+                    /** @description `true` — спільні (без категорії) теж (з category) або лише вони (без нього);
+                     *     `false` — без спільних. */
+                    shared?: boolean;
+                    /** @description Частина коду константи, без регістру. */
+                    code?: string;
+                    /** @description Речовина звуження. */
+                    substanceEntryId?: number;
+                    /** @description `Code` (типово), `Category`, `ValidFrom`. */
+                    sort?: components["schemas"]["MethodologyConstantSort"];
+                    /** @description Зворотний порядок першого ключа. */
+                    desc?: boolean;
+                };
                 header?: never;
                 path: {
                     /** @description Методологія. */
@@ -26640,6 +26852,11 @@ export interface components {
             sourceEntities: number;
             transport: components["schemas"]["ExternalTransport"];
         };
+        /**
+         * @description Вид елемента похідного списку аргументів.
+         * @enum {unknown}
+         */
+        DeclaredArgumentKind: "Argument" | "Constant" | "Formula";
         /** @description Видалений рядок динамічної таблиці (D3). */
         DeleteRowResponse: {
             /** @description Задача перерахунку, поставлена видаленням; `null` — таблиця без колонок. */
@@ -28457,6 +28674,30 @@ export interface components {
             /** @description Чи змінилася конвенція. */
             isChanged?: boolean;
         };
+        /** @description Категорія констант версії (план CONST-CATEGORY). */
+        MethodologyCategoryDto: {
+            /** @description Код — значення `category` константи і ключ, який повертає правило категорії. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Скільки рядків констант версії стоїть під цією категорією.
+             */
+            constantCount: number;
+            /** @description Опис; `null` — немає. */
+            description: null | string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description Виведена з ужитку: нова константа її не вибирає. */
+            isRetired: boolean;
+            /**
+             * Format: int32
+             * @description Порядок у переліку.
+             */
+            ordinal: number;
+        };
         /** @description Правило категорії константи версії (L-2, `calc.CategoryRule`): вираз «рядок → ключ категорії». */
         MethodologyCategoryRuleDto: {
             /** @description Вираз діалекту Methodology (`!ECW_Location`, `if(@Land_TypeFuel = …, 'Diesel', …)`);
@@ -28485,6 +28726,11 @@ export interface components {
             kind: components["schemas"]["ConstantKind"];
             /** @description Звідки взято значення. */
             source: null | string;
+            /**
+             * Format: int64
+             * @description Речовина звуження (запис довідника); `null` — спільна. Код речовини — з `GET …/substances` версії.
+             */
+            substanceEntryId?: null | number;
             /** @description Текст або сирий рядок джерела. */
             textValue: null | string;
             /**
@@ -28508,6 +28754,8 @@ export interface components {
              */
             value: null | string;
         };
+        /** @enum {unknown} */
+        MethodologyConstantSort: "Code" | "Category" | "ValidFrom" | null;
         /** @description Покриття версії: які виходи куди лягають і які колонки чекають на вихід (`BE-25`). */
         MethodologyCoverageDto: {
             /**
@@ -28610,12 +28858,24 @@ export interface components {
             /** @description Версії з їхніми вікнами дії. */
             versions: components["schemas"]["MethodologyVersionDto"][];
         };
+        /** @description Елемент похідного списку аргументів формули (лише читання). */
+        MethodologyFormulaArgumentDto: {
+            /** @description Маркер `?` у виразі (`@A?`) — аргумент без комірки дає `null`. */
+            isOptional: boolean;
+            /** @description `Argument` (`@A`), `Constant` (`CST.K`) чи `Formula` (`!F`). */
+            kind: components["schemas"]["DeclaredArgumentKind"];
+            /** @description Ім'я як у виразі, без префікса й маркера. */
+            name: string;
+            /** @description Запис, як у `argumentsCsv`: `@A?`, `CST.K`, `!F`. */
+            text: string;
+        };
         /** @description Формула версії методології, як її бачить конфігуратор. */
         MethodologyFormulaDto: {
-            /** @description Оголошені аргументи — `;`-список, як у `FInfo_Arguments`;
-             *     `null` — списку немає. ⛔ Не те саме, що порожній рядок: `null`
-             *     глушить звірку пастки 2 (`ECR-CALC-0432`), а порожній оголошує «нуль
-             *     аргументів», і тоді будь-який токен у виразі є порушенням. */
+            /** @description Похідний список структуровано (лише читання): вид, ім'я, маркер «необов'язковий» — у порядку першої появи у виразі. */
+            arguments: components["schemas"]["MethodologyFormulaArgumentDto"][];
+            /** @description ✎ 2026-11-02 (похідні аргументи): ПОХІДНИЙ від Expression`;`-список
+             *     (`@A?;CST.K;!F`), лише для читання. Той самий текст, що лежить у `calc.MethodologyFormula.ArgumentsCsv`;
+             *     рантайм бере з нього маркери `?` (об'єднання по версії). */
             argumentsCsv: null | string;
             /** @description Код — те, на що посилається `!Name`. */
             code: string;
@@ -33513,6 +33773,18 @@ export interface components {
              */
             ordinal: null | number;
         };
+        /** @description Запит на запис категорії переліку версії-чернетки (план CONST-CATEGORY). */
+        SaveMethodologyCategoryRequest: {
+            /** @description Опис для методолога; `null` — зняти. До 400 символів. */
+            description: null | string;
+            /** @description Вивести з ужитку; `null` — не змінювати. Категорію з константами — 409. */
+            isRetired: null | boolean;
+            /**
+             * Format: int32
+             * @description Порядок у переліку; `null` — нова в кінець, наявна не зсувається.
+             */
+            ordinal: null | number;
+        };
         /** @description Правило категорії константи версії (L-2): вираз діалекту Methodology. */
         SaveMethodologyCategoryRuleRequest: {
             /** @description Вираз, що з рядка документа дає ключ категорії (текст). */
@@ -33559,14 +33831,11 @@ export interface components {
         };
         /** @description Запит на запис формули версії-чернетки. */
         SaveMethodologyFormulaRequest: {
-            /** @description Оголошені аргументи — `;`-список, як у `FInfo_Arguments`;
-             *     `null` — списку немає. ⛔ Це **джерело істини про аргументи**, а не
-             *     текст виразу (директива ПК-1 №05 §7, пастка 2): збірка підставляє рівно
-             *     перелічене, і токен поза списком у вираз не потрапляє — формула рахується з
-             *     невизначеним параметром і повертає правдоподібне число, а не помилку.
-             *     ⚠ `null` і порожній рядок — різні стани: перший глушить звірку
-             *     (`ECR-CALC-0432`), другий оголошує «нуль аргументів». */
-            argumentsCsv: null | string;
+            /** @description ⚠ ЗАСТАРІЛЕ (похідні аргументи, 2026-11-02; приймається ОДИН реліз, далі — прибрати з запиту). Список
+             *     аргументів більше не вводиться: відповідь несе ПОХІДНИЙ від виразу `argumentsCsv`/`arguments`.
+             *     Із цього поля беруться лише маркери `Name?` і переносяться у вираз як `@Name?`; решта ігнорується.
+             *     Необов'язковий аргумент пишеться прямо у виразі: `@Land_Measure_RunningHours?`. */
+            argumentsCsv?: null | string;
             /** @description Вираз діалекту методологій. */
             expression: string;
             /**
