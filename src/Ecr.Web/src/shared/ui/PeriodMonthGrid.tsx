@@ -1,10 +1,21 @@
-import { useEffect, useRef, type JSX, type KeyboardEvent, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, type JSX, type KeyboardEvent, type RefObject } from 'react';
 import { formatMonthName, formatPeriodKey } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { PeriodStateIcon, periodStateText, type PeriodStateSummary } from './periodStates';
 
-/** Колонок у сітці (макет `.months`: 3 × 4). */
+/** Колонок у сітці (макет `.months`: 3 × 4); у вузькому вікні CSS дає 2 — тоді рахуємо з розкладки. */
 const Columns = 3;
+/** Відступ випадайки від країв вікна, px (`max-width = вікно − 16 px`). */
+const ViewportGutter = 8;
+
+/** Скільки стовпців сітка має насправді (CSS-медіазапит може дати 2); jsdom без розкладки — `Columns`. */
+function columnsOf(element: HTMLElement | null): number {
+  if (element === null) return Columns;
+  const template = getComputedStyle(element).gridTemplateColumns.trim();
+  const count = template === '' || template === 'none' ? 0 : template.split(/\s+/).length;
+
+  return count > 0 && count <= Columns ? count : Columns;
+}
 
 /**
  * Випадайка вибору періоду (UI-13, макет `48-period-picker-open.png`,
@@ -51,6 +62,43 @@ export default function PeriodMonthGrid({
 }): JSX.Element {
   const keys = Array.from({ length: perYear }, (_, index) => year * 100 + index + 1);
   const grid = useRef<HTMLDivElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+
+  /*
+   * ⛔ Випадайка завжди в межах вікна (живий стенд, вікно ~600 px: третій стовпець сітки
+   * — березень/червень/вересень/грудень — обрізався правим краєм). Власне позиціонування
+   * (без `Popover`, див. вище) тепер має й колізії: зсув уліво, щоб правий край не виходив
+   * за `вікно − ViewportGutter`, але не лівіше за `ViewportGutter`; знизу бракує місця, а
+   * згори є — відкривається вгору. Ширину обмежує CSS (`min(18.75rem, 100vw − 16px)`).
+   */
+  useLayoutEffect(() => {
+    const element = pop.current;
+    if (element === null) return undefined;
+
+    const place = (): void => {
+      element.style.left = '0px';
+      element.style.top = '';
+      element.style.bottom = '';
+      const rect = element.getBoundingClientRect();
+      const width = document.documentElement.clientWidth || window.innerWidth;
+      const height = window.innerHeight;
+      let shift = 0;
+      if (rect.right > width - ViewportGutter) shift = width - ViewportGutter - rect.right;
+      if (rect.left + shift < ViewportGutter) shift = ViewportGutter - rect.left;
+      element.style.left = `${shift}px`;
+
+      const anchorRect = anchor.current?.getBoundingClientRect();
+      if (anchorRect !== undefined && rect.bottom > height && anchorRect.top - rect.height - 4 >= 0) {
+        element.style.top = 'auto';
+        element.style.bottom = 'calc(100% + 4px)';
+      }
+    };
+
+    place();
+    window.addEventListener('resize', place);
+
+    return () => window.removeEventListener('resize', place);
+  }, [anchor]);
 
   useEffect(() => {
     const close = (event: MouseEvent): void => {
@@ -77,7 +125,8 @@ export default function PeriodMonthGrid({
   const handleKey = (event: KeyboardEvent<HTMLDivElement>): void => {
     const buttons = Array.from(grid.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
     const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    const move: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: Columns, ArrowUp: -Columns };
+    const columns = columnsOf(grid.current);
+    const move: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: columns, ArrowUp: -columns };
 
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -100,6 +149,7 @@ export default function PeriodMonthGrid({
   return (
     <div
       className="ecr-period-pop"
+      ref={pop}
       role="dialog"
       aria-label={t('period.choose')}
       data-testid="period-grid"
