@@ -173,7 +173,8 @@ describe('NaeStructurePage: довідник не завантажено', () =>
     const user = userEvent.setup();
     mount();
 
-    expect(await screen.findByText('permits.nae.import.hintNotProvisioned')).toBeTruthy();
+    // Довідника ще немає: замість дерева - порожній стан із трьома шляхами (PI AF / Excel / вручну).
+    expect(await screen.findByText('permits.nae.manual.emptyTitle')).toBeTruthy();
     expect(screen.queryByRole('tree')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'permits.nae.import.open' }));
     expect(await screen.findByRole('button', { name: 'permits.nae.import.preview' })).toBeTruthy();
