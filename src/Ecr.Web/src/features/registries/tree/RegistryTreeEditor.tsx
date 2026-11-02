@@ -19,6 +19,8 @@ export interface RegistryTreeEditorProps {
   readonly hideEntryCode?: boolean | undefined;
   readonly selectedId?: TreeNodeId | null | undefined;
   readonly onSelect?: ((id: TreeNodeId | null) => void) | undefined;
+  /** Показується над деревом, коли воно порожнє (без пошукового запиту): способи наповнення. */
+  readonly emptyState?: ReactNode;
 }
 
 /**
@@ -36,6 +38,7 @@ export function RegistryTreeEditor({
   hideEntryCode = false,
   selectedId,
   onSelect,
+  emptyState,
 }: RegistryTreeEditorProps): JSX.Element {
   const tree = useRegistryTree(registryCode);
   const nodes = useMemo(
@@ -56,8 +59,12 @@ export function RegistryTreeEditor({
     return <ErrorAlert error={tree.error} onRetry={tree.refetch} />;
   }
 
+  const showEmpty = emptyState !== undefined && !tree.isPending && tree.nodes.length === 0 && tree.query === '';
+
   return (
-    <TreeEditor
+    <>
+      {showEmpty && emptyState}
+      <TreeEditor
       label={label}
       nodes={nodes}
       levels={tree.levels}
@@ -82,6 +89,7 @@ export function RegistryTreeEditor({
           {node !== null && renderPanelExtra?.(node)}
         </TreeNodePanel>
       )}
-    />
+      />
+    </>
   );
 }
