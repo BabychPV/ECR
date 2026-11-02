@@ -36,18 +36,39 @@ interface RuleCoverageWindow {
 /**
  * Вікно за замовчуванням — минулий і поточний календарні роки.
  *
- * ⛔ Числа повторюють серверні дослівно (`RuleCoverageHandler`: `(year-1)*100+1`
- * … `year*100+99`), і це НЕ дублювання про запас: клієнт мусить показати в полях
- * саме те вікно, за яке прийде відповідь. Порожні поля з «сервер щось підставить»
- * означали б, що людина не знає, за який період дивиться матрицю.
+ * ⛔ Вікно ЗАВЖДИ передається серверу явно, тож у полях стоїть саме те вікно, за
+ * яке прийде відповідь. Порожні поля з «сервер щось підставить» означали б, що
+ * людина не знає, за який період дивиться матрицю.
  *
- * ⚠ `99`, а не `12`: ключ періоду вміщає не лише місяці (квартали, рік цілком),
- * тож верхня межа року — саме `YYYY99`.
+ * ✎ 2026-10-30 (lane/integ-methodology-ui): верхня межа — `YYYY12`, а не серверне
+ * `YYYY99`. Поля тепер — `PeriodPicker` (той самий, що на решті екранів), а він
+ * приймає лише дійсний `periodKey` (`01..12`); `YYYY99` він показати не може. Для
+ * місяців, кварталів (`01..04`) і року (`01`) межа `12` охоплює той самий набір
+ * ключів; ширше вікно `Custom`-періодичності (номер > 12) — лише набором вручну.
  */
 export function defaultRuleCoverageWindow(now: Date): RuleCoverageWindow {
   const year = now.getFullYear();
 
-  return { tableDefId: null, periodFrom: (year - 1) * 100 + 1, periodTo: year * 100 + 99 };
+  return { tableDefId: null, periodFrom: (year - 1) * 100 + 1, periodTo: year * 100 + 12 };
+}
+
+/** Що не так із вікном: `missing` — бракує межі, `reversed` — нижня вища за верхню. */
+export type RuleCoverageWindowProblem = 'missing' | 'reversed';
+
+/**
+ * Перевірка вікна перед запитом: обидві межі задані й `from ≤ to`.
+ *
+ * ⚠ Порожня межа — окрема причина, а не «порожнє вікно»: `PeriodPicker` дає
+ * `null`, коли поле очищено, і сервер на запит без межі підставив би власну —
+ * тобто матриця показала б не той період, що в полях.
+ */
+export function ruleCoverageWindowProblem(
+  periodFrom: number | null,
+  periodTo: number | null,
+): RuleCoverageWindowProblem | null {
+  if (periodFrom === null || periodTo === null) return 'missing';
+
+  return ruleCoverageWindowEmpty(periodFrom, periodTo) ? 'reversed' : null;
 }
 
 /**

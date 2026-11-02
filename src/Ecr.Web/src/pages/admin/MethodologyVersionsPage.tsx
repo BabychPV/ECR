@@ -44,6 +44,7 @@ import {
   type FormulaDraft,
 } from '@/features/methodologies/draft';
 import { useDeleteVersionAction } from '@/features/methodologies/DeleteVersionAction';
+import { MethodologySection } from '@/features/methodologies/MethodologySection';
 import { VersionDiffModal } from '@/features/methodologies/VersionDiffModal';
 import { showPublishError } from '@/features/methodologies/publishError';
 import { t } from '@/shared/i18n';
@@ -125,6 +126,13 @@ const MethodologyCategoryRulePanel = lazy(async () => {
   const loaded = await import('@/features/methodologies/CategoryRulePanel');
 
   return { default: loaded.MethodologyCategoryRulePanel };
+});
+
+/** Довідка синтаксису формули — власний чанк: потрібна лише у відкритому діалозі формули. */
+const FormulaSyntaxHelp = lazy(async () => {
+  const loaded = await import('@/features/methodologies/FormulaSyntaxHelp');
+
+  return { default: loaded.FormulaSyntaxHelp };
 });
 
 const MethodologyCoveragePanel = lazy(async () => {
@@ -508,10 +516,12 @@ export function MethodologyVersionsPage(): JSX.Element {
 
       {selected !== undefined && (
         <>
-          <Group justify="space-between">
-            <Text fw={600}>{t('methodologies.formulas')}</Text>
-
-            {editable && (
+          {/* ⚠ Формули — головна секція сторінки й тому перша; як і решта, згортається,
+              а вибір пам'ятається на користувача (`MethodologySection`). */}
+          <MethodologySection
+            sectionId="formulas"
+            title={t('methodologies.formulas')}
+            actions={editable && (
               <Button
                 size="xs"
                 variant="default"
@@ -531,7 +541,7 @@ export function MethodologyVersionsPage(): JSX.Element {
                 {t('methodologies.addFormula')}
               </Button>
             )}
-          </Group>
+          >
 
           <AsyncBoundary<MethodologyFormulaDto[]>
             isPending={formulas.isPending}
@@ -609,6 +619,7 @@ export function MethodologyVersionsPage(): JSX.Element {
               </Table>
             )}
           </AsyncBoundary>
+          </MethodologySection>
 
           {/* ⛔ П'ять панелей стоять на ОДНОМУ екрані з формулами, а не по
               вкладках. Методологія не рахує нічого, поки бракує бодай однієї:
@@ -833,6 +844,12 @@ export function MethodologyVersionsPage(): JSX.Element {
               height="140px"
               onValidated={setExpressionErrors}
             />
+
+            {/* ✎ lane/integ-methodology-ui: довідка синтаксису — ПІД редактором, у потоці
+                діалогу (не перекриває його); власний `import()`-чанк (`D-132`). */}
+            <Suspense fallback={null}>
+              <FormulaSyntaxHelp versionId={editing.versionId} />
+            </Suspense>
 
             {/* ⛔ UI-аудит, lane 5: підкреслення в Monaco саме по собі не
                 несе тексту (ані підказки, ані тултипа) — без цього блоку
