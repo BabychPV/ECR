@@ -10,7 +10,7 @@ import * as airApi from '@/features/permits/air/airApi';
 import { AirImportWizard } from '../import/AirImportWizard';
 import { EmptyDraft } from '../import/importModel';
 import { PreviewStep } from '../import/PreviewStep';
-import { analysis, preview, profile, profiles, result, scopeCodes, tree, xlsx } from './airFixtures';
+import { analysis, preview, profile, profiles, result, scopeCodes, scopeFields, tree, xlsx } from './airFixtures';
 
 /**
  * Майстер імпорту лімітів із Excel (NAE-план N5): файл -> відповідність -> перегляд -> застосування. API замоканий;
@@ -38,6 +38,7 @@ vi.mock('@/features/permits/air/airApi', () => ({
   applyAirImport: vi.fn(),
   getNaeTree: vi.fn(),
   getAirScopeCodes: vi.fn(),
+  getAirScopeFields: vi.fn(),
 }));
 
 const api = vi.mocked(airApi);
@@ -51,6 +52,7 @@ beforeEach(() => {
   api.applyAirImport.mockResolvedValue(result());
   api.getNaeTree.mockResolvedValue(tree());
   api.getAirScopeCodes.mockResolvedValue(scopeCodes());
+  api.getAirScopeFields.mockResolvedValue(scopeFields());
 });
 afterEach(() => {
   cleanup();
@@ -63,7 +65,7 @@ function mount(props: { mayImport?: boolean; mayEditProfile?: boolean } = {}): v
     <TestProviders>
       <QueryClientProvider client={client}>
         <MemoryRouter>
-          <AirImportWizard permitId={5} mayImport={props.mayImport ?? true} mayEditProfile={props.mayEditProfile ?? true} />
+          <AirImportWizard permitId={5} permitNumber="KZ87VCZ14622157" mayImport={props.mayImport ?? true} mayEditProfile={props.mayEditProfile ?? true} />
         </MemoryRouter>
       </QueryClientProvider>
     </TestProviders>,
@@ -78,13 +80,16 @@ async function pick(label: string, option: RegExp): Promise<void> {
   await userEvent.click(await screen.findByRole('option', { name: option }));
 }
 
-async function fillFile(region = 'ATYRAU', area = 'OFFSHORE'): Promise<void> {
+/** Крок 1 «Регіон і ділянка» → «Next» → крок «Файл» із книгою. */
+async function fillFile(region = 'Atyrau', area = 'Offshore'): Promise<void> {
   await screen.findByLabelText(new RegExp(text('permits.air.import.region.label')));
+  await pick(text('permits.air.import.region.label'), new RegExp(`^${region}`));
+  await pick(text('permits.air.import.area.label'), new RegExp(`^${area}`));
+  fireEvent.click(button('wizard.next'));
+  await screen.findByRole('heading', { name: text('permits.air.import.step.file') });
   const input = document.querySelector<HTMLInputElement>('input[type="file"]');
   if (input === null) throw new Error('file input');
   await userEvent.upload(input, xlsx());
-  await pick(text('permits.air.import.region.label'), new RegExp(`^${region}`));
-  await pick(text('permits.air.import.area.label'), new RegExp(`^${area}`));
 }
 
 async function toMapping(): Promise<void> {
@@ -100,27 +105,38 @@ async function toPreview(): Promise<void> {
   await screen.findByText(text('permits.air.import.replace.title'));
 }
 
-describe('крок 1: файл', () => {
-  it('без файлу й регіону далі не йде й нічого не шле', async () => {
+describe('кроки 1-2: регіон і ділянка, файл', () => {
+  it('без регіону далі не йде; без файлу аналіз не шле нічого', async () => {
     mount();
+    expect(await screen.findByDisplayValue('KZ87VCZ14622157')).toBeTruthy();
     await screen.findByLabelText(new RegExp(text('permits.air.import.region.label')));
+    fireEvent.click(button('wizard.next'));
+    expect(await screen.findByText(text('permits.air.import.region.required'))).toBeTruthy();
+    await pick(text('permits.air.import.region.label'), /^Atyrau/);
+    fireEvent.click(button('wizard.next'));
+    await screen.findByRole('heading', { name: text('permits.air.import.step.file') });
     fireEvent.click(button('permits.air.import.analyse'));
     expect(await screen.findByText(text('permits.air.import.file.required'))).toBeTruthy();
     expect(api.analyseAirImport).not.toHaveBeenCalled();
   });
 
-  it('аналіз шле файл і options: профіль за замовчуванням, регіон великими, ділянка', async () => {
+  it('аналіз шле файл і options без області (область - лише полями форми preview/apply)', async () => {
     await toMapping();
     expect(api.analyseAirImport).toHaveBeenCalledTimes(1);
     const [file, options] = api.analyseAirImport.mock.calls[0]!;
     expect(file.name).toBe('limits.xlsx');
-    expect(options).toEqual({ profileCode: 'ERA_TABLE_33', region: 'ATYRAU', area: 'OFFSHORE' });
+    expect(options).toEqual({ profileCode: 'ERA_TABLE_33' });
+  });
+
+  it('preview шле regionEntryId/areaEntryId (Registry) окремими полями', async () => {
+    await toPreview();
+    expect(api.previewAirImport.mock.calls[0]![3]).toEqual({ regionEntryId: '11', areaEntryId: '21' });
   });
 
   it('лише для читання: «Next» вимкнено', async () => {
     mount({ mayImport: false });
     await screen.findByLabelText(new RegExp(text('permits.air.import.region.label')));
-    expect(button('permits.air.import.analyse').disabled).toBe(true);
+    expect(button('wizard.next').disabled).toBe(true);
   });
 });
 
@@ -248,13 +264,12 @@ describe('крок 3: перегляд, відсутні НАЕ, заміна ч
 
     fireEvent.click(button('permits.air.import.apply'));
     await waitFor(() => expect(api.applyAirImport).toHaveBeenCalledTimes(1));
-    const [permitId, file, options] = api.applyAirImport.mock.calls[0]!;
+    const [permitId, file, options, scope] = api.applyAirImport.mock.calls[0]!;
     expect(permitId).toBe(5);
     expect(file.name).toBe('limits.xlsx');
+    expect(scope).toEqual({ regionEntryId: '11', areaEntryId: '21' });
     expect(options).toEqual({
       profileCode: 'ERA_TABLE_33',
-      region: 'ATYRAU',
-      area: 'OFFSHORE',
       resolutions: [
         { kind: 'nae', code: '3544', action: 'skip' },
         { kind: 'nae', code: '3545', action: 'skip' },

@@ -8,6 +8,8 @@ import { showDone } from '@/shared/ui/notify';
 import { PermitsPaths } from '../../shell/permitPaths';
 import type { AirAnalysis, AirImportResult, AirPreview } from '../airTypes';
 import {
+  useAirScopeCodes,
+  useAirScopeFields,
   useAnalyseAirImport,
   useApplyAirImport,
   useImportProfile,
@@ -15,6 +17,8 @@ import {
   useSaveImportProfile,
 } from '../useAirLimits';
 import { ApplyStep } from './ApplyStep';
+import { ScopeStep } from './ScopeStep';
+import { scopeFormFields, scopeProblem } from './scopeModel';
 import { FileStep } from './FileStep';
 import {
   buildOptions,
@@ -32,6 +36,8 @@ import '../air.css';
 
 export interface AirImportWizardProps {
   readonly permitId: number;
+  /** Номер дозволу: крок «Регіон і ділянка» показує його, як діалог «Import Parameters» в Excel. */
+  readonly permitNumber: string;
   /** Право `Registry.EditData` і не симуляція; без нього кроки лише читаються, а «Next»/«Apply» вимкнено. */
   readonly mayImport: boolean;
   /** Право `Registry.EditDefinition`: збереження профілю імпорту. */
@@ -40,6 +46,8 @@ export interface AirImportWizardProps {
 
 function stepLabel(step: ImportStep): string {
   switch (step) {
+    case 'scope':
+      return t('permits.air.import.step.scope');
     case 'file':
       return t('permits.air.import.step.file');
     case 'mapping':
@@ -53,6 +61,8 @@ function stepLabel(step: ImportStep): string {
 
 function stepHint(step: ImportStep): string {
   switch (step) {
+    case 'scope':
+      return t('permits.air.import.hint.scope');
     case 'file':
       return t('permits.air.import.hint.file');
     case 'mapping':
@@ -65,11 +75,13 @@ function stepHint(step: ImportStep): string {
 }
 
 /**
- * Майстер імпорту лімітів із Excel (NAE-план N5; макет «Wizard»): 1 Файл → 2 Відповідність → 3 Перегляд (+ «Apply»)
- * → 4 Результат. Все, що змінюється на сервері, — лише кроком 3; кроки 1-2 (`analyse`) нічого не пишуть.
+ * Майстер «Import parameters…» (NAE-план N5 + AIR-ON-AIR; макет «Wizard»): 1 Регіон і ділянка → 2 Файл →
+ * 3 Відповідність → 4 Перегляд (+ «Apply») → 5 Результат. Все, що змінюється на сервері, — лише кроком 4; кроки 1-3
+ * нічого не пишуть.
  */
-export function AirImportWizard({ permitId, mayImport, mayEditProfile }: AirImportWizardProps): JSX.Element {
-  const [step, setStep] = useState<ImportStep>('file');
+export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProfile }: AirImportWizardProps): JSX.Element {
+  const [step, setStep] = useState<ImportStep>('scope');
+  const [scopeIssue, setScopeIssue] = useState<'region' | 'area' | null>(null);
   const [draft, setDraft] = useState<ImportDraft>(EmptyDraft);
   const [analysis, setAnalysis] = useState<AirAnalysis | null>(null);
   // Специфікація, з якою файл розкладено востаннє: перегляд дозволено лише для неї (інакше бачили б чужу розкладку).
@@ -88,6 +100,12 @@ export function AirImportWizard({ permitId, mayImport, mayEditProfile }: AirImpo
   const previewCall = usePreviewAirImport(permitId);
   const apply = useApplyAirImport(permitId);
   const saveProfile = useSaveImportProfile();
+  const scopeFields = useAirScopeFields();
+  const scopeCodes = useAirScopeCodes();
+  const scopeForm = (snapshot: ImportDraft): Readonly<Record<string, string>> =>
+    scopeFields.data === undefined || scopeCodes.data === undefined
+      ? {}
+      : scopeFormFields(scopeFields.data, scopeCodes.data, snapshot.region, snapshot.area);
   const profile = useImportProfile(step === 'mapping' ? draft.profileCode : undefined);
   const analysing = usePendingLoading(analyse.isPending);
   const previewing = usePendingLoading(previewCall.isPending);
@@ -130,7 +148,7 @@ export function AirImportWizard({ permitId, mayImport, mayEditProfile }: AirImpo
     const missing = preview?.preview.missing ?? [];
     const snapshot = draft;
     previewCall.mutate(
-      { file: draft.file, options: buildOptions(snapshot, { missing }) },
+      { file: draft.file, options: buildOptions(snapshot, { missing }), scope: scopeForm(snapshot) },
       {
         onSuccess: (data) => {
           setPreview(data);
@@ -154,6 +172,7 @@ export function AirImportWizard({ permitId, mayImport, mayEditProfile }: AirImpo
           ownerKeys: confirmedOwnerKeys(preview, draft.confirmedReplace),
           fingerprint: preview.preview.fingerprint,
         }),
+        scope: scopeForm(draft),
       },
       {
         onSuccess: (data) => {
@@ -186,7 +205,12 @@ export function AirImportWizard({ permitId, mayImport, mayEditProfile }: AirImpo
   };
 
   const next = (): void => {
-    if (step === 'file') {
+    if (step === 'scope') {
+      if (scopeFields.data === undefined || scopeCodes.data === undefined) return;
+      const found = scopeProblem(scopeFields.data, scopeCodes.data, draft.region, draft.area);
+      setScopeIssue(found);
+      if (found === null) goTo('file');
+    } else if (step === 'file') {
       const found = fileStepProblem(draft);
       setProblem(found);
       if (found === null) runAnalyse('mapping');
@@ -196,7 +220,8 @@ export function AirImportWizard({ permitId, mayImport, mayEditProfile }: AirImpo
   };
 
   const back = (): void => {
-    if (step === 'mapping') goTo('file');
+    if (step === 'file') goTo('scope');
+    else if (step === 'mapping') goTo('file');
     else if (step === 'preview') goTo('mapping');
   };
 
@@ -222,6 +247,21 @@ export function AirImportWizard({ permitId, mayImport, mayEditProfile }: AirImpo
       </div>
       {failure !== null && <ErrorAlert error={failure} />}
 
+      {step === 'scope' && (
+        <ScopeStep
+          permitNumber={permitNumber}
+          fields={scopeFields.data}
+          codes={scopeCodes.data}
+          failure={scopeFields.error ?? scopeCodes.error}
+          onRetry={() => {
+            void scopeFields.refetch();
+            void scopeCodes.refetch();
+          }}
+          draft={draft}
+          onChange={patchDraft}
+          problem={scopeIssue}
+        />
+      )}
       {step === 'file' && <FileStep draft={draft} onChange={patchDraft} problem={problem} />}
       {step === 'mapping' && analysis !== null && (
         <MappingStep
@@ -254,13 +294,18 @@ export function AirImportWizard({ permitId, mayImport, mayEditProfile }: AirImpo
 
       {step !== 'apply' && (
         <div className="pi-actions">
-          {step === 'file' ? (
+          {step === 'scope' ? (
             <Button component={Link} variant="default" to={`${PermitsPaths.permits}/${String(permitId)}?tab=air`}>
               {t('common.cancel')}
             </Button>
           ) : (
             <Button variant="default" onClick={back}>
               {t('wizard.back')}
+            </Button>
+          )}
+          {step === 'scope' && (
+            <Button disabled={!mayImport || scopeFields.data === undefined || scopeCodes.data === undefined} onClick={next}>
+              {t('wizard.next')}
             </Button>
           )}
           {step === 'file' && (

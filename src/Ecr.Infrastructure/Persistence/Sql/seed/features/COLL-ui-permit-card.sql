@@ -3,14 +3,14 @@
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'permits.page.tabs.air', N'ru', N'Лимиты выбросов'),
-    (N'permits.page.tabs.air', N'kz', N'Шығарынды лимиттері'),
+    (N'permits.page.tabs.air', N'ru', N'Источники и параметры'),
+    (N'permits.page.tabs.air', N'kz', N'Көздер мен параметрлер'),
     (N'permits.air.title', N'ru', N'Источники выбросов'),
     (N'permits.air.title', N'kz', N'Шығарынды көздері'),
     (N'permits.air.counts', N'ru', N'Источников: {sources} · строк веществ: {rows}'),
     (N'permits.air.counts', N'kz', N'Көздер: {sources} · заттар жолдары: {rows}'),
-    (N'permits.air.import', N'ru', N'Импорт из Excel…'),
-    (N'permits.air.import', N'kz', N'Excel-ден импорттау…'),
+    (N'permits.air.import', N'ru', N'Импорт параметров…'),
+    (N'permits.air.import', N'kz', N'Параметрлерді импорттау…'),
     (N'permits.air.empty.title', N'ru', N'Источников выбросов пока нет'),
     (N'permits.air.empty.title', N'kz', N'Шығарынды көздері әлі жоқ'),
     (N'permits.air.empty.text', N'ru', N'Загрузите таблицу лимитов из книги Excel, чтобы заполнить это разрешение.'),

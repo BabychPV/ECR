@@ -4,11 +4,13 @@ import {
   applyAirImport,
   getAirLimits,
   getAirScopeCodes,
+  getAirScopeFields,
   getImportProfile,
   getNaeTree,
   listImportProfiles,
   previewAirImport,
   saveImportProfile,
+  type AirScopeForm,
 } from './airApi';
 import type {
   AirAnalysis,
@@ -17,6 +19,7 @@ import type {
   AirLimitsPermit,
   AirPreview,
   AirScopeCodes,
+  AirScopeFields,
   ImportProfile,
   ImportProfileSummary,
   NaeTree,
@@ -33,6 +36,7 @@ export const airKeys = {
   profile: (code: string) => ['permits', 'air', 'profile', code] as const,
   tree: ['permits', 'air', 'nae-tree'] as const,
   scope: ['permits', 'air', 'scope-codes'] as const,
+  scopeFields: ['permits', 'air', 'scope-fields'] as const,
 };
 
 /**
@@ -74,6 +78,8 @@ export function useNaeTree(enabled: boolean) {
 export interface AirImportCall {
   readonly file: File;
   readonly options: AirImportOptions;
+  /** Поля області імпорту (лише preview/apply). */
+  readonly scope?: AirScopeForm;
 }
 
 /**
@@ -89,7 +95,7 @@ export function useAnalyseAirImport() {
 
 export function usePreviewAirImport(permitId: number) {
   return useMutation<AirPreview, Error, AirImportCall>({
-    mutationFn: ({ file, options }) => previewAirImport(permitId, file, options),
+    mutationFn: ({ file, options, scope }) => previewAirImport(permitId, file, options, scope),
     meta: { handled: true },
   });
 }
@@ -99,7 +105,7 @@ export function useApplyAirImport(permitId: number) {
   const client = useQueryClient();
 
   return useMutation<AirImportResult, Error, AirImportCall>({
-    mutationFn: ({ file, options }) => applyAirImport(permitId, file, options),
+    mutationFn: ({ file, options, scope }) => applyAirImport(permitId, file, options, scope),
     meta: { handled: true },
     onSuccess: () => client.invalidateQueries({ queryKey: ['permits'] }),
   });
@@ -118,7 +124,12 @@ export function useSaveImportProfile() {
   });
 }
 
-/** Regions and areas for the File step. */
+/** Regions and areas of the NAE tree: which Region has areas (scope step). */
 export function useAirScopeCodes() {
   return useQuery<AirScopeCodes>({ queryKey: airKeys.scope, queryFn: getAirScopeCodes });
+}
+
+/** AIR-ON-AIR: how REGION / AREA are configured on the AIR type, with their values (scope step). */
+export function useAirScopeFields() {
+  return useQuery<AirScopeFields>({ queryKey: airKeys.scopeFields, queryFn: getAirScopeFields });
 }
