@@ -290,7 +290,9 @@ test.describe('Live refresh: two users on the stand', () => {
         const target = await writableColumn(admin.page.request);
         await reviewerWrites(admin.page.request, target.row0, target.column, 6000 + Math.floor(Math.random() * 999));
 
-        await expect.poll(() => polls.length, { timeout: SlowPoll }).toBeGreaterThan(1);
+        // At least one marker poll AFTER the write (the next 30 s tick), and still no banner.
+        const afterWrite = polls.length;
+        await expect.poll(() => polls.length, { timeout: SlowPoll }).toBeGreaterThan(afterWrite);
         expect(polls.every((status) => status === 200), `marker answers: ${polls.join(',')}`).toBe(true);
         await expect(page.getByTestId('sheet-live-banner')).toHaveCount(0);
 
