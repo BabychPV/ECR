@@ -95,21 +95,11 @@ export async function ensureSubstances(api: APIRequestContext): Promise<void> {
   expect(batch.applied, 'речовини не застосовані').toBe(true);
 }
 
-/** Registry `code` with one optional text field, if it is not there yet; returns its definition id. */
+/** Registry `code` (no fields), if it is not there yet; returns its definition id. */
 async function ensureRegistry(api: APIRequestContext, code: string, name: string): Promise<number> {
   if ((await api.get(`/api/v1/registries/${code}/definition`)).status() === 404) {
+    // Без полів: записи області — код і назва (поле без ключа сервер відхиляє 422 noKeyField, а ключ тут не потрібен).
     await ok(await api.post('/api/v1/registries', { data: { code, nameL10n: { en: name }, isTemporal: false } }), `registry ${code}`);
-    await ok(
-      await api.put(`/api/v1/registries/${code}/definition`, {
-        headers: { 'If-Match': '1' },
-        data: {
-          fields: [{ id: null, code: 'NOTE', nameL10n: { values: { en: 'Note' } }, dataType: 'String', ordinal: 1, isRequired: false, isKey: false, lookupRegistryDefId: null, unitId: null }],
-          rules: [],
-          reason: 'e2e fixture: air import scope',
-        },
-      }),
-      `definition ${code}`,
-    );
   }
 
   return (await ok<{ id: number }>(await api.get(`/api/v1/registries/${code}/definition`), code)).id;
