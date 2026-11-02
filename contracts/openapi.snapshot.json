@@ -4115,6 +4115,51 @@
         ],
         "type": "object"
       },
+      "CreateNaeRootRequest": {
+        "description": "Creates a root of the NAE tree by hand (no AF): a region and, optionally, one area under it.",
+        "properties": {
+          "areaCode": {
+            "description": "Area code (`OFFSHORE`); `null` or empty — only the region.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "nameEn": {
+            "description": "English name of the deepest created node; `null` — the code as written.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "nameKz": {
+            "description": "Kazakh name of the deepest created node.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "nameRu": {
+            "description": "Russian name of the deepest created node.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "regionCode": {
+            "description": "Region code (`ATYRAU`); normalised to upper case.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "regionCode",
+          "areaCode",
+          "nameEn",
+          "nameRu",
+          "nameKz"
+        ],
+        "type": "object"
+      },
       "CreateNotificationChannelRequest": {
         "description": "Тіло створення каналу.",
         "properties": {
@@ -11496,6 +11541,191 @@
           "levelCode",
           "create",
           "existing"
+        ],
+        "type": "object"
+      },
+      "NaeRootResultDto": {
+        "description": "Result of `POST /api/v1/nae-tree/roots`.",
+        "properties": {
+          "areaEntryId": {
+            "description": "The area node; `null` when no area was asked.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "created": {
+            "description": "Something was created (`false` — every asked node already existed; nothing was changed).",
+            "type": "boolean"
+          },
+          "regionEntryId": {
+            "description": "The region node (created or already there).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "registryCode": {
+            "description": "Registry (`NAE_TREE`).",
+            "type": "string"
+          },
+          "registryProvisioned": {
+            "description": "The registry (fields, key, levels) was created by this call.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "registryCode",
+          "regionEntryId",
+          "areaEntryId",
+          "created",
+          "registryProvisioned"
+        ],
+        "type": "object"
+      },
+      "NaeSeedRootsResultDto": {
+        "description": "Result of `POST /api/v1/nae-tree/seed-roots`.",
+        "properties": {
+          "created": {
+            "description": "Region codes created as roots, in order.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "registryCode": {
+            "description": "Registry (`NAE_TREE`).",
+            "type": "string"
+          },
+          "registryProvisioned": {
+            "description": "The registry was created by this call.",
+            "type": "boolean"
+          },
+          "sourceRegistryCode": {
+            "description": "Registry the region list was read from (`LAND_REGION`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "registryCode",
+          "sourceRegistryCode",
+          "created",
+          "registryProvisioned"
+        ],
+        "type": "object"
+      },
+      "NaeTreeImportIssueDto": {
+        "description": "One finding of the Excel import of the NAE tree.",
+        "properties": {
+          "code": {
+            "description": "`headerNotFound`, `regionRequired`, `siteRequired`, `badCode`, `areaMismatch` (Area and On_Offshore\n        differ), `duplicateInFile`, `existingElsewhere` (the business key belongs to a node under another parent),\n        `codeTaken` (the technical code belongs to another node), `nameDiffers` (warning: the stored name differs; names are\n        not overwritten).",
+            "type": "string"
+          },
+          "column": {
+            "description": "Template column name (`NAE code`), when the finding is about one cell.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "detail": {
+            "description": "Short explanation (English; the UI shows its own text per `Code`).",
+            "type": "string"
+          },
+          "naeCode": {
+            "description": "Normalised NAE code of the row, when it has one.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "row": {
+            "description": "Excel row (1-based); 0 — the whole file.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "severity": {
+            "description": "`error` (blocks the apply) or `warning` (reported, the apply is allowed).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "severity",
+          "code",
+          "row",
+          "column",
+          "naeCode",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "NaeTreeImportReportDto": {
+        "description": "Result of the NAE tree Excel import (analyse, preview and apply return the same shape).",
+        "properties": {
+          "applied": {
+            "description": "Something was written (apply only; never when there was nothing new).",
+            "type": "boolean"
+          },
+          "canApply": {
+            "description": "No error finding (analyse: the file itself is clean; the database is not consulted).",
+            "type": "boolean"
+          },
+          "droppedIssues": {
+            "description": "Findings beyond the limit.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "fileSha256": {
+            "description": "Hash of the uploaded file.",
+            "type": "string"
+          },
+          "fingerprint": {
+            "description": "Hash of the plan; pass it back to apply as `expectedFingerprint`.",
+            "type": "string"
+          },
+          "issues": {
+            "description": "Findings, at most 200.",
+            "items": {
+              "$ref": "#/components/schemas/NaeTreeImportIssueDto"
+            },
+            "type": "array"
+          },
+          "levels": {
+            "description": "Per level: nodes to create (applied: created) and nodes already in the tree (left untouched).",
+            "items": {
+              "$ref": "#/components/schemas/NaeAfLevelCountDto"
+            },
+            "type": "array"
+          },
+          "registryCode": {
+            "description": "Registry (`NAE_TREE`).",
+            "type": "string"
+          },
+          "registryProvisioned": {
+            "description": "The registry was created by this call (apply only).",
+            "type": "boolean"
+          },
+          "rowsRead": {
+            "description": "Data rows read (empty rows not counted).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetName": {
+            "description": "Sheet that was read.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "registryCode",
+          "fileSha256",
+          "sheetName",
+          "rowsRead",
+          "levels",
+          "issues",
+          "droppedIssues",
+          "fingerprint",
+          "canApply",
+          "applied",
+          "registryProvisioned"
         ],
         "type": "object"
       },
@@ -43729,6 +43959,483 @@
           }
         },
         "summary": "Loads the NAE tree from the PI AF equipment tree (elements with `Region` / `On_Offshore` attributes). Needs\n`Registry.EditDefinition` and `Registry.EditData`.",
+        "tags": [
+          "NaeTree"
+        ]
+      }
+    },
+    "/api/v1/nae-tree/import/analyse": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "$ref": "#/components/schemas/IFormFile"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "description": "Cancellation token.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaeTreeImportReportDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaeTreeImportReportDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaeTreeImportReportDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Reads an NAE tree workbook (the template layout) and reports rows, planned nodes and file findings. The database is not\nconsulted and nothing is written. Permission `Registry.EditData`.",
+        "tags": [
+          "NaeTree"
+        ]
+      }
+    },
+    "/api/v1/nae-tree/import/apply": {
+      "post": {
+        "description": "An error finding (`422 naeImportHasErrors`) or a plan that differs from the previewed one (`422 regPlanChanged`)\nwrites nothing. Existing nodes are never changed: a second apply of the same file is a no-op (`applied = false`).",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "properties": {
+                      "file": {
+                        "$ref": "#/components/schemas/IFormFile"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "request": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "description": "Cancellation token.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaeTreeImportReportDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaeTreeImportReportDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaeTreeImportReportDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Applies the NAE tree import in ONE transaction: all planned nodes or none. Permission `Registry.EditData` (and\n`Registry.EditDefinition` when the registry does not exist yet).",
+        "tags": [
+          "NaeTree"
+        ]
+      }
+    },
+    "/api/v1/nae-tree/import/preview": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "properties": {
+                      "file": {
+                        "$ref": "#/components/schemas/IFormFile"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "request": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "description": "Cancellation token.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaeTreeImportReportDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaeTreeImportReportDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaeTreeImportReportDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Preview of the NAE tree import over the stored tree: nodes to create, nodes already there (left untouched; a differing\nstored name is a warning), conflicts by business key (NAE code + region + area). Nothing is written. Permission\n`Registry.EditData`.",
+        "tags": [
+          "NaeTree"
+        ]
+      }
+    },
+    "/api/v1/nae-tree/import/template": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Empty Excel template of the NAE tree import: `Region | Area | Site | Equipment | NAE code | Name_En | Name_Ru |\nName_Kz | On_Offshore`. Permission `Registry.View`.",
+        "tags": [
+          "NaeTree"
+        ]
+      }
+    },
+    "/api/v1/nae-tree/roots": {
+      "post": {
+        "description": "Idempotent and create-only: a region or area that already exists (technical code `R_&lt;REGION&gt;` /\n`A_&lt;REGION&gt;_&lt;AREA&gt;`, the same as the AF load) is returned as it is, never renamed.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNaeRootRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNaeRootRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNaeRootRequest"
+              }
+            }
+          },
+          "description": "Cancellation token.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaeRootResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaeRootResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaeRootResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Creates a region root (and, optionally, one area under it) of the NAE tree by hand — the first node of an empty tree\nwithout AF. Needs `Registry.EditData`; the call that provisions the registry also needs\n`Registry.EditDefinition`.",
+        "tags": [
+          "NaeTree"
+        ]
+      }
+    },
+    "/api/v1/nae-tree/seed-roots": {
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaeSeedRootsResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaeSeedRootsResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaeSeedRootsResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Creates one region root per live entry of the `LAND_REGION` registry. Only for an EMPTY tree (otherwise\n`422 naeTreeNotEmpty`); an explicit action, never automatic. Same permissions as `POST nae-tree/roots`.",
         "tags": [
           "NaeTree"
         ]
