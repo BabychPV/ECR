@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { DocumentTableDto } from '@/api/types';
+import { queryKeys } from '@/api/queryKeys';
+import type { DocumentSummary, DocumentTableDto } from '@/api/types';
+import { workflowHistoryQuery } from '@/features/workflow/api';
+import { refreshSheetWorkflow } from '@/features/workflow/refreshSheetWorkflow';
+import { whileStatusStale } from '@/features/workflow/statusStale';
 import { formatTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
 import { isRefreshKey, isTypingOrDialogTarget } from '../shortcutKey';
 import { refreshSheetTables } from './refreshSheet';
-import { useSheetChanges, type ForeignChange } from './useSheetChanges';
+import { useSheetChanges, type ForeignChange, type StatusChange } from './useSheetChanges';
 import './liveRefresh.css';
 
 export interface SheetLiveRefreshProps {
@@ -95,9 +99,24 @@ export function useSheetLiveRefresh({ documentId, periodKey, tables }: SheetLive
     </button>
   );
 
+  const status = useStatusTransition(documentId, periodKey, sheetDefId, tables[0]?.sheetCode ?? null, changes.statusChange);
+
   const change = changes.change;
   const banner = (
     <div className="ecr-live-host" role="status" aria-live="polite" aria-atomic="true" data-testid="sheet-live-host">
+      {status.notice !== null && (
+        <div className="ecr-live-banner" data-testid="sheet-status-banner" data-live-status={status.notice.state}>
+          <span className="ecr-live-banner-text">{statusBannerText(status.notice)}</span>
+          <button
+            type="button"
+            className="ecr-full-btn ecr-live-refresh-btn"
+            onClick={status.dismiss}
+            data-testid="sheet-status-dismiss"
+          >
+            {t('common.close')}
+          </button>
+        </div>
+      )}
       {change !== null && (
         <div className="ecr-live-banner" data-testid="sheet-live-banner" data-live-tables={[...change.tables.keys()].join(',')}>
           <span className="ecr-live-banner-text">{bannerText(change)}</span>
@@ -126,6 +145,89 @@ export function bannerText(change: ForeignChange): string {
   if (change.by === null || change.by.trim() === '') return t('liveRefresh.updatedByOther', { time });
 
   return t('liveRefresh.updatedBy', { user: change.by, time });
+}
+
+/** ✎ LIVE-STATUS: what the "Status changed" banner says. */
+export interface StatusNotice {
+  readonly state: string;
+  /** Author of the transition from the transition log; `null` — unknown (never a made-up name). */
+  readonly by: string | null;
+}
+
+/** "Status changed by <user>: Submitted"; unknown author — "by another user". */
+export function statusBannerText(notice: StatusNotice): string {
+  const status = sheetStateLabel(notice.state);
+  if (notice.by === null || notice.by.trim() === '') return t('liveStatus.changedByOther', { status });
+
+  return t('liveStatus.changedBy', { user: notice.by, status });
+}
+
+/** Label of a sheet state (`status.sheet.*`, literal keys for the catalog guard); an unknown state — as is. */
+function sheetStateLabel(state: string): string {
+  switch (state) {
+    case 'Draft':
+      return t('status.sheet.Draft');
+    case 'Submitted':
+      return t('status.sheet.Submitted');
+    case 'Approved':
+      return t('status.sheet.Approved');
+    case 'Rejected':
+      return t('status.sheet.Rejected');
+    default:
+      return state;
+  }
+}
+
+/**
+ * ✎ LIVE-STATUS: a transition of the sheet seen by the poll → re-read everything that depends on the state
+ * (`refreshSheetWorkflow` — the same keys as own workflow actions) while the action bar is held disabled
+ * (`whileStatusStale`), then a polite notice — only when the state on the screen really moved (own action in this
+ * tab already re-read it; a route step keeps the state: buttons refresh silently).
+ */
+function useStatusTransition(
+  documentId: number,
+  periodKey: number,
+  sheetDefId: number | null,
+  sheetCode: string | null,
+  transition: StatusChange | null,
+): { readonly notice: StatusNotice | null; readonly dismiss: () => void } {
+  const client = useQueryClient();
+  const [notice, setNotice] = useState<StatusNotice | null>(null);
+  const handled = useRef<string | null>(null);
+
+  useEffect(() => {
+    setNotice(null);
+  }, [documentId, periodKey, sheetDefId]);
+
+  useEffect(() => {
+    if (transition === null || sheetDefId === null || handled.current === transition.revision) return;
+    handled.current = transition.revision;
+
+    // The state the page shows now (`DocumentPage`: a sheet without a row is `Draft`); no summary — unknown.
+    const summary = client.getQueryData<DocumentSummary>(queryKeys.document.summary(documentId, periodKey));
+    const shown = sheetCode === null || summary === undefined ? undefined : (summary.sheetStates[sheetCode] ?? 'Draft');
+    const moved = shown !== undefined && shown !== transition.state;
+
+    void whileStatusStale(documentId, periodKey, () =>
+      refreshSheetWorkflow(client, documentId, { sheetDefId, periodKey }),
+    ).then(async () => {
+      if (!moved || handled.current !== transition.revision) return;
+
+      let by: string | null = null;
+      try {
+        const events = await client.fetchQuery({ ...workflowHistoryQuery(documentId, periodKey), staleTime: 5_000 });
+        const latest = Array.isArray(events)
+          ? events.find((event) => event.sheetCode === sheetCode && event.toState === transition.state)
+          : undefined;
+        by = latest?.byDisplayName ?? null;
+      } catch {
+        // The author is an accessory: without the log the notice says "another user".
+      }
+      if (handled.current === transition.revision) setNotice({ state: transition.state, by });
+    });
+  }, [client, documentId, periodKey, sheetDefId, sheetCode, transition]);
+
+  return { notice, dismiss: useCallback(() => setNotice(null), []) };
 }
 
 /** Two arrows in a circle; decorative — the button has its text. */

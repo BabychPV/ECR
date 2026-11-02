@@ -26,14 +26,21 @@ export function useWorkflowHistory(
   periodKey: number,
   enabled: boolean,
 ): UseQueryResult<WorkflowEvent[]> {
-  return useQuery({
-    queryKey: ['document', documentId, periodKey, 'workflow-history'],
+  return useQuery({ ...workflowHistoryQuery(documentId, periodKey), enabled });
+}
+
+/**
+ * ✎ LIVE-STATUS: key and reader of the transition log — ONE pair for `useWorkflowHistory` and the live banner
+ * ("Status changed by …" reads the author from the same cache entry; no second key for the same data).
+ */
+export function workflowHistoryQuery(documentId: number, periodKey: number) {
+  return {
+    queryKey: ['document', documentId, periodKey, 'workflow-history'] as const,
     queryFn: () =>
       apiFetch<WorkflowEvent[]>(
         `/api/v1/documents/${String(documentId)}/workflow/history?periodKey=${String(periodKey)}`,
       ),
-    enabled,
-  });
+  };
 }
 
 /** Рядок журналу дій на аркуші (правка комірки людиною або дія процесу); тип - зі згенерованої схеми. */

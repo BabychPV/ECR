@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePollWhileVisible } from '@/shared/ui/usePollWhileVisible';
-import { getSheetChanges, isFinalChangesError, SheetChangesPollMs } from './api';
+import { getSheetChanges, isFinalChangesError, pollSheetChanges, SheetChangesPollMs, type SheetChanges } from './api';
 
 /** What somebody else changed since the screen last read the sheet (accumulated over polls until a refresh). */
 export interface ForeignChange {
@@ -12,9 +12,19 @@ export interface ForeignChange {
   readonly tables: ReadonlyMap<number, string>;
 }
 
+/** ✎ LIVE-STATUS: the approval state of the sheet moved since the screen last read it (any transition, anyone). */
+export interface StatusChange {
+  /** New state (`Draft`/`Submitted`/`Approved`/`Rejected`). */
+  readonly state: string;
+  /** Opaque revision of the state — a new one per transition (a step of the route keeps the state, not the revision). */
+  readonly revision: string;
+}
+
 export interface SheetChangesState {
   /** `null` — nothing new from others (or the banner was dealt with). */
   readonly change: ForeignChange | null;
+  /** ✎ LIVE-STATUS: the latest transition seen by the poll; `null` — none since the chain started. */
+  readonly statusChange: StatusChange | null;
   /** The server said the poll cannot succeed for this sheet/period (`404`/`422`): no more requests. */
   readonly stopped: boolean;
   /** The change was taken care of (refresh done): hide the banner until the next foreign change. */
@@ -38,9 +48,26 @@ export interface SheetChangesState {
 export function useSheetChanges(documentId: number, sheetDefId: number | null, periodKey: number): SheetChangesState {
   const [change, setChange] = useState<ForeignChange | null>(null);
   const [stoppedKey, setStoppedKey] = useState<string | null>(null);
+  const [statusChange, setStatusChange] = useState<StatusChange | null>(null);
 
   const key = sheetDefId === null ? null : `${String(documentId)}:${String(sheetDefId)}:${String(periodKey)}`;
   const marker = useRef<string | null>(null);
+  /** ✎ LIVE-STATUS: `ETag` of the last full answer — `If-None-Match` of the next poll (`304` — nothing to do). */
+  const etag = useRef<string | null>(null);
+  /** ✎ LIVE-STATUS: revision of the approval state the chain has seen; `null` — not yet (first answer = baseline). */
+  const revision = useRef<string | null>(null);
+
+  /** A new revision after the baseline (or `statusChanged`) is a transition; an old server without the fields — none. */
+  const noteStatus = useCallback((answer: SheetChanges): void => {
+    const next = typeof answer.statusRevision === 'string' ? answer.statusRevision : null;
+    if (next === null) return;
+
+    const seen = revision.current;
+    revision.current = next;
+    if ((seen !== null && seen !== next) || answer.statusChanged === true) {
+      setStatusChange({ state: String(answer.sheetStatus), revision: next });
+    }
+  }, []);
   const busy = useRef(false);
   /** Bumped on every key change: answers that arrive for an older key are dropped. */
   const generation = useRef(0);
@@ -54,10 +81,15 @@ export function useSheetChanges(documentId: number, sheetDefId: number | null, p
     const mine = generation.current;
 
     try {
-      const answer = await getSheetChanges(documentId, sheetDefId, periodKey, marker.current);
+      const fresh = await pollSheetChanges(documentId, sheetDefId, periodKey, marker.current, etag.current);
       if (mine !== generation.current) return;
+      // ✎ LIVE-STATUS: `304` — neither the data nor the state changed for this reader; the marker stays.
+      if (fresh === null) return;
 
+      const answer = fresh.body;
       marker.current = answer.marker;
+      etag.current = fresh.etag;
+      noteStatus(answer);
       if (!answer.changed) return;
 
       setChange((previous) => {
@@ -73,14 +105,17 @@ export function useSheetChanges(documentId: number, sheetDefId: number | null, p
     } finally {
       busy.current = false;
     }
-  }, [documentId, sheetDefId, periodKey, key]);
+  }, [documentId, sheetDefId, periodKey, key, noteStatus]);
 
   // A new sheet/period/document starts a new chain: take the marker at once (the baseline of "since now").
   useEffect(() => {
     generation.current += 1;
     marker.current = null;
+    etag.current = null;
+    revision.current = null;
     busy.current = false;
     setChange(null);
+    setStatusChange(null);
     if (key !== null) void poll();
 
     return () => {
@@ -105,12 +140,17 @@ export function useSheetChanges(documentId: number, sheetDefId: number | null, p
     const mine = generation.current;
     try {
       const answer = await getSheetChanges(documentId, sheetDefId, periodKey, marker.current);
-      if (mine === generation.current) marker.current = answer.marker;
+      if (mine === generation.current) {
+        marker.current = answer.marker;
+        // The answer was not conditional: the next poll asks without `If-None-Match`.
+        etag.current = null;
+        noteStatus(answer);
+      }
     } catch (error) {
       if (mine === generation.current && isFinalChangesError(error)) setStoppedKey(key);
     }
     if (mine === generation.current) setChange(null);
-  }, [documentId, sheetDefId, periodKey, key, stopped]);
+  }, [documentId, sheetDefId, periodKey, key, stopped, noteStatus]);
 
-  return { change: stopped ? null : change, stopped, clear, rebase };
+  return { change: stopped ? null : change, statusChange: stopped ? null : statusChange, stopped, clear, rebase };
 }

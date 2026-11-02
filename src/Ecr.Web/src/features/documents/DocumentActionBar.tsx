@@ -107,6 +107,8 @@ export function DocumentActionBar({
   //   місці, а «Подати» недоступна (`submit.checking`), доки не прийде ціль нового;
   // - ✎ людина без права подання скелета не бачить: «Подати» їй не буде за будь-якої відповіді.
   const actionsPending = actions.submitPending;
+  // ✎ LIVE-STATUS: чужий перехід, новий стан у дорозі — кнопки процесу на місці, але недоступні (фокус лишається).
+  const staleProps = actions.stale ? { 'data-disabled': true, 'aria-disabled': true } : {};
   const openImport = useRef<((returnTo?: HTMLElement | null) => void) | null>(null);
   const startExport = useExportStarter();
 
@@ -182,7 +184,7 @@ export function DocumentActionBar({
       </Menu.Item>
     ) : null,
     actions.recall !== null ? (
-      <Menu.Item key="recall" onClick={actions.recall.ask}>
+      <Menu.Item key="recall" disabled={actions.stale} onClick={actions.recall.ask}>
         {t('workflow.recall')}
       </Menu.Item>
     ) : null,
@@ -207,6 +209,7 @@ export function DocumentActionBar({
         color="statusSuccess"
         loading={actions.approve.loading}
         onClick={actions.approve.ask}
+        {...staleProps}
       >
         {t('workflow.approve')}
       </Button>
@@ -242,7 +245,7 @@ export function DocumentActionBar({
 
         {/* ⛔ Затвердження і відхилення — пара: «Reject» поруч з «Approve». */}
         {actions.reject !== null && (
-          <Button color="statusError" variant="outline" onClick={actions.reject.ask}>
+          <Button color="statusError" variant="outline" onClick={actions.reject.ask} {...staleProps}>
             {t('workflow.reject')}
           </Button>
         )}
@@ -250,7 +253,7 @@ export function DocumentActionBar({
         {/* ⚠ На затвердженому аркуші головної дії немає — повернення в роботу
             (окреме небезпечне право, причина обов'язкова) лишається видимим. */}
         {actions.reopen !== null && (
-          <Button variant="default" onClick={actions.reopen.ask}>
+          <Button variant="default" onClick={actions.reopen.ask} {...staleProps}>
             {t('workflow.reopen')}
           </Button>
         )}
