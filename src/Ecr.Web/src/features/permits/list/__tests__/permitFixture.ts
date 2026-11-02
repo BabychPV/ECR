@@ -17,6 +17,7 @@ export function makePermit(id: number, patch: Partial<PermitListItem> = {}): Per
     rowCount: 10,
     tableCount: 2,
     boundSheetCount: 1,
+    usedInDocumentCount: 0,
     updatedAt: '2026-10-01T08:00:00Z',
     updatedByDisplayName: 'A. Operator',
     ...patch,
