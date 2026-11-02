@@ -1,6 +1,16 @@
 // src/Ecr.Application/Registries/Nae/NaeTreeSchema.cs
 namespace Ecr.Application.Registries.Nae;
 
+/// <summary>Where the manual NAE tree actions write and read (configuration <c>AirLimits:NaeRegistryCode</c>,
+/// <c>NaeTree:RegionSourceRegistryCode</c>).</summary>
+/// <param name="RegistryCode">NAE tree registry (the same one the air limits permits point at).</param>
+/// <param name="RegionSourceRegistryCode">Registry the seed-roots action reads the regions from.</param>
+public sealed record NaeTreeSettings(string RegistryCode, string RegionSourceRegistryCode)
+{
+    /// <summary>Defaults: <c>NAE_TREE</c>, <c>LAND_REGION</c>.</summary>
+    public static NaeTreeSettings Default { get; } = new(NaeTreeSchema.RegistryCode, "LAND_REGION");
+}
+
 /// <summary>Fixed names of the NAE tree registry (NAE plan N2).</summary>
 /// <remarks>
 /// The registry is an ordinary hierarchical registry (N1): five levels, string fields for the business key and the extra
