@@ -70,8 +70,9 @@ export function NaeStructurePage(): JSX.Element {
   // Довідника ще немає (його створює перше завантаження з AF): визначення відповідає 404.
   const notProvisioned = definition.error instanceof EcrApiError && definition.error.problem.status === 404;
 
-  // Вузли без AF (корінь, регіони з довідника, Excel): EditData, а ще не створеному довіднику - ще й EditDefinition.
-  const canManual = canEdit && (!notProvisioned || canImport);
+  // Вузли без AF (корінь, регіони з довідника, Excel): завжди EditData; якщо виклик має СТВОРИТИ довідник NAE_TREE (він
+  // ще не існує) - ще й EditDefinition + Publish (сервер: NaeTreeManualHandler). Без них - підказка «до адміністратора».
+  const canManual = canEdit && (!notProvisioned || (canImport && can(session.data, 'Registry.Publish')));
   const emptyState = (
     <NaeEmptyState
       canManual={canManual}
