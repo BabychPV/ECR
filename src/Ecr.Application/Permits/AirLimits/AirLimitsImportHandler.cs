@@ -24,7 +24,9 @@ public sealed class AirLimitsImportHandler(
     IRegistryStore registries,
     IRegistryHierarchyStore hierarchy,
     Security.IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    AirScopeColumns columns,
+    GetAirScopeCodesHandler naeScopes)
 {
     /// <summary>Permission to analyse, preview and apply an import.</summary>
     public const string Permission = "Registry.EditData";
@@ -54,7 +56,9 @@ public sealed class AirLimitsImportHandler(
         ArgumentNullException.ThrowIfNull(file);
         var ctx = await PrepareAsync(permitId, options, ct).ConfigureAwait(false);
         var preview = await importer.PreviewAsync(file, ctx.Spec, ctx.Request with { ExpectedFingerprint = null }, ct).ConfigureAwait(false);
-        return new AirLimitsPreviewDto(permitId, ctx.Number, ctx.Region, ctx.Area, ctx.ProfileCode, preview);
+        return new AirLimitsPreviewDto(
+            permitId, ctx.Number, ctx.Region, ctx.Area, ctx.ProfileCode, preview,
+            ctx.Scope.Region.EntryId, ctx.Scope.Area?.EntryId, ScopeInNaeTree: ctx.Scope.InTree);
     }
 
     /// <summary>Apply: the same plan as the preview, all or nothing, one transaction.</summary>
@@ -82,11 +86,19 @@ public sealed class AirLimitsImportHandler(
             result.Replace.OtherOwners,
             result.Diff,
             plan.Fingerprint,
-            plan.FileSha256 ?? string.Empty);
+            plan.FileSha256 ?? string.Empty,
+            ctx.Scope.Region.EntryId,
+            ctx.Scope.Area?.EntryId);
     }
 
-    private sealed record Ctx(
-        RegistryImportSpec Spec, string? ProfileCode, ImportRequest Request, string Number, string Region, string Area);
+    private sealed record Ctx(RegistryImportSpec Spec, string? ProfileCode, ImportRequest Request, string Number, AirImportScope Scope)
+    {
+        /// <summary>Region shown in the answer: the NAE tree region code of the scope.</summary>
+        public string Region => Scope.NaeRegion;
+
+        /// <summary>Area shown in the answer: the NAE tree area, else the value's code, else «no area».</summary>
+        public string Area => Scope.NaeArea ?? Scope.Area?.Code ?? AirLimitsSchema.NoArea;
+    }
 
     private async Task<Ctx> PrepareAsync(long permitId, AirLimitsImportOptions options, CancellationToken ct)
     {
@@ -108,16 +120,15 @@ public sealed class AirLimitsImportHandler(
             await RegistryAccess.RequireAsync(access, currentUser, Permission, GrantLevel.Write, def.Id, ct).ConfigureAwait(false);
         }
 
-        var region = AirLimitsSchema.NormalizeScope(options.Region, string.Empty);
-        if (region.Length == 0)
-        {
-            throw new BusinessRuleException(
-                "ECR-IMP-0422",
-                "The region of the import is required.",
-                new Dictionary<string, object?> { ["messageKey"] = AirLimitsKeys.ScopeInvalid });
-        }
+        // ✎ AIR-ON-AIR: the scope values per the kind configured on the type (Registry → entry id, Text / List → string), mapped to
+        // the NAE tree through the ONE shared matcher.
+        var (regionColumn, areaColumn) = await columns.ReadAsync(ct).ConfigureAwait(false);
+        var region = await ScopeValueAsync(regionColumn, options.RegionEntryId, options.Region, ct).ConfigureAwait(false)
+                     ?? throw ScopeInvalid("The region of the import is required.", AirLimitsSchema.Region);
+        var area = await ScopeValueAsync(areaColumn, options.AreaEntryId, options.Area, ct).ConfigureAwait(false);
+        var match = AirScopeMatcher.Match(region.Label, area?.Label, (await naeScopes.ReadAsync(ct).ConfigureAwait(false)).Regions);
+        var air = AirImportScope.From(match, region, area);
 
-        var area = AirLimitsSchema.NormalizeScope(options.Area, AirLimitsSchema.NoArea);
         var (spec, profileCode) = await SpecAsync(options, tables, ct).ConfigureAwait(false);
 
         var resolutions = options.Resolutions ?? [];
@@ -131,15 +142,67 @@ public sealed class AirLimitsImportHandler(
         var number = header.TryGetValue(permitId, out var row) ? row.Text("Permit_Number") ?? string.Empty : string.Empty;
 
         var request = new ImportRequest(
-            new ImportScope(permitId.ToString(CultureInfo.InvariantCulture), AirScope.Key(region, area)),
+            new ImportScope(permitId.ToString(CultureInfo.InvariantCulture), air.Key()),
             resolutions,
             options.ConfirmedOtherOwners,
             options.ExpectedFingerprint,
             null,
             profileCode);
 
-        return new Ctx(spec, profileCode, request, number, region, area);
+        return new Ctx(spec, profileCode, request, number, air);
     }
+
+    /// <summary>
+    /// The value of one scope column: Registry → an entry of that registry (by id); List → one of the type's values (by text or
+    /// code); Text → the text. Nothing given → <c>null</c>. A value outside the registry / list → <c>422 airScopeInvalid</c>.
+    /// </summary>
+    private async Task<AirScopeValue?> ScopeValueAsync(AirScopeColumn column, long? entryId, string? text, CancellationToken ct)
+    {
+        if (column.Kind == AirLimitsSchema.KindText)
+        {
+            var clean = text?.Trim();
+            return string.IsNullOrEmpty(clean) ? null : new AirScopeValue(null, clean, clean, clean);
+        }
+
+        if (entryId is null && string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var def = column.RegistryCode is null ? null : await registries.FindDefinitionAsync(column.RegistryCode, ct).ConfigureAwait(false);
+        if (def is null)
+        {
+            throw ScopeInvalid($"The registry {column.RegistryCode} of the {column.ColumnCode} column does not exist.", column.ColumnCode);
+        }
+
+        Domain.Entities.Dictionaries.RegistryEntry? entry;
+        if (entryId is { } id)
+        {
+            entry = await registries.FindEntryAsync(id, ct).ConfigureAwait(false);
+            if (entry is null || entry.IsDeleted || entry.RegistryDefId != def.Id)
+            {
+                entry = null;
+            }
+        }
+        else
+        {
+            var wanted = text!.Trim();
+            entry = (await registries.ListEntriesAsync(def.Id, ct).ConfigureAwait(false))
+                .Where(e => !e.IsDeleted && e.IsActive)
+                .FirstOrDefault(e => string.Equals(AirScopeColumns.NameOf(e), wanted, StringComparison.OrdinalIgnoreCase)
+                                     || string.Equals(e.Code, wanted, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return entry is null
+            ? throw ScopeInvalid($"The {column.ColumnCode} value is not in {column.RegistryCode}.", column.ColumnCode)
+            : new AirScopeValue(entry.Id, null, AirScopeColumns.NameOf(entry), entry.Code);
+    }
+
+    private static BusinessRuleException ScopeInvalid(string message, string column)
+        => new(
+            "ECR-IMP-0422",
+            message,
+            new Dictionary<string, object?> { ["messageKey"] = AirLimitsKeys.ScopeInvalid, ["column"] = column });
 
     private async Task EnsureCreateUnderAsync(AirTables tables, IReadOnlyList<MissingResolution> resolutions, CancellationToken ct)
     {

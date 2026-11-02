@@ -64,7 +64,7 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
 
         var a = await PostFileAsync(client, "/api/v1/air-limits/import/analyse", Synthetic.Bytes, new { });
         Assert.Equal((HttpStatusCode)analyse, a.StatusCode);
-        var p = await PostFileAsync(client, $"/api/v1/permits/{permitId}/air-limits/import/preview", Synthetic.Bytes, new { region = "ACCESS" });
+        var p = await PostFileAsync(client, $"/api/v1/permits/{permitId}/air-limits/import/preview", Synthetic.Bytes, new { region = NewRegion() });
         Assert.Equal((HttpStatusCode)preview, p.StatusCode);
         var c = await client.GetAsync(new Uri($"/api/v1/permits/{permitId}/air-limits", UriKind.Relative));
         Assert.Equal((HttpStatusCode)card, c.StatusCode);
@@ -80,7 +80,7 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         using var client = await SignedInAsync(app, Admin);
 
         var again = await ReadAsync(app, await client.PostAsync(new Uri("/api/v1/air-limits/provision", UriKind.Relative), null));
-        Assert.Equal("AIR_LIMITS", again.GetProperty("typeCode").GetString());
+        Assert.Equal("AIR", again.GetProperty("typeCode").GetString());
         Assert.False(again.GetProperty("typeCreated").GetBoolean());
         Assert.True(again.GetProperty("published").GetBoolean());
         Assert.False(again.GetProperty("profileCreated").GetBoolean());
@@ -96,6 +96,144 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         Assert.Equal(HttpStatusCode.Forbidden, (await reader.PutAsJsonAsync(
             new Uri("/api/v1/air-limits/import-profiles/X1", UriKind.Relative),
             new { nameL10n = new Dictionary<string, string> { ["en"] = "x" }, spec = profile.GetProperty("spec"), rowVersion = (string?)null })).StatusCode);
+    }
+
+    /// <summary>
+    /// ✎ AIR-ON-AIR (human 02.11: «таблиця параметрів відноситься до пермиту … а не як окремий тип»): provisioning appends the
+    /// sources tables to the EXISTING AIR type as a new version; the type's own «Emission limits» table stays; no AIR_LIMITS type.
+    /// REGION / AREA are configured like any column: Registry LAND_REGION (required) / Registry AIR_AREA (optional).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Provision__appends_the_sources_tables_to_the_existing_AIR_type_and_keeps_its_own_table()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+
+        var type = await ReadAsync(app, await client.GetAsync(new Uri("/api/v1/permit-types/AIR", UriKind.Relative)));
+        Assert.Equal("Published", type.GetProperty("status").GetString());
+        Assert.True(type.GetProperty("version").GetInt32() >= 2, type.ToString());
+        var tables = type.GetProperty("tables").EnumerateArray().ToDictionary(t => t.GetProperty("code").GetString()!);
+        Assert.Contains(EmissionLimitsTable, tables.Keys);
+        Assert.Contains(AirLimitsSchema.SourcesTable, tables.Keys);
+        Assert.Contains(AirLimitsSchema.SubstancesTable, tables.Keys);
+        Assert.Equal("LIMIT_NOTE", Assert.Single(tables[EmissionLimitsTable].GetProperty("columns").EnumerateArray()).GetProperty("code").GetString());
+
+        var columns = tables[AirLimitsSchema.SourcesTable].GetProperty("columns").EnumerateArray().ToDictionary(c => c.GetProperty("code").GetString()!);
+        Assert.Equal(("Lookup", "LAND_REGION", true), (columns["REGION"].GetProperty("dataType").GetString(), columns["REGION"].GetProperty("listRegistryCode").GetString(), columns["REGION"].GetProperty("required").GetBoolean()));
+        Assert.Equal(("Lookup", "AIR_AREA", false), (columns["AREA"].GetProperty("dataType").GetString(), columns["AREA"].GetProperty("listRegistryCode").GetString(), columns["AREA"].GetProperty("required").GetBoolean()));
+
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(new Uri($"/api/v1/permit-types/{AirLimitsSchema.RetiredTypeCode}", UriKind.Relative))).StatusCode);
+    }
+
+    /// <summary>
+    /// ✎ AIR-ON-AIR: scope values come from the registries (human 02.11: «Region і Area береться з Registrates») and map to the NAE
+    /// tree by name (Atyrau → ATYRAU, Offshore → OFFSHORE; Mangistau is not in this tree).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task ScopeFields__registry_values_mapped_to_the_NAE_tree()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Importer);
+
+        var fields = await ReadAsync(app, await client.GetAsync(new Uri("/api/v1/air-limits/scope-fields", UriKind.Relative)));
+        Assert.Equal("AIR", fields.GetProperty("typeCode").GetString());
+
+        var region = fields.GetProperty("region");
+        Assert.Equal(("Registry", "LAND_REGION", true, true), (region.GetProperty("kind").GetString(), region.GetProperty("registryCode").GetString(), region.GetProperty("required").GetBoolean(), region.GetProperty("registryFound").GetBoolean()));
+        var regions = region.GetProperty("options").EnumerateArray().ToDictionary(o => o.GetProperty("code").GetString()!);
+        Assert.Equal("ATYRAU", regions["REG_001"].GetProperty("naeRegion").GetString());
+        Assert.Equal(JsonValueKind.Null, regions["REG_002"].GetProperty("naeRegion").ValueKind);
+        Assert.Equal(JsonValueKind.Number, regions["REG_001"].GetProperty("entryId").ValueKind);
+
+        var area = fields.GetProperty("area");
+        Assert.Equal(("Registry", "AIR_AREA", false), (area.GetProperty("kind").GetString(), area.GetProperty("registryCode").GetString(), area.GetProperty("required").GetBoolean()));
+        var areas = area.GetProperty("options").EnumerateArray().ToDictionary(o => o.GetProperty("code").GetString()!);
+        Assert.Equal(["OFFSHORE", "ONSHORE"], areas.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal("Offshore", areas["OFFSHORE"].GetProperty("name").GetString());
+        Assert.Equal("OFFSHORE", areas["OFFSHORE"].GetProperty("naeArea").GetString());
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await (await SignedInAsync(app, [])).GetAsync(new Uri("/api/v1/air-limits/scope-fields", UriKind.Relative))).StatusCode);
+    }
+
+    /// <summary>
+    /// ✎ AIR-ON-AIR: the import takes the registry entry ids as form fields, stores them on every source row (id + code for SSRS),
+    /// says «not in NAE tree» for a region the tree does not know yet, and refuses an entry of another registry.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Import__takes_registry_entry_ids_and_stores_them_on_the_rows()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+        var regionCode = NewRegion();
+        var permitId = await NewPermitAsync(client, app);
+        var small = Small(Synthetic.Bytes, 40);
+
+        var fields = await ReadAsync(app, await client.GetAsync(new Uri("/api/v1/air-limits/scope-fields", UriKind.Relative)));
+        var regionId = fields.GetProperty("region").GetProperty("options").EnumerateArray().Single(o => o.GetProperty("code").GetString() == regionCode).GetProperty("entryId").GetInt64();
+        var offshoreId = fields.GetProperty("area").GetProperty("options").EnumerateArray().Single(o => o.GetProperty("code").GetString() == "OFFSHORE").GetProperty("entryId").GetInt64();
+        var scope = new Dictionary<string, string>
+        {
+            ["regionEntryId"] = regionId.ToString(CultureInfo.InvariantCulture),
+            ["areaEntryId"] = offshoreId.ToString(CultureInfo.InvariantCulture),
+        };
+
+        var first = await ReadAsync(app, await PostFileWithFormAsync(client, Preview(permitId), small, new { }, scope));
+        Assert.False(first.GetProperty("scopeInNaeTree").GetBoolean());
+        Assert.Equal(regionId, first.GetProperty("regionEntryId").GetInt64());
+        Assert.Equal(offshoreId, first.GetProperty("areaEntryId").GetInt64());
+        var resolutions = first.GetProperty("preview").GetProperty("missing").EnumerateArray()
+            .Select(m => (object)new { kind = "nae", code = m.GetProperty("code").GetString(), action = "create", createUnder = siteNodeId.ToString(CultureInfo.InvariantCulture) })
+            .ToArray();
+
+        var applied = await ReadAsync(app, await PostFileWithFormAsync(client, Apply(permitId), small, new { resolutions }, scope));
+        Assert.Equal(regionId, applied.GetProperty("regionEntryId").GetInt64());
+        Assert.True(applied.GetProperty("sources").GetInt32() > 0);
+
+        var card = await CardAsync(app, client, permitId);
+        Assert.All(card.GetProperty("sources").EnumerateArray(), s =>
+        {
+            Assert.Equal(regionId, s.GetProperty("regionEntryId").GetInt64());
+            Assert.Equal(regionCode, s.GetProperty("regionEntryCode").GetString());
+            Assert.Equal(offshoreId, s.GetProperty("areaEntryId").GetInt64());
+            Assert.Equal("OFFSHORE", s.GetProperty("areaEntryCode").GetString());
+        });
+
+        // The region is in the NAE tree now (its NAE were created there): the same scope maps to it.
+        var again = await ReadAsync(app, await PostFileWithFormAsync(client, Preview(permitId), small, new { }, scope));
+        Assert.True(again.GetProperty("scopeInNaeTree").GetBoolean(), again.ToString());
+        Assert.Equal(regionCode, again.GetProperty("region").GetString());
+
+        // An entry of ANOTHER registry is not an area: 422, nothing read further.
+        await AssertErrorAsync(
+            app,
+            await PostFileWithFormAsync(client, Preview(permitId), small, new { }, new Dictionary<string, string>(scope) { ["areaEntryId"] = scope["regionEntryId"] }),
+            HttpStatusCode.UnprocessableEntity,
+            "err.ECR-IMP-0422.airScopeInvalid");
+    }
+
+    private static async Task<HttpResponseMessage> PostFileWithFormAsync(
+        HttpClient client, string url, byte[] bytes, object request, IReadOnlyDictionary<string, string> form)
+    {
+        using var content = new MultipartFormDataContent();
+        var file = new ByteArrayContent(bytes);
+        file.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        content.Add(file, "file", "table33.xlsx");
+        content.Add(new StringContent(JsonSerializer.Serialize(request, Web)), "request");
+        foreach (var (name, value) in form)
+        {
+            content.Add(new StringContent(value), name);
+        }
+
+        return await client.PostAsync(new Uri(url, UriKind.Relative), content);
     }
 
     [Fact]
@@ -187,7 +325,7 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
             $"/api/v1/registries/{NaeTreeSchema.RegistryCode}/entries/{sample.GetProperty("naeEntryId").GetInt64()}/references", UriKind.Relative)));
         var use = Assert.Single(refs.GetProperty("items").EnumerateArray());
         Assert.Equal(permitId, use.GetProperty("permitId").GetInt64());
-        Assert.Equal("AIR_LIMITS", use.GetProperty("permitTypeCode").GetString());
+        Assert.Equal("AIR", use.GetProperty("permitTypeCode").GetString());
         Assert.Equal(sample.GetProperty("substances").GetArrayLength(), use.GetProperty("substanceCount").GetInt32());
 
         var substanceEntryId = sample.GetProperty("substances")[0].GetProperty("substanceEntryId").GetInt64();
@@ -316,10 +454,19 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         var permitId = await NewPermitAsync(client, app);
 
         await AssertErrorAsync(app, await PostFileAsync(client, Preview(permitId), Synthetic.Bytes, new { }), HttpStatusCode.UnprocessableEntity, "err.ECR-IMP-0422.airScopeInvalid");
+
+        // ✎ AIR-ON-AIR: a value outside the configured registry is refused (Registry kind: LAND_REGION / AIR_AREA).
         await AssertErrorAsync(
-            app, await PostFileAsync(client, Preview(permitId), Synthetic.Bytes, new { region = "X1", profileCode = "NOPE" }),
+            app, await PostFileAsync(client, Preview(permitId), Synthetic.Bytes, new { region = "NOT_A_REGION_X1" }),
+            HttpStatusCode.UnprocessableEntity, "err.ECR-IMP-0422.airScopeInvalid");
+        await AssertErrorAsync(
+            app, await PostFileAsync(client, Preview(permitId), Synthetic.Bytes, new { region = NewRegion(), area = "NOT_AN_AREA" }),
+            HttpStatusCode.UnprocessableEntity, "err.ECR-IMP-0422.airScopeInvalid");
+
+        await AssertErrorAsync(
+            app, await PostFileAsync(client, Preview(permitId), Synthetic.Bytes, new { region = NewRegion(), profileCode = "NOPE" }),
             HttpStatusCode.UnprocessableEntity, "err.ECR-IMP-0422.airProfileUnknown");
-        Assert.Equal(HttpStatusCode.NotFound, (await PostFileAsync(client, Preview(999_999_999), Synthetic.Bytes, new { region = "X1" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await PostFileAsync(client, Preview(999_999_999), Synthetic.Bytes, new { region = NewRegion() })).StatusCode);
     }
 
     // ---------- N3b: the apply is set-based ----------
@@ -414,6 +561,21 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         var permitId = await NewPermitAsync(client, app);
         var neighbour = await NewPermitAsync(client, app);
         var small = Small(Synthetic.Bytes, 40);
+
+        // ✎ AIR-ON-AIR: the region and BOTH its areas are in the NAE tree (as Atyrau on live), so «Offshore» / «Onshore» map to
+        // two NAE areas; an area the tree region does not have would be matched by region only (AirScopeMatcherTests).
+        await using (var db = new EcrDbContext(Options()))
+        {
+            var defId = (await db.RegistryDefs.AsNoTracking().SingleAsync(d => d.Code == NaeTreeSchema.RegistryCode)).Id;
+            async Task<long> NodeAsync(string code, string level, long? parent)
+                => (await ReadAsync(app, await client.PostAsJsonAsync(
+                    new Uri($"/api/v1/registries/{NaeTreeSchema.RegistryCode}/entries", UriKind.Relative),
+                    new { id = (long?)null, registryDefId = defId, code, display = new { values = new Dictionary<string, string> { ["en"] = code } }, parentEntryId = parent, levelCode = level, values = new Dictionary<string, object?>() })))
+                    .GetProperty("id").GetInt64();
+            var regionNode = await NodeAsync($"R_{region}", NaeTreeSchema.LevelRegion, null);
+            await NodeAsync($"A_{region}_OFFSHORE", NaeTreeSchema.LevelArea, regionNode);
+            await NodeAsync($"A_{region}_ONSHORE", NaeTreeSchema.LevelArea, regionNode);
+        }
 
         var offshore = await ResolveAsync(app, client, permitId, region, "OFFSHORE", small);
         var inOffshore = await ApplyBytesAsync(app, client, permitId, small, new { region, area = "OFFSHORE", resolutions = offshore });
@@ -957,7 +1119,17 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
 
     private static string Apply(long permitId) => $"/api/v1/permits/{permitId}/air-limits/import/apply";
 
-    private static string NewRegion() => $"T{Guid.NewGuid():N}"[..10].ToUpperInvariant();
+    /// <summary>The AIR type's own table that provisioning must not touch.</summary>
+    private const string EmissionLimitsTable = "EMISSION_LIMITS";
+
+    /// <summary>Region registry the REGION scope column points at by default.</summary>
+    private const string Regions = AirLimitsSchema.DefaultRegionRegistry;
+
+    private static readonly System.Collections.Concurrent.ConcurrentQueue<string> RegionPool = new();
+
+    /// <summary>A fresh region: an entry of the Region registry (code = name) that no NAE node and no other test uses yet.</summary>
+    private static string NewRegion()
+        => RegionPool.TryDequeue(out var code) ? code : throw new InvalidOperationException("The region pool of the fixture is exhausted.");
 
     private static byte[] Edit(byte[] bytes, string column, int row, string? value)
     {
@@ -1026,7 +1198,7 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         var number = $"AIR-{Guid.NewGuid():N}"[..14].ToUpperInvariant();
         var created = await client.PostAsJsonAsync(
             new Uri("/api/v1/permits", UriKind.Relative),
-            new { typeCode = "AIR_LIMITS", number, location = (string?)null, issueDate = (string?)null, validFrom = "2026-01-01", validTo = "2031-01-01", reportingFlags = (object?)null });
+            new { typeCode = AirLimitsSchema.TypeCode, number, location = (string?)null, issueDate = (string?)null, validFrom = "2026-01-01", validTo = "2031-01-01", reportingFlags = (object?)null });
         return (await ReadAsync(app, created)).GetProperty("id").GetInt64();
     }
 
@@ -1093,6 +1265,61 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
             var tree = await ReadAsync(app, await client.GetAsync(new Uri($"/api/v1/registries/{NaeTreeSchema.RegistryCode}/tree", UriKind.Relative)));
             siteNodeId = tree.GetProperty("nodes").EnumerateArray()
                 .First(n => n.GetProperty("levelCode").GetString() == "SITE").GetProperty("id").GetInt64();
+
+            // ✎ AIR-ON-AIR: the Region registry (Land bootstrap on live, the fixture here) with the two real regions and a pool of
+            // fresh regions — one per test (NewRegion), so tests stay isolated as with the old free-text region codes.
+            var regionSeed = new List<(string Code, string Name)>();
+            if ((await client.GetAsync(new Uri($"/api/v1/registries/{Regions}/definition", UriKind.Relative))).StatusCode == HttpStatusCode.NotFound)
+            {
+                await ReadAsync(app, await client.PostAsJsonAsync(
+                    new Uri("/api/v1/registries", UriKind.Relative),
+                    new { code = Regions, nameL10n = new Dictionary<string, string> { ["en"] = "Regions" }, isTemporal = false }));
+                regionSeed.AddRange([("REG_001", "Atyrau"), ("REG_002", "Mangistau")]);
+            }
+
+            var pool = Enumerable.Range(0, 80).Select(_ => $"T{Guid.NewGuid():N}"[..10].ToUpperInvariant()).ToList();
+            var regionItems = regionSeed
+                .Concat(pool.Select(p => (Code: p, Name: p)))
+                .Select(r => new { clientRowId = r.Code, op = "upsert", id = (long?)null, code = r.Code, baseVersion = (string?)null, values = new Dictionary<string, object?>(), name = r.Name })
+                .ToArray();
+            var regionBatch = await client.PostAsJsonAsync(new Uri($"/api/v1/registries/{Regions}/entries/batch?dryRun=false", UriKind.Relative), new { items = regionItems });
+            var regionText = await regionBatch.Content.ReadAsStringAsync();
+            Assert.True(regionBatch.IsSuccessStatusCode && regionText.Contains("\"applied\":true", StringComparison.Ordinal), regionText);
+            foreach (var code in pool)
+            {
+                RegionPool.Enqueue(code);
+            }
+
+            // ✎ AIR-ON-AIR: as on live, the «Air emission permit» type AIR exists BEFORE provisioning, published, with its own
+            // «Emission limits» table: provisioning must append the sources tables as a new version and leave that table alone.
+            if ((await client.GetAsync(new Uri("/api/v1/permit-types/AIR", UriKind.Relative))).StatusCode == HttpStatusCode.NotFound)
+            {
+                var name = new Dictionary<string, string> { ["en"] = "Air emission permit" };
+                var created = await ReadAsync(app, await client.PostAsJsonAsync(
+                    new Uri("/api/v1/permit-types", UriKind.Relative), new { code = "AIR", nameL10n = name, category = "Air" }));
+                var limits = new
+                {
+                    code = EmissionLimitsTable,
+                    nameL10n = new Dictionary<string, string> { ["en"] = "Emission limits" },
+                    order = 1,
+                    columns = new object[]
+                    {
+                        new
+                        {
+                            code = "LIMIT_NOTE", nameL10n = new Dictionary<string, string> { ["en"] = "Note" }, dataType = "String",
+                            unitId = (int?)null, required = true, key = true, group = (string?)null, precision = (int?)null, scale = (int?)null,
+                            listScope = (string?)null, listRegistryCode = (string?)null, siblingTableCode = (string?)null, choices = (string[]?)null, order = 1,
+                        },
+                    },
+                    rules = Array.Empty<object>(),
+                };
+                var draft = await ReadAsync(app, await client.PutAsJsonAsync(
+                    new Uri("/api/v1/permit-types/AIR", UriKind.Relative),
+                    new { rowVersion = created.GetProperty("rowVersion").GetString(), nameL10n = name, category = "Air", tables = new[] { limits }, rules = Array.Empty<object>() }));
+                await ReadAsync(app, await client.PostAsJsonAsync(
+                    new Uri("/api/v1/permit-types/AIR/publish", UriKind.Relative),
+                    new { reason = "Land-like AIR type", rowVersion = draft.GetProperty("rowVersion").GetString() }));
+            }
 
             await ReadAsync(app, await client.PostAsync(new Uri("/api/v1/air-limits/provision", UriKind.Relative), null));
             prepared = true;

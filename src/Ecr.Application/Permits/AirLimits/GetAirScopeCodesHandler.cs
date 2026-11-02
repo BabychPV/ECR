@@ -24,7 +24,13 @@ public sealed class GetAirScopeCodesHandler(
     public async Task<AirScopeCodesDto> HandleAsync(CancellationToken ct)
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        return await ReadAsync(ct).ConfigureAwait(false);
+    }
 
+    /// <summary>The same list without the permission check: for callers that checked their own permission (the import).</summary>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<AirScopeCodesDto> ReadAsync(CancellationToken ct)
+    {
         var data = accessor.Data;
         var tables = await data.TablesAsync(ct).ConfigureAwait(false);
         var entries = (await rows.ListEntriesAsync(tables.Nae.Id, null, ct).ConfigureAwait(false)).Where(e => !e.IsDeleted).ToList();
