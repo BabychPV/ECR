@@ -7,6 +7,7 @@ import { t } from '@/shared/i18n';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { GridHScroll } from './GridHScroll';
 import { GridKeyHint } from './GridKeyHint';
+import { useSheetLiveRefresh } from './liveRefresh/SheetLiveRefresh';
 import { SheetTables, type SheetTablesProps } from './SheetTables';
 import { Icon, TableNavigator, tableName } from './TableNavigator';
 import { buildTableTree, resolveTable, tableUrlKey } from './tableTreeModel';
@@ -90,6 +91,8 @@ export function SheetWorkspace({
   const [tableKey, setTableKey] = useUrlState('table');
   const [fullParam, setFullParam] = useUrlState(FullParam);
   const status = useTableStatus(documentId, periodKey);
+  // LIVE-REFRESH B2/B3: "Refresh" (Shift+F5) and the polite banner about other users' changes on this sheet.
+  const live = useSheetLiveRefresh({ documentId, periodKey, tables });
 
   const narrow = useMediaQuery(NarrowNavigatorQuery, false, { getInitialValueInEffect: false }) === true;
   // `null` — людина стан не обирала: аркуш з однією таблицею згорнутий, решта — розгорнуті.
@@ -233,7 +236,11 @@ export function SheetWorkspace({
       panel.current?.querySelector<HTMLElement>(focusedSlot === null ? '[data-table-mounted="true"]' : `[data-table-slot="${focusedSlot}"]`) ?? null;
     return (
       <>
-        <GridKeyHint readOnly={readOnly} />
+        {live.banner}
+        <div className="ecr-live-row">
+          <GridKeyHint readOnly={readOnly} />
+          {live.button}
+        </div>
         <div
           ref={panel}
           className={panelClass}
@@ -346,6 +353,7 @@ export function SheetWorkspace({
         aria-label={full && selected !== undefined ? tableName(selected) : undefined}
         data-sheet-full={full ? '' : undefined}
       >
+        {live.banner}
         <div ref={panel} className={panelClass}>
           <SheetTables
             documentId={documentId}
@@ -369,6 +377,7 @@ export function SheetWorkspace({
                   </span>
                 )}
                 <GridKeyHint readOnly={readOnly} />
+                {live.button}
                 {fullButton}
               </>
             }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePollWhileVisible } from '@/shared/ui/usePollWhileVisible';
 import { DiscussionPollMs, MessagesPageSize, PollPageSize, getMessages } from './api';
 import { mergeMessages } from './chatModel';
 import type { DiscussionMessage, DiscussionPage } from './types';
@@ -245,27 +246,4 @@ function mergeFrom(
     previous.filter((message) => message.id < first),
     refetched,
   );
-}
-
-/**
- * Calls `tick` every `ms` while the tab is visible and once when the tab becomes visible again; a hidden tab does
- * not poll at all.
- */
-export function usePollWhileVisible(tick: () => void | Promise<void>, ms: number): void {
-  const latest = useRef(tick);
-  latest.current = tick;
-
-  useEffect(() => {
-    const run = (): void => {
-      if (document.visibilityState === 'visible') void latest.current();
-    };
-
-    const timer = window.setInterval(run, ms);
-    document.addEventListener('visibilitychange', run);
-
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', run);
-    };
-  }, [ms]);
 }

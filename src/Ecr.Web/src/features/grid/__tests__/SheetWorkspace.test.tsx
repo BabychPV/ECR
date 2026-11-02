@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useEffect, useState, type JSX } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import type { DocumentTableDto } from '@/api/types';
 import { SheetWorkspace } from '../SheetWorkspace';
@@ -72,10 +73,13 @@ function LocationProbe(): null {
 function renderWorkspace(entry = '/documents/1?periodKey=202401'): void {
   render(
     <MantineProvider>
-      <MemoryRouter initialEntries={[entry]}>
-        <SheetWorkspace documentId={1} periodKey={202401} periodEnd={null} readOnly={false} tables={Tables} />
-        <LocationProbe />
-      </MemoryRouter>
+      {/* LIVE-REFRESH: «Refresh» і маркер змін аркуша працюють через кеш запитів. */}
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={[entry]}>
+          <SheetWorkspace documentId={1} periodKey={202401} periodEnd={null} readOnly={false} tables={Tables} />
+          <LocationProbe />
+        </MemoryRouter>
+      </QueryClientProvider>
     </MantineProvider>,
   );
 }

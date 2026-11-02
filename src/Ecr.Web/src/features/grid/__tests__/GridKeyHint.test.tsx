@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { GridKeyHint } from '../GridKeyHint';
-import { isRecalculateKey, isTypingOrDialogTarget } from '../shortcutKey';
+import { isRecalculateKey, isRefreshKey, isTypingOrDialogTarget } from '../shortcutKey';
 
 /** `UI-41`: видима підказка клавіш і довідка «Keyboard shortcuts». */
 function show(readOnly: boolean): void {
@@ -60,6 +60,34 @@ describe('isRecalculateKey', () => {
     expect(isRecalculateKey({ ...base, shiftKey: true })).toBe(false);
     expect(isRecalculateKey({ ...base, metaKey: true })).toBe(false);
     expect(isRecalculateKey({ ...base, code: 'F8', key: 'F8' })).toBe(false);
+  });
+});
+
+describe('isRefreshKey (LIVE-REFRESH B3)', () => {
+  const base = { code: 'F5', key: 'F5', ctrlKey: false, altKey: false, shiftKey: true, metaKey: false };
+
+  it('лише Shift+F5; голий F5 і Ctrl+F5 лишаються браузеру; F9 — не він', () => {
+    expect(isRefreshKey(base)).toBe(true);
+    expect(isRefreshKey({ ...base, code: '' })).toBe(true);
+    expect(isRefreshKey({ ...base, shiftKey: false })).toBe(false);
+    expect(isRefreshKey({ ...base, ctrlKey: true })).toBe(false);
+    expect(isRefreshKey({ ...base, altKey: true })).toBe(false);
+    expect(isRefreshKey({ ...base, metaKey: true })).toBe(false);
+    expect(isRefreshKey({ ...base, code: 'F9', key: 'F9' })).toBe(false);
+    // Не перетинається з чинними клавішами сітки.
+    expect(isRecalculateKey(base)).toBe(false);
+  });
+
+  it('є в довідці клавіш і на аркуші лише для читання', async () => {
+    show(true);
+    await userEvent.click(screen.getByRole('button', { name: /grid\.keys\.help/ }));
+    const keys = await waitFor(() => {
+      const found = [...document.querySelectorAll('.ecr-keyhint-list kbd')].map((node) => node.textContent);
+      expect(found.length).toBeGreaterThan(0);
+
+      return found;
+    });
+    expect(keys).toContain('Shift+F5');
   });
 });
 

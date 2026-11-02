@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JSX } from 'react';
 import { render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { DocumentTableDto } from '@/api/types';
 import { SheetWorkspace } from '../SheetWorkspace';
@@ -68,23 +69,26 @@ afterEach(() => {
 function show(entry: string, withBar: boolean): void {
   render(
     <MantineProvider>
-      <MemoryRouter initialEntries={[entry]}>
-        <SheetWorkspace
-          documentId={1}
-          periodKey={202610}
-          readOnly={false}
-          tables={Tables}
-          bottomBar={
-            withBar
-              ? (scroll) => (
-                  <div data-testid="bottom-bar" className="doc-sheet-bar">
-                    <div data-testid="bar-scroll">{scroll}</div>
-                  </div>
-                )
-              : undefined
-          }
-        />
-      </MemoryRouter>
+      {/* LIVE-REFRESH: «Refresh» і маркер змін аркуша працюють через кеш запитів. */}
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={[entry]}>
+          <SheetWorkspace
+            documentId={1}
+            periodKey={202610}
+            readOnly={false}
+            tables={Tables}
+            bottomBar={
+              withBar
+                ? (scroll) => (
+                    <div data-testid="bottom-bar" className="doc-sheet-bar">
+                      <div data-testid="bar-scroll">{scroll}</div>
+                    </div>
+                  )
+                : undefined
+            }
+          />
+        </MemoryRouter>
+      </QueryClientProvider>
     </MantineProvider>,
   );
 }
