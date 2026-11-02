@@ -263,7 +263,9 @@ describe('А: значення з відповіді доходить до ек�
     // (як формат у Excel): колонка зі `scale = N` показує рівно N знаків
     // (`DocumentGrid.fixedScale.test.tsx`). Серверний хвіст `.0000000000`
     // (10 знаків) при цьому все одно не просочується: C1 має scale 16, C2 — 2.
-    expect((await screen.findByTestId('cell-r2-C1')).textContent).toBe('5.0000000000000000');
+    // ✎ 2026-11-02, рішення людини («так, межа 6 знаків підходить»): scale > 6 — точність
+    // сховища, не формат; C1 (scale 16) показує найкоротший точний запис «5».
+    expect((await screen.findByTestId('cell-r2-C1')).textContent).toBe('5');
     expect((await screen.findByTestId('cell-r1-C2')).textContent).toBe('12.34');
     expect((await screen.findByTestId('cell-r2-C2')).textContent).toBe('0.00');
   });
