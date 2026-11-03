@@ -1143,6 +1143,77 @@ public sealed partial class SourceEventSyncJobTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "L6-02")]
+    public async Task ВидаленняРядківПодій_СтруктураЗмінилась_ПокиЧекали_НічогоНеВидаляє()
+    {
+        // ⛔ L6-02 (писар): аркуш таблиці читається ПІСЛЯ блокування `doc-structure`, а не до нього. Перенос версії,
+        // що зафіксувався, поки видалення чекало, міняє аркуш таблиці; прочитаний до очікування `sheetDefId` був би
+        // застарілим, і гард «аркуш поданий» перевіряв би не той аркуш.
+        // Жорстке видалення cfg.TableDef неможливе (14 зовнішніх ключів), тому перенос моделюємо його реальним
+        // наслідком: таблиця переїжджає на інший аркуш (нова версія шаблону), де період уже ПОДАНО. Повторне
+        // читання після блокування бачить новий аркуш і відмовляє; читання до блокування видалило б рядок.
+        // Мутація: перенести ReadSheetDefIdAsync перед TryAppLockAsync(StructureResourceOf) — тест червоний.
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+
+        var oldSheetId = Convert.ToInt32(
+            await ScalarAsync($"SELECT SheetDefId FROM cfg.TableDef WHERE Id = {stand.TableDefId}"), CultureInfo.InvariantCulture);
+        var versionId = Convert.ToInt32(
+            await ScalarAsync($"SELECT TemplateVersionId FROM cfg.SheetDef WHERE Id = {oldSheetId}"), CultureInfo.InvariantCulture);
+
+        // Новий аркуш і поданий на ньому січень — заздалегідь, до блокування (бачиться лише після «переносу»).
+        int newSheetId;
+        await using (var db = sql.CreateContext())
+        {
+            var sheet = new SheetDef(
+                versionId, EcrCode.Create("MOVED" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()), Name("Moved sheet"), 2);
+            db.SheetDefs.Add(sheet);
+            await db.SaveChangesAsync();
+            newSheetId = sheet.Id;
+
+            var state = new ApprovalState(stand.DocumentId, newSheetId, 202601);
+            state.Submit(stand.HumanId, Now);
+            db.ApprovalStates.Add(state);
+            await db.SaveChangesAsync();
+        }
+
+        await using var holder = new SqlConnection(sql.ConnectionString);
+        await holder.OpenAsync();
+        await using var tx = (SqlTransaction)await holder.BeginTransactionAsync();
+        await using (var take = holder.CreateCommand())
+        {
+            take.Transaction = tx;
+            take.CommandText = "DECLARE @r int; EXEC @r = sp_getapplock @Resource = @res, @LockMode = 'Exclusive', "
+                               + "@LockOwner = 'Transaction', @LockTimeout = 0; SELECT @r;";
+            take.Parameters.AddWithValue("@res", SheetEditGate.StructureResourceOf(stand.DocumentId));
+            Assert.True(Convert.ToInt32(await take.ExecuteScalarAsync(), CultureInfo.InvariantCulture) >= 0);
+        }
+
+        var job = RunAsync(stand, source);
+        var first = await Task.WhenAny(job, Task.Delay(TimeSpan.FromSeconds(4)));
+        Assert.NotSame(job, first);
+
+        // «Перенос версії» у транзакції утримувача: таблиця переїжджає на новий аркуш.
+        await using (var move = holder.CreateCommand())
+        {
+            move.Transaction = tx;
+            move.CommandText = $"UPDATE cfg.TableDef SET SheetDefId = {newSheetId} WHERE Id = {stand.TableDefId};";
+            Assert.Equal(1, await move.ExecuteNonQueryAsync());
+        }
+
+        await tx.CommitAsync();
+        await job;
+
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(0, await JournalCountAsync(stand));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
     [Trait("Finding", "R7-Y2-02")]
     public async Task ВидаленняРядківПодій_НеЧекаєДругийПеріод_ТримаючиПерший()
     {
