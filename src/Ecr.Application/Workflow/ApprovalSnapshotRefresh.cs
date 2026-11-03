@@ -1,3 +1,5 @@
+using System.Runtime.ExceptionServices;
+using System.Text.Json;
 using Ecr.Application.Ports;
 using Ecr.Domain.ValueObjects;
 
@@ -153,9 +155,73 @@ public sealed class ApprovalSnapshotRefresh(
             return true;
         }
 
-        var before = SubmissionPayload.Read(latestPayload).Where(c => sheetColumns.Contains(c.Column)).ToHashSet();
-        var after = SubmissionPayload.Read(livePayload).Where(c => sheetColumns.Contains(c.Column)).ToHashSet();
+        // ⛔ PERF (AN-135): кожен payload розбирається ОДИН раз (SubmissionPayload.Read), а множини будуються лише
+        // тоді, коли відфільтровані послідовності не збіглися поелементно. Обидва payload пише
+        // SubmissionPayload.Write у тому самому порядку (рядок, колонка), тож поелементна рівність — звичайний
+        // випадок «аркуш не змінено»; вона ж достатня для рівності множин. Інакше — рівно старе порівняння
+        // множин (дублікати й порядок не мають значення).
+        // Два незалежні розбори по ~10 МБ — паралельно (чисті функції над незмінними рядками). Помилка розбору
+        // виходить та сама й у тому самому порядку, що й доти (спершу зрізу, потім живих), — без AggregateException.
+        List<SubmissionPayloadCell> before = [], after = [];
+        ExceptionDispatchInfo? beforeError = null, afterError = null;
+        Parallel.Invoke(
+            () =>
+            {
+                try
+                {
+                    before = Filter(SubmissionPayload.Read(latestPayload), sheetColumns);
+                }
+                catch (JsonException ex)
+                {
+                    beforeError = ExceptionDispatchInfo.Capture(ex);
+                }
+            },
+            () =>
+            {
+                try
+                {
+                    after = Filter(SubmissionPayload.Read(livePayload), sheetColumns);
+                }
+                catch (JsonException ex)
+                {
+                    afterError = ExceptionDispatchInfo.Capture(ex);
+                }
+            });
+        beforeError?.Throw();
+        afterError?.Throw();
 
-        return !before.SetEquals(after);
+        if (before.Count == after.Count && SequenceEqual(before, after))
+        {
+            return false;
+        }
+
+        return !before.ToHashSet().SetEquals(after);
+    }
+
+    private static List<SubmissionPayloadCell> Filter(IReadOnlyList<SubmissionPayloadCell> cells, IReadOnlySet<int> columns)
+    {
+        var result = new List<SubmissionPayloadCell>(cells.Count);
+        foreach (var cell in cells)
+        {
+            if (columns.Contains(cell.Column))
+            {
+                result.Add(cell);
+            }
+        }
+
+        return result;
+    }
+
+    private static bool SequenceEqual(List<SubmissionPayloadCell> left, List<SubmissionPayloadCell> right)
+    {
+        for (var i = 0; i < left.Count; i++)
+        {
+            if (!left[i].Equals(right[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

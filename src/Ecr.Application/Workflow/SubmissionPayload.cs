@@ -69,7 +69,44 @@ public static class SubmissionPayload
 
     /// <summary>Читає клітинки payload будь-якого покоління (голий масив, з <c>type</c> і без,
     /// або об'єкт із секцією <c>cells</c>).</summary>
+    /// <remarks>
+    /// ⛔ PERF (AN-135): один прохід серіалізатора замість <c>JsonDocument.Parse</c> + <c>GetRawText</c> +
+    /// другого розбору (~10 МБ на документі з 91 таблицею). Форма визначається першим значущим символом:
+    /// <c>[</c> — голий масив, <c>{</c> — об'єкт, з якого береться лише <c>cells</c> (решта пропускається,
+    /// але синтаксис перевіряється так само; повторений ключ — виграє останній, як і в <c>TryGetProperty</c>).
+    /// Будь-що інше — старий шлях через <see cref="JsonDocument"/> (ті самі <c>[]</c> чи виняток).
+    /// </remarks>
     public static IReadOnlyList<SubmissionPayloadCell> Read(string payloadJson)
+    {
+        ArgumentNullException.ThrowIfNull(payloadJson);
+
+        switch (FirstSignificant(payloadJson))
+        {
+            case '[':
+                return JsonSerializer.Deserialize<List<SubmissionPayloadCell>>(payloadJson) ?? [];
+            case '{':
+                return JsonSerializer.Deserialize<SubmissionPayloadCellsOnly>(payloadJson)?.Cells ?? [];
+            default:
+                return ReadViaDocument(payloadJson);
+        }
+    }
+
+    /// <summary>Перший символ після пробільних символів JSON; <c>'\0'</c> — немає.</summary>
+    private static char FirstSignificant(string json)
+    {
+        foreach (var ch in json)
+        {
+            if (ch is not (' ' or '\t' or '\n' or '\r'))
+            {
+                return ch;
+            }
+        }
+
+        return '\0';
+    }
+
+    /// <summary>Попередня реалізація <see cref="Read"/> — для форм, які не є ні масивом, ні об'єктом.</summary>
+    private static List<SubmissionPayloadCell> ReadViaDocument(string payloadJson)
     {
         using var doc = JsonDocument.Parse(payloadJson);
         var root = doc.RootElement;
@@ -189,6 +226,10 @@ public sealed record SubmissionPayloadCell(
 public sealed record SubmissionPayloadHeaderValue(
     [property: JsonPropertyName("value")] string? Value,
     [property: JsonPropertyName("type"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Type);
+
+/// <summary>Лише секція <c>cells</c> об'єктної форми payload — для однопрохідного <see cref="SubmissionPayload.Read"/>.</summary>
+internal sealed record SubmissionPayloadCellsOnly(
+    [property: JsonPropertyName("cells")] List<SubmissionPayloadCell>? Cells);
 
 /// <summary>Форма payload, коли є секція <c>header</c> — інакше голий масив клітинок (сумісність).</summary>
 internal sealed record SubmissionPayloadEnvelope(
