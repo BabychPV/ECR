@@ -55,6 +55,11 @@ test.describe('«Піти» у beforeunload (L8-08)', () => {
     await expect(page.locator('.edit-input-wrapper')).toHaveCount(0);
     expect((await failed).status()).toBe(500);
 
+    // Мережа здорова до закриття: перехоплення Playwright на вивантаженні сторінки ненадійне (у CI
+    // правка не доїхала саме через нього), тож маячок і збір ідуть повз `route`.
+    leaving = true;
+    await page.unroute(`**/api/v1/documents/${DocumentId}/cells`);
+
     // ⚠ `close({ runBeforeUnload })` не чекає на діалог: ловимо подію, відповідаємо «Піти» й чекаємо закриття.
     const dialogShown = page.waitForEvent('dialog', { timeout: 15_000 });
     const closed = page.waitForEvent('close', { timeout: 30_000 });
@@ -67,7 +72,6 @@ test.describe('«Піти» у beforeunload (L8-08)', () => {
     // встигає до вивантаження, тож ЦЕЙ тест зелений і без `pagehide`-маячка (перевірено локально). Він
     // страхує наскрізний шлях «Піти -> правка на сервері»; відсутність маячка доводять vitest-и
     // `autosave.leavePagehide.test.tsx` (червоні без фіксу).
-    leaving = true;
     await dialog.accept();
     await closed;
 
