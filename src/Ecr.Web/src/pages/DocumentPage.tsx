@@ -49,7 +49,7 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { useProjectCurrentPeriodDefault } from '@/features/documents/useProjectCurrentPeriodDefault';
 import { SheetStrip } from '@/features/documents/SheetStrip';
 import { copyFieldsOf, sheetTabKey } from '@/features/documents/sheetCopies/sheetCopyTypes';
-import { groupBySheet, sheetItemsOf } from '@/features/documents/sheetCopies/sheetGroups';
+import { groupBySheet, sheetItemsOf, stateOfGroup } from '@/features/documents/sheetCopies/sheetGroups';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/settleEdits';
@@ -470,13 +470,13 @@ export function DocumentPage(): JSX.Element {
     revealHeld(held);
   }, [periodKey, tables.data, revealHeld]);
 
-  // ⚠ Стан береться з `SheetStates` документа за КОДОМ аркуша: скалярного
+  // ⚠ Стан береться з `SheetStates` документа за ключом аркуша (`КОД` для оригіналу, `КОД#sheetCopyId` для копії): скалярного
   // статусу документа не існує (D-93) — аркуші за один період бувають у
   // різних станах одночасно.
   const state =
     active === undefined || summary.data === undefined
       ? ''
-      : (summary.data.sheetStates[active.code] ?? 'Draft');
+      : stateOfGroup(active, summary.data.sheetStates);
   // ⛔ Редагованість — питання ОДНОГО стану аркуша, і відповідає на нього
   // таблиця переходів (`features/workflow/transitions.ts`), а не порівняння
   // рядків тут. Порівняння на місці — це друга копія машини станів домену, і
@@ -768,6 +768,7 @@ export function DocumentPage(): JSX.Element {
           periodKey={periodKey}
           sheetDefId={active.sheetDefId}
           sheetCode={active.code}
+          sheetCopyId={active.sheetCopyId}
           sheetName={active.name}
           state={state}
           lock={lock}

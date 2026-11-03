@@ -1,60 +1,49 @@
-import type { DocumentTableDto, SheetDto } from '@/api/types';
-import { localized, type LocalizedText } from '@/shared/i18n/localized';
+import type { DocumentTableDto, RenameSheetGroupRequest, SheetCopyCreated } from '@/api/types';
+import { localized } from '@/shared/i18n/localized';
 
 /*
- * TODO(contract): replace with schema.d.ts types.
- *
- * Сервер (lane/integ-repeatable-sheets-m) ще не запушив контракт, тому ПЛАНОВА форма
- * лежить тут, в одному файлі. Коли `openapi.snapshot.json` / `schema.d.ts` з'являться, ці
- * типи замінюються на згенеровані (`DocumentTableDto['sheetCopyId']` тощо), а `copyFieldsOf`
- * і `isSheetCopyable` стають звичайним доступом до полів.
- *
- * Планова форма:
- *   SheetDto.isCopyable: boolean
- *   DocumentTableDto.sheetCopyId?: number | null   (null / немає — оригінал)
- *   DocumentTableDto.copyOrdinal: number           (1 — оригінал)
- *   DocumentTableDto.displayNameL10n: LocalizedText (назва групи аркушів, яку можна перейменувати)
- *   DocumentTableDto.isCopyable: boolean
+ * Типи копій аркушів — згенеровані (`schema.d.ts`): `DocumentTableDto.sheetCopyId` / `copyOrdinal` /
+ * `isCopyable` / `displayNameL10n`, `SheetDto.isCopyable`, `SheetCopyCreated`, `RenameSheetGroupRequest`.
  */
 
-/** Планові поля копій аркуша в таблиці документа. Необов'язкові, доки контракту немає. */
-export interface PlannedTableCopyFields {
-  readonly sheetCopyId?: number | null;
-  readonly copyOrdinal?: number;
-  readonly displayNameL10n?: LocalizedText;
-  readonly isCopyable?: boolean;
-}
+export type { RenameSheetGroupRequest, SheetCopyCreated };
 
-/** Рядок перелічення копій аркуша після застосування значень за замовчуванням. */
+/** Поля копій таблиці з нормалізованим `sheetCopyId` (`undefined` / `null` — оригінал). */
 export interface TableCopyFields {
   /** `null` — оригінал. */
   readonly sheetCopyId: number | null;
   /** 1 — оригінал; копії нумеруються далі. */
   readonly copyOrdinal: number;
-  readonly displayNameL10n: LocalizedText | undefined;
+  readonly displayNameL10n: DocumentTableDto['displayNameL10n'];
   readonly isCopyable: boolean;
 }
 
-/** Поля копій таблиці; старий сервер (без полів) дає «оригінал, не копіюється». */
+/** Поля копій таблиці; `sheetCopyId` необов'язковий у контракті — `undefined` читається як оригінал. */
 export function copyFieldsOf(table: DocumentTableDto): TableCopyFields {
-  const planned = table as DocumentTableDto & PlannedTableCopyFields;
-
   return {
-    sheetCopyId: planned.sheetCopyId ?? null,
-    copyOrdinal: planned.copyOrdinal ?? 1,
-    displayNameL10n: planned.displayNameL10n,
-    isCopyable: planned.isCopyable ?? false,
+    sheetCopyId: table.sheetCopyId ?? null,
+    copyOrdinal: table.copyOrdinal,
+    displayNameL10n: table.displayNameL10n,
+    isCopyable: table.isCopyable,
   };
-}
-
-/** `SheetDto.isCopyable` шаблону (планове поле). */
-export function isSheetCopyable(sheet: SheetDto): boolean {
-  return (sheet as SheetDto & { isCopyable?: boolean }).isCopyable ?? false;
 }
 
 /** Ключ вкладки: оригінал — код аркуша (адреса `?sheet=` не змінилась), копія — `код~id`. */
 export function sheetTabKey(sheetCode: string, sheetCopyId: number | null): string {
   return sheetCopyId === null ? sheetCode : `${sheetCode}~${String(sheetCopyId)}`;
+}
+
+/**
+ * Ключ у `DocumentSummary.sheetStates`: оригінал — `КОД`, копія — `КОД#sheetCopyId`
+ * (контракт сервера; відрізняється від ключа вкладки `код~id`).
+ */
+export function sheetStateKey(sheetCode: string, sheetCopyId: number | null): string {
+  return sheetCopyId === null ? sheetCode : `${sheetCode}#${String(sheetCopyId)}`;
+}
+
+/** Ключ `sheetStates` належить копії (`КОД#id`), а не окремому аркушу шаблону. */
+export function isCopyStateKey(key: string): boolean {
+  return /#\d+$/.test(key);
 }
 
 /**
@@ -70,17 +59,5 @@ export function sheetTabLabel(name: string, copyOrdinal: number, isCopy: boolean
 
 /** Назва групи аркушів: перейменована (`displayNameL10n`), інакше назва шаблону. */
 export function groupNameOf(table: DocumentTableDto): string {
-  return localized(copyFieldsOf(table).displayNameL10n) || localized(table.sheetNameL10n) || '—';
-}
-
-/** Відповідь на `POST …/copies` — нова таблиця (планова). */
-export type CreatedSheetCopy = DocumentTableDto & PlannedTableCopyFields;
-
-/**
- * Тіло `PUT …/sheets/{sheetDefId}/name`.
- *
- * Припущення: та сама форма, що й у `SaveSheetDefRequest.nameL10n` — мова → текст.
- */
-export interface RenameSheetGroupRequest {
-  readonly nameL10n: Record<string, string>;
+  return localized(table.displayNameL10n) || localized(table.sheetNameL10n) || '—';
 }

@@ -1,5 +1,4 @@
 import type { SheetDto } from '@/api/types';
-import { isSheetCopyable } from '@/features/documents/sheetCopies/sheetCopyTypes';
 import type { LocalizedValue } from '@/shared/ui/LocalizedInput';
 
 /**
@@ -17,7 +16,7 @@ export interface SheetDraft {
   readonly sheetGroup: string;
   readonly isMandatory: boolean;
   readonly isVisible: boolean;
-  /** Чи можна копіювати аркуш у документі (планове `SheetDto.isCopyable`). */
+  /** Чи можна копіювати аркуш у документі (`SheetDto.isCopyable`). */
   readonly isCopyable: boolean;
 
   /** Чи це нова чернетка: код нової ще можна набрати. */
@@ -47,7 +46,7 @@ export function draftOf(sheet: SheetDto): SheetDraft {
     sheetGroup: sheet.sheetGroup ?? '',
     isMandatory: sheet.isMandatory,
     isVisible: sheet.isVisible,
-    isCopyable: isSheetCopyable(sheet),
+    isCopyable: sheet.isCopyable,
     isNew: false,
   };
 }

@@ -1,17 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { DocumentTableDto } from '@/api/types';
-import { groupBySheet, sheetItemsOf } from '../sheetGroups';
-import type { PlannedTableCopyFields } from '../sheetCopyTypes';
+import { groupBySheet, sheetItemsOf, stateOfGroup } from '../sheetGroups';
 
-/** Таблиця документа з плановими полями копій (контракт сервера ще не запушено). */
-function table(
-  tableInstanceId: number,
-  sheetCode: string,
-  copy: PlannedTableCopyFields = {},
-  sheetOrdinal = 1,
-): DocumentTableDto {
+type CopyFields = Partial<Pick<DocumentTableDto, 'sheetCopyId' | 'copyOrdinal' | 'isCopyable' | 'displayNameL10n'>>;
+
+/** Таблиця документа з полями копій за контрактом (`DocumentTableDto`). */
+function table(tableInstanceId: number, sheetCode: string, copy: CopyFields = {}, sheetOrdinal = 1): DocumentTableDto {
   return {
     allowsDynamicRows: false,
+    copyOrdinal: 1,
+    isCopyable: false,
     maxDynamicRows: null,
     sheetCode,
     sheetDefId: sheetOrdinal * 10,
@@ -43,8 +41,16 @@ describe('groupBySheet: вкладки копій аркуша', () => {
 
     expect(groups.map((g) => g.name)).toEqual(['Sheet GEN 1', 'Sheet GEN 2', 'Sheet GEN 3']);
     expect(groups.map((g) => g.key)).toEqual(['GEN', 'GEN~77', 'GEN~78']);
-    // Код аркуша спільний: за ним читається стан аркуша (`sheetStates`).
+    // Код аркуша спільний; ключі стану (`sheetStates`) — `КОД` для оригіналу і `КОД#id` для копій.
     expect(groups.every((g) => g.code === 'GEN')).toBe(true);
+    expect(groups.map((g) => g.stateKey)).toEqual(['GEN', 'GEN#77', 'GEN#78']);
+  });
+
+  it('sheetCopyId відсутній у відповіді (необов\'язкове поле) — це оригінал', () => {
+    const [only] = groupBySheet([table(1, 'GEN')]);
+
+    expect(only?.sheetCopyId).toBeNull();
+    expect(only?.stateKey).toBe('GEN');
   });
 
   it('перейменована група: displayNameL10n замінює назву шаблону на всіх вкладках', () => {
@@ -70,15 +76,29 @@ describe('groupBySheet: вкладки копій аркуша', () => {
     expect(groups[0]?.tables.map((x) => x.tableInstanceId)).toEqual([1, 3]);
   });
 
-  it('смуга аркушів: код пункту — ключ вкладки, стан — за кодом аркуша', () => {
-    const groups = groupBySheet([
+  it('активна вкладка-копія (DocumentPage) читає власний стан «КОД#id», а не стан оригіналу', () => {
+    const [original, copy] = groupBySheet([
       table(1, 'GEN', { sheetCopyId: null, copyOrdinal: 1 }),
       table(2, 'GEN', { sheetCopyId: 77, copyOrdinal: 2 }),
     ]);
+    const states = { GEN: 'Submitted', 'GEN#77': 'Rejected' };
 
-    expect(sheetItemsOf(groups, { GEN: 'Submitted' })).toEqual([
+    expect(original && stateOfGroup(original, states)).toBe('Submitted');
+    expect(copy && stateOfGroup(copy, states)).toBe('Rejected');
+  });
+
+  it('смуга аркушів: код пункту — ключ вкладки, стан копії — з власного ключа «КОД#id», не з оригіналу', () => {
+    const groups = groupBySheet([
+      table(1, 'GEN', { sheetCopyId: null, copyOrdinal: 1 }),
+      table(2, 'GEN', { sheetCopyId: 77, copyOrdinal: 2 }),
+      table(3, 'GEN', { sheetCopyId: 78, copyOrdinal: 3 }),
+    ]);
+
+    expect(sheetItemsOf(groups, { GEN: 'Submitted', 'GEN#77': 'Approved' })).toEqual([
       { code: 'GEN', name: 'Sheet GEN 1', state: 'Submitted' },
-      { code: 'GEN~77', name: 'Sheet GEN 2', state: 'Submitted' },
+      { code: 'GEN~77', name: 'Sheet GEN 2', state: 'Approved' },
+      // Копії без запису в `sheetStates` — Draft, а не стан оригіналу.
+      { code: 'GEN~78', name: 'Sheet GEN 3', state: 'Draft' },
     ]);
   });
 });

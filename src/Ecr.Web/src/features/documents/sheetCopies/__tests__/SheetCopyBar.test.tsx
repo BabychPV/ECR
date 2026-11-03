@@ -10,7 +10,7 @@ import { SheetCopyBar, type SheetCopyTarget } from '../SheetCopyBar';
  *
  * ⛔ Сервер — справжній `fetch`-стаб (`apiFetch` → `EcrApiError` → `ErrorAlert`), а не підмінені
  * функції `sheetCopyApi`: так перевіряється той самий шлях запиту й розбір відмови, що й у продукті.
- * Контракт копій ще не запушено (TODO(contract) у `sheetCopyTypes.ts`), тому відповіді — планової форми.
+ * Відповіді — форми контракту (`schema.d.ts`: `SheetCopyCreated`, `RenameSheetGroupRequest`, 409 `ECR-DOC-0409`).
  */
 interface Sent {
   readonly url: string;
@@ -119,7 +119,8 @@ describe('SheetCopyBar: додати копію', () => {
     mockServer({
       'POST /api/v1/documents/42/sheets/10/copies': {
         status: 201,
-        body: { sheetCode: 'GEN', sheetCopyId: 78, copyOrdinal: 3 },
+        // Контракт: `SheetCopyCreated` — лише Id копії та її номер у групі, не таблиця.
+        body: { sheetCopyId: 78, ordinal: 3 },
       },
     });
     const { onSelect, invalidate } = show(Original);
@@ -229,10 +230,11 @@ describe('SheetCopyBar: видалити копію', () => {
           status: 409,
           errorCode: 'ECR-DOC-0409',
           correlationId: 'cid-del',
-          detail: 'A submitted copy cannot be deleted.',
-          // ⚠ Припущення: сервер кладе причину в messageKey (як ECR-DOC-0409 при видаленні документа);
-          // без нього `ErrorAlert` показує лише заголовок і код (див. тест «без messageKey» вище).
-          messageKey: 'err.ECR-DOC-0409.sheetCopyDelete',
+          detail: 'The copy cannot be deleted: in period 202606 it is Submitted. Return it to draft first.',
+          // Реальний ключ сервера (seed SHEETCOPY-sheet-copies.sql) і його підстановки.
+          messageKey: 'err.ECR-DOC-0409.sheetCopyHasWorkflow',
+          periodKey: 202606,
+          workflowStatus: 'Submitted',
         },
       },
     });
@@ -242,8 +244,31 @@ describe('SheetCopyBar: видалити копію', () => {
     fireEvent.click(await screen.findByTestId('confirm-verb'));
 
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('A submitted copy cannot be deleted.');
+    expect(alert.textContent).toContain('in period 202606 it is Submitted');
     expect(alert.textContent).toContain('ECR-DOC-0409');
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('409 «це оригінал» (messageKey sheetCopyIsOriginal) — текст сервера в банері', async () => {
+    mockServer({
+      'DELETE /api/v1/documents/42/sheet-copies/77': {
+        status: 409,
+        body: {
+          title: 'Conflict',
+          status: 409,
+          errorCode: 'ECR-DOC-0409',
+          correlationId: 'cid-orig',
+          detail: 'The original sheet cannot be deleted: only a copy can.',
+          messageKey: 'err.ECR-DOC-0409.sheetCopyIsOriginal',
+        },
+      },
+    });
+    show(Copy);
+
+    fireEvent.click(screen.getByTestId('sheet-copy-delete'));
+    fireEvent.click(await screen.findByTestId('confirm-verb'));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('only a copy can');
   });
 });

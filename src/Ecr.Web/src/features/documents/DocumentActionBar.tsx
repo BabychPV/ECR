@@ -31,6 +31,8 @@ interface DocumentActionBarProps {
   readonly sheetDefId: number;
   /** Код активного аркуша — для банера «хто, коли» (UI-26). */
   readonly sheetCode: string;
+  /** RS: копія активного аркуша; `null`/не задано — оригінал. */
+  readonly sheetCopyId?: number | null;
   readonly sheetName: string;
   /** Стан активного аркуша за період. */
   readonly state: string;
@@ -80,6 +82,7 @@ export function DocumentActionBar({
   periodKey,
   sheetDefId,
   sheetCode,
+  sheetCopyId = null,
   sheetName,
   state,
   lock,
@@ -96,7 +99,7 @@ export function DocumentActionBar({
   resultsStaleSince,
   staleReminderHost,
 }: DocumentActionBarProps): JSX.Element {
-  const actions = useSheetActions({ documentId, sheetDefId, sheetName, periodKey, state, lock });
+  const actions = useSheetActions({ documentId, sheetDefId, sheetCopyId, sheetName, periodKey, state, lock });
   useStaleResultsReminder(documentId, resultsStale === true, actions.recalculate !== null, staleReminderHost);
   // ✎ D-441 CLS: доки сервер не відповів, ЧИ і ЯКИЙ період подавати, остаточна форма рядка дій невідома
   // (кнопка «Подати: <період>», ▾, «Next to submit: …» або нічого) — скелет замість дій (`DocumentToolbar`,

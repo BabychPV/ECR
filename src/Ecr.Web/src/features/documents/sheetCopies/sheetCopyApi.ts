@@ -1,16 +1,15 @@
 import { apiFetch } from '@/api/client';
-import type { CreatedSheetCopy, RenameSheetGroupRequest } from './sheetCopyTypes';
+import type { RenameSheetGroupRequest, SheetCopyCreated } from '@/api/types';
 
 /**
- * Звернення до копій аркушів документа (TODO(contract): типи — із `schema.d.ts`, коли контракт
- * сервера запушено; див. `sheetCopyTypes.ts`).
+ * Звернення до копій аркушів документа (типи — із `schema.d.ts`).
  *
  * ⚠ Адреси записані ПОВНІСТЮ поруч із викликом — так їх шукає сторож споживачів дій сервера.
  */
 
-/** Створює копію аркуша; повертає нову таблицю. */
-export function createSheetCopy(documentId: number, sheetDefId: number): Promise<CreatedSheetCopy> {
-  return apiFetch<CreatedSheetCopy>(
+/** Створює копію аркуша; повертає лише Id копії (`sheetCopyId`) і її номер у групі — таблиці перечитуються. */
+export function createSheetCopy(documentId: number, sheetDefId: number): Promise<SheetCopyCreated> {
+  return apiFetch<SheetCopyCreated>(
     `/api/v1/documents/${String(documentId)}/sheets/${String(sheetDefId)}/copies`,
     { method: 'POST' },
   );

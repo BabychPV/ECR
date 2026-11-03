@@ -36,8 +36,8 @@ export interface SheetCopyBarProps {
  * ⚠ Окремий лінивий чанк (`D-132`): `DocumentPage` стоїть упритул до бюджету, а аркуша, що копіюється,
  * у більшості документів немає — компонент не малює нічого й сторінка його не вантажить.
  *
- * ⛔ Відмову сервера (409 для оригіналу чи поданої копії) показує `ErrorAlert` ПРИЧИНОЮ сервера;
- * власних кодів помилок тут немає (у `ErrorCodes.cs` код копій аркушів ще не заведено).
+ * ⛔ Відмову сервера (409 `ECR-DOC-0409`: `sheetCopyIsOriginal`, `sheetCopyHasWorkflow`) показує `ErrorAlert`
+ * текстом каталогу за `messageKey`; власних кодів помилок тут немає.
  */
 export function SheetCopyBar({ documentId, target, canAdd, onSelect }: SheetCopyBarProps): JSX.Element | null {
   const queryClient = useQueryClient();
@@ -58,7 +58,7 @@ export function SheetCopyBar({ documentId, target, canAdd, onSelect }: SheetCopy
     mutationFn: () => createSheetCopy(documentId, target.sheetDefId),
     onSuccess: async (created) => {
       await refresh();
-      onSelect(sheetTabKey(target.sheetCode, created.sheetCopyId ?? null));
+      onSelect(sheetTabKey(target.sheetCode, created.sheetCopyId));
     },
   });
 

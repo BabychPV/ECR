@@ -9,7 +9,8 @@ import { testTheme } from '@/test/render';
 
 /**
  * Копії аркуша на сторінці документа: вкладки «<Назва> N», дії копій над смугою, «Delete copy» лише на копії.
- * TODO(contract): поля `sheetCopyId` / `copyOrdinal` / `displayNameL10n` / `isCopyable` — планові (`sheetCopyTypes.ts`).
+ * Поля `sheetCopyId` / `copyOrdinal` / `displayNameL10n` / `isCopyable` — за контрактом (`schema.d.ts`); стан копії —
+ * у `sheetStates` за ключем `КОД#sheetCopyId`.
  */
 vi.mock('@/features/methodologies/CalculationResultsPanel', () => ({
   CalculationResultsPanel: (): JSX.Element => <div data-testid="calc-stub" />,
@@ -44,7 +45,7 @@ function tableOf(tableInstanceId: number, copy: Record<string, unknown>): Record
   };
 }
 
-function mockFetch(): void {
+function mockFetch(sheetStates: Record<string, string> = { GEN: 'Draft' }): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -94,7 +95,7 @@ function mockFetch(): void {
           nameL10n: { values: {} },
           projectId: 1,
           sheetCount: 1,
-          sheetStates: { GEN: 'Draft' },
+          sheetStates,
           hasLateEdits: false,
         });
       }
@@ -141,6 +142,35 @@ describe('DocumentPage: копії аркуша', () => {
         expect(screen.getByRole('tab', { name: /General 2/ }).getAttribute('aria-selected')).toBe('true');
       });
       expect(screen.getByTestId('sheet-copy-delete')).toBeDefined();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'вкладка копії показує власний стан із ключа «GEN#77», а не стан оригіналу',
+    async () => {
+      mockFetch({ GEN: 'Draft', 'GEN#77': 'Submitted' });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <MantineProvider theme={testTheme}>
+          <MemoryRouter initialEntries={[`/documents/1?periodKey=${String(Period)}`]}>
+            <QueryClientProvider client={client}>
+              <Routes>
+                <Route path="/documents/:id" element={<DocumentPage />} />
+              </Routes>
+            </QueryClientProvider>
+          </MemoryRouter>
+        </MantineProvider>,
+      );
+
+      const first = await screen.findByRole('tab', { name: /General 1/ }, { timeout: SlowEnvTimeout });
+      const second = screen.getByRole('tab', { name: /General 2/ });
+
+      await waitFor(() => {
+        expect(first.textContent).toContain('⟦status.sheet.Draft⟧');
+        expect(second.textContent).toContain('⟦status.sheet.Submitted⟧');
+      });
+      expect(first.textContent).not.toContain('Submitted');
     },
     SlowEnvTimeout,
   );

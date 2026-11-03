@@ -12,6 +12,11 @@ export const SheetChangesPollMs = 30_000;
  * expression and does not see addresses assembled by helpers.
  */
 
+/** Query tail of the marker: `since` and, for a sheet copy, `sheetCopyId` (without it — the original). */
+function changesTail(since: string | null, sheetCopyId: number | null): string {
+  return (since === null ? '' : `&since=${encodeURIComponent(since)}`) + (sheetCopyId === null ? '' : `&sheetCopyId=${String(sheetCopyId)}`);
+}
+
 /**
  * Change marker of the sheet data for a period. Without `since` — only the current marker (`changed = false`);
  * with it — whether SOMEBODY ELSE changed the visible tables since then (own PATCHes only move the marker).
@@ -21,8 +26,9 @@ export function getSheetChanges(
   sheetDefId: number,
   periodKey: number,
   since: string | null,
+  sheetCopyId: number | null = null,
 ): Promise<SheetChanges> {
-  const tail = since === null ? '' : `&since=${encodeURIComponent(since)}`;
+  const tail = changesTail(since, sheetCopyId);
 
   return apiFetch<SheetChanges>(
     `/api/v1/documents/${String(documentId)}/sheets/${String(sheetDefId)}/changes?periodKey=${String(periodKey)}${tail}`,
@@ -39,8 +45,9 @@ export function pollSheetChanges(
   periodKey: number,
   since: string | null,
   etag: string | null,
+  sheetCopyId: number | null = null,
 ): Promise<Conditional<SheetChanges> | null> {
-  const tail = since === null ? '' : `&since=${encodeURIComponent(since)}`;
+  const tail = changesTail(since, sheetCopyId);
 
   return apiFetchIfChanged<SheetChanges>(
     `/api/v1/documents/${String(documentId)}/sheets/${String(sheetDefId)}/changes?periodKey=${String(periodKey)}${tail}`,

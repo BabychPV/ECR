@@ -1,11 +1,13 @@
 import type { DocumentTableDto } from '@/api/types';
-import { copyFieldsOf, groupNameOf, sheetTabKey, sheetTabLabel } from './sheetCopyTypes';
+import { copyFieldsOf, groupNameOf, sheetStateKey, sheetTabKey, sheetTabLabel } from './sheetCopyTypes';
 
 /** Вкладка документа: аркуш шаблону або його копія — з таблицями. */
 export interface SheetGroup {
   sheetDefId: number;
-  /** Код аркуша шаблону: ключ у `sheetStates`; у оригіналу й копій однаковий. */
+  /** Код аркуша шаблону; у оригіналу й копій однаковий. */
   code: string;
+  /** Ключ у `sheetStates`: оригінал — `КОД`, копія — `КОД#sheetCopyId`. */
+  stateKey: string;
   /** Ключ вкладки (`?sheet=`): оригінал — код, копія — `код~id`. */
   key: string;
   /** Підпис вкладки («Назва», «Назва 2»). */
@@ -19,12 +21,20 @@ export interface SheetGroup {
   tables: DocumentTableDto[];
 }
 
-/** Елемент смуги аркушів: `code` — ключ вкладки, стан береться за кодом аркуша. */
+/**
+ * Стан вкладки: оригінал — `sheetStates[КОД]`, копія — `sheetStates[КОД#sheetCopyId]` (власний стан, не оригіналу).
+ * Немає запису — `Draft` (так само його читає сервер).
+ */
+export function stateOfGroup(group: Pick<SheetGroup, 'stateKey'>, states: Readonly<Record<string, string>>): string {
+  return states[group.stateKey] ?? 'Draft';
+}
+
+/** Елемент смуги аркушів: `code` — ключ вкладки, стан береться за ключем стану вкладки (`stateOfGroup`). */
 export function sheetItemsOf(
   sheets: readonly SheetGroup[],
   states: Readonly<Record<string, string>>,
 ): { code: string; name: string; state: string }[] {
-  return sheets.map((s) => ({ code: s.key, name: s.name, state: states[s.code] ?? 'Draft' }));
+  return sheets.map((s) => ({ code: s.key, name: s.name, state: stateOfGroup(s, states) }));
 }
 
 /**
@@ -48,6 +58,7 @@ export function groupBySheet(tables: DocumentTableDto[]): SheetGroup[] {
     const group = sheets.get(key) ?? {
       sheetDefId: table.sheetDefId,
       code: table.sheetCode,
+      stateKey: sheetStateKey(table.sheetCode, copy.sheetCopyId),
       key,
       name: sheetTabLabel(groupNameOf(table), copy.copyOrdinal, copy.sheetCopyId !== null, withCopies.has(table.sheetCode)),
       groupNameValues: { ...((copy.displayNameL10n ?? table.sheetNameL10n).values ?? {}) },

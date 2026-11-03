@@ -98,12 +98,13 @@ export function useRecallAvailability(
   sheetDefId: number,
   periodKey: number,
   enabled: boolean,
+  sheetCopyId: number | null = null,
 ): UseQueryResult<components['schemas']['RecallAvailabilityDto']> {
   return useQuery({
-    queryKey: ['document', documentId, periodKey, 'recall', sheetDefId],
+    queryKey: ['document', documentId, periodKey, 'recall', sheetDefId, sheetCopyId],
     queryFn: () =>
       apiFetch<components['schemas']['RecallAvailabilityDto']>(
-        `/api/v1/documents/${String(documentId)}/recall?sheetDefId=${String(sheetDefId)}&periodKey=${String(periodKey)}`,
+        `/api/v1/documents/${String(documentId)}/recall?sheetDefId=${String(sheetDefId)}&periodKey=${String(periodKey)}${sheetCopyId === null ? '' : `&sheetCopyId=${String(sheetCopyId)}`}`,
       ),
     enabled,
   });
