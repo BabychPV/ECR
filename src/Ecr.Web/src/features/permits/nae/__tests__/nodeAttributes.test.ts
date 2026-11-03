@@ -193,6 +193,9 @@ describe('serverFieldProblem', () => {
   it('чужа відмова й не-API помилка поля не підсвічують', () => {
     expect(serverFieldProblem(errorWithKey('err.ECR-REG-0422.levelOrder'))).toBeNull();
     expect(serverFieldProblem(errorWithKey('err.ECR-REG-0422.naeMoveChangesScope'))).toBeNull();
+    // Зміна рівня з SRC і перенос у SRC без номера - сповіщення з каталогу; форма й «Move to…» рівень не міняють (levelCode: null).
+    expect(serverFieldProblem(errorWithKey('err.ECR-REG-0422.naeSourceLevelChange'))).toBeNull();
+    expect(serverFieldProblem(errorWithKey('err.ECR-REG-0422.requiredFieldsMissing'))).toBeNull();
     expect(serverFieldProblem(new Error('boom'))).toBeNull();
   });
 });
