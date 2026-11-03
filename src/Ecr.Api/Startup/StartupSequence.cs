@@ -43,9 +43,9 @@ public static partial class StartupSequence
             processStart = self.StartTime;
         }
 
-        LogStepTiming(logger, "процес до початку послідовності", (long)(DateTime.Now - processStart).TotalMilliseconds);
+        LogProcessAge(logger, "процес до початку послідовності", processStart);
         _ = app.Lifetime.ApplicationStarted.Register(() =>
-            LogStepTiming(logger, "застосунок слухає (від початку процесу)", (long)(DateTime.Now - processStart).TotalMilliseconds));
+            LogProcessAge(logger, "застосунок слухає (від початку процесу)", processStart));
 
         // ⚠ ПЕРШИМ ділом — журнал Quartz на фабрику ЦЬОГО хоста. Quartz
         // тримає постачальника журналу в статичному полі, і без цього рядка
@@ -53,6 +53,7 @@ public static partial class StartupSequence
         // WebApplicationFactory) звертався б до вже закритої фабрики й падав
         // ще до першого запиту.
         Infrastructure.Jobs.QuartzLogging.UseHost(loggerFactory);
+
         await using var scope = app.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
 
@@ -132,35 +133,40 @@ public static partial class StartupSequence
         // dev/CI. Файл читається й видаляється тут-таки, ДО виклику
         // HandleAsync — не після, щоб виняток усередині HandleAsync не
         // лишив пароль непрочищеним.
-        var secretFile = BootstrapSecretFile.ReadAndDelete(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
-
-        if (secretFile.RejectedOwner is not null)
+        async Task BootstrapStepAsync()
         {
-            LogBootstrapSecretRejected(logger, secretFile.RejectedOwner);
+            var stepLap = Stopwatch.StartNew();
+            await using var stepScope = app.Services.CreateAsyncScope();
+            var secretFile = BootstrapSecretFile.ReadAndDelete(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
+
+            if (secretFile.RejectedOwner is not null)
+            {
+                LogBootstrapSecretRejected(logger, secretFile.RejectedOwner);
+            }
+
+            if (secretFile.DeleteError is not null)
+            {
+                LogBootstrapSecretNotDeleted(logger, secretFile.DeleteError);
+            }
+
+            var bootstrap = stepScope.ServiceProvider
+                .GetRequiredService<Application.Security.EnsureBootstrapAdminHandler>();
+
+            await bootstrap
+                .HandleAsync(secretFile.Password ?? app.Configuration["Bootstrap:Password"], CancellationToken.None)
+                .ConfigureAwait(false);
+
+            // ⚠ Попередження ВИДИМІ. «Увійти буде нікому» — це стан, про який
+            // адміністратор має дізнатися зі старту, а не зі скарги користувача.
+            foreach (var warning in bootstrap.Warnings)
+            {
+                LogBootstrapWarning(logger, warning);
+            }
+
+            LogBootstrapOutcome(logger, bootstrap.LastOutcome);
+            LogStepTiming(logger, "4a bootstrap-адмін", stepLap.ElapsedMilliseconds);
         }
-
-        if (secretFile.DeleteError is not null)
-        {
-            LogBootstrapSecretNotDeleted(logger, secretFile.DeleteError);
-        }
-
-        var bootstrap = scope.ServiceProvider
-            .GetRequiredService<Application.Security.EnsureBootstrapAdminHandler>();
-
-        await bootstrap
-            .HandleAsync(secretFile.Password ?? app.Configuration["Bootstrap:Password"], CancellationToken.None)
-            .ConfigureAwait(false);
-
-        // ⚠ Попередження ВИДИМІ. «Увійти буде нікому» — це стан, про який
-        // адміністратор має дізнатися зі старту, а не зі скарги користувача.
-        foreach (var warning in bootstrap.Warnings)
-        {
-            LogBootstrapWarning(logger, warning);
-        }
-
-        LogBootstrapOutcome(logger, bootstrap.LastOutcome);
-        LogStepTiming(logger, "4a bootstrap-адмін", lap.ElapsedMilliseconds); lap.Restart();
 
         // 5) ПОКИНУТІ фонові задачі. ⛔ Задача, яку виконував процес, що
         //     впав, лишається `Running`/`Queued` у базі НАЗАВЖДИ — процеса,
@@ -182,28 +188,33 @@ public static partial class StartupSequence
         //     Рядки ПОПЕРЕДНЬОГО процесу цієї ж машини закриваються НЕЗАЛЕЖНО від
         //     свіжості биття — за `itg.JobProgress.InstanceId`; рядки інших машин
         //     — як і раніше, лише за віком биття.
-        var progress = scope.ServiceProvider.GetService<IJobProgressStore>();
-        if (progress is not null)
+        async Task SweepStepAsync()
         {
-            var clock = scope.ServiceProvider.GetRequiredService<Domain.Abstractions.IClock>();
-            var swept = await new Infrastructure.Jobs.AbandonedWorkSweeper(db, progress)
-                .SweepAsync(
-                    "Застосунок перезапущено: задача не завершилася до зупинки процесу.",
-                    clock.UtcNow,
-                    purge: false,
-                    CancellationToken.None,
-                    (Infrastructure.Persistence.JobProgressStore.CurrentHostName,
-                     Infrastructure.Persistence.JobProgressStore.CurrentRole,
-                     Infrastructure.Persistence.JobProgressStore.CurrentInstanceId))
-                .ConfigureAwait(false);
-
-            if (swept.Any)
+            var stepLap = Stopwatch.StartNew();
+            await using var stepScope = app.Services.CreateAsyncScope();
+            var stepDb = stepScope.ServiceProvider.GetRequiredService<EcrDbContext>();
+            var progress = stepScope.ServiceProvider.GetService<IJobProgressStore>();
+            if (progress is not null)
             {
-                LogStaleJobsFailed(logger, swept.Jobs, swept.CollectionRuns, swept.MaintenanceRuns);
-            }
-        }
+                var clock = stepScope.ServiceProvider.GetRequiredService<Domain.Abstractions.IClock>();
+                var swept = await new Infrastructure.Jobs.AbandonedWorkSweeper(stepDb, progress)
+                    .SweepAsync(
+                        "Застосунок перезапущено: задача не завершилася до зупинки процесу.",
+                        clock.UtcNow,
+                        purge: false,
+                        CancellationToken.None,
+                        (Infrastructure.Persistence.JobProgressStore.CurrentHostName,
+                         Infrastructure.Persistence.JobProgressStore.CurrentRole,
+                         Infrastructure.Persistence.JobProgressStore.CurrentInstanceId))
+                    .ConfigureAwait(false);
 
-        LogStepTiming(logger, "5 покинуті задачі", lap.ElapsedMilliseconds); lap.Restart();
+                if (swept.Any)
+                {
+                    LogStaleJobsFailed(logger, swept.Jobs, swept.CollectionRuns, swept.MaintenanceRuns);
+                }
+            }
+            LogStepTiming(logger, "5 покинуті задачі", stepLap.ElapsedMilliseconds);
+        }
 
         // ⚠ Запас партицій окремим кроком тут більше не рахується: його
         //    попередження дає `SchemaValidator` на кроці 3 (одне джерело).
@@ -213,18 +224,40 @@ public static partial class StartupSequence
         //    Помилка прогріву старт не валить: це оптимізація, і застосунок,
         //    що не піднявся через непрогрітий кеш, гірший за повільний
         //    перший запит.
-        var warmed = await scope.ServiceProvider
-            .GetRequiredService<MetadataWarmup>()
-            .WarmupAsync(CancellationToken.None)
-            .ConfigureAwait(false);
+        async Task WarmupStepAsync()
+        {
+            var stepLap = Stopwatch.StartNew();
+            await using var stepScope = app.Services.CreateAsyncScope();
+            var warmed = await stepScope.ServiceProvider
+                .GetRequiredService<MetadataWarmup>()
+                .WarmupAsync(CancellationToken.None)
+                .ConfigureAwait(false);
 
-        LogWarmupDone(logger, warmed);
-        LogStepTiming(logger, "6 прогрів кешу метаданих", lap.ElapsedMilliseconds);
-        LogStepTiming(logger, "послідовність завершено (від початку процесу)", (long)(DateTime.Now - processStart).TotalMilliseconds);
+            LogWarmupDone(logger, warmed);
+            LogStepTiming(logger, "6 прогрів кешу метаданих", stepLap.ElapsedMilliseconds);
+        }
+
+        // AN-156: 4a, 5 і 6 не залежать одне від одного (різні таблиці, кожен у своєму scope зі своїм
+        // DbContext) і всі йдуть ПІСЛЯ seed і валідації, тож виконуються одночасно: холодний старт
+        // коштує найдовший з них, а не суму. Помилка будь-якого, як і раніше, зупиняє старт.
+        lap.Restart();
+        await StartupConcurrency.RunAllAsync(BootstrapStepAsync, SweepStepAsync, WarmupStepAsync).ConfigureAwait(false);
+        LogStepTiming(logger, "4a+5+6 разом", lap.ElapsedMilliseconds);
+        LogProcessAge(logger, "послідовність завершено (від початку процесу)", processStart);
 
         // 7) Постійні розклади ставить окремий hosted service після того, як
         //    застосунок піднявся: планувальник Quartz стає придатним лише
         //    після ApplicationStarted (RecurringScheduleService).
+    }
+
+    // AN-156: вік процесу в мс (через TimeProvider: прямий годинник заборонено сторожем ForbiddenApiTests).
+    private static void LogProcessAge(ILogger logger, string step, DateTime processStart)
+    {
+        if (logger.IsEnabled(LogLevel.Information))
+        {
+            var ageMs = (long)(TimeProvider.System.GetLocalNow() - new DateTimeOffset(processStart)).TotalMilliseconds;
+            LogStepTiming(logger, step, ageMs);
+        }
     }
 
     private static async Task WaitForDatabaseAsync(EcrDbContext db, ILogger logger)
