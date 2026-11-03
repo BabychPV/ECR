@@ -36,7 +36,7 @@ export interface ListRow {
   readonly registryCode: string | null;
   /** Кількість значень; `null` — список-таблиця дозволу (значення — рядки дозволу). */
   readonly entries: number | null;
-  /** Перші значення для підказки; порожньо, доки сервер не віддає `preview` (поле додасть окрема lane). */
+  /** Перші значення для підказки (`preview` сервера, до 4); порожньо для дерева НАЕ і таблиці дозволу. */
   readonly preview: readonly string[];
   /** Чи може поточний користувач змінювати значення (рішення сервера: право й область). */
   readonly editable: boolean;
@@ -136,11 +136,9 @@ function useOf(use: PermitListUseDto, lang: string | undefined): ListUse {
   };
 }
 
-/** `preview` з відповіді сервера, коли він його віддає (поки його немає в схемі - порожньо). */
-function previewOf(list: PermitListDto): readonly string[] {
-  const value = (list as { readonly preview?: unknown }).preview;
-
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+/** Перші значення з `preview` сервера мовою інтерфейсу; `null`/відсутнє (дерево НАЕ, таблиця дозволу) - порожньо. */
+function previewOf(list: PermitListDto, lang: string | undefined): readonly string[] {
+  return (list.preview ?? []).map((value) => textOf(value.displayL10n, lang) || value.code);
 }
 
 /** Рядки екрана з відповіді сервера: спершу спільні, далі «лише тип» і «таблиця дозволу», усередині — за назвою. */
@@ -161,7 +159,7 @@ export function rowsFromLists(lists: readonly PermitListDto[], lang: string | un
       typeCode: list.typeCode ?? first?.typeCode ?? '',
       registryCode: list.registryCode,
       entries: list.itemCount,
-      preview: previewOf(list),
+      preview: previewOf(list, lang),
       editable: list.editable,
       used,
     });

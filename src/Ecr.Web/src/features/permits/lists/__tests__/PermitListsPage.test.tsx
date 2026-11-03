@@ -57,8 +57,12 @@ function lists(editable: boolean): PermitListDto[] {
       typeCode: null,
       nameL10n: { en: 'Substances' },
       itemCount: 42,
-      // Поле `preview` сервер додасть окремою lane; клітинка вже вміє його показати.
-      ...({ preview: ['Nitrogen oxides', 'Sulfur dioxide', 'Ozone'] } as object),
+      // `preview` - записи довідника (PermitListValueDto); підпис мовою інтерфейсу, без підпису - код.
+      preview: [
+        { id: 1, code: 'NOX', displayL10n: { en: 'Nitrogen oxides' } },
+        { id: 2, code: 'SO2', displayL10n: { en: 'Sulfur dioxide' } },
+        { id: 3, code: 'Ozone', displayL10n: {} },
+      ],
       editable,
       usedBy: [use('Air', 'Emission', 'Substance', 'Air permit')],
     },
