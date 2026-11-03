@@ -74,6 +74,16 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Persistence/TableFillStore.cs"] = "заповненість — лише оригінали (OriginalOnly), копії не входять",
         ["src/Ecr.Infrastructure/Persistence/PeriodStore.cs"] = "HasReopenedSheetAsync — оригінал; HasReopenedSheetCopyAsync — своя копія",
         ["src/Ecr.Infrastructure/Persistence/CellSourceStore.cs"] = "останній запис журналу — екземпляра своєї копії (@copy)",
+
+        // ── склад документа, видалення, перенос версії (RS6) ──
+        ["src/Ecr.Infrastructure/Persistence/DocumentSheetCopyStore.cs"] =
+            "додає/перейменовує/видаляє копії; видалення — по періодах за SheetCopyId, потім перенумерація",
+        ["src/Ecr.Infrastructure/Persistence/DocumentDeletionStore.cs"] =
+            "видалення документа забирає ВСІ екземпляри, стани й склад (копії теж); стани копій входять у «чернетка»",
+        ["src/Ecr.Infrastructure/Persistence/DocumentVersionMigrationStore.cs"] =
+            "перенос версії міняє TableDefId/SheetDefId на місці — SheetCopyId лишається; значення копій входять у «втрату» (Q4)",
+        ["src/Ecr.Infrastructure/Persistence/DocumentVersionStore.cs"] =
+            "перелік і порівняння зрізів — за Id зрізу/рядка; рядки копій мають власні Id",
     };
 
     /// <summary>
@@ -81,11 +91,6 @@ public sealed partial class SheetCopyQuerySitesTests
     /// </summary>
     private static readonly Dictionary<string, string> PendingReviewCommits5To7 = new(StringComparer.Ordinal)
     {
-        // RS6 — видалення документа/копії, перенос версії
-        ["src/Ecr.Infrastructure/Persistence/DocumentDeletionStore.cs"] = "RS6",
-        ["src/Ecr.Infrastructure/Persistence/DocumentVersionMigrationStore.cs"] = "RS6: SheetCopyId зберігається",
-        ["src/Ecr.Infrastructure/Persistence/DocumentVersionStore.cs"] = "RS6",
-
         // RS7 — звітність, зведення, аудит
         ["src/Ecr.Infrastructure/Reporting/ReportSnapshotBuilder.cs"] = "RS7: стан аркуша зрізу — оригінал/копії",
         ["src/Ecr.Infrastructure/Persistence/CampaignSummaryStore.cs"] = "RS7",

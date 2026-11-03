@@ -2423,6 +2423,30 @@ public interface IDocumentDeletionStore
 }
 ```
 
+#### `IDocumentSheetCopyStore`
+
+Копії аркушів документа (RS, рішення людини 03.11; обробник `DocumentSheetCopyHandlers`, право `Document.Create` +
+грант запису в проєкт). Усі методи — в одній транзакції під ВИНЯТКОВИМ блокуванням структури документа
+(`ISheetEditGate.EnterStructureAsync(exclusive: true)`): додати порожню копію оригіналу (наступний номер 2…),
+перейменувати групу (назва — на оригіналі; показується «<Назва> N»), видалити копію. Видалення — явне й по періодах
+(екземпляри, рядки, комірки), потім стани й журнал подій копії, рядок складу, перенумерація решти (3→2); зрізи подань
+лишаються. Відмови: `409 ECR-DOC-0409` — `sheetCopyIsOriginal` (це оригінал), `sheetCopyHasWorkflow` (копія подана/затверджена
+хоч в одному періоді; `periodKey`, `status`), `sheetCopyProjectArchived`; `422 ECR-DOC-0422` — `sheetNotCopyable`,
+`sheetNameInvalid`; `404 ECR-DOC-0404` — `sheetCopy`. Операції лягають в `aud.SecurityEvent` (`DocumentSheetCopyAdded`,
+`DocumentSheetGroupRenamed`, `DocumentSheetCopyDeleted`).
+
+```csharp
+public interface IDocumentSheetCopyStore
+{
+    public Task<SheetCopyGroup?> FindGroupAsync(long documentId, int sheetDefId, CancellationToken ct);
+    public Task<SheetCopyRef?> FindAsync(long documentId, long sheetCopyId, CancellationToken ct);
+    public Task<(long SheetCopyId, short Ordinal)> AddCopyAsync(long documentId, int sheetDefId, CancellationToken ct);
+    public Task RenameGroupAsync(long documentId, int sheetDefId, LocalizedText name, CancellationToken ct);
+    public Task<SheetCopyWorkflowBlock?> FindBlockingStateAsync(long documentId, long sheetCopyId, CancellationToken ct);
+    public Task<int> DeleteCopyAsync(long documentId, long sheetCopyId, CancellationToken ct);
+}
+```
+
 #### `IDocumentKeyStore`
 
 Зміна бізнес-ключа документа (ФВ-3.9, `POST /api/v1/documents/{id}/business-key`,
