@@ -177,8 +177,10 @@ test.describe('Permit lists UX', () => {
     await expect(drawer).toBeHidden({ timeout: 10_000 });
 
     // Рядок «NAE structure» веде на вкладку НАЕ, а не до шторки значень.
-    const nae = page.locator('[data-list-table] table tbody tr', { hasText: /NAE/ }).first();
-    await expect(nae).toBeVisible({ timeout: 30_000 });
+    // За точною назвою: preview/«Used by» інших рядків (AIR_AREA) теж містять «NAE».
+    const nae = page.locator('[data-list-table] table tbody tr').filter({ has: page.getByText('NAE structure', { exact: true }) });
+    await expect(nae).toHaveCount(1, { timeout: 30_000 });
+    await expect(nae).toBeVisible();
     await nae.click();
     await expect(page).toHaveURL(/\/admin\/permits\/nae/, { timeout: 15_000 });
     await expect(page.getByRole('dialog')).toHaveCount(0);
