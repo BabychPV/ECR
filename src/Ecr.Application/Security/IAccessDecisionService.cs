@@ -329,4 +329,136 @@ public interface IAccessDecisionService
     /// <param name="ct">Токен скасування.</param>
     public Task<ApprovalStepView?> CurrentApprovalStepAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary><see cref="CanSubmitAsync"/> для КОПІЇ аркуша (RS).</summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія; не <c>null</c> (оригінал — перевантаження без копії, див. <see cref="SheetCopyAccess"/>).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>⚠ Типова реалізація (тестові обгортки) копій не знає; справжня — <c>AccessDecisionService</c>.</remarks>
+    public Task<EditDecision> CanSubmitCopyAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => throw new NotSupportedException("Рішення про копію аркуша не реалізовано цією службою.");
+
+    /// <summary><see cref="CanApproveAsync"/> для КОПІЇ аркуша (RS).</summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<EditDecision> CanApproveCopyAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => throw new NotSupportedException("Рішення про копію аркуша не реалізовано цією службою.");
+
+    /// <summary><see cref="CanReopenAsync"/> для КОПІЇ аркуша (RS).</summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<EditDecision> CanReopenCopyAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => throw new NotSupportedException("Рішення про копію аркуша не реалізовано цією службою.");
+
+    /// <summary><see cref="CurrentApprovalStepAsync"/> для КОПІЇ аркуша (RS).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<ApprovalStepView?> CurrentCopyApprovalStepAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => throw new NotSupportedException("Рішення про копію аркуша не реалізовано цією службою.");
+}
+
+/// <summary>
+/// RS: виклик рішень і блокувань аркуша з <c>long? sheetCopyId</c> — оригінал (<c>null</c>) іде ТИМ САМИМ
+/// перевантаженням, що й до копій, копія — своїм.
+/// </summary>
+/// <remarks>
+/// ⚠ Чому не одне перевантаження з <c>long?</c>: тести підміняють службу й блокування (NSubstitute, обгортки), і виклик
+/// нового члена з <c>null</c> повз їхні налаштування повернув би типове значення замість налаштованого.
+/// </remarks>
+public static class SheetCopyAccess
+{
+    /// <summary>Подання аркуша або копії.</summary>
+    public static Task<EditDecision> CanSubmitOfAsync(
+        this IAccessDecisionService access, AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey,
+        long? sheetCopyId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        return sheetCopyId is { } copy
+            ? access.CanSubmitCopyAsync(profile, documentId, sheetDefId, periodKey, copy, ct)
+            : access.CanSubmitAsync(profile, documentId, sheetDefId, periodKey, ct);
+    }
+
+    /// <summary>Затвердження аркуша або копії.</summary>
+    public static Task<EditDecision> CanApproveOfAsync(
+        this IAccessDecisionService access, AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey,
+        long? sheetCopyId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        return sheetCopyId is { } copy
+            ? access.CanApproveCopyAsync(profile, documentId, sheetDefId, periodKey, copy, ct)
+            : access.CanApproveAsync(profile, documentId, sheetDefId, periodKey, ct);
+    }
+
+    /// <summary>Повернення в роботу аркуша або копії.</summary>
+    public static Task<EditDecision> CanReopenOfAsync(
+        this IAccessDecisionService access, AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey,
+        long? sheetCopyId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        return sheetCopyId is { } copy
+            ? access.CanReopenCopyAsync(profile, documentId, sheetDefId, periodKey, copy, ct)
+            : access.CanReopenAsync(profile, documentId, sheetDefId, periodKey, ct);
+    }
+
+    /// <summary>Крок маршруту аркуша або копії.</summary>
+    public static Task<ApprovalStepView?> CurrentApprovalStepOfAsync(
+        this IAccessDecisionService access, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        return sheetCopyId is { } copy
+            ? access.CurrentCopyApprovalStepAsync(documentId, sheetDefId, periodKey, copy, ct)
+            : access.CurrentApprovalStepAsync(documentId, sheetDefId, periodKey, ct);
+    }
+
+    /// <summary>Спільне блокування правки аркуша або копії.</summary>
+    public static Task<DocumentStatus> EnterEditOfAsync(
+        this Ports.ISheetEditGate gate, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(gate);
+        return sheetCopyId is null
+            ? gate.EnterEditAsync(documentId, sheetDefId, periodKey, ct)
+            : gate.EnterCopyEditAsync(documentId, sheetDefId, periodKey, sheetCopyId.Value, ct);
+    }
+
+    /// <summary>Спільне блокування правки аркуша або копії без черги.</summary>
+    public static Task<DocumentStatus> EnterEditNoWaitOfAsync(
+        this Ports.ISheetEditGate gate, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(gate);
+        return sheetCopyId is null
+            ? gate.EnterEditNoWaitAsync(documentId, sheetDefId, periodKey, ct)
+            : gate.EnterCopyEditNoWaitAsync(documentId, sheetDefId, periodKey, sheetCopyId.Value, ct);
+    }
+
+    /// <summary>Виняткове блокування подання аркуша або копії.</summary>
+    public static Task EnterSubmitOfAsync(
+        this Ports.ISheetEditGate gate, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(gate);
+        return sheetCopyId is null
+            ? gate.EnterSubmitAsync(documentId, sheetDefId, periodKey, ct)
+            : gate.EnterCopySubmitAsync(documentId, sheetDefId, periodKey, sheetCopyId.Value, ct);
+    }
 }

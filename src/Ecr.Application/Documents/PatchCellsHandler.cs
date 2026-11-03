@@ -2800,12 +2800,15 @@ public sealed partial class PatchCellsHandler(
             {
                 // ⛔ Y7-03: відмова «зайнято» — про рядки, а не про подання (див. `RowWriteLock`).
                 await RowWriteLock
-                    .EnterAsync(sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
+                    .EnterAsync(sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct, context.Instance.SheetCopyId)
                     .ConfigureAwait(false);
             }
 
+            // RS: копія аркуша — власне блокування й власний стан (у кожному періоді та сама копія).
             lockedStatuses[lockedPeriod] = await sheetGate
-                .EnterEditAsync(context.Instance.DocumentId, context.Table.SheetDefId, new PeriodKey(lockedPeriod), ct)
+                .EnterEditOfAsync(
+                    context.Instance.DocumentId, context.Table.SheetDefId, new PeriodKey(lockedPeriod),
+                    context.Instance.SheetCopyId, ct)
                 .ConfigureAwait(false);
         }
 
@@ -2912,7 +2915,8 @@ public sealed partial class PatchCellsHandler(
     /// </remarks>
     private Task<bool> StillCurrentApproverAsync(RequestContext context, CancellationToken ct)
         => ApproverEditRule.IsCurrentStepApproverAsync(
-            access, context.Profile, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct);
+            access, context.Profile, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct,
+            context.Instance.SheetCopyId);
 
     /// <summary>
     /// EA-B: передача зрізу повторно — під блокуванням аркуша, у транзакції запису.

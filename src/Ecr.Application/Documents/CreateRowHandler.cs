@@ -227,9 +227,9 @@ public sealed class CreateRowHandler(
         foreach (var period in periodsToLock)
         {
             var periodKey = new PeriodKey(period);
-            await RowWriteLock.EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, periodKey, ct).ConfigureAwait(false);
+            await RowWriteLock.EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, periodKey, ct, instance.SheetCopyId).ConfigureAwait(false);
             statuses[period] = await sheetGate
-                .EnterEditAsync(instance.DocumentId, table.SheetDefId, periodKey, ct)
+                .EnterEditOfAsync(instance.DocumentId, table.SheetDefId, periodKey, instance.SheetCopyId, ct)
                 .ConfigureAwait(false);
         }
 
@@ -415,10 +415,10 @@ public sealed class CreateRowHandler(
 
         // ⛔ Y7-03: відмова «зайнято» — про рядок, а не про подання (див. `RowWriteLock`).
         await RowWriteLock
-            .EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct)
+            .EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct, instance.SheetCopyId)
             .ConfigureAwait(false);
         var status = await sheetGate
-            .EnterEditAsync(instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct)
+            .EnterEditOfAsync(instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), instance.SheetCopyId, ct)
             .ConfigureAwait(false);
 
         var stateReason = status switch

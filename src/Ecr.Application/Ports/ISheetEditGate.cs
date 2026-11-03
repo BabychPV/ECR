@@ -79,6 +79,49 @@ public interface ISheetEditGate
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
+    /// <see cref="EnterEditAsync"/> для КОПІЇ аркуша (RS): власне
+    /// блокування і власний стан копії за період.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія аркуша (оригінал — <see cref="EnterEditAsync"/>).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Стан копії; <see cref="DocumentStatus.Draft"/>, якщо рядка стану ще немає.</returns>
+    /// <remarks>
+    /// ⚠ Типова реалізація (обгортки в тестах) знає лише оригінал; справжня — <c>SheetEditGate</c>.
+    /// </remarks>
+    public Task<DocumentStatus> EnterCopyEditAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => throw new NotSupportedException("Блокування копії аркуша не реалізовано цією обгорткою.");
+
+    /// <summary>
+    /// <see cref="EnterEditNoWaitAsync"/> для КОПІЇ аркуша (RS).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія аркуша.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Стан копії, прочитаний після того, як блокування взято.</returns>
+    public Task<DocumentStatus> EnterCopyEditNoWaitAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => throw new NotSupportedException("Блокування копії аркуша не реалізовано цією обгорткою.");
+
+    /// <summary>
+    /// <see cref="EnterSubmitAsync"/> для КОПІЇ аркуша (RS): подання копії
+    /// не чекає на правки оригіналу й навпаки.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія аркуша.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task EnterCopySubmitAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => throw new NotSupportedException("Блокування копії аркуша не реалізовано цією обгорткою.");
+
+    /// <summary>
     /// Блокування СТРУКТУРИ документа (L6-02): спільне — під будь-який запис у
     /// документ (комірки, рядки, подання, імпорт, шапка), виняткове — під перенос
     /// документа на іншу версію шаблону. Повертає <c>Project.TemplateVersionId</c>
