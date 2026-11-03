@@ -1579,6 +1579,10 @@ public sealed class SaveRegistryDefinitionHandler(
                     f.UnitId,
                     relationKind = f.RelationKind.ToString(),
                     onParentDelete = f.RelationKind == RegistryRelationKind.Composition ? f.OnParentDelete.ToString() : null,
+
+                    // Типи вузлів НАЕ (03.11): прив'язка поля до рівня — частина опису; без неї журнал не пояснював би, чому
+                    // поле перестало вимагатися (чи показуватися) на іншому рівні.
+                    f.LevelId,
                 })
                 .ToList(),
             keys,
