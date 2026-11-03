@@ -343,6 +343,137 @@ public sealed class NaeNodeTypesHttpTests(SqlServerFixture sql)
         static string? Text(JsonElement v, string name) => v.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
     }
 
+    /// <summary>
+    /// Cascade (coordinator 03.11): renaming RegionCode of a REGION rewrites the stored region of every source below it (an AREA
+    /// with its own AreaCode keeps its sources' area); a same-value upsert writes nothing.
+    /// </summary>
+    /// <remarks>
+    /// Mutation proof (local, not committed): skip <c>ApplyScopeCascadeAsync</c> → the sources keep the old region and this fails.
+    /// Nesting REGION in REGION or AREA in AREA is refused by the level order (the ordinal strictly grows), so "an inner region
+    /// shields its subtree" has no HTTP shape; the shield that exists is an AREA with its own code — asserted here.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Cascade__renaming_a_region_code_rewrites_the_sources_below_and_a_same_value_upsert_writes_nothing()
+    {
+        var (client, code, app) = await TreeAsync();
+        using var _ = app;
+        using var __ = client;
+
+        var x = "Z" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var y = "Y" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var region = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_R", null, "REGION", "Region X", new() { ["RegionCode"] = x }));
+        var area = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_OFF", region, "AREA", "Offshore", new() { ["AreaCode"] = "offshore" }));
+        var siteInArea = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_S1", area, "SITE", "Site 1"));
+        var siteDirect = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_S2", region, "SITE", "Site 2"));
+        var underArea = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_N1", siteInArea, "SRC", "Src 1", new() { ["NaeCode"] = "8101" }));
+        var direct = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_N2", siteDirect, "SRC", "Src 2", new() { ["NaeCode"] = "8102" }));
+
+        Assert.Equal<(string?, string?)>((x, "OFFSHORE"), Scope(await ValuesAsync(client, code, underArea)));
+        Assert.Equal<(string?, string?)>((x, "-"), Scope(await ValuesAsync(client, code, direct)));
+
+        // A same-value upsert (even in another case) is not a change: no value event for the sources, no revision churn.
+        var before = await ValueEventsAsync(underArea, direct);
+        Assert.Equal(HttpStatusCode.OK, (await UpsertAsync(client, code, $"{x}_R", null, "REGION", "Region X", new() { ["RegionCode"] = x.ToLowerInvariant() }, id: region)).StatusCode);
+        Assert.Equal(before, await ValueEventsAsync(underArea, direct));
+
+        Assert.Equal(HttpStatusCode.OK, (await UpsertAsync(client, code, $"{x}_R", null, "REGION", "Region X", new() { ["RegionCode"] = y }, id: region)).StatusCode);
+
+        Assert.Equal<(string?, string?)>((y, null), Scope(await ValuesAsync(client, code, region)));
+        Assert.Equal<(string?, string?)>((y, "OFFSHORE"), Scope(await ValuesAsync(client, code, underArea)));
+        Assert.Equal<(string?, string?)>((y, "-"), Scope(await ValuesAsync(client, code, direct)));
+        Assert.Equal(before + 2, await ValueEventsAsync(underArea, direct));
+
+        // The number scope follows the new code: a duplicate of 8101 in region Y / OFFSHORE is taken.
+        using var dup = await UpsertAsync(client, code, $"{x}_N3", siteInArea, "SRC", "Dup", new() { ["NaeCode"] = "8101" });
+        Assert.Equal(HttpStatusCode.Conflict, dup.StatusCode);
+        Assert.Contains(y, (await ProblemAsync(dup)).ToString(), StringComparison.Ordinal);
+
+        static (string?, string?) Scope(JsonElement v) => (Text(v, "RegionCode"), Text(v, "AreaCode"));
+    }
+
+    /// <summary>Cascade: an AreaCode change reaches only the sources under that AREA.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Cascade__changing_an_area_code_rewrites_only_the_sources_under_that_area()
+    {
+        var (client, code, app) = await TreeAsync();
+        using var _ = app;
+        using var __ = client;
+
+        var x = "Z" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var region = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_R", null, "REGION", "Region X", new() { ["RegionCode"] = x }));
+        var off = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_OFF", region, "AREA", "Offshore", new() { ["AreaCode"] = "offshore" }));
+        var on = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_ON", region, "AREA", "Onshore", new() { ["AreaCode"] = "onshore" }));
+        var siteOff = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_S1", off, "SITE", "Site 1"));
+        var siteOn = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_S2", on, "SITE", "Site 2"));
+        var srcOff = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_N1", siteOff, "SRC", "Src 1", new() { ["NaeCode"] = "8201" }));
+        var srcOn = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_N2", siteOn, "SRC", "Src 2", new() { ["NaeCode"] = "8201" }));
+
+        Assert.Equal(HttpStatusCode.OK, (await UpsertAsync(client, code, $"{x}_OFF", region, "AREA", "Offshore", new() { ["AreaCode"] = "deep" }, id: off)).StatusCode);
+
+        var changed = await ValuesAsync(client, code, srcOff);
+        var untouched = await ValuesAsync(client, code, srcOn);
+        Assert.Equal<(string?, string?)>((x, "DEEP"), (Text(changed, "RegionCode"), Text(changed, "AreaCode")));
+        Assert.Equal<(string?, string?)>((x, "ONSHORE"), (Text(untouched, "RegionCode"), Text(untouched, "AreaCode")));
+    }
+
+    /// <summary>Cascade: a rename that would put two sources with one number into one region/area is refused whole.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Cascade__a_rename_that_would_duplicate_a_number_is_refused_and_changes_nothing()
+    {
+        var (client, code, app) = await TreeAsync();
+        using var _ = app;
+        using var __ = client;
+
+        var x = "Z" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var y = "Y" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var regionX = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_R", null, "REGION", "Region X", new() { ["RegionCode"] = x }));
+        var regionY = await CreatedIdAsync(await UpsertAsync(client, code, $"{y}_R", null, "REGION", "Region Y", new() { ["RegionCode"] = y }));
+        var siteX = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_S", regionX, "SITE", "Site X"));
+        var siteY = await CreatedIdAsync(await UpsertAsync(client, code, $"{y}_S", regionY, "SITE", "Site Y"));
+        var srcX = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_N1", siteX, "SRC", "Src X", new() { ["NaeCode"] = "1" }));
+        var srcY = await CreatedIdAsync(await UpsertAsync(client, code, $"{y}_N1", siteY, "SRC", "Src Y", new() { ["NaeCode"] = "1" }));
+        var otherX = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_N2", siteX, "SRC", "Src X2", new() { ["NaeCode"] = "2" }));
+
+        using (var refused = await UpsertAsync(client, code, $"{x}_R", null, "REGION", "Region X", new() { ["RegionCode"] = y }, id: regionX))
+        {
+            Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+            var problem = await ProblemAsync(refused);
+            Assert.Equal(("ECR-REG-4094", "err.ECR-REG-4094.naeCodeTaken"), (problem.GetProperty("errorCode").GetString(), problem.GetProperty("messageKey").GetString()));
+            Assert.Contains($"{y}_N1", problem.ToString(), StringComparison.Ordinal);
+            Assert.Contains(srcY.ToString(System.Globalization.CultureInfo.InvariantCulture), problem.ToString(), StringComparison.Ordinal);
+        }
+
+        // Nothing moved: the region keeps its code, the sources below keep theirs (the whole upsert rolled back).
+        Assert.Equal(x, Text(await ValuesAsync(client, code, regionX), "RegionCode"));
+        Assert.Equal(x, Text(await ValuesAsync(client, code, srcX), "RegionCode"));
+        Assert.Equal(x, Text(await ValuesAsync(client, code, otherX), "RegionCode"));
+        Assert.Equal(y, Text(await ValuesAsync(client, code, srcY), "RegionCode"));
+    }
+
+    private static string? Text(JsonElement v, string name)
+        => v.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+
+    private async Task<int> ValueEventsAsync(params long[] entries)
+    {
+        await using var db = new EcrDbContext(Options());
+        var total = 0;
+        foreach (var id in entries)
+        {
+            var pattern = $"%\"entryId\":{id},%";
+            total += await db.Database
+                .SqlQuery<int>($"SELECT COUNT(*) AS Value FROM aud.SecurityEvent WHERE EventType = 'RegistryValueChanged' AND DetailsJson LIKE {pattern}")
+                .SingleAsync();
+        }
+
+        return total;
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
