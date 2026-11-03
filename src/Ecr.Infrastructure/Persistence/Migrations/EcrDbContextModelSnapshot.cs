@@ -1886,6 +1886,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(false, "DF_RegField_Req");
 
+                    b.Property<int?>("LevelId")
+                        .HasColumnType("int");
+
                     b.Property<string>("NameL10n")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -1911,6 +1914,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("LevelId")
+                        .HasDatabaseName("IX_RegistryFieldDef_Level")
+                        .HasFilter("[LevelId] IS NOT NULL");
 
                     b.HasIndex("RegistryDefId", "Code")
                         .IsUnique()
@@ -2054,6 +2061,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("AllowsSelfNesting")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_RegLevel_SelfNest");
 
                     b.Property<string>("Code")
                         .IsRequired()
@@ -7137,6 +7149,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryFieldDef", b =>
                 {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryLevelDef", null)
+                        .WithMany()
+                        .HasForeignKey("LevelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_RegField_Level");
+
                     b.HasOne("Ecr.Domain.Entities.Configuration.RegistryDef", null)
                         .WithMany("Fields")
                         .HasForeignKey("RegistryDefId")

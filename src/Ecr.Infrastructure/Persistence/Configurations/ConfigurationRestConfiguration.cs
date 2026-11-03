@@ -311,6 +311,7 @@ public sealed class RegistryLevelDefConfiguration : IEntityTypeConfiguration<Reg
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
         builder.LocalizedText(x => x.NameL10n);
         builder.Property(x => x.IsOptional).HasDefaultValue(false, "DF_RegLevel_Opt");
+        builder.Property(x => x.AllowsSelfNesting).HasDefaultValue(false, "DF_RegLevel_SelfNest");
 
         builder.HasIndex(x => new { x.RegistryDefId, x.Ordinal })
                .IsUnique().HasDatabaseName("UQ_RegistryLevelDef_Ordinal");
@@ -367,6 +368,13 @@ public sealed class RegistryFieldDefConfiguration : IEntityTypeConfiguration<Reg
         // і перевірка ключа при видаленні одиниці сканує її за мілісекунди.
         builder.HasOne<Unit>().WithMany().HasForeignKey(x => x.UnitId)
                .HasConstraintName("FK_RegField_Unit");
+
+        // NAE node types (human 03.11): a field belongs to one level of its hierarchical registry (null — all levels).
+        // NO ACTION: a level with bound fields is refused by the hierarchy save (409 levelHasFields) before the delete.
+        builder.HasOne<RegistryLevelDef>().WithMany().HasForeignKey(x => x.LevelId)
+               .OnDelete(DeleteBehavior.Restrict)
+               .HasConstraintName("FK_RegField_Level");
+        builder.HasIndex(x => x.LevelId).HasDatabaseName("IX_RegistryFieldDef_Level").HasFilter("[LevelId] IS NOT NULL");
     }
 }
 
