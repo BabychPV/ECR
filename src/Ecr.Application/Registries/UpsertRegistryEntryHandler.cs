@@ -177,9 +177,16 @@ public sealed class UpsertRegistryEntryHandler(
                 await nae!.EnsureMoveKeepsScopeAsync(definition, entry.Id, dto.ParentEntryId, ct).ConfigureAwait(false);
             }
 
+            var oldLevelId = entry.LevelId;
             placement = await ApplyHierarchyAsync(definition, entry, dto, ct).ConfigureAwait(false);
             if (naeTree)
             {
+                // Out of SRC — refused; INTO SRC — the usual SRC rules below (number required and free, derived region/area).
+                if (entry.IsPersisted)
+                {
+                    Nae.NaeTreeNodePolicy.EnsureNotLeavingSource(placement.Value.Levels, oldLevelId, placement.Value.Level, entry.Code);
+                }
+
                 values = await nae!.PrepareAsync(definition, entry, placement.Value.Level, dto.ParentEntryId, values, ct).ConfigureAwait(false);
             }
         }

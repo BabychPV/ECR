@@ -4309,6 +4309,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-REG-0422.naeMoveChangesScope` | 422 | перенос вузла дерева НАЕ (`POST …/entries/{id}/move` або upsert з іншим батьком) змінив би регіон/район джерела НАЕ в його піддереві; деталі `entryCode`, `sourceCode` |
 | `err.ECR-REG-0422.fieldLevelMismatch` | 422 | непорожнє значення поля, прив'язаного до іншого рівня, ніж рівень запису (`RegistryFieldDef.LevelId`); деталі `registryCode`, `fields` |
 | `err.ECR-REG-0409.levelHasFields` | 409 | збереження рівнів прибирає рівень, до якого прив'язані поля опису; деталі `levelCode`, `fields` |
+| `err.ECR-REG-0422.naeSourceLevelChange` | 422 | вузол SRC дерева НАЕ змінює тип на інший (move `levelCode` або upsert): джерело, на яке дивляться дозволи, не стає групою — його закривають і заводять групу; деталі `entryCode`, `levelCode`. Зміна типу В SRC: збережений номер обов'язковий (`requiredFieldsMissing`) і вільний (`ECR-REG-4094`), регіон/район — похідні |
 
 ---
 

@@ -38,6 +38,83 @@ public sealed class NaeTreeNodePolicy(IRegistryStore registries, IRegistryHierar
     /// <summary>A move would change the region/area of a source.</summary>
     internal const string MoveChangesScopeKey = "err.ECR-REG-0422.naeMoveChangesScope";
 
+    /// <summary>An NAE source changed into another node type.</summary>
+    internal const string SourceLevelChangeKey = "err.ECR-REG-0422.naeSourceLevelChange";
+
+    /// <summary>
+    /// A level change OUT of SRC is refused (<c>422 naeSourceLevelChange</c>): the source is the object permits point at, and
+    /// its SRC-only values (number, region/area, type, point) would otherwise sit on a group node. To stop being a source the
+    /// node is retired and a group created instead. A level change INTO SRC goes through <see cref="SourceValuesAsync"/>
+    /// (move) or the normal upsert rules (number required and free, derived region/area).
+    /// </summary>
+    /// <param name="levels">Levels of the tree.</param>
+    /// <param name="oldLevelId">Level before the change.</param>
+    /// <param name="newLevel">Level after it.</param>
+    /// <param name="entryCode">Entry code (detail).</param>
+    public static void EnsureNotLeavingSource(IReadOnlyList<RegistryLevelDef> levels, int? oldLevelId, RegistryLevelDef newLevel, string entryCode)
+    {
+        ArgumentNullException.ThrowIfNull(levels);
+        ArgumentNullException.ThrowIfNull(newLevel);
+        var old = levels.FirstOrDefault(l => l.Id == oldLevelId);
+        if (old is not null && IsSource(old) && !IsSource(newLevel))
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"NAE source {entryCode} cannot become a {newLevel.Code} node; retire it and create the group instead.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = SourceLevelChangeKey,
+                    ["entryCode"] = entryCode,
+                    ["levelCode"] = newLevel.Code,
+                });
+        }
+    }
+
+    /// <summary>Whether a level is the NAE source level.</summary>
+    /// <param name="level">Level.</param>
+    public static bool IsSource(RegistryLevelDef level)
+    {
+        ArgumentNullException.ThrowIfNull(level);
+        return string.Equals(level.Code, NaeTreeSchema.LevelSource, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A move INTO SRC (the move carries no values): the node's stored NAE number is required (<c>422 requiredFieldsMissing</c>
+    /// otherwise), and the values to write are prepared like an upsert's — English name, normalised number, derived region/area.
+    /// </summary>
+    /// <param name="definition">The NAE tree.</param>
+    /// <param name="entry">Moved entry.</param>
+    /// <param name="level">New level (SRC).</param>
+    /// <param name="parentId">New parent.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<IReadOnlyDictionary<string, object?>> SourceValuesAsync(
+        RegistryDef definition, RegistryEntry entry, RegistryLevelDef level, long? parentId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(entry);
+
+        var codeField = definition.Fields.FirstOrDefault(f => string.Equals(f.Code, NaeTreeSchema.NaeCodeField, StringComparison.OrdinalIgnoreCase));
+        var stored = codeField is null
+            ? null
+            : (await registries.ListValuesAsync(entry.Id, ct).ConfigureAwait(false)).FirstOrDefault(v => v.RegistryFieldDefId == codeField.Id)?.ValueString;
+        if (string.IsNullOrWhiteSpace(stored))
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Entry {entry.Code} has no NAE number: it cannot become an NAE source by a move. Edit it with the number instead.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.requiredFieldsMissing",
+                    ["registryCode"] = definition.Code,
+                    ["fields"] = NaeTreeSchema.NaeCodeField,
+                });
+        }
+
+        return await PrepareAsync(
+                definition, entry, level, parentId, new Dictionary<string, object?> { [NaeTreeSchema.NaeCodeField] = stored }, ct)
+            .ConfigureAwait(false);
+    }
+
     /// <summary>A hierarchical registry with the NAE business fields and the REGION/SRC levels' fields is an NAE tree.</summary>
     /// <param name="definition">Registry.</param>
     public static bool IsNaeTree(RegistryDef definition)

@@ -405,8 +405,12 @@ public sealed class MoveRegistryEntryHandler(
     IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock,
-    Nae.NaeTreeNodePolicy? nae = null)
+    Nae.NaeTreeNodePolicy? nae = null,
+    RegistryEntryWriter? writer = null)
 {
+    // ⚠ `nae` і `writer` (типи вузлів НАЕ, 03.11) — контейнер підставляє обидва; без них (ручні тести) дерево НАЕ
+    // переміщується як звичайний довідник.
+
     /// <summary>Permission to change registry data.</summary>
     public const string Permission = "Registry.EditData";
 
@@ -460,6 +464,21 @@ public sealed class MoveRegistryEntryHandler(
         var oldOrdinal = entry.Ordinal;
         var ordinal = 0;
 
+        // NAE node types (03.11): out of SRC — refused; INTO SRC — the stored number is required and free, region/area derived.
+        var naeTree = nae is not null && Nae.NaeTreeNodePolicy.IsNaeTree(definition);
+        var intoSource = naeTree
+                         && Nae.NaeTreeNodePolicy.IsSource(level)
+                         && levels.FirstOrDefault(l => l.Id == oldLevel) is { } before
+                         && !Nae.NaeTreeNodePolicy.IsSource(before);
+        if (naeTree)
+        {
+            Nae.NaeTreeNodePolicy.EnsureNotLeavingSource(levels, oldLevel, level, entry.Code);
+            if (intoSource && writer is null)
+            {
+                throw new InvalidOperationException("RegistryEntryWriter is required to move a node into the NAE source level.");
+            }
+        }
+
         await uow.ExecuteInTransactionAsync(
             async token =>
             {
@@ -472,9 +491,15 @@ public sealed class MoveRegistryEntryHandler(
                     hierarchy, definition.Id, levels, entry.Id, request.ParentEntryId, level, token).ConfigureAwait(false);
 
                 // NAE node types (03.11): a move never changes the region/area of an NAE source (its business identity).
-                if (nae is not null && Nae.NaeTreeNodePolicy.IsNaeTree(definition))
+                IReadOnlyDictionary<string, object?>? sourceValues = null;
+                if (naeTree)
                 {
-                    await nae.EnsureMoveKeepsScopeAsync(definition, entry.Id, request.ParentEntryId, token).ConfigureAwait(false);
+                    await nae!.EnsureMoveKeepsScopeAsync(definition, entry.Id, request.ParentEntryId, token).ConfigureAwait(false);
+                    if (intoSource)
+                    {
+                        sourceValues = await nae.SourceValuesAsync(definition, entry, level, request.ParentEntryId, token).ConfigureAwait(false);
+                        await nae.EnsureCodeFreeAsync(definition, entry, level, request.ParentEntryId, sourceValues, token).ConfigureAwait(false);
+                    }
                 }
 
                 var siblings = (await hierarchy.ListChildrenTrackedAsync(definition.Id, request.ParentEntryId, token)
@@ -510,6 +535,14 @@ public sealed class MoveRegistryEntryHandler(
                 }
 
                 ordinal = entry.Ordinal;
+                if (sourceValues is not null)
+                {
+                    // Into SRC: number, derived region/area through the writer — the same required/level checks, the composite
+                    // key and the value audit as an upsert, in this transaction (the writer saves the move with it).
+                    var changes = await writer!.ApplyValuesAsync(definition, entry, sourceValues, prefetch: null, token).ConfigureAwait(false);
+                    await writer.SaveEntryAsync(definition, entry, changes, userId, token).ConfigureAwait(false);
+                }
+
                 await uow.SaveChangesAsync(token).ConfigureAwait(false);
 
                 await audit.WriteStructureChangeAsync(

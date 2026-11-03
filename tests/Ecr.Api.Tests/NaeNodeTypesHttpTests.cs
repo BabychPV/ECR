@@ -218,6 +218,91 @@ public sealed class NaeNodeTypesHttpTests(SqlServerFixture sql)
             .GetProperty("fields").EnumerateArray().ToDictionary(f => f.GetProperty("code").GetString()!);
         Assert.Equal(JsonValueKind.Null, after["SourceType"].GetProperty("levelCode").ValueKind);
         Assert.Equal("SRC", after["NaeCode"].GetProperty("levelCode").GetString()); // null keeps the binding
+
+        // The definition audit records the binding: before (SourceType on SRC) and after (all levels).
+        await using var db = new EcrDbContext(Options());
+        var defId = await db.RegistryDefs.Where(d => d.Code == code).Select(d => d.Id).SingleAsync();
+        var srcId = await db.RegistryLevelDefs.Where(l => l.RegistryDefId == defId && l.Code == "SRC").Select(l => l.Id).SingleAsync();
+        var audit = await db.Database
+            .SqlQuery<string>($"SELECT TOP 1 OldJson + '|' + NewJson AS Value FROM aud.StructureChange WHERE Operation = 'SaveDefinition' AND EntityId = {defId} ORDER BY ChangedAt DESC")
+            .SingleAsync();
+        var (oldJson, newJson) = (JsonDocument.Parse(audit.Split('|')[0]).RootElement, JsonDocument.Parse(audit.Split('|')[1]).RootElement);
+        int? LevelOf(JsonElement snapshot, string field)
+        {
+            var f = snapshot.GetProperty("fields").EnumerateArray().Single(x => x.GetProperty("Code").GetString() == field);
+            return f.GetProperty("LevelId").ValueKind == JsonValueKind.Null ? null : f.GetProperty("LevelId").GetInt32();
+        }
+
+        Assert.Equal((srcId, (int?)null, srcId), (LevelOf(oldJson, "SourceType"), LevelOf(newJson, "SourceType"), LevelOf(newJson, "NaeCode")));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task LevelChange__into_src_needs_a_free_number_and_out_of_src_is_refused()
+    {
+        var (client, code, app) = await TreeAsync();
+        using var _ = app;
+        using var __ = client;
+        var plant = (await NodesAsync(client, code))["S_ATYRAU_ONSHORE_PLANT"].Id;
+        var source = await CreatedIdAsync(await UpsertAsync(client, code, "ON_A", plant, "SRC", "On A", new() { ["NaeCode"] = "2001" }));
+
+        // Upsert INTO SRC: the number is required, must be free in the region/area, region/area are derived.
+        var unit = await CreatedIdAsync(await UpsertAsync(client, code, "UNIT_L", plant, "EQUIP", "Unit L"));
+        using (var noNumber = await UpsertAsync(client, code, "UNIT_L", plant, "SRC", "Unit L", id: unit))
+        {
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, noNumber.StatusCode);
+            Assert.Equal("err.ECR-REG-0422.requiredFieldsMissing", (await ProblemAsync(noNumber)).GetProperty("messageKey").GetString());
+        }
+
+        using (var taken = await UpsertAsync(client, code, "UNIT_L", plant, "SRC", "Unit L", new() { ["NaeCode"] = "2001" }, id: unit))
+        {
+            Assert.Equal(HttpStatusCode.Conflict, taken.StatusCode);
+            Assert.Equal("err.ECR-REG-4094.naeCodeTaken", (await ProblemAsync(taken)).GetProperty("messageKey").GetString());
+        }
+
+        await ReadAsync(await UpsertAsync(client, code, "UNIT_L", plant, "SRC", "Unit L", new() { ["NaeCode"] = "2002" }, id: unit));
+        var values = await ValuesAsync(client, code, unit);
+        Assert.Equal(("2002", "ATYRAU", "ONSHORE"), (values.GetProperty("NaeCode").GetString(), values.GetProperty("RegionCode").GetString(), values.GetProperty("AreaCode").GetString()));
+
+        // Move INTO SRC: the move carries no values, so a node without a stored number is refused...
+        var bare = await CreatedIdAsync(await UpsertAsync(client, code, "UNIT_M", plant, "EQUIP", "Unit M"));
+        using (var bareMove = await MoveAsync(client, code, bare, plant, "SRC"))
+        {
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, bareMove.StatusCode);
+            Assert.Equal("err.ECR-REG-0422.requiredFieldsMissing", (await ProblemAsync(bareMove)).GetProperty("messageKey").GetString());
+        }
+
+        // ...a node holding a number (data from before the node types) must find it free, then gets the derived region/area.
+        await StoreNumberAsync(code, bare, "2001");
+        using (var takenMove = await MoveAsync(client, code, bare, plant, "SRC"))
+        {
+            Assert.Equal(HttpStatusCode.Conflict, takenMove.StatusCode);
+
+            // The scope check answers first (4094 with the holder), not only the composite key behind it (4092).
+            Assert.Equal("err.ECR-REG-4094.naeCodeTaken", (await ProblemAsync(takenMove)).GetProperty("messageKey").GetString());
+        }
+
+        await StoreNumberAsync(code, bare, "2003");
+        await ReadAsync(await MoveAsync(client, code, bare, plant, "SRC"));
+        var moved = await ValuesAsync(client, code, bare);
+        Assert.Equal(("2003", "ATYRAU", "ONSHORE"), (moved.GetProperty("NaeCode").GetString(), moved.GetProperty("RegionCode").GetString(), moved.GetProperty("AreaCode").GetString()));
+        Assert.Equal("SRC", (await NodesAsync(client, code))["UNIT_M"].Level);
+
+        // OUT of SRC: refused by move and by upsert; the source stays a source.
+        using (var outMove = await MoveAsync(client, code, source, plant, "EQUIP"))
+        {
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, outMove.StatusCode);
+            Assert.Equal("err.ECR-REG-0422.naeSourceLevelChange", (await ProblemAsync(outMove)).GetProperty("messageKey").GetString());
+        }
+
+        using (var outUpsert = await UpsertAsync(client, code, "ON_A", plant, "EQUIP", "On A", id: source))
+        {
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, outUpsert.StatusCode);
+            Assert.Equal("err.ECR-REG-0422.naeSourceLevelChange", (await ProblemAsync(outUpsert)).GetProperty("messageKey").GetString());
+        }
+
+        Assert.Equal("SRC", (await NodesAsync(client, code))["ON_A"].Level);
     }
 
     [Fact]
@@ -322,7 +407,7 @@ public sealed class NaeNodeTypesHttpTests(SqlServerFixture sql)
         => (f.GetProperty("levelCode").GetString(), f.GetProperty("isRequired").GetBoolean(), f.GetProperty("isReadOnly").GetBoolean());
 
     private static async Task<HttpResponseMessage> UpsertAsync(
-        HttpClient client, string registry, string code, long parent, string level, string? en, Dictionary<string, object?>? values = null, string? ru = null)
+        HttpClient client, string registry, string code, long parent, string level, string? en, Dictionary<string, object?>? values = null, string? ru = null, long? id = null)
     {
         var registryId = (await client.GetFromJsonAsync<JsonElement>(new Uri($"/api/v1/registries/{registry}/definition", UriKind.Relative))).GetProperty("id").GetInt32();
         var names = new Dictionary<string, string>();
@@ -338,11 +423,28 @@ public sealed class NaeNodeTypesHttpTests(SqlServerFixture sql)
 
         return await client.PostAsJsonAsync(
             new Uri($"/api/v1/registries/{registry}/entries", UriKind.Relative),
-            new { registryDefId = registryId, code, display = new { values = names }, parentEntryId = parent, levelCode = level, values = values ?? [] });
+            new { id, registryDefId = registryId, code, display = new { values = names }, parentEntryId = parent, levelCode = level, values = values ?? [] });
     }
 
-    private static Task<HttpResponseMessage> MoveAsync(HttpClient client, string registry, long id, long parent)
-        => client.PostAsJsonAsync(new Uri($"/api/v1/registries/{registry}/entries/{id}/move", UriKind.Relative), new { parentEntryId = parent });
+    private static Task<HttpResponseMessage> MoveAsync(HttpClient client, string registry, long id, long parent, string? level = null)
+        => client.PostAsJsonAsync(new Uri($"/api/v1/registries/{registry}/entries/{id}/move", UriKind.Relative), new { parentEntryId = parent, levelCode = level });
+
+    /// <summary>A number stored on a node directly (data from before the node types: the API refuses it on a group node).</summary>
+    private async Task StoreNumberAsync(string registry, long entryId, string number)
+    {
+        await using var db = new EcrDbContext(Options());
+        var def = await db.RegistryDefs.Include(d => d.Fields).SingleAsync(d => d.Code == registry);
+        var field = def.Fields.Single(f => f.Code == "NaeCode");
+        var value = await db.RegistryValues.SingleOrDefaultAsync(v => v.RegistryEntryId == entryId && v.RegistryFieldDefId == field.Id);
+        if (value is null)
+        {
+            value = new Ecr.Domain.Entities.Dictionaries.RegistryValue(entryId, field.Id);
+            db.RegistryValues.Add(value);
+        }
+
+        value.Set(CellDataType.String, number, null);
+        await db.SaveChangesAsync();
+    }
 
     private static async Task<HttpResponseMessage> PutDefinitionAsync(HttpClient client, string registry, JsonElement definition, object body)
     {

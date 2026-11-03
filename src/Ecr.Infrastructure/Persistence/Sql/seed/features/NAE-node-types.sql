@@ -13,7 +13,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REG-0422.fieldLevelMismatch', N'ru', N'Поля {fields} относятся к другому типу узла справочника «{registryCode}».'),
     (N'err.ECR-REG-0422.fieldLevelMismatch', N'kz', N'{fields} өрістері «{registryCode}» анықтамалығының басқа түйін түріне жатады.'),
     (N'err.ECR-REG-0409.levelHasFields', N'ru', N'К уровню «{levelCode}» привязаны поля ({fields}): сначала отвяжите их.'),
-    (N'err.ECR-REG-0409.levelHasFields', N'kz', N'«{levelCode}» деңгейіне өрістер байланған ({fields}): алдымен оларды ажыратыңыз.')
+    (N'err.ECR-REG-0409.levelHasFields', N'kz', N'«{levelCode}» деңгейіне өрістер байланған ({fields}): алдымен оларды ажыратыңыз.'),
+    (N'err.ECR-REG-0422.naeSourceLevelChange', N'ru', N'Источник НАЕ {entryCode} нельзя превратить в узел типа {levelCode}: выведите его из действия и создайте группу.'),
+    (N'err.ECR-REG-0422.naeSourceLevelChange', N'kz', N'{entryCode} НАЕ көзін {levelCode} түріндегі түйінге айналдыруға болмайды: оны қолданыстан шығарып, топ жасаңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -27,7 +29,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-REG-0422.naeNameEnRequired', N'en', N'The node needs an English name; Russian and Kazakh names are optional.', 1),
     (N'err.ECR-REG-0422.naeMoveChangesScope', N'en', N'Moving node {entryCode} would change the region or area of NAE source {sourceCode}. Create the source again in the right place.', 1),
     (N'err.ECR-REG-0422.fieldLevelMismatch', N'en', N'Fields {fields} belong to another node type of registry «{registryCode}».', 1),
-    (N'err.ECR-REG-0409.levelHasFields', N'en', N'Fields are bound to level «{levelCode}» ({fields}): unbind them first.', 1)
+    (N'err.ECR-REG-0409.levelHasFields', N'en', N'Fields are bound to level «{levelCode}» ({fields}): unbind them first.', 1),
+    (N'err.ECR-REG-0422.naeSourceLevelChange', N'en', N'NAE source {entryCode} cannot become a {levelCode} node: retire it and create the group instead.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO
