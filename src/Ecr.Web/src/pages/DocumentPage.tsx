@@ -611,7 +611,7 @@ export function DocumentPage(): JSX.Element {
    * лише читання: відкрити сітку через невідомість означало б показати дію, якої може не бути.
    */
   const deferredToServer = editsDeferToServer(state) && active !== undefined;
-  const approverEdit = useApproverEditAvailability(documentId, active?.sheetDefId ?? 0, periodKey, deferredToServer);
+  const approverEdit = useApproverEditAvailability(documentId, active?.sheetDefId ?? 0, periodKey, deferredToServer, active?.sheetCopyId ?? null);
   const approverEditable =
     deferredToServer && approverEdit.data?.canApproverEdit === true && !locksDataActions(lock) && !narrow;
   const gridReadOnly = readOnly && !approverEditable;

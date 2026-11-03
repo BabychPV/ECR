@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SheetActions } from '../SheetActions';
@@ -112,5 +112,24 @@ describe('SheetActions: копія аркуша (sheetCopyId у запитах)'
     await waitFor(() => {
       expect(requestedUrls.some((url) => url.includes('/recall?') && url.includes('sheetCopyId=77'))).toBe(true);
     });
+  });
+
+  it('ціль подання копії питається з sheetCopyId, а оригіналу — без нього', async () => {
+    mockFetch();
+    show(77);
+
+    await waitFor(() => {
+      expect(requestedUrls.some((url) => url.includes('/submission-target?') && url.includes('sheetCopyId=77'))).toBe(true);
+    });
+    cleanup();
+    vi.unstubAllGlobals();
+
+    mockFetch();
+    show(null);
+
+    await waitFor(() => {
+      expect(requestedUrls.some((url) => url.includes('/submission-target?'))).toBe(true);
+    });
+    expect(requestedUrls.filter((url) => url.includes('sheetCopyId'))).toEqual([]);
   });
 });

@@ -45,11 +45,15 @@ function tableOf(tableInstanceId: number, copy: Record<string, unknown>): Record
   };
 }
 
+const requestedUrls: string[] = [];
+
 function mockFetch(sheetStates: Record<string, string> = { GEN: 'Draft' }): void {
+  requestedUrls.length = 0;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      requestedUrls.push(url);
 
       if (url.includes('/api/v1/me')) {
         return jsonResponse({
@@ -171,6 +175,45 @@ describe('DocumentPage: копії аркуша', () => {
         expect(second.textContent).toContain('⟦status.sheet.Submitted⟧');
       });
       expect(first.textContent).not.toContain('Submitted');
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'RS: вкладка копії питає history / submission-target / approver-edit з sheetCopyId; оригінал — без нього',
+    async () => {
+      mockFetch({ GEN: 'Submitted', 'GEN#77': 'Submitted' });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <MantineProvider theme={testTheme}>
+          <MemoryRouter initialEntries={[`/documents/1?periodKey=${String(Period)}`]}>
+            <QueryClientProvider client={client}>
+              <Routes>
+                <Route path="/documents/:id" element={<DocumentPage />} />
+              </Routes>
+            </QueryClientProvider>
+          </MemoryRouter>
+        </MantineProvider>,
+      );
+
+      await screen.findByRole('tab', { name: /General 1/ }, { timeout: SlowEnvTimeout });
+      const withPath = (path: string): string[] => requestedUrls.filter((url) => url.includes(path));
+
+      // Оригінал: усі три запити є і жоден не несе sheetCopyId.
+      await waitFor(() => {
+        expect(withPath('/workflow/history?').length).toBeGreaterThan(0);
+        expect(withPath('/submission-target?').length).toBeGreaterThan(0);
+        expect(withPath('/approver-edit?').length).toBeGreaterThan(0);
+      });
+      expect(requestedUrls.filter((url) => url.includes('sheetCopyId'))).toEqual([]);
+
+      fireEvent.click(screen.getByRole('tab', { name: /General 2/ }));
+
+      await waitFor(() => {
+        for (const path of ['/workflow/history?', '/submission-target?', '/approver-edit?']) {
+          expect(withPath(path).some((url) => url.includes('sheetCopyId=77'))).toBe(true);
+        }
+      });
     },
     SlowEnvTimeout,
   );

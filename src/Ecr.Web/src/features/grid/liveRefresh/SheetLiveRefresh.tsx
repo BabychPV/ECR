@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
 import type { DocumentSummary, DocumentTableDto } from '@/api/types';
 import { sheetStateKey } from '@/features/documents/sheetCopies/sheetCopyTypes';
-import { workflowHistoryQuery } from '@/features/workflow/api';
+import { isEventOfSheet, workflowHistoryQuery } from '@/features/workflow/api';
 import { refreshSheetWorkflow } from '@/features/workflow/refreshSheetWorkflow';
 import { whileStatusStale } from '@/features/workflow/statusStale';
 import { formatTime } from '@/shared/format/datetime';
@@ -229,9 +229,9 @@ function useStatusTransition(
 
       let by: string | null = null;
       try {
-        const events = await client.fetchQuery({ ...workflowHistoryQuery(documentId, periodKey), staleTime: 5_000 });
-        const latest = Array.isArray(events)
-          ? events.find((event) => event.sheetCode === sheetCode && event.toState === transition.state)
+        const events = await client.fetchQuery({ ...workflowHistoryQuery(documentId, periodKey, sheetCopyId), staleTime: 5_000 });
+        const latest = Array.isArray(events) && sheetCode !== null
+          ? events.find((event) => isEventOfSheet(event, sheetCode, sheetCopyId) && event.toState === transition.state)
           : undefined;
         by = latest?.byDisplayName ?? null;
       } catch {

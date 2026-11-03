@@ -269,6 +269,7 @@ export function DocumentActionBar({
         documentId={documentId}
         periodKey={periodKey}
         sheetCode={sheetCode}
+        sheetCopyId={sheetCopyId}
         state={state}
         lock={lock}
         canDecide={actions.approve !== null || actions.reject !== null}

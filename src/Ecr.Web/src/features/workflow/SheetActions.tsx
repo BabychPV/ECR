@@ -816,7 +816,7 @@ export function useSheetActions({
    * до відповіді подав би відкритий період, тобто саме те, що D-441 скасовує. Збій запиту — стара поведінка
    * (відкритий на екрані період), щоб робочий процес не зупинявся через недоступну підказку.
    */
-  const submissionTarget = useSubmissionTarget(documentId, sheetDefId, periodKey);
+  const submissionTarget = useSubmissionTarget(documentId, sheetDefId, periodKey, sheetCopyId);
   // ⚠ Відповідь без переліку періодів (старіший сервер, проксі, порожнє тіло) — та сама невідомість, що й збій.
   const target = Array.isArray(submissionTarget.data?.periods) ? submissionTarget.data : undefined;
   const targetUnknown = submissionTarget.isError || (submissionTarget.isSuccess && target === undefined);
