@@ -146,7 +146,7 @@ test.describe('Permit lists UX', () => {
         await expect(row.locator('[data-list-chevron]'), where).toHaveCount(1);
         await expect(row, where).toHaveCSS('cursor', 'pointer');
 
-        const filter = page.getByLabel('Kinds', { exact: true });
+        const filter = page.getByRole('textbox', { name: 'Kinds' });
         await expect(filter, `${where}: фільтр з підказкою «All kinds»`).toHaveAttribute('placeholder', 'All kinds');
 
         expect(await axe(page), `axe ${where}`).toEqual([]);
@@ -161,7 +161,7 @@ test.describe('Permit lists UX', () => {
 
     // Фільтр показує лічильники видів.
     await page.goto('/admin/permits/lists');
-    await page.getByLabel('Kinds', { exact: true }).click();
+    await page.getByRole('textbox', { name: 'Kinds' }).click();
     await expect(page.getByRole('option', { name: /^Shared list \(\d+\)$/ })).toBeVisible();
     await expect(page.getByRole('option', { name: /^One permit type \(\d+\)$/ })).toBeVisible();
     await page.keyboard.press('Escape');
