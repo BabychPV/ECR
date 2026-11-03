@@ -2,6 +2,7 @@ using Ecr.Application.Ports;
 using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Startup;
 using Microsoft.Data.SqlClient;
+using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Api.Startup;
@@ -34,6 +35,18 @@ public static partial class StartupSequence
         var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
         var logger = loggerFactory.CreateLogger("Ecr.Startup");
 
+        // AN-156: тривалість кроків — у журнал (Information), щоб холодний старт міряли за логом, а не на око.
+        var lap = Stopwatch.StartNew();
+        DateTime processStart;
+        using (var self = Process.GetCurrentProcess())
+        {
+            processStart = self.StartTime;
+        }
+
+        LogStepTiming(logger, "процес до початку послідовності", (long)(DateTime.Now - processStart).TotalMilliseconds);
+        _ = app.Lifetime.ApplicationStarted.Register(() =>
+            LogStepTiming(logger, "застосунок слухає (від початку процесу)", (long)(DateTime.Now - processStart).TotalMilliseconds));
+
         // ⚠ ПЕРШИМ ділом — журнал Quartz на фабрику ЦЬОГО хоста. Quartz
         // тримає постачальника журналу в статичному полі, і без цього рядка
         // другий хост у тому самому процесі (а саме так працює
@@ -47,6 +60,7 @@ public static partial class StartupSequence
         //    не «частково працює», він не працює зовсім, і краще, щоб це було
         //    видно як невдалий старт, а не як 500 на кожен запит.
         await WaitForDatabaseAsync(db, logger).ConfigureAwait(false);
+        LogStepTiming(logger, "1 очікування БД", lap.ElapsedMilliseconds); lap.Restart();
 
         // 2) Можливості СУБД. Читаються один раз: редакція між запитами не
         //    змінюється, а кожна перевірка коштує запиту. ⚠ ДО перевірки схеми:
@@ -54,6 +68,7 @@ public static partial class StartupSequence
         //    непрочитаною пробою він бачив би нулі й пропускав будь-який сервер.
         var capabilities = scope.ServiceProvider.GetRequiredService<ISqlCapabilities>();
         await ProbeCapabilitiesAsync(app, db, capabilities, logger).ConfigureAwait(false);
+        LogStepTiming(logger, "2 можливості СУБД", lap.ElapsedMilliseconds); lap.Restart();
 
         // 3) Сумісність середовища (ФВ-7.9) — ЄДИНЕ джерело цих перевірок,
         //    `SchemaValidator`. Зупиняє старт (`ECR-SYS-5031`): редакція/версія,
@@ -66,6 +81,7 @@ public static partial class StartupSequence
         var validator = new SchemaValidator(
             db, capabilities, scope.ServiceProvider.GetRequiredService<Domain.Abstractions.IClock>());
         await validator.ValidateAsync(mode, CancellationToken.None).ConfigureAwait(false);
+        LogStepTiming(logger, "3 валідація схеми", lap.ElapsedMilliseconds); lap.Restart();
 
         foreach (var finding in validator.Critical)
         {
@@ -83,6 +99,7 @@ public static partial class StartupSequence
         //    застосунок формально піднімається і не робить нічого.
         await new SeedRunner(db, logger).RunAsync(CancellationToken.None).ConfigureAwait(false);
         LogSeedDone(logger);
+        LogStepTiming(logger, "4 seed", lap.ElapsedMilliseconds); lap.Restart();
 
         // 4b) Вʼюхи сирих даних rpt.v_* для SSRS (ФВ-10.2, ФВ-10.4) по
         //     кожній таблиці опублікованих версій шаблонів. ⚠ ПІСЛЯ seed і на
@@ -99,6 +116,8 @@ public static partial class StartupSequence
         {
             LogReportViewsFailed(logger, ex.Message);
         }
+
+        LogStepTiming(logger, "4b вʼюхи rpt.v_*", lap.ElapsedMilliseconds); lap.Restart();
 
         // 4a) Bootstrap-адміністратор. ⛔ Крок був ОГОЛОШЕНИЙ (обробник є,
         //     зареєстрований, покритий тестами) і НЕ ВИКЛИКАВСЯ (`A7-10`):
@@ -141,6 +160,7 @@ public static partial class StartupSequence
         }
 
         LogBootstrapOutcome(logger, bootstrap.LastOutcome);
+        LogStepTiming(logger, "4a bootstrap-адмін", lap.ElapsedMilliseconds); lap.Restart();
 
         // 5) ПОКИНУТІ фонові задачі. ⛔ Задача, яку виконував процес, що
         //     впав, лишається `Running`/`Queued` у базі НАЗАВЖДИ — процеса,
@@ -183,6 +203,8 @@ public static partial class StartupSequence
             }
         }
 
+        LogStepTiming(logger, "5 покинуті задачі", lap.ElapsedMilliseconds); lap.Restart();
+
         // ⚠ Запас партицій окремим кроком тут більше не рахується: його
         //    попередження дає `SchemaValidator` на кроці 3 (одне джерело).
 
@@ -197,6 +219,8 @@ public static partial class StartupSequence
             .ConfigureAwait(false);
 
         LogWarmupDone(logger, warmed);
+        LogStepTiming(logger, "6 прогрів кешу метаданих", lap.ElapsedMilliseconds);
+        LogStepTiming(logger, "послідовність завершено (від початку процесу)", (long)(DateTime.Now - processStart).TotalMilliseconds);
 
         // 7) Постійні розклади ставить окремий hosted service після того, як
         //    застосунок піднявся: планувальник Quartz стає придатним лише
@@ -297,6 +321,9 @@ public static partial class StartupSequence
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: bootstrap-адміністратор — {Outcome}.")]
     private static partial void LogBootstrapOutcome(
         ILogger logger, Application.Security.BootstrapAdmin.Outcome outcome);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Старт: крок «{Step}» — {Ms} мс.")]
+    private static partial void LogStepTiming(ILogger logger, string step, long ms);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: прогріто версій шаблонів: {Count}.")]
     private static partial void LogWarmupDone(ILogger logger, int count);
