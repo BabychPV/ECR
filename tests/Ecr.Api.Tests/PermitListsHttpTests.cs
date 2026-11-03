@@ -77,6 +77,47 @@ public sealed class PermitListsHttpTests(SqlServerFixture sql)
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перегляд_віддає_перші_чотири_чинні_значення_за_порядком_показу()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, AllRights);
+        var shared = await EnsureSharedRegistryAsync(sql, $"PLV_{_tag}");
+        await PublishTypeAsync(client, $"PLV{_tag}", shared, ["A"], withSibling: true);
+
+        // Реєстр E1 (позиція 1) + шість записів у «переставленому» порядку; один неактивний, один видалений.
+        await using (var db = sql.CreateContext())
+        {
+            var registryId = (await db.RegistryDefs.SingleAsync(r => r.Code == shared)).Id;
+            var entries = new (string Code, int Ordinal)[] { ("E6", 6), ("E3", 3), ("E2", 2), ("E5", 5), ("EOFF", 4), ("EDEL", 2) }
+                .Select(x =>
+                {
+                    var entry = new Ecr.Domain.Entities.Dictionaries.RegistryEntry(registryId, Ecr.Domain.ValueObjects.EcrCode.Create(x.Code), Text(x.Code), 1, DateTime.UnixEpoch);
+                    entry.SetOrdinal(x.Ordinal);
+                    if (x.Code == "EOFF") { entry.Deactivate(); }
+                    if (x.Code == "EDEL") { entry.SoftDelete(); }
+                    return entry;
+                });
+            db.RegistryEntries.AddRange(entries);
+            await db.SaveChangesAsync();
+        }
+
+        var lists = await ReadListAsync(client);
+        var sharedList = Assert.Single(lists, l => l.GetProperty("key").GetString() == $"shared:{shared}");
+        var codes = sharedList.GetProperty("preview").EnumerateArray().Select(p => p.GetProperty("code").GetString()).ToList();
+
+        // Чинних п'ять (E1 E2 E3 E5 E6), ItemCount їх рахує; перегляд - перші чотири за Ordinal, далі Id.
+        Assert.Equal(5, sharedList.GetProperty("itemCount").GetInt32());
+        Assert.Equal(["E1", "E2", "E3", "E5"], codes);
+
+        var typeOnly = Assert.Single(lists, l => l.GetProperty("key").GetString() == $"type:PLV{_tag}:Rows:Kind");
+        Assert.Equal(["A"], typeOnly.GetProperty("preview").EnumerateArray().Select(p => p.GetProperty("displayL10n").GetProperty("en").GetString()));
+
+        var samePermit = Assert.Single(lists, l => l.GetProperty("key").GetString() == $"permit:PLV{_tag}:Rows:Place");
+        Assert.Empty(samePermit.GetProperty("preview").EnumerateArray());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Читання_потребує_Registry_View_а_невідомий_ключ_дає_404_PRM_0404()
     {
         using var app = new EcrApiFactory(sql);
@@ -109,8 +150,8 @@ public sealed class PermitListsHttpTests(SqlServerFixture sql)
 
         Assert.True(few.Queries == many.Queries, $"Типів +4, а запитів {few.Queries} -> {many.Queries}.\n{few.Detail}\n{many.Detail}");
 
-        // Проєкція стовпців + підрахунок значень; перелік типів і визначення типів по одному не читаються (раніше: 1 + N).
-        Assert.True(many.Queries <= 2, $"Очікувалось не більше двох запитів, а {many.Queries}:\n{many.Detail}");
+        // Проєкція стовпців + підрахунок значень + перегляд перших значень (один запит на всі реєстри); перелік типів і визначення типів по одному не читаються (раніше: 1 + N).
+        Assert.True(many.Queries <= 3, $"Очікувалось не більше трьох запитів, а {many.Queries}:\n{many.Detail}");
         Assert.True(many.Lists >= 5, $"Перелік не віддав списки типів: {many.Lists}.");
     }
 

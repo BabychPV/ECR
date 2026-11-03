@@ -36,6 +36,9 @@ internal static class PermitListCatalog
     /// <summary>Право на зміну значень списку «лише для типу».</summary>
     internal const string EditTypePermission = "Permit.EditType";
 
+    /// <summary>Скільки перших значень віддає перегляд у переліку.</summary>
+    internal const int PreviewSize = 4;
+
     internal static string SharedKey(string registryCode) => $"{Shared}:{registryCode}";
 
     internal static string ColumnKey(string prefix, PermitListUsage use) => $"{prefix}:{use.TypeCode}:{use.TableCode}:{use.FieldCode}";
@@ -56,6 +59,10 @@ internal static class PermitListCatalog
             .CountActiveEntriesAsync([.. usages.Where(u => u.ListRegistryDefId is not null).Select(u => u.ListRegistryDefId!.Value).Distinct()], ct)
             .ConfigureAwait(false);
 
+        var previews = await lists
+            .ListTopActiveEntriesAsync([.. usages.Where(u => u.ListRegistryDefId is not null).Select(u => u.ListRegistryDefId!.Value).Distinct()], PreviewSize, ct)
+            .ConfigureAwait(false);
+
         var canEditType = Security.PermissionCheck.IsGranted(profile, EditTypePermission);
         var result = new List<PermitListEntry>();
 
@@ -71,7 +78,8 @@ internal static class PermitListCatalog
                     Copy(first.ListRegistryName!),
                     counts.GetValueOrDefault(group.Key),
                     RegistryAccess.CanAccess(profile, EditSharedPermission, GrantLevel.Write, group.Key),
-                    [.. group.Select(Use)]),
+                    [.. group.Select(Use)],
+                    Preview(previews, group.Key)),
                 PermitListScope.SharedRegistry,
                 group.Key,
                 [.. group]));
@@ -88,7 +96,8 @@ internal static class PermitListCatalog
                     Copy(use.FieldName),
                     counts.GetValueOrDefault(use.ListRegistryDefId!.Value),
                     canEditType,
-                    [Use(use)]),
+                    [Use(use)],
+                    Preview(previews, use.ListRegistryDefId!.Value)),
                 PermitListScope.TypeOnly,
                 use.ListRegistryDefId,
                 [use]));
@@ -105,7 +114,8 @@ internal static class PermitListCatalog
                     Copy(use.FieldName),
                     null,
                     false,
-                    [Use(use)]),
+                    [Use(use)],
+                    []),
                 PermitListScope.SamePermitTable,
                 null,
                 [use]));
@@ -138,6 +148,11 @@ internal static class PermitListCatalog
             ErrorCodes.PermitTypeNotFound,
             $"Списку «{key}» не існує.",
             new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRM-0404.list", ["key"] = key });
+
+    private static List<PermitListValueDto> Preview(IReadOnlyDictionary<int, IReadOnlyList<RegistryEntry>> previews, int registryDefId)
+        => previews.TryGetValue(registryDefId, out var entries)
+            ? [.. entries.Select(e => new PermitListValueDto(e.Id, e.Code, new Dictionary<string, string>(e.DisplayL10n.Values, StringComparer.OrdinalIgnoreCase)))]
+            : [];
 
     private static PermitListUseDto Use(PermitListUsage use)
         => new(use.TypeCode, Copy(use.TypeName), use.TableCode, Copy(use.TableName), use.FieldCode, Copy(use.FieldName));

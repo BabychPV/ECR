@@ -32727,6 +32727,8 @@ export interface components {
             nameL10n: {
                 [key: string]: string;
             };
+            /** @description Перші 4 чинні значення в порядку показу (для `SamePermitTable` - порожньо; `null` - попередній перегляд не передбачено). */
+            preview?: null | components["schemas"]["PermitListValueDto"][];
             /** @description Код довідника зі значеннями (для `SharedRegistry` і `TypeOnly` - прихованого); для таблиці дозволу `null`. */
             registryCode: null | string;
             /** @description `SharedRegistry`, `TypeOnly` або `SamePermitTable`. */

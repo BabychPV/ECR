@@ -25,6 +25,7 @@ public sealed record PermitListUseDto(
 /// <param name="ItemCount">Скільки чинних значень; <c>null</c> для таблиці того самого дозволу (значення - рядки дозволу).</param>
 /// <param name="Editable">Чи може поточний користувач змінювати значення (право і область).</param>
 /// <param name="UsedBy">Стовпці опублікованих типів, що беруть значення зі списку.</param>
+/// <param name="Preview">Перші 4 чинні значення в порядку показу (для <c>SamePermitTable</c> - порожньо; <c>null</c> - попередній перегляд не передбачено).</param>
 public sealed record PermitListDto(
     string Key,
     string Scope,
@@ -33,7 +34,8 @@ public sealed record PermitListDto(
     Dictionary<string, string> NameL10n,
     int? ItemCount,
     bool Editable,
-    IReadOnlyList<PermitListUseDto> UsedBy);
+    IReadOnlyList<PermitListUseDto> UsedBy,
+    IReadOnlyList<PermitListValueDto>? Preview = null);
 
 /// <summary>Значення списку.</summary>
 /// <param name="Id">Ідентифікатор запису довідника.</param>

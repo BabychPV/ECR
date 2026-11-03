@@ -1,4 +1,5 @@
 // src/Ecr.Application/Ports/IPermitListStore.cs
+using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 
@@ -57,4 +58,14 @@ public interface IPermitListStore
     /// <param name="registryDefIds">Реєстри списків.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyDictionary<int, int>> CountActiveEntriesAsync(IReadOnlyCollection<int> registryDefIds, CancellationToken ct);
+
+    /// <summary>
+    /// Перші <paramref name="perRegistry"/> чинних (активних, не видалених) записів кожного з переданих реєстрів у порядку показу
+    /// (<c>Ordinal</c>, далі <c>Id</c>); реєстр без чинних записів відсутній. Один запит на весь набір.
+    /// </summary>
+    /// <param name="registryDefIds">Реєстри списків.</param>
+    /// <param name="perRegistry">Скільки записів брати з кожного реєстру.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyDictionary<int, IReadOnlyList<RegistryEntry>>> ListTopActiveEntriesAsync(
+        IReadOnlyCollection<int> registryDefIds, int perRegistry, CancellationToken ct);
 }
