@@ -51,6 +51,15 @@
 4. **Перенос** (move або upsert з іншим батьком), що змінив би REGION/AREA будь-якого SRC у піддереві, — `422 ECR-REG-0422
    naeMoveChangesScope` (деталі `entryCode`, `sourceCode`): REGION+AREA — частина бізнес-ідентичності НАЕ, на яку дивляться
    дозволи. Перенос у межах тієї самої області — дозволено.
+5. **Зміна типу вузла** (move з `levelCode` або upsert з іншим `levelCode`; ✎ follow-up 03.11):
+   - **В SRC** — правила SRC повністю: upsert вимагає номер у запиті або збережений (`422 requiredFieldsMissing`), перевіряє
+     його область (`409 ECR-REG-4094`) і ставить похідні регіон/район. Move значень не несе: вузол без збереженого номера —
+     `422 requiredFieldsMissing` (номер дає upsert), зі збереженим (дані до типів вузлів) — та сама перевірка області, похідні
+     регіон/район і запис через writer (обов'язковість, складений ключ, аудит значень) у транзакції переносу.
+   - **З SRC** — **відмова** `422 ECR-REG-0422 naeSourceLevelChange` (деталі `entryCode`, `levelCode`), і в move, і в upsert.
+     Чому відмова, а не очищення: джерело — об'єкт, на який дивляться дозволи; очищення номера/регіону мовчки рвало б цей
+     зв'язок, а лишені SRC-значення на групі суперечили б прив'язці полів. Перестати бути джерелом — закрити вікно вузла
+     (retire) і завести групу.
 
 ## Імпорт з AF за шаблоном
 
@@ -61,9 +70,12 @@
 ті самі, що в завантаженні за шляхом (`R_…`, `A_…`, `S_…`, `G_…`, `N_…`); вкладений SITE — `S_<R>_<A>_<БАТЬКО>_<САЙТ>`.
 Знімок без шаблонів іде старим шляхом (атрибути `Region`/`On_Offshore` і сегменти шляху) — без змін.
 
-⚠ [blocks] `PiAfNaeReader` поки НЕ заповнює `Template`: порт `SourceElement` (`IExternalDataSource.DiscoverElementsAsync`)
-шаблону елемента не несе, а порт і адаптери PI AF — поза межами цієї lane. Доки адаптер не віддасть `TemplateName`, живе
-завантаження йде шляхом за шляхом; логіка за шаблоном покрита тестами з фейковим читачем.
+✎ follow-up 03.11: шаблон іде наскрізно. `SourceElement.TemplateName` (порт, nullable, синк довідників його не читає)
+заповнюють адаптери: PI Web API — поле `TemplateName` елемента; PI SQL Client — необов'язкова колонка `TemplateName`
+налаштованого запиту `ElementListQuery` (без колонки — `null`, як раніше). `PiAfNaeReader` кладе його в `NaeAfElement.Template`.
+PI Web API віддає лише прямих дітей вузла, тож для нього читач обходить піддерево рівень за рівнем (стеля глибини 10 і
+20 000 елементів — далі знімок неповний, `sourceIncomplete`), не заходячи в джерела (`Equipment`). PI SQL Client не
+обходиться: глибину визначає його запит. ⚠ Обхід — один HTTP-запит на кожен вузол-групу: для разового завантаження прийнятно.
 
 ## Оновлення наявної бази
 
@@ -84,11 +96,14 @@
 - Створення/зміна вузла — без нового ендпоінта: `POST /registries/{code}/entries` (`levelCode`, `parentEntryId`, `display`,
   `values` — лише поля свого рівня; read-only поля можна не слати, їх ігнорують).
 - Нові ключі каталогу: `err.ECR-REG-4094`, `err.ECR-REG-4094.naeCodeTaken`, `err.ECR-REG-0422.naeNameEnRequired`,
-  `err.ECR-REG-0422.naeMoveChangesScope`, `err.ECR-REG-0422.fieldLevelMismatch`, `err.ECR-REG-0409.levelHasFields`
+  `err.ECR-REG-0422.naeMoveChangesScope`, `err.ECR-REG-0422.fieldLevelMismatch`, `err.ECR-REG-0409.levelHasFields`,
+  `err.ECR-REG-0422.naeSourceLevelChange`
   (`seed/features/NAE-node-types.sql`, en/ru/kz).
 
 ## Припущення
 
 - Похідний `RegionCode` = технічний код предка REGION без префікса `R_` (так його дають усі три завантаження), інакше — сам
   код; так значення збігаються з уже збереженими (`ATYRAU`, `OFFSHORE`, `-`).
-- Зміна рівня вузла переносом у SRC/з SRC (`levelCode` у move) номер НАЕ не перевіряє — [debt].
+- Журнал збереження опису (`aud.StructureChange`, `SaveDefinition`) містить `LevelId` кожного поля в знімках «до» і «після».
+- Разове оновлення на старті (`UpgradeNodeTypesAsync`) окремого запису в `aud.StructureChange` не пише — лише версію опису й
+  автора «система»; [debt], якщо знадобиться слід у журналі.
