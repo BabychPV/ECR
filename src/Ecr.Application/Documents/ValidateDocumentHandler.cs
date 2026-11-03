@@ -49,8 +49,13 @@ public sealed class ValidateDocumentHandler(
         // ⚠ Екземпляри таблиць беруться ОДНИМ запитом, а не по аркушах:
         // бюджет — 3 с p95 на весь документ, і похід у базу на кожну з
         // сотні таблиць у нього не вкладається.
-        var instances = await rowStore
-            .GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        // ⛔ RS: «Перевірити» документ — по ОРИГІНАЛАХ. Копія аркуша перевіряється на своєму поданні
+        // (`SubmissionPayloadSource.ForSheetCopy`): повідомлення цього результату адресують таблицю і рядок за кодами,
+        // без копії, а зв'язки Check складали б рядки копій разом з оригіналом.
+        var instances = (await rowStore
+                .GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false))
+            .Where(i => i.SheetCopyId is null)
+            .ToList();
 
         // ⛔ Q-165 (аудит фази 2, продуктивність): які таблиці мають правила
         // з'ясовується з кешу метаданих (без походу в базу) ДО читання

@@ -17,6 +17,28 @@ public sealed class DocumentSheetCopyStore(EcrDbContext db) : IDocumentSheetCopy
     private const short FirstCopyOrdinal = Ecr.Domain.Entities.Documents.DocumentSheet.OriginalOrdinal + 1;
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<SheetCopyGroupInfo>> ListGroupsAsync(long documentId, CancellationToken ct)
+    {
+        var rows = await db.DocumentSheets.AsNoTracking()
+            .Where(s => s.DocumentId == documentId)
+            .Select(s => new { s.Id, s.SheetDefId, s.CopyOfId, s.CopyOrdinal, s.NameOverrideL10n })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var copiesOf = rows.Where(r => r.CopyOfId != null)
+            .GroupBy(r => r.CopyOfId!.Value)
+            .ToDictionary(g => g.Key, g => g.OrderBy(r => r.CopyOrdinal).Select(r => new SheetCopyOrdinal(r.Id, r.CopyOrdinal)).ToList());
+
+        return
+        [
+            .. rows.Where(r => r.CopyOfId == null)
+                .Select(r => new SheetCopyGroupInfo(
+                    r.SheetDefId, r.NameOverrideL10n, copiesOf.GetValueOrDefault(r.Id) ?? []))
+                .Where(g => g.NameOverride is not null || g.Copies.Count > 0),
+        ];
+    }
+
+    /// <inheritdoc />
     public async Task<SheetCopyGroup?> FindGroupAsync(long documentId, int sheetDefId, CancellationToken ct)
     {
         var original = await db.DocumentSheets.AsNoTracking()

@@ -94,7 +94,7 @@ public sealed class RefreshPermitBindingHandler(
         // Екземпляр створюється (разом із рядками дозволу) тим самим шляхом, що й під час відкриття документа.
         await rows.EnsureTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
         var instance = (await rows.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false))
-            .FirstOrDefault(i => i.TableDefId == view.Binding.SheetTableDefId)
+            .FirstOrDefault(i => i.TableDefId == view.Binding.SheetTableDefId && i.SheetCopyId is null)   // RS: лише оригінал (Q5)
             ?? throw DocumentVisibility.DocumentNotFound(documentId);
 
         await DocumentVisibility

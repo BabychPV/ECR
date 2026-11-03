@@ -16,6 +16,18 @@ public sealed record SheetCopyRef(long Id, long OriginalId, int SheetDefId, shor
 /// <param name="Status">Стан.</param>
 public sealed record SheetCopyWorkflowBlock(int PeriodKey, DocumentStatus Status);
 
+/// <summary>Копія в групі: Id і номер.</summary>
+/// <param name="SheetCopyId">Id копії (<c>doc.DocumentSheet.Id</c>).</param>
+/// <param name="Ordinal">Номер у групі (2…).</param>
+public sealed record SheetCopyOrdinal(long SheetCopyId, short Ordinal);
+
+/// <summary>Назва й копії аркуша у складі документа — для показу «&lt;Назва&gt; N» (<c>SheetCopyNaming</c>).</summary>
+/// <param name="SheetDefId">Аркуш шаблону.</param>
+/// <param name="NameOverride">Назва групи, задана в документі; <c>null</c> — з шаблону.</param>
+/// <param name="Copies">Копії за зростанням номера; порожньо — копій немає.</param>
+public sealed record SheetCopyGroupInfo(
+    int SheetDefId, LocalizedText? NameOverride, IReadOnlyList<SheetCopyOrdinal> Copies);
+
 /// <summary>Група аркуша в документі: оригінал і його копії.</summary>
 /// <param name="OriginalId">Оригінал.</param>
 /// <param name="SheetDefId">Аркуш шаблону.</param>
@@ -31,6 +43,14 @@ public sealed record SheetCopyGroup(long OriginalId, int SheetDefId, LocalizedTe
 /// </remarks>
 public interface IDocumentSheetCopyStore
 {
+    /// <summary>
+    /// Назви груп і копії усіх аркушів документа — читання для показу (Excel, API). Не вимагає блокування структури.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Лише групи з назвою в документі або з копіями; решта показується за шаблоном.</returns>
+    public Task<IReadOnlyList<SheetCopyGroupInfo>> ListGroupsAsync(long documentId, CancellationToken ct);
+
     /// <summary>Група аркуша в складі документа; <c>null</c> — аркуша в складі немає.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="sheetDefId">Аркуш.</param>

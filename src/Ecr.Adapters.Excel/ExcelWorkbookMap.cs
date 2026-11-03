@@ -69,6 +69,10 @@ public sealed record ExcelWorkbookMap(
 /// Відбиток комірок рядків груп (<see cref="LayoutFingerprint"/>): рядок за рядком згори донизу, по колонці на комірку;
 /// звіряється з книгою як заголовки колонок. <c>null</c> - груп немає.
 /// </param>
+/// <param name="SheetCopyId">
+/// RS: копія аркуша, якій належить блок (<c>null</c> — оригінал). Лише для побудови формул експорту (посилання копії —
+/// на таблиці своєї копії); у карту НЕ пишеться: імпорт маршрутизує за <paramref name="TableInstanceId"/>.
+/// </param>
 public sealed record ExcelTableBlock(
     long TableInstanceId,
     int TableDefId,
@@ -82,7 +86,9 @@ public sealed record ExcelTableBlock(
     int? GroupRows = null,
     [property: System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    string? Groups = null)
+    string? Groups = null,
+    [property: System.Text.Json.Serialization.JsonIgnore]
+    long? SheetCopyId = null)
 {
     /// <summary>Рядок з назвою таблиці: над групами (якщо є) і рядком заголовків.</summary>
     [System.Text.Json.Serialization.JsonIgnore]

@@ -129,7 +129,12 @@ public sealed class DocumentDataExporter(
         // порожній» — хоча документ є і шаблон дає йому таблиці (UX-прохід
         // 2026-09-24, живий стенд). Виклик ідемпотентний.
         await rowStore.EnsureTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
-        var instances = await rowStore.GetTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
+        // ⛔ RS: CSV/JSON — формат «таблиця за кодом», без копій: файл і ключ об'єкта називає код таблиці, тож копії,
+        // що мають ті самі коди, зливалися б з оригіналом (або падали на дублі). Копії виходять у xlsx
+        // (`ExcelExporter`: аркуш «<Назва> N» на кожну).
+        var instances = (await rowStore.GetTableInstancesAsync(documentId, key, ct).ConfigureAwait(false))
+            .Where(i => i.SheetCopyId is null)
+            .ToList();
         if (instances.Count == 0)
         {
             throw new NotFoundException(

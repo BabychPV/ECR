@@ -222,7 +222,7 @@ public sealed class PreviewPermitBindingHandler(
 
         var periodKey = PeriodKey.Parse(periodValue);
         var instance = (await rows.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false))
-            .FirstOrDefault(i => i.TableDefId == sheetTable.Id);
+            .FirstOrDefault(i => i.TableDefId == sheetTable.Id && i.SheetCopyId is null);   // RS: лише оригінал (Q5)
         if (instance is null)
         {
             return result;
