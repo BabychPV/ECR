@@ -10,7 +10,7 @@ namespace Ecr.Application.Registries.Hierarchy;
 /// <param name="Name">Level name, all languages.</param>
 /// <param name="IsOptional">A node may skip this level (child on a deeper level than <c>parent + 1</c>).</param>
 /// <param name="EntryCount">Live entries placed on this level.</param>
-/// <param name="AllowsSelfNesting">A node of this level may sit under a node of the same level (NAE: a site inside a site).</param>
+/// <param name="AllowsSelfNesting">A node of this level may sit under a node of the same level (NAE: a site inside a site); the server always fills it (nullable only to keep older clients' fixtures valid).</param>
 public sealed record RegistryLevelDto(
     int Id,
     int Ordinal,
@@ -18,7 +18,7 @@ public sealed record RegistryLevelDto(
     LocalizedText Name,
     bool IsOptional,
     int EntryCount,
-    bool AllowsSelfNesting = false);
+    bool? AllowsSelfNesting = null);
 
 /// <summary>Level in a save request; its position in the list is its ordinal.</summary>
 /// <param name="Code">Level code (EcrCode); an existing code keeps the level id.</param>

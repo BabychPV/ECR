@@ -34515,11 +34515,22 @@ export interface components {
              * @description Ідентифікатор поля.
              */
             id: number;
+            /** @description Значення веде сервер, а не користувач (НАЕ: `RegionCode`/`AreaCode` виводяться з предків, `AfPath` пише
+             *     завантаження з AF); введене в запиті ігнорується. `null` — відповідь, що ознаки не рахує (не опис довідника); опис дає її завжди. */
+            isReadOnly?: null | boolean;
             /** @description Обов'язковість. */
             isRequired: boolean;
             /** @description Чи можна звужувати доступ за цим полем. Саме ці поля бере
              *     `RoleAssignment.ScopeJson`; решта для звуження недоступна. */
             isScopeField: boolean;
+            /** @description Код того самого рівня; `null` — поле всіх рівнів (або читач без рівнів). */
+            levelCode?: null | string;
+            /**
+             * Format: int32
+             * @description Рівень ієрархічного довідника, якому належить поле (типи вузлів НАЕ, 03.11): форма вузла показує лише поля свого рівня і
+             *     поля всіх рівнів; `null` — поле всіх рівнів.
+             */
+            levelId?: null | number;
             /**
              * Format: int32
              * @description Довідник-джерело для полів-посилань.
@@ -34548,6 +34559,10 @@ export interface components {
             isKey: boolean;
             /** @description Обов'язковість. */
             isRequired: boolean;
+            /** @description Рівень ієрархічного довідника, якому належить поле (типи вузлів НАЕ, 03.11): код рівня — прив'язати; порожній рядок —
+             *     поле всіх рівнів; `null` — без змін (клієнт, що про рівні не знає, прив'язку не знімає; нове поле — усі рівні).
+             *     Обов'язковість прив'язаного поля діє лише для записів його рівня. */
+            levelCode?: null | string;
             /**
              * Format: int32
              * @description Довідник-джерело; у наявного змінюється чи знімається (`null`), лише поки жодне значення поля не вказує на запис (ФВ-8.12).
@@ -34756,6 +34771,8 @@ export interface components {
         };
         /** @description One declared level of a hierarchical registry (NAE plan N1). */
         RegistryLevelDto: {
+            /** @description A node of this level may sit under a node of the same level (NAE: a site inside a site); the server always fills it (nullable only to keep older clients' fixtures valid). */
+            allowsSelfNesting?: null | boolean;
             /** @description Level code, unique within the registry. */
             code: string;
             /**
@@ -34780,6 +34797,9 @@ export interface components {
         };
         /** @description Level in a save request; its position in the list is its ordinal. */
         RegistryLevelInput: {
+            /** @description A node of this level may sit under a node of the same level; `null` — unchanged for an existing level, `false` for
+             *     a new one (a client that does not know the flag does not switch it off). */
+            allowsSelfNesting?: null | boolean;
             /** @description Level code (EcrCode); an existing code keeps the level id. */
             code: string;
             /** @description A node may skip this level. */

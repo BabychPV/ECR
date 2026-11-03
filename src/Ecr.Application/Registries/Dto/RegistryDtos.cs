@@ -123,7 +123,7 @@ public enum RegistryDefKind
 /// <param name="LevelCode">Код того самого рівня; <c>null</c> — поле всіх рівнів (або читач без рівнів).</param>
 /// <param name="IsReadOnly">
 /// Значення веде сервер, а не користувач (НАЕ: <c>RegionCode</c>/<c>AreaCode</c> виводяться з предків, <c>AfPath</c> пише
-/// завантаження з AF); введене в запиті ігнорується.
+/// завантаження з AF); введене в запиті ігнорується. <c>null</c> — відповідь, що ознаки не рахує (не опис довідника); опис дає її завжди.
 /// </param>
 public sealed record RegistryFieldDto(
     int Id,
@@ -136,7 +136,7 @@ public sealed record RegistryFieldDto(
     int? UnitId,
     int? LevelId = null,
     string? LevelCode = null,
-    bool IsReadOnly = false);
+    bool? IsReadOnly = null);
 
 /// <summary>
 /// Заведення довідника з нуля — **без жодного поля**.
