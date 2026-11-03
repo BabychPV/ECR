@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Button, Fieldset, Group, Skeleton, Stack, Text, TextInput } from '@mantine/core';
+import { Anchor, Button, Fieldset, Group, Skeleton, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { components } from '@/api/schema';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { invalidateRegistryTree } from '@/features/registries/tree/useRegistryTree';
-import { dataTypeLabel } from '@/features/templates/enumLabels';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -16,14 +15,18 @@ import type { TreeNode } from '@/shared/ui/TreeEditor';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import {
   EmptyNodeForm,
+  NaeCodeField,
   buildNodeBody,
+  fieldsForLevel,
   formOfDetail,
   hasProblems,
-  inheritedValues,
-  NaeAreaField,
+  isServerField,
   serverFieldProblem,
   serverKeyHolder,
+  serverNaeCodeHolder,
+  targetLevelCode,
   validateNode,
+  type NaeCodeHolder,
   type NodeDetail,
   type NodeFormProblems,
   type NodeFormState,
@@ -48,6 +51,8 @@ export interface NodeAttributesFormProps {
   /** Збережено; `id` - запис (для вибору в дереві після створення). */
   readonly onSaved: (id: number) => void;
   readonly onCancel?: (() => void) | undefined;
+  /** «Відкрити вузол» з відмови «номер NAE зайнятий»: тримач номера. Без нього посилання не показується. */
+  readonly onOpenNode?: ((id: number) => void) | undefined;
 }
 
 /** Ключ `GET …/entries/{id}` - під префіксом `entries(code)`, тож інвалідується разом із переліком і деревом. */
@@ -55,45 +60,33 @@ function detailKey(code: string, id: number): readonly unknown[] {
   return [...queryKeys.registries.entries(code), 'detail', id] as const;
 }
 
+function detailPath(code: string, id: number): string {
+  return `/api/v1/registries/${encodeURIComponent(code)}/entries/${String(id)}`;
+}
+
 /**
- * Форма атрибутів вузла структури (NAE plan N2): код, назва мовами каталогу й поля довідника.
+ * Форма вузла структури NAE за ТИПОМ вузла (рівнем реєстру, 03.11): код, назва трьома мовами (англійська обов'язкова) і
+ * поля довідника, що належать саме цьому рівню або всім рівням. Поля, які веде сервер (регіон і район - з предків,
+ * шлях AF - із завантаження), показані текстом, а не полем вводу.
  * Створення - під батьком на вказаному рівні (кнопка «Add child»), правка - вибраного вузла.
  *
  * ⛔ Один ендпоінт на створення й правку (`POST …/entries`, `id: null` - створення): рівень і батько їдуть у тілі,
- * порядок рівнів і унікальність коду перевіряє сервер, а його відмова не губиться - біля поля коду або сповіщенням.
+ * порядок рівнів і унікальність номера NAE перевіряє сервер, а його відмова не губиться - біля поля або сповіщенням.
  */
 export function NodeAttributesForm(props: NodeAttributesFormProps): JSX.Element {
   const { target, registryCode } = props;
   const detail = useQuery({
     queryKey: detailKey(registryCode, target.mode === 'edit' ? Number(target.node.id) : 0),
-    queryFn: () =>
-      apiFetch<NodeDetail>(
-        `/api/v1/registries/${encodeURIComponent(registryCode)}/entries/${String(target.mode === 'edit' ? target.node.id : 0)}`,
-      ),
+    queryFn: () => apiFetch<NodeDetail>(detailPath(registryCode, target.mode === 'edit' ? Number(target.node.id) : 0)),
     enabled: target.mode === 'edit',
     // ⚠ Форма бере стан із відповіді один раз при монтуванні: кешована з минулого відкриття відповідь підставила б
     // те, чого вже немає.
     gcTime: 0,
   });
-  const parentId = target.mode === 'create' && target.parent !== null ? Number(target.parent.id) : null;
-  // Регіон і район нового вузла підказуються від батька: його значення лежать лише в повному записі.
-  const parent = useQuery({
-    queryKey: detailKey(registryCode, parentId ?? 0),
-    queryFn: () =>
-      apiFetch<NodeDetail>(`/api/v1/registries/${encodeURIComponent(registryCode)}/entries/${String(parentId ?? 0)}`),
-    enabled: parentId !== null,
-    gcTime: 0,
-  });
-  const pending = usePendingLoading((detail.isPending && target.mode === 'edit') || (parent.isPending && parentId !== null));
+  const pending = usePendingLoading(detail.isPending && target.mode === 'edit');
 
   if (target.mode === 'create') {
-    // Підказка не обов'язкова: збій читання батька не блокує створення, поля просто порожні.
-    if (parentId !== null && parent.isPending) {
-      return pending ? <Skeleton height={160} radius="sm" data-nae-form="pending" /> : <div aria-busy="true" data-nae-form="pending" />;
-    }
-    const inherited = parent.data === undefined ? {} : inheritedValues(formOfDetail(parent.data).values, target.level.code);
-
-    return <Form {...props} initial={{ ...EmptyNodeForm, values: inherited }} parentEntryId={parentId} />;
+    return <Form {...props} initial={EmptyNodeForm} parentEntryId={target.parent === null ? null : Number(target.parent.id)} />;
   }
 
   if (detail.error !== null && detail.error !== undefined) {
@@ -117,20 +110,30 @@ function Form({
   readOnly,
   onSaved,
   onCancel,
+  onOpenNode,
   initial,
   parentEntryId,
 }: NodeAttributesFormProps & { readonly initial: NodeFormState; readonly parentEntryId: number | null }): JSX.Element {
   const queryClient = useQueryClient();
+  // Базовий стан: те, що збережено на сервері. Після збереження правки він береться з відповіді сервера заново, бо сервер
+  // нормалізує значення (номер `36_pod` -> `0036_pod`) і виводить регіон та район.
+  const [baseline, setBaseline] = useState<NodeFormState>(initial);
   const [code, setCode] = useState(initial.code);
   const [display, setDisplay] = useState<LocalizedValue>({ ...initial.display });
   const [values, setValues] = useState<Record<string, string>>({ ...initial.values });
   const [tried, setTried] = useState(false);
   const [serverProblem, setServerProblem] = useState<ServerFieldProblem | null>(null);
   const [holder, setHolder] = useState<string | null>(null);
+  const [naeHolder, setNaeHolder] = useState<NaeCodeHolder | null>(null);
+
+  // Поля свого типу: одні вводить людина, інші веде сервер.
+  const levelFields = fieldsForLevel(fields, targetLevelCode(target));
+  const inputFields = levelFields.filter((field) => !isServerField(field));
+  const serverFields = levelFields.filter(isServerField);
 
   const current: NodeFormState = { code, display, values };
-  const problems: NodeFormProblems = validateNode(fields, current, codeAutomatic);
-  const dirty = JSON.stringify(current) !== JSON.stringify(initial);
+  const problems: NodeFormProblems = validateNode(inputFields, current, codeAutomatic);
+  const dirty = JSON.stringify(current) !== JSON.stringify(baseline);
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
 
@@ -145,17 +148,38 @@ function Form({
       apiFetch<EntryIdResponse>(`/api/v1/registries/${encodeURIComponent(registryCode)}/entries`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildNodeBody({ registryId, fields, target, parentEntryId, initial, current, codeAutomatic })),
+        body: JSON.stringify(
+          buildNodeBody({ registryId, fields: inputFields, target, parentEntryId, initial: baseline, current, codeAutomatic }),
+        ),
       }),
     onSuccess: async (result) => {
       await invalidateRegistryTree(queryClient, registryCode);
+      if (target.mode === 'edit') {
+        // Нормалізований номер і виведені регіон/район - зі збереженого запису, а не з того, що ввела людина.
+        try {
+          const fresh = await queryClient.fetchQuery({
+            queryKey: detailKey(registryCode, Number(target.node.id)),
+            queryFn: () => apiFetch<NodeDetail>(detailPath(registryCode, Number(target.node.id))),
+            staleTime: 0,
+          });
+          const next = formOfDetail(fresh);
+          setBaseline(next);
+          setCode(next.code);
+          setDisplay({ ...next.display });
+          setValues({ ...next.values });
+        } catch {
+          // Збережено, а перечитати не вдалося: форма лишається з введеним, наступне відкриття прочитає сервер.
+        }
+      }
+      setTried(false);
       showDone(target.mode === 'create' ? t('registries.entryCreated') : t('registries.entrySaved'));
       onSaved(result.id);
     },
     onError: (error: unknown) => {
-      // Відмова про код - біля поля коду; решта - сповіщенням (текст бере каталог за `messageKey`).
+      // Відмова про поле - біля поля; решта - сповіщенням (текст бере каталог за `messageKey`).
       setServerProblem(serverFieldProblem(error));
       setHolder(serverKeyHolder(error));
+      setNaeHolder(serverNaeCodeHolder(error));
       showApiError(error);
     },
   });
@@ -184,6 +208,28 @@ function Form({
         : tried && problems.code !== undefined
           ? t('permits.nae.form.codeRequired')
           : undefined;
+
+  const fieldError = (field: RegistryField): JSX.Element | string | undefined => {
+    if (field.code === NaeCodeField && serverProblem === 'naeCodeTaken' && naeHolder !== null) {
+      return (
+        <span data-nae-code-taken="">
+          {t('permits.nae.form.naeCodeTaken', {
+            naeCode: naeHolder.naeCode,
+            holder: naeHolder.entryCode,
+            region: naeHolder.region,
+            area: naeHolder.area,
+          })}{' '}
+          {onOpenNode !== undefined && naeHolder.entryId !== null && (
+            <Anchor component="button" type="button" size="sm" onClick={() => onOpenNode(naeHolder.entryId ?? 0)} data-nae-code-taken-open="">
+              {t('permits.nae.form.naeCodeTakenOpen')}
+            </Anchor>
+          )}
+        </span>
+      );
+    }
+
+    return tried && problems.values[field.code] !== undefined ? t('permits.nae.form.fieldRequired') : undefined;
+  };
 
   return (
     <form
@@ -228,32 +274,45 @@ function Form({
               />
             )}
 
-            <LocalizedInput label={t('registries.name')} value={display} onChange={setDisplay} required />
-            {tried && problems.display !== undefined && (
+            <LocalizedInput label={t('registries.name')} description={t('permits.nae.form.nameHint')} value={display} onChange={setDisplay} required />
+            {((tried && problems.display !== undefined) || serverProblem === 'nameEnRequired') && (
               <Text size="sm" c="statusError" role="alert" data-nae-name-error="">
                 {t('permits.nae.form.nameRequired')}
               </Text>
             )}
 
-            {fields.map((field) => (
+            {inputFields.map((field) => (
               <TextInput
                 key={field.id}
                 label={localized(field.nameL10n) || field.code}
-                description={
-                  field.code === NaeAreaField
-                    ? t('permits.nae.form.areaHint')
-                    : `${field.code} · ${dataTypeLabel(field.dataType)}`
-                }
+                description={field.code === NaeCodeField ? t('permits.nae.form.naeCodeHint') : undefined}
                 required={field.isRequired}
                 value={values[field.code] ?? ''}
-                error={tried && problems.values[field.code] !== undefined ? t('permits.nae.form.fieldRequired') : undefined}
+                error={fieldError(field)}
                 onChange={(event) => {
                   // ⛔ `currentTarget` обнуляється після обробника, а апдейтер `setValues` читає ліниво (StrictMode).
                   const next = event.currentTarget.value;
                   setValues((previous) => ({ ...previous, [field.code]: next }));
+                  if (field.code === NaeCodeField) setServerProblem(null);
                 }}
               />
             ))}
+
+            {serverFields.length > 0 && (
+              <Stack gap="xs" data-nae-derived="">
+                <Text size="xs" c="dimmed">
+                  {target.mode === 'create' ? t('permits.nae.form.derivedCreate') : t('permits.nae.form.derived')}
+                </Text>
+                {serverFields.map((field) => (
+                  <Group key={field.id} gap="xs" wrap="nowrap" data-nae-derived-field={field.code}>
+                    <Text size="sm" fw={500} style={{ minWidth: '9rem' }}>
+                      {localized(field.nameL10n) || field.code}
+                    </Text>
+                    <Text size="sm">{target.mode === 'create' ? '—' : (baseline.values[field.code] ?? '') || '—'}</Text>
+                  </Group>
+                ))}
+              </Stack>
+            )}
           </Stack>
         </Fieldset>
 

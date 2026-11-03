@@ -262,6 +262,7 @@ export function draftNewFields(draft: RegistryDraftDto, language: string): Field
       isKey: field.isKey,
       lookupRegistryDefId: field.lookupRegistryDefId,
       unitId: field.unitId,
+      levelCode: field.levelCode ?? '',
       ...compositionFromSave(field),
     }));
 }

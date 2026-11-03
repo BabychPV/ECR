@@ -183,6 +183,7 @@ export function NaeStructurePage(): JSX.Element {
                   target={{ mode: 'edit', node }}
                   readOnly={!canEdit || node.retired === true}
                   onSaved={() => undefined}
+                  onOpenNode={(id) => setNodeParam(String(id))}
                 />
               </Suspense>
             )}
@@ -200,6 +201,10 @@ export function NaeStructurePage(): JSX.Element {
             fields={registry.fields}
             draft={draft}
             onClose={() => setDraft(null)}
+            onOpenNode={(id) => {
+              setDraft(null);
+              setNodeParam(String(id));
+            }}
             onCreated={(id) => {
               setDraft(null);
               setNodeParam(String(id));
