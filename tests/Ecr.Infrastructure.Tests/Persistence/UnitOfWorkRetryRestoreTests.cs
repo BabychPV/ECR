@@ -1,6 +1,7 @@
 // tests/Ecr.Infrastructure.Tests/Persistence/UnitOfWorkRetryRestoreTests.cs
 using System.Data.Common;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
@@ -190,7 +191,164 @@ public sealed class UnitOfWorkRetryRestoreTests(SqlServerFixture sql)
             await check.DataSources.AsNoTracking().Where(s => s.Code == code).Select(s => s.Endpoint).ToListAsync());
     }
 
+    // ── AN-101: сутності, додані викликачем ДО транзакції ──────────────
+    //
+    // ⛔ Що було. Перша спроба вставляла додану сутність і приймала її (`Unchanged` зі справжнім ключем
+    // IDENTITY); коміт падав, база відкочувала вставку, а повтор не бачив у трекері нічого незбереженого —
+    // рядка не ставало, обробник відповідав 200. Головний шлях — `UnitOfWork.SaveChangesAsync` із
+    // ревізіями довідників: обробник робить `db.Add`, а транзакцію відкриває вже одиниця роботи.
+    // ⛔ Мутації: прибрати крок 4 у `ChangeTrackerCheckpoint.Restore` — усі чотири тести нижче червоні
+    // (рядка немає); не позначати тимчасові властивості знову тимчасовими — три з ключем IDENTITY червоні
+    // («Cannot insert explicit value for identity column»).
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "AN-101")]
+    public async Task Додана_до_транзакції_сутність_з_ключем_IDENTITY_вставляється_після_повтору_рівно_раз()
+    {
+        var code = NewCode();
+        var fault = new CommitFaultOnce();
+        int id;
+
+        await using (var db = Context(fault))
+        {
+            var source = new DataSource(
+                EcrCode.Create(code), Name, ExternalTransport.PiWebApi, OldEndpoint, "DataSource." + code);
+            db.DataSources.Add(source);
+
+            await new UnitOfWork(db).ExecuteInTransactionAsync(ct => db.SaveChangesAsync(ct), CancellationToken.None);
+
+            Assert.True(fault.Fired, "Збій першої спроби не спрацював — тест нічого не довів.");
+            Assert.Equal(EntityState.Unchanged, db.Entry(source).State);
+            id = source.Id;
+        }
+
+        await using var check = Context();
+        Assert.Equal(
+            [id],
+            await check.DataSources.AsNoTracking().Where(s => s.Code == code).Select(s => s.Id).ToListAsync());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "AN-101")]
+    public async Task Додана_до_транзакції_і_змінена_в_замиканні_між_двома_збереженнями_записується_після_повтору()
+    {
+        var code = NewCode();
+        var fault = new CommitFaultOnce();
+
+        await using (var db = Context(fault))
+        {
+            var source = new DataSource(
+                EcrCode.Create(code), Name, ExternalTransport.PiWebApi, OldEndpoint, "DataSource." + code);
+            db.DataSources.Add(source);
+
+            await new UnitOfWork(db).ExecuteInTransactionAsync(
+                async ct =>
+                {
+                    await db.SaveChangesAsync(ct);
+                    source.Update(Name, ExternalTransport.PiWebApi, NewEndpoint, isActive: true);
+                    await db.SaveChangesAsync(ct);
+                },
+                CancellationToken.None);
+
+            Assert.True(fault.Fired, "Збій першої спроби не спрацював — тест нічого не довів.");
+        }
+
+        await using var check = Context();
+        Assert.Equal(
+            [NewEndpoint],
+            await check.DataSources.AsNoTracking().Where(s => s.Code == code).Select(s => s.Endpoint).ToListAsync());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "AN-101")]
+    public async Task Додані_до_транзакції_principal_і_dependent_вставляються_після_повтору_з_FK_на_новий_рядок()
+    {
+        var code = NewCode();
+        var fault = new CommitFaultOnce();
+        int routeId;
+
+        await using (var db = Context(fault))
+        {
+            var route = new ApprovalRoute(EcrCode.Create(code), Name);
+            db.ApprovalRoutes.Add(route);
+            route.AddStep(roleId: 1);
+            route.AddStep(roleId: 2);
+
+            await new UnitOfWork(db).ExecuteInTransactionAsync(ct => db.SaveChangesAsync(ct), CancellationToken.None);
+
+            Assert.True(fault.Fired, "Збій першої спроби не спрацював — тест нічого не довів.");
+            routeId = route.Id;
+            Assert.All(route.Steps, s => Assert.Equal(routeId, s.ApprovalRouteId));
+        }
+
+        await using var check = Context();
+        Assert.Equal(
+            [routeId],
+            await check.ApprovalRoutes.AsNoTracking().Where(r => r.Code == code).Select(r => r.Id).ToListAsync());
+        Assert.Equal(
+            [1, 2],
+            await check.ApprovalSteps.AsNoTracking()
+                .Where(s => s.ApprovalRouteId == routeId).OrderBy(s => s.Ordinal).Select(s => s.RoleId).ToListAsync());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "AN-101")]
+    public async Task Додана_до_транзакції_сутність_з_ключем_клієнта_вставляється_після_повтору_з_тим_самим_ключем()
+    {
+        var code = NewCode();
+        var fault = new CommitFaultOnce();
+        var id = await FreeDimensionIdAsync();
+
+        try
+        {
+            await using (var db = Context(fault))
+            {
+                var dimension = new Domain.Entities.Units.Dimension(id, EcrCode.Create(code), Name);
+                db.Dimensions.Add(dimension);
+
+                await new UnitOfWork(db).ExecuteInTransactionAsync(ct => db.SaveChangesAsync(ct), CancellationToken.None);
+
+                Assert.True(fault.Fired, "Збій першої спроби не спрацював — тест нічого не довів.");
+                Assert.Equal(id, dimension.Id);
+            }
+
+            await using var check = Context();
+            Assert.Equal(
+                [id],
+                await check.Dimensions.AsNoTracking().Where(d => d.Code == code).Select(d => d.Id).ToListAsync());
+        }
+        finally
+        {
+            // Ключ — byte: без прибирання 20 прогонів поспіль вичерпали б вільні значення.
+            await using var cleanup = Context();
+            await cleanup.Dimensions.Where(d => d.Code == code).ExecuteDeleteAsync();
+        }
+    }
+
     // ── Підготовка ──────────────────────────────────────────────────────
+
+    private async Task<byte> FreeDimensionIdAsync()
+    {
+        await using var db = Context();
+        var used = (await db.Dimensions.AsNoTracking().Select(d => d.Id).ToListAsync()).ToHashSet();
+        for (var candidate = byte.MaxValue; candidate > 100; candidate--)
+        {
+            if (!used.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new InvalidOperationException("Немає вільного Id розмірності для тесту.");
+    }
 
     private static string NewCode() => $"L615{Guid.NewGuid():N}"[..20].ToUpperInvariant();
 
