@@ -435,6 +435,18 @@ public interface IDocumentStore
     /// </remarks>
     public Task<bool> HasSheetAsync(long documentId, int sheetDefId, CancellationToken ct);
 
+    /// <summary>
+    /// RS: чи є <paramref name="sheetCopyId"/> КОПІЄЮ аркуша <paramref name="sheetDefId"/> (той самий код у будь-якій
+    /// версії шаблону) у складі документа.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="sheetCopyId">Копія (<c>doc.DocumentSheet.Id</c>).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>⚠ Типова реалізація (тестові підміни) копій не знає; справжня — <c>DocumentStore</c>.</remarks>
+    public Task<bool> HasSheetCopyAsync(long documentId, int sheetDefId, long sheetCopyId, CancellationToken ct)
+        => throw new NotSupportedException("Копії аркушів не реалізовано цим сховищем.");
+
     /// <summary>Усі аркуші, що входять у склад документа (RC15, P2-A).</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="ct">Токен скасування.</param>

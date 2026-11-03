@@ -147,14 +147,29 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     }
 
     /// <inheritdoc />
-    public async Task<ApprovalState> GetOrCreateAsync(
+    public Task<ApprovalState> GetOrCreateAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        => GetOrCreateCoreAsync(documentId, sheetDefId, periodKey, null, ct);
+
+    /// <inheritdoc />
+    public Task<ApprovalState> GetOrCreateCopyAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => GetOrCreateCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct);
+
+    /// <summary>Стан оригіналу (<paramref name="sheetCopyId"/> = <c>null</c>) або копії аркуша за період.</summary>
+    /// <remarks>
+    /// ⛔ RS: фільтр за копією обов'язковий і для оригіналу — без нього <c>FirstOrDefault</c> міг би повернути стан
+    /// КОПІЇ, і подання оригіналу змінило б не той рядок.
+    /// </remarks>
+    private async Task<ApprovalState> GetOrCreateCoreAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
     {
         var existing = await db.ApprovalStates
             .FirstOrDefaultAsync(
                 s => s.DocumentId == documentId
                      && s.SheetDefId == sheetDefId
-                     && s.PeriodKey == periodKey.Value,
+                     && s.PeriodKey == periodKey.Value
+                     && s.SheetCopyId == sheetCopyId,
                 ct)
             .ConfigureAwait(false);
 
@@ -165,7 +180,7 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
 
         // Відсутній рядок означає Draft, а не помилку: стан з'являється в
         // момент першої дії, а не разом із документом.
-        var created = new ApprovalState(documentId, sheetDefId, periodKey.Value);
+        var created = new ApprovalState(documentId, sheetDefId, periodKey.Value, sheetCopyId);
         db.ApprovalStates.Add(created);
         return created;
     }
@@ -195,6 +210,7 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             select new ApprovalEventRecord(
                 sheet.Code, e.FromStatus, e.ToStatus, e.Action, e.ByUserId,
                 user == null ? null : user.DisplayName, e.At, e.Reason, e.StepOrdinal,
+                // RS: подання тієї самої КОПІЇ (null — оригінал), що й погодження.
                 // ⛔ D-440: «погоджено автором подання» — з ЖУРНАЛУ, а не з `ApprovalState.SubmittedByUserId`:
                 // рядок стану тримає лише останнє подання, і після повторного подання іншою людиною стара
                 // подія погодження змінила б позначку заднім числом. Подання — найближче ПЕРЕД цією подією
@@ -203,11 +219,13 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
                 && e.ByUserId != null
                 && db.ApprovalEvents
                     .Where(s => s.DocumentId == e.DocumentId && s.SheetDefId == e.SheetDefId
+                                && s.SheetCopyId == e.SheetCopyId
                                 && s.PeriodKey == e.PeriodKey && s.Action == ApprovalAction.Submit && s.Id < e.Id)
                     .OrderByDescending(s => s.Id)
                     .Select(s => s.ByUserId)
                     .FirstOrDefault() == e.ByUserId,
-                e.Id);
+                e.Id,
+                e.SheetCopyId);
 
         return await query.Take(limit).ToListAsync(ct).ConfigureAwait(false);
     }
@@ -253,8 +271,10 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // RS: календар подання — оригіналу аркуша (календар копії — разом із контрактом, коміт 8).
         var statuses = await db.ApprovalStates
             .AsNoTracking()
+            .OriginalOnly()
             .Where(s => s.DocumentId == documentId && s.SheetDefId == sheetDefId)
             .Select(s => new { s.PeriodKey, s.Status })
             .ToDictionaryAsync(s => s.PeriodKey, s => s.Status, ct)
@@ -327,7 +347,8 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             snapshot.PayloadJson,
             Convert.FromHexString(snapshot.ContentHash),
             snapshot.SubmittedAt,
-            snapshot.SubmittedByUserId);
+            snapshot.SubmittedByUserId,
+            snapshot.SheetCopyId);
 
         db.SubmissionSnapshots.Add(entity);
 
@@ -339,13 +360,24 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<SubmissionSnapshotRecord>> GetSnapshotsAsync(
+    public Task<IReadOnlyList<SubmissionSnapshotRecord>> GetSnapshotsAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        => GetSnapshotsCoreAsync(documentId, sheetDefId, periodKey, null, ct);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<SubmissionSnapshotRecord>> GetCopySnapshotsAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => GetSnapshotsCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct);
+
+    /// <summary>Зрізи оригіналу або копії аркуша (RS: зрізи копії окремі).</summary>
+    private async Task<IReadOnlyList<SubmissionSnapshotRecord>> GetSnapshotsCoreAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
         => await db.SubmissionSnapshots
             .AsNoTracking()
             .Where(s => s.DocumentId == documentId
                         && s.SheetDefId == sheetDefId
-                        && s.PeriodKey == periodKey.Value)
+                        && s.PeriodKey == periodKey.Value
+                        && s.SheetCopyId == sheetCopyId)
             .OrderByDescending(s => s.SubmittedAt)
             .Select(s => new SubmissionSnapshotRecord(
                 s.DocumentId,
@@ -358,20 +390,32 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
                 s.PayloadJson,
                 Convert.ToHexStringLower(s.ContentHash),
                 s.SubmittedAt,
-                s.SubmittedByUserId))
+                s.SubmittedByUserId,
+                s.SheetCopyId))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
     /// <inheritdoc />
-    public async Task<(long Id, string ContentHash)?> GetLatestSnapshotKeyAsync(
+    public Task<(long Id, string ContentHash)?> GetLatestSnapshotKeyAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        => GetLatestSnapshotKeyCoreAsync(documentId, sheetDefId, periodKey, null, ct);
+
+    /// <inheritdoc />
+    public Task<(long Id, string ContentHash)?> GetLatestCopySnapshotKeyAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => GetLatestSnapshotKeyCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct);
+
+    /// <summary>Ключ найновішого зрізу оригіналу або копії аркуша.</summary>
+    private async Task<(long Id, string ContentHash)?> GetLatestSnapshotKeyCoreAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
     {
         // Без PayloadJson у проєкції: у вибірку йдуть лише Id і хеш (32 байти).
         var row = await db.SubmissionSnapshots
             .AsNoTracking()
             .Where(s => s.DocumentId == documentId
                         && s.SheetDefId == sheetDefId
-                        && s.PeriodKey == periodKey.Value)
+                        && s.PeriodKey == periodKey.Value
+                        && s.SheetCopyId == sheetCopyId)
             .OrderByDescending(s => s.SubmittedAt)
             .ThenByDescending(s => s.Id)
             .Select(s => new { s.Id, s.ContentHash })

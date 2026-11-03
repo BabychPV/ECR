@@ -1080,6 +1080,19 @@ public sealed class DocumentStore(
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    /// <remarks>Той самий збіг за кодом, що й <see cref="HasSheetAsync"/> (перенос версії міняє <c>SheetDefId</c>).</remarks>
+    public async Task<bool> HasSheetCopyAsync(long documentId, int sheetDefId, long sheetCopyId, CancellationToken ct)
+        => await db.DocumentSheets
+            .AsNoTracking()
+            .Where(s => s.Id == sheetCopyId && s.DocumentId == documentId && s.CopyOfId != null && s.IsIncluded)
+            .Join(db.SheetDefs, s => s.SheetDefId, d => d.Id, (s, d) => new { s.SheetDefId, d.Code })
+            .AnyAsync(
+                x => x.SheetDefId == sheetDefId
+                     || x.Code == db.SheetDefs.Where(r => r.Id == sheetDefId).Select(r => r.Code).FirstOrDefault(),
+                ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<int>> GetIncludedSheetIdsAsync(long documentId, CancellationToken ct)
         => await db.DocumentSheets
             .AsNoTracking()

@@ -187,6 +187,80 @@ public interface IWorkflowStore
     /// <param name="roleIds">Ролі кроків.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<int?> FirstMissingRoleAsync(IReadOnlyCollection<int> roleIds, CancellationToken ct);
+
+    /// <summary>
+    /// <see cref="GetOrCreateAsync"/> для КОПІЇ аркуша (RS): власний стан копії за період, <c>Draft</c>, якщо рядка
+    /// ще немає.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія аркуша (<c>doc.DocumentSheet.Id</c>).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>⚠ Типова реалізація (тестові підміни) копій не знає; справжня — <c>WorkflowStore</c>.</remarks>
+    public Task<ApprovalState> GetOrCreateCopyAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => throw new NotSupportedException("Стан копії аркуша не реалізовано цим сховищем.");
+
+    /// <summary><see cref="GetLatestSnapshotKeyAsync"/> для КОПІЇ аркуша (RS): зрізи копії окремі.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія аркуша.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<(long Id, string ContentHash)?> GetLatestCopySnapshotKeyAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => throw new NotSupportedException("Зрізи копії аркуша не реалізовано цим сховищем.");
+
+    /// <summary><see cref="GetSnapshotsAsync"/> для КОПІЇ аркуша (RS).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія аркуша.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<SubmissionSnapshotRecord>> GetCopySnapshotsAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => throw new NotSupportedException("Зрізи копії аркуша не реалізовано цим сховищем.");
+}
+
+/// <summary>
+/// RS: виклики <see cref="IWorkflowStore"/> з <c>long? sheetCopyId</c> — оригінал (<c>null</c>) іде ТИМ САМИМ членом,
+/// що й до копій (підміни в тестах лишаються чинними), копія — своїм.
+/// </summary>
+public static class WorkflowStoreCopies
+{
+    /// <summary>Стан аркуша або копії за період.</summary>
+    public static Task<ApprovalState> GetOrCreateOfAsync(
+        this IWorkflowStore workflow, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(workflow);
+        return sheetCopyId is { } copy
+            ? workflow.GetOrCreateCopyAsync(documentId, sheetDefId, periodKey, copy, ct)
+            : workflow.GetOrCreateAsync(documentId, sheetDefId, periodKey, ct);
+    }
+
+    /// <summary>Ключ найновішого зрізу аркуша або копії.</summary>
+    public static Task<(long Id, string ContentHash)?> GetLatestSnapshotKeyOfAsync(
+        this IWorkflowStore workflow, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(workflow);
+        return sheetCopyId is { } copy
+            ? workflow.GetLatestCopySnapshotKeyAsync(documentId, sheetDefId, periodKey, copy, ct)
+            : workflow.GetLatestSnapshotKeyAsync(documentId, sheetDefId, periodKey, ct);
+    }
+
+    /// <summary>Зрізи аркуша або копії, від найновішого.</summary>
+    public static Task<IReadOnlyList<SubmissionSnapshotRecord>> GetSnapshotsOfAsync(
+        this IWorkflowStore workflow, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(workflow);
+        return sheetCopyId is { } copy
+            ? workflow.GetCopySnapshotsAsync(documentId, sheetDefId, periodKey, copy, ct)
+            : workflow.GetSnapshotsAsync(documentId, sheetDefId, periodKey, ct);
+    }
 }
 
 /// <summary>
@@ -215,6 +289,7 @@ public interface IWorkflowStore
 /// <param name="ContentHash">Контрольна сума вмісту.</param>
 /// <param name="SubmittedAt">Момент подання.</param>
 /// <param name="SubmittedByUserId">Хто подав.</param>
+/// <param name="SheetCopyId">Копія аркуша (RS); <c>null</c> — оригінал.</param>
 public sealed record SubmissionSnapshotRecord(
     long DocumentId,
     int SheetDefId,
@@ -226,7 +301,8 @@ public sealed record SubmissionSnapshotRecord(
     string PayloadJson,
     string ContentHash,
     DateTime SubmittedAt,
-    int SubmittedByUserId);
+    int SubmittedByUserId,
+    long? SheetCopyId = null);
 
 /// <summary>Рядок журналу переходів разом із кодом аркуша й іменем виконавця.</summary>
 /// <param name="SheetCode">Код аркуша.</param>
@@ -243,6 +319,7 @@ public sealed record SubmissionSnapshotRecord(
 /// подання (<c>Submit</c>) цього аркуша за період перед ним (<c>D-440</c>); для інших дій — <c>false</c>.
 /// </param>
 /// <param name="Id">Ідентифікатор події (порядок вставки; другий складник курсора журналу аркуша).</param>
+/// <param name="SheetCopyId">Копія аркуша (RS); <c>null</c> — оригінал.</param>
 public sealed record ApprovalEventRecord(
     string SheetCode,
     Ecr.Domain.Enums.DocumentStatus FromStatus,
@@ -254,7 +331,8 @@ public sealed record ApprovalEventRecord(
     string? Reason,
     int? StepOrdinal,
     bool ApprovedBySubmitter = false,
-    long Id = 0);
+    long Id = 0,
+    long? SheetCopyId = null);
 
 /// <summary>Календар подання аркуша (D-441): проєкт документа і стани періодів × аркуша.</summary>
 /// <param name="ProjectStatus">Стан проєкту.</param>

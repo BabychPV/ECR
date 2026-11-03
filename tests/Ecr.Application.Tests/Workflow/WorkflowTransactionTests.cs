@@ -193,7 +193,8 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
 
     private SubmitSheetHandler Submit(
         World world, EcrDbContext db, IAccessDecisionService access, ISheetEditGate? gate = null,
-        IReportSnapshotBuilder? reportSnapshots = null, SheetWorkflowNotifier? notifier = null)
+        IReportSnapshotBuilder? reportSnapshots = null, SheetWorkflowNotifier? notifier = null,
+        IDocumentStore? documents = null)
     {
         var cells = Substitute.For<ICellStore>();
         cells.ReadSliceAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
@@ -210,11 +211,14 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
         rows.GetRowIdsAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<string, long>());
 
-        var documents = Substitute.For<IDocumentStore>();
-        documents.HasSheetAsync(world.DocumentId, world.SheetDefId, Arg.Any<CancellationToken>())
-                 .Returns(true);
-        documents.FindProjectIdAsync(world.DocumentId, Arg.Any<CancellationToken>())
-                 .Returns(world.ProjectId);
+        if (documents is null)
+        {
+            documents = Substitute.For<IDocumentStore>();
+            documents.HasSheetAsync(world.DocumentId, world.SheetDefId, Arg.Any<CancellationToken>())
+                     .Returns(true);
+            documents.FindProjectIdAsync(world.DocumentId, Arg.Any<CancellationToken>())
+                     .Returns(world.ProjectId);
+        }
 
         // ⚠ AN-36b: подання звіряє аркуш із версією під блокуванням структури —
         // знімок мусить містити аркуш світу (таблиць у нього тут немає).

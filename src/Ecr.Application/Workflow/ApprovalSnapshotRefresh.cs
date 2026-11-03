@@ -1,6 +1,7 @@
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Ecr.Application.Ports;
+using Ecr.Application.Security;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Workflow;
@@ -49,11 +50,13 @@ public sealed class ApprovalSnapshotRefresh(
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task EnterAsync(long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+    /// <param name="sheetCopyId">Копія аркуша (RS); <c>null</c> — оригінал.</param>
+    public async Task EnterAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct, long? sheetCopyId = null)
     {
         await sheetGate.EnterStructureAsync(documentId, exclusive: false, ct).ConfigureAwait(false);
         await sheetGate.EnterHeaderAsync(documentId, exclusive: false, ct).ConfigureAwait(false);
-        await sheetGate.EnterSubmitAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false);
+        await sheetGate.EnterSubmitOfAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -65,15 +68,21 @@ public sealed class ApprovalSnapshotRefresh(
     /// <param name="userId">Погоджувач — автор нового зрізу.</param>
     /// <param name="now">Момент затвердження.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="sheetCopyId">Копія аркуша (RS); <c>null</c> — оригінал. Зрізи копії окремі.</param>
     /// <returns><c>true</c> — зріз знято.</returns>
     public async Task<bool> RefreshAsync(
-        long documentId, int sheetDefId, PeriodKey periodKey, int userId, DateTime now, CancellationToken ct)
+        long documentId, int sheetDefId, PeriodKey periodKey, int userId, DateTime now, CancellationToken ct,
+        long? sheetCopyId = null)
     {
-        var instances = await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
-        var templateVersionId = instances.Count > 0
-            ? instances[0].TemplateVersionId
+        var allInstances = await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        var templateVersionId = allInstances.Count > 0
+            ? allInstances[0].TemplateVersionId
             : await Documents.DocumentPeriodVersion.GetAsync(documents, documentId, periodKey.Value, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+
+        // RS: таблиці цього аркуша — лише своєї копії (див. SubmissionPayloadSource.ForSheetCopy).
+        var instances = SubmissionPayloadSource.ForSheetCopy(
+            allInstances, snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId), sheetCopyId);
 
         var sheetTables = snapshot.Sheets
             .Where(s => s.Id == sheetDefId)
@@ -96,7 +105,7 @@ public sealed class ApprovalSnapshotRefresh(
         // зрізів аркуша за період (~10 МБ кожен на документі з 91 таблицею; кожне подання додає зріз) —
         // затвердження 268→493 с і росло з числом подань. Хеш живих даних збігся з хешем найновішого зрізу
         // (той самий `SubmissionPayloadSource`) — дані байт-у-байт ті самі, зміни немає, payload не читаємо.
-        var latestKey = await workflow.GetLatestSnapshotKeyAsync(documentId, sheetDefId, periodKey, ct)
+        var latestKey = await workflow.GetLatestSnapshotKeyOfAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct)
             .ConfigureAwait(false);
         if (latestKey is { } key
             && string.Equals(key.ContentHash, SubmissionPayloadSource.Hash(live), StringComparison.Ordinal))
@@ -113,9 +122,13 @@ public sealed class ApprovalSnapshotRefresh(
             return false;
         }
 
-        await recalculation
-            .RecalculateSheetUnderSubmitLockAsync(documentId, sheetDefId, periodKey, ct)
-            .ConfigureAwait(false);
+        // ⛔ RS: перерахунок КОПІЇ — коміт 5; перерахунок оригіналу під блокуванням копії писав би чужі комірки.
+        if (sheetCopyId is null)
+        {
+            await recalculation
+                .RecalculateSheetUnderSubmitLockAsync(documentId, sheetDefId, periodKey, ct)
+                .ConfigureAwait(false);
+        }
 
         var payload = await SubmissionPayloadSource
             .ReadAsync(cellStore, headers, documentId, instances, periodKey, headerFieldCodes, ct)
@@ -132,7 +145,8 @@ public sealed class ApprovalSnapshotRefresh(
                 PayloadJson: payload,
                 ContentHash: SubmissionPayloadSource.Hash(payload),
                 SubmittedAt: now,
-                SubmittedByUserId: userId),
+                SubmittedByUserId: userId,
+                SheetCopyId: sheetCopyId),
             ct).ConfigureAwait(false);
 
         return true;
