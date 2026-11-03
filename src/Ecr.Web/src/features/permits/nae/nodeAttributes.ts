@@ -44,8 +44,15 @@ export function fieldsForLevel(fields: readonly RegistryField[], levelCode: stri
   return fields.filter((field) => field.levelCode === undefined || field.levelCode === null || field.levelCode === levelCode);
 }
 
-/** Поле веде сервер (регіон і район - з предків, шлях AF - із завантаження): форма його лише показує. */
-export function isServerField(field: Pick<RegistryField, 'isReadOnly'>): boolean {
+/**
+ * Поле веде сервер (регіон і район - з предків, шлях AF - із завантаження): форма його лише показує.
+ * ⚠ Виняток: `RegionCode` пишеться на вузлі REGION, `AreaCode` - на вузлі AREA (це їхній код); на інших рівнях обидва
+ * виводяться з предків і лишаються лише для читання, хоч би що казала ознака поля.
+ */
+export function isServerField(field: Pick<RegistryField, 'isReadOnly'> & { readonly code?: string }, levelCode: string | null = null): boolean {
+  if (field.code === NaeRegionField) return levelCode !== 'REGION';
+  if (field.code === NaeAreaField) return levelCode !== 'AREA';
+
   return field.isReadOnly === true;
 }
 

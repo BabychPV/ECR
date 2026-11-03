@@ -60,6 +60,22 @@ describe('fieldsForLevel / isServerField / targetLevelCode', () => {
     expect(isServerField({})).toBe(false);
   });
 
+  it('RegionCode пишеться лише на REGION, AreaCode - лише на AREA; на інших рівнях - поле сервера', () => {
+    const region = { code: 'RegionCode', isReadOnly: false };
+    const area = { code: 'AreaCode', isReadOnly: false };
+
+    expect(isServerField(region, 'REGION')).toBe(false);
+    expect(isServerField(region, 'AREA')).toBe(true);
+    expect(isServerField(region, 'SRC')).toBe(true);
+    expect(isServerField(region)).toBe(true);
+    expect(isServerField(area, 'AREA')).toBe(false);
+    expect(isServerField(area, 'REGION')).toBe(true);
+    expect(isServerField(area, 'SITE')).toBe(true);
+    // Інші поля йдуть за ознакою поля, а не за рівнем.
+    expect(isServerField({ code: 'AfPath', isReadOnly: true }, 'REGION')).toBe(true);
+    expect(isServerField({ code: 'Comment', isReadOnly: false }, 'REGION')).toBe(false);
+  });
+
   it('рівень форми: нового вузла - вибраний, наявного - власний', () => {
     expect(targetLevelCode(createTarget)).toBe('SRC');
     expect(targetLevelCode(editTarget)).toBe('SRC');

@@ -128,8 +128,9 @@ function Form({
 
   // Поля свого типу: одні вводить людина, інші веде сервер.
   const levelFields = fieldsForLevel(fields, targetLevelCode(target));
-  const inputFields = levelFields.filter((field) => !isServerField(field));
-  const serverFields = levelFields.filter(isServerField);
+  const levelCode = targetLevelCode(target);
+  const inputFields = levelFields.filter((field) => !isServerField(field, levelCode));
+  const serverFields = levelFields.filter((field) => isServerField(field, levelCode));
 
   const current: NodeFormState = { code, display, values };
   const problems: NodeFormProblems = validateNode(inputFields, current, codeAutomatic);
