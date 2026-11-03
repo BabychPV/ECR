@@ -418,6 +418,54 @@ describe('NodeAttributesForm: відмова ділового ключа', () =>
     await user.click(within(form).getByRole('button', { name: 'permits.nae.form.naeCodeTakenOpen' }));
     expect(onOpenNode).toHaveBeenCalledWith(501);
   });
+
+  it('REGION: код регіону, чий каскад на джерела дав би дубль номера NAE, - відмова біля поля коду регіону', async () => {
+    const user = userEvent.setup();
+    const { EcrApiError } = await import('@/api/client');
+    // Поля після f395edaf3: RegionCode/AreaCode - усіх рівнів і не лише для читання; вводяться на REGION/AREA.
+    const regionFields = [
+      { id: 2, code: 'RegionCode', nameL10n: { values: { en: 'Region code' } }, dataType: 'String', isRequired: false, levelCode: null, isReadOnly: false },
+      { id: 3, code: 'AreaCode', nameL10n: { values: { en: 'Area code' } }, dataType: 'String', isRequired: false, levelCode: null, isReadOnly: false },
+    ];
+    vi.mocked(apiFetch).mockImplementation((path: string, init?: RequestInit) => {
+      if (path.endsWith('/languages')) return Promise.resolve([{ code: 'en', nameNative: 'English', isDefault: true }]);
+      if (init?.method === 'POST') {
+        return Promise.reject(
+          new EcrApiError({
+            status: 409,
+            title: 'taken',
+            extensions2: { messageKey: 'err.ECR-REG-4094.naeCodeTaken', naeCode: '0036_pod', regionCode: 'MANGISTAU', areaCode: 'ONSHORE', entryId: '601', entryCode: 'T-88' },
+          } as never),
+        );
+      }
+
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    renderWithQuery(
+      <MemoryRouter>
+        <NodeAttributesForm
+          registryCode="NAE_TREE"
+          registryId={9}
+          codeAutomatic
+          fields={regionFields as never}
+          target={{ mode: 'create', parent: null, level: { code: 'REGION', ordinal: 1, name: 'Region', isOptional: false } }}
+          readOnly={false}
+          onSaved={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    const form = await screen.findByRole('form');
+    await user.type(within(form).getByLabelText(/registries\.name/), 'Mangistau');
+    const region = within(form).getByLabelText(/Region code/);
+    await user.type(region, 'MANGISTAU');
+    await user.click(within(form).getByRole('button', { name: 'common.save' }));
+
+    const message = await within(form).findByText(/permits\.nae\.form\.naeCodeTaken \{/);
+    expect(message.textContent).toContain('"holder":"T-88"');
+    // Відмова - саме на полі коду регіону (його опис помилки), а не лише сповіщенням.
+    expect(region.getAttribute('aria-describedby') ?? '').toContain(message.closest('[id]')?.id ?? 'missing');
+  });
 });
 
 describe('WhereUsed', () => {
