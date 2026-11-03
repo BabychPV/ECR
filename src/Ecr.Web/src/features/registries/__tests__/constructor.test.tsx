@@ -1,4 +1,4 @@
-﻿import type { JSX } from 'react';
+import type { JSX } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -581,5 +581,56 @@ describe('Збереження опису довідника', () => {
     expect(
       isFieldComplete({ ...emptyField('Lookup'), code: 'A', name: 'A', lookupRegistryDefId: 5 }),
     ).toBe(true);
+  });
+});
+
+describe('Рівень поля (типи вузлів НАЕ)', () => {
+  const levelOptions = [
+    { value: 'REGION', label: 'Region' },
+    { value: 'SRC', label: 'NAE' },
+  ];
+
+  it('плаский довідник: колонки й вибору рівня немає', () => {
+    show(
+      <RegistryFields definition={Definition} canEdit newFields={[emptyField()]} registryOptions={[]} onAddField={vi.fn()} onChangeField={vi.fn()} onRemoveField={vi.fn()} />,
+    );
+
+    expect(screen.queryByText('registries.fieldForm.level')).toBeNull();
+  });
+
+  it('нове поле: вибір рівня з «Усі рівні» за замовчуванням, зміна йде в чернетку', () => {
+    const onChangeField = vi.fn();
+    const draft = emptyField();
+    show(
+      <RegistryFields definition={Definition} canEdit newFields={[draft]} registryOptions={[]} levelOptions={levelOptions} onAddField={vi.fn()} onChangeField={onChangeField} onRemoveField={vi.fn()} />,
+    );
+
+    const select = screen.getByRole('combobox', { name: /registries\.fieldForm\.level/ }) as HTMLSelectElement;
+    expect(select.value).toBe('');
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(['', 'REGION', 'SRC']);
+    fireEvent.change(select, { target: { value: 'SRC' } });
+    expect(onChangeField).toHaveBeenLastCalledWith(0, { ...draft, levelCode: 'SRC' });
+  });
+
+  it('наявне поле: рівень правиться в таблиці й іде в запит; без правки - без levelCode (старий клієнт не знімає прив\'язку)', () => {
+    const onChangeLevel = vi.fn();
+    const first = Definition.fields[0]!;
+    show(
+      <RegistryFields definition={Definition} canEdit newFields={[]} registryOptions={[]} levelOptions={levelOptions} levelEdits={{}} onChangeLevel={onChangeLevel} onAddField={vi.fn()} onChangeField={vi.fn()} onRemoveField={vi.fn()} />,
+    );
+    fireEvent.change(screen.getAllByRole('combobox', { name: /registries\.fieldLevelFor/ })[0]!, { target: { value: 'REGION' } });
+    expect(onChangeLevel).toHaveBeenCalledWith(first.id, 'REGION');
+
+    const plain = buildSaveRequest(Definition, [], [], 'r', 'en');
+    expect(plain.fields.every((field) => !('levelCode' in field))).toBe(true);
+    const edited = buildSaveRequest(Definition, [], [], 'r', 'en', {}, { [first.id]: '' });
+    expect(edited.fields[0]).toMatchObject({ id: first.id, levelCode: '' });
+  });
+
+  it('нове поле з рівнем: levelCode у запиті; без рівня ключа немає', () => {
+    const bound = buildSaveRequest(Definition, [], [{ ...emptyField(), code: 'A', name: 'A', levelCode: 'SRC' }], 'r', 'en');
+    expect(bound.fields.at(-1)).toMatchObject({ id: null, levelCode: 'SRC' });
+    const all = buildSaveRequest(Definition, [], [{ ...emptyField(), code: 'A', name: 'A' }], 'r', 'en');
+    expect('levelCode' in all.fields.at(-1)!).toBe(false);
   });
 });

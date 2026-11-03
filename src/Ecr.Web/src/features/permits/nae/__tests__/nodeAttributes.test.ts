@@ -3,10 +3,13 @@ import { EcrApiError } from '@/api/client';
 import {
   EmptyNodeForm,
   buildNodeBody,
+  fieldsForLevel,
   formOfDetail,
   hasProblems,
-  inheritedValues,
+  isServerField,
   serverFieldProblem,
+  serverNaeCodeHolder,
+  targetLevelCode,
   validateNode,
   type NodeDetail,
   type NodeFormState,
@@ -14,62 +17,92 @@ import {
 } from '../nodeAttributes';
 
 /**
- * Модель форми атрибутів вузла структури NAE: перевірка, тіло запиту, успадкування регіону/району, відмови сервера.
- * Мутаційний доказ (вручну, відновлено): `after !== before` -> `true` у buildNodeBody валив «правка везе лише змінені».
+ * Модель форми вузла структури NAE за типом вузла: поля свого рівня, поля сервера, перевірка (назва англійською, номер NAE),
+ * тіло запиту, відмови сервера.
+ * Мутаційний доказ (вручну, відновлено): `after !== before` -> `true` у buildNodeBody валив «правка везе лише змінені»;
+ * прибраний фільтр рівня у `fieldsForLevel` валив «поля за рівнем».
  */
 
-const fields = [
-  { code: 'NaeCode', isRequired: true },
-  { code: 'RegionCode', isRequired: true },
-  { code: 'AreaCode', isRequired: true },
-  { code: 'PointName', isRequired: false },
+const field = (code: string, over: Record<string, unknown> = {}) => ({ id: 1, code, isRequired: false, ...over }) as never;
+
+const allFields = [
+  field('NaeCode', { isRequired: true, levelCode: 'SRC' }),
+  field('RegionCode', { levelCode: 'SRC', isReadOnly: true }),
+  field('AreaCode', { levelCode: 'SRC', isReadOnly: true }),
+  field('AfPath', { levelCode: null, isReadOnly: true }),
+  field('SourceType', { levelCode: 'SRC' }),
+  field('Comment'),
 ];
 
 const level = { code: 'SRC', ordinal: 5, name: 'NAE', isOptional: false };
 const createTarget: NodeFormTarget = { mode: 'create', parent: null, level };
 const editTarget: NodeFormTarget = {
   mode: 'edit',
-  node: { id: 42, parentId: 7, label: 'Pipe', ordinal: 1 },
+  node: { id: 42, parentId: 7, label: 'Pipe', ordinal: 1, levelCode: 'SRC' },
 };
 
 const form = (over: Partial<NodeFormState> = {}): NodeFormState => ({ ...EmptyNodeForm, ...over });
 
-function errorWithKey(messageKey: string): EcrApiError {
-  return new EcrApiError({ status: 409, title: 'x', extensions2: { messageKey } } as never);
+function errorWithKey(messageKey: string, extra: Record<string, unknown> = {}): EcrApiError {
+  return new EcrApiError({ status: 409, title: 'x', extensions2: { messageKey, ...extra } } as never);
 }
 
+describe('fieldsForLevel / isServerField / targetLevelCode', () => {
+  it('поля свого рівня й поля всіх рівнів; чужий рівень не показується', () => {
+    expect(fieldsForLevel(allFields, 'SRC').map((f: { code: string }) => f.code)).toEqual(['NaeCode', 'RegionCode', 'AreaCode', 'AfPath', 'SourceType', 'Comment']);
+    expect(fieldsForLevel(allFields, 'AREA').map((f: { code: string }) => f.code)).toEqual(['AfPath', 'Comment']);
+    expect(fieldsForLevel(allFields, null).map((f: { code: string }) => f.code)).toEqual(['AfPath', 'Comment']);
+  });
+
+  it('поле сервера - лише isReadOnly=true; відсутня ознака - поле вводу', () => {
+    expect(isServerField({ isReadOnly: true })).toBe(true);
+    expect(isServerField({ isReadOnly: false })).toBe(false);
+    expect(isServerField({})).toBe(false);
+  });
+
+  it('рівень форми: нового вузла - вибраний, наявного - власний', () => {
+    expect(targetLevelCode(createTarget)).toBe('SRC');
+    expect(targetLevelCode(editTarget)).toBe('SRC');
+    expect(targetLevelCode({ mode: 'edit', node: { id: 1, parentId: null, label: 'x', ordinal: 1 } })).toBeNull();
+  });
+});
+
 describe('validateNode', () => {
-  it('порожня форма: назва і обов’язкові поля (район не рахується), код - якщо він не автоматичний', () => {
-    const problems = validateNode(fields, form());
+  const inputs = [field('NaeCode', { isRequired: true }), field('SourceType')];
+
+  it('порожня форма: назва англійською, номер NAE, код - якщо він не автоматичний', () => {
+    const problems = validateNode(inputs, form());
 
     expect(problems.code).toBe('required');
     expect(problems.display).toBe('required');
-    expect(Object.keys(problems.values).sort()).toEqual(['NaeCode', 'RegionCode']);
+    expect(Object.keys(problems.values)).toEqual(['NaeCode']);
     expect(hasProblems(problems)).toBe(true);
   });
 
   it('автоматичний код не вимагається', () => {
-    const problems = validateNode(fields, form({ display: { en: 'Pipe' }, values: { NaeCode: '1085', RegionCode: 'ATYRAU' } }), true);
+    const problems = validateNode(inputs, form({ display: { en: 'Pipe' }, values: { NaeCode: '1085' } }), true);
 
     expect(problems).toEqual({ values: {} });
     expect(hasProblems(problems)).toBe(false);
   });
 
-  it('назва хоч однією мовою - досить; пробіли не рахуються', () => {
-    expect(validateNode(fields, form({ display: { en: '  ', ru: 'Труба' } }), true).display).toBeUndefined();
-    expect(validateNode(fields, form({ display: { en: '  ' } }), true).display).toBe('required');
+  it('назва англійською обов’язкова: російська чи казахська самі не рятують; пробіли не рахуються', () => {
+    expect(validateNode(inputs, form({ display: { en: '  ', ru: 'Труба', kz: 'Құбыр' }, values: { NaeCode: '1' } }), true).display).toBe('required');
+    expect(validateNode(inputs, form({ display: { en: 'Pipe' }, values: { NaeCode: '1' } }), true).display).toBeUndefined();
   });
 });
 
 describe('buildNodeBody', () => {
-  it('новий вузол: id null, рівень і батько з місця, всі непорожні значення, порожній район -> «-», код порожній за автокоду', () => {
+  const inputs = [field('NaeCode'), field('SourceType'), field('Comment')];
+
+  it('новий вузол: id null, рівень і батько з місця, всі непорожні значення, код порожній за автокоду', () => {
     const body = buildNodeBody({
       registryId: 9,
-      fields,
+      fields: inputs,
       target: createTarget,
       parentEntryId: 3,
-      initial: form({ values: { RegionCode: 'ATYRAU' } }),
-      current: form({ code: ' ', display: { en: 'Pipe' }, values: { NaeCode: '1085', RegionCode: 'ATYRAU', AreaCode: '' } }),
+      initial: EmptyNodeForm,
+      current: form({ code: ' ', display: { en: 'Pipe', ru: 'Труба', kz: 'Құбыр' }, values: { NaeCode: '36_pod', SourceType: '' } }),
       codeAutomatic: true,
     });
 
@@ -77,22 +110,22 @@ describe('buildNodeBody', () => {
       id: null,
       registryDefId: 9,
       code: '',
-      display: { values: { en: 'Pipe' } },
+      display: { values: { en: 'Pipe', ru: 'Труба', kz: 'Құбыр' } },
       parentEntryId: 3,
       levelCode: 'SRC',
-      values: { NaeCode: '1085', RegionCode: 'ATYRAU', AreaCode: '-' },
+      values: { NaeCode: '36_pod' },
     });
   });
 
   it('правка: id вузла, рівень не чіпається, у значеннях лише змінені; стерте поле - null; стерта мова - порожній рядок', () => {
-    const initial = form({ code: 'T-1', display: { en: 'Pipe', ru: 'Труба' }, values: { NaeCode: '1085', RegionCode: 'ATYRAU', AreaCode: '-', PointName: 'old' } });
+    const initial = form({ code: 'T-1', display: { en: 'Pipe', ru: 'Труба' }, values: { NaeCode: '0036_pod', SourceType: 'old' } });
     const body = buildNodeBody({
       registryId: 9,
-      fields,
+      fields: inputs,
       target: editTarget,
       parentEntryId: 7,
       initial,
-      current: { ...initial, display: { en: 'Pipe 2' }, values: { ...initial.values, NaeCode: '1086', PointName: '' } },
+      current: { ...initial, display: { en: 'Pipe 2' }, values: { ...initial.values, NaeCode: '37_pod', SourceType: '' } },
       codeAutomatic: true,
     });
 
@@ -101,7 +134,22 @@ describe('buildNodeBody', () => {
     expect(body.parentEntryId).toBe(7);
     expect(body.code).toBe('T-1');
     expect(body.display).toEqual({ values: { en: 'Pipe 2', ru: '' } });
-    expect(body.values).toEqual({ NaeCode: '1086', PointName: null });
+    expect(body.values).toEqual({ NaeCode: '37_pod', SourceType: null });
+  });
+
+  it('поля сервера в тіло не потрапляють, бо форма не передає їх у fields', () => {
+    const inputFields = fieldsForLevel(allFields, 'SRC').filter((f) => !isServerField(f));
+    const body = buildNodeBody({
+      registryId: 1,
+      fields: inputFields,
+      target: createTarget,
+      parentEntryId: null,
+      initial: EmptyNodeForm,
+      current: form({ display: { en: 'x' }, values: { NaeCode: '1', RegionCode: 'HACK', AreaCode: 'HACK', AfPath: 'HACK' } }),
+      codeAutomatic: true,
+    });
+
+    expect(Object.keys(body.values)).toEqual(['NaeCode']);
   });
 
   it('ручний код іде як є (обрізаний)', () => {
@@ -118,26 +166,15 @@ describe('buildNodeBody', () => {
   });
 });
 
-describe('inheritedValues', () => {
-  const parent = { RegionCode: 'ATYRAU', AreaCode: 'ONSHORE' };
-
-  it('регіон успадковується завжди, крім вузла-регіону; район - крім вузла-району; «-» не успадковується', () => {
-    expect(inheritedValues(parent, 'SITE')).toEqual({ RegionCode: 'ATYRAU', AreaCode: 'ONSHORE' });
-    expect(inheritedValues(parent, 'AREA')).toEqual({ RegionCode: 'ATYRAU' });
-    expect(inheritedValues(parent, 'REGION')).toEqual({});
-    expect(inheritedValues({ RegionCode: 'MANGISTAU', AreaCode: '-' }, 'SRC')).toEqual({ RegionCode: 'MANGISTAU' });
-  });
-});
-
 describe('formOfDetail', () => {
   it('null із сервера - порожній рядок; назва - усі мови', () => {
     const detail = {
       code: 'T-1',
       displayL10n: { values: { en: 'Pipe' } },
-      values: { NaeCode: '1085', PointName: null },
+      values: { NaeCode: '1085', SourceType: null },
     } as unknown as NodeDetail;
 
-    expect(formOfDetail(detail)).toEqual({ code: 'T-1', display: { en: 'Pipe' }, values: { NaeCode: '1085', PointName: '' } });
+    expect(formOfDetail(detail)).toEqual({ code: 'T-1', display: { en: 'Pipe' }, values: { NaeCode: '1085', SourceType: '' } });
   });
 });
 
@@ -147,12 +184,25 @@ describe('serverFieldProblem', () => {
     ['err.ECR-REG-0422.entryCodeAutomatic', 'codeAutomatic'],
     ['err.ECR-REG-4092.keyTaken', 'keyTaken'],
     ['err.ECR-REG-4092.keyWindowOverlap', 'keyTaken'],
+    ['err.ECR-REG-4094.naeCodeTaken', 'naeCodeTaken'],
+    ['err.ECR-REG-0422.naeNameEnRequired', 'nameEnRequired'],
   ])('%s -> %s', (key, expected) => {
     expect(serverFieldProblem(errorWithKey(key))).toBe(expected);
   });
 
   it('чужа відмова й не-API помилка поля не підсвічують', () => {
     expect(serverFieldProblem(errorWithKey('err.ECR-REG-0422.levelOrder'))).toBeNull();
+    expect(serverFieldProblem(errorWithKey('err.ECR-REG-0422.naeMoveChangesScope'))).toBeNull();
     expect(serverFieldProblem(new Error('boom'))).toBeNull();
+  });
+});
+
+describe('serverNaeCodeHolder', () => {
+  it('тримач номера: нормалізований номер, область, запис; без messageKey 4094 - null', () => {
+    const error = errorWithKey('err.ECR-REG-4094.naeCodeTaken', { naeCode: '0036_pod', regionCode: 'ATYRAU', areaCode: 'OFFSHORE', entryId: '501', entryCode: 'T-501' });
+
+    expect(serverNaeCodeHolder(error)).toEqual({ naeCode: '0036_pod', region: 'ATYRAU', area: 'OFFSHORE', entryCode: 'T-501', entryId: 501 });
+    expect(serverNaeCodeHolder(errorWithKey('err.ECR-REG-4092.keyTaken', { entryCode: 'T-1' }))).toBeNull();
+    expect(serverNaeCodeHolder(errorWithKey('err.ECR-REG-4094.naeCodeTaken'))?.entryId).toBeNull();
   });
 });
