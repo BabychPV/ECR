@@ -3,6 +3,7 @@ using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Startup;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using System.Diagnostics;
 
 namespace Ecr.Api.Startup;
 
@@ -34,6 +35,18 @@ public static partial class StartupSequence
         var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
         var logger = loggerFactory.CreateLogger("Ecr.Startup");
 
+        // AN-156: тривалість кожного кроку — у журнал (Information), щоб холодний старт міряли за логом.
+        var lap = Stopwatch.StartNew();
+        DateTime processStart;
+        using (var self = Process.GetCurrentProcess())
+        {
+            processStart = self.StartTime;
+        }
+
+        LogProcessAge(logger, "процес до початку послідовності", processStart);
+        _ = app.Lifetime.ApplicationStarted.Register(() =>
+            LogProcessAge(logger, "застосунок слухає (від початку процесу)", processStart));
+
         // ⚠ ПЕРШИМ ділом — журнал Quartz на фабрику ЦЬОГО хоста. Quartz
         // тримає постачальника журналу в статичному полі, і без цього рядка
         // другий хост у тому самому процесі (а саме так працює
@@ -47,6 +60,7 @@ public static partial class StartupSequence
         //    не «частково працює», він не працює зовсім, і краще, щоб це було
         //    видно як невдалий старт, а не як 500 на кожен запит.
         await WaitForDatabaseAsync(db, logger).ConfigureAwait(false);
+        Lap(logger, lap, "1 очікування БД");
 
         // 2) Можливості СУБД. Читаються один раз: редакція між запитами не
         //    змінюється, а кожна перевірка коштує запиту. ⚠ ДО перевірки схеми:
@@ -54,6 +68,7 @@ public static partial class StartupSequence
         //    непрочитаною пробою він бачив би нулі й пропускав будь-який сервер.
         var capabilities = scope.ServiceProvider.GetRequiredService<ISqlCapabilities>();
         await ProbeCapabilitiesAsync(app, db, capabilities, logger).ConfigureAwait(false);
+        Lap(logger, lap, "2 можливості СУБД");
 
         // 3) Сумісність середовища (ФВ-7.9) — ЄДИНЕ джерело цих перевірок,
         //    `SchemaValidator`. Зупиняє старт (`ECR-SYS-5031`): редакція/версія,
@@ -78,11 +93,13 @@ public static partial class StartupSequence
         }
 
         LogSchemaValid(logger);
+        Lap(logger, lap, "3 валідація схеми");
 
         // 4) Ідемпотентний seed. Без нього немає ні мов, ні прав, ні одиниць —
         //    застосунок формально піднімається і не робить нічого.
         await new SeedRunner(db, logger).RunAsync(CancellationToken.None).ConfigureAwait(false);
         LogSeedDone(logger);
+        Lap(logger, lap, "4 seed");
 
         // 4c) Похідні аргументи методологій (2026-11-02): старі, введені руками `ArgumentsCsv` → маркери `?` у
         //     виразах + похідний список. Ідемпотентно, лише версії старого формату; звіт — у журнал. ⚠ Відмова —
@@ -100,6 +117,8 @@ public static partial class StartupSequence
             LogArgumentsBackfillFailed(logger, ex.Message);
         }
 
+        Lap(logger, lap, "4c аргументи методологій");
+
         // 4b) Вʼюхи сирих даних rpt.v_* для SSRS (ФВ-10.2, ФВ-10.4) по
         //     кожній таблиці опублікованих версій шаблонів. ⚠ ПІСЛЯ seed і на
         //     кожному старті: так вʼюхи отримують і версії, опубліковані до
@@ -115,6 +134,8 @@ public static partial class StartupSequence
         {
             LogReportViewsFailed(logger, ex.Message);
         }
+
+        Lap(logger, lap, "4b вʼюхи rpt.v_*");
 
         // 4a) Bootstrap-адміністратор. ⛔ Крок був ОГОЛОШЕНИЙ (обробник є,
         //     зареєстрований, покритий тестами) і НЕ ВИКЛИКАВСЯ (`A7-10`):
@@ -157,10 +178,12 @@ public static partial class StartupSequence
         }
 
         LogBootstrapOutcome(logger, bootstrap.LastOutcome);
+        Lap(logger, lap, "4a bootstrap-адмін");
 
         // 4d) ✎ AIR-ON-AIR: the AIR permit type's sources tables and the Area registry — idempotent, after the bootstrap admin
         //     (a fresh database gets a publisher here), never stops the start.
         await AirTypeStartupStep.RunAsync(app.Services, logger, CancellationToken.None).ConfigureAwait(false);
+        Lap(logger, lap, "4d AIR");
 
         // 5) ПОКИНУТІ фонові задачі. ⛔ Задача, яку виконував процес, що
         //     впав, лишається `Running`/`Queued` у базі НАЗАВЖДИ — процеса,
@@ -203,6 +226,8 @@ public static partial class StartupSequence
             }
         }
 
+        Lap(logger, lap, "5 покинуті задачі");
+
         // ⚠ Запас партицій окремим кроком тут більше не рахується: його
         //    попередження дає `SchemaValidator` на кроці 3 (одне джерело).
 
@@ -217,11 +242,33 @@ public static partial class StartupSequence
             .ConfigureAwait(false);
 
         LogWarmupDone(logger, warmed);
+        Lap(logger, lap, "6 прогрів кешу метаданих");
+        LogProcessAge(logger, "послідовність завершено (від початку процесу)", processStart);
 
         // 7) Постійні розклади ставить окремий hosted service після того, як
         //    застосунок піднявся: планувальник Quartz стає придатним лише
         //    після ApplicationStarted (RecurringScheduleService).
     }
+
+    // AN-156: тривалість кроку з початку попереднього, потім секундомір з нуля.
+    private static void Lap(ILogger logger, Stopwatch lap, string step)
+    {
+        LogStepTiming(logger, step, lap.ElapsedMilliseconds);
+        lap.Restart();
+    }
+
+    // AN-156: вік процесу в мс (через TimeProvider: прямий годинник заборонено сторожем ForbiddenApiTests).
+    private static void LogProcessAge(ILogger logger, string step, DateTime processStart)
+    {
+        if (logger.IsEnabled(LogLevel.Information))
+        {
+            var ageMs = (long)(TimeProvider.System.GetLocalNow() - new DateTimeOffset(processStart)).TotalMilliseconds;
+            LogStepTiming(logger, step, ageMs);
+        }
+    }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Старт: крок «{Step}» — {Ms} мс.")]
+    private static partial void LogStepTiming(ILogger logger, string step, long ms);
 
     private static async Task WaitForDatabaseAsync(EcrDbContext db, ILogger logger)
     {
