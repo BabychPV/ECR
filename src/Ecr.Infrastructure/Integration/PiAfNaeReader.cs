@@ -37,7 +37,9 @@ public sealed class PiAfNaeReader(EcrDbContext db, IEnumerable<IExternalDataSour
                           "err.ECR-INT-0503.transportNotRegistered",
                           ("transport", dataSource.Transport.ToString()));
 
-        var listed = await adapter.DiscoverElementsAsync(dataSourceId, rootPath, ct).ConfigureAwait(false);
+        var listed = dataSource.Transport == Domain.Enums.ExternalTransport.PiWebApi
+            ? await WalkAsync(adapter, dataSourceId, rootPath, ct).ConfigureAwait(false)
+            : await adapter.DiscoverElementsAsync(dataSourceId, rootPath, ct).ConfigureAwait(false);
         var withAddress = listed.Elements.Where(e => !string.IsNullOrWhiteSpace(e.ReadAddress)).ToList();
 
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -64,11 +66,68 @@ public sealed class PiAfNaeReader(EcrDbContext db, IEnumerable<IExternalDataSour
             {
                 var r = new SourceEntityRef(e.ReadAddress);
                 return new NaeAfElement(
-                    e.Path ?? e.Name, e.Name, Get(r, "Name_En"), Get(r, "Name_Ru"), Get(r, "Name_Kz"), Get(r, "Region"), Get(r, "On_Offshore"));
+                    e.Path ?? e.Name, e.Name, Get(r, "Name_En"), Get(r, "Name_Ru"), Get(r, "Name_Kz"), Get(r, "Region"), Get(r, "On_Offshore"), e.TemplateName);
             })
             .ToList();
 
         return new NaeAfSnapshot(elements, listed.IsComplete);
+    }
+
+    /// <summary>Deepest level the PI Web API walk descends to (root children = 1).</summary>
+    public const int MaxDepth = 10;
+
+    /// <summary>Most elements the walk collects; reaching it marks the snapshot incomplete.</summary>
+    public const int MaxElements = 20_000;
+
+    /// <summary>
+    /// NAE node types (human 03.11): PI Web API lists only the DIRECT children of a node, but the template load needs the whole
+    /// typed subtree (region → area → site → unit → equipment), so the reader walks it level by level. PI SQL Client is not walked:
+    /// its configured element-list query decides the depth itself.
+    /// </summary>
+    internal static async Task<SourceElementsResult> WalkAsync(IExternalDataSource adapter, int dataSourceId, string rootPath, CancellationToken ct)
+    {
+        var all = new List<SourceElement>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var complete = true;
+        var level = new List<string> { rootPath };
+        for (var depth = 1; depth <= MaxDepth && level.Count > 0; depth++)
+        {
+            var next = new List<string>();
+            foreach (var parent in level)
+            {
+                var listed = await adapter.DiscoverElementsAsync(dataSourceId, parent, ct).ConfigureAwait(false);
+                complete &= listed.IsComplete;
+                foreach (var element in listed.Elements)
+                {
+                    if (element.Path is not { Length: > 0 } path || !seen.Add(path))
+                    {
+                        continue;
+                    }
+
+                    if (all.Count >= MaxElements)
+                    {
+                        return new SourceElementsResult(all, false);
+                    }
+
+                    all.Add(element);
+
+                    // An NAE source (template Equipment) is a leaf of the NAE tree: no request for its children.
+                    if (NaeTreeSchema.LevelOfAfTemplate(element.TemplateName) != NaeTreeSchema.LevelSource)
+                    {
+                        next.Add(path);
+                    }
+                }
+            }
+
+            if (depth == MaxDepth && next.Count > 0)
+            {
+                complete = false;
+            }
+
+            level = next;
+        }
+
+        return new SourceElementsResult(all, complete);
     }
 
     private static BusinessRuleException Unavailable(string message, string messageKey, params (string Name, string Value)[] details)

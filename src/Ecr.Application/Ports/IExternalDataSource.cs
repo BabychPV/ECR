@@ -290,7 +290,11 @@ public sealed record SourceElementsResult(IReadOnlyList<SourceElement> Elements,
 /// Що стоїть перед <c>|атрибут</c> у шляху для <see cref="IExternalDataSource.ReadCurrentAsync"/>:
 /// PI Web API — шлях, PI SQL Client — ім'я (RTQP шукає елемент <c>WHERE e.Name = ?</c>).
 /// </param>
-public sealed record SourceElement(string ExternalId, string Name, string? Path, string ReadAddress);
+/// <param name="TemplateName">
+/// Шаблон елемента AF (PI Web API — <c>TemplateName</c>, PI SQL Client — необов'язкова колонка <c>TemplateName</c>);
+/// <c>null</c> — джерело його не дає. Читає завантаження дерева НАЕ за шаблоном (людина 03.11); синк довідників його не бере.
+/// </param>
+public sealed record SourceElement(string ExternalId, string Name, string? Path, string ReadAddress, string? TemplateName = null);
 
 /// <summary>Шлях, поточне значення якого не прочитано.</summary>
 /// <param name="SourcePath">Шлях атрибута.</param>
