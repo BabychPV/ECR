@@ -208,7 +208,10 @@ public sealed class DocumentSheetConfiguration : IEntityTypeConfiguration<Docume
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.ToTable("DocumentSheet", "doc");
+        // RS: оригінал — номер 1 без CopyOfId, копія — номер ≥ 2 з CopyOfId.
+        builder.ToTable("DocumentSheet", "doc", t => t.HasCheckConstraint(
+            "CK_DocSheet_Copy",
+            "(CopyOfId IS NULL AND CopyOrdinal = 1) OR (CopyOfId IS NOT NULL AND CopyOrdinal >= 2)"));
 
         // Ключ — сурогатний Id, а пара «документ × аркуш» тримається окремим
         // UNIQUE. Складений PK виглядав би природніше, але схема — єдине
@@ -219,9 +222,20 @@ public sealed class DocumentSheetConfiguration : IEntityTypeConfiguration<Docume
         // неможливо прибрати скриптом, не з'ясувавши спершу його
         // випадкове ім'я на конкретній базі.
         builder.Property(x => x.IsIncluded).HasDefaultValue(true, "DF_DocSheet_Inc");
+        builder.Property(x => x.CopyOrdinal).HasDefaultValue((short)1, "DF_DocSheet_CopyOrd");
+        builder.LocalizedText(x => x.NameOverrideL10n!).IsRequired(false);
+        builder.Property(x => x.RowVersion).IsRowVersion();
 
+        // RS: «документ × аркуш» унікальна лише серед ОРИГІНАЛІВ; копії тримає пара (оригінал, номер).
         builder.HasIndex(x => new { x.DocumentId, x.SheetDefId })
-               .IsUnique().HasDatabaseName("UQ_DocumentSheet");
+               .IsUnique().HasFilter("[CopyOfId] IS NULL").HasDatabaseName("UQ_DocumentSheet");
+        builder.HasIndex(x => new { x.CopyOfId, x.CopyOrdinal })
+               .IsUnique().HasFilter("[CopyOfId] IS NOT NULL").HasDatabaseName("UQ_DocumentSheet_Copy");
+
+        builder.HasOne<DocumentSheet>()
+               .WithMany()
+               .HasForeignKey(x => x.CopyOfId)
+               .HasConstraintName("FK_DocSheet_CopyOf");
 
         builder.HasOne<Document>()
                .WithMany(d => d.Sheets)
@@ -257,8 +271,22 @@ public sealed class TableInstanceConfiguration : IEntityTypeConfiguration<TableI
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.RowVersion).IsRowVersion();
 
-        builder.HasIndex(x => new { x.PeriodKeyValue, x.DocumentId, x.TableDefId })
-               .IsUnique().HasDatabaseName("UQ_TableInstance");
+        // RS: + SheetCopyId. ⛔ HasFilter(null): типовий фільтр EF для унікального індексу з NULL-колонкою
+        // (`WHERE SheetCopyId IS NOT NULL`) зняв би унікальність саме з ОРИГІНАЛІВ. Без фільтра SQL Server
+        // вважає NULL рівними — рівно один оригінал на (період, документ, таблицю). Індекс лежить на
+        // ps_ByPeriodKey (міграція RS1_SheetCopies будує його сирим SQL, 07-partition-tables.sql вирівнює).
+        builder.HasIndex(x => new { x.PeriodKeyValue, x.DocumentId, x.TableDefId, x.SheetCopyId })
+               .IsUnique().HasFilter(null).HasDatabaseName("UQ_TableInstance");
+
+        // Під FK_TableInstance_SheetCopy: видалення рядка doc.DocumentSheet перевіряє посилання seek-ом, а не
+        // скануванням усіх партицій. Фільтрований — оригінали (NULL) його не роздувають.
+        builder.HasIndex(x => x.SheetCopyId)
+               .HasFilter("[SheetCopyId] IS NOT NULL").HasDatabaseName("IX_TableInstance_SheetCopy");
+
+        builder.HasOne<DocumentSheet>()
+               .WithMany()
+               .HasForeignKey(x => x.SheetCopyId)
+               .HasConstraintName("FK_TableInstance_SheetCopy");
 
         // ⛔ Q-222: були в 02a-db-schema.md (FK_TableInstance_Doc/_Table),
         // ніколи не потрапили в цю конфігурацію. Прості (не складені) FK:

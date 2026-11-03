@@ -415,9 +415,10 @@ BEGIN
 
             IF @hiId IS NULL BREAK;
 
+            -- RS: SheetCopyId — інакше відновлення злило б копію аркуша з оригіналом.
             INSERT INTO arc.TableInstance WITH (TABLOCK)
-                (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt)
-            SELECT PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt
+                (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt, SheetCopyId)
+            SELECT PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt, SheetCopyId
             FROM doc.TableInstance
             WHERE PeriodKey = @k AND (@lastId IS NULL OR Id > @lastId) AND Id <= @hiId
             OPTION (RECOMPILE);
@@ -738,8 +739,8 @@ BEGIN
 
             IF @hiId IS NULL BREAK;
 
-            INSERT INTO doc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt)
-            SELECT a.PeriodKey, a.Id, a.DocumentId, a.TableDefId, a.CreatedAt, a.ModifiedAt
+            INSERT INTO doc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt, SheetCopyId)
+            SELECT a.PeriodKey, a.Id, a.DocumentId, a.TableDefId, a.CreatedAt, a.ModifiedAt, a.SheetCopyId
             FROM arc.TableInstance AS a
             WHERE a.PeriodKey = @k
               AND (@lastId IS NULL OR a.Id > @lastId) AND a.Id <= @hiId

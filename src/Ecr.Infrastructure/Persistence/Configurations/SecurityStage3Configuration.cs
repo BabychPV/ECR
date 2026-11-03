@@ -213,8 +213,10 @@ public sealed class SubmissionSnapshotConfiguration : IEntityTypeConfiguration<S
 
         // Зрізи накопичуються, і читають їх завжди по трійці «документ × аркуш
         // × період» від найновішого (ФВ-9.17).
-        builder.HasIndex(x => new { x.DocumentId, x.SheetDefId, x.PeriodKey, x.SubmittedAt })
-               .IsDescending(false, false, false, true)
+        // RS: зріз копії окремий — SheetCopyId перед SubmittedAt (рівність, потім порядок). Без FK: зрізи
+        // незмінні й переживають видалення копії (Q2).
+        builder.HasIndex(x => new { x.DocumentId, x.SheetDefId, x.PeriodKey, x.SheetCopyId, x.SubmittedAt })
+               .IsDescending(false, false, false, false, true)
                .HasDatabaseName("IX_SubmissionSnapshot_Sheet");
     }
 }

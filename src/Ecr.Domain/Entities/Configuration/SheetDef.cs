@@ -30,6 +30,16 @@ public sealed class SheetDef : Entity<int>
     public string? SheetGroup { get; private set; }
 
     public bool IsMandatory { get; private set; }
+
+    /// <summary>
+    /// Аркуш дозволено копіювати в документі (RS, рішення людини 03.11): «Додати копію» заводить
+    /// «&lt;Назва&gt; 2, 3…» — порожні, з тією самою структурою і формулами, у всіх періодах.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Зняття позначки наявних копій не видаляє (Q4): вона лише ховає дію «Додати копію».
+    /// </remarks>
+    public bool IsCopyable { get; private set; }
+
     public bool IsVisible { get; private set; }
     public bool IsDeleted { get; private set; }
     public DateTime? DeletedAt { get; private set; }
@@ -64,6 +74,10 @@ public sealed class SheetDef : Entity<int>
 
     /// <summary>Позначає аркуш обов'язковим для складу документа.</summary>
     public void SetMandatory(bool mandatory) => IsMandatory = mandatory;
+
+    /// <summary>Дозволяє чи забороняє копії аркуша в документах (RS).</summary>
+    /// <param name="copyable"><c>false</c> — нових копій не заводять; наявні лишаються (Q4).</param>
+    public void SetCopyable(bool copyable) => IsCopyable = copyable;
 
     /// <summary>
     /// Видимість аркуша.

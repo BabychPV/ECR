@@ -212,6 +212,13 @@ IF COL_LENGTH(N'arc.TableRow', N'IsOrphaned') IS NULL
         ADD IsOrphaned bit NOT NULL CONSTRAINT DF_arc_TableRow_Orph DEFAULT (0);
 GO
 
+-- RS (копії аркушів, міграція RS1_SheetCopies): дзеркало doc.TableInstance.SheetCopyId для наявних баз. Без нього
+-- архівування+відновлення злило б екземпляр копії з оригіналом (UQ_TableInstance (PeriodKey, DocumentId, TableDefId,
+-- SheetCopyId) — дубль на відновленні). Копіюють `usp_ArchiveYear`/`usp_RestoreYear`.
+IF COL_LENGTH(N'arc.TableInstance', N'SheetCopyId') IS NULL
+    ALTER TABLE arc.TableInstance ADD SheetCopyId bigint NULL;
+GO
+
 -- D-247 / НФ-8.4b: архів аудиту — SWITCH партицій aud.* у дзеркала arc.Audit*.
 --
 -- ⛔ Чому НЕ існуючий arc.CellChange: він clustered columnstore на [DATA_ARCHIVE],

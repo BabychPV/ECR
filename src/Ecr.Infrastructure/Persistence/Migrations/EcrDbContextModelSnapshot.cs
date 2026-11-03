@@ -2280,6 +2280,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int?>("DeletedByUserId")
                         .HasColumnType("int");
 
+                    b.Property<bool>("IsCopyable")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_SheetDef_Copy");
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
@@ -3282,6 +3287,14 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
+                    b.Property<long?>("CopyOfId")
+                        .HasColumnType("bigint");
+
+                    b.Property<short>("CopyOrdinal")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)1, "DF_DocSheet_CopyOrd");
+
                     b.Property<long>("DocumentId")
                         .HasColumnType("bigint");
 
@@ -3290,16 +3303,34 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(true, "DF_DocSheet_Inc");
 
+                    b.Property<string>("NameOverrideL10n")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<int>("SheetDefId")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CopyOfId", "CopyOrdinal")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_DocumentSheet_Copy")
+                        .HasFilter("[CopyOfId] IS NOT NULL");
+
                     b.HasIndex("DocumentId", "SheetDefId")
                         .IsUnique()
-                        .HasDatabaseName("UQ_DocumentSheet");
+                        .HasDatabaseName("UQ_DocumentSheet")
+                        .HasFilter("[CopyOfId] IS NULL");
 
-                    b.ToTable("DocumentSheet", "doc");
+                    b.ToTable("DocumentSheet", "doc", t =>
+                        {
+                            t.HasCheckConstraint("CK_DocSheet_Copy", "(CopyOfId IS NULL AND CopyOrdinal = 1) OR (CopyOfId IS NOT NULL AND CopyOrdinal >= 2)");
+                        });
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.EditAssignment", b =>
@@ -3919,12 +3950,19 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 
+                    b.Property<long?>("SheetCopyId")
+                        .HasColumnType("bigint");
+
                     b.Property<int>("TableDefId")
                         .HasColumnType("int");
 
                     b.HasKey("PeriodKeyValue", "Id");
 
-                    b.HasIndex("PeriodKeyValue", "DocumentId", "TableDefId")
+                    b.HasIndex("SheetCopyId")
+                        .HasDatabaseName("IX_TableInstance_SheetCopy")
+                        .HasFilter("[SheetCopyId] IS NOT NULL");
+
+                    b.HasIndex("PeriodKeyValue", "DocumentId", "TableDefId", "SheetCopyId")
                         .IsUnique()
                         .HasDatabaseName("UQ_TableInstance");
 
@@ -6323,6 +6361,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<long?>("SheetCopyId")
+                        .HasColumnType("bigint");
+
                     b.Property<int>("SheetDefId")
                         .HasColumnType("int");
 
@@ -6430,6 +6471,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 
+                    b.Property<long?>("SheetCopyId")
+                        .HasColumnType("bigint");
+
                     b.Property<int>("SheetDefId")
                         .HasColumnType("int");
 
@@ -6444,7 +6488,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("DocumentId", "SheetDefId", "PeriodKey")
+                    b.HasIndex("DocumentId", "SheetDefId", "PeriodKey", "SheetCopyId")
                         .IsUnique()
                         .HasDatabaseName("UQ_ApprovalState");
 
@@ -6518,6 +6562,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int>("PeriodKey")
                         .HasColumnType("int");
 
+                    b.Property<long?>("SheetCopyId")
+                        .HasColumnType("bigint");
+
                     b.Property<int>("SheetDefId")
                         .HasColumnType("int");
 
@@ -6532,8 +6579,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("DocumentId", "SheetDefId", "PeriodKey", "SubmittedAt")
-                        .IsDescending(false, false, false, true)
+                    b.HasIndex("DocumentId", "SheetDefId", "PeriodKey", "SheetCopyId", "SubmittedAt")
+                        .IsDescending(false, false, false, false, true)
                         .HasDatabaseName("IX_SubmissionSnapshot_Sheet");
 
                     b.ToTable("SubmissionSnapshot", "calc");
@@ -7521,6 +7568,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.DocumentSheet", b =>
                 {
+                    b.HasOne("Ecr.Domain.Entities.Documents.DocumentSheet", null)
+                        .WithMany()
+                        .HasForeignKey("CopyOfId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_DocSheet_CopyOf");
+
                     b.HasOne("Ecr.Domain.Entities.Documents.Document", null)
                         .WithMany("Sheets")
                         .HasForeignKey("DocumentId")
@@ -7747,6 +7800,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_TableInstance_Doc");
+
+                    b.HasOne("Ecr.Domain.Entities.Documents.DocumentSheet", null)
+                        .WithMany()
+                        .HasForeignKey("SheetCopyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_TableInstance_SheetCopy");
 
                     b.HasOne("Ecr.Domain.Entities.Configuration.TableDef", null)
                         .WithMany()
@@ -8335,6 +8394,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_ApprState_Doc");
+
+                    b.HasOne("Ecr.Domain.Entities.Documents.DocumentSheet", null)
+                        .WithMany()
+                        .HasForeignKey("SheetCopyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ApprState_SheetCopy");
 
                     b.HasOne("Ecr.Domain.Entities.Configuration.SheetDef", null)
                         .WithMany()

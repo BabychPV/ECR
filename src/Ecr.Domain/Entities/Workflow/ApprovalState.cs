@@ -17,16 +17,27 @@ public sealed class ApprovalState : Entity<long>
 {
     private ApprovalState() { }
 
-    public ApprovalState(long documentId, int sheetDefId, int periodKey)
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал (RS).</param>
+    public ApprovalState(long documentId, int sheetDefId, int periodKey, long? sheetCopyId = null)
     {
         DocumentId = documentId;
         SheetDefId = sheetDefId;
         PeriodKey = periodKey;
+        SheetCopyId = sheetCopyId;
         Status = DocumentStatus.Draft;
     }
 
     public long DocumentId { get; private set; }
     public int SheetDefId { get; private set; }
+
+    /// <summary>
+    /// Копія аркуша (<c>doc.DocumentSheet.Id</c>); <c>null</c> — оригінал. Копія має ВЛАСНИЙ стан за
+    /// період (рішення людини 03.11): затвердження оригіналу її не замикає.
+    /// </summary>
+    public long? SheetCopyId { get; private set; }
     public int PeriodKey { get; private set; }
     public DocumentStatus Status { get; private set; }
     public int? CurrentStepId { get; private set; }
