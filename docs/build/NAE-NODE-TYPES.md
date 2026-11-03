@@ -73,6 +73,8 @@
 ✎ follow-up 03.11: шаблон іде наскрізно. `SourceElement.TemplateName` (порт, nullable, синк довідників його не читає)
 заповнюють адаптери: PI Web API — поле `TemplateName` елемента; PI SQL Client — необов'язкова колонка `TemplateName`
 налаштованого запиту `ElementListQuery` (без колонки — `null`, як раніше). `PiAfNaeReader` кладе його в `NaeAfElement.Template`.
+Для встановлення це обов'язкова колонка `TemplateName` в `ElementListQuery` (`11-install-guide.md` §2.8, `operations-runbook.md`).
+Разове оновлення наявного дерева на старті пише один рядок `aud.StructureChange` (`UpgradeNodeTypes`, автор 0 «система», знімки до/після з `LevelId`, та сама транзакція); створення нового дерева йде через `SaveDefinition` і вже аудитується.
 PI Web API віддає лише прямих дітей вузла, тож для нього читач обходить піддерево рівень за рівнем (стеля глибини 10 і
 20 000 елементів — далі знімок неповний, `sourceIncomplete`), не заходячи в джерела (`Equipment`). PI SQL Client не
 обходиться: глибину визначає його запит. ⚠ Обхід — один HTTP-запит на кожен вузол-групу: для разового завантаження прийнятно.
