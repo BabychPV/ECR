@@ -1,7 +1,8 @@
-// tests/Ecr.Application.Tests/Registries/Rules/RegistryRuleEngineTests.cs
+﻿// tests/Ecr.Application.Tests/Registries/Rules/RegistryRuleEngineTests.cs
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Ecr.Application.Registries.Rows;
 using Ecr.Application.Registries.Rules;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
@@ -413,6 +414,93 @@ public sealed class RegistryRuleEngineTests
         await _loader.DidNotReceive().LoadAsync(
             Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<DateOnly>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
         Assert.Equal([DateOnly.FromDateTime(Now), future, later], _source.BuiltDates.Order());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "AN-83")]
+    public async Task AN_83__типовий_пакет_повного_Land_вкладається_у_чверть_бюджету()
+    {
+        // Повний імпорт Land: 220 кейсів × 49 компонентів = 10 780 рядків складу (FEATURE-REGISTRY-TABLES §Land).
+        // Правила: шаблон «Сума дочірніх» на кейсі (~455 кроків на батька), діапазон і обов'язковість на рядку.
+        // Крок = детермінований лічильник, не час. Запас ×4 — щоб додаткові правила не з'їли стелю.
+        var ids = AddLand(cases: 220, perCase: 49);
+        _caseRules.Add(SumRule(ValidationSeverity.Error));
+        _compositionRules.Add(Rule(CompositionId, "PCT_RANGE", RegistryRuleKind.Expression, "ROW.MOL_PCT >= 0 AND ROW.MOL_PCT <= 100", ValidationSeverity.Error));
+        _compositionRules.Add(Rule(
+            CompositionId, "COMPONENT_WHEN_PCT", RegistryRuleKind.RequiredWhen, "ROW.MOL_PCT > 0",
+            ValidationSeverity.Error, """{"field":"COMPONENT"}"""));
+
+        var check = await Engine(packageBudgetSteps: RegistryRuleEngine.DefaultPackageBudgetSteps / 4)
+            .EvaluateAsync(_composition, ids, [], null, default);
+
+        Assert.Empty(check.Violations);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "AN-83")]
+    public async Task AN_83__агрегат_на_кожен_рядок_повного_Land_вкладається_у_бюджет()
+    {
+        // Найдорожча реалістична форма: індексний REGCOUNT по дітях кейса на КОЖЕН рядок (~301 крок при 49
+        // дітях). Повний Land (10 780 рядків) = 3,24 млн кроків — у межах бюджету, але вже не в чверті.
+        var ids = AddLand(cases: 220, perCase: 49);
+        _compositionRules.Add(Rule(
+            CompositionId, "CASE_HAS_ROWS", RegistryRuleKind.Expression,
+            "REGCOUNT('GAS_COMPOSITION', ROW.CASE = REGFIELD(THIS, 'CASE')) >= 1", ValidationSeverity.Error));
+
+        var check = await Engine().EvaluateAsync(_composition, ids, [], null, default);
+
+        Assert.Empty(check.Violations);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "AN-83")]
+    public async Task AN_83__пакетний_запис_макс_розміру_з_агрегатом_на_рядок_вкладається_у_чверть_бюджету()
+    {
+        var ids = AddLand(cases: 220, perCase: 49).Take(RegistryBatchHandler.MaxItems).ToList();
+        _compositionRules.Add(Rule(
+            CompositionId, "CASE_HAS_ROWS", RegistryRuleKind.Expression,
+            "REGCOUNT('GAS_COMPOSITION', ROW.CASE = REGFIELD(THIS, 'CASE')) >= 1", ValidationSeverity.Error));
+
+        var check = await Engine(packageBudgetSteps: RegistryRuleEngine.DefaultPackageBudgetSteps / 4)
+            .EvaluateAsync(_composition, ids, [], null, default);
+
+        Assert.Empty(check.Violations);
+    }
+
+    /// <summary>Додає <paramref name="cases"/> кейсів по <paramref name="perCase"/> рядків складу; віддає id рядків складу.</summary>
+    private List<long> AddLand(int cases, int perCase)
+    {
+        var parentOf = new Dictionary<long, long>();
+        var ids = new List<long>();
+        long id = 100_000;
+        for (var c = 0; c < cases; c++)
+        {
+            var parent = 20_000L + c;
+            _snapshot.AddEntry("STREAM_CASE", parent, $"LC{c}", new() { ["NAME"] = ExpressionValue.Text($"N{c}") }, ordinal: c);
+            for (var k = 0; k < perCase; k++)
+            {
+                id++;
+                var values = new Dictionary<string, ExpressionValue>
+                {
+                    ["CASE"] = ExpressionValue.Number(parent),
+                    ["MOL_PCT"] = ExpressionValue.Number(100m / perCase),
+                    ["COMPONENT"] = ExpressionValue.Text("CH4"),
+                };
+                _snapshot.AddEntry("GAS_COMPOSITION", id, $"LG{id}", values, ordinal: k);
+                parentOf[id] = parent;
+                ids.Add(id);
+            }
+        }
+
+        _registries.ListValuesForEntriesAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0)
+                .Where(parentOf.ContainsKey)
+                .Select(child => Link(child, parentOf[child]))
+                .ToList());
+        return ids;
     }
 
     private List<long> AddManyRows(int count)
