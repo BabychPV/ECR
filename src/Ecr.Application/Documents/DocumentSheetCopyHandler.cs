@@ -33,7 +33,7 @@ public sealed record SheetCopyCreated(long SheetCopyId, short Ordinal);
 /// Журнал безпеки пишеться в ТІЙ САМІЙ транзакції.
 /// </para>
 /// </remarks>
-public sealed class DocumentSheetCopyHandlers(
+public sealed class DocumentSheetCopyHandler(
     IDocumentStore documents,
     IDocumentSheetCopyStore copies,
     IMetadataCache metadata,

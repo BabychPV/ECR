@@ -195,7 +195,7 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<ApprovalEventRecord>> GetHistoryAsync(
-        long documentId, PeriodKey periodKey, int limit, CancellationToken ct)
+        long documentId, PeriodKey periodKey, int limit, CancellationToken ct, long? sheetCopyId = null)
     {
         // ⚠ Користувач приєднується ЛІВИМ з'єднанням: `ByUserId = null` — це
         // системний перехід, і внутрішнє з'єднання мовчки викинуло б його з журналу.
@@ -206,6 +206,7 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             join u in db.Users.AsNoTracking() on e.ByUserId equals (int?)u.Id into users
             from user in users.DefaultIfEmpty()
             where e.DocumentId == documentId && e.PeriodKey == periodKey.Value
+                  && e.SheetCopyId == sheetCopyId
             orderby e.At descending, e.Id descending
             select new ApprovalEventRecord(
                 sheet.Code, e.FromStatus, e.ToStatus, e.Action, e.ByUserId,
@@ -241,7 +242,7 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
 
     /// <inheritdoc />
     public async Task<SubmissionCalendar?> GetSubmissionCalendarAsync(
-        long documentId, int sheetDefId, DateTime utcNow, CancellationToken ct)
+        long documentId, int sheetDefId, DateTime utcNow, CancellationToken ct, long? sheetCopyId = null)
     {
         var project = await (
                 from d in db.Documents.AsNoTracking()
@@ -271,11 +272,10 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        // RS: календар подання — оригіналу аркуша (календар копії — разом із контрактом, коміт 8).
+        // RS: календар подання — оригіналу аркуша або заданої копії (`sheetCopyId`).
         var statuses = await db.ApprovalStates
             .AsNoTracking()
-            .OriginalOnly()
-            .Where(s => s.DocumentId == documentId && s.SheetDefId == sheetDefId)
+            .Where(s => s.DocumentId == documentId && s.SheetDefId == sheetDefId && s.SheetCopyId == sheetCopyId)
             .Select(s => new { s.PeriodKey, s.Status })
             .ToDictionaryAsync(s => s.PeriodKey, s => s.Status, ct)
             .ConfigureAwait(false);

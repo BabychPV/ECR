@@ -25,12 +25,14 @@ public sealed class DocumentWorkflowHistoryController(
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="periodKey">Період, відкритий на екрані; його рік задає місяці колонок.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="sheetCopyId">Копія аркуша (RS); без нього - оригінал (для журналу - лише події оригіналів).</param>
     [HttpGet("{id:long}/submission-target")]
     [ProducesResponseType<SubmissionTargetDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> SubmissionTarget(
-        long id, [FromQuery] int sheetDefId, [FromQuery] int periodKey, CancellationToken ct)
-        => Ok(await submissionTarget.HandleAsync(id, sheetDefId, periodKey, ct).ConfigureAwait(false));
+        long id, [FromQuery] int sheetDefId, [FromQuery] int periodKey, CancellationToken ct,
+        [FromQuery] long? sheetCopyId = null)
+        => Ok(await submissionTarget.HandleAsync(id, sheetDefId, periodKey, ct, sheetCopyId).ConfigureAwait(false));
 
     /// <summary>
     /// Хто й коли подав, погодив, відхилив або повернув аркуші документа за
@@ -39,11 +41,13 @@ public sealed class DocumentWorkflowHistoryController(
     /// <param name="id">Документ.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="sheetCopyId">Копія аркуша (RS); без нього - оригінал (для журналу - лише події оригіналів).</param>
     [HttpGet("{id:long}/workflow/history")]
     [ProducesResponseType<IReadOnlyList<WorkflowEventDto>>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> History(long id, [FromQuery] int periodKey, CancellationToken ct)
-        => Ok(await history.HandleAsync(id, periodKey, ct).ConfigureAwait(false));
+    public async Task<IActionResult> History(
+        long id, [FromQuery] int periodKey, CancellationToken ct, [FromQuery] long? sheetCopyId = null)
+        => Ok(await history.HandleAsync(id, periodKey, ct, sheetCopyId).ConfigureAwait(false));
 
     /// <summary>
     /// Журнал дій на аркуші за період (панель History): правки значень людьми (сітка, імпорт, правка погоджувача)
@@ -104,12 +108,14 @@ public sealed class DocumentWorkflowHistoryController(
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="sheetCopyId">Копія аркуша (RS); без нього - оригінал (для журналу - лише події оригіналів).</param>
     [HttpGet("{id:long}/approver-edit")]
     [ProducesResponseType<ApproverEditAvailabilityDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ApproverEdit(
-        long id, [FromQuery] int sheetDefId, [FromQuery] int periodKey, CancellationToken ct)
-        => Ok(await approverEdit.HandleAsync(id, sheetDefId, periodKey, ct).ConfigureAwait(false));
+        long id, [FromQuery] int sheetDefId, [FromQuery] int periodKey, CancellationToken ct,
+        [FromQuery] long? sheetCopyId = null)
+        => Ok(await approverEdit.HandleAsync(id, sheetDefId, periodKey, ct, sheetCopyId).ConfigureAwait(false));
 }
 
 /// <summary>Тіло відкликання аркуша.</summary>

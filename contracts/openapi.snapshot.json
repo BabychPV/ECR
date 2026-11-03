@@ -28546,6 +28546,14 @@
             "description": "Код аркуша.",
             "type": "string"
           },
+          "sheetCopyId": {
+            "description": "RS: копія аркуша, якої стосується подія; `null` — оригінал (код аркуша в копії той самий).",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "stepOrdinal": {
             "description": "Крок маршруту, якщо маршрут є.",
             "format": "int32",
@@ -36251,6 +36259,15 @@
               "format": "int32",
               "type": "integer"
             }
+          },
+          {
+            "description": "Копія аркуша (RS); без нього - оригінал (для журналу - лише події оригіналів).",
+            "in": "query",
+            "name": "sheetCopyId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -38298,6 +38315,15 @@
               "format": "int32",
               "type": "integer"
             }
+          },
+          {
+            "description": "Копія аркуша (RS); без нього - оригінал (для журналу - лише події оригіналів).",
+            "in": "query",
+            "name": "sheetCopyId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -38791,6 +38817,15 @@
             "name": "periodKey",
             "schema": {
               "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Копія аркуша (RS); без нього - оригінал (для журналу - лише події оригіналів).",
+            "in": "query",
+            "name": "sheetCopyId",
+            "schema": {
+              "format": "int64",
               "type": "integer"
             }
           }

@@ -75,8 +75,9 @@ public sealed class GetApproverEditAvailabilityHandler(
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Скасування.</param>
+    /// <param name="sheetCopyId">Копія аркуша (RS); <c>null</c> — оригінал.</param>
     public async Task<ApproverEditAvailabilityDto> HandleAsync(
-        long documentId, int sheetDefId, int periodKey, CancellationToken ct)
+        long documentId, int sheetDefId, int periodKey, CancellationToken ct, long? sheetCopyId = null)
     {
         var profile = await PermissionCheck
             .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
@@ -87,7 +88,7 @@ public sealed class GetApproverEditAvailabilityHandler(
 
         return new ApproverEditAvailabilityDto(
             await ApproverEditRule
-                .IsCurrentStepApproverAsync(access, profile, documentId, sheetDefId, PeriodKey.Parse(periodKey), ct)
+                .IsCurrentStepApproverAsync(access, profile, documentId, sheetDefId, PeriodKey.Parse(periodKey), ct, sheetCopyId)
                 .ConfigureAwait(false));
     }
 }

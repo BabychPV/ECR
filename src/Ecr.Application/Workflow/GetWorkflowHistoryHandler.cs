@@ -17,6 +17,7 @@ namespace Ecr.Application.Workflow;
 /// <param name="Reason">Причина відхилення або повернення в роботу.</param>
 /// <param name="StepOrdinal">Крок маршруту, якщо маршрут є.</param>
 /// <param name="ApprovedBySubmitter">Погодження виконав той самий користувач, що й подання перед ним: позначка «погоджено автором подання» (<c>D-440</c>).</param>
+/// <param name="SheetCopyId">RS: копія аркуша, якої стосується подія; <c>null</c> — оригінал (код аркуша в копії той самий).</param>
 public sealed record WorkflowEventDto(
     string SheetCode,
     string FromState,
@@ -26,7 +27,8 @@ public sealed record WorkflowEventDto(
     DateTime At,
     string? Reason,
     int? StepOrdinal,
-    bool ApprovedBySubmitter);
+    bool ApprovedBySubmitter,
+    long? SheetCopyId = null);
 
 /// <summary>
 /// Журнал переходів документа за період. Право <c>Document.View</c>.
@@ -65,8 +67,9 @@ public sealed class GetWorkflowHistoryHandler(
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="sheetCopyId">Копія аркуша (RS); <c>null</c> — лише події оригіналів, НЕ всі.</param>
     public async Task<IReadOnlyList<WorkflowEventDto>> HandleAsync(
-        long documentId, int periodKey, CancellationToken ct)
+        long documentId, int periodKey, CancellationToken ct, long? sheetCopyId = null)
     {
         var key = PeriodKey.Parse(periodKey);
 
@@ -83,7 +86,7 @@ public sealed class GetWorkflowHistoryHandler(
                 });
         }
 
-        var events = await workflow.GetHistoryAsync(documentId, key, MaxEvents, ct).ConfigureAwait(false);
+        var events = await workflow.GetHistoryAsync(documentId, key, MaxEvents, ct, sheetCopyId).ConfigureAwait(false);
 
         // ⛔ L1-18 (D-214, ФВ-6.6): подія називає аркуш, виконавця й текст причини повернення чи
         // відмови — це дані аркуша; закритого користувачу аркуша подій немає. Межі — для
@@ -109,7 +112,8 @@ public sealed class GetWorkflowHistoryHandler(
                 e.At,
                 e.Reason,
                 e.StepOrdinal,
-                e.ApprovedBySubmitter))
+                e.ApprovedBySubmitter,
+                e.SheetCopyId))
             .ToList();
     }
 

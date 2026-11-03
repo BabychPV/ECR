@@ -36,7 +36,7 @@ public sealed class DocumentSheetCopyApiTests(SqlServerFixture sql)
     [Trait("Decision", "RS-1103")]
     public async Task Додавання_копій_віддає_номери_а_таблиці_і_стани_знають_копії_у_правильному_порядку()
     {
-        var s = await ArrangeAsync(DocumentSheetCopyHandlers.Permission).ConfigureAwait(true);
+        var s = await ArrangeAsync(DocumentSheetCopyHandler.Permission).ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
@@ -84,7 +84,7 @@ public sealed class DocumentSheetCopyApiTests(SqlServerFixture sql)
     [Trait("Decision", "RS-1103")]
     public async Task Перейменування_групи_міняє_назву_оригінала_і_всіх_копій()
     {
-        var s = await ArrangeAsync(DocumentSheetCopyHandlers.Permission).ConfigureAwait(true);
+        var s = await ArrangeAsync(DocumentSheetCopyHandler.Permission).ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
         await PostCopyAsync(client, s).ConfigureAwait(true);
@@ -112,7 +112,7 @@ public sealed class DocumentSheetCopyApiTests(SqlServerFixture sql)
     [Trait("Decision", "RS-1103")]
     public async Task Видалення_оригінала_і_затвердженої_копії_дає_409_з_ключами_а_копії_2_із_3_перенумеровує_третю()
     {
-        var s = await ArrangeAsync(DocumentSheetCopyHandlers.Permission).ConfigureAwait(true);
+        var s = await ArrangeAsync(DocumentSheetCopyHandler.Permission).ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
         var two = await PostCopyAsync(client, s).ConfigureAwait(true);
@@ -171,7 +171,7 @@ public sealed class DocumentSheetCopyApiTests(SqlServerFixture sql)
             Assert.Equal(HttpStatusCode.Forbidden, response.Status);
         }
 
-        var notCopyable = await ArrangeAsync(DocumentSheetCopyHandlers.Permission, copyable: false).ConfigureAwait(true);
+        var notCopyable = await ArrangeAsync(DocumentSheetCopyHandler.Permission, copyable: false).ConfigureAwait(true);
         using var factory = new EcrApiFactory(sql);
         using var signedIn = await SignedInAsync(factory, notCopyable.UserName).ConfigureAwait(true);
         var refused = await signedIn.PostAsync(
@@ -182,6 +182,79 @@ public sealed class DocumentSheetCopyApiTests(SqlServerFixture sql)
         Assert.Equal("err.ECR-DOC-0422.sheetNotCopyable", body.GetProperty("messageKey").GetString());
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "RS-1103")]
+    public async Task Журнал_без_sheetCopyId_віддає_лише_оригінал_а_з_ним_лише_свою_копію()
+    {
+        var s = await ArrangeAsync(DocumentSheetCopyHandler.Permission).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var copy = await PostCopyAsync(client, s).ConfigureAwait(true);
+
+        await using (var arrange = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var at = new DateTime(2026, 3, 20, 9, 0, 0, DateTimeKind.Utc);
+            arrange.ApprovalEvents.Add(new ApprovalEvent(
+                s.DocumentId, s.SheetDefId, s.PeriodKey, DocumentStatus.Draft, DocumentStatus.Submitted, ApprovalAction.Submit, null, at));
+            arrange.ApprovalEvents.Add(new ApprovalEvent(
+                s.DocumentId, s.SheetDefId, s.PeriodKey, DocumentStatus.Draft, DocumentStatus.Submitted, ApprovalAction.Submit, null, at.AddMinutes(1),
+                sheetCopyId: copy.SheetCopyId));
+            await arrange.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var path = $"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/workflow/history?periodKey={s.PeriodKey.ToString(CultureInfo.InvariantCulture)}";
+        var original = await GetJsonAsync(client, path).ConfigureAwait(true);
+        var ofCopy = await GetJsonAsync(client, path + "&sheetCopyId=" + copy.SheetCopyId.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(true);
+
+        var originalEvents = original.EnumerateArray().ToList();
+        var copyEvents = ofCopy.EnumerateArray().ToList();
+        Assert.Single(originalEvents);
+        Assert.Equal(JsonValueKind.Null, originalEvents[0].GetProperty("sheetCopyId").ValueKind);
+        Assert.Single(copyEvents);
+        Assert.Equal(copy.SheetCopyId, copyEvents[0].GetProperty("sheetCopyId").GetInt64());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "RS-1103")]
+    public async Task Ціль_подання_бере_стани_періодів_із_копії_а_approver_edit_приймає_sheetCopyId()
+    {
+        var s = await ArrangeAsync(DocumentSheetCopyHandler.Permission).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var copy = await PostCopyAsync(client, s).ConfigureAwait(true);
+
+        await using (var arrange = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            // Проєкт-чернетка: рішення бере ЗБЕРЕЖЕНІ стани, тож період робимо Open, щоб він потрапив до переліку.
+            var projectId = await arrange.Documents.Where(d => d.Id == s.DocumentId).Select(d => d.ProjectId).SingleAsync().ConfigureAwait(true);
+            var period = await arrange.Periods.SingleAsync(p => p.ProjectId == projectId && p.PeriodKeyValue == s.PeriodKey).ConfigureAwait(true);
+            period.AdvanceTo(PeriodState.Open, new DateTime(2026, 3, 10, 9, 0, 0, DateTimeKind.Utc));
+            var state = new ApprovalState(s.DocumentId, s.SheetDefId, s.PeriodKey, copy.SheetCopyId);
+            state.Submit(1, new DateTime(2026, 3, 20, 9, 0, 0, DateTimeKind.Utc));
+            arrange.ApprovalStates.Add(state);
+            await arrange.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var basePath = $"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/submission-target?sheetDefId={s.SheetDefId.ToString(CultureInfo.InvariantCulture)}&periodKey={s.PeriodKey.ToString(CultureInfo.InvariantCulture)}";
+        var original = await GetJsonAsync(client, basePath).ConfigureAwait(true);
+        var ofCopy = await GetJsonAsync(client, basePath + "&sheetCopyId=" + copy.SheetCopyId.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(true);
+
+        string StatusOf(JsonElement target) => target.GetProperty("periods").EnumerateArray()
+            .Single(p => p.GetProperty("periodKey").GetInt32() == s.PeriodKey).GetProperty("sheetStatus").ToString();
+
+        // Оригінал неподаний (Draft), копія подана: стани періодів не змішуються.
+        Assert.NotEqual(StatusOf(original), StatusOf(ofCopy));
+
+        var edit = await GetJsonAsync(
+            client,
+            $"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/approver-edit?sheetDefId={s.SheetDefId.ToString(CultureInfo.InvariantCulture)}&periodKey={s.PeriodKey.ToString(CultureInfo.InvariantCulture)}&sheetCopyId={copy.SheetCopyId.ToString(CultureInfo.InvariantCulture)}")
+            .ConfigureAwait(true);
+        Assert.False(edit.GetProperty("canApproverEdit").GetBoolean());
+    }
     private static async Task<(HttpStatusCode Status, long SheetCopyId, int Ordinal)> PostCopyAsync(
         HttpClient client, Scenario s)
     {

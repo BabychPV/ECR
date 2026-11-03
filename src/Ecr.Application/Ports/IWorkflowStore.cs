@@ -35,13 +35,14 @@ public interface IWorkflowStore
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="utcNow">Поточний момент.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="sheetCopyId">Копія аркуша (RS); <c>null</c> — оригінал.</param>
     /// <remarks>
     /// ⚠ Стан періоду — те саме правило, що й у рішенні про подання (<c>AccessDecisionService.BuildContextAsync</c>,
     /// F-08): <c>PeriodStateCalculator.Effective</c> лише для активного проєкту, інакше збережений. Інакше кнопка
     /// пропонувала б період, який <c>EditRules.CanSubmit</c> відхилить (чи навпаки).
     /// </remarks>
     public Task<SubmissionCalendar?> GetSubmissionCalendarAsync(
-        long documentId, int sheetDefId, DateTime utcNow, CancellationToken ct);
+        long documentId, int sheetDefId, DateTime utcNow, CancellationToken ct, long? sheetCopyId = null);
 
     /// <summary>Додає запис у журнал переходів стану (<c>wf.ApprovalEvent</c>).</summary>
     /// <remarks>
@@ -52,14 +53,14 @@ public interface IWorkflowStore
 
     /// <summary>
     /// Журнал переходів документа за період: найновіші перші, не більше
-    /// <paramref name="limit"/> записів (<c>BE-11b</c>).
+    /// <paramref name="limit"/> записів (<c>BE-11b</c>). RS: <paramref name="sheetCopyId"/> <c>null</c> — лише події оригіналів.
     /// </summary>
     /// <remarks>
     /// ⚠ Код аркуша й ім'я виконавця приєднуються ТИМ САМИМ запитом: журнал
     /// читають переліком, і похід у базу на кожен рядок був би N+1.
     /// </remarks>
     public Task<IReadOnlyList<ApprovalEventRecord>> GetHistoryAsync(
-        long documentId, PeriodKey periodKey, int limit, CancellationToken ct);
+        long documentId, PeriodKey periodKey, int limit, CancellationToken ct, long? sheetCopyId = null);
 
     /// <summary>
     /// Бере період документа **з <c>UPDLOCK</c>** до кінця транзакції.

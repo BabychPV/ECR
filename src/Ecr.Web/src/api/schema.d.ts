@@ -5205,6 +5205,8 @@ export interface paths {
                     sheetDefId?: number;
                     /** @description Період. */
                     periodKey?: number;
+                    /** @description Копія аркуша (RS); без нього - оригінал (для журналу - лише події оригіналів). */
+                    sheetCopyId?: number;
                 };
                 header?: never;
                 path: {
@@ -6656,6 +6658,8 @@ export interface paths {
                     sheetDefId?: number;
                     /** @description Період, відкритий на екрані; його рік задає місяці колонок. */
                     periodKey?: number;
+                    /** @description Копія аркуша (RS); без нього - оригінал (для журналу - лише події оригіналів). */
+                    sheetCopyId?: number;
                 };
                 header?: never;
                 path: {
@@ -7067,6 +7071,8 @@ export interface paths {
                 query?: {
                     /** @description Період. */
                     periodKey?: number;
+                    /** @description Копія аркуша (RS); без нього - оригінал (для журналу - лише події оригіналів). */
+                    sheetCopyId?: number;
                 };
                 header?: never;
                 path: {
@@ -39619,6 +39625,11 @@ export interface components {
             reason: null | string;
             /** @description Код аркуша. */
             sheetCode: string;
+            /**
+             * Format: int64
+             * @description RS: копія аркуша, якої стосується подія; `null` — оригінал (код аркуша в копії той самий).
+             */
+            sheetCopyId?: null | number;
             /**
              * Format: int32
              * @description Крок маршруту, якщо маршрут є.

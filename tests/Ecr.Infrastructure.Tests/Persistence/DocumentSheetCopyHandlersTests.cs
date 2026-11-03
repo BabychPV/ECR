@@ -50,7 +50,7 @@ public sealed class DocumentSheetCopyHandlersTests(SqlServerFixture sql)
         await using var db = world.Builder.CreateContext();
         Assert.Equal(
             2, await db.DocumentSheets.CountAsync(s => s.DocumentId == world.Chain.DocumentId && s.CopyOfId != null));
-        Assert.True(await HasSecurityEventAsync(db, DocumentSheetCopyHandlers.AddedEventType, created.SheetCopyId));
+        Assert.True(await HasSecurityEventAsync(db, DocumentSheetCopyHandler.AddedEventType, created.SheetCopyId));
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public sealed class DocumentSheetCopyHandlersTests(SqlServerFixture sql)
                 s => s.DocumentId == world.Chain.DocumentId && s.CopyOfId == null);
             Assert.Equal("Stacks", original.NameOverrideL10n!.Get("en"));
             Assert.Equal("Штабели", original.NameOverrideL10n.Get("ru"));
-            Assert.True(await HasSecurityEventAsync(db, DocumentSheetCopyHandlers.RenamedEventType, null));
+            Assert.True(await HasSecurityEventAsync(db, DocumentSheetCopyHandler.RenamedEventType, null));
         }
 
         var thrown = await Assert.ThrowsAsync<BusinessRuleException>(
@@ -174,7 +174,7 @@ public sealed class DocumentSheetCopyHandlersTests(SqlServerFixture sql)
 
         var remaining = Assert.Single(copies);
         Assert.Equal((three.SheetCopyId, (short)2), (remaining.Id, remaining.CopyOrdinal));
-        Assert.True(await HasSecurityEventAsync(db, DocumentSheetCopyHandlers.DeletedEventType, two.SheetCopyId));
+        Assert.True(await HasSecurityEventAsync(db, DocumentSheetCopyHandler.DeletedEventType, two.SheetCopyId));
     }
 
     private static async Task<bool> HasSecurityEventAsync(EcrDbContext db, string eventType, long? sheetCopyId)
@@ -218,7 +218,7 @@ public sealed class DocumentSheetCopyHandlersTests(SqlServerFixture sql)
 
         var access = Substitute.For<IAccessDecisionService>();
         var profile = new AccessBuilder { UserId = UserId }
-            .Permission(DocumentSheetCopyHandlers.Permission)
+            .Permission(DocumentSheetCopyHandler.Permission)
             .Grant(ResourceKind.Project, chain.ProjectId, GrantLevel.Write)
             .Build();
         access.BuildProfileAsync(UserId, Arg.Any<CancellationToken>()).Returns(profile);
@@ -241,19 +241,19 @@ public sealed class DocumentSheetCopyHandlersTests(SqlServerFixture sql)
         public TestDocument Chain { get; } = chain;
 
         /// <summary>Новий контекст і обробник на КОЖЕН виклик — як на кожен HTTP-запит.</summary>
-        public async Task<T> Run<T>(Func<DocumentSheetCopyHandlers, Task<T>> action)
+        public async Task<T> Run<T>(Func<DocumentSheetCopyHandler, Task<T>> action)
         {
             await using var db = Builder.CreateContext();
             return await action(Handlers(db)).ConfigureAwait(false);
         }
 
-        public async Task Run(Func<DocumentSheetCopyHandlers, Task> action)
+        public async Task Run(Func<DocumentSheetCopyHandler, Task> action)
         {
             await using var db = Builder.CreateContext();
             await action(Handlers(db)).ConfigureAwait(false);
         }
 
-        private DocumentSheetCopyHandlers Handlers(EcrDbContext db)
+        private DocumentSheetCopyHandler Handlers(EcrDbContext db)
             => new(
                 new DocumentStore(db), new DocumentSheetCopyStore(db), metadata, new SheetEditGate(db), access,
                 new UnitOfWork(db), new AuditWriter(db), user, new FixedClock());

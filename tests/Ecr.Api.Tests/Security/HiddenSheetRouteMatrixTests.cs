@@ -209,7 +209,7 @@ public sealed class HiddenSheetRouteMatrixTests(SqlServerFixture sql)
         var root = JsonNode.Parse(reply.Body)!.AsObject();
         var sheets = root["sheets"]!.AsArray();
         Assert.NotEmpty(sheets);
-        string[] expectedKeys = ["code", "id", "isMandatory", "nameL10n", "sheetGroup"];
+        string[] expectedKeys = ["code", "id", "isCopyable", "isMandatory", "nameL10n", "sheetGroup"];
         foreach (var sheet in sheets)
         {
             var keys = sheet!.AsObject().Select(p => p.Key).OrderBy(k => k, StringComparer.Ordinal).ToArray();

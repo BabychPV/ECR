@@ -2425,7 +2425,7 @@ public interface IDocumentDeletionStore
 
 #### `IDocumentSheetCopyStore`
 
-Копії аркушів документа (RS, рішення людини 03.11; обробник `DocumentSheetCopyHandlers`, право `Document.Create` +
+Копії аркушів документа (RS, рішення людини 03.11; обробник `DocumentSheetCopyHandler`, право `Document.Create` +
 грант запису в проєкт). Усі методи — в одній транзакції під ВИНЯТКОВИМ блокуванням структури документа
 (`ISheetEditGate.EnterStructureAsync(exclusive: true)`): додати порожню копію оригіналу (наступний номер 2…),
 перейменувати групу (назва — на оригіналі; показується «<Назва> N»), видалити копію. Видалення — явне й по періодах

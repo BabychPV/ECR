@@ -42,7 +42,7 @@ public sealed class DocumentsController(
     GetDocumentHeaderHandler getHeader,
     PatchDocumentHeaderHandler patchHeader,
     Application.Documents.VersionMigration.MigrateDocumentVersionHandler migrateVersion,
-    DocumentSheetCopyHandlers sheetCopies) : ControllerBase
+    DocumentSheetCopyHandler sheetCopies) : ControllerBase
 {
     /// <summary>
     /// Стеля тіла запиту перегляду імпорту — рівно стандартна межа Kestrel
