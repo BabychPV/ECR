@@ -10,19 +10,25 @@ namespace Ecr.Application.Registries.Hierarchy;
 /// <param name="Name">Level name, all languages.</param>
 /// <param name="IsOptional">A node may skip this level (child on a deeper level than <c>parent + 1</c>).</param>
 /// <param name="EntryCount">Live entries placed on this level.</param>
+/// <param name="AllowsSelfNesting">A node of this level may sit under a node of the same level (NAE: a site inside a site).</param>
 public sealed record RegistryLevelDto(
     int Id,
     int Ordinal,
     string Code,
     LocalizedText Name,
     bool IsOptional,
-    int EntryCount);
+    int EntryCount,
+    bool AllowsSelfNesting = false);
 
 /// <summary>Level in a save request; its position in the list is its ordinal.</summary>
 /// <param name="Code">Level code (EcrCode); an existing code keeps the level id.</param>
 /// <param name="Name">Name; <c>en</c> is required.</param>
 /// <param name="IsOptional">A node may skip this level.</param>
-public sealed record RegistryLevelInput(string Code, LocalizedText Name, bool IsOptional);
+/// <param name="AllowsSelfNesting">
+/// A node of this level may sit under a node of the same level; <c>null</c> — unchanged for an existing level, <c>false</c> for
+/// a new one (a client that does not know the flag does not switch it off).
+/// </param>
+public sealed record RegistryLevelInput(string Code, LocalizedText Name, bool IsOptional, bool? AllowsSelfNesting = null);
 
 /// <summary>Hierarchy settings of a registry.</summary>
 /// <param name="RegistryCode">Registry code.</param>

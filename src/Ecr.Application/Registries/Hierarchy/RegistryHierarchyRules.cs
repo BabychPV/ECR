@@ -15,9 +15,10 @@ public readonly record struct HierarchyNode(long Id, long? ParentId, int? LevelI
 /// Placement rules of a hierarchical registry (NAE plan N1), pure functions so one rule serves upsert, move, level save and tests.
 /// </summary>
 /// <remarks>
-/// Rules: a node sits on exactly one declared level; along any path the level ordinal STRICTLY grows; every level skipped
-/// between a parent and its child (and above a root) must be optional; no cycles; the depth never exceeds the number of levels
-/// (at most <see cref="RegistryLevelDef.MaxLevels"/>), which strict growth guarantees.
+/// Rules: a node sits on exactly one declared level; along any path the level ordinal STRICTLY grows, except a level flagged
+/// <see cref="RegistryLevelDef.AllowsSelfNesting"/> directly under the same level (NAE Q2, 03.11); every level skipped between a
+/// parent and its child (and above a root) must be optional; no cycles. Without self-nesting the depth never exceeds the number
+/// of levels; with it the depth is bounded only by the cycle walk cap (64).
 /// </remarks>
 public static class RegistryHierarchyRules
 {
@@ -31,6 +32,15 @@ public static class RegistryHierarchyRules
     {
         ArgumentNullException.ThrowIfNull(levels);
         ArgumentNullException.ThrowIfNull(level);
+
+        // NAE node types (human 03.11, Q2): a self-nesting level may sit directly under a node of the SAME level (a site inside a
+        // site). Only the same level: a node never hangs under a deeper level, and the flag does not open any other equal ordinal.
+        if (parentLevel is not null
+            && level.AllowsSelfNesting
+            && string.Equals(parentLevel.Code, level.Code, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
 
         var floor = parentLevel?.Ordinal ?? 0;
         if (level.Ordinal <= floor)

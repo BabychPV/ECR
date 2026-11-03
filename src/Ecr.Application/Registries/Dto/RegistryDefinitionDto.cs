@@ -227,6 +227,11 @@ public sealed record RegistryHistoryEntryDto(
 /// Що робити з частиною при видаленні батька; <c>null</c> — <c>Restrict</c>. Читається лише для
 /// композиції; у наявного не змінюється.
 /// </param>
+/// <param name="LevelCode">
+/// Рівень ієрархічного довідника, якому належить поле (типи вузлів НАЕ, 03.11): код рівня — прив'язати; порожній рядок —
+/// поле всіх рівнів; <c>null</c> — без змін (клієнт, що про рівні не знає, прив'язку не знімає; нове поле — усі рівні).
+/// Обов'язковість прив'язаного поля діє лише для записів його рівня.
+/// </param>
 public sealed record RegistryFieldSaveDto(
     int? Id,
     string Code,
@@ -238,7 +243,8 @@ public sealed record RegistryFieldSaveDto(
     int? LookupRegistryDefId,
     int? UnitId,
     Domain.Enums.RegistryRelationKind? RelationKind = null,
-    Domain.Enums.ParentDeletePolicy? OnParentDelete = null);
+    Domain.Enums.ParentDeletePolicy? OnParentDelete = null,
+    string? LevelCode = null);
 
 /// <summary>Правило, яке зберігає конструктор.</summary>
 /// <param name="Id"><c>null</c> — нове правило; інакше — правка наявного.</param>

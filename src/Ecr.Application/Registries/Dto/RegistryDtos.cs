@@ -116,6 +116,15 @@ public enum RegistryDefKind
 /// </param>
 /// <param name="LookupRegistryDefId">Довідник-джерело для полів-посилань.</param>
 /// <param name="UnitId">Одиниця для числових полів; <c>null</c> — безрозмірне.</param>
+/// <param name="LevelId">
+/// Рівень ієрархічного довідника, якому належить поле (типи вузлів НАЕ, 03.11): форма вузла показує лише поля свого рівня і
+/// поля всіх рівнів; <c>null</c> — поле всіх рівнів.
+/// </param>
+/// <param name="LevelCode">Код того самого рівня; <c>null</c> — поле всіх рівнів (або читач без рівнів).</param>
+/// <param name="IsReadOnly">
+/// Значення веде сервер, а не користувач (НАЕ: <c>RegionCode</c>/<c>AreaCode</c> виводяться з предків, <c>AfPath</c> пише
+/// завантаження з AF); введене в запиті ігнорується.
+/// </param>
 public sealed record RegistryFieldDto(
     int Id,
     string Code,
@@ -124,7 +133,10 @@ public sealed record RegistryFieldDto(
     bool IsRequired,
     bool IsScopeField,
     int? LookupRegistryDefId,
-    int? UnitId);
+    int? UnitId,
+    int? LevelId = null,
+    string? LevelCode = null,
+    bool IsReadOnly = false);
 
 /// <summary>
 /// Заведення довідника з нуля — **без жодного поля**.
