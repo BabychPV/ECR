@@ -1557,6 +1557,16 @@ public sealed class SaveRegistryDefinitionHandler(
         return result;
     }
 
+    /// <summary>
+    /// Знімок опису для журналу в тій самій формі, що в <c>SaveDefinition</c>/<c>Publish</c> (одне місце формату). <c>internal</c>:
+    /// його викликає разове оновлення дерева НАЕ на старті.
+    /// </summary>
+    /// <param name="definition">Довідник (поточний стан у пам'яті).</param>
+    /// <param name="rules">Його правила.</param>
+    /// <param name="existingKeys">Його ключі.</param>
+    internal static string AuditSnapshot(RegistryDef definition, IReadOnlyList<RegistryRuleDef> rules, IReadOnlyList<RegistryKeyDef> existingKeys)
+        => Snapshot(definition, rules, KeySnapshots(definition, existingKeys, []));
+
     /// <summary>Знімок опису для журналу: саме він відповідає «що змінилося».</summary>
     /// <param name="definition">Довідник.</param>
     /// <param name="rules">Його правила.</param>

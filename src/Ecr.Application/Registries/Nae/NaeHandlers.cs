@@ -25,8 +25,14 @@ public sealed class NaeTreeProvisioner(
     SaveRegistryDefinitionHandler saveDefinition,
     Hierarchy.SaveRegistryHierarchyHandler saveHierarchy,
     IUnitOfWork uow,
-    IClock clock)
+    IClock clock,
+    IAuditWriter audit,
+    IRegistryKeyStore keys,
+    ICurrentUser currentUser)
 {
+    /// <summary>Operation of the one-time upgrade row in <c>aud.StructureChange</c>.</summary>
+    internal const string UpgradeOperation = "UpgradeNodeTypes";
+
     internal const string IncompatibleKey = "err.ECR-REG-0422.naeTreeIncompatible";
 
     private static readonly (string Code, string En, string Ru, bool IsKey)[] Fields =
@@ -211,6 +217,12 @@ public sealed class NaeTreeProvisioner(
             return false;
         }
 
+        // Audit (follow-up 03.11): same snapshot helper as SaveDefinition; «before» is taken ahead of the changes below, «after» from
+        // memory; the row is written in the caller's transaction, so it lands (or rolls back) together with the upgrade.
+        var rules = await registries.ListRulesAsync(definition.Id, ct).ConfigureAwait(false);
+        var existingKeys = await keys.ListKeysForUpdateAsync(definition.Id, ct).ConfigureAwait(false);
+        var before = SaveRegistryDefinitionHandler.AuditSnapshot(definition, rules, existingKeys);
+
         foreach (var field in naeFields)
         {
             if (NaeTreeSchema.LevelByField[field.Code] is { } levelCode && levels.TryGetValue(levelCode, out var level))
@@ -230,6 +242,21 @@ public sealed class NaeTreeProvisioner(
 
         definition.BumpDefinitionVersion();
         definition.MarkDefinitionUpdated(userId, clock.UtcNow);
+
+        await audit.WriteStructureChangeAsync(
+            new StructureChangeRecord(
+                ChangedAt: clock.UtcNow,
+                TemplateVersionId: 0,
+                EntityType: "cfg.RegistryDef",
+                EntityId: definition.Id,
+                ChangeClass: ChangeClass.Guarded,
+                Operation: UpgradeOperation,
+                OldJson: before,
+                NewJson: SaveRegistryDefinitionHandler.AuditSnapshot(definition, rules, existingKeys),
+                ChangeReason: "NAE node types: one-time upgrade on start",
+                ChangedByUserId: userId,
+                CorrelationId: currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
         return true;
     }

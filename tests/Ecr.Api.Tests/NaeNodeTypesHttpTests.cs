@@ -342,12 +342,32 @@ public sealed class NaeNodeTypesHttpTests(SqlServerFixture sql)
         var once = await StateAsync();
         Assert.Equal((5, true, true), (once.Bound, once.Required, once.SiteNests));
 
+        // Audit: exactly one system row — before without levels, after with them (the same snapshot shape as SaveDefinition).
+        var audit = await UpgradeAuditAsync();
+        Assert.Single(audit);
+        Assert.Equal(0, audit[0].UserId);
+        Assert.DoesNotContain("\"LevelId\":", audit[0].Old.Replace("\"LevelId\":null", string.Empty, StringComparison.Ordinal));
+        Assert.Contains("\"LevelId\":", audit[0].New.Replace("\"LevelId\":null", string.Empty, StringComparison.Ordinal));
+        Assert.Contains("\"definitionVersion\":" + (once.Version - 1), audit[0].Old);
+        Assert.Contains("\"definitionVersion\":" + once.Version, audit[0].New);
+
         await using (var scope = upgraded.Services.CreateAsyncScope())
         {
             await scope.ServiceProvider.GetRequiredService<AirTypeSystemProvisioner>().EnsureNaeTreeAsync(CancellationToken.None);
         }
 
         Assert.Equal(once, await StateAsync());
+        Assert.Single(await UpgradeAuditAsync());
+
+        async Task<List<(int UserId, string Old, string New)>> UpgradeAuditAsync()
+        {
+            await using var db = new EcrDbContext(Options());
+            var defId = await db.RegistryDefs.Where(d => d.Code == code).Select(d => d.Id).SingleAsync();
+            var rows = await db.Database
+                .SqlQuery<string>($"SELECT CONCAT(ChangedByUserId, CHAR(1), OldJson, CHAR(1), NewJson) AS Value FROM aud.StructureChange WHERE Operation = 'UpgradeNodeTypes' AND EntityId = {defId}")
+                .ToListAsync();
+            return [.. rows.Select(r => r.Split('\u0001')).Select(p => (int.Parse(p[0], System.Globalization.CultureInfo.InvariantCulture), p[1], p[2]))];
+        }
     }
 
     // ---- fixtures ------------------------------------------------------------------------------------------------------
