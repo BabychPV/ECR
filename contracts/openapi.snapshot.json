@@ -14174,6 +14174,16 @@
             "description": "Назва: довідника (спільний) або стовпця-власника (решта).",
             "type": "object"
           },
+          "preview": {
+            "description": "Перші 4 чинні значення в порядку показу (для `SamePermitTable` - порожньо; `null` - попередній перегляд не передбачено).",
+            "items": {
+              "$ref": "#/components/schemas/PermitListValueDto"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "registryCode": {
             "description": "Код довідника зі значеннями (для `SharedRegistry` і `TypeOnly` - прихованого); для таблиці дозволу `null`.",
             "type": [

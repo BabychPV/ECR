@@ -46,6 +46,9 @@ export interface FilterSpec {
    */
   readonly label: string;
 
+  /** Підказка в порожньому полі («All kinds») — ДОДАТОК до підпису: без вибору поле не виглядає недозаповненим. */
+  readonly placeholder?: string | undefined;
+
   /** Варіанти. */
   readonly options: readonly FilterOption[];
 }
@@ -249,6 +252,7 @@ function SelectField({
   return (
     <Select
       label={spec.label}
+      placeholder={spec.placeholder}
       data={[...spec.options]}
       value={value}
       onChange={(next) => {

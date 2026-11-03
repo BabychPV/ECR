@@ -31,3 +31,13 @@
 [data-list-used] {
   overflow-x: clip;
 }
+
+/* Рядок переліку відкривається кліком: наведення й фокус видно, шеврон наприкінці рядка підсвічується. */
+[data-list-table] tbody tr[tabindex]:hover {
+  background: var(--ecr-hover);
+}
+
+[data-list-table] tbody tr[tabindex]:hover [data-list-chevron],
+[data-list-table] tbody tr[tabindex]:focus-visible [data-list-chevron] {
+  color: var(--mantine-color-text);
+}

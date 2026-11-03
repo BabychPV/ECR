@@ -1,4 +1,5 @@
 using Ecr.Application.Ports;
+using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -67,5 +68,32 @@ public sealed class PermitListStore(EcrDbContext db) : IPermitListStore
             .Select(g => new { Id = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.Id, x => x.Count, ct)
             .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<RegistryEntry>>> ListTopActiveEntriesAsync(
+        IReadOnlyCollection<int> registryDefIds, int perRegistry, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(registryDefIds);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(perRegistry);
+
+        if (registryDefIds.Count == 0)
+        {
+            return new Dictionary<int, IReadOnlyList<RegistryEntry>>();
+        }
+
+        // Один запит: для кожного реєстру - TOP(perRegistry) чинних записів за (Ordinal, Id) (EF: CROSS APPLY (SELECT TOP(@n) ...)).
+        // Раніше був корельований COUNT «скільки записів перед цим» - O(N²) на реєстр (4509 записів = 14 с); тепер
+        // кожен реєстр читається один раз і відсікається після perRegistry рядків (реєстр НСІ - до 20 тис. записів).
+        var rows = await db.RegistryDefs.AsNoTracking()
+            .Where(d => registryDefIds.Contains(d.Id))
+            .SelectMany(d => db.RegistryEntries
+                .Where(e => e.RegistryDefId == d.Id && e.IsActive && !e.IsDeleted)
+                .OrderBy(e => e.Ordinal).ThenBy(e => e.Id)
+                .Take(perRegistry))
+            .ToListAsync(ct).ConfigureAwait(false);
+        return rows
+            .GroupBy(e => e.RegistryDefId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<RegistryEntry>)[.. g.OrderBy(e => e.Ordinal).ThenBy(e => e.Id)]);
     }
 }

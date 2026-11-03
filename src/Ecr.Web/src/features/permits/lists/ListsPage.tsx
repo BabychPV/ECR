@@ -1,36 +1,40 @@
 import { useMemo, type JSX } from 'react';
 import { Box, Stack, Text } from '@mantine/core';
+import { useNavigate } from 'react-router-dom';
+import { NaeRegistryCode } from '../air/airApi';
 import { t } from '@/shared/i18n';
 import { DataTable } from '@/shared/ui/DataTable';
 import { useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { FilterBar } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
-import { StatStrip } from '@/shared/ui/StatStrip';
 import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
+import { PermitsPaths } from '../shell/permitPaths';
 import { PermitsSubnav } from '../shell/PermitsSubnav';
 import { ListDrawer } from './ListDrawer';
 import { listColumns } from './ListsColumns';
-import { filterLists, kindLabel, kindParam, ListKinds, listsStats, type ListRow } from './listsModel';
+import { filterLists, kindParam, kindShortLabel, ListKinds, listsStats, type ListRow } from './listsModel';
 import { useLists } from './useLists';
+import './lists.css';
 
 /**
  * Списки вибору пермітів (`/admin/permits/lists`, PM-08d; макет `screens-permits.js` екран «Lists»).
- * Будова — як у переліку типів: шапка → смуга розділів → показники → пошук і походження → таблиця;
- * клік по рядку відкриває шторку (`?panel=`). Пошук, походження й показник живуть в адресі.
+ * Будова — за KIT.md §3 «Шаблон сторінки-переліку»: шапка з одним реченням → смуга розділів → пошук і походження → таблиця;
+ * клік по рядку відкриває шторку (`?panel=`). Лічильники видів стоять у варіантах фільтра «Kind», окремої смуги показників немає.
+ * Пошук і вид живуть в адресі.
  *
  * Дані — один запит `GET /permit-lists` (PM-08e; раніше визначення кожного типу читалось окремо). Правити значення
  * можна у шторці, якщо сервер віддав `editable`; без права під шапкою стоїть `permits.lists.readOnly`.
+ * Дерево НАЕ — не плоский список: рядок веде на вкладку «NAE structure», а не до шторки значень.
  */
 export function ListsPage(): JSX.Element {
   const data = useLists();
+  const navigate = useNavigate();
   const setParams = useUrlParamsSetter();
   const [query] = useUrlState('q');
   const [kindFilter] = useUrlState('kind');
-  const [statParam, setStat] = useUrlState('stat');
   const [panel] = useDetailPanel();
 
-  const stat = kindParam(statParam);
-  const kind = stat !== '' ? stat : kindParam(kindFilter);
+  const kind = kindParam(kindFilter);
   const all = useMemo(() => data.rows ?? [], [data.rows]);
   const rows = useMemo(
     () => (data.rows === undefined ? undefined : filterLists(data.rows, { needle: query ?? '', kind })),
@@ -51,22 +55,10 @@ export function ListsPage(): JSX.Element {
         secondary={[{ label: t('permits.lists.openRegistries'), href: '/admin/registries' }]}
       />
       <PermitsSubnav current="lists" />
-      <Text size="sm" c="dimmed" data-lists-readonly={canEdit ? undefined : ''} data-lists-editable={canEdit ? '' : undefined}>
-        {canEdit ? t('permits.lists.editable') : t('permits.lists.readOnly')}
-      </Text>
-
-      {hasLists && (
-        <StatStrip
-          label={t('permits.lists.stats.aria')}
-          active={stat === '' ? null : stat}
-          onSelect={setStat}
-          items={[
-            { id: 'all', label: t('permits.lists.stat.all'), value: stats.all, filter: false },
-            { id: 'shared', label: t('permits.lists.stat.shared'), value: stats.shared },
-            { id: 'type', label: t('permits.lists.stat.type'), value: stats.type },
-            { id: 'permit', label: t('permits.lists.stat.permit'), value: stats.permit },
-          ]}
-        />
+      {!canEdit && (
+        <Text size="sm" c="dimmed" data-lists-readonly="">
+          {t('permits.lists.readOnly')}
+        </Text>
       )}
 
       {hasLists && (
@@ -77,7 +69,8 @@ export function ListsPage(): JSX.Element {
               {
                 id: 'kind',
                 label: t('permits.lists.filter.kind'),
-                options: ListKinds.map((value) => ({ value, label: kindLabel(value) })),
+                placeholder: t('permits.lists.filter.kindAll'),
+                options: ListKinds.map((value) => ({ value, label: `${kindShortLabel(value)} (${String(stats[value])})` })),
               },
             ]}
             clearLabel={t('filters.clear')}
@@ -98,9 +91,12 @@ export function ListsPage(): JSX.Element {
           emptyHint={t('permits.lists.empty.hint')}
           emptyHeadingOrder={2}
           noMatchTitle={t('permits.lists.noMatches')}
-          onClearFilters={() => setParams({ q: null, kind: null, stat: null })}
+          onClearFilters={() => setParams({ q: null, kind: null })}
           clearFiltersLabel={t('filters.clear')}
-          onRowClick={(row) => setParams({ panel: row.id })}
+          onRowClick={(row) => {
+            if (row.registryCode === NaeRegistryCode) void navigate(PermitsPaths.nae);
+            else setParams({ panel: row.id });
+          }}
           // PUI-1: у клітинках немає посилання на шторку - рядок мусить відкриватися клавіатурою (Tab -> Enter/Space).
           rowFocusable
           rowLabel={(row) => row.name}
