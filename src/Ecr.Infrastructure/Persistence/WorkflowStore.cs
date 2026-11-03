@@ -1,9 +1,11 @@
+using System.Data;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Ecr.Infrastructure.Persistence;
 
@@ -380,13 +382,43 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ PERF (AN-135): НЕ через EF <c>FirstOrDefaultAsync</c>. Асинхронне читання ~10 МБ <c>nvarchar(max)</c>
+    /// у звичайному (не послідовному) режимі SqlClient коштувало 11–12 с проти ~0,15 с синхронного: кожен
+    /// наступний мережевий пакет перечитує вже накопичене значення. Тут — сирий запит у тій самій
+    /// транзакції з <see cref="CommandBehavior.SequentialAccess"/> і потоковим <c>GetTextReader</c>: зовнішній
+    /// API лишається асинхронним, а значення читається частинами без квадратичного буфера.
+    /// </remarks>
     public async Task<string?> GetSnapshotPayloadAsync(long snapshotId, CancellationToken ct)
-        => await db.SubmissionSnapshots
-            .AsNoTracking()
-            .Where(s => s.Id == snapshotId)
-            .Select(s => s.PayloadJson)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
+    {
+        await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            command.CommandText = "SELECT TOP (1) PayloadJson FROM calc.SubmissionSnapshot WHERE Id = @id;";
+            var id = command.CreateParameter();
+            id.ParameterName = "@id";
+            id.DbType = DbType.Int64;
+            id.Value = snapshotId;
+            command.Parameters.Add(id);
+
+            await using var reader = await command
+                .ExecuteReaderAsync(CommandBehavior.SequentialAccess | CommandBehavior.SingleRow, ct)
+                .ConfigureAwait(false);
+            if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                return null;
+            }
+
+            using var text = reader.GetTextReader(0);
+            return await text.ReadToEndAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+        }
+    }
 
     /// <inheritdoc />
     public Task<bool> HasSubmittedSheetsAsync(int projectId, PeriodKey periodKey, CancellationToken ct)
