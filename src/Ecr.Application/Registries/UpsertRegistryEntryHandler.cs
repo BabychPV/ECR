@@ -206,9 +206,15 @@ public sealed class UpsertRegistryEntryHandler(
         // транзакції збереження, і ОДНА подія аудиту на всі змінені поля — після коміту.
         if (rules is null || uow is null)
         {
+            IReadOnlyList<RegistryEntryUpdate> plain = naeTree && placement is { } pl
+                ? await nae!.PlanScopeCascadeAsync(definition, entry, pl.Level, values, changes, ct).ConfigureAwait(false)
+                : Array.Empty<RegistryEntryUpdate>();
             await writer.SaveEntryAsync(definition, entry, changes, userId, ct).ConfigureAwait(false);
+            await ApplyScopeCascadeAsync(definition, plain, ct).ConfigureAwait(false);
             return new RegistryEntryUpsertResult(entry.Id, []);
         }
+
+        IReadOnlyList<RegistryEntryUpdate> cascade = [];
 
         // ⛔ RT-17a (§6): правила — ПІСЛЯ збереження, у ТІЙ САМІЙ транзакції: знімок довідників
         // бачить запис таким, яким він ляже, а порушення рівня Error відкочує і запис, і його
@@ -231,16 +237,43 @@ public sealed class UpsertRegistryEntryHandler(
                     if (naeTree)
                     {
                         await nae!.EnsureCodeFreeAsync(definition, entry, p.Level, dto.ParentEntryId, values, token).ConfigureAwait(false);
+
+                        // Coordinator 03.11: a changed RegionCode (REGION) / AreaCode (AREA) cascades to the stored codes of the
+                        // sources below — pre-checked here (409 naeCodeTaken, nothing written), written after the node.
+                        cascade = await nae.PlanScopeCascadeAsync(definition, entry, p.Level, values, changes, token).ConfigureAwait(false);
                     }
                 }
 
                 await writer.SaveEntryAsync(definition, entry, changes, userId, token).ConfigureAwait(false);
+                await ApplyScopeCascadeAsync(definition, cascade, token).ConfigureAwait(false);
                 check = await rules.EvaluateAsync(definition, [entry.Id], [], businessDate: null, token).ConfigureAwait(false);
                 check.ThrowIfErrors();
             },
             ct).ConfigureAwait(false);
 
         return new RegistryEntryUpsertResult(entry.Id, check.Warnings);
+    }
+
+    /// <summary>
+    /// Writes the planned region/area updates of NAE sources through the registry writer (the same path as an upsert: value
+    /// checks, composite key, data revision and one <c>RegistryValueChanged</c> audit event per source).
+    /// </summary>
+    private async Task ApplyScopeCascadeAsync(RegistryDef definition, IReadOnlyList<RegistryEntryUpdate> cascade, CancellationToken ct)
+    {
+        if (cascade.Count == 0)
+        {
+            return;
+        }
+
+        var result = await writer.UpdateAsync(new RegistryEntryUpdateBatch(definition.Id, cascade), ct).ConfigureAwait(false);
+        if (result.Errors.Count > 0)
+        {
+            var first = result.Errors[0];
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"NAE scope cascade failed for entry {first.Key}: {first.MessageKey}.",
+                new Dictionary<string, object?> { ["messageKey"] = first.MessageKey });
+        }
     }
 
     /// <summary>
