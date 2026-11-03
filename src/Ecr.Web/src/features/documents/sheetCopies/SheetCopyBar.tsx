@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react';
 import { Button, Group, Modal, Stack } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { LazyConfirmModal } from '@/features/workflow/lazyDialogs';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -56,6 +57,8 @@ export function SheetCopyBar({ documentId, target, canAdd, onSelect }: SheetCopy
 
   const add = useMutation({
     mutationFn: () => createSheetCopy(documentId, target.sheetDefId),
+    // Відмову показує власний ErrorAlert панелі — без другого глобального сповіщення.
+    meta: { handled: true },
     onSuccess: async (created) => {
       await refresh();
       onSelect(sheetTabKey(target.sheetCode, created.sheetCopyId));
@@ -64,6 +67,7 @@ export function SheetCopyBar({ documentId, target, canAdd, onSelect }: SheetCopy
 
   const rename = useMutation({
     mutationFn: () => renameSheetGroup(documentId, target.sheetDefId, { nameL10n: nameDraft }),
+    meta: { handled: true },
     onSuccess: async () => {
       setRenameOpen(false);
       await refresh();
@@ -82,6 +86,8 @@ export function SheetCopyBar({ documentId, target, canAdd, onSelect }: SheetCopy
       setDeleteOpen(false);
     },
   });
+  const addLoading = usePendingLoading(add.isPending);
+  const renameLoading = usePendingLoading(rename.isPending);
 
   const isCopy = target.sheetCopyId !== null;
   if (!target.isCopyable && !isCopy) return null;
@@ -96,7 +102,7 @@ export function SheetCopyBar({ documentId, target, canAdd, onSelect }: SheetCopy
           size="xs"
           variant="default"
           disabled={!canAdd}
-          loading={add.isPending}
+          loading={addLoading}
           data-testid="sheet-copy-add"
           onClick={() => {
             remove.reset();
@@ -157,7 +163,7 @@ export function SheetCopyBar({ documentId, target, canAdd, onSelect }: SheetCopy
             </Button>
             <Button
               disabled={!hasAnyText(nameDraft)}
-              loading={rename.isPending}
+              loading={renameLoading}
               data-testid="sheet-copy-rename-save"
               onClick={() => {
                 rename.mutate();
