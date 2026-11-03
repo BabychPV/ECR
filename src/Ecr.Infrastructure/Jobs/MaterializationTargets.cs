@@ -104,8 +104,10 @@ internal static class MaterializationTargets
             join p in db.Periods.AsNoTracking() on d.ProjectId equals p.ProjectId
             where !td.IsDeleted
                   && s.IsIncluded
+                  && s.CopyOfId == null // RS (Q5): збір пише лише в оригінал аркуша
                   && (p.State == Domain.Enums.PeriodState.Open || p.State == Domain.Enums.PeriodState.Grace)
-                  && !db.TableInstances.Any(t => t.DocumentId == d.Id
+                  && !db.TableInstances.Any(t => t.SheetCopyId == null
+                                                 && t.DocumentId == d.Id
                                                  && t.TableDefId == td.Id
                                                  && t.PeriodKeyValue == p.PeriodKeyValue)
             select new { m.SourceEntityId, DocumentId = d.Id, d.ProjectId, p.PeriodKeyValue, p.PeriodStart, p.PeriodEnd };
@@ -212,7 +214,8 @@ internal static class MaterializationTargets
                   && m.TargetRowKey != null
                   && m.TargetColumnDefId != null
                   && c.Id == m.TargetColumnDefId
-            join t in db.TableInstances.AsNoTracking() on c.TableDefId equals t.TableDefId
+            // RS (Q5): адресати збору — лише екземпляри оригінальних аркушів; копії заповнює людина.
+            join t in db.TableInstances.AsNoTracking().OriginalOnly() on c.TableDefId equals t.TableDefId
             join d in db.Documents.AsNoTracking() on t.DocumentId equals d.Id
             join p in db.Periods.AsNoTracking()
                 on new { d.ProjectId, t.PeriodKeyValue } equals new { p.ProjectId, p.PeriodKeyValue }

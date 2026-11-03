@@ -67,7 +67,7 @@ public sealed class RowWindowMapStore(EcrDbContext db) : IRowWindowMapStore
         // Стан — того періоду проєкту документа, якому належить екземпляр: Scheduled ще нема що рахувати,
         // закритий не змінюється (так само відсіює й сама задача підтягування).
         var instances = await (
-                from t in db.TableInstances.AsNoTracking()
+                from t in db.TableInstances.AsNoTracking().OriginalOnly() // RS (Q5): лише оригінал аркуша
                 join d in db.Documents.AsNoTracking() on t.DocumentId equals d.Id
                 join p in db.Periods.AsNoTracking()
                     on new { d.ProjectId, t.PeriodKeyValue } equals new { p.ProjectId, p.PeriodKeyValue }

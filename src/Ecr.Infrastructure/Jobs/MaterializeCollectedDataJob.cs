@@ -126,7 +126,9 @@ public sealed class MaterializeCollectedDataJob(
         // щопрогону отримував хибний `ConflictKeptManual` «правка людини».
         // Видалені колонки своєї таблиці НЕ відсіюються тут навмисно: це
         // справжня помилка конфігурації, і патчер про неї звітує.
+        // RS (Q5): задача, що вказує на екземпляр КОПІЇ аркуша, мапінгів не отримує — нічого не пише.
         var instanceTable = db.TableInstances
+            .OriginalOnly()
             .Where(t => t.Id == task.TableInstanceId && t.PeriodKeyValue == task.PeriodKey)
             .Select(t => t.TableDefId);
 

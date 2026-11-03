@@ -175,11 +175,19 @@ public sealed class IntegrationCellPatcher(
         var instance = await db.TableInstances
             .AsNoTracking()
             .Where(t => t.Id == tableInstanceId && t.PeriodKeyValue == periodKey.Value)
-            .Select(t => new { t.TableDefId, t.DocumentId })
+            .Select(t => new { t.TableDefId, t.DocumentId, t.SheetCopyId })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException(
                 $"Екземпляра таблиці {tableInstanceId} за період {periodKey.Value} не існує.");
+
+        // ⛔ RS (Q5): інтеграція пише лише в оригінал аркуша. Адресати (MaterializationTargets, SourceEventSyncJob)
+        // копій не містять; екземпляр копії тут — помилка викликача, і мовчки писати в копію не можна.
+        if (instance.SheetCopyId is not null)
+        {
+            throw new InvalidOperationException(
+                $"Екземпляр таблиці {tableInstanceId} належить копії аркуша {instance.SheetCopyId}: інтеграція пише лише в оригінал.");
+        }
 
         var columns = await db.ColumnDefs
             .AsNoTracking()
