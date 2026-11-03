@@ -168,16 +168,80 @@ public sealed class NaeTreeNodePolicy(IRegistryStore registries, IRegistryHierar
             result[NaeTreeSchema.NaeCodeField] = normalized;
         }
 
+        // Region/area codes (decision 03.11): written by the client only on the node's OWN level (REGION: RegionCode, AREA:
+        // AreaCode, normalised like the permits scope); everywhere else the input is ignored.
+        foreach (var field in new[] { NaeTreeSchema.RegionField, NaeTreeSchema.AreaField })
+        {
+            if (!result.TryGetValue(field, out var scopeRaw))
+            {
+                continue;
+            }
+
+            var own = string.Equals(NaeTreeSchema.OwnLevelOfScopeField(field), level.Code, StringComparison.OrdinalIgnoreCase);
+            var text = own ? Permits.AirLimits.AirLimitsSchema.NormalizeScope(CellValueReader.Normalize(scopeRaw) as string, "") : "";
+            if (text.Length == 0)
+            {
+                _ = result.Remove(field);
+            }
+            else
+            {
+                result[field] = text;
+            }
+        }
+
         if (string.Equals(level.Code, NaeTreeSchema.LevelSource, StringComparison.OrdinalIgnoreCase))
         {
             var tree = await TreeAsync(definition.Id, ct).ConfigureAwait(false);
-            var scope = ScopeOf(parentId, tree);
-            var region = scope.Region is { } r ? NaeTreeSchema.DerivedRegion(tree.Nodes[r].Code) : "";
+            var (region, area) = await ScopeCodesAsync(definition, ScopeOf(parentId, tree), tree, ct).ConfigureAwait(false);
             result[NaeTreeSchema.RegionField] = region;
-            result[NaeTreeSchema.AreaField] = NaeTreeSchema.DerivedArea(scope.Area is { } a ? tree.Nodes[a].Code : null, region);
+            result[NaeTreeSchema.AreaField] = area;
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Region/area codes of a scope: the stored <c>RegionCode</c> of the REGION node / <c>AreaCode</c> of the AREA node when set,
+    /// else derived from the technical code (<see cref="NaeTreeSchema.DerivedRegion"/> / <see cref="NaeTreeSchema.DerivedArea"/>) —
+    /// the same rule as the air scope-codes list, so a source and its region group never disagree.
+    /// </summary>
+    private async Task<(string Region, string Area)> ScopeCodesAsync(
+        RegistryDef definition, (long? Region, long? Area) scope, Tree tree, CancellationToken ct)
+    {
+        var ids = new List<long>();
+        if (scope.Region is { } ri)
+        {
+            ids.Add(ri);
+        }
+
+        if (scope.Area is { } ai)
+        {
+            ids.Add(ai);
+        }
+
+        var stored = new Dictionary<(long Entry, string Field), string>();
+        if (ids.Count > 0)
+        {
+            var fieldCodeById = definition.Fields.ToDictionary(f => f.Id, f => f.Code);
+            foreach (var v in await registries.ListValuesForEntriesAsync(ids, ct).ConfigureAwait(false))
+            {
+                if (fieldCodeById.TryGetValue(v.RegistryFieldDefId, out var fieldCode) && v.ValueString is { } text)
+                {
+                    stored[(v.RegistryEntryId, fieldCode)] = text;
+                }
+            }
+        }
+
+        string Stored(long? id, string field)
+            => id is { } i && stored.TryGetValue((i, field), out var s) ? Permits.AirLimits.AirLimitsSchema.NormalizeScope(s, "") : "";
+
+        var region = scope.Region is { } r
+            ? Stored(r, NaeTreeSchema.RegionField) is { Length: > 0 } sr ? sr : NaeTreeSchema.DerivedRegion(tree.Nodes[r].Code)
+            : "";
+        var area = scope.Area is { } a
+            ? Stored(a, NaeTreeSchema.AreaField) is { Length: > 0 } sa ? sa : NaeTreeSchema.DerivedArea(tree.Nodes[a].Code, region)
+            : NaeAfTreeBuilder.NoArea;
+        return (region, area);
     }
 
     /// <summary>
@@ -249,17 +313,17 @@ public sealed class NaeTreeNodePolicy(IRegistryStore registries, IRegistryHierar
             return;
         }
 
-        var region = scope.Region is { } r ? NaeTreeSchema.DerivedRegion(tree.Nodes[r].Code) : "";
+        var (region, area) = await ScopeCodesAsync(definition, scope, tree, ct).ConfigureAwait(false);
         var holder = rivals[taken.RegistryEntryId];
         throw new BusinessRuleException(
             ErrorCodes.NaeCodeTaken,
-            $"NAE {code} is already used in {region}/{(scope.Area is null ? "-" : NaeTreeSchema.DerivedArea(tree.Nodes[scope.Area.Value].Code, region))} by entry {holder.Code}.",
+            $"NAE {code} is already used in {region}/{(scope.Area is null ? "-" : area)} by entry {holder.Code}.",
             new Dictionary<string, object?>
             {
                 ["messageKey"] = CodeTakenKey,
                 ["naeCode"] = code,
                 ["regionCode"] = region,
-                ["areaCode"] = scope.Area is { } a ? NaeTreeSchema.DerivedArea(tree.Nodes[a].Code, region) : NaeAfTreeBuilder.NoArea,
+                ["areaCode"] = area,
                 ["entryId"] = holder.Id.ToString(CultureInfo.InvariantCulture),
                 ["entryCode"] = holder.Code,
             });

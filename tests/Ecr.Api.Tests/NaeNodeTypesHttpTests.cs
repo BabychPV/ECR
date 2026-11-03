@@ -62,8 +62,8 @@ public sealed class NaeNodeTypesHttpTests(SqlServerFixture sql)
         var fields = (await ReadAsync(await client.GetAsync(new Uri($"/api/v1/registries/{code}/definition", UriKind.Relative))))
             .GetProperty("fields").EnumerateArray().ToDictionary(f => f.GetProperty("code").GetString()!);
         Assert.Equal(("SRC", true, false), Field(fields["NaeCode"]));
-        Assert.Equal(("SRC", false, true), Field(fields["RegionCode"]));
-        Assert.Equal(("SRC", false, true), Field(fields["AreaCode"]));
+        Assert.Equal((null, false, false), Field(fields["RegionCode"]));
+        Assert.Equal((null, false, false), Field(fields["AreaCode"]));
         Assert.Equal((null, false, true), Field(fields["AfPath"]));
         Assert.Equal(("SRC", false, false), Field(fields["SourceType"]));
 
@@ -308,6 +308,44 @@ public sealed class NaeNodeTypesHttpTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task RegionCode_AreaCode__are_the_own_identity_of_region_and_area_nodes_and_derived_below_them()
+    {
+        var (client, code, app) = await TreeAsync();
+        using var _ = app;
+        using var __ = client;
+
+        // The e2e shape (airLimitsReal): REGION node `<X>_R` (not `R_<X>`) with RegionCode X, AREA node with AreaCode OFFSHORE.
+        var x = "Z" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var region = await CreatedIdAsync(await UpsertAsync(
+            client, code, $"{x}_R", null, "REGION", "Region X", new() { ["RegionCode"] = x.ToLowerInvariant(), ["AreaCode"] = "IGNORED" }));
+        var area = await CreatedIdAsync(await UpsertAsync(
+            client, code, $"{x}_OFF", region, "AREA", "Offshore X", new() { ["AreaCode"] = "offshore", ["RegionCode"] = "IGNORED" }));
+        var regionValues = await ValuesAsync(client, code, region);
+        var areaValues = await ValuesAsync(client, code, area);
+        Assert.Equal<(string?, string?)>((x, null), (Text(regionValues, "RegionCode"), Text(regionValues, "AreaCode")));
+        Assert.Equal<(string?, string?)>((null, "OFFSHORE"), (Text(areaValues, "RegionCode"), Text(areaValues, "AreaCode")));
+
+        // SITE / SRC: client input ignored, the source derives both from the stored codes of its ancestors.
+        var site = await CreatedIdAsync(await UpsertAsync(client, code, $"{x}_S", area, "SITE", "Site X", new() { ["RegionCode"] = "NO" }));
+        Assert.Null(Text(await ValuesAsync(client, code, site), "RegionCode"));
+        var source = await CreatedIdAsync(await UpsertAsync(
+            client, code, $"{x}_N1", site, "SRC", "Source", new() { ["NaeCode"] = "7001", ["RegionCode"] = "BAD", ["AreaCode"] = "BAD" }));
+        var values = await ValuesAsync(client, code, source);
+        Assert.Equal((x, "OFFSHORE"), (Text(values, "RegionCode"), Text(values, "AreaCode")));
+
+        // The uniqueness scope and its error details use the stored codes.
+        using var dup = await UpsertAsync(client, code, $"{x}_N2", site, "SRC", "Dup", new() { ["NaeCode"] = "7001" });
+        Assert.Equal(HttpStatusCode.Conflict, dup.StatusCode);
+        var problem = (await ProblemAsync(dup)).ToString();
+        Assert.Contains(x, problem, StringComparison.Ordinal);
+        Assert.Contains("OFFSHORE", problem, StringComparison.Ordinal);
+
+        static string? Text(JsonElement v, string name) => v.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Upgrade__a_tree_from_before_the_node_types_is_bound_once_on_start()
     {
         var (client, code, app) = await TreeAsync();
@@ -340,7 +378,7 @@ public sealed class NaeNodeTypesHttpTests(SqlServerFixture sql)
         }
 
         var once = await StateAsync();
-        Assert.Equal((5, true, true), (once.Bound, once.Required, once.SiteNests));
+        Assert.Equal((3, true, true), (once.Bound, once.Required, once.SiteNests));
 
         // Audit: exactly one system row — before without levels, after with them (the same snapshot shape as SaveDefinition).
         var audit = await UpgradeAuditAsync();
@@ -358,6 +396,24 @@ public sealed class NaeNodeTypesHttpTests(SqlServerFixture sql)
 
         Assert.Equal(once, await StateAsync());
         Assert.Single(await UpgradeAuditAsync());
+
+        // A tree upgraded by the first node-types build has RegionCode/AreaCode bound to SRC: the next start unbinds them (once),
+        // audited; the second start changes nothing.
+        await using (var db = new EcrDbContext(Options()))
+        {
+            var id = await db.RegistryDefs.Where(d => d.Code == code).Select(d => d.Id).SingleAsync();
+            await db.Database.ExecuteSqlAsync($"UPDATE f SET LevelId = (SELECT Id FROM cfg.RegistryLevelDef WHERE RegistryDefId = {id} AND Code = 'SRC') FROM cfg.RegistryFieldDef f WHERE f.RegistryDefId = {id} AND f.Code IN ('RegionCode', 'AreaCode')");
+        }
+
+        for (var i = 0; i < 2; i++)
+        {
+            await using var scope = upgraded.Services.CreateAsyncScope();
+            await scope.ServiceProvider.GetRequiredService<AirTypeSystemProvisioner>().EnsureNaeTreeAsync(CancellationToken.None);
+        }
+
+        var corrected = await StateAsync();
+        Assert.Equal((3, true, true, once.Version + 1), (corrected.Bound, corrected.Required, corrected.SiteNests, corrected.Version));
+        Assert.Equal(2, (await UpgradeAuditAsync()).Count);
 
         async Task<List<(int UserId, string Old, string New)>> UpgradeAuditAsync()
         {
@@ -427,7 +483,7 @@ public sealed class NaeNodeTypesHttpTests(SqlServerFixture sql)
         => (f.GetProperty("levelCode").GetString(), f.GetProperty("isRequired").GetBoolean(), f.GetProperty("isReadOnly").GetBoolean());
 
     private static async Task<HttpResponseMessage> UpsertAsync(
-        HttpClient client, string registry, string code, long parent, string level, string? en, Dictionary<string, object?>? values = null, string? ru = null, long? id = null)
+        HttpClient client, string registry, string code, long? parent, string level, string? en, Dictionary<string, object?>? values = null, string? ru = null, long? id = null)
     {
         var registryId = (await client.GetFromJsonAsync<JsonElement>(new Uri($"/api/v1/registries/{registry}/definition", UriKind.Relative))).GetProperty("id").GetInt32();
         var names = new Dictionary<string, string>();
