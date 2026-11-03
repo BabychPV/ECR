@@ -80,23 +80,31 @@ public static class NaeTreeSchema
 
     /// <summary>
     /// Field → node type it belongs to (human 03.11: attributes are configured per node type; <c>null</c> — all levels).
-    /// <see cref="RegionField"/> / <see cref="AreaField"/> are derived from the ancestors by the server and live on SRC only;
-    /// <see cref="AfPathField"/> is informational on every node.
+    /// <see cref="RegionField"/> / <see cref="AreaField"/> are not bound to a level (decision 03.11, «Аналіз»): they are the OWN
+    /// identity of a REGION / AREA node (writable there, see <see cref="OwnLevelOfScopeField"/>) and derived from the ancestors on
+    /// every other node; <see cref="AfPathField"/> is informational on every node.
     /// </summary>
     public static readonly IReadOnlyDictionary<string, string?> LevelByField =
         new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             [NaeCodeField] = LevelSource,
-            [RegionField] = LevelSource,
-            [AreaField] = LevelSource,
+            [RegionField] = null,
+            [AreaField] = null,
             [AfPathField] = null,
             [SourceTypeField] = LevelSource,
             [PointNameField] = LevelSource,
         };
 
-    /// <summary>Fields the server owns: client input for them is ignored (derived from ancestors / written by the AF load).</summary>
+    /// <summary>Fields the server owns on every node: client input is ignored (written by the AF load).</summary>
     public static readonly IReadOnlySet<string> ReadOnlyFields =
-        new HashSet<string>([RegionField, AreaField, AfPathField], StringComparer.OrdinalIgnoreCase);
+        new HashSet<string>([AfPathField], StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The only level where the client may write <see cref="RegionField"/> / <see cref="AreaField"/>; <c>null</c> — other field.</summary>
+    /// <param name="field">Field code.</param>
+    public static string? OwnLevelOfScopeField(string field)
+        => string.Equals(field, RegionField, StringComparison.OrdinalIgnoreCase) ? LevelRegion
+            : string.Equals(field, AreaField, StringComparison.OrdinalIgnoreCase) ? LevelArea
+            : null;
 
     /// <summary>The level that may nest inside itself (human 03.11, Q2: Air_Area inside Air_Area).</summary>
     public const string SelfNestingLevel = LevelSite;

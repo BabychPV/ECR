@@ -212,7 +212,16 @@ public sealed class NaeTreeProvisioner(
         var levels = (await hierarchy.ListLevelsAsync(definition.Id, ct).ConfigureAwait(false))
             .ToDictionary(l => l.Code, StringComparer.OrdinalIgnoreCase);
         var naeFields = definition.Fields.Where(f => NaeTreeSchema.LevelByField.ContainsKey(f.Code)).ToList();
-        if (naeFields.Any(f => f.LevelId is not null) || levels.Values.Any(l => l.AllowsSelfNesting))
+        var alreadyUpgraded = naeFields.Any(f => f.LevelId is not null) || levels.Values.Any(l => l.AllowsSelfNesting);
+
+        // Correction (decision 03.11, «Аналіз»): a tree upgraded by the first node-types build has RegionCode/AreaCode bound to SRC;
+        // they are unbound now (own identity of REGION/AREA nodes). Only a binding to SRC is touched — an administrator's own is not.
+        var misbound = levels.TryGetValue(NaeTreeSchema.LevelSource, out var sourceLevel)
+            ? naeFields.Where(f => NaeTreeSchema.LevelByField[f.Code] is null
+                                   && NaeTreeSchema.OwnLevelOfScopeField(f.Code) is not null
+                                   && f.LevelId == sourceLevel.Id).ToList()
+            : [];
+        if (alreadyUpgraded && misbound.Count == 0)
         {
             return false;
         }
@@ -223,21 +232,29 @@ public sealed class NaeTreeProvisioner(
         var existingKeys = await keys.ListKeysForUpdateAsync(definition.Id, ct).ConfigureAwait(false);
         var before = SaveRegistryDefinitionHandler.AuditSnapshot(definition, rules, existingKeys);
 
-        foreach (var field in naeFields)
+        foreach (var field in misbound)
         {
-            if (NaeTreeSchema.LevelByField[field.Code] is { } levelCode && levels.TryGetValue(levelCode, out var level))
-            {
-                field.BindToLevel(level.Id);
-                if (string.Equals(field.Code, NaeTreeSchema.NaeCodeField, StringComparison.OrdinalIgnoreCase))
-                {
-                    field.Update(field.NameL10n, field.Ordinal, isRequired: true);
-                }
-            }
+            field.BindToLevel(null);
         }
 
-        if (levels.TryGetValue(NaeTreeSchema.SelfNestingLevel, out var site))
+        if (!alreadyUpgraded)
         {
-            site.AllowSelfNesting(true);
+            foreach (var field in naeFields)
+            {
+                if (NaeTreeSchema.LevelByField[field.Code] is { } levelCode && levels.TryGetValue(levelCode, out var level))
+                {
+                    field.BindToLevel(level.Id);
+                    if (string.Equals(field.Code, NaeTreeSchema.NaeCodeField, StringComparison.OrdinalIgnoreCase))
+                    {
+                        field.Update(field.NameL10n, field.Ordinal, isRequired: true);
+                    }
+                }
+            }
+
+            if (levels.TryGetValue(NaeTreeSchema.SelfNestingLevel, out var site))
+            {
+                site.AllowSelfNesting(true);
+            }
         }
 
         definition.BumpDefinitionVersion();
@@ -253,7 +270,9 @@ public sealed class NaeTreeProvisioner(
                 Operation: UpgradeOperation,
                 OldJson: before,
                 NewJson: SaveRegistryDefinitionHandler.AuditSnapshot(definition, rules, existingKeys),
-                ChangeReason: "NAE node types: one-time upgrade on start",
+                ChangeReason: alreadyUpgraded
+                    ? "NAE node types: RegionCode/AreaCode unbound from SRC on start"
+                    : "NAE node types: one-time upgrade on start",
                 ChangedByUserId: userId,
                 CorrelationId: currentUser.CorrelationId),
             ct).ConfigureAwait(false);
