@@ -177,11 +177,21 @@ public sealed class StyleMapper
             return;
         }
 
-        if (scale is { } digits)
+        // ✎ AN-70 (правило людини 02.11): scale ≤ MaxPaddedScale — формат комірки, доповнення нулями до scale;
+        // більший scale — точність СХОВИЩА (Land: 16), не формат: «0.0000000000000000» показував би «3.0000000000000000».
+        // Такий стовпець лишається у форматі «Загальний» (найкоротший запис, без округлення до scale) — як сітка
+        // клієнта (`shared/format/number.ts`, `MaxPaddedScale`).
+        if (scale is { } digits && digits <= MaxPaddedScale)
         {
             target.NumberFormat.Format = digits == 0 ? "0" : "0." + new string('0', digits);
         }
     }
+
+    /// <summary>
+    /// Найбільший <c>Scale</c> колонки, що читається як формат (доповнення нулями). Дзеркало
+    /// <c>MaxPaddedScale</c> клієнта (<c>src/Ecr.Web/src/shared/format/number.ts</c>) — одне правило для сітки й книги.
+    /// </summary>
+    public const byte MaxPaddedScale = 6;
 
     /// <summary>Накладає результат умовного форматування (ФВ-2.6/2.7) на комірку.</summary>
     /// <remarks>Лише задані складові: колір теми (<c>null</c>) лишає колір колонки.</remarks>
