@@ -975,4 +975,15 @@ public static class ErrorCodes
     /// ⚠ 409 за цифрами коду: без власного арма в <c>ExceptionHandlingMiddleware</c> <c>BusinessRuleException</c> доїхав би як 422.
     /// </remarks>
     public const string PermitBindingBlocksSheetChange = "ECR-PRM-4102";
+
+    /// <summary>
+    /// Номер НАЕ вже зайнятий у своїй області (<c>ECR-REG-4094</c>, типи вузлів НАЕ, людина 03.11, Q3): <c>NaeCode</c> вузла SRC
+    /// унікальний у межах (предок REGION, предок AREA), а де регіон не ділиться на On/Offshore — у межах REGION. У деталях —
+    /// номер, регіон, район і вузол, що його тримає.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ 409 за цифрами коду: без власного арма в <c>ExceptionHandlingMiddleware</c> <c>BusinessRuleException</c> доїхав би як 422.
+    /// <c>4094</c>, а не <c>4092</c>: складений ключ <c>NAE_BUSINESS</c> ловить той самий збіг пізніше, у записі, і без області.
+    /// </remarks>
+    public const string NaeCodeTaken = "ECR-REG-4094";
 }
