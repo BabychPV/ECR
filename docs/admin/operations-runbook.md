@@ -254,7 +254,9 @@ ORDER BY [Ts];
 
 | Ключ | Обов'язковий | Типово | Значення |
 |---|---|---|---|
+| `AirLimits:AreaRegistryCode` | ні | `AIR_AREA` | Значення на старті не перевіряється. |
 | `AirLimits:NaeRegistryCode` | ні | `NAE_TREE` | Значення на старті не перевіряється. |
+| `AirLimits:RegionRegistryCode` | ні | `LAND_REGION` | Значення на старті не перевіряється. |
 | `AirLimits:SubstanceRegistryCode` | ні | `LAND_AIR_SUBSTANCE` | Значення на старті не перевіряється. |
 | `AllowedHosts` | ні | `*` | Значення на старті не перевіряється. |
 | `Audit:ExportMaxRows` | ні | `100000` | Ціле число, не менше 1. |
@@ -321,6 +323,7 @@ ORDER BY [Ts];
 | `Logging:LogLevel:Default` | ні | `Information` | Значення на старті не перевіряється. |
 | `Logging:LogLevel:Microsoft.AspNetCore` | ні | `Warning` | Значення на старті не перевіряється. |
 | `Logging:LogLevel:Microsoft.EntityFrameworkCore.Database.Command` | ні | `Warning` | Значення на старті не перевіряється. |
+| `NaeTree:RegionSourceRegistryCode` | ні | `LAND_REGION` | Значення на старті не перевіряється. |
 | `Notifications:PublicBaseUrl` | ні | *порожньо* | Значення на старті не перевіряється. |
 | `Notifications:WebhookAllowedHostSuffixes` | ні | `.webhook.office.com;.logic.azure.com;.powerplatform.com` | Значення на старті не перевіряється. |
 | `PiSqlClient:CommandTimeoutSeconds` | ні | — | Ціле число, не менше 1. |
