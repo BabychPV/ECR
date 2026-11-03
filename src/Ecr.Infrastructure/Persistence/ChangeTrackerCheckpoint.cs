@@ -31,16 +31,21 @@ namespace Ecr.Infrastructure.Persistence;
 /// <item>Сутності, чисті на початку, у момент першого збереження, що їх зачіпає
 /// (<see cref="DbContext.SavingChanges"/>): початкові значення ДО прийняття. Поточні відновлюються
 /// рівними початковим — замикання повторить зміну саме так, як зробило вперше.</item>
+/// <item>Сутності, додані (<c>Added</c>) викликачем ДО транзакції (AN-101): поточні значення й те, які
+/// з них тимчасові (ключ IDENTITY і FK на ще не вставлений principal). Перша спроба їх вставляла й
+/// приймала (<c>Unchanged</c> зі справжнім ключем, або <c>Detached</c>, якщо замикання їх ще й
+/// видалило), а після відкату повтор нічого не вставляв: рядок мовчки губився, обробник відповідав
+/// 200. Перед повтором кожна знову стає <c>Added</c> зі значеннями на початок і тими самими
+/// тимчасовими ключами — зв'язки principal↔dependent зберігаються за значенням ключа, без
+/// покладання на fixup навігацій. Ключ, заданий клієнтом (не тимчасовий), лишається як був.</item>
 /// </list>
-/// Сутності, додані (<c>Added</c>) викликачем ДО транзакції, сюди не входять: їхні згенеровані ключі
-/// відновити без втручання у внутрішній стан EF не можна. Для них поведінка та сама, що й була
-/// (див. <c>CreateDocumentHandler</c>: додавання робиться всередині замикання).
 /// </remarks>
 internal sealed class ChangeTrackerCheckpoint : IDisposable
 {
     private readonly DbContext _db;
     private readonly HashSet<object> _tracked = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<object, Snapshot> _snapshots = new(ReferenceEqualityComparer.Instance);
+    private readonly List<AddedSnapshot> _added = [];
 
     /// <summary>Знімає контрольну точку й починає стежити за збереженнями.</summary>
     /// <param name="db">Контекст.</param>
@@ -52,6 +57,13 @@ internal sealed class ChangeTrackerCheckpoint : IDisposable
         // ⚠ `Entries()` сам запускає DetectChanges: зміни викликача ДО транзакції видно як Modified.
         foreach (var entry in db.ChangeTracker.Entries())
         {
+            // ⚠ Додані — НЕ в `_tracked`: крок 1 відновлення їх відчіплює, крок 4 додає наново.
+            if (entry.State == EntityState.Added)
+            {
+                _added.Add(AddedSnapshot.Of(entry));
+                continue;
+            }
+
             _tracked.Add(entry.Entity);
 
             if (entry.State is EntityState.Modified or EntityState.Deleted)
@@ -68,11 +80,12 @@ internal sealed class ChangeTrackerCheckpoint : IDisposable
 
     /// <summary>
     /// Повертає трекер у стан на початок транзакції: створене спробою відчіплюється, змінене й
-    /// збережене — відновлюється.
+    /// збережене — відновлюється, додане викликачем — знову <c>Added</c>.
     /// </summary>
     public void Restore()
     {
-        // 1. Усе, що з'явилося в трекері після початку, — спроба створила чи завантажила наново.
+        // 1. Усе, чого не було в трекері на початку (спроба створила чи завантажила наново), і додане
+        //    викликачем (крок 4 додасть його наново).
         foreach (var entry in _db.ChangeTracker.Entries()
                      .Where(e => !_tracked.Contains(e.Entity))
                      .ToList())
@@ -97,6 +110,13 @@ internal sealed class ChangeTrackerCheckpoint : IDisposable
         {
             snapshot.Apply(_db.Entry(snapshot.Entity));
         }
+
+        // 4. Додані викликачем ДО транзакції (AN-101): крок 1 їх відчепив — що б із ними не зробила
+        //    спроба (вставила й прийняла, змінила, видалила), — тепер вони знову Added як на початку.
+        foreach (var added in _added)
+        {
+            added.Apply(_db.Entry(added.Entity));
+        }
     }
 
     private void OnSavingChanges(object? sender, SavingChangesEventArgs e)
@@ -108,6 +128,41 @@ internal sealed class ChangeTrackerCheckpoint : IDisposable
                 && !_snapshots.ContainsKey(entry.Entity))
             {
                 _snapshots[entry.Entity] = Snapshot.OfClosureChange(entry);
+            }
+        }
+    }
+
+    /// <summary>Сутність, додана викликачем ДО транзакції: значення на початок і тимчасові властивості.</summary>
+    private sealed class AddedSnapshot
+    {
+        private readonly PropertyValues _current;
+        private readonly string[] _temporary;
+
+        private AddedSnapshot(object entity, PropertyValues current, string[] temporary)
+        {
+            Entity = entity;
+            _current = current;
+            _temporary = temporary;
+        }
+
+        public object Entity { get; }
+
+        public static AddedSnapshot Of(EntityEntry entry)
+            => new(
+                entry.Entity,
+                entry.CurrentValues.Clone(),
+                [.. entry.Properties.Where(p => p.IsTemporary).Select(p => p.Metadata.Name)]);
+
+        public void Apply(EntityEntry entry)
+        {
+            // ⚠ Сутність відчеплена (крок 1): у мапі ідентичності немає ні її справжнього ключа з першої
+            // спроби, ні тимчасового. Значення — на початок; тимчасові позначаються тимчасовими знову,
+            // тож EF не надішле їх у INSERT (IDENTITY), а FK залежної збігається з тимчасовим ключем principal.
+            entry.State = EntityState.Added;
+            entry.CurrentValues.SetValues(_current);
+            foreach (var name in _temporary)
+            {
+                entry.Property(name).IsTemporary = true;
             }
         }
     }
