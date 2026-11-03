@@ -1,4 +1,5 @@
 import { language, t } from '@/shared/i18n';
+import { NaeRegistryCode } from '../air/airApi';
 import { textOf } from '../typeEditor/labels';
 import type { PermitListDto, PermitListUseDto } from './listsApi';
 
@@ -35,16 +36,53 @@ export interface ListRow {
   readonly registryCode: string | null;
   /** Кількість значень; `null` — список-таблиця дозволу (значення — рядки дозволу). */
   readonly entries: number | null;
+  /** Перші значення для підказки; порожньо, доки сервер не віддає `preview` (поле додасть окрема lane). */
+  readonly preview: readonly string[];
   /** Чи може поточний користувач змінювати значення (рішення сервера: право й область). */
   readonly editable: boolean;
   readonly used: readonly ListUse[];
 }
 
-/** «Used by» словами макета: «1 column» / «N columns» / «No column yet». */
+/** «Used by» у шторці: «1 column» / «N columns» / «No column yet». */
 export function usedCountText(count: number): string {
   if (count <= 0) return t('permits.lists.used.none');
 
   return count === 1 ? t('permits.lists.used.one') : t('permits.lists.used.other', { count });
+}
+
+/** Де лежать значення списку; показує шторка (у таблиці цього підпису немає: вид каже «Kind»). */
+export function keptIn(row: ListRow): string {
+  return row.kind === 'shared' ? t('permits.lists.keptIn.registries') : t('permits.lists.keptIn.type', { owner: row.owner });
+}
+
+/** Скільки стовпців показує клітинка «Used by» до «+N». */
+export const UsedShown = 2;
+
+/** Один споживач списку людською мовою: «Air emission permit · Sources › Area» (тип · таблиця › стовпець). */
+export function useText(use: ListUse): string {
+  return `${use.typeName} · ${use.tableName} › ${use.columnName}`;
+}
+
+/** Підпис «+N» за межею показаних споживачів. */
+export function usedMoreText(total: number): string {
+  return total > UsedShown ? t('permits.lists.used.more', { count: total - UsedShown }) : '';
+}
+
+/** Підпис кількості значень: «12 values», «1 value», для дерева НАЕ — «N nodes», для таблиці дозволу — словами. */
+export function valuesText(row: ListRow): string {
+  if (row.kind === 'permit') return t('permits.lists.values.permit');
+  if (row.entries === null) return '—';
+  if (row.registryCode === NaeRegistryCode) return t('permits.lists.values.nodes', { count: row.entries });
+
+  return row.entries === 1 ? t('permits.lists.values.one') : t('permits.lists.values.other', { count: row.entries });
+}
+
+/** Перші значення для підказки в таблиці: «Atyrau, Mangistau, +3 more»; порожньо, поки сервер не віддав `preview`. */
+export function previewText(row: ListRow): string {
+  if (row.preview.length === 0) return '';
+  const rest = row.entries === null ? 0 : row.entries - row.preview.length;
+
+  return rest > 0 ? `${row.preview.join(', ')}, ${t('permits.lists.values.previewMore', { count: rest })}` : row.preview.join(', ');
 }
 
 /** Підпис походження словом каталогу (ключі — літерали: сторож каталогу читає їх як текст). */
@@ -56,6 +94,18 @@ export function kindLabel(kind: ListKind): string {
       return t('permits.lists.kind.type');
     case 'permit':
       return t('permits.lists.kind.permit');
+  }
+}
+
+/** Короткий підпис виду для варіантів фільтра: «Shared list», далі додається лічильник. */
+export function kindShortLabel(kind: ListKind): string {
+  switch (kind) {
+    case 'shared':
+      return t('permits.lists.kindShort.shared');
+    case 'type':
+      return t('permits.lists.kindShort.type');
+    case 'permit':
+      return t('permits.lists.kindShort.permit');
   }
 }
 
@@ -86,6 +136,13 @@ function useOf(use: PermitListUseDto, lang: string | undefined): ListUse {
   };
 }
 
+/** `preview` з відповіді сервера, коли він його віддає (поки його немає в схемі - порожньо). */
+function previewOf(list: PermitListDto): readonly string[] {
+  const value = (list as { readonly preview?: unknown }).preview;
+
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
 /** Рядки екрана з відповіді сервера: спершу спільні, далі «лише тип» і «таблиця дозволу», усередині — за назвою. */
 export function rowsFromLists(lists: readonly PermitListDto[], lang: string | undefined = undefined): ListRow[] {
   const rows: ListRow[] = [];
@@ -104,6 +161,7 @@ export function rowsFromLists(lists: readonly PermitListDto[], lang: string | un
       typeCode: list.typeCode ?? first?.typeCode ?? '',
       registryCode: list.registryCode,
       entries: list.itemCount,
+      preview: previewOf(list),
       editable: list.editable,
       used,
     });

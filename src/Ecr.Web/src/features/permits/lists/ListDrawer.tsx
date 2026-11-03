@@ -11,10 +11,9 @@ import { showApiError, showDone, showWarning } from '@/shared/ui/notify';
 import { EcrApiError } from '@/api/client';
 import { textOf } from '../typeEditor/labels';
 import { typeEditorPath } from '../shell/permitPaths';
-import { keptIn } from './ListsColumns';
 import { listsKeys } from './listsKeys';
 import type { PermitListChange, PermitListDetail, PermitListValue } from './listsApi';
-import { kindLabel, usedCountText, valueLabels, type ListRow, type ListUse } from './listsModel';
+import { keptIn, kindLabel, usedCountText, valueLabels, type ListRow, type ListUse } from './listsModel';
 import { useChangeListItems, useListDetail } from './useLists';
 import './lists.css';
 
@@ -232,6 +231,11 @@ function ValueList({ row, detail }: ValuesProps): JSX.Element {
             </Button>
           </Group>
         </form>
+      )}
+      {row.editable && row.kind === 'shared' && (
+        <Text size="sm" c="dimmed" data-list-in-use-note="">
+          {t('permits.lists.editable')}
+        </Text>
       )}
     </Stack>
   );

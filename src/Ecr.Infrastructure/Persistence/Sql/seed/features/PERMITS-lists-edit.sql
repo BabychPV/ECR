@@ -2,8 +2,8 @@
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'permits.lists.editable', N'ru', N'Откройте список, чтобы добавить, переименовать или убрать его значения. Значение общего списка, которое ещё используют разрешения, убрать нельзя.'),
-    (N'permits.lists.editable', N'kz', N'Мәндерін қосу, атын өзгерту немесе алып тастау үшін тізімді ашыңыз. Рұқсаттар әлі қолданатын ортақ тізім мәнін алып тастауға болмайды.'),
+    (N'permits.lists.editable', N'ru', N'Значение общего списка, которое ещё используют разрешения, убрать нельзя.'),
+    (N'permits.lists.editable', N'kz', N'Рұқсаттар әлі қолданатын ортақ тізім мәнін алып тастауға болмайды.'),
     (N'permits.lists.drawer.note.typeEditable', N'ru', N'Эти значения видит только {owner}. Изменение сразу применяется к опубликованному типу и к его открытому черновику.'),
     (N'permits.lists.drawer.note.typeEditable', N'kz', N'Бұл мәндерді тек {owner} көреді. Өзгеріс жарияланған түрге және оның ашық жобасына бірден қолданылады.'),
     (N'permits.lists.drawer.add.label', N'ru', N'Новое значение'),
@@ -38,7 +38,7 @@ GO
 INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
-    (N'permits.lists.editable', N'en', N'Open a list to add, rename or remove its values. A value of a shared list that permits still use cannot be removed.', 1),
+    (N'permits.lists.editable', N'en', N'A value of a shared list that permits still use cannot be removed.', 1),
     (N'permits.lists.drawer.note.typeEditable', N'en', N'Only {owner} sees these values. A change applies at once to the published type and to its open draft.', 1),
     (N'permits.lists.drawer.add.label', N'en', N'New value', 1),
     (N'permits.lists.drawer.add.submit', N'en', N'Add value', 1),

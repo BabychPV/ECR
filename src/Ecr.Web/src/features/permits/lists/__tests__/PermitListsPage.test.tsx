@@ -57,6 +57,8 @@ function lists(editable: boolean): PermitListDto[] {
       typeCode: null,
       nameL10n: { en: 'Substances' },
       itemCount: 42,
+      // Поле `preview` сервер додасть окремою lane; клітинка вже вміє його показати.
+      ...({ preview: ['Nitrogen oxides', 'Sulfur dioxide', 'Ozone'] } as object),
       editable,
       usedBy: [use('Air', 'Emission', 'Substance', 'Air permit')],
     },
@@ -69,6 +71,20 @@ function lists(editable: boolean): PermitListDto[] {
       itemCount: 2,
       editable,
       usedBy: [use('Air', 'Emission', 'Method', 'Air permit')],
+    },
+    {
+      key: 'shared:NAE_TREE',
+      scope: 'SharedRegistry',
+      registryCode: 'NAE_TREE',
+      typeCode: null,
+      nameL10n: { en: 'NAE structure' },
+      itemCount: 120,
+      editable,
+      usedBy: [
+        use('Air', 'Sources', 'Area', 'Air emission permit'),
+        use('Land', 'Plots', 'Region', 'Land contract'),
+        use('Waste', 'Streams', 'Site', 'Waste permit'),
+      ],
     },
   ];
 }
@@ -154,6 +170,7 @@ function show(entry = '/admin/permits/lists'): void {
           <Where />
           <Routes>
             <Route path="/admin/permits/lists" element={<PermitListsPage />} />
+            <Route path="/admin/permits/nae" element={<p>NAE structure tab</p>} />
           </Routes>
         </QueryClientProvider>
       </MemoryRouter>
@@ -168,16 +185,69 @@ afterEach(() => {
 });
 
 describe('Lists: перелік', () => {
-  it('показує списки з одного запиту; з правом - підказка про редагування', async () => {
+  it('показує списки з одного запиту; з правом немає підказки «лише читання», а «значення в роботі» - лише у шторці', async () => {
     const calls = stub();
     show();
 
     expect(await screen.findByText('Substances')).toBeTruthy();
     expect(screen.getByText('Method')).toBeTruthy();
-    expect(screen.getByText('42')).toBeTruthy();
-    expect(screen.getByText('permits.lists.editable')).toBeTruthy();
     expect(screen.queryByText('permits.lists.readOnly')).toBeNull();
+    expect(screen.queryByText('permits.lists.editable')).toBeNull();
     expect(calls.requests).toEqual(['/api/v1/permit-lists']);
+  });
+
+  it('«Values»: лічильник словами (не порожній), для НАЕ - вузли, під ним перші значення', async () => {
+    stub();
+    show();
+
+    expect(await screen.findByText('permits.lists.values.other {"count":42}')).toBeTruthy();
+    expect(screen.getByText('permits.lists.values.other {"count":2}')).toBeTruthy();
+    expect(screen.getByText('permits.lists.values.nodes {"count":120}')).toBeTruthy();
+    expect(screen.getByText('Nitrogen oxides, Sulfur dioxide, Ozone, permits.lists.values.previewMore {"count":39}')).toBeTruthy();
+    // Без `preview` від сервера (Method) другого рядка в клітинці немає.
+    expect(document.querySelectorAll('[data-list-preview]')).toHaveLength(1);
+  });
+
+  it('«Used by»: тип · таблиця › стовпець; більше двох - перші два й «+N»', async () => {
+    stub();
+    show();
+
+    expect(await screen.findByText('Air permit · Emission › Substance')).toBeTruthy();
+    expect(screen.getByText('Air emission permit · Sources › Area')).toBeTruthy();
+    expect(screen.getByText('Land contract · Plots › Region')).toBeTruthy();
+    expect(screen.queryByText('Waste permit · Streams › Site')).toBeNull();
+    expect(screen.getByText('permits.lists.used.more {"count":1}')).toBeTruthy();
+  });
+
+  it('вид - словами, без другого рядка «Kept in…» під назвою; рядки мають шеврон', async () => {
+    stub();
+    show();
+
+    expect(await screen.findByText('permits.lists.kind.type')).toBeTruthy();
+    expect(screen.getAllByText('permits.lists.kind.shared').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/permits\.lists\.keptIn/)).toBeNull();
+    expect(document.querySelectorAll('[data-list-chevron]')).toHaveLength(3);
+  });
+
+  it('рядок НАЕ веде на вкладку «NAE structure», а не відкриває шторку', async () => {
+    stub();
+    show();
+
+    fireEvent.click(await screen.findByText('NAE structure'));
+
+    expect(await screen.findByText('NAE structure tab')).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('рядок відкривається з клавіатури: Enter на рядку ставить ?panel=', async () => {
+    stub();
+    show();
+
+    const row = (await screen.findByText('Method')).closest('tr');
+    expect(row?.getAttribute('tabindex')).toBe('0');
+    fireEvent.keyDown(row as HTMLElement, { key: 'Enter' });
+
+    await waitFor(() => expect((globalThis as { __where?: string }).__where).toContain('panel=type'));
   });
 
   it('без права редагувати - підказка «лише читання»', async () => {
@@ -212,18 +282,17 @@ describe('Lists: перелік', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('«Used by» словами: «1 column» у таблиці й у шторці', async () => {
+  it('«Used by» у шторці: «1 column»; для спільного списку - примітка про значення в роботі', async () => {
     stub();
     show();
 
-    expect((await screen.findAllByText('permits.lists.used.one')).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByText('Method'));
+    fireEvent.click(await screen.findByText('Method'));
     expect(within(await screen.findByRole('dialog')).getByText('permits.lists.used.one')).toBeTruthy();
   });
 
-  it('показник у адресі лишає лише обране походження', async () => {
+  it('вид у адресі лишає лише обране походження', async () => {
     stub();
-    show('/admin/permits/lists?stat=type');
+    show('/admin/permits/lists?kind=type');
 
     expect(await screen.findByText('Method')).toBeTruthy();
     expect(screen.queryByText('Substances')).toBeNull();
@@ -248,6 +317,7 @@ describe('Lists: шторка', () => {
     const drawer = await screen.findByRole('dialog');
     expect(await within(drawer).findByText('Nitrogen oxides')).toBeTruthy();
     expect(within(drawer).getByText('permits.lists.drawer.note.shared')).toBeTruthy();
+    expect(within(drawer).getByText('permits.lists.editable')).toBeTruthy();
     expect(drawer.querySelector('[data-list-open="registry"]')?.getAttribute('href')).toBe('/admin/registries/SUBSTANCES/entries');
   });
 

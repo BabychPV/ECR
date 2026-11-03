@@ -8,28 +8,36 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.lists.readOnly', N'kz', N'Бұл экран тізімдерді тек көрсетеді. Бір рұқсат түрінде сақталатын мәндер сол түрдің конструкторында өңделеді; ортақ тізімдер — анықтамалықтарда.'),
     (N'permits.lists.registriesFailed', N'ru', N'Справочники прочитать не удалось, поэтому общие списки показаны по коду и без количества значений.'),
     (N'permits.lists.registriesFailed', N'kz', N'Анықтамалықтарды оқу мүмкін болмады, сондықтан ортақ тізімдер код бойынша және мәндер санынсыз көрсетілген.'),
-    (N'permits.lists.stats.aria', N'ru', N'Сводка списков выбора'),
-    (N'permits.lists.stats.aria', N'kz', N'Таңдау тізімдерінің қорытындысы'),
-    (N'permits.lists.stat.all', N'ru', N'списков'),
-    (N'permits.lists.stat.all', N'kz', N'тізім'),
-    (N'permits.lists.stat.shared', N'ru', N'общих'),
-    (N'permits.lists.stat.shared', N'kz', N'ортақ'),
-    (N'permits.lists.stat.type', N'ru', N'только одного типа'),
-    (N'permits.lists.stat.type', N'kz', N'тек бір түрдікі'),
-    (N'permits.lists.stat.permit', N'ru', N'из таблицы разрешения'),
-    (N'permits.lists.stat.permit', N'kz', N'рұқсат кестесінен'),
     (N'permits.lists.search.label', N'ru', N'Поиск по спискам'),
     (N'permits.lists.search.label', N'kz', N'Тізімдерден іздеу'),
     (N'permits.lists.search.placeholder', N'ru', N'Список или тип разрешения'),
     (N'permits.lists.search.placeholder', N'kz', N'Тізім немесе рұқсат түрі'),
     (N'permits.lists.filter.kind', N'ru', N'Виды'),
     (N'permits.lists.filter.kind', N'kz', N'Түрлері'),
-    (N'permits.lists.kind.shared', N'ru', N'Общий справочник'),
-    (N'permits.lists.kind.shared', N'kz', N'Ортақ анықтамалық'),
-    (N'permits.lists.kind.type', N'ru', N'Только этот тип разрешения'),
-    (N'permits.lists.kind.type', N'kz', N'Тек осы рұқсат түрі'),
-    (N'permits.lists.kind.permit', N'ru', N'Таблица того же разрешения'),
-    (N'permits.lists.kind.permit', N'kz', N'Сол рұқсаттың кестесі'),
+    (N'permits.lists.filter.kindAll', N'ru', N'Все виды'),
+    (N'permits.lists.filter.kindAll', N'kz', N'Барлық түрлер'),
+    (N'permits.lists.kind.shared', N'ru', N'Общий список (хранится в справочниках)'),
+    (N'permits.lists.kind.shared', N'kz', N'Ортақ тізім (анықтамалықтарда сақталады)'),
+    (N'permits.lists.kind.type', N'ru', N'Только для одного типа разрешения'),
+    (N'permits.lists.kind.type', N'kz', N'Тек бір рұқсат түріне арналған'),
+    (N'permits.lists.kind.permit', N'ru', N'Значения из таблицы этого разрешения'),
+    (N'permits.lists.kind.permit', N'kz', N'Осы рұқсат кестесінен алынған мәндер'),
+    (N'permits.lists.kindShort.shared', N'ru', N'Общий список'),
+    (N'permits.lists.kindShort.shared', N'kz', N'Ортақ тізім'),
+    (N'permits.lists.kindShort.type', N'ru', N'Один тип разрешения'),
+    (N'permits.lists.kindShort.type', N'kz', N'Бір рұқсат түрі'),
+    (N'permits.lists.kindShort.permit', N'ru', N'Таблица разрешения'),
+    (N'permits.lists.kindShort.permit', N'kz', N'Рұқсат кестесі'),
+    (N'permits.lists.values.one', N'ru', N'1 значение'),
+    (N'permits.lists.values.one', N'kz', N'1 мән'),
+    (N'permits.lists.values.other', N'ru', N'Значений: {count}'),
+    (N'permits.lists.values.other', N'kz', N'Мәндер: {count}'),
+    (N'permits.lists.values.nodes', N'ru', N'Узлов: {count}'),
+    (N'permits.lists.values.nodes', N'kz', N'Түйіндер: {count}'),
+    (N'permits.lists.values.previewMore', N'ru', N'и ещё {count}'),
+    (N'permits.lists.values.previewMore', N'kz', N'тағы {count}'),
+    (N'permits.lists.used.more', N'ru', N'и ещё {count}'),
+    (N'permits.lists.used.more', N'kz', N'тағы {count}'),
     (N'permits.lists.col.list', N'ru', N'Список'),
     (N'permits.lists.col.list', N'kz', N'Тізім'),
     (N'permits.lists.col.kind', N'ru', N'Вид'),
@@ -87,6 +95,52 @@ OPTION (RECOMPILE);
 GO
 -- PERMITS: ui-lists ── кінець секції ──
 
+-- PERMITS: ui-lists ── перепис екрана «Lists» (людина 03.11: «незрозуміла сторінка»): змінені тексти наявних ключів і прибрані ключі смуги показників ──
+-- Нове значення вже стоїть у MERGE свого файлу (PERMITS-shell.sql, PERMITS-lists-edit.sql, цей файл); епілог оновлює, лише поки в базі старе.
+INSERT INTO #UiChanged ([Key], Lang, OldVal, NewVal)
+SELECT v.[Key], v.Lang, v.OldVal, v.NewVal
+  FROM (VALUES
+    (N'permits.lists.description', N'en', N'The pick-lists behind permit columns: shared by many types, for one type only, or a table of the permit itself.', N'Lists give the choices for drop-down columns in permit tables. Click a list to edit its values.'),
+    (N'permits.lists.description', N'ru', N'Списки выбора для столбцов разрешений: общие для многих типов, только для одного типа или таблица самого разрешения.', N'Списки задают варианты для столбцов с выпадающим выбором в таблицах разрешений. Нажмите на список, чтобы править его значения.'),
+    (N'permits.lists.description', N'kz', N'Рұқсат бағандарының таңдау тізімдері: көптеген түрге ортақ, тек бір түрге арналған немесе рұқсаттың өз кестесі.', N'Тізімдер рұқсат кестелеріндегі ашылмалы бағандардың таңдау нұсқаларын береді. Мәндерін өңдеу үшін тізімді басыңыз.'),
+    (N'permits.lists.editable', N'en', N'Open a list to add, rename or remove its values. A value of a shared list that permits still use cannot be removed.', N'A value of a shared list that permits still use cannot be removed.'),
+    (N'permits.lists.editable', N'ru', N'Откройте список, чтобы добавить, переименовать или убрать его значения. Значение общего списка, которое ещё используют разрешения, убрать нельзя.', N'Значение общего списка, которое ещё используют разрешения, убрать нельзя.'),
+    (N'permits.lists.editable', N'kz', N'Мәндерін қосу, атын өзгерту немесе алып тастау үшін тізімді ашыңыз. Рұқсаттар әлі қолданатын ортақ тізім мәнін алып тастауға болмайды.', N'Рұқсаттар әлі қолданатын ортақ тізім мәнін алып тастауға болмайды.'),
+    (N'permits.lists.kind.shared', N'en', N'Shared registry', N'Shared list (kept in Registries)'),
+    (N'permits.lists.kind.shared', N'ru', N'Общий справочник', N'Общий список (хранится в справочниках)'),
+    (N'permits.lists.kind.shared', N'kz', N'Ортақ анықтамалық', N'Ортақ тізім (анықтамалықтарда сақталады)'),
+    (N'permits.lists.kind.type', N'en', N'This permit type only', N'Only for one permit type'),
+    (N'permits.lists.kind.type', N'ru', N'Только этот тип разрешения', N'Только для одного типа разрешения'),
+    (N'permits.lists.kind.type', N'kz', N'Тек осы рұқсат түрі', N'Тек бір рұқсат түріне арналған'),
+    (N'permits.lists.kind.permit', N'en', N'Table of the same permit', N'Values from a table of this permit'),
+    (N'permits.lists.kind.permit', N'ru', N'Таблица того же разрешения', N'Значения из таблицы этого разрешения'),
+    (N'permits.lists.kind.permit', N'kz', N'Сол рұқсаттың кестесі', N'Осы рұқсат кестесінен алынған мәндер')
+       ) AS v ([Key], Lang, OldVal, NewVal)
+OPTION (RECOMPILE);
+GO
+INSERT INTO #UiRemoved ([Key], Lang, OldVal)
+SELECT v.[Key], v.Lang, v.OldVal
+  FROM (VALUES
+    (N'permits.lists.stats.aria', N'en', N'Pick-lists summary'),
+    (N'permits.lists.stats.aria', N'ru', N'Сводка списков выбора'),
+    (N'permits.lists.stats.aria', N'kz', N'Таңдау тізімдерінің қорытындысы'),
+    (N'permits.lists.stat.all', N'en', N'lists'),
+    (N'permits.lists.stat.all', N'ru', N'списков'),
+    (N'permits.lists.stat.all', N'kz', N'тізім'),
+    (N'permits.lists.stat.shared', N'en', N'shared'),
+    (N'permits.lists.stat.shared', N'ru', N'общих'),
+    (N'permits.lists.stat.shared', N'kz', N'ортақ'),
+    (N'permits.lists.stat.type', N'en', N'one type only'),
+    (N'permits.lists.stat.type', N'ru', N'только одного типа'),
+    (N'permits.lists.stat.type', N'kz', N'тек бір түрдікі'),
+    (N'permits.lists.stat.permit', N'en', N'from a permit table'),
+    (N'permits.lists.stat.permit', N'ru', N'из таблицы разрешения'),
+    (N'permits.lists.stat.permit', N'kz', N'рұқсат кестесінен')
+       ) AS v ([Key], Lang, OldVal)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: ui-lists ── кінець секції ──
+
 -- PERMITS: ui-lists ── PM-08d: екран «Lists» (списки вибору пермітів), варіант A без окремого ендпоінта; ru/kz — порцією PERMITS: ui-lists нижче ──
 INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
@@ -94,17 +148,21 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'permits.lists.openRegistries', N'en', N'Open Registries', 1),
     (N'permits.lists.readOnly', N'en', N'This screen only shows the lists. Values kept in one permit type are edited in that type''s builder; shared lists are edited in Registries.', 1),
     (N'permits.lists.registriesFailed', N'en', N'Registries could not be read, so shared lists are shown by code and without value counts.', 1),
-    (N'permits.lists.stats.aria', N'en', N'Pick-lists summary', 1),
-    (N'permits.lists.stat.all', N'en', N'lists', 1),
-    (N'permits.lists.stat.shared', N'en', N'shared', 1),
-    (N'permits.lists.stat.type', N'en', N'one type only', 1),
-    (N'permits.lists.stat.permit', N'en', N'from a permit table', 1),
     (N'permits.lists.search.label', N'en', N'Search lists', 1),
     (N'permits.lists.search.placeholder', N'en', N'List or permit type', 1),
     (N'permits.lists.filter.kind', N'en', N'Kinds', 1),
-    (N'permits.lists.kind.shared', N'en', N'Shared registry', 1),
-    (N'permits.lists.kind.type', N'en', N'This permit type only', 1),
-    (N'permits.lists.kind.permit', N'en', N'Table of the same permit', 1),
+    (N'permits.lists.filter.kindAll', N'en', N'All kinds', 1),
+    (N'permits.lists.kind.shared', N'en', N'Shared list (kept in Registries)', 1),
+    (N'permits.lists.kind.type', N'en', N'Only for one permit type', 1),
+    (N'permits.lists.kind.permit', N'en', N'Values from a table of this permit', 1),
+    (N'permits.lists.kindShort.shared', N'en', N'Shared list', 1),
+    (N'permits.lists.kindShort.type', N'en', N'One permit type', 1),
+    (N'permits.lists.kindShort.permit', N'en', N'Permit table', 1),
+    (N'permits.lists.values.one', N'en', N'1 value', 1),
+    (N'permits.lists.values.other', N'en', N'{count} values', 1),
+    (N'permits.lists.values.nodes', N'en', N'{count} nodes', 1),
+    (N'permits.lists.values.previewMore', N'en', N'+{count} more', 1),
+    (N'permits.lists.used.more', N'en', N'+{count} more', 1),
     (N'permits.lists.col.list', N'en', N'List', 1),
     (N'permits.lists.col.kind', N'en', N'Kind', 1),
     (N'permits.lists.col.values', N'en', N'Values', 1),
