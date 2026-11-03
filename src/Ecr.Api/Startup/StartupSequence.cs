@@ -243,6 +243,13 @@ public static partial class StartupSequence
 
         LogWarmupDone(logger, warmed);
         Lap(logger, lap, "6 прогрів кешу метаданих");
+
+        // 6a) Прогрів метаданих моделі MVC (record-тіла запитів) ДО першого запиту: інакше два одночасні перші
+        //     запити до дії після рестарту можуть зламати її до наступного рестарту (гонитва
+        //     ModelMetadata.GetHashCode у ASP.NET Core; деталі — MvcModelMetadataWarmup). Помилка — попередження.
+        var mvc = MvcModelMetadataWarmup.Warm(app.Services, logger);
+        LogMvcWarmupDone(logger, mvc.Actions, mvc.Nodes, mvc.Records, mvc.Failures);
+        Lap(logger, lap, "6a прогрів метаданих MVC");
         LogProcessAge(logger, "послідовність завершено (від початку процесу)", processStart);
 
         // 7) Постійні розклади ставить окремий hosted service після того, як
@@ -372,6 +379,10 @@ public static partial class StartupSequence
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: прогріто версій шаблонів: {Count}.")]
     private static partial void LogWarmupDone(ILogger logger, int count);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Старт: метадані MVC прогріто — дій {Actions}, вузлів {Nodes}, record-типів {Records}, збоїв {Failures}.")]
+    private static partial void LogMvcWarmupDone(ILogger logger, int actions, int nodes, int records, int failures);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: SQL {Edition}, режим {Mode}, RCSI {Rcsi}.")]
     private static partial void LogSqlMode(
