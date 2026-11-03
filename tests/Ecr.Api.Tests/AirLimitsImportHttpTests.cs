@@ -1010,8 +1010,11 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         var text = await clash.Content.ReadAsStringAsync();
         Assert.True(clash.StatusCode == HttpStatusCode.Conflict, $"{(int)clash.StatusCode}: {text} | {app.ErrorsText}");
         var problem = JsonDocument.Parse(text).RootElement;
-        Assert.Equal("ECR-REG-4092", problem.GetProperty("errorCode").GetString());
-        Assert.Equal("err.ECR-REG-4092.keyWindowOverlap", problem.GetProperty("messageKey").GetString());
+
+        // ✎ NAE node types (human 03.11, Q3): the manual path checks the number in its region/area first — 409 ECR-REG-4094 with
+        // the holder; the composite key (4092) stays the backstop and answers the retired-node case below.
+        Assert.Equal("ECR-REG-4094", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REG-4094.naeCodeTaken", problem.GetProperty("messageKey").GetString());
         Assert.Equal($"N_KEYREG_{tag}_A", problem.GetProperty("entryCode").GetString());
 
         // Retiring closes the validity window; it does NOT clear IsActive (that flag is the "enabled" switch used by the AF sync
@@ -1032,6 +1035,7 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         // (SetValidity / the AF sync), not through a plain create.
         using var again = await Post($"N_KEYREG_{tag}_C");
         Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+        Assert.Equal("err.ECR-REG-4092.keyWindowOverlap", JsonDocument.Parse(await again.Content.ReadAsStringAsync()).RootElement.GetProperty("messageKey").GetString());
     }
 
     [Fact]

@@ -153,8 +153,14 @@ public sealed class NaeTreeHttpTests(SqlServerFixture sql)
         var duplicate = await UpsertSrcAsync(client, def.Id, code, "MANUAL_DUP", site.Id, "1085", "ATYRAU", "OFFSHORE");
         Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
 
-        var otherArea = await UpsertSrcAsync(client, def.Id, code, "MANUAL_OK", site.Id, "1085", "ATYRAU", "ONSHORE");
-        Assert.Equal(HttpStatusCode.Created, otherArea.StatusCode);
+        // ✎ NAE node types (human 03.11): RegionCode/AreaCode are derived from the ancestors, so a client-sent ONSHORE under the
+        // Offshore site is ignored and the code is still taken; another region is the way to repeat a number (NaeNodeTypesHttpTests).
+        var sentOtherArea = await UpsertSrcAsync(client, def.Id, code, "MANUAL_AREA", site.Id, "1085", "ATYRAU", "ONSHORE");
+        Assert.Equal(HttpStatusCode.Conflict, sentOtherArea.StatusCode);
+
+        var mangistau = await db.RegistryEntries.SingleAsync(e => e.RegistryDefId == def.Id && e.Code.StartsWith("S_MANGISTAU"));
+        var otherRegion = await UpsertSrcAsync(client, def.Id, code, "MANUAL_OK", mangistau.Id, "1086", "ATYRAU", "OFFSHORE");
+        Assert.Equal(HttpStatusCode.Created, otherRegion.StatusCode);
     }
 
     [Fact]
