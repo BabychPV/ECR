@@ -55,6 +55,11 @@ export interface NodeAttributesFormProps {
   readonly onOpenNode?: ((id: number) => void) | undefined;
 }
 
+/** Поля, від яких залежить ідентичність номера NAE: сам номер і коди регіону/району (каскад на джерела під вузлом). */
+function ownsNaeIdentity(field: RegistryField): boolean {
+  return field.code === NaeCodeField || field.code === 'RegionCode' || field.code === 'AreaCode';
+}
+
 /** Ключ `GET …/entries/{id}` - під префіксом `entries(code)`, тож інвалідується разом із переліком і деревом. */
 function detailKey(code: string, id: number): readonly unknown[] {
   return [...queryKeys.registries.entries(code), 'detail', id] as const;
@@ -211,7 +216,9 @@ function Form({
           : undefined;
 
   const fieldError = (field: RegistryField): JSX.Element | string | undefined => {
-    if (field.code === NaeCodeField && serverProblem === 'naeCodeTaken' && naeHolder !== null) {
+    // Дубль номера NAE - біля поля, що його спричинило: номер на SRC або код регіону/району на REGION/AREA, чий каскад
+    // на джерела під ним дав би дубль (сервер нічого не змінює).
+    if (ownsNaeIdentity(field) && serverProblem === 'naeCodeTaken' && naeHolder !== null) {
       return (
         <span data-nae-code-taken="">
           {t('permits.nae.form.naeCodeTaken', {
@@ -294,7 +301,7 @@ function Form({
                   // ⛔ `currentTarget` обнуляється після обробника, а апдейтер `setValues` читає ліниво (StrictMode).
                   const next = event.currentTarget.value;
                   setValues((previous) => ({ ...previous, [field.code]: next }));
-                  if (field.code === NaeCodeField) setServerProblem(null);
+                  if (ownsNaeIdentity(field)) setServerProblem(null);
                 }}
               />
             ))}

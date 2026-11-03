@@ -57,13 +57,17 @@ export function CreateNodeModal({
 
   const level = draft === null ? null : (options.find((item) => item.code === (chosen ?? draft.level.code)) ?? draft.level);
 
+  // ⛔ Будь-яке закриття (X, Esc, «Cancel», перехід до тримача номера) скидає вибраний тип: інакше наступне «Add child»
+  // відкрилося б із типом минулого разу, а не з типом, який пропонує батько.
+  const close = (): void => {
+    setChosen(null);
+    onClose();
+  };
+
   return (
     <Modal
       opened={draft !== null}
-      onClose={() => {
-        setChosen(null);
-        onClose();
-      }}
+      onClose={close}
       title={t('permits.nae.form.newNode')}
       size="lg"
     >
@@ -92,8 +96,15 @@ export function CreateNodeModal({
               setChosen(null);
               onCreated(id);
             }}
-            onCancel={onClose}
-            onOpenNode={onOpenNode}
+            onCancel={close}
+            onOpenNode={
+              onOpenNode === undefined
+                ? undefined
+                : (id) => {
+                    setChosen(null);
+                    onOpenNode(id);
+                  }
+            }
           />
         </>
       )}

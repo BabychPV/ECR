@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -299,6 +300,51 @@ describe('CreateNodeModal', () => {
     expect(Array.from(select.options).some((option) => option.value === 'REGION')).toBe(false);
   });
 
+  it('«Cancel» скидає вибраний тип: наступне відкриття - з типом, який пропонує батько (як X і Save)', async () => {
+    const user = userEvent.setup();
+    const draft = {
+      parent: { id: 2, label: 'Barge 7', parentId: 1, ordinal: 1, levelCode: 'SITE' },
+      level: { code: 'SRC', ordinal: 3, name: 'NAE', isOptional: false },
+    };
+    function Harness() {
+      const [open, setOpen] = useState(true);
+
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            reopen
+          </button>
+          <CreateNodeModal
+            registryCode="NAE_TREE"
+            registryId={9}
+            codeAutomatic
+            fields={fields as never}
+            draft={open ? draft : null}
+            onClose={() => setOpen(false)}
+            onCreated={vi.fn()}
+          />
+        </>
+      );
+    }
+    renderWithQuery(
+      <MemoryRouter>
+        <Harness />
+      </MemoryRouter>,
+    );
+
+    const select = (await screen.findByLabelText('permits.nae.form.nodeType')) as HTMLSelectElement;
+    await waitFor(() => expect(Array.from(select.options).map((option) => option.value)).toContain('SITE'));
+    await user.selectOptions(select, 'SITE');
+    expect(select.value).toBe('SITE');
+
+    await user.click(within(screen.getByRole('form')).getByRole('button', { name: 'common.cancel' }));
+    await waitFor(() => expect(screen.queryByLabelText('permits.nae.form.nodeType')).toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: 'reopen', hidden: true }));
+    const again = (await screen.findByLabelText('permits.nae.form.nodeType')) as HTMLSelectElement;
+    expect(again.value).toBe('SRC');
+  });
+
   it('порожні обов’язкові поля (назва, номер NAE) не йдуть на сервер', async () => {
     const user = userEvent.setup();
     renderWithQuery(
@@ -371,6 +417,54 @@ describe('NodeAttributesForm: відмова ділового ключа', () =>
     expect(message.closest('[data-error]')).not.toBeNull();
     await user.click(within(form).getByRole('button', { name: 'permits.nae.form.naeCodeTakenOpen' }));
     expect(onOpenNode).toHaveBeenCalledWith(501);
+  });
+
+  it('REGION: код регіону, чий каскад на джерела дав би дубль номера NAE, - відмова біля поля коду регіону', async () => {
+    const user = userEvent.setup();
+    const { EcrApiError } = await import('@/api/client');
+    // Поля після f395edaf3: RegionCode/AreaCode - усіх рівнів і не лише для читання; вводяться на REGION/AREA.
+    const regionFields = [
+      { id: 2, code: 'RegionCode', nameL10n: { values: { en: 'Region code' } }, dataType: 'String', isRequired: false, levelCode: null, isReadOnly: false },
+      { id: 3, code: 'AreaCode', nameL10n: { values: { en: 'Area code' } }, dataType: 'String', isRequired: false, levelCode: null, isReadOnly: false },
+    ];
+    vi.mocked(apiFetch).mockImplementation((path: string, init?: RequestInit) => {
+      if (path.endsWith('/languages')) return Promise.resolve([{ code: 'en', nameNative: 'English', isDefault: true }]);
+      if (init?.method === 'POST') {
+        return Promise.reject(
+          new EcrApiError({
+            status: 409,
+            title: 'taken',
+            extensions2: { messageKey: 'err.ECR-REG-4094.naeCodeTaken', naeCode: '0036_pod', regionCode: 'MANGISTAU', areaCode: 'ONSHORE', entryId: '601', entryCode: 'T-88' },
+          } as never),
+        );
+      }
+
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    renderWithQuery(
+      <MemoryRouter>
+        <NodeAttributesForm
+          registryCode="NAE_TREE"
+          registryId={9}
+          codeAutomatic
+          fields={regionFields as never}
+          target={{ mode: 'create', parent: null, level: { code: 'REGION', ordinal: 1, name: 'Region', isOptional: false } }}
+          readOnly={false}
+          onSaved={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    const form = await screen.findByRole('form');
+    await user.type(within(form).getByLabelText(/registries\.name/), 'Mangistau');
+    const region = within(form).getByLabelText(/Region code/);
+    await user.type(region, 'MANGISTAU');
+    await user.click(within(form).getByRole('button', { name: 'common.save' }));
+
+    const message = await within(form).findByText(/permits\.nae\.form\.naeCodeTaken \{/);
+    expect(message.textContent).toContain('"holder":"T-88"');
+    // Відмова - саме на полі коду регіону (його опис помилки), а не лише сповіщенням.
+    expect(region.getAttribute('aria-describedby') ?? '').toContain(message.closest('[id]')?.id ?? 'missing');
   });
 });
 

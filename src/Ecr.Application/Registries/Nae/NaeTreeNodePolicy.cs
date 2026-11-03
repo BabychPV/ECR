@@ -206,7 +206,11 @@ public sealed class NaeTreeNodePolicy(IRegistryStore registries, IRegistryHierar
     /// the same rule as the air scope-codes list, so a source and its region group never disagree.
     /// </summary>
     private async Task<(string Region, string Area)> ScopeCodesAsync(
-        RegistryDef definition, (long? Region, long? Area) scope, Tree tree, CancellationToken ct)
+        RegistryDef definition,
+        (long? Region, long? Area) scope,
+        Tree tree,
+        CancellationToken ct,
+        IReadOnlyDictionary<(long Entry, string Field), string>? overrides = null)
     {
         var ids = new List<long>();
         if (scope.Region is { } ri)
@@ -230,6 +234,12 @@ public sealed class NaeTreeNodePolicy(IRegistryStore registries, IRegistryHierar
                     stored[(v.RegistryEntryId, fieldCode)] = text;
                 }
             }
+        }
+
+        // A value about to be written to a REGION/AREA node (the cascade plan runs before the node itself is saved).
+        foreach (var (key, text) in overrides ?? new Dictionary<(long Entry, string Field), string>())
+        {
+            stored[key] = text;
         }
 
         string Stored(long? id, string field)
@@ -327,6 +337,151 @@ public sealed class NaeTreeNodePolicy(IRegistryStore registries, IRegistryHierar
                 ["entryId"] = holder.Id.ToString(CultureInfo.InvariantCulture),
                 ["entryCode"] = holder.Code,
             });
+    }
+
+    /// <summary>
+    /// Cascade (coordinator decision 03.11): an upsert that changes <c>RegionCode</c> of a REGION node (or <c>AreaCode</c> of an
+    /// AREA node) recomputes the stored region/area of EVERY NAE source below it (nearest-ancestor rule, so a nested REGION/AREA with
+    /// its own code shields its subtree). Called inside the write transaction, after the tree lock and BEFORE the node is saved:
+    /// the new number scopes are pre-checked (a duplicate rejects the whole upsert with <c>409 naeCodeTaken</c>, nothing is
+    /// changed), then the caller writes the returned updates through the registry writer (per-value audit event per source).
+    /// </summary>
+    /// <remarks>
+    /// A REGION code change also moves the derived AREA code of an AREA below it that has no stored <c>AreaCode</c> (the fallback
+    /// strips <c>A_&lt;REGION&gt;_</c>) — the same rule as the air scope-codes list, so a source and its groups never disagree.
+    /// </remarks>
+    /// <param name="definition">The NAE tree.</param>
+    /// <param name="node">The upserted node (persisted).</param>
+    /// <param name="level">Its level.</param>
+    /// <param name="values">Prepared values of the upsert (<see cref="PrepareAsync"/>).</param>
+    /// <param name="changes">Actual value changes the writer computed for the node (old vs new, before saving).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Updates of the sources whose stored region/area changes; empty — nothing to cascade.</returns>
+    /// <exception cref="BusinessRuleException"><c>409 ECR-REG-4094 naeCodeTaken</c>.</exception>
+    internal async Task<IReadOnlyList<RegistryEntryUpdate>> PlanScopeCascadeAsync(
+        RegistryDef definition, RegistryEntry node, RegistryLevelDef level,
+        IReadOnlyDictionary<string, object?> values,
+        IReadOnlyList<RegistryValueFieldChange> changes,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(node);
+        ArgumentNullException.ThrowIfNull(level);
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(changes);
+
+        var ownField = level.Code.Equals(NaeTreeSchema.LevelRegion, StringComparison.OrdinalIgnoreCase) ? NaeTreeSchema.RegionField
+            : level.Code.Equals(NaeTreeSchema.LevelArea, StringComparison.OrdinalIgnoreCase) ? NaeTreeSchema.AreaField
+            : null;
+        if (ownField is null
+            || !node.IsPersisted
+            || !values.TryGetValue(ownField, out var rawNew)
+            || CellValueReader.Normalize(rawNew) as string is not { Length: > 0 } newText
+            || !changes.Any(c => string.Equals(c.FieldCode, ownField, StringComparison.OrdinalIgnoreCase)))
+        {
+            // No actual change of the node's own code (the writer already compared old and new): nothing to cascade.
+            return [];
+        }
+
+        var tree = await TreeAsync(definition.Id, ct).ConfigureAwait(false);
+        var children = tree.Nodes.Values.Where(n => n.ParentEntryId != null).ToLookup(n => n.ParentEntryId!.Value);
+        var subtree = new List<RegistryEntry> { tree.Nodes.TryGetValue(node.Id, out var live) ? live : node };
+        for (var i = 0; i < subtree.Count && i < 100_000; i++)
+        {
+            subtree.AddRange(children[subtree[i].Id]);
+        }
+
+        var below = subtree.Where(n => n.LevelId == tree.SourceLevelId).ToList();
+        if (below.Count == 0)
+        {
+            return [];
+        }
+
+        var fieldById = definition.Fields.ToDictionary(f => f.Id, f => f.Code);
+        var sources = tree.Nodes.Values.Where(n => n.LevelId == tree.SourceLevelId).ToDictionary(n => n.Id);
+        var stored = (await registries.ListValuesForEntriesAsync([.. sources.Keys], ct).ConfigureAwait(false))
+            .Where(v => fieldById.ContainsKey(v.RegistryFieldDefId))
+            .GroupBy(v => v.RegistryEntryId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.ToDictionary(v => fieldById[v.RegistryFieldDefId], v => v.ValueString ?? "", StringComparer.OrdinalIgnoreCase));
+
+        string Stored(long id, string field)
+            => stored.TryGetValue(id, out var byField) && byField.TryGetValue(field, out var s) ? s.Trim() : "";
+
+        var overrides = new Dictionary<(long Entry, string Field), string> { [(node.Id, ownField)] = newText };
+        var byScope = new Dictionary<(long? Region, long? Area), (string Region, string Area)>();
+        var newScope = new Dictionary<long, (string Region, string Area)>();
+        foreach (var source in below)
+        {
+            var scope = ScopeOf(source.Id, tree);
+            if (!byScope.TryGetValue(scope, out var codes))
+            {
+                codes = await ScopeCodesAsync(definition, scope, tree, ct, overrides).ConfigureAwait(false);
+                byScope[scope] = codes;
+            }
+
+            if (!string.Equals(Stored(source.Id, NaeTreeSchema.RegionField), codes.Region, StringComparison.Ordinal)
+                || !string.Equals(Stored(source.Id, NaeTreeSchema.AreaField), codes.Area, StringComparison.Ordinal))
+            {
+                newScope[source.Id] = codes;
+            }
+        }
+
+        if (newScope.Count == 0)
+        {
+            return [];
+        }
+
+        // Pre-check: the number stays unique within (region code, area code) under the NEW codes — among the moved sources and
+        // against every other live source of the target scopes. Same liveness rule as EnsureCodeFreeAsync.
+        var today = DateOnly.FromDateTime(clock.UtcNow);
+        var holders = sources.Values
+            .Where(n => n.IsActive && (n.ValidTo is not { } to || to > today) && Stored(n.Id, NaeTreeSchema.NaeCodeField).Length > 0)
+            .Select(n =>
+            {
+                var (region, area) = newScope.TryGetValue(n.Id, out var moved)
+                    ? moved
+                    : (Stored(n.Id, NaeTreeSchema.RegionField), Stored(n.Id, NaeTreeSchema.AreaField));
+                return (Entry: n, Code: Stored(n.Id, NaeTreeSchema.NaeCodeField), Region: region, Area: area);
+            })
+            .ToList();
+        foreach (var group in holders.GroupBy(h => (h.Code.ToUpperInvariant(), h.Region.ToUpperInvariant(), h.Area.ToUpperInvariant())))
+        {
+            var members = group.OrderBy(h => h.Entry.Id).ToList();
+            if (members.Count < 2 || !members.Any(h => newScope.ContainsKey(h.Entry.Id)))
+            {
+                continue;
+            }
+
+            // The holder reported is one that is NOT being moved when there is one (the one already sitting in the target scope).
+            var holder = members.FirstOrDefault(h => !newScope.ContainsKey(h.Entry.Id)) is { Entry: not null } fixedOne
+                ? fixedOne
+                : members[0];
+            throw new BusinessRuleException(
+                ErrorCodes.NaeCodeTaken,
+                $"NAE {holder.Code} would be used twice in {holder.Region}/{holder.Area}: entry {holder.Entry.Code} already holds it.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = CodeTakenKey,
+                    ["naeCode"] = holder.Code,
+                    ["regionCode"] = holder.Region,
+                    ["areaCode"] = holder.Area,
+                    ["entryId"] = holder.Entry.Id.ToString(CultureInfo.InvariantCulture),
+                    ["entryCode"] = holder.Entry.Code,
+                });
+        }
+
+        return
+        [
+            .. newScope.Select(kv => new RegistryEntryUpdate(
+                kv.Key,
+                new Dictionary<string, object?>
+                {
+                    [NaeTreeSchema.RegionField] = kv.Value.Region,
+                    [NaeTreeSchema.AreaField] = kv.Value.Area,
+                })),
+        ];
     }
 
     /// <summary>
