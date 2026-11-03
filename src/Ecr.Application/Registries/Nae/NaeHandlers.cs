@@ -24,8 +24,15 @@ public sealed class NaeTreeProvisioner(
     CreateRegistryHandler create,
     SaveRegistryDefinitionHandler saveDefinition,
     Hierarchy.SaveRegistryHierarchyHandler saveHierarchy,
-    IUnitOfWork uow)
+    IUnitOfWork uow,
+    IClock clock,
+    IAuditWriter audit,
+    IRegistryKeyStore keys,
+    ICurrentUser currentUser)
 {
+    /// <summary>Operation of the one-time upgrade row in <c>aud.StructureChange</c>.</summary>
+    internal const string UpgradeOperation = "UpgradeNodeTypes";
+
     internal const string IncompatibleKey = "err.ECR-REG-0422.naeTreeIncompatible";
 
     private static readonly (string Code, string En, string Ru, bool IsKey)[] Fields =
@@ -103,6 +110,8 @@ public sealed class NaeTreeProvisioner(
         ArgumentNullException.ThrowIfNull(system);
         if (await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false) is not null)
         {
+            // NAE node types (human 03.11): an existing tree from before the node types is upgraded once, idempotently.
+            await uow.ExecuteInTransactionAsync(token => UpgradeNodeTypesAsync(code, system.AuditUserId, token), ct).ConfigureAwait(false);
             return false;
         }
 
@@ -137,8 +146,26 @@ public sealed class NaeTreeProvisioner(
             _ = await create.ApplyAsync(code, registryName, isTemporal: true, system.Profile, ct).ConfigureAwait(false);
         }
 
+        // Levels first (NAE node types, 03.11): the fields are bound to them in the same definition save below.
+        var hierarchyRequest = new Hierarchy.SaveRegistryHierarchyRequest(
+            true,
+            [.. Levels.Select(l => new Hierarchy.RegistryLevelInput(
+                l.Code, Name(l.En, l.Ru), l.Optional, l.Code == NaeTreeSchema.SelfNestingLevel))]);
+        if (system is null)
+        {
+            await saveHierarchy.HandleAsync(code, hierarchyRequest, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            var tracked = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
+                          ?? throw new InvalidOperationException($"Registry {code} vanished after creation.");
+            _ = await saveHierarchy.SaveForAuthorAsync(tracked, hierarchyRequest, system.AuditUserId, ct).ConfigureAwait(false);
+        }
+
+        // NaeCode is required on SRC only (Q3): the field is bound to SRC, so the requirement does not reach the group nodes.
         var fields = Fields.Select((f, i) => new RegistryFieldSaveDto(
-            null, f.Code, Name(f.En, f.Ru), "String", i + 1, false, f.IsKey, null, null)).ToList();
+            null, f.Code, Name(f.En, f.Ru), "String", i + 1, f.Code == NaeTreeSchema.NaeCodeField, f.IsKey, null, null,
+            LevelCode: NaeTreeSchema.LevelByField[f.Code] ?? "")).ToList();
         var keys = new List<RegistryKeySaveDto>
         {
             new(
@@ -161,21 +188,96 @@ public sealed class NaeTreeProvisioner(
             _ = await saveDefinition.SaveForAuthorAsync(code, definitionDto, system.AuditUserId, system.Profile, version, ct).ConfigureAwait(false);
         }
 
-        var hierarchyRequest = new Hierarchy.SaveRegistryHierarchyRequest(
-            true, [.. Levels.Select(l => new Hierarchy.RegistryLevelInput(l.Code, Name(l.En, l.Ru), l.Optional))]);
-        if (system is null)
-        {
-            await saveHierarchy.HandleAsync(code, hierarchyRequest, ct).ConfigureAwait(false);
-        }
-        else
-        {
-            var tracked = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
-                          ?? throw new InvalidOperationException($"Registry {code} vanished after creation.");
-            _ = await saveHierarchy.SaveForAuthorAsync(tracked, hierarchyRequest, system.AuditUserId, ct).ConfigureAwait(false);
-        }
-
         return await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
                ?? throw new InvalidOperationException($"Registry {code} vanished after creation.");
+    }
+
+    /// <summary>
+    /// NAE node types (human 03.11): a tree provisioned before them gets the field bindings (<see cref="NaeTreeSchema.LevelByField"/>),
+    /// <c>NaeCode</c> required (on SRC only) and SITE self-nesting — once. A tree where any NAE field is already bound or any level
+    /// already nests is left alone (upgraded before, or configured by an administrator), so a second start changes nothing.
+    /// </summary>
+    /// <param name="code">Registry code.</param>
+    /// <param name="userId">Author recorded on the definition (0 — system).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Whether anything changed.</returns>
+    internal async Task<bool> UpgradeNodeTypesAsync(string code, int userId, CancellationToken ct)
+    {
+        var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false);
+        if (definition is null || !NaeTreeNodePolicy.IsNaeTree(definition))
+        {
+            return false;
+        }
+
+        var levels = (await hierarchy.ListLevelsAsync(definition.Id, ct).ConfigureAwait(false))
+            .ToDictionary(l => l.Code, StringComparer.OrdinalIgnoreCase);
+        var naeFields = definition.Fields.Where(f => NaeTreeSchema.LevelByField.ContainsKey(f.Code)).ToList();
+        var alreadyUpgraded = naeFields.Any(f => f.LevelId is not null) || levels.Values.Any(l => l.AllowsSelfNesting);
+
+        // Correction (decision 03.11, «Аналіз»): a tree upgraded by the first node-types build has RegionCode/AreaCode bound to SRC;
+        // they are unbound now (own identity of REGION/AREA nodes). Only a binding to SRC is touched — an administrator's own is not.
+        var misbound = levels.TryGetValue(NaeTreeSchema.LevelSource, out var sourceLevel)
+            ? naeFields.Where(f => NaeTreeSchema.LevelByField[f.Code] is null
+                                   && NaeTreeSchema.OwnLevelOfScopeField(f.Code) is not null
+                                   && f.LevelId == sourceLevel.Id).ToList()
+            : [];
+        if (alreadyUpgraded && misbound.Count == 0)
+        {
+            return false;
+        }
+
+        // Audit (follow-up 03.11): same snapshot helper as SaveDefinition; «before» is taken ahead of the changes below, «after» from
+        // memory; the row is written in the caller's transaction, so it lands (or rolls back) together with the upgrade.
+        var rules = await registries.ListRulesAsync(definition.Id, ct).ConfigureAwait(false);
+        var existingKeys = await keys.ListKeysForUpdateAsync(definition.Id, ct).ConfigureAwait(false);
+        var before = SaveRegistryDefinitionHandler.AuditSnapshot(definition, rules, existingKeys);
+
+        foreach (var field in misbound)
+        {
+            field.BindToLevel(null);
+        }
+
+        if (!alreadyUpgraded)
+        {
+            foreach (var field in naeFields)
+            {
+                if (NaeTreeSchema.LevelByField[field.Code] is { } levelCode && levels.TryGetValue(levelCode, out var level))
+                {
+                    field.BindToLevel(level.Id);
+                    if (string.Equals(field.Code, NaeTreeSchema.NaeCodeField, StringComparison.OrdinalIgnoreCase))
+                    {
+                        field.Update(field.NameL10n, field.Ordinal, isRequired: true);
+                    }
+                }
+            }
+
+            if (levels.TryGetValue(NaeTreeSchema.SelfNestingLevel, out var site))
+            {
+                site.AllowSelfNesting(true);
+            }
+        }
+
+        definition.BumpDefinitionVersion();
+        definition.MarkDefinitionUpdated(userId, clock.UtcNow);
+
+        await audit.WriteStructureChangeAsync(
+            new StructureChangeRecord(
+                ChangedAt: clock.UtcNow,
+                TemplateVersionId: 0,
+                EntityType: "cfg.RegistryDef",
+                EntityId: definition.Id,
+                ChangeClass: ChangeClass.Guarded,
+                Operation: UpgradeOperation,
+                OldJson: before,
+                NewJson: SaveRegistryDefinitionHandler.AuditSnapshot(definition, rules, existingKeys),
+                ChangeReason: alreadyUpgraded
+                    ? "NAE node types: RegionCode/AreaCode unbound from SRC on start"
+                    : "NAE node types: one-time upgrade on start",
+                ChangedByUserId: userId,
+                CorrelationId: currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        return true;
     }
 
     private static LocalizedText Name(string en, string ru)

@@ -116,6 +116,26 @@ export function isComplete(draft: RuleDraft): boolean {
 
 export type LinkEdits = Readonly<Record<number, number | null>>;
 
+/** Правки рівня наявних полів: код рівня; `''` - поле всіх рівнів (`RegistryFieldSaveDto.levelCode`). */
+export type LevelEdits = Readonly<Record<number, string>>;
+
+/**
+ * Правки рівня наявних полів, які відрізняються від опублікованого опису (відновлення з чернетки).
+ * ⚠ `levelCode: null` у чернетці - «без змін», правкою не є.
+ */
+export function draftLevelEdits(
+  fields: readonly { readonly id: number | null; readonly levelCode?: string | null | undefined }[],
+  definition: RegistryDefinitionDto,
+): LevelEdits {
+  const edits: Record<number, string> = {};
+  for (const field of fields) {
+    if (field.id === null || field.levelCode === undefined || field.levelCode === null) continue;
+    const current = definition.fields.find((f) => f.id === field.id)?.levelCode ?? '';
+    if (current !== field.levelCode) edits[field.id] = field.levelCode;
+  }
+  return edits;
+}
+
 /**
  * Правки зв'язків наявних полів, які відрізняються від опублікованого опису (відновлення з чернетки).
  *
@@ -163,6 +183,7 @@ export function buildSaveRequest(
   reason: string,
   language: string,
   linkEdits: LinkEdits = {},
+  levelEdits: LevelEdits = {},
 ): SaveRegistryDefinitionDto {
   const existingFields: RegistryFieldSaveDto[] = definition.fields.map((field, index) => ({
     id: field.id,
@@ -179,6 +200,8 @@ export function buildSaveRequest(
     // ФВ-8.12: ціль посилання наявного поля — зі списку правок вкладки «Зв'язки» (`null` — зняти).
     lookupRegistryDefId: field.id in linkEdits ? (linkEdits[field.id] ?? null) : field.lookupRegistryDefId,
     unitId: field.unitId,
+    // Типи вузлів: рівень наявного поля міняється лише явною правкою; `null` - без змін (старий клієнт прив'язку не знімає).
+    ...(field.id in levelEdits ? { levelCode: levelEdits[field.id] ?? null } : {}),
   }));
 
   const addedFields: RegistryFieldSaveDto[] = newFields.map((draft, index) => ({
@@ -195,6 +218,8 @@ export function buildSaveRequest(
     isKey: draft.isKey,
     lookupRegistryDefId: draft.dataType === 'Lookup' ? draft.lookupRegistryDefId : null,
     unitId: NumericFieldTypes.includes(draft.dataType) ? draft.unitId : null,
+    // Нове поле без вибраного рівня - поле всіх рівнів (`null`).
+    ...(draft.levelCode === '' ? {} : { levelCode: draft.levelCode }),
     // ФВ-8.16: композиція (`relationKind`, `onParentDelete`; поле композиції обов'язкове).
     ...compositionSave(draft),
   }));
@@ -255,6 +280,8 @@ export interface FieldDraft extends CompositionDraft {
   readonly isKey: boolean;
   readonly lookupRegistryDefId: number | null;
   readonly unitId: number | null;
+  /** Рівень ієрархічного довідника, якому належить поле (`''` - усі рівні). */
+  readonly levelCode: string;
 }
 
 /** Порожнє нове поле для форми «додати». */
@@ -267,6 +294,7 @@ export function emptyField(dataType: FieldDataType = 'String'): FieldDraft {
     isKey: false,
     lookupRegistryDefId: null,
     unitId: null,
+    levelCode: '',
   };
 }
 

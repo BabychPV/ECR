@@ -20,6 +20,7 @@ import {
   Severities,
   isComplete,
   isFieldComplete,
+  type LevelEdits,
   type LinkEdits,
   type FieldDraft,
   type RuleDraft,
@@ -60,6 +61,9 @@ export function RegistryFields({
   registryOptions,
   unitOptions = [],
   entryCount = null,
+  levelOptions = [],
+  levelEdits = {},
+  onChangeLevel,
   onAddField,
   onChangeField,
   onRemoveField,
@@ -81,12 +85,18 @@ export function RegistryFields({
    * `null`/невідомо — ні (сервер відхиляє обов'язкове нове поле, коли записи є).
    */
   readonly entryCount?: number | null;
+  /** Рівні ієрархічного довідника (код і назва); порожньо - довідник плаский: колонки й вибору рівня немає. */
+  readonly levelOptions?: readonly { value: string; label: string }[];
+  /** Правки рівня наявних полів, ще не збережені. */
+  readonly levelEdits?: LevelEdits;
+  readonly onChangeLevel?: (fieldId: number, levelCode: string) => void;
   readonly onAddField: () => void;
   readonly onChangeField: (index: number, field: FieldDraft) => void;
   readonly onRemoveField: (index: number) => void;
 }): JSX.Element {
   const focus = useListFocus(newFields.length);
   const mayBeRequired = entryCount === 0;
+  const hasLevels = levelOptions.length > 0;
 
   // ⚠ Ціль посилання й одиниця показуються назвою, а не числовим ідентифікатором: число нічого не
   // каже тому, хто не тримає в голові таблицю довідників. Перелік ще їде — лишається число.
@@ -135,6 +145,7 @@ export function RegistryFields({
             <Table.Th>{t('registries.keyField')}</Table.Th>
             <Table.Th>{t('registries.lookup')}</Table.Th>
             <Table.Th>{t('registries.unit')}</Table.Th>
+            {hasLevels && <Table.Th>{t('registries.fieldForm.level')}</Table.Th>}
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -142,7 +153,7 @@ export function RegistryFields({
               що читаються як «ще вантажиться». */}
           {definition.fields.length === 0 && newFields.length === 0 && (
             <Table.Tr data-registry-fields-empty="">
-              <Table.Td colSpan={7}>
+              <Table.Td colSpan={hasLevels ? 8 : 7}>
                 <Text size="sm" c="dimmed">
                   {t('registries.noFields')}
                 </Text>
@@ -158,6 +169,21 @@ export function RegistryFields({
               <Table.Td>{field.isScopeField ? t('registries.yes') : '—'}</Table.Td>
               <Table.Td>{nameOf(registryOptions, field.lookupRegistryDefId)}</Table.Td>
               <Table.Td>{nameOf(unitOptions, field.unitId)}</Table.Td>
+              {hasLevels && (
+                <Table.Td>
+                  {canEdit && onChangeLevel !== undefined ? (
+                    <NativeSelect
+                      size="xs"
+                      aria-label={t('registries.fieldLevelFor', { field: field.code })}
+                      value={field.id in levelEdits ? (levelEdits[field.id] ?? '') : (field.levelCode ?? '')}
+                      data={[{ value: '', label: t('registries.fieldForm.levelAll') }, ...levelOptions]}
+                      onChange={(event) => onChangeLevel(field.id, event.currentTarget.value)}
+                    />
+                  ) : (
+                    (levelOptions.find((option) => option.value === field.levelCode)?.label ?? t('registries.fieldForm.levelAll'))
+                  )}
+                </Table.Td>
+              )}
             </Table.Tr>
           ))}
         </Table.Tbody>
@@ -176,6 +202,7 @@ export function RegistryFields({
           mayBeRequired={mayBeRequired}
           registryOptions={registryOptions}
           unitOptions={unitOptions}
+          levelOptions={levelOptions}
           onChange={(field) => onChangeField(index, field)}
           onRemove={() => {
             focus.removed();

@@ -39,6 +39,8 @@ export interface TreeLevel {
   readonly name: string;
   /** Вузол може пропустити цей рівень. */
   readonly isOptional: boolean;
+  /** Вузол цього рівня може стояти прямо під вузлом того самого рівня (НАЕ: майданчик у майданчику). */
+  readonly allowsSelfNesting?: boolean | undefined;
 }
 
 /** Рядок видимого (розгорнутого) дерева. */
@@ -209,6 +211,7 @@ export function canPlace(
 
   const parent = parentLevel === null || parentLevel === undefined ? 0 : ordinalOf(levels, parentLevel);
   if (parent === null) return true;
+  if (parent === node && node > 0 && levels.find((level) => level.code === nodeLevel)?.allowsSelfNesting === true) return true;
   if (parent >= node) return false;
 
   return levels.filter((level) => level.ordinal > parent && level.ordinal < node).every((level) => level.isOptional);
@@ -225,6 +228,10 @@ export function childLevelsFor(levels: readonly TreeLevel[], parentLevel: string
     out.push(level);
     if (!level.isOptional) break;
   }
+
+  // Вкладення рівня в себе - останнім у переліку: головна («наступна») дія лишається першою.
+  const own = levels.find((level) => level.ordinal === parent);
+  if (own !== undefined && own.allowsSelfNesting === true) out.push(own);
 
   return out;
 }

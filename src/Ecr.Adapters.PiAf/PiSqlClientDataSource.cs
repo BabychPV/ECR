@@ -955,7 +955,7 @@ public sealed partial class PiSqlClientDataSource(
 
     /// <summary>
     /// Елементи з результату <see cref="ElementListQueryKey"/>: <c>ElementId</c>, <c>ElementName</c>,
-    /// необов'язкова <c>ElementPath</c>; адреса читання — ім'я.
+    /// необов'язкові <c>ElementPath</c> і <c>TemplateName</c> (шаблон AF, дерево НАЕ); адреса читання — ім'я.
     /// </summary>
     /// <remarks>Публічний для тестів: <c>OdbcDataReader</c> ззовні не зробиш.</remarks>
     /// <param name="reader">Відкритий результат запиту.</param>
@@ -984,7 +984,7 @@ public sealed partial class PiSqlClientDataSource(
                 continue;
             }
 
-            elements.Add(new SourceElement(id, name, Column(row, "ElementPath") as string, name));
+            elements.Add(new SourceElement(id, name, Column(row, "ElementPath") as string, name, Column(row, "TemplateName") as string));
         }
 
         return new SourceElementsResult(elements, complete && rows < ceiling);

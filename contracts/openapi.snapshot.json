@@ -18041,6 +18041,13 @@
             "format": "int32",
             "type": "integer"
           },
+          "isReadOnly": {
+            "description": "Значення веде сервер, а не користувач (НАЕ: `RegionCode`/`AreaCode` виводяться з предків, `AfPath` пише\nзавантаження з AF); введене в запиті ігнорується. `null` — відповідь, що ознаки не рахує (не опис довідника); опис дає її завжди.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "isRequired": {
             "description": "Обов'язковість.",
             "type": "boolean"
@@ -18048,6 +18055,21 @@
           "isScopeField": {
             "description": "Чи можна звужувати доступ за цим полем. Саме ці поля бере\n`RoleAssignment.ScopeJson`; решта для звуження недоступна.",
             "type": "boolean"
+          },
+          "levelCode": {
+            "description": "Код того самого рівня; `null` — поле всіх рівнів (або читач без рівнів).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "levelId": {
+            "description": "Рівень ієрархічного довідника, якому належить поле (типи вузлів НАЕ, 03.11): форма вузла показує лише поля свого рівня і\nполя всіх рівнів; `null` — поле всіх рівнів.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "lookupRegistryDefId": {
             "description": "Довідник-джерело для полів-посилань.",
@@ -18108,6 +18130,13 @@
           "isRequired": {
             "description": "Обов'язковість.",
             "type": "boolean"
+          },
+          "levelCode": {
+            "description": "Рівень ієрархічного довідника, якому належить поле (типи вузлів НАЕ, 03.11): код рівня — прив'язати; порожній рядок —\nполе всіх рівнів; `null` — без змін (клієнт, що про рівні не знає, прив'язку не знімає; нове поле — усі рівні).\nОбов'язковість прив'язаного поля діє лише для записів його рівня.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "lookupRegistryDefId": {
             "description": "Довідник-джерело; у наявного змінюється чи знімається (`null`), лише поки жодне значення поля не вказує на запис (ФВ-8.12).",
@@ -18636,6 +18665,13 @@
       "RegistryLevelDto": {
         "description": "One declared level of a hierarchical registry (NAE plan N1).",
         "properties": {
+          "allowsSelfNesting": {
+            "description": "A node of this level may sit under a node of the same level (NAE: a site inside a site); the server always fills it (nullable only to keep older clients' fixtures valid).",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "code": {
             "description": "Level code, unique within the registry.",
             "type": "string"
@@ -18677,6 +18713,13 @@
       "RegistryLevelInput": {
         "description": "Level in a save request; its position in the list is its ordinal.",
         "properties": {
+          "allowsSelfNesting": {
+            "description": "A node of this level may sit under a node of the same level; `null` — unchanged for an existing level, `false` for\na new one (a client that does not know the flag does not switch it off).",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "code": {
             "description": "Level code (EcrCode); an existing code keeps the level id.",
             "type": "string"

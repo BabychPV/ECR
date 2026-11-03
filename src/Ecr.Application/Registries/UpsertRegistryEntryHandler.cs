@@ -28,8 +28,11 @@ public sealed class UpsertRegistryEntryHandler(
     RegistryEntryWriter writer,
     IUnitOfWork? uow = null,
     Rules.IRegistryRuleEngine? rules = null,
-    IRegistryHierarchyStore? hierarchy = null)
+    IRegistryHierarchyStore? hierarchy = null,
+    Nae.NaeTreeNodePolicy? nae = null)
 {
+    // ⚠ `nae` (типи вузлів НАЕ, людина 03.11) — правила дерева НАЕ: назва en, похідні RegionCode/AreaCode, унікальність номера
+    // в області. Контейнер підставляє його завжди; без нього (ручні тести) дерево НАЕ пишеться як звичайний довідник.
     // ⚠ `uow` і `rules` необов'язкові лише для тестів, що будують обробник руками (довідники без
     // правил) — той самий прийом, що `keys` у RegistryEntryWriter. Контейнер підставляє обидва
     // завжди; що правила на справжньому шляху виконуються, тримає `RegistryRulesHttpTests`.
@@ -165,9 +168,27 @@ public sealed class UpsertRegistryEntryHandler(
         // свідомо прибирається (так клієнт каже «цей переклад видалено»).
         entry.Rename(dto.Id is null ? WithoutEmpty(dto.Display) : Merge(entry.DisplayL10n, dto.Display));
         (IReadOnlyList<RegistryLevelDef> Levels, RegistryLevelDef Level)? placement = null;
+        var naeTree = nae is not null && Nae.NaeTreeNodePolicy.IsNaeTree(definition);
         if (definition.IsHierarchical)
         {
+            if (naeTree && entry.IsPersisted)
+            {
+                // A changed parent moves the subtree: the region/area of its NAE sources must not change (before SetParent).
+                await nae!.EnsureMoveKeepsScopeAsync(definition, entry.Id, dto.ParentEntryId, ct).ConfigureAwait(false);
+            }
+
+            var oldLevelId = entry.LevelId;
             placement = await ApplyHierarchyAsync(definition, entry, dto, ct).ConfigureAwait(false);
+            if (naeTree)
+            {
+                // Out of SRC — refused; INTO SRC — the usual SRC rules below (number required and free, derived region/area).
+                if (entry.IsPersisted)
+                {
+                    Nae.NaeTreeNodePolicy.EnsureNotLeavingSource(placement.Value.Levels, oldLevelId, placement.Value.Level, entry.Code);
+                }
+
+                values = await nae!.PrepareAsync(definition, entry, placement.Value.Level, dto.ParentEntryId, values, ct).ConfigureAwait(false);
+            }
         }
         else
         {
@@ -204,6 +225,13 @@ public sealed class UpsertRegistryEntryHandler(
                     await Hierarchy.RegistryHierarchyPlacement.EnsureAsync(
                         hierarchy, definition.Id, p.Levels, entry.IsPersisted ? entry.Id : null, dto.ParentEntryId, p.Level, token)
                         .ConfigureAwait(false);
+
+                    // NAE Q3 (03.11): the number is free in its region/area — under the same tree lock, so two concurrent
+                    // creates of one number cannot both pass.
+                    if (naeTree)
+                    {
+                        await nae!.EnsureCodeFreeAsync(definition, entry, p.Level, dto.ParentEntryId, values, token).ConfigureAwait(false);
+                    }
                 }
 
                 await writer.SaveEntryAsync(definition, entry, changes, userId, token).ConfigureAwait(false);

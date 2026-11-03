@@ -144,21 +144,6 @@ test.describe('Структура NAE: дерево, дії, права, які�
         unitId: null,
         ...over,
       });
-      const saved = await admin.request.put(`/api/v1/registries/${registry}/definition`, {
-        headers: { 'If-Match': `"${String(definition.definitionVersion)}"` },
-        data: {
-          fields: [
-            field('NaeCode', 1, { isRequired: true, isKey: true }),
-            field('RegionCode', 2, { isRequired: true }),
-            field('AreaCode', 3, { isRequired: true }),
-            field('PointName', 4, {}),
-          ],
-          rules: [],
-          reason: 'e2e: naeStructure - поля структури',
-        },
-      });
-      expect(saved.status(), `поля: ${await saved.text()}`).toBe(200);
-
       // Усі три нові рівні одним PUT (на 4af0a0112 це давало 500; виправлено в integ-nae-a2) - заодно сторож цього.
       const wanted = [
         { code: 'REGION', isOptional: false, name: { values: { en: 'Region' } } },
@@ -169,6 +154,24 @@ test.describe('Структура NAE: дерево, дії, права, які�
         data: { isHierarchical: true, levels: wanted },
       });
       expect(levels.status(), `рівні: ${await levels.text()}`).toBe(200);
+
+      // Рівні задані ДО полів (поле прив'язується до рівня); версію опису читаємо знову: збереження рівнів її може піднімати.
+      const current = (await (await admin.request.get(`/api/v1/registries/${registry}/definition`)).json()) as { definitionVersion: number };
+      const saved = await admin.request.put(`/api/v1/registries/${registry}/definition`, {
+        headers: { 'If-Match': `"${String(current.definitionVersion)}"` },
+        data: {
+          fields: [
+            // Типи вузлів (03.11): номер NAE - лише на SRC; регіон і район сервер виводить з предків.
+            field('NaeCode', 1, { isRequired: true, isKey: true, levelCode: 'SRC' }),
+            field('RegionCode', 2, { levelCode: 'SRC' }),
+            field('AreaCode', 3, { levelCode: 'SRC' }),
+            field('PointName', 4, { levelCode: 'SRC' }),
+          ],
+          rules: [],
+          reason: 'e2e: naeStructure - поля структури',
+        },
+      });
+      expect(saved.status(), `поля: ${await saved.text()}`).toBe(200);
 
       const auto = definition.codeMode === 'Auto';
       let counter = 0;
@@ -182,7 +185,7 @@ test.describe('Структура NAE: дерево, дії, права, які�
             display: { values: { en: name } },
             parentEntryId: parent,
             levelCode: level,
-            values: { NaeCode: naeCode, RegionCode: 'ATYRAU', AreaCode: '-' },
+            values: level === 'SRC' ? { NaeCode: naeCode } : {},
           },
         });
         expect(response.status(), `вузол ${name}: ${await response.text()}`).toBe(201);
@@ -293,7 +296,9 @@ test.describe('Структура NAE: дерево, дії, права, які�
     const form = page.getByRole('form', { name: 'Node attributes' });
     await expect(form).toBeVisible({ timeout: 30_000 });
     await expect(form.getByLabel(/^NaeCode/)).toHaveValue('1085');
-    await expect(form.getByLabel(/^RegionCode/)).toHaveValue('ATYRAU');
+    // Регіон і район веде сервер: це текст, а не поле вводу.
+    await expect(form.getByLabel(/^RegionCode/)).toHaveCount(0);
+    await expect(form.locator('[data-nae-derived-field="RegionCode"]')).toBeVisible();
     await expect(page.getByTestId('tree-panel')).toContainText(Names.siteA);
   });
 
@@ -382,8 +387,7 @@ test.describe('Структура NAE: дерево, дії, права, які�
       else await codeField.fill(`E2E_${nae}_${name.replace(/\s/g, '')}`);
       await dialog.getByLabel(/^Name · English/).fill(name);
       await dialog.getByLabel(/^NaeCode/).fill(nae);
-      // Регіон успадковано від батька (підказка), район порожній -> «-».
-      await expect(dialog.getByLabel(/^RegionCode/)).toHaveValue('ATYRAU');
+      await expect(dialog.getByLabel(/^RegionCode/)).toHaveCount(0);
 
       return dialog;
     };
@@ -396,32 +400,14 @@ test.describe('Структура NAE: дерево, дії, права, які�
     expect(created!.levelCode).toBe('SRC');
     expect(created!.parentEntryId).toBe(data.siteB);
 
-    // Відмова ділового ключа (409 ECR-REG-4092) - ПІДМІНЕНА відповідь сервера (page.route), а не справжня: довідник цього
-    // спеку має простий ключ по NaeCode без складеного ключа NAE_TREE, і сервер приймає дубль (201) - див. звіт. Доводиться
-    // саме клієнтське оброблення тіла відмови: форма лишається відкритою й називає тримача ключа.
-    await page.route('**/api/v1/registries/*/entries', async (route) => {
-      if (route.request().method() !== 'POST') return route.fallback();
-
-      return route.fulfill({
-        status: 409,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          type: 'https://ecr.ncoc.kz/errors/ECR-REG-4092',
-          title: 'Key window overlap',
-          status: 409,
-          errorCode: 'ECR-REG-4092',
-          messageKey: 'err.ECR-REG-4092.keyWindowOverlap',
-          entryCode: 'HOLDER_1',
-        }),
-      });
-    });
     // Після створення вибрано НОВИЙ вузол (лист, «Add child» нема): повертаємось на майданчик.
     await page.goto(url(data.registry, data.siteB));
     await expect(page.getByTestId('tree-panel')).toContainText(Names.siteB, { timeout: 30_000 });
     await expect(page.getByRole('button', { name: 'Add child' }).first()).toBeEnabled();
     const again = await fill('Pipe Dup', '1090');
     await again.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect(again.locator('[data-nae-key-error]')).toContainText('HOLDER_1', { timeout: 15_000 });
+    // Справжня відмова сервера (409 ECR-REG-4094): номер уже є в цій області - текст стоїть на полі номера.
+    await expect(again.locator('[data-nae-code-taken]')).toContainText('1090', { timeout: 15_000 });
     await expect(again).toBeVisible();
     expect((await readTree(page.request, data.registry)).filter((n) => n.display === 'Pipe Dup')).toHaveLength(0);
   });

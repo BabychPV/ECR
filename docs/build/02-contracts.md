@@ -4201,6 +4201,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-TMPL-4091` | 409 | відв'язка (`PUT …/bindings/…`, `isActive=false`) забрала б у колонки типу `Formula` опублікованої (`Published`/`Deprecated`) версії шаблону останнє джерело — ні формули шаблону, ні іншої активної прив'язки (HSE301 C5b, `D-215`, `lastSourceOfPublishedColumn`); джерела рахуються ПІСЛЯ зміни під блоком версії, тож заміна «прив'язати нове → відв'язати старе» проходить. Константа — `ErrorCodes.LastSourceOfPublishedColumn` |
 | `ECR-EXPR-0422` | 422 | дерево виразу надто глибоке для обходу на стеку потоку (L7-01): сторож стека рекурсивного обходу (`RuntimeHelpers.EnsureSufficientExecutionStack`, `TraversalStackGuard`) кинув `InsufficientExecutionStackException` замість переповнення стека, що валить процес; `messageKey` = `expr.tooComplex` («розбийте на кілька формул»). Фонова задача з цією причиною **не повторюється** (`JobRetryPolicy`) і падає один раз із цим кодом. Константа — `ErrorCodes.ExpressionTooComplex` |
 | `ECR-AUTH-0409` | 409 | небезпечний запит (`POST`/`PUT`/`PATCH`/`DELETE`) несе заголовок `X-Ecr-User` (id користувача з `/me`, якого бачила вкладка), а cookie сеансу належить іншому користувачу — у сусідній вкладці увійшов інший (AN-108 / S2-05, `sessionUserChanged`); відмова до обробника (`SessionUserMiddleware`), клієнт покидає сеанс вкладки, як після виходу. Без заголовка (скрипти, служби, старі клієнти) і на вході/виході — не перевіряється. Константа — `ErrorCodes.SessionUserMismatch` |
+| `ECR-REG-4094` | 409 | номер НАЕ вже зайнятий у своїй області (типи вузлів НАЕ, людина 03.11, Q3): `NaeCode` вузла SRC унікальний у межах (предок REGION, предок AREA), а де регіон без поділу On/Offshore — у межах REGION. Перевіряє upsert `POST /registries/{code}/entries` під блокуванням дерева; `messageKey` `naeCodeTaken` |
 
 ### 7.1 Суфікси `messageKey` (`err.<код>.<суфікс>`) нових випадків
 
@@ -4303,6 +4304,12 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-TMPL-0404.effectiveAccessNotInProject` | 404 | розріз: ресурс не з версії шаблону проєкту |
 | `err.ECR-REQ-0422.reportPublishReason` | 422 | публікація версії звіту без причини |
 | `err.ECR-REQ-0422.validationScope` | 422 | область виконання перевірок (validation) задано невалідно |
+| `err.ECR-REG-4094.naeCodeTaken` | 409 | типи вузлів НАЕ (людина 03.11, Q3): номер НАЕ вузла SRC уже має інший живий вузол у тій самій області — предок REGION + предок AREA, або лише REGION, де регіон не ділиться на On/Offshore; деталі `naeCode`, `regionCode`, `areaCode` (`-` без району), `entryId`, `entryCode` тримача |
+| `err.ECR-REG-0422.naeNameEnRequired` | 422 | вузол дерева НАЕ без англійської назви (Q1: en обов'язкова, ru/kz — ні); деталь `levelCode` |
+| `err.ECR-REG-0422.naeMoveChangesScope` | 422 | перенос вузла дерева НАЕ (`POST …/entries/{id}/move` або upsert з іншим батьком) змінив би регіон/район джерела НАЕ в його піддереві; деталі `entryCode`, `sourceCode` |
+| `err.ECR-REG-0422.fieldLevelMismatch` | 422 | непорожнє значення поля, прив'язаного до іншого рівня, ніж рівень запису (`RegistryFieldDef.LevelId`); деталі `registryCode`, `fields` |
+| `err.ECR-REG-0409.levelHasFields` | 409 | збереження рівнів прибирає рівень, до якого прив'язані поля опису; деталі `levelCode`, `fields` |
+| `err.ECR-REG-0422.naeSourceLevelChange` | 422 | вузол SRC дерева НАЕ змінює тип на інший (move `levelCode` або upsert): джерело, на яке дивляться дозволи, не стає групою — його закривають і заводять групу; деталі `entryCode`, `levelCode`. Зміна типу В SRC: збережений номер обов'язковий (`requiredFieldsMissing`) і вільний (`ECR-REG-4094`), регіон/район — похідні |
 
 ---
 

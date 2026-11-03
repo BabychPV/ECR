@@ -86,16 +86,24 @@ public sealed partial class PiWebApiDataSource(
     public async Task<IReadOnlyList<SourceEntityDescriptor>> BrowseAsync(
         int dataSourceId, string? parentPath, CancellationToken ct)
     {
+        var (source, collection) = await ChildrenCollectionAsync(dataSourceId, parentPath, ct).ConfigureAwait(false);
+        return await ItemsAsync(source, collection, Descriptor, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Джерело і колекція прямих дітей вузла (<c>null</c> — корінь бази).</summary>
+    private async Task<(Domain.Entities.External.DataSource Source, string Collection)> ChildrenCollectionAsync(
+        int dataSourceId, string? parentPath, CancellationToken ct)
+    {
         var source = await SourceAsync(dataSourceId, ct).ConfigureAwait(false);
 
         var collection = string.IsNullOrWhiteSpace(parentPath)
             ? $"assetdatabases/{Uri.EscapeDataString(source.Catalog ?? string.Empty)}/elements"
             : $"elements/{Uri.EscapeDataString(await ElementWebIdAsync(source, parentPath, ct).ConfigureAwait(false))}/elements";
+        return (source, collection + "?searchFullHierarchy=false");
+    }
 
-        return await ItemsAsync(
-            source,
-            collection + "?searchFullHierarchy=false",
-            item => new SourceEntityDescriptor(
+    private static SourceEntityDescriptor Descriptor(JsonElement item)
+        => new(
                 Text(item, "Name") ?? string.Empty,
                 Text(item, "Description"),
                 Text(item, "Path"),
@@ -104,9 +112,7 @@ public sealed partial class PiWebApiDataSource(
 
                 // GUID елемента, а не WebId: WebId кодує ще й сервер і формат
                 // (WebID 2.0), тож змінюється разом із ними; GUID — ні (S1).
-                ExternalId: Text(item, "Id")),
-            ct).ConfigureAwait(false);
-    }
+                ExternalId: Text(item, "Id"));
 
     /// <inheritdoc />
     /// <remarks>
@@ -116,12 +122,15 @@ public sealed partial class PiWebApiDataSource(
     /// </remarks>
     public async Task<SourceElementsResult> DiscoverElementsAsync(int dataSourceId, string root, CancellationToken ct)
     {
-        var children = await BrowseAsync(dataSourceId, root, ct).ConfigureAwait(false);
+        // Шаблон елемента (`TemplateName`) — разом із дескриптором: за ним дерево НАЕ мапить тип вузла (людина 03.11).
+        var (source, collection) = await ChildrenCollectionAsync(dataSourceId, root, ct).ConfigureAwait(false);
+        var children = await ItemsAsync(source, collection, item => (Descriptor: Descriptor(item), Template: Text(item, "TemplateName")), ct)
+            .ConfigureAwait(false);
 
         var complete = children.Count < MaxItemsPerLevel;
         var elements = new List<SourceElement>(children.Count);
 
-        foreach (var child in children)
+        foreach (var (child, template) in children)
         {
             if (string.IsNullOrWhiteSpace(child.ExternalId) || string.IsNullOrWhiteSpace(child.EntityPath))
             {
@@ -129,7 +138,8 @@ public sealed partial class PiWebApiDataSource(
                 continue;
             }
 
-            elements.Add(new SourceElement(child.ExternalId, child.Code, child.EntityPath, child.EntityPath));
+            elements.Add(new SourceElement(
+                child.ExternalId, child.Code, child.EntityPath, child.EntityPath, string.IsNullOrWhiteSpace(template) ? null : template));
         }
 
         return new SourceElementsResult(elements, complete);
@@ -199,13 +209,13 @@ public sealed partial class PiWebApiDataSource(
     /// ⛔ <c>Links.Next</c> іде лише на той самий хост, що й джерело: інакше
     /// заголовок автентифікації пішов би за адресою, яку назвала відповідь.
     /// </remarks>
-    private async Task<List<SourceEntityDescriptor>> ItemsAsync(
+    private async Task<List<T>> ItemsAsync<T>(
         Domain.Entities.External.DataSource source,
         string path,
-        Func<JsonElement, SourceEntityDescriptor> map,
+        Func<JsonElement, T> map,
         CancellationToken ct)
     {
-        var result = new List<SourceEntityDescriptor>();
+        var result = new List<T>();
         var origin = new Uri($"{source.Endpoint.TrimEnd('/')}/");
         Uri? next = new(origin, path);
 

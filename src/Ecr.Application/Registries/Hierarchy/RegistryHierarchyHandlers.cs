@@ -32,7 +32,7 @@ internal static class HierarchyHandlerSupport
             RegistryLevelDef.MaxLevels);
 
     internal static RegistryLevelDto ToDto(RegistryLevelDef level, IReadOnlyDictionary<int, int> counts)
-        => new(level.Id, level.Ordinal, level.Code, level.NameL10n, level.IsOptional, counts.GetValueOrDefault(level.Id));
+        => new(level.Id, level.Ordinal, level.Code, level.NameL10n, level.IsOptional, counts.GetValueOrDefault(level.Id), level.AllowsSelfNesting);
 
     internal static string Reason(string key, int count)
         => JsonSerializer.Serialize(new
@@ -137,11 +137,11 @@ public sealed class SaveRegistryHierarchyHandler(
         var originalOrdinal = existing.ToDictionary(l => l.Id, l => l.Ordinal);
 
         var byCode = existing.ToDictionary(l => l.Code, StringComparer.OrdinalIgnoreCase);
-        var finals = new List<(RegistryLevelDef? Existing, EcrCode Code, int Ordinal, LocalizedText Name, bool Optional)>();
+        var finals = new List<(RegistryLevelDef? Existing, EcrCode Code, int Ordinal, LocalizedText Name, bool Optional, bool? SelfNest)>();
         for (var i = 0; i < input.Count; i++)
         {
             var code = EcrCode.Create(input[i].Code.Trim());
-            finals.Add((byCode.GetValueOrDefault(code.Value), code, i + 1, input[i].Name, input[i].IsOptional));
+            finals.Add((byCode.GetValueOrDefault(code.Value), code, i + 1, input[i].Name, input[i].IsOptional, input[i].AllowsSelfNesting));
         }
 
         var kept = finals.Where(f => f.Existing is not null).Select(f => f.Existing!).ToHashSet();
@@ -159,13 +159,35 @@ public sealed class SaveRegistryHierarchyHandler(
         }
 
         // Project the new levels in memory, then make sure no placed entry ends up in an invalid place.
+        // NAE node types (03.11): a level that fields are bound to cannot go (FK_RegField_Level) — the binding is a decision of
+        // the definition, refused here with the field codes instead of a 500 from the foreign key.
+        foreach (var level in removed)
+        {
+            var bound = definition.Fields.Where(fd => fd.LevelId == level.Id).Select(fd => fd.Code).ToList();
+            if (bound.Count > 0)
+            {
+                throw RegistryHierarchyRules.Conflict(
+                    "err.ECR-REG-0409.levelHasFields",
+                    $"Level «{level.Code}» has {bound.Count} bound field(s) and cannot be removed.",
+                    new Dictionary<string, object?>
+                    {
+                        ["levelCode"] = level.Code,
+                        ["fields"] = string.Join(", ", bound),
+                    });
+            }
+        }
+
         foreach (var f in finals.Where(f => f.Existing is not null))
         {
             f.Existing!.Update(f.Ordinal, f.Name, f.Optional);
+            if (f.SelfNest is { } selfNest)
+            {
+                f.Existing.AllowSelfNesting(selfNest);
+            }
         }
 
         var projected = finals
-            .Select(f => f.Existing ?? new RegistryLevelDef(definition.Id, f.Ordinal, f.Code, f.Name, f.Optional))
+            .Select(f => f.Existing ?? NewLevel(definition.Id, f.Ordinal, f.Code, f.Name, f.Optional, f.SelfNest))
             .ToList();
         var live = await hierarchy.ListLiveEntriesAsync(definition.Id, ct).ConfigureAwait(false);
         var all = live.ToDictionary(e => e.Id, e => new HierarchyNode(e.Id, e.ParentEntryId, e.LevelId));
@@ -201,10 +223,14 @@ public sealed class SaveRegistryHierarchyHandler(
                     if (f.Existing is { } ex)
                     {
                         ex.Update(f.Ordinal, f.Name, f.Optional);
+                        if (f.SelfNest is { } selfNest)
+                        {
+                            ex.AllowSelfNesting(selfNest);
+                        }
                     }
                     else
                     {
-                        hierarchy.AddLevel(new RegistryLevelDef(definition.Id, f.Ordinal, f.Code, f.Name, f.Optional));
+                        hierarchy.AddLevel(NewLevel(definition.Id, f.Ordinal, f.Code, f.Name, f.Optional, f.SelfNest));
                     }
                 }
 
@@ -235,18 +261,25 @@ public sealed class SaveRegistryHierarchyHandler(
             definition, saved, await hierarchy.CountEntriesByLevelAsync(definition.Id, ct).ConfigureAwait(false));
     }
 
+    private static RegistryLevelDef NewLevel(int registryDefId, int ordinal, EcrCode code, LocalizedText name, bool optional, bool? selfNest)
+    {
+        var level = new RegistryLevelDef(registryDefId, ordinal, code, name, optional);
+        level.AllowSelfNesting(selfNest ?? false);
+        return level;
+    }
+
     private static string LevelsJson(bool isHierarchical, IEnumerable<RegistryLevelDef> levels)
         => JsonSerializer.Serialize(new
         {
             isHierarchical,
-            levels = levels.OrderBy(l => l.Ordinal).Select(l => new { l.Code, l.IsOptional }),
+            levels = levels.OrderBy(l => l.Ordinal).Select(l => new { l.Code, l.IsOptional, l.AllowsSelfNesting }),
         });
 
     private static string LevelsJson(bool isHierarchical, IEnumerable<RegistryLevelInput> levels)
         => JsonSerializer.Serialize(new
         {
             isHierarchical,
-            levels = levels.Select(l => new { l.Code, l.IsOptional }),
+            levels = levels.Select(l => new { l.Code, l.IsOptional, l.AllowsSelfNesting }),
         });
 }
 
@@ -371,8 +404,13 @@ public sealed class MoveRegistryEntryHandler(
     IAuditWriter audit,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    Nae.NaeTreeNodePolicy? nae = null,
+    RegistryEntryWriter? writer = null)
 {
+    // ⚠ `nae` і `writer` (типи вузлів НАЕ, 03.11) — контейнер підставляє обидва; без них (ручні тести) дерево НАЕ
+    // переміщується як звичайний довідник.
+
     /// <summary>Permission to change registry data.</summary>
     public const string Permission = "Registry.EditData";
 
@@ -426,6 +464,21 @@ public sealed class MoveRegistryEntryHandler(
         var oldOrdinal = entry.Ordinal;
         var ordinal = 0;
 
+        // NAE node types (03.11): out of SRC — refused; INTO SRC — the stored number is required and free, region/area derived.
+        var naeTree = nae is not null && Nae.NaeTreeNodePolicy.IsNaeTree(definition);
+        var intoSource = naeTree
+                         && Nae.NaeTreeNodePolicy.IsSource(level)
+                         && levels.FirstOrDefault(l => l.Id == oldLevel) is { } before
+                         && !Nae.NaeTreeNodePolicy.IsSource(before);
+        if (naeTree)
+        {
+            Nae.NaeTreeNodePolicy.EnsureNotLeavingSource(levels, oldLevel, level, entry.Code);
+            if (intoSource && writer is null)
+            {
+                throw new InvalidOperationException("RegistryEntryWriter is required to move a node into the NAE source level.");
+            }
+        }
+
         await uow.ExecuteInTransactionAsync(
             async token =>
             {
@@ -436,6 +489,18 @@ public sealed class MoveRegistryEntryHandler(
 
                 await RegistryHierarchyPlacement.EnsureAsync(
                     hierarchy, definition.Id, levels, entry.Id, request.ParentEntryId, level, token).ConfigureAwait(false);
+
+                // NAE node types (03.11): a move never changes the region/area of an NAE source (its business identity).
+                IReadOnlyDictionary<string, object?>? sourceValues = null;
+                if (naeTree)
+                {
+                    await nae!.EnsureMoveKeepsScopeAsync(definition, entry.Id, request.ParentEntryId, token).ConfigureAwait(false);
+                    if (intoSource)
+                    {
+                        sourceValues = await nae.SourceValuesAsync(definition, entry, level, request.ParentEntryId, token).ConfigureAwait(false);
+                        await nae.EnsureCodeFreeAsync(definition, entry, level, request.ParentEntryId, sourceValues, token).ConfigureAwait(false);
+                    }
+                }
 
                 var siblings = (await hierarchy.ListChildrenTrackedAsync(definition.Id, request.ParentEntryId, token)
                                     .ConfigureAwait(false))
@@ -470,6 +535,14 @@ public sealed class MoveRegistryEntryHandler(
                 }
 
                 ordinal = entry.Ordinal;
+                if (sourceValues is not null)
+                {
+                    // Into SRC: number, derived region/area through the writer — the same required/level checks, the composite
+                    // key and the value audit as an upsert, in this transaction (the writer saves the move with it).
+                    var changes = await writer!.ApplyValuesAsync(definition, entry, sourceValues, prefetch: null, token).ConfigureAwait(false);
+                    await writer.SaveEntryAsync(definition, entry, changes, userId, token).ConfigureAwait(false);
+                }
+
                 await uow.SaveChangesAsync(token).ConfigureAwait(false);
 
                 await audit.WriteStructureChangeAsync(

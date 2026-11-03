@@ -12,6 +12,11 @@ namespace Ecr.Application.Registries.Nae;
 /// <param name="NameKz">Attribute <c>Name_Kz</c>.</param>
 /// <param name="Region">Attribute <c>Region</c>.</param>
 /// <param name="OnOffshore">Attribute <c>On_Offshore</c>.</param>
+/// <param name="Template">
+/// AF element template (<c>Air_Region</c>, <c>Air_OnShoreOffShore</c>, <c>Air_Area</c>, <c>Air_Unit</c>, <c>Equipment</c>);
+/// <c>null</c> — the reader does not know it. When any element of a snapshot carries a template the load maps BY TEMPLATE
+/// (human 03.11), otherwise by the path rules below.
+/// </param>
 public sealed record NaeAfElement(
     string Path,
     string Name,
@@ -19,7 +24,8 @@ public sealed record NaeAfElement(
     string? NameRu,
     string? NameKz,
     string? Region,
-    string? OnOffshore);
+    string? OnOffshore,
+    string? Template = null);
 
 /// <summary>Elements under the root.</summary>
 /// <param name="Elements">All elements (groups and NAE alike).</param>
@@ -72,6 +78,11 @@ public static class NaeAfTreeBuilder
     public static NaeTreePlan Build(NaeAfSnapshot snapshot, string rootPath)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        if (snapshot.Elements.Any(e => !string.IsNullOrWhiteSpace(e.Template)))
+        {
+            return NaeAfTemplateTreeBuilder.Build(snapshot);
+        }
+
         var rootName = Segments(rootPath).LastOrDefault() ?? "";
 
         var issues = new List<NaeAfIssueDto>();

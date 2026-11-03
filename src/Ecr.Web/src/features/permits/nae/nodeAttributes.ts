@@ -23,6 +23,39 @@ export interface NodeFormState {
 
 export const EmptyNodeForm: NodeFormState = { code: '', display: {}, values: {} };
 
+/** Поля ділового ключа NAE (`NaeTreeSchema`): номер NAE; регіон і район сервер виводить з предків. */
+export const NaeCodeField = 'NaeCode';
+export const NaeRegionField = 'RegionCode';
+export const NaeAreaField = 'AreaCode';
+
+/** Мова, назва якою обов'язкова на кожному вузлі дерева NAE (Q1, 03.11); `ru` і `kz` - за бажанням. */
+export const RequiredNameLanguage = 'en';
+
+/** Код рівня вузла, для якого відкрита форма: новий - вибраний, наявний - власний (`null` - рівня немає). */
+export function targetLevelCode(target: NodeFormTarget): string | null {
+  return target.mode === 'create' ? target.level.code : (target.node.levelCode ?? null);
+}
+
+/**
+ * Поля вузла його типу (рівня): власні й поля всіх рівнів (`levelCode == null`). Вузол без рівня бачить лише поля всіх рівнів.
+ * ⛔ Фільтр потрібен і сервер його знає: непорожнє значення поля чужого рівня - `422 fieldLevelMismatch`.
+ */
+export function fieldsForLevel(fields: readonly RegistryField[], levelCode: string | null): RegistryField[] {
+  return fields.filter((field) => field.levelCode === undefined || field.levelCode === null || field.levelCode === levelCode);
+}
+
+/**
+ * Поле веде сервер (регіон і район - з предків, шлях AF - із завантаження): форма його лише показує.
+ * ⚠ Виняток: `RegionCode` пишеться на вузлі REGION, `AreaCode` - на вузлі AREA (це їхній код); на інших рівнях обидва
+ * виводяться з предків і лишаються лише для читання, хоч би що казала ознака поля.
+ */
+export function isServerField(field: Pick<RegistryField, 'isReadOnly'> & { readonly code?: string }, levelCode: string | null = null): boolean {
+  if (field.code === NaeRegionField) return levelCode !== 'REGION';
+  if (field.code === NaeAreaField) return levelCode !== 'AREA';
+
+  return field.isReadOnly === true;
+}
+
 /** Стан форми з повного запису. `null` із сервера - поле не заповнене, у формі це порожній рядок. */
 export function formOfDetail(detail: NodeDetail): NodeFormState {
   const values: Record<string, string> = {};
@@ -39,10 +72,10 @@ export interface NodeFormProblems {
 }
 
 /**
- * Клієнтська перевірка: код, хоч одна мова назви й обов'язкові поля довідника.
+ * Клієнтська перевірка: код, назва англійською й обов'язкові поля свого типу.
  *
- * ⚠ Решту (унікальність коду, порядок рівнів, типи значень) знає лише сервер: його відмова показується
- * біля поля (`serverFieldProblem`) або сповіщенням, а не вгадується тут.
+ * ⚠ `fields` - лише поля, які людина вводить (свого рівня, без полів сервера). Решту (унікальність номера NAE, порядок
+ * рівнів, типи значень) знає лише сервер: його відмова показується біля поля (`serverFieldProblem`) або сповіщенням.
  */
 export function validateNode(
   fields: readonly Pick<RegistryField, 'code' | 'isRequired'>[],
@@ -51,41 +84,16 @@ export function validateNode(
 ): NodeFormProblems {
   const values: Record<string, 'required'> = {};
   for (const field of fields) {
-    // ⚠ Порожній «район» - це «-» (вузол без району), тож обов'язковим він лишається, а порожнім не вважається.
-    if (field.code === NaeAreaField) continue;
     if (field.isRequired && (form.values[field.code] ?? '').trim().length === 0) values[field.code] = 'required';
   }
 
-  const named = Object.values(form.display).some((text) => text.trim().length > 0);
+  const named = (form.display[RequiredNameLanguage] ?? '').trim().length > 0;
 
   return {
     ...(!codeAutomatic && form.code.trim().length === 0 ? { code: 'required' as const } : {}),
     ...(named ? {} : { display: 'required' as const }),
     values,
   };
-}
-
-/** Поля ділового ключа NAE (`NaeTreeSchema`): код NAE, регіон, район (`-`, якщо району немає). */
-export const NaeCodeField = 'NaeCode';
-export const NaeRegionField = 'RegionCode';
-export const NaeAreaField = 'AreaCode';
-export const NaeNoArea = '-';
-
-/**
- * Значення нового вузла, які успадковуються від батька: регіон завжди, район - крім вузла-району.
- * ⚠ Лише підказка в порожніх полях; людина може змінити, а сервер перевірить ключ.
- */
-export function inheritedValues(
-  parentValues: Readonly<Record<string, string>>,
-  levelCode: string,
-): Readonly<Record<string, string>> {
-  const result: Record<string, string> = {};
-  const region = (parentValues[NaeRegionField] ?? '').trim();
-  const area = (parentValues[NaeAreaField] ?? '').trim();
-  if (levelCode !== 'REGION' && region !== '') result[NaeRegionField] = region;
-  if (levelCode !== 'REGION' && levelCode !== 'AREA' && area !== '' && area !== NaeNoArea) result[NaeAreaField] = area;
-
-  return result;
 }
 
 export function hasProblems(problems: NodeFormProblems): boolean {
@@ -100,7 +108,8 @@ export function hasProblems(problems: NodeFormProblems): boolean {
  * батько - той, що був (правка атрибутів не переносить вузол).
  *
  * ⚠ Назва везе всі мови форми, а мову, яку людина стерла, - порожнім рядком (сервер зливає назву з наявною:
- * відсутня лишається, порожня прибирається). Значення полів - лише змінені; стерте поле - `null`.
+ * відсутня лишається, порожня прибирається). Значення - лише полів, які людина вводить (`fields`: свого рівня, без
+ * полів сервера), і лише змінені; стерте поле - `null`.
  */
 export function buildNodeBody(input: {
   readonly registryId: number;
@@ -120,10 +129,9 @@ export function buildNodeBody(input: {
 
   const values: Record<string, string | null> = {};
   for (const field of input.fields) {
-    // Новий вузол везе всі непорожні значення (в тому числі успадковані від батька), правка - лише змінені.
+    // Новий вузол везе всі непорожні значення, правка - лише змінені.
     const before = target.mode === 'create' ? '' : (initial.values[field.code] ?? '');
-    let after = current.values[field.code] ?? '';
-    if (field.code === NaeAreaField && after.trim().length === 0) after = NaeNoArea;
+    const after = current.values[field.code] ?? '';
     if (after !== before) values[field.code] = after.trim().length === 0 ? null : after;
   }
 
@@ -139,12 +147,15 @@ export function buildNodeBody(input: {
 }
 
 /** Відмови сервера, які належать конкретному полю форми. */
-export type ServerFieldProblem = 'codeTaken' | 'codeAutomatic' | 'keyTaken';
+export type ServerFieldProblem = 'codeTaken' | 'codeAutomatic' | 'keyTaken' | 'naeCodeTaken' | 'nameEnRequired';
 
 const CodeTakenKey = 'err.ECR-REG-0409.entryCodeTaken';
 const CodeAutomaticKey = 'err.ECR-REG-0422.entryCodeAutomatic';
 /** Ділового ключа (код NAE + регіон + район) вже хтось займає. */
 const KeyTakenKeys: readonly string[] = ['err.ECR-REG-4092.keyTaken', 'err.ECR-REG-4092.keyWindowOverlap'];
+/** Номер NAE зайнятий у своєму регіоні й на вибраному On/Offshore (Q3, 03.11). */
+const NaeCodeTakenKey = 'err.ECR-REG-4094.naeCodeTaken';
+const NameEnRequiredKey = 'err.ECR-REG-0422.naeNameEnRequired';
 
 /** Ключ каталогу відмови сервера (`extensions2.messageKey`), якщо він є. */
 export function serverMessageKey(error: unknown): string | null {
@@ -165,14 +176,44 @@ export function serverKeyHolder(error: unknown): string | null {
   return typeof holder === 'string' && holder !== '' ? holder : null;
 }
 
+/** Хто тримає номер NAE (`409 ECR-REG-4094`): номер у нормалізованому вигляді, область і запис-тримач. */
+export interface NaeCodeHolder {
+  readonly naeCode: string;
+  readonly region: string;
+  readonly area: string;
+  readonly entryCode: string;
+  /** Запис-тримач, до якого веде посилання; `null` - сервер його не назвав. */
+  readonly entryId: number | null;
+}
+
+export function serverNaeCodeHolder(error: unknown): NaeCodeHolder | null {
+  if (!(error instanceof EcrApiError) || serverMessageKey(error) !== NaeCodeTakenKey) return null;
+  const read = (key: string): string => {
+    const value = error.problem.extensions2?.[key];
+
+    return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+  };
+  const id = Number(read('entryId'));
+
+  return {
+    naeCode: read('naeCode'),
+    region: read('regionCode'),
+    area: read('areaCode'),
+    entryCode: read('entryCode'),
+    entryId: Number.isInteger(id) && id > 0 ? id : null,
+  };
+}
+
 /**
- * Чи відмова про поле коду: «код зайнятий» (409) і «код довідника автоматичний» (422).
- * Решта відмов (порядок рівнів, право, збій) - сповіщення, поле не підсвічується.
+ * Чи відмова про поле форми: «код зайнятий» (409), «код автоматичний» (422), «номер NAE зайнятий» (409), «англійська назва
+ * обов'язкова» (422). Решта відмов (порядок рівнів, право, збій) - сповіщення, поле не підсвічується.
  */
 export function serverFieldProblem(error: unknown): ServerFieldProblem | null {
   const key = serverMessageKey(error);
   if (key === CodeTakenKey) return 'codeTaken';
   if (key === CodeAutomaticKey) return 'codeAutomatic';
+  if (key === NaeCodeTakenKey) return 'naeCodeTaken';
+  if (key === NameEnRequiredKey) return 'nameEnRequired';
   if (key !== null && KeyTakenKeys.includes(key)) return 'keyTaken';
 
   return null;

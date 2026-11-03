@@ -934,6 +934,25 @@ public sealed class RegistryEntryWriter(
                 });
         }
 
+        // Типи вузлів НАЕ (людина 03.11): поле, прив'язане до ІНШОГО рівня, ніж рівень запису, не приймає значення — мовчки
+        // відкинуте виглядало б збереженим. Порожнє значення пропускається (клієнт може слати всі поля опису).
+        var foreign = values
+            .Where(v => !fields[v.Key].AppliesToLevel(entry.LevelId) && !IsBlank(CellValueReader.Normalize(v.Value)))
+            .Select(v => v.Key)
+            .ToList();
+        if (foreign.Count > 0)
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Поля {string.Join(", ", foreign)} належать іншому рівню, ніж запис довідника «{definition.Code}».",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.fieldLevelMismatch",
+                    ["registryCode"] = definition.Code,
+                    ["fields"] = string.Join(", ", foreign),
+                });
+        }
+
         var existing = entry.IsPersisted
             ? (prefetch?.ExistingValues
                ?? await registries.ListValuesAsync(entry.Id, ct).ConfigureAwait(false))
@@ -981,7 +1000,7 @@ public sealed class RegistryEntryWriter(
         // вище його вже стер, — обов'язкове поле очищувалося ручною правкою, пакетом, CSV і синком.
         // Рядок із самих пробілів — теж «не заповнено»: інакше він гасив поле первинного ключа.
         var missing = definition.Fields
-            .Where(f => f.IsRequired)
+            .Where(f => f.IsRequiredFor(entry.LevelId))
             .Where(f => !final.TryGetValue(f.Id, out var v) || IsBlank(RawValue(v, f.DataType)))
             .Select(f => f.Code)
             .ToList();

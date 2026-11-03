@@ -119,6 +119,33 @@ public sealed class RegistryFieldDef : Entity<int>
         OnParentDelete = onParentDelete;
     }
 
+    /// <summary>
+    /// Рівень ієрархічного довідника, якому належить поле (типи вузлів НАЕ, людина 03.11): поле показується й
+    /// вимагається лише у вузлів цього рівня. <c>null</c> — поле всіх рівнів (і єдиний стан у плоскому довіднику).
+    /// </summary>
+    public int? LevelId { get; private set; }
+
+    /// <summary>Прив'язує поле до рівня або знімає прив'язку.</summary>
+    /// <param name="levelId">Рівень того самого довідника; <c>null</c> — усі рівні.</param>
+    /// <remarks>
+    /// ⚠ Що рівень належить ТОМУ САМОМУ довіднику, перевіряє обробник збереження опису (рівні він читає сам); база
+    /// тримає лише існування рівня (<c>FK_RegField_Level</c>).
+    /// </remarks>
+    public void BindToLevel(int? levelId) => LevelId = levelId;
+
+    /// <summary>Чи стосується поле запису рівня <paramref name="entryLevelId"/>.</summary>
+    /// <param name="entryLevelId">Рівень запису; <c>null</c> — рівня ще немає (плоский довідник, запис пакета до розміщення).</param>
+    /// <returns><c>true</c>, коли поле всіх рівнів, рівень запису невідомий або збігається з рівнем поля.</returns>
+    public bool AppliesToLevel(int? entryLevelId) => LevelId is null || entryLevelId is null || LevelId == entryLevelId;
+
+    /// <summary>Чи вимагає поле значення від запису рівня <paramref name="entryLevelId"/>.</summary>
+    /// <param name="entryLevelId">Рівень запису; <c>null</c> — ще не розміщений (пакет створює запис до рівня).</param>
+    /// <returns>
+    /// Обов'язкове поле всіх рівнів — завжди; прив'язане — лише для запису ЙОГО рівня. Запис без рівня прив'язаних полів
+    /// не вимагає: рівень йому дає той, хто розміщує (завантаження НАЕ, ручний upsert — уже з рівнем).
+    /// </returns>
+    public bool IsRequiredFor(int? entryLevelId) => IsRequired && (LevelId is null || LevelId == entryLevelId);
+
     /// <summary>Вказує одиницю значення поля.</summary>
     /// <param name="unitId">Одиниця; <c>null</c> — безрозмірне.</param>
     public void MeasureIn(int? unitId) => UnitId = unitId;

@@ -33,5 +33,6 @@ export function toTreeLevels(levels: readonly RegistryLevel[]): TreeLevel[] {
       ordinal: level.ordinal,
       name: localized(level.name) || level.code,
       isOptional: level.isOptional,
+      allowsSelfNesting: level.allowsSelfNesting === true,
     }));
 }

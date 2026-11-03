@@ -867,6 +867,38 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task ScopeCodes__region_and_area_nodes_with_own_codes_give_one_offshore_and_the_source_derives_the_same_codes()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+        await using var db = new EcrDbContext(Options());
+        var defId = (await db.RegistryDefs.AsNoTracking().SingleAsync(d => d.Code == NaeTreeSchema.RegistryCode)).Id;
+        var region = NewRegion();
+
+        async Task<long> NodeAsync(string code, string level, long? parent, Dictionary<string, object?> values)
+            => (await ReadAsync(app, await client.PostAsJsonAsync(
+                new Uri($"/api/v1/registries/{NaeTreeSchema.RegistryCode}/entries", UriKind.Relative),
+                new { id = (long?)null, registryDefId = defId, code, display = new { values = new Dictionary<string, string> { ["en"] = $"Name {code}" } }, parentEntryId = parent, levelCode = level, values })))
+                .GetProperty("id").GetInt64();
+
+        // The e2e shape: the REGION node is `<X>_R` (no «R_» prefix) and carries RegionCode; AREA carries AreaCode.
+        var regionId = await NodeAsync($"{region}_R", NaeTreeSchema.LevelRegion, null, new() { ["RegionCode"] = region });
+        var areaId = await NodeAsync($"{region}_OFF", NaeTreeSchema.LevelArea, regionId, new() { ["AreaCode"] = "OFFSHORE" });
+        var siteId = await NodeAsync($"{region}_S", NaeTreeSchema.LevelSite, areaId, []);
+        var sourceId = await NodeAsync($"{region}_N", NaeTreeSchema.LevelSource, siteId, new() { ["NaeCode"] = "8801", ["RegionCode"] = "BAD" });
+
+        var url = new Uri("/api/v1/air-limits/scope-codes", UriKind.Relative);
+        var listed = Assert.Single((await ReadAsync(app, await client.GetAsync(url))).GetProperty("regions").EnumerateArray(), r => r.GetProperty("code").GetString() == region);
+        Assert.Equal(["OFFSHORE"], listed.GetProperty("areas").EnumerateArray().Select(a => a.GetProperty("code").GetString()));
+
+        var values = (await ReadAsync(app, await client.GetAsync(new Uri($"/api/v1/registries/{NaeTreeSchema.RegistryCode}/entries/{sourceId}", UriKind.Relative)))).GetProperty("values");
+        Assert.Equal((region, "OFFSHORE"), (values.GetProperty("RegionCode").GetString(), values.GetProperty("AreaCode").GetString()));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Provision__a_missing_shared_registry_is_named_before_anything_is_written_and_a_retry_succeeds()
     {
         await PrepareAsync();
@@ -1010,8 +1042,11 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         var text = await clash.Content.ReadAsStringAsync();
         Assert.True(clash.StatusCode == HttpStatusCode.Conflict, $"{(int)clash.StatusCode}: {text} | {app.ErrorsText}");
         var problem = JsonDocument.Parse(text).RootElement;
-        Assert.Equal("ECR-REG-4092", problem.GetProperty("errorCode").GetString());
-        Assert.Equal("err.ECR-REG-4092.keyWindowOverlap", problem.GetProperty("messageKey").GetString());
+
+        // ✎ NAE node types (human 03.11, Q3): the manual path checks the number in its region/area first — 409 ECR-REG-4094 with
+        // the holder; the composite key (4092) stays the backstop and answers the retired-node case below.
+        Assert.Equal("ECR-REG-4094", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REG-4094.naeCodeTaken", problem.GetProperty("messageKey").GetString());
         Assert.Equal($"N_KEYREG_{tag}_A", problem.GetProperty("entryCode").GetString());
 
         // Retiring closes the validity window; it does NOT clear IsActive (that flag is the "enabled" switch used by the AF sync
@@ -1032,6 +1067,7 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         // (SetValidity / the AF sync), not through a plain create.
         using var again = await Post($"N_KEYREG_{tag}_C");
         Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+        Assert.Equal("err.ECR-REG-4092.keyWindowOverlap", JsonDocument.Parse(await again.Content.ReadAsStringAsync()).RootElement.GetProperty("messageKey").GetString());
     }
 
     [Fact]

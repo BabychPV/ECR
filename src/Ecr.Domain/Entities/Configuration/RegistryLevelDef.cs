@@ -6,7 +6,9 @@ namespace Ecr.Domain.Entities.Configuration;
 
 /// <summary>
 /// One declared level of a hierarchical registry (NAE plan N1): Region, Area, Site, ... A node sits on exactly one level;
-/// along any path the ordinal strictly grows and every skipped level must be optional.
+/// along any path the ordinal strictly grows and every skipped level must be optional — except that a level flagged
+/// <see cref="AllowsSelfNesting"/> may sit directly under a node of the SAME level (NAE node types, human 03.11, Q2: a site
+/// inside a site).
 /// </summary>
 public sealed class RegistryLevelDef : Entity<int>
 {
@@ -43,6 +45,16 @@ public sealed class RegistryLevelDef : Entity<int>
 
     /// <summary>A node may skip this level.</summary>
     public bool IsOptional { get; private set; }
+
+    /// <summary>
+    /// A node of this level may have a child of the same level (the only exception to the strictly growing ordinal). Only
+    /// the same level nests: a node never hangs under a deeper level. Default <c>false</c>.
+    /// </summary>
+    public bool AllowsSelfNesting { get; private set; }
+
+    /// <summary>Allows or forbids a node of this level under a node of the same level.</summary>
+    /// <param name="allows">New flag.</param>
+    public void AllowSelfNesting(bool allows) => AllowsSelfNesting = allows;
 
     /// <summary>Parks the level on a temporary ordinal outside 1..MaxLevels so a swap does not trip the unique index.</summary>
     /// <param name="tempOrdinal">Ordinal above <see cref="MaxLevels"/>.</param>

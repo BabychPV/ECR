@@ -292,6 +292,7 @@ public static class DependencyInjection
         services.AddScoped<Registries.Nae.ImportNaeFromAfHandler>();
         services.AddScoped<Registries.Nae.GetRegistryEntryReferencesHandler>();
         services.AddScoped<Registries.Nae.NaeTreeProvisioner>();
+        services.AddScoped<Registries.Nae.NaeTreeNodePolicy>();
         services.AddScoped<Registries.Nae.NaeTreeManualHandler>();
         services.AddScoped<Registries.Nae.NaeTreeNodeApplier>();
         services.AddScoped<Registries.SwitchRegistrySourceHandler>();
