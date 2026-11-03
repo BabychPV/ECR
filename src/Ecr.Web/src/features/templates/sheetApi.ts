@@ -40,8 +40,10 @@ export function deleteSheet(templateVersionId: number, code: string): Promise<vo
 }
 
 /** Тіло запиту `PUT …/sheets/{code}`. */
-function sheetBody(draft: SheetDraft): SaveSheetDefRequest {
+function sheetBody(draft: SheetDraft): SaveSheetDefRequest & { isCopyable: boolean } {
+  // TODO(contract): `isCopyable` — планове поле `SaveSheetDefRequest`; після пушу контракту прибрати перетин типів.
   return {
+    isCopyable: draft.isCopyable,
     nameL10n: draft.nameL10n,
     ordinal: draft.ordinal,
     sheetGroup: draft.sheetGroup.trim().length === 0 ? null : draft.sheetGroup.trim(),
