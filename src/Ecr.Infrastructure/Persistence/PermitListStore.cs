@@ -82,13 +82,15 @@ public sealed class PermitListStore(EcrDbContext db) : IPermitListStore
             return new Dictionary<int, IReadOnlyList<RegistryEntry>>();
         }
 
-        // Один запит: запис береться, якщо чинних записів його реєстру ПЕРЕД ним у порядку показу (Ordinal, далі Id) менше за
-        // perRegistry. Те саме, що ROW_NUMBER() <= perRegistry, але без GroupBy.SelectMany, який EF не завжди перекладає.
-        var rows = await db.RegistryEntries.AsNoTracking()
-            .Where(e => registryDefIds.Contains(e.RegistryDefId) && e.IsActive && !e.IsDeleted)
-            .Where(e => db.RegistryEntries.Count(o =>
-                o.RegistryDefId == e.RegistryDefId && o.IsActive && !o.IsDeleted
-                && (o.Ordinal < e.Ordinal || (o.Ordinal == e.Ordinal && o.Id < e.Id))) < perRegistry)
+        // Один запит: для кожного реєстру - TOP(perRegistry) чинних записів за (Ordinal, Id) (EF: CROSS APPLY (SELECT TOP(@n) ...)).
+        // Раніше був корельований COUNT «скільки записів перед цим» - O(N²) на реєстр (4509 записів = 14 с); тепер
+        // кожен реєстр читається один раз і відсікається після perRegistry рядків (реєстр НСІ - до 20 тис. записів).
+        var rows = await db.RegistryDefs.AsNoTracking()
+            .Where(d => registryDefIds.Contains(d.Id))
+            .SelectMany(d => db.RegistryEntries
+                .Where(e => e.RegistryDefId == d.Id && e.IsActive && !e.IsDeleted)
+                .OrderBy(e => e.Ordinal).ThenBy(e => e.Id)
+                .Take(perRegistry))
             .ToListAsync(ct).ConfigureAwait(false);
         return rows
             .GroupBy(e => e.RegistryDefId)
