@@ -4,8 +4,8 @@ SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'err.ECR-DOC-0409.sheetCopyIsOriginal', N'ru', N'Оригинал аркуша удалить нельзя: удаляется только копия.'),
     (N'err.ECR-DOC-0409.sheetCopyIsOriginal', N'kz', N'Парақтың түпнұсқасын жоюға болмайды: тек көшірмесі жойылады.'),
-    (N'err.ECR-DOC-0409.sheetCopyHasWorkflow', N'ru', N'Копию нельзя удалить: за период {periodKey} она в состоянии {status}. Сначала верните её в черновик.'),
-    (N'err.ECR-DOC-0409.sheetCopyHasWorkflow', N'kz', N'Көшірмені жою мүмкін емес: {periodKey} кезеңінде ол {status} күйінде. Алдымен оны жобаға қайтарыңыз.'),
+    (N'err.ECR-DOC-0409.sheetCopyHasWorkflow', N'ru', N'Копию нельзя удалить: за период {periodKey} она в состоянии {workflowStatus}. Сначала верните её в черновик.'),
+    (N'err.ECR-DOC-0409.sheetCopyHasWorkflow', N'kz', N'Көшірмені жою мүмкін емес: {periodKey} кезеңінде ол {workflowStatus} күйінде. Алдымен оны жобаға қайтарыңыз.'),
     (N'err.ECR-DOC-0409.sheetCopyProjectArchived', N'ru', N'Проект в архиве: состав документа не меняется.'),
     (N'err.ECR-DOC-0409.sheetCopyProjectArchived', N'kz', N'Жоба мұрағатта: құжат құрамы өзгермейді.'),
     (N'err.ECR-DOC-0422.sheetNotCopyable', N'ru', N'Этот аркуш в шаблоне не помечен как копируемый.'),
@@ -29,7 +29,7 @@ INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
     (N'err.ECR-DOC-0409.sheetCopyIsOriginal', N'en', N'The original sheet cannot be deleted: only a copy can.', 1),
-    (N'err.ECR-DOC-0409.sheetCopyHasWorkflow', N'en', N'The copy cannot be deleted: in period {periodKey} it is {status}. Return it to draft first.', 1),
+    (N'err.ECR-DOC-0409.sheetCopyHasWorkflow', N'en', N'The copy cannot be deleted: in period {periodKey} it is {workflowStatus}. Return it to draft first.', 1),
     (N'err.ECR-DOC-0409.sheetCopyProjectArchived', N'en', N'The project is archived: the document composition cannot change.', 1),
     (N'err.ECR-DOC-0422.sheetNotCopyable', N'en', N'This sheet is not marked as copyable in the template.', 1),
     (N'err.ECR-DOC-0422.sheetNameInvalid', N'en', N'The sheet group name must be 1 to {maxLength} characters in at least one language.', 1),

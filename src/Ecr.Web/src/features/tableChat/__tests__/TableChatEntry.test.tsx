@@ -32,6 +32,8 @@ vi.mock('@/shared/session/useSession', async (importOriginal) => ({
 function table(code: string, id: number, ordinal: number): DocumentTableDto {
   return {
     allowsDynamicRows: false,
+    copyOrdinal: 1,
+    isCopyable: false,
     maxDynamicRows: null,
     sheetCode: 'A',
     sheetDefId: 1,

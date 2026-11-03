@@ -75,10 +75,12 @@ public sealed record SheetGroupRuleDto(string SheetGroup, byte RuleKind, string?
 /// <param name="IsMandatory">Чи обов'язковий аркуш для складу документа.</param>
 /// <param name="IsVisible">Видимість; презентаційне поле (<c>ФВ-7.2</c>).</param>
 /// <param name="Tables">Таблиці аркуша в порядку <c>Ordinal</c>.</param>
+/// <param name="IsCopyable">RS: аркуш можна копіювати в документі («Додати копію»); за замовчуванням ні.</param>
 public sealed record SheetDto(
     int Id, string Code, LocalizedText NameL10n, int Ordinal,
     string? SheetGroup, bool IsMandatory, bool IsVisible,
-    IReadOnlyList<TableDto> Tables);
+    IReadOnlyList<TableDto> Tables,
+    bool IsCopyable = false);
 
 /// <param name="Id">Ідентифікатор.</param>
 /// <param name="Code">Код — ідентичність таблиці й адреса в <c>PUT …/sheets/{sheetCode}/tables/{code}</c>.</param>

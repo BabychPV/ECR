@@ -83,6 +83,13 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Persistence/DocumentListSummaryStore.cs"] =
             "смуга переліку: копія — окремий аркуш складу зі своїм станом",
 
+        // ── контракт (RS8): відповідь API знає копію ──
+        ["src/Ecr.Infrastructure/Persistence/DocumentStore.cs"] =
+            "SheetStates/Sheets: ключ КОД#sheetCopyId, стан СВОГО рядка складу; WhereState — те саме; Distinct id/кодів аркушів",
+        ["src/Ecr.Infrastructure/Persistence/SheetChangeStore.cs"] =
+            "опитування змін і стан аркуша — екземплярів і стану своєї копії (@copy)",
+        ["src/Ecr.Infrastructure/Persistence/AuditReader.cs"] = "журнал переходів несе SheetCopyId події",
+
         // ── склад документа, видалення, перенос версії (RS6) ──
         ["src/Ecr.Infrastructure/Persistence/DocumentSheetCopyStore.cs"] =
             "додає/перейменовує/видаляє копії; видалення — по періодах за SheetCopyId, потім перенумерація",
@@ -95,20 +102,13 @@ public sealed partial class SheetCopyQuerySitesTests
     };
 
     /// <summary>
-    /// Pending review (RS commits 5–7): ще НЕ перероблено під копії. Звідси — у <see cref="Reviewed"/> разом із правкою.
+    /// Pending review (RS commits 5–7): місця, ще НЕ перероблені під копії. Порожньо — усі 8 комітів RS завершено;
+    /// словник лишено, щоб наступна зміна могла знову відкласти місце до рішення, а не мовчки його пропустити.
     /// </summary>
-    private static readonly Dictionary<string, string> PendingReviewCommits5To7 = new(StringComparer.Ordinal)
-    {
-        // RS7 — звітність, зведення, аудит
-        ["src/Ecr.Infrastructure/Persistence/AuditReader.cs"] = "RS7: журнал переходів — з копією",
-    };
+    private static readonly Dictionary<string, string> PendingReviewCommits5To7 = new(StringComparer.Ordinal);
 
-    /// <summary>Pending review (RS commit 8 — контракт/UI): відповідь API ще без копії.</summary>
-    private static readonly Dictionary<string, string> PendingReviewCommit8 = new(StringComparer.Ordinal)
-    {
-        ["src/Ecr.Infrastructure/Persistence/DocumentStore.cs"] = "RS8: SheetStates/склад — ключ CODE#copyId",
-        ["src/Ecr.Infrastructure/Persistence/SheetChangeStore.cs"] = "RS8: опитування змін і стан аркуша — за копією",
-    };
+    /// <summary>Pending review (RS commit 8 — контракт/UI): порожньо (див. <see cref="PendingReviewCommits5To7"/>).</summary>
+    private static readonly Dictionary<string, string> PendingReviewCommit8 = new(StringComparer.Ordinal);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]

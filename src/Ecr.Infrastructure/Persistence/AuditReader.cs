@@ -817,9 +817,9 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         // документ чи користувач не ховає саму подію.
         command.CommandText = $"""
             SELECT a.Id, a.At, a.Action, a.FromStatus, a.ToStatus, a.Reason, a.ByUserId, u.DisplayName,
-                   a.DocumentId, d.BusinessKey, a.SheetDefId, sd.Code, a.PeriodKey, a.StepOrdinal
+                   a.DocumentId, d.BusinessKey, a.SheetDefId, sd.Code, a.PeriodKey, a.StepOrdinal, a.SheetCopyId
               FROM (
-                    {AuditPaging.TopPage("Id, At, Action, FromStatus, ToStatus, Reason, ByUserId, DocumentId, SheetDefId, PeriodKey, StepOrdinal", "wf.ApprovalEvent", where.ToString(), order, at: "At", userColumn: "ByUserId")}
+                    {AuditPaging.TopPage("Id, At, Action, FromStatus, ToStatus, Reason, ByUserId, DocumentId, SheetDefId, PeriodKey, StepOrdinal, SheetCopyId", "wf.ApprovalEvent", where.ToString(), order, at: "At", userColumn: "ByUserId")}
                    ) AS a
               LEFT JOIN sec.[User] AS u ON u.Id = a.ByUserId
               LEFT JOIN doc.Document AS d ON d.Id = a.DocumentId
@@ -849,7 +849,8 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                         reader.GetInt32(10),
                         StringOrNull(reader, 11),
                         reader.GetInt32(12),
-                        reader.IsDBNull(13) ? null : reader.GetInt32(13))));
+                        reader.IsDBNull(13) ? null : reader.GetInt32(13),
+                        reader.IsDBNull(14) ? null : reader.GetInt64(14))));
             }
         }
 

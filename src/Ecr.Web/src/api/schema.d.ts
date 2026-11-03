@@ -6065,6 +6065,7 @@ export interface paths {
                 query?: {
                     sheetDefId?: number;
                     periodKey?: number;
+                    sheetCopyId?: number;
                 };
                 header?: never;
                 path: {
@@ -6216,6 +6217,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/sheet-copies/{sheetCopyId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Видаляє копію аркуша з даними всіх періодів; решта копій групи перенумеровується. Право `Document.Create` + запис у проєкт.
+         * @description `409` `ECR-DOC-0409`: `sheetCopyIsOriginal` — це оригінал; `sheetCopyHasWorkflow` — копія подана чи
+         *     затверджена хоч в одному періоді (`periodKey`, `status`). Зрізи подань лишаються.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                    /** @description Копія (`sheetCopyId` з `GET …/tables`). */
+                    sheetCopyId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/sheets/{sheetDefId}/activity": {
         parameters: {
             query?: never;
@@ -6317,6 +6394,8 @@ export interface paths {
                     periodKey?: number;
                     /** @description Маркер попереднього опитування; без нього — лише поточний маркер (`changed = false`). */
                     since?: string;
+                    /** @description RS: копія аркуша (`sheetCopyId` з `GET …/tables`); без нього — оригінал. */
+                    sheetCopyId?: number;
                 };
                 header?: never;
                 path: {
@@ -6372,6 +6451,189 @@ export interface paths {
             };
         };
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/sheets/{sheetDefId}/copies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Додає порожню копію аркуша («Додати копію»): ті самі таблиці й формули, без даних, у КОЖНОМУ періоді. Право
+         *     `Document.Create` + запис у проєкт.
+         * @description `422` `ECR-DOC-0422` (`sheetNotCopyable`) — шаблон не дозволяє копіювати аркуш; `404` — аркуша немає у
+         *     складі; `409` — проєкт у архіві. Відповідь — Id копії (він же `sheetCopyId` у даних) і її номер у групі
+         *     («&lt;Назва&gt; N»).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                    /** @description Аркуш-оригінал (джерело копії — завжди оригінал). */
+                    sheetDefId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SheetCopyCreated"];
+                        "text/json": components["schemas"]["SheetCopyCreated"];
+                        "text/plain": components["schemas"]["SheetCopyCreated"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/sheets/{sheetDefId}/name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Перейменовує групу аркуша: оригінал і всі копії стають «&lt;Назва&gt; N». Право `Document.Create` + запис у проєкт. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                    /** @description Аркуш-оригінал. */
+                    sheetDefId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["RenameSheetGroupRequest"];
+                    "application/json": components["schemas"]["RenameSheetGroupRequest"];
+                    "text/json": components["schemas"]["RenameSheetGroupRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -26616,6 +26878,11 @@ export interface components {
             /** @description Причина; обов'язкова при відхиленні. */
             reason: null | string;
             /**
+             * Format: int64
+             * @description RS: копія аркуша; `null` — оригінал.
+             */
+            sheetCopyId?: null | number;
+            /**
              * Format: int32
              * @description Аркуш.
              */
@@ -28827,12 +29094,30 @@ export interface components {
             allowsDynamicRows: boolean;
             /**
              * Format: int32
+             * @description RS: номер у групі — 1 оригінал, 2… копії; копії діляться `sheetCode`/`sheetOrdinal` з оригіналом.
+             * @default 1
+             */
+            copyOrdinal: number;
+            displayNameL10n?: null | components["schemas"]["LocalizedText"];
+            /**
+             * @description RS: шаблон дозволяє копіювати аркуш («Додати копію»).
+             * @default false
+             */
+            isCopyable: boolean;
+            /**
+             * Format: int32
              * @description Стеля кількості рядків; `null` — без стелі.
              */
             maxDynamicRows: null | number;
             permitBinding?: null | components["schemas"]["DocumentTablePermitBindingDto"];
             /** @description Код аркуша; він же ключ у `DocumentSummary.SheetStates`. */
             sheetCode: string;
+            /**
+             * Format: int64
+             * @description RS: копія аркуша (`doc.DocumentSheet.Id`), якій належить екземпляр; `null` — оригінал. Саме нею подають,
+             *     затверджують і повертають копію (`sheetCopyId` у запитах), а в `SheetStates` вона має ключ `КОД#sheetCopyId`.
+             */
+            sheetCopyId?: null | number;
             /**
              * Format: int32
              * @description Аркуш; ним подають і затверджують.
@@ -28899,6 +29184,11 @@ export interface components {
              * @description Ідентифікатор `SheetDef` — те, що йде в `sheetDefIds`.
              */
             id: number;
+            /**
+             * @description RS: аркуш можна копіювати в документі.
+             * @default false
+             */
+            isCopyable: boolean;
             /** @description Чи обов'язковий аркуш. */
             isMandatory: boolean;
             /** @description Назва всіма мовами каталогу. */
@@ -33941,6 +34231,11 @@ export interface components {
             /** @description Причина; обов'язкова. */
             reason: string;
             /**
+             * Format: int64
+             * @description RS: копія аркуша; `null` — оригінал.
+             */
+            sheetCopyId?: null | number;
+            /**
              * Format: int32
              * @description Аркуш.
              */
@@ -35066,6 +35361,13 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description Нова назва групи аркуша (оригінал і копії). */
+        RenameSheetGroupRequest: {
+            /** @description Назва за мовами — така сама форма, як `SaveSheetDefRequest.NameL10n`. */
+            nameL10n: {
+                [key: string]: string;
+            };
+        };
         /** @description Запит на зміну назви шаблону. */
         RenameTemplateRequest: {
             /** @description Назва мовами каталогу; хоча б одна непорожня. */
@@ -35090,6 +35392,11 @@ export interface components {
             periodKey: number;
             /** @description Причина; обов'язкова. */
             reason: string;
+            /**
+             * Format: int64
+             * @description RS: копія аркуша; `null` — оригінал.
+             */
+            sheetCopyId?: null | number;
             /**
              * Format: int32
              * @description Аркуш.
@@ -36309,6 +36616,9 @@ export interface components {
         };
         /** @description Налаштування аркуша чернетки (`ФВ-2.1`). */
         SaveSheetDefRequest: {
+            /** @description RS: аркуш можна копіювати в документі. `null` — не змінювати (новий аркуш — ні); так старий клієнт, що поля не знає,
+             *     не скидає позначку при збереженні. Зняття позначки наявних копій не видаляє. */
+            isCopyable?: null | boolean;
             /** @description Чи обов'язковий аркуш для складу документа. */
             isMandatory: boolean;
             /** @description Видимість аркуша. */
@@ -36660,6 +36970,19 @@ export interface components {
              *     аркуша (банер, кнопки дій); дані комірок від цього не змінюються. */
             statusRevision: string;
         };
+        /** @description Результат додавання копії аркуша. */
+        SheetCopyCreated: {
+            /**
+             * Format: int16
+             * @description Номер у групі (2…): назва копії — «&lt;Назва&gt; N».
+             */
+            ordinal: number;
+            /**
+             * Format: int64
+             * @description Id копії (`doc.DocumentSheet.Id`) — він же `sheetCopyId` у даних копії.
+             */
+            sheetCopyId: number;
+        };
         SheetDto: {
             /** @description Код — ідентичність аркуша й адреса в `PUT …/sheets/{code}`. */
             code: string;
@@ -36668,6 +36991,11 @@ export interface components {
              * @description Ідентифікатор.
              */
             id: number;
+            /**
+             * @description RS: аркуш можна копіювати в документі («Додати копію»); за замовчуванням ні.
+             * @default false
+             */
+            isCopyable: boolean;
             /** @description Чи обов'язковий аркуш для складу документа. */
             isMandatory: boolean;
             /** @description Видимість; презентаційне поле (`ФВ-7.2`). */
@@ -36709,6 +37037,11 @@ export interface components {
              * @description Період.
              */
             periodKey: number;
+            /**
+             * Format: int64
+             * @description RS: копія аркуша (`sheetCopyId` з `GET …/tables`); `null` — оригінал.
+             */
+            sheetCopyId?: null | number;
             /**
              * Format: int32
              * @description Аркуш.
@@ -39328,6 +39661,11 @@ export interface components {
             periodKey: number;
             /** @description Код аркуша; `null` — визначення вже немає. */
             sheetCode: null | string;
+            /**
+             * Format: int64
+             * @description RS: копія аркуша, якої стосується подія; `null` — оригінал (код аркуша в копії той самий).
+             */
+            sheetCopyId?: null | number;
             /**
              * Format: int32
              * @description Аркуш.

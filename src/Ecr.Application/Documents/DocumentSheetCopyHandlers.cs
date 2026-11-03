@@ -178,7 +178,10 @@ public sealed class DocumentSheetCopyHandlers(
                     {
                         ["messageKey"] = "err.ECR-DOC-0409.sheetCopyHasWorkflow",
                         ["periodKey"] = blocking.PeriodKey.ToString(CultureInfo.InvariantCulture),
+                        // ⚠ `status` збігається з полем `status` (HTTP-код) problem+json і в тілі відповіді перекривається ним;
+                        // тому стан копії ще й під безпечним ключем `workflowStatus` (його читає клієнт і шаблон тексту).
                         ["status"] = blocking.Status.ToString(),
+                        ["workflowStatus"] = blocking.Status.ToString(),
                     });
             }
 

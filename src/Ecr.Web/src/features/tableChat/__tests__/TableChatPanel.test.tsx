@@ -32,6 +32,8 @@ const text = (key: string): string => Catalog[key] ?? `⟦${key}⟧`;
 
 const Table = {
   allowsDynamicRows: false,
+  copyOrdinal: 1,
+  isCopyable: false,
   maxDynamicRows: null,
   sheetCode: 'A',
   sheetDefId: 1,

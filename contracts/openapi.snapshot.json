@@ -1272,6 +1272,14 @@
               "string"
             ]
           },
+          "sheetCopyId": {
+            "description": "RS: копія аркуша; `null` — оригінал.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "sheetDefId": {
             "description": "Аркуш.",
             "format": "int32",
@@ -5916,6 +5924,28 @@
             "description": "Чи додає рядки користувач (`ФВ-3.2`).",
             "type": "boolean"
           },
+          "copyOrdinal": {
+            "default": 1,
+            "description": "RS: номер у групі — 1 оригінал, 2… копії; копії діляться `sheetCode`/`sheetOrdinal` з оригіналом.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "displayNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "RS: назва аркуша для показу — «&lt;Назва&gt; N» (оригінал «&lt;Назва&gt; 1», коли копії є; без копій — назва як є).\nSheetNameL10n лишається назвою з шаблону."
+              }
+            ]
+          },
+          "isCopyable": {
+            "default": false,
+            "description": "RS: шаблон дозволяє копіювати аркуш («Додати копію»).",
+            "type": "boolean"
+          },
           "maxDynamicRows": {
             "description": "Стеля кількості рядків; `null` — без стелі.",
             "format": "int32",
@@ -5938,6 +5968,14 @@
           "sheetCode": {
             "description": "Код аркуша; він же ключ у `DocumentSummary.SheetStates`.",
             "type": "string"
+          },
+          "sheetCopyId": {
+            "description": "RS: копія аркуша (`doc.DocumentSheet.Id`), якій належить екземпляр; `null` — оригінал. Саме нею подають,\nзатверджують і повертають копію (`sheetCopyId` у запитах), а в `SheetStates` вона має ключ `КОД#sheetCopyId`.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "sheetDefId": {
             "description": "Аркуш; ним подають і затверджують.",
@@ -6066,6 +6104,11 @@
             "description": "Ідентифікатор `SheetDef` — те, що йде в `sheetDefIds`.",
             "format": "int32",
             "type": "integer"
+          },
+          "isCopyable": {
+            "default": false,
+            "description": "RS: аркуш можна копіювати в документі.",
+            "type": "boolean"
           },
           "isMandatory": {
             "description": "Чи обов'язковий аркуш.",
@@ -16832,6 +16875,14 @@
             "description": "Причина; обов'язкова.",
             "type": "string"
           },
+          "sheetCopyId": {
+            "description": "RS: копія аркуша; `null` — оригінал.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "sheetDefId": {
             "description": "Аркуш.",
             "format": "int32",
@@ -19329,6 +19380,22 @@
         ],
         "type": "object"
       },
+      "RenameSheetGroupRequest": {
+        "description": "Нова назва групи аркуша (оригінал і копії).",
+        "properties": {
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва за мовами — така сама форма, як `SaveSheetDefRequest.NameL10n`.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "nameL10n"
+        ],
+        "type": "object"
+      },
       "RenameTemplateRequest": {
         "description": "Запит на зміну назви шаблону.",
         "properties": {
@@ -19373,6 +19440,14 @@
           "reason": {
             "description": "Причина; обов'язкова.",
             "type": "string"
+          },
+          "sheetCopyId": {
+            "description": "RS: копія аркуша; `null` — оригінал.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "sheetDefId": {
             "description": "Аркуш.",
@@ -22140,6 +22215,13 @@
       "SaveSheetDefRequest": {
         "description": "Налаштування аркуша чернетки (`ФВ-2.1`).",
         "properties": {
+          "isCopyable": {
+            "description": "RS: аркуш можна копіювати в документі. `null` — не змінювати (новий аркуш — ні); так старий клієнт, що поля не знає,\nне скидає позначку при збереженні. Зняття позначки наявних копій не видаляє.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "isMandatory": {
             "description": "Чи обов'язковий аркуш для складу документа.",
             "type": "boolean"
@@ -22975,6 +23057,26 @@
         ],
         "type": "object"
       },
+      "SheetCopyCreated": {
+        "description": "Результат додавання копії аркуша.",
+        "properties": {
+          "ordinal": {
+            "description": "Номер у групі (2…): назва копії — «&lt;Назва&gt; N».",
+            "format": "int16",
+            "type": "integer"
+          },
+          "sheetCopyId": {
+            "description": "Id копії (`doc.DocumentSheet.Id`) — він же `sheetCopyId` у даних копії.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sheetCopyId",
+          "ordinal"
+        ],
+        "type": "object"
+      },
       "SheetDto": {
         "properties": {
           "code": {
@@ -22985,6 +23087,11 @@
             "description": "Ідентифікатор.",
             "format": "int32",
             "type": "integer"
+          },
+          "isCopyable": {
+            "default": false,
+            "description": "RS: аркуш можна копіювати в документі («Додати копію»); за замовчуванням ні.",
+            "type": "boolean"
           },
           "isMandatory": {
             "description": "Чи обов'язковий аркуш для складу документа.",
@@ -23069,6 +23176,14 @@
             "description": "Період.",
             "format": "int32",
             "type": "integer"
+          },
+          "sheetCopyId": {
+            "description": "RS: копія аркуша (`sheetCopyId` з `GET …/tables`); `null` — оригінал.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "sheetDefId": {
             "description": "Аркуш.",
@@ -28517,6 +28632,14 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "sheetCopyId": {
+            "description": "RS: копія аркуша, якої стосується подія; `null` — оригінал (код аркуша в копії той самий).",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "sheetDefId": {
@@ -37304,6 +37427,14 @@
               "format": "int32",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "sheetCopyId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -37504,6 +37635,104 @@
         ]
       }
     },
+    "/api/v1/documents/{id}/sheet-copies/{sheetCopyId}": {
+      "delete": {
+        "description": "`409` `ECR-DOC-0409`: `sheetCopyIsOriginal` — це оригінал; `sheetCopyHasWorkflow` — копія подана чи\nзатверджена хоч в одному періоді (`periodKey`, `status`). Зрізи подань лишаються.",
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Копія (`sheetCopyId` з `GET …/tables`).",
+            "in": "path",
+            "name": "sheetCopyId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Видаляє копію аркуша з даними всіх періодів; решта копій групи перенумеровується. Право `Document.Create` + запис у проєкт.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
     "/api/v1/documents/{id}/sheets/{sheetDefId}/activity": {
       "get": {
         "parameters": [
@@ -37683,6 +37912,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "RS: копія аркуша (`sheetCopyId` з `GET …/tables`); без нього — оригінал.",
+            "in": "query",
+            "name": "sheetCopyId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -37753,6 +37991,279 @@
         "summary": "Маркер змін даних аркуша за період. Право `Document.View`; доступ — як на читання аркуша.",
         "tags": [
           "SheetChanges"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/sheets/{sheetDefId}/copies": {
+      "post": {
+        "description": "`422` `ECR-DOC-0422` (`sheetNotCopyable`) — шаблон не дозволяє копіювати аркуш; `404` — аркуша немає у\nскладі; `409` — проєкт у архіві. Відповідь — Id копії (він же `sheetCopyId` у даних) і її номер у групі\n(«&lt;Назва&gt; N»).",
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Аркуш-оригінал (джерело копії — завжди оригінал).",
+            "in": "path",
+            "name": "sheetDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SheetCopyCreated"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SheetCopyCreated"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SheetCopyCreated"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Додає порожню копію аркуша («Додати копію»): ті самі таблиці й формули, без даних, у КОЖНОМУ періоді. Право\n`Document.Create` + запис у проєкт.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/sheets/{sheetDefId}/name": {
+      "put": {
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Аркуш-оригінал.",
+            "in": "path",
+            "name": "sheetDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameSheetGroupRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameSheetGroupRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameSheetGroupRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Перейменовує групу аркуша: оригінал і всі копії стають «&lt;Назва&gt; N». Право `Document.Create` + запис у проєкт.",
+        "tags": [
+          "Documents"
         ]
       }
     },

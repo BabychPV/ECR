@@ -35,6 +35,8 @@ vi.mock('@/shared/session/useSession', async (importOriginal) => ({
 
 const Table = {
   allowsDynamicRows: false,
+  copyOrdinal: 1,
+  isCopyable: false,
   maxDynamicRows: null,
   sheetCode: 'A',
   sheetDefId: 1,

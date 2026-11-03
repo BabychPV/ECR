@@ -51,6 +51,8 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 const Tables = [
   {
     allowsDynamicRows: false,
+    copyOrdinal: 1,
+    isCopyable: false,
     maxDynamicRows: null,
     sheetCode: 'A',
     sheetDefId: 1,

@@ -48,6 +48,29 @@ public static class SheetCopyNaming
             : groupName;
     }
 
+    /// <summary>Роздільник коду аркуша і Id копії в ключі <c>SheetStates</c> (код шаблону його не містить).</summary>
+    public const char StateKeySeparator = '#';
+
+    /// <summary>
+    /// Ключ стану аркуша в <c>DocumentSummary.SheetStates</c>: <c>КОД</c> для оригінала, <c>КОД#sheetCopyId</c> для копії.
+    /// </summary>
+    /// <param name="sheetCode">Код аркуша шаблону.</param>
+    /// <param name="sheetCopyId">Копія; <c>null</c> — оригінал.</param>
+    public static string StateKey(string sheetCode, long? sheetCopyId)
+        => sheetCopyId is { } id
+            ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{sheetCode}{StateKeySeparator}{id}")
+            : sheetCode;
+
+    /// <summary>Код аркуша шаблону з ключа стану (без <c>#sheetCopyId</c>).</summary>
+    /// <param name="stateKey">Ключ з <see cref="StateKey"/>.</param>
+    public static string CodeOfStateKey(string stateKey)
+    {
+        ArgumentNullException.ThrowIfNull(stateKey);
+        var at = stateKey.IndexOf(StateKeySeparator, StringComparison.Ordinal);
+
+        return at < 0 ? stateKey : stateKey[..at];
+    }
+
     /// <summary>Показувана назва одного аркуша групи — один рядок.</summary>
     /// <param name="groupName">Назва групи.</param>
     /// <param name="ordinal">Номер у групі: 1 — оригінал.</param>

@@ -21,6 +21,8 @@ vi.mock('@/features/documents/api', () => ({ useTableStatus: () => ({ data: [] }
 function table(ordinal: number): DocumentTableDto {
   return {
     allowsDynamicRows: false,
+    copyOrdinal: 1,
+    isCopyable: false,
     maxDynamicRows: null,
     sheetCode: 'S1',
     sheetDefId: 1,

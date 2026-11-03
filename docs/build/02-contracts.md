@@ -4510,6 +4510,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/approve` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/reopen` | `Document.Reopen` | 3 |
 | `GET` | `/api/v1/documents/{id}/workflow/history` | `Document.View` | 3 |
+| `POST` | `/api/v1/documents/{id}/sheets/{sheetDefId}/copies` | `Document.Create` + запис у проєкті (додає порожню копію аркуша, позначеного в шаблоні `isCopyable`; → 201 `{ sheetCopyId, ordinal }`; не копіювальний аркуш — 422 `ECR-DOC-0422`; джерело завжди оригінал) | 8 |
+| `PUT` | `/api/v1/documents/{id}/sheets/{sheetDefId}/name` | `Document.Create` + запис у проєкті (перейменовує групу «<Назва> N» для всіх копій; тіло `{ nameL10n }`; → 204) | 8 |
+| `DELETE` | `/api/v1/documents/{id}/sheet-copies/{sheetCopyId}` | `Document.Create` + запис у проєкті (видаляє копію в усіх періодах і перенумеровує решту; оригінал — 409 `ECR-DOC-0409` `sheetCopyIsOriginal`; копія з поданням/затвердженням/зрізом у будь-якому періоді — 409 `sheetCopyHasWorkflow`; → 204) | 8 |
 | `GET` | `/api/v1/documents/{id}/sheets/{sheetDefId}/activity` | `Document.View` | 3 |
 | `GET` | `/api/v1/documents/{id}/sheets/{sheetDefId}/changes` | `Document.View` (живе оновлення сітки: `periodKey`, `since` — маркер попереднього опитування; → `SheetChangesDto { marker, changed, lastChangedByUserId, lastChangedBy, lastChangedAt, changedTables: [{ tableCode, tableInstanceId }] }`; власні записи викликача лише пересувають маркер; схована таблиця не потрапляє в `changedTables`; невидимий документ і схований аркуш — 404; `Cache-Control: no-store`) | 8 |
 | `GET` | `/api/v1/documents/{id}/submission-target` | `Document.View` | 3 |

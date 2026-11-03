@@ -36,6 +36,8 @@ function show(path: string, routePath: string, handle: unknown, queryClient = cl
 function table(sheetCode: string, sheetOrdinal: number, name: string): DocumentTableDto {
   return {
     allowsDynamicRows: false,
+    copyOrdinal: 1,
+    isCopyable: false,
     maxDynamicRows: null,
     sheetCode,
     sheetDefId: sheetOrdinal,
