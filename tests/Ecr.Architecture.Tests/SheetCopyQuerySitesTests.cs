@@ -61,6 +61,19 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Persistence/CollectionStore.cs"] = "проєкти мапінгу (без ключа таблиці)",
         ["src/Ecr.Infrastructure/Persistence/TableDiscussionStore.cs"] = "перелік періодів документа (Distinct)",
         ["src/Ecr.Infrastructure/Persistence/RuleCoverageReader.cs"] = "лічильники рядків і документів (копії — теж рядки)",
+
+        // ── перерахунок і Q-17 (RS5): «вид» копії, каскад усередині копії ──
+        ["src/Ecr.Infrastructure/Jobs/RecalculationJob.cs"] =
+            "формули — усі «види» (RecalculationService); методології, стани подання й гейти — лише оригінал",
+        ["src/Ecr.Infrastructure/Jobs/FormulaRecalculationJob.cs"] = "насіння розкладається за видами (оригінал, кожна копія)",
+        ["src/Ecr.Infrastructure/Jobs/CrossPeriodFanOut.cs"] =
+            "читачі за (таблиця, колонка); вид розрізняє прогін періоду-читача; Distinct за періодами",
+        ["src/Ecr.Infrastructure/Persistence/FormulaOverrideStore.cs"] = "позначки ручних значень — за Id рядка; лічильник за TableDefId",
+        ["src/Ecr.Infrastructure/Persistence/MonthColumnRouter.cs"] = "Q-17 для копій не діє: екземпляр копії не «маршрутизований»",
+        ["src/Ecr.Infrastructure/Persistence/MonthRoutedCellStore.cs"] = "Q-17 — лише оригінали (OriginalOnly)",
+        ["src/Ecr.Infrastructure/Persistence/TableFillStore.cs"] = "заповненість — лише оригінали (OriginalOnly), копії не входять",
+        ["src/Ecr.Infrastructure/Persistence/PeriodStore.cs"] = "HasReopenedSheetAsync — оригінал; HasReopenedSheetCopyAsync — своя копія",
+        ["src/Ecr.Infrastructure/Persistence/CellSourceStore.cs"] = "останній запис журналу — екземпляра своєї копії (@copy)",
     };
 
     /// <summary>
@@ -68,16 +81,6 @@ public sealed partial class SheetCopyQuerySitesTests
     /// </summary>
     private static readonly Dictionary<string, string> PendingReviewCommits5To7 = new(StringComparer.Ordinal)
     {
-        // RS5 — перерахунок, валідація, Q-17, ручні значення формул
-        ["src/Ecr.Infrastructure/Jobs/RecalculationJob.cs"] = "RS5: зріз перерахунку за копією",
-        ["src/Ecr.Infrastructure/Jobs/FormulaRecalculationJob.cs"] = "RS5",
-        ["src/Ecr.Infrastructure/Jobs/CrossPeriodFanOut.cs"] = "RS5: каскад між періодами — та сама копія",
-        ["src/Ecr.Infrastructure/Persistence/FormulaOverrideStore.cs"] = "RS5",
-        ["src/Ecr.Infrastructure/Persistence/MonthColumnRouter.cs"] = "RS5: Q-17 для копій",
-        ["src/Ecr.Infrastructure/Persistence/MonthRoutedCellStore.cs"] = "RS5: Q-17 для копій",
-        ["src/Ecr.Infrastructure/Persistence/TableFillStore.cs"] = "RS5: заповненість за (таблиця, копія)",
-        ["src/Ecr.Infrastructure/Persistence/PeriodStore.cs"] = "RS5: HasReopenedSheetAsync (позначка пізньої правки) — без копії",
-
         // RS6 — видалення документа/копії, перенос версії
         ["src/Ecr.Infrastructure/Persistence/DocumentDeletionStore.cs"] = "RS6",
         ["src/Ecr.Infrastructure/Persistence/DocumentVersionMigrationStore.cs"] = "RS6: SheetCopyId зберігається",
@@ -95,7 +98,6 @@ public sealed partial class SheetCopyQuerySitesTests
     {
         ["src/Ecr.Infrastructure/Persistence/DocumentStore.cs"] = "RS8: SheetStates/склад — ключ CODE#copyId",
         ["src/Ecr.Infrastructure/Persistence/SheetChangeStore.cs"] = "RS8: опитування змін і стан аркуша — за копією",
-        ["src/Ecr.Infrastructure/Persistence/CellSourceStore.cs"] = "RS8: походження комірки — екземпляр копії",
     };
 
     [Fact]

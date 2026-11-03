@@ -30,7 +30,11 @@ public interface ISubmitRecalculation
     /// <param name="sheetDefId">Аркуш, який подається.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="sheetCopyId">
+    /// RS: копія аркуша, яку подають; <c>null</c> — оригінал. Рахується лише цей «вид»: оригінал не пише комірок
+    /// копій, а копія — комірок оригіналу (їхнього блокування викликач не тримає).
+    /// </param>
     /// <returns>Скільки комірок записано.</returns>
     public Task<int> RecalculateSheetUnderSubmitLockAsync(
-        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct, long? sheetCopyId = null);
 }

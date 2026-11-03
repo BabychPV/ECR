@@ -332,7 +332,9 @@ public sealed partial class PatchCellsHandler
                 documentId, [.. active.Select(x => x.Context.Table.SheetDefId).Distinct()], period.Value, ct,
                 [.. active.SelectMany(x => x.Context.ColumnPeriods).Distinct()],
                 active.Exists(x => x.Context.InstancePeriodGoverns),
-                [.. active.SelectMany(x => x.Context.AnnualPeriods).Distinct()])
+                [.. active.SelectMany(x => x.Context.AnnualPeriods).Distinct()],
+                includesOriginal: active.Exists(x => x.Context.Instance.SheetCopyId is null),
+                sheetCopyIds: [.. active.Select(x => x.Context.Instance.SheetCopyId).OfType<long>().Distinct()])
             .ConfigureAwait(false);
 
         await uow.ExecuteInTransactionAsync(

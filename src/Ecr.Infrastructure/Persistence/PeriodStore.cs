@@ -207,7 +207,8 @@ public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock?
         // ⚠ `Reject` теж ставить ApprovedAt, але статус тоді Rejected: доопрацювання
         // відхиленого після Reopen лишається пізньою правкою. Знімає позначку
         // лише Approved, датований не раніше за Reopen.
-        return await db.ApprovalStates.AsNoTracking()
+        // RS: «позначка пізньої правки» — стан оригінала; стан копії має власний ключ і сюди не змішується.
+        return await db.ApprovalStates.AsNoTracking().OriginalOnly()
             .AnyAsync(
                 a => a.DocumentId == documentId
                      && a.PeriodKey == periodKey
@@ -217,4 +218,18 @@ public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock?
                 ct)
             .ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public async Task<bool> HasReopenedSheetCopyAsync(
+        long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKey, long sheetCopyId, CancellationToken ct)
+        => await db.ApprovalStates.AsNoTracking()
+            .AnyAsync(
+                a => a.DocumentId == documentId
+                     && a.PeriodKey == periodKey
+                     && a.SheetCopyId == sheetCopyId
+                     && sheetDefIds.Contains(a.SheetDefId)
+                     && a.ReopenedAt != null
+                     && !(a.Status == Ecr.Domain.Enums.DocumentStatus.Approved && a.ApprovedAt >= a.ReopenedAt),
+                ct)
+            .ConfigureAwait(false);
 }

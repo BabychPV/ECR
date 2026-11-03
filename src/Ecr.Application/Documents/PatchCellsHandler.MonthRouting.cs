@@ -71,7 +71,10 @@ public sealed partial class PatchCellsHandler
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
         CancellationToken ct)
     {
-        if (monthRouter is not { Enabled: true } || !monthRouter.AppliesToTable(context.Table))
+        // RS: копії аркушів Q-17 не підтримують — власники місячних стовпців лежали б в оригіналі, і запис копії
+        // потрапив би в його екземпляри. Копія зберігає значення у своїх комірках.
+        if (monthRouter is not { Enabled: true } || context.Instance.SheetCopyId is not null
+            || !monthRouter.AppliesToTable(context.Table))
         {
             return null;
         }

@@ -223,7 +223,8 @@ public sealed class GetTableSliceHandler(
         // ✎ HU-16 (Q-17): склад рядків таблиці «місяці в колонках» — за якорем року. Екземпляр не-якірного періоду
         // (Scheduled/Open…), створений до прапора чи до появи якоря, не має дзеркал — добираємо їх (лише рядки).
         // Прапор вимкнено / таблиця поза маршрутизацією / період сам якір — жодного звернення до бази.
-        if (monthRouter is { Enabled: true } && monthRouter.AppliesToTable(table))
+        // RS: копії аркушів Q-17 не підтримують (рішення людини 03.11) — власний склад рядків, без дзеркал якоря.
+        if (monthRouter is { Enabled: true } && instance.SheetCopyId is null && monthRouter.AppliesToTable(table))
         {
             var routing = await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false);
             var anchor = routing is null

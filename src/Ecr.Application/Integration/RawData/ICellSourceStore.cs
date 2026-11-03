@@ -46,8 +46,13 @@ public interface ICellSourceStore
     /// Останній запис журналу змін комірки (рядок + колонка) у документі — в екземплярах таблиці за
     /// <paramref name="periodKeys"/> (для Q-17 — і період-власник); <c>null</c> — змін не записано (або вони в архіві).
     /// </summary>
+    /// <remarks>
+    /// RS: <paramref name="sheetCopyId"/> — копія аркуша (<c>null</c> — оригінал). Той самий <c>(таблиця, рядок, колонка)</c>
+    /// у копії — інші комірки, тож журнал копії не змішується з журналом оригіналу.
+    /// </remarks>
     public Task<CellLastWrite?> LastWriteAsync(
-        long documentId, int tableDefId, string rowKey, int columnDefId, IReadOnlyList<int> periodKeys, CancellationToken ct);
+        long documentId, int tableDefId, string rowKey, int columnDefId, IReadOnlyList<int> periodKeys, CancellationToken ct,
+        long? sheetCopyId = null);
 }
 
 /// <summary>Стан згортки для комірки.</summary>

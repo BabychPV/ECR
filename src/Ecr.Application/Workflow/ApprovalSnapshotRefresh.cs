@@ -122,13 +122,10 @@ public sealed class ApprovalSnapshotRefresh(
             return false;
         }
 
-        // ⛔ RS: перерахунок КОПІЇ — коміт 5; перерахунок оригіналу під блокуванням копії писав би чужі комірки.
-        if (sheetCopyId is null)
-        {
-            await recalculation
-                .RecalculateSheetUnderSubmitLockAsync(documentId, sheetDefId, periodKey, ct)
-                .ConfigureAwait(false);
-        }
+        // ⛔ RS: рахується «вид» своєї копії (оригінал для sheetCopyId = null).
+        await recalculation
+            .RecalculateSheetUnderSubmitLockAsync(documentId, sheetDefId, periodKey, ct, sheetCopyId)
+            .ConfigureAwait(false);
 
         var payload = await SubmissionPayloadSource
             .ReadAsync(cellStore, headers, documentId, instances, periodKey, headerFieldCodes, ct)

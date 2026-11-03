@@ -104,6 +104,7 @@ public sealed class MonthColumnRouter : IMonthColumnRouter
                 join document in _db.Documents.AsNoTracking() on instance.DocumentId equals document.Id
                 join project in _db.Projects.AsNoTracking() on document.ProjectId equals project.Id
                 where project.PeriodKind == PeriodKind.Monthly
+                      && instance.SheetCopyId == null   // RS: копії аркушів Q-17 не підтримують — не «маршрутизовані»
                 select new InstanceRow
                 {
                     Id = instance.Id,

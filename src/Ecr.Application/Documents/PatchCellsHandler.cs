@@ -188,7 +188,9 @@ public sealed partial class PatchCellsHandler(
         var now = clock.UtcNow;
         var isLateEdit = await DetermineIsLateEditAsync(
                 context.Instance.DocumentId, [context.Table.SheetDefId], request.PeriodKey, ct,
-                context.ColumnPeriods, context.InstancePeriodGoverns, context.AnnualPeriods)
+                context.ColumnPeriods, context.InstancePeriodGoverns, context.AnnualPeriods,
+                includesOriginal: context.Instance.SheetCopyId is null,
+                sheetCopyIds: context.Instance.SheetCopyId is { } copy ? [copy] : null)
             .ConfigureAwait(false);
 
         // ⚠ `BE-05`: ідентифікатор поставленої задачі їде клієнтові у відповіді.
@@ -2403,10 +2405,13 @@ public sealed partial class PatchCellsHandler(
         CancellationToken ct,
         IEnumerable<int>? columnPeriods = null,
         bool instancePeriodGoverns = true,
-        SortedSet<int>? annualPeriods = null)
+        SortedSet<int>? annualPeriods = null,
+        bool includesOriginal = true,
+        IReadOnlyCollection<long>? sheetCopyIds = null)
     {
         if (instancePeriodGoverns
-            && await IsLateEditInPeriodAsync(documentId, sheetDefIds, periodKeyValue, ct).ConfigureAwait(false))
+            && await IsLateEditInPeriodAsync(documentId, sheetDefIds, periodKeyValue, ct, includesOriginal, sheetCopyIds)
+                .ConfigureAwait(false))
         {
             return true;
         }
@@ -2431,7 +2436,8 @@ public sealed partial class PatchCellsHandler(
 
         foreach (var columnPeriod in columnPeriods ?? [])
         {
-            if (await IsLateEditInPeriodAsync(documentId, sheetDefIds, columnPeriod, ct).ConfigureAwait(false))
+            if (await IsLateEditInPeriodAsync(documentId, sheetDefIds, columnPeriod, ct, includesOriginal, sheetCopyIds)
+                    .ConfigureAwait(false))
             {
                 return true;
             }
@@ -2441,7 +2447,8 @@ public sealed partial class PatchCellsHandler(
     }
 
     private async Task<bool> IsLateEditInPeriodAsync(
-        long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKeyValue, CancellationToken ct)
+        long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKeyValue, CancellationToken ct,
+        bool includesOriginal = true, IReadOnlyCollection<long>? sheetCopyIds = null)
     {
         var periodState = await periods
             .FindPeriodStateAsync(documentId, periodKeyValue, ct)
@@ -2451,9 +2458,23 @@ public sealed partial class PatchCellsHandler(
             return true;
         }
 
-        return await periods
-            .HasReopenedSheetAsync(documentId, sheetDefIds, periodKeyValue, ct)
-            .ConfigureAwait(false);
+        // RS: «перевідкритий» — стан ТОГО аркуша, у який пишуть: оригінал або власне копія (не будь-яка з них).
+        if (includesOriginal
+            && await periods.HasReopenedSheetAsync(documentId, sheetDefIds, periodKeyValue, ct).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        foreach (var copyId in sheetCopyIds ?? [])
+        {
+            if (await periods.HasReopenedSheetCopyAsync(documentId, sheetDefIds, periodKeyValue, copyId, ct)
+                    .ConfigureAwait(false))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

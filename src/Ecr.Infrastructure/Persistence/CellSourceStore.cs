@@ -42,6 +42,7 @@ public sealed class CellSourceStore(EcrDbContext db, Ecr.Application.Ports.IUnit
                      WHERE cc.DocumentId = @document AND cc.TableRowId = r.Id AND cc.ColumnDefId = @column
                      ORDER BY cc.ChangedAt DESC, cc.Id DESC) AS c
         WHERE i.DocumentId = @document AND i.TableDefId = @table AND i.PeriodKey IN (@period, @owner)
+          AND ((@copy IS NULL AND i.SheetCopyId IS NULL) OR i.SheetCopyId = @copy)
         ORDER BY c.ChangedAt DESC, c.Id DESC;
         """;
 
@@ -106,7 +107,8 @@ public sealed class CellSourceStore(EcrDbContext db, Ecr.Application.Ports.IUnit
 
     /// <inheritdoc />
     public async Task<CellLastWrite?> LastWriteAsync(
-        long documentId, int tableDefId, string rowKey, int columnDefId, IReadOnlyList<int> periodKeys, CancellationToken ct)
+        long documentId, int tableDefId, string rowKey, int columnDefId, IReadOnlyList<int> periodKeys, CancellationToken ct,
+        long? sheetCopyId = null)
     {
         ArgumentNullException.ThrowIfNull(periodKeys);
 
@@ -117,6 +119,7 @@ public sealed class CellSourceStore(EcrDbContext db, Ecr.Application.Ports.IUnit
         command.Parameters.Add("@column", SqlDbType.Int).Value = columnDefId;
         command.Parameters.Add("@period", SqlDbType.Int).Value = periodKeys[0];
         command.Parameters.Add("@owner", SqlDbType.Int).Value = periodKeys[^1];
+        command.Parameters.Add("@copy", SqlDbType.BigInt).Value = (object?)sheetCopyId ?? DBNull.Value;
 
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         return await reader.ReadAsync(ct).ConfigureAwait(false)
