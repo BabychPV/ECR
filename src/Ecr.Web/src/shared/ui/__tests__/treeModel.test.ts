@@ -152,6 +152,23 @@ describe('правила рівнів', () => {
   });
 });
 
+describe('вкладення рівня в себе (НАЕ: майданчик у майданчику)', () => {
+  const nested = levels.map((level) => (level.code === 'site' ? { ...level, allowsSelfNesting: true } : level));
+
+  it('canPlace: рівень з прапорцем стоїть під самим собою, без прапорця - ні; інші правила без змін', () => {
+    expect(canPlace(nested, 'site', 'site')).toBe(true);
+    expect(canPlace(levels, 'site', 'site')).toBe(false);
+    expect(canPlace(nested, 'region', 'region')).toBe(false);
+    expect(canPlace(nested, 'nae', 'site')).toBe(false);
+  });
+
+  it('childLevelsFor: власний рівень - останнім у переліку, головна дія лишається першою', () => {
+    expect(childLevelsFor(nested, 'site').map((level) => level.code)).toEqual(['equip', 'nae', 'site']);
+    expect(childLevelsFor(nested, 'region').map((level) => level.code)).toEqual(['area', 'site']);
+    expect(childLevelsFor(levels, 'site').map((level) => level.code)).toEqual(['equip', 'nae']);
+  });
+});
+
 describe('moveTargets', () => {
   const index = buildTreeIndex(sample);
   const barges = sample[2] as TreeNode;
