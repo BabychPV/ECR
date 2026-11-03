@@ -18,6 +18,7 @@ import {
   pendingCount,
   pendingSlice,
   pendingSlices,
+  replacePendingSlice,
   resetPending,
   sendableEdits,
   subscribePending,
@@ -680,6 +681,7 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
 
     return () => {
       cancelAutosave();
+      beaconed = null;
       clearBusyRetry();
       resetFailedSaves();
       resetPending();
@@ -707,6 +709,7 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
       registerUnloadFlush(hasPending, () => {
         // ⛔ AN-108 / S2-05: сеанс змінився в іншій вкладці — правки вже лежать у сліді `lostEdits` їхнього
         // власника, а відправити їх зараз означало б записати їх під чужим cookie. Без маячка і без питання.
+        beaconed = null;
         if (isSessionClosed()) return false;
 
         // ⚠ `V-01`: і тут без відхилених — інакше останній шанс зберегти
@@ -758,6 +761,7 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
         }
 
         for (const request of requests) sendPatchBeacon(documentId, request);
+        beaconed = sendable.map((slice) => ({ ...slice }));
 
         return false;
       }, () => {
@@ -773,12 +777,14 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
         //    збережене там не закомічене, тож дубля не буде.
         if (isSessionClosed()) return;
 
-        const requests = pendingSlices({ sendableOnly: true })
+        const split = pendingSlices({ sendableOnly: true })
           .map((slice) => ({
             slice,
             now: splitByInFlight(slice.tableInstanceId, slice.periodKey, slice.edits).now,
           }))
-          .filter(({ now }) => now.length > 0)
+          .filter(({ now }) => now.length > 0);
+        const slicesNow = split.map(({ slice, now }) => ({ ...slice, edits: now }));
+        const requests = split
           .map(({ slice, now }) =>
             buildRequest(
               slice.tableInstanceId,
@@ -790,9 +796,57 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
         if (beaconBytes(requests) > BeaconBudgetBytes) return;
 
         for (const request of requests) sendPatchBeacon(documentId, request);
+        beaconed = slicesNow;
       }),
     [documentId, queryClient],
   );
+
+  // ⛔ bfcache: `pagehide` (і маячок) бувають перед відправкою сторінки в bfcache, а не в смерть.
+  // «Назад» відновлює ту саму сторінку: правки, що вже поїхали маячком, лежать у сховищі зі старою
+  // версією, і наступне збереження дало б `409` на власних правках. Тому на `pageshow` з `persisted`:
+  //  1) знімаємо зі сховища ЛИШЕ те, що поїхало й не змінилося (комірка з тим самим значенням) -
+  //     правки, зроблені вже після маячка (інше значення), лишаються й їдуть звичайним збором;
+  //  2) інвалідуємо зрізи - сітка перечитає значення й нові версії рядків із сервера.
+  // Утримані (відхилені) правки маячком не їхали - їх не чіпаємо.
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent): void => {
+      if (!event.persisted) return;
+      restoreAfterBfcache(queryClient);
+    };
+    window.addEventListener('pageshow', onPageShow);
+
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, [queryClient]);
+}
+
+/** Що поїхало маячком останнім разом (для відновлення з bfcache); `null` - нічого. */
+let beaconed: readonly PendingSliceLike[] | null = null;
+
+interface PendingSliceLike {
+  readonly tableInstanceId: number;
+  readonly periodKey: number;
+  readonly edits: readonly PendingEdit[];
+}
+
+function sameSentValue(a: PendingEdit, b: PendingEdit): boolean {
+  return a.isEmpty === b.isEmpty && JSON.stringify(a.value) === JSON.stringify(b.value);
+}
+
+/** Відновлення сторінки з bfcache: див. коментар у `useDocumentPending`. Експорт - для тестів. */
+export function restoreAfterBfcache(queryClient: QueryClient): void {
+  const sent = beaconed;
+  beaconed = null;
+  if (sent === null) return;
+
+  for (const slice of sent) {
+    const next = new Map(pendingSlice(slice.tableInstanceId, slice.periodKey));
+    for (const edit of slice.edits) {
+      const current = next.get(cellKey(edit));
+      if (current !== undefined && sameSentValue(current, edit)) next.delete(cellKey(edit));
+    }
+    replacePendingSlice(slice.tableInstanceId, slice.periodKey, next);
+    void queryClient.invalidateQueries({ queryKey: queryKeys.slices.one(slice.tableInstanceId, slice.periodKey) });
+  }
 }
 
 /** Сума тіл маячка в байтах UTF-8 — так, як їх рахує ліміт `keepalive`. */
