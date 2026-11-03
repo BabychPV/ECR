@@ -42,6 +42,7 @@ export function deleteSheet(templateVersionId: number, code: string): Promise<vo
 /** Тіло запиту `PUT …/sheets/{code}`. */
 function sheetBody(draft: SheetDraft): SaveSheetDefRequest {
   return {
+    isCopyable: draft.isCopyable,
     nameL10n: draft.nameL10n,
     ordinal: draft.ordinal,
     sheetGroup: draft.sheetGroup.trim().length === 0 ? null : draft.sheetGroup.trim(),

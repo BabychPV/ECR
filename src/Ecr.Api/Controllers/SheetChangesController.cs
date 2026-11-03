@@ -21,6 +21,7 @@ public sealed class SheetChangesController(GetSheetChangesHandler changes) : Con
     /// <param name="periodKey">Період (рік*100+номер).</param>
     /// <param name="since">Маркер попереднього опитування; без нього — лише поточний маркер (<c>changed = false</c>).</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="sheetCopyId">RS: копія аркуша (<c>sheetCopyId</c> з <c>GET …/tables</c>); без нього — оригінал.</param>
     /// <remarks>
     /// <c>changed = true</c> — після <c>since</c> дані видимих таблиць аркуша змінив хтось інший; власні записи
     /// викликача лише пересувають маркер. Схована таблиця не потрапляє в <c>changedTables</c>; невидимий документ і
@@ -35,9 +36,10 @@ public sealed class SheetChangesController(GetSheetChangesHandler changes) : Con
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Changes(
-        long id, int sheetDefId, [FromQuery] int periodKey, [FromQuery] string? since, CancellationToken ct)
+        long id, int sheetDefId, [FromQuery] int periodKey, [FromQuery] string? since, CancellationToken ct,
+        [FromQuery] long? sheetCopyId = null)
     {
-        var result = await changes.HandleAsync(id, sheetDefId, periodKey, since, ct).ConfigureAwait(false);
+        var result = await changes.HandleAsync(id, sheetDefId, periodKey, since, ct, sheetCopyId).ConfigureAwait(false);
         var etag = result.ETag();
         Response.Headers[HeaderNames.CacheControl] = "no-store";
         Response.Headers[HeaderNames.ETag] = etag;

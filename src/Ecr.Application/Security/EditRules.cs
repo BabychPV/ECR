@@ -51,6 +51,13 @@ public readonly record struct CellAccessContext(
     public PeriodKey? Period { get; init; }
 
     /// <summary>
+    /// Копія аркуша (RS, <c>doc.DocumentSheet.Id</c>); <c>null</c> — оригінал. <see cref="SheetStatus"/> — стан
+    /// САМЕ цієї копії за період. Правила <see cref="EditRules"/> поля не читають: гранти, ролі, звужені аркушами, і
+    /// правила доступу до періоду — рівня шаблону й діють на копії як є (Q6).
+    /// </summary>
+    public long? SheetCopyId { get; init; }
+
+    /// <summary>
     /// У документа є хоч одна передача зрізу (EA-B). Лише ознака для служби: правила
     /// <see cref="EditRules"/> її не читають. Дає змогу документам без передач не платити
     /// ні читанням передач у рішенні, ні повторною перевіркою під блокуванням.

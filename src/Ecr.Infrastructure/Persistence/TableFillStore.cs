@@ -55,7 +55,7 @@ public sealed class TableFillStore(
         // Рахуються ВСІ нерозмічені видаленими рядки екземпляра, навіть
         // повністю порожні: саме вони і є те, що людина має заповнити.
         var rowCounts = await (
-            from instance in db.TableInstances.AsNoTracking()
+            from instance in db.TableInstances.AsNoTracking().OriginalOnly()   // RS: заповненість — оригінали (копії не мають TableDefId-ключа)
             where instance.DocumentId == documentId && instance.PeriodKeyValue == key
             join row in db.TableRows.AsNoTracking()
                     .Where(r => r.PeriodKeyValue == key && !r.IsDeleted)
@@ -76,7 +76,7 @@ public sealed class TableFillStore(
         // 190–250 мс із групуванням за колонкою (ключовий стовпець, сотні
         // груп) — і ще окремий план на кожну довжину списку.
         var filledByColumn = await (
-            from instance in db.TableInstances.AsNoTracking()
+            from instance in db.TableInstances.AsNoTracking().OriginalOnly()
             where instance.DocumentId == documentId && instance.PeriodKeyValue == key
             join row in db.TableRows.AsNoTracking()
                     .Where(r => r.PeriodKeyValue == key && !r.IsDeleted)
@@ -158,13 +158,13 @@ public sealed class TableFillStore(
         // 50–58 с і Execution Timeout). Тут кожен рядок власника читається ОДНИМ діапазоном (PeriodKey, TableRowId)
         // вузького IX_CellValue_Fill, а відбір колонок власника робить виклик у пам'яті по результату
         // «таблиця × колонка × період» (їх сотні, не мільйони).
-        return from instance in db.TableInstances.AsNoTracking()
+        return from instance in db.TableInstances.AsNoTracking().OriginalOnly()
                where instance.DocumentId == documentId
                      && instance.PeriodKeyValue == key
                      && tableDefIds.Contains(instance.TableDefId)
                join row in db.TableRows.AsNoTracking().Where(r => r.PeriodKeyValue == key && !r.IsDeleted)
                    on instance.Id equals row.TableInstanceId
-               join owner in db.TableInstances.AsNoTracking()
+               join owner in db.TableInstances.AsNoTracking().OriginalOnly()
                        .Where(o => o.DocumentId == documentId
                                    && o.PeriodKeyValue >= firstOwner
                                    && o.PeriodKeyValue <= lastOwner

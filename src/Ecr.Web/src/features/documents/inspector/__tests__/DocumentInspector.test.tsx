@@ -23,6 +23,8 @@ import { clearInspectedCell, inspectedCell, publishInspectedCell, type Inspected
 function table(sheetCode: string, sheetOrdinal: number, tableDefId: number): DocumentTableDto {
   return {
     allowsDynamicRows: false,
+    copyOrdinal: 1,
+    isCopyable: false,
     maxDynamicRows: null,
     sheetCode,
     sheetDefId: sheetOrdinal + 1,

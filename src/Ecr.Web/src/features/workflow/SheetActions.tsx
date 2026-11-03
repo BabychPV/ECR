@@ -66,6 +66,11 @@ interface SheetActionsProps {
   documentId: number;
   /** Аркуш; гранулярність робочого процесу — `аркуш × період` (D-38). */
   sheetDefId: number;
+  /**
+   * RS: копія аркуша (`sheetCopyId` з `GET …/tables`); `null`/не задано — оригінал. Іде в запитах подання,
+   * погодження, повернення й відкликання (контракт: необов'язкове `sheetCopyId`).
+   */
+  sheetCopyId?: number | null | undefined;
   /** Період. */
   periodKey: number;
   /** Поточний стан аркуша за цей період. */
@@ -400,11 +405,17 @@ export interface SheetActionsModel {
  * відмови (він називає аркуш, над яким дія).
  */
 type SheetAddress = { readonly sheetDefId: number; readonly periodKey: number };
-type ActionTarget = SheetAddress & { readonly sheetName: string | null };
+type ActionTarget = SheetAddress & { readonly sheetName: string | null; readonly sheetCopyId: number | null };
+
+/** Поле `sheetCopyId` запиту: лише для копії — оригінал його не шле (контракт: без нього — оригінал). */
+function copyPart(sheetCopyId: number | null): { sheetCopyId?: number } {
+  return sheetCopyId === null ? {} : { sheetCopyId };
+}
 
 export function useSheetActions({
   documentId,
   sheetDefId,
+  sheetCopyId = null,
   periodKey,
   state,
   sheetName = null,
@@ -414,7 +425,7 @@ export function useSheetActions({
   const session = useSession();
 
   // Знімок адреси цього рендеру: те, що оператор бачить у мить кліку (N3-01).
-  const here: ActionTarget = { sheetDefId, periodKey, sheetName };
+  const here: ActionTarget = { sheetDefId, periodKey, sheetName, sheetCopyId };
 
   // Яка дія чекає на причину; `null` — діалог закритий.
   const [asking, setAsking] = useState<'approve' | 'reject' | 'reopen' | 'recall' | null>(null);
@@ -446,6 +457,7 @@ export function useSheetActions({
     mutationFn: ({
       sheetDefId: sheet,
       periodKey: period,
+      sheetCopyId: copy,
       acknowledgeWarnings,
     }: ActionTarget & { acknowledgeWarnings: boolean }) =>
       apiFetch(`/api/v1/documents/${documentId}/submit`, {
@@ -453,6 +465,7 @@ export function useSheetActions({
         body: JSON.stringify({
           sheetDefId: sheet,
           periodKey: period,
+          ...copyPart(copy),
           acknowledgeWarnings,
         } satisfies SheetWorkflowRequest),
       }),
@@ -486,6 +499,7 @@ export function useSheetActions({
         body: JSON.stringify({
           sheetDefId: verdict.sheetDefId,
           periodKey: verdict.periodKey,
+          ...copyPart(verdict.sheetCopyId),
           approved: verdict.approved,
           reason: verdict.reason,
         } satisfies ApproveSheetRequest),
@@ -499,10 +513,10 @@ export function useSheetActions({
   });
 
   const reopen = useMutation({
-    mutationFn: ({ sheetDefId: sheet, periodKey: period, reason }: ActionTarget & { reason: string }) =>
+    mutationFn: ({ sheetDefId: sheet, periodKey: period, sheetCopyId: copy, reason }: ActionTarget & { reason: string }) =>
       apiFetch(`/api/v1/documents/${documentId}/reopen`, {
         method: 'POST',
-        body: JSON.stringify({ sheetDefId: sheet, periodKey: period, reason } satisfies ReopenDocumentRequest),
+        body: JSON.stringify({ sheetDefId: sheet, periodKey: period, ...copyPart(copy), reason } satisfies ReopenDocumentRequest),
       }),
     onSuccess: async (_result, at) => {
       await refresh(at);
@@ -525,14 +539,15 @@ export function useSheetActions({
     sheetDefId,
     periodKey,
     isAllowed('recall', state),
+    sheetCopyId,
   );
   const canRecall = isAllowed('recall', state) && recallAvailability.data?.canRecall === true;
 
   const recall = useMutation({
-    mutationFn: ({ sheetDefId: sheet, periodKey: period, reason }: ActionTarget & { reason: string }) =>
+    mutationFn: ({ sheetDefId: sheet, periodKey: period, sheetCopyId: copy, reason }: ActionTarget & { reason: string }) =>
       apiFetch(`/api/v1/documents/${documentId}/recall`, {
         method: 'POST',
-        body: JSON.stringify({ sheetDefId: sheet, periodKey: period, reason } satisfies RecallSheetRequest),
+        body: JSON.stringify({ sheetDefId: sheet, periodKey: period, ...copyPart(copy), reason } satisfies RecallSheetRequest),
       }),
     onSuccess: async (_result, at) => {
       await refresh(at);
@@ -801,7 +816,7 @@ export function useSheetActions({
    * до відповіді подав би відкритий період, тобто саме те, що D-441 скасовує. Збій запиту — стара поведінка
    * (відкритий на екрані період), щоб робочий процес не зупинявся через недоступну підказку.
    */
-  const submissionTarget = useSubmissionTarget(documentId, sheetDefId, periodKey);
+  const submissionTarget = useSubmissionTarget(documentId, sheetDefId, periodKey, sheetCopyId);
   // ⚠ Відповідь без переліку періодів (старіший сервер, проксі, порожнє тіло) — та сама невідомість, що й збій.
   const target = Array.isArray(submissionTarget.data?.periods) ? submissionTarget.data : undefined;
   const targetUnknown = submissionTarget.isError || (submissionTarget.isSuccess && target === undefined);

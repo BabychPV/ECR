@@ -15,6 +15,8 @@ import { clearInspectedCell, publishInspectedCell } from '../inspectedCell';
 const Tables = [
   {
     allowsDynamicRows: false,
+    copyOrdinal: 1,
+    isCopyable: false,
     maxDynamicRows: null,
     sheetCode: 'A',
     sheetDefId: 1,

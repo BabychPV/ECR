@@ -87,8 +87,10 @@ public sealed partial class PermitBindingService(
             return Finish(documentId, 0, warnings);
         }
 
+        // RS (Q5): рядки з дозволу — лише в оригінал аркуша.
         var instanceIds = await db.TableInstances
             .AsNoTracking()
+            .OriginalOnly()
             .Where(t => t.PeriodKeyValue == periodKey.Value && t.DocumentId == documentId && createdTableDefIds.Contains(t.TableDefId))
             .ToDictionaryAsync(t => t.TableDefId, t => t.Id, ct)
             .ConfigureAwait(false);

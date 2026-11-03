@@ -273,7 +273,7 @@ public sealed partial class SourceEventSyncJob(
         var tableIds = pairs.Select(p => p.TableDefId).Distinct().ToList();
 
         var live = await (
-                from i in db.TableInstances.AsNoTracking()
+                from i in db.TableInstances.AsNoTracking().OriginalOnly() // RS (Q5): події джерел — лише в оригінал
                 join d in db.Documents.AsNoTracking() on i.DocumentId equals d.Id
                 join p in db.Periods.AsNoTracking()
                     on new { d.ProjectId, i.PeriodKeyValue } equals new { p.ProjectId, p.PeriodKeyValue }
@@ -628,8 +628,10 @@ public sealed partial class SourceEventSyncJob(
                 p.PeriodKeyValue, p.State, Domain.Entities.Documents.Period.UtcBounds(p.PeriodStart, p.PeriodEnd, tz)))
             .ToList();
 
+        // RS (Q5): лише оригінал аркуша — інакше ToDictionary за періодом падав би на копії.
         var instances = await db.TableInstances
             .AsNoTracking()
+            .OriginalOnly()
             .Where(t => t.DocumentId == map.DocumentId && t.TableDefId == map.TableDefId)
             .ToDictionaryAsync(t => t.PeriodKeyValue, t => t.Id, ct)
             .ConfigureAwait(false);
@@ -645,6 +647,7 @@ public sealed partial class SourceEventSyncJob(
         var lockedSheets = sheetDefId is { } sheet
             ? (await db.ApprovalStates
                     .AsNoTracking()
+                    .OriginalOnly() // RS: стан КОПІЇ не замикає запис в оригінал
                     .Where(a => a.DocumentId == map.DocumentId && a.SheetDefId == sheet
                                 && (a.Status == DocumentStatus.Submitted || a.Status == DocumentStatus.Approved))
                     .Select(a => new { a.PeriodKey, a.Status })
@@ -1336,6 +1339,7 @@ public sealed partial class SourceEventSyncJob(
 
             SELECT TOP (1) Status FROM wf.ApprovalState
              WHERE @sheet IS NOT NULL AND DocumentId = @document AND SheetDefId = @sheet AND PeriodKey = @period
+               AND SheetCopyId IS NULL -- RS: події джерел пишуть лише в оригінал; стан копії його не замикає
                AND Status IN (@submitted, @approved);
 
             -- ⛔ R5-Q1-01: c.DocumentId = @document — провідна колонка IX_CellChange_Cell; без неї скан УСЬОГО

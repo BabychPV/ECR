@@ -30,15 +30,16 @@ public static class ApproverEditRule
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Скасування.</param>
+    /// <param name="sheetCopyId">Копія аркуша (RS); <c>null</c> — оригінал.</param>
     /// <returns><c>true</c> — правку значень поданого аркуша сервер пропустить (решту правил комірки — окремо).</returns>
     public static async Task<bool> IsCurrentStepApproverAsync(
         IAccessDecisionService access, AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey,
-        CancellationToken ct)
+        CancellationToken ct, long? sheetCopyId = null)
     {
         ArgumentNullException.ThrowIfNull(access);
 
         var decision = await access
-            .CanApproveAsync(profile, documentId, sheetDefId, periodKey, ct)
+            .CanApproveOfAsync(profile, documentId, sheetDefId, periodKey, sheetCopyId, ct)
             .ConfigureAwait(false);
 
         return decision.IsAllowed;
@@ -74,8 +75,9 @@ public sealed class GetApproverEditAvailabilityHandler(
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Скасування.</param>
+    /// <param name="sheetCopyId">Копія аркуша (RS); <c>null</c> — оригінал.</param>
     public async Task<ApproverEditAvailabilityDto> HandleAsync(
-        long documentId, int sheetDefId, int periodKey, CancellationToken ct)
+        long documentId, int sheetDefId, int periodKey, CancellationToken ct, long? sheetCopyId = null)
     {
         var profile = await PermissionCheck
             .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
@@ -86,7 +88,7 @@ public sealed class GetApproverEditAvailabilityHandler(
 
         return new ApproverEditAvailabilityDto(
             await ApproverEditRule
-                .IsCurrentStepApproverAsync(access, profile, documentId, sheetDefId, PeriodKey.Parse(periodKey), ct)
+                .IsCurrentStepApproverAsync(access, profile, documentId, sheetDefId, PeriodKey.Parse(periodKey), ct, sheetCopyId)
                 .ConfigureAwait(false));
     }
 }

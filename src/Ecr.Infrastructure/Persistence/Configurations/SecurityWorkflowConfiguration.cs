@@ -138,8 +138,14 @@ public sealed class ApprovalStateConfiguration : IEntityTypeConfiguration<Approv
         // Ключ — сурогат; трійка «документ × аркуш × період» тримається
         // окремим UNIQUE (02a-db-schema.md).
         builder.HasKey(x => x.Id);
-        builder.HasIndex(x => new { x.DocumentId, x.SheetDefId, x.PeriodKey })
-               .IsUnique().HasDatabaseName("UQ_ApprovalState");
+        // RS: + SheetCopyId; ⛔ HasFilter(null) — див. UQ_TableInstance (NULL = оригінал, рівно один).
+        builder.HasIndex(x => new { x.DocumentId, x.SheetDefId, x.PeriodKey, x.SheetCopyId })
+               .IsUnique().HasFilter(null).HasDatabaseName("UQ_ApprovalState");
+
+        builder.HasOne<Domain.Entities.Documents.DocumentSheet>()
+               .WithMany()
+               .HasForeignKey(x => x.SheetCopyId)
+               .HasConstraintName("FK_ApprState_SheetCopy");
 
         builder.Property(x => x.Status).HasConversion<byte>();
         builder.Property(x => x.RejectedReason).HasMaxLength(1000);

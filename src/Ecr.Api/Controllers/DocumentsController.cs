@@ -41,7 +41,8 @@ public sealed class DocumentsController(
     ChangeDocumentKeyHandler changeKey,
     GetDocumentHeaderHandler getHeader,
     PatchDocumentHeaderHandler patchHeader,
-    Application.Documents.VersionMigration.MigrateDocumentVersionHandler migrateVersion) : ControllerBase
+    Application.Documents.VersionMigration.MigrateDocumentVersionHandler migrateVersion,
+    DocumentSheetCopyHandler sheetCopies) : ControllerBase
 {
     /// <summary>
     /// Стеля тіла запиту перегляду імпорту — рівно стандартна межа Kestrel
@@ -452,7 +453,7 @@ public sealed class DocumentsController(
         ArgumentNullException.ThrowIfNull(request);
 
         await submit
-            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.AcknowledgeWarnings, ct)
+            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.AcknowledgeWarnings, request.SheetCopyId, ct)
             .ConfigureAwait(false);
         return NoContent();
     }
@@ -467,7 +468,7 @@ public sealed class DocumentsController(
         ArgumentNullException.ThrowIfNull(request);
 
         await approve
-            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Approved, request.Reason, ct)
+            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Approved, request.Reason, request.SheetCopyId, ct)
             .ConfigureAwait(false);
 
         return NoContent();
@@ -491,8 +492,76 @@ public sealed class DocumentsController(
         ArgumentNullException.ThrowIfNull(request);
 
         await reopen
-            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Reason, ct)
+            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Reason, request.SheetCopyId, ct)
             .ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Додає порожню копію аркуша («Додати копію»): ті самі таблиці й формули, без даних, у КОЖНОМУ періоді. Право
+    /// <c>Document.Create</c> + запис у проєкт.
+    /// </summary>
+    /// <param name="id">Документ.</param>
+    /// <param name="sheetDefId">Аркуш-оригінал (джерело копії — завжди оригінал).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// <c>422</c> <c>ECR-DOC-0422</c> (<c>sheetNotCopyable</c>) — шаблон не дозволяє копіювати аркуш; <c>404</c> — аркуша немає у
+    /// складі; <c>409</c> — проєкт у архіві. Відповідь — Id копії (він же <c>sheetCopyId</c> у даних) і її номер у групі
+    /// («&lt;Назва&gt; N»).
+    /// </remarks>
+    [HttpPost("{id:long}/sheets/{sheetDefId:int}/copies")]
+    [ProducesResponseType<SheetCopyCreated>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<SheetCopyCreated>> AddSheetCopy(long id, int sheetDefId, CancellationToken ct)
+        => StatusCode(
+            StatusCodes.Status201Created,
+            await sheetCopies.AddAsync(id, sheetDefId, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Перейменовує групу аркуша: оригінал і всі копії стають «&lt;Назва&gt; N». Право <c>Document.Create</c> + запис у проєкт.
+    /// </summary>
+    /// <param name="id">Документ.</param>
+    /// <param name="sheetDefId">Аркуш-оригінал.</param>
+    /// <param name="request">Назва за мовами.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpPut("{id:long}/sheets/{sheetDefId:int}/name")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> RenameSheetGroup(
+        long id, int sheetDefId, [FromBody] RenameSheetGroupRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await sheetCopies.RenameGroupAsync(id, sheetDefId, request.NameL10n, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Видаляє копію аркуша з даними всіх періодів; решта копій групи перенумеровується. Право <c>Document.Create</c> + запис у проєкт.
+    /// </summary>
+    /// <param name="id">Документ.</param>
+    /// <param name="sheetCopyId">Копія (<c>sheetCopyId</c> з <c>GET …/tables</c>).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// <c>409</c> <c>ECR-DOC-0409</c>: <c>sheetCopyIsOriginal</c> — це оригінал; <c>sheetCopyHasWorkflow</c> — копія подана чи
+    /// затверджена хоч в одному періоді (<c>periodKey</c>, <c>status</c>). Зрізи подань лишаються.
+    /// </remarks>
+    [HttpDelete("{id:long}/sheet-copies/{sheetCopyId:long}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteSheetCopy(long id, long sheetCopyId, CancellationToken ct)
+    {
+        await sheetCopies.DeleteCopyAsync(id, sheetCopyId, ct).ConfigureAwait(false);
 
         return NoContent();
     }
@@ -726,20 +795,29 @@ public sealed record RecalculateDocumentRequest(int PeriodKey, int? SheetDefId =
 /// Подавач підтвердив попередження валідації (ФВ-5.19); без цього подання
 /// аркуша з попередженнями відхиляється з їхнім переліком.
 /// </param>
-public sealed record SheetWorkflowRequest(int SheetDefId, int PeriodKey, bool AcknowledgeWarnings = false);
+/// <param name="SheetCopyId">RS: копія аркуша (<c>sheetCopyId</c> з <c>GET …/tables</c>); <c>null</c> — оригінал.</param>
+public sealed record SheetWorkflowRequest(
+    int SheetDefId, int PeriodKey, bool AcknowledgeWarnings = false, long? SheetCopyId = null);
 
 /// <summary>Запит на погодження аркуша.</summary>
 /// <param name="SheetDefId">Аркуш.</param>
 /// <param name="PeriodKey">Період.</param>
 /// <param name="Approved"><c>true</c> — погодити, <c>false</c> — відхилити.</param>
 /// <param name="Reason">Причина; обов'язкова при відхиленні.</param>
-public sealed record ApproveSheetRequest(int SheetDefId, int PeriodKey, bool Approved, string? Reason);
+/// <param name="SheetCopyId">RS: копія аркуша; <c>null</c> — оригінал.</param>
+public sealed record ApproveSheetRequest(
+    int SheetDefId, int PeriodKey, bool Approved, string? Reason, long? SheetCopyId = null);
 
 /// <summary>Запит на відкриття поданого документа.</summary>
 /// <param name="SheetDefId">Аркуш.</param>
 /// <param name="PeriodKey">Період.</param>
 /// <param name="Reason">Причина; обов'язкова.</param>
-public sealed record ReopenDocumentRequest(int SheetDefId, int PeriodKey, string Reason);
+/// <param name="SheetCopyId">RS: копія аркуша; <c>null</c> — оригінал.</param>
+public sealed record ReopenDocumentRequest(int SheetDefId, int PeriodKey, string Reason, long? SheetCopyId = null);
+
+/// <summary>Нова назва групи аркуша (оригінал і копії).</summary>
+/// <param name="NameL10n">Назва за мовами — така сама форма, як <c>SaveSheetDefRequest.NameL10n</c>.</param>
+public sealed record RenameSheetGroupRequest(IReadOnlyDictionary<string, string> NameL10n);
 
 /// <summary>Запит на зміну бізнес-ключа документа (ФВ-3.9).</summary>
 /// <param name="BusinessKey">Новий ключ.</param>

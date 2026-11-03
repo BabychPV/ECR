@@ -84,7 +84,7 @@ public sealed partial class ReportViewStableTests
         // Lookup-колонки віддають і значення, і явний <Код>_Id (то те саме Id запису); службові колонки на місці.
         Assert.Equal(
             ["PERMIT", "NAE", "SUBSTANCE", "TONS", "PERMIT_Id", "NAE_Id", "SUBSTANCE_Id"],
-            (await ColumnNamesAsync(stable)).Skip(10).ToList());
+            await UserColumnsAsync(stable));
         var ids = await RowsAsync(stable, project.ProjectId, "_RowKey", "PERMIT", "PERMIT_Id", "SUBSTANCE_Id");
         Assert.All(ids, r => Assert.Equal(r[1], r[2]));
         Assert.Equal(p1, Convert.ToInt64(ids[0][2], System.Globalization.CultureInfo.InvariantCulture));
@@ -173,7 +173,7 @@ public sealed partial class ReportViewStableTests
         await GenerateAsync(versionId);
         var columns = await ColumnNamesAsync(StableName(tpl, "S", "T"));
 
-        Assert.Equal(["OWNER", "OWNER_Id"], columns.Skip(10).ToList());
+        Assert.Equal(["OWNER", "OWNER_Id"], columns.Where(name => !name.StartsWith('_')).ToList());
         var types = await ColumnTypesAsync(StableName(tpl, "S", "T"));
         Assert.Equal("nvarchar", types["OWNER_Id"]);   // власна колонка шаблону, а не супутник
     }

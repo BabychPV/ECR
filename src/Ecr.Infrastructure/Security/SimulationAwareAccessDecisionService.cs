@@ -167,4 +167,24 @@ public sealed class SimulationAwareAccessDecisionService(
     public Task<ApprovalStepView?> CurrentApprovalStepAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
         => inner.CurrentApprovalStepAsync(documentId, sheetDefId, periodKey, ct);
+
+    /// <inheritdoc />
+    public Task<EditDecision> CanSubmitCopyAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => inner.CanSubmitCopyAsync(profile, documentId, sheetDefId, periodKey, sheetCopyId, ct);
+
+    /// <inheritdoc />
+    public Task<EditDecision> CanApproveCopyAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => inner.CanApproveCopyAsync(profile, documentId, sheetDefId, periodKey, sheetCopyId, ct);
+
+    /// <inheritdoc />
+    public Task<EditDecision> CanReopenCopyAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => inner.CanReopenCopyAsync(profile, documentId, sheetDefId, periodKey, sheetCopyId, ct);
+
+    /// <inheritdoc />
+    public Task<ApprovalStepView?> CurrentCopyApprovalStepAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => inner.CurrentCopyApprovalStepAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct);
 }

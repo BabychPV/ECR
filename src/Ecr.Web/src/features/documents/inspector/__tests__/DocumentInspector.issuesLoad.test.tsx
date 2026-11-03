@@ -32,6 +32,8 @@ vi.mock('@/shared/ui/StatusBadge', () => ({
 const Tables = [
   {
     allowsDynamicRows: false,
+    copyOrdinal: 1,
+    isCopyable: false,
     maxDynamicRows: null,
     sheetCode: 'A',
     sheetDefId: 1,

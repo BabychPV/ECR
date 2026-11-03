@@ -19,8 +19,9 @@ namespace Ecr.Application.Documents;
 /// <param name="NameL10n">Назва всіма мовами каталогу.</param>
 /// <param name="SheetGroup">Група для правил складу; <c>null</c> — поза групами.</param>
 /// <param name="IsMandatory">Чи обов'язковий аркуш.</param>
+/// <param name="IsCopyable">RS: аркуш можна копіювати в документі.</param>
 public sealed record DocumentTemplateSheetDto(
-    int Id, string Code, LocalizedText NameL10n, string? SheetGroup, bool IsMandatory);
+    int Id, string Code, LocalizedText NameL10n, string? SheetGroup, bool IsMandatory, bool IsCopyable = false);
 
 /// <summary>З чого складається новий документ проєкту.</summary>
 /// <param name="TemplateVersionId">Версія шаблону проєкту — те, що йде в <c>templateVersionId</c>.</param>
@@ -137,7 +138,7 @@ public sealed class GetDocumentTemplateHandler(
             version.Version,
             [.. snapshot.Sheets
                 .OrderBy(s => s.Ordinal)
-                .Select(s => new DocumentTemplateSheetDto(s.Id, s.Code, s.NameL10n, s.SheetGroup, s.IsMandatory))],
+                .Select(s => new DocumentTemplateSheetDto(s.Id, s.Code, s.NameL10n, s.SheetGroup, s.IsMandatory, s.IsCopyable))],
             [.. groupRules.Select(r => new SheetGroupRuleDto(r.SheetGroup, r.RuleKind, r.TargetGroup))]);
     }
 }

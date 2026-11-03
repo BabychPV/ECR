@@ -367,7 +367,7 @@ public sealed class CellSourceHandler(
             : await store
                 .LastWriteAsync(
                     documentId, instance.TableDefId, rowKey, columnDefId,
-                    [instance.PeriodKey, owner?.Value ?? instance.PeriodKey], ct)
+                    [instance.PeriodKey, owner?.Value ?? instance.PeriodKey], ct, instance.SheetCopyId)
                 .ConfigureAwait(false);
 
         Domain.Entities.Documents.Period.UtcRange? utc = window is { } w

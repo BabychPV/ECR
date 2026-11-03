@@ -1179,7 +1179,9 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             select db.ApprovalStates
                        .Where(a => a.DocumentId == document.Id
                                    && a.SheetDefId == sheet.SheetDefId
-                                   && a.PeriodKey == period.PeriodKeyValue)
+                                   && a.PeriodKey == period.PeriodKeyValue
+                                   // RS: копія аркуша — окремий рядок складу зі СВОЇМ станом (всі копії затверджені — зріз Approved).
+                                   && (a.SheetCopyId == sheet.Id || (a.SheetCopyId == null && sheet.CopyOfId == null)))
                        .Select(a => (DocumentStatus?)a.Status)
                        .FirstOrDefault()
                    ?? DocumentStatus.Draft;

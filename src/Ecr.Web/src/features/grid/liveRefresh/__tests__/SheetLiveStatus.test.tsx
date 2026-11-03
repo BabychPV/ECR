@@ -27,6 +27,8 @@ const Period = 202610;
 const Tables: DocumentTableDto[] = [
   {
     allowsDynamicRows: false,
+    copyOrdinal: 1,
+    isCopyable: false,
     maxDynamicRows: null,
     sheetCode: 'S1',
     sheetDefId: 5,

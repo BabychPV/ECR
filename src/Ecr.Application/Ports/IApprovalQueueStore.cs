@@ -112,7 +112,11 @@ public sealed record ApprovalQueueCandidate(
     DateTime SubmittedAt,
     int? SubmittedByUserId,
     string? SubmittedByDisplayName,
-    int? CurrentStepId);
+    int? CurrentStepId)
+{
+    /// <summary>Копія аркуша (RS); <c>null</c> — оригінал.</summary>
+    public long? SheetCopyId { get; init; }
+}
 
 /// <summary>Позиція в порядку черги: момент подання (тики UTC) і ключ стану.</summary>
 /// <param name="SubmittedAtTicks">Тики моменту подання.</param>
@@ -152,6 +156,9 @@ public sealed record ReturnedSheetCandidate(
 
     /// <summary>Вид повернення.</summary>
     public ReturnKind Kind { get; init; } = ReturnKind.Rejected;
+
+    /// <summary>Копія аркуша (RS); <c>null</c> — оригінал.</summary>
+    public long? SheetCopyId { get; init; }
 }
 
 /// <summary>✎ D-449: вид повернення на доопрацювання.</summary>

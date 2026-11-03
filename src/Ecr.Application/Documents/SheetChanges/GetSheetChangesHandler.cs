@@ -54,8 +54,9 @@ public sealed class GetSheetChangesHandler(
     /// <param name="periodKey">Період (рік*100+номер).</param>
     /// <param name="since">Маркер попереднього опитування; <c>null</c> — перше.</param>
     /// <param name="ct">Скасування.</param>
+    /// <param name="sheetCopyId">RS: копія аркуша, яку дивиться клієнт (її дані й стан); <c>null</c> — оригінал.</param>
     public async Task<SheetChangesDto> HandleAsync(
-        long documentId, int sheetDefId, int periodKey, string? since, CancellationToken ct)
+        long documentId, int sheetDefId, int periodKey, string? since, CancellationToken ct, long? sheetCopyId = null)
     {
         var key = PeriodKey.Parse(periodKey);
 
@@ -70,7 +71,7 @@ public sealed class GetSheetChangesHandler(
         var previous = SheetChangeMarker.Decode(since);
 
         // ✎ LIVE-STATUS: стан погодження — окремо від даних і на КОЖНОМУ шляху відповіді (і без змін комірок).
-        var status = await store.SheetStatusAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false);
+        var status = await store.SheetStatusAsync(documentId, sheetDefId, periodKey, ct, sheetCopyId).ConfigureAwait(false);
         var statusChanged = previous?.StatusRevision is { } seen && seen != status.Revision;
 
         if (previous is null || view.Tables.Count == 0)
@@ -79,7 +80,8 @@ public sealed class GetSheetChangesHandler(
         }
 
         var probe = await store
-            .ProbeAsync(documentId, periodKey, [.. view.Tables.Keys.Order()], previous.Value.Version, SampledRowsPerTable, ct)
+            .ProbeAsync(
+                documentId, periodKey, [.. view.Tables.Keys.Order()], previous.Value.Version, SampledRowsPerTable, ct, sheetCopyId)
             .ConfigureAwait(false);
 
         if (probe.Rows.Count == 0)

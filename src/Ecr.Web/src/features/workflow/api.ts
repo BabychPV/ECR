@@ -25,22 +25,35 @@ export function useWorkflowHistory(
   documentId: number,
   periodKey: number,
   enabled: boolean,
+  sheetCopyId: number | null = null,
 ): UseQueryResult<WorkflowEvent[]> {
-  return useQuery({ ...workflowHistoryQuery(documentId, periodKey), enabled });
+  return useQuery({ ...workflowHistoryQuery(documentId, periodKey, sheetCopyId), enabled });
+}
+
+/** ✎ RS: the event belongs to this sheet — same code AND same copy (`null`/absent = the original). */
+export function isEventOfSheet(event: WorkflowEvent, sheetCode: string, sheetCopyId: number | null): boolean {
+  return event.sheetCode === sheetCode && (event.sheetCopyId ?? null) === (sheetCopyId ?? null);
 }
 
 /**
  * ✎ LIVE-STATUS: key and reader of the transition log — ONE pair for `useWorkflowHistory` and the live banner
  * ("Status changed by …" reads the author from the same cache entry; no second key for the same data).
  */
-export function workflowHistoryQuery(documentId: number, periodKey: number) {
+export function workflowHistoryQuery(documentId: number, periodKey: number, sheetCopyId: number | null = null) {
   return {
-    queryKey: ['document', documentId, periodKey, 'workflow-history'] as const,
+    // ✎ RS: a copy has its own entry; the original's key and URL are unchanged (no param = originals only).
+    queryKey: (sheetCopyId === null
+      ? ['document', documentId, periodKey, 'workflow-history']
+      : ['document', documentId, periodKey, 'workflow-history', sheetCopyId]) as readonly unknown[],
     queryFn: () =>
       apiFetch<WorkflowEvent[]>(
-        `/api/v1/documents/${String(documentId)}/workflow/history?periodKey=${String(periodKey)}`,
+        `/api/v1/documents/${String(documentId)}/workflow/history?periodKey=${String(periodKey)}${copyParam(sheetCopyId)}`,
       ),
   };
+}
+
+function copyParam(sheetCopyId: number | null): string {
+  return sheetCopyId === null ? '' : `&sheetCopyId=${String(sheetCopyId)}`;
 }
 
 /** Рядок журналу дій на аркуші (правка комірки людиною або дія процесу); тип - зі згенерованої схеми. */
@@ -98,12 +111,13 @@ export function useRecallAvailability(
   sheetDefId: number,
   periodKey: number,
   enabled: boolean,
+  sheetCopyId: number | null = null,
 ): UseQueryResult<components['schemas']['RecallAvailabilityDto']> {
   return useQuery({
-    queryKey: ['document', documentId, periodKey, 'recall', sheetDefId],
+    queryKey: ['document', documentId, periodKey, 'recall', sheetDefId, sheetCopyId],
     queryFn: () =>
       apiFetch<components['schemas']['RecallAvailabilityDto']>(
-        `/api/v1/documents/${String(documentId)}/recall?sheetDefId=${String(sheetDefId)}&periodKey=${String(periodKey)}`,
+        `/api/v1/documents/${String(documentId)}/recall?sheetDefId=${String(sheetDefId)}&periodKey=${String(periodKey)}${sheetCopyId === null ? '' : `&sheetCopyId=${String(sheetCopyId)}`}`,
       ),
     enabled,
   });
@@ -127,12 +141,16 @@ export function useApproverEditAvailability(
   sheetDefId: number,
   periodKey: number,
   enabled: boolean,
+  sheetCopyId: number | null = null,
 ): UseQueryResult<ApproverEditAvailability> {
   return useQuery({
-    queryKey: ['document', documentId, periodKey, 'approver-edit', sheetDefId],
+    queryKey:
+      sheetCopyId === null
+        ? ['document', documentId, periodKey, 'approver-edit', sheetDefId]
+        : ['document', documentId, periodKey, 'approver-edit', sheetDefId, sheetCopyId],
     queryFn: () =>
       apiFetch<ApproverEditAvailability>(
-        `/api/v1/documents/${String(documentId)}/approver-edit?sheetDefId=${String(sheetDefId)}&periodKey=${String(periodKey)}`,
+        `/api/v1/documents/${String(documentId)}/approver-edit?sheetDefId=${String(sheetDefId)}&periodKey=${String(periodKey)}${copyParam(sheetCopyId)}`,
       ),
     enabled,
   });
@@ -151,13 +169,25 @@ export type MonthColumnStatus = components['schemas']['MonthColumnStatusDto'];
  * і скидання ключа відкритого періоду цю відповідь не оновило б. `SheetActions` скидає
  * `['submission-target', id]` після кожної дії робочого процесу.
  */
-export function submissionTargetKey(documentId: number, sheetDefId: number, periodKey: number): readonly unknown[] {
-  return ['submission-target', documentId, sheetDefId, periodKey];
+export function submissionTargetKey(
+  documentId: number,
+  sheetDefId: number,
+  periodKey: number,
+  sheetCopyId: number | null = null,
+): readonly unknown[] {
+  return sheetCopyId === null
+    ? ['submission-target', documentId, sheetDefId, periodKey]
+    : ['submission-target', documentId, sheetDefId, periodKey, sheetCopyId];
 }
 
-export function fetchSubmissionTarget(documentId: number, sheetDefId: number, periodKey: number): Promise<SubmissionTarget> {
+export function fetchSubmissionTarget(
+  documentId: number,
+  sheetDefId: number,
+  periodKey: number,
+  sheetCopyId: number | null = null,
+): Promise<SubmissionTarget> {
   return apiFetch<SubmissionTarget>(
-    `/api/v1/documents/${String(documentId)}/submission-target?sheetDefId=${String(sheetDefId)}&periodKey=${String(periodKey)}`,
+    `/api/v1/documents/${String(documentId)}/submission-target?sheetDefId=${String(sheetDefId)}&periodKey=${String(periodKey)}${copyParam(sheetCopyId)}`,
   );
 }
 
@@ -174,10 +204,11 @@ export function useSubmissionTarget(
   documentId: number,
   sheetDefId: number,
   periodKey: number,
+  sheetCopyId: number | null = null,
 ): UseQueryResult<SubmissionTarget> {
   return useQuery({
-    queryKey: submissionTargetKey(documentId, sheetDefId, periodKey),
-    queryFn: () => fetchSubmissionTarget(documentId, sheetDefId, periodKey),
+    queryKey: submissionTargetKey(documentId, sheetDefId, periodKey, sheetCopyId),
+    queryFn: () => fetchSubmissionTarget(documentId, sheetDefId, periodKey, sheetCopyId),
     placeholderData: keepPreviousData,
   });
 }

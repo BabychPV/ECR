@@ -18,6 +18,8 @@ vi.mock('@/features/grid/sliceCache', () => ({ invalidateSlices: vi.fn().mockRes
 
 const table = {
   allowsDynamicRows: true,
+  copyOrdinal: 1,
+  isCopyable: false,
   maxDynamicRows: 200,
   sheetCode: 'Air',
   sheetDefId: 11,

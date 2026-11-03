@@ -225,7 +225,7 @@ public sealed class DocumentStore(
 
         return rows
             .GroupBy(r => r.DocumentId)
-            .ToDictionary(g => g.Key, IReadOnlyList<string> (g) => [.. g.Select(r => r.Code)]);
+            .ToDictionary(g => g.Key, IReadOnlyList<string> (g) => [.. g.Select(r => r.Code).Distinct()]);   // RS: копії діляться кодом з оригіналом
     }
 
     /// <inheritdoc />
@@ -1080,11 +1080,25 @@ public sealed class DocumentStore(
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    /// <remarks>Той самий збіг за кодом, що й <see cref="HasSheetAsync"/> (перенос версії міняє <c>SheetDefId</c>).</remarks>
+    public async Task<bool> HasSheetCopyAsync(long documentId, int sheetDefId, long sheetCopyId, CancellationToken ct)
+        => await db.DocumentSheets
+            .AsNoTracking()
+            .Where(s => s.Id == sheetCopyId && s.DocumentId == documentId && s.CopyOfId != null && s.IsIncluded)
+            .Join(db.SheetDefs, s => s.SheetDefId, d => d.Id, (s, d) => new { s.SheetDefId, d.Code })
+            .AnyAsync(
+                x => x.SheetDefId == sheetDefId
+                     || x.Code == db.SheetDefs.Where(r => r.Id == sheetDefId).Select(r => r.Code).FirstOrDefault(),
+                ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<int>> GetIncludedSheetIdsAsync(long documentId, CancellationToken ct)
         => await db.DocumentSheets
             .AsNoTracking()
             .Where(s => s.DocumentId == documentId && s.IsIncluded)
             .Select(s => s.SheetDefId)
+            .Distinct()   // RS: копії діляться SheetDefId з оригіналом
             .OrderBy(id => id)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -1280,27 +1294,56 @@ public sealed class DocumentStore(
                 db.SheetDefs,
                 s => s.SheetDefId,
                 d => d.Id,
-                (s, d) => new { s.DocumentId, s.SheetDefId, d.Code, d.NameL10n, d.Ordinal })
+                (s, d) => new
+                {
+                    RowId = s.Id, s.DocumentId, s.SheetDefId, s.CopyOfId, s.CopyOrdinal, s.NameOverrideL10n,
+                    d.Code, d.NameL10n, d.Ordinal,
+                })
             .OrderBy(s => s.DocumentId)
             .ThenBy(s => s.Ordinal)
             .ThenBy(s => s.Code)
+            .ThenBy(s => s.CopyOrdinal)
             .Select(s => new SheetStateRow(
                 s.DocumentId,
                 s.Code,
                 s.NameL10n,
+                // ⛔ RS: стан СВОГО рядка складу — копія має власний `wf.ApprovalState` (SheetCopyId = Id рядка), оригінал — без копії.
                 db.ApprovalStates
                     .Where(a => a.DocumentId == s.DocumentId
                                 && a.SheetDefId == s.SheetDefId
-                                && a.PeriodKey == periodKey)
+                                && a.PeriodKey == periodKey
+                                && (a.SheetCopyId == s.RowId || (a.SheetCopyId == null && s.CopyOfId == null)))
                     .Select(a => (DocumentStatus?)a.Status)
-                    .FirstOrDefault()));
+                    .FirstOrDefault(),
+                s.RowId, s.SheetDefId, s.CopyOfId, s.CopyOrdinal, s.NameOverrideL10n));
 
-    /// <summary>Аркуш складу, його назва і стан; <c>null</c> — рядка стану ще немає.</summary>
-    private sealed record SheetStateRow(long DocumentId, string Code, LocalizedText NameL10n, DocumentStatus? Status);
+    /// <summary>Аркуш складу, його назва і стан; <c>null</c> — рядка стану ще немає. Копія — окремий рядок (RS).</summary>
+    private sealed record SheetStateRow(
+        long DocumentId, string Code, LocalizedText NameL10n, DocumentStatus? Status,
+        long RowId, int SheetDefId, long? CopyOfId, short CopyOrdinal, LocalizedText? NameOverride);
 
-    /// <summary>Рядок запиту → аркуш контракту; аркуш без рядка стану — <c>Draft</c> (<c>U-03</c>).</summary>
-    private static DocumentSheetState ToSheet(SheetStateRow row)
-        => new(row.Code, row.NameL10n, (row.Status ?? DocumentStatus.Draft).ToString());
+    /// <summary>Рядки запиту → аркуші контракту; аркуш без рядка стану — <c>Draft</c> (<c>U-03</c>).</summary>
+    /// <remarks>
+    /// ⛔ RS: оригінал має ключ <c>КОД</c>, копія — <c>КОД#sheetCopyId</c> (<c>SheetCopyNaming.StateKey</c>), назва —
+    /// «&lt;Назва&gt; N» (оригінал групи з копіями — «&lt;Назва&gt; 1»; назва групи — з оригінала, інакше з шаблону).
+    /// </remarks>
+    private static List<DocumentSheetState> ToSheets(IReadOnlyList<SheetStateRow> rows)
+    {
+        var overrides = rows.Where(r => r.CopyOfId is null)
+            .GroupBy(r => (r.DocumentId, r.SheetDefId))
+            .ToDictionary(g => g.Key, g => g.First().NameOverride);
+        var withCopies = rows.Where(r => r.CopyOfId is not null).Select(r => (r.DocumentId, r.SheetDefId)).ToHashSet();
+
+        return
+        [
+            .. rows.Select(r => new DocumentSheetState(
+                SheetCopyNaming.StateKey(r.Code, r.CopyOfId is null ? null : r.RowId),
+                SheetCopyNaming.Display(
+                    SheetCopyNaming.Effective(r.NameL10n, overrides.GetValueOrDefault((r.DocumentId, r.SheetDefId))),
+                    r.CopyOrdinal, withCopies.Contains((r.DocumentId, r.SheetDefId))),
+                (r.Status ?? DocumentStatus.Draft).ToString())),
+        ];
+    }
 
     /// <summary>
     /// Словник «код → стан» із тих самих аркушів — щоб <c>SheetStates</c> і
@@ -1334,7 +1377,7 @@ public sealed class DocumentStore(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        return [.. states.Select(ToSheet)];
+        return ToSheets(states);
     }
 
     /// <summary>Стан аркушів кількох документів ОДНИМ запитом; порожньо, якщо період не вказано.</summary>
@@ -1371,7 +1414,7 @@ public sealed class DocumentStore(
             .GroupBy(s => s.DocumentId)
             .ToDictionary(
                 g => g.Key,
-                IReadOnlyList<DocumentSheetState> (g) => [.. g.Select(ToSheet)]);
+                IReadOnlyList<DocumentSheetState> (g) => ToSheets([.. g]));
     }
 
     /// <summary>Лічильники ОСТАННЬОГО підсумку перевірки для сторінки документів — одним запитом.</summary>
@@ -1444,9 +1487,9 @@ public sealed class DocumentStore(
         var states = db.ApprovalStates.Where(a => a.PeriodKey == periodKey);
 
         Expression<Func<Document, bool>> rejected = d => sheets.Any(s => s.DocumentId == d.Id
-            && states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && a.Status == DocumentStatus.Rejected));
+            && states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null)) && a.Status == DocumentStatus.Rejected));
         Expression<Func<Document, bool>> draftSheet = d => sheets.Any(s => s.DocumentId == d.Id
-            && !states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && a.Status != DocumentStatus.Draft));
+            && !states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null)) && a.Status != DocumentStatus.Draft));
 
         return state switch
         {
@@ -1454,14 +1497,14 @@ public sealed class DocumentStore(
             DocumentStatus.Draft => documents.Where(Not(rejected))
                 .Where(d => !sheets.Any(s => s.DocumentId == d.Id)
                             || sheets.Any(s => s.DocumentId == d.Id
-                                && !states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && a.Status != DocumentStatus.Draft))),
+                                && !states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null)) && a.Status != DocumentStatus.Draft))),
             DocumentStatus.Submitted => documents.Where(Not(rejected)).Where(Not(draftSheet))
                 .Where(d => sheets.Any(s => s.DocumentId == d.Id
-                    && states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && a.Status == DocumentStatus.Submitted))),
+                    && states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null)) && a.Status == DocumentStatus.Submitted))),
             DocumentStatus.Approved => documents
                 .Where(d => sheets.Any(s => s.DocumentId == d.Id))
                 .Where(d => !sheets.Any(s => s.DocumentId == d.Id
-                    && !states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && a.Status == DocumentStatus.Approved))),
+                    && !states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null)) && a.Status == DocumentStatus.Approved))),
             _ => throw new ArgumentOutOfRangeException(nameof(state), state, "Невідомий стан документа."),
         };
     }

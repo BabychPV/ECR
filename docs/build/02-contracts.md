@@ -2423,6 +2423,31 @@ public interface IDocumentDeletionStore
 }
 ```
 
+#### `IDocumentSheetCopyStore`
+
+Копії аркушів документа (RS, рішення людини 03.11; обробник `DocumentSheetCopyHandler`, право `Document.Create` +
+грант запису в проєкт). Усі методи — в одній транзакції під ВИНЯТКОВИМ блокуванням структури документа
+(`ISheetEditGate.EnterStructureAsync(exclusive: true)`): додати порожню копію оригіналу (наступний номер 2…),
+перейменувати групу (назва — на оригіналі; показується «<Назва> N»), видалити копію. Видалення — явне й по періодах
+(екземпляри, рядки, комірки), потім стани й журнал подій копії, рядок складу, перенумерація решти (3→2); зрізи подань
+лишаються. Відмови: `409 ECR-DOC-0409` — `sheetCopyIsOriginal` (це оригінал), `sheetCopyHasWorkflow` (копія подана/затверджена
+хоч в одному періоді; `periodKey`, `status`), `sheetCopyProjectArchived`; `422 ECR-DOC-0422` — `sheetNotCopyable`,
+`sheetNameInvalid`; `404 ECR-DOC-0404` — `sheetCopy`. Операції лягають в `aud.SecurityEvent` (`DocumentSheetCopyAdded`,
+`DocumentSheetGroupRenamed`, `DocumentSheetCopyDeleted`).
+
+```csharp
+public interface IDocumentSheetCopyStore
+{
+    public Task<IReadOnlyList<SheetCopyGroupInfo>> ListGroupsAsync(long documentId, CancellationToken ct);
+    public Task<SheetCopyGroup?> FindGroupAsync(long documentId, int sheetDefId, CancellationToken ct);
+    public Task<SheetCopyRef?> FindAsync(long documentId, long sheetCopyId, CancellationToken ct);
+    public Task<(long SheetCopyId, short Ordinal)> AddCopyAsync(long documentId, int sheetDefId, CancellationToken ct);
+    public Task RenameGroupAsync(long documentId, int sheetDefId, LocalizedText name, CancellationToken ct);
+    public Task<SheetCopyWorkflowBlock?> FindBlockingStateAsync(long documentId, long sheetCopyId, CancellationToken ct);
+    public Task<int> DeleteCopyAsync(long documentId, long sheetCopyId, CancellationToken ct);
+}
+```
+
 #### `IDocumentKeyStore`
 
 Зміна бізнес-ключа документа (ФВ-3.9, `POST /api/v1/documents/{id}/business-key`,
@@ -3190,6 +3215,13 @@ AN-120: побудова відмовляє `ECR-RPT-0422` (`err.ECR-RPT-0422.sn
 не відкочує, а лягає в журнал і в `IReportViewStatus`) і на старті після seed.
 Ідемпотентна: незмінну вʼюху не чіпає; нова версія = нові вʼюхи, старі
 лишаються (D-53). Читання — роль бази `rpt_reader` (SELECT на схему `rpt`).
+
+RS (копії аркушів, рішення людини 03.11): копія аркуша — окремі екземпляри таблиць зі СВОЇМ станом подання, тож вʼюхи
+віддають її рядки окремо від оригінала. Стан (`Status`/`_Status`) з'єднується за копією екземпляра
+(`a.SheetCopyId = ti.SheetCopyId OR (обидва NULL)`); у кінці списку колонок — `SheetCopyOrdinal`/`SheetDisplayName` у
+довгій вʼюсі та `_SheetCopyOrdinal`/`_SheetDisplayName` у широких (номер у групі: 1 — оригінал, 2… — копії; назва
+«&lt;Назва&gt; N» — мова `en`, інакше код аркуша; з номером лише коли в групі є копії; група шукається за аркушем версії
+вʼюхи). Текст вʼюх змінився, тож наступний запуск генератора їх переписує (`Altered`).
 
 ```csharp
 public interface IReportViewGenerator
@@ -4478,6 +4510,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/approve` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/reopen` | `Document.Reopen` | 3 |
 | `GET` | `/api/v1/documents/{id}/workflow/history` | `Document.View` | 3 |
+| `POST` | `/api/v1/documents/{id}/sheets/{sheetDefId}/copies` | `Document.Create` + запис у проєкті (додає порожню копію аркуша, позначеного в шаблоні `isCopyable`; → 201 `{ sheetCopyId, ordinal }`; не копіювальний аркуш — 422 `ECR-DOC-0422`; джерело завжди оригінал) | 8 |
+| `PUT` | `/api/v1/documents/{id}/sheets/{sheetDefId}/name` | `Document.Create` + запис у проєкті (перейменовує групу «<Назва> N» для всіх копій; тіло `{ nameL10n }`; → 204) | 8 |
+| `DELETE` | `/api/v1/documents/{id}/sheet-copies/{sheetCopyId}` | `Document.Create` + запис у проєкті (видаляє копію в усіх періодах і перенумеровує решту; оригінал — 409 `ECR-DOC-0409` `sheetCopyIsOriginal`; копія з поданням/затвердженням/зрізом у будь-якому періоді — 409 `sheetCopyHasWorkflow`; → 204) | 8 |
 | `GET` | `/api/v1/documents/{id}/sheets/{sheetDefId}/activity` | `Document.View` | 3 |
 | `GET` | `/api/v1/documents/{id}/sheets/{sheetDefId}/changes` | `Document.View` (живе оновлення сітки: `periodKey`, `since` — маркер попереднього опитування; → `SheetChangesDto { marker, changed, lastChangedByUserId, lastChangedBy, lastChangedAt, changedTables: [{ tableCode, tableInstanceId }] }`; власні записи викликача лише пересувають маркер; схована таблиця не потрапляє в `changedTables`; невидимий документ і схований аркуш — 404; `Cache-Control: no-store`) | 8 |
 | `GET` | `/api/v1/documents/{id}/submission-target` | `Document.View` | 3 |

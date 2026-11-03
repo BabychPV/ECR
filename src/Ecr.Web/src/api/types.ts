@@ -630,6 +630,12 @@ export type TemplateColumnDto = Schemas['TemplateColumnDto'];
 /** Аркуш у структурі версії. */
 export type SheetDto = Schemas['SheetDto'];
 
+/** Відповідь `POST …/sheets/{sheetDefId}/copies`: Id копії (`sheetCopyId`) і номер у групі. */
+export type SheetCopyCreated = Schemas['SheetCopyCreated'];
+
+/** Тіло `PUT …/sheets/{sheetDefId}/name`. */
+export type RenameSheetGroupRequest = Schemas['RenameSheetGroupRequest'];
+
 /** Таблиця у структурі версії. */
 export type TableDto = Schemas['TableDto'];
 

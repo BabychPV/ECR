@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import { Alert, Button, Group, NumberInput, Stack, Switch, TextInput } from '@mantine/core';
+import { Alert, Button, Checkbox, Group, NumberInput, Stack, Switch, TextInput } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { LocalizedInput } from '@/shared/ui/LocalizedInput';
 import { type SheetBlocker, type SheetDraft, whyCannotSave } from './sheet';
@@ -82,6 +82,14 @@ export function SheetEditor({
         disabled={disabled}
         checked={draft.isVisible}
         onChange={(event) => onChange({ ...draft, isVisible: event.currentTarget.checked })}
+      />
+
+      <Checkbox
+        label={t('sheets.copyable')}
+        description={t('sheets.copyableHint')}
+        disabled={disabled}
+        checked={draft.isCopyable}
+        onChange={(event) => onChange({ ...draft, isCopyable: event.currentTarget.checked })}
       />
 
       {blocker !== null && <Alert color="statusWarning">{blockerLabel(blocker)}</Alert>}

@@ -84,16 +84,19 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
             x.d.ProjectId,
             x.d.BusinessKey,
             x.a.SheetDefId,
+            x.a.SheetCopyId,
             x.a.PeriodKey,
             SubmittedAt = x.a.SubmittedAt ?? DateTime.MinValue,
             x.a.SubmittedByUserId,
             x.a.CurrentStepId,
         });
 
+        // RS: у складі має бути САМЕ цей рядок — оригінал (без копій) або копія за її Id.
         if (requireIncludedSheet)
         {
             query = query.Where(x => db.DocumentSheets.Any(
-                s => s.DocumentId == x.DocumentId && s.SheetDefId == x.SheetDefId && s.IsIncluded));
+                s => s.DocumentId == x.DocumentId && s.SheetDefId == x.SheetDefId && s.IsIncluded
+                     && ((x.SheetCopyId == null && s.CopyOfId == null) || s.Id == x.SheetCopyId)));
         }
 
         if (after is not null)
@@ -114,6 +117,7 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
                 x.ProjectId,
                 x.BusinessKey,
                 x.SheetDefId,
+                x.SheetCopyId,
                 x.PeriodKey,
                 x.SubmittedAt,
                 x.SubmittedByUserId,
@@ -138,7 +142,10 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
                 DateTime.SpecifyKind(x.SubmittedAt, DateTimeKind.Utc),
                 x.SubmittedByUserId,
                 x.SubmittedByDisplayName,
-                x.CurrentStepId)),
+                x.CurrentStepId)
+            {
+                SheetCopyId = x.SheetCopyId,
+            }),
         ];
     }
 
@@ -188,7 +195,8 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
                   || (a.Status == DocumentStatus.Draft
                       && a.ReopenedAt != null
                       && db.ApprovalEvents
-                          .Where(e => e.DocumentId == a.DocumentId && e.SheetDefId == a.SheetDefId && e.PeriodKey == a.PeriodKey)
+                          .Where(e => e.DocumentId == a.DocumentId && e.SheetDefId == a.SheetDefId && e.PeriodKey == a.PeriodKey
+                                      && e.SheetCopyId == a.SheetCopyId) // RS: журнал тієї самої копії
                           .OrderByDescending(e => e.At)
                           .ThenByDescending(e => e.Id)
                           .Select(e => (ApprovalAction?)e.Action)
@@ -213,6 +221,7 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
             x.d.CreatedByUserId,
             x.a.SubmittedByUserId,
             x.a.SheetDefId,
+            x.a.SheetCopyId,
             x.a.PeriodKey,
             Reopened = x.a.Status == DocumentStatus.Draft,
             ReturnedAt = (x.a.Status == DocumentStatus.Rejected ? x.a.ApprovedAt : x.a.ReopenedAt) ?? DateTime.MinValue,
@@ -223,7 +232,8 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
         if (requireIncludedSheet)
         {
             query = query.Where(x => db.DocumentSheets.Any(
-                s => s.DocumentId == x.DocumentId && s.SheetDefId == x.SheetDefId && s.IsIncluded));
+                s => s.DocumentId == x.DocumentId && s.SheetDefId == x.SheetDefId && s.IsIncluded
+                     && ((x.SheetCopyId == null && s.CopyOfId == null) || s.Id == x.SheetCopyId)));
         }
 
         if (after is not null)
@@ -247,6 +257,7 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
                 x.CreatedByUserId,
                 x.SubmittedByUserId,
                 x.SheetDefId,
+                x.SheetCopyId,
                 x.PeriodKey,
                 x.Reopened,
                 x.ReturnedAt,
@@ -278,6 +289,7 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
                 SubmittedByUserId = x.SubmittedByUserId,
                 ReturnedByUserId = x.ReturnedByUserId,
                 Kind = x.Reopened ? ReturnKind.Reopened : ReturnKind.Rejected,
+                SheetCopyId = x.SheetCopyId,
             }),
         ];
     }

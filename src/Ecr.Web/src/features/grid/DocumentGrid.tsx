@@ -213,6 +213,8 @@ interface DocumentGridProps {
    * без позначок (сітка поза сторінкою документа).
    */
   sheetDefId?: number;
+  /** ✎ RS: копія аркуша (ключ статусів місячних колонок копії); не задано/`null` — оригінал. */
+  sheetCopyId?: number | null;
   /**
    * Останній день періоду документа (`PeriodDto.periodEnd`, `YYYY-MM-DD`) —
    * `asOf` темпоральних Lookup-довідників комірок (ФВ-8.5). `null` — календар
@@ -422,6 +424,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     tableDefId,
     periodKey,
     sheetDefId,
+    sheetCopyId = null,
     periodEnd = null,
     readOnly: pageReadOnly,
     sheetState,
@@ -1332,7 +1335,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   );
 
   // ✎ D-441: колонка місяця k таблиці `MonthsInColumns` позначається станом аркуша за період k.
-  const monthStatus = useMonthColumnStatuses(documentId, sheetDefId, periodKey, tableDefId);
+  const monthStatus = useMonthColumnStatuses(documentId, sheetDefId, periodKey, tableDefId, sheetCopyId);
 
   const columns = useMemo(
     () =>

@@ -273,8 +273,18 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         await GenerateAsync(f, routing: false);
         var current = await ViewDefinitionAsync(f.View);
         Assert.Contains("_Text]", current, StringComparison.Ordinal);
+        // RS (копії аркушів): службові колонки _SheetCopyOrdinal/_SheetDisplayName, умова копії у приєднанні стану й
+        // приєднання doc.DocumentSheet — теж адитивні (стан і колонки копії), текст до них незмінний.
+        var withoutCopies = System.Text.RegularExpressions.Regex.Replace(
+            current,
+            @",\r?\n\s+CAST\(COALESCE\(dsh\.CopyOrdinal, 1\) AS smallint\) AS _SheetCopyOrdinal,[\s\S]*?AS _SheetDisplayName", "");
+        withoutCopies = System.Text.RegularExpressions.Regex.Replace(
+            withoutCopies,
+            @"\r?\n\s+AND \(a\.SheetCopyId = ti\.SheetCopyId OR \(a\.SheetCopyId IS NULL AND ti\.SheetCopyId IS NULL\)\)", "");
+        withoutCopies = System.Text.RegularExpressions.Regex.Replace(
+            withoutCopies, @"\r?\nLEFT JOIN doc\.DocumentSheet AS dsh ON dsh\.Id = ti\.SheetCopyId", "");
         Assert.Equal(golden, System.Text.RegularExpressions.Regex.Replace(
-            current, @",\r?\n\s+CASE WHEN c\d+\.ValueNumeric IS NULL THEN c\d+\.ValueString END AS \[[^\]]+_Text\]", ""));
+            withoutCopies, @",\r?\n\s+CASE WHEN c\d+\.ValueNumeric IS NULL THEN c\d+\.ValueString END AS \[[^\]]+_Text\]", ""));
 
         await GenerateAsync(f, routing: true);
         Assert.NotEqual(golden, await ViewDefinitionAsync(f.View));
@@ -1090,7 +1100,8 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
 
             var types = await ViewColumnTypesAsync(f.View);
             Assert.Contains(types, t => t.StartsWith(f.Derived + ":decimal:", StringComparison.Ordinal));
-            Assert.StartsWith(text + ":nvarchar:", types[^1], StringComparison.Ordinal);
+            // RS: дві службові колонки копій (_SheetCopyOrdinal, _SheetDisplayName) — після колонок шаблону.
+            Assert.StartsWith(text + ":nvarchar:", types[^3], StringComparison.Ordinal);
             Assert.Single(types, t => t.Contains("_Text:", StringComparison.Ordinal));
         }
     }

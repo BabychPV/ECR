@@ -1,5 +1,6 @@
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Ecr.Application.Security;
 using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 
@@ -36,14 +37,16 @@ internal static class RowWriteLock
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="sheetCopyId">Копія аркуша (RS); <c>null</c> — оригінал.</param>
     public static async Task EnterAsync(
-        ISheetEditGate gate, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        ISheetEditGate gate, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct,
+        long? sheetCopyId = null)
     {
         ArgumentNullException.ThrowIfNull(gate);
 
         try
         {
-            await gate.EnterSubmitAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false);
+            await gate.EnterSubmitOfAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct).ConfigureAwait(false);
         }
         catch (ConcurrencyConflictException busy)
             when (busy.ErrorCode == ErrorCodes.SheetBusy

@@ -14,6 +14,7 @@ namespace Ecr.Application.Ports;
 /// <param name="SheetCode">Код аркуша; <c>null</c> — визначення вже немає.</param>
 /// <param name="PeriodKey">Звітний період.</param>
 /// <param name="StepOrdinal">Крок маршруту, якщо маршрут є.</param>
+/// <param name="SheetCopyId">RS: копія аркуша, якої стосується подія; <c>null</c> — оригінал (код аркуша в копії той самий).</param>
 public sealed record WorkflowEventView(
     DateTime ChangedAt,
     string Action,
@@ -27,7 +28,8 @@ public sealed record WorkflowEventView(
     int SheetDefId,
     string? SheetCode,
     int PeriodKey,
-    int? StepOrdinal);
+    int? StepOrdinal,
+    long? SheetCopyId = null);
 
 /// <summary>Фільтр журналу подій погодження; вікно часу обов'язкове, як у решти журналів.</summary>
 /// <param name="From">Початок вікна в UTC, включно.</param>

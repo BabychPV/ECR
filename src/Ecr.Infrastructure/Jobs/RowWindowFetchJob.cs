@@ -65,8 +65,10 @@ public sealed class RowWindowFetchJob(
 
         using var author = await actor.EnterAsync(ct).ConfigureAwait(false);
 
+        // RS (Q5): підтягування за вікном пише лише в оригінал аркуша; екземпляр копії — пропуск.
         var instance = await db.TableInstances
             .AsNoTracking()
+            .OriginalOnly()
             .FirstOrDefaultAsync(t => t.Id == request.TableInstanceId && t.PeriodKeyValue == request.PeriodKey, ct)
             .ConfigureAwait(false);
         if (instance is null)

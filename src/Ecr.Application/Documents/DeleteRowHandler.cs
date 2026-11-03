@@ -279,10 +279,10 @@ public sealed class DeleteRowHandler(
         if (mirrorPeriods is null)
         {
             await RowWriteLock
-                .EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, periodKey, ct)
+                .EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, periodKey, ct, instance.SheetCopyId)
                 .ConfigureAwait(false);
             status = await sheetGate
-                .EnterEditAsync(instance.DocumentId, table.SheetDefId, periodKey, ct)
+                .EnterEditOfAsync(instance.DocumentId, table.SheetDefId, periodKey, instance.SheetCopyId, ct)
                 .ConfigureAwait(false);
         }
         else
@@ -297,9 +297,9 @@ public sealed class DeleteRowHandler(
             foreach (var period in toLock)
             {
                 var lockKey = new PeriodKey(period);
-                await RowWriteLock.EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, lockKey, ct).ConfigureAwait(false);
+                await RowWriteLock.EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, lockKey, ct, instance.SheetCopyId).ConfigureAwait(false);
                 statuses[period] = await sheetGate
-                    .EnterEditAsync(instance.DocumentId, table.SheetDefId, lockKey, ct)
+                    .EnterEditOfAsync(instance.DocumentId, table.SheetDefId, lockKey, instance.SheetCopyId, ct)
                     .ConfigureAwait(false);
             }
 

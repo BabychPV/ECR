@@ -42,6 +42,7 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
                   JOIN doc.TableRow r WITH (FORCESEEK (UQ_TableRow_Key (PeriodKey, TableInstanceId)))
                     ON r.PeriodKey = i.PeriodKey AND r.TableInstanceId = i.Id
                  WHERE i.PeriodKey = @period AND i.DocumentId = @doc
+                   AND ((@copy IS NULL AND i.SheetCopyId IS NULL) OR i.SheetCopyId = @copy)
                    AND i.TableDefId IN (SELECT t.value FROM OPENJSON(@tables) WITH (value int '$') t)
                    AND r.RowVersion >= @since AND r.RowVersion < @upto) x
          WHERE x.Rn <= @sample;
@@ -82,11 +83,13 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
         SET NOCOUNT ON;
         SELECT CAST(a.Status AS int), CAST(a.RowVersion AS binary(8))
           FROM wf.ApprovalState a
-         WHERE a.DocumentId = @doc AND a.SheetDefId = @sheet AND a.PeriodKey = @period;
+         WHERE a.DocumentId = @doc AND a.SheetDefId = @sheet AND a.PeriodKey = @period
+           AND ((@copy IS NULL AND a.SheetCopyId IS NULL) OR a.SheetCopyId = @copy);
         """;
 
     /// <inheritdoc />
-    public Task<SheetStatusSnapshot> SheetStatusAsync(long documentId, int sheetDefId, int periodKey, CancellationToken ct)
+    public Task<SheetStatusSnapshot> SheetStatusAsync(
+        long documentId, int sheetDefId, int periodKey, CancellationToken ct, long? sheetCopyId = null)
         => RunAsync(
             SheetStatusSql,
             parameters =>
@@ -94,6 +97,7 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
                 parameters.Add("@doc", SqlDbType.BigInt).Value = documentId;
                 parameters.Add("@sheet", SqlDbType.Int).Value = sheetDefId;
                 parameters.Add("@period", SqlDbType.Int).Value = periodKey;
+                parameters.Add("@copy", SqlDbType.BigInt).Value = (object?)sheetCopyId ?? DBNull.Value;
             },
             static async (reader, token) =>
                 await reader.ReadAsync(token).ConfigureAwait(false)
@@ -115,7 +119,8 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
 
     /// <inheritdoc />
     public Task<SheetChangeProbe> ProbeAsync(
-        long documentId, int periodKey, IReadOnlyCollection<int> tableDefIds, ulong since, int cap, CancellationToken ct)
+        long documentId, int periodKey, IReadOnlyCollection<int> tableDefIds, ulong since, int cap, CancellationToken ct,
+        long? sheetCopyId = null)
     {
         ArgumentNullException.ThrowIfNull(tableDefIds);
 
@@ -128,6 +133,7 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
                 parameters.Add("@tables", SqlDbType.NVarChar, -1).Value = JsonSerializer.Serialize(tableDefIds);
                 parameters.Add("@since", SqlDbType.Binary, 8).Value = FromVersion(since);
                 parameters.Add("@sample", SqlDbType.Int).Value = cap;
+                parameters.Add("@copy", SqlDbType.BigInt).Value = (object?)sheetCopyId ?? DBNull.Value;
             },
             async (reader, token) =>
             {

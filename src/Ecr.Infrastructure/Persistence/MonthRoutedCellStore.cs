@@ -155,7 +155,7 @@ public sealed class MonthRoutedCellStore(
         // лише в періоді свого місяця). Гілки не перетинаються (друга виключає якорі), тож рядки ті самі, що й з OR
         // (`OwnerCellsQuery…EquivalenceTests`), а читань ~12 тис. і план послідовний.
         var instancesRows =
-            from instance in db.TableInstances.AsNoTracking()
+            from instance in db.TableInstances.AsNoTracking().OriginalOnly()   // RS: Q-17 — лише оригінали
             where instance.DocumentId == documentId
                   && ownerPeriods.Contains(instance.PeriodKeyValue)
                   && tableDefIds.Contains(instance.TableDefId)

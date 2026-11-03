@@ -132,6 +132,7 @@ public static class DependencyInjection
         services.AddScoped<IConsistencyIssueReader, ConsistencyIssueReader>();
         services.AddScoped<IDocumentStore, DocumentStore>();
         services.AddScoped<IDocumentDeletionStore, DocumentDeletionStore>();
+        services.AddScoped<IDocumentSheetCopyStore, DocumentSheetCopyStore>();
         services.AddScoped<IDocumentKeyStore, DocumentKeyStore>();
         services.AddScoped<IEditAssignmentStore, EditAssignmentStore>();
         services.AddScoped<IEditorSetStore, EditorSetStore>();

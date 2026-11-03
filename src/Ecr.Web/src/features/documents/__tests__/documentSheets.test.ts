@@ -45,6 +45,12 @@ describe('sheetLabels', () => {
     ]);
   });
 
+  it('без `sheets` ключі копій «КОД#id» не стають окремими аркушами', () => {
+    expect(sheetLabels({ sheetStates: { S7: 'Draft', 'S7#12': 'Submitted', 'S7#13': 'Draft' } })).toEqual([
+      { code: 'S7', label: 'S7', state: 'Draft' },
+    ]);
+  });
+
   it('без `sheets` — пари словника з кодом', () => {
     expect(sheetLabels({ sheetStates: { S7: 'Draft' } })).toEqual([{ code: 'S7', label: 'S7', state: 'Draft' }]);
   });

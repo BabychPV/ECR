@@ -41,7 +41,11 @@ public sealed class ExcelExporter(
     ICellStyleStore? cellStyles = null,
 
     // Permits PRMG: колонка-група друкує «номер — тип» записів реєстрів-членів. `null` - груп немає.
-    Ecr.Application.Permits.Groups.ILookupTargetResolver? groups = null) : IExcelExporter
+    Ecr.Application.Permits.Groups.ILookupTargetResolver? groups = null,
+
+    // RS: назви груп і копії аркушів документа — один аркуш книги на оригінал і на кожну копію («<Назва> N»).
+    // Необов'язковий лише заради тестів, що конструюють експортер вручну; без нього копії не називаються.
+    IDocumentSheetCopyStore? sheetCopies = null) : IExcelExporter
 {
     /// <summary>Рядок, з якого починається перший блок аркуша.</summary>
     private const int FirstRow = 1;
@@ -124,7 +128,14 @@ public sealed class ExcelExporter(
         var hiddenTables = options.HiddenTableDefIds?.ToHashSet() ?? [];
         instances = [.. instances.Where(i => !hiddenTables.Contains(i.TableDefId))];
 
-        var byTableDef = instances.ToDictionary(i => i.TableDefId);
+        // ⛔ RS: екземпляр — за (таблиця, копія), а не за таблицею: копія аркуша має ВЛАСНІ екземпляри тих самих таблиць.
+        // Ключ `0` — оригінал. Один аркуш книги на оригінал і на кожну копію, ключ карти книги — Id екземпляра
+        // (зворотний імпорт маршрутизує за ним, тож копія не зливається з оригіналом).
+        var byTableCopy = instances.ToDictionary(i => (i.TableDefId, CopyKey: i.SheetCopyId ?? 0));
+        var groupOf = sheetCopies is null
+            ? new Dictionary<int, SheetCopyGroupInfo>()
+            : (await sheetCopies.ListGroupsAsync(documentId, ct).ConfigureAwait(false))
+                .ToDictionary(g => g.SheetDefId);
 
         // ⛔ Рядки й комірки ВСІХ таблиць читаються ДВОМА пакетними запитами
         // до циклу, а не двома запитами на кожну з ~90 таблиць документа
@@ -191,52 +202,67 @@ public sealed class ExcelExporter(
 
         foreach (var sheet in snapshot.Sheets.Where(s => !s.IsDeleted).OrderBy(s => s.Ordinal))
         {
-            var tables = sheet.Tables
-                .Where(t => !t.IsDeleted && byTableDef.ContainsKey(t.Id))
-                .OrderBy(t => t.Ordinal)
-                .ToList();
+            groupOf.TryGetValue(sheet.Id, out var group);
 
-            if (tables.Count == 0)
+            // Оригінал першим, далі копії за номером (`0` — оригінал).
+            var copyKeys = Enumerable.Repeat(0L, 1)
+                .Concat(sheet.Tables
+                    .Where(t => !t.IsDeleted)
+                    .SelectMany(t => instances.Where(i => i.TableDefId == t.Id && i.SheetCopyId is not null))
+                    .Select(i => i.SheetCopyId!.Value)
+                    .Distinct()
+                    .OrderBy(id => group?.Copies.FirstOrDefault(c => c.SheetCopyId == id)?.Ordinal ?? short.MaxValue)
+                    .ThenBy(id => id));
+
+            foreach (var copyKey in copyKeys)
             {
-                continue;
+                var tables = sheet.Tables
+                    .Where(t => !t.IsDeleted && byTableCopy.ContainsKey((t.Id, copyKey)))
+                    .OrderBy(t => t.Ordinal)
+                    .ToList();
+
+                if (tables.Count == 0)
+                {
+                    continue;
+                }
+
+                var name = SheetName(sheet, group, copyKey, options.Language, usedNames);
+                var worksheet = workbook.Worksheets.Add(name);
+                var row = FirstRow;
+                var headerRows = new List<int>(tables.Count);
+                var lastColumn = 0;
+                var contentLength = new List<int>();
+
+                foreach (var table in tables)
+                {
+                    var instance = byTableCopy[(table.Id, copyKey)];
+
+                    var block = WriteTable(
+                        worksheet, name, table, instance, snapshot, styleMap, lookups, styleSource, options, row,
+                        rowIdsBatch.GetValueOrDefault(instance.TableInstanceId, NoRows),
+                        versionsBatch.GetValueOrDefault(instance.TableInstanceId, NoVersions),
+                        slicesBatch.GetValueOrDefault(instance.TableInstanceId, NoCells),
+                        formatRules,
+                        contentLength,
+                        userStyles.GetValueOrDefault(instance.TableInstanceId));
+
+                    blocks.Add(block with { SheetCopyId = instance.SheetCopyId });
+                    headerRows.Add(block.HeaderRow);
+
+                    // +1 — стовпець підпису рядка праворуч від колонок даних.
+                    lastColumn = Math.Max(lastColumn, block.Columns.Count + 1);
+                    row = block.HeaderRow + block.Rows.Count + 1 + GapRows;
+                }
+
+                AdjustHeaders(worksheet, headerRows, lastColumn, contentLength);
+
+                // ⚠ Заморожується рядок ЗАГОЛОВКА першої таблиці, а не перший
+                // рядок аркуша: у першому лежить назва таблиці, і замороження по
+                // ньому лишало б видимою назву, а не підписи колонок — тобто саме
+                // те, заради чого це роблять.
+                var firstHeader = blocks.FirstOrDefault(b => b.SheetName == name)?.HeaderRow ?? FirstRow;
+                worksheet.SheetView.FreezeRows(firstHeader);
             }
-
-            var name = SheetName(sheet, options.Language, usedNames);
-            var worksheet = workbook.Worksheets.Add(name);
-            var row = FirstRow;
-            var headerRows = new List<int>(tables.Count);
-            var lastColumn = 0;
-            var contentLength = new List<int>();
-
-            foreach (var table in tables)
-            {
-                var instance = byTableDef[table.Id];
-
-                var block = WriteTable(
-                    worksheet, name, table, instance, snapshot, styleMap, lookups, styleSource, options, row,
-                    rowIdsBatch.GetValueOrDefault(instance.TableInstanceId, NoRows),
-                    versionsBatch.GetValueOrDefault(instance.TableInstanceId, NoVersions),
-                    slicesBatch.GetValueOrDefault(instance.TableInstanceId, NoCells),
-                    formatRules,
-                    contentLength,
-                    userStyles.GetValueOrDefault(instance.TableInstanceId));
-
-                blocks.Add(block);
-                headerRows.Add(block.HeaderRow);
-
-                // +1 — стовпець підпису рядка праворуч від колонок даних.
-                lastColumn = Math.Max(lastColumn, block.Columns.Count + 1);
-                row = block.HeaderRow + block.Rows.Count + 1 + GapRows;
-            }
-
-            AdjustHeaders(worksheet, headerRows, lastColumn, contentLength);
-
-            // ⚠ Заморожується рядок ЗАГОЛОВКА першої таблиці, а не перший
-            // рядок аркуша: у першому лежить назва таблиці, і замороження по
-            // ньому лишало б видимою назву, а не підписи колонок — тобто саме
-            // те, заради чого це роблять.
-            var firstHeader = blocks.FirstOrDefault(b => b.SheetName == name)?.HeaderRow ?? FirstRow;
-            worksheet.SheetView.FreezeRows(firstHeader);
         }
 
         if (options.IncludeFormulas)
@@ -1114,15 +1140,31 @@ public sealed class ExcelExporter(
         IReadOnlyList<ExcelTableBlock> blocks,
         IReadOnlyList<FormulaDependency> graph)
     {
-        var coordinates = Coordinates(blocks);
-        var byTableDef = blocks.ToDictionary(b => b.TableDefId);
+        // ⛔ RS: посилання формули адресують ТАБЛИЦІ СВОГО «виду» — копія читає таблиці своєї копії, решту аркушів —
+        // оригінали (як і перерахунок: `CopyScope`). Мапа координат будується раз на копію (`0` — оригінали).
+        var allTables = snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
+        var coordinatesByCopy = new Dictionary<long, Dictionary<(string, string, string), string>>();
+
+        Dictionary<(string, string, string), string> CoordinatesOf(ExcelTableBlock owner)
+        {
+            var copyKey = owner.SheetCopyId ?? 0;
+            if (!coordinatesByCopy.TryGetValue(copyKey, out var found))
+            {
+                var sheetOfCopy = allTables[owner.TableDefId].SheetDefId;
+                found = coordinatesByCopy[copyKey] = Coordinates(
+                    [.. blocks.Where(b => b.SheetCopyId is null
+                                          ? copyKey == 0 || allTables[b.TableDefId].SheetDefId != sheetOfCopy
+                                          : b.SheetCopyId == copyKey)]);
+            }
+
+            return found;
+        }
 
         // ⛔ ФВ-0.2: діапазон формули — ті рядки, які розкрила ПУБЛІКАЦІЯ, а не все між кінцями за
         // макетом книги (макет іде за поточним Ordinal, який презентаційна правка могла змінити).
         // Граф порожній (чернетка, експортер без порту) — `PublishedRangesOf` дає `null`, і діапазон,
         // як і раніше, за макетом: перерахунок тоді теж читає поточний порядок.
         var edgesByFormula = Ecr.Application.Recalculation.PublishedRanges.EdgesByFormula(graph);
-        var allTables = snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
         var resolver = new Ecr.Expressions.Binding.ReferenceResolver(snapshot);
         var rangesByFormula = new Dictionary<int, IReadOnlyDictionary<int, IReadOnlyList<string>>?>();
 
@@ -1151,13 +1193,15 @@ public sealed class ExcelExporter(
             return ranges;
         }
 
-        foreach (var table in snapshot.Sheets.SelectMany(s => s.Tables).Where(t => !t.IsDeleted))
+        // RS: за БЛОКАМИ (оригінал і кожна копія — свій блок), а не за таблицями шаблону.
+        foreach (var block in blocks)
         {
-            if (!byTableDef.TryGetValue(table.Id, out var block))
+            if (!allTables.TryGetValue(block.TableDefId, out var table) || table.IsDeleted)
             {
                 continue;
             }
 
+            var coordinates = CoordinatesOf(block);
             var worksheet = workbook.Worksheet(block.SheetName);
             var targets = new Dictionary<(string RowKey, int ColumnDefId), List<FormulaDef>>();
 
@@ -1349,10 +1393,33 @@ public sealed class ExcelExporter(
     /// падає на книзі, у якій два аркуші починаються однаково — а в реальних
     /// шаблонах вони так і починаються.
     /// </remarks>
-    private static string SheetName(SheetDef sheet, string language, HashSet<string> used)
+    private static string SheetName(
+        SheetDef sheet, SheetCopyGroupInfo? group, long copyKey, string language, HashSet<string> used)
     {
-        return UniqueName(CleanSheetName(sheet.NameL10n.Get(language) ?? sheet.Code, sheet.Code), used);
+        var baseName = SheetCopyNaming.Effective(sheet.NameL10n, group?.NameOverride).Get(language) ?? sheet.Code;
+        var clean = CleanSheetName(baseName, sheet.Code);
+
+        if (group is not { Copies.Count: > 0 })
+        {
+            return UniqueName(clean, used);
+        }
+
+        // ⛔ RS: «<Назва> N» — номер НЕ можна обрізати межею Excel у 31 символ (інакше «Штабелі 2» і «Штабелі 3» зіллються
+        // в «~2»): різеться назва, а " N" лишається. Оригінал групи з копіями — «<Назва> 1».
+        var ordinal = copyKey == 0
+            ? DocumentSheetOriginalOrdinal
+            : group.Copies.FirstOrDefault(c => c.SheetCopyId == copyKey)?.Ordinal ?? (short)(DocumentSheetOriginalOrdinal + 1);
+        var tail = " " + ordinal.ToString(CultureInfo.InvariantCulture);
+        if (clean.Length + tail.Length > MaxSheetNameLength)
+        {
+            clean = clean[..(MaxSheetNameLength - tail.Length)].TrimEnd();
+        }
+
+        return UniqueName(clean + tail, used);
     }
+
+    /// <summary>Номер оригінала в групі (<c>DocumentSheet.OriginalOrdinal</c>).</summary>
+    private const short DocumentSheetOriginalOrdinal = Ecr.Domain.Entities.Documents.DocumentSheet.OriginalOrdinal;
 
     /// <summary>Ім'я без заборонених символів, не довше межі Excel; порожнє — запасне.</summary>
     private static string CleanSheetName(string raw, string fallback)

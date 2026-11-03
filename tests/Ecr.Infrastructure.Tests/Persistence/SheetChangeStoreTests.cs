@@ -238,6 +238,7 @@ public sealed class SheetChangeStoreTests(ITestOutputHelper output)
         command.Parameters.Add("@tables", SqlDbType.NVarChar, -1).Value = JsonSerializer.Serialize(new[] { tableDefId });
         command.Parameters.Add("@since", SqlDbType.Binary, 8).Value = SheetChangeStore.FromVersion(since);
         command.Parameters.Add("@sample", SqlDbType.Int).Value = 50;
+        command.Parameters.Add("@copy", SqlDbType.BigInt).Value = DBNull.Value;
         await using (var reader = await command.ExecuteReaderAsync(CancellationToken.None))
         {
             while (await reader.NextResultAsync(CancellationToken.None))

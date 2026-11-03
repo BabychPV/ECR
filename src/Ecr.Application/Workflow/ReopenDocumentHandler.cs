@@ -42,8 +42,20 @@ public sealed class ReopenDocumentHandler(
     /// <param name="reason">Причина; обов'язкова.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="BusinessRuleException">Період закритий — <c>ECR-PRD-4223</c>.</exception>
-    public async Task HandleAsync(
+    public Task HandleAsync(
         long documentId, int sheetDefId, int periodKey, string reason, CancellationToken ct)
+        => HandleAsync(documentId, sheetDefId, periodKey, reason, sheetCopyId: null, ct);
+
+    /// <summary>Повертає аркуш або його КОПІЮ в <c>Draft</c> (RS: власний стан копії за період).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="reason">Причина; обов'язкова.</param>
+    /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="BusinessRuleException">Період закритий — <c>ECR-PRD-4223</c>.</exception>
+    public async Task HandleAsync(
+        long documentId, int sheetDefId, int periodKey, string reason, long? sheetCopyId, CancellationToken ct)
     {
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
@@ -64,6 +76,12 @@ public sealed class ReopenDocumentHandler(
         // ⛔ Схований від читача аркуш — та сама відмова, що й аркуш поза складом, ДО гранта й стану.
         await Documents.DocumentVisibility
             .RequireSheetVisibleAsync(documents, access, profile, documentId, sheetDefId, key, ct).ConfigureAwait(false);
+
+        // RS: копія має належати цьому аркушу документа.
+        if (sheetCopyId is { } copy && !await documents.HasSheetCopyAsync(documentId, sheetDefId, copy, ct).ConfigureAwait(false))
+        {
+            throw Documents.DocumentVisibility.SheetNotInDocument(documentId, sheetDefId);
+        }
 
         // Право небезпечне і тому перевіряється окремо від грантів: воно дає
         // змогу змінити вже подані числа (ФВ-6.12).
@@ -88,7 +106,7 @@ public sealed class ReopenDocumentHandler(
         // «саме на ЦЕЙ документ». Submit і Approve того самого документа
         // перевіряють обидва рівні (CanSubmitAsync/CanApproveAsync) — Reopen,
         // що скасовує будь-яке з них, не мав перевіряти менше.
-        var reopenDecision = await access.CanReopenAsync(profile, documentId, sheetDefId, key, ct)
+        var reopenDecision = await access.CanReopenOfAsync(profile, documentId, sheetDefId, key, sheetCopyId, ct)
                                           .ConfigureAwait(false);
         if (!reopenDecision.IsAllowed)
         {
@@ -123,7 +141,7 @@ public sealed class ReopenDocumentHandler(
                 .ConfigureAwait(false);
 
             var state = await workflow
-                .GetOrCreateAsync(documentId, sheetDefId, key, innerCt)
+                .GetOrCreateOfAsync(documentId, sheetDefId, key, sheetCopyId, innerCt)
                 .ConfigureAwait(false);
             var fromStatus = state.Status;
             var now = clock.UtcNow;
@@ -143,19 +161,27 @@ public sealed class ReopenDocumentHandler(
             await reports.RefreshAsync(documentId, key, innerCt).ConfigureAwait(false);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
-            await SheetMaterializationTrigger
-                .InsideTransactionAsync(materialization, documentId, sheetDefId, periodKey, innerCt)
-                .ConfigureAwait(false);
+            // RS (Q5): збір пише лише в оригінал — для копії наздоганяти нічого.
+            if (sheetCopyId is null)
+            {
+                await SheetMaterializationTrigger
+                    .InsideTransactionAsync(materialization, documentId, sheetDefId, periodKey, innerCt)
+                    .ConfigureAwait(false);
+            }
         }, ct).ConfigureAwait(false);
 
-        await SheetMaterializationTrigger
-            .AfterCommitAsync(materialization, documentId, sheetDefId, periodKey, ct)
-            .ConfigureAwait(false);
+        if (sheetCopyId is null)
+        {
+            await SheetMaterializationTrigger
+                .AfterCommitAsync(materialization, documentId, sheetDefId, periodKey, ct)
+                .ConfigureAwait(false);
+        }
 
         // ✎ D-451: «повернути для правок» (`Submitted/Approved → Draft`, `ApprovalAction.Reopen`) — повернення
         // погоджувачем із правом `Document.Reopen` (кнопку клієнт показує лише тому, хто погоджує). Відкликання
         // автором — інший обробник (`RecallSheetHandler`, `ApprovalAction.Recall`) і листа не дає.
-        if (notifier is not null)
+        // RS: лист про повернення КОПІЇ — разом із контрактом копій (коміт 8).
+        if (notifier is not null && sheetCopyId is null)
         {
             await notifier.ReturnedAsync(documentId, sheetDefId, key, userId, clock.UtcNow, reason, ct)
                 .ConfigureAwait(false);

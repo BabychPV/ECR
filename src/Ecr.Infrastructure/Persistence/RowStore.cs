@@ -84,7 +84,8 @@ public sealed class RowStore(
                     join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
                     select new TableInstanceRef(
                         instance.Id, instance.DocumentId, instance.TableDefId,
-                        EcrDbContext.VersionOf(project.Id, instance.PeriodKeyValue), instance.PeriodKeyValue),
+                        EcrDbContext.VersionOf(project.Id, instance.PeriodKeyValue), instance.PeriodKeyValue,
+                        instance.SheetCopyId),
                 r => r.TableInstanceId,
                 ct).ConfigureAwait(false))
             .ToDictionary(r => r.TableInstanceId);
@@ -786,12 +787,16 @@ public sealed class RowStore(
     public async Task<IReadOnlyList<TableInstanceRef>> GetTableInstancesAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct)
     {
+        // RS: копії аркушів теж тут (з SheetCopyId), але ПІСЛЯ оригіналів (NULL першим): споживач, що шукає «перший
+        // екземпляр таблиці», отримує оригінал.
         var hot = await TableInstancesQuery(db, documentId, periodKey)
-            .OrderBy(t => t.Id)
+            .OrderBy(t => t.SheetCopyId)
+            .ThenBy(t => t.Id)
             .Join(db.Documents, t => t.DocumentId, d => d.Id, (t, d) => new { t, d.ProjectId })
             .Join(db.Projects, x => x.ProjectId, p => p.Id,
                   (x, p) => new TableInstanceRef(
-                      x.t.Id, x.t.DocumentId, x.t.TableDefId, EcrDbContext.VersionOf(p.Id, x.t.PeriodKeyValue), x.t.PeriodKeyValue))
+                      x.t.Id, x.t.DocumentId, x.t.TableDefId, EcrDbContext.VersionOf(p.Id, x.t.PeriodKeyValue), x.t.PeriodKeyValue,
+                      x.t.SheetCopyId))
             .Take(MaxTableInstances)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -865,10 +870,18 @@ public sealed class RowStore(
     }
 
     /// <summary>
-    /// Табличні описи документа за період, для яких екземпляра ще немає; порожній перелік —
+    /// Екземпляр, який треба створити: таблиця і копія аркуша (<c>null</c> — оригінал, RS).
+    /// </summary>
+    /// <param name="TableDefId">Таблиця шаблону.</param>
+    /// <param name="SheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+    private readonly record struct InstanceTarget(int TableDefId, long? SheetCopyId);
+
+    /// <summary>
+    /// Табличні описи документа за період, для яких екземпляра ще немає — для оригіналу і для КОЖНОЇ копії аркуша
+    /// (RS: копія існує в усіх періодах, зокрема минулих, і створюється при першому відкритті); порожній перелік —
     /// нічого створювати (або період заархівовано).
     /// </summary>
-    private async Task<List<int>> FindMissingTableDefsAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    private async Task<List<InstanceTarget>> FindMissingTableDefsAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
     {
         // ⚠ Аркуші документа — це і є перелік того, що в ньому заповнюють
         // (ФВ-3.2). Таблиці беруться з тих аркушів, а не з усього шаблону:
@@ -886,6 +899,8 @@ public sealed class RowStore(
                     Id = sd.Id,
                     sd.Code,
                     sd.TemplateVersionId,
+                    // RS: рядок копії має той самий SheetDefId, що й оригінал; копія — це Id рядка складу.
+                    CopyId = s.CopyOfId == null ? (long?)null : s.Id,
                     PeriodVersion = db.Documents.Where(d => d.Id == documentId)
                         .Select(d => EcrDbContext.VersionOf(d.ProjectId, period)).FirstOrDefault(),
                 })
@@ -897,31 +912,48 @@ public sealed class RowStore(
             return [];
         }
 
-        var sheetIds = docSheets.Select(s => s.Id).ToList();
+        // Аркуш версії періоду → копії цього аркуша (оригінал — null) у складі документа.
         var periodVersion = docSheets[0].PeriodVersion;
+        var copiesOfSheet = docSheets.Where(s => s.TemplateVersionId == periodVersion)
+            .Select(s => (SheetId: s.Id, s.CopyId))
+            .ToList();
         if (docSheets.Any(s => s.TemplateVersionId != periodVersion))
         {
-            var foreignCodes = docSheets.Where(s => s.TemplateVersionId != periodVersion).Select(s => s.Code).ToList();
+            var foreignCodes = docSheets.Where(s => s.TemplateVersionId != periodVersion).Select(s => s.Code).Distinct().ToList();
             var mapped = await db.SheetDefs
                 .AsNoTracking()
                 .Where(s => s.TemplateVersionId == periodVersion && foreignCodes.Contains(s.Code))
-                .Select(s => s.Id)
+                .Select(s => new { s.Id, s.Code })
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
-            sheetIds = [.. docSheets.Where(s => s.TemplateVersionId == periodVersion).Select(s => s.Id).Concat(mapped)];
+            copiesOfSheet.AddRange(
+                from s in docSheets
+                where s.TemplateVersionId != periodVersion
+                join m in mapped on s.Code equals m.Code
+                select (m.Id, s.CopyId));
         }
 
-        var tableDefIds = await db.TableDefs
+        var sheetIds = copiesOfSheet.Select(s => s.SheetId).Distinct().ToList();
+        var tables = await db.TableDefs
             .AsNoTracking()
             .Where(t => sheetIds.Contains(t.SheetDefId) && !t.IsDeleted)
-            .Select(t => t.Id)
+            .Select(t => new { t.Id, t.SheetDefId })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var existing = await TableInstancesQuery(db, documentId, periodKey)
-            .Select(t => t.TableDefId)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        var targets = (
+                from t in tables
+                join s in copiesOfSheet on t.SheetDefId equals s.SheetId
+                select new InstanceTarget(t.Id, s.CopyId))
+            .Distinct()
+            .ToList();
+
+        var existing = (await TableInstancesQuery(db, documentId, periodKey)
+                .Select(t => new { t.TableDefId, t.SheetCopyId })
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .Select(t => new InstanceTarget(t.TableDefId, t.SheetCopyId))
+            .ToList();
 
         // ⚠ F-13. `existing` порожній має ДВА зовсім різних читання: «період
         // ще не відкривали» (тоді нижче треба матеріалізувати) і «період
@@ -930,13 +962,15 @@ public sealed class RowStore(
         // перевірки метод мовчки фабрикував би НОВІ порожні екземпляри з
         // НОВИМИ Id замість архівних даних, ГОЛОВНИЙ баг F-13). Різницю
         // видає лише запит до `arc.*`.
-        if (existing.Count == 0 && tableDefIds.Count > 0 && archive is not null
+        //
+        // ⚠ RS (Q3): у заархівованому році копій не заводять — та сама перевірка повертає порожній перелік і для них.
+        if (existing.Count == 0 && targets.Count > 0 && archive is not null
             && await archive.HasArchivedTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false))
         {
             return [];
         }
 
-        return [.. tableDefIds.Except(existing).Order()];
+        return [.. targets.Except(existing).OrderBy(t => t.SheetCopyId).ThenBy(t => t.TableDefId)];
     }
 
     /// <summary>
@@ -958,8 +992,12 @@ public sealed class RowStore(
     /// Створює екземпляри <paramref name="missing"/> (Fixed-рядки, за прапором Q-17 — дзеркала рядків якоря, рядки з
     /// дозволу); під спільним <c>doc-structure</c> і в транзакції викликача.
     /// </summary>
+    /// <remarks>
+    /// RS: екземпляр КОПІЇ аркуша отримує лише Fixed-рядки шаблону й порожні комірки — без дзеркал якоря Q-17 і без
+    /// рядків із дозволу (Q5: інтеграція й дозволи пишуть лише в оригінал).
+    /// </remarks>
     private async Task<(int Created, Application.Permits.Bindings.PermitMaterialization? Materialized)>
-        CreateInstancesCoreAsync(long documentId, PeriodKey periodKey, List<int> missing, CancellationToken ct)
+        CreateInstancesCoreAsync(long documentId, PeriodKey periodKey, List<InstanceTarget> missing, CancellationToken ct)
     {
         if (missing.Count == 0)
         {
@@ -999,15 +1037,23 @@ public sealed class RowStore(
 
         var utcNow = clock.UtcNow;
 
+        // Оригінали: TableDefId → екземпляр (дзеркала якоря, рядки з дозволу); усі: (таблиця, екземпляр) — Fixed-рядки.
         var created = new Dictionary<int, long>(missing.Count);
+        var all = new List<(int TableDefId, long InstanceId)>(missing.Count);
 
         for (var i = 0; i < missing.Count; i++)
         {
-            created[missing[i]] = first + i;
-            db.TableInstances.Add(new TableInstance(periodKey, first + i, documentId, missing[i], utcNow));
+            var target = missing[i];
+            all.Add((target.TableDefId, first + i));
+            if (target.SheetCopyId is null)
+            {
+                created[target.TableDefId] = first + i;
+            }
+
+            db.TableInstances.Add(new TableInstance(periodKey, first + i, documentId, target.TableDefId, utcNow, target.SheetCopyId));
         }
 
-        await MaterializeFixedRowsAsync(created, periodKey, utcNow, ct).ConfigureAwait(false);
+        await MaterializeFixedRowsAsync(all, periodKey, utcNow, ct).ConfigureAwait(false);
         await MirrorAnchorRowsAsync(documentId, periodKey, created, utcNow, ct).ConfigureAwait(false);
 
         try
@@ -1042,9 +1088,9 @@ public sealed class RowStore(
         // рядків з дозволу виходить назовні і відкочує транзакцію разом з екземплярами (аудит B17, тести
         // `PermitRuntimeRowsTests.FailurePaths`).
         Application.Permits.Bindings.PermitMaterialization? materialized = null;
-        if (permits is not null)
+        if (permits is not null && created.Count > 0)
         {
-            materialized = await permits.MaterializeAsync(documentId, periodKey, missing, ct).ConfigureAwait(false);
+            materialized = await permits.MaterializeAsync(documentId, periodKey, [.. created.Keys.Order()], ct).ConfigureAwait(false);
         }
 
         return (missing.Count, materialized);
@@ -1094,8 +1140,10 @@ public sealed class RowStore(
             return;
         }
 
+        // RS: дзеркала якоря — лише оригіналам (копії отримують тільки Fixed-рядки, див. CreateInstancesCoreAsync).
         var anchorInstances = await db.TableInstances
             .AsNoTracking()
+            .OriginalOnly()
             .Where(t => t.PeriodKeyValue == anchorKey.Value && t.DocumentId == documentId && monthTables.Contains(t.TableDefId))
             .Select(t => new { t.Id, t.TableDefId })
             .ToListAsync(ct)
@@ -1148,7 +1196,7 @@ public sealed class RowStore(
 
         // ⚠ Q-17: ключ періоду в діапазоні (рік*100, рік*100+12] — відсікає партиції інших років.
         var instances = await (
-                from t in db.TableInstances.AsNoTracking()
+                from t in db.TableInstances.AsNoTracking().OriginalOnly()
                 where t.DocumentId == documentId
                       && t.TableDefId == tableDefId
                       && t.PeriodKeyValue > first
@@ -1186,8 +1234,15 @@ public sealed class RowStore(
             return 0;
         }
 
+        // RS: Q-17 для копій аркуша — коміт 5 (зараз лише оригінал).
+        if (instance.SheetCopyId is not null)
+        {
+            return 0;
+        }
+
         var anchorInstanceId = await db.TableInstances
             .AsNoTracking()
+            .OriginalOnly()
             .Where(t => t.PeriodKeyValue == anchor.Value && t.DocumentId == instance.DocumentId && t.TableDefId == instance.TableDefId)
             .Select(t => (long?)t.Id)
             .FirstOrDefaultAsync(ct)
@@ -1320,7 +1375,7 @@ public sealed class RowStore(
                         return;
                     }
 
-                    await CreateInstancesCoreAsync(documentId, periodKey, [tableDefId], token).ConfigureAwait(false);
+                    await CreateInstancesCoreAsync(documentId, periodKey, [new InstanceTarget(tableDefId, null)], token).ConfigureAwait(false);
                 },
                 ct).ConfigureAwait(false);
         }
@@ -1361,12 +1416,13 @@ public sealed class RowStore(
     /// створює нуль екземплярів і, отже, нуль рядків.
     /// </remarks>
     private async Task MaterializeFixedRowsAsync(
-        IReadOnlyDictionary<int, long> instancesByTableDef,
+        IReadOnlyList<(int TableDefId, long InstanceId)> instances,
         PeriodKey periodKey,
         DateTime utcNow,
         CancellationToken ct)
     {
-        var tableDefIds = instancesByTableDef.Keys.ToList();
+        // RS: одна таблиця може мати кілька нових екземплярів (оригінал і копії аркуша) — рядки кожному.
+        var tableDefIds = instances.Select(i => i.TableDefId).Distinct().ToList();
 
         var rowDefs = await db.RowDefs
             .AsNoTracking()
@@ -1384,18 +1440,24 @@ public sealed class RowStore(
             return;
         }
 
+        var rows = (
+                from i in instances
+                join def in rowDefs on i.TableDefId equals def.TableDefId
+                select (i.InstanceId, def))
+            .ToList();
+
         var firstRowId = await bulk
-            .ReserveIdsAsync("doc.TableRowSeq", rowDefs.Count, ct)
+            .ReserveIdsAsync("doc.TableRowSeq", rows.Count, ct)
             .ConfigureAwait(false);
 
-        for (var i = 0; i < rowDefs.Count; i++)
+        for (var i = 0; i < rows.Count; i++)
         {
-            var def = rowDefs[i];
+            var (instanceId, def) = rows[i];
 
             db.TableRows.Add(new TableRow(
                 periodKey,
                 firstRowId + i,
-                instancesByTableDef[def.TableDefId],
+                instanceId,
                 RowKey.Create(def.RowKeyValue),
                 def.Ordinal,
                 utcNow,

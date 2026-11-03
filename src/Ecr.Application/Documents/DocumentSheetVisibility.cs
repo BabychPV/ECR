@@ -255,9 +255,12 @@ public static class DocumentSheetVisibility
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(scope);
 
+        // RS: ключ копії в `Sheets`/`SheetStates` — «КОД#sheetCopyId»; межі читача діють за КОДОМ аркуша шаблону.
         var included = document.IncludedSheetCodes
-                       ?? [.. (document.Sheets ?? []).Select(s => s.Code)];
-        var visibleSheets = (document.Sheets ?? []).Where(s => scope.CanReadSheetCode(s.Code)).ToList();
+                       ?? [.. (document.Sheets ?? []).Select(s => SheetCopyNaming.CodeOfStateKey(s.Code))];
+        var visibleSheets = (document.Sheets ?? [])
+            .Where(s => scope.CanReadSheetCode(SheetCopyNaming.CodeOfStateKey(s.Code)))
+            .ToList();
         var visibleCodes = included.Count(scope.CanReadSheetCode);
         var narrowed = IsNarrowed(scope, included);
         var staleHidden = narrowed || IsProjectNarrowed(scope);

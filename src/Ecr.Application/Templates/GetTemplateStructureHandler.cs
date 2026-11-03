@@ -84,7 +84,8 @@ public sealed class GetTemplateStructureHandler(
                 sheet.SheetGroup,
                 sheet.IsMandatory,
                 sheet.IsVisible,
-                [.. sheet.Tables.OrderBy(t => t.Ordinal).Select(table => Table(table, symbolById))]))
+                [.. sheet.Tables.OrderBy(t => t.Ordinal).Select(table => Table(table, symbolById))],
+                sheet.IsCopyable))
             .ToList();
 
         return new TemplateStructureDto(

@@ -138,7 +138,7 @@ public sealed class SheetActivityTests
     public async Task Події_іншого_аркуша_і_іншого_користувача_не_потрапляють()
     {
         var workflow = Substitute.For<IWorkflowStore>();
-        workflow.GetHistoryAsync(DocumentId, Arg.Any<PeriodKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+        workflow.GetHistoryAsync(DocumentId, Arg.Any<PeriodKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>(), Arg.Any<long?>())
             .Returns([Event("SA", 1, 7, "Reject", "bad"), Event("SB", 2, 7, "Reject", "other sheet"), Event("SA", 3, 8, "Submit", null)]);
         var query = new SheetActivityQuery(FakeAudit([]), workflow);
 
@@ -204,7 +204,7 @@ public sealed class SheetActivityTests
         }
 
         await audit.DidNotReceiveWithAnyArgs().ReadCellChangesAsync(default!, default!, default);
-        await workflow.DidNotReceiveWithAnyArgs().GetHistoryAsync(default, default, default, default);
+        await workflow.DidNotReceiveWithAnyArgs().GetHistoryAsync(default, default, default, default, default);
     }
 
     [Fact]
@@ -223,7 +223,7 @@ public sealed class SheetActivityTests
 
         Assert.Equal("ECR-DOC-0404", error.ErrorCode);
         await audit.DidNotReceiveWithAnyArgs().ReadCellChangesAsync(default!, default!, default);
-        await workflow.DidNotReceiveWithAnyArgs().GetHistoryAsync(default, default, default, default);
+        await workflow.DidNotReceiveWithAnyArgs().GetHistoryAsync(default, default, default, default, default);
     }
 
     [Fact]
@@ -419,7 +419,7 @@ public sealed class SheetActivityTests
     private static IWorkflowStore FakeWorkflow(IReadOnlyList<(long Id, DateTime At)> events)
     {
         var workflow = Substitute.For<IWorkflowStore>();
-        workflow.GetHistoryAsync(DocumentId, Arg.Any<PeriodKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+        workflow.GetHistoryAsync(DocumentId, Arg.Any<PeriodKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>(), Arg.Any<long?>())
             .Returns(events
                 .OrderByDescending(e => e.At).ThenByDescending(e => e.Id)
                 .Select(e => new ApprovalEventRecord(

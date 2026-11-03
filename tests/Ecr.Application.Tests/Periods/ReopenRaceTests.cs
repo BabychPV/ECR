@@ -294,16 +294,16 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
             => inner.AddEventAsync(approvalEvent, ct);
 
         public Task<IReadOnlyList<Ecr.Application.Ports.ApprovalEventRecord>> GetHistoryAsync(
-            long documentId, PeriodKey periodKey, int limit, CancellationToken ct)
-            => inner.GetHistoryAsync(documentId, periodKey, limit, ct);
+            long documentId, PeriodKey periodKey, int limit, CancellationToken ct, long? sheetCopyId = null)
+            => inner.GetHistoryAsync(documentId, periodKey, limit, ct, sheetCopyId);
 
         public Task<IReadOnlyList<Ecr.Domain.Entities.Workflow.ApprovalState>> GetSheetsAsync(
             long documentId, PeriodKey periodKey, CancellationToken ct)
             => inner.GetSheetsAsync(documentId, periodKey, ct);
 
         public Task<Ecr.Application.Ports.SubmissionCalendar?> GetSubmissionCalendarAsync(
-            long documentId, int sheetDefId, DateTime utcNow, CancellationToken ct)
-            => inner.GetSubmissionCalendarAsync(documentId, sheetDefId, utcNow, ct);
+            long documentId, int sheetDefId, DateTime utcNow, CancellationToken ct, long? sheetCopyId = null)
+            => inner.GetSubmissionCalendarAsync(documentId, sheetDefId, utcNow, ct, sheetCopyId);
 
         public Task<long> SaveSnapshotAsync(
             Ecr.Application.Ports.SubmissionSnapshotRecord snapshot, CancellationToken ct)

@@ -33,6 +33,8 @@ vi.mock('@/features/grid/liveRefresh/useSheetChanges', () => ({
 function table(ordinal: number): DocumentTableDto {
   return {
     allowsDynamicRows: false,
+    copyOrdinal: 1,
+    isCopyable: false,
     maxDynamicRows: null,
     sheetCode: 'S1',
     sheetDefId: 1,

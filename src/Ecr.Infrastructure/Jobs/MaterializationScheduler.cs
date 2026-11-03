@@ -114,8 +114,10 @@ public sealed class MaterializationScheduler(
         }
 
         var instanceIds = targets.Select(t => t.TableInstanceId).Distinct().ToList();
+        // RS (Q5): лише оригінал аркуша — адресати збору копій не містять (MaterializationTargets).
         var ofSheet = (await db.TableInstances
                 .AsNoTracking()
+                .OriginalOnly()
                 .Where(i => i.PeriodKeyValue == periodKey && instanceIds.Contains(i.Id)
                             && db.TableDefs.Any(t => t.Id == i.TableDefId && t.SheetDefId == sheetDefId))
                 .Select(i => i.Id)

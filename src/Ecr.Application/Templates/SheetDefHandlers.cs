@@ -162,6 +162,7 @@ public sealed class SaveSheetDefHandler(
                 existing.SetGroup(command.SheetGroup);
                 existing.SetMandatory(command.IsMandatory);
                 existing.SetVisible(command.IsVisible);
+                existing.SetCopyable(command.IsCopyable ?? false);
 
                 version.AddSheet(existing);
 
@@ -176,6 +177,13 @@ public sealed class SaveSheetDefHandler(
                 existing.SetGroup(command.SheetGroup);
                 existing.SetMandatory(command.IsMandatory);
                 existing.SetVisible(command.IsVisible);
+
+                // RS: зняття позначки не чіпає наявні копії документів (Q4) — вони лишаються й далі працюють;
+                // `null` (старий клієнт без цього поля) позначку не міняє.
+                if (command.IsCopyable is { } copyable)
+                {
+                    existing.SetCopyable(copyable);
+                }
 
                 if (command.Ordinal is { } ordinal)
                 {
@@ -215,7 +223,8 @@ public sealed class SaveSheetDefHandler(
         => new(
             sheet.Id, sheet.Code, sheet.NameL10n, sheet.Ordinal,
             sheet.SheetGroup, sheet.IsMandatory, sheet.IsVisible,
-            []);
+            [],
+            sheet.IsCopyable);
 
     /// <summary>Стан аркуша для аудиту.</summary>
     /// <param name="sheet">Аркуш.</param>
@@ -229,6 +238,7 @@ public sealed class SaveSheetDefHandler(
             sheet.SheetGroup,
             sheet.IsMandatory,
             sheet.IsVisible,
+            sheet.IsCopyable,
         });
 }
 
@@ -238,12 +248,17 @@ public sealed class SaveSheetDefHandler(
 /// <param name="SheetGroup">Група для правил складу документа; <c>null</c> — поза групами.</param>
 /// <param name="IsMandatory">Чи обов'язковий аркуш для складу документа.</param>
 /// <param name="IsVisible">Видимість аркуша.</param>
+/// <param name="IsCopyable">
+/// RS: аркуш можна копіювати в документі («Додати копію»): копія порожня, зі структурою й формулами аркуша, у кожному
+/// періоді. <c>null</c> — не змінювати (новий аркуш — ні). Зняття позначки наявних копій не видаляє.
+/// </param>
 public sealed record SaveSheetDefCommand(
     IReadOnlyDictionary<string, string> NameL10n,
     int? Ordinal,
     string? SheetGroup,
     bool IsMandatory,
-    bool IsVisible);
+    bool IsVisible,
+    bool? IsCopyable = null);
 
 /// <summary>
 /// Прибирає аркуш із версії-чернетки — м'яко (<c>ФВ-7.6</c>).

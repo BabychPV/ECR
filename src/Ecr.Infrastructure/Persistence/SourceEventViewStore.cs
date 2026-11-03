@@ -128,7 +128,8 @@ public sealed class SourceEventViewStore(
         var locked = await (
                 from t in db.TableDefs.AsNoTracking()
                 where t.Id == map.TableDefId
-                join a in db.ApprovalStates.AsNoTracking() on t.SheetDefId equals a.SheetDefId
+                // RS: події джерел пишуть лише в оригінал — стан копії аркуша його не замикає (як у синку).
+                join a in db.ApprovalStates.AsNoTracking().OriginalOnly() on t.SheetDefId equals a.SheetDefId
                 where a.DocumentId == map.DocumentId
                       && (a.Status == DocumentStatus.Submitted || a.Status == DocumentStatus.Approved)
                 select a.PeriodKey)

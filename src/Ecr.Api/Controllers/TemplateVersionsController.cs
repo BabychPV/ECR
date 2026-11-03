@@ -345,7 +345,7 @@ public sealed class TemplateVersionsController(
                 code,
                 new SaveSheetDefCommand(
                     request.NameL10n, request.Ordinal, request.SheetGroup,
-                    request.IsMandatory, request.IsVisible),
+                    request.IsMandatory, request.IsVisible, request.IsCopyable),
                 ct)
             .ConfigureAwait(false));
     }
@@ -1079,12 +1079,17 @@ public sealed record ReplaceHeaderGroupsResponse(int PresentationRevision, IRead
 /// <param name="SheetGroup">Група для правил складу документа; <c>null</c> — поза групами.</param>
 /// <param name="IsMandatory">Чи обов'язковий аркуш для складу документа.</param>
 /// <param name="IsVisible">Видимість аркуша.</param>
+/// <param name="IsCopyable">
+/// RS: аркуш можна копіювати в документі. <c>null</c> — не змінювати (новий аркуш — ні); так старий клієнт, що поля не знає,
+/// не скидає позначку при збереженні. Зняття позначки наявних копій не видаляє.
+/// </param>
 public sealed record SaveSheetDefRequest(
     IReadOnlyDictionary<string, string> NameL10n,
     int? Ordinal,
     string? SheetGroup,
     bool IsMandatory,
-    bool IsVisible);
+    bool IsVisible,
+    bool? IsCopyable = null);
 
 /// <summary>Налаштування таблиці на аркуші чернетки (<c>W5.1</c>).</summary>
 /// <param name="NameL10n">Назва таблиці мовами каталогу.</param>

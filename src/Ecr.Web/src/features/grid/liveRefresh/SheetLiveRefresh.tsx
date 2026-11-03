@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
 import type { DocumentSummary, DocumentTableDto } from '@/api/types';
-import { workflowHistoryQuery } from '@/features/workflow/api';
+import { sheetStateKey } from '@/features/documents/sheetCopies/sheetCopyTypes';
+import { isEventOfSheet, workflowHistoryQuery } from '@/features/workflow/api';
 import { refreshSheetWorkflow } from '@/features/workflow/refreshSheetWorkflow';
 import { whileStatusStale } from '@/features/workflow/statusStale';
 import { formatTime } from '@/shared/format/datetime';
@@ -36,7 +37,8 @@ export interface SheetLiveRefresh {
 export function useSheetLiveRefresh({ documentId, periodKey, tables }: SheetLiveRefreshProps): SheetLiveRefresh {
   const client = useQueryClient();
   const sheetDefId = tables[0]?.sheetDefId ?? null;
-  const changes = useSheetChanges(documentId, sheetDefId, periodKey);
+  const sheetCopyId = tables[0]?.sheetCopyId ?? null;
+  const changes = useSheetChanges(documentId, sheetDefId, periodKey, sheetCopyId);
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
 
@@ -99,7 +101,14 @@ export function useSheetLiveRefresh({ documentId, periodKey, tables }: SheetLive
     </button>
   );
 
-  const status = useStatusTransition(documentId, periodKey, sheetDefId, tables[0]?.sheetCode ?? null, changes.statusChange);
+  const status = useStatusTransition(
+    documentId,
+    periodKey,
+    sheetDefId,
+    tables[0]?.sheetCode ?? null,
+    sheetCopyId,
+    changes.statusChange,
+  );
 
   const change = changes.change;
   const banner = (
@@ -189,6 +198,7 @@ function useStatusTransition(
   periodKey: number,
   sheetDefId: number | null,
   sheetCode: string | null,
+  sheetCopyId: number | null,
   transition: StatusChange | null,
 ): { readonly notice: StatusNotice | null; readonly dismiss: () => void } {
   const client = useQueryClient();
@@ -205,7 +215,11 @@ function useStatusTransition(
 
     // The state the page shows now (`DocumentPage`: a sheet without a row is `Draft`); no summary — unknown.
     const summary = client.getQueryData<DocumentSummary>(queryKeys.document.summary(documentId, periodKey));
-    const shown = sheetCode === null || summary === undefined ? undefined : (summary.sheetStates[sheetCode] ?? 'Draft');
+    // ✎ RS: a copy has its own key in `sheetStates` (`CODE#sheetCopyId`).
+    const shown =
+      sheetCode === null || summary === undefined
+        ? undefined
+        : (summary.sheetStates[sheetStateKey(sheetCode, sheetCopyId)] ?? 'Draft');
     const moved = shown !== undefined && shown !== transition.state;
 
     void whileStatusStale(documentId, periodKey, () =>
@@ -215,9 +229,9 @@ function useStatusTransition(
 
       let by: string | null = null;
       try {
-        const events = await client.fetchQuery({ ...workflowHistoryQuery(documentId, periodKey), staleTime: 5_000 });
-        const latest = Array.isArray(events)
-          ? events.find((event) => event.sheetCode === sheetCode && event.toState === transition.state)
+        const events = await client.fetchQuery({ ...workflowHistoryQuery(documentId, periodKey, sheetCopyId), staleTime: 5_000 });
+        const latest = Array.isArray(events) && sheetCode !== null
+          ? events.find((event) => isEventOfSheet(event, sheetCode, sheetCopyId) && event.toState === transition.state)
           : undefined;
         by = latest?.byDisplayName ?? null;
       } catch {
@@ -225,7 +239,7 @@ function useStatusTransition(
       }
       if (handled.current === transition.revision) setNotice({ state: transition.state, by });
     });
-  }, [client, documentId, periodKey, sheetDefId, sheetCode, transition]);
+  }, [client, documentId, periodKey, sheetDefId, sheetCode, sheetCopyId, transition]);
 
   return { notice, dismiss: useCallback(() => setNotice(null), []) };
 }

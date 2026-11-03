@@ -44,6 +44,7 @@ public sealed class SubmissionSnapshot : Entity<long>
     /// <param name="contentHash">Контрольна сума вмісту.</param>
     /// <param name="submittedAt">Момент подання.</param>
     /// <param name="submittedByUserId">Хто подав.</param>
+    /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал (RS).</param>
     public SubmissionSnapshot(
         long documentId,
         int sheetDefId,
@@ -55,10 +56,12 @@ public sealed class SubmissionSnapshot : Entity<long>
         string payloadJson,
         byte[] contentHash,
         DateTime submittedAt,
-        int submittedByUserId)
+        int submittedByUserId,
+        long? sheetCopyId = null)
     {
         DocumentId = documentId;
         SheetDefId = sheetDefId;
+        SheetCopyId = sheetCopyId;
         PeriodKey = periodKey;
         TemplateVersionId = templateVersionId;
         MethodologyVersionsJson = methodologyVersionsJson;
@@ -75,6 +78,12 @@ public sealed class SubmissionSnapshot : Entity<long>
 
     /// <summary>Аркуш; подання має гранулярність «аркуш × період» (D-38).</summary>
     public int SheetDefId { get; private set; }
+
+    /// <summary>
+    /// Копія аркуша; <c>null</c> — оригінал (RS): зріз копії окремий. ⚠ Без FK навмисно — зрізи
+    /// незмінні й переживають видалення копії (Q2).
+    /// </summary>
+    public long? SheetCopyId { get; private set; }
 
     /// <summary>Період.</summary>
     public int PeriodKey { get; private set; }

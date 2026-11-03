@@ -346,8 +346,12 @@ public interface IRowStore
 /// <param name="TableDefId">Опис таблиці.</param>
 /// <param name="TemplateVersionId">Версія шаблону — ключ знімка метаданих.</param>
 /// <param name="PeriodKey">Період екземпляра; він же ключ партиції.</param>
+/// <param name="SheetCopyId">
+/// Копія аркуша (<c>doc.DocumentSheet.Id</c>); <c>null</c> — оригінал (RS). ⚠ Перелік екземплярів документа містить
+/// і копії (оригінали першими): споживач, що ключує за <c>TableDefId</c>, мусить відібрати свою копію.
+/// </param>
 public sealed record TableInstanceRef(
-    long TableInstanceId, long DocumentId, int TableDefId, int TemplateVersionId, int PeriodKey);
+    long TableInstanceId, long DocumentId, int TableDefId, int TemplateVersionId, int PeriodKey, long? SheetCopyId = null);
 
 /// <summary>Живий рядок екземпляра для видалення (D3).</summary>
 /// <param name="Id"><c>TableRow.Id</c>.</param>

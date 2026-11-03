@@ -65,18 +65,19 @@ public sealed partial class SubmissionSnapshotRetentionJob(
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromMinutes(10);
 
     // Спільна частина: Ranked — номер від найновішого; Pinned — зрізи погодження; Candidates — що МОЖНА видалити.
+    // RS: «аркуш» тут — (аркуш, копія): у копії власні зрізи, власні N найновіших і власні зрізи погодження.
     private const string CandidatesCte = """
         WITH Ranked AS (
             SELECT s.Id,
-                   ROW_NUMBER() OVER (PARTITION BY s.DocumentId, s.SheetDefId, s.PeriodKey
+                   ROW_NUMBER() OVER (PARTITION BY s.DocumentId, s.SheetDefId, s.SheetCopyId, s.PeriodKey
                                       ORDER BY s.SubmittedAt DESC, s.Id DESC) AS Rn
               FROM calc.SubmissionSnapshot AS s),
         Markers AS (
-            SELECT e.DocumentId, e.SheetDefId, e.PeriodKey, e.[At] AS MarkedAt
+            SELECT e.DocumentId, e.SheetDefId, e.SheetCopyId, e.PeriodKey, e.[At] AS MarkedAt
               FROM wf.ApprovalEvent AS e
              WHERE e.[Action] IN (2, 3)
             UNION
-            SELECT a.DocumentId, a.SheetDefId, a.PeriodKey, a.ApprovedAt
+            SELECT a.DocumentId, a.SheetDefId, a.SheetCopyId, a.PeriodKey, a.ApprovedAt
               FROM wf.ApprovalState AS a
              WHERE a.ApprovedAt IS NOT NULL),
         Pinned AS (
@@ -86,6 +87,7 @@ public sealed partial class SubmissionSnapshotRetentionJob(
                             FROM calc.SubmissionSnapshot AS s
                            WHERE s.DocumentId = m.DocumentId
                              AND s.SheetDefId = m.SheetDefId
+                             AND (s.SheetCopyId = m.SheetCopyId OR (s.SheetCopyId IS NULL AND m.SheetCopyId IS NULL))
                              AND s.PeriodKey = m.PeriodKey
                              AND s.SubmittedAt <= DATEADD(SECOND, @slack, m.MarkedAt)
                            ORDER BY s.SubmittedAt DESC, s.Id DESC) AS p),

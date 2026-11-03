@@ -58,7 +58,8 @@ public interface ISheetChangeStore
     /// Одна команда (два оператори: межа, потім знімок рядків).
     /// </summary>
     public Task<SheetChangeProbe> ProbeAsync(
-        long documentId, int periodKey, IReadOnlyCollection<int> tableDefIds, ulong since, int cap, CancellationToken ct);
+        long documentId, int periodKey, IReadOnlyCollection<int> tableDefIds, ulong since, int cap, CancellationToken ct,
+        long? sheetCopyId = null);
 
     /// <summary>
     /// Хто змінив рядки <paramref name="rowIds"/> від <paramref name="fromUtc"/>: зміни читача
@@ -69,5 +70,6 @@ public interface ISheetChangeStore
         int viewerUserId, CancellationToken ct);
 
     /// <summary>Стан погодження аркуша <paramref name="sheetDefId"/> документа за період і ревізія цього стану.</summary>
-    public Task<SheetStatusSnapshot> SheetStatusAsync(long documentId, int sheetDefId, int periodKey, CancellationToken ct);
+    public Task<SheetStatusSnapshot> SheetStatusAsync(
+        long documentId, int sheetDefId, int periodKey, CancellationToken ct, long? sheetCopyId = null);
 }

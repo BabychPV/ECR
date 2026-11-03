@@ -45,12 +45,21 @@ export interface SheetChangesState {
  * ⛔ Not `useQuery`: each request depends on the previous answer (marker chain) and the answer is an EVENT to
  * accumulate, not data to cache — a cached `changed: true` would bring the banner back after it was dismissed.
  */
-export function useSheetChanges(documentId: number, sheetDefId: number | null, periodKey: number): SheetChangesState {
+export function useSheetChanges(
+  documentId: number,
+  sheetDefId: number | null,
+  periodKey: number,
+  sheetCopyId: number | null = null,
+): SheetChangesState {
   const [change, setChange] = useState<ForeignChange | null>(null);
   const [stoppedKey, setStoppedKey] = useState<string | null>(null);
   const [statusChange, setStatusChange] = useState<StatusChange | null>(null);
 
-  const key = sheetDefId === null ? null : `${String(documentId)}:${String(sheetDefId)}:${String(periodKey)}`;
+  // ✎ RS: a copy is its own chain (own marker, own ETag, own approval state).
+  const key =
+    sheetDefId === null
+      ? null
+      : `${String(documentId)}:${String(sheetDefId)}:${String(periodKey)}${sheetCopyId === null ? '' : `:${String(sheetCopyId)}`}`;
   const marker = useRef<string | null>(null);
   /** ✎ LIVE-STATUS: `ETag` of the last full answer — `If-None-Match` of the next poll (`304` — nothing to do). */
   const etag = useRef<string | null>(null);
@@ -81,7 +90,7 @@ export function useSheetChanges(documentId: number, sheetDefId: number | null, p
     const mine = generation.current;
 
     try {
-      const fresh = await pollSheetChanges(documentId, sheetDefId, periodKey, marker.current, etag.current);
+      const fresh = await pollSheetChanges(documentId, sheetDefId, periodKey, marker.current, etag.current, sheetCopyId);
       if (mine !== generation.current) return;
       // ✎ LIVE-STATUS: `304` — neither the data nor the state changed for this reader; the marker stays.
       if (fresh === null) return;
@@ -105,7 +114,7 @@ export function useSheetChanges(documentId: number, sheetDefId: number | null, p
     } finally {
       busy.current = false;
     }
-  }, [documentId, sheetDefId, periodKey, key, noteStatus]);
+  }, [documentId, sheetDefId, periodKey, sheetCopyId, key, noteStatus]);
 
   // A new sheet/period/document starts a new chain: take the marker at once (the baseline of "since now").
   useEffect(() => {
@@ -139,7 +148,7 @@ export function useSheetChanges(documentId: number, sheetDefId: number | null, p
     generation.current += 1;
     const mine = generation.current;
     try {
-      const answer = await getSheetChanges(documentId, sheetDefId, periodKey, marker.current);
+      const answer = await getSheetChanges(documentId, sheetDefId, periodKey, marker.current, sheetCopyId);
       if (mine === generation.current) {
         marker.current = answer.marker;
         // The answer was not conditional: the next poll asks without `If-None-Match`.
@@ -150,7 +159,7 @@ export function useSheetChanges(documentId: number, sheetDefId: number | null, p
       if (mine === generation.current && isFinalChangesError(error)) setStoppedKey(key);
     }
     if (mine === generation.current) setChange(null);
-  }, [documentId, sheetDefId, periodKey, key, stopped, noteStatus]);
+  }, [documentId, sheetDefId, periodKey, sheetCopyId, key, stopped, noteStatus]);
 
   return { change: stopped ? null : change, statusChange: stopped ? null : statusChange, stopped, clear, rebase };
 }
