@@ -318,6 +318,31 @@ public sealed class ListDocumentsHandler(
     }
 
     /// <summary>
+    /// Усі версії шаблону серед документів, які читач бачить, — для вибору у фільтрі «Version». Право <c>Document.View</c>.
+    /// </summary>
+    /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі видимі.</param>
+    /// <param name="periodKey">Період, за яким береться версія (як у колонці); <c>null</c> — чинна версія проєкту.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Видимість — тим самим шляхом, що й перелік (<see cref="ReaderBoundsAsync"/> + базовий запит сховища): версія, що є
+    /// лише в невидимих документах, не називається.
+    /// </remarks>
+    public async Task<Dto.DocumentTemplateVersionsResponse> HandleTemplateVersionsAsync(
+        int? projectId, int? periodKey, CancellationToken ct)
+    {
+        var profile = await ProfileAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var visibleProjects = ReadableProjects(profile, Permission);
+        var (filter, _, _, _) = await ReaderBoundsAsync(profile, visibleProjects, projectId, periodKey, default, ct)
+            .ConfigureAwait(false);
+
+        var options = await documents
+            .ListTemplateVersionsAsync(projectId, new PeriodKeyFilter(periodKey), filter, visibleProjects, ct)
+            .ConfigureAwait(false);
+
+        return new Dto.DocumentTemplateVersionsResponse(options.Items, options.WithoutVersionCount);
+    }
+
+    /// <summary>
     /// ✎ D-450: <c>ownerUserId</c> — додатне ціле й не разом із <c>mine</c>; інакше 422 тієї самої родини REQ, що й
     /// решта параметрів переліку.
     /// </summary>

@@ -4346,6 +4346,11 @@ public sealed class NotFoundException(string errorCode, string message)
   непрозорий і діє лише з тим самим `sort`. Діють ЗАПИТОМ, поруч з межею видимості (чужих документів не додають).
   Недопустиме значення `sort`, понад 20 версій чи версія довша за 20 символів — `422 ECR-REQ-0422`
   (`messageKey` `err.ECR-REQ-0422.malformedRequest`; нових кодів немає). Невідома версія просто нічого не знаходить.
+* `GET /api/v1/documents/template-versions?projectId=&periodKey=` (варіанти фільтра «Version»): ВСІ версії шаблону серед
+  документів, які читач бачить (та сама межа видимості, що й перелік; версія лише в невидимих документах не називається).
+  Відповідь `{ items: [{ version, count }], withoutVersionCount }`: версії в природному порядку (2.9 перед 2.10), `count` —
+  видимі документи цієї версії, `withoutVersionCount` — видимі документи без версії; не більше 200 версій. Версія — за
+  `periodKey` (без нього — чинна версія проєкту), як у колонці й у фільтрі `templateVersions` переліку.
 
 **Ідемпотентність:** мутації, які можна повторити (імпорт, запуск задачі),
 приймають заголовок `Idempotency-Key`.
@@ -4442,6 +4447,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/documents` | `Document.View` | 1 |
 | `GET` | `/api/v1/documents/summary` | `Document.View` | 6 |
 | `GET` | `/api/v1/documents/owners` | `Document.View` (✎ D-450: власники лише серед видимих викликачу документів; без імені — поза переліком) | 6 |
+| `GET` | `/api/v1/documents/template-versions` | `Document.View` (усі версії шаблону лише серед видимих викликачу документів; `projectId`, `periodKey` → `{ items: [{ version, count }], withoutVersionCount }`, природний порядок, ≤ 200) | 6 |
 | `POST` | `/api/v1/documents` | `Document.Create` | 1 |
 | `GET` | `/api/v1/documents/{id}` | `Document.View` | 1 |
 | `DELETE` | `/api/v1/documents/{id}` | `Document.Delete` | 6 |

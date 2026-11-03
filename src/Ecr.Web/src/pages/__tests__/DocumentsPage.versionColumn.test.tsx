@@ -33,12 +33,25 @@ const Items = [item(1, '2.0', null), item(2, '1.0', { '202609': '3.0' }), item(3
 /** Запити переліку документів у порядку виклику (повні адреси). */
 let listed: string[] = [];
 
+/** Запити варіантів фільтра «Version» (`GET /documents/template-versions`) і їхня відповідь (статус 200, якщо не `null`). */
+let optionRequests: string[] = [];
+let optionsAnswer: { items: { version: string; count: number }[]; withoutVersionCount: number } | null = {
+  items: [
+    { version: '1.0', count: 2 },
+    { version: '2.0', count: 1 },
+    { version: '2.10', count: 5 },
+    { version: '3.0', count: 1 },
+  ],
+  withoutVersionCount: 1,
+};
+
 /**
  * `answer` - що віддає сервер на запит переліку (за його адресою); типово - усі рядки в порядку сервера. ⛔ Порядок і
  * склад відповіді задає ТІЛЬКИ вона: тести доводять, що клієнт нічого не пересортовує й не відфільтровує сам.
  */
 function mockFetch(answer: (params: URLSearchParams) => typeof Items = () => Items): void {
   listed = [];
+  optionRequests = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -50,6 +63,10 @@ function mockFetch(answer: (params: URLSearchParams) => typeof Items = () => Ite
         return json({ denies: [], grants: {}, isSimulation: false, language: 'en', mustChangePassword: false, permissions: [], simulatedForUserId: null, userId: 1, userName: 'tester' });
       }
       if (url.includes('/api/v1/documents/summary')) return json({ draft: 4, submitted: 0, approved: 0, rejected: 0, withIssues: 0 });
+      if (url.includes('/api/v1/documents/template-versions')) {
+        optionRequests.push(url);
+        return optionsAnswer === null ? new Response('{}', { status: 500 }) : json(optionsAnswer);
+      }
       if (url.includes('/api/v1/documents')) {
         listed.push(url);
         const items = answer(new URL(url, 'http://localhost').searchParams);
@@ -94,6 +111,28 @@ const versionOf = (key: string): string | null =>
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+/** Відкриває мультивибір «Version» і віддає підписи його варіантів (у порядку списку). */
+async function versionOptionLabels(): Promise<string[]> {
+  const user = userEvent.setup();
+  const field = await waitFor(
+    () => {
+      const found = document.querySelector<HTMLElement>('[data-version-filter]');
+      expect(found).not.toBeNull();
+      return found!;
+    },
+    { timeout: SlowEnvTimeout },
+  );
+  await user.click(field);
+
+  // На сторінці є й інші списки (проєкти, власники): беремо лише варіанти версій.
+  await screen.findAllByRole('option', {}, { timeout: SlowEnvTimeout });
+
+  return screen
+    .getAllByRole('option')
+    .map((option) => option.textContent ?? '')
+    .filter((label) => label.includes('documents.versionValue'));
+}
 
 describe('DocumentsPage: колонка «Version»', () => {
   it(
@@ -229,6 +268,68 @@ describe('DocumentsPage: колонка «Version»', () => {
 
       await screen.findByText('DOC-000003', {}, { timeout: SlowEnvTimeout });
       expect(rowKeys()).toEqual(['DOC-000003']);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'варіанти фільтра — усі версії з template-versions у порядку сервера (2.10 після 2.0, хоча на сторінці її немає); запит без templateVersions',
+    async () => {
+      mockFetch();
+      show('/?periodKey=202609');
+      await screen.findByText('DOC-000001', {}, { timeout: SlowEnvTimeout });
+
+      const labels = await versionOptionLabels();
+      expect(labels).toHaveLength(4);
+      expect(labels[0]).toContain('version=1.0');
+      expect(labels[1]).toContain('version=2.0');
+      expect(labels[2]).toContain('version=2.10');
+      expect(labels[3]).toContain('version=3.0');
+      expect(optionRequests).toHaveLength(1);
+      const params = new URL(optionRequests[0] ?? '/', 'http://localhost').searchParams;
+      expect(params.get('periodKey')).toBe('202609');
+      expect(params.has('templateVersions')).toBe(false);
+      expect(params.has('sort')).toBe(false);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'обрана версія, якої сервер уже не віддає, лишається у варіантах (її є чим зняти)',
+    async () => {
+      mockFetch((params) => (params.has('templateVersions') ? [Items[0]!] : Items));
+      show('/?periodKey=202609&versions=9.9');
+      await screen.findByText('DOC-000001', {}, { timeout: SlowEnvTimeout });
+
+      const labels = await versionOptionLabels();
+      expect(labels.some((label) => label.includes('version=9.9'))).toBe(true);
+      expect(labels.some((label) => label.includes('version=2.10'))).toBe(true);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'коли template-versions відмовив, варіанти — версії завантаженої сторінки (фільтр не зникає)',
+    async () => {
+      mockFetch();
+      optionsAnswer = null;
+      try {
+        show('/?periodKey=202609');
+        await screen.findByText('DOC-000001', {}, { timeout: SlowEnvTimeout });
+
+        const labels = await versionOptionLabels();
+        expect(labels.map((label) => /version=([\d.]+)/.exec(label)?.[1])).toEqual(['1.0', '2.0', '3.0']);
+      } finally {
+        optionsAnswer = {
+          items: [
+            { version: '1.0', count: 2 },
+            { version: '2.0', count: 1 },
+            { version: '2.10', count: 5 },
+            { version: '3.0', count: 1 },
+          ],
+          withoutVersionCount: 1,
+        };
+      }
     },
     SlowEnvTimeout,
   );

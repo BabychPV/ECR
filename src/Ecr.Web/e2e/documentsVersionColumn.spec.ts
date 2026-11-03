@@ -306,6 +306,33 @@ test.describe('Documents list: Version column', () => {
     await expect.poll(async () => (await versionTexts(page)).length).toBe(before.length);
   });
 
+  test('фільтр: варіанти — усі версії видимих документів із сервера (template-versions), а не лише сторінки', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, 'light');
+
+    const requests: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/api/v1/documents/template-versions')) requests.push(request.url());
+    });
+    await openList(page, 'light');
+
+    const response = await page.request.get(`/api/v1/documents/template-versions?periodKey=${PeriodKey}`);
+    const body = await ok<{ items: { version: string; count: number }[]; withoutVersionCount: number }>(response, 'варіанти версій');
+    const versions = body.items.map((item) => item.version);
+    expect(versions, 'власна версія 2.7.0.0 відсутня у варіантах сервера').toContain(OwnVersion);
+    for (let i = 1; i < versions.length; i += 1) {
+      expect(compare(versions[i - 1] ?? '0', versions[i] ?? '0'), `порядок варіантів: ${versions.join(', ')}`).toBeLessThanOrEqual(0);
+    }
+
+    await expect.poll(() => requests.length, { message: 'сторінка не питала template-versions' }).toBeGreaterThan(0);
+    expect(requests[0]).toContain(`periodKey=${PeriodKey}`);
+
+    await page.locator('[data-version-filter]').click();
+    // Лише варіанти версій («v<версія>»): на сторінці є й інші списки (проєкт, власник) з власними пунктами.
+    const shown = (await page.getByRole('option').allTextContents()).map((text) => text.trim()).filter((text) => /^v\d/.test(text));
+    expect(shown.map((text) => text.replace(/^v/, '')), 'варіанти фільтра ≠ версії сервера').toEqual(versions);
+  });
+
   for (const scheme of ['light', 'dark'] as const) {
     test(`500 px, ${scheme}: колонка й список мультивибору читабельні, без горизонтальної прокрутки сторінки, клавіатура працює`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width: 500, height: 900 });

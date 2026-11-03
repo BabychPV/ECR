@@ -3033,6 +3033,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/template-versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Усі версії шаблону серед документів, які користувач бачить, — для вибору у фільтрі переліку «Version». Право
+         *     `Document.View`.
+         * @description ⛔ Та сама межа видимості, що й перелік: версія, наявна лише в невидимих документах, не називається. Версія — за
+         *     `periodKey` (без нього — чинна версія проєкту), як у колонці «Version». Не більше 200 версій.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    projectId?: number;
+                    periodKey?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentTemplateVersionsResponse"];
+                        "text/json": components["schemas"]["DocumentTemplateVersionsResponse"];
+                        "text/plain": components["schemas"]["DocumentTemplateVersionsResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{documentId}/cells": {
         parameters: {
             query?: never;
@@ -28859,6 +28905,26 @@ export interface components {
             nameL10n: components["schemas"]["LocalizedText"];
             /** @description Група для правил складу; `null` — поза групами. */
             sheetGroup: null | string;
+        };
+        /** @description Версія шаблону серед видимих читачеві документів — варіант фільтра «Version». */
+        DocumentTemplateVersionOption: {
+            /**
+             * Format: int32
+             * @description Скільки видимих читачеві документів мають цю версію.
+             */
+            count: number;
+            /** @description Версія (як у колонці переліку). */
+            version: string;
+        };
+        /** @description Усі версії шаблону серед видимих читачеві документів — варіанти фільтра переліку «Version». */
+        DocumentTemplateVersionsResponse: {
+            /** @description Версії за природним порядком (2.9 перед 2.10) з кількістю документів; не більше 200. */
+            items: components["schemas"]["DocumentTemplateVersionOption"][];
+            /**
+             * Format: int32
+             * @description Скільки видимих документів без версії.
+             */
+            withoutVersionCount: number;
         };
         /** @description Версія документа — зріз подання аркуша (ФВ-5.22). */
         DocumentVersionDto: {

@@ -79,6 +79,9 @@ function mockFetch(reply: ListReply): void {
         return json({ draft: 1, submitted: 1, approved: 1, rejected: 0, withIssues: 0, staleResultsCount: 7, staleResultsMineCount: 2 });
       }
 
+      // Варіанти фільтра «Version» - не запит переліку (у `listed` не потрапляє).
+      if (url.includes('/api/v1/documents/template-versions')) return json({ items: [], withoutVersionCount: 0 });
+
       if (url.includes('/api/v1/documents')) {
         listed.push(url);
         if (reply === 'forbidden') return json(Forbidden, 403);

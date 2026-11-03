@@ -479,36 +479,24 @@ public sealed class DocumentStore(
     /// </summary>
     private async Task<VersionPlan> PlanVersionsAsync(PeriodKeyFilter period, DocumentListFilter filter, CancellationToken ct)
     {
-        // ⛔ Версію за період дає ЛИШЕ `doc.fn_VersionOf` (`ProjectTemplateVersionReadGuardTests`): без періоду - за
-        // найпізніший можливий період (YYYY12 далекого року), тобто чинна версія проєкту. Проєкти без документів у групи
-        // не потрапляють (їм нічого сортувати).
-        var key = period.Value ?? MaxPeriodKey;
-        var projects = await db.Projects.AsNoTracking()
-            .Where(p => db.Documents.Any(d => d.ProjectId == p.Id))
-            .Select(p => new { p.Id, VersionId = EcrDbContext.VersionOf(p.Id, key) })
-            .ToListAsync(ct).ConfigureAwait(false);
-        var versionIds = projects.Select(p => p.VersionId).Distinct().ToArray();
-        var labels = await db.TemplateVersions.AsNoTracking()
-            .Where(v => versionIds.Contains(v.Id))
-            .Select(v => new { v.Id, v.Version })
-            .ToDictionaryAsync(v => v.Id, v => v.Version, ct).ConfigureAwait(false);
+        var projects = await ProjectVersionLabelsAsync(period, onlyProjects: null, ct).ConfigureAwait(false);
 
         var byVersion = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         var unversioned = new List<int>();
         foreach (var project in projects)
         {
-            if (labels.TryGetValue(project.VersionId, out var version) && !string.IsNullOrWhiteSpace(version))
+            if (project.Value is { } version)
             {
                 if (!byVersion.TryGetValue(version, out var ids))
                 {
                     byVersion[version] = ids = [];
                 }
 
-                ids.Add(project.Id);
+                ids.Add(project.Key);
             }
             else
             {
-                unversioned.Add(project.Id);
+                unversioned.Add(project.Key);
             }
         }
 
@@ -531,6 +519,93 @@ public sealed class DocumentStore(
             filter.VersionSort is not null, descending, ordered,
             [.. ordered.SelectMany(g => g.ProjectIds)]);
     }
+
+    /// <summary>
+    /// Версія шаблону кожного проєкту ДЛЯ ПЕРІОДУ (<c>null</c> — без версії). Єдине місце, що дає версію переліку:
+    /// фільтр, сортування і варіанти фільтра (<see cref="ListTemplateVersionsAsync"/>) не розходяться.
+    /// </summary>
+    /// <param name="period">Період; без нього — чинна версія проєкту.</param>
+    /// <param name="onlyProjects">Лише ці проєкти; <c>null</c> — усі проєкти, що мають документи.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task<Dictionary<int, string?>> ProjectVersionLabelsAsync(
+        PeriodKeyFilter period, int[]? onlyProjects, CancellationToken ct)
+    {
+        // ⛔ Версію за період дає ЛИШЕ `doc.fn_VersionOf` (`ProjectTemplateVersionReadGuardTests`): без періоду - за
+        // найпізніший можливий період (YYYY12 далекого року), тобто чинна версія проєкту. Проєкти без документів у групи
+        // не потрапляють (їм нічого сортувати).
+        var key = period.Value ?? MaxPeriodKey;
+        var candidates = db.Projects.AsNoTracking().Where(p => db.Documents.Any(d => d.ProjectId == p.Id));
+        if (onlyProjects is not null)
+        {
+            candidates = candidates.Where(p => onlyProjects.Contains(p.Id));
+        }
+
+        var projects = await candidates
+            .Select(p => new { p.Id, VersionId = EcrDbContext.VersionOf(p.Id, key) })
+            .ToListAsync(ct).ConfigureAwait(false);
+        var versionIds = projects.Select(p => p.VersionId).Distinct().ToArray();
+        var labels = await db.TemplateVersions.AsNoTracking()
+            .Where(v => versionIds.Contains(v.Id))
+            .Select(v => new { v.Id, v.Version })
+            .ToDictionaryAsync(v => v.Id, v => v.Version, ct).ConfigureAwait(false);
+
+        return projects.ToDictionary(
+            p => p.Id,
+            p => labels.TryGetValue(p.VersionId, out var version) && !string.IsNullOrWhiteSpace(version) ? version : null);
+    }
+
+    /// <inheritdoc />
+    public async Task<DocumentTemplateVersionOptions> ListTemplateVersionsAsync(
+        int? projectId,
+        PeriodKeyFilter period,
+        DocumentListFilter filter,
+        IReadOnlyCollection<int> visibleProjectIds,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(visibleProjectIds);
+
+        // Видимість — тим самим базовим запитом, що й перелік: версії, які є лише в невидимих документах, не називаються.
+        var perProject = await VisibleDocuments(projectId, 0, filter, visibleProjectIds.ToArray())
+            .GroupBy(d => d.ProjectId)
+            .Select(g => new { ProjectId = g.Key, Count = g.Count() })
+            .OrderBy(g => g.ProjectId)
+            .Take(MaxVersionProjects)
+            .ToListAsync(ct).ConfigureAwait(false);
+        if (perProject.Count == 0)
+        {
+            return new DocumentTemplateVersionOptions([], 0);
+        }
+
+        var labels = await ProjectVersionLabelsAsync(period, [.. perProject.Select(p => p.ProjectId)], ct).ConfigureAwait(false);
+
+        var byVersion = new Dictionary<string, int>(StringComparer.Ordinal);
+        var without = 0;
+        foreach (var project in perProject)
+        {
+            if (labels.TryGetValue(project.ProjectId, out var version) && version is not null)
+            {
+                byVersion[version] = byVersion.GetValueOrDefault(version) + project.Count;
+            }
+            else
+            {
+                without += project.Count;
+            }
+        }
+
+        var items = byVersion
+            .OrderBy(e => e.Key, Comparer<string>.Create(VersionOrder.Compare))
+            .ThenBy(e => e.Key, StringComparer.Ordinal)
+            .Take(MaxVersionOptions)
+            .Select(e => new DocumentTemplateVersionOption(e.Key, e.Value))
+            .ToList();
+        return new DocumentTemplateVersionOptions(items, without);
+    }
+
+    /// <summary>Стеля проєктів, з яких збираються варіанти версій (проти необмеженого читання).</summary>
+    private const int MaxVersionProjects = 5000;
+
+    /// <summary>Стеля варіантів версій у відповіді.</summary>
+    private const int MaxVersionOptions = 200;
 
     /// <summary>Найпізніший можливий ключ періоду (YYYYMM): версія за нього = чинна версія проєкту.</summary>
     private const int MaxPeriodKey = 999912;

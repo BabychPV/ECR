@@ -241,6 +241,16 @@ public enum DocumentVersionSort
 /// <param name="DocumentCount">Скільки ВИДИМИХ читачеві документів (тих, де ім'я власника йому віддається) належать цій людині.</param>
 public sealed record DocumentOwnerOption(int UserId, string DisplayName, int DocumentCount);
 
+/// <summary>Версія шаблону серед видимих читачеві документів — варіант фільтра «Version».</summary>
+/// <param name="Version">Версія (як у колонці переліку).</param>
+/// <param name="Count">Скільки видимих читачеві документів мають цю версію.</param>
+public sealed record DocumentTemplateVersionOption(string Version, int Count);
+
+/// <summary>Варіанти фільтра «Version»: версії за природним порядком і кількість документів без версії.</summary>
+/// <param name="Items">Версії від меншої до більшої («2.9» перед «2.10»); не більше 200.</param>
+/// <param name="WithoutVersionCount">Скільки видимих документів не мають версії (рядок «—» у колонці).</param>
+public sealed record DocumentTemplateVersionOptions(IReadOnlyList<DocumentTemplateVersionOption> Items, int WithoutVersionCount);
+
 /// <summary>D-443: що з документів учасника потрапляє в перелік поза проєктами з грантом.</summary>
 /// <param name="UserId">Учасник (виконавець передачі).</param>
 /// <param name="AsOfUtc">Момент перевірки строку дії надання.</param>
@@ -374,6 +384,25 @@ public interface IDocumentStore
         IReadOnlyCollection<int> visibleProjectIds,
         string? nameQuery,
         int limit,
+        CancellationToken ct);
+
+    /// <summary>
+    /// ✎ Усі версії шаблону серед документів, видимих читачеві, — для вибору у фільтрі переліку «Version». Версія — та
+    /// сама, що в колонці і фільтрі переліку (за період; без періоду — чинна версія проєкту).
+    /// </summary>
+    /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі видимі.</param>
+    /// <param name="period">Період, за яким береться версія.</param>
+    /// <param name="filter">Межі читача — ті самі, що у <see cref="ListAsync"/>; інші фільтри не діють.</param>
+    /// <param name="visibleProjectIds">Проєкти з грантом читання — та сама межа, що в <see cref="ListAsync"/>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Видимість — базовим запитом переліку: версія, що є лише в невидимих читачеві документах, не називається.
+    /// </remarks>
+    public Task<DocumentTemplateVersionOptions> ListTemplateVersionsAsync(
+        int? projectId,
+        PeriodKeyFilter period,
+        DocumentListFilter filter,
+        IReadOnlyCollection<int> visibleProjectIds,
         CancellationToken ct);
 
     /// <summary>
