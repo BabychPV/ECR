@@ -50,6 +50,8 @@ public sealed partial class ReportViewGeneratorTests(SqlServerFixture sql)
                 ("_DocumentKey", "nvarchar"), ("_PeriodKey", "int"), ("_Status", "tinyint"),
                 ("_RowId", "bigint"), ("_RowKey", "nvarchar"), ("_RowOrdinal", "int"),
                 (codes[0], "nvarchar"), (codes[1], "decimal"), (codes[2], "decimal"),
+                // RS (копії аркушів): службові колонки в кінці списку.
+                ("_SheetCopyOrdinal", "smallint"), ("_SheetDisplayName", "nvarchar"),
             ],
             await ColumnsAsync(view));
 

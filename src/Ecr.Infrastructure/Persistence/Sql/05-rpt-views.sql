@@ -63,7 +63,16 @@ SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
        cv.ValueRegistryEntryId, cv.ValueUnitId, vu.Code AS ValueUnitCode,
        cu.Code AS ColumnUnitCode,
        cv.IsCalculated,
-       CAST(COALESCE(a.Status, 0) AS tinyint) AS Status
+       CAST(COALESCE(a.Status, 0) AS tinyint) AS Status,
+       -- ⛔ RS (копії аркушів, людина 03.11): SheetCopyOrdinal — номер у групі (1 — оригінал, 2… — копія); SheetDisplayName —
+       -- «<Назва> N»: назва групи (в документі або з шаблону, мова en, інакше код аркуша), з номером лише коли в групі є
+       -- копії. Стан подання й дані копії — окремі від оригінала (SheetCopyId на екземплярі й на стані).
+       CAST(COALESCE(dsh.CopyOrdinal, 1) AS smallint) AS SheetCopyOrdinal,
+       (SELECT CONCAT(COALESCE(JSON_VALUE(MAX(CASE WHEN g.CopyOfId IS NULL THEN g.NameOverrideL10n END), N'$.en'),
+                               JSON_VALUE(sd.NameL10n, N'$.en'), sd.Code),
+                      CASE WHEN ti.SheetCopyId IS NOT NULL OR MAX(CASE WHEN g.CopyOfId IS NOT NULL THEN 1 ELSE 0 END) = 1
+                           THEN CONCAT(N' ', COALESCE(dsh.CopyOrdinal, 1)) ELSE N'' END)
+        FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = sd.Id) AS SheetDisplayName
 FROM doc.CellValue          AS cv
 JOIN doc.TableRow           AS r  ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId AND r.IsDeleted = 0
 JOIN doc.TableInstance      AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
@@ -77,6 +86,8 @@ JOIN cfg.Template           AS t  ON t.Id = tv.TemplateId
 LEFT JOIN uom.Unit          AS vu ON vu.Id = cv.ValueUnitId
 LEFT JOIN uom.Unit          AS cu ON cu.Id = cd.UnitId
 LEFT JOIN wf.ApprovalState  AS a  ON a.DocumentId = d.Id AND a.SheetDefId = sd.Id AND a.PeriodKey = cv.PeriodKey
+                                 AND (a.SheetCopyId = ti.SheetCopyId OR (a.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
+LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId
 WHERE cv.IsEmpty = 0;
 GO
 
@@ -218,6 +229,8 @@ BEGIN
     DECLARE @rvPack nvarchar(max), @rvChoose nvarchar(max), @rvExprs nvarchar(max), @rvPred bit, @rvDer nvarchar(max), @rvOwn nvarchar(max), @rvGen nvarchar(max),
             @plainAgg nvarchar(max), @plainCnt int, @numRef nvarchar(64), @strRef nvarchar(64),
             @famAgg nvarchar(max), @pkExpr nvarchar(16), @rvRef nvarchar(8), @fromSql nvarchar(max), @tiAp nvarchar(max), @rowApply nvarchar(max);
+    -- RS (копії аркушів): службові колонки _SheetCopyOrdinal/_SheetDisplayName — у КІНЦІ списку (адитивні, як <Код>_Text).
+    DECLARE @sheetNameLit nvarchar(max), @copyCols nvarchar(max);
 
     DECLARE cur_views CURSOR LOCAL FAST_FORWARD FOR
         SELECT TableDefId, SheetDefId, Header, ViewName FROM @tables ORDER BY TableDefId;
@@ -597,6 +610,18 @@ JOIN doc.Document      AS d ON d.Id = ti.DocumentId
 JOIN doc.Project       AS p ON p.Id = d.ProjectId' + @tiAp + CASE WHEN @rowApply <> N'' THEN @rowApply ELSE N'
 JOIN doc.TableRow      AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id AND r.IsDeleted = 0' END END;
 
+        -- ⛔ RS (копії аркушів, людина 03.11): стан подання — СВОЄЇ копії (SheetCopyId екземпляра), номер у групі і назва
+        -- «<Назва> N» (мова en, інакше код аркуша; з номером лише коли в групі є копії). Назва аркуша версії — літерал
+        -- (опублікована версія незмінна); група шукається за аркушем ЦІЄЇ версії.
+        SET @sheetNameLit = N'N''' + REPLACE(COALESCE((SELECT COALESCE(JSON_VALUE(sdn.NameL10n, N'$.en'), sdn.Code)
+                                                         FROM cfg.SheetDef AS sdn WHERE sdn.Id = @sheet), N''), N'''', N'''''') + N'''';
+        SET @copyCols = CONCAT(N',
+       CAST(COALESCE(dsh.CopyOrdinal, 1) AS smallint) AS _SheetCopyOrdinal,
+       (SELECT CONCAT(COALESCE(JSON_VALUE(MAX(CASE WHEN g.CopyOfId IS NULL THEN g.NameOverrideL10n END), N''$.en''), ', @sheetNameLit, N'),
+                      CASE WHEN ti.SheetCopyId IS NOT NULL OR MAX(CASE WHEN g.CopyOfId IS NOT NULL THEN 1 ELSE 0 END) = 1
+                           THEN CONCAT(N'' '', COALESCE(dsh.CopyOrdinal, 1)) ELSE N'''' END)
+        FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = ', CAST(@sheet AS nvarchar(10)), N') AS _SheetDisplayName');
+
         SET @sql = CONCAT(
 N'CREATE OR ALTER VIEW rpt.', QUOTENAME(@view), N'
 AS
@@ -605,10 +630,12 @@ SELECT p.Id AS _ProjectId, p.Code AS _ProjectCode,
        d.Id AS _DocumentId, d.BusinessKey AS _DocumentKey,
        ', @pkExpr, N' AS _PeriodKey,
        CAST(COALESCE(a.Status, 0) AS tinyint) AS _Status,
-       r.Id AS _RowId, r.RowKey AS _RowKey, r.Ordinal AS _RowOrdinal', @select, N'
+       r.Id AS _RowId, r.RowKey AS _RowKey, r.Ordinal AS _RowOrdinal', @select, @copyCols, N'
 ', @fromSql, N'
 LEFT JOIN wf.ApprovalState AS a ON a.DocumentId = d.Id AND a.SheetDefId = ', CAST(@sheet AS nvarchar(10)),
-N' AND a.PeriodKey = ti.PeriodKey', @joins, N'
+N' AND a.PeriodKey = ti.PeriodKey
+                               AND (a.SheetCopyId = ti.SheetCopyId OR (a.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
+LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId', @joins, N'
 WHERE ti.TableDefId = ', CAST(@id AS nvarchar(10)), N';');
 
         -- ⚠ Порівнюється текст від позначки, а не весь: заголовок
@@ -767,6 +794,8 @@ BEGIN
     DECLARE @agg nvarchar(max), @aggBody nvarchar(max), @aggList nvarchar(max), @ownerNo int, @famAgg nvarchar(max), @pkExpr nvarchar(16), @fromSql nvarchar(max), @rowApply nvarchar(max);
     DECLARE @selectRv nvarchar(max), @selectTextRv nvarchar(max), @rvIds nvarchar(max), @rvApply nvarchar(max), @rvAgg nvarchar(max), @rvPack nvarchar(max), @rvExprs nvarchar(max);
     DECLARE @rvPred bit, @rvRef nvarchar(8), @conflictCodes nvarchar(1500), @hasText bit, @hasId bit, @extra int;
+    -- RS (копії аркушів): службові колонки _SheetCopyOrdinal/_SheetDisplayName — у КІНЦІ списку (адитивні).
+    DECLARE @sheetNameCase nvarchar(max), @copyCols nvarchar(max);
     DECLARE @pv TABLE (OwnerNo int NOT NULL, ColNo int NOT NULL, Agg nvarchar(max) NOT NULL);
 
     -- Columns of one group: one row per ColumnDef (all versions), then one row per code.
@@ -1082,6 +1111,19 @@ JOIN doc.Project       AS p ON p.Id = d.ProjectId'
 JOIN doc.Document      AS d ON d.Id = ti.DocumentId
 JOIN doc.Project       AS p ON p.Id = d.ProjectId' + @rowApply END;
 
+        -- ⛔ RS (копії аркушів, людина 03.11): стан подання — СВОЄЇ копії; номер у групі і назва «<Назва> N» (мова en, інакше
+        -- код аркуша). Назва аркуша кожної версії групи — літерал у CASE за таблицею; група шукається за аркушем версії рядка.
+        SET @sheetNameCase = N'CASE ti.TableDefId' + (SELECT N' WHEN ' + CAST(x.TableDefId AS nvarchar(10)) + N' THEN N'''
+                                    + REPLACE(COALESCE(JSON_VALUE(sn.NameL10n, N'$.en'), sn.Code), N'''', N'''''') + N''''
+                           FROM @gt AS x JOIN cfg.SheetDef AS sn ON sn.Id = x.SheetDefId
+                           WHERE x.GroupId = @g ORDER BY x.TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END';
+        SET @copyCols = CONCAT(N',
+       CAST(COALESCE(dsh.CopyOrdinal, 1) AS smallint) AS _SheetCopyOrdinal,
+       (SELECT CONCAT(COALESCE(JSON_VALUE(MAX(CASE WHEN g.CopyOfId IS NULL THEN g.NameOverrideL10n END), N''$.en''), ', @sheetNameCase, N'),
+                      CASE WHEN ti.SheetCopyId IS NOT NULL OR MAX(CASE WHEN g.CopyOfId IS NOT NULL THEN 1 ELSE 0 END) = 1
+                           THEN CONCAT(N'' '', COALESCE(dsh.CopyOrdinal, 1)) ELSE N'''' END)
+        FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = ', @sheetCase, N') AS _SheetDisplayName');
+
         SET @sql = CONCAT(
 N'CREATE OR ALTER VIEW rpt.', QUOTENAME(@view), N'
 AS
@@ -1091,10 +1133,12 @@ SELECT p.Id AS _ProjectId, p.Code AS _ProjectCode,
        ', @pkExpr, N' AS _PeriodKey,
        CAST(COALESCE(a.Status, 0) AS tinyint) AS _Status,
        r.Id AS _RowId, r.RowKey AS _RowKey, r.Ordinal AS _RowOrdinal,
-       ', @verCase, N' AS _TemplateVersion', @select, N'
+       ', @verCase, N' AS _TemplateVersion', @select, @copyCols, N'
 ', @fromSql, N'
 LEFT JOIN wf.ApprovalState AS a ON a.DocumentId = d.Id AND a.SheetDefId = ', @sheetCase,
-N' AND a.PeriodKey = ti.PeriodKey', @joins, N'
+N' AND a.PeriodKey = ti.PeriodKey
+                               AND (a.SheetCopyId = ti.SheetCopyId OR (a.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
+LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId', @joins, N'
 WHERE ti.TableDefId IN (', @tids, N');');
 
         SET @warning = CASE WHEN @conflictCodes = N'' THEN NULL

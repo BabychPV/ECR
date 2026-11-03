@@ -2438,6 +2438,7 @@ public interface IDocumentDeletionStore
 ```csharp
 public interface IDocumentSheetCopyStore
 {
+    public Task<IReadOnlyList<SheetCopyGroupInfo>> ListGroupsAsync(long documentId, CancellationToken ct);
     public Task<SheetCopyGroup?> FindGroupAsync(long documentId, int sheetDefId, CancellationToken ct);
     public Task<SheetCopyRef?> FindAsync(long documentId, long sheetCopyId, CancellationToken ct);
     public Task<(long SheetCopyId, short Ordinal)> AddCopyAsync(long documentId, int sheetDefId, CancellationToken ct);
@@ -3214,6 +3215,13 @@ AN-120: побудова відмовляє `ECR-RPT-0422` (`err.ECR-RPT-0422.sn
 не відкочує, а лягає в журнал і в `IReportViewStatus`) і на старті після seed.
 Ідемпотентна: незмінну вʼюху не чіпає; нова версія = нові вʼюхи, старі
 лишаються (D-53). Читання — роль бази `rpt_reader` (SELECT на схему `rpt`).
+
+RS (копії аркушів, рішення людини 03.11): копія аркуша — окремі екземпляри таблиць зі СВОЇМ станом подання, тож вʼюхи
+віддають її рядки окремо від оригінала. Стан (`Status`/`_Status`) з'єднується за копією екземпляра
+(`a.SheetCopyId = ti.SheetCopyId OR (обидва NULL)`); у кінці списку колонок — `SheetCopyOrdinal`/`SheetDisplayName` у
+довгій вʼюсі та `_SheetCopyOrdinal`/`_SheetDisplayName` у широких (номер у групі: 1 — оригінал, 2… — копії; назва
+«&lt;Назва&gt; N» — мова `en`, інакше код аркуша; з номером лише коли в групі є копії; група шукається за аркушем версії
+вʼюхи). Текст вʼюх змінився, тож наступний запуск генератора їх переписує (`Altered`).
 
 ```csharp
 public interface IReportViewGenerator

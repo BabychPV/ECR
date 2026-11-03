@@ -75,6 +75,14 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Persistence/PeriodStore.cs"] = "HasReopenedSheetAsync — оригінал; HasReopenedSheetCopyAsync — своя копія",
         ["src/Ecr.Infrastructure/Persistence/CellSourceStore.cs"] = "останній запис журналу — екземпляра своєї копії (@copy)",
 
+        // ── звітність і зведення (RS7): копія — окремий аркуш складу зі СВОЇМ станом ──
+        ["src/Ecr.Infrastructure/Reporting/ReportSnapshotBuilder.cs"] =
+            "статус зрізу: стан рядка складу (копія — своя); Approved лише коли затверджені оригінал і всі копії",
+        ["src/Ecr.Infrastructure/Persistence/CampaignSummaryStore.cs"] =
+            "підсумки кампанії: стан СВОГО рядка складу (a.SheetCopyId = s.Id або обидва NULL)",
+        ["src/Ecr.Infrastructure/Persistence/DocumentListSummaryStore.cs"] =
+            "смуга переліку: копія — окремий аркуш складу зі своїм станом",
+
         // ── склад документа, видалення, перенос версії (RS6) ──
         ["src/Ecr.Infrastructure/Persistence/DocumentSheetCopyStore.cs"] =
             "додає/перейменовує/видаляє копії; видалення — по періодах за SheetCopyId, потім перенумерація",
@@ -92,9 +100,6 @@ public sealed partial class SheetCopyQuerySitesTests
     private static readonly Dictionary<string, string> PendingReviewCommits5To7 = new(StringComparer.Ordinal)
     {
         // RS7 — звітність, зведення, аудит
-        ["src/Ecr.Infrastructure/Reporting/ReportSnapshotBuilder.cs"] = "RS7: стан аркуша зрізу — оригінал/копії",
-        ["src/Ecr.Infrastructure/Persistence/CampaignSummaryStore.cs"] = "RS7",
-        ["src/Ecr.Infrastructure/Persistence/DocumentListSummaryStore.cs"] = "RS7",
         ["src/Ecr.Infrastructure/Persistence/AuditReader.cs"] = "RS7: журнал переходів — з копією",
     };
 

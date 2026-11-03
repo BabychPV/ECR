@@ -61,7 +61,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
         // Крок 1: лише v1 - стабільна вʼюха = v1; службові колонки + _TemplateVersion + A, B.
         Assert.Equal(
             ["_ProjectId", "_ProjectCode", "_DocumentId", "_DocumentKey", "_PeriodKey", "_Status", "_RowId", "_RowKey", "_RowOrdinal",
-             "_TemplateVersion", "A", "B"],
+             "_TemplateVersion", "A", "B", "_SheetCopyOrdinal", "_SheetDisplayName"],
             await ColumnNamesAsync(stable));
         var v1Definition = await DefinitionAsync(v1View);
 
@@ -69,7 +69,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
         var v2 = (await AddVersionAsync(templateId, "2",
             [new("S", "T", [("A", CellDataType.String), ("B", CellDataType.Decimal), ("C", CellDataType.Decimal)])]))["S/T"];
         await GenerateAsync(v2.VersionId);
-        Assert.Equal(["A", "B", "C"], (await ColumnNamesAsync(stable)).Skip(10).ToList());
+        Assert.Equal(["A", "B", "C"], await UserColumnsAsync(stable));
         Assert.Equal(
             [(202609, "1", "a9", 9m, (decimal?)null), (202610, "1", "a10", 10m, null)],
             (await RowsAsync(stable, p1.ProjectId, "_PeriodKey", "_TemplateVersion", "A", "B", "C"))
@@ -100,7 +100,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
             (int)(await ScalarRowsAsync(
                 $"SELECT COUNT(*) FROM rpt.[{stable}] WHERE _ProjectId = {p1.ProjectId} AND _TemplateVersion = N'2' AND _PeriodKey BETWEEN 202611 AND 202611"))[0][0]!);
         Assert.Equal(
-            ab.Length + 11,
+            ab.Length + 13,
             (await ScalarRowsAsync($"SELECT TOP 1 * FROM rpt.[{stable}]"))[0].Length);
 
         // Крок 4: v3 ПРИБИРАЄ B і додає аркуш S2: стара колонка B лишається (NULL для нових рядків), для S2 зʼявляється своя вʼюха,
@@ -113,15 +113,15 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
         var p3 = await NewProjectAsync(v3["S/T"].VersionId, 202609);
         await SeedAsync(p3, 202609, v3["S/T"], ("R1", 1, new() { ["A"] = "z", ["C"] = 5m }));
         await GenerateAsync(v3["S/T"].VersionId);
-        Assert.Equal(["A", "B", "C"], (await ColumnNamesAsync(stable)).Skip(10).ToList());   // B не зникла
+        Assert.Equal(["A", "B", "C"], await UserColumnsAsync(stable));   // B не зникла
         var row3 = (await RowsAsync(stable, p3.ProjectId, "_TemplateVersion", "A", "B", "C"))[0];
         Assert.Equal(("3", "z", (decimal?)null, (decimal?)5m), ((string)row3[0]!, (string)row3[1]!, (decimal?)row3[2], (decimal?)row3[3]));
-        Assert.Equal(["Q"], (await ColumnNamesAsync(StableName(tpl, "S2", "U"))).Skip(10).ToList());
+        Assert.Equal(["Q"], await UserColumnsAsync(StableName(tpl, "S2", "U")));
         Assert.Equal(4, (await RowsAsync(stable, p1.ProjectId, "_PeriodKey")).Count);   // ряд P1 не змінився
 
         // Обовʼязково: вʼюхи _vN не зачеплені (текст байт-у-байт той самий, колонки ті самі, рядки ті самі).
         Assert.Equal(v1Definition, await DefinitionAsync(v1View));
-        Assert.Equal(["A", "B"], (await ColumnNamesAsync(v1View)).Skip(9).ToList());
+        Assert.Equal(["A", "B"], await UserColumnsAsync(v1View));
         Assert.Equal(2, (await RowsAsync(v1View, p1.ProjectId, "_PeriodKey")).Count);
 
         // Ідемпотентність: повторний запуск - усе Unchanged, нічого не перебудовано.
@@ -177,7 +177,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
         await ExecStableAsync(v2.VersionId);
 
         var stable = StableName(tpl, "S", "T");
-        Assert.Equal(["Old", "New"], (await ColumnNamesAsync(stable)).Skip(10).ToList());
+        Assert.Equal(["Old", "New"], await UserColumnsAsync(stable));
         Assert.Equal(
             [((decimal?)1m, (decimal?)null), (null, 2m)],
             (await RowsAsync(stable, p.ProjectId, "Old", "New")).Select(r => ((decimal?)r[0], (decimal?)r[1])).ToList());
@@ -223,7 +223,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
 
         await ExecStableAsync(built.VersionId);
         var stable = StableName(tpl, "S", "T");
-        Assert.Equal(300, (await ColumnNamesAsync(stable)).Count - 10);
+        Assert.Equal(300, (await ColumnNamesAsync(stable)).Count - 12);
         var row = (await RowsAsync(stable, p.ProjectId, "C1", "C2", "C300"))[0];
         Assert.Equal((1m, (decimal?)null, 300m), ((decimal)row[0]!, (decimal?)row[1], (decimal)row[2]!));
 
@@ -469,10 +469,10 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
                 (int)(await ScalarRowsAsync("SELECT COUNT(*) FROM sys.procedures WHERE name = N'usp_GenerateStableViews' AND schema_id = SCHEMA_ID(N'rpt')"))[0][0]!);
 
             await GenerateAsync(v1.VersionId);
-            Assert.Equal(["_ProjectId", "_ProjectCode", "_DocumentId", "_DocumentKey", "_PeriodKey", "_Status", "_RowId", "_RowKey", "_RowOrdinal", "_TemplateVersion", "A"],
+            Assert.Equal(["_ProjectId", "_ProjectCode", "_DocumentId", "_DocumentKey", "_PeriodKey", "_Status", "_RowId", "_RowKey", "_RowOrdinal", "_TemplateVersion", "A", "_SheetCopyOrdinal", "_SheetDisplayName"],
                 await ColumnNamesAsync(stable));
             await GenerateAsync(v1.VersionId);   // idempotent re-run
-            Assert.Equal(11, (await ColumnNamesAsync(stable)).Count);
+            Assert.Equal(13, (await ColumnNamesAsync(stable)).Count);
         }
         finally
         {
@@ -543,7 +543,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
             [(202609, (decimal?)5m, (decimal?)5m), (202610, 7m, 7m)],
             (await RowsAsync(stable, p.ProjectId, "_PeriodKey", "OLD", "NEW"))
                 .Select(r => ((int)r[0]!, (decimal?)r[1], (decimal?)r[2])).ToList());
-        Assert.Equal(["OLD", "KEEP", "NEW"], (await ColumnNamesAsync(stable)).Skip(10).ToList());   // за першою появою
+        Assert.Equal(["OLD", "KEEP", "NEW"], await UserColumnsAsync(stable));   // за першою появою
 
         // Ідемпотентність і без побічних ефектів на _vN.
         Assert.All(await ExecStableAsync(v2.VersionId), r => Assert.Equal("Unchanged", r.Action));
@@ -725,6 +725,10 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
 
         return list;
     }
+
+    /// <summary>Колонки шаблону: без службових _… (їх перелік зростав — RS додала _SheetCopyOrdinal, _SheetDisplayName).</summary>
+    private async Task<List<string>> UserColumnsAsync(string view)
+        => [.. (await ColumnNamesAsync(view)).Where(name => !name.StartsWith('_'))];
 
     private async Task<List<string>> ColumnNamesAsync(string view)
         => (await ScalarRowsAsync(
