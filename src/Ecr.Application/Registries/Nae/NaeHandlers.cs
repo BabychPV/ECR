@@ -24,7 +24,8 @@ public sealed class NaeTreeProvisioner(
     CreateRegistryHandler create,
     SaveRegistryDefinitionHandler saveDefinition,
     Hierarchy.SaveRegistryHierarchyHandler saveHierarchy,
-    IUnitOfWork uow)
+    IUnitOfWork uow,
+    IClock clock)
 {
     internal const string IncompatibleKey = "err.ECR-REG-0422.naeTreeIncompatible";
 
@@ -103,6 +104,8 @@ public sealed class NaeTreeProvisioner(
         ArgumentNullException.ThrowIfNull(system);
         if (await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false) is not null)
         {
+            // NAE node types (human 03.11): an existing tree from before the node types is upgraded once, idempotently.
+            await uow.ExecuteInTransactionAsync(token => UpgradeNodeTypesAsync(code, system.AuditUserId, token), ct).ConfigureAwait(false);
             return false;
         }
 
@@ -137,8 +140,26 @@ public sealed class NaeTreeProvisioner(
             _ = await create.ApplyAsync(code, registryName, isTemporal: true, system.Profile, ct).ConfigureAwait(false);
         }
 
+        // Levels first (NAE node types, 03.11): the fields are bound to them in the same definition save below.
+        var hierarchyRequest = new Hierarchy.SaveRegistryHierarchyRequest(
+            true,
+            [.. Levels.Select(l => new Hierarchy.RegistryLevelInput(
+                l.Code, Name(l.En, l.Ru), l.Optional, l.Code == NaeTreeSchema.SelfNestingLevel))]);
+        if (system is null)
+        {
+            await saveHierarchy.HandleAsync(code, hierarchyRequest, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            var tracked = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
+                          ?? throw new InvalidOperationException($"Registry {code} vanished after creation.");
+            _ = await saveHierarchy.SaveForAuthorAsync(tracked, hierarchyRequest, system.AuditUserId, ct).ConfigureAwait(false);
+        }
+
+        // NaeCode is required on SRC only (Q3): the field is bound to SRC, so the requirement does not reach the group nodes.
         var fields = Fields.Select((f, i) => new RegistryFieldSaveDto(
-            null, f.Code, Name(f.En, f.Ru), "String", i + 1, false, f.IsKey, null, null)).ToList();
+            null, f.Code, Name(f.En, f.Ru), "String", i + 1, f.Code == NaeTreeSchema.NaeCodeField, f.IsKey, null, null,
+            LevelCode: NaeTreeSchema.LevelByField[f.Code] ?? "")).ToList();
         var keys = new List<RegistryKeySaveDto>
         {
             new(
@@ -161,21 +182,56 @@ public sealed class NaeTreeProvisioner(
             _ = await saveDefinition.SaveForAuthorAsync(code, definitionDto, system.AuditUserId, system.Profile, version, ct).ConfigureAwait(false);
         }
 
-        var hierarchyRequest = new Hierarchy.SaveRegistryHierarchyRequest(
-            true, [.. Levels.Select(l => new Hierarchy.RegistryLevelInput(l.Code, Name(l.En, l.Ru), l.Optional))]);
-        if (system is null)
-        {
-            await saveHierarchy.HandleAsync(code, hierarchyRequest, ct).ConfigureAwait(false);
-        }
-        else
-        {
-            var tracked = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
-                          ?? throw new InvalidOperationException($"Registry {code} vanished after creation.");
-            _ = await saveHierarchy.SaveForAuthorAsync(tracked, hierarchyRequest, system.AuditUserId, ct).ConfigureAwait(false);
-        }
-
         return await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
                ?? throw new InvalidOperationException($"Registry {code} vanished after creation.");
+    }
+
+    /// <summary>
+    /// NAE node types (human 03.11): a tree provisioned before them gets the field bindings (<see cref="NaeTreeSchema.LevelByField"/>),
+    /// <c>NaeCode</c> required (on SRC only) and SITE self-nesting — once. A tree where any NAE field is already bound or any level
+    /// already nests is left alone (upgraded before, or configured by an administrator), so a second start changes nothing.
+    /// </summary>
+    /// <param name="code">Registry code.</param>
+    /// <param name="userId">Author recorded on the definition (0 — system).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Whether anything changed.</returns>
+    internal async Task<bool> UpgradeNodeTypesAsync(string code, int userId, CancellationToken ct)
+    {
+        var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false);
+        if (definition is null || !NaeTreeNodePolicy.IsNaeTree(definition))
+        {
+            return false;
+        }
+
+        var levels = (await hierarchy.ListLevelsAsync(definition.Id, ct).ConfigureAwait(false))
+            .ToDictionary(l => l.Code, StringComparer.OrdinalIgnoreCase);
+        var naeFields = definition.Fields.Where(f => NaeTreeSchema.LevelByField.ContainsKey(f.Code)).ToList();
+        if (naeFields.Any(f => f.LevelId is not null) || levels.Values.Any(l => l.AllowsSelfNesting))
+        {
+            return false;
+        }
+
+        foreach (var field in naeFields)
+        {
+            if (NaeTreeSchema.LevelByField[field.Code] is { } levelCode && levels.TryGetValue(levelCode, out var level))
+            {
+                field.BindToLevel(level.Id);
+                if (string.Equals(field.Code, NaeTreeSchema.NaeCodeField, StringComparison.OrdinalIgnoreCase))
+                {
+                    field.Update(field.NameL10n, field.Ordinal, isRequired: true);
+                }
+            }
+        }
+
+        if (levels.TryGetValue(NaeTreeSchema.SelfNestingLevel, out var site))
+        {
+            site.AllowSelfNesting(true);
+        }
+
+        definition.BumpDefinitionVersion();
+        definition.MarkDefinitionUpdated(userId, clock.UtcNow);
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        return true;
     }
 
     private static LocalizedText Name(string en, string ru)
