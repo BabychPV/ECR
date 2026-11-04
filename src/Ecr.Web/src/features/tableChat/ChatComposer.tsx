@@ -10,6 +10,9 @@ import type { MentionCandidate, PostMessageRequest } from './types';
 export interface ChatComposerProps {
   readonly documentId: number;
   readonly tableCode: string;
+  /** TC02: the copy of the sheet whose chat this is (
+ull - the original): mention candidates are those who see THAT table. */
+  readonly sheetCopyId?: number | null;
   /** Period the message is written in (the document period). */
   readonly periodKey: number;
   readonly periodText: string;
@@ -34,6 +37,7 @@ export interface ChatComposerProps {
 export function ChatComposer({
   documentId,
   tableCode,
+  sheetCopyId = null,
   periodKey,
   periodText,
   onSubmit,
@@ -62,6 +66,7 @@ export function ChatComposer({
     tableCode,
     periodKey,
     trigger === null ? '' : debounced,
+    sheetCopyId,
   );
 
   const suggestions: readonly MentionCandidate[] =

@@ -7,8 +7,9 @@ using Microsoft.Net.Http.Headers;
 namespace Ecr.Api.Controllers;
 
 /// <summary>
-/// Чат таблиці документа: ОДНА розмова на пару «документ × код таблиці», кожне повідомлення несе період, у якому його
-/// написано. Простий текст, без HTML.
+/// Чат таблиці документа: ОДНА розмова на трійку «документ × код таблиці × копія аркуша», кожне повідомлення несе період,
+/// у якому його написано. Простий текст, без HTML. TC02: необов'язковий query <c>sheetCopyId</c> (<c>doc.DocumentSheet.Id</c>
+/// копії; немає — оригінал) на кожному маршруті; копія — окремий чат, не мішається з оригіналом.
 /// </summary>
 /// <remarks>
 /// ⛔ Читання — те саме рішення про доступ, що й зріз таблиці: невидимий документ і схована таблиця — одна відповідь
@@ -28,7 +29,8 @@ public sealed class TableDiscussionsController(
     /// <remarks>
     /// Віддає лише таблиці, які користувач бачить і де є повідомлення. <c>404 ECR-DOC-0404</c> — документ невидимий.
     /// Кожен рядок несе <c>revision</c> чату (росте на нове/правку/видалення). Відповідь несе <c>ETag</c> з усіх
-    /// полів; <c>If-None-Match</c> → <c>304</c> без тіла (опитування живого оновлення).
+    /// полів; <c>If-None-Match</c> → <c>304</c> без тіла (опитування живого оновлення). TC02: рядки копій несуть
+    /// <c>sheetCopyId</c>, а <c>key</c> — «КОД» (оригінал) чи «КОД#sheetCopyId» (копія), як <c>sheetStates</c> у <c>GET …/tables</c>.
     /// </remarks>
     [HttpGet("discussions/summary")]
     [ProducesResponseType<TableDiscussionSummaryDto>(StatusCodes.Status200OK)]
@@ -53,10 +55,12 @@ public sealed class TableDiscussionsController(
     /// <param name="after">Повернути повідомлення з <c>id</c> більше за це (опитування; зростання).</param>
     /// <param name="limit">1..100, за замовчуванням 50.</param>
     /// <param name="periodKey">Лише повідомлення цього періоду (фільтр «лише цей період»).</param>
+    /// <param name="sheetCopyId">TC02: копія аркуша (<c>sheetCopyId</c> з <c>GET …/tables</c>); немає — оригінал.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// Відповідь несе <c>ETag</c> (ревізія чату + права читача); <c>If-None-Match</c> → <c>304</c> без тіла.
-    /// <c>422 ECR-REQ-0422</c> — <c>before</c> разом з <c>after</c>, недійсні межі. <c>404</c> — документ чи таблиця невидимі.
+    /// <c>422 ECR-REQ-0422</c> — <c>before</c> разом з <c>after</c>, недійсні межі. <c>404</c> — документ чи таблиця невидимі,
+    /// або <c>sheetCopyId</c> не копія аркуша цієї таблиці (та сама відповідь, що й для схованої таблиці).
     /// </remarks>
     [HttpGet("tables/{tableCode}/messages")]
     [ProducesResponseType<TableDiscussionPageDto>(StatusCodes.Status200OK)]
@@ -66,12 +70,12 @@ public sealed class TableDiscussionsController(
     public async Task<IActionResult> Messages(
         long documentId, string tableCode,
         [FromQuery] long? before, [FromQuery] long? after, [FromQuery] int? limit, [FromQuery] int? periodKey,
-        CancellationToken ct)
+        [FromQuery] long? sheetCopyId, CancellationToken ct)
     {
         var (page, etag) = await queries
             .ListMessagesAsync(
                 documentId, tableCode, before, after, limit, periodKey,
-                Request.Headers[HeaderNames.IfNoneMatch].ToString(), ct)
+                Request.Headers[HeaderNames.IfNoneMatch].ToString(), sheetCopyId, ct)
             .ConfigureAwait(false);
 
         Response.Headers[HeaderNames.ETag] = etag;
@@ -87,8 +91,9 @@ public sealed class TableDiscussionsController(
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> MentionCandidates(
-        long documentId, string tableCode, [FromQuery] string? q, [FromQuery] int? periodKey, CancellationToken ct)
-        => Ok(await queries.MentionCandidatesAsync(documentId, tableCode, q, periodKey, ct).ConfigureAwait(false));
+        long documentId, string tableCode, [FromQuery] string? q, [FromQuery] int? periodKey,
+        [FromQuery] long? sheetCopyId, CancellationToken ct)
+        => Ok(await queries.MentionCandidatesAsync(documentId, tableCode, q, periodKey, sheetCopyId, ct).ConfigureAwait(false));
 
     /// <summary>Пише повідомлення в чат таблиці. Право <c>Document.Discuss</c>.</summary>
     /// <remarks>
@@ -106,9 +111,10 @@ public sealed class TableDiscussionsController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Post(
-        long documentId, string tableCode, [FromBody] PostTableDiscussionMessageRequest request, CancellationToken ct)
+        long documentId, string tableCode, [FromBody] PostTableDiscussionMessageRequest request,
+        [FromQuery] long? sheetCopyId, CancellationToken ct)
     {
-        var (message, created) = await commands.PostAsync(documentId, tableCode, request, ct).ConfigureAwait(false);
+        var (message, created) = await commands.PostAsync(documentId, tableCode, request, sheetCopyId, ct).ConfigureAwait(false);
 
         // 201 — нове повідомлення; 200 — повтор із тим самим clientMessageId (повернуто існуюче, друге не створено).
         return created ? StatusCode(StatusCodes.Status201Created, message) : Ok(message);
@@ -127,8 +133,8 @@ public sealed class TableDiscussionsController(
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Edit(
         long documentId, string tableCode, long messageId,
-        [FromBody] EditTableDiscussionMessageRequest request, CancellationToken ct)
-        => Ok(await commands.EditAsync(documentId, tableCode, messageId, request, ct).ConfigureAwait(false));
+        [FromBody] EditTableDiscussionMessageRequest request, [FromQuery] long? sheetCopyId, CancellationToken ct)
+        => Ok(await commands.EditAsync(documentId, tableCode, messageId, request, sheetCopyId, ct).ConfigureAwait(false));
 
     /// <summary>М'яке видалення: власне повідомлення або будь-яке — з правом <c>Document.DiscussModerate</c>.</summary>
     /// <remarks>
@@ -139,9 +145,10 @@ public sealed class TableDiscussionsController(
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Delete(long documentId, string tableCode, long messageId, CancellationToken ct)
+    public async Task<IActionResult> Delete(
+        long documentId, string tableCode, long messageId, [FromQuery] long? sheetCopyId, CancellationToken ct)
     {
-        await commands.DeleteAsync(documentId, tableCode, messageId, ct).ConfigureAwait(false);
+        await commands.DeleteAsync(documentId, tableCode, messageId, sheetCopyId, ct).ConfigureAwait(false);
         return NoContent();
     }
 
@@ -152,9 +159,10 @@ public sealed class TableDiscussionsController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> MarkRead(
-        long documentId, string tableCode, [FromBody] MarkTableDiscussionReadRequest request, CancellationToken ct)
+        long documentId, string tableCode, [FromBody] MarkTableDiscussionReadRequest request,
+        [FromQuery] long? sheetCopyId, CancellationToken ct)
     {
-        await commands.MarkReadAsync(documentId, tableCode, request, ct).ConfigureAwait(false);
+        await commands.MarkReadAsync(documentId, tableCode, request, sheetCopyId, ct).ConfigureAwait(false);
         return NoContent();
     }
 }

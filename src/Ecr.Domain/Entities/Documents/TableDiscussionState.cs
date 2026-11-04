@@ -17,8 +17,9 @@ public sealed class TableDiscussionState
     private TableDiscussionState() { }
 
     /// <summary>Створює зведення порожнього чату.</summary>
-    public TableDiscussionState(long documentId, string tableDefCode)
+    public TableDiscussionState(long documentId, string tableDefCode, long sheetCopyKey = 0)
     {
+        SheetCopyKey = sheetCopyKey;
         DocumentId = documentId;
         TableDefCode = tableDefCode;
     }
@@ -28,6 +29,9 @@ public sealed class TableDiscussionState
 
     /// <summary>Код таблиці.</summary>
     public string TableDefCode { get; private set; } = null!;
+
+    /// <summary>TC02: чат копії аркуша (<c>doc.DocumentSheet.Id</c> копії); <c>0</c> — оригінал.</summary>
+    public long SheetCopyKey { get; private set; }
 
     /// <summary>Лічильник змін чату; ETag опитування.</summary>
     public long Revision { get; private set; }

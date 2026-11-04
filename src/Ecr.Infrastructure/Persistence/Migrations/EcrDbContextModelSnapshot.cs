@@ -3802,6 +3802,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<long>("DocumentId")
                         .HasColumnType("bigint");
 
+                    b.Property<long>("SheetCopyKey")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
                     b.Property<string>("TableDefCode")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -3809,7 +3814,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("MessageId", "UserId");
 
-                    b.HasIndex("UserId", "DocumentId", "TableDefCode")
+                    b.HasIndex("UserId", "DocumentId", "TableDefCode", "SheetCopyKey")
                         .HasDatabaseName("IX_TableDiscussionMention_User");
 
                     b.ToTable("TableDiscussionMention", "doc");
@@ -3852,6 +3857,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int>("PeriodKey")
                         .HasColumnType("int");
 
+                    b.Property<long>("SheetCopyKey")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
                     b.Property<string>("TableDefCode")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -3859,13 +3869,13 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("DocumentId", "TableDefCode", "Id")
-                        .IsDescending(false, false, true)
+                    b.HasIndex("DocumentId", "TableDefCode", "SheetCopyKey", "Id")
+                        .IsDescending(false, false, false, true)
                         .HasDatabaseName("IX_TableDiscussionMessage_Chat");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("DocumentId", "TableDefCode", "Id"), new[] { "PeriodKey", "AuthorUserId", "CreatedAt", "DeletedAt" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("DocumentId", "TableDefCode", "SheetCopyKey", "Id"), new[] { "PeriodKey", "AuthorUserId", "CreatedAt", "DeletedAt" });
 
-                    b.HasIndex("DocumentId", "TableDefCode", "AuthorUserId", "ClientMessageId")
+                    b.HasIndex("DocumentId", "TableDefCode", "SheetCopyKey", "AuthorUserId", "ClientMessageId")
                         .IsUnique()
                         .HasDatabaseName("UX_TableDiscussionMessage_ClientId")
                         .HasFilter("[ClientMessageId] IS NOT NULL");
@@ -3892,10 +3902,15 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<long>("SheetCopyKey")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
                     b.Property<long>("LastReadMessageId")
                         .HasColumnType("bigint");
 
-                    b.HasKey("UserId", "DocumentId", "TableDefCode");
+                    b.HasKey("UserId", "DocumentId", "TableDefCode", "SheetCopyKey");
 
                     b.ToTable("TableDiscussionRead", "doc");
                 });
@@ -3909,6 +3924,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<long>("SheetCopyKey")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
                     b.Property<DateTime?>("LastMessageAt")
                         .HasColumnType("datetime2(3)");
 
@@ -3921,7 +3941,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<long>("Revision")
                         .HasColumnType("bigint");
 
-                    b.HasKey("DocumentId", "TableDefCode");
+                    b.HasKey("DocumentId", "TableDefCode", "SheetCopyKey");
 
                     b.ToTable("TableDiscussion", "doc");
                 });

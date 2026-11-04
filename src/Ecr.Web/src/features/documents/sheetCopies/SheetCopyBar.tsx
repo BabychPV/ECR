@@ -20,6 +20,8 @@ export interface SheetCopyTarget {
   /** `null` — оригінал: видалити його не можна. */
   readonly sheetCopyId: number | null;
   readonly isCopyable: boolean;
+  /** TC02: живих повідомлень чату копії — видаляються разом із нею; `null`/0 — нема чого попереджати. */
+  readonly chatMessageCount?: number | null;
 }
 
 export interface SheetCopyBarProps {
@@ -91,6 +93,13 @@ export function SheetCopyBar({ documentId, target, canAdd, onSelect }: SheetCopy
 
   const isCopy = target.sheetCopyId !== null;
   if (!target.isCopyable && !isCopy) return null;
+
+  // TC02: чат копії видаляється разом із нею — число видно до підтвердження (0/невідомо — без зайвого рядка).
+  const chatCount = target.chatMessageCount ?? 0;
+  const deleteText =
+    chatCount > 0
+      ? `${t('documents.sheetCopies.deleteText')} ${t('documents.sheetCopies.deleteChat', { n: chatCount })}`
+      : t('documents.sheetCopies.deleteText');
 
   // Відмова додавання/видалення — банером; «повторити» не пропонуємо (повторне видалення без підтвердження).
   const refusal = add.error ?? remove.error;
@@ -179,7 +188,7 @@ export function SheetCopyBar({ documentId, target, canAdd, onSelect }: SheetCopy
         <LazyConfirmModal
           opened={deleteOpen}
           title={t('documents.sheetCopies.deleteTitle', { name: target.label })}
-          text={t('documents.sheetCopies.deleteText')}
+          text={deleteText}
           verb={t('documents.sheetCopies.delete')}
           danger
           isPending={remove.isPending}

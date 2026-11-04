@@ -82,6 +82,8 @@ export interface ChatWindow {
 export function useChatWindow(
   documentId: number,
   tableCode: string,
+  /** TC02: the copy of the sheet whose chat this is; null - the original. Part of the window identity. */
+  sheetCopyId: number | null,
   periodFilter: number | null,
 ): ChatWindow {
   const [state, setState] = useState<ChatWindowState>(Initial);
@@ -103,7 +105,7 @@ export function useChatWindow(
 
     void (async () => {
       try {
-        const result = await getMessages(documentId, tableCode, { limit: MessagesPageSize, periodKey: periodFilter }, null);
+        const result = await getMessages(documentId, tableCode, { limit: MessagesPageSize, periodKey: periodFilter, sheetCopyId }, null);
         if (mine !== generation.current || result === null) return;
 
         etagRef.current = result.etag;
@@ -117,7 +119,7 @@ export function useChatWindow(
     return () => {
       generation.current += 1;
     };
-  }, [documentId, tableCode, periodFilter, attempt]);
+  }, [documentId, tableCode, sheetCopyId, periodFilter, attempt]);
 
   /** Refetch the loaded window from its first message (or the latest page when nothing is loaded). */
   const reloadWindow = useCallback(
@@ -127,13 +129,13 @@ export function useChatWindow(
       const pages: DiscussionPage[] = [];
 
       if (first === undefined) {
-        const result = await getMessages(documentId, tableCode, { limit: MessagesPageSize, periodKey: periodFilter }, null);
+        const result = await getMessages(documentId, tableCode, { limit: MessagesPageSize, periodKey: periodFilter, sheetCopyId }, null);
         if (mine !== generation.current || result === null) return;
         pages.push(result.body);
       } else {
         let after = first - 1;
         for (let round = 0; round < MaxReloadRounds; round += 1) {
-          const result = await getMessages(documentId, tableCode, { after, limit: PollPageSize, periodKey: periodFilter }, null);
+          const result = await getMessages(documentId, tableCode, { after, limit: PollPageSize, periodKey: periodFilter, sheetCopyId }, null);
           if (mine !== generation.current || result === null) return;
           pages.push(result.body);
 
@@ -155,7 +157,7 @@ export function useChatWindow(
         loadingOlder: previous.loadingOlder,
       }));
     },
-    [documentId, tableCode, periodFilter],
+    [documentId, tableCode, sheetCopyId, periodFilter],
   );
 
   const poll = useCallback(async (): Promise<void> => {
@@ -169,7 +171,7 @@ export function useChatWindow(
       const result = await getMessages(
         documentId,
         tableCode,
-        { after: current.lastMessageId, limit: PollPageSize, periodKey: periodFilter },
+        { after: current.lastMessageId, limit: PollPageSize, periodKey: periodFilter, sheetCopyId },
         etagRef.current,
       );
       if (mine !== generation.current || result === null) return;
@@ -181,7 +183,7 @@ export function useChatWindow(
     } finally {
       busy.current = false;
     }
-  }, [documentId, tableCode, periodFilter, reloadWindow]);
+  }, [documentId, tableCode, sheetCopyId, periodFilter, reloadWindow]);
 
   usePollWhileVisible(poll, DiscussionPollMs);
 
@@ -194,7 +196,7 @@ export function useChatWindow(
     setState((previous) => ({ ...previous, loadingOlder: true }));
 
     try {
-      const result = await getMessages(documentId, tableCode, { before: first, limit: MessagesPageSize, periodKey: periodFilter }, null);
+      const result = await getMessages(documentId, tableCode, { before: first, limit: MessagesPageSize, periodKey: periodFilter, sheetCopyId }, null);
       if (mine !== generation.current || result === null) return;
 
       setState((previous) => ({
@@ -207,7 +209,7 @@ export function useChatWindow(
       if (mine === generation.current) setState((previous) => ({ ...previous, loadingOlder: false }));
       throw error;
     }
-  }, [documentId, tableCode, periodFilter]);
+  }, [documentId, tableCode, sheetCopyId, periodFilter]);
 
   const reload = useCallback(async (): Promise<void> => {
     try {

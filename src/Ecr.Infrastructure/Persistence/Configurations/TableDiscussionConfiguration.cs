@@ -10,6 +10,8 @@ namespace Ecr.Infrastructure.Persistence.Configurations;
 /// <c>doc.TableDiscussionRead</c>, <c>doc.TableDiscussionMention</c>.
 /// </summary>
 /// <remarks>
+/// TC02: чат копії аркуша — окремий чат: ключ несе <c>SheetCopyKey</c> (0 — оригінал, інакше <c>doc.DocumentSheet.Id</c> копії;
+/// без зовнішнього ключа: 0 не рядок складу, а видалення копії прибирає чат явно).
 /// ⚠ Усі FK — NO ACTION (конвенція бази): видалення чернетки прибирає чат явно у <c>DocumentDeletionStore</c>.
 /// Таблиці не мають жодного зв'язку з <c>doc.CellValue</c> і розрахунками — запис у чат їх не торкається.
 /// </remarks>
@@ -34,6 +36,7 @@ public sealed class TableDiscussionMessageConfiguration : IEntityTypeConfigurati
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).UseIdentityColumn();
         builder.Property(x => x.TableDefCode).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.SheetCopyKey).HasDefaultValue(0L);
         builder.Property(x => x.Body).HasMaxLength(TableDiscussionMessage.MaxBodyLength).IsRequired();
         builder.Property(x => x.CreatedAt).HasColumnType("datetime2(3)");
         builder.Property(x => x.EditedAt).HasColumnType("datetime2(3)");
@@ -43,13 +46,13 @@ public sealed class TableDiscussionMessageConfiguration : IEntityTypeConfigurati
 
         // Ключ пагінації й опитування: чат однієї таблиці за спаданням id; PeriodKey/AuthorUserId/DeletedAt/CreatedAt у листі —
         // фільтр періоду, «непрочитано» (чужі живі) і час останнього живого читаються без звернення до рядка.
-        builder.HasIndex(x => new { x.DocumentId, x.TableDefCode, x.Id })
-               .IsDescending(false, false, true)
+        builder.HasIndex(x => new { x.DocumentId, x.TableDefCode, x.SheetCopyKey, x.Id })
+               .IsDescending(false, false, false, true)
                .HasDatabaseName("IX_TableDiscussionMessage_Chat")
                .IncludeProperties(x => new { x.PeriodKey, x.AuthorUserId, x.CreatedAt, x.DeletedAt });
 
         // Ідемпотентність POST: повтор з тим самим clientMessageId того ж автора в тому ж чаті не дає другого рядка.
-        builder.HasIndex(x => new { x.DocumentId, x.TableDefCode, x.AuthorUserId, x.ClientMessageId })
+        builder.HasIndex(x => new { x.DocumentId, x.TableDefCode, x.SheetCopyKey, x.AuthorUserId, x.ClientMessageId })
                .IsUnique()
                .HasFilter("[ClientMessageId] IS NOT NULL")
                .HasDatabaseName("UX_TableDiscussionMessage_ClientId");
@@ -80,8 +83,9 @@ public sealed class TableDiscussionStateConfiguration : IEntityTypeConfiguration
         ArgumentNullException.ThrowIfNull(builder);
 
         builder.ToTable("TableDiscussion", "doc");
-        builder.HasKey(x => new { x.DocumentId, x.TableDefCode });
+        builder.HasKey(x => new { x.DocumentId, x.TableDefCode, x.SheetCopyKey });
         builder.Property(x => x.TableDefCode).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.SheetCopyKey).HasDefaultValue(0L);
         builder.Property(x => x.LastMessageAt).HasColumnType("datetime2(3)");
 
         builder.HasOne<Document>()
@@ -100,8 +104,9 @@ public sealed class TableDiscussionReadConfiguration : IEntityTypeConfiguration<
         ArgumentNullException.ThrowIfNull(builder);
 
         builder.ToTable("TableDiscussionRead", "doc");
-        builder.HasKey(x => new { x.UserId, x.DocumentId, x.TableDefCode });
+        builder.HasKey(x => new { x.UserId, x.DocumentId, x.TableDefCode, x.SheetCopyKey });
         builder.Property(x => x.TableDefCode).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.SheetCopyKey).HasDefaultValue(0L);
 
         builder.HasOne<User>()
                .WithMany()
@@ -126,9 +131,10 @@ public sealed class TableDiscussionMentionConfiguration : IEntityTypeConfigurati
         builder.ToTable("TableDiscussionMention", "doc");
         builder.HasKey(x => new { x.MessageId, x.UserId });
         builder.Property(x => x.TableDefCode).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.SheetCopyKey).HasDefaultValue(0L);
 
         // «Мої задачі» і підсумок: згадки користувача (за документом і таблицею).
-        builder.HasIndex(x => new { x.UserId, x.DocumentId, x.TableDefCode })
+        builder.HasIndex(x => new { x.UserId, x.DocumentId, x.TableDefCode, x.SheetCopyKey })
                .HasDatabaseName("IX_TableDiscussionMention_User");
 
         builder.HasOne<TableDiscussionMessage>()

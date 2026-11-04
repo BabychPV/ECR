@@ -10,8 +10,9 @@ public sealed class TableDiscussionRead
     private TableDiscussionRead() { }
 
     /// <summary>Створює позначку.</summary>
-    public TableDiscussionRead(int userId, long documentId, string tableDefCode, long lastReadMessageId)
+    public TableDiscussionRead(int userId, long documentId, string tableDefCode, long lastReadMessageId, long sheetCopyKey = 0)
     {
+        SheetCopyKey = sheetCopyKey;
         UserId = userId;
         DocumentId = documentId;
         TableDefCode = tableDefCode;
@@ -26,6 +27,9 @@ public sealed class TableDiscussionRead
 
     /// <summary>Код таблиці.</summary>
     public string TableDefCode { get; private set; } = null!;
+
+    /// <summary>TC02: чат копії аркуша (<c>doc.DocumentSheet.Id</c> копії); <c>0</c> — оригінал.</summary>
+    public long SheetCopyKey { get; private set; }
 
     /// <summary>Остання прочитана позначка (ідентифікатор повідомлення).</summary>
     public long LastReadMessageId { get; private set; }

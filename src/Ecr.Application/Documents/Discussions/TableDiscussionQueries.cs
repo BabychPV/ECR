@@ -20,6 +20,7 @@ public sealed class TableDiscussionQueries(
     IAccessDecisionService access,
     ICurrentUser currentUser,
     ITableDiscussionStore store,
+    IDocumentSheetCopyStore sheetCopies,
     IEditAssignmentManagementStore candidateSource,
     IClock clock)
 {
@@ -61,8 +62,9 @@ public sealed class TableDiscussionQueries(
             && !await TableDiscussionAccess.IsReadOnlyAsync(candidateSource, documentId, ct).ConfigureAwait(false);
 
         return new TableDiscussionSummaryDto(
-            [.. rows.OrderBy(r => r.TableCode, StringComparer.Ordinal).Select(r => new TableDiscussionSummaryItemDto(
-                r.TableCode, r.Total, r.Unread, r.LastAt, r.LastMessageId, r.MentionedMe, r.Revision))],
+            [.. rows.OrderBy(r => r.TableCode, StringComparer.Ordinal).ThenBy(r => r.SheetCopyKey).Select(r => new TableDiscussionSummaryItemDto(
+                r.TableCode, r.Total, r.Unread, r.LastAt, r.LastMessageId, r.MentionedMe, r.Revision,
+                r.SheetCopyKey == 0 ? null : r.SheetCopyKey, SummaryKey(r.TableCode, r.SheetCopyKey)))],
             canWrite);
     }
 
@@ -82,13 +84,17 @@ public sealed class TableDiscussionQueries(
         return (IsNotModified(ifNoneMatch, etag) ? null : summary, etag);
     }
 
+    /// <summary>Ключ рядка підсумку: «КОД» (оригінал) або «КОД#sheetCopyId» (копія) — як <c>sheetStates</c> у <c>GET …/tables</c>.</summary>
+    internal static string SummaryKey(string tableCode, long sheetCopyKey)
+        => sheetCopyKey == 0 ? tableCode : tableCode + "#" + sheetCopyKey.ToString(CultureInfo.InvariantCulture);
+
     /// <summary>ETag підсумку: короткий хеш усіх полів відповіді в стабільному порядку.</summary>
     internal static string SummaryETag(TableDiscussionSummaryDto summary)
     {
         var text = new System.Text.StringBuilder(summary.CanWrite ? "w" : "-");
         foreach (var item in summary.Items)
         {
-            text.Append('|').Append(item.TableCode)
+            text.Append('|').Append(item.Key)
                 .Append(':').Append(item.Revision.ToString(CultureInfo.InvariantCulture))
                 .Append(':').Append(item.Total.ToString(CultureInfo.InvariantCulture))
                 .Append(':').Append(item.Unread.ToString(CultureInfo.InvariantCulture))
@@ -105,10 +111,10 @@ public sealed class TableDiscussionQueries(
     /// </summary>
     public async Task<(TableDiscussionPageDto? Page, string ETag)> ListMessagesAsync(
         long documentId, string tableCode, long? before, long? after, int? limit, int? periodKey,
-        string? ifNoneMatch, CancellationToken ct)
+        string? ifNoneMatch, long? sheetCopyId, CancellationToken ct)
     {
         var chat = await TableDiscussionAccess
-            .ResolveAsync(access, currentUser, store, documentId, tableCode, ct).ConfigureAwait(false);
+            .ResolveAsync(access, currentUser, store, sheetCopies, documentId, tableCode, sheetCopyId, ct).ConfigureAwait(false);
 
         if ((before is not null && after is not null)
             || (before is < 0) || (after is < 0)
@@ -117,8 +123,8 @@ public sealed class TableDiscussionQueries(
             throw TableDiscussionAccess.BodyInvalid("Недійсні межі сторінки чату.");
         }
 
-        var state = await store.GetStateAsync(documentId, tableCode, ct).ConfigureAwait(false);
-        var lastRead = await store.GetLastReadAsync(chat.UserId, documentId, tableCode, ct).ConfigureAwait(false);
+        var state = await store.GetStateAsync(documentId, tableCode, chat.SheetCopyKey, ct).ConfigureAwait(false);
+        var lastRead = await store.GetLastReadAsync(chat.UserId, documentId, tableCode, chat.SheetCopyKey, ct).ConfigureAwait(false);
         var canWrite = await TableDiscussionAccess.CanDiscussAsync(access, chat.Profile, documentId, ct).ConfigureAwait(false);
         var canModerate = await TableDiscussionAccess.CanModerateAsync(access, chat.Profile, documentId, ct).ConfigureAwait(false);
 
@@ -132,7 +138,7 @@ public sealed class TableDiscussionQueries(
         var size = TableDiscussionRules.PageSize(limit);
         var etag = string.Create(
             CultureInfo.InvariantCulture,
-            $"\"tc-{state.Revision}-{lastRead}-{(canWrite ? 'w' : '-')}{(canModerate ? 'm' : '-')}-{before}-{after}-{size}-{periodKey}\"");
+            $"\"tc-{state.Revision}-{lastRead}-{(canWrite ? 'w' : '-')}{(canModerate ? 'm' : '-')}-{before}-{after}-{size}-{periodKey}-{chat.SheetCopyKey}\"");
 
         if (IsNotModified(ifNoneMatch, etag))
         {
@@ -140,7 +146,7 @@ public sealed class TableDiscussionQueries(
         }
 
         var rows = await store
-            .ListAsync(documentId, tableCode, before, after, periodKey, chat.AllowedPeriods,
+            .ListAsync(documentId, tableCode, chat.SheetCopyKey, before, after, periodKey, chat.AllowedPeriods,
                 after is null ? size + 1 : size, ct)
             .ConfigureAwait(false);
 
@@ -159,10 +165,10 @@ public sealed class TableDiscussionQueries(
 
     /// <summary>Кандидати у згадки: лише користувачі, які бачать таблицю (в періоді, якщо заданий).</summary>
     public async Task<IReadOnlyList<TableDiscussionMentionCandidateDto>> MentionCandidatesAsync(
-        long documentId, string tableCode, string? q, int? periodKey, CancellationToken ct)
+        long documentId, string tableCode, string? q, int? periodKey, long? sheetCopyId, CancellationToken ct)
     {
         var chat = await TableDiscussionAccess
-            .ResolveAsync(access, currentUser, store, documentId, tableCode, ct).ConfigureAwait(false);
+            .ResolveAsync(access, currentUser, store, sheetCopies, documentId, tableCode, sheetCopyId, ct).ConfigureAwait(false);
         await DocumentVisibility
             .RequireVisibleAsync(access, chat.Profile, documentId, "Document.Discuss", ct).ConfigureAwait(false);
 
@@ -251,7 +257,7 @@ public sealed class TableDiscussionQueries(
 
             items.Add(new TableDiscussionMentionTaskDto(
                 row.MessageId, row.DocumentId, row.TableCode, row.PeriodKey, row.AuthorUserId, row.AuthorName,
-                Snippet(row.Body), Utc(row.CreatedAt)));
+                Snippet(row.Body), Utc(row.CreatedAt), row.SheetCopyKey == 0 ? null : row.SheetCopyKey));
         }
 
         return new TableDiscussionMentionTasksDto(items);

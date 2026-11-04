@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { chatKey } from './chatKey';
 import type { DiscussionSummaryItem } from './types';
 
 /**
@@ -35,9 +36,10 @@ function subscribe(listener: () => void): () => void {
  */
 let override: string | null = null;
 
-export function setChatTable(tableCode: string | null): void {
-  if (override === tableCode) return;
-  override = tableCode;
+/** `chatKey` of the chosen table: `КОД` for the original, `КОД#sheetCopyId` for a copy (TC02). */
+export function setChatTable(key: string | null): void {
+  if (override === key) return;
+  override = key;
   emit();
 }
 
@@ -95,15 +97,22 @@ let summaryItems: ReadonlyMap<string, DiscussionSummaryItem> = new Map();
 /** `null` clears (the button unmounts or the chat is unavailable). */
 export function publishSummary(documentId: number, items: readonly DiscussionSummaryItem[] | null): void {
   summaryDocumentId = items === null ? null : documentId;
-  summaryItems = new Map((items ?? []).map((item) => [item.tableCode, item]));
+  // TC02: by the chat KEY, never by `tableCode` - a copy of a sheet and its original share the code.
+  summaryItems = new Map((items ?? []).map((item) => [item.key, item]));
   emit();
 }
 
-/** Summary line of one table; `undefined` — no messages there, or the chat is unavailable. */
-export function useTableSummaryItem(documentId: number, tableCode: string): DiscussionSummaryItem | undefined {
+/** Summary line of one table (of one copy of it); `undefined` — no messages there, or the chat is unavailable. */
+export function useTableSummaryItem(
+  documentId: number,
+  tableCode: string,
+  sheetCopyId: number | null = null,
+): DiscussionSummaryItem | undefined {
+  const key = chatKey(tableCode, sheetCopyId);
+
   return useSyncExternalStore(
     subscribe,
-    () => (summaryDocumentId === documentId ? summaryItems.get(tableCode) : undefined),
+    () => (summaryDocumentId === documentId ? summaryItems.get(key) : undefined),
     () => undefined,
   );
 }

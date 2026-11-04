@@ -25,8 +25,14 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 public sealed class TableDiscussionStoreTests(SqlServerFixture sql, ITestOutputHelper output)
 {
     private const int Tables = 150;
-    private const int PerTable = 200;
+    private const int PerTable = 66;
+    private const int Chats = Tables * 3;
+    private const int FullReadsCeiling = 2500; // виміряно 2256 (+10 %)
+    private const int MixedReadsCeiling = 2600; // виміряно 2361 (+10 %)
     private static readonly int[] FirstQuarter = [202601, 202602, 202603];
+    private const int TablesPerChunk = 150;
+    private const long CopyOne = 9_000_001;
+    private const long CopyTwo = 9_000_002;
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -45,7 +51,12 @@ public sealed class TableDiscussionStoreTests(SqlServerFixture sql, ITestOutputH
 
         try
         {
-            await SeedAsync(document.DocumentId, me, other).ConfigureAwait(true);
+            // ⚠ Обсяг даних тримається близьким до 30 000 рядків (файли тестової бази не стискаються після DELETE, а стеля - 192 МБ):
+            // 150 таблиць x (оригінал + 2 копії) x 66 повідомлень = 29 700 рядків, ОДИН набір на всі заміри. Вартість підсумку
+            // рахується від ЧИСЛА ЧАТІВ (450), а не повідомлень: ~6-7 читань на чат.
+            await SeedAsync(document.DocumentId, me, other, copyKey: 0).ConfigureAwait(true);
+            await SeedAsync(document.DocumentId, me, other, copyKey: CopyOne).ConfigureAwait(true);
+            await SeedAsync(document.DocumentId, me, other, copyKey: CopyTwo).ConfigureAwait(true);
 
             var codes = Enumerable.Range(1, Tables).Select(i => $"T{i:D3}").ToList();
             var counter = new DbCommandCounter();
@@ -53,7 +64,8 @@ public sealed class TableDiscussionStoreTests(SqlServerFixture sql, ITestOutputH
                 .UseSqlServer(sql.ConnectionString).AddInterceptors(counter).Options);
             var store = new TableDiscussionStore(db);
 
-            // Прогрів плану, потім замір: команда одна; читання — різниця накопичених читань сеансу (те саме з'єднання).
+            // Прогрів плану, потім замір: команда одна; читання - різниця накопичених читань сеансу (те саме з'єднання).
+            await store.SummaryAsync(document.DocumentId, codes, new Dictionary<string, IReadOnlyCollection<int>>(), me, CancellationToken.None).ConfigureAwait(true);
             await store.SummaryAsync(document.DocumentId, codes, new Dictionary<string, IReadOnlyCollection<int>>(), me, CancellationToken.None).ConfigureAwait(true);
 
             await db.Database.OpenConnectionAsync().ConfigureAwait(true);
@@ -67,13 +79,22 @@ public sealed class TableDiscussionStoreTests(SqlServerFixture sql, ITestOutputH
             var seen = counter.Tally.Snapshot();
             var fullReads = await SessionReadsAsync(db).ConfigureAwait(true) - readsBefore;
 
-            Assert.Equal(1, seen.Total);
-            Assert.Equal(Tables, rows.Count);
-            Assert.All(rows, r => Assert.Equal(PerTable, r.Total));
-            Assert.All(rows, r => Assert.Equal(PerTable / 2, r.Unread)); // половина повідомлень — чужі, прочитано 0
-            output.WriteLine($"summary (full): commands={seen.Total} logical reads={fullReads} ms={clock.ElapsedMilliseconds} tables={Tables} messages={Tables * PerTable}");
+            // ⚠ Перший заміряний прогін у сеансі платить службові читання поза планом запиту; усталену вартість дає повторний
+            // прогін - беремо менший з двох.
+            readsBefore = await SessionReadsAsync(db).ConfigureAwait(true);
+            await store.SummaryAsync(document.DocumentId, codes, new Dictionary<string, IReadOnlyCollection<int>>(), me, CancellationToken.None).ConfigureAwait(true);
+            fullReads = Math.Min(fullReads, await SessionReadsAsync(db).ConfigureAwait(true) - readsBefore);
 
-            // Роль, звужена періодами: 20 таблиць × 3 періоди рахуються з повідомлень тією самою командою (UNION ALL).
+            Assert.Equal(1, seen.Total);
+            Assert.Equal(Chats, rows.Count);
+            Assert.All(rows, r => Assert.Equal(PerTable, r.Total));
+            Assert.All(rows, r => Assert.Equal(PerTable / 2, r.Unread)); // половина повідомлень - чужі, прочитано 0
+            Assert.Equal(Tables, rows.Count(r => r.SheetCopyKey == 0));
+            Assert.Equal(Tables, rows.Count(r => r.SheetCopyKey == CopyOne));
+            Assert.Equal(Tables, rows.Count(r => r.SheetCopyKey == CopyTwo));
+            output.WriteLine($"summary (150 tables x original + 2 copies = {Chats} chats): commands={seen.Total} logical reads={fullReads} ms={clock.ElapsedMilliseconds} messages={Chats * PerTable}");
+
+            // Роль, звужена періодами: 20 таблиць x 3 періоди рахуються з повідомлень тією самою командою (UNION ALL).
             var restricted = Enumerable.Range(1, 20).ToDictionary(
                 i => $"T{i:D3}", _ => (IReadOnlyCollection<int>)FirstQuarter);
             var fullRest = codes.Skip(20).ToList();
@@ -87,23 +108,24 @@ public sealed class TableDiscussionStoreTests(SqlServerFixture sql, ITestOutputH
             var mixedReads = await SessionReadsAsync(db).ConfigureAwait(true) - readsBefore;
 
             Assert.Equal(1, mixedCommands);
-            Assert.Equal(Tables, mixed.Count);
+            Assert.Equal(Chats, mixed.Count);
             Assert.All(mixed.Where(r => string.CompareOrdinal(r.TableCode, "T020") <= 0), r => Assert.True(r.Total is > 0 and < PerTable));
-            output.WriteLine($"summary (20 period-restricted tables): logical reads={mixedReads} ms={clock.ElapsedMilliseconds}");
+            output.WriteLine($"summary (20 period-restricted tables x 3 chats): logical reads={mixedReads} ms={clock.ElapsedMilliseconds}");
 
-            // Сторінка одного чату: keyset по індексу — незалежно від розміру документа.
+            // Сторінка одного чату (оригінал): keyset по індексу - незалежно від розміру документа.
             readsBefore = await SessionReadsAsync(db).ConfigureAwait(true);
             clock.Restart();
-            var page = await store.ListAsync(document.DocumentId, "T001", null, null, null, null, 51, CancellationToken.None).ConfigureAwait(true);
+            var page = await store.ListAsync(document.DocumentId, "T001", 0, null, null, null, null, 51, CancellationToken.None).ConfigureAwait(true);
             clock.Stop();
             var pageReads = await SessionReadsAsync(db).ConfigureAwait(true) - readsBefore;
             Assert.Equal(51, page.Count);
             Assert.True(page[0].Id > page[^1].Id);
             output.WriteLine($"page of 51: logical reads={pageReads} ms={clock.ElapsedMilliseconds}");
 
-            // Пороги: виміряно 894 / 871 / 338 читань (150 таблиць × 200 повідомлень, 43 / 96 / 25 мс), поріг — запас ×3; ріст — лінійний за числом таблиць, не повідомлень.
-            Assert.True(fullReads < 3000, $"підсумок: {fullReads} логічних читань");
-            Assert.True(mixedReads < 3000, $"підсумок зі звуженням: {mixedReads} логічних читань");
+            // Пороги (виміряно на 450 чатах x 66): вартість лінійна за числом чатів, не повідомлень.
+            Assert.True(fullReads < FullReadsCeiling, $"підсумок: {fullReads} логічних читань");
+            Assert.True(fullReads <= Chats * 8, $"підсумок: {fullReads} читань на {Chats} чатів - понад 8 на чат");
+            Assert.True(mixedReads < MixedReadsCeiling, $"підсумок зі звуженням: {mixedReads} логічних читань");
             Assert.True(pageReads < 1000, $"сторінка: {pageReads} логічних читань");
         }
         finally
@@ -127,26 +149,35 @@ public sealed class TableDiscussionStoreTests(SqlServerFixture sql, ITestOutputH
         return user.Id;
     }
 
-    private async Task SeedAsync(long documentId, int me, int other)
+    private async Task SeedAsync(long documentId, int me, int other, long copyKey)
     {
         await using var conn = new SqlConnection(sql.ConnectionString);
         await conn.OpenAsync().ConfigureAwait(true);
         await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 120;
+        cmd.CommandTimeout = 300;
         cmd.CommandText = $"""
-            ;WITH n AS (SELECT TOP ({PerTable}) ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS i FROM sys.all_objects a CROSS JOIN sys.all_objects b),
-                  t AS (SELECT TOP ({Tables}) ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS i FROM sys.all_objects a CROSS JOIN sys.all_objects b)
-            INSERT INTO doc.TableDiscussionMessage (DocumentId, TableDefCode, PeriodKey, AuthorUserId, Body, CreatedAt)
-            SELECT @doc, CONCAT('T', RIGHT(CONCAT('000', t.i), 3)), 202601 + (n.i % 12),
-                   CASE WHEN n.i % 2 = 0 THEN @me ELSE @other END,
-                   REPLICATE(N'повідомлення ', 10), DATEADD(minute, n.i, '2026-01-01')
-            FROM t CROSS JOIN n;
+            -- Порціями по {TablesPerChunk} таблиць (= {TablesPerChunk * PerTable} рядків) з CHECKPOINT: журнал тестової бази
+            -- інакше розростається і валить TestDatabaseSizeTests.
+            DECLARE @from int = 1;
+            WHILE @from <= {Tables}
+            BEGIN
+                ;WITH n AS (SELECT TOP ({PerTable}) ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS i FROM sys.all_objects a CROSS JOIN sys.all_objects b),
+                      t AS (SELECT TOP ({TablesPerChunk}) @from - 1 + ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS i FROM sys.all_objects a CROSS JOIN sys.all_objects b)
+                INSERT INTO doc.TableDiscussionMessage (DocumentId, TableDefCode, SheetCopyKey, PeriodKey, AuthorUserId, Body, CreatedAt)
+                SELECT @doc, CONCAT('T', RIGHT(CONCAT('000', t.i), 3)), @copy, 202601 + (n.i % 12),
+                       CASE WHEN n.i % 2 = 0 THEN @me ELSE @other END,
+                       REPLICATE(N'текст ', 3), DATEADD(minute, n.i, '2026-01-01')
+                FROM t CROSS JOIN n WHERE t.i <= {Tables};
+                SET @from += {TablesPerChunk};
+                CHECKPOINT;
+            END;
 
-            INSERT INTO doc.TableDiscussion (DocumentId, TableDefCode, Revision, MessageCount, LastMessageId, LastMessageAt)
-            SELECT DocumentId, TableDefCode, COUNT(*), COUNT(*), MAX(Id), MAX(CreatedAt)
-            FROM doc.TableDiscussionMessage WHERE DocumentId = @doc GROUP BY DocumentId, TableDefCode;
+            INSERT INTO doc.TableDiscussion (DocumentId, TableDefCode, SheetCopyKey, Revision, MessageCount, LastMessageId, LastMessageAt)
+            SELECT DocumentId, TableDefCode, SheetCopyKey, COUNT(*), COUNT(*), MAX(Id), MAX(CreatedAt)
+            FROM doc.TableDiscussionMessage WHERE DocumentId = @doc AND SheetCopyKey = @copy GROUP BY DocumentId, TableDefCode, SheetCopyKey;
             """;
         cmd.Parameters.AddWithValue("@doc", documentId);
+        cmd.Parameters.AddWithValue("@copy", copyKey);
         cmd.Parameters.AddWithValue("@me", me);
         cmd.Parameters.AddWithValue("@other", other);
         await cmd.ExecuteNonQueryAsync().ConfigureAwait(true);
@@ -158,11 +189,18 @@ public sealed class TableDiscussionStoreTests(SqlServerFixture sql, ITestOutputH
         await conn.OpenAsync().ConfigureAwait(true);
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
+        // Порціями з CHECKPOINT - з тієї ж причини, що й вставка.
         cmd.CommandText = """
             DELETE FROM doc.TableDiscussionMention WHERE DocumentId = @doc;
             DELETE FROM doc.TableDiscussionRead WHERE DocumentId = @doc;
-            DELETE FROM doc.TableDiscussionMessage WHERE DocumentId = @doc;
+            WHILE 1 = 1
+            BEGIN
+                DELETE TOP (10000) FROM doc.TableDiscussionMessage WHERE DocumentId = @doc;
+                IF @@ROWCOUNT = 0 BREAK;
+                CHECKPOINT;
+            END;
             DELETE FROM doc.TableDiscussion WHERE DocumentId = @doc;
+            CHECKPOINT;
             """;
         cmd.Parameters.AddWithValue("@doc", documentId);
         await cmd.ExecuteNonQueryAsync().ConfigureAwait(true);

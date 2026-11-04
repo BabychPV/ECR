@@ -108,6 +108,51 @@ async function createCopyableDocument(page: Page): Promise<{ documentId: number;
   return { documentId: document.documentId, periodKey: period?.periodKey ?? 0 };
 }
 
+interface ChatPage {
+  messages: { body: string | null }[];
+}
+
+/** TC02: чат копії ізольований від чату оригіналу; діалог видалення копії називає кількість її повідомлень. */
+test('копія аркуша: чат копії не видно в чаті оригіналу; діалог видалення показує кількість повідомлень', async ({ page }) => {
+  await signIn(page);
+  const doc = await createCopyableDocument(page);
+  const documentUrl = `/api/v1/documents/${String(doc.documentId)}`;
+
+  const before = await ok<{ sheetDefId: number; tableCode: string }[]>(
+    await page.request.get(`${documentUrl}/tables?periodKey=${String(doc.periodKey)}`),
+    'таблиці документа',
+  );
+  const first = before[0];
+  expect(first, 'у документа немає таблиць').toBeDefined();
+  await ok(await page.request.post(`${documentUrl}/sheets/${String(first?.sheetDefId)}/copies`), 'копія аркуша');
+
+  const tables = await ok<{ tableCode: string; sheetCopyId?: number | null }[]>(
+    await page.request.get(`${documentUrl}/tables?periodKey=${String(doc.periodKey)}`),
+    'таблиці після копії',
+  );
+  const copyTable = tables.find((table) => table.sheetCopyId !== undefined && table.sheetCopyId !== null);
+  expect(copyTable, 'у відповіді немає таблиці копії').toBeDefined();
+  const copyId = copyTable?.sheetCopyId ?? 0;
+  const messages = `${documentUrl}/tables/${copyTable?.tableCode ?? ''}/messages`;
+
+  await ok(
+    await page.request.post(`${messages}?sheetCopyId=${String(copyId)}`, {
+      data: { body: 'e2e copy chat message', periodKey: doc.periodKey, clientMessageId: crypto.randomUUID(), mentionUserIds: [] },
+    }),
+    'повідомлення в чаті копії',
+  );
+
+  const inCopy = await ok<ChatPage>(await page.request.get(`${messages}?sheetCopyId=${String(copyId)}&limit=50`), 'чат копії');
+  const inOriginal = await ok<ChatPage>(await page.request.get(`${messages}?limit=50`), 'чат оригінала');
+  expect(inCopy.messages.map((message) => message.body)).toEqual(['e2e copy chat message']);
+  expect(inOriginal.messages, 'повідомлення копії потрапило в чат оригінала').toEqual([]);
+
+  // Діалог видалення копії: число повідомлень видно до підтвердження.
+  await page.goto(`/documents/${String(doc.documentId)}?periodKey=${String(doc.periodKey)}&sheet=COPYSHEET~${String(copyId)}`);
+  await page.getByTestId('sheet-copy-delete').click();
+  await expect(page.getByRole('dialog')).toContainText(/Chat messages of this copy that will be deleted with it: 1/, { timeout: 30_000 });
+});
+
 test('копія аркуша: додати -> вкладка «Назва 2» -> перейменувати групу -> видалити з підтвердженням', async ({ page }) => {
   await signIn(page);
   const doc = await createCopyableDocument(page);

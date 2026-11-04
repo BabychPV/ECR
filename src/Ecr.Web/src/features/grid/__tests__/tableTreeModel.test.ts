@@ -125,6 +125,16 @@ describe('ключ таблиці в адресі', () => {
     expect(resolveTable('#203', tables)?.tableInstanceId).toBe(203);
   });
 
+  it('TC02: КОД#sheetCopyId відновлює таблицю саме цієї копії аркуша, а голий код - будь-яку', () => {
+    const original = table(1, 'A', 101);
+    const copy = { ...table(2, 'A', 301), sheetCopyId: 77 } as DocumentTableDto;
+    const tables = [original, copy];
+
+    expect(resolveTable('A#77', tables)?.tableInstanceId).toBe(301);
+    expect(resolveTable('A', tables)?.tableInstanceId).toBe(101);
+    expect(resolveTable('A#78', tables)?.tableInstanceId).toBe(101);
+  });
+
   it('без ключа або з чужим ключем — перша таблиця за порядком шаблону', () => {
     const tables = [table(2), table(1)];
 

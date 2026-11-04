@@ -29,6 +29,18 @@ export function stateOfGroup(group: Pick<SheetGroup, 'stateKey'>, states: Readon
   return states[group.stateKey] ?? 'Draft';
 }
 
+/**
+ * TC02: скільки живих повідомлень чату буде видалено разом із копією (показується ДО підтвердження).
+ * Сервер віддає число в кожній таблиці копії (`null` — оригінал); береться перше задане. Немає — `null`.
+ */
+export function chatMessageCountOf(group: Pick<SheetGroup, 'tables'>): number | null {
+  for (const table of group.tables) {
+    if (table.chatMessageCount !== undefined && table.chatMessageCount !== null) return table.chatMessageCount;
+  }
+
+  return null;
+}
+
 /** Елемент смуги аркушів: `code` — ключ вкладки, стан береться за ключем стану вкладки (`stateOfGroup`). */
 export function sheetItemsOf(
   sheets: readonly SheetGroup[],

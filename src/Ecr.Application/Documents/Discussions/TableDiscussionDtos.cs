@@ -65,8 +65,11 @@ public sealed record TableDiscussionPageDto(
 /// Ревізія чату: росте на кожне нове, правлене чи видалене повідомлення (та сама, що в ETag сторінки повідомлень).
 /// Опитування порівнює її з попередньою і перечитує сторінку лише тоді, коли вона змінилась.
 /// </param>
+/// <param name="SheetCopyId">TC02: чат копії аркуша (<c>doc.DocumentSheet.Id</c> копії); <c>null</c> — чат оригінала.</param>
+/// <param name="Key">TC02: ключ рядка — «КОД» для оригінала, «КОД#sheetCopyId» для копії (як <c>sheetStates</c> у <c>GET documents/{id}/tables</c>).</param>
 public sealed record TableDiscussionSummaryItemDto(
-    string TableCode, int Total, int Unread, DateTime? LastAt, long LastMessageId, bool MentionedMe, long Revision);
+    string TableCode, int Total, int Unread, DateTime? LastAt, long LastMessageId, bool MentionedMe, long Revision,
+    long? SheetCopyId, string Key);
 
 /// <summary>Підсумок чатів усіх таблиць документа, які бачить користувач; таблиці без розмов — відсутні.</summary>
 /// <param name="Items">Таблиці з хоча б одним повідомленням.</param>
@@ -108,9 +111,10 @@ public sealed record TableDiscussionMentionCandidateDto(int UserId, string Name)
 /// <param name="AuthorName">Ім'я автора.</param>
 /// <param name="Snippet">Початок тексту (до 160 символів).</param>
 /// <param name="CreatedAt">Коли написано (UTC).</param>
+/// <param name="SheetCopyId">TC02: згадка в чаті копії аркуша (<c>doc.DocumentSheet.Id</c> копії); <c>null</c> — в чаті оригінала.</param>
 public sealed record TableDiscussionMentionTaskDto(
     long MessageId, long DocumentId, string TableCode, int PeriodKey, int AuthorUserId, string AuthorName,
-    string Snippet, DateTime CreatedAt);
+    string Snippet, DateTime CreatedAt, long? SheetCopyId = null);
 
 /// <summary>Непрочитані згадки поточного користувача, найновіші першими.</summary>
 /// <param name="Items">Згадки в таблицях, які користувач досі бачить.</param>

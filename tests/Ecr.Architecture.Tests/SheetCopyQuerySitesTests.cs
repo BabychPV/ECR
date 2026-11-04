@@ -59,7 +59,7 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Persistence/ConsistencyIssueReader.cs"] = "рядок → екземпляр за Id",
         ["src/Ecr.Infrastructure/Jobs/ConsistencyCheckJob.cs"] = "анти-з'єднання рядок → екземпляр за Id",
         ["src/Ecr.Infrastructure/Persistence/CollectionStore.cs"] = "проєкти мапінгу (без ключа таблиці)",
-        ["src/Ecr.Infrastructure/Persistence/TableDiscussionStore.cs"] = "перелік періодів документа (Distinct)",
+        ["src/Ecr.Infrastructure/Persistence/TableDiscussionStore.cs"] = "перелік періодів документа (Distinct); чат — окремий на копію: ключ SheetCopyKey в усіх запитах чату (TC02)",
         ["src/Ecr.Infrastructure/Persistence/RuleCoverageReader.cs"] = "лічильники рядків і документів (копії — теж рядки)",
 
         // ── перерахунок і Q-17 (RS5): «вид» копії, каскад усередині копії ──
