@@ -180,7 +180,7 @@ public static class CellValueReader
         short number => number,
         double number => (decimal)number,
         float number => (decimal)number,
-        bool flag => flag ? 1m : 0m,
+        // ⛔ PM-PASS-A-P3 п.8: JSON `true`/`false` (bool) у числовій колонці - відмова (нижче), а не 1/0.
         // ⛔ `C1`: без культури — `Float`, не `Number`. `AllowThousands` під
         // Invariant викидав кожну кому, і «12,5» через PATCH лягало як 125.
         // Машинний запис (інтеграція) коми не має, тож кома там — відмова.

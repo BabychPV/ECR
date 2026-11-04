@@ -182,4 +182,29 @@ public sealed class ColumnDefValidationTests
         // гучний збій на бойовому записі.
         Assert.Equal(1000, ColumnDef.MaxStringLength);
     }
+
+    /// <summary>PM-PASS-A-P3 п.8: Int понад межі <c>int</c> відхиляється (ранiше 2147483648 приймалось).</summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [InlineData(2147483648)]
+    [InlineData(-2147483649)]
+    public void Int_поза_межами_int_відхиляється(long outside)
+    {
+        var column = Column(CellDataType.Int, "Count");
+
+        Assert.Equal("ECR-CELL-0422", column.ValidateValue(new CellValueData { ValueNumeric = outside }));
+        Assert.Null(column.ValidateValue(new CellValueData { ValueNumeric = int.MaxValue }));
+        Assert.Null(column.ValidateValue(new CellValueData { ValueNumeric = int.MinValue }));
+    }
+
+    /// <summary>PM-PASS-A-P3 п.8: символ NUL у рядку відхиляється (він ламає звіти й експорт).</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Рядок_із_NUL_відхиляється()
+    {
+        var column = Column(CellDataType.String, "Note");
+
+        Assert.Equal("ECR-CELL-0422", column.ValidateValue(new CellValueData { ValueString = "a\0b" }));
+        Assert.Null(column.ValidateValue(new CellValueData { ValueString = "ab" }));
+    }
 }

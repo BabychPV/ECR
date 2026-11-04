@@ -425,9 +425,15 @@ public sealed class ColumnDef : Entity<int>
             return "ECR-CELL-0422";
         }
 
-        // 6. Цілочислова колонка не приймає дробову частину.
+        // 5а. PM-PASS-A-P3 п.8: символ NUL у рядку - відмова (ламає звіти, експорт і порівняння).
+        if (value.ValueString is { } withNul && withNul.Contains('\0', StringComparison.Ordinal))
+        {
+            return "ECR-CELL-0422";
+        }
+
+        // 6. Цілочислова колонка не приймає дробову частину і число поза межами `int` (PM-PASS-A-P3 п.8).
         if (DataType == CellDataType.Int && value.ValueNumeric is { } asInt
-            && decimal.Truncate(asInt) != asInt)
+            && (decimal.Truncate(asInt) != asInt || asInt < int.MinValue || asInt > int.MaxValue))
         {
             return "ECR-CELL-0422";
         }
