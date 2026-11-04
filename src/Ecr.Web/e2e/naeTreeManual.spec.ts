@@ -236,7 +236,7 @@ test.describe('NAE tree manual', () => {
     await page.goto('/admin/permits/nae');
     if (initialEmpty) {
       await expect(page.getByText('The NAE tree is empty')).toBeVisible();
-      for (const way of [/Load from PI AF/, /Import from Excel:/, /By hand/]) await expect(page.getByText(way)).toBeVisible();
+      for (const way of [/Load from PI AF/, /Import from Excel:/, /By hand/]) await expect(page.locator('[data-nae-empty]').getByText(way)).toBeVisible();
       const seeded = page.waitForResponse((response) => response.url().includes('/nae-tree/seed-roots'));
       await page.locator('[data-nae-seed-roots]').click();
       const seedResponse = await seeded;

@@ -11954,7 +11954,7 @@
         "description": "One finding of the Excel import of the NAE tree.",
         "properties": {
           "code": {
-            "description": "`headerNotFound`, `regionRequired`, `siteRequired`, `badCode`, `areaMismatch` (Area and On_Offshore\n        differ), `duplicateInFile`, `existingElsewhere` (the business key belongs to a node under another parent),\n        `codeTaken` (the technical code belongs to another node), `nameDiffers` (warning: the stored name differs; names are\n        not overwritten).",
+            "description": "`headerNotFound`, `regionRequired`, `badCode`, `areaMismatch` (Area and On_Offshore\n        differ), `duplicateInFile`, `existingElsewhere` (the business key belongs to a node under another parent),\n        `codeTaken` (the technical code belongs to another node), `nameDiffers` (warning: the stored name differs; names are\n        not overwritten).",
             "type": "string"
           },
           "column": {
