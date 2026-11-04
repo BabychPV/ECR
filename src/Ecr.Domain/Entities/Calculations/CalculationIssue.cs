@@ -28,7 +28,7 @@ public sealed class CalculationIssue : Entity<long>
     /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
     /// <param name="rowKey">Ключ рядка.</param>
     /// <param name="rowNumber">Номер рядка, з 1.</param>
-    /// <param name="methodologyCode">Методологія прив'язки; <c>null</c> — невідома.</param>
+    /// <param name="methodologyId">Методологія прив'язки; <c>null</c> — невідома.</param>
     /// <param name="calculationRunId">Прогін, що виявив проблему.</param>
     /// <param name="detectedAt">Момент виявлення (UTC).</param>
     public CalculationIssue(
@@ -38,7 +38,7 @@ public sealed class CalculationIssue : Entity<long>
         long? sheetCopyId,
         string rowKey,
         int rowNumber,
-        string? methodologyCode,
+        int? methodologyId,
         long calculationRunId,
         DateTime detectedAt)
     {
@@ -51,7 +51,7 @@ public sealed class CalculationIssue : Entity<long>
         RowKey = rowKey;
         RowNumber = rowNumber;
         Kind = NoMatchingRuleKind;
-        MethodologyCode = methodologyCode;
+        MethodologyId = methodologyId;
         CalculationRunId = calculationRunId;
         DetectedAt = detectedAt;
     }
@@ -66,7 +66,8 @@ public sealed class CalculationIssue : Entity<long>
     public string RowKey { get; private set; } = null!;
     public int RowNumber { get; private set; }
     public string Kind { get; private set; } = null!;
-    public string? MethodologyCode { get; private set; }
+    /// <summary>Методологія (не версія) прив'язки таблиці; <c>null</c> — невідома.</summary>
+    public int? MethodologyId { get; private set; }
     public long CalculationRunId { get; private set; }
     public DateTime DetectedAt { get; private set; }
 }

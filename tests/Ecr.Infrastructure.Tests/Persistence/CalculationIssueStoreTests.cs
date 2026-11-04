@@ -61,7 +61,7 @@ public sealed class CalculationIssueStoreTests(SqlServerFixture sql)
 
         // Проблема копії записана напряму (екземпляр копії вимагає ланцюга DocumentSheet, тут не потрібного).
         db.CalculationIssues.Add(new CalculationIssue(
-            f.Document.DocumentId, f.Period, f.Document.TableDefId, sheetCopyId: 77, "RC", 9, "M1", run, T0));
+            f.Document.DocumentId, f.Period, f.Document.TableDefId, sheetCopyId: 77, "RC", 9, null, run, T0));
         await db.SaveChangesAsync();
 
         await store.ReplaceAsync(run, [table], [Issue(table, 1)], CancellationToken.None);
@@ -97,6 +97,28 @@ public sealed class CalculationIssueStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Код_методології_у_читанні_це_код_методології_а_не_мітка_версії()
+    {
+        var f = await PurgeKit.ArrangeAsync(sql, 202703);
+        await using var db = f.Builder.CreateContext();
+        var run = await PurgeKit.AddRunAsync(db, f, "Running", T0);
+        var store = new CalculationIssueStore(db, new TestClock(T0));
+        var table = f.Document.TableInstanceId;
+        var code = await db.Methodologies.AsNoTracking().Where(m => m.Id == f.MethodologyId).Select(m => m.Code).SingleAsync();
+        var label = await db.MethodologyVersions.AsNoTracking().Where(v => v.Id == f.VersionId).Select(v => v.Version).SingleAsync();
+
+        await store.ReplaceAsync(run, [table], [Issue(table, 1, f.MethodologyId), Issue(table, 2)], CancellationToken.None);
+        await db.SaveChangesAsync();
+
+        var rows = await store.ListAsync(f.Document.DocumentId, f.Period, null, CancellationToken.None);
+        Assert.Equal(code, rows.Single(r => r.RowNumber == 1).MethodologyCode);
+        Assert.NotEqual(label, rows.Single(r => r.RowNumber == 1).MethodologyCode);
+        Assert.Null(rows.Single(r => r.RowNumber == 2).MethodologyCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Читання_проблем_це_одна_SQL_команда()
     {
         var f = await PurgeKit.ArrangeAsync(sql, 202702);
@@ -119,8 +141,8 @@ public sealed class CalculationIssueStoreTests(SqlServerFixture sql)
         Assert.Equal(1, counter.Tally.Snapshot().Total);
     }
 
-    private static CalculationIssueInput Issue(long tableInstanceId, int row)
-        => new(tableInstanceId, row, $"R{row}", "M1");
+    private static CalculationIssueInput Issue(long tableInstanceId, int row, int? methodologyId = null)
+        => new(tableInstanceId, row, $"R{row}", methodologyId);
 
     private static async Task<List<int>> RowNumbersAsync(CalculationIssueStore store, PurgeStand f, long? copy)
         => [.. (await store.ListAsync(f.Document.DocumentId, f.Period, copy, CancellationToken.None))

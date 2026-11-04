@@ -48,8 +48,8 @@ public interface ICalculationIssueStore
 /// <param name="TableInstanceId">Екземпляр таблиці.</param>
 /// <param name="RowNumber">Номер рядка, з 1.</param>
 /// <param name="RowKey">Ключ рядка.</param>
-/// <param name="MethodologyCode">Методологія прив'язки; <c>null</c> — невідома.</param>
-public sealed record CalculationIssueInput(long TableInstanceId, int RowNumber, string RowKey, string? MethodologyCode);
+/// <param name="MethodologyId">Методологія прив'язки; <c>null</c> — невідома.</param>
+public sealed record CalculationIssueInput(long TableInstanceId, int RowNumber, string RowKey, int? MethodologyId);
 
 /// <summary>Збережена проблема для читання.</summary>
 /// <param name="TableDefId">Таблиця шаблону (для видимості).</param>
@@ -58,7 +58,7 @@ public sealed record CalculationIssueInput(long TableInstanceId, int RowNumber, 
 /// <param name="RowNumber">Номер рядка, з 1.</param>
 /// <param name="RowKey">Ключ рядка.</param>
 /// <param name="Kind">Вид проблеми.</param>
-/// <param name="MethodologyCode">Методологія; <c>null</c> — невідома.</param>
+/// <param name="MethodologyCode">Код методології (з <c>cfg.Methodology</c>, не мітка версії); <c>null</c> — невідома.</param>
 /// <param name="DetectedAt">Коли виявлено (UTC).</param>
 public sealed record CalculationIssueRow(
     int TableDefId,

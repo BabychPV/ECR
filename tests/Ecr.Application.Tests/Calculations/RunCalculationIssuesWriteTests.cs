@@ -26,14 +26,14 @@ public sealed class RunCalculationIssuesWriteTests
         var (handler, issues) = Arrange(supersededSelf: false);
         var profile = new ModuleProfile();
         profile.RecordEvaluatedTables([10, 11]);
-        profile.RecordUnmatched([new UnmatchedRow(10, 2, "R2", 900, "M1")]);
+        profile.RecordUnmatched([new UnmatchedRow(10, 2, "R2", 900, 7)]);
 
         await handler.CompleteAsync(RunId, profile, CancellationToken.None);
 
         await issues.Received(1).ReplaceAsync(
             RunId,
             Arg.Is<IReadOnlyCollection<long>>(t => t.Order().SequenceEqual(new long[] { 10, 11 })),
-            Arg.Is<IReadOnlyCollection<CalculationIssueInput>>(i => i.Single().RowKey == "R2" && i.Single().MethodologyCode == "M1"),
+            Arg.Is<IReadOnlyCollection<CalculationIssueInput>>(i => i.Single().RowKey == "R2" && i.Single().MethodologyId == 7),
             Arg.Any<CancellationToken>());
     }
 
