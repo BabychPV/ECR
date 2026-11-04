@@ -27,6 +27,7 @@ public sealed class TableDiscussionStoreTests(SqlServerFixture sql, ITestOutputH
     private const int Tables = 150;
     private const int PerTable = 200;
     private static readonly int[] FirstQuarter = [202601, 202602, 202603];
+    private const int TablesPerChunk = 50;
     private const long CopyOne = 9_000_001;
     private const long CopyTwo = 9_000_002;
 
@@ -167,15 +168,23 @@ public sealed class TableDiscussionStoreTests(SqlServerFixture sql, ITestOutputH
         await using var conn = new SqlConnection(sql.ConnectionString);
         await conn.OpenAsync().ConfigureAwait(true);
         await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 120;
+        cmd.CommandTimeout = 300;
         cmd.CommandText = $"""
-            ;WITH n AS (SELECT TOP ({PerTable}) ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS i FROM sys.all_objects a CROSS JOIN sys.all_objects b),
-                  t AS (SELECT TOP ({Tables}) ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS i FROM sys.all_objects a CROSS JOIN sys.all_objects b)
-            INSERT INTO doc.TableDiscussionMessage (DocumentId, TableDefCode, SheetCopyKey, PeriodKey, AuthorUserId, Body, CreatedAt)
-            SELECT @doc, CONCAT('T', RIGHT(CONCAT('000', t.i), 3)), @copy, 202601 + (n.i % 12),
-                   CASE WHEN n.i % 2 = 0 THEN @me ELSE @other END,
-                   REPLICATE(N'повідомлення ', 10), DATEADD(minute, n.i, '2026-01-01')
-            FROM t CROSS JOIN n;
+            -- Порціями по {TablesPerChunk} таблиць (= {TablesPerChunk * PerTable} рядків) з CHECKPOINT: журнал тестової бази
+            -- інакше розростається і валить TestDatabaseSizeTests.
+            DECLARE @from int = 1;
+            WHILE @from <= {Tables}
+            BEGIN
+                ;WITH n AS (SELECT TOP ({PerTable}) ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS i FROM sys.all_objects a CROSS JOIN sys.all_objects b),
+                      t AS (SELECT TOP ({TablesPerChunk}) @from - 1 + ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS i FROM sys.all_objects a CROSS JOIN sys.all_objects b)
+                INSERT INTO doc.TableDiscussionMessage (DocumentId, TableDefCode, SheetCopyKey, PeriodKey, AuthorUserId, Body, CreatedAt)
+                SELECT @doc, CONCAT('T', RIGHT(CONCAT('000', t.i), 3)), @copy, 202601 + (n.i % 12),
+                       CASE WHEN n.i % 2 = 0 THEN @me ELSE @other END,
+                       REPLICATE(N'повідомлення ', 10), DATEADD(minute, n.i, '2026-01-01')
+                FROM t CROSS JOIN n WHERE t.i <= {Tables};
+                SET @from += {TablesPerChunk};
+                CHECKPOINT;
+            END;
 
             INSERT INTO doc.TableDiscussion (DocumentId, TableDefCode, SheetCopyKey, Revision, MessageCount, LastMessageId, LastMessageAt)
             SELECT DocumentId, TableDefCode, SheetCopyKey, COUNT(*), COUNT(*), MAX(Id), MAX(CreatedAt)
@@ -194,11 +203,18 @@ public sealed class TableDiscussionStoreTests(SqlServerFixture sql, ITestOutputH
         await conn.OpenAsync().ConfigureAwait(true);
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
+        // Порціями з CHECKPOINT - з тієї ж причини, що й вставка.
         cmd.CommandText = """
             DELETE FROM doc.TableDiscussionMention WHERE DocumentId = @doc;
             DELETE FROM doc.TableDiscussionRead WHERE DocumentId = @doc;
-            DELETE FROM doc.TableDiscussionMessage WHERE DocumentId = @doc;
+            WHILE 1 = 1
+            BEGIN
+                DELETE TOP (10000) FROM doc.TableDiscussionMessage WHERE DocumentId = @doc;
+                IF @@ROWCOUNT = 0 BREAK;
+                CHECKPOINT;
+            END;
             DELETE FROM doc.TableDiscussion WHERE DocumentId = @doc;
+            CHECKPOINT;
             """;
         cmd.Parameters.AddWithValue("@doc", documentId);
         await cmd.ExecuteNonQueryAsync().ConfigureAwait(true);
