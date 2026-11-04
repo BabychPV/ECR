@@ -131,12 +131,17 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         // 5. Число НЕ людське: зріз віддає заборону на цю комірку саме як
         //    `CalculatedCell`, а спроба записати в неї відхиляється. Без цих
         //    двох перевірок 6.5 могло б бути чим завгодно, що туди поклали.
-        var permissions = (await ReadSliceAsync(admin.Client, doc.DocumentId, tableInstanceId))
-            .GetProperty("cellPermissions");
+        //    HSE401: ключ `CalculatedCell` на кожну комірку колонки формули зрізом більше не віддається - клієнт виводить
+        //    його з ТИПУ колонки (`permissions.ts`), тож доказ тепер: колонка C у зрізі має тип Formula/Calculated, а
+        //    ключа заборони, відмінного від CalculatedCell, на ній немає.
+        var slice = await ReadSliceAsync(admin.Client, doc.DocumentId, tableInstanceId);
+        var permissions = slice.GetProperty("cellPermissions");
+        var columnC = slice.GetProperty("columns").EnumerateArray()
+            .Single(c => string.Equals(c.GetProperty("code").GetString(), "C", StringComparison.Ordinal));
         Assert.True(
-            permissions.TryGetProperty($"{rowKey}:C", out var reason)
-            && string.Equals(reason.GetString(), "CalculatedCell", StringComparison.Ordinal),
-            $"зріз не позначив C як обчислену системою: {permissions.GetRawText()}");
+            columnC.GetProperty("dataType").GetString() is "Formula" or "Calculated"
+            && !permissions.TryGetProperty($"{rowKey}:C", out _),
+            $"зріз не позначив C як обчислену системою: {columnC.GetRawText()}; {permissions.GetRawText()}");
 
         var manualWrite = await TryWriteCalculatedAsync(
             admin.Client, doc.DocumentId, tableInstanceId, doc.PeriodKey, rowKey);
