@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type APIResponse, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { ensureNaeTree, ensureSubstances } from './airScope';
 import { buildXlsx, type Cell } from './airXlsx';
 
 /**
@@ -162,6 +163,12 @@ test.describe('NAE tree manual', () => {
     admin = await playwright.request.newContext(baseURL === undefined ? {} : { baseURL });
     await login(admin, Admin);
     await ensureLandRegion(admin);
+    // Район вузла - вибір зі списку AIR_AREA (OFFSHORE/ONSHORE), а його створює провізіонування AIR. Окремий прогін спеку
+    // (без airLimitsReal/airParams перед ним) інакше не має AIR_AREA. Провізіонування ідемпотентне; без NAE_TREE і довідника
+    // речовин сервер відмовляє 422 sharedRegistryUnknown - їх заводять ті самі помічники, що й у специфікаціях AIR.
+    await ensureNaeTree(admin);
+    await ensureSubstances(admin);
+    await ok(await admin.post('/api/v1/air-limits/provision'), 'провізіонування AIR (AIR_AREA)');
 
     const before = await treeNodes(admin);
     initialIds = new Set(before.map((node) => node.id));
