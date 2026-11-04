@@ -140,6 +140,7 @@ public static class DependencyInjection
         services.AddScoped<ITableDiscussionStore, TableDiscussionStore>();
         services.AddScoped<ISheetChangeStore, SheetChangeStore>();
         services.AddScoped<IApprovalQueueStore, ApprovalQueueStore>();
+        services.AddScoped<IStepApproverStore, StepApproverStore>();
         services.AddScoped<IColumnDefSearchStore, ColumnDefSearchStore>();
         services.AddScoped<ISearchStore, SearchStore>();
         services.AddScoped<IValidationResultStore, ValidationResultStore>();

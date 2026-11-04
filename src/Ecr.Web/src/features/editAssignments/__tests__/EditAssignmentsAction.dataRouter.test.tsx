@@ -18,6 +18,7 @@ const Document: DocumentSummary = {
   sheetCount: 1,
   sheetStates: { GEN: 'Draft' },
   hasLateEdits: false,
+  stepApproverNamesTruncated: false,
   ownerDisplayName: 'Owner Olena',
   canManageEditAccess: true,
 };

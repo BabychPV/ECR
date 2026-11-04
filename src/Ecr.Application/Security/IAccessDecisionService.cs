@@ -18,6 +18,10 @@ namespace Ecr.Application.Security;
 public sealed record ApprovalStepView(
     int StepId, int Ordinal, int RoleId, int? NextStepId, int TotalSteps);
 
+/// <summary>Роль поточного кроку, відома викликачу наперед (AN-59): маршрут не читається вдруге.</summary>
+/// <param name="RoleId">Роль кроку; <c>null</c> — маршруту немає, затвердження одноетапне.</param>
+public sealed record KnownStepRole(int? RoleId);
+
 /// <summary>Доступ до рядка, якого ще немає.</summary>
 /// <param name="Row">
 /// Рішення без огляду на колонку: період, проєкт, аркуш, вікно доступу, грант
@@ -304,6 +308,68 @@ public interface IAccessDecisionService
     /// <summary>Чи може користувач затвердити аркуш за період.</summary>
     public Task<EditDecision> CanApproveAsync(
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// AN-59: профілі кількох користувачів одним пакетом (стала кількість звернень до бази, а не за користувача). Профіль
+    /// той самий, що й <see cref="BuildProfileAsync"/>; вимкнений чи відсутній користувач у результаті відсутній.
+    /// </summary>
+    /// <param name="userIds">Користувачі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>⚠ Типова реалізація (тестові обгортки) — цикл поштучних; справжня служба читає пакетом.</remarks>
+    public async Task<IReadOnlyDictionary<int, AccessProfile>> BuildProfilesAsync(
+        IReadOnlyCollection<int> userIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(userIds);
+
+        var result = new Dictionary<int, AccessProfile>();
+        foreach (var id in userIds.Distinct())
+        {
+            try
+            {
+                result[id] = await BuildProfileAsync(id, ct).ConfigureAwait(false);
+            }
+            catch (Errors.AccessDeniedException)
+            {
+                // Вимкнений обліковий запис профілю не має.
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// AN-59: <see cref="SheetCopyAccess.CanApproveOfAsync"/> для КІЛЬКОХ профілів одного аркуша (копії) — те саме
+    /// рішення на кожен профіль, але умови аркуша й крок маршруту читаються раз, а залежне від профілю — множинними
+    /// запитами. Результат — у порядку <paramref name="profiles"/>.
+    /// </summary>
+    /// <param name="profiles">Профілі.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія; <c>null</c> — оригінал.</param>
+    /// <param name="knownStep">
+    /// Роль поточного кроку, уже відома викликачу (він обчислив її тим самим маршрутом, ApprovalRoute.StepAt), — щоб не
+    /// читати маршрут вдруге; <c>null</c> — крок читається тут.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Поштучне <see cref="CanApproveAsync"/> справжньої служби і є цим методом з одним профілем (тест еквівалентності
+    /// <c>CanApproveManyEquivalenceTests</c>). Типова реалізація — цикл поштучних.
+    /// </remarks>
+    public async Task<IReadOnlyList<EditDecision>> CanApproveManyAsync(
+        IReadOnlyList<AccessProfile> profiles, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId,
+        KnownStepRole? knownStep, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profiles);
+
+        var result = new List<EditDecision>(profiles.Count);
+        foreach (var profile in profiles)
+        {
+            result.Add(await this.CanApproveOfAsync(profile, documentId, sheetDefId, periodKey, sheetCopyId, ct).ConfigureAwait(false));
+        }
+
+        return result;
+    }
 
     /// <summary>Чи може користувач повернути поданий/затверджений аркуш у <c>Draft</c>.</summary>
     /// <remarks>

@@ -247,6 +247,28 @@ public static class DocumentSheetVisibility
                || sheetCodes.Any(c => !scope.CanReadSheetCode(c));
     }
 
+    /// <summary>
+    /// RS: коди аркушів складу документа; ключ копії в `Sheets`/`SheetStates` — «КОД#sheetCopyId», а межі читача діють за
+    /// КОДОМ аркуша шаблону.
+    /// </summary>
+    private static IReadOnlyList<string> IncludedCodes(DocumentSummary document)
+        => document.IncludedSheetCodes
+           ?? [.. (document.Sheets ?? []).Select(s => SheetCopyNaming.CodeOfStateKey(s.Code))];
+
+    /// <summary>
+    /// Чи читач ЗВУЖЕНИЙ для цього документа — та сама умова, що обнуляє автора й «хто затвердив» у <see cref="For"/>
+    /// (AN-59: за нею ж ховаються імена погоджувачів кроку).
+    /// </summary>
+    /// <param name="document">Документ зі сховища (до звуження).</param>
+    /// <param name="scope">Межі читання його проєкту (або надання учасника).</param>
+    public static bool IsNarrowedFor(DocumentSummary document, DocumentReadScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        return IsNarrowed(scope, IncludedCodes(document));
+    }
+
     /// <summary>Залишає читачеві лише видимі аркуші; лічильники звуженого читача — <c>null</c>.</summary>
     /// <param name="document">Документ зі сховища.</param>
     /// <param name="scope">Межі читання його проєкту.</param>
@@ -255,9 +277,7 @@ public static class DocumentSheetVisibility
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(scope);
 
-        // RS: ключ копії в `Sheets`/`SheetStates` — «КОД#sheetCopyId»; межі читача діють за КОДОМ аркуша шаблону.
-        var included = document.IncludedSheetCodes
-                       ?? [.. (document.Sheets ?? []).Select(s => SheetCopyNaming.CodeOfStateKey(s.Code))];
+        var included = IncludedCodes(document);
         var visibleSheets = (document.Sheets ?? [])
             .Where(s => scope.CanReadSheetCode(SheetCopyNaming.CodeOfStateKey(s.Code)))
             .ToList();

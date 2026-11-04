@@ -582,14 +582,27 @@ public sealed class ListDocumentsHandler(
 
 /// <summary>Документ і стан його аркушів. Право <c>Document.View</c>.</summary>
 public sealed class GetDocumentHandler(
-    IDocumentStore documents, IAccessDecisionService access, ICurrentUser currentUser)
+    IDocumentStore documents, IAccessDecisionService access, ICurrentUser currentUser,
+    StepApproversResolver? stepApprovers = null)
 {
     /// <summary>Повертає документ; <c>null</c> — не існує або невидимий.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період для стану аркушів.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<DocumentSummary?> HandleAsync(
+    public Task<DocumentSummary?> HandleAsync(
         long documentId, int? periodKey, CancellationToken ct)
+        => HandleAsync(documentId, periodKey, includeStepApprovers: false, ct);
+
+    /// <summary>Повертає документ; <c>null</c> — не існує або невидимий.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період для стану аркушів.</param>
+    /// <param name="includeStepApprovers">
+    /// AN-59 (D-466): заповнити <c>StepApproverNames</c> — лише для картки одного документа
+    /// (<c>GET /documents/{id}</c>); решта споживачів цього обробника (історія, версії, активність) платити не мусять.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<DocumentSummary?> HandleAsync(
+        long documentId, int? periodKey, bool includeStepApprovers, CancellationToken ct)
     {
         var profile = await ListDocumentsHandler
             .ProfileAsync(access, currentUser, ListDocumentsHandler.Permission, ct)
@@ -645,10 +658,34 @@ public sealed class GetDocumentHandler(
 
         // EA-C: рішення сервера для пункту меню «Доступ до редагування»; автор береться з сховища, а не з
         // OwnerUserId відповіді (той null для звуженого читача).
-        return narrowed with
+        var result = narrowed with
         {
             CanManageEditAccess = EditAssignments.EditAssignmentAccess.CanManage(
                 profile, document.ProjectId, document.OwnerUserId ?? 0, document.ProjectIsReadOnly),
         };
+
+        // ✎ AN-59 (D-466): «хто може діяти на поточному кроці» — лише картка, лише з періодом і лише коли є поданий аркуш
+        // (або копія) у НЕЗВУЖЕНОМУ документі. ⛔ Звужений читач (та сама умова, що ховає автора) — null: імена людей
+        // не віддаємо там, де документ показано частково; склад кроку не рахується взагалі (ні запитів, ні витоку).
+        if (!includeStepApprovers || stepApprovers is null || periodKey is not { } period
+            || !(document.Sheets ?? []).Any(s => string.Equals(s.State, nameof(DocumentStatus.Submitted), StringComparison.Ordinal)))
+        {
+            return result;
+        }
+
+        if (DocumentSheetVisibility.HasRestrictions(profile))
+        {
+            var scope = (await DocumentSheetVisibility
+                .ScopesAsync(access, profile, [(document.ProjectId, document.Id)], periodKey, ct)
+                .ConfigureAwait(false))[document.ProjectId];
+            if (DocumentSheetVisibility.IsNarrowedFor(document, scope))
+            {
+                return result;
+            }
+        }
+
+        var (names, truncated) = await stepApprovers.ResolveAsync(document.Id, period, ct).ConfigureAwait(false);
+
+        return result with { StepApproverNames = names, StepApproverNamesTruncated = truncated };
     }
 }
