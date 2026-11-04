@@ -64,7 +64,7 @@ public sealed record NaeTreePlan(IReadOnlyList<NaeTreeNodePlan> Nodes, IReadOnly
 /// <item>REGION / AREA come from the <c>Region</c> / <c>On_Offshore</c> attributes, not from path names;</item>
 /// <item>SITE is the first path segment between the root (after the leading region / area / "Air" segments) and the NAE, EQUIP is
 /// the last one when there are two or more (more than two: warning <c>pathFlattened</c>);</item>
-/// <item>an NAE with no SITE segment is skipped (<c>noSite</c>): SITE is a required level, a synthetic site would be invented data.</item>
+/// <item>an NAE with no SITE segment hangs straight under its area / region (SITE is optional since 04.11).</item>
 /// </list>
 /// </remarks>
 public static class NaeAfTreeBuilder
@@ -135,12 +135,6 @@ public static class NaeAfTreeBuilder
             }
 
             var middle = RelativeMiddle(segments, rootName, region, area);
-            if (middle.Count == 0)
-            {
-                issues.Add(new NaeAfIssueDto("skipped", "noSite", element.Path, "No site element between the root and the NAE."));
-                continue;
-            }
-
             if (middle.Count > 2)
             {
                 issues.Add(new NaeAfIssueDto(
@@ -148,24 +142,28 @@ public static class NaeAfTreeBuilder
             }
 
             var regionKey = $"R|{region}";
-            Ensure(nodes, usedCodes, regionKey, null, NaeTreeSchema.LevelRegion, "R_" + region, NaeCodeNormalizer.Clean(element.Region));
+            Ensure(nodes, usedCodes, regionKey, null, NaeTreeSchema.LevelRegion, "R_" + region, NaeCodeNormalizer.Clean(element.Region), (NaeTreeSchema.RegionField, region));
 
             var parentKey = regionKey;
             var areaTag = area == NoArea ? "NA" : area;
             if (area != NoArea)
             {
                 var areaKey = $"A|{region}|{area}";
-                Ensure(nodes, usedCodes, areaKey, parentKey, NaeTreeSchema.LevelArea, $"A_{region}_{area}", areaRaw);
+                Ensure(nodes, usedCodes, areaKey, parentKey, NaeTreeSchema.LevelArea, $"A_{region}_{area}", areaRaw, (NaeTreeSchema.AreaField, area));
                 parentKey = areaKey;
             }
 
-            var siteKey = $"S|{region}|{area}|{Upper(middle[0])}";
-            Ensure(nodes, usedCodes, siteKey, parentKey, NaeTreeSchema.LevelSite, $"S_{region}_{areaTag}_{Upper(middle[0])}", middle[0]);
-            parentKey = siteKey;
+            // No grouping element between the area/region and the NAE: it hangs straight under it (SITE is optional, 04.11).
+            if (middle.Count > 0)
+            {
+                var siteKey = $"S|{region}|{area}|{Upper(middle[0])}";
+                Ensure(nodes, usedCodes, siteKey, parentKey, NaeTreeSchema.LevelSite, $"S_{region}_{areaTag}_{Upper(middle[0])}", middle[0]);
+                parentKey = siteKey;
+            }
 
             if (middle.Count > 1)
             {
-                var equipKey = $"{siteKey}|G|{Upper(middle[^1])}";
+                var equipKey = $"{parentKey}|G|{Upper(middle[^1])}";
                 Ensure(nodes, usedCodes, equipKey, parentKey, NaeTreeSchema.LevelEquipment, $"G_{region}_{areaTag}_{Upper(middle[0])}_{Upper(middle[^1])}", middle[^1]);
                 parentKey = equipKey;
             }
@@ -243,11 +241,19 @@ public static class NaeAfTreeBuilder
         string? parentKey,
         string level,
         string codeBase,
-        string display)
+        string display,
+        (string Field, string Value)? own = null)
     {
         if (nodes.ContainsKey(key))
         {
             return;
+        }
+
+        // AN-158: a REGION/AREA node stores its OWN code, so sources below never fall back to a code derived from the technical one.
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (own is { Value.Length: > 0 } o)
+        {
+            fields[o.Field] = o.Value;
         }
 
         nodes[key] = new NaeTreeNodePlan(
@@ -256,7 +262,7 @@ public static class NaeAfTreeBuilder
             level,
             UniqueCode(codeBase, key, usedCodes),
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["en"] = display },
-            new Dictionary<string, string>(StringComparer.Ordinal),
+            fields,
             0);
 }
 
@@ -284,6 +290,18 @@ public static class NaeAfTreeBuilder
 
         return code;
     }
+
+    /// <summary>The text has at least one letter or digit (an all-<c>_</c> code carries no information).</summary>
+    internal static bool HasMeaning(string? text) => text is not null && text.Any(char.IsLetterOrDigit);
+
+    /// <summary>
+    /// Region/area part of a MANUAL technical code (AN-158): the code table allows ASCII only, so a part typed in Cyrillic would
+    /// become a run of <c>_</c>; it is replaced by the 8-hex hash of the text (readable, unique, stable) instead.
+    /// </summary>
+    internal static string ReadablePart(string upper)
+        => upper.Length > 0 && !upper.Any(char.IsAsciiLetterOrDigit) && HasMeaning(upper)
+            ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(upper)))[..8]
+            : upper;
 
     private static List<string> Segments(string? path)
         => (path ?? "").Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();

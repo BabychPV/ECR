@@ -50,7 +50,7 @@ public sealed class GetAirScopeCodesHandler(
 
         // Region code of a REGION node: its RegionCode, else its technical code without "R_".
         string RegionOf(Domain.Entities.Dictionaries.RegistryEntry e)
-            => AirLimitsSchema.NormalizeScope(regionValues.GetValueOrDefault(e.Id) is { Length: > 0 } r ? r : Strip(e.Code, "R_"), "");
+            => NaeTreeSchema.Meaningful(AirLimitsSchema.NormalizeScope(regionValues.GetValueOrDefault(e.Id) is { Length: > 0 } r ? r : Strip(e.Code, "R_"), ""));
 
         var regions = new SortedDictionary<string, (string? Name, SortedDictionary<string, string?> Areas, bool LooseSources)>(StringComparer.Ordinal);
         (string? Name, SortedDictionary<string, string?> Areas, bool LooseSources) RegionSlot(string code)
@@ -94,8 +94,13 @@ public sealed class GetAirScopeCodesHandler(
                 region = AirLimitsSchema.NormalizeScope(regionValues.GetValueOrDefault(e.Id), "");
             }
 
-            var area = AirLimitsSchema.NormalizeScope(
-                areaValues.GetValueOrDefault(e.Id) is { Length: > 0 } a ? a : Strip(Strip(e.Code, "A_"), region + "_"), AirLimitsSchema.NoArea);
+            var area = NaeTreeSchema.Meaningful(AirLimitsSchema.NormalizeScope(
+                areaValues.GetValueOrDefault(e.Id) is { Length: > 0 } a ? a : Strip(Strip(e.Code, "A_"), region + "_"), AirLimitsSchema.NoArea));
+            if (area.Length == 0)
+            {
+                area = AirLimitsSchema.NoArea;
+            }
+
             if (region.Length > 0 && area != AirLimitsSchema.NoArea)
             {
                 RegionSlot(region).Areas[area] = Name(e);

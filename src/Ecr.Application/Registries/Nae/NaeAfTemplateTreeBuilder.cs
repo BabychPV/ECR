@@ -137,11 +137,13 @@ internal static class NaeAfTemplateTreeBuilder
                 region = NaeAfTreeBuilder.Upper(name);
                 key = $"R|{region}";
                 codeBase = "R_" + region;
+                fields[NaeTreeSchema.RegionField] = region;
                 break;
             case NaeTreeSchema.LevelArea:
                 area = NaeAfTreeBuilder.Upper(name);
                 key = $"A|{region}|{area}";
                 codeBase = $"A_{region}_{area}";
+                fields[NaeTreeSchema.AreaField] = area;
                 break;
             case NaeTreeSchema.LevelSite:
                 site = parent?.Level == NaeTreeSchema.LevelSite ? $"{parent.Site}_{NaeAfTreeBuilder.Upper(name)}" : NaeAfTreeBuilder.Upper(name);

@@ -111,7 +111,10 @@ public sealed class NaeNodeTypesTests
     [InlineData(null, "REGION", true)]
     [InlineData(null, "SITE", false)]
     [InlineData("REGION", "SITE", true)]
-    [InlineData("REGION", "SRC", false)]
+    [InlineData("REGION", "SRC", true)]
+    [InlineData("AREA", "EQUIP", true)]
+    [InlineData("AREA", "SRC", true)]
+    [InlineData("REGION", "EQUIP", true)]
     [InlineData("SITE", "SITE", true)]
     [InlineData("EQUIP", "EQUIP", false)]
     [InlineData("AREA", "AREA", false)]
@@ -188,7 +191,7 @@ public sealed class NaeNodeTypesTests
             new NaeAfSnapshot(
             [
                 El(@"Atyrau", "Air_Region"),
-                El(@"Atyrau\1001", "Equipment"),                // SRC directly under REGION skips the required SITE
+                El(@"Atyrau\1001", "Equipment"),                // SRC directly under REGION is valid since SITE is optional (04.11)
                 El(@"Atyrau\Site", "Air_Area"),
                 El(@"Atyrau\Site\Odd", "Something_Else"),       // unknown template
                 El(@"Atyrau\Site\Odd\1002", "Equipment"),       // below a skipped element
@@ -200,9 +203,9 @@ public sealed class NaeNodeTypesTests
             Root);
 
         Assert.Equal(
-            ["levelOrder", "levelOrder", "parentSkipped", "unknownTemplate"],
+            ["levelOrder", "parentSkipped", "unknownTemplate"],
             plan.Issues.Select(i => i.Code).Order().ToArray());
-        Assert.Equal(["N_ATYRAU_NA_1003"], plan.Nodes.Where(n => n.LevelCode == "SRC").Select(n => n.Code).ToArray());
+        Assert.Equal(["N_ATYRAU_NA_1001", "N_ATYRAU_NA_1003"], plan.Nodes.Where(n => n.LevelCode == "SRC").Select(n => n.Code).Order().ToArray());
     }
 
     private static NaeAfElement El(string relative, string? template, string? en = null)

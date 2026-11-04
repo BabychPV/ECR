@@ -85,12 +85,6 @@ public static class NaeSheetTreeBuilder
 
             var siteText = Cell(NaeTreeImportLayout.Site);
             var equipText = Cell(NaeTreeImportLayout.Equipment);
-            if (siteText is null && (equipText is not null || codeText is not null))
-            {
-                issues.Add(Error("siteRequired", row, NaeTreeImportLayout.Site, codeText, "Equipment and NAE need a site (a required level)."));
-                continue;
-            }
-
             string? naeCode = null;
             if (codeText is not null)
             {
@@ -118,22 +112,27 @@ public static class NaeSheetTreeBuilder
             var names = Names(Cell(NaeTreeImportLayout.NameEn), Cell(NaeTreeImportLayout.NameRu), Cell(NaeTreeImportLayout.NameKz));
 
             var regionKey = $"R|{region}";
-            var deepest = Ensure(nodes, rowOf, usedCodes, regionKey, null, NaeTreeSchema.LevelRegion, "R_" + region, regionText, row);
+            var deepest = Ensure(nodes, rowOf, usedCodes, regionKey, null, NaeTreeSchema.LevelRegion, "R_" + region, regionText, row, (NaeTreeSchema.RegionField, region));
             if (area != NaeAfTreeBuilder.NoArea)
             {
-                deepest = Ensure(nodes, rowOf, usedCodes, $"A|{region}|{area}", deepest, NaeTreeSchema.LevelArea, $"A_{region}_{area}", areaRaw!, row);
+                deepest = Ensure(nodes, rowOf, usedCodes, $"A|{region}|{area}", deepest, NaeTreeSchema.LevelArea, $"A_{region}_{area}", areaRaw!, row, (NaeTreeSchema.AreaField, area));
             }
 
+            // SITE is optional (human 04.11): an equipment group / NAE hangs straight under the area (or region) without it.
+            var siteKey = $"S|{region}|{area}";
+            var siteTag = "";
             if (siteText is not null)
             {
                 var site = NaeAfTreeBuilder.Upper(siteText);
-                var siteKey = $"S|{region}|{area}|{site}";
+                siteKey = $"S|{region}|{area}|{site}";
+                siteTag = "_" + site;
                 deepest = Ensure(nodes, rowOf, usedCodes, siteKey, deepest, NaeTreeSchema.LevelSite, $"S_{region}_{areaTag}_{site}", siteText, row);
-                if (equipText is not null)
-                {
-                    var equip = NaeAfTreeBuilder.Upper(equipText);
-                    deepest = Ensure(nodes, rowOf, usedCodes, $"{siteKey}|G|{equip}", deepest, NaeTreeSchema.LevelEquipment, $"G_{region}_{areaTag}_{site}_{equip}", equipText, row);
-                }
+            }
+
+            if (equipText is not null)
+            {
+                var equip = NaeAfTreeBuilder.Upper(equipText);
+                deepest = Ensure(nodes, rowOf, usedCodes, $"{siteKey}|G|{equip}", deepest, NaeTreeSchema.LevelEquipment, $"G_{region}_{areaTag}{siteTag}_{equip}", equipText, row);
             }
 
             if (naeCode is null)
@@ -257,17 +256,25 @@ public static class NaeSheetTreeBuilder
         string level,
         string codeBase,
         string display,
-        int row)
+        int row,
+        (string Field, string Value)? own = null)
     {
         if (!nodes.ContainsKey(key))
         {
+            // AN-158: a REGION/AREA node stores its own code field.
+            var fields = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (own is { Value.Length: > 0 } o)
+            {
+                fields[o.Field] = o.Value;
+            }
+
             nodes[key] = new NaeTreeNodePlan(
                 key,
                 parentKey,
                 level,
                 NaeAfTreeBuilder.UniqueCode(codeBase, key, usedCodes),
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["en"] = NaeCodeNormalizer.Clean(display) },
-                new Dictionary<string, string>(StringComparer.Ordinal),
+                fields,
                 0);
             rowOf[key] = row;
         }

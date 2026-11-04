@@ -9,6 +9,7 @@ import { lookupLabel, useLookupOptions } from '@/features/registries/rc812/data'
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { AreaSelect } from './AreaSelect';
 import { createNaeRoot, type CreateNaeRootRequest, type NaeRootResult } from './naeManualApi';
 
 /** Довідник регіонів, з якого вибирається корінь (його ж читає `seed-roots`). */
@@ -100,11 +101,11 @@ export function AddRegionModal({ opened, onClose, onAdded }: AddRegionModalProps
             data-nae-region=""
           />
         )}
-        <TextInput
+        <AreaSelect
           label={t('permits.nae.manual.area')}
           description={t('permits.nae.manual.areaHint')}
           value={areaCode}
-          onChange={(event) => setAreaCode(event.currentTarget.value)}
+          onChange={setAreaCode}
           data-nae-area=""
         />
         <Text size="sm" c="dimmed">

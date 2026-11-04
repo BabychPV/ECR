@@ -32033,7 +32033,7 @@ export interface components {
         };
         /** @description One finding of the Excel import of the NAE tree. */
         NaeTreeImportIssueDto: {
-            /** @description `headerNotFound`, `regionRequired`, `siteRequired`, `badCode`, `areaMismatch` (Area and On_Offshore
+            /** @description `headerNotFound`, `regionRequired`, `badCode`, `areaMismatch` (Area and On_Offshore
              *             differ), `duplicateInFile`, `existingElsewhere` (the business key belongs to a node under another parent),
              *             `codeTaken` (the technical code belongs to another node), `nameDiffers` (warning: the stored name differs; names are
              *             not overwritten). */

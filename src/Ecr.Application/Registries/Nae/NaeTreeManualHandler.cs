@@ -28,7 +28,8 @@ public sealed class NaeTreeManualHandler(
     NaeTreeNodeApplier applier,
     INaeTreeWorkbook workbook,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    Permits.AirLimits.AirLimitsSettings airSettings)
 {
     /// <summary>Permission to write the tree.</summary>
     public const string EditPermission = "Registry.EditData";
@@ -60,21 +61,28 @@ public sealed class NaeTreeManualHandler(
                 "ECR-REG-0422", "A region code is required.", new Dictionary<string, object?> { ["messageKey"] = RegionRequiredKey });
         }
 
-        var areaText = NaeCodeNormalizer.Clean(request.AreaCode);
-        var area = NaeAfTreeBuilder.Upper(areaText);
+        // The area is CHOSEN from the Area list (human 04.11): free text is refused, the list entry gives the code.
+        var (chosenArea, chosenName) = await NaeAreaChoice.ResolveAsync(registries, airSettings, request.AreaCode, ct).ConfigureAwait(false);
+        var areaText = chosenName is { Length: > 0 } listed ? NaeCodeNormalizer.Clean(listed) : chosenArea;
+        var area = chosenArea;
         var names = Names(request.NameEn, request.NameRu, request.NameKz);
 
+        // AN-158: the technical code allows ASCII only, so a non-ASCII part becomes its 8-hex hash (A_ATYRAU_3F2A91C0), not "_____";
+        // the node also stores its OWN code (RegionCode / AreaCode), which sources below inherit.
         var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var regionKey = $"R|{region}";
+        var regionPart = NaeAfTreeBuilder.ReadablePart(region);
         var nodes = new List<NaeTreeNodePlan>
         {
-            Group(regionKey, null, NaeTreeSchema.LevelRegion, NaeAfTreeBuilder.UniqueCode("R_" + region, regionKey, used), regionText, area.Length == 0 ? names : null),
+            Group(
+                regionKey, null, NaeTreeSchema.LevelRegion, NaeAfTreeBuilder.UniqueCode("R_" + regionPart, regionKey, used), regionText,
+                area.Length == 0 ? names : null, (NaeTreeSchema.RegionField, region)),
         };
         string? areaKey = null;
         if (area.Length > 0)
         {
             areaKey = $"A|{region}|{area}";
-            nodes.Add(Group(areaKey, regionKey, NaeTreeSchema.LevelArea, NaeAfTreeBuilder.UniqueCode($"A_{region}_{area}", areaKey, used), areaText, names));
+            nodes.Add(Group(areaKey, regionKey, NaeTreeSchema.LevelArea, NaeAfTreeBuilder.UniqueCode($"A_{regionPart}_{NaeAfTreeBuilder.ReadablePart(area)}", areaKey, used), areaText, names, (NaeTreeSchema.AreaField, area)));
         }
 
         var state = await LoadAsync(ct).ConfigureAwait(false);
@@ -144,7 +152,7 @@ public sealed class NaeTreeManualHandler(
 
             nodes.Add(new NaeTreeNodePlan(
                 key, null, NaeTreeSchema.LevelRegion, NaeAfTreeBuilder.UniqueCode("R_" + region, key, used), display,
-                new Dictionary<string, string>(StringComparer.Ordinal), nodes.Count + 1));
+                new Dictionary<string, string>(StringComparer.Ordinal) { [NaeTreeSchema.RegionField] = region }, nodes.Count + 1));
         }
 
         if (nodes.Count == 0)
@@ -458,7 +466,8 @@ public sealed class NaeTreeManualHandler(
     }
 
     private static NaeTreeNodePlan Group(
-        string key, string? parentKey, string level, string code, string codeText, Dictionary<string, string>? names)
+        string key, string? parentKey, string level, string code, string codeText, Dictionary<string, string>? names,
+        (string Field, string Value)? own = null)
     {
         var display = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["en"] = codeText };
         foreach (var (lang, text) in names ?? [])
@@ -466,7 +475,13 @@ public sealed class NaeTreeManualHandler(
             display[lang] = text;
         }
 
-        return new NaeTreeNodePlan(key, parentKey, level, code, display, new Dictionary<string, string>(StringComparer.Ordinal), 1);
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (own is { Value.Length: > 0 } o)
+        {
+            fields[o.Field] = o.Value;
+        }
+
+        return new NaeTreeNodePlan(key, parentKey, level, code, display, fields, 1);
     }
 
     private sealed record TreeState(

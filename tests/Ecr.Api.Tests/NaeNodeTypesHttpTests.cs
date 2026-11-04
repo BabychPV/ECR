@@ -490,7 +490,7 @@ public sealed class NaeNodeTypesHttpTests(SqlServerFixture sql)
             await db.Database.ExecuteSqlAsync($"UPDATE cfg.RegistryLevelDef SET AllowsSelfNesting = 0 WHERE RegistryDefId = {id}");
         }
 
-        using var upgraded = new EcrApiFactory(sql) { ExtraServices = s => s.AddSingleton(new AirLimitsSettings(code, "NO_SUBSTANCES_" + code)) };
+        using var upgraded = new EcrApiFactory(sql) { ExtraServices = s => s.AddSingleton(new AirLimitsSettings(code, "NO_SUBSTANCES_" + code, AreaRegistryCode: "NOAREAS_" + code)) };
         serverErrors = () => upgraded.ErrorsText;
         using var started = upgraded.CreateClient();
 
@@ -587,7 +587,7 @@ public sealed class NaeNodeTypesHttpTests(SqlServerFixture sql)
     private async Task<(HttpClient Client, string Code, EcrApiFactory App)> TreeAsync()
     {
         var code = $"NAEN{Guid.NewGuid():N}"[..14].ToUpperInvariant();
-        var app = new EcrApiFactory(sql) { ExtraServices = s => s.AddSingleton<INaeAfReader>(new FakeAf(Standard())) };
+        var app = new EcrApiFactory(sql) { ExtraServices = s => { s.AddSingleton<INaeAfReader>(new FakeAf(Standard())); s.AddSingleton(AirLimitsSettings.Default with { AreaRegistryCode = "NOAREAS_" + code }); } };
         serverErrors = () => app.ErrorsText;
         var client = await SignedInAsync(app);
         var report = await ReadAsync(await client.PostAsJsonAsync(

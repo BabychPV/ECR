@@ -74,7 +74,9 @@ describe('каталог структури НВ без AF', () => {
     }
     for (const key of en.keys()) {
       for (const lang of ['en', 'ru', 'kz']) {
-        expect(seed.split(`(N'${key}', N'${lang}'`).length - 1, `${key}/${lang}`).toBe(1);
+        // Рядок секції «Змінені тексти наявних ключів» (ключ, мова, старе, нове) - не дубль: це оновлення, а не вставка.
+        const updates = (seed.match(new RegExp(`\\(N'${key.replace(/\./g, '\\.')}', N'${lang}', N'(?:[^']|'')*', N'`, 'g')) ?? []).length;
+        expect(seed.split(`(N'${key}', N'${lang}'`).length - 1 - updates, `${key}/${lang}`).toBe(1);
       }
     }
   });

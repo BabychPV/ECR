@@ -24,7 +24,7 @@ public sealed record NaeTreeImportOptions(string? ExpectedFingerprint);
 /// <summary>One finding of the Excel import of the NAE tree.</summary>
 /// <param name="Severity"><c>error</c> (blocks the apply) or <c>warning</c> (reported, the apply is allowed).</param>
 /// <param name="Code">
-/// <c>headerNotFound</c>, <c>regionRequired</c>, <c>siteRequired</c>, <c>badCode</c>, <c>areaMismatch</c> (Area and On_Offshore
+/// <c>headerNotFound</c>, <c>regionRequired</c>, <c>badCode</c>, <c>areaMismatch</c> (Area and On_Offshore
 /// differ), <c>duplicateInFile</c>, <c>existingElsewhere</c> (the business key belongs to a node under another parent),
 /// <c>codeTaken</c> (the technical code belongs to another node), <c>nameDiffers</c> (warning: the stored name differs; names are
 /// not overwritten).

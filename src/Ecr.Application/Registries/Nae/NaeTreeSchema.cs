@@ -116,7 +116,7 @@ public static class NaeTreeSchema
 
     /// <summary>
     /// The same placement rule as <c>RegistryHierarchyRules.CheckPlacement</c> over the fixed NAE levels (pure, for the AF plan):
-    /// the ordinal strictly grows (SITE may sit under SITE), skipped levels must be optional (AREA, EQUIP).
+    /// the ordinal strictly grows (SITE may sit under SITE), skipped levels must be optional (AREA, SITE, EQUIP; SITE became optional on 04.11 — AN-158).
     /// </summary>
     /// <param name="parentLevel">Parent level; <c>null</c> — root.</param>
     /// <param name="level">Node level.</param>
@@ -136,7 +136,7 @@ public static class NaeTreeSchema
             return level == SelfNestingLevel;
         }
 
-        return node > parent && rank.Skip(parent + 1).Take(node - parent - 1).All(l => l is LevelArea or LevelEquipment);
+        return node > parent && rank.Skip(parent + 1).Take(node - parent - 1).All(l => l is LevelArea or LevelSite or LevelEquipment);
     }
 
     /// <summary>
@@ -145,7 +145,14 @@ public static class NaeTreeSchema
     /// </summary>
     /// <param name="regionCode">Technical code of the REGION node.</param>
     public static string DerivedRegion(string regionCode)
-        => NaeAfTreeBuilder.Upper(regionCode.StartsWith("R_", StringComparison.OrdinalIgnoreCase) ? regionCode[2..] : regionCode);
+        => Meaningful(NaeAfTreeBuilder.Upper(regionCode.StartsWith("R_", StringComparison.OrdinalIgnoreCase) ? regionCode[2..] : regionCode));
+
+    /// <summary>
+    /// AN-158: a derived code made only of <c>_</c> (a non-ASCII code flattened into the technical one) is no code — empty, so the
+    /// UI shows an empty field instead of <c>_____</c>.
+    /// </summary>
+    /// <param name="derived">Derived code.</param>
+    public static string Meaningful(string derived) => NaeAfTreeBuilder.HasMeaning(derived) ? derived : "";
 
     /// <summary>
     /// Area code derived from the AREA ancestor: the technical code without the <c>A_&lt;REGION&gt;_</c> prefix the loads give it
@@ -161,6 +168,6 @@ public static class NaeTreeSchema
         }
 
         var prefix = $"A_{region}_";
-        return NaeAfTreeBuilder.Upper(areaCode.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? areaCode[prefix.Length..] : areaCode);
+        return Meaningful(NaeAfTreeBuilder.Upper(areaCode.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? areaCode[prefix.Length..] : areaCode));
     }
 }

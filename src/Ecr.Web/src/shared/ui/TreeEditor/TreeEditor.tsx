@@ -71,6 +71,8 @@ export interface TreeEditorProps {
   readonly onRetire?: ((node: TreeNode, cascade: boolean) => Promise<void> | void) | undefined;
   /** Додати дитину (`parent === null` - корінь) на рівні `level`; форму показує сторінка. */
   readonly onAddChild?: ((parent: TreeNode | null, level: TreeLevel) => void) | undefined;
+  /** Сторінка має власну кнопку додавання кореня (напр. «Add region»): кнопку «Додати кореневий вузол» дерева не малювати. */
+  readonly hideAddRoot?: boolean | undefined;
 
   /** Є право змінювати. Без нього лишається перегляд і пошук. */
   readonly canEdit?: boolean | undefined;
@@ -134,6 +136,7 @@ export function TreeEditor({
   onMove,
   onRetire,
   onAddChild,
+  hideAddRoot = false,
   canEdit = false,
   busy = false,
   loading = false,
@@ -377,7 +380,7 @@ export function TreeEditor({
   const levelName = (code: string | null | undefined): string | undefined =>
     code === null || code === undefined ? undefined : levels.find((level) => level.code === code)?.name;
 
-  const rootLevel = onAddChild !== undefined && editable ? childLevelsFor(levels, null)[0] : undefined;
+  const rootLevel = onAddChild !== undefined && editable && !hideAddRoot ? childLevelsFor(levels, null)[0] : undefined;
   const path = selectedNode === null ? [] : [...ancestorsOf(index, selectedNode.id), selectedNode];
   const clearSearch = (): void => {
     setText('');

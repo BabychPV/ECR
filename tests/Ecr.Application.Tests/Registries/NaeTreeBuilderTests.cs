@@ -119,7 +119,6 @@ public sealed class NaeTreeBuilderTests
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [InlineData(@"Atyrau_Air\Onshore\S1\1085", null, "noRegion")]
     [InlineData(@"Atyrau_Air\Onshore\S1\abc", "Atyrau", null)]
-    [InlineData(@"Atyrau_Air\Onshore\1085", "Atyrau", "noSite")]
     public void Build__issues(string path, string? region, string? issueCode)
     {
         var plan = Build(E(path, region, "Onshore"));
@@ -134,6 +133,18 @@ public sealed class NaeTreeBuilderTests
             Assert.Equal(issueCode, Assert.Single(plan.Issues).Code);
             Assert.DoesNotContain(plan.Nodes, n => n.LevelCode == NaeTreeSchema.LevelSource);
         }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public void Build__an_nae_without_a_site_hangs_straight_under_its_area()
+    {
+        var plan = Build(E(@"Atyrau_Air\Onshore\1085", "Atyrau", "Onshore"));
+
+        Assert.Empty(plan.Issues);
+        var src = Assert.Single(plan.Nodes, n => n.LevelCode == NaeTreeSchema.LevelSource);
+        Assert.DoesNotContain(plan.Nodes, n => n.LevelCode == NaeTreeSchema.LevelSite);
+        Assert.Equal(plan.Nodes.Single(n => n.LevelCode == NaeTreeSchema.LevelArea).Key, src.ParentKey);
     }
 
     [Fact]
