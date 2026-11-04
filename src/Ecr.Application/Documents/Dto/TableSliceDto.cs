@@ -1,4 +1,4 @@
-﻿// src/Ecr.Application/Documents/Dto/TableSliceDto.cs
+// src/Ecr.Application/Documents/Dto/TableSliceDto.cs
 using Ecr.Domain.Entities.Configuration;
 
 namespace Ecr.Application.Documents.Dto;
@@ -198,6 +198,9 @@ public sealed record CellStyleAccessDto(
 /// ⛔ <see cref="Expression"/> (UI-25, B4) — вираз формули колонки; <c>null</c>, коли формули немає АБО
 /// хоч одне посилання в ній читачеві не видне (інша колонка, таблиця, аркуш під забороною), або вираз не
 /// розібрався. Різницю «немає» / «сховано» клієнтові свідомо не видно.
+///
+/// HSE401: <see cref="LookupFilter"/> - фільтр довідника колонки (<c>level=CODE</c>, див. <c>LookupFilterSpec</c>); сітка
+/// передає рівень у <c>GET registries/{code}/entries?level=</c>. <c>null</c> - без звуження.
 /// </remarks>
 public sealed record ColumnDto(
     int Id,
@@ -218,7 +221,8 @@ public sealed record ColumnDto(
     CellStyleDto? Style = null,
     int? WidthPx = null,
     string? Expression = null,
-    int? HeaderGroupId = null);
+    int? HeaderGroupId = null,
+    string? LookupFilter = null);
 
 /// <summary>
 /// Підмножина <c>StyleDef</c>, потрібна ЖИВІЙ сітці (директива registry-

@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Calculations;
+using Ecr.Application.Calculations;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -351,7 +351,8 @@ public sealed class GetTableSliceHandler(
                 c.Precision, c.Scale, requiredByMethodology.Contains(c.Id), StyleOf(styleById, c.StyleId), c.WidthPx,
                 ColumnExpressionVisibility.Visible(
                     columnFormulas.GetValueOrDefault(c.Id), table, c.Id, snapshot, readable, formulaEngine),
-                c.HeaderGroupId))
+                c.HeaderGroupId,
+                c.LookupFilter))
             .ToList();
 
         // Групи заголовків: лише ті, у піддереві яких є видима колонка; колонка без групи/з невідомою — без групи.

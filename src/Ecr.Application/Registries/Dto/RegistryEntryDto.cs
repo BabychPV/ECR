@@ -21,6 +21,7 @@ namespace Ecr.Application.Registries.Dto;
 /// <param name="TypeName">
 /// Назва типу мовою користувача (підпис «номер — тип»); лише в піклері групи, інакше <c>null</c>.
 /// </param>
+/// <param name="LevelCode">Код рівня запису ієрархічного довідника; <c>null</c> - плоский довідник чи запис без рівня.</param>
 public sealed record RegistryEntryDto(
     long Id,
     string Code,
@@ -29,7 +30,8 @@ public sealed record RegistryEntryDto(
     DateOnly? ValidFrom,
     DateOnly? ValidTo,
     string? TypeCode = null,
-    string? TypeName = null);
+    string? TypeName = null,
+    string? LevelCode = null);
 
 /// <summary>Створення або оновлення запису довідника.</summary>
 /// <param name="Id"><c>null</c> — створення нового запису; інакше — оновлення наявного.</param>

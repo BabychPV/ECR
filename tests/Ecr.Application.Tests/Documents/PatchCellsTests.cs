@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Common;
+using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
@@ -23,6 +23,7 @@ public sealed class PatchCellsTests
     private const int Period = 202601;
     private const int VolumeColumnId = 11;
     private const int RegistryLinkColumnId = 12;
+    private const int SiteLinkColumnId = 13;
     private static readonly DateTime Now = new(2026, 1, 20, 9, 0, 0, DateTimeKind.Utc);
 
     private readonly ICellStore _cells = Substitute.For<ICellStore>();
@@ -68,6 +69,14 @@ public sealed class PatchCellsTests
         registryLinkColumn.SetLookup(registryDefId: 1);
         SetId(registryLinkColumn, RegistryLinkColumnId);
 
+        // HSE401: Lookup-колонка з фільтром рівня `level=SITE`.
+        var siteLinkColumn = new ColumnDef(
+            tableDefId: 3, EcrCode.Create("SiteLink"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Site link" }), 3,
+            CellDataType.Lookup);
+        siteLinkColumn.SetLookup(registryDefId: 1, "level=SITE");
+        SetId(siteLinkColumn, SiteLinkColumnId);
+
         // ⚠ Q-148: PatchCellsHandler тепер шукає TableDef у Sheets, щоб
         // перевірити RowMode/MaxDynamicRows на створення рядка. Dynamic —
         // щоб тести, які не про Q-148, і далі вільно створювали рядки.
@@ -82,6 +91,7 @@ public sealed class PatchCellsTests
         typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(table, 3);
         table.AddColumn(column);
         table.AddColumn(registryLinkColumn);
+        table.AddColumn(siteLinkColumn);
         sheet.AddTable(table);
 
         var snapshot = new TemplateVersionSnapshot(
@@ -90,6 +100,7 @@ public sealed class PatchCellsTests
             {
                 [VolumeColumnId] = column,
                 [RegistryLinkColumnId] = registryLinkColumn,
+                [SiteLinkColumnId] = siteLinkColumn,
             },
             RowsByKey: new Dictionary<(int, string), RowDef>());
 
@@ -135,6 +146,7 @@ public sealed class PatchCellsTests
                {
                    [new CellAddress(PeriodKey.Parse(Period), 1001L, VolumeColumnId)] = EditDecision.Allow(),
                    [new CellAddress(PeriodKey.Parse(Period), 1001L, RegistryLinkColumnId)] = EditDecision.Allow(),
+                   [new CellAddress(PeriodKey.Parse(Period), 1001L, SiteLinkColumnId)] = EditDecision.Allow(),
                });
 
         // ⚠ Створення за замовчуванням ДОЗВОЛЕНЕ: тести, які не про права, не
@@ -1029,6 +1041,7 @@ public sealed class PatchCellsTests
                    [new CellAddress(PeriodKey.Parse(Period), 1001L, VolumeColumnId)] =
                        EditDecision.AllowWithConfirmation("Поза вікном дозволу"),
                    [new CellAddress(PeriodKey.Parse(Period), 1001L, RegistryLinkColumnId)] = EditDecision.Allow(),
+                   [new CellAddress(PeriodKey.Parse(Period), 1001L, SiteLinkColumnId)] = EditDecision.Allow(),
                });
 
     /// <summary>
@@ -1546,6 +1559,45 @@ public sealed class PatchCellsTests
         // структурні відмови комірки (R-B3).
         await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// HSE401: колонка з фільтром `level=SITE` приймає лише запис рівня SITE; запис іншого рівня відмовляється тією
+    /// самою відповіддю, що й чужий довідник (`ECR-CELL-4223`, `missingEntry`) - без оракула рівня.
+    /// </summary>
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [InlineData("AREA")]
+    [InlineData(null)]
+    public async Task Lookup_з_фільтром_рівня_відмовляє_запис_іншого_рівня(string? entryLevel)
+    {
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0)
+                       .Select(id => new RegistryEntryStanding(id, 1, true, false, null, null, entryLevel))
+                       .ToList());
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(
+                Request(new PatchRow("7001001", "0x0A", [new PatchCell("SiteLink", 4242L)])),
+                CancellationToken.None));
+
+        Assert.Equal("ECR-CELL-4223", error.ErrorCode);
+        Assert.Equal("err.ECR-CELL-4223.missingEntry", error.Details!["messageKey"]);
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Lookup_з_фільтром_рівня_приймає_запис_свого_рівня_а_колонка_без_фільтра_будь_який()
+    {
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0)
+                       .Select(id => new RegistryEntryStanding(id, 1, true, false, null, null, "site"))
+                       .ToList());
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("SiteLink", 4242L), new PatchCell("RegistryLink", 4243L)])),
+            CancellationToken.None);
+
+        Assert.Equal(2, response.AppliedCells);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]

@@ -380,7 +380,7 @@ public sealed class ColumnDefTests
     {
         await Save().HandleAsync(
             1, _table.Id, "Substance",
-            Command(dataType: CellDataType.Lookup, lookupRegistryDefId: 5, lookupFilter: "kind=gas"),
+            Command(dataType: CellDataType.Lookup, lookupRegistryDefId: 5, lookupFilter: "level=SITE"),
             CancellationToken.None);
 
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
@@ -389,7 +389,7 @@ public sealed class ColumnDefTests
         var read = await Get().HandleAsync(1, _table.Id, "Substance", CancellationToken.None);
 
         Assert.Equal(5, read.LookupRegistryDefId);
-        Assert.Equal("kind=gas", read.LookupFilter);
+        Assert.Equal("level=SITE", read.LookupFilter);
     }
 
     [Fact]

@@ -2111,13 +2111,18 @@ public sealed partial class PatchCellsHandler(
     {
         // PRMG: ціль-група приймає записи реєстрів складу (збіг реєстру - швидкий шлях без резолвера; Deny - як «немає»).
         // Рішення людини 25.10: без Registry.View вибір запису - теж «немає» (проєкт документа - лише для scoped-ролей).
+        // HSE401: фільтр колонки `level=X` - запис іншого рівня відмовляється тією самою відповіддю, що й чужий довідник
+        // (без оракула: рівень чужого запису не розкривається).
         var foreign = changed
             .Where(cell => !Permits.Groups.LookupTargetMatcher.Belongs(
                 groups,
                 context.Profile,
                 context.Snapshot.ColumnsById[cell.Address.ColumnDefId].LookupRegistryDefId,
                 standings[cell.EntryId!.Value].RegistryDefId,
-                viewProjectId))
+                viewProjectId)
+                || !MatchesLevelFilter(
+                    context.Snapshot.ColumnsById[cell.Address.ColumnDefId].LookupFilter,
+                    standings[cell.EntryId!.Value].LevelCode))
             .Select(cell => DescribeLookup(context, cell))
             .ToList();
 
@@ -2129,6 +2134,11 @@ public sealed partial class PatchCellsHandler(
             throw MissingEntryRefusal(foreign);
         }
     }
+
+    /// <summary>Чи запис рівня <paramref name="entryLevel"/> проходить фільтр колонки <c>level=X</c> (немає фільтра - проходить).</summary>
+    private static bool MatchesLevelFilter(string? lookupFilter, string? entryLevel)
+        => LookupFilterSpec.LevelOf(lookupFilter) is not { } required
+           || string.Equals(required, entryLevel, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Проєкт документа для перевірки <c>Registry.View</c> у scoped-ролі; для решти - <c>null</c> без запиту.</summary>
     private async Task<int?> LookupViewProjectAsync(RequestContext context, CancellationToken ct)

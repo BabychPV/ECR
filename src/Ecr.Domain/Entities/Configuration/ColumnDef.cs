@@ -156,8 +156,21 @@ public sealed class ColumnDef : Entity<int>
                 });
         }
 
+        if (!LookupFilterSpec.TryParse(filter, out _))
+        {
+            throw new DomainException(
+                "ECR-TMPL-0422",
+                $"Фільтр довідника колонки {Code} має формат level=<код рівня>; отримано «{filter}».",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.lookupFilterUnsupported",
+                    ["columnCode"] = Code,
+                    ["filter"] = filter,
+                });
+        }
+
         LookupRegistryDefId = registryDefId;
-        LookupFilter = filter;
+        LookupFilter = string.IsNullOrWhiteSpace(filter) ? null : filter.Trim();
     }
 
     /// <summary>Одиниця, в якій зберігаються значення колонки (ФВ-16.1).</summary>

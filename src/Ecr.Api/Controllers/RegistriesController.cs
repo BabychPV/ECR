@@ -95,6 +95,9 @@ public sealed class RegistriesController(
     /// Документ, у шапку якого обирається запис: перелік звужується до записів, придатних у вікні проєкту документа
     /// (активні, чинні бодай один день вікна), а <paramref name="asOf"/> не потрібен. Невидимий документ - 404.
     /// </param>
+    /// <param name="level">
+    /// HSE401: код рівня ієрархічного довідника (<c>level=</c> із фільтра колонки) - лише записи цього рівня.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// <paramref name="asOf"/> обов'язковий за змістом: довідники темпоральні,
@@ -109,8 +112,9 @@ public sealed class RegistriesController(
         [FromQuery] DateOnly asOf,
         [FromQuery] long? parentEntryId,
         [FromQuery] long? documentId,
+        [FromQuery] string? level,
         CancellationToken ct)
-        => Ok(await getEntries.HandleAsync(code, asOf, parentEntryId, documentId, ct).ConfigureAwait(false));
+        => Ok(await getEntries.HandleAsync(code, asOf, parentEntryId, documentId, level, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Повний опис довідника для конструктора. Право <c>Registry.View</c>.

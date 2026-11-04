@@ -288,7 +288,10 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             .AsNoTracking()
             .Where(e => registryEntryIds.Contains(e.Id))
             .Select(e => new RegistryEntryStanding(
-                e.Id, e.RegistryDefId, e.IsActive, e.IsDeleted, e.ValidFrom, e.ValidTo))
+                e.Id, e.RegistryDefId, e.IsActive, e.IsDeleted, e.ValidFrom, e.ValidTo,
+                e.LevelId == null
+                    ? null
+                    : db.RegistryLevelDefs.Where(l => l.Id == e.LevelId).Select(l => l.Code).FirstOrDefault()))
             .ToListAsync(ct)
             .ConfigureAwait(false);
     }
