@@ -49,7 +49,7 @@ const settle = (): Promise<void> =>
   });
 
 const notFound = () =>
-  new EcrApiError({ title: 'Not found', status: 404, errorCode: 'ECR-DOC-4040', correlationId: 'c1' });
+  new EcrApiError({ title: 'Not found', status: 404, errorCode: 'ECR-DOC-0404', correlationId: 'c1' });
 
 beforeEach(() => {
   vi.mocked(apiFetch).mockResolvedValue({ items: [] });
@@ -120,7 +120,7 @@ describe('CalculationIssuesPanel', () => {
 
   it('інша відмова - стандартна помилка', async () => {
     vi.mocked(apiFetch).mockRejectedValue(
-      new EcrApiError({ title: 'Boom', status: 500, errorCode: 'ECR-SYS-5000', correlationId: 'c2' }),
+      new EcrApiError({ title: 'Busy', status: 409, errorCode: 'ECR-DOC-0409', correlationId: 'c2' }),
     );
     mount();
 
