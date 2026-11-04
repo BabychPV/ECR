@@ -20,6 +20,11 @@ const Strings = {
   'deny.PeriodClosed': 'Период закрыт.',
   'deny.NoGrant': 'У вас нет права редактировать эту ячейку.',
   'deny.approve.NoRight': 'нет права утверждать или отклонять листы в этом проекте',
+  'deny.reopen.NoRight': 'нет права вернуть этот лист в работу',
+  'deny.reopen.BusinessRule': 'лист не подан и не утверждён',
+  'deny.submit.NoRight': 'нет права подать этот лист',
+  'deny.reason.Unknown': 'действие сейчас недоступно',
+  'deny.ProjectArchived': 'Проект архивирован.',
 };
 
 beforeAll(async () => {
@@ -89,35 +94,98 @@ describe('sheetDenialText: відмова називає аркуш назвою
     }
   });
 
-  it('D4: інші причини затвердження лишаються як є', () => {
-    const text = sheetDenialText(
+  it('PM-PASS-A-P3 п.7: причина без рядка в каталозі - загальний текст, а не сирий reason', () => {
+    const approve = sheetDenialText(
       denial('err.ECR-ACCS-0403.approveDenied', { reason: 'Locked', reasonKey: 'deny.Locked' }),
       'Выбросы',
     );
-
-    expect(text).toBe('Лист «Выбросы» нельзя утвердить или вернуть в работу: Locked.');
-  });
-
-  it('submitDenied без рядка причини в каталозі — сирий reason, як у сервера', () => {
-    const text = sheetDenialText(
+    const submit = sheetDenialText(
       denial('err.ECR-ACCS-0403.submitDenied', { reason: 'Locked', reasonKey: 'deny.Locked' }),
       'Отходы',
     );
 
-    expect(text).toBe('Лист «Отходы» нельзя подать: Locked.');
+    expect(approve).toBe('Лист «Выбросы» нельзя утвердить или вернуть в работу: действие сейчас недоступно.');
+    expect(submit).toBe('Лист «Отходы» нельзя подать: действие сейчас недоступно.');
+    expect(approve).not.toContain('Locked');
+    expect(submit).not.toContain('Locked');
   });
 
-  it('reopenDenied — теж про аркуш', () => {
-    const text = sheetDenialText(denial('err.ECR-ACCS-0403.reopenDenied', { reason: 'x' }), 'Вода');
+  it('PM-PASS-A-P3 п.7: submitDenied без права - причина про подання, а не про комірку', () => {
+    const text = sheetDenialText(
+      denial('err.ECR-ACCS-0403.submitDenied', { reason: 'NoGrant', reasonKey: 'deny.NoGrant' }),
+      'Отходы',
+    );
 
-    expect(text).toBe('Лист «Вода» нельзя вернуть в работу: x.');
+    expect(text).toBe('Лист «Отходы» нельзя подать: нет права подать этот лист.');
+    expect(text).not.toContain('ячейк');
+  });
+
+  it('PM-PASS-A-P3 п.7: reopenDenied без права - причина про повернення, а не про комірку', () => {
+    for (const reason of ['NoGrant', 'InsufficientGrantLevel']) {
+      const bare = sheetDenialText(denial('err.ECR-ACCS-0403.reopenDenied', { reason }), 'Вода');
+      const keyed = sheetDenialText(
+        denial('err.ECR-ACCS-0403.reopenDenied', { reason, reasonKey: `deny.${reason}` }),
+        'Вода',
+      );
+
+      expect(bare).toBe('Лист «Вода» нельзя вернуть в работу: нет права вернуть этот лист в работу.');
+      expect(keyed).toBe(bare);
+      expect(bare).not.toContain('ячейк');
+    }
+  });
+
+  it('PM-PASS-A-P3 п.7: reopenDenied з сирою назвою enum - текст каталогу, не ідентифікатор', () => {
+    const bySpecific = sheetDenialText(denial('err.ECR-ACCS-0403.reopenDenied', { reason: 'BusinessRule' }), 'Вода');
+    const byGeneric = sheetDenialText(denial('err.ECR-ACCS-0403.reopenDenied', { reason: 'ProjectArchived' }), 'Вода');
+
+    expect(bySpecific).toBe('Лист «Вода» нельзя вернуть в работу: лист не подан и не утверждён.');
+    expect(byGeneric).toBe('Лист «Вода» нельзя вернуть в работу: Проект архивирован.');
+  });
+
+  it('PM-PASS-A-P3 п.7: reopenDenied з невідомою причиною - загальний текст, ніколи сирий ідентифікатор', () => {
+    for (const reason of ['SomethingNew', 'x', 'a.b c', '']) {
+      const text = sheetDenialText(denial('err.ECR-ACCS-0403.reopenDenied', { reason }), 'Вода');
+
+      expect(text).toBe('Лист «Вода» нельзя вернуть в работу: действие сейчас недоступно.');
+    }
+
+    expect(sheetDenialText(denial('err.ECR-ACCS-0403.reopenDenied'), 'Вода')).toBe(
+      'Лист «Вода» нельзя вернуть в работу: действие сейчас недоступно.',
+    );
+  });
+
+  it('PM-PASS-A-P3 п.7: без назви аркуша причина все одно про дію, лист названо id', () => {
+    for (const sheetName of [null, undefined, '  ']) {
+      const approve = sheetDenialText(
+        denial('err.ECR-ACCS-0403.approveDenied', { reason: 'NoGrant', reasonKey: 'deny.NoGrant' }),
+        sheetName,
+      );
+      const reopen = sheetDenialText(denial('err.ECR-ACCS-0403.reopenDenied', { reason: 'NoGrant' }), sheetName);
+
+      expect(approve).toBe(
+        'Лист 2 нельзя утвердить или вернуть в работу: нет права утверждать или отклонять листы в этом проекте.',
+      );
+      expect(reopen).toBe('Лист 2 нельзя вернуть в работу: нет права вернуть этот лист в работу.');
+    }
   });
 
   it('інша відмова, інший код, не EcrApiError чи без назви — null (показує showApiError)', () => {
     expect(sheetDenialText(denial('err.ECR-ACCS-0403.addRowDenied'), 'Выбросы')).toBeNull();
     expect(sheetDenialText(denial('err.ECR-ACCS-0403.approveDenied', {}, 'ECR-DOC-0409'), 'Выбросы')).toBeNull();
     expect(sheetDenialText(new Error('boom'), 'Выбросы')).toBeNull();
-    expect(sheetDenialText(denial('err.ECR-ACCS-0403.approveDenied'), '  ')).toBeNull();
-    expect(sheetDenialText(denial('err.ECR-ACCS-0403.approveDenied'), null)).toBeNull();
+    // ні назви, ні id в розширеннях - показати нічим, лишається showApiError
+    expect(
+      sheetDenialText(
+        new EcrApiError({
+          title: 'Forbidden',
+          status: 403,
+          detail: 'd',
+          errorCode: 'ECR-ACCS-0403',
+          correlationId: 'c-1',
+          extensions2: { messageKey: 'err.ECR-ACCS-0403.approveDenied' },
+        }),
+        null,
+      ),
+    ).toBeNull();
   });
 });
