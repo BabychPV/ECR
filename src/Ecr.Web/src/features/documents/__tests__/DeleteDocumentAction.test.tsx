@@ -34,6 +34,7 @@ const DraftDocument: DocumentSummary = {
   sheetCount: 2,
   sheetStates: { GEN: 'Draft', AIR: 'Draft' },
   hasLateEdits: false,
+  stepApproverNamesTruncated: false,
 };
 
 const sent: { url: string; method: string }[] = [];

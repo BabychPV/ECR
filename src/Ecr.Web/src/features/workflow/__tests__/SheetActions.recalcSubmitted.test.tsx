@@ -21,6 +21,7 @@ function summary(sheetStates: Record<string, string>): DocumentSummary {
     sheetCount: Object.keys(sheetStates).length,
     sheetStates,
     hasLateEdits: false,
+    stepApproverNamesTruncated: false,
   };
 }
 
