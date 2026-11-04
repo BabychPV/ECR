@@ -263,7 +263,8 @@ test.describe('NAE tree manual', () => {
     await page.locator('[data-nae-add-region-open]').click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel(/^Region/).selectOption(Region);
-    await dialog.getByLabel(/^Area/).fill(Area);
+    // Район - select зі списку AIR_AREA (OFFSHORE/ONSHORE), не текстове поле (людина 04.11).
+    await dialog.getByLabel(/^Area/).selectOption(Area);
     await dialog.getByLabel('Name (English)').fill(`E2E NAE ${Stamp}`);
     await dialog.getByRole('button', { name: 'Add', exact: true }).click();
     await expect(dialog).toBeHidden({ timeout: 30_000 });
