@@ -3162,7 +3162,8 @@ export interface paths {
          * Підсумок чатів усіх таблиць документа одним запитом (лічильники й «непрочитано»).
          * @description Віддає лише таблиці, які користувач бачить і де є повідомлення. `404 ECR-DOC-0404` — документ невидимий.
          *     Кожен рядок несе `revision` чату (росте на нове/правку/видалення). Відповідь несе `ETag` з усіх
-         *     полів; `If-None-Match` → `304` без тіла (опитування живого оновлення).
+         *     полів; `If-None-Match` → `304` без тіла (опитування живого оновлення). TC02: рядки копій несуть
+         *     `sheetCopyId`, а `key` — «КОД» (оригінал) чи «КОД#sheetCopyId» (копія), як `sheetStates` у `GET …/tables`.
          */
         get: {
             parameters: {
@@ -4131,6 +4132,7 @@ export interface paths {
                 query?: {
                     q?: string;
                     periodKey?: number;
+                    sheetCopyId?: number;
                 };
                 header?: never;
                 path: {
@@ -4194,7 +4196,8 @@ export interface paths {
         /**
          * Повідомлення чату таблиці: сторінка за ключем (`before`) або опитування (`after`).
          * @description Відповідь несе `ETag` (ревізія чату + права читача); `If-None-Match` → `304` без тіла.
-         *     `422 ECR-REQ-0422` — `before` разом з `after`, недійсні межі. `404` — документ чи таблиця невидимі.
+         *     `422 ECR-REQ-0422` — `before` разом з `after`, недійсні межі. `404` — документ чи таблиця невидимі,
+         *     або `sheetCopyId` не копія аркуша цієї таблиці (та сама відповідь, що й для схованої таблиці).
          */
         get: {
             parameters: {
@@ -4207,6 +4210,8 @@ export interface paths {
                     limit?: number;
                     /** @description Лише повідомлення цього періоду (фільтр «лише цей період»). */
                     periodKey?: number;
+                    /** @description TC02: копія аркуша (`sheetCopyId` з `GET …/tables`); немає — оригінал. */
+                    sheetCopyId?: number;
                 };
                 header?: never;
                 path: {
@@ -4272,7 +4277,9 @@ export interface paths {
          */
         post: {
             parameters: {
-                query?: never;
+                query?: {
+                    sheetCopyId?: number;
+                };
                 header?: never;
                 path: {
                     documentId: number;
@@ -4379,7 +4386,9 @@ export interface paths {
          */
         delete: {
             parameters: {
-                query?: never;
+                query?: {
+                    sheetCopyId?: number;
+                };
                 header?: never;
                 path: {
                     documentId: number;
@@ -4431,7 +4440,9 @@ export interface paths {
          */
         patch: {
             parameters: {
-                query?: never;
+                query?: {
+                    sheetCopyId?: number;
+                };
                 header?: never;
                 path: {
                     documentId: number;
@@ -4510,7 +4521,9 @@ export interface paths {
          */
         put: {
             parameters: {
-                query?: never;
+                query?: {
+                    sheetCopyId?: number;
+                };
                 header?: never;
                 path: {
                     documentId: number;
@@ -29100,6 +29113,12 @@ export interface components {
             allowsDynamicRows: boolean;
             /**
              * Format: int32
+             * @description TC02: живих повідомлень чату цієї копії в усіх її таблицях (видалення копії забирає їх разом з даними); `null` — оригінал,
+             *     0 — чат копії порожній. Клієнт показує число ДО підтвердження видалення.
+             */
+            chatMessageCount?: null | number;
+            /**
+             * Format: int32
              * @description RS: номер у групі — 1 оригінал, 2… копії; копії діляться `sheetCode`/`sheetOrdinal` з оригіналом.
              * @default 1
              */
@@ -38039,6 +38058,11 @@ export interface components {
              * @description Період повідомлення.
              */
             periodKey: number;
+            /**
+             * Format: int64
+             * @description TC02: згадка в чаті копії аркуша (`doc.DocumentSheet.Id` копії); `null` — в чаті оригінала.
+             */
+            sheetCopyId?: null | number;
             /** @description Початок тексту (до 160 символів). */
             snippet: string;
             /** @description Код таблиці. */
@@ -38136,6 +38160,8 @@ export interface components {
         };
         /** @description Підсумок чату однієї таблиці. */
         TableDiscussionSummaryItemDto: {
+            /** @description TC02: ключ рядка — «КОД» для оригінала, «КОД#sheetCopyId» для копії (як `sheetStates` у `GET documents/{id}/tables`). */
+            key: string;
             /**
              * Format: date-time
              * @description Коли написано останнє живе (UTC); `null` — чат порожній.
@@ -38154,6 +38180,11 @@ export interface components {
              *     Опитування порівнює її з попередньою і перечитує сторінку лише тоді, коли вона змінилась.
              */
             revision: number;
+            /**
+             * Format: int64
+             * @description TC02: чат копії аркуша (`doc.DocumentSheet.Id` копії); `null` — чат оригінала.
+             */
+            sheetCopyId: null | number;
             /** @description Код таблиці. */
             tableCode: string;
             /**

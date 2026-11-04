@@ -28,20 +28,23 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
             from s in db.TableDiscussions.AsNoTracking()
             where s.DocumentId == documentId && s.MessageCount > 0 && full.Contains(s.TableDefCode)
             let lastRead = db.TableDiscussionReads
-                .Where(r => r.UserId == userId && r.DocumentId == documentId && r.TableDefCode == s.TableDefCode)
+                .Where(r => r.UserId == userId && r.DocumentId == documentId && r.TableDefCode == s.TableDefCode
+                            && r.SheetCopyKey == s.SheetCopyKey)
                 .Select(r => r.LastReadMessageId).FirstOrDefault()
             select new SummaryShape
             {
                 Code = s.TableDefCode,
                 Total = s.MessageCount,
                 Unread = db.TableDiscussionMessages.Count(m =>
-                    m.DocumentId == documentId && m.TableDefCode == s.TableDefCode && m.Id > lastRead
+                    m.DocumentId == documentId && m.TableDefCode == s.TableDefCode && m.SheetCopyKey == s.SheetCopyKey && m.Id > lastRead
                     && m.AuthorUserId != userId && m.DeletedAt == null),
                 LastAt = s.LastMessageAt,
                 LastId = s.LastMessageId,
                 Mentioned = db.TableDiscussionMentions.Any(x =>
-                    x.UserId == userId && x.DocumentId == documentId && x.TableDefCode == s.TableDefCode),
+                    x.UserId == userId && x.DocumentId == documentId && x.TableDefCode == s.TableDefCode
+                    && x.SheetCopyKey == s.SheetCopyKey),
                 Revision = s.Revision,
+                CopyKey = s.SheetCopyKey,
             };
 
         if (periodRestricted.Count == 0)
@@ -61,25 +64,28 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
             where m.DocumentId == documentId && m.DeletedAt == null && codes.Contains(m.TableDefCode)
                   && pairs.Contains(m.TableDefCode + "|" + m.PeriodKey.ToString())
             join r in db.TableDiscussionReads.Where(r => r.UserId == userId && r.DocumentId == documentId)
-                on m.TableDefCode equals r.TableDefCode into reads
+                on new { m.TableDefCode, m.SheetCopyKey } equals new { r.TableDefCode, r.SheetCopyKey } into reads
             from rd in reads.DefaultIfEmpty()
-            group new { m.Id, m.AuthorUserId, m.CreatedAt, Read = rd == null ? 0L : rd.LastReadMessageId } by m.TableDefCode
+            group new { m.Id, m.AuthorUserId, m.CreatedAt, Read = rd == null ? 0L : rd.LastReadMessageId }
+                by new { m.TableDefCode, m.SheetCopyKey }
             into g
             select new SummaryShape
             {
-                Code = g.Key,
+                Code = g.Key.TableDefCode,
+                CopyKey = g.Key.SheetCopyKey,
                 Total = g.Count(),
                 Unread = g.Count(x => x.Id > x.Read && x.AuthorUserId != userId),
                 LastAt = g.Max(x => (DateTime?)x.CreatedAt),
                 LastId = g.Max(x => x.Id),
                 Mentioned = db.TableDiscussionMentions.Any(x => x.UserId == userId && x.DocumentId == documentId
-                    && x.TableDefCode == g.Key
+                    && x.TableDefCode == g.Key.TableDefCode && x.SheetCopyKey == g.Key.SheetCopyKey
                     && db.TableDiscussionMessages.Any(mm => mm.Id == x.MessageId && mm.DeletedAt == null
                         && pairs.Contains(mm.TableDefCode + "|" + mm.PeriodKey.ToString()))),
 
                 // Та сама ревізія зведення, що в ETag сторінки повідомлень (вона спільна для всіх періодів чату).
                 Revision = db.TableDiscussions
-                    .Where(x => x.DocumentId == documentId && x.TableDefCode == g.Key)
+                    .Where(x => x.DocumentId == documentId && x.TableDefCode == g.Key.TableDefCode
+                                && x.SheetCopyKey == g.Key.SheetCopyKey)
                     .Select(x => x.Revision).FirstOrDefault(),
             };
 
@@ -89,7 +95,7 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
     }
 
     private static List<TableDiscussionSummaryRow> ToRows(List<SummaryShape> shapes)
-        => [.. shapes.Select(s => new TableDiscussionSummaryRow(s.Code, s.Total, s.Unread, s.LastAt, s.LastId, s.Mentioned, s.Revision))];
+        => [.. shapes.Select(s => new TableDiscussionSummaryRow(s.Code, s.Total, s.Unread, s.LastAt, s.LastId, s.Mentioned, s.Revision, s.CopyKey))];
 
     /// <summary>Форма рядка підсумку для SQL: об'єднання (UNION ALL) вимагає однакової проєкції в обох запитах.</summary>
     private sealed class SummaryShape
@@ -107,6 +113,8 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
         public bool Mentioned { get; init; }
 
         public long Revision { get; init; }
+
+        public long CopyKey { get; init; }
     }
 
     /// <inheritdoc />
@@ -118,10 +126,10 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
             .ToListAsync(ct).ConfigureAwait(false);
 
     /// <inheritdoc />
-    public async Task<TableDiscussionStateRow> GetStateAsync(long documentId, string tableCode, CancellationToken ct)
+    public async Task<TableDiscussionStateRow> GetStateAsync(long documentId, string tableCode, long sheetCopyKey, CancellationToken ct)
     {
         var row = await db.TableDiscussions.AsNoTracking()
-            .Where(s => s.DocumentId == documentId && s.TableDefCode == tableCode)
+            .Where(s => s.DocumentId == documentId && s.TableDefCode == tableCode && s.SheetCopyKey == sheetCopyKey)
             .Select(s => new TableDiscussionStateRow(s.Revision, s.LastMessageId))
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
@@ -129,19 +137,21 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
     }
 
     /// <inheritdoc />
-    public async Task<long> GetLastReadAsync(int userId, long documentId, string tableCode, CancellationToken ct)
+    public async Task<long> GetLastReadAsync(
+        int userId, long documentId, string tableCode, long sheetCopyKey, CancellationToken ct)
         => await db.TableDiscussionReads.AsNoTracking()
-            .Where(r => r.UserId == userId && r.DocumentId == documentId && r.TableDefCode == tableCode)
+            .Where(r => r.UserId == userId && r.DocumentId == documentId && r.TableDefCode == tableCode
+                        && r.SheetCopyKey == sheetCopyKey)
             .Select(r => r.LastReadMessageId)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<TableDiscussionMessageRow>> ListAsync(
-        long documentId, string tableCode, long? before, long? after, int? periodKey,
+        long documentId, string tableCode, long sheetCopyKey, long? before, long? after, int? periodKey,
         IReadOnlyCollection<int>? allowedPeriods, int take, CancellationToken ct)
     {
         var query = db.TableDiscussionMessages.AsNoTracking()
-            .Where(m => m.DocumentId == documentId && m.TableDefCode == tableCode);
+            .Where(m => m.DocumentId == documentId && m.TableDefCode == tableCode && m.SheetCopyKey == sheetCopyKey);
 
         if (allowedPeriods is not null)
         {
@@ -169,10 +179,11 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
 
     /// <inheritdoc />
     public async Task<TableDiscussionMessageRow?> FindByClientIdAsync(
-        long documentId, string tableCode, int authorUserId, Guid clientMessageId, CancellationToken ct)
+        long documentId, string tableCode, long sheetCopyKey, int authorUserId, Guid clientMessageId, CancellationToken ct)
         => await (
             from m in db.TableDiscussionMessages.AsNoTracking()
-            where m.DocumentId == documentId && m.TableDefCode == tableCode && m.AuthorUserId == authorUserId
+            where m.DocumentId == documentId && m.TableDefCode == tableCode && m.SheetCopyKey == sheetCopyKey
+                  && m.AuthorUserId == authorUserId
                   && m.ClientMessageId == clientMessageId
             join u in db.Users.AsNoTracking() on m.AuthorUserId equals u.Id
             select new TableDiscussionMessageRow(
@@ -182,10 +193,10 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
 
     /// <inheritdoc />
     public async Task<long> MaxVisibleIdAsync(
-        long documentId, string tableCode, IReadOnlyCollection<int>? allowedPeriods, CancellationToken ct)
+        long documentId, string tableCode, long sheetCopyKey, IReadOnlyCollection<int>? allowedPeriods, CancellationToken ct)
     {
         var query = db.TableDiscussionMessages.AsNoTracking()
-            .Where(m => m.DocumentId == documentId && m.TableDefCode == tableCode);
+            .Where(m => m.DocumentId == documentId && m.TableDefCode == tableCode && m.SheetCopyKey == sheetCopyKey);
 
         if (allowedPeriods is not null)
         {
@@ -241,20 +252,21 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
             join u in db.Users.AsNoTracking() on m.AuthorUserId equals u.Id
             orderby m.Id descending
             select new TableDiscussionMentionRow(
-                m.Id, m.DocumentId, m.TableDefCode, m.PeriodKey, m.AuthorUserId, u.DisplayName, m.Body, m.CreatedAt))
+                m.Id, m.DocumentId, m.TableDefCode, m.PeriodKey, m.AuthorUserId, u.DisplayName, m.Body, m.CreatedAt,
+                m.SheetCopyKey))
             .Take(take)
             .ToListAsync(ct).ConfigureAwait(false);
 
     /// <inheritdoc />
-    public async Task<TableDiscussionState> LockStateAsync(long documentId, string tableCode, CancellationToken ct)
+    public async Task<TableDiscussionState> LockStateAsync(long documentId, string tableCode, long sheetCopyKey, CancellationToken ct)
     {
         var state = await db.TableDiscussions
-            .FromSql($"SELECT * FROM doc.TableDiscussion WITH (UPDLOCK, HOLDLOCK) WHERE DocumentId = {documentId} AND TableDefCode = {tableCode}")
+            .FromSql($"SELECT * FROM doc.TableDiscussion WITH (UPDLOCK, HOLDLOCK) WHERE DocumentId = {documentId} AND TableDefCode = {tableCode} AND SheetCopyKey = {sheetCopyKey}")
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
         if (state is null)
         {
-            state = new TableDiscussionState(documentId, tableCode);
+            state = new TableDiscussionState(documentId, tableCode, sheetCopyKey);
             db.TableDiscussions.Add(state);
         }
 
@@ -263,9 +275,9 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
 
     /// <inheritdoc />
     public Task<TableDiscussionMessage?> FindMessageForUpdateAsync(
-        long documentId, string tableCode, long messageId, CancellationToken ct)
+        long documentId, string tableCode, long sheetCopyKey, long messageId, CancellationToken ct)
         => db.TableDiscussionMessages
-            .FromSql($"SELECT * FROM doc.TableDiscussionMessage WITH (UPDLOCK, ROWLOCK) WHERE Id = {messageId} AND DocumentId = {documentId} AND TableDefCode = {tableCode}")
+            .FromSql($"SELECT * FROM doc.TableDiscussionMessage WITH (UPDLOCK, ROWLOCK) WHERE Id = {messageId} AND DocumentId = {documentId} AND TableDefCode = {tableCode} AND SheetCopyKey = {sheetCopyKey}")
             .FirstOrDefaultAsync(ct);
 
     /// <inheritdoc />
@@ -292,7 +304,7 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
         var have = existing.Select(x => x.UserId).ToHashSet();
         var added = wanted.Where(u => !have.Contains(u)).Order().ToList();
         db.TableDiscussionMentions.AddRange(added.Select(
-            u => new TableDiscussionMention(message.Id, u, message.DocumentId, message.TableDefCode)));
+            u => new TableDiscussionMention(message.Id, u, message.DocumentId, message.TableDefCode, message.SheetCopyKey)));
 
         return added;
     }
@@ -302,23 +314,25 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
         => db.TableDiscussionMentions.Where(x => x.MessageId == messageId).ExecuteDeleteAsync(ct);
 
     /// <inheritdoc />
-    public Task<DateTime?> LastLiveAtAsync(long documentId, string tableCode, CancellationToken ct)
+    public Task<DateTime?> LastLiveAtAsync(long documentId, string tableCode, long sheetCopyKey, CancellationToken ct)
         => db.TableDiscussionMessages.AsNoTracking()
-            .Where(m => m.DocumentId == documentId && m.TableDefCode == tableCode && m.DeletedAt == null)
+            .Where(m => m.DocumentId == documentId && m.TableDefCode == tableCode && m.SheetCopyKey == sheetCopyKey
+                        && m.DeletedAt == null)
             .OrderByDescending(m => m.Id)
             .Select(m => (DateTime?)m.CreatedAt)
             .FirstOrDefaultAsync(ct);
 
     /// <inheritdoc />
-    public async Task MarkReadAsync(int userId, long documentId, string tableCode, long upTo, CancellationToken ct)
+    public async Task MarkReadAsync(
+        int userId, long documentId, string tableCode, long sheetCopyKey, long upTo, CancellationToken ct)
     {
         var read = await db.TableDiscussionReads
-            .FromSql($"SELECT * FROM doc.TableDiscussionRead WITH (UPDLOCK, HOLDLOCK) WHERE UserId = {userId} AND DocumentId = {documentId} AND TableDefCode = {tableCode}")
+            .FromSql($"SELECT * FROM doc.TableDiscussionRead WITH (UPDLOCK, HOLDLOCK) WHERE UserId = {userId} AND DocumentId = {documentId} AND TableDefCode = {tableCode} AND SheetCopyKey = {sheetCopyKey}")
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
         if (read is null)
         {
-            db.TableDiscussionReads.Add(new TableDiscussionRead(userId, documentId, tableCode, upTo));
+            db.TableDiscussionReads.Add(new TableDiscussionRead(userId, documentId, tableCode, upTo, sheetCopyKey));
         }
         else
         {
@@ -326,7 +340,8 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
         }
 
         await db.TableDiscussionMentions
-            .Where(x => x.UserId == userId && x.DocumentId == documentId && x.TableDefCode == tableCode && x.MessageId <= upTo)
+            .Where(x => x.UserId == userId && x.DocumentId == documentId && x.TableDefCode == tableCode
+                        && x.SheetCopyKey == sheetCopyKey && x.MessageId <= upTo)
             .ExecuteDeleteAsync(ct).ConfigureAwait(false);
     }
 }

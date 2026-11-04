@@ -20,6 +20,7 @@ public sealed class TableDiscussionCommands(
     IAccessDecisionService access,
     ICurrentUser currentUser,
     ITableDiscussionStore store,
+    IDocumentSheetCopyStore sheetCopies,
     IEditAssignmentManagementStore documents,
     IUnitOfWork uow,
     IAuditWriter audit,
@@ -40,12 +41,12 @@ public sealed class TableDiscussionCommands(
     /// повідомлення, друге не створювалося, зведення не змінювалось.
     /// </summary>
     public async Task<(TableDiscussionMessageDto Message, bool Created)> PostAsync(
-        long documentId, string tableCode, PostTableDiscussionMessageRequest request, CancellationToken ct)
+        long documentId, string tableCode, PostTableDiscussionMessageRequest request, long? sheetCopyId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         var chat = await TableDiscussionAccess
-            .ResolveAsync(access, currentUser, store, documentId, tableCode, ct).ConfigureAwait(false);
+            .ResolveAsync(access, currentUser, store, sheetCopies, documentId, tableCode, sheetCopyId, ct).ConfigureAwait(false);
         await DocumentVisibility
             .RequireVisibleAsync(access, chat.Profile, documentId, "Document.Discuss", ct).ConfigureAwait(false);
 
@@ -71,7 +72,7 @@ public sealed class TableDiscussionCommands(
         if (clientId is { } known)
         {
             var existing = await store
-                .FindByClientIdAsync(documentId, tableCode, chat.UserId, known, ct).ConfigureAwait(false);
+                .FindByClientIdAsync(documentId, tableCode, chat.SheetCopyKey, chat.UserId, known, ct).ConfigureAwait(false);
             if (existing is not null)
             {
                 return (await MapRowAsync(existing, chat, documentId, ct).ConfigureAwait(false), false);
@@ -83,7 +84,8 @@ public sealed class TableDiscussionCommands(
             .ConfigureAwait(false);
 
         var now = clock.UtcNow;
-        var message = new TableDiscussionMessage(documentId, tableCode, request.PeriodKey, chat.UserId, body, now, clientId);
+        var message = new TableDiscussionMessage(
+            documentId, tableCode, request.PeriodKey, chat.UserId, body, now, clientId, chat.SheetCopyKey);
         TableDiscussionMessageRow? duplicate = null;
 
         try
@@ -91,12 +93,12 @@ public sealed class TableDiscussionCommands(
             await uow.ExecuteInTransactionAsync(async innerCt =>
             {
                 // Блокування зведення серіалізує паралельні повтори: другий побачить уже збережене й нічого не пише.
-                var state = await store.LockStateAsync(documentId, tableCode, innerCt).ConfigureAwait(false);
+                var state = await store.LockStateAsync(documentId, tableCode, chat.SheetCopyKey, innerCt).ConfigureAwait(false);
 
                 if (clientId is { } id)
                 {
                     duplicate = await store
-                        .FindByClientIdAsync(documentId, tableCode, chat.UserId, id, innerCt).ConfigureAwait(false);
+                        .FindByClientIdAsync(documentId, tableCode, chat.SheetCopyKey, chat.UserId, id, innerCt).ConfigureAwait(false);
                     if (duplicate is not null)
                     {
                         return;
@@ -114,7 +116,7 @@ public sealed class TableDiscussionCommands(
                         now, PostedEvent, null, null,
                         JsonSerializer.Serialize(new
                         {
-                            documentId, tableCode, messageId = message.Id, periodKey = request.PeriodKey,
+                            documentId, tableCode, sheetCopyId = chat.SheetCopyKey, messageId = message.Id, periodKey = request.PeriodKey,
                             length = body.Length, mentions,
                         }),
                         chat.UserId, currentUser.CorrelationId),
@@ -127,7 +129,7 @@ public sealed class TableDiscussionCommands(
         {
             // Паралельний дублікат проскочив повз перевірку: транзакцію відкотило, віддаємо те, що збереглось.
             duplicate = await store
-                .FindByClientIdAsync(documentId, tableCode, chat.UserId, clientId.Value, ct).ConfigureAwait(false);
+                .FindByClientIdAsync(documentId, tableCode, chat.SheetCopyKey, chat.UserId, clientId.Value, ct).ConfigureAwait(false);
             if (duplicate is null)
             {
                 throw;
@@ -146,12 +148,12 @@ public sealed class TableDiscussionCommands(
 
     /// <summary>Правка свого повідомлення в межах вікна.</summary>
     public async Task<TableDiscussionMessageDto> EditAsync(
-        long documentId, string tableCode, long messageId, EditTableDiscussionMessageRequest request, CancellationToken ct)
+        long documentId, string tableCode, long messageId, EditTableDiscussionMessageRequest request, long? sheetCopyId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         var chat = await TableDiscussionAccess
-            .ResolveAsync(access, currentUser, store, documentId, tableCode, ct).ConfigureAwait(false);
+            .ResolveAsync(access, currentUser, store, sheetCopies, documentId, tableCode, sheetCopyId, ct).ConfigureAwait(false);
         await DocumentVisibility
             .RequireVisibleAsync(access, chat.Profile, documentId, "Document.Discuss", ct).ConfigureAwait(false);
 
@@ -165,7 +167,7 @@ public sealed class TableDiscussionCommands(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            var message = await store.FindMessageForUpdateAsync(documentId, tableCode, messageId, innerCt).ConfigureAwait(false);
+            var message = await store.FindMessageForUpdateAsync(documentId, tableCode, chat.SheetCopyKey, messageId, innerCt).ConfigureAwait(false);
             if (message is null || !chat.CanSeePeriod(message.PeriodKey))
             {
                 throw TableDiscussionAccess.MessageNotFound(documentId);
@@ -199,7 +201,7 @@ public sealed class TableDiscussionCommands(
                 throw TableDiscussionAccess.BodyInvalid("Текст повідомлення або згадки недійсні.");
             }
 
-            var state = await store.LockStateAsync(documentId, tableCode, innerCt).ConfigureAwait(false);
+            var state = await store.LockStateAsync(documentId, tableCode, chat.SheetCopyKey, innerCt).ConfigureAwait(false);
             var oldBody = message.Body;
             message.Edit(body, now);
             state.OnEdited();
@@ -216,7 +218,7 @@ public sealed class TableDiscussionCommands(
             await audit.WriteSecurityEventAsync(
                 new SecurityEventRecord(
                     now, EditedEvent, null, null,
-                    JsonSerializer.Serialize(new { documentId, tableCode, messageId, oldBody, newBody = body, mentions }),
+                    JsonSerializer.Serialize(new { documentId, tableCode, sheetCopyId = chat.SheetCopyKey, messageId, oldBody, newBody = body, mentions }),
                     chat.UserId, currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
 
@@ -228,10 +230,11 @@ public sealed class TableDiscussionCommands(
     }
 
     /// <summary>М'яке видалення (автор або модератор); повторне — без змін.</summary>
-    public async Task DeleteAsync(long documentId, string tableCode, long messageId, CancellationToken ct)
+    public async Task DeleteAsync(
+        long documentId, string tableCode, long messageId, long? sheetCopyId, CancellationToken ct)
     {
         var chat = await TableDiscussionAccess
-            .ResolveAsync(access, currentUser, store, documentId, tableCode, ct).ConfigureAwait(false);
+            .ResolveAsync(access, currentUser, store, sheetCopies, documentId, tableCode, sheetCopyId, ct).ConfigureAwait(false);
 
         if (await TableDiscussionAccess.IsReadOnlyAsync(documents, documentId, ct).ConfigureAwait(false))
         {
@@ -247,7 +250,7 @@ public sealed class TableDiscussionCommands(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            var message = await store.FindMessageForUpdateAsync(documentId, tableCode, messageId, innerCt).ConfigureAwait(false);
+            var message = await store.FindMessageForUpdateAsync(documentId, tableCode, chat.SheetCopyKey, messageId, innerCt).ConfigureAwait(false);
             if (message is null || !chat.CanSeePeriod(message.PeriodKey))
             {
                 throw TableDiscussionAccess.MessageNotFound(documentId);
@@ -265,19 +268,19 @@ public sealed class TableDiscussionCommands(
                     "err.ECR-ACCS-0403.discussionDeleteForbidden", "Видалити може автор або модератор.");
             }
 
-            var state = await store.LockStateAsync(documentId, tableCode, innerCt).ConfigureAwait(false);
+            var state = await store.LockStateAsync(documentId, tableCode, chat.SheetCopyKey, innerCt).ConfigureAwait(false);
             message.SoftDelete(chat.UserId, now);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
             await store.RemoveMentionsAsync(messageId, innerCt).ConfigureAwait(false);
-            state.OnDeleted(await store.LastLiveAtAsync(documentId, tableCode, innerCt).ConfigureAwait(false));
+            state.OnDeleted(await store.LastLiveAtAsync(documentId, tableCode, chat.SheetCopyKey, innerCt).ConfigureAwait(false));
 
             await audit.WriteSecurityEventAsync(
                 new SecurityEventRecord(
                     now, DeletedEvent, message.AuthorUserId, null,
                     JsonSerializer.Serialize(new
                     {
-                        documentId, tableCode, messageId, periodKey = message.PeriodKey, body = message.Body,
+                        documentId, tableCode, sheetCopyId = chat.SheetCopyKey, messageId, periodKey = message.PeriodKey, body = message.Body,
                         byModerator = !own,
                     }),
                     chat.UserId, currentUser.CorrelationId),
@@ -292,12 +295,12 @@ public sealed class TableDiscussionCommands(
     /// інакше роль, звужена періодами, «прочитала» б повідомлення, яких не бачить, і розкрила б їх існування.
     /// </summary>
     public async Task MarkReadAsync(
-        long documentId, string tableCode, MarkTableDiscussionReadRequest request, CancellationToken ct)
+        long documentId, string tableCode, MarkTableDiscussionReadRequest request, long? sheetCopyId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         var chat = await TableDiscussionAccess
-            .ResolveAsync(access, currentUser, store, documentId, tableCode, ct).ConfigureAwait(false);
+            .ResolveAsync(access, currentUser, store, sheetCopies, documentId, tableCode, sheetCopyId, ct).ConfigureAwait(false);
 
         if (request.LastReadMessageId < 0)
         {
@@ -305,7 +308,7 @@ public sealed class TableDiscussionCommands(
         }
 
         var visibleMax = await store
-            .MaxVisibleIdAsync(documentId, tableCode, chat.AllowedPeriods, ct).ConfigureAwait(false);
+            .MaxVisibleIdAsync(documentId, tableCode, chat.SheetCopyKey, chat.AllowedPeriods, ct).ConfigureAwait(false);
         var upTo = Math.Min(request.LastReadMessageId, visibleMax);
         if (upTo == 0)
         {
@@ -314,7 +317,7 @@ public sealed class TableDiscussionCommands(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            await store.MarkReadAsync(chat.UserId, documentId, tableCode, upTo, innerCt).ConfigureAwait(false);
+            await store.MarkReadAsync(chat.UserId, documentId, tableCode, chat.SheetCopyKey, upTo, innerCt).ConfigureAwait(false);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
     }

@@ -27,8 +27,9 @@ public sealed class TableDiscussionMessage : Entity<long>
     /// <summary>Створює повідомлення (текст уже нормалізовано й перевірено на довжину викликачем).</summary>
     public TableDiscussionMessage(
         long documentId, string tableDefCode, int periodKey, int authorUserId, string body, DateTime utcNow,
-        Guid? clientMessageId = null)
+        Guid? clientMessageId = null, long sheetCopyKey = 0)
     {
+        SheetCopyKey = sheetCopyKey;
         ClientMessageId = clientMessageId;
         DocumentId = documentId;
         TableDefCode = tableDefCode;
@@ -46,6 +47,9 @@ public sealed class TableDiscussionMessage : Entity<long>
     /// повідомлення, а не друге. <c>null</c> — клієнт дедуплікації не просив.
     /// </summary>
     public Guid? ClientMessageId { get; private set; }
+
+    /// <summary>TC02: чат копії аркуша — <c>doc.DocumentSheet.Id</c> копії; <c>0</c> — оригінал.</summary>
+    public long SheetCopyKey { get; private set; }
 
     /// <summary>Код таблиці в шаблоні (стабільний між версіями).</summary>
     public string TableDefCode { get; private set; } = null!;

@@ -5924,6 +5924,14 @@
             "description": "Чи додає рядки користувач (`ФВ-3.2`).",
             "type": "boolean"
           },
+          "chatMessageCount": {
+            "description": "TC02: живих повідомлень чату цієї копії в усіх її таблицях (видалення копії забирає їх разом з даними); `null` — оригінал,\n0 — чат копії порожній. Клієнт показує число ДО підтвердження видалення.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "copyOrdinal": {
             "default": 1,
             "description": "RS: номер у групі — 1 оригінал, 2… копії; копії діляться `sheetCode`/`sheetOrdinal` з оригіналом.",
@@ -25381,6 +25389,14 @@
             "format": "int32",
             "type": "integer"
           },
+          "sheetCopyId": {
+            "description": "TC02: згадка в чаті копії аркуша (`doc.DocumentSheet.Id` копії); `null` — в чаті оригінала.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "snippet": {
             "description": "Початок тексту (до 160 символів).",
             "type": "string"
@@ -25591,6 +25607,10 @@
       "TableDiscussionSummaryItemDto": {
         "description": "Підсумок чату однієї таблиці.",
         "properties": {
+          "key": {
+            "description": "TC02: ключ рядка — «КОД» для оригінала, «КОД#sheetCopyId» для копії (як `sheetStates` у `GET documents/{id}/tables`).",
+            "type": "string"
+          },
           "lastAt": {
             "description": "Коли написано останнє живе (UTC); `null` — чат порожній.",
             "format": "date-time",
@@ -25612,6 +25632,14 @@
             "description": "Ревізія чату: росте на кожне нове, правлене чи видалене повідомлення (та сама, що в ETag сторінки повідомлень).\nОпитування порівнює її з попередньою і перечитує сторінку лише тоді, коли вона змінилась.",
             "format": "int64",
             "type": "integer"
+          },
+          "sheetCopyId": {
+            "description": "TC02: чат копії аркуша (`doc.DocumentSheet.Id` копії); `null` — чат оригінала.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "tableCode": {
             "description": "Код таблиці.",
@@ -25635,7 +25663,9 @@
           "lastAt",
           "lastMessageId",
           "mentionedMe",
-          "revision"
+          "revision",
+          "sheetCopyId",
+          "key"
         ],
         "type": "object"
       },
@@ -33085,7 +33115,7 @@
     },
     "/api/v1/documents/{documentId}/discussions/summary": {
       "get": {
-        "description": "Віддає лише таблиці, які користувач бачить і де є повідомлення. `404 ECR-DOC-0404` — документ невидимий.\nКожен рядок несе `revision` чату (росте на нове/правку/видалення). Відповідь несе `ETag` з усіх\nполів; `If-None-Match` → `304` без тіла (опитування живого оновлення).",
+        "description": "Віддає лише таблиці, які користувач бачить і де є повідомлення. `404 ECR-DOC-0404` — документ невидимий.\nКожен рядок несе `revision` чату (росте на нове/правку/видалення). Відповідь несе `ETag` з усіх\nполів; `If-None-Match` → `304` без тіла (опитування живого оновлення). TC02: рядки копій несуть\n`sheetCopyId`, а `key` — «КОД» (оригінал) чи «КОД#sheetCopyId» (копія), як `sheetStates` у `GET …/tables`.",
         "parameters": [
           {
             "in": "path",
@@ -34568,6 +34598,14 @@
               "format": "int32",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "sheetCopyId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -34649,7 +34687,7 @@
     },
     "/api/v1/documents/{documentId}/tables/{tableCode}/messages": {
       "get": {
-        "description": "Відповідь несе `ETag` (ревізія чату + права читача); `If-None-Match` → `304` без тіла.\n`422 ECR-REQ-0422` — `before` разом з `after`, недійсні межі. `404` — документ чи таблиця невидимі.",
+        "description": "Відповідь несе `ETag` (ревізія чату + права читача); `If-None-Match` → `304` без тіла.\n`422 ECR-REQ-0422` — `before` разом з `after`, недійсні межі. `404` — документ чи таблиця невидимі,\nабо `sheetCopyId` не копія аркуша цієї таблиці (та сама відповідь, що й для схованої таблиці).",
         "parameters": [
           {
             "description": "Документ.",
@@ -34704,6 +34742,15 @@
             "name": "periodKey",
             "schema": {
               "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "TC02: копія аркуша (`sheetCopyId` з `GET …/tables`); немає — оригінал.",
+            "in": "query",
+            "name": "sheetCopyId",
+            "schema": {
+              "format": "int64",
               "type": "integer"
             }
           }
@@ -34797,6 +34844,14 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sheetCopyId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
             }
           }
         ],
@@ -34979,6 +35034,14 @@
               "pattern": "^-?(?:0|[1-9]\\d*)$",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "sheetCopyId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -35059,6 +35122,14 @@
             "schema": {
               "format": "int64",
               "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sheetCopyId",
+            "schema": {
+              "format": "int64",
               "type": "integer"
             }
           }
@@ -35191,6 +35262,14 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sheetCopyId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
             }
           }
         ],

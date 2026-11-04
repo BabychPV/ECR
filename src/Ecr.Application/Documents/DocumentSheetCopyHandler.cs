@@ -185,6 +185,9 @@ public sealed class DocumentSheetCopyHandler(
                     });
             }
 
+            // TC02: чат копії йде разом з нею, в ТІЙ САМІЙ транзакції; кількість — у журнал (тексти повідомлень лишаються
+            // в журналі безпеки подій чату).
+            var chatMessages = await copies.DeleteChatAsync(documentId, sheetCopyId, innerCt).ConfigureAwait(false);
             var cells = await copies.DeleteCopyAsync(documentId, sheetCopyId, innerCt).ConfigureAwait(false);
 
             await WriteAuditAsync(
@@ -192,7 +195,7 @@ public sealed class DocumentSheetCopyHandler(
                 new
                 {
                     documentId, projectId, sheetDefId = copy.SheetDefId, originalId = copy.OriginalId,
-                    sheetCopyId, ordinal = copy.Ordinal, cells,
+                    sheetCopyId, ordinal = copy.Ordinal, cells, chatMessages,
                 },
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);

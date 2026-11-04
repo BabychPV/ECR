@@ -146,6 +146,11 @@ public sealed class DocumentReadScope
     /// <summary>Коди всіх таблиць структури (видимих чи ні).</summary>
     public IReadOnlyCollection<string> TableCodes() => [.. _tableCodes.Values.Distinct(StringComparer.Ordinal)];
 
+    /// <summary>Аркуш шаблону, якому належить таблиця з цим кодом; <c>null</c> — знімок такої таблиці не знає (TC02).</summary>
+    /// <param name="tableCode">Код таблиці.</param>
+    public int? SheetDefIdOfTableCode(string tableCode)
+        => TableIdOf(tableCode) is { } id && _sheetOfTable.TryGetValue(id, out var sheetDefId) ? sheetDefId : null;
+
     /// <summary>Чи знає знімок таблицю з таким кодом (видима вона чи ні).</summary>
     /// <param name="tableCode">Код таблиці.</param>
     public bool KnowsTableCode(string tableCode) => TableIdOf(tableCode) is not null;
