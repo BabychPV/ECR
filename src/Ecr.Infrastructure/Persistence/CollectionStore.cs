@@ -793,16 +793,28 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        // Останній прогін кожної сутності: беремо всі завершені за стелею і
-        // згортаємо в пам'яті — вибірка на кожну сутність коштувала б N запитів.
-        var runs = await db.CollectionRuns
-            .AsNoTracking()
-            .Where(r => ids.Contains(r.SourceEntityId))
-            .OrderByDescending(r => r.StartedAt)
-            .Take(MaxRunsScanned)
-            .Select(r => new { r.SourceEntityId, r.FinishedAt, r.Status, r.PointsRetrieved, r.StartedAt })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        // ⛔ AN-56: останній прогін КОЖНОЇ сутності одним запитом — OUTER APPLY (TOP 1 за Id спадно) = seek у
+        // `IX_CollectionRun_SourceEntityId_Id` на сутність. Колишня форма «20 000 найсвіжіших прогонів усіх сутностей,
+        // згорнути в пам'яті» читала ВСІ прогони цих сутностей (сортування за StartedAt поза індексом; на Land - роки
+        // прогонів кожні 15 хв) на кожен перелік і кожну пробу /health/ready, і втрачала останній прогін сутності, чиї
+        // прогони старші за 20 000 чужих (екран показував «не збиралось»). Id - identity, вставляється в момент
+        // старту прогону, тож порядок за Id = порядок за StartedAt; так само читає `RawDataReader.LastCollectionAsync`.
+        var lastRun = (await db.SourceEntities
+                .AsNoTracking()
+                .Where(e => ids.Contains(e.Id))
+                .Select(e => new
+                {
+                    e.Id,
+                    Run = db.CollectionRuns
+                        .Where(r => r.SourceEntityId == e.Id)
+                        .OrderByDescending(r => r.Id)
+                        .Select(r => new { r.FinishedAt, r.Status, r.PointsRetrieved })
+                        .FirstOrDefault(),
+                })
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .Where(x => x.Run is not null)
+            .ToDictionary(x => x.Id, x => x.Run!);
 
         var now = clock.UtcNow;
         var gapWindowFrom = now.AddDays(-GapLookbackDays);
@@ -833,12 +845,6 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
 
         var transportById = transports.ToDictionary(s => s.Id, s => s.Transport.ToString());
         var codeById = transports.ToDictionary(s => s.Id, s => s.Code);
-
-        var lastRun = runs
-            .GroupBy(r => r.SourceEntityId)
-            .ToDictionary(
-                g => g.Key,
-                g => g.OrderByDescending(r => r.StartedAt).First());
 
         return entities.ConvertAll(entity =>
         {
@@ -923,9 +929,6 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
 
     /// <summary>Стеля переліку сутностей збору.</summary>
     private const int MaxSourceEntities = 5_000;
-
-    /// <summary>Скільки прогонів проглядати, шукаючи останній по кожній сутності.</summary>
-    private const int MaxRunsScanned = 20_000;
 
     /// <summary>Наскільки глибоко екран шукає прогалини.</summary>
     /// <remarks>
