@@ -144,6 +144,11 @@ const PermitRefreshStrip = lazy(async () => ({
   default: (await import('@/features/permits/bindings/PermitRefreshStrip')).PermitRefreshStrip,
 }));
 
+// AN-69: панель «рядки без правила методології» - окремим чанком, у бюджет маршруту (`D-132`) не входить.
+const CalculationIssuesPanel = lazy(async () => ({
+  default: (await import('@/features/calculationIssues/CalculationIssuesPanel')).CalculationIssuesPanel,
+}));
+
 /**
  * Пропозиція повернути загублені правки — сьома лінива панель (`D-132`).
  *
@@ -838,6 +843,19 @@ export function DocumentPage(): JSX.Element {
       {active !== undefined && active.tables.some((table) => table.permitBinding != null) && (
         <Suspense fallback={null}>
           <PermitRefreshStrip documentId={documentId} periodKey={periodKey} tables={active.tables} readOnly={readOnly} />
+        </Suspense>
+      )}
+
+      {/* AN-69: рядки, яких розрахунок не охопив жодним правилом методології, - згортна панель активного аркуша.
+          Сама мовчить, коли проблем немає або документ невидимий (404). */}
+      {active !== undefined && (
+        <Suspense fallback={null}>
+          <CalculationIssuesPanel
+            documentId={documentId}
+            periodKey={periodKey}
+            sheetCopyId={active.sheetCopyId ?? null}
+            tables={active.tables}
+          />
         </Suspense>
       )}
 

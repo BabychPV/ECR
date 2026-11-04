@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { useMediaQuery } from '@mantine/hooks';
 import { useTableStatus } from '@/features/documents/api';
+import { countByTable, issuesOfSheet } from '@/features/calculationIssues/calculationIssuesModel';
+import { useCalculationIssues } from '@/features/calculationIssues/useCalculationIssues';
 import { focusSoon } from '@/shared/a11y/focus';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
@@ -105,6 +107,15 @@ export function SheetWorkspace({
   const selected = resolveTable(tableKey, tables);
   const selectedId = selected?.tableInstanceId;
   const items = useMemo(() => buildTableTree(tables, status.data), [tables, status.data]);
+
+  // AN-69: позначки «рядки без правила» в дереві. Аркуш - оригінал або одна копія, тож копія береться з таблиць;
+  // запит той самий, що в панелі сторінки (один ключ - один запит), помилка читання тут мовчки без позначок.
+  const sheetCopyId = tables[0]?.sheetCopyId ?? null;
+  const issuesQuery = useCalculationIssues(documentId, periodKey, sheetCopyId);
+  const issueCounts = useMemo(
+    () => countByTable(issuesOfSheet(issuesQuery.data, tables, sheetCopyId)),
+    [issuesQuery.data, tables, sheetCopyId],
+  );
 
   const work = useRef<HTMLDivElement>(null);
   // Рамка панелі таблиці (сітки + нижній рядок) і слот, на якому останнім був фокус (режим «усі таблиці»).
@@ -317,6 +328,7 @@ export function SheetWorkspace({
       <TableNavigator
         id={NavigatorId}
         items={items}
+        issueCounts={issueCounts}
         selectedTableInstanceId={selectedId}
         hidden={!navigatorOpen || full}
         onCollapse={toggleNavigator}
