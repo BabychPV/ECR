@@ -819,8 +819,9 @@ jobs:
 
       - name: Форма lane-гілки (лише попередження)
         run: |
-          git fetch origin dev/integration || true
-          BASE=origin/dev/integration
+          # ✎ 2026-11-04 (слово людини): база швидкого контуру — origin/main (lane ріжуться від main)
+          git fetch origin main || true
+          BASE=origin/main
           MERGES=$(git rev-list --merges "$BASE..HEAD" | wc -l)
           if [ "$MERGES" -gt 0 ]; then
             echo "::warning::lane містить merge-коміти ($MERGES); має бути лінійною"
@@ -830,7 +831,7 @@ jobs:
           fi
           BEHIND=$(git rev-list --count "HEAD..$BASE")
           if [ "$BEHIND" -gt 50 ]; then
-            echo "::warning::база відстає від dev/integration на $BEHIND комітів (>50); створи lane від свіжого tip"
+            echo "::warning::база відстає від main на $BEHIND комітів (>50); створи lane від свіжого tip"
           fi
           HOT=$(git diff --name-only "$BASE...HEAD" | grep -E '(^|/)(Sql/|Migrations/|openapi\.snapshot\.json|schema\.d\.ts|shared/ui/|package(-lock)?\.json|Directory\.Packages\.props|CLAUDE\.md|\.github/)' || true)
           if [ -n "$HOT" ]; then
@@ -842,7 +843,7 @@ jobs:
   # Повний набір (server-part ×4, client, a11y, windows) там пропущено; його ганяють
   # `lane/integ-*`, `dev/integration`, PR у `main` (в т.ч. `rc/*`). Цей контур разом з
   # Evidence (build + test + honesty-guard) тримає ≤ ~12 хв: тести лише ТЕСТОВИХ КЛАСІВ,
-  # змінених у diff проти `origin/dev/integration` (`tools/ci-lane-affected.ps1`), включно з
+  # змінених у diff проти `origin/main` (`tools/ci-lane-affected.ps1`; ✎ 2026-11-04), включно з
   # інтеграційними (SQL у контейнері). Зміна лише в `src/**` без тестів іде через Evidence
   # (усі тести `Category!=Integration`), а інтеграційні покриває повний набір на integ/rc.
   # ⛔ Не обов'язковий гейт: ні в `server`, ні в ruleset `main` не входить.
@@ -898,8 +899,8 @@ jobs:
       - name: Чи чіпає diff клієнт
         id: diff
         run: |
-          git fetch origin dev/integration || true
-          BASE="$(git merge-base origin/dev/integration HEAD)"
+          git fetch origin main || true
+          BASE="$(git merge-base origin/main HEAD)"
           if git diff --name-only "$BASE" HEAD | grep -qE '^(src/Ecr\.Web/|contracts/)'; then
             echo "web=true" >> "$GITHUB_OUTPUT"
           else

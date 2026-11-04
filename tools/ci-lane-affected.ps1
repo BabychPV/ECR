@@ -3,7 +3,7 @@
     Швидкий контур lane-гілки: тести лише тих тестових КЛАСІВ, що змінені в diff.
 .DESCRIPTION
     Використовується завданням `lane-affected` у `.github/workflows/ci.yml` на push у
-    не-інтеграційну `lane/**`. Береться diff від merge-base з `origin/dev/integration`,
+    не-інтеграційну `lane/**`. Береться diff від merge-base з `origin/main` (✎ 2026-11-04),
     у `tests/<Проєкт>.Tests/**/*.cs` вибираються оголошені класи, і для кожного проєкту
     запускається `dotnet test --filter "FullyQualifiedName~КласА|FullyQualifiedName~КласБ"`.
 
@@ -12,7 +12,7 @@
     `lane/integ-*` / `dev/integration` / PR). Повний набір — за `verify-all.ps1`.
 
 .PARAMETER Base
-    З чим порівнювати (типово `origin/dev/integration`).
+    З чим порівнювати (типово `origin/main`).
 .PARAMETER Plan
     Лише надрукувати план і записати `has_work=true|false` у `$GITHUB_OUTPUT`.
 .PARAMETER Run
@@ -22,7 +22,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $Base = 'origin/dev/integration',
+    [string] $Base = 'origin/main',
     [switch] $Plan,
     [switch] $Run,
     [string[]] $Files
