@@ -61,6 +61,38 @@ public sealed class SimulationAwareAccessDecisionService(
     }
 
     /// <inheritdoc />
+    /// <remarks>⚠ Пакет — лише поза симуляцією; під симуляцією кожен профіль будується поштучно (суб'єкт симуляції — свій).</remarks>
+    public async Task<IReadOnlyDictionary<int, AccessProfile>> BuildProfilesAsync(
+        IReadOnlyCollection<int> userIds, CancellationToken ct)
+    {
+        if (currentUser.SimulationSessionId is null)
+        {
+            return await inner.BuildProfilesAsync(userIds, ct).ConfigureAwait(false);
+        }
+
+        var result = new Dictionary<int, AccessProfile>();
+        foreach (var id in userIds.Distinct())
+        {
+            try
+            {
+                result[id] = await BuildProfileAsync(id, ct).ConfigureAwait(false);
+            }
+            catch (AccessDeniedException)
+            {
+                // Вимкнений обліковий запис профілю не має.
+            }
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<EditDecision>> CanApproveManyAsync(
+        IReadOnlyList<AccessProfile> profiles, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId,
+        KnownStepRole? knownStep, CancellationToken ct)
+        => inner.CanApproveManyAsync(profiles, documentId, sheetDefId, periodKey, sheetCopyId, knownStep, ct);
+
+    /// <inheritdoc />
     public Task InvalidateProfileAsync(int userId, CancellationToken ct)
         => inner.InvalidateProfileAsync(userId, ct);
 

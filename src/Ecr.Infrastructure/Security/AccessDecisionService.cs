@@ -339,8 +339,6 @@ public sealed class AccessDecisionService(
         // раніше або пізніше за місцеву північ. Це не той клас помилки, що межі
         // періодів: там дата — ЗОБОВ'ЯЗАННЯ («останній день місяця»), тут вона
         // адміністративна, і зсув у кілька годин не робить нікого спізнілим.
-        var today = DateOnly.FromDateTime(clock.UtcNow);
-
         // ⚠ Строкові призначення враховуються тут, а не «десь у перевірці»:
         // підміна на час відпустки має закінчитися сама, інакше її доводиться
         // знімати руками — а того, хто мав би зняти, саме й немає на місці.
@@ -367,6 +365,34 @@ public sealed class AccessDecisionService(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        return await AssembleProfileAsync(userId, securityStamp, groupsFingerprint, participates, assignments, null, null, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Рядок функціонального права ролі (проєкція `sec.RolePermission`).</summary>
+    private sealed record PermissionRow(int RoleId, string PermissionCode);
+
+    /// <summary>Рядок гранта ролі (проєкція `sec.ResourceGrant`).</summary>
+    private sealed record GrantRow(int RoleId, ResourceKind ResourceKind, int ResourceId, GrantLevel Level, bool IsDeny);
+
+    /// <summary>
+    /// Збирає профіль із призначень користувача. ОДНЕ місце побудови і для поштучного (<see cref="LoadAsync"/>), і для
+    /// пакетного (<see cref="BuildProfilesAsync"/>) шляхів: пакетний лише наперед читає права й гранти ВСІХ ролей одним запитом.
+    /// </summary>
+    /// <param name="userId">Користувач.</param>
+    /// <param name="securityStamp">Штамп безпеки.</param>
+    /// <param name="groupsFingerprint">Третій компонент ключа кешу.</param>
+    /// <param name="participates">Ознака учасника документа.</param>
+    /// <param name="assignments">Призначення (до 200, найновіші першими).</param>
+    /// <param name="preloadedPermissions">Права ролей (надмножина; відбирається за ролями користувача) або <c>null</c> — з бази.</param>
+    /// <param name="preloadedGrants">Гранти ролей (надмножина) або <c>null</c> — з бази.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task<AccessProfile> AssembleProfileAsync(
+        int userId, string securityStamp, string groupsFingerprint, bool participates,
+        List<RoleAssignment> assignments, IReadOnlyList<PermissionRow>? preloadedPermissions,
+        IReadOnlyList<GrantRow>? preloadedGrants, CancellationToken ct)
+    {
+        var today = DateOnly.FromDateTime(clock.UtcNow);
         var effective = assignments.Where(a => a.IsEffectiveOn(today)).ToList();
 
         // ⛔ ФВ-6.14: призначення з областю дії дає свої права ЛИШЕ в
@@ -406,14 +432,16 @@ public sealed class AccessDecisionService(
             .Distinct()
             .ToList();
 
-        var rolePermissions = roleIds.Count == 0
+        List<PermissionRow> rolePermissions = roleIds.Count == 0
             ? []
-            : await db.RolePermissions
-                .AsNoTracking()
-                .Where(rp => roleIds.Contains(rp.RoleId))
-                .Select(rp => new { rp.RoleId, rp.PermissionCode })
-                .ToListAsync(ct)
-                .ConfigureAwait(false);
+            : preloadedPermissions is not null
+                ? [.. preloadedPermissions.Where(rp => roleIds.Contains(rp.RoleId))]
+                : await db.RolePermissions
+                    .AsNoTracking()
+                    .Where(rp => roleIds.Contains(rp.RoleId))
+                    .Select(rp => new PermissionRow(rp.RoleId, rp.PermissionCode))
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
 
         // ⛔ Функціональні права ролей без області — глобальні (`Has(code)`).
         // Ролей з областю — лише в її проєктах (`Has(code, projectId)`) і лише
@@ -434,14 +462,16 @@ public sealed class AccessDecisionService(
             .Select(rp => rp.RoleId)
             .ToHashSet();
 
-        var rows = roleIds.Count == 0
+        List<GrantRow> rows = roleIds.Count == 0
             ? []
-            : await db.ResourceGrants
-                .AsNoTracking()
-                .Where(g => roleIds.Contains(g.RoleId))
-                .Select(g => new { g.RoleId, g.ResourceKind, g.ResourceId, g.Level, g.IsDeny })
-                .ToListAsync(ct)
-                .ConfigureAwait(false);
+            : preloadedGrants is not null
+                ? [.. preloadedGrants.Where(g => roleIds.Contains(g.RoleId))]
+                : await db.ResourceGrants
+                    .AsNoTracking()
+                    .Where(g => roleIds.Contains(g.RoleId))
+                    .Select(g => new GrantRow(g.RoleId, g.ResourceKind, g.ResourceId, g.Level, g.IsDeny))
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
 
         var grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal);
         var denies = new HashSet<string>(StringComparer.Ordinal);
@@ -2665,23 +2695,158 @@ public sealed class AccessDecisionService(
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        var context = await BuildContextAsync(
-                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct, sheetCopyId)
-            .ConfigureAwait(false);
-        context = await WithSheetCodeAsync(profile, documentId, context, ct).ConfigureAwait(false);
-        context = await WithParticipationAsync(profile, documentId, context, ct).ConfigureAwait(false);
+        // ⛔ Поштучне рішення — пакетне з одним профілем: ОДИН шлях правил (AN-59).
+        return (await CanApproveManyCoreAsync([profile], documentId, sheetDefId, periodKey, sheetCopyId, null, ct)
+            .ConfigureAwait(false))[0];
+    }
 
-        if (DenyIfInvisible(profile, context) is { } invisible)
+    /// <inheritdoc />
+    public Task<IReadOnlyList<EditDecision>> CanApproveManyAsync(
+        IReadOnlyList<AccessProfile> profiles, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId,
+        KnownStepRole? knownStep, CancellationToken ct)
+        => CanApproveManyCoreAsync(profiles, documentId, sheetDefId, periodKey, sheetCopyId, knownStep, ct);
+
+    /// <summary>
+    /// Затвердження аркуша або копії для кількох профілів: умови аркуша, маршрут і крок читаються ОДИН раз, залежне від
+    /// профілю (код аркуша, надання учасника, видимість) — у пам'яті або множинним запитом, рішення — те саме
+    /// <see cref="EditRules.CanApprove"/> на кожен профіль.
+    /// </summary>
+    private async Task<IReadOnlyList<EditDecision>> CanApproveManyCoreAsync(
+        IReadOnlyList<AccessProfile> profiles, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId,
+        KnownStepRole? knownStep, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profiles);
+        if (profiles.Count == 0)
         {
-            return invisible;
+            return [];
         }
 
-        // ⚠ Маршрут читається ЛИШЕ при затвердженні, а не в кожному рішенні
-        // про доступ: затверджують рідко, а комірки читають тисячами.
-        var step = await CurrentApprovalStepCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct)
+        var shared = await BuildContextAsync(
+                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct, sheetCopyId)
             .ConfigureAwait(false);
 
-        return EditRules.CanApprove(profile, context, step?.RoleId);
+        var contexts = new CellAccessContext[profiles.Count];
+        for (var i = 0; i < profiles.Count; i++)
+        {
+            contexts[i] = await WithSheetCodeAsync(profiles[i], documentId, shared, ct).ConfigureAwait(false);
+        }
+
+        await ParticipationContextsAsync(profiles, documentId, contexts, ct).ConfigureAwait(false);
+
+        var decisions = new EditDecision[profiles.Count];
+        int? stepRoleId = knownStep?.RoleId;
+        var stepRead = knownStep is not null;
+        for (var i = 0; i < profiles.Count; i++)
+        {
+            if (DenyIfInvisible(profiles[i], contexts[i]) is { } invisible)
+            {
+                decisions[i] = invisible;
+                continue;
+            }
+
+            // ⚠ Маршрут читається ЛИШЕ при затвердженні, а не в кожному рішенні
+            // про доступ: затверджують рідко, а комірки читають тисячами.
+            if (!stepRead)
+            {
+                stepRoleId = (await CurrentApprovalStepCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct)
+                    .ConfigureAwait(false))?.RoleId;
+                stepRead = true;
+            }
+
+            decisions[i] = EditRules.CanApprove(profiles[i], contexts[i], stepRoleId);
+        }
+
+        return decisions;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, AccessProfile>> BuildProfilesAsync(
+        IReadOnlyCollection<int> userIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(userIds);
+
+        var result = new Dictionary<int, AccessProfile>();
+        var batch = new List<int>();
+        foreach (var id in userIds.Distinct())
+        {
+            // Групи беруться з токена лише для власної сесії — її профіль будується поштучно (як і в BuildProfileAsync).
+            if (GroupSidsFor(id).Count > 0)
+            {
+                try
+                {
+                    result[id] = await BuildProfileAsync(id, ct).ConfigureAwait(false);
+                }
+                catch (AccessDeniedException)
+                {
+                    // Вимкнений обліковий запис профілю не має.
+                }
+            }
+            else
+            {
+                batch.Add(id);
+            }
+        }
+
+        if (batch.Count == 0)
+        {
+            return result;
+        }
+
+        // Штамп, ознака учасника й призначення (найновіші ≤ MaxRoleAssignments, як у BuildProfileAsync) — ОДНИМ запитом.
+        var accounts = await db.Users
+            .AsNoTracking()
+            .Where(u => batch.Contains(u.Id) && u.IsActive)
+            .Select(u => new { u.Id, u.SecurityStamp, Participates = db.EditAssignmentRecipients.Any(r => r.UserId == u.Id), Assignments = db.RoleAssignments.Where(a => a.UserId == u.Id).OrderByDescending(a => a.Id).Take(MaxRoleAssignments).ToList() })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (accounts.Count == 0)
+        {
+            return result;
+        }
+
+        var byUser = accounts.ToDictionary(a => a.Id, a => a.Assignments);
+        var today = DateOnly.FromDateTime(clock.UtcNow);
+        var roleIds = byUser.Values.SelectMany(l => l).Where(a => a.IsEffectiveOn(today)).Select(a => a.RoleId).Distinct().ToList();
+        IReadOnlyList<PermissionRow> permissions = [];
+        IReadOnlyList<GrantRow> grants = [];
+        if (roleIds.Count > 0)
+        {
+            permissions = await db.RolePermissions.AsNoTracking()
+                .Where(rp => roleIds.Contains(rp.RoleId))
+                .Select(rp => new PermissionRow(rp.RoleId, rp.PermissionCode))
+                .ToListAsync(ct).ConfigureAwait(false);
+            grants = await db.ResourceGrants.AsNoTracking()
+                .Where(g => roleIds.Contains(g.RoleId))
+                .Select(g => new GrantRow(g.RoleId, g.ResourceKind, g.ResourceId, g.Level, g.IsDeny))
+                .ToListAsync(ct).ConfigureAwait(false);
+        }
+
+        foreach (var account in accounts)
+        {
+            var userId = account.Id;
+            var stamp = account.SecurityStamp;
+            var participates = account.Participates;
+            var assignments = byUser.GetValueOrDefault(userId) ?? [];
+
+            // Той самий ключ кешу, що й у BuildProfileAsync (без груп: відбиток груп порожній).
+            var variant = ParticipationKeyed(
+                AssignmentRowsFingerprint([.. assignments.Select(x => new AssignmentRow(
+                    x.Id, x.RoleId, x.UserId, x.PrincipalSid, x.ScopeJson, x.ValidFrom, x.ValidTo))]),
+                participates);
+
+            var profile = await profileCache
+                .GetOrCreateAsync(
+                    userId, stamp, variant,
+                    token => AssembleProfileAsync(userId, stamp, variant, participates, assignments, permissions, grants, token),
+                    ct)
+                .ConfigureAwait(false);
+
+            result[userId] = currentUser.IsIntegrationJob && currentUser.UserId == userId
+                ? IntegrationWriter(profile)
+                : profile;
+        }
+
+        return result;
     }
 
     /// <inheritdoc />
@@ -3024,6 +3189,13 @@ public sealed class AccessDecisionService(
         var locked = db.Database.CurrentTransaction is not null;
         var grants = (await ParticipationGrantsAsync(profile, [documentId], ct, locked).ConfigureAwait(false))
             .TryGetValue(documentId, out var mine) ? mine : [];
+        return await ApplyParticipationAsync(documentId, context, grants, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Надання учасника → умови аркуша (ОДНЕ місце для поштучного й пакетного шляхів).</summary>
+    private async Task<CellAccessContext> ApplyParticipationAsync(
+        long documentId, CellAccessContext context, IReadOnlyList<ParticipationGrant> grants, CancellationToken ct)
+    {
         if (grants.Count == 0)
         {
             return context;
@@ -3038,6 +3210,72 @@ public sealed class AccessDecisionService(
             ParticipatesInDocument = true,
             ParticipationLevel = DocumentParticipation.LevelAt(grants, sheetCode, null, context.Period),
         };
+    }
+
+    /// <summary>
+    /// AN-59: <see cref="WithParticipationAsync"/> для КІЛЬКОХ профілів одного документа (затвердження кроку). Ті самі
+    /// умови відбору й та сама побудова умов; факти передач читаються двома запитами на всіх, а перевірка прав
+    /// делегаторів (<see cref="WithDelegatorRightsAsync"/>) — раз на документ, бо від виконавця не залежить.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Один профіль або транзакція дії (читання під блокуванням) — поштучний шлях без змін: пакет не бере блокувань.
+    /// </remarks>
+    private async Task ParticipationContextsAsync(
+        IReadOnlyList<AccessProfile> profiles, long documentId, CellAccessContext[] contexts, CancellationToken ct)
+    {
+        var eligible = new List<int>();
+        for (var i = 0; i < profiles.Count; i++)
+        {
+            if (profiles[i].HasDocumentParticipations
+                && !profiles[i].IsIntegrationWriter
+                && contexts[i].HasEditAssignments
+                && !profiles[i].DeniesProject(contexts[i].ProjectId))
+            {
+                eligible.Add(i);
+            }
+        }
+
+        if (eligible.Count == 0)
+        {
+            return;
+        }
+
+        if (eligible.Count == 1 || db.Database.CurrentTransaction is not null)
+        {
+            foreach (var i in eligible)
+            {
+                contexts[i] = await WithParticipationAsync(profiles[i], documentId, contexts[i], ct).ConfigureAwait(false);
+            }
+
+            return;
+        }
+
+        var now = clock.UtcNow;
+        var many = await EditAssignmentFactsReader
+            .LoadManyAsync(db, documentId, [.. eligible.Select(i => profiles[i].UserId)], now, ct)
+            .ConfigureAwait(false);
+        if (many is null)
+        {
+            return;
+        }
+
+        // Права делегаторів не залежать від виконавця: перевіряються раз, на «умовно призначених» фактах (кандидат — будь-який
+        // факт із станом виконавця), а результат переноситься на факти кожного, у кого стан є.
+        var checkedShared = await WithDelegatorRightsAsync(
+                documentId, many.OwnerUserId,
+                [.. many.Shared.Select(f => f with { MyProgress = AssigneeProgress.Assigned })], now, ct)
+            .ConfigureAwait(false);
+
+        foreach (var i in eligible)
+        {
+            var facts = many.ByUser[profiles[i].UserId]
+                .Select((f, index) => f.MyProgress is null ? f : f with { DelegatorActive = checkedShared[index].DelegatorActive })
+                .ToList();
+
+            contexts[i] = await ApplyParticipationAsync(
+                    documentId, contexts[i], DocumentParticipation.Active(facts, now), ct)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>Аркуш, якому належить таблиця.</summary>
