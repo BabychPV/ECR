@@ -361,7 +361,15 @@ public sealed class StepApproversResolverTests(SqlServerFixture sql)
             Assert.True(facts.Capped);
             Assert.True(seen.Total <= 3, seen.Format());
 
-            var (names, truncated) = await ResolveAsync(w);
+            // Ціле поле (передфільтр + профілі + рішення), холодний кеш профілів: не більше 8 звернень НЕЗАЛЕЖНО від числа
+            // кандидатів (раніше — ~8 на кандидата).
+            using var fieldMemory = new MemoryCache(new MemoryCacheOptions());
+            var resolver = new StepApproversResolver(store, Service(counted, fieldMemory));
+            counter.Tally.Reset();
+            var (names, truncated) = await resolver.ResolveAsync(
+                w.Doc.DocumentId, w.Doc.PeriodKey.Value, CancellationToken.None);
+            var field = counter.Tally.Snapshot();
+            Assert.True(field.Total <= 8, field.Format());
 
             Assert.True(truncated);
             Assert.NotNull(names);
