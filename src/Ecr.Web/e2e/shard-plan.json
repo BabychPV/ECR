@@ -15,7 +15,10 @@
       "documentsQuickLook.spec.ts",
       "navbarCollapse.spec.ts",
       "createDocumentWizard.spec.ts",
-      "periodsOverview.spec.ts"
+      "periodsOverview.spec.ts",
+      "naeStructure.spec.ts",
+      "naeNodeTypes.spec.ts",
+      "naeTreeManual.spec.ts"
     ],
     "3": [
       "keyCommitGateLive.spec.ts::\\sC,\\s",
@@ -31,7 +34,10 @@
       "documentInspector.spec.ts",
       "lazyTables.spec.ts",
       "cellStates.spec.ts",
-      "modalReopen.spec.ts"
+      "modalReopen.spec.ts",
+      "methodologyCategories.spec.ts",
+      "methodologyUi.spec.ts",
+      "documentsVersionColumn.spec.ts"
     ],
     "4": [
       "keyCommitGateLive.spec.ts::\\sA,\\s",
@@ -68,6 +74,15 @@
       "documentsBoardCard.spec.ts",
       "registriesList.spec.ts",
       "healthPage.spec.ts"
+    ],
+    "6": [
+      "tableChatLiveRefresh.spec.ts",
+      "tableChat.spec.ts",
+      "airLimitsReal.spec.ts",
+      "airParams.spec.ts",
+      "permitGroups.spec.ts",
+      "permitUsage.spec.ts",
+      "liveStatus.spec.ts"
     ]
   }
 }
