@@ -50,8 +50,7 @@ export interface MessagesQuery {
   readonly limit?: number;
   /** `null`/absent — all periods. */
   readonly periodKey?: number | null;
-  /** TC02: chat of a sheet copy; 
-ull/absent — the original. */
+  /** TC02: chat of a sheet copy; null/absent — the original. */
   readonly sheetCopyId?: number | null;
 }
 
@@ -254,7 +253,7 @@ export function useMentionCandidates(
   const trimmed = query.trim();
 
   return useQuery({
-    // TC02: the key carries the copy (a copy and its original share 	ableCode, but not the people who see them).
+    // TC02: the key carries the copy (a copy and its original share `tableCode`, but not the people who see them).
     queryKey: queryKeys.tableChat.candidates(documentId, chatKey(tableCode, sheetCopyId), periodKey, trimmed),
     queryFn: () => getMentionCandidates(documentId, tableCode, periodKey, trimmed, sheetCopyId),
     enabled: trimmed.length >= MinMentionQuery,

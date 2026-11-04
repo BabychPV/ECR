@@ -82,8 +82,7 @@ export interface ChatWindow {
 export function useChatWindow(
   documentId: number,
   tableCode: string,
-  /** TC02: the copy of the sheet whose chat this is; 
-ull - the original. Part of the window identity. */
+  /** TC02: the copy of the sheet whose chat this is; null - the original. Part of the window identity. */
   sheetCopyId: number | null,
   periodFilter: number | null,
 ): ChatWindow {
