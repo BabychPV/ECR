@@ -33,6 +33,7 @@ public sealed class DocumentsController(
     GetTableStatusHandler tableStatus,
     GetCalculationResultsHandler calculationResults,
     GetCalculationRunStatusHandler calculationRunStatus,
+    GetCalculationIssuesHandler calculationIssues,
     ExportDocumentHandler export,
     DownloadExportHandler downloadExport,
     PreviewImportHandler previewImport,
@@ -646,6 +647,19 @@ public sealed class DocumentsController(
     public async Task<IActionResult> CalculationRun(
         long id, [FromQuery] int periodKey, CancellationToken ct)
         => Ok(await calculationRunStatus.HandleAsync(id, periodKey, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Поточні проблеми розрахунку документа за період і копію аркуша: рядки без правила (AN-69). Право <c>Document.View</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Лише поточні проблеми останнього проходу; без <c>sheetCopyId</c> — оригінал аркуша. Рядки схованих таблиць
+    /// у відповіді відсутні; невидимий документ — 404.
+    /// </remarks>
+    [HttpGet("{id:long}/calculation-issues")]
+    [ProducesResponseType<Ecr.Application.Calculations.Dto.CalculationIssuesDto>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> CalculationIssues(
+        long id, [FromQuery] int periodKey, [FromQuery] long? sheetCopyId, CancellationToken ct)
+        => Ok(await calculationIssues.HandleAsync(id, periodKey, sheetCopyId, ct).ConfigureAwait(false));
 
     /// <summary>Експорт у <c>.xlsx</c>. Право <c>Document.Export</c>.</summary>
     [HttpPost("{id:long}/export")]
