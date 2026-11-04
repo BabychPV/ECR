@@ -8,13 +8,15 @@
   gap: var(--mantine-spacing-xs);
 }
 
+/* CL-18 (B-3): 10 стовпців x 24 px + 9 проміжків по 3 px + відступи дропдауна Mantine (2 x 12 px) - плитка >= 24x24 (була ~19). */
 .ecr-cell-color-dropdown {
-  width: 232px;
+  width: 292px;
+  max-width: calc(100vw - 16px);
 }
 
 .ecr-cell-color-grid {
   display: grid;
-  grid-template-columns: repeat(10, 1fr);
+  grid-template-columns: repeat(10, minmax(24px, 1fr));
   gap: 3px;
   margin-bottom: 3px;
 }
@@ -32,6 +34,8 @@
 .ecr-cell-color-swatch {
   box-sizing: border-box;
   width: 100%;
+  min-width: 24px;
+  min-height: 24px;
   aspect-ratio: 1;
   padding: 0;
   cursor: pointer;

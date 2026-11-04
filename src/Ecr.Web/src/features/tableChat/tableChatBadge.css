@@ -6,7 +6,9 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 22px;
+  /* CL-18 (WCAG 2.5.8): ціль >= 24 px (було 22). */
+  min-height: 24px;
+  height: 24px;
   padding: 0 8px;
   border: 1px solid var(--mantine-color-default-border);
   border-radius: 11px;

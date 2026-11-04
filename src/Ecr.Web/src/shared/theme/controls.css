@@ -65,7 +65,14 @@
 }
 
 /* Іконка-кнопка: типовий `md` — висота контролу; `sm` — малий, як кнопка `xs`. */
+/* CL-18 (B-3, WCAG 2.5.8): кнопка очищення поля (Clear from/to) була 18 px (xs) / 22 px (sm) - мінімум 24 px. */
+.mantine-CloseButton-root {
+  --cb-size-xs: 24px;
+  --cb-size-sm: 24px;
+}
+
 .mantine-ActionIcon-root {
+  --ai-size-xs: 24px;
   --ai-size-sm: 24px;
   --ai-size-md: var(--ecr-ctl-height);
   --ai-size-input-xs: var(--ecr-ctl-height);
