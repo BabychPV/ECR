@@ -61,6 +61,19 @@ export function isServerField(field: Pick<RegistryField, 'isReadOnly'> & { reado
   return field.isReadOnly === true;
 }
 
+/** Рівень джерела NAE: лише на ньому сервер зберігає виведені регіон і район. */
+export const NaeSourceLevel = 'SRC';
+
+/**
+ * Поле сервера показується в картці цього рівня. Виведені регіон і район сервер зберігає лише на джерелах (SRC): на
+ * SITE/EQUIP (і району на REGION, регіону на AREA) там завжди «—», що читалося як збій (AN-161), тож рядка немає.
+ */
+export function showsServerField(field: { readonly code?: string }, levelCode: string | null): boolean {
+  if (field.code === NaeRegionField || field.code === NaeAreaField) return levelCode === NaeSourceLevel;
+
+  return true;
+}
+
 /** Стан форми з повного запису. `null` із сервера - поле не заповнене, у формі це порожній рядок. */
 export function formOfDetail(detail: NodeDetail): NodeFormState {
   const values: Record<string, string> = {};

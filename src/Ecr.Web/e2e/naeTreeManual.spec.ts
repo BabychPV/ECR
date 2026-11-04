@@ -272,6 +272,14 @@ test.describe('NAE tree manual', () => {
     const nodes = await treeNodes(admin);
     expect(nodes.some((node) => node.levelCode === 'REGION' && node.display.includes(Region)), 'вузол регіону').toBe(true);
     expect(nodes.some((node) => node.levelCode === 'AREA' && node.display.includes(`E2E NAE ${Stamp}`)), 'вузол району з назвою').toBe(true);
+
+    // AN-161: картка району без порожнього «Region —» - виведені коди сервер зберігає лише на джерелах (SRC).
+    const area = nodes.find((node) => node.levelCode === 'AREA' && node.display.includes(`E2E NAE ${Stamp}`))!;
+    await page.goto(`/admin/permits/nae?node=${String(area.id)}`);
+    const form = page.getByRole('form', { name: 'Node attributes' });
+    await expect(form.getByLabel('Name (English)')).toHaveValue(`E2E NAE ${Stamp}`, { timeout: 30_000 });
+    await expect(form.locator('[data-nae-derived-field="RegionCode"]')).toHaveCount(0);
+    await expect(form.locator('[data-nae-derived-field="AreaCode"]')).toHaveCount(0);
     await context.close();
   });
 
