@@ -143,7 +143,7 @@ jobs:
       # ⛔ На push (lane/**) у події немає pull_request.*, і сторож отримував
       # порожні BASE/HEAD: `git diff "..."` давав порожній diff, а скрипт
       # виходив нулем — зелений гейт, що нічого не перевірив. Тому на push і
-      # workflow_dispatch база — merge-base з dev/integration (історія є:
+      # workflow_dispatch база — merge-base з main (✎ 2026-11-04; історія є:
       # fetch-depth: 0; на самій dev/integration база = вершина, і порожній
       # diff там чесний), а
       # порожня чи неіснуюча база — падіння, а не «змін у .cs немає».
@@ -158,7 +158,7 @@ jobs:
           set -euo pipefail
           if [ "$EVENT_NAME" = "push" ] || [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             HEAD_SHA="$PUSH_SHA"
-            BASE_SHA="$(git merge-base origin/dev/integration "$HEAD_SHA" || true)"
+            BASE_SHA="$(git merge-base origin/main "$HEAD_SHA" || true)"
             # push у dev/integration: merge-base = сама вершина (порожній diff, хибно зелений); база - попередня вершина
             if [ "$GITHUB_REF" = "refs/heads/dev/integration" ] && [ "$EVENT_NAME" = "push" ]; then
               BASE_SHA="$BEFORE_SHA"
