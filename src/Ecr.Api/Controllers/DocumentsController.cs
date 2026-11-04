@@ -167,7 +167,7 @@ public sealed class DocumentsController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Get(long id, [FromQuery] int? periodKey, CancellationToken ct)
     {
-        var document = await getDocument.HandleAsync(id, periodKey, ct).ConfigureAwait(false);
+        var document = await getDocument.HandleAsync(id, periodKey, includeStepApprovers: true, ct).ConfigureAwait(false);
 
         // ⛔ Кидок, а не `NotFound(new { errorCode })` — і це знайдено проходом
         // інтерфейсу як користувач (`docs/build/UI-WALKTHROUGH.md`, F4).
