@@ -122,3 +122,14 @@ public sealed record RetireRegistryEntryRequest(DateOnly? On, bool Cascade);
 public sealed record RetireRegistryEntryResponse(
     IReadOnlyList<long> RetiredIds,
     int AffectedRows);
+
+/// <summary>Restore a retired node (reopens its validity window; children stay retired).</summary>
+/// <param name="WithAncestors">Also restore the retired ancestors up to the first live one; without it a retired parent is refused.</param>
+public sealed record UnretireRegistryEntryRequest(bool? WithAncestors);
+
+/// <summary>Result of a restore.</summary>
+/// <param name="RestoredIds">Entries whose window was reopened (topmost ancestor first, the node last); empty — it was live.</param>
+/// <param name="AffectedRows">Document rows re-checked by the orphan scan for the restored entries.</param>
+public sealed record UnretireRegistryEntryResponse(
+    IReadOnlyList<long> RestoredIds,
+    int AffectedRows);

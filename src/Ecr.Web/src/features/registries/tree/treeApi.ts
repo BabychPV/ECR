@@ -11,6 +11,8 @@ type MoveBody = components['schemas']['MoveRegistryEntryRequest'];
 type MoveResult = components['schemas']['MoveRegistryEntryResponse'];
 type RetireBody = components['schemas']['RetireRegistryEntryRequest'];
 type RetireResult = components['schemas']['RetireRegistryEntryResponse'];
+type UnretireBody = components['schemas']['UnretireRegistryEntryRequest'];
+type UnretireResult = components['schemas']['UnretireRegistryEntryResponse'];
 
 /*
  * ⛔ Адреси записані повністю, а не збираються з помічника: сторож
@@ -60,5 +62,30 @@ export function retireRegistryEntry(code: string, id: number, body: RetireBody):
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Повернення закритого вузла (людина 04.11): вікно дійсності відкривається, діти лишаються закритими.
+ *
+ * ⚠ Закритий предок без `withAncestors` - `409 ECR-REG-0409 parentRetired` (`ancestorIds`); зайнятий номер НАЕ -
+ * `409 ECR-REG-4094 naeCodeTaken`; ключ довідника - `409 ECR-REG-4092`.
+ */
+export function unretireRegistryEntry(code: string, id: number, body: UnretireBody): Promise<UnretireResult> {
+  return apiFetch<UnretireResult>(`/api/v1/registries/${encodeURIComponent(code)}/entries/${String(id)}/unretire`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Остаточне видалення закритого або видаленого запису, якщо він ніде не вживається.
+ *
+ * ⚠ Діючий запис - `409 ECR-REG-0409 purgeActive` (спершу закрити); вживаний - `409 ECR-REG-0409 entryUsed` з `referenceKinds`.
+ */
+export function purgeRegistryEntry(code: string, id: number): Promise<void> {
+  return apiFetch<void>(`/api/v1/registries/${encodeURIComponent(code)}/entries/${String(id)}/purge`, {
+    method: 'DELETE',
   });
 }

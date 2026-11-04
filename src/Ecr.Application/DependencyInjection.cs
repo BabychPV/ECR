@@ -291,6 +291,8 @@ public static class DependencyInjection
         services.AddScoped<Registries.Hierarchy.GetRegistryTreeHandler>();
         services.AddScoped<Registries.Hierarchy.MoveRegistryEntryHandler>();
         services.AddScoped<Registries.Hierarchy.RetireRegistryEntryHandler>();
+        services.AddScoped<Registries.Hierarchy.UnretireRegistryEntryHandler>();
+        services.AddScoped<Registries.Hierarchy.PurgeRegistryEntryHandler>();
         services.AddScoped<Registries.Nae.ImportNaeFromAfHandler>();
         services.AddScoped<Registries.Nae.GetRegistryEntryReferencesHandler>();
         services.AddScoped<Registries.Nae.NaeTreeProvisioner>();

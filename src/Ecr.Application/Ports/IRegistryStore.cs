@@ -213,6 +213,27 @@ public interface IRegistryStore
         IReadOnlyCollection<long> registryEntryIds, CancellationToken ct);
 
     /// <summary>
+    /// «Де вживається» перед ФІЗИЧНИМ видаленням запису (purge, NAE restore/purge): усі сліди id запису поза рядками, якими
+    /// він володіє сам, — за видами (<see cref="RegistryEntryHardReferences"/>). Порожньо — видаляти можна.
+    /// </summary>
+    /// <param name="entry">Запис (його довідник і момент створення звужують пошук у зрізах подання).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Суворіше за <see cref="CountReferencesAsync"/>: рахуються посилання й від ЛОГІЧНО ВИДАЛЕНИХ власників, діти в будь-якому
+    /// стані, архів <c>arc.CellValue</c> і незмінні зрізи подання (D-67: зріз не видаляється ніколи, і id у ньому мусить
+    /// резолвитися). Журнал <c>aud.*</c> не блокує.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<string, int>> FindHardReferencesAsync(RegistryEntry entry, CancellationToken ct);
+
+    /// <summary>
+    /// Фізично видаляє запис і рядки, якими він володіє (значення, рядки ключів, зовнішні ключі), — у транзакції виклику.
+    /// </summary>
+    /// <param name="registryEntryId">Запис.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>false</c> — базу зупинив зовнішній ключ (SQL 547): посилання з'явилося між перевіркою й видаленням.</returns>
+    public Task<bool> PurgeEntryAsync(long registryEntryId, CancellationToken ct);
+
+    /// <summary>
     /// Живі (не видалені логічно) частини композиції переданих батьків — <b>з відстеженням</b>
     /// і з політикою видалення поля композиції (RT-12, <c>D-155</c>).
     /// </summary>
@@ -513,4 +534,80 @@ public sealed record RegistryEntryReferences(
 
         return kinds;
     }
+}
+
+/// <summary>
+/// Види слідів id запису для <see cref="IRegistryStore.FindHardReferencesAsync"/> (ключі <c>referenceKinds</c> у
+/// <c>409 entryUsed</c>; клієнт підписує їх <c>registries.referenceKind.{вид}</c>).
+/// </summary>
+/// <remarks>
+/// ⛔ Кожен зовнішній ключ на <c>dic.RegistryEntry</c> — або вид тут, або рядок, яким запис володіє сам і який purge видаляє
+/// разом із ним (<see cref="OwnedForeignKeys"/>). Сторож <c>RegistryEntryForeignKeyCoverageTests</c> (Architecture) звіряє з
+/// моделлю EF: новий FK без рішення тут — червоний.
+/// </remarks>
+public static class RegistryEntryHardReferences
+{
+    /// <summary><c>doc.CellValue.ValueRegistryEntryId</c> (FK_CellValue_Entry).</summary>
+    public const string Cells = "cells";
+
+    /// <summary><c>doc.DocumentHeaderValue.ValueRegistryEntryId</c> (FK_DocumentHeaderValue_Entry).</summary>
+    public const string HeaderValues = "headerValues";
+
+    /// <summary><c>dic.RegistryValue.ValueRefEntryId</c> іншого власника, також видаленого логічно (FK_RegValue_Ref).</summary>
+    public const string RegistryValues = "registryValues";
+
+    /// <summary><c>dic.RegistryEntry.ParentEntryId</c> — діти в будь-якому стані (FK_RegEntry_Parent).</summary>
+    public const string ChildEntries = "childEntries";
+
+    /// <summary><c>dic.RegistryEntryLink</c> зліва чи справа (FK_RegLink_Left, FK_RegLink_Right).</summary>
+    public const string Links = "links";
+
+    /// <summary><c>calc.MethodologyConstant.SubstanceEntryId</c> (FK_MC_Substance).</summary>
+    public const string MethodologyConstants = "methodologyConstants";
+
+    /// <summary>
+    /// <c>calc.MethodologySubstance.SubstanceEntryId</c> (FK_MS_Substance). ⚠ Покриває й <c>calc.CalculationResult</c> /
+    /// <c>calc.CalculationStep</c> / їхні <c>arc.*</c>: <c>SubstanceEntryId</c> результату береться лише з речовин версії
+    /// методології (<c>GenericCalculationModule</c>), а речовина опублікованої версії тримає FK.
+    /// </summary>
+    public const string MethodologySubstances = "methodologySubstances";
+
+    /// <summary><c>itg.SourceEventValueMap.RegistryEntryId</c> (FK_SEVM_Entry).</summary>
+    public const string SourceEventValueMaps = "sourceEventValueMaps";
+
+    /// <summary>Без FK: id у <c>calc.SubmissionSnapshot.PayloadJson</c> (<c>"value":"id","type":"ref"</c>), D-67.</summary>
+    public const string Snapshots = "snapshots";
+
+    /// <summary>Без FK: <c>arc.CellValue.ValueRegistryEntryId</c> (архів року, холодна файлова група).</summary>
+    public const string ArchivedCells = "archivedCells";
+
+    /// <summary>Без FK: id як текст у <c>MatchJson</c> правил методології, прив'язок розрахунку й зв'язків таблиць.</summary>
+    public const string MatchRules = "matchRules";
+
+    /// <summary>Запасний вид: FK 547 на самому видаленні (посилання з'явилося після перевірки).</summary>
+    public const string Other = "other";
+
+    /// <summary>
+    /// FK на <c>dic.RegistryEntry</c>, рядки яких належать самому запису й видаляються разом із ним (не блокують purge).
+    /// </summary>
+    public static IReadOnlySet<string> OwnedForeignKeys { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "FK_RegValue_Entry",
+        "FK_RegEntryKey_Entry",
+        "FK_RegExtKey_Entry",
+    };
+
+    /// <summary>FK на <c>dic.RegistryEntry</c> → вид, яким його рахує <see cref="IRegistryStore.FindHardReferencesAsync"/>.</summary>
+    public static IReadOnlyDictionary<string, string> CheckedForeignKeys { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["FK_CellValue_Entry"] = Cells,
+        ["FK_DocumentHeaderValue_Entry"] = HeaderValues,
+        ["FK_RegValue_Ref"] = RegistryValues,
+        ["FK_RegEntry_Parent"] = ChildEntries,
+        ["FK_RegLink_Left"] = Links,
+        ["FK_RegLink_Right"] = Links,
+        ["FK_MC_Substance"] = MethodologyConstants,
+        ["FK_MS_Substance"] = MethodologySubstances,
+        ["FK_SEVM_Entry"] = SourceEventValueMaps,
+    };
 }

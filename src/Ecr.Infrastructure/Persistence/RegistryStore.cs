@@ -431,6 +431,241 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
         return new RegistryEntryReferences(cells, headers, values, children, links, constants, substances);
     }
 
+    /// <summary>Мітка запиту «комірки з id запису» перед purge — за нею тест знаходить план у кеші (seek, не скан).</summary>
+    public const string HardReferenceCellsTag = "NAE purge where-used: cells";
+
+    /// <summary>Мітка запиту «діти запису в будь-якому стані» перед purge.</summary>
+    public const string HardReferenceChildrenTag = "NAE purge where-used: children";
+
+    /// <summary>Стеля підрахунку одного виду: для відмови досить «щонайменше N», повний підрахунок мільйонів комірок — зайвий.</summary>
+    public const int HardReferenceCap = 1000;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// Кожен вид — окремий запит зі стелею <see cref="HardReferenceCap"/>. Вартість:
+    /// комірки — seek по фільтрованому <c>IX_CellValue_RegistryEntry</c>; діти — seek по <c>IX_RegistryEntry_Parent</c>
+    /// (<c>RegistryDefId, ParentEntryId</c>; дитина завжди в тому ж довіднику — інше ловить FK); зв'язки зліва — seek по
+    /// <c>UQ_RegistryEntryLink</c>. ⚠ <c>dic.RegistryValue.ValueRefEntryId</c>, праву сторону зв'язку, шапку, константи й мапи
+    /// подій індекс не покриває — скан цих таблиць (так само платить і сам FK на DELETE); індекс на
+    /// <c>ValueRefEntryId</c> — окрема міграція.
+    /// </para>
+    /// <para>
+    /// Зрізи подання й архів комірок звужені КОНФІГУРАЦІЄЮ: читаються лише версії шаблону / колонки, де поле шапки чи
+    /// колонка дивляться на довідник запису (<c>LookupRegistryDefId</c>; опублікована версія незмінна); довідник, якого
+    /// немає в жодному шаблоні (дерево НАЕ), не читає їх зовсім.
+    /// Зрізи — ще й лише подані після створення запису (раніше id у них бути не могло), і лише версій шаблону з такою
+    /// колонкою/полем; у JSON шукається точний токен <c>"value":"id","type":"ref"</c> (<c>SubmissionPayload</c>).
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<string, int>> FindHardReferencesAsync(RegistryEntry entry, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        var id = entry.Id;
+        var registryDefId = entry.RegistryDefId;
+        var kinds = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        async Task AddAsync(string kind, Task<int> count)
+        {
+            var n = await count.ConfigureAwait(false);
+            if (n > 0)
+            {
+                kinds[kind] = kinds.GetValueOrDefault(kind) + n;
+            }
+        }
+
+        // ⚠ Запити — послідовно: один DbContext не виконує два запити одночасно.
+        await AddAsync(
+            RegistryEntryHardReferences.Cells,
+            db.CellValues.AsNoTracking().TagWith(HardReferenceCellsTag)
+                .Where(c => c.ValueRegistryEntryId != null && c.ValueRegistryEntryId == id)
+                .OrderBy(c => c.ValueRegistryEntryId)
+                .Take(HardReferenceCap).CountAsync(ct)).ConfigureAwait(false);
+
+        // ⚠ OrderBy у кожного запиту зі стелею — за колонкою рівності (порядок індексу, сортування немає): EF без нього
+        // попереджає про Take без порядку (EfWarningGuard у тестах).
+
+        // Будь-який власник, крім самого запису (його значення purge видаляє), — і видалений логічно теж: FK тримає рядок.
+        await AddAsync(
+            RegistryEntryHardReferences.RegistryValues,
+            db.RegistryValues.AsNoTracking()
+                .Where(v => v.ValueRefEntryId != null && v.ValueRefEntryId == id && v.RegistryEntryId != id)
+                .OrderBy(v => v.Id)
+                .Take(HardReferenceCap).CountAsync(ct)).ConfigureAwait(false);
+
+        // Діти в будь-якому стані: закриті й видалені логічно теж тримають FK_RegEntry_Parent.
+        await AddAsync(
+            RegistryEntryHardReferences.ChildEntries,
+            db.RegistryEntries.AsNoTracking().TagWith(HardReferenceChildrenTag)
+                .Where(e => e.RegistryDefId == registryDefId && e.ParentEntryId != null && e.ParentEntryId == id)
+                .OrderBy(e => e.ParentEntryId)
+                .Take(HardReferenceCap).CountAsync(ct)).ConfigureAwait(false);
+
+        await AddAsync(
+            RegistryEntryHardReferences.Links,
+            db.RegistryEntryLinks.AsNoTracking()
+                .Where(l => l.LeftEntryId == id || l.RightEntryId == id)
+                .OrderBy(l => l.Id)
+                .Take(HardReferenceCap).CountAsync(ct)).ConfigureAwait(false);
+
+        await AddAsync(
+            RegistryEntryHardReferences.MethodologyConstants,
+            db.MethodologyConstants.AsNoTracking()
+                .Where(c => c.SubstanceEntryId != null && c.SubstanceEntryId == id)
+                .OrderBy(c => c.Id)
+                .Take(HardReferenceCap).CountAsync(ct)).ConfigureAwait(false);
+
+        await AddAsync(
+            RegistryEntryHardReferences.MethodologySubstances,
+            db.MethodologySubstances.AsNoTracking()
+                .Where(m => m.SubstanceEntryId == id)
+                .OrderBy(m => m.Id)
+                .Take(HardReferenceCap).CountAsync(ct)).ConfigureAwait(false);
+
+        await AddAsync(
+            RegistryEntryHardReferences.SourceEventValueMaps,
+            db.SourceEventValueMaps.AsNoTracking()
+                .Where(m => m.RegistryEntryId == id)
+                .OrderBy(m => m.Id)
+                .Take(HardReferenceCap).CountAsync(ct)).ConfigureAwait(false);
+
+        // Id як текст у предикатах (`MethodologyRuleMatcher.Text`: Lookup порівнюється текстом id). Таблиці конфігурації —
+        // малі; збіг шукається з лапками, щоб «12» не знаходило «123». ⚠ Свідомо обережно: число-поріг, що збігся з id, теж
+        // блокує — хибна відмова безпечна, хибний дозвіл — ні.
+        var quoted = "\"" + id.ToString(CultureInfo.InvariantCulture) + "\"";
+        await AddAsync(
+            RegistryEntryHardReferences.MatchRules,
+            db.MethodologyRules.AsNoTracking().Where(r => r.MatchJson.Contains(quoted)).OrderBy(r => r.Id).Take(HardReferenceCap).CountAsync(ct))
+            .ConfigureAwait(false);
+        await AddAsync(
+            RegistryEntryHardReferences.MatchRules,
+            db.CalculationBindings.AsNoTracking().Where(b => b.MatchJson.Contains(quoted)).OrderBy(b => b.Id).Take(HardReferenceCap).CountAsync(ct))
+            .ConfigureAwait(false);
+        await AddAsync(
+            RegistryEntryHardReferences.MatchRules,
+            db.TableRelations.AsNoTracking().Where(r => r.MatchJson.Contains(quoted)).OrderBy(r => r.Id).Take(HardReferenceCap).CountAsync(ct))
+            .ConfigureAwait(false);
+
+        // ── Звужене конфігурацією: поля шапки й колонки шаблонів, що дивляться на довідник запису ──
+        // ⚠ Ціль колонки/поля — сам довідник АБО група типів дозволів (PRMG_), до якої входить тип із цим реєстром шапки:
+        // такі колонки теж тримають id його записів.
+        var targets = await (
+                from member in db.PermitGroupMembers.AsNoTracking()
+                join type in db.PermitTypeDefs.AsNoTracking() on member.PermitTypeDefId equals type.Id
+                join permitGroup in db.PermitGroups.AsNoTracking() on member.PermitGroupId equals permitGroup.Id
+                where type.HeaderRegistryDefId == registryDefId
+                select permitGroup.RegistryDefId)
+            .ToListAsync(ct).ConfigureAwait(false);
+        targets.Add(registryDefId);
+
+        var headerFields = await db.HeaderFieldDefs.AsNoTracking()
+            .Where(h => h.LookupRegistryDefId != null && targets.Contains(h.LookupRegistryDefId.Value))
+            .Select(h => new { h.Id, h.TemplateVersionId })
+            .ToListAsync(ct).ConfigureAwait(false);
+        var columns = await (
+                from column in db.ColumnDefs.AsNoTracking()
+                where column.LookupRegistryDefId != null && targets.Contains(column.LookupRegistryDefId.Value)
+                join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                select new { column.Id, sheet.TemplateVersionId })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        // ⚠ Шапка — без звуження за полями: FK тримає значення й тоді, коли поле перевели на інший довідник. Таблиця мала
+        // (документ × поле шапки).
+        await AddAsync(
+            RegistryEntryHardReferences.HeaderValues,
+            db.DocumentHeaderValues.AsNoTracking()
+                .Where(h => h.ValueRegistryEntryId != null && h.ValueRegistryEntryId == id)
+                .OrderBy(h => h.ValueRegistryEntryId)
+                .Take(HardReferenceCap).CountAsync(ct)).ConfigureAwait(false);
+
+        var versions = headerFields.Select(h => h.TemplateVersionId).Concat(columns.Select(c => c.TemplateVersionId)).Distinct().ToList();
+        if (versions.Count > 0)
+        {
+            // D-67: зрізи не видаляються ніколи. До створення запису його id у зрізі бути не могло (запас — доба на годинники).
+            var since = entry.CreatedAt.AddDays(-1);
+            var token = "\"value\":\"" + id.ToString(CultureInfo.InvariantCulture) + "\",\"type\":\"" + RefPayloadType + "\"";
+            await AddAsync(
+                RegistryEntryHardReferences.Snapshots,
+                db.SubmissionSnapshots.AsNoTracking()
+                    .Where(s => versions.Contains(s.TemplateVersionId) && s.SubmittedAt >= since && s.PayloadJson.Contains(token))
+                    .OrderBy(s => s.Id)
+                    .Take(HardReferenceCap).CountAsync(ct)).ConfigureAwait(false);
+        }
+
+        if (columns.Count > 0)
+        {
+            await AddAsync(RegistryEntryHardReferences.ArchivedCells, ArchivedCellsAsync(id, [.. columns.Select(c => c.Id)], ct))
+                .ConfigureAwait(false);
+        }
+
+        return kinds;
+    }
+
+    /// <summary>Тип значення «запис довідника» у payload зрізу (<c>SubmissionPayload.RegistryEntry</c>, Application).</summary>
+    private const string RefPayloadType = "ref";
+
+    /// <summary>
+    /// Архів року (<c>arc.CellValue</c>, columnstore на <c>DATA_ARCHIVE</c>): таблиця поза моделлю EF і з'являється лише після
+    /// <c>12-archive-tables.sql</c> — тому динамічний запит під перевіркою <c>OBJECT_ID</c>. Колонки — лише Lookup на довідник
+    /// запису: columnstore відкидає сегменти за min/max <c>ColumnDefId</c> і <c>ValueRegistryEntryId</c>.
+    /// </summary>
+    private async Task<int> ArchivedCellsAsync(long id, IReadOnlyList<int> columnIds, CancellationToken ct)
+    {
+        var list = string.Join(",", columnIds.Distinct().Select(c => c.ToString(CultureInfo.InvariantCulture)));
+        var sql = $"""
+            IF OBJECT_ID(N'arc.CellValue', N'U') IS NULL
+                SELECT 0 AS Value;
+            ELSE
+                EXEC sys.sp_executesql
+                    N'SELECT COUNT(*) AS Value FROM (SELECT TOP ({HardReferenceCap}) 1 AS x FROM arc.CellValue WHERE ValueRegistryEntryId = @id AND ColumnDefId IN ({list})) AS t;',
+                    N'@id int', @id = {id.ToString(CultureInfo.InvariantCulture)};
+            """;
+#pragma warning disable EF1002 // Список — лише цілі числа з моделі, id — long; рядкових даних у тексті немає.
+        var rows = await db.Database.SqlQueryRaw<int>(sql).ToListAsync(ct).ConfigureAwait(false);
+#pragma warning restore EF1002
+        return rows.Count == 0 ? 0 : rows[0];
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ <c>ExecuteDelete</c> — повз відстеження: відстежений запис (і його значення) після видалення від'єднуються, інакше
+    /// наступний <c>SaveChanges</c> цієї одиниці роботи спробував би оновити рядок, якого вже немає. Темпоральні таблиці
+    /// (<c>dic.RegistryEntry</c>, <c>dic.RegistryValue</c>) кладуть видалене в свої <c>*History</c> — це слід, а не посилання.
+    /// </remarks>
+    public async Task<bool> PurgeEntryAsync(long registryEntryId, CancellationToken ct)
+    {
+        try
+        {
+            await db.RegistryEntryKeys.Where(k => k.RegistryEntryId == registryEntryId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            await db.RegistryExternalKeys.Where(k => k.RegistryEntryId == registryEntryId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            await db.RegistryValues.Where(v => v.RegistryEntryId == registryEntryId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            await db.RegistryEntries.Where(e => e.Id == registryEntryId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 547)
+        {
+            return false;
+        }
+
+        foreach (var tracked in db.ChangeTracker.Entries<RegistryEntry>().Where(e => e.Entity.Id == registryEntryId).ToList())
+        {
+            tracked.State = EntityState.Detached;
+        }
+
+        foreach (var tracked in db.ChangeTracker.Entries<RegistryValue>().Where(e => e.Entity.RegistryEntryId == registryEntryId).ToList())
+        {
+            tracked.State = EntityState.Detached;
+        }
+
+        foreach (var tracked in db.ChangeTracker.Entries<RegistryEntryKey>().Where(e => e.Entity.RegistryEntryId == registryEntryId).ToList())
+        {
+            tracked.State = EntityState.Detached;
+        }
+
+        return true;
+    }
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<RegistryCompositionChild>> ListCompositionChildrenAsync(
         IReadOnlyCollection<long> parentEntryIds, CancellationToken ct)
