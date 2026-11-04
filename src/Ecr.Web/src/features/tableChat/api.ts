@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch, apiFetchIfChanged, EcrApiError, type Conditional } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { chatKey, copyParam } from './chatKey';
 import type {
   DiscussionMessage,
   DiscussionPage,
@@ -49,6 +50,9 @@ export interface MessagesQuery {
   readonly limit?: number;
   /** `null`/absent — all periods. */
   readonly periodKey?: number | null;
+  /** TC02: chat of a sheet copy; 
+ull/absent — the original. */
+  readonly sheetCopyId?: number | null;
 }
 
 function queryString(query: MessagesQuery): string {
@@ -57,6 +61,7 @@ function queryString(query: MessagesQuery): string {
   if (query.after !== undefined) params.set('after', String(query.after));
   if (query.limit !== undefined) params.set('limit', String(query.limit));
   if (query.periodKey !== undefined && query.periodKey !== null) params.set('periodKey', String(query.periodKey));
+  if (query.sheetCopyId !== undefined && query.sheetCopyId !== null) params.set('sheetCopyId', String(query.sheetCopyId));
 
   return params.toString();
 }
@@ -122,9 +127,14 @@ export function getMessages(
 }
 
 /** `201` for a new message, `200` for a retry of the same `clientMessageId` (the existing message comes back). */
-export function postMessage(documentId: number, tableCode: string, request: PostMessageRequest): Promise<DiscussionMessage> {
+export function postMessage(
+  documentId: number,
+  tableCode: string,
+  request: PostMessageRequest,
+  sheetCopyId: number | null = null,
+): Promise<DiscussionMessage> {
   return apiFetch<DiscussionMessage>(
-    `/api/v1/documents/${String(documentId)}/tables/${encodeURIComponent(tableCode)}/messages`,
+    `/api/v1/documents/${String(documentId)}/tables/${encodeURIComponent(tableCode)}/messages?${copyParam(sheetCopyId)}`,
     { method: 'POST', body: JSON.stringify(request) },
   );
 }
@@ -134,26 +144,37 @@ export function editMessage(
   tableCode: string,
   messageId: number,
   request: EditMessageRequest,
+  sheetCopyId: number | null = null,
 ): Promise<DiscussionMessage> {
   return apiFetch<DiscussionMessage>(
-    `/api/v1/documents/${String(documentId)}/tables/${encodeURIComponent(tableCode)}/messages/${String(messageId)}`,
+    `/api/v1/documents/${String(documentId)}/tables/${encodeURIComponent(tableCode)}/messages/${String(messageId)}?${copyParam(sheetCopyId)}`,
     { method: 'PATCH', body: JSON.stringify(request) },
   );
 }
 
 /** Soft delete; a repeat is `204` too. */
-export function deleteMessage(documentId: number, tableCode: string, messageId: number): Promise<void> {
+export function deleteMessage(
+  documentId: number,
+  tableCode: string,
+  messageId: number,
+  sheetCopyId: number | null = null,
+): Promise<void> {
   return apiFetch<void>(
-    `/api/v1/documents/${String(documentId)}/tables/${encodeURIComponent(tableCode)}/messages/${String(messageId)}`,
+    `/api/v1/documents/${String(documentId)}/tables/${encodeURIComponent(tableCode)}/messages/${String(messageId)}?${copyParam(sheetCopyId)}`,
     { method: 'DELETE' },
   );
 }
 
 /** The server clamps the threshold to the highest id the user can see. */
-export function markRead(documentId: number, tableCode: string, lastReadMessageId: number): Promise<void> {
+export function markRead(
+  documentId: number,
+  tableCode: string,
+  lastReadMessageId: number,
+  sheetCopyId: number | null = null,
+): Promise<void> {
   const body: MarkReadRequest = { lastReadMessageId };
 
-  return apiFetch<void>(`/api/v1/documents/${String(documentId)}/tables/${encodeURIComponent(tableCode)}/read`, {
+  return apiFetch<void>(`/api/v1/documents/${String(documentId)}/tables/${encodeURIComponent(tableCode)}/read?${copyParam(sheetCopyId)}`, {
     method: 'PUT',
     body: JSON.stringify(body),
   });
@@ -164,9 +185,10 @@ export function getMentionCandidates(
   tableCode: string,
   periodKey: number,
   q: string,
+  sheetCopyId: number | null = null,
 ): Promise<readonly MentionCandidate[]> {
   return apiFetch<readonly MentionCandidate[]>(
-    `/api/v1/documents/${String(documentId)}/tables/${encodeURIComponent(tableCode)}/mention-candidates?q=${encodeURIComponent(q)}&periodKey=${String(periodKey)}`,
+    `/api/v1/documents/${String(documentId)}/tables/${encodeURIComponent(tableCode)}/mention-candidates?q=${encodeURIComponent(q)}&periodKey=${String(periodKey)}&${copyParam(sheetCopyId)}`,
   );
 }
 
@@ -227,12 +249,14 @@ export function useMentionCandidates(
   tableCode: string,
   periodKey: number,
   query: string,
+  sheetCopyId: number | null = null,
 ): UseQueryResult<readonly MentionCandidate[]> {
   const trimmed = query.trim();
 
   return useQuery({
-    queryKey: queryKeys.tableChat.candidates(documentId, tableCode, periodKey, trimmed),
-    queryFn: () => getMentionCandidates(documentId, tableCode, periodKey, trimmed),
+    // TC02: the key carries the copy (a copy and its original share 	ableCode, but not the people who see them).
+    queryKey: queryKeys.tableChat.candidates(documentId, chatKey(tableCode, sheetCopyId), periodKey, trimmed),
+    queryFn: () => getMentionCandidates(documentId, tableCode, periodKey, trimmed, sheetCopyId),
     enabled: trimmed.length >= MinMentionQuery,
     retry: false,
     staleTime: 60_000,

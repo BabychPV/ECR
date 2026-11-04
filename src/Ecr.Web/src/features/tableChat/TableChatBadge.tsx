@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
 import { t } from '@/shared/i18n';
+import { chatKey } from './chatKey';
 import { requestChatFocus, requestChatOpen, setChatTable, useTableSummaryItem } from './chatStore';
 import './tableChatBadge.css';
 
@@ -12,8 +13,18 @@ import './tableChatBadge.css';
  * unavailable to the user) has no badge at all — the header button opens the panel for an empty table. The click
  * only ASKS to open (`requestChatOpen`); the host writes `?panel=discussion`.
  */
-export function TableChatBadge({ documentId, tableCode }: { readonly documentId: number; readonly tableCode: string }): JSX.Element | null {
-  const item = useTableSummaryItem(documentId, tableCode);
+export function TableChatBadge({
+  documentId,
+  tableCode,
+  sheetCopyId = null,
+}: {
+  readonly documentId: number;
+  readonly tableCode: string;
+  /** TC02: the copy of the sheet the table belongs to; `null` — the original (its counters are NOT the copy's). */
+  readonly sheetCopyId?: number | null;
+}): JSX.Element | null {
+  const key = chatKey(tableCode, sheetCopyId);
+  const item = useTableSummaryItem(documentId, tableCode, sheetCopyId);
 
   if (item === undefined || item.total === 0) return null;
 
@@ -24,11 +35,11 @@ export function TableChatBadge({ documentId, tableCode }: { readonly documentId:
       type="button"
       className="ecr-chat-badge"
       data-unread={item.unread > 0 ? '' : undefined}
-      data-chat-badge={tableCode}
+      data-chat-badge={key}
       aria-label={label}
       title={label}
       onClick={() => {
-        setChatTable(tableCode);
+        setChatTable(key);
         requestChatFocus();
         requestChatOpen();
       }}

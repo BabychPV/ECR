@@ -49,7 +49,8 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { useProjectCurrentPeriodDefault } from '@/features/documents/useProjectCurrentPeriodDefault';
 import { SheetStrip } from '@/features/documents/SheetStrip';
 import { copyFieldsOf, sheetTabKey } from '@/features/documents/sheetCopies/sheetCopyTypes';
-import { groupBySheet, sheetItemsOf, stateOfGroup } from '@/features/documents/sheetCopies/sheetGroups';
+import { chatMessageCountOf, groupBySheet, sheetItemsOf, stateOfGroup } from '@/features/documents/sheetCopies/sheetGroups';
+import { parseChatKey } from '@/features/tableChat/chatKey';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/settleEdits';
@@ -417,7 +418,13 @@ export function DocumentPage(): JSX.Element {
    * створює її видимість.
    */
   const sheets = useMemo(() => groupBySheet(tables.data ?? []), [tables.data]);
-  const active = sheets.find((s) => s.key === sheet) ?? sheets[0];
+  // TC02: a mention link names a copy's table (`?table=КОД#sheetCopyId`) and carries no `?sheet=` (the sheet code of
+  // the copy is not in the mention): without an explicit sheet that copy's tab opens.
+  const linkedCopyId = sheet === null || sheet === '' ? parseChatKey(tableParam ?? '').sheetCopyId : null;
+  const active =
+    sheets.find((s) => s.key === sheet) ??
+    (linkedCopyId === null ? undefined : sheets.find((s) => s.sheetCopyId === linkedCopyId)) ??
+    sheets[0];
   const activeCode = active?.key;
 
   // AN-28 P2-1: дія заблокована утриманою (відхиленою) коміркою - показати її:
@@ -1012,6 +1019,7 @@ export function DocumentPage(): JSX.Element {
               groupNameValues: active.groupNameValues,
               sheetCopyId: active.sheetCopyId,
               isCopyable: active.isCopyable,
+              chatMessageCount: chatMessageCountOf(active),
             }}
             canAdd={!readOnly}
             onSelect={setSheet}

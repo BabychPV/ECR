@@ -5,6 +5,7 @@ import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { isChatUnavailable, useMentionTasks } from './api';
+import { chatKey } from './chatKey';
 import { DiscussionPanelValue } from './chatStore';
 import type { MentionTask } from './types';
 
@@ -15,10 +16,11 @@ import type { MentionTask } from './types';
  * `MyTasksDrawer.myTaskDocumentHref`). A divergence from the route registry is caught by
  * `__tests__/MentionTasksSection.test.tsx`.
  */
-export function mentionTaskHref(task: Pick<MentionTask, 'documentId' | 'periodKey' | 'tableCode'>): string {
+export function mentionTaskHref(task: Pick<MentionTask, 'documentId' | 'periodKey' | 'tableCode' | 'sheetCopyId'>): string {
   const query = new URLSearchParams({
     periodKey: String(task.periodKey),
-    table: task.tableCode,
+    // TC02: a mention in a copy's chat leads to THAT copy (`КОД#sheetCopyId`; `DocumentPage` opens its sheet).
+    table: chatKey(task.tableCode, task.sheetCopyId),
     panel: DiscussionPanelValue,
   });
 
