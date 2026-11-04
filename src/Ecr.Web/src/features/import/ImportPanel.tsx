@@ -26,6 +26,21 @@ import { t } from '@/shared/i18n';
 import { useSettledAction } from '@/features/grid/settleEdits';
 import { localized } from '@/shared/i18n/localized';
 
+const PeriodStateKeys: ReadonlySet<string> = new Set([
+  'deny.PeriodClosed',
+  'deny.DocumentSubmitted',
+  'deny.DocumentApproved',
+]);
+
+/** Коди колонок, відхилених за станом періоду (унікальні, у порядку появи); порожньо — такої відмови немає. */
+function periodRejectedColumns(rejected: readonly ImportRejection[]): string[] {
+  const codes = rejected
+    .filter((r) => r.messageKey != null && PeriodStateKeys.has(r.messageKey))
+    .map((r) => r.columnCode);
+
+  return [...new Set(codes)];
+}
+
 /** Куди імпортувати. */
 export interface ImportPanelProps {
   /** Документ. */
@@ -219,6 +234,7 @@ export function ImportPanel({
     .filter((row) => overwrite.has(row.key))
     .map((row) => ({ tableCode: row.tableCode, rowKey: row.rowKey }));
 
+  const periodColumns = periodRejectedColumns(rejected);
   const blocked = (preview?.conflicts.length ?? 0) > 0 || rejected.length > 0;
   const undecided = unresolved > 0 && !skipRest;
   const nothingToApply = (preview?.changes.length ?? 0) === 0 && overwriteRows.length === 0;
@@ -299,6 +315,15 @@ export function ImportPanel({
               // його тут означало б показати успіх там, де сервер відмовить.
               <Alert color="statusWarning" title={t('import.blockedTitle')}>
                 {t('import.blockedHint')}
+              </Alert>
+            )}
+
+            {periodColumns.length > 0 && (
+              // ✎ PM-UI-IMPORT-REJECT-BANNER: відмова за станом періоду колонки місяця відхиляє ВЕСЬ пакет
+              // («все або нічого», p53-monthcol), а не лише названі комірки. Прапора в відповіді немає, тож
+              // ознака — причина відмови `deny.PeriodClosed/DocumentSubmitted/DocumentApproved`.
+              <Alert color="statusError" title={t('import.preview.packageRejected')} data-testid="import-package-rejected">
+                {t('import.preview.packageRejectedHint', { columns: periodColumns.join(', ') })}
               </Alert>
             )}
 
