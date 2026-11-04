@@ -79,7 +79,7 @@ public sealed class CalculationIssueStore(EcrDbContext db, IClock clock) : ICalc
             {
                 db.CalculationIssues.Add(new CalculationIssue(
                     instance.DocumentId, period, instance.TableDefId, instance.SheetCopyId,
-                    issue.RowKey, issue.RowNumber, issue.MethodologyCode, calculationRunId, now));
+                    issue.RowKey, issue.RowNumber, issue.MethodologyId, calculationRunId, now));
             }
         }
 
@@ -93,9 +93,12 @@ public sealed class CalculationIssueStore(EcrDbContext db, IClock clock) : ICalc
                 from i in db.CalculationIssues.AsNoTracking()
                 where i.DocumentId == documentId && i.PeriodKey == periodKey && i.SheetCopyId == sheetCopyId
                 join t in db.TableDefs.AsNoTracking() on i.TableDefId equals t.Id
+                join m in db.Methodologies.AsNoTracking() on i.MethodologyId equals (int?)m.Id into methods
+                from m in methods.DefaultIfEmpty()
                 orderby t.Id, i.RowNumber
                 select new CalculationIssueRow(
-                    i.TableDefId, t.Code, i.SheetCopyId, i.RowNumber, i.RowKey, i.Kind, i.MethodologyCode, i.DetectedAt))
+                    i.TableDefId, t.Code, i.SheetCopyId, i.RowNumber, i.RowKey, i.Kind,
+                    m == null ? null : m.Code, i.DetectedAt))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 }

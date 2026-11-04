@@ -31,11 +31,11 @@ public sealed class ModuleProfileEvaluatedTablesTests
     {
         var profile = new ModuleProfile();
         profile.RecordEvaluatedTables([42]);
-        profile.RecordUnmatched([new UnmatchedRow(42, 2, "R2", 900, "SECRET_METHODOLOGY")]);
+        profile.RecordUnmatched([new UnmatchedRow(42, 2, "R2", 900, 987654)]);
 
         var json = profile.ToJson();
 
-        Assert.DoesNotContain("SECRET_METHODOLOGY", json, StringComparison.Ordinal);
-        Assert.Equal("SECRET_METHODOLOGY", Assert.Single(profile.UnmatchedRows).MethodologyCode);
+        Assert.DoesNotContain("987654", json, StringComparison.Ordinal);
+        Assert.Equal(987654, Assert.Single(profile.UnmatchedRows).MethodologyId);
     }
 }

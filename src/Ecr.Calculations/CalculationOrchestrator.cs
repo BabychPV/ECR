@@ -268,7 +268,7 @@ public sealed class CalculationOrchestrator(
         IReadOnlyCollection<string> MatchedKeys,
         IReadOnlyList<string>? AllRowKeys,
         IReadOnlyCollection<string>? ExcludedKeys = null,
-        string? MethodologyCode = null);
+        int? MethodologyId = null);
 
     /// <summary>
     /// Рядки, яким не підійшло жодне правило жодної прив'язки своєї таблиці (L-4).
@@ -296,12 +296,11 @@ public sealed class CalculationOrchestrator(
                 .SelectMany(s => s.MatchedKeys.Concat(s.ExcludedKeys ?? []))
                 .ToHashSet(StringComparer.Ordinal);
 
-            // AN-69: методологія - перша за кодом з прив'язок таблиці, що бачили рядки (ConcurrentBag не має порядку).
-            var methodology = table
-                .Where(s => s.AllRowKeys is not null)
-                .Select(s => s.MethodologyCode)
-                .Where(c => c is not null)
-                .Order(StringComparer.Ordinal)
+            // AN-69: методологія - з найменшим Id серед прив'язок таблиці, що бачили рядки (ConcurrentBag не має порядку).
+            int? methodology = table
+                .Where(s => s.AllRowKeys is not null && s.MethodologyId is not null)
+                .Select(s => s.MethodologyId)
+                .Order()
                 .FirstOrDefault();
             for (var i = 0; i < all.Count; i++)
             {
@@ -363,7 +362,7 @@ public sealed class CalculationOrchestrator(
             .ConfigureAwait(false);
         IReadOnlyList<string> rowKeys = [.. outcome.Matches.Select(m => m.RowKey)];
         rowMatches.Add(new RowMatchSummary(
-            binding.TableInstanceId, rowKeys, outcome.AllRowKeys, outcome.Excluded, binding.Descriptor.Code));
+            binding.TableInstanceId, rowKeys, outcome.AllRowKeys, outcome.Excluded, binding.Descriptor.MethodologyId));
 
         // 4. Входи ПАКЕТНО: один запит на методологію × період, не N на рядок.
         var inputs = await scopedInputBuilder

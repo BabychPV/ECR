@@ -322,7 +322,7 @@ public sealed class RunCalculationHandler(
                     calculationRunId,
                     [.. profile.EvaluatedTables],
                     [.. profile.UnmatchedRows.Select(r => new CalculationIssueInput(
-                        r.TableInstanceId, r.RowNumber, r.RowKey, r.MethodologyCode))],
+                        r.TableInstanceId, r.RowNumber, r.RowKey, r.MethodologyId))],
                     ct)
                 .ConfigureAwait(false);
         }

@@ -1,4 +1,4 @@
-﻿using Ecr.Domain.Entities.Calculations;
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
@@ -591,7 +591,6 @@ public sealed class CalculationIssueConfiguration : IEntityTypeConfiguration<Cal
         builder.HasKey(x => x.Id);
         builder.Property(x => x.RowKey).HasMaxLength(CalculationIssue.MaxRowKeyLength).IsRequired();
         builder.Property(x => x.Kind).HasMaxLength(32).IsRequired();
-        builder.Property(x => x.MethodologyCode).HasMaxLength(64);
         builder.Property(x => x.DetectedAt).HasColumnType("datetime2(3)").IsRequired();
 
         // Читання аркуша й заміна проходу йдуть за однією адресою: документ × період × таблиця × копія.

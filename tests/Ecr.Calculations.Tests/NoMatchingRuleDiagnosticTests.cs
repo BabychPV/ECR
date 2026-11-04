@@ -45,7 +45,7 @@ public sealed class NoMatchingRuleDiagnosticTests
 
         // Рядок 1 (Gas) закрило правило; рядки 2 (Diesel) і 3 (Coal) — ні.
         Assert.Equal(
-            [new UnmatchedRow(TableInstance, 2, "R001", DocumentId), new UnmatchedRow(TableInstance, 3, "R002", DocumentId)],
+            [new UnmatchedRow(TableInstance, 2, "R001", DocumentId, 42), new UnmatchedRow(TableInstance, 3, "R002", DocumentId, 42)],
             profile.UnmatchedRows);
         Assert.Equal(1, profile.Stats.Single().Rows);
     }
@@ -76,8 +76,8 @@ public sealed class NoMatchingRuleDiagnosticTests
 
         var profile = await Run(provider, [42, 43]);
 
-        // Coal (рядок 3) не закрила жодна з двох.
-        Assert.Equal([new UnmatchedRow(TableInstance, 3, "R002", DocumentId)], profile.UnmatchedRows);
+        // Coal (рядок 3) не закрила жодна з двох; методологія рядка - з найменшим Id (42).
+        Assert.Equal([new UnmatchedRow(TableInstance, 3, "R002", DocumentId, 42)], profile.UnmatchedRows);
     }
 
     /// <summary>
@@ -156,7 +156,7 @@ public sealed class NoMatchingRuleDiagnosticTests
         var profile = await Run(provider, [42]);
 
         // Diesel/Removed виключено фільтром; Coal/Running — справді без правила.
-        Assert.Equal([new UnmatchedRow(TableInstance, 3, "R002", DocumentId)], profile.UnmatchedRows);
+        Assert.Equal([new UnmatchedRow(TableInstance, 3, "R002", DocumentId, 42)], profile.UnmatchedRows);
         Assert.Equal(1, profile.Stats.Single().Rows);
     }
 

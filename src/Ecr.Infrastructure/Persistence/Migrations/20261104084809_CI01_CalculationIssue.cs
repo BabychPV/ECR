@@ -25,7 +25,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     RowKey = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
                     RowNumber = table.Column<int>(type: "int", nullable: false),
                     Kind = table.Column<string>(type: "nvarchar(32)", maxLength: 32, nullable: false),
-                    MethodologyCode = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
+                    MethodologyId = table.Column<int>(type: "int", nullable: true),
                     CalculationRunId = table.Column<long>(type: "bigint", nullable: false),
                     DetectedAt = table.Column<DateTime>(type: "datetime2(3)", nullable: false)
                 },

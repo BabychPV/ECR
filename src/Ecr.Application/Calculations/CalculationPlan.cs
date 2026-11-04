@@ -362,9 +362,9 @@ public sealed record ModuleStat(string Code, TimeSpan Elapsed, int Rows, int Cal
 /// <param name="RowNumber">Номер рядка, з 1, у порядку створення (за <c>TableRow.Id</c>).</param>
 /// <param name="RowKey">Публічний ключ рядка.</param>
 /// <param name="DocumentId">Документ прогону (D14): прогін проєкту зводить профілі багатьох документів в один.</param>
-/// <param name="MethodologyCode">Методологія прив'язки таблиці (AN-69); <c>null</c> — невідома. У профіль не пишеться.</param>
+/// <param name="MethodologyId">Методологія (не версія) прив'язки таблиці (AN-69); <c>null</c> — невідома. У профіль не пишеться.</param>
 public sealed record UnmatchedRow(
-    long TableInstanceId, int RowNumber, string RowKey, long DocumentId = 0, string? MethodologyCode = null);
+    long TableInstanceId, int RowNumber, string RowKey, long DocumentId = 0, int? MethodologyId = null);
 
 /// <summary>
 /// Рядок, відхилений правилом категорії (L2-6): ключ категорії не отримано (порожній, помилка обчислення,

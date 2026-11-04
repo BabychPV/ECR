@@ -78,7 +78,7 @@ public sealed class CalculationIssueCleanupTests(SqlServerFixture sql)
     }
 
     private static CalculationIssue Issue(long documentId, TestDocument chain, long? copy)
-        => new(documentId, chain.PeriodKey.Value, chain.TableDefId, copy, "R1", 1, "M1", 1, Now);
+        => new(documentId, chain.PeriodKey.Value, chain.TableDefId, copy, "R1", 1, null, 1, Now);
 
     private async Task<(TestDocumentBuilder Builder, TestDocument Chain)> ArrangeAsync()
     {

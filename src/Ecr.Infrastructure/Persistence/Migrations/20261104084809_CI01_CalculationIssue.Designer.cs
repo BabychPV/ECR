@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Ecr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(EcrDbContext))]
-    [Migration("20261104075305_CI01_CalculationIssue")]
+    [Migration("20261104084809_CI01_CalculationIssue")]
     partial class CI01_CalculationIssue
     {
         /// <inheritdoc />
@@ -98,9 +98,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
 
-                    b.Property<string>("MethodologyCode")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
+                    b.Property<int?>("MethodologyId")
+                        .HasColumnType("int");
 
                     b.Property<int>("PeriodKey")
                         .HasColumnType("int");
