@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json;
 using ClosedXML.Excel;
 using Ecr.Application.Errors;
@@ -1027,6 +1027,20 @@ public sealed class ExcelExporter(
         }
     }
 
+    /// <summary>
+    /// Кладе рядок у комірку ЯК ТЕКСТ (PM-PASS-A-P3 п.5).
+    /// </summary>
+    /// <param name="cell">Комірка.</param>
+    /// <param name="text">Текст значення.</param>
+    public static void WriteText(IXLCell cell, string text)
+    {
+        ArgumentNullException.ThrowIfNull(cell);
+
+        // ⚠ ClosedXML читає початковий апостроф присвоєного рядка як «префікс тексту» Excel і ВІДКИДАЄ його зі
+        // значення - реімпорт показував би це як зміну. Зайвий апостроф попереду з'їдається замість справжнього.
+        cell.Value = text.StartsWith('\'') ? "'" + text : text;
+    }
+
     /// <summary>Кладе значення комірки за її типом.</summary>
     /// <remarks>
     /// ⚠ Тип береться з <c>ColumnDef</c>, а не «як лежить». Число, записане
@@ -1105,7 +1119,7 @@ public sealed class ExcelExporter(
             default:
                 if (value.ValueString is { } text)
                 {
-                    cell.Value = text;
+                    WriteText(cell, text);
                 }
 
                 break;

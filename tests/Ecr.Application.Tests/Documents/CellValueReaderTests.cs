@@ -70,6 +70,23 @@ public sealed class CellValueReaderTests
         Assert.Null(data.ValueString);
     }
 
+    /// <summary>
+    /// PM-PASS-A-P3 п.8: JSON <c>true</c>/<c>false</c> у числовій колонці - відмова <c>ECR-CELL-0422</c>
+    /// (раніше мовчки лягало як 1/0). ⛔ Мутація: повернути <c>bool flag =&gt; flag ? 1m : 0m</c> - червоне.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [InlineData(CellDataType.Int, true)]
+    [InlineData(CellDataType.Decimal, true)]
+    [InlineData(CellDataType.Int, false)]
+    [InlineData(CellDataType.Decimal, false)]
+    public void Булеве_з_HTTP_у_числовій_колонці_відхиляється(CellDataType type, bool value)
+    {
+        var error = Assert.Throws<BusinessRuleException>(() => CellValueReader.Read(FromWire(value), Column(type)));
+
+        Assert.Equal(CellValueReader.TypeMismatch, error.ErrorCode);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Дата_приходить_рядком_і_лягає_у_ValueDate()

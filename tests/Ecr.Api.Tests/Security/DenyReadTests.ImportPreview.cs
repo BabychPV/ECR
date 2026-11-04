@@ -1,6 +1,7 @@
 // tests/Ecr.Api.Tests/Security/DenyReadTests.ImportPreview.cs
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text.Json;
 using ClosedXML.Excel;
 using Ecr.Adapters.Excel;
@@ -81,6 +82,36 @@ public sealed partial class DenyReadTests
             Assert.Contains(s.DeniedTable.TableCode, miss, StringComparison.Ordinal);
             Assert.DoesNotContain(Rejected(miss), r => r.Key == ImportMessageKeys.InstanceMissing);
         }
+    }
+
+    /// <summary>
+    /// PM-PASS-A-P3 п.10в (D-390 / AN-143): перегляд із відхиленою прихованою таблицею/колонкою не застосовується
+    /// частково - застосування відмовляє цілком (раніше решта комірок записувалась).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Застосування_перегляду_з_прихованою_таблицею_відмовляє_цілком()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        await GrantImportAsync(s).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var reader = await SignedInAsync(app, s.Reader).ConfigureAwait(true);
+
+        var preview = await PreviewAsync(app, reader, s, Book(s, DeniedColumn, DeniedTable)).ConfigureAwait(true);
+        var token = JsonDocument.Parse(preview).RootElement.GetProperty("previewToken").GetString();
+
+        using var response = await reader.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.Doc.DocumentId}/import/apply", UriKind.Relative),
+            new { previewToken = token }).ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(
+            response.StatusCode is HttpStatusCode.UnprocessableEntity or HttpStatusCode.Forbidden,
+            $"{(int)response.StatusCode}\n{body}");
+        Assert.DoesNotContain(s.DeniedTable.TableCode, body, StringComparison.Ordinal);
     }
 
     /// <summary>Роль із правом імпорту для обох користувачів сценарію.</summary>

@@ -118,6 +118,8 @@ public sealed class ReopenDocumentHandler(
                     ["messageKey"] = "err.ECR-ACCS-0403.reopenDenied",
                     ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["reason"] = reopenDecision.Reason.ToString(),
+                    // PM-PASS-A-P3 п.7a: ключ каталогу, як у Approve/Submit - `detail` локалізується, а не сире ім'я enum.
+                    ["reasonKey"] = $"deny.{reopenDecision.Reason}",
                 });
         }
 

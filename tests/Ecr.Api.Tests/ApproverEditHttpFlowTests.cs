@@ -350,6 +350,41 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
         Assert.Equal(DocumentStatus.Submitted, await StatusAsync(s).ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// PM-PASS-A-P3 п.4: застосування плану погоджувача НЕ поточного кроку (перегляд має відхилену комірку
+    /// <c>DocumentSubmitted</c>) - відмова, а не 200 з <c>appliedCells: 0</c>; значення не змінилося.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-445")]
+    public async Task Застосування_плану_погоджувача_не_поточного_кроку_відмовляє()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var submitter = await NewUserAsync(s, GrantLevel.Submit).ConfigureAwait(true);
+        var first = await NewUserAsync(s, GrantLevel.Approve, "Document.Import").ConfigureAwait(true);
+        var second = await NewUserAsync(s, GrantLevel.Approve, "Document.Import").ConfigureAwait(true);
+        await RouteAsync(s, first.RoleId, second.RoleId).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var author = await SignInAsync(app, submitter.Name).ConfigureAwait(true);
+        using var secondClient = await SignInAsync(app, second.Name).ConfigureAwait(true);
+
+        var column = await NumberColumnCodeAsync(author, s).ConfigureAwait(true);
+        var rowKey = $"AN{Guid.NewGuid():N}"[..12];
+
+        await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(author, s, rowKey, column, 10m, null)).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+
+        var plan = await PreviewAsync(app, secondClient, s, Book(s, column, rowKey, 77m)).ConfigureAwait(true);
+        AssertRejected(plan, rowKey, EditDenyReason.DocumentSubmitted, "погоджувач іншого кроку");
+
+        using var response = await ApplyAsync(secondClient, s, plan).ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(response.StatusCode is HttpStatusCode.UnprocessableEntity or HttpStatusCode.Forbidden, $"{(int)response.StatusCode}\n{body}");
+        Assert.Equal(10m, await StoredValueAsync(s, rowKey).ConfigureAwait(true));
+    }
+
     private static void AssertRejected(JsonElement preview, string rowKey, EditDenyReason reason, string who)
     {
         Assert.True(preview.GetProperty("changes").GetArrayLength() == 0, $"{who}: {preview}");

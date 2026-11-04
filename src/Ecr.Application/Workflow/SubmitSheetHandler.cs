@@ -88,6 +88,12 @@ public sealed class SubmitSheetHandler(
     /// </summary>
     public const string SubmitPeriodNotOpenReasonKey = "deny.PeriodNotOpenYet.Submit";
 
+    /// <summary>
+    /// Ключ тексту відмови подання з причиною <c>NoGrant</c> (PM-PASS-A-P3 п.7b): загальний
+    /// <c>deny.NoGrant</c> говорить про редагування комірки.
+    /// </summary>
+    public const string SubmitNoRightReasonKey = "deny.submit.NoRight";
+
     /// <summary>Ключ каталогу відмови «обов'язкове поле шапки порожнє» (D-PS, <c>ECR-HDR-0422</c>).</summary>
     public const string RequiredHeaderMessageKey = Validation.RequiredHeaderCheck.MessageKey;
 
@@ -268,6 +274,7 @@ public sealed class SubmitSheetHandler(
                     {
                         EditDenyReason.InsufficientGrantLevel => SubmitInsufficientLevelReasonKey,
                         EditDenyReason.PeriodNotOpenYet => SubmitPeriodNotOpenReasonKey,
+                        EditDenyReason.NoGrant => SubmitNoRightReasonKey,
                         _ => $"deny.{decision.Reason}",
                     },
                 });

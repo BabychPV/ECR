@@ -209,7 +209,8 @@ public sealed partial class PatchCellsHandler
             else
             {
                 foreach (var seed in BuildRecalculationSeeds(
-                             applied, item.Context.ApproverEdit ? item.Context.Table.SheetDefId : null))
+                             SeedSource(item.Request, applied, item.Previous),
+                             item.Context.ApproverEdit ? item.Context.Table.SheetDefId : null))
                 {
                     recalculationSeeds.Add(seed);
                 }
@@ -690,6 +691,7 @@ public sealed partial class PatchCellsHandler
         foreach (var item in active)
         {
             item.Applied = item.Planned;
+            item.Previous = previous;
         }
 
         var creating = active.Where(x => x.Context.Creations.Count > 0).ToList();
@@ -1045,6 +1047,9 @@ public sealed partial class PatchCellsHandler
         public CellChangeLists Planned { get; set; } = null!;
 
         public CellChangeLists? Applied { get; set; }
+
+        /// <summary>Значення до запису (для відсіву незмінених комірок із насіння, п.10а); <c>null</c> - невідомі.</summary>
+        public IReadOnlyDictionary<CellAddress, CellValueData>? Previous { get; set; }
 
         public List<ApplicableMethodology> Applicable { get; } = [];
 

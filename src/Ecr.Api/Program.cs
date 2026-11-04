@@ -51,6 +51,10 @@ builder.Configuration.AddEnvironmentVariables(prefix: "ECR_");
 // звідти. Відбиток заданий, а сертифікат непридатний — відмова старту тут.
 builder.Services.AddSingleton(builder.ConfigureEcrHttps());
 
+// PM-PASS-A-P3 п.6: `Server: Kestrel` розкриває стек - вимкнено. HSTS і Secure-cookie не чіпаються: HSTS - лише на
+// HTTPS-запиті (`SecurityHeadersMiddleware`), cookie `Secure` за `Auth:RequireHttps = true` (типово; `false` - лише стенд).
+builder.WebHost.ConfigureKestrel(kestrel => kestrel.AddServerHeader = false);
+
 // Файловий журнал (`D14-09`): під Windows-службою консолі немає, і без файлу
 // стек винятку з CorrelationId не зберігався ніде. Консоль і EventLog лишаються
 // типовими постачальниками хоста — файл додається поруч, не замість.

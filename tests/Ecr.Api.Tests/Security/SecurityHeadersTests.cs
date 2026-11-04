@@ -6,6 +6,9 @@ using Ecr.Api.Security;
 using Ecr.TestKit;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Ecr.Api.Tests.Security;
@@ -32,6 +35,23 @@ public sealed class SecurityHeadersTests(SqlServerFixture sql)
     private const string Csp = "Content-Security-Policy";
     private const string CspReportOnly = "Content-Security-Policy-Report-Only";
     private const string Hsts = "Strict-Transport-Security";
+
+    /// <summary>
+    /// PM-PASS-A-P3 п.6: Kestrel не додає <c>Server: Kestrel</c>. ⛔ Мутація: прибрати
+    /// <c>AddServerHeader = false</c> у <c>Program.cs</c> - тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public void Kestrel_не_додає_заголовок_Server()
+    {
+        using var app = new EcrApiFactory(sql);
+        _ = app.CreateClient();
+
+        var options = app.Services.GetRequiredService<IOptions<KestrelServerOptions>>().Value;
+
+        Assert.False(options.AddServerHeader);
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
