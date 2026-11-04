@@ -207,6 +207,11 @@ public sealed class DocumentSheetCopyStore(EcrDbContext db) : IDocumentSheetCopy
             await instances.ExecuteDeleteAsync(ct).ConfigureAwait(false);
         }
 
+        // AN-69: поточні проблеми розрахунку цієї копії.
+        await db.CalculationIssues
+            .Where(i => i.DocumentId == documentId && i.SheetCopyId == sheetCopyId)
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
         // Журнал подій і стани копії (зрізи подань лишаються — без зовнішнього ключа).
         await db.ApprovalEvents
             .Where(e => e.DocumentId == documentId && e.SheetCopyId == sheetCopyId)

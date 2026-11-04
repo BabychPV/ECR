@@ -261,6 +261,7 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
             await db.CalculationRuns.Where(r => runIds.Contains(r.Id)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         }
 
+        await db.CalculationIssues.Where(i => i.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.DocumentIndexValues.Where(v => v.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.ValidationResults.Where(v => v.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.DocumentHeaderValues.Where(v => v.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
