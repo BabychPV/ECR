@@ -116,7 +116,7 @@ test.describe('Списки пермітів: екран «Lists»', () => {
     await page.goto('/admin/permits/lists');
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('navigation', { name: /Permits sections|Разделы|Бөлімдер/i })).toBeVisible();
-    await expect(page.locator('[data-lists-editable]')).toBeVisible();
+    await expect(page.locator('[data-list-page]')).toBeVisible();
 
     const row = page.locator('[data-list-table] table tbody tr', { hasText: method });
     await expect(row).toBeVisible({ timeout: 30_000 });

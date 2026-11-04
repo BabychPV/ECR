@@ -249,8 +249,10 @@ describe('DocumentPage: результат перевірки не пережи�
        */
       // ✎ UI-14: стан збереження в рядку дій — теж `role="status"`, але
       // постійний; скелет перезавантаження — це решта статусів.
+      // ✎ LIVE-REFRESH: так само постійна жива область банера «Updated by» над аркушем.
+      const persistent = new Set(['document-save-state', 'sheet-live-host']);
       const skeletons = (): HTMLElement[] =>
-        screen.queryAllByRole('status').filter((element) => element.dataset.testid !== 'document-save-state');
+        screen.queryAllByRole('status').filter((element) => !persistent.has(element.dataset.testid ?? ''));
 
       await waitFor(() => expect(skeletons()).not.toHaveLength(0), {
         timeout: SettleTimeout,

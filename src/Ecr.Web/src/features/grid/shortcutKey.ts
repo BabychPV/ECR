@@ -64,6 +64,25 @@ export function isRecalculateKey(event: {
 }
 
 /**
+ * Shift+F5 — перечитати таблиці аркуша з сервера (LIVE-REFRESH B3), не перезавантажуючи сторінку.
+ *
+ * ⚠ Лише Shift без Ctrl/Alt/Meta: голий F5 і Ctrl+F5 лишаються браузеру (перезавантаження). Сітка
+ * Shift+F5 не займає (`gridShortcut`, `isRecalculateKey`, `isFullToggleKey`, `f2Edit.ts`).
+ */
+export function isRefreshKey(event: {
+  code: string;
+  key: string;
+  ctrlKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+  metaKey: boolean;
+}): boolean {
+  if (!event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return false;
+
+  return event.code === 'F5' || (event.code === '' && event.key === 'F5');
+}
+
+/**
  * Чи натискання прийшло з місця, де клавіша належить вводу, а не сторінці: поле, редактор
  * комірки, діалог. Там F9 не запускає перерахунок — інакше незафіксований набір у редакторі
  * (`keyCommitGate`) пішов би в обхід, а дія за модальним вікном сталася б «за спиною».

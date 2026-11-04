@@ -68,6 +68,9 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('integrationAudit.eventMapChanged', params);
     case 'integrationAudit.eventMapDeleted':
       return t('integrationAudit.eventMapDeleted', params);
+    // D-464: масове видалення зниклих у PI подій підтверджено вручну (`SyncSourceEventsHandler`).
+    case 'integrationAudit.sourceEventRemovalConfirmed':
+      return t('integrationAudit.sourceEventRemovalConfirmed', params);
     case 'integrationAudit.registryPolicyChanged':
       return t('integrationAudit.registryPolicyChanged', params);
     case 'integrationAudit.dataSourceCreated':

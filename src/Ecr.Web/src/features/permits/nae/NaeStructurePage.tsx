@@ -1,0 +1,217 @@
+import { Suspense, lazy, useState, type JSX } from 'react';
+import { Button, Group, Stack, Text } from '@mantine/core';
+import { EcrApiError } from '@/api/client';
+import { useRegistryDefinition } from '@/features/registries/rc812/data';
+import { RegistryTreeEditor } from '@/features/registries/tree/RegistryTreeEditor';
+import { t } from '@/shared/i18n';
+import { can, useSession } from '@/shared/session/useSession';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { PageHeader } from '@/shared/ui/PageHeader';
+import type { TreeLevel, TreeNode, TreeNodeId } from '@/shared/ui/TreeEditor';
+import { useUrlState } from '@/shared/ui/useUrlState';
+import { useMayWritePermits } from '../list/permitListRights';
+import { PermitsSubnav } from '../shell/PermitsSubnav';
+import { NaeEmptyState } from './NaeEmptyState';
+import { NaeRegistryCode } from './nodeAttributes';
+import { WhereUsed } from './WhereUsed';
+import './naeStructure.css';
+
+/*
+ * ⚠ Форма атрибутів і діалог нового вузла - окремими чанками (`D-132`): Mantine `Modal`, поля й локалізований ввід
+ * не потрібні, доки людина не вибрала вузол чи не натиснула «Add child». Чанк маршруту стоїть під бюджетом.
+ */
+const NodeAttributesForm = lazy(async () => ({
+  default: (await import('./NodeAttributesForm')).NodeAttributesForm,
+}));
+const AfImportPanel = lazy(async () => ({
+  default: (await import('./AfImportPanel')).AfImportPanel,
+}));
+const AddRegionModal = lazy(async () => ({
+  default: (await import('./AddRegionModal')).AddRegionModal,
+}));
+const NaeExcelImportPanel = lazy(async () => ({
+  default: (await import('./NaeExcelImportPanel')).NaeExcelImportPanel,
+}));
+const CreateNodeModal = lazy(async () => ({
+  default: (await import('./CreateNodeModal')).CreateNodeModal,
+}));
+
+interface Draft {
+  readonly parent: TreeNode | null;
+  readonly level: TreeLevel;
+}
+
+/**
+ * Структура НВ (`/admin/permits/nae`, NAE plan N2): дерево регіон › район › майданчик › обладнання › НВ ліворуч, панель
+ * вузла праворуч - відомості, атрибути (форма) і «Де використовується».
+ *
+ * ⛔ Право: читання - `Registry.View` (маршрут); додати, перенести, вивести з обігу й зберегти атрибути - лише з
+ * `Registry.EditData` і поза симуляцією (`useMayWritePermits`: те саме право, що й у дозволів). Без нього лишається
+ * дерево, пошук і панель, а кнопок немає (приховані, не вимкнені). Грант `Write` на довідник клієнт не бачить:
+ * сервер відмовить `403`, і відмова покажеться сповіщенням.
+ *
+ * ⚠ Вибраний вузол живе в адресі (`?node=<id>`): оновлення сторінки й посилання повертають на той самий вузол.
+ */
+export function NaeStructurePage(): JSX.Element {
+  const canEdit = useMayWritePermits();
+  // ⚠ `?registry=<код>` підміняє довідник структури (лише формат коду): так e2e працює на власному довіднику, а не на
+  // спільному `NAE_TREE`, який у стенді створює лише завантаження з AF. Без параметра - `NAE_TREE`.
+  const [registryParam] = useUrlState('registry');
+  const registryCode = registryParam !== null && /^[A-Za-z0-9_]{1,64}$/.test(registryParam) ? registryParam : NaeRegistryCode;
+  const definition = useRegistryDefinition(registryCode);
+  const [nodeParam, setNodeParam] = useUrlState('node');
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [addRegionOpen, setAddRegionOpen] = useState(false);
+  const [excelOpen, setExcelOpen] = useState(false);
+  const session = useSession();
+  // ⛔ Завантаження з AF створює довідник і вузли: сервер вимагає `Registry.EditDefinition` ТА `Registry.EditData`.
+  const canImport = canEdit && can(session.data, 'Registry.EditDefinition');
+  // Довідника ще немає (його створює перше завантаження з AF): визначення відповідає 404.
+  const notProvisioned = definition.error instanceof EcrApiError && definition.error.problem.status === 404;
+
+  // Вузли без AF (корінь, регіони з довідника, Excel): завжди EditData; якщо виклик має СТВОРИТИ довідник NAE_TREE (він
+  // ще не існує) - ще й EditDefinition + Publish (сервер: NaeTreeManualHandler). Без них - підказка «до адміністратора».
+  const canManual = canEdit && (!notProvisioned || (canImport && can(session.data, 'Registry.Publish')));
+  const emptyState = (
+    <NaeEmptyState
+      canManual={canManual}
+      onAddRegion={() => setAddRegionOpen(true)}
+      onImportExcel={() => setExcelOpen(true)}
+    />
+  );
+
+  const selected: TreeNodeId | null = nodeParam === null || nodeParam === '' ? null : Number(nodeParam);
+  const registry = definition.data;
+  // ⚠ Код запису NAE_TREE технічний: бізнес-код - поле NaeCode. Поки визначення не приїхало, код вважаємо технічним.
+  const codeAutomatic = registry === undefined || registry.codeMode === 'Auto';
+
+  return (
+    <Stack gap="md" data-nae-page="">
+      <PageHeader title={t('permits.nae.title')} description={t('permits.nae.description')} />
+      <PermitsSubnav current="nae" />
+      <Text size="sm" c="dimmed" data-nae-source="">
+        {t('permits.nae.sourceNote')}
+      </Text>
+      {!canEdit && (
+        <Text size="sm" c="dimmed" data-nae-readonly="">
+          {t('permits.nae.readOnly')}
+        </Text>
+      )}
+
+      {(canImport || canManual) && (
+        <Group gap="xs" data-nae-import-bar="">
+          {canManual && (
+            <Button size="xs" onClick={() => setAddRegionOpen(true)} data-nae-add-region-open="">
+              {t('permits.nae.manual.addRegion')}
+            </Button>
+          )}
+          {canManual && (
+            <Button
+              variant="default"
+              size="xs"
+              onClick={() => setExcelOpen((open) => !open)}
+              aria-expanded={excelOpen}
+              data-nae-excel-open=""
+            >
+              {t('permits.nae.manual.excel.open')}
+            </Button>
+          )}
+          {canImport && (
+            <Button variant="default" size="xs" onClick={() => setImportOpen((open) => !open)} aria-expanded={importOpen}>
+              {t('permits.nae.import.open')}
+            </Button>
+          )}
+        </Group>
+      )}
+      {canImport && importOpen && (
+        <Suspense fallback={null}>
+          <AfImportPanel registryCode={registryCode} onClose={() => setImportOpen(false)} />
+        </Suspense>
+      )}
+      {canManual && excelOpen && (
+        <Suspense fallback={null}>
+          <NaeExcelImportPanel onClose={() => setExcelOpen(false)} />
+        </Suspense>
+      )}
+      {addRegionOpen && (
+        <Suspense fallback={null}>
+          <AddRegionModal
+            opened
+            onClose={() => setAddRegionOpen(false)}
+            onAdded={(nodeId) => {
+              setAddRegionOpen(false);
+              setNodeParam(String(nodeId));
+            }}
+          />
+        </Suspense>
+      )}
+
+      {notProvisioned ? (
+        canManual ? (
+          emptyState
+        ) : (
+          <Text size="sm" role="status" data-nae-not-provisioned="">
+            {t('permits.nae.import.hintAskAdmin')}
+          </Text>
+        )
+      ) : (
+        definition.error !== null &&
+        definition.error !== undefined && <ErrorAlert error={definition.error} onRetry={() => void definition.refetch()} />
+      )}
+      {!notProvisioned && <RegistryTreeEditor
+        registryCode={registryCode}
+        label={t('permits.nae.treeLabel')}
+        canEdit={canEdit}
+        hideEntryCode={codeAutomatic}
+        emptyState={canEdit ? emptyState : undefined}
+        selectedId={selected}
+        onSelect={(id) => setNodeParam(id === null ? null : String(id))}
+        onAddChild={
+          canEdit && registry !== undefined ? (parent, level) => setDraft({ parent, level }) : undefined
+        }
+        renderPanelExtra={(node) => (
+          <div className="nae-panel-extra">
+            {registry !== undefined && (
+              <Suspense fallback={null}>
+                <NodeAttributesForm
+                  key={String(node.id)}
+                  registryCode={registryCode}
+                  registryId={registry.id}
+                  codeAutomatic={codeAutomatic}
+                  fields={registry.fields}
+                  target={{ mode: 'edit', node }}
+                  readOnly={!canEdit || node.retired === true}
+                  onSaved={() => undefined}
+                  onOpenNode={(id) => setNodeParam(String(id))}
+                />
+              </Suspense>
+            )}
+            <WhereUsed key={`used-${String(node.id)}`} registryCode={registryCode} entryId={Number(node.id)} />
+          </div>
+        )}
+      />}
+
+      {draft !== null && registry !== undefined && (
+        <Suspense fallback={null}>
+          <CreateNodeModal
+            registryCode={registryCode}
+            registryId={registry.id}
+            codeAutomatic={codeAutomatic}
+            fields={registry.fields}
+            draft={draft}
+            onClose={() => setDraft(null)}
+            onOpenNode={(id) => {
+              setDraft(null);
+              setNodeParam(String(id));
+            }}
+            onCreated={(id) => {
+              setDraft(null);
+              setNodeParam(String(id));
+            }}
+          />
+        </Suspense>
+      )}
+    </Stack>
+  );
+}

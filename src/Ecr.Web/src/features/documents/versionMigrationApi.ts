@@ -10,6 +10,9 @@ export type MigrationAccepted = components['schemas']['MigrationAcceptedResponse
 /** Поточна версія і версії, на які можна перенести документ. */
 type VersionMigrationTargets = components['schemas']['DocumentVersionMigrationTargetsDto'];
 
+/** Обсяг переносу, який обирає людина (контракт допускає ще null - це те саме, що WholeProject). */
+export type VersionMigrationRangeChoice = 'WholeProject' | 'FromMonth';
+
 /** Режим переносу: `Safe` — без втрати даних, `Presentation` — лише зміни вигляду. */
 export type VersionMigrationMode = components['schemas']['VersionMigrationMode'];
 
@@ -38,6 +41,10 @@ interface MigrateDocumentVersionParams {
   readonly acceptGuardedOverwrite?: boolean;
   /** Шлях і/або час резервної копії бази; обов'язкове від `BackupConfirmationThreshold` значень (інакше 422 `migrateBackupRequired`). */
   readonly backupConfirmation?: string;
+  /** RPT-STABLE Part B: обсяг переносу; без поля - увесь проєкт. */
+  readonly range?: VersionMigrationRangeChoice;
+  /** Період X (`Рік*100+№`) для `FromMonth`. */
+  readonly fromPeriodKey?: number | null;
 }
 
 /**
@@ -46,6 +53,11 @@ interface MigrateDocumentVersionParams {
  * Звіт сухого прогону каже `transferredValues`, тож діалог показує поле до старту, а не після відмови задачі.
  */
 export const BackupConfirmationThreshold = 500_000;
+
+const rangeFields = (params: { range?: VersionMigrationRangeChoice; fromPeriodKey?: number | null }): { range?: VersionMigrationRangeChoice; fromPeriodKey?: number } =>
+  params.range === 'FromMonth' && params.fromPeriodKey != null
+    ? { range: 'FromMonth', fromPeriodKey: params.fromPeriodKey }
+    : {};
 
 const backupField = (value: string | undefined): { backupConfirmation?: string } => {
   const trimmed = value?.trim() ?? '';
@@ -69,6 +81,7 @@ export function migrateDocumentVersion(params: MigrateDocumentVersionParams): Pr
       mode: params.mode,
       dryRun: params.dryRun,
       ...(params.acceptGuardedOverwrite === true ? { acceptGuardedOverwrite: true } : {}),
+      ...rangeFields(params),
       // Синхронний шлях (сухий прогін завжди синхронний; apply у фоні йде через `startMigrateDocumentVersion`).
       async: false,
     } satisfies components['schemas']['MigrateDocumentVersionRequest']),
@@ -94,6 +107,7 @@ export function startMigrateDocumentVersion(
       dryRun: false,
       ...(params.acceptGuardedOverwrite === true ? { acceptGuardedOverwrite: true } : {}),
       ...backupField(params.backupConfirmation),
+      ...rangeFields(params),
       async: true,
     } satisfies components['schemas']['MigrateDocumentVersionRequest']),
   });

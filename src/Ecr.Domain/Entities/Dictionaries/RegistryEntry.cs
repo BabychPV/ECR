@@ -80,6 +80,13 @@ public sealed class RegistryEntry : Entity<long>
     public bool IsDeleted { get; private set; }
     public long? ParentEntryId { get; private set; }
 
+    /// <summary>Level of the entry in a hierarchical registry (<c>RegistryLevelDef.Id</c>); <c>null</c> in a flat one.</summary>
+    public int? LevelId { get; private set; }
+
+    /// <summary>Places the entry on a level (the handler validates the placement against the parent).</summary>
+    /// <param name="levelId">Level id; <c>null</c> — no level.</param>
+    public void SetLevel(int? levelId) => LevelId = levelId;
+
     public DateTime CreatedAt { get; private set; }
     public int CreatedByUserId { get; private set; }
     public DateTime? DeletedAt { get; private set; }

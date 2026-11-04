@@ -30,7 +30,7 @@ function resolve(pathname: string, entries: readonly RouteEntry[] = permitRoutes
 }
 
 describe('Permits: маршрути', () => {
-  it('у реєстрі рівно вісім маршрутів Permits', () => {
+  it('у реєстрі рівно дев\'ять маршрутів Permits (+ майстер імпорту лімітів, NAE N5)', () => {
     expect(permitRoutes.map((route) => route.path)).toEqual([
       '/admin/permits',
       '/admin/permits/types',
@@ -39,7 +39,9 @@ describe('Permits: маршрути', () => {
       '/admin/permits/groups',
       '/admin/permits/bindings',
       '/admin/permits/bindings/:id',
+      '/admin/permits/nae',
       '/admin/permits/:id',
+      '/admin/permits/:id/import',
     ]);
   });
 
@@ -51,15 +53,17 @@ describe('Permits: маршрути', () => {
     ['/admin/permits/groups', 'admin-permit-groups'],
     ['/admin/permits/bindings', 'admin-permit-bindings'],
     ['/admin/permits/bindings/B-01', 'admin-permit-binding'],
+    ['/admin/permits/nae', 'admin-permit-nae'],
     ['/admin/permits/P-0001', 'admin-permit'],
     ['/admin/permits/typesx', 'admin-permit'],
+    ['/admin/permits/5/import', 'admin-permit-import'],
   ])('%s → %s', (pathname, id) => {
     expect(resolve(pathname)).toBe(id);
   });
 
   it('статичні маршрути виграють у `:id` за будь-якого порядку оголошення', () => {
     const reversed = [...permitRoutes].reverse();
-    for (const pathname of ['/admin/permits/types', '/admin/permits/lists', '/admin/permits/groups', '/admin/permits/bindings']) {
+    for (const pathname of ['/admin/permits/types', '/admin/permits/lists', '/admin/permits/groups', '/admin/permits/bindings', '/admin/permits/nae']) {
       expect(resolve(pathname, reversed)).not.toBe('admin-permit');
       expect(resolve(pathname, reversed)).toBe(resolve(pathname));
     }
@@ -73,6 +77,7 @@ describe('Permits: маршрути', () => {
       lists: routes.adminPermitLists.path,
       groups: routes.adminPermitGroups.path,
       bindings: routes.adminPermitBindings.path,
+      nae: routes.adminPermitNae.path,
     });
   });
 
@@ -85,7 +90,9 @@ describe('Permits: маршрути', () => {
       ['admin-permit-groups', 'Registry.View'],
       ['admin-permit-bindings', 'Registry.View'],
       ['admin-permit-binding', 'Registry.View'],
+      ['admin-permit-nae', 'Registry.View'],
       ['admin-permit', 'Registry.View'],
+      ['admin-permit-import', 'Registry.View'],
     ]);
   });
 
@@ -108,7 +115,7 @@ describe('Permits: маршрути', () => {
     expect(container.querySelector('svg')).not.toBeNull();
   });
 
-  it('пояснення є в п’яти розділів (список, типи, списки, групи, привʼязки), решти — немає', () => {
+  it('пояснення є в шести розділів (список, типи, списки, групи, привʼязки, структура НАВ), решти — немає', () => {
     expect(
       permitRoutes.filter((route) => route.handle.descriptionKey !== undefined).map((route) => route.path),
     ).toEqual([
@@ -117,6 +124,7 @@ describe('Permits: маршрути', () => {
       '/admin/permits/lists',
       '/admin/permits/groups',
       '/admin/permits/bindings',
+      '/admin/permits/nae',
     ]);
   });
 

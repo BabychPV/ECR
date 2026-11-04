@@ -16,6 +16,8 @@ export interface SheetDraft {
   readonly sheetGroup: string;
   readonly isMandatory: boolean;
   readonly isVisible: boolean;
+  /** Чи можна копіювати аркуш у документі (`SheetDto.isCopyable`). */
+  readonly isCopyable: boolean;
 
   /** Чи це нова чернетка: код нової ще можна набрати. */
   readonly isNew: boolean;
@@ -30,6 +32,7 @@ export function emptyDraft(nextOrdinal: number): SheetDraft {
     sheetGroup: '',
     isMandatory: false,
     isVisible: true,
+    isCopyable: false,
     isNew: true,
   };
 }
@@ -43,6 +46,7 @@ export function draftOf(sheet: SheetDto): SheetDraft {
     sheetGroup: sheet.sheetGroup ?? '',
     isMandatory: sheet.isMandatory,
     isVisible: sheet.isVisible,
+    isCopyable: sheet.isCopyable,
     isNew: false,
   };
 }

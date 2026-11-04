@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { UserPage } from '@/api/types';
 import { t } from '@/shared/i18n';
-import { isHumanOrigin } from '@/features/audit/api';
+import { isHumanCellChange } from '@/features/audit/api';
 import { can, useSession } from '@/shared/session/useSession';
 
 /** Рядок журналу з автором — спільна форма журналу комірок і структури. */
@@ -22,14 +22,14 @@ export function authorName(row: AuthoredRow): string {
  * міграції (`isHumanOrigin`, AN-115). Того, хто запустив системну зміну, видно в підказці
  * (`cellAuthorHint`) — журнал не губить, чия це була дія.
  */
-export function cellAuthorName(row: AuthoredRow & { readonly origin: string }): string {
-  return isHumanOrigin(row.origin) ? authorName(row) : t('audit.systemAuthor');
+export function cellAuthorName(row: AuthoredRow & { readonly origin: string; readonly reason?: string | null | undefined }): string {
+  return isHumanCellChange(row) ? authorName(row) : t('audit.systemAuthor');
 }
 
 /** Підказка до автора зміни комірки: номер, а для системної зміни — ще й хто її запустив. */
-export function cellAuthorHint(row: AuthoredRow & { readonly origin: string }): string {
+export function cellAuthorHint(row: AuthoredRow & { readonly origin: string; readonly reason?: string | null | undefined }): string {
   const id = `#${String(row.changedByUserId)}`;
-  return isHumanOrigin(row.origin) ? id : `${authorName(row)} (${id})`;
+  return isHumanCellChange(row) ? id : `${authorName(row)} (${id})`;
 }
 
 /**

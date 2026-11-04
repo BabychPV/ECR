@@ -50,6 +50,7 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
               ON s.DocumentId = d.Id AND s.IsIncluded = 1
             LEFT JOIN wf.ApprovalState a
               ON a.DocumentId = s.DocumentId AND a.SheetDefId = s.SheetDefId AND a.PeriodKey = @periodKey
+             AND (a.SheetCopyId = s.Id OR (a.SheetCopyId IS NULL AND s.CopyOfId IS NULL))   -- RS: стан СВОГО рядка складу (копія — окремий аркуш)
             WHERE d.ProjectId IN (/*projects*/)
             GROUP BY d.Id, d.ProjectId
         ) x
@@ -228,6 +229,7 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
         JOIN doc.DocumentSheet s ON s.DocumentId = d.Id AND s.IsIncluded = 1
         LEFT JOIN wf.ApprovalState a
           ON a.DocumentId = s.DocumentId AND a.SheetDefId = s.SheetDefId AND a.PeriodKey = p.PeriodKey
+         AND (a.SheetCopyId = s.Id OR (a.SheetCopyId IS NULL AND s.CopyOfId IS NULL))   -- RS: стан СВОГО рядка складу
         WHERE p.ProjectId = @projectId
         GROUP BY p.PeriodKey
         """;

@@ -2,12 +2,13 @@ import type { JSX } from 'react';
 import { Link } from 'react-router-dom';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
+import { permitSheetBindingsEnabled } from '../permitFeatures';
 import { PermitTypesPermission } from '../permitRights';
 import { PermitsPaths } from './permitPaths';
 import './permitsShell.css';
 
 /** Розділ Permits, на якому стоїть людина. */
-export type PermitsSection = 'permits' | 'types' | 'lists' | 'groups' | 'bindings';
+export type PermitsSection = 'permits' | 'types' | 'lists' | 'groups' | 'bindings' | 'nae';
 
 interface SubnavItem {
   readonly id: PermitsSection;
@@ -25,6 +26,7 @@ const items: readonly SubnavItem[] = [
   { id: 'lists', to: PermitsPaths.lists, label: () => t('permits.lists.title') },
   { id: 'groups', to: PermitsPaths.groups, label: () => t('permits.groups.title') },
   { id: 'bindings', to: PermitsPaths.bindings, label: () => t('permits.bindings.title') },
+  { id: 'nae', to: PermitsPaths.nae, label: () => t('permits.nae.title') },
 ];
 
 /**
@@ -37,8 +39,12 @@ const items: readonly SubnavItem[] = [
  */
 export function PermitsSubnav({ current }: { readonly current: PermitsSection }): JSX.Element {
   const session = useSession();
+  // PERMIT-USAGE п. 1: «Sheet bindings» сховано прапорцем (поточний розділ лишається — на нього вже прийшли адресою).
+  const bindings = permitSheetBindingsEnabled();
   const visible = items.filter(
-    (item) => item.id === current || item.permission === undefined || can(session.data, item.permission),
+    (item) =>
+      item.id === current ||
+      ((item.id !== 'bindings' || bindings) && (item.permission === undefined || can(session.data, item.permission))),
   );
 
   return (

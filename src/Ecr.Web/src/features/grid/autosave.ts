@@ -5,6 +5,7 @@ import { hasUnsavedChangesExcept, registerUnsavedSource, UnsavedSettleMs } from 
 import { EcrApiError, isSessionClosed, onBeforeLoginRedirect } from '@/api/client';
 import { recordLostEdits } from './lostEdits';
 import { resetConfirmed } from './confirmedEdits';
+import { resetOverrideReasons } from './overrideReasons';
 import { registerHeldEditLookup } from './settleEdits';
 import {
   cellKey,
@@ -17,6 +18,7 @@ import {
   pendingCount,
   pendingSlice,
   pendingSlices,
+  replacePendingSlice,
   resetPending,
   sendableEdits,
   subscribePending,
@@ -120,19 +122,45 @@ export function createDebouncer(callback: () => void, delayMs = 500): Debouncer 
  *
  * @returns Функція відписки — знімає слухача при розмонтуванні.
  */
-export function registerUnloadFlush(isPending: () => boolean, flush: () => boolean | void): () => void {
+export function registerUnloadFlush(
+  isPending: () => boolean,
+  flush: () => boolean | void,
+  onLeave?: () => void,
+): () => void {
+  // L8-08 («Піти»): браузер питає «Покинути сторінку?» ПІСЛЯ обробника, і ми не знаємо відповіді.
+  // «Залишитися» - далі звичайний `setTimeout`-збір (`flush` його планує). «Піти» - вкладка зникає,
+  // таймер може не встигнути (або збір, що стартував під час діалогу, обірветься вивантаженням), а
+  // маячка не було. Тому питання ставимо тут, а маячок їде з `pagehide` (спрацьовує лише коли
+  // сторінка справді йде) і бере те, що ЩЕ лежить у сховищі: збережене зібрав таймер і прибрав.
+  // `asked` озброює `pagehide` лише після питання - без нього маячок їхав би вдруге (шлях без
+  // питання вже відправив його у `beforeunload`). «Залишитися» `pagehide` не викликає взагалі, а
+  // кожен новий `beforeunload` перераховує прапорець.
+  let asked = false;
+
   const handler = (event: BeforeUnloadEvent): void => {
+    asked = false;
     // AN-39/L8-08: `flush` повертає `true`, якщо лишилось те, що надіслати не можна
     // (утримані відхилені правки) - тоді єдиний чесний захист - рідне питання браузера.
     if (isPending() && flush() === true) {
       event.preventDefault();
       event.returnValue = '';
+      asked = true;
     }
   };
 
-  window.addEventListener('beforeunload', handler);
+  const pageHide = (): void => {
+    if (!asked) return;
+    asked = false;
+    onLeave?.();
+  };
 
-  return () => window.removeEventListener('beforeunload', handler);
+  window.addEventListener('beforeunload', handler);
+  window.addEventListener('pagehide', pageHide);
+
+  return () => {
+    window.removeEventListener('beforeunload', handler);
+    window.removeEventListener('pagehide', pageHide);
+  };
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -653,11 +681,14 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
 
     return () => {
       cancelAutosave();
+      beaconed = null;
       clearBusyRetry();
       resetFailedSaves();
       resetPending();
       // ⚠ Разом зі сховищем правок — і підтвердження до них (`ФВ-2.16`).
       resetConfirmed();
+      // ✎ D-461: і причини ручних значень замість формул.
+      resetOverrideReasons();
     };
   }, [documentId]);
 
@@ -678,6 +709,7 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
       registerUnloadFlush(hasPending, () => {
         // ⛔ AN-108 / S2-05: сеанс змінився в іншій вкладці — правки вже лежать у сліді `lostEdits` їхнього
         // власника, а відправити їх зараз означало б записати їх під чужим cookie. Без маячка і без питання.
+        beaconed = null;
         if (isSessionClosed()) return false;
 
         // ⚠ `V-01`: і тут без відхилених — інакше останній шанс зберегти
@@ -729,11 +761,92 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
         }
 
         for (const request of requests) sendPatchBeacon(documentId, request);
+        beaconed = sendable.map((slice) => ({ ...slice }));
 
         return false;
+      }, () => {
+        // ⛔ L8-08 («Піти»): людина відповіла «Піти» - сторінка вже йде, звичайного збору не буде.
+        // Шлемо маячок із того, що ще лежить у сховищі, АЛЕ з тими самими винятками, що й раніше:
+        //  - утримані (відхилені) правки не їдуть - `sendableOnly`;
+        //  - рядки, чий PATCH ще в дорозі, пропускаємо (`splitByInFlight`): їхня версія в кеші стара,
+        //    і `409` («все або нічого») забрав би решту пакета. Сам запит у дорозі браузер може доробити;
+        //  - сеанс закрито (AN-108) - нічого не шлемо (`sendPatchBeacon` перевіряє теж);
+        //  - пакет більший за ліміт `keepalive` (64 КиБ) - не шлемо: запит упав би мовчки. Це єдина
+        //    втрата, і про неї людина вже була спитана;
+        //  - недоступний сервер (`G1-03`) і «дані зайняті» НЕ виняток: маячок безкоштовний, а
+        //    збережене там не закомічене, тож дубля не буде.
+        if (isSessionClosed()) return;
+
+        const split = pendingSlices({ sendableOnly: true })
+          .map((slice) => ({
+            slice,
+            now: splitByInFlight(slice.tableInstanceId, slice.periodKey, slice.edits).now,
+          }))
+          .filter(({ now }) => now.length > 0);
+        const slicesNow = split.map(({ slice, now }) => ({ ...slice, edits: now }));
+        const requests = split
+          .map(({ slice, now }) =>
+            buildRequest(
+              slice.tableInstanceId,
+              slice.periodKey,
+              withKnownVersions(now, cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey)),
+            ),
+          );
+
+        if (beaconBytes(requests) > BeaconBudgetBytes) return;
+
+        for (const request of requests) sendPatchBeacon(documentId, request);
+        beaconed = slicesNow;
       }),
     [documentId, queryClient],
   );
+
+  // ⛔ bfcache: `pagehide` (і маячок) бувають перед відправкою сторінки в bfcache, а не в смерть.
+  // «Назад» відновлює ту саму сторінку: правки, що вже поїхали маячком, лежать у сховищі зі старою
+  // версією, і наступне збереження дало б `409` на власних правках. Тому на `pageshow` з `persisted`:
+  //  1) знімаємо зі сховища ЛИШЕ те, що поїхало й не змінилося (комірка з тим самим значенням) -
+  //     правки, зроблені вже після маячка (інше значення), лишаються й їдуть звичайним збором;
+  //  2) інвалідуємо зрізи - сітка перечитає значення й нові версії рядків із сервера.
+  // Утримані (відхилені) правки маячком не їхали - їх не чіпаємо.
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent): void => {
+      if (!event.persisted) return;
+      restoreAfterBfcache(queryClient);
+    };
+    window.addEventListener('pageshow', onPageShow);
+
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, [queryClient]);
+}
+
+/** Що поїхало маячком останнім разом (для відновлення з bfcache); `null` - нічого. */
+let beaconed: readonly PendingSliceLike[] | null = null;
+
+interface PendingSliceLike {
+  readonly tableInstanceId: number;
+  readonly periodKey: number;
+  readonly edits: readonly PendingEdit[];
+}
+
+function sameSentValue(a: PendingEdit, b: PendingEdit): boolean {
+  return a.isEmpty === b.isEmpty && JSON.stringify(a.value) === JSON.stringify(b.value);
+}
+
+/** Відновлення сторінки з bfcache: див. коментар у `useDocumentPending`. Експорт - для тестів. */
+export function restoreAfterBfcache(queryClient: QueryClient): void {
+  const sent = beaconed;
+  beaconed = null;
+  if (sent === null) return;
+
+  for (const slice of sent) {
+    const next = new Map(pendingSlice(slice.tableInstanceId, slice.periodKey));
+    for (const edit of slice.edits) {
+      const current = next.get(cellKey(edit));
+      if (current !== undefined && sameSentValue(current, edit)) next.delete(cellKey(edit));
+    }
+    replacePendingSlice(slice.tableInstanceId, slice.periodKey, next);
+    void queryClient.invalidateQueries({ queryKey: queryKeys.slices.one(slice.tableInstanceId, slice.periodKey) });
+  }
 }
 
 /** Сума тіл маячка в байтах UTF-8 — так, як їх рахує ліміт `keepalive`. */

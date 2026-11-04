@@ -42,13 +42,20 @@ public interface IMetadataCache
     /// <param name="kind">Вид даних — частина ключа; один вид = один тип й одне джерело.</param>
     /// <param name="load">Читання з бази; виконується щонайбільше один раз на політ і ключ.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="shortLived">Значення, що живе не довше за вікно ревізії; <c>null</c> — звичайна стеля.</param>
     /// <returns>Значення з кешу або щойно прочитане.</returns>
     /// <remarks>
     /// ⛔ Чому не окремий кеш: окремий мусив би сам знати, коли версія змінилася (публікація, міграція, правка
     /// чернетки) — і розійшовся б зі знімком на першій же новій точці інвалідації. Тут кожен виклик
     /// <see cref="InvalidateAsync"/> (а їх ставлять усі структурні обробники) скидає й похідні.
+    /// <para>
+    /// ✎ Аудит 31.10 (F3): <paramref name="shortLived"/> — значення, яке не можна тримати довше за вікно ревізії навіть
+    /// на замороженій версії (відповідь «ще немає» про стан, що змінюється БЕЗ підйому ревізії, напр. «позначок ручних
+    /// значень немає»): для нього стеля життя — як у чернетки, а не години.
+    /// </para>
     /// </remarks>
     public Task<T> GetDerivedAsync<T>(
-        int templateVersionId, string kind, Func<CancellationToken, Task<T>> load, CancellationToken ct)
+        int templateVersionId, string kind, Func<CancellationToken, Task<T>> load, CancellationToken ct,
+        Func<T, bool>? shortLived = null)
         where T : class;
 }

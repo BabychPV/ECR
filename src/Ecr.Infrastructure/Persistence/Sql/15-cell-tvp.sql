@@ -188,6 +188,7 @@ GO
 -- лише параметри команд застосунку, не процедури, тож DROP TYPE проходить.
 -- ✎ D-447: та сама перевірка тепер по НАЙНОВІШІЙ колонці `IsOverwrite` — тип із нею має й
 -- IsOutOfWindow, а тип без неї (база до D-447) знімається й створюється в новій формі.
+-- ✎ D-461: найновіша колонка тепер `Reason` (причина ручного значення замість формули).
 IF TYPE_ID(N'aud.CellChangeTvp') IS NOT NULL
    AND NOT EXISTS (
         SELECT 1
@@ -195,7 +196,7 @@ IF TYPE_ID(N'aud.CellChangeTvp') IS NOT NULL
         JOIN sys.columns     AS c ON c.object_id = tt.type_table_object_id
         WHERE tt.name = N'CellChangeTvp'
           AND SCHEMA_NAME(tt.schema_id) = N'aud'
-          AND c.name = N'IsOverwrite')
+          AND c.name = N'Reason')
     DROP TYPE aud.CellChangeTvp;
 GO
 
@@ -216,7 +217,8 @@ CREATE TYPE aud.CellChangeTvp AS TABLE
     IsLateEdit      bit            NOT NULL,
     CorrelationId   nvarchar(64)   NULL,
     IsOutOfWindow   bit            NOT NULL,
-    IsOverwrite     bit            NOT NULL
+    IsOverwrite     bit            NOT NULL,
+    Reason          nvarchar(1000) NULL
 );');
 GO
 

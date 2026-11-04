@@ -86,6 +86,27 @@ public static class CellChangeOrigins
     public const string ApproverEdit = "ApproverEdit";
 
     /// <summary>
+    /// ✎ D-461: ручне значення ЗАМІСТЬ ФОРМУЛИ — людина з правом <c>Document.OverrideFormula</c> записала значення в
+    /// комірку формули, що дозволяє ручне значення; причина — у <c>aud.CellChange.Reason</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ставить СЕРВЕР (<c>PatchCellsHandler</c>), коли запис іде в обчислювану комірку; клієнт заявити його не може
+    /// (<see cref="RequireClientOrigin"/>). Людина (<see cref="HumanOriginsSql"/>, <see cref="IsHuman"/>).
+    /// ⛔ Перемагає <see cref="ApproverEdit"/> і <see cref="Import"/>: «замінено формулу» — головний зміст рядка
+    /// (з причиною); погоджувача видно за автором і станом аркуша.
+    /// </remarks>
+    public const string FormulaOverride = "FormulaOverride";
+
+    /// <summary>
+    /// ✎ D-461: ручне значення прибрано — комірка повернулася до формули (видалення значення в такій комірці).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Людина (<see cref="HumanOriginsSql"/>, <see cref="IsHuman"/>); ставить сервер, клієнт заявити не може.
+    /// Обчислене число, що з'явиться після, пише перерахунок окремим рядком (<see cref="Recalculation"/>).
+    /// </remarks>
+    public const string FormulaRestored = "FormulaRestored";
+
+    /// <summary>
     /// Походження, які сторожі інтеграції вважають рішенням людини, — готовим
     /// списком для <c>IN (…)</c> у сирому SQL над <c>aud.CellChange</c> (журнал
     /// не є сутністю EF).
@@ -105,7 +126,8 @@ public static class CellChangeOrigins
     /// </para>
     /// </remarks>
     public const string HumanOriginsSql =
-        "N'" + UserEdit + "', N'" + Import + "', N'" + ImportOverwrite + "', N'" + ApproverEdit + "'";
+        "N'" + UserEdit + "', N'" + Import + "', N'" + ImportOverwrite + "', N'" + ApproverEdit + "', N'"
+        + FormulaOverride + "', N'" + FormulaRestored + "'";
 
     /// <summary>
     /// Чи зробила зміну з цим походженням ЛЮДИНА: <see cref="UserEdit"/>,
@@ -123,7 +145,9 @@ public static class CellChangeOrigins
         string.Equals(origin, UserEdit, StringComparison.Ordinal)
         || string.Equals(origin, Import, StringComparison.Ordinal)
         || string.Equals(origin, ImportOverwrite, StringComparison.Ordinal)
-        || string.Equals(origin, ApproverEdit, StringComparison.Ordinal);
+        || string.Equals(origin, ApproverEdit, StringComparison.Ordinal)
+        || string.Equals(origin, FormulaOverride, StringComparison.Ordinal)
+        || string.Equals(origin, FormulaRestored, StringComparison.Ordinal);
 
     /// <summary>Скільки символів значення повертається в тексті відмови.</summary>
     private const int EchoLength = 32;

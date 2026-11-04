@@ -337,6 +337,34 @@ public sealed class ColumnDef : Entity<int>
     /// </remarks>
     public const int MaxStringLength = 1000;
 
+    /// <summary>
+    /// ✎ D-461: перевіряє РУЧНЕ ЗНАЧЕННЯ ЗАМІСТЬ ФОРМУЛИ. Обчислювана колонка формули (<see cref="CellDataType.Formula"/>)
+    /// приймає заповнене число (результат формули шаблону — число); колонка вводу з комірочною формулою — за власним
+    /// типом, як звичайне значення. Методологічна (<see cref="CellDataType.Calculated"/>) ручного значення не приймає.
+    /// </summary>
+    /// <returns>Код помилки з каталогу або <c>null</c>.</returns>
+    public string? ValidateManualOverride(CellValueData value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+
+        if (DataType != CellDataType.Formula)
+        {
+            return ValidateValue(value);
+        }
+
+        if (!value.IsWellFormed() || value.IsEmpty || value.ValueNumeric is not { } number)
+        {
+            return "ECR-CELL-0422";
+        }
+
+        if (Scale is { } scale && decimal.Round(number, scale, MidpointRounding.AwayFromZero) != number)
+        {
+            return "ECR-CELL-0422";
+        }
+
+        return FitsPrecision(number) ? null : "ECR-CELL-0422";
+    }
+
     /// <summary>Перевіряє, чи значення сумісне з типом і обмеженнями колонки.</summary>
     /// <returns>Код помилки з каталогу або <c>null</c>, якщо все гаразд.</returns>
     public string? ValidateValue(CellValueData value)

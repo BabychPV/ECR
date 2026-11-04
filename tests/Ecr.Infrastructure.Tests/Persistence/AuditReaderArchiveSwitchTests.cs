@@ -52,7 +52,7 @@ public sealed class AuditReaderArchiveSwitchTests
             var reader = new AuditReader(db);
             var filter = new CellChangeFilter(
                 new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2026, 11, 1, 0, 0, 0, DateTimeKind.Utc),
-                DocumentId: 1);
+                DocumentId: 1, Sort: AuditSort.ChangedAtAsc);
 
             // До архівації: усе гаряче.
             var before = await ReadAllAsync(reader, filter);
@@ -74,7 +74,7 @@ public sealed class AuditReaderArchiveSwitchTests
             Assert.Equal(4, counts.Sum(c => c.Total));
 
             // Історія однієї комірки (найновіші першими) — теж через межу гаряче/архів, сторінками по 1.
-            var cell = filter with { RowKey = "k", ColumnDefId = 1 };
+            var cell = filter with { RowKey = "k", ColumnDefId = 1, Sort = AuditSort.ChangedAtDesc };
             var history = await ReadAllAsync(reader, cell, limit: 1);
             Assert.Equal(["oct-1", "sep-1", "feb-2", "feb-1"], history.Select(c => c.NewValue));
 

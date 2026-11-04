@@ -22,10 +22,11 @@ export function useMonthColumnStatuses(
   sheetDefId: number | undefined,
   periodKey: number,
   tableDefId: number,
+  sheetCopyId: number | null = null,
 ): ReadonlyMap<string, MarkedMonthStatus> {
   const { data } = useQuery({
-    queryKey: submissionTargetKey(documentId, sheetDefId ?? 0, periodKey),
-    queryFn: () => fetchSubmissionTarget(documentId, sheetDefId ?? 0, periodKey),
+    queryKey: submissionTargetKey(documentId, sheetDefId ?? 0, periodKey, sheetCopyId),
+    queryFn: () => fetchSubmissionTarget(documentId, sheetDefId ?? 0, periodKey, sheetCopyId),
     enabled: false,
   });
 

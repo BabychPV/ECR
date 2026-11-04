@@ -1,0 +1,33 @@
+/*
+ * Count pill of the table chat: the badge in a table title (grid chunk) and the header button counter.
+ * Colours are theme variables only (light and dark are one rule set).
+ */
+.ecr-chat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 11px;
+  background: var(--ecr-sunken);
+  color: var(--mantine-color-text);
+  font: inherit;
+  font-size: var(--mantine-font-size-xs);
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ecr-chat-badge:hover {
+  background: var(--ecr-hover);
+}
+
+.ecr-chat-badge:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 2px;
+}
+
+.ecr-chat-badge[data-unread] {
+  border-color: var(--mantine-primary-color-filled);
+}

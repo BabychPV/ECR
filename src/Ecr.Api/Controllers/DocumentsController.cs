@@ -41,7 +41,8 @@ public sealed class DocumentsController(
     ChangeDocumentKeyHandler changeKey,
     GetDocumentHeaderHandler getHeader,
     PatchDocumentHeaderHandler patchHeader,
-    Application.Documents.VersionMigration.MigrateDocumentVersionHandler migrateVersion) : ControllerBase
+    Application.Documents.VersionMigration.MigrateDocumentVersionHandler migrateVersion,
+    DocumentSheetCopyHandler sheetCopies) : ControllerBase
 {
     /// <summary>
     /// Стеля тіла запиту перегляду імпорту — рівно стандартна межа Kestrel
@@ -75,6 +76,8 @@ public sealed class DocumentsController(
         [FromQuery] bool? resultsStale,
         [FromQuery] string? staleBy,
         [FromQuery] int? ownerUserId,
+        [FromQuery] string? sort,
+        [FromQuery] string? templateVersions,
         CancellationToken ct)
     {
         var page = new CursorRequest(limit == 0 ? 50 : limit, cursor);
@@ -97,7 +100,9 @@ public sealed class DocumentsController(
         // вказано період: без періоду «стан документа» не визначений — аркуші
         // за різні періоди бувають у різних станах одночасно (D-93).
         return Ok(await listDocuments
-            .HandleAsync(projectId, periodKey, state, mine, hasLateEdits, q, resultsStale, staleBy, ownerUserId, page, ct)
+            .HandleAsync(
+                projectId, periodKey, state, mine, hasLateEdits, q, resultsStale, staleBy, ownerUserId, sort, templateVersions,
+                page, ct)
             .ConfigureAwait(false));
     }
 
@@ -115,6 +120,20 @@ public sealed class DocumentsController(
     public async Task<IActionResult> Owners(
         [FromQuery] int? projectId, [FromQuery] int? periodKey, [FromQuery] string? q, CancellationToken ct)
         => Ok(await listDocuments.HandleOwnersAsync(projectId, periodKey, q, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Усі версії шаблону серед документів, які користувач бачить, — для вибору у фільтрі переліку «Version». Право
+    /// <c>Document.View</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Та сама межа видимості, що й перелік: версія, наявна лише в невидимих документах, не називається. Версія — за
+    /// <c>periodKey</c> (без нього — чинна версія проєкту), як у колонці «Version». Не більше 200 версій.
+    /// </remarks>
+    [HttpGet("template-versions")]
+    [ProducesResponseType<DocumentTemplateVersionsResponse>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> TemplateVersions(
+        [FromQuery] int? projectId, [FromQuery] int? periodKey, CancellationToken ct)
+        => Ok(await listDocuments.HandleTemplateVersionsAsync(projectId, periodKey, ct).ConfigureAwait(false));
 
     /// <summary>Зведення переліку за період (<c>BE-09</c>). Право <c>Document.View</c>.</summary>
     /// <remarks>
@@ -398,6 +417,8 @@ public sealed class DocumentsController(
         var mode = request.Mode ?? Application.Documents.VersionMigration.VersionMigrationMode.Safe;
 
         migrateVersion.BackupConfirmation = request.BackupConfirmation;
+        migrateVersion.Range = request.Range ?? Application.Documents.VersionMigration.VersionMigrationRange.WholeProject;
+        migrateVersion.FromPeriodKey = request.FromPeriodKey;
         if (request.Async && !request.DryRun)
         {
             var jobId = await migrateVersion
@@ -432,7 +453,7 @@ public sealed class DocumentsController(
         ArgumentNullException.ThrowIfNull(request);
 
         await submit
-            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.AcknowledgeWarnings, ct)
+            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.AcknowledgeWarnings, request.SheetCopyId, ct)
             .ConfigureAwait(false);
         return NoContent();
     }
@@ -447,7 +468,7 @@ public sealed class DocumentsController(
         ArgumentNullException.ThrowIfNull(request);
 
         await approve
-            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Approved, request.Reason, ct)
+            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Approved, request.Reason, request.SheetCopyId, ct)
             .ConfigureAwait(false);
 
         return NoContent();
@@ -471,8 +492,76 @@ public sealed class DocumentsController(
         ArgumentNullException.ThrowIfNull(request);
 
         await reopen
-            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Reason, ct)
+            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Reason, request.SheetCopyId, ct)
             .ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Додає порожню копію аркуша («Додати копію»): ті самі таблиці й формули, без даних, у КОЖНОМУ періоді. Право
+    /// <c>Document.Create</c> + запис у проєкт.
+    /// </summary>
+    /// <param name="id">Документ.</param>
+    /// <param name="sheetDefId">Аркуш-оригінал (джерело копії — завжди оригінал).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// <c>422</c> <c>ECR-DOC-0422</c> (<c>sheetNotCopyable</c>) — шаблон не дозволяє копіювати аркуш; <c>404</c> — аркуша немає у
+    /// складі; <c>409</c> — проєкт у архіві. Відповідь — Id копії (він же <c>sheetCopyId</c> у даних) і її номер у групі
+    /// («&lt;Назва&gt; N»).
+    /// </remarks>
+    [HttpPost("{id:long}/sheets/{sheetDefId:int}/copies")]
+    [ProducesResponseType<SheetCopyCreated>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<SheetCopyCreated>> AddSheetCopy(long id, int sheetDefId, CancellationToken ct)
+        => StatusCode(
+            StatusCodes.Status201Created,
+            await sheetCopies.AddAsync(id, sheetDefId, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Перейменовує групу аркуша: оригінал і всі копії стають «&lt;Назва&gt; N». Право <c>Document.Create</c> + запис у проєкт.
+    /// </summary>
+    /// <param name="id">Документ.</param>
+    /// <param name="sheetDefId">Аркуш-оригінал.</param>
+    /// <param name="request">Назва за мовами.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpPut("{id:long}/sheets/{sheetDefId:int}/name")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> RenameSheetGroup(
+        long id, int sheetDefId, [FromBody] RenameSheetGroupRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await sheetCopies.RenameGroupAsync(id, sheetDefId, request.NameL10n, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Видаляє копію аркуша з даними всіх періодів; решта копій групи перенумеровується. Право <c>Document.Create</c> + запис у проєкт.
+    /// </summary>
+    /// <param name="id">Документ.</param>
+    /// <param name="sheetCopyId">Копія (<c>sheetCopyId</c> з <c>GET …/tables</c>).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// <c>409</c> <c>ECR-DOC-0409</c>: <c>sheetCopyIsOriginal</c> — це оригінал; <c>sheetCopyHasWorkflow</c> — копія подана чи
+    /// затверджена хоч в одному періоді (<c>periodKey</c>, <c>status</c>). Зрізи подань лишаються.
+    /// </remarks>
+    [HttpDelete("{id:long}/sheet-copies/{sheetCopyId:long}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteSheetCopy(long id, long sheetCopyId, CancellationToken ct)
+    {
+        await sheetCopies.DeleteCopyAsync(id, sheetCopyId, ct).ConfigureAwait(false);
 
         return NoContent();
     }
@@ -706,20 +795,29 @@ public sealed record RecalculateDocumentRequest(int PeriodKey, int? SheetDefId =
 /// Подавач підтвердив попередження валідації (ФВ-5.19); без цього подання
 /// аркуша з попередженнями відхиляється з їхнім переліком.
 /// </param>
-public sealed record SheetWorkflowRequest(int SheetDefId, int PeriodKey, bool AcknowledgeWarnings = false);
+/// <param name="SheetCopyId">RS: копія аркуша (<c>sheetCopyId</c> з <c>GET …/tables</c>); <c>null</c> — оригінал.</param>
+public sealed record SheetWorkflowRequest(
+    int SheetDefId, int PeriodKey, bool AcknowledgeWarnings = false, long? SheetCopyId = null);
 
 /// <summary>Запит на погодження аркуша.</summary>
 /// <param name="SheetDefId">Аркуш.</param>
 /// <param name="PeriodKey">Період.</param>
 /// <param name="Approved"><c>true</c> — погодити, <c>false</c> — відхилити.</param>
 /// <param name="Reason">Причина; обов'язкова при відхиленні.</param>
-public sealed record ApproveSheetRequest(int SheetDefId, int PeriodKey, bool Approved, string? Reason);
+/// <param name="SheetCopyId">RS: копія аркуша; <c>null</c> — оригінал.</param>
+public sealed record ApproveSheetRequest(
+    int SheetDefId, int PeriodKey, bool Approved, string? Reason, long? SheetCopyId = null);
 
 /// <summary>Запит на відкриття поданого документа.</summary>
 /// <param name="SheetDefId">Аркуш.</param>
 /// <param name="PeriodKey">Період.</param>
 /// <param name="Reason">Причина; обов'язкова.</param>
-public sealed record ReopenDocumentRequest(int SheetDefId, int PeriodKey, string Reason);
+/// <param name="SheetCopyId">RS: копія аркуша; <c>null</c> — оригінал.</param>
+public sealed record ReopenDocumentRequest(int SheetDefId, int PeriodKey, string Reason, long? SheetCopyId = null);
+
+/// <summary>Нова назва групи аркуша (оригінал і копії).</summary>
+/// <param name="NameL10n">Назва за мовами — така сама форма, як <c>SaveSheetDefRequest.NameL10n</c>.</param>
+public sealed record RenameSheetGroupRequest(IReadOnlyDictionary<string, string> NameL10n);
 
 /// <summary>Запит на зміну бізнес-ключа документа (ФВ-3.9).</summary>
 /// <param name="BusinessKey">Новий ключ.</param>
@@ -770,6 +868,19 @@ public sealed record ChangeDocumentKeyRequest(string? BusinessKey, string? Expec
 /// (<c>migrateLookupLockedDocuments</c>), нічого не записано; їх кількість сухий прогін показує до згоди
 /// (<c>lockedDocumentCount</c>). Не впливає на подані/затверджені аркуші (<c>409 sheetsLocked</c>) і на перенос без мап.
 /// </param>
+/// <param name="Range">
+/// RPT-STABLE Part B. Обсяг переносу: <c>WholeProject</c> (типово; поведінка як раніше — усі періоди проєкту, у будь-який
+/// час) або <c>FromMonth</c> (з періоду <c>fromPeriodKey</c>). Для <c>FromMonth</c> періоди &lt; X лишаються на старих
+/// ідентифікаторах структури, УКЛЮЧНО з поданими/затвердженими; періоди ≥ X переходять на нову версію; нові періоди
+/// проєкту йдуть на нову версію; подані/затверджені перевіряються лише для періодів ≥ X. Якщо у проєкті є таблиця з
+/// місяцями в колонках (Q-17) і X — не січень, увесь рік переходить з ЯНВАРЯ цього року: відповідь несе
+/// <c>effectiveFromPeriodKey</c> і попередження <c>effectiveFromShiftedToJanuary</c>. X мусить бути ≥ початку останнього
+/// сегмента шкали версій проєкту (<c>GET /projects/{id}/template-versions</c>); <c>WholeProject</c> можливий, лише коли
+/// шкала має один сегмент. Помилки (<c>422 ECR-SCHM-0422</c>): <c>migrateFromMonthRequired</c>,
+/// <c>migrateFromMonthInvalid</c>, <c>migrateFromMonthBeforeSegment</c>, <c>migrateWholeProjectMultiVersion</c>,
+/// <c>migrateTargetNotPublished</c>.
+/// </param>
+/// <param name="FromPeriodKey">Період X (<c>Рік*100+№</c>) для <c>Range = FromMonth</c>; для <c>WholeProject</c> ігнорується.</param>
 public sealed record MigrateDocumentVersionRequest(
     int TargetVersionId,
     Application.Documents.VersionMigration.VersionMigrationMode? Mode,
@@ -779,7 +890,9 @@ public sealed record MigrateDocumentVersionRequest(
     bool? AcceptGuardedOverwrite = null,
     IReadOnlyList<Application.Documents.VersionMigration.VersionMigrationLookupRemap>? LookupRemaps = null,
     bool? AllowLockedDocuments = null,
-    string? BackupConfirmation = null);
+    string? BackupConfirmation = null,
+    Application.Documents.VersionMigration.VersionMigrationRange? Range = null,
+    int? FromPeriodKey = null);
 
 /// <summary>Запит на експорт.</summary>
 /// <param name="IncludeFormulas">

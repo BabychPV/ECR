@@ -25,7 +25,10 @@ public sealed class ApproveSheetHandler(
 
     // ✎ D-451: лист «Аркуш повернуто» після відхилення — ПІСЛЯ коміту, без права валити дію; `null` — тестові
     // фабрики обробника без пошти.
-    SheetWorkflowNotifier? notifier = null)
+    SheetWorkflowNotifier? notifier = null,
+    // D-462: повернутий аркуш знову редагований — комірки наздоганяють сирий шар (SheetMaterializationTrigger);
+    // `null` — тестові фабрики обробника без черги.
+    IMaterializationScheduler? materialization = null)
 {
     /// <summary>Затверджує або відхиляє аркуш.</summary>
     /// <param name="documentId">Документ.</param>
@@ -34,8 +37,21 @@ public sealed class ApproveSheetHandler(
     /// <param name="approved"><c>true</c> — затвердити, <c>false</c> — відхилити.</param>
     /// <param name="reason">Коментар; обов'язковий при відхиленні (ФВ-5.15).</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task HandleAsync(
+    public Task HandleAsync(
         long documentId, int sheetDefId, int periodKey, bool approved, string? reason, CancellationToken ct)
+        => HandleAsync(documentId, sheetDefId, periodKey, approved, reason, sheetCopyId: null, ct);
+
+    /// <summary>Затверджує або відхиляє аркуш чи його КОПІЮ (RS: власний стан копії за період).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="approved"><c>true</c> — затвердити, <c>false</c> — відхилити.</param>
+    /// <param name="reason">Коментар; обов'язковий при відхиленні (ФВ-5.15).</param>
+    /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task HandleAsync(
+        long documentId, int sheetDefId, int periodKey, bool approved, string? reason, long? sheetCopyId,
+        CancellationToken ct)
     {
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
@@ -58,10 +74,16 @@ public sealed class ApproveSheetHandler(
         await Documents.DocumentVisibility
             .RequireSheetVisibleAsync(documents, access, profile, documentId, sheetDefId, key, ct).ConfigureAwait(false);
 
+        // RS: копія має належати цьому аркушу документа — інакше та сама відмова, що й аркуш поза складом.
+        if (sheetCopyId is { } copy && !await documents.HasSheetCopyAsync(documentId, sheetDefId, copy, ct).ConfigureAwait(false))
+        {
+            throw Documents.DocumentVisibility.SheetNotInDocument(documentId, sheetDefId);
+        }
+
         // ⚠ Швидка відмова ДО транзакції — без блокувань і без читання стану.
         // Рішення, на яке справді спирається підпис, приймається ще раз
         // усередині транзакції (R5-W1 / W1-05, нижче).
-        await RequireApproveAllowedAsync(profile, documentId, sheetDefId, key, ct).ConfigureAwait(false);
+        await RequireApproveAllowedAsync(profile, documentId, sheetDefId, key, sheetCopyId, ct).ConfigureAwait(false);
 
         // ⛔ `DAT-06`. Стан аркуша, запис у аудит і перерахунок статусу зрізу —
         // ОДНИМ комітом. Транзакції тут не було зовсім, і це не «на всяк
@@ -90,10 +112,10 @@ public sealed class ApproveSheetHandler(
                 // і під своїм спільним блокуванням побачить новий крок чи `Approved` — і відмову.
                 if (snapshotRefresh is not null)
                 {
-                    await snapshotRefresh.EnterAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
+                    await snapshotRefresh.EnterAsync(documentId, sheetDefId, key, innerCt, sheetCopyId).ConfigureAwait(false);
                 }
 
-                var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
+                var state = await workflow.GetOrCreateOfAsync(documentId, sheetDefId, key, sheetCopyId, innerCt).ConfigureAwait(false);
 
                 // ⛔ R5-W1 / W1-05 (TOCTOU): роль кроку маршруту — ПІСЛЯ читання
                 // стану, у тій самій транзакції. Рішення до транзакції бачило
@@ -104,19 +126,36 @@ public sealed class ApproveSheetHandler(
                 // Тепер: коміт ДО читання стану — рішення бачить новий крок і
                 // відмовляє; коміт ПІСЛЯ — збереження падає на `RowVersion`
                 // (409). На повторі після 1205 рішення теж перевиконується.
-                await RequireApproveAllowedAsync(profile, documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
+                await RequireApproveAllowedAsync(profile, documentId, sheetDefId, key, sheetCopyId, innerCt).ConfigureAwait(false);
 
                 // ⚠ D-440: правило чотирьох очей (F-25, заборона самопогодження) скасоване безумовно —
                 // той, хто подав, погоджує сам, якщо роль поточного кроку і грант це дають (рішення вище).
                 // Слід лишається в журналі: `GetWorkflowHistoryHandler` позначає таке погодження.
-                await ApproveCoreAsync(state, documentId, sheetDefId, periodKey, approved, reason, userId, innerCt)
+                await ApproveCoreAsync(state, documentId, sheetDefId, periodKey, approved, reason, userId, sheetCopyId, innerCt)
                     .ConfigureAwait(false);
+
+                // ⛔ D-462: відхилення — аркуш знову редагований; черга в базі — постановка тут, останнім оператором.
+                // RS (Q5): збір пише лише в оригінал — повернута копія наздоганяти сирий шар не має чого.
+                if (!approved && sheetCopyId is null)
+                {
+                    await SheetMaterializationTrigger
+                        .InsideTransactionAsync(materialization, documentId, sheetDefId, periodKey, innerCt)
+                        .ConfigureAwait(false);
+                }
             },
             ct).ConfigureAwait(false);
 
+        if (!approved && sheetCopyId is null)
+        {
+            await SheetMaterializationTrigger
+                .AfterCommitAsync(materialization, documentId, sheetDefId, periodKey, ct)
+                .ConfigureAwait(false);
+        }
+
         // ✎ D-451: відхилення (`Submitted → Rejected`, `ApprovalAction.Reject`) — повернення погоджувачем; лист
         // власнику й учасникам Write/Submit, за ввімкненим правилом, ПІСЛЯ коміту. Затвердження листа не дає.
-        if (!approved && notifier is not null)
+        // RS: лист про повернення КОПІЇ — разом із контрактом копій (коміт 8).
+        if (!approved && notifier is not null && sheetCopyId is null)
         {
             await notifier.ReturnedAsync(documentId, sheetDefId, key, userId, clock.UtcNow, reason, ct)
                 .ConfigureAwait(false);
@@ -125,9 +164,9 @@ public sealed class ApproveSheetHandler(
 
     /// <summary>Рішення про затвердження (грант, стан, роль поточного кроку маршруту); відмова — 403.</summary>
     private async Task RequireApproveAllowedAsync(
-        AccessProfile profile, long documentId, int sheetDefId, PeriodKey key, CancellationToken ct)
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey key, long? sheetCopyId, CancellationToken ct)
     {
-        var decision = await access.CanApproveAsync(profile, documentId, sheetDefId, key, ct)
+        var decision = await access.CanApproveOfAsync(profile, documentId, sheetDefId, key, sheetCopyId, ct)
                                    .ConfigureAwait(false);
         if (!decision.IsAllowed)
         {
@@ -153,6 +192,7 @@ public sealed class ApproveSheetHandler(
         bool approved,
         string? reason,
         int userId,
+        long? sheetCopyId,
         CancellationToken ct)
     {
         var key = new PeriodKey(periodKey);
@@ -171,7 +211,7 @@ public sealed class ApproveSheetHandler(
             // ⚠ Маршруту немає — `step` порожній, `nextStepId` теж, і
             // `ApproveStep` поводиться рівно як `Approve`: одноетапно, як було.
             var step = await access
-                .CurrentApprovalStepAsync(documentId, sheetDefId, key, ct)
+                .CurrentApprovalStepOfAsync(documentId, sheetDefId, key, sheetCopyId, ct)
                 .ConfigureAwait(false);
 
             // ✎ D-442: знімок даних — заново при погодженні, якщо погоджувач правив поданий аркуш (зріз
@@ -179,7 +219,7 @@ public sealed class ApproveSheetHandler(
             // Автору на ознайомлення аркуш не повертається.
             if (snapshotRefresh is not null)
             {
-                await snapshotRefresh.RefreshAsync(documentId, sheetDefId, key, userId, now, ct).ConfigureAwait(false);
+                await snapshotRefresh.RefreshAsync(documentId, sheetDefId, key, userId, now, ct, sheetCopyId).ConfigureAwait(false);
             }
 
             state.ApproveStep(userId, now, step?.NextStepId);

@@ -4,12 +4,14 @@ import { useQueries, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { PeriodCalendarDto } from '@/api/types';
-import { listDocuments, type DocumentListPage } from '@/features/documents/api';
+import { listDocuments, listDocumentTemplateVersions, type DocumentListPage } from '@/features/documents/api';
 import { DocumentListFilterBar } from '@/features/documents/DocumentListFilterBar';
 import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSummaryStrip';
 import { useDocumentListFilters } from '@/features/documents/documentListFilters';
 import { EyeIcon, IssueCount } from '@/features/documents/DocumentListMarks';
 import { documentState, hasSheetStates, sheetLabels } from '@/features/documents/documentSheets';
+import { distinctVersions, mergeVersionOptions, nextVersionSort } from '@/features/documents/documentVersion';
+import { DocumentVersionCell, DocumentVersionTh } from '@/features/documents/DocumentVersionColumn';
 import { parseDocumentsView } from '@/features/documents/documentsBoardModel';
 import '@/features/documents/documentsList.css';
 import { LateEditsMark } from '@/features/documents/LateEditsMark';
@@ -110,6 +112,8 @@ export function DocumentsPage(): JSX.Element {
 
   // `UI-18`: пошук іде в запит після паузи в наборі; поле й адреса оновлюються одразу.
   const appliedQ = useDebouncedFilter(filters.q.trim());
+  // Версії - масив; у ключ кешу іде рядок, щоб новий масив з тими ж версіями не давав новий запит.
+  const versionsKey = filters.versions.join(',');
 
   const query = useQuery({
     queryKey: [
@@ -123,6 +127,8 @@ export function DocumentsPage(): JSX.Element {
       appliedQ,
       filters.projectId,
       filters.owner,
+      versionsKey,
+      filters.versionSort,
     ],
     queryFn: () =>
       listDocuments({
@@ -131,11 +137,19 @@ export function DocumentsPage(): JSX.Element {
         state: filters.state,
         mine: filters.mine,
         ownerUserId: filters.owner,
+        templateVersions: filters.versions,
+        versionSort: filters.versionSort,
         hasLateEdits: filters.hasLateEdits,
         resultsStale: filters.resultsStale,
         q: appliedQ,
         projectId: filters.projectId,
       }),
+  });
+
+  // Варіанти фільтра «Version»: усі версії видимих документів (за проєктом і періодом), а не лише сторінки.
+  const versionOptionsQuery = useQuery({
+    queryKey: ['documents', 'template-versions', filters.projectId, periodKey],
+    queryFn: () => listDocumentTemplateVersions({ projectId: filters.projectId, periodKey }),
   });
 
   // ⛔ Аудит-пас 5: колонка «Project» показувала голий числовий `projectId`
@@ -343,6 +357,12 @@ export function DocumentsPage(): JSX.Element {
         periodKey={periodKey}
         filters={filters}
         projects={projects.data?.items ?? []}
+        // Варіанти — УСІ версії видимих документів (`GET /documents/template-versions`); обрані, яких сервер уже не
+        // віддає, лишаються (їх є чим зняти). Поки відповіді немає (або вона відмовила) — версії поточної сторінки.
+        versionOptions={mergeVersionOptions(
+          versionOptionsQuery.data?.versions ?? distinctVersions(query.data?.items ?? [], periodKey),
+          filters.versions,
+        )}
         staleOnPage={query.data?.items.filter((d) => d.resultsStale === true).length ?? 0}
         // ✎ D-450: під фільтром за людиною кожен рядок сторінки — її документ, тож ім'я вже є без окремого запиту.
         ownerName={
@@ -422,7 +442,11 @@ export function DocumentsPage(): JSX.Element {
         skeleton="table"
         onRetry={() => void query.refetch()}
       >
-        {(page) => (
+        {(page) => {
+          // Колонка «Version»: фільтр і сортування - СЕРВЕРНІ (`templateVersions`, `sort`), сторінка вже в потрібному порядку.
+          const rows = page.items;
+
+          return (
           <>
             {/* ⛔ Відмова переліку проєктів — окрема від відмови переліку
                 документів (та під власною межею вище): сама таблиця приїхала,
@@ -450,7 +474,7 @@ export function DocumentsPage(): JSX.Element {
             {view === 'board' ? (
               <Suspense fallback={<Skeleton height={240} />}>
                 <DocumentsBoard
-                  documents={page.items}
+                  documents={rows}
                   documentHref={documentHref}
                   projectCode={(projectId) => projects.data?.items.find((project) => project.id === projectId)?.code}
                   onQuickLook={(documentId, opener) => {
@@ -470,6 +494,10 @@ export function DocumentsPage(): JSX.Element {
                       <Table.Th>{t('documents.sheets')}</Table.Th>
                       <Table.Th>{t('documents.issues')}</Table.Th>
                       <Table.Th data-column="updated">{t('documents.updated')}</Table.Th>
+                      <DocumentVersionTh
+                        sort={filters.versionSort}
+                        onSort={() => filters.setVersionSort(nextVersionSort(filters.versionSort))}
+                      />
                       <Table.Th>{t('documents.state')}</Table.Th>
                       <Table.Th>
                         <VisuallyHidden>{t('documents.quickLookColumn')}</VisuallyHidden>
@@ -477,7 +505,7 @@ export function DocumentsPage(): JSX.Element {
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
-                    {page.items.map((document) => {
+                    {rows.map((document) => {
                       const name = localized(document.nameL10n);
                       const state = documentState(document);
                       const errors = document.errorCount;
@@ -569,6 +597,9 @@ export function DocumentsPage(): JSX.Element {
                               </Group>
                             </Box>
                           </Table.Td>
+                          <Table.Td data-column="version">
+                            <DocumentVersionCell source={document} periodKey={periodKey} />
+                          </Table.Td>
                           <Table.Td data-column="state">
                             {state === null ? <Text c="dimmed">—</Text> : <StatusBadge kind="sheet" state={state} quiet />}
                           </Table.Td>
@@ -604,7 +635,8 @@ export function DocumentsPage(): JSX.Element {
               </Button>
             )}
           </>
-        )}
+          );
+        }}
       </AsyncBoundary>
 
       {/* ⚠ Шторка монтується лише за `?panel=` — запити заповненості й історії

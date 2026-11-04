@@ -48,6 +48,7 @@ const Strings: Record<string, string> = {
     'The server stopped at {shown} combinations; a gap may be outside them.',
   'methodologies.noRuleCoverage': 'No rows match this window',
   'methodologies.noRuleCoverageHint': 'Widen the period window or pick another table.',
+  'methodologies.ruleCoveragePeriodMissing': 'Choose both periods to see the coverage matrix.',
   'err.ECR-CALC-0422.coverageWindow':
     'The period window is empty: periodFrom {periodFrom} is after periodTo {periodTo}.',
   'state.errorTitle': 'The request failed',
@@ -60,7 +61,9 @@ const Strings: Record<string, string> = {
 /** Вікно за замовчуванням — те саме, що рахує `defaultRuleCoverageWindow`. */
 const Year = new Date().getFullYear();
 const DefaultFrom = (Year - 1) * 100 + 1;
-const DefaultTo = Year * 100 + 99;
+const DefaultTo = Year * 100 + 12;
+/** Дійсний periodKey РАНІШЕ за нижню межу — `PeriodPicker` приймає лише повний ключ. */
+const BeforeFrom = (Year - 2) * 100 + 12;
 
 function matrix(overrides: Partial<RuleCoverageDto>): RuleCoverageDto {
   return {
@@ -291,14 +294,14 @@ describe('Матриця покриття правил: порожнє вікн�
     expect(calls).toHaveLength(1);
 
     fireEvent.change(screen.getByLabelText('Period to'), {
-      target: { value: String(DefaultFrom - 1) },
+      target: { value: String(BeforeFrom) },
     });
 
     // ⛔ Мутація «не показує причину» валить цей рядок…
     const banner = await screen.findByTestId('rule-coverage-window');
     expect(banner.textContent).toContain(
       `The period window is empty: periodFrom ${String(DefaultFrom)} is after periodTo ${String(
-        DefaultFrom - 1,
+        BeforeFrom,
       )}.`,
     );
 
@@ -310,6 +313,58 @@ describe('Матриця покриття правил: порожнє вікн�
     // Матриці на екрані немає: показано причину, а не порожній стан (`L10`).
     expect(screen.queryByText('Two rules, same priority')).toBeNull();
     expect(screen.queryByText('No rows match this window')).toBeNull();
+  }, 60000);
+});
+
+describe('Матриця покриття правил: межі періоду — PeriodPicker', () => {
+  it('межі — два PeriodPicker (група зі стрілками), вікно за замовчуванням іде в запит', async () => {
+    const { calls } = mockApi(ThreeStates);
+    await show();
+    await screen.findByText('CO2');
+
+    const filters = screen.getByTestId('rule-coverage-filters');
+    expect(filters.querySelectorAll('.ecr-period')).toHaveLength(2);
+    expect(calls[0]).toContain(`periodFrom=${String(DefaultFrom)}`);
+    expect(calls[0]).toContain(`periodTo=${String(DefaultTo)}`);
+  }, 60000);
+
+  it('нова межа — новий запит саме з нею (фільтр)', async () => {
+    const { calls } = mockApi(ThreeStates);
+    await show();
+    await screen.findByText('CO2');
+
+    const narrowed = Year * 100 + 3;
+    fireEvent.change(screen.getByLabelText('Period from'), { target: { value: String(narrowed) } });
+
+    await waitFor(() => {
+      expect(calls.some((url) => url.includes(`periodFrom=${String(narrowed)}`))).toBe(true);
+    });
+  }, 60000);
+
+  it('рівні межі — дійсне вікно з одного періоду, без відмови', async () => {
+    const { calls } = mockApi(ThreeStates);
+    await show();
+    await screen.findByText('CO2');
+
+    fireEvent.change(screen.getByLabelText('Period to'), { target: { value: String(DefaultFrom) } });
+
+    await waitFor(() => {
+      expect(calls.some((url) => url.includes(`periodTo=${String(DefaultFrom)}`))).toBe(true);
+    });
+    expect(screen.queryByTestId('rule-coverage-window')).toBeNull();
+  }, 60000);
+
+  it('очищене поле — запиту немає, причина «оберіть обидва періоди»', async () => {
+    const { calls } = mockApi(ThreeStates);
+    await show();
+    await screen.findByText('CO2');
+
+    fireEvent.change(screen.getByLabelText('Period from'), { target: { value: '' } });
+
+    const banner = await screen.findByTestId('rule-coverage-window');
+    expect(banner.textContent).toContain('Choose both periods');
+    expect(calls).toHaveLength(1);
+    expect(screen.queryByText('Two rules, same priority')).toBeNull();
   }, 60000);
 });
 

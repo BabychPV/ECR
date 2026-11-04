@@ -120,8 +120,20 @@ public sealed class SubmitSheetHandler(
     /// Валідація, осиротілі рядки, застарілі результати методологій або
     /// непідтверджені попередження.
     /// </exception>
-    public async Task HandleAsync(
+    public Task HandleAsync(
         long documentId, int sheetDefId, int periodKey, bool acknowledgeWarnings, CancellationToken ct)
+        => HandleAsync(documentId, sheetDefId, periodKey, acknowledgeWarnings, sheetCopyId: null, ct);
+
+    /// <summary>Подає аркуш або його КОПІЮ на погодження (RS: власний стан і зріз копії за період).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="acknowledgeWarnings">Подавач підтвердив попередження валідації (ФВ-5.19).</param>
+    /// <param name="sheetCopyId">Копія аркуша (<c>doc.DocumentSheet.Id</c>); <c>null</c> — оригінал.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Аркуша (копії) немає в складі документа.</exception>
+    public async Task HandleAsync(
+        long documentId, int sheetDefId, int periodKey, bool acknowledgeWarnings, long? sheetCopyId, CancellationToken ct)
     {
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
@@ -149,7 +161,9 @@ public sealed class SubmitSheetHandler(
         // `IWorkflowStore.GetOrCreateAsync` нижче створює новий рядок стану
         // для БУДЬ-ЯКОГО ідентифікатора, а `CanSubmitAsync` перевіряє права,
         // не існування (виміряно живим прогоном, директива №09 §6.4, `S-17`).
-        if (!await documents.HasSheetAsync(documentId, sheetDefId, ct).ConfigureAwait(false))
+        if (!await documents.HasSheetAsync(documentId, sheetDefId, ct).ConfigureAwait(false)
+            || (sheetCopyId is { } copy
+                && !await documents.HasSheetCopyAsync(documentId, sheetDefId, copy, ct).ConfigureAwait(false)))
         {
             throw new NotFoundException(
                 "ECR-DOC-0404",
@@ -185,7 +199,7 @@ public sealed class SubmitSheetHandler(
                 // ⛔ L6-02: структура документа — спільно й першою. Подання не йде
                 // паралельно з переносом версії: перенос або вже зафіксований (і
                 // версію нижче читаємо нову), або чекає на подання.
-                var structure = await sheetGate.EnterStructureAsync(documentId, exclusive: false, innerCt)
+                var structure = await sheetGate.EnterStructureForPeriodAsync(documentId, exclusive: false, key.Value, innerCt)
                     .ConfigureAwait(false);
 
                 // ⛔ AN-36b (рев'ю AN-36, P2-1): склад документа вище перевірено ДО
@@ -206,9 +220,9 @@ public sealed class SubmitSheetHandler(
                 // вже зафіксована й подання бачить нову, або чекає на подання й
                 // бачить поданий аркуш. Доти у зріз ішла шапка, яку вже правили.
                 await sheetGate.EnterHeaderAsync(documentId, exclusive: false, innerCt).ConfigureAwait(false);
-                await sheetGate.EnterSubmitAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
+                await sheetGate.EnterSubmitOfAsync(documentId, sheetDefId, key, sheetCopyId, innerCt).ConfigureAwait(false);
                 await SubmitUnderLockAsync(
-                        documentId, sheetDefId, periodKey, key, userId, profile, acknowledgeWarnings, innerCt)
+                        documentId, sheetDefId, periodKey, key, userId, profile, acknowledgeWarnings, sheetCopyId, innerCt)
                     .ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
@@ -217,7 +231,11 @@ public sealed class SubmitSheetHandler(
         // подання не відкочує й не перетворює `204` на помилку (`SheetWorkflowNotifier` не кидає).
         if (notifier is not null)
         {
-            await notifier.SubmittedAsync(documentId, sheetDefId, key, userId, clock.UtcNow, ct).ConfigureAwait(false);
+            // RS: лист про подання КОПІЇ — разом із контрактом копій (коміт 8); зараз — лише про оригінал.
+            if (sheetCopyId is null)
+            {
+                await notifier.SubmittedAsync(documentId, sheetDefId, key, userId, clock.UtcNow, ct).ConfigureAwait(false);
+            }
         }
     }
 
@@ -227,9 +245,9 @@ public sealed class SubmitSheetHandler(
     /// </summary>
     private async Task SubmitUnderLockAsync(
         long documentId, int sheetDefId, int periodKey, PeriodKey key, int userId, AccessProfile profile,
-        bool acknowledgeWarnings, CancellationToken ct)
+        bool acknowledgeWarnings, long? sheetCopyId, CancellationToken ct)
     {
-        var decision = await access.CanSubmitAsync(profile, documentId, sheetDefId, key, ct)
+        var decision = await access.CanSubmitOfAsync(profile, documentId, sheetDefId, key, sheetCopyId, ct)
                                    .ConfigureAwait(false);
         if (!decision.IsAllowed)
         {
@@ -301,13 +319,16 @@ public sealed class SubmitSheetHandler(
         // `snapshot` / `tables`) рахувався лише перед валідацією (див. нижче
         // за текстом); тепер рахується один раз тут і використовується в
         // обох місцях.
-        var instances = await rowStore.GetTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
-        var templateVersionId = await TemplateVersionOfAsync(documentId, instances, ct).ConfigureAwait(false);
+        var allInstances = await rowStore.GetTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
+        var templateVersionId = await TemplateVersionOfAsync(documentId, allInstances, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
 
         var sheet = snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId);
         var tables = sheet?.Tables.Where(t => !t.IsDeleted).ToDictionary(t => t.Id)
                      ?? new Dictionary<int, Domain.Entities.Configuration.TableDef>();
+
+        // RS: таблиці ЦЬОГО аркуша — лише тієї копії, яку подають (оригінал — без копій); решта документа — як була.
+        var instances = SubmissionPayloadSource.ForSheetCopy(allInstances, sheet, sheetCopyId);
 
         // ⛔ ЗАСТАРІЛІСТЬ РЕЗУЛЬТАТІВ МЕТОДОЛОГІЙ (F-02/F-05, пряме інженерне
         // рішення). Факт: `IsStale` — стан, що НЕ минає сам. Його дає
@@ -417,8 +438,10 @@ public sealed class SubmitSheetHandler(
         // момент подання, а пізніші зміни сусіда поданого аркуша не змінюють
         // (ФВ-9.17). Блокувати сусідів, тримаючи виняткове, означало б дедлок
         // двох подань, що читають одне одного (X(A)+S(B) проти X(B)+S(A)).
+        // ⛔ RS: рахується «вид» ЦІЄЇ копії (її таблиці — зі своїх екземплярів, решта — оригінал), а не оригінал: інакше
+        // під блокуванням копії писалися б комірки оригіналу без його блокування.
         await recalculation
-            .RecalculateSheetUnderSubmitLockAsync(documentId, sheetDefId, key, ct)
+            .RecalculateSheetUnderSubmitLockAsync(documentId, sheetDefId, key, ct, sheetCopyId)
             .ConfigureAwait(false);
 
         // ⛔ ВАЛІДАЦІЯ АРКУША, який подають (`ФВ-5.4`, директива №09 `W8` п.5).
@@ -659,7 +682,7 @@ public sealed class SubmitSheetHandler(
         await uow.ExecuteInTransactionAsync(
             innerCt => SubmitCoreAsync(
                 documentId, sheetDefId, periodKey, key, userId, templateVersionId, instances, headerFieldCodes,
-                shownWarnings, innerCt),
+                shownWarnings, sheetCopyId, innerCt),
             ct).ConfigureAwait(false);
     }
 
@@ -710,9 +733,10 @@ public sealed class SubmitSheetHandler(
         IReadOnlyList<TableInstanceRef> instances,
         IReadOnlyDictionary<int, string> headerFieldCodes,
         List<Validation.ValidationMessage> acknowledgedWarnings,
+        long? sheetCopyId,
         CancellationToken ct)
     {
-        var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, ct).ConfigureAwait(false);
+        var state = await workflow.GetOrCreateOfAsync(documentId, sheetDefId, key, sheetCopyId, ct).ConfigureAwait(false);
 
         // ⚠ Іммутабельний зріз створюється ДО зміни стану: якщо зріз не
         // збережеться, аркуш не має стати поданим. Поданий аркуш без зрізу —
@@ -747,7 +771,8 @@ public sealed class SubmitSheetHandler(
                 PayloadJson: payload,
                 ContentHash: Hash(payload),
                 SubmittedAt: now,
-                SubmittedByUserId: userId),
+                SubmittedByUserId: userId,
+                SheetCopyId: sheetCopyId),
             ct).ConfigureAwait(false);
 
         // ⛔ Подання СТАВИТЬ аркуш на перший крок маршруту (`ФВ-5.17`).
@@ -756,7 +781,7 @@ public sealed class SubmitSheetHandler(
         //
         // ⚠ Маршруту немає — крок `null`, і поведінка та сама, що була.
         var step = await access
-            .CurrentApprovalStepAsync(documentId, sheetDefId, key, ct)
+            .CurrentApprovalStepOfAsync(documentId, sheetDefId, key, sheetCopyId, ct)
             .ConfigureAwait(false);
 
         var fromStatus = state.Status;

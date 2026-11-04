@@ -503,8 +503,8 @@ public sealed class ExcelImporterAtomicApplyTests
         // ⚠ Аркушів цей опудальний світ не має (їх список — з метаданих), тож порядок
         // «структура → аркуші» тут видно лише як «структура — один раз і спільно»;
         // сам порядок перевіряє книжковий тест (`PatchCellsWorkbookTests.LockOrder`).
-        await _importGate.Received(1).EnterStructureAsync(DocumentId, false, Arg.Any<CancellationToken>());
-        await _importGate.DidNotReceive().EnterStructureAsync(DocumentId, true, Arg.Any<CancellationToken>());
+        await _importGate.Received(1).EnterStructureForPeriodAsync(DocumentId, false, Arg.Any<int?>(), Arg.Any<CancellationToken>());
+        await _importGate.DidNotReceive().EnterStructureForPeriodAsync(DocumentId, true, Arg.Any<int?>(), Arg.Any<CancellationToken>());
     }
 
     /// <summary>
@@ -523,7 +523,7 @@ public sealed class ExcelImporterAtomicApplyTests
     public async Task Перегляд_за_версією_якої_проєкт_уже_не_має_не_застосовується()
     {
         _previews.FindAsync(Token, Arg.Any<CancellationToken>()).Returns(PlanOfVersion(TemplateVersionId));
-        _importGate.EnterStructureAsync(DocumentId, false, Arg.Any<CancellationToken>())
+        _importGate.EnterStructureForPeriodAsync(DocumentId, false, Arg.Any<int?>(), Arg.Any<CancellationToken>())
             .Returns((int?)(TemplateVersionId + 1));
 
         var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(
@@ -541,7 +541,7 @@ public sealed class ExcelImporterAtomicApplyTests
     public async Task Перегляд_за_версією_проєкту_застосовується()
     {
         _previews.FindAsync(Token, Arg.Any<CancellationToken>()).Returns(PlanOfVersion(TemplateVersionId));
-        _importGate.EnterStructureAsync(DocumentId, false, Arg.Any<CancellationToken>())
+        _importGate.EnterStructureForPeriodAsync(DocumentId, false, Arg.Any<int?>(), Arg.Any<CancellationToken>())
             .Returns((int?)TemplateVersionId);
 
         await Importer().ApplyAsync(DocumentId, Token, CancellationToken.None);

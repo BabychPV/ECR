@@ -316,7 +316,6 @@ public sealed class ConsistencyIssueReader(EcrDbContext db) : IConsistencyIssueR
                 on new { row.PeriodKeyValue, Id = row.TableInstanceId }
                 equals new { instance.PeriodKeyValue, instance.Id }
             join document in db.Documents.AsNoTracking() on instance.DocumentId equals document.Id
-            join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
             join table in db.TableDefs.AsNoTracking() on instance.TableDefId equals table.Id
             join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
             orderby row.Id
@@ -327,7 +326,8 @@ public sealed class ConsistencyIssueReader(EcrDbContext db) : IConsistencyIssueR
                 document.Id,
                 document.BusinessKey,
                 document.ProjectId,
-                project.TemplateVersionId,
+                // ✎ RPT-STABLE B2: версія рядка - версія ВЛАСНОГО аркуша екземпляра (шкала за період), не чинна версія проєкту.
+                sheet.TemplateVersionId,
                 sheet.Id,
                 sheet.Code,
                 table.Id,

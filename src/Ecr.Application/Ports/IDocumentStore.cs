@@ -71,7 +71,16 @@ namespace Ecr.Application.Ports;
 /// <param name="ResultsStaleSince">Відколи застаріло (перша правка входу після прогону, UTC); <c>null</c> — не застаріло чи невідомо.</param>
 /// <param name="TemplateVersion">
 /// RC15: версія шаблону проєкту документа (<c>TemplateVersion.Version</c>, рядок). Адитивне поле; метадані шаблону не секрет,
-/// тож звуження читача його не знімає. Заповнює лише шлях картки (<c>FindAsync</c>); перелік віддає <c>null</c>.
+/// тож звуження читача його не знімає. ~~Заповнює лише шлях картки (<c>FindAsync</c>); перелік віддає <c>null</c>.~~
+/// ✎ RPT-STABLE: заповнюють і картка, і перелік (колонка «Версія» переліку документів) — це ТИПОВА версія документа;
+/// періоди, що відрізняються, називає <paramref name="TemplateVersionByPeriod"/>.
+/// </param>
+/// <param name="TemplateVersionByPeriod">
+/// ✎ RPT-STABLE (Part A, контракт під Part B «міграція з обраного місяця»): РІДКА карта «ключ періоду → версія шаблону»
+/// лише для періодів, версія яких ВІДРІЗНЯЄТЬСЯ від <paramref name="TemplateVersion"/> (ключ — рядок <c>YYYYMM</c>, значення —
+/// <c>TemplateVersion.Version</c>). <c>null</c> = усі періоди документа на <paramref name="TemplateVersion"/> (так є зараз:
+/// версія живе лише в проєкті); непорожня карта = документ «змішаний». Версія періоду = карта[період] ?? <paramref name="TemplateVersion"/>.
+/// Адитивне; метадані шаблону не секрет — звуження читача не знімає.
 /// </param>
 /// <param name="OwnerUserId">
 /// EA-C: ідентифікатор автора документа (<c>CreatedByUserId</c>) — поруч з <paramref name="OwnerDisplayName"/> тим самим розкриттям,
@@ -121,7 +130,8 @@ public sealed record DocumentSummary(
     bool? CanManageEditAccess = null,
     [property: System.Text.Json.Serialization.JsonIgnore] bool ProjectIsReadOnly = false,
     string? PeriodKind = null,
-    ResultsStaleUndeterminedReason? ResultsStaleUndetermined = null);
+    ResultsStaleUndeterminedReason? ResultsStaleUndetermined = null,
+    IReadOnlyDictionary<string, string>? TemplateVersionByPeriod = null);
 
 /// <summary>
 /// ✎ D-446: чому застарілість результатів документа читачеві не визначається
@@ -195,6 +205,12 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// у фільтр не потрапляють: ім'я власника там не віддається, і фільтр за ним був би оракулом «чий це документ».
 /// З <paramref name="MineUserId"/> не поєднується (обробник відмовляє 422).
 /// </param>
+/// <param name="TemplateVersions">
+/// ✎ Версія шаблону у списку: лише документи, версія шаблону яких (за період, як у колонці «Version» — типова або з
+/// <see cref="DocumentSummary.TemplateVersionByPeriod"/>) дорівнює одній з перелічених (точний збіг); <c>null</c> — без
+/// фільтра. Діє ЗАПИТОМ до <c>Take</c>, поруч з межею видимості, а не постфільтром: видимість документів не змінює.
+/// </param>
+/// <param name="VersionSort">✎ Сортування за версією шаблону (за період); <c>null</c> — за <c>Id</c>. Другий ключ — завжди <c>Id</c>.</param>
 public readonly record struct DocumentListFilter(
     DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null,
     IReadOnlyCollection<(int ProjectId, int Id)>? HiddenSheetDefIds = null,
@@ -205,13 +221,35 @@ public readonly record struct DocumentListFilter(
     int? StaleByUserId = null,
     IReadOnlyCollection<int>? NarrowedProjectIds = null,
     DocumentParticipationFilter? Participation = null,
-    int? OwnerUserId = null);
+    int? OwnerUserId = null,
+    IReadOnlyCollection<string>? TemplateVersions = null,
+    DocumentVersionSort? VersionSort = null);
+
+/// <summary>Напрямок сортування переліку документів за версією шаблону.</summary>
+public enum DocumentVersionSort
+{
+    /// <summary>Від меншої версії до більшої; документи без версії — в кінці.</summary>
+    Ascending,
+
+    /// <summary>Від більшої до меншої; документи без версії — в кінці.</summary>
+    Descending,
+}
 
 /// <summary>✎ D-450: власник документів для вибору у фільтрі переліку.</summary>
 /// <param name="UserId">Користувач (<c>Document.CreatedByUserId</c>).</param>
 /// <param name="DisplayName">Відображуване ім'я (<c>D-86</c>), не логін.</param>
 /// <param name="DocumentCount">Скільки ВИДИМИХ читачеві документів (тих, де ім'я власника йому віддається) належать цій людині.</param>
 public sealed record DocumentOwnerOption(int UserId, string DisplayName, int DocumentCount);
+
+/// <summary>Версія шаблону серед видимих читачеві документів — варіант фільтра «Version».</summary>
+/// <param name="Version">Версія (як у колонці переліку).</param>
+/// <param name="Count">Скільки видимих читачеві документів мають цю версію.</param>
+public sealed record DocumentTemplateVersionOption(string Version, int Count);
+
+/// <summary>Варіанти фільтра «Version»: версії за природним порядком і кількість документів без версії.</summary>
+/// <param name="Items">Версії від меншої до більшої («2.9» перед «2.10»); не більше 200.</param>
+/// <param name="WithoutVersionCount">Скільки видимих документів не мають версії (рядок «—» у колонці).</param>
+public sealed record DocumentTemplateVersionOptions(IReadOnlyList<DocumentTemplateVersionOption> Items, int WithoutVersionCount);
 
 /// <summary>D-443: що з документів учасника потрапляє в перелік поза проєктами з грантом.</summary>
 /// <param name="UserId">Учасник (виконавець передачі).</param>
@@ -349,6 +387,25 @@ public interface IDocumentStore
         CancellationToken ct);
 
     /// <summary>
+    /// ✎ Усі версії шаблону серед документів, видимих читачеві, — для вибору у фільтрі переліку «Version». Версія — та
+    /// сама, що в колонці і фільтрі переліку (за період; без періоду — чинна версія проєкту).
+    /// </summary>
+    /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі видимі.</param>
+    /// <param name="period">Період, за яким береться версія.</param>
+    /// <param name="filter">Межі читача — ті самі, що у <see cref="ListAsync"/>; інші фільтри не діють.</param>
+    /// <param name="visibleProjectIds">Проєкти з грантом читання — та сама межа, що в <see cref="ListAsync"/>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Видимість — базовим запитом переліку: версія, що є лише в невидимих читачеві документах, не називається.
+    /// </remarks>
+    public Task<DocumentTemplateVersionOptions> ListTemplateVersionsAsync(
+        int? projectId,
+        PeriodKeyFilter period,
+        DocumentListFilter filter,
+        IReadOnlyCollection<int> visibleProjectIds,
+        CancellationToken ct);
+
+    /// <summary>
     /// Перевіряє склад за <c>SheetGroupRule</c> (ФВ-3.2).
     /// </summary>
     /// <returns>Порожній перелік — склад коректний.</returns>
@@ -377,6 +434,18 @@ public interface IDocumentStore
     /// нічим (директива №09 §6.4, `S-17`).
     /// </remarks>
     public Task<bool> HasSheetAsync(long documentId, int sheetDefId, CancellationToken ct);
+
+    /// <summary>
+    /// RS: чи є <paramref name="sheetCopyId"/> КОПІЄЮ аркуша <paramref name="sheetDefId"/> (той самий код у будь-якій
+    /// версії шаблону) у складі документа.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="sheetCopyId">Копія (<c>doc.DocumentSheet.Id</c>).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>⚠ Типова реалізація (тестові підміни) копій не знає; справжня — <c>DocumentStore</c>.</remarks>
+    public Task<bool> HasSheetCopyAsync(long documentId, int sheetDefId, long sheetCopyId, CancellationToken ct)
+        => throw new NotSupportedException("Копії аркушів не реалізовано цим сховищем.");
 
     /// <summary>Усі аркуші, що входять у склад документа (RC15, P2-A).</summary>
     /// <param name="documentId">Документ.</param>
@@ -417,6 +486,16 @@ public interface IDocumentStore
     /// <c>IRowStore.ResolveTableInstanceAsync</c>).
     /// </remarks>
     public Task<int> GetTemplateVersionIdAsync(long documentId, CancellationToken ct);
+
+    /// <summary>
+    /// RPT-STABLE B2: версія шаблону документа за ПЕРІОД (шкала версій проєкту). Типова реалізація (обгортки у тестах) -
+    /// чинна версія проєкту.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<int> GetTemplateVersionIdForPeriodAsync(long documentId, int periodKey, CancellationToken ct)
+        => GetTemplateVersionIdAsync(documentId, ct);
 
     /// <summary>Версія шаблону ПРОЄКТУ; <c>null</c> — проєкту немає.</summary>
     /// <remarks>

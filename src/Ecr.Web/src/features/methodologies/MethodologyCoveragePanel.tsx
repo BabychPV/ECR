@@ -7,6 +7,7 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Banner } from '@/shared/ui/Banner';
 import { toneFills } from '@/shared/ui/StatusBadge';
 import { methodologyCoverage, type MethodologyCoverageDto } from './api';
+import { MethodologySection } from './MethodologySection';
 
 /**
  * Позначка «нікуди не пише» — локальний ґап-бейдж, той самий прийом, що
@@ -76,8 +77,7 @@ export function MethodologyCoveragePanel({
   });
 
   return (
-    <>
-      <Text fw={600}>{t('methodologies.outputCoverage')}</Text>
+    <MethodologySection sectionId="outputCoverage" title={t('methodologies.outputCoverage')}>
       <Text size="sm" c="dimmed">
         {t('methodologies.outputCoverageHint')}
       </Text>
@@ -159,6 +159,6 @@ export function MethodologyCoveragePanel({
           </Stack>
         )}
       </AsyncBoundary>
-    </>
+    </MethodologySection>
   );
 }

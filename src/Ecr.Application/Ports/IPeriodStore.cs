@@ -131,6 +131,19 @@ public interface IPeriodStore
     /// </remarks>
     public Task<bool> HasReopenedSheetAsync(
         long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// <see cref="HasReopenedSheetAsync"/> для КОПІЇ аркуша (RS): стан саме цієї копії, не оригіналу.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefIds">Аркуші, у які пишуться комірки.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія аркуша.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>⚠ Типова реалізація (підміни у тестах) — «ні»; справжня — <c>PeriodStore</c>.</remarks>
+    public Task<bool> HasReopenedSheetCopyAsync(
+        long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKey, long sheetCopyId, CancellationToken ct)
+        => Task.FromResult(false);
 }
 
 /// <summary>Стан одного періоду.</summary>

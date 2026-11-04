@@ -137,6 +137,46 @@ public sealed class DiscoverElementsTests
         Assert.Equal((G1, "Stack1", plant + @"\Stack1", plant + @"\Stack1"), (element.ExternalId, element.Name, element.Path, element.ReadAddress));
     }
 
+    /// <summary>
+    /// Типи вузлів НАЕ (людина 03.11): шаблон елемента AF (<c>TemplateName</c>) доходить до <see cref="SourceElement.TemplateName"/>.
+    /// Мутація (локально): у <c>DiscoverElementsAsync</c> не передати шаблон → тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait("Requirement", Requirement)]
+    public async Task PiWebApi_шаблон_елемента_доходить_до_переліку()
+    {
+        const string plant = @"\\PISRV\ECR\Plant";
+        var escaped = plant.Replace(@"\", @"\\", StringComparison.Ordinal);
+        var pi = new RoutingHandler()
+            .On("/piwebapi/elements?path=" + Uri.EscapeDataString(plant), """{"WebId":"E-P","Id":"p"}""")
+            .On("/piwebapi/elements/E-P/elements?searchFullHierarchy=false",
+                "{\"Items\":[{\"Id\":\"" + G1 + "\",\"Name\":\"Island_A\",\"TemplateName\":\"Air_Area\",\"Path\":\"" + escaped + "\\\\Island_A\"},"
+                + "{\"Id\":\"" + G2 + "\",\"Name\":\"Folder\",\"TemplateName\":\"\",\"Path\":\"" + escaped + "\\\\Folder\"}]}");
+
+        var result = await WebApi(pi).DiscoverElementsAsync(1, plant, CancellationToken.None);
+
+        Assert.Equal([("Island_A", "Air_Area"), ("Folder", null)], result.Elements.Select(e => (e.Name, e.TemplateName)));
+    }
+
+    [Fact]
+    [Trait("Requirement", Requirement)]
+    public async Task PiSqlClient_колонка_TemplateName_необов_язкова()
+    {
+        using var table = Elements(withPath: true);
+        table.Columns.Add("TemplateName", typeof(string));
+        table.Rows.Add(Guid.Parse(G1), "Island_A", @"\\AF\Db\Island_A", "Air_Area");
+        table.Rows.Add(Guid.Parse(G2), "Folder", DBNull.Value, DBNull.Value);
+
+        var result = await PiSqlClientDataSource.ReadElementsAsync(table.CreateDataReader(), 100, CancellationToken.None);
+
+        Assert.Equal([("Island_A", "Air_Area"), ("Folder", null)], result.Elements.Select(e => (e.Name, e.TemplateName)));
+
+        // Без колонки — як і раніше, шаблону немає.
+        using var plain = Elements(withPath: false);
+        plain.Rows.Add(Guid.Parse(G1), "Stack1");
+        Assert.Null(Assert.Single((await PiSqlClientDataSource.ReadElementsAsync(plain.CreateDataReader(), 100, CancellationToken.None)).Elements).TemplateName);
+    }
+
     [Fact]
     [Trait("Requirement", Requirement)]
     public async Task PiWebApi_елемент_без_Id_робить_перелік_неповним()

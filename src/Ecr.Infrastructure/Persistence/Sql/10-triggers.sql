@@ -205,8 +205,7 @@ BEGIN
         THROW 50004, N'Додати формулу в опубліковану або виведену з обігу версію заборонено [ECR-TMPL-0409 structurallyFrozen] (ФВ-7.1).', 1;
     END
 
-    -- UPDATE/DELETE: будь-яка зміна чи видалення формули замороженої версії.
-    -- Стара таблиця (`deleted`) — правка, видалення і перенесення ІЗ замороженої.
+    -- DELETE: формулу замороженої версії видаляти не можна (лише м'яке видалення в Draft).
     IF EXISTS (
         SELECT 1
         FROM deleted d
@@ -214,21 +213,35 @@ BEGIN
         JOIN cfg.SheetDef s ON s.Id = t.SheetDefId
         JOIN cfg.TemplateVersion v ON v.Id = s.TemplateVersionId
         WHERE v.Status IN (1, 2)
+          AND NOT EXISTS (SELECT 1 FROM inserted i WHERE i.Id = d.Id)
     )
     BEGIN
         THROW 50003, N'Зміна або видалення формули в опублікованій або виведеній з обігу версії заборонені [ECR-TMPL-0409 structurallyFrozen] (ФВ-7.1).', 1;
     END
 
-    -- Нова таблиця (`inserted`, лише для UPDATE — рядок є і в `deleted`):
-    -- перенесення чернеткової формули У заморожену версію.
+    -- UPDATE: будь-яке СТРУКТУРНЕ поле формули замороженої версії. Таблиця береться і СТАРА (`deleted` — правка й
+    -- перенесення ІЗ замороженої), і НОВА (`inserted` — перенесення чернеткової формули У заморожену).
+    -- ✎ D-461: `AllowManualOverride` («Дозволити ручне значення») — налаштування, а не структура: UPDATE, що міняє
+    -- лише його, проходить і в Published/Deprecated (рішення людини 30.10, без нової версії). Тому перелік полів
+    -- явний — усе, крім цього прапорця. Вираз порівнюється БІНАРНО: зміна лише регістру — теж зміна.
     IF EXISTS (
         SELECT 1
         FROM inserted i
-        JOIN deleted d ON d.Id = i.Id
-        JOIN cfg.TableDef t ON t.Id = i.TableDefId
+        JOIN deleted  d ON d.Id = i.Id
+        JOIN cfg.TableDef t ON t.Id IN (d.TableDefId, i.TableDefId)
         JOIN cfg.SheetDef s ON s.Id = t.SheetDefId
         JOIN cfg.TemplateVersion v ON v.Id = s.TemplateVersionId
         WHERE v.Status IN (1, 2)
+          AND (i.TableDefId               <> d.TableDefId
+            OR i.Scope                    <> d.Scope
+            OR ISNULL(i.ColumnDefId, -1)  <> ISNULL(d.ColumnDefId, -1)
+            OR ISNULL(i.RowDefId, -1)     <> ISNULL(d.RowDefId, -1)
+            OR i.Dialect                  <> d.Dialect
+            OR i.Expression COLLATE Latin1_General_BIN2 <> d.Expression COLLATE Latin1_General_BIN2
+            OR i.EvaluationOrder          <> d.EvaluationOrder
+            OR i.IsCrossSheet             <> d.IsCrossSheet
+            OR i.IsSnapshot               <> d.IsSnapshot
+            OR i.IsDeleted                <> d.IsDeleted)
     )
     BEGIN
         THROW 50003, N'Зміна або видалення формули в опублікованій або виведеній з обігу версії заборонені [ECR-TMPL-0409 structurallyFrozen] (ФВ-7.1).', 1;

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import { formatDate } from '@/shared/format';
 import { testTheme } from '@/test/render';
 
@@ -86,7 +87,9 @@ async function show(): Promise<void> {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
-        <MethodologyConstantsPanel methodologyId={1} versionId={10} editable={false} />
+        <MemoryRouter>
+          <MethodologyConstantsPanel methodologyId={1} versionId={10} editable={false} />
+        </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   );

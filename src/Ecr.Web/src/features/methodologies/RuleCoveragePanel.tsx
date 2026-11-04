@@ -1,5 +1,5 @@
 import { useMemo, useState, type JSX } from 'react';
-import { Badge, Code, Group, NumberInput, Select, Stack, Table, Text } from '@mantine/core';
+import { Badge, Code, Group, Select, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
 import { t } from '@/shared/i18n';
@@ -7,14 +7,16 @@ import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { toneFills, type StatusTone } from '@/shared/ui/StatusBadge';
 import { calculationBindings } from './api';
+import { MethodologySection } from './MethodologySection';
 import {
   defaultRuleCoverageWindow,
   ruleCoverage,
   ruleCoverageCell,
   ruleCoverageOtherRules,
-  ruleCoverageWindowEmpty,
+  ruleCoverageWindowProblem,
   type RuleCoverageCombinationDto,
   type RuleCoverageDto,
   type RuleCoverageState,
@@ -191,10 +193,12 @@ export function MethodologyRuleCoveragePanel({
   const initial = useMemo(() => defaultRuleCoverageWindow(new Date()), []);
 
   const [tableDefId, setTableDefId] = useState<number | null>(initial.tableDefId);
-  const [periodFrom, setPeriodFrom] = useState<number>(initial.periodFrom);
-  const [periodTo, setPeriodTo] = useState<number>(initial.periodTo);
+  // ⚠ `null` — поле очищено (`PeriodPicker` віддає `null`); запиту тоді немає, а причина названа.
+  const [periodFrom, setPeriodFrom] = useState<number | null>(initial.periodFrom);
+  const [periodTo, setPeriodTo] = useState<number | null>(initial.periodTo);
 
-  const windowEmpty = ruleCoverageWindowEmpty(periodFrom, periodTo);
+  const problem = ruleCoverageWindowProblem(periodFrom, periodTo);
+  const windowEmpty = problem !== null;
 
   // ⚠ Перелік таблиць береться з прив'язок методології — тих самих, якими
   // сервер обмежує вибірку. Інше джерело давало б у списку таблиці, за якими
@@ -229,8 +233,13 @@ export function MethodologyRuleCoveragePanel({
   }, [bindings.data]);
 
   const coverage = useQuery({
-    queryKey: queryKeys.methodologies.ruleCoverage(versionId, tableDefId, periodFrom, periodTo),
-    queryFn: () => ruleCoverage(methodologyId, versionId, { tableDefId, periodFrom, periodTo }),
+    queryKey: queryKeys.methodologies.ruleCoverage(versionId, tableDefId, periodFrom ?? 0, periodTo ?? 0),
+    queryFn: () =>
+      ruleCoverage(methodologyId, versionId, {
+        tableDefId,
+        periodFrom: periodFrom ?? 0,
+        periodTo: periodTo ?? 0,
+      }),
 
     // ⛔ Порожнє вікно НЕ йде мережею: сервер відповів би на нього `422`
     // (`ECR-CALC-0422`), і єдиним наслідком кола до сервера була б затримка
@@ -239,16 +248,12 @@ export function MethodologyRuleCoveragePanel({
   });
 
   return (
-    <>
-      <Group justify="space-between">
-        <Text fw={600}>{t('methodologies.ruleCoverage')}</Text>
-      </Group>
-
+    <MethodologySection sectionId="ruleCoverage" title={t('methodologies.ruleCoverage')}>
       <Text size="sm" c="dimmed">
         {t('methodologies.ruleCoverageHint')}
       </Text>
 
-      <Group gap="sm" align="flex-start">
+      <Group gap="sm" align="flex-end" data-testid="rule-coverage-filters">
         {/* ⛔ Вибір звужує, а не наповнює: «усі таблиці» — це саме те, що
             сервер робить без параметра, тож доки перелік прив'язок не приїхав
             (або не приїхав узагалі), матриця лишається робочою. Порожній
@@ -270,38 +275,46 @@ export function MethodologyRuleCoveragePanel({
           }}
         />
 
-        <NumberInput
-          size="xs"
-          miw={140}
+        {/* ✎ lane/integ-methodology-ui: межі — `PeriodPicker` (`KIT.md` §6.7), а не голий
+            `NumberInput`: той вимагав знати кодування `YYYYMM` і стрілкою з `…12` вів у
+            неіснуючий `…13` (та сама вада, через яку `PeriodPicker` і з'явився). */}
+        <PeriodPicker
           label={t('methodologies.ruleCoveragePeriodFrom')}
-          description={t('methodologies.ruleCoveragePeriodHint')}
           value={periodFrom}
-          onChange={(value) => {
-            if (typeof value === 'number') setPeriodFrom(value);
-          }}
+          onChange={setPeriodFrom}
         />
 
-        <NumberInput
-          size="xs"
-          miw={140}
+        <PeriodPicker
           label={t('methodologies.ruleCoveragePeriodTo')}
-          description={t('methodologies.ruleCoveragePeriodHint')}
           value={periodTo}
-          onChange={(value) => {
-            if (typeof value === 'number') setPeriodTo(value);
-          }}
+          onChange={setPeriodTo}
         />
       </Group>
+
+      <Text size="xs" c="dimmed">
+        {t('methodologies.ruleCoveragePeriodHint')}
+      </Text>
+
+      {problem === 'missing' && (
+        <Banner
+          tone="warning"
+          testId="rule-coverage-window"
+          title={t('methodologies.ruleCoveragePeriodMissing')}
+        />
+      )}
 
       {/* ⚠ Текст відмови — ТОЙ САМИЙ ключ каталогу, що його віддає сервер
           (`err.ECR-CALC-0422.coverageWindow`), а не власний переказ: одна й
           та сама помилка, названа двома різними реченнями залежно від того,
           хто її помітив першим, — це два різні факти для того, хто читає. */}
-      {windowEmpty && (
+      {problem === 'reversed' && (
         <Banner
           tone="danger"
           testId="rule-coverage-window"
-          title={t('err.ECR-CALC-0422.coverageWindow', { periodFrom, periodTo })}
+          title={t('err.ECR-CALC-0422.coverageWindow', {
+            periodFrom: periodFrom ?? 0,
+            periodTo: periodTo ?? 0,
+          })}
         />
       )}
 
@@ -382,6 +395,6 @@ export function MethodologyRuleCoveragePanel({
           )}
         </AsyncBoundary>
       )}
-    </>
+    </MethodologySection>
   );
 }

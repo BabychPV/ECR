@@ -15,6 +15,7 @@ import { SecurityPage } from '@/pages/admin/SecurityPage';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
 import { MappingPreviewPage } from '@/pages/admin/MappingPreviewPage';
+import { PiDataPage } from '@/pages/admin/PiDataPage';
 import { PipelinePage } from '@/pages/admin/PipelinePage';
 import { JobsPage } from '@/pages/admin/JobsPage';
 import { SnapshotsPage } from '@/pages/admin/SnapshotsPage';
@@ -49,6 +50,9 @@ const Pages: [string, () => JSX.Element][] = [
   // обрізана стелею (`a11yFixtures.tsx`, `CampaignSummaryFixture`), тож axe
   // сканує і банер усічення, і смугу, і перелік відстаючих.
   ['/admin/campaign', CampaignOverviewPage],
+
+  // ⚠ «Дані з PI» (`D-463`) — сюди ж, з тієї самої причини (найлегша частина).
+  ['/admin/pi-data', PiDataPage],
 ];
 
 registerA11yFetchMock();

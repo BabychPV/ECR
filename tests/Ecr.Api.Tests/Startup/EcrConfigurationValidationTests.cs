@@ -34,6 +34,10 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
     [InlineData("Security:RateLimit:ChangePasswordPermitPerMinute", "0")]     // U1-09: ключа не було в переліку
     [InlineData("Security:RateLimit:ChangePasswordPermitPerMinute", "5/хв")]
     [InlineData("Auth:DataProtection:AllowUnprotectedKeys", "yes")]
+    [InlineData("PiSqlClient:EventQueryTimeoutSeconds", "0")]            // D-464
+    [InlineData("PiSqlClient:EventQueryTimeoutSeconds", "5m")]           // D-464
+    [InlineData("Collection:MaxEventPages", "0")]                        // D-464
+    [InlineData("PiSqlClient:EventQueryChunk", "Mnth")]                  // D-464
     public void Недійсне_значення_називає_ключ(string key, string value)
     {
         var problems = EcrConfigurationValidation.Validate(Config((key, value)));

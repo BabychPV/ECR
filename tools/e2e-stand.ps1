@@ -64,6 +64,18 @@
     Значення `--reporter` для Playwright (напр. `list,html`); порожнє —
     репортер із `playwright.config.ts`, як і раніше.
 
+.PARAMETER Shard
+    `k/M` - прогнати лише k-й із M шардів набору Playwright. Розподіл файлів/сценаріїв за шардами - явний
+    план `src/Ecr.Web/e2e/shard-plan.json` (шарди 2..M перелічують свої файли, шард 1 = усе решта, тож новий
+    spec-файл потрапляє в шард 1 сам). Не `--shard=k/M` Playwright: той ділить за кількістю тестів, а не за
+    часом, і `keyCommitGateLive.spec.ts` (20 хв із 55) зробив би розподіл перекошеним. Разом із `-Grep` план
+    не діє: `--shard=k/M` Playwright + `--pass-with-no-tests` (шард без збігів не падає). `M` = 1 -
+    без шардування. Кожен шард ганяють на ОКРЕМОМУ стенді (CI: окремий раннер); на одній машині різні шарди
+    потребують різних `-Database`, `-Port` і `-DataPath`.
+
+.PARAMETER ShardPlan
+    Шлях до плану шардів; типово `src/Ecr.Web/e2e/shard-plan.json`.
+
 .EXAMPLE
     powershell -File tools/e2e-stand.ps1
     pwsh -File tools/e2e-stand.ps1 -Server 'localhost,1433' -Login sa -SmallFiles -RequireFreeGb 0
@@ -89,7 +101,14 @@ param(
     [string] $SqlPassword = $env:ECR_SQL_PASSWORD,
     [switch] $SmallFiles,
     [int] $StartupTimeoutSec = 60,
-    [string] $Reporter = ''
+    [string] $Reporter = '',
+
+    # `k/M`: ганяти лише k-й із M шардів набору (CI: кожен шард — свій раннер, своя база, свій стенд).
+    [string] $Shard = '',
+    [string] $ShardPlan = '',
+
+    # Лише показати склад шарда (`playwright test --list`) і вийти: без бази й стенда, за секунди.
+    [switch] $ListOnly
 )
 
 # ⚠ Масив аргументів, а не сплат: `setup-dev-db.ps1` викликається окремим
@@ -215,6 +234,74 @@ function GrantsVersion {
     if (-not $etag) { Fail "GET /api/v1/roles/$RoleId/grants не віддав ETag" }
 
     return $etag
+}
+
+# Шардування набору (див. `.PARAMETER Shard`). Рахується ДО підйому стенда: помилка плану має падати за секунди,
+# а не після розгортання бази.
+$shardArgs = @()
+if ($Shard) {
+    if ($Shard -notmatch '^(\d+)/(\d+)$') { Fail "-Shard має вигляд k/M, отримано '$Shard'" }
+    $shardIndex = [int] $Matches[1]
+    $shardCount = [int] $Matches[2]
+    if ($shardCount -lt 1 -or $shardIndex -lt 1 -or $shardIndex -gt $shardCount) { Fail "-Shard ${Shard}: k має бути в 1..M" }
+
+    if ($shardCount -gt 1) {
+        if ($Grep) {
+            # Цільовий прогін: план (він під ПОВНИЙ набір) не застосовний - ділимо те, що знайшов grep.
+            $shardArgs = @("--shard=$shardIndex/$shardCount", '--pass-with-no-tests')
+        }
+        else {
+            if (-not $ShardPlan) { $ShardPlan = Join-Path $client 'e2e/shard-plan.json' }
+            $plan = Get-Content -Raw -Encoding UTF8 $ShardPlan | ConvertFrom-Json
+            $claimed = @($plan.claims.PSObject.Properties.Name | Sort-Object { [int] $_ })
+            $expected = @(2..$shardCount | ForEach-Object { [string] $_ })
+            if (($claimed -join ',') -ne ($expected -join ',')) {
+                Fail "план шардів $ShardPlan заявляє шарди [$($claimed -join ',')], а потрібні [$($expected -join ',')] (M=$shardCount; шард 1 = решта)"
+            }
+
+            # `grep` Playwright дивиться на повний заголовок (проєкт, файл, describe, тест), тож файл ловиться
+            # за ім'ям; `файл::регекс` - сценарії всередині файла (один великий файл ділиться на шарди).
+            function ConvertTo-ClaimRegex([string] $Entry) {
+                $file, $title = $Entry -split '::', 2
+                $rx = '(?:^|[ /])' + [regex]::Escape($file)
+                if ($title) { $rx += '.*' + $title }
+                return $rx
+            }
+            $byShard = @{}
+            foreach ($k in $expected) {
+                $byShard[$k] = '(?:' + ((@($plan.claims.$k) | ForEach-Object { ConvertTo-ClaimRegex $_ }) -join '|') + ')'
+            }
+            if ($shardIndex -eq 1) {
+                # Шард 1 = доповнення до заявок решти: новий spec-файл не губиться, а їде сюди.
+                # ⚠ Скобки обов'язкові: в `@(a, b + c)` кома старша за `+`, і без них масив розвалюється на частини.
+                $shardArgs = @('--grep-invert', ('(?:' + (($expected | ForEach-Object { $byShard[$_] }) -join '|') + ')'))
+            }
+            else {
+                $shardArgs = @('--grep', $byShard[[string] $shardIndex])
+            }
+        }
+    }
+}
+
+if ($ListOnly) {
+    $listArgs = @('playwright', 'test', '--list') + @($shardArgs) + $(if ($Grep) { @('--grep', $Grep) } else { @() })
+    Push-Location $client
+    $previousEapList = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $listOut = @(& $npxExe @listArgs)
+        $listCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousEapList
+        Pop-Location
+    }
+    $total = $listOut | Select-Object -Last 1
+    Write-Host "шард ${Shard}: $total"
+    if ($env:GITHUB_STEP_SUMMARY) { Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- шард ${Shard}: $total" }
+    if ($listCode -ne 0) { Fail "playwright --list завершився з кодом $listCode (шард ${Shard})" }
+    if (-not $Grep -and "$total" -notmatch 'Total: [1-9]') { Fail "шард $Shard порожній без grep: перевір ${ShardPlan}" }
+    return
 }
 
 if ($WebPort -eq 0) { $WebPort = $Port + 1000 }
@@ -452,6 +539,8 @@ $env:ECR_Auth__DataProtection__AllowUnprotectedKeys = 'true'
 # (DataGen: `PerPeriodInstance`) нею не зачеплений. Потрібна `anchorTextSubmittedLive.spec.ts`: вона збирає таку
 # таблицю через API і перевіряє правку тексту якоря в поданому році.
 $env:ECR_Collection__MonthColumnRouting = 'true'
+# RPT-STABLE Part B: перенос версії «з місяця» (на живому стенді прапор увімкнено; типово false) - потрібен versionMigrationRange.spec.ts.
+$env:ECR_Documents__VersionMigration__FromMonthEnabled = 'true'
 
 Step 'старт застосунку'
 $startArgs = @{
@@ -514,6 +603,13 @@ try {
             'Permit.EditType', 'Permit.PublishType',
             'Document.View', 'Document.Create', 'Document.Export', 'Document.Import',
             'Document.Reopen',
+            # ✎ audit-rows-polish: `Document.Delete` — специфікації прибирають власні чернетки документів (DELETE
+            # /documents/{id}, лише Draft). Лише тестова роль стенда; ролі продукту не змінюються.
+            'Document.Delete',
+            # ✎ TC: чат таблиці — e2e UI-lane на двох користувачах (написати, згадати, видалити чуже). Лише тестова роль.
+            'Document.Discuss', 'Document.DiscussModerate',
+            # ✎ D-461: ручне значення замість формули — e2e UI-lane (замінити, повернути формулу). Лише тестова роль.
+            'Document.OverrideFormula',
             'Project.Manage', 'Period.Configure', 'Period.Reopen',
             # ✎ P44: `Calculation.EditFormula` — `resizableModal.spec` заводить методологію з чернеткою й відкриває
             # вікно формули. Лише тестова роль стенда; ролі продукту не змінюються.
@@ -639,6 +735,43 @@ try {
         $ErrorActionPreference = $previousEapMonth
     }
     if ($LASTEXITCODE -ne 0) { Fail 'не вдалося позначити місячну колонку' }
+
+    # ⛔ D-463: «Дані з PI» і «Звідки це значення» читають ЗІБРАНЕ (`ext.RawDataPoint`), а живого PI на стенді
+    # немає. Тож з'єднання, сутність (здорова для /health: покриття суцільне останні 45 діб), прогін, точки періоду документа (щогодини) і року до нього (щодня)
+    # та покриття з прогалиною кладуться сирим SQL — лише в тимчасову базу стенда. Мапінг на комірку сценарій
+    # `piRawDataLive.spec.ts` заводить сам через API і призупиняє в кінці.
+    Step 'дані з PI для e2e «Дані з PI» (D-463)'
+    $previousEapPi = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $piSeed = Join-Path $root 'tools/e2e/pi-raw-data-seed.sql'
+        $piEntity = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d $Database -i $piSeed `
+            -v "DocumentId=$($env:ECR_E2E_DOCUMENT)" "PeriodKey=$($open.periodKey)") | Select-Object -Last 1
+    }
+    finally {
+        $ErrorActionPreference = $previousEapPi
+    }
+    if ($LASTEXITCODE -ne 0 -or -not ("$piEntity".Trim() -match '^\d+$')) { Fail "не вдалося покласти дані з PI: $piEntity" }
+    $env:ECR_E2E_PI_ENTITY = "$piEntity".Trim()
+    Write-Host "      сутність PI $($env:ECR_E2E_PI_ENTITY)"
+
+    # ⛔ D-465: «Дані з PI → Події» читають те, що синк подій уже записав (зв'язки, значення атрибутів за останнім
+    # прочитанням, журнал видалень); живого PI на стенді немає. Вимкнена сутність і ПРИЗУПИНЕНИЙ мапінг на документ
+    # стенда кладуться сирим SQL у тимчасову базу: синк не запускається, перенос версії не блокується.
+    Step 'події з PI для e2e «Дані з PI → Події» (D-465)'
+    $previousEapEf = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $efSeed = Join-Path $root 'tools/e2e/pi-events-seed.sql'
+        $efEntity = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d $Database -i $efSeed `
+            -v "DocumentId=$($env:ECR_E2E_DOCUMENT)" "PeriodKey=$($open.periodKey)") | Select-Object -Last 1
+    }
+    finally {
+        $ErrorActionPreference = $previousEapEf
+    }
+    if ($LASTEXITCODE -ne 0 -or -not ("$efEntity".Trim() -match '^\d+$')) { Fail "не вдалося покласти події з PI: $efEntity" }
+    $env:ECR_E2E_PI_EVENTS_ENTITY = "$efEntity".Trim()
+    Write-Host "      сутність подій PI $($env:ECR_E2E_PI_EVENTS_ENTITY)"
     Step 'прогрів Vite (кеш залежностей)'
     Assert-WebPortFree
     $warmStart = Get-Date
@@ -657,7 +790,13 @@ try {
         try {
             $pwArgs = @('playwright', 'test')
             if ($Grep) { $pwArgs += @('--grep', $Grep) }
+            $pwArgs += $shardArgs
             if ($Reporter) { $pwArgs += "--reporter=$Reporter" }
+            if ($Shard) {
+                # Склад шарда видно в журналі (і для звірки: сума по шардах = увесь набір).
+                $listArgs = @('playwright', 'test', '--list') + @($shardArgs) + $(if ($Grep) { @('--grep', $Grep) } else { @() })
+                Write-Host "  шард ${Shard}: $(@(& $npxExe @listArgs) | Select-Object -Last 1)"
+            }
             & $npxExe @pwArgs
         }
         finally {

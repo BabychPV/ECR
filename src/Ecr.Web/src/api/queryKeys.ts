@@ -119,6 +119,18 @@ const registries = {
 
   /** `GET /api/v1/registries/{code}/history`. */
   history: (code: string) => ['registries', 'history', code] as const,
+
+  /** `GET /api/v1/registries/{code}/hierarchy` - рівні ієрархічного довідника (NAE plan N1). */
+  hierarchy: (code: string) => ['registries', 'hierarchy', code] as const,
+
+  /**
+   * `GET /api/v1/registries/{code}/tree` - плаский список вузлів. Без параметрів - префікс для інвалідації всіх
+   * варіантів дерева довідника (з виведеними / з пошуком); із параметрами - ключ одного запиту.
+   */
+  tree: (code: string, includeRetired?: boolean, q?: string) =>
+    includeRetired === undefined
+      ? (['registries', 'tree', code] as const)
+      : (['registries', 'tree', code, { includeRetired, q: q ?? '' }] as const),
 };
 
 /** Домен `methodologies`: перелік, версії, вміст версії (формули, константи…). */
@@ -149,6 +161,9 @@ const methodologies = {
 
   /** Константи версії (`ФВ-16.1`). */
   constants: (versionId: number) => ['methodologies', 'constants', versionId] as const,
+
+  /** Перелік категорій констант версії (план CONST-CATEGORY). */
+  categories: (versionId: number) => ['methodologies', 'categories', versionId] as const,
 
   /** Правила відбору рядків (`ФВ-13.3`). */
   rules: (versionId: number) => ['methodologies', 'rules', versionId] as const,
@@ -295,6 +310,26 @@ const projects = {
 };
 
 /**
+ * Domain `tableChat` (TC, table discussion). The message window itself is NOT a query (it is a polled window with
+ * older pages; see `features/tableChat/useChatWindow.ts`); queries are the per-document summary, the mention
+ * candidates and the "mentions" block of My tasks.
+ */
+const tableChat = {
+  /** Prefix of the whole domain. */
+  all: () => ['tableChat'] as const,
+
+  /** `GET /documents/{id}/discussions/summary` — counters of every table the user sees. */
+  summary: (documentId: number) => ['tableChat', 'summary', documentId] as const,
+
+  /** `GET /me/table-discussion-mentions` — unread mentions for My tasks. */
+  mentions: () => ['tableChat', 'mentions'] as const,
+
+  /** `GET /documents/{id}/tables/{code}/mention-candidates?q=` — people who can see the table. */
+  candidates: (documentId: number, tableCode: string, periodKey: number, query: string) =>
+    ['tableChat', 'candidates', documentId, tableCode, periodKey, query] as const,
+};
+
+/**
  * Єдина точка правди для ключів TanStack Query.
  *
  * Охоплює домени, потрібні для першого зрізу навігаційної архітектури —
@@ -312,4 +347,5 @@ export const queryKeys = {
   editAssignments,
   document: documentKeys,
   projects,
+  tableChat,
 };

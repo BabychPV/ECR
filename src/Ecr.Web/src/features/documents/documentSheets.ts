@@ -1,5 +1,6 @@
 import type { DocumentSummary } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
+import { isCopyStateKey } from './sheetCopies/sheetCopyTypes';
 
 /** Аркуш документа в переліку: код, людська назва, стан. */
 export interface SheetLabel {
@@ -26,7 +27,10 @@ export function sheetLabels(document: SheetSource): SheetLabel[] {
     });
   }
 
-  return Object.entries(document.sheetStates).map(([code, state]) => ({ code, label: code, state }));
+  // ⚠ Копії (`КОД#id`) — не окремі аркуші шаблону: їх у переліку немає (вони вкладки аркуша `КОД`).
+  return Object.entries(document.sheetStates)
+    .filter(([code]) => !isCopyStateKey(code))
+    .map(([code, state]) => ({ code, label: code, state }));
 }
 
 /** Чи є в документа стани за обраний період (без періоду словник порожній, `D-93`). */

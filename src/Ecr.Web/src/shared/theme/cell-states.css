@@ -299,7 +299,7 @@
 
 .ecr-cell-out-of-window:not(.ecr-cell-save-error):not(.ecr-cell-required-input-blocked):not(
     .ecr-cell-required-input-warning
-  ):not(.ecr-cell--calculated)::before {
+  ):not(.ecr-cell--calculated):not(.ecr-cell-formula-manual)::before {
   content: '◷';
   position: absolute;
   top: 0;
@@ -316,6 +316,44 @@
 
 :root[data-mantine-color-scheme='dark'] .ecr-cell-out-of-window::before {
   color: #ffd24d;
+}
+
+/*
+ * ── ✎ D-461: ручне значення замість формули ───────────────────────────────
+ *
+ * ⚠ ДОДАТКОВИЙ маркер поверх будь-якого стану (ручна комірка редаговна, тож `calculated` на ній немає, а `dirty`
+ * буває). Форма, не колір (`D-128`): ВЕРХНЯ внутрішня лінія (нижню тримає «поза вікном») і знак `✎` у лівому
+ * верхньому куті — коли `::before` не зайнятий помилкою збереження чи обов'язковим входом (ті важливіші, а причина
+ * ручного значення однаково є в `title`). Колір — лінія обчислюваної комірки: це та сама «формула», лише замінена.
+ * Нічого не змінює розмірів комірки (`box-shadow`, абсолютний знак) — сусідні колонки формул не «стрибають».
+ */
+.ecr-cell-formula-manual {
+  box-shadow: inset 0 2px 0 var(--ecr-cell-calculated-line);
+}
+
+.ecr-cell-formula-manual.ecr-cell-out-of-window {
+  box-shadow:
+    inset 0 2px 0 var(--ecr-cell-calculated-line),
+    inset 0 -2px 0 #8a6100;
+}
+
+:root[data-mantine-color-scheme='dark'] .ecr-cell-formula-manual.ecr-cell-out-of-window {
+  box-shadow:
+    inset 0 2px 0 var(--ecr-cell-calculated-line),
+    inset 0 -2px 0 #ffd24d;
+}
+
+.ecr-cell-formula-manual:not(.ecr-cell-save-error):not(.ecr-cell-required-input-blocked):not(
+    .ecr-cell-required-input-warning
+  )::before {
+  content: '✎';
+  position: absolute;
+  top: 1px;
+  left: 2px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--ecr-cell-calculated-line);
+  pointer-events: none;
 }
 
 /*

@@ -84,7 +84,7 @@ public sealed partial class PiWebApiDataSource
         try
         {
             using var attribute = await GetAsync(
-                source.Endpoint, $"attributes?path={Uri.EscapeDataString(path)}", source.SecretName, ct)
+                source, $"attributes?path={Uri.EscapeDataString(path)}", ct)
                 .ConfigureAwait(false);
 
             return new AttributeRef(
@@ -229,7 +229,7 @@ public sealed partial class PiWebApiDataSource
 
         try
         {
-            recorded = await GetAsync(source.Endpoint, query.ToString(), source.SecretName, ct).ConfigureAwait(false);
+            recorded = await GetAsync(source, query.ToString(), ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -282,7 +282,10 @@ public sealed partial class PiWebApiDataSource
                 // інтервал у FailedIntervals, як і коли WebId не знайдено.
                 // Сусіди з того самого запиту від цього не страждають.
                 items[index] = streams.TryGetValue(attribute.WebId!, out var stream) && !Failed(stream)
-                    ? new BatchReadItem(Batch(Points(stream, request.SourcePath, attribute.DefaultUnits), request), null)
+                    ? new BatchReadItem(
+                        Batch(Points(stream, request.SourcePath, attribute.DefaultUnits), request)
+                            with { ServedBySecondary = failover.IsOnSecondary(source.Id) },
+                        null)
                     : new BatchReadItem(Unresolved(request), null);
             }
         }

@@ -587,8 +587,8 @@ public sealed partial class EndpointCoverageTests
         new("features/audit/CellChangesTable.tsx", "`audit.originLabel.${origin}`", 1,
             "features/audit/CellChangesTable.tsx",
             ["audit.originLabel.UserEdit", "audit.originLabel.Import", "audit.originLabel.Recalculation",
-             "audit.originLabel.Migration"],
-            "UI-38: походження зміни словом (OriginIcons)."),
+             "audit.originLabel.Migration", "audit.originLabel.FormulaOverride", "audit.originLabel.FormulaRestored"],
+            "UI-38: походження зміни словом (OriginIcons); ✎ D-461 — ручне значення замість формули й повернення формули."),
         new("features/audit/auditLabels.ts", "key", 1, "features/audit/auditLabels.ts",
             ["audit.operationLabel.Create",
              "audit.operationLabel.Update",
@@ -624,6 +624,9 @@ public sealed partial class EndpointCoverageTests
         new("features/audit/auditLabels.ts", "key", 1, "features/audit/auditLabels.ts",
             ["audit.eventLabel.AccessDenied",
              "audit.eventLabel.AuditStructureExported",
+             "audit.eventLabel.AuditCellsExported",
+             "audit.eventLabel.AuditSecurityExported",
+             "audit.eventLabel.AuditWorkflowExported",
              "audit.eventLabel.CellStyleReset",
              "audit.eventLabel.CellStyleSet",
              "audit.eventLabel.ConsistencyCheckRunRequested",
@@ -643,6 +646,7 @@ public sealed partial class EndpointCoverageTests
              "audit.eventLabel.MappingResumed",
              "audit.eventLabel.MappingSourceUnitChangeAccepted",
              "audit.eventLabel.MethodologyVersionDeleted",
+             "audit.eventLabel.PiRawDataExported",
              "audit.eventLabel.RecalculationApprovalConfirmed",
              "audit.eventLabel.RecalculationApprovalRequested",
              "audit.eventLabel.RecalculationApprovalUsed",
@@ -720,6 +724,7 @@ public sealed partial class EndpointCoverageTests
         "registries.data.title",
         "nav.permits", "permits.types.title", "permits.typeEditor.title", "permits.lists.title",
         "permits.bindings.title", "permits.binding.title", "permits.detail.title",
+        "nav.piData",
     ];
 
     /// <summary>Підписи груп бічного меню (UI-12, <c>navGroups</c> у <c>routes.ts</c>).</summary>
@@ -735,7 +740,7 @@ public sealed partial class EndpointCoverageTests
         "nav.jobs.description", "nav.snapshots.description", "nav.audit.description",
         "nav.consistency.description", "nav.uiStrings.description", "nav.health.description",
         "nav.permits.description", "permits.types.description", "permits.lists.description",
-        "permits.bindings.description",
+        "permits.bindings.description", "nav.piData.description",
     ];
 
     /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 45 прав каталогу <c>sec.Permission</c>.</summary>
@@ -844,8 +849,7 @@ public sealed partial class EndpointCoverageTests
 
     private static HashSet<string> SeedCatalogKeys()
     {
-        var seed = File.ReadAllText(
-            Path.Combine(SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+        var seed = SeedSql.Text;
 
         var seeded = SeedKeyRegex.Matches(seed)
             .Select(m => m.Groups[1].Value)
@@ -978,8 +982,7 @@ public sealed partial class EndpointCoverageTests
         // ⚠ Перевіряється ФАЙЛ, а не база: тестова база спільна, і сусідній
         // тест, який заводить маршрут для власного проєкту, зробив би цю
         // перевірку то зеленою, то червоною залежно від порядку прогону.
-        var seed = File.ReadAllText(Path.Combine(
-            SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+        var seed = SeedSql.Text;
 
         Assert.DoesNotContain("wf.ApprovalRoute", seed, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("wf.ApprovalStep", seed, StringComparison.OrdinalIgnoreCase);
@@ -1000,16 +1003,15 @@ public sealed partial class EndpointCoverageTests
         // `deny.OutsidePermitWindow`, я вставив її двома скриптами в два
         // місця. Помітив випадково — жодна перевірка цього не ловила, а
         // ціна помилки максимальна: чиста база не піднімається взагалі.
-        var seed = File.ReadAllText(Path.Combine(
-            SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+        var seed = SeedSql.Text;
 
         // ⚠ Лише блок MERGE: секція змінених текстів над ним законно називає
         // ті самі ключі вдруге (старе → нове), і MERGE вона не валить.
-        var start = seed.IndexOf("MERGE sys_ecr.UiString AS t", StringComparison.Ordinal);
-        var end = start < 0 ? -1 : seed.IndexOf("WHEN NOT MATCHED", start, StringComparison.Ordinal);
-        Assert.True(end > start, "У 09-seed.sql немає блоку MERGE sys_ecr.UiString AS t — сторож дивиться не туди.");
+        // ✎ en-каталог — порції INSERT INTO #UiEn файлів seed/features (дубль впаде на PRIMARY KEY #UiEn).
+        var block = SeedSql.EnCatalogOf(seed);
+        Assert.True(block.Length > 0, "У сіді немає порцій en-каталогу (INSERT INTO #UiEn) — сторож дивиться не туди.");
 
-        var keys = SeedKeyRegex.Matches(seed[start..end]).Select(m => m.Groups[1].Value).ToList();
+        var keys = SeedKeyRegex.Matches(block).Select(m => m.Groups[1].Value).ToList();
         Assert.NotEmpty(keys);
 
         var duplicates = keys
@@ -1030,8 +1032,7 @@ public sealed partial class EndpointCoverageTests
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Роль_і_право_bootstrap_адміністратора_існують_у_seed()
     {
-        var seed = File.ReadAllText(
-            Path.Combine(SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+        var seed = SeedSql.Text;
 
         // ⛔ Тест дивиться на SEED, а не на фікстуру. До `A7-13` обробник
         // видавав роль `Administrator`, якої seed не створює; фікстура
@@ -1088,8 +1089,7 @@ public sealed partial class EndpointCoverageTests
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Кожне_право_яке_вимагає_обробник_існує_в_каталозі()
     {
-        var seed = File.ReadAllText(
-            Path.Combine(SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+        var seed = SeedSql.Text;
 
         var catalogue = Blocks(seed, "MERGE sec.Permission").Single();
 
@@ -1357,6 +1357,10 @@ public sealed partial class EndpointCoverageTests
         // звіт про порушення без жодної участі клієнта застосунку.
         "POST /api/v1/csp-report",
 
+        // RPT-STABLE Part B: шкала версій шаблону проєкту — контракт для діалогу переносу «з місяця» (Permites).
+        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/documents` (діалог переносу версії).
+        "GET /api/v1/projects/{p}/template-versions",
+
         // UI-38 (хвиля 3): серверна частина підсумку журналу змін (всього/сьогодні/імпорт/перерахунок);
         // смуга показників сторінки «Аудит» ще не під'єднана — споживач з'явиться разом із UI-38.
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/audit`.
@@ -1384,6 +1388,21 @@ public sealed partial class EndpointCoverageTests
         // екрана налаштувань методології для цього прапорця ще немає — це рідкісна адмін-дія, що змінює числа.
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/methodologies`.
         "PUT /api/v1/methodologies/{p}/row-activity-filter",
+
+        // NAE plan N1 (hierarchical registry): GET hierarchy, GET tree, POST move and POST retire now have their client
+        // calls in `features/registries/tree/treeApi.ts` (generic tree editor). Only the level-editing PUT is left without a
+        // consumer: the screen that edits hierarchy levels is not built yet (NAE plan N2 / registry constructor).
+        // ⚠ TEMPORARY: remove in the same commit that adds `saveRegistryHierarchy` to a screen.
+        "PUT /api/v1/registries/{p}/hierarchy",
+
+        // NAE plan N2: af-import is consumed by `features/permits/nae/afImportApi.ts` (AfImportPanel),
+        // "where used" (GET .../entries/{p}/references) by `features/permits/nae/referencesApi.ts`.
+
+        // NAE plan N3 ("Air Limits Import" permits): server + contract first; the permit card and the import wizard (plan N5, session
+        // Permites) are the consumers. TEMPORARY: remove each line in the commit that adds the client call in `features/permits`.
+        // ✎ Card + wizard (lane/integ-ui-permit-card) consume all but `provision`, which stays until the "prepare the type" action
+        // has a screen (admin action on the permit types page; not part of N3/N5 UI).
+        "POST /api/v1/air-limits/provision",
 
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було

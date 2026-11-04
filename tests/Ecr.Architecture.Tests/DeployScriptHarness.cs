@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Ecr.TestKit;
 using Xunit;
 
@@ -93,9 +93,91 @@ internal static class DeployScriptHarness
         return value!;
     }
 
-    /// <summary><c>pwsh</c> з PATH; на Windows без нього — вбудований <c>powershell.exe</c>.</summary>
+    // Лише Linux (раннер CI). pwsh інколи гине SIGSEGV (код 139) на старті: 2026-10-30 push-CI 41024966306 - 9 тестів
+    // LandStaleValuesTests поспіль із порожнім виводом, lane/integ-rpt-stable 40977687661 - код 139. Обгортка:
+    // (1) не більше двох pwsh одночасно на всі класи (xUnit ганяє класи паралельно);
+    // (2) TERM=dumb і вимкнена телеметрія - жодної взаємодії з терміналом/мережею на старті;
+    // (3) ОДИН повтор запуску ЛИШЕ за коду 139, причина - у stderr. Інші коди й провали перевірок не повторюються.
+    private const string LauncherScript = """
+        #!/bin/sh
+        # Тести інколи звужують PATH: утиліти обгортки (mktemp, cat, rm, flock) шукаємо й у системних каталогах.
+        ORIG_PATH="$PATH"
+        SYS_PATH="$PATH:/usr/bin:/bin"
+        PATH="$SYS_PATH"
+        export TERM=dumb POWERSHELL_TELEMETRY_OPTOUT=1 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+        lockdir="${TMPDIR:-/tmp}"
+        if command -v flock >/dev/null 2>&1; then
+          while :; do
+            for i in 1 2; do
+              exec 9>"$lockdir/ecr-pwsh-slot-$i.lock"
+              if flock -n 9; then break 2; fi
+            done
+            sleep 0.2
+          done
+        fi
+        d=$(mktemp -d)
+        trap 'rm -rf "$d"' EXIT
+        attempt=1
+        note=""
+        while :; do
+          # pwsh бачить ЛИШЕ початковий PATH: тести навмисно звужують його (напр. "git недоступний").
+          PATH="$ORIG_PATH" "$ECR_REAL_PWSH" -NoLogo "$@" >"$d/out" 2>"$d/err"
+          code=$?
+          if [ "$code" -eq 139 ] && [ "$attempt" -lt 2 ]; then
+            note="ecr-pwsh-launcher: pwsh exit 139 (SIGSEGV on start), launch retried once"
+            attempt=2
+            continue
+          fi
+          break
+        done
+        cat "$d/out"
+        cat "$d/err" >&2
+        [ -n "$note" ] && echo "$note; second attempt exit $code" >&2
+        [ "$code" -ge 128 ] && [ -z "$note" ] && echo "ecr-pwsh-launcher: pwsh exit $code" >&2
+        exit $code
+        """;
+
+    private static readonly Lazy<string> LinuxLauncher = new(() =>
+    {
+        var real = FindOnPath("pwsh");
+        var dir = Path.Combine(Path.GetTempPath(), "ecr-pwsh-launcher-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var file = Path.Combine(dir, "pwsh-launch.sh");
+        File.WriteAllText(file, LauncherScript.Replace("\r\n", "\n", StringComparison.Ordinal) + "\n");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        // Дочірній процес успадковує змінну від тестового хоста; значення стале на весь прогін.
+        Environment.SetEnvironmentVariable("ECR_REAL_PWSH", real);
+        return file;
+    });
+
+    private static string FindOnPath(string name)
+    {
+        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var candidate = Path.Combine(dir, name);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        // ⛔ Не пропуск: без PowerShell сторож мовчав би саме там, де його чекають.
+        throw new InvalidOperationException("Немає pwsh у PATH (на Windows — і powershell.exe): тест не може виконати deploy-ecr.ps1.");
+    }
+
+    /// <summary><c>pwsh</c> з PATH; на Windows без нього — вбудований <c>powershell.exe</c>. На Linux - обгортка запуску.</summary>
     internal static string FindPowerShell()
     {
+        if (OperatingSystem.IsLinux())
+        {
+            return LinuxLauncher.Value;
+        }
+
         var names = OperatingSystem.IsWindows() ? new[] { "pwsh.exe", "powershell.exe" } : ["pwsh"];
         var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
         foreach (var name in names)

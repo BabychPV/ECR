@@ -664,6 +664,197 @@ public sealed class DeleteRegistryEntryHandler(
     }
 
     /// <summary>
+    /// Логічно видаляє НАБІР записів одного довідника однією дією (NAE N3b, заміна рядків Air Limits).
+    /// </summary>
+    /// <remarks>
+    /// Ті самі правила, що в <see cref="HandleAsync"/>, але набір читається, перевіряється й зберігається
+    /// пакетом: право на довідник — раз; записи, каскад, посилання, ключі — запитами на набір; одне
+    /// збереження; одна ревізія даних довідника на набір (а не N); журнал — рівно по одному запису
+    /// <c>Delete</c> на кожен запис набору (пакетним <c>INSERT</c>). Посилання рахуються ЗЗОВНІ набору
+    /// (як для частин композиції): набір видаляється разом. Блокуюче посилання — та сама відмова
+    /// <c>ECR-REG-0409</c>, що й для одного запису: її кидає поштучний шлях для першого блокованого запису.
+    /// <para>
+    /// ⚠ Усе або нічого: виклик має бути всередині <see cref="IUnitOfWork.ExecuteInTransactionAsync"/> або сам
+    /// відкриває його тут; збій відкочує і записи, і журнал.
+    /// </para>
+    /// </remarks>
+    /// <param name="registryCode">Довідник зі шляху запиту.</param>
+    /// <param name="registryEntryIds">Записи довідника.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Хоч одного запису немає, він видалений або з іншого довідника.</exception>
+    /// <exception cref="BusinessRuleException">На запис посилаються дані — <c>ECR-REG-0409</c>.</exception>
+    public async Task HandleManyAsync(string registryCode, IReadOnlyCollection<long> registryEntryIds, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(registryCode);
+        ArgumentNullException.ThrowIfNull(registryEntryIds);
+
+        var userId = currentUser.UserId
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401",
+                "Анонімний запит не змінює довідники.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
+
+        var ids = registryEntryIds.Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        var lookup = new RegistryLookup(registries, registryCode);
+        await RegistryAccess
+            .RequireAsync(access, currentUser, Permission, GrantLevel.Write, lookup, ct)
+            .ConfigureAwait(false);
+
+        var definition = await lookup.RequireAsync(ct).ConfigureAwait(false);
+        var found = (await registries.FindEntriesByIdsAsync(ids, ct).ConfigureAwait(false)).ToDictionary(e => e.Id);
+        foreach (var id in ids)
+        {
+            if (!found.TryGetValue(id, out var candidate) || candidate.IsDeleted || candidate.RegistryDefId != definition.Id)
+            {
+                throw RegistryAccess.EntryNotFound(id, registryCode);
+            }
+        }
+
+        ExternalRegistryGuard.EnsureManualEditAllowed(definition);
+
+        // Каскад: рівнями на весь набір; кожна частина приписана КОРЕНЮ, від якого вона дійшла (для журналу).
+        var rootOf = ids.ToDictionary(id => id, id => id);
+        var parts = new List<(RegistryEntry Entry, long Root)>();
+        var level = ids.ToList();
+        while (level.Count > 0)
+        {
+            var next = new List<long>();
+            foreach (var child in await registries.ListCompositionChildrenAsync(level, ct).ConfigureAwait(false))
+            {
+                if (child.OnParentDelete != ParentDeletePolicy.Cascade || !rootOf.TryAdd(child.Entry.Id, rootOf[child.ParentEntryId]))
+                {
+                    continue;
+                }
+
+                parts.Add((child.Entry, rootOf[child.Entry.Id]));
+                next.Add(child.Entry.Id);
+            }
+
+            level = next;
+        }
+
+        var partRegistries = new List<RegistryDef>();
+        foreach (var partRegistryId in parts.Select(p => p.Entry.RegistryDefId).Distinct().Where(id => id != definition.Id))
+        {
+            if (await registries.FindDefinitionByIdAsync(partRegistryId, ct).ConfigureAwait(false) is { } partRegistry)
+            {
+                await RegistryAccess
+                    .RequireAsync(access, currentUser, Permission, GrantLevel.Write, partRegistry.Id, ct)
+                    .ConfigureAwait(false);
+
+                ExternalRegistryGuard.EnsureManualEditAllowed(partRegistry);
+                partRegistries.Add(partRegistry);
+            }
+        }
+
+        var everything = ids.Concat(parts.Select(p => p.Entry.Id)).ToList();
+        var references = await registries.CountReferencesFromOutsideAsync(everything, ct).ConfigureAwait(false);
+        if (references.Total > 0)
+        {
+            // Блокування: той самий текст відмови, що й у поштучному шляху, — для першого блокованого запису.
+            // Шлях помилки, не гарячий: тут можна платити запитом на запис.
+            foreach (var id in ids)
+            {
+                var own = parts.Where(p => p.Root == id).Select(p => p.Entry.Id).ToList();
+                var one = own.Count == 0
+                    ? await registries.CountReferencesAsync(id, ct).ConfigureAwait(false)
+                    : await registries.CountReferencesFromOutsideAsync([id, .. own], ct).ConfigureAwait(false);
+                if (one.Total > 0)
+                {
+                    throw ReferencedRefusal(found[id], id, one);
+                }
+            }
+
+            throw ReferencedRefusal(found[ids[0]], ids[0], references);
+        }
+
+        var now = clock.UtcNow;
+        foreach (var id in ids)
+        {
+            found[id].SoftDelete(userId, now);
+        }
+
+        foreach (var part in parts)
+        {
+            part.Entry.SoftDelete(userId, now);
+        }
+
+        definition.BumpDataRevision();
+        foreach (var partRegistry in partRegistries)
+        {
+            partRegistry.BumpDataRevision();
+        }
+
+        var codesByRegistry = partRegistries.ToDictionary(r => r.Id, r => r.Code);
+        codesByRegistry[definition.Id] = definition.Code;
+
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            if (keys is not null)
+            {
+                await keys.ReleaseManyAsync([.. ids.Select(id => found[id]), .. parts.Select(p => p.Entry)], innerCt)
+                    .ConfigureAwait(false);
+            }
+
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            var records = new List<StructureChangeRecord>(ids.Count);
+            foreach (var id in ids)
+            {
+                var entry = found[id];
+                var own = parts.Where(p => p.Root == id).Select(p => p.Entry).ToList();
+                records.Add(new StructureChangeRecord(
+                    ChangedAt: now,
+                    TemplateVersionId: 0,
+                    EntityType: "dic.RegistryEntry",
+                    EntityId: checked((int)id),
+                    ChangeClass: ChangeClass.Breaking,
+                    Operation: "Delete",
+                    OldJson: own.Count == 0
+                        ? JsonSerializer.Serialize(new { registry = definition.Code, code = entry.Code })
+                        : JsonSerializer.Serialize(new
+                        {
+                            registry = definition.Code,
+                            code = entry.Code,
+                            cascade = own.Select(p => new { registry = codesByRegistry.GetValueOrDefault(p.RegistryDefId), code = p.Code }),
+                        }),
+                    NewJson: null,
+                    ChangeReason: own.Count == 0
+                        ? $"Записів довідника «{definition.Code}» прибрано: 1."
+                        : $"Записів довідника «{definition.Code}» прибрано: 1, разом із частинами композиції: {own.Count}.",
+                    ChangedByUserId: userId,
+                    CorrelationId: currentUser.CorrelationId));
+            }
+
+            await audit.WriteStructureChangesAsync(records, innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+    }
+
+    private static BusinessRuleException ReferencedRefusal(RegistryEntry entry, long registryEntryId, RegistryEntryReferences references)
+    {
+        var byKind = references.ByKind();
+        return new BusinessRuleException(
+            "ECR-REG-0409",
+            $"Запис «{entry.Code}» не видаляється: на нього посилаються — {references.Total} "
+            + $"({string.Join(", ", byKind.Select(k => $"{k.Key}: {k.Value}"))}). "
+            + "Закрийте його датою — історія лишиться читабельною, а в нових періодах він не пропонуватиметься.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-REG-0409.entryReferenced",
+                ["code"] = entry.Code,
+                ["referenceCount"] = references.Total.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["registryEntryId"] = registryEntryId,
+                ["references"] = references.Total,
+                ["referenceKinds"] = byKind,
+            });
+    }
+
+    /// <summary>
     /// Частини композиції з <c>Cascade</c>, що видаляються разом із записом, — на всю глибину
     /// (RT-12, FEATURE-REGISTRY-TABLES §4.8).
     /// </summary>

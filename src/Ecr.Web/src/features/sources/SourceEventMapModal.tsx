@@ -16,6 +16,7 @@ import {
   VisuallyHidden,
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { EcrApiError } from '@/api/client';
 import type { DocumentSummary } from '@/api/types';
 import { useReturnFocusOnUnmount } from '@/shared/a11y/focus';
 import { t } from '@/shared/i18n';
@@ -452,6 +453,11 @@ export function SourceEventMapModal({
                         size="xs"
                         searchable
                         aria-label={t('sourceEvents.fieldColumn')}
+                        error={
+                          field.targetColumnDefId !== null && field.targetColumnDefId === monthColumnOf(save.error)
+                            ? t('sourceEvents.fieldMonthColumn')
+                            : undefined
+                        }
                         data={columnList.map((item) => ({
                           value: String(item.id),
                           label: `${item.code} · ${item.header} (${item.dataType})`,
@@ -627,4 +633,13 @@ export function SourceEventMapModal({
       </Stack>
     </Modal>
   );
+}
+
+/** D-465: колонка, яку сервер відхилив як колонку місяця (`422 eventMapMonthColumn`); інакше `null`. */
+function monthColumnOf(error: unknown): number | null {
+  if (!(error instanceof EcrApiError)) return null;
+  const extensions = error.problem.extensions2;
+  if (extensions?.['messageKey'] !== 'err.ECR-INT-0422.eventMapMonthColumn') return null;
+  const id = Number(extensions['columnDefId']);
+  return Number.isFinite(id) ? id : null;
 }

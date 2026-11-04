@@ -38,13 +38,18 @@ public sealed record RegistryEntryDto(
 /// <param name="Display">Локалізована назва для показу.</param>
 /// <param name="ParentEntryId">Батьківський запис в ієрархії; <c>null</c> — корінь.</param>
 /// <param name="Values">Значення полів: код поля → значення відповідного типу.</param>
+/// <param name="LevelCode">
+/// Level code in a hierarchical registry (required for a new entry there, ignored in a flat registry);
+/// <c>null</c> on update keeps the current level.
+/// </param>
 public sealed record RegistryEntryUpsertDto(
     long? Id,
     int RegistryDefId,
     string Code,
     LocalizedText Display,
     long? ParentEntryId,
-    IReadOnlyDictionary<string, object?> Values);
+    IReadOnlyDictionary<string, object?> Values,
+    string? LevelCode = null);
 
 /// <summary>Один запис довідника цілком — для форми правки (X-03, R-04).</summary>
 /// <param name="Id">Ідентифікатор.</param>
@@ -60,6 +65,7 @@ public sealed record RegistryEntryUpsertDto(
 /// Значення полів: код поля → текст в інваріантному форматі, який приймає
 /// <c>POST …/entries</c>; <c>null</c> — поле не заповнене.
 /// </param>
+/// <param name="LevelCode">Level code in a hierarchical registry; <c>null</c> in a flat one.</param>
 public sealed record RegistryEntryDetailDto(
     long Id,
     string Code,
@@ -67,4 +73,5 @@ public sealed record RegistryEntryDetailDto(
     long? ParentEntryId,
     DateOnly? ValidFrom,
     DateOnly? ValidTo,
-    IReadOnlyDictionary<string, string?> Values);
+    IReadOnlyDictionary<string, string?> Values,
+    string? LevelCode = null);

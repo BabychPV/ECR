@@ -1,6 +1,7 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import type { DocumentStateFilter } from './api';
+import { parseVersionSort, parseVersionsParam, versionsToParam, type VersionSort } from './documentVersion';
 
 /**
  * Значення фільтра стану — у порядку життєвого шляху аркуша.
@@ -71,6 +72,19 @@ export interface DocumentListFilters {
   /** Лише документи цього проєкту (`projectId`); `null` — усі проєкти. */
   readonly projectId: number | null;
 
+  /**
+   * Колонка «Version»: лише документи з цими версіями шаблону (точний збіг; `versions=1.0,2.3` в адресі).
+   *
+   * ✎ СЕРВЕРНИЙ фільтр: іде в запит як `templateVersions` і в ключ кешу; зміна скидає `cursor`.
+   */
+  readonly versions: readonly string[];
+
+  /**
+   * Колонка «Version»: напрямок сортування (`vsort=asc|desc` в адресі → `sort=±templateVersion` у запиті); `null` — за Id.
+   * Не фільтр. ✎ Серверне: порядок рахується по всьому набору, зміна скидає `cursor`.
+   */
+  readonly versionSort: VersionSort | null;
+
   /** Чи звужує перелік хоч один фільтр — те, що відрізняє «нічого не знайшлося» від «немає». */
   readonly active: boolean;
 
@@ -82,8 +96,10 @@ export interface DocumentListFilters {
   readonly setResultsStale: (resultsStale: boolean) => void;
   readonly setQ: (q: string) => void;
   readonly setProjectId: (projectId: number | null) => void;
+  readonly setVersions: (versions: readonly string[]) => void;
+  readonly setVersionSort: (sort: VersionSort | null) => void;
 
-  /** Знімає всі фільтри; період лишається — він належить екрану. */
+  /** Знімає всі фільтри; період лишається — він належить екрану. Сортування — не фільтр, воно лишається. */
   readonly reset: () => void;
 }
 
@@ -102,6 +118,8 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
   const [rawResultsStale] = useUrlState('resultsStale');
   const [rawQ] = useUrlState('q');
   const [rawProjectId] = useUrlState('projectId');
+  const [rawVersions] = useUrlState('versions');
+  const [rawVersionSort] = useUrlState('vsort');
   const setParams = useUrlParamsSetter();
 
   const state = periodKey === null ? null : parseStateFilter(rawState);
@@ -112,6 +130,26 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
   const q = rawQ ?? '';
   const parsedProject = rawProjectId === null ? Number.NaN : Number(rawProjectId);
   const projectId = Number.isInteger(parsedProject) && parsedProject > 0 ? parsedProject : null;
+
+  // Новий масив на кожен рендер ламав би залежності; рядок з адреси стабільний, тож розбір - за ним.
+  const versions = useMemo(() => parseVersionsParam(rawVersions), [rawVersions]);
+  const versionSort = parseVersionSort(rawVersionSort);
+
+  const setVersions = useCallback(
+    (next: readonly string[]) => {
+      // Серверний фільтр: курсор належить попередньому набору.
+      setParams({ versions: versionsToParam(next), cursor: null });
+    },
+    [setParams],
+  );
+
+  const setVersionSort = useCallback(
+    (next: VersionSort | null) => {
+      // Серверне сортування: курсор несе позицію в старому порядку.
+      setParams({ vsort: next, cursor: null });
+    },
+    [setParams],
+  );
 
   const setState = useCallback(
     (next: DocumentStateFilter | null) => {
@@ -176,6 +214,7 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
       resultsStale: null,
       q: null,
       projectId: null,
+      versions: null,
       cursor: null,
     });
   }, [setParams]);
@@ -188,8 +227,17 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
     resultsStale,
     q,
     projectId,
+    versions,
+    versionSort,
     active:
-      state !== null || mine || owner !== null || hasLateEdits || resultsStale || q.trim() !== '' || projectId !== null,
+      state !== null ||
+      mine ||
+      owner !== null ||
+      hasLateEdits ||
+      resultsStale ||
+      q.trim() !== '' ||
+      projectId !== null ||
+      versions.length > 0,
     setState,
     setMine,
     setOwner,
@@ -197,6 +245,8 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
     setResultsStale,
     setQ,
     setProjectId,
+    setVersions,
+    setVersionSort,
     reset,
   };
 }

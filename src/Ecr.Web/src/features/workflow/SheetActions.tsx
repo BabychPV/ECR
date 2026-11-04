@@ -14,6 +14,8 @@ import type {
 } from '@/api/types';
 import { allSheetsLocked, locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
 import { invalidateSlices } from '@/features/grid/sliceCache';
+import { refreshSheetWorkflow } from './refreshSheetWorkflow';
+import { useStatusStale } from './statusStale';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { LazyConfirmModal, LazyReasonModal } from './lazyDialogs';
 import { Hint } from '@/shared/ui/Hint';
@@ -64,6 +66,11 @@ interface SheetActionsProps {
   documentId: number;
   /** Аркуш; гранулярність робочого процесу — `аркуш × період` (D-38). */
   sheetDefId: number;
+  /**
+   * RS: копія аркуша (`sheetCopyId` з `GET …/tables`); `null`/не задано — оригінал. Іде в запитах подання,
+   * погодження, повернення й відкликання (контракт: необов'язкове `sheetCopyId`).
+   */
+  sheetCopyId?: number | null | undefined;
   /** Період. */
   periodKey: number;
   /** Поточний стан аркуша за цей період. */
@@ -205,6 +212,8 @@ export function SheetActions(props: SheetActionsProps): JSX.Element {
   const { recalculate, submit, approve, reject, reopen, recall } = actions;
   const hasAnyAction =
     recalculate !== null || submit !== null || approve !== null || reject !== null || reopen !== null || recall !== null;
+  // ✎ LIVE-STATUS: застарілий стан — кнопки на місці, але недоступні.
+  const staleProps = actions.stale ? { 'data-disabled': true, 'aria-disabled': true } : {};
 
   return (
     <>
@@ -260,7 +269,7 @@ export function SheetActions(props: SheetActionsProps): JSX.Element {
           «Reject» і «Return for edits» питають. Затверджені дані йдуть у
           звітність регулятору — це та сама вага рішення. */}
       {approve !== null && (
-        <Button color="statusSuccess" loading={approve.loading} onClick={approve.ask}>
+        <Button color="statusSuccess" loading={approve.loading} onClick={approve.ask} {...staleProps}>
           {t('workflow.approve')}
         </Button>
       )}
@@ -269,19 +278,19 @@ export function SheetActions(props: SheetActionsProps): JSX.Element {
           (`docs/design/ui-conventions.md`, «Кнопки»): `light` без рамки
           поруч з обвідними читався як кнопка іншого розміру. */}
       {reject !== null && (
-        <Button color="statusError" variant="outline" onClick={reject.ask}>
+        <Button color="statusError" variant="outline" onClick={reject.ask} {...staleProps}>
           {t('workflow.reject')}
         </Button>
       )}
 
       {reopen !== null && (
-        <Button variant="default" onClick={reopen.ask}>
+        <Button variant="default" onClick={reopen.ask} {...staleProps}>
           {t('workflow.reopen')}
         </Button>
       )}
 
       {recall !== null && (
-        <Button variant="default" onClick={recall.ask}>
+        <Button variant="default" onClick={recall.ask} {...staleProps}>
           {t('workflow.recall')}
         </Button>
       )}
@@ -380,6 +389,11 @@ export interface SheetActionsModel {
   readonly reject: { readonly ask: () => void } | null;
   readonly reopen: { readonly ask: () => void } | null;
   readonly recall: { readonly ask: () => void } | null;
+  /**
+   * ✎ LIVE-STATUS: стан аркуша на екрані застарів (чужий перехід, новий стан у дорозі) — дії процесу лишаються
+   * на місці, але недоступні (`aria-disabled`), і їхні `run`/`ask` нічого не роблять.
+   */
+  readonly stale: boolean;
   readonly dialogs: JSX.Element;
 }
 
@@ -391,11 +405,17 @@ export interface SheetActionsModel {
  * відмови (він називає аркуш, над яким дія).
  */
 type SheetAddress = { readonly sheetDefId: number; readonly periodKey: number };
-type ActionTarget = SheetAddress & { readonly sheetName: string | null };
+type ActionTarget = SheetAddress & { readonly sheetName: string | null; readonly sheetCopyId: number | null };
+
+/** Поле `sheetCopyId` запиту: лише для копії — оригінал його не шле (контракт: без нього — оригінал). */
+function copyPart(sheetCopyId: number | null): { sheetCopyId?: number } {
+  return sheetCopyId === null ? {} : { sheetCopyId };
+}
 
 export function useSheetActions({
   documentId,
   sheetDefId,
+  sheetCopyId = null,
   periodKey,
   state,
   sheetName = null,
@@ -405,7 +425,7 @@ export function useSheetActions({
   const session = useSession();
 
   // Знімок адреси цього рендеру: те, що оператор бачить у мить кліку (N3-01).
-  const here: ActionTarget = { sheetDefId, periodKey, sheetName };
+  const here: ActionTarget = { sheetDefId, periodKey, sheetName, sheetCopyId };
 
   // Яка дія чекає на причину; `null` — діалог закритий.
   const [asking, setAsking] = useState<'approve' | 'reject' | 'reopen' | 'recall' | null>(null);
@@ -418,21 +438,15 @@ export function useSheetActions({
     setAsking(action);
   };
 
-  /** Перечитує стан документа після кожної зміни робочого процесу - ТОГО аркуша й періоду, над якими була дія. */
-  const refresh = async (at: SheetAddress): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: ['document', documentId, at.periodKey] });
-    // ⛔ AN-28/L8-02: `cellPermissions` зрізу залежать від стану аркуша
-    // (`EditRules.CanEdit` -> `DocumentSubmitted`), а зріз живе 5 хв без
-    // перезапиту на фокус. Без цього після Recall/Return/Reopen сітка лишалась
-    // сірою до F5. Зрізи ЦЬОГО аркуша перезапитуються, решта лише позначається.
-    await invalidateSlices(queryClient, { documentId, periodKey: at.periodKey, sheetDefId: at.sheetDefId });
-    // ✎ D-441: ціль подання й статуси місячних колонок залежать від станів аркуша в УСІХ періодах.
-    await queryClient.invalidateQueries({ queryKey: ['submission-target', documentId] });
-    // ✎ D-449: «До погодження» й «Повернуто на доопрацювання» в «My tasks» (і лічильник кнопки) залежать від стану
-    // аркуша: подання/погодження/повернення/відкликання прибирає чи додає рядок. Без очікування - це не сторінка.
-    void queryClient.invalidateQueries({ queryKey: ['approval-queue'] });
-    void queryClient.invalidateQueries({ queryKey: ['returned-sheets'] });
-  };
+  /**
+   * Перечитує стан документа після кожної зміни робочого процесу - ТОГО аркуша й періоду, над якими була дія.
+   * ✎ LIVE-STATUS: перелік ключів — один (`refreshSheetWorkflow`), спільний із живим опитуванням чужих переходів.
+   */
+  const refresh = (at: SheetAddress): Promise<void> => refreshSheetWorkflow(queryClient, documentId, at);
+
+  // ✎ LIVE-STATUS: хтось інший щойно змінив стан аркуша, і новий стан ще в дорозі — дія проти старого стану
+  // недоступна (кнопки лишаються на місці з `aria-disabled`, клік нічого не шле).
+  const statusStale = useStatusStale(documentId, periodKey);
 
   // ФВ-5.19: попередження, які сервер попросив підтвердити; `null` — діалог закритий.
   const [warnings, setWarnings] = useState<string[] | null>(null);
@@ -443,6 +457,7 @@ export function useSheetActions({
     mutationFn: ({
       sheetDefId: sheet,
       periodKey: period,
+      sheetCopyId: copy,
       acknowledgeWarnings,
     }: ActionTarget & { acknowledgeWarnings: boolean }) =>
       apiFetch(`/api/v1/documents/${documentId}/submit`, {
@@ -450,6 +465,7 @@ export function useSheetActions({
         body: JSON.stringify({
           sheetDefId: sheet,
           periodKey: period,
+          ...copyPart(copy),
           acknowledgeWarnings,
         } satisfies SheetWorkflowRequest),
       }),
@@ -483,6 +499,7 @@ export function useSheetActions({
         body: JSON.stringify({
           sheetDefId: verdict.sheetDefId,
           periodKey: verdict.periodKey,
+          ...copyPart(verdict.sheetCopyId),
           approved: verdict.approved,
           reason: verdict.reason,
         } satisfies ApproveSheetRequest),
@@ -496,10 +513,10 @@ export function useSheetActions({
   });
 
   const reopen = useMutation({
-    mutationFn: ({ sheetDefId: sheet, periodKey: period, reason }: ActionTarget & { reason: string }) =>
+    mutationFn: ({ sheetDefId: sheet, periodKey: period, sheetCopyId: copy, reason }: ActionTarget & { reason: string }) =>
       apiFetch(`/api/v1/documents/${documentId}/reopen`, {
         method: 'POST',
-        body: JSON.stringify({ sheetDefId: sheet, periodKey: period, reason } satisfies ReopenDocumentRequest),
+        body: JSON.stringify({ sheetDefId: sheet, periodKey: period, ...copyPart(copy), reason } satisfies ReopenDocumentRequest),
       }),
     onSuccess: async (_result, at) => {
       await refresh(at);
@@ -522,14 +539,15 @@ export function useSheetActions({
     sheetDefId,
     periodKey,
     isAllowed('recall', state),
+    sheetCopyId,
   );
   const canRecall = isAllowed('recall', state) && recallAvailability.data?.canRecall === true;
 
   const recall = useMutation({
-    mutationFn: ({ sheetDefId: sheet, periodKey: period, reason }: ActionTarget & { reason: string }) =>
+    mutationFn: ({ sheetDefId: sheet, periodKey: period, sheetCopyId: copy, reason }: ActionTarget & { reason: string }) =>
       apiFetch(`/api/v1/documents/${documentId}/recall`, {
         method: 'POST',
-        body: JSON.stringify({ sheetDefId: sheet, periodKey: period, reason } satisfies RecallSheetRequest),
+        body: JSON.stringify({ sheetDefId: sheet, periodKey: period, ...copyPart(copy), reason } satisfies RecallSheetRequest),
       }),
     onSuccess: async (_result, at) => {
       await refresh(at);
@@ -798,7 +816,7 @@ export function useSheetActions({
    * до відповіді подав би відкритий період, тобто саме те, що D-441 скасовує. Збій запиту — стара поведінка
    * (відкритий на екрані період), щоб робочий процес не зупинявся через недоступну підказку.
    */
-  const submissionTarget = useSubmissionTarget(documentId, sheetDefId, periodKey);
+  const submissionTarget = useSubmissionTarget(documentId, sheetDefId, periodKey, sheetCopyId);
   // ⚠ Відповідь без переліку періодів (старіший сервер, проксі, порожнє тіло) — та сама невідомість, що й збій.
   const target = Array.isArray(submissionTarget.data?.periods) ? submissionTarget.data : undefined;
   const targetUnknown = submissionTarget.isError || (submissionTarget.isSuccess && target === undefined);
@@ -832,7 +850,8 @@ export function useSheetActions({
    * аркуша/періоду, доки йде запит нового. ⛔ Подати можна лише ПІДТВЕРДЖЕНУ ціль: поки дані підставні,
    * `confirmedPeriod === null` і `run` — порожній, хай би кнопка й показувала період зі старої відповіді.
    */
-  const checking = submissionTarget.isPlaceholderData;
+  // ✎ LIVE-STATUS: чужий перехід, новий стан у дорозі — та сама недоступність, що й підставна ціль.
+  const checking = submissionTarget.isPlaceholderData || statusStale;
   const confirmedPeriod = checking ? null : submitPeriod;
 
   // Перша відповідь у дорозі (без підставних даних) — лише ПЕРША спроба: збій із повторами не тримає скелет
@@ -934,6 +953,11 @@ export function useSheetActions({
    */
   const canReopen = isAllowed('reopen', state) && can(me, 'Document.Reopen') && mayWorkflow('approve');
 
+  // ✎ LIVE-STATUS: діалог проти застарілого стану не відкривається.
+  const askFresh = (action: 'approve' | 'reject' | 'reopen' | 'recall'): void => {
+    if (!statusStale) ask(action);
+  };
+
   const dialogs = (
     <>
       <LazyConfirmModal
@@ -1026,10 +1050,11 @@ export function useSheetActions({
         }
       : null,
     submitPending,
-    approve: canApprove ? { loading: decideLoading || settled.settling, ask: () => ask('approve') } : null,
-    reject: canReject ? { ask: () => ask('reject') } : null,
-    reopen: canReopen ? { ask: () => ask('reopen') } : null,
-    recall: canRecall ? { ask: () => ask('recall') } : null,
+    approve: canApprove ? { loading: decideLoading || settled.settling, ask: () => askFresh('approve') } : null,
+    reject: canReject ? { ask: () => askFresh('reject') } : null,
+    reopen: canReopen ? { ask: () => askFresh('reopen') } : null,
+    recall: canRecall ? { ask: () => askFresh('recall') } : null,
+    stale: statusStale,
     dialogs,
   };
 }

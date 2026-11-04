@@ -235,14 +235,14 @@ public sealed class PatchCellStylesHandler(
 
             // ⛔ L6-02: структура документа — першою; перенос версії тримає її винятково.
             DocumentStructure.EnsureUnchanged(
-                await sheetGate.EnterStructureAsync(documentId, exclusive: false, innerCt).ConfigureAwait(false),
+                await sheetGate.EnterStructureForPeriodAsync(documentId, exclusive: false, instance.PeriodKey, innerCt).ConfigureAwait(false),
                 instance.TemplateVersionId,
                 documentId);
 
             // Стан аркуша — ПІД блокуванням: подання, що зафіксувалося між рішенням і тут, відхиляє зміну.
             // ⚠ Це стан усього аркуша, а не комірки: для області — теж повна відмова (дозволених 0).
             var status = await sheetGate
-                .EnterEditAsync(documentId, table.SheetDefId, period, innerCt)
+                .EnterEditOfAsync(documentId, table.SheetDefId, period, instance.SheetCopyId, innerCt)
                 .ConfigureAwait(false);
             EnsureSheetEditable(status, targets.Count + decided.ScopeDenied.Values.Sum());
 

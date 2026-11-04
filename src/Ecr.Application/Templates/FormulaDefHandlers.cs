@@ -425,7 +425,10 @@ public sealed class SaveFormulaDefHandler(
     internal static FormulaDto Map(FormulaDef formula)
         => new(
             formula.Id, formula.TableDefId, formula.Scope,
-            formula.ColumnDefId, formula.RowDefId, formula.Dialect, formula.Expression);
+            formula.ColumnDefId, formula.RowDefId, formula.Dialect, formula.Expression)
+        {
+            AllowManualOverride = formula.AllowManualOverride,
+        };
 
     /// <summary>Стан формули для аудиту.</summary>
     internal static string Describe(FormulaDef formula)
@@ -455,7 +458,11 @@ public sealed record SaveFormulaDefCommand(ExpressionDialect Dialect, string Exp
 /// <param name="Expression">Текст виразу.</param>
 public sealed record FormulaDto(
     int Id, int TableDefId, FormulaScope Scope,
-    int? ColumnDefId, int? RowDefId, ExpressionDialect Dialect, string Expression);
+    int? ColumnDefId, int? RowDefId, ExpressionDialect Dialect, string Expression)
+{
+    /// <summary>✎ D-461: «Дозволити ручне значення» (змінює <c>PUT …/formulas/{formulaId}/manual-override</c>).</summary>
+    public bool AllowManualOverride { get; init; }
+}
 
 /// <summary>
 /// Прибирає формулу з версії-чернетки — м'яко (<c>ФВ-7.6</c>).

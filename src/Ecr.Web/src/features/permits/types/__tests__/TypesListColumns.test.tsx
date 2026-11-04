@@ -119,3 +119,32 @@ describe('TypesListColumns: меню рядка «⋯»', () => {
     });
   }
 });
+
+describe('TypesListColumns: «Permits» з «Used in documents» другим рядком (PERMIT-USAGE)', () => {
+  function renderPermits(item: PermitTypeListItem): HTMLElement {
+    const permits = typeColumns().find((column) => column.key === 'permits');
+    if (permits === undefined) throw new Error('колонки Permits немає');
+    const { container } = render(
+      <MantineProvider theme={testTheme}>
+        <MemoryRouter>{permits.render?.(item)}</MemoryRouter>
+      </MantineProvider>,
+    );
+
+    return container;
+  }
+
+  it('тип із дозволами, обраними в документах: число дозволів і «Used in documents» другим рядком', () => {
+    const cell = renderPermits(makeType('AirEmission', { permitCount: 4, usedInDocumentCount: 3 }));
+
+    expect(cell.querySelector('[data-two-line-primary]')?.textContent).toBe('4');
+    expect(cell.querySelector('[data-two-line-secondary]')?.textContent).toBe('permits.usage.typeListUsedIn');
+  });
+
+  it('ніде не використаний: другого рядка немає (D15-06), колонок не більше семи', () => {
+    const cell = renderPermits(makeType('AirEmission', { permitCount: 4, usedInDocumentCount: 0 }));
+
+    expect(cell.querySelector('[data-two-line-primary]')?.textContent).toBe('4');
+    expect(cell.querySelector('[data-two-line-secondary]')).toBeNull();
+    expect(typeColumns(vi.fn()).length).toBeLessThanOrEqual(7);
+  });
+});

@@ -1,3 +1,4 @@
+import { formatNumber } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import type { PermitListItem } from '../api/types';
@@ -163,6 +164,11 @@ export function readByText(item: PermitListItem): string | null {
   return item.boundSheetCount === 1
     ? t('permits.list.readByOne', { count: item.boundSheetCount })
     : t('permits.list.readByMany', { count: item.boundSheetCount });
+}
+
+/** У скількох документах дозвіл обрано значенням: число; ніде — `null` (D15-06: порожнє не малюється). */
+export function usedInText(item: PermitListItem): string | null {
+  return item.usedInDocumentCount > 0 ? formatNumber(item.usedInDocumentCount) : null;
 }
 
 /** Адреса сторінки дозволу (`/admin/permits/:id`). */

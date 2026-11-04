@@ -83,16 +83,17 @@ public sealed partial class AuditStructureJournalTests(SqlServerFixture sql)
         await WriteAsync(type, 1, operation: "Second");
 
         var first = await PageAsync(client, $"entityType={type}", limit: 1);
-        Assert.Equal("First", Assert.Single(Items(first)).GetProperty("operation").GetString());
+        // Типовий порядок — найновіші першими: «Second» записано пізніше.
+        Assert.Equal("Second", Assert.Single(Items(first)).GetProperty("operation").GetString());
 
         var cursor = first.GetProperty("nextCursor").GetString();
         Assert.NotNull(cursor);
 
-        // ⛔ Мутація: прибрати `AND Id > @after` — друга сторінка знову віддасть
-        // «First», і «показати ще» гортало б по колу.
+        // ⛔ Мутація: прибрати курсорний предикат — друга сторінка знову віддасть
+        // «Second», і «показати ще» гортало б по колу.
         var second = await PageAsync(
             client, $"entityType={type}&cursor={Uri.EscapeDataString(cursor)}", limit: 1);
-        Assert.Equal("Second", Assert.Single(Items(second)).GetProperty("operation").GetString());
+        Assert.Equal("First", Assert.Single(Items(second)).GetProperty("operation").GetString());
         Assert.Equal(JsonValueKind.Null, second.GetProperty("nextCursor").ValueKind);
     }
 

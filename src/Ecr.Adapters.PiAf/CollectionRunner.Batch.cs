@@ -37,6 +37,21 @@ public sealed partial class CollectionRunner
         public Dictionary<DateTime, int> Carried { get; set; } = [];
 
         public int Pages { get; set; }
+
+        /// <summary>
+        /// Мітки, які джерело віддало за шматок (D-462): основа видалення зниклих точок; <c>null</c> — не ведуться.
+        /// </summary>
+        public HashSet<DateTime>? Seen { get; set; }
+
+        /// <summary>Міток забагато (<see cref="CollectionRunnerOptions.MaxTrackedTimestamps"/>): видалення за шматок не буде.</summary>
+        public bool Untracked { get; set; }
+
+        /// <summary>
+        /// ✎ Аудит 31.10 (G1/G5/G6): чому відповідь за шматок не годиться як доказ відсутності точок (мітка поза
+        /// шматком — ознака зсуву поясу; запасна адреса; відповідь із пропусками чи самих помилок); <c>null</c> —
+        /// годиться. Прочитане зберігається, видалення зниклих за шматок — ні.
+        /// </summary>
+        public string? RemovalUnsafe { get; set; }
     }
 
     /// <summary>Один раунд пакетного читання: сторінка кожного атрибута з його курсора.</summary>

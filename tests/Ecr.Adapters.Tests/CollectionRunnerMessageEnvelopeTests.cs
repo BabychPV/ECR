@@ -215,7 +215,7 @@ public sealed class CollectionRunnerMessageEnvelopeTests
     {
         // ⚠ Ключа без рядка каталог не знайде, і читач побачить сам ключ замість
         // причини — рівно та сама непрозорість, що й сирий український текст.
-        var seed = File.ReadAllText(SeedPath());
+        var seed = SeedSql.Text;
 
         Assert.Contains($"(N'{key}',", seed, StringComparison.Ordinal);
     }
@@ -259,21 +259,6 @@ public sealed class CollectionRunnerMessageEnvelopeTests
                         && (string)c.GetArguments()[1]! == status)
             .Select(c => (string?)c.GetArguments()[3])
             .Single();
-
-    private static string SeedPath()
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            var candidate = Path.Combine(dir.FullName, "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql");
-
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        throw new FileNotFoundException("09-seed.sql не знайдено вгору від каталогу збірки.");
-    }
 
     /// <summary>Сутність без мапінгів: збирач читає її саму.</summary>
     private sealed class World

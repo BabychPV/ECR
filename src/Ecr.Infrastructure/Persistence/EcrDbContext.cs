@@ -46,6 +46,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<RegistryDef> RegistryDefs => Set<RegistryDef>();
     public DbSet<RegistryFieldDef> RegistryFieldDefs => Set<RegistryFieldDef>();
     public DbSet<RegistryRuleDef> RegistryRuleDefs => Set<RegistryRuleDef>();
+    public DbSet<RegistryLevelDef> RegistryLevelDefs => Set<RegistryLevelDef>();
     public DbSet<RegistryDefinitionDraft> RegistryDefinitionDrafts => Set<RegistryDefinitionDraft>();
 
     /// <summary>Складені ключі довідників і їхні частини (FEATURE-REGISTRY-TABLES, RT-01).</summary>
@@ -86,6 +87,20 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
 
     // doc
     public DbSet<Project> Projects => Set<Project>();
+
+    /// <summary>Часова шкала версій шаблону проєкту (RPT-STABLE Part B).</summary>
+    public DbSet<ProjectTemplateVersion> ProjectTemplateVersions => Set<ProjectTemplateVersion>();
+
+    /// <summary>Збережена мапа перейменування колонок між версіями (RPT-STABLE Part B).</summary>
+    public DbSet<ColumnRename> ColumnRenames => Set<ColumnRename>();
+
+    /// <summary>
+    /// Версія шаблону проєкту за період (SQL: <c>doc.fn_VersionOf</c>) — для запитів-приєднань. Поза запитом кидає.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="periodKey">Період.</param>
+    public static int VersionOf(int projectId, int periodKey)
+        => throw new NotSupportedException("EcrDbContext.VersionOf можна викликати лише всередині LINQ-запиту.");
     public DbSet<PeriodPolicy> PeriodPolicies => Set<PeriodPolicy>();
     public DbSet<Period> Periods => Set<Period>();
     public DbSet<Document> Documents => Set<Document>();
@@ -96,6 +111,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
 
     /// <summary>Користувацька заливка/колір тексту/жирність комірок (CELL-STYLE L3b).</summary>
     public DbSet<CellStyle> CellStyles => Set<CellStyle>();
+
+    /// <summary>✎ D-461: позначки «ручне значення замість формули».</summary>
+    public DbSet<CellFormulaOverride> CellFormulaOverrides => Set<CellFormulaOverride>();
     public DbSet<DocumentHeaderValue> DocumentHeaderValues => Set<DocumentHeaderValue>();
 
     /// <summary>Передачі зрізу документа виконавцям (EA-1): зріз, ексклюзивність, стан валідації.</summary>
@@ -109,6 +127,18 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
 
     /// <summary>Члени наборів виконавців (EA-1).</summary>
     public DbSet<EditorSetMember> EditorSetMembers => Set<EditorSetMember>();
+
+    /// <summary>Повідомлення чатів таблиць документів (TC).</summary>
+    public DbSet<TableDiscussionMessage> TableDiscussionMessages => Set<TableDiscussionMessage>();
+
+    /// <summary>Зведення чатів таблиць: ревізія, лічильник, останнє повідомлення (TC).</summary>
+    public DbSet<TableDiscussionState> TableDiscussions => Set<TableDiscussionState>();
+
+    /// <summary>Позначки «прочитано до» чатів таблиць (TC).</summary>
+    public DbSet<TableDiscussionRead> TableDiscussionReads => Set<TableDiscussionRead>();
+
+    /// <summary>Згадки в чатах таблиць (TC).</summary>
+    public DbSet<TableDiscussionMention> TableDiscussionMentions => Set<TableDiscussionMention>();
 
     // sec
     public DbSet<User> Users => Set<User>();
@@ -139,6 +169,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     /// <summary>Тести методології: вхід, очікуваний вихід, допуск (ФВ-13.7).</summary>
     public DbSet<MethodologyTestCaseEntity> MethodologyTestCases => Set<MethodologyTestCaseEntity>();
     public DbSet<MethodologySubstance> MethodologySubstances => Set<MethodologySubstance>();
+
+    /// <summary>Перелік категорій констант версії методології (план CONST-CATEGORY).</summary>
+    public DbSet<MethodologyCategory> MethodologyCategories => Set<MethodologyCategory>();
     public DbSet<MethodologyOutput> MethodologyOutputs => Set<MethodologyOutput>();
     public DbSet<MethodologyRule> MethodologyRules => Set<MethodologyRule>();
 
@@ -186,6 +219,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<SourceEventFieldMap> SourceEventFieldMaps => Set<SourceEventFieldMap>();
     public DbSet<SourceEventValueMap> SourceEventValueMaps => Set<SourceEventValueMap>();
     public DbSet<SourceEventLink> SourceEventLinks => Set<SourceEventLink>();
+
+    /// <summary>D-465: значення атрибутів подій за останнім прочитанням синку (лише зміни).</summary>
+    public DbSet<SourceEventAttributeValue> SourceEventAttributeValues => Set<SourceEventAttributeValue>();
 
     // itg
     public DbSet<CollectionRun> CollectionRuns => Set<CollectionRun>();
@@ -235,6 +271,11 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
         ArgumentNullException.ThrowIfNull(modelBuilder);
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(EcrDbContext).Assembly);
+
+        // ✎ RPT-STABLE Part B: SQL-відповідник `ProjectVersionTimeline.VersionOf` для запитів-приєднань
+        // (скалярна функція, створена міграцією; паритет зі C# доводить `ProjectVersionTimelineTests`).
+        modelBuilder.HasDbFunction(typeof(EcrDbContext).GetMethod(nameof(VersionOf), [typeof(int), typeof(int)])!)
+            .HasSchema("doc").HasName("fn_VersionOf");
 
         // ⚠ Конфігурація тут, а не в `Configurations/`: сутність чужа (її
         // оголошує пакет DataProtection), і єдине, що ми про неї вирішуємо, —

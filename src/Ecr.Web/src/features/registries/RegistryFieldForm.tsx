@@ -51,6 +51,7 @@ export function RegistryFieldForm({
   mayBeRequired,
   registryOptions,
   unitOptions,
+  levelOptions = [],
   onChange,
   onRemove,
 }: {
@@ -62,6 +63,8 @@ export function RegistryFieldForm({
   readonly mayBeRequired: boolean;
   readonly registryOptions: readonly { value: string; label: string }[];
   readonly unitOptions: readonly { value: string; label: string }[];
+  /** Рівні ієрархічного довідника; порожньо - довідник плаский, вибору рівня немає. */
+  readonly levelOptions?: readonly { value: string; label: string }[];
   readonly onChange: (field: FieldDraft) => void;
   readonly onRemove: () => void;
 }): JSX.Element {
@@ -168,6 +171,17 @@ export function RegistryFieldForm({
                 unitId: event.currentTarget.value === '' ? null : Number(event.currentTarget.value),
               })
             }
+          />
+        )}
+
+        {levelOptions.length > 0 && (
+          <NativeSelect
+            label={t('registries.fieldForm.level')}
+            description={t('registries.fieldForm.levelHint')}
+            disabled={!canEdit}
+            value={draft.levelCode}
+            data={[{ value: '', label: t('registries.fieldForm.levelAll') }, ...levelOptions]}
+            onChange={(event) => onChange({ ...draft, levelCode: event.currentTarget.value })}
           />
         )}
 

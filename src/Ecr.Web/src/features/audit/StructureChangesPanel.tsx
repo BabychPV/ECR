@@ -2,6 +2,8 @@ import type { JSX } from 'react';
 import { Button, Select, Table, Text, TextInput } from '@mantine/core';
 import { structureChangesQuery, useStructureChanges, type StructureChangePage } from '@/features/audit/api';
 import { authorName, useAuthorOptions } from '@/features/audit/authorOptions';
+import { useAuditSort } from '@/features/audit/auditSort';
+import { SortableTh } from '@/features/audit/SortableTh';
 import { FilterHints, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -30,6 +32,7 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
   // ⛔ Набір у полях — у запит після паузи, як у журналі комірок (`AuditPage`).
   const appliedEntityType = useDebouncedFilter(entityType);
   const appliedChangedBy = useDebouncedFilter(changedBy);
+  const [sort, setSort] = useAuditSort();
   // ⛔ Поля показують ВЛАСНЕ значення, не адресу (`useFieldDraft`; той самий
   // дефект втрати символів, що в «Row key» журналу комірок).
   const entityTypeField = useFieldDraft(entityType ?? '');
@@ -39,6 +42,7 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
     to,
     entityType: appliedEntityType,
     changedByUserId: appliedChangedBy,
+    sort,
     limit: 100,
   };
   // ⛔ Курсор — від застосованого фільтра, не від сирого поля (`useFilterCursor`).
@@ -98,8 +102,8 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
             <Table striped className="ecr-sticky-head ecr-audit-table" aria-label={t('audit.viewStructure')}>
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>{t('audit.when')}</Table.Th>
-                  <Table.Th>{t('audit.who')}</Table.Th>
+                  <SortableTh label={t('audit.when')} column="time" sort={sort} onSort={setSort} />
+                  <SortableTh label={t('audit.who')} column="user" sort={sort} onSort={setSort} />
                   <Table.Th>{t('audit.entity')}</Table.Th>
                   <Table.Th>{t('audit.operation')}</Table.Th>
                   <Table.Th>{t('audit.reason')}</Table.Th>
@@ -122,9 +126,16 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
                     {/* ⛔ `R-18`: ім'я з сервера; номер — у підказці. */}
                     <Table.Td title={`#${String(change.changedByUserId)}`}>{authorName(change)}</Table.Td>
                     <Table.Td>
-                      <Text size="xs" title={change.entityType}>
-                        {entityTypeLabel(change.entityType)} · {change.entityId}
+                      {/* Читабельний код сутності (якщо сервер його визначив), номер — другим рядком: журнал є
+                          доказом, номер лишається доступним. Видалена сутність — як і раніше номер. */}
+                      <Text size="xs" title={`${change.entityType} #${String(change.entityId)}`}>
+                        {entityTypeLabel(change.entityType)} · {change.entityLabel ?? change.entityId}
                       </Text>
+                      {change.entityLabel !== null && change.entityLabel !== undefined && (
+                        <Text size="xs" c="var(--ecr-muted)" ff="monospace" data-audit-entity-id="">
+                          #{change.entityId}
+                        </Text>
+                      )}
                     </Table.Td>
                     <Table.Td title={change.operation}>{operationLabel(change.operation)}</Table.Td>
                     <Table.Td>

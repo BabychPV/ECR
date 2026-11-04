@@ -24,7 +24,7 @@ namespace Ecr.Architecture.Tests;
 /// </remarks>
 public sealed partial class MethodologyDiffFieldCatalogTests
 {
-    private const string SeedFile = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedFile = SeedSql.DisplayPath;
 
     private const string ClientFile = "src/Ecr.Web/src/features/methodologies/DiffFieldLabel.tsx";
 
@@ -72,19 +72,13 @@ public sealed partial class MethodologyDiffFieldCatalogTests
             + string.Join(Environment.NewLine, problems));
     }
 
-    /// <summary>Ключі блоку <c>MERGE sys_ecr.UiString AS t</c>.</summary>
+    /// <summary>Ключі en-каталогу (<see cref="SeedSql.EnCatalog"/>).</summary>
     private static HashSet<string> SeedKeys()
     {
-        var text = File.ReadAllText(
-            Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar)));
+        var block = SeedSql.EnCatalog;
+        Assert.True(block.Length > 0, $"У {SeedFile} немає порцій en-каталогу ({SeedSql.EnCatalogInsert}).");
 
-        var start = text.IndexOf("MERGE sys_ecr.UiString AS t", StringComparison.Ordinal);
-        Assert.True(start >= 0, $"У {SeedFile} немає блоку MERGE sys_ecr.UiString AS t.");
-
-        var end = text.IndexOf("WHEN NOT MATCHED", start, StringComparison.Ordinal);
-        Assert.True(end > start, $"Блок MERGE sys_ecr.UiString AS t у {SeedFile} не закінчується.");
-
-        return SeedRow().Matches(text[start..end])
+        return SeedRow().Matches(block)
             .Select(m => m.Groups[1].Value)
             .ToHashSet(StringComparer.Ordinal);
     }

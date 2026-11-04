@@ -174,6 +174,9 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
             await db.SaveChangesAsync();
         }
 
+        // Журнал рядків — до/після (Id документів у спільній тестовій базі можуть повторюватися між прогонами).
+        var journalBefore = await ScalarAsync<int>("SELECT COUNT(*) FROM aud.RowChange");
+
         var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => DeleteHandler(doc).Handler.HandleAsync(
             doc.DocumentId, doc.TableInstanceId, RowKeyOf(doc, 2), Profile(), default));
 
@@ -183,6 +186,7 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
         Assert.Equal(0, await ScalarAsync<int>(
             $"SELECT COUNT(*) FROM doc.TableRow WHERE PeriodKey = {doc.PeriodKey.Value} AND TableInstanceId = {doc.TableInstanceId} AND IsDeleted = 1"));
         Assert.Equal(0, await ScalarAsync<int>("SELECT COUNT(*) FROM aud.StructureChange WHERE EntityType = N'doc.TableRow' AND OldJson LIKE N'%" + RowKeyOf(doc, 2) + "%'"));
+        Assert.Equal(journalBefore, await ScalarAsync<int>("SELECT COUNT(*) FROM aud.RowChange"));
     }
 
     [Fact]
@@ -203,6 +207,88 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
         Assert.Equal("err.ECR-ROW-0409.templateRowNotDeletable", ex.Details!["messageKey"]);
         Assert.Equal(0, await ScalarAsync<int>(
             $"SELECT CAST(IsDeleted AS int) FROM doc.TableRow WHERE PeriodKey = {doc.PeriodKey.Value} AND Id = {rowId}"));
+    }
+
+    /// <summary>
+    /// Журнал рядків (<c>aud.RowChange</c>): додавання й видалення рядка — по запису з дією, адресою рядка, автором і
+    /// походженням <c>UserEdit</c>, у момент зміни.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: приберіть <c>rowAudit.WriteRowChangesAsync</c> у <c>DeleteRowHandler.DeleteUnderLockAsync</c> —
+    /// рядка «2|…» немає, тест червоніє (так само для <c>CreateRowHandler.CreateUnderLockAsync</c> і «1|…»).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.21")]
+    public async Task Додавання_і_видалення_рядка_лишають_запис_у_журналі_рядків()
+    {
+        var doc = await ArrangeAsync();
+        var since = await JournalTipAsync();
+        var deletedKey = RowKeyOf(doc, 2);
+        var deletedId = doc.RowIds[1];
+
+        var created = await CreateHandler(doc).HandleAsync(
+            doc.DocumentId, doc.TableInstanceId, RowKey.Create("AUDROW_1"), Profile(), default);
+        await DeleteHandler(doc).Handler.HandleAsync(doc.DocumentId, doc.TableInstanceId, deletedKey, Profile(), default);
+
+        var createdId = await ScalarAsync<long>(
+            $"SELECT Id FROM doc.TableRow WHERE PeriodKey = {doc.PeriodKey.Value} AND TableInstanceId = {doc.TableInstanceId} AND RowKey = N'{created.Value}'");
+
+        Assert.Equal(
+            new[]
+            {
+                $"1|{created.Value}|{createdId}|UserEdit",
+                $"2|{deletedKey}|{deletedId}|UserEdit",
+            }.Order(StringComparer.Ordinal),
+            await RowJournalAsync(doc, since));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.21")]
+    public async Task Відкат_додавання_рядка_забирає_і_запис_журналу_рядків()
+    {
+        var doc = await ArrangeAsync();
+        var since = await JournalTipAsync();
+
+        // Падіння ПІСЛЯ вставки рядка й запису журналу (дотик документа — останній крок транзакції).
+        var documents = Substitute.For<IDocumentStore>();
+        documents.TouchAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new InvalidOperationException("touch failed")));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateHandler(doc, documents).HandleAsync(
+            doc.DocumentId, doc.TableInstanceId, RowKey.Create("AUDROW_RB"), Profile(), default));
+
+        Assert.Equal(0, await ScalarAsync<int>(
+            $"SELECT COUNT(*) FROM doc.TableRow WHERE PeriodKey = {doc.PeriodKey.Value} AND RowKey = N'AUDROW_RB'"));
+        Assert.Empty(await RowJournalAsync(doc, since));
+    }
+
+    /// <summary>Найбільший Id журналу рядків до дії: спільна тестова база може мати записи з тими самими Id документів.</summary>
+    private async Task<long> JournalTipAsync()
+        => await ScalarAsync<long>("SELECT ISNULL(MAX(Id), 0) FROM aud.RowChange");
+
+    /// <summary>Журнал рядків документа після <paramref name="since"/>: дія|ключ|рядок|походження (автор і момент — в умові).</summary>
+    private async Task<List<string>> RowJournalAsync(TestDocument doc, long since)
+    {
+        var lines = new List<string>();
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT Action, RowKey, TableRowId, Origin FROM aud.RowChange " +
+            $"WHERE Id > {since} AND DocumentId = {doc.DocumentId} AND PeriodKey = {doc.PeriodKey.Value} AND TableInstanceId = {doc.TableInstanceId} " +
+            $"AND TableDefId = {doc.TableDefId} AND ChangedByUserId = {UserId} " +
+            "AND ChangedAt = '" + Now.ToString("yyyy-MM-ddTHH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "'";
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            lines.Add($"{reader.GetByte(0)}|{reader.GetString(1)}|{reader.GetInt64(2)}|{reader.GetString(3)}");
+        }
+
+        return [.. lines.Order(StringComparer.Ordinal)];
     }
 
     // ── Побудова ─────────────────────────────────────────────────────────────
@@ -227,19 +313,20 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
         var handler = new DeleteRowHandler(
             new RowStore(db, new BulkCellLoader(sql.ConnectionString, 1000), clock), new DocumentStore(db),
             Metadata(doc), Access(db, doc), new NormalizedCellStore(db), new AuditWriter(db), jobs,
-            new UnitOfWork(db), clock, new SheetEditGate(db));
+            new UnitOfWork(db), clock, new SheetEditGate(db), rowAudit: new RowChangeAudit(db));
 
         return (handler, jobs);
     }
 
-    private CreateRowHandler CreateHandler(TestDocument doc)
+    private CreateRowHandler CreateHandler(TestDocument doc, IDocumentStore? documents = null)
     {
         var db = CreateContext();
         var clock = new FixedClock(Now);
 
         return new CreateRowHandler(
-            new RowStore(db, new BulkCellLoader(sql.ConnectionString, 1000), clock), new DocumentStore(db),
-            Metadata(doc), Access(db, doc), new UnitOfWork(db), clock, new SheetEditGate(db));
+            new RowStore(db, new BulkCellLoader(sql.ConnectionString, 1000), clock), documents ?? new DocumentStore(db),
+            Metadata(doc), Access(db, doc), new UnitOfWork(db), clock, new SheetEditGate(db),
+            rowAudit: new RowChangeAudit(db));
     }
 
     /// <summary>Служба доступу: документ видимий, рядки дозволені (стан аркуша перевіряє сам обробник під замком).</summary>

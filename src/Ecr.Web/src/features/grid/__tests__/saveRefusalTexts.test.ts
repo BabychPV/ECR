@@ -1,6 +1,5 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readSeedEnCatalog } from '@/test/seedSql';
 
 /**
  * `U-17`, друга половина: самі ТЕКСТИ в каталозі.
@@ -16,18 +15,8 @@ import { describe, expect, it } from 'vitest';
  * старе значення тут і шукається як помилка.
  */
 function mergeBlock(): string {
-  const seed = readFileSync(
-    path.resolve(process.cwd(), '../../src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql'),
-    'utf8',
-  );
-
-  const start = seed.indexOf('MERGE sys_ecr.UiString AS t');
-  const end = seed.indexOf(') AS s ([Key], Lang, Val, Scope)', start);
-
-  expect(start, '09-seed.sql: не знайдено блоку MERGE sys_ecr.UiString').toBeGreaterThan(-1);
-  expect(end, '09-seed.sql: не знайдено кінця блоку MERGE').toBeGreaterThan(start);
-
-  return seed.slice(start, end);
+  // ✎ en-каталог — порції `#UiEn` файлів seed/features (readSeedEnCatalog).
+  return readSeedEnCatalog();
 }
 
 function value(key: string): string {

@@ -1,0 +1,55 @@
+/*
+ * LIVE-REFRESH B2: polite banner "Updated by <user> at HH:MM — Refresh" over the sheet.
+ * ⚠ Hybrid kit tokens only (`--ecr-*`, KIT.md §6.4 info banner: calm, not a warning), so light and dark are one rule.
+ */
+/* ⚠ The live region stays in the tree while empty (no `display: none`): a region that appears together with its
+   text is often not announced. Empty, it takes no space. */
+
+/* `?view=all`: key hint and "Refresh" share one row above the stack of tables. */
+.ecr-live-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ecr-live-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--ecr-border-strong);
+  border-inline-start: 3px solid var(--ecr-accent-text);
+  border-radius: 4px;
+  background: var(--ecr-surface);
+  color: var(--ecr-text);
+  font-size: 13px;
+}
+
+.ecr-live-banner-text {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.ecr-live-refresh-btn[aria-busy='true'] {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.ecr-live-refresh-btn svg[data-spin] {
+  animation: ecr-live-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ecr-live-refresh-btn svg[data-spin] {
+    animation: none;
+  }
+}
+
+@keyframes ecr-live-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

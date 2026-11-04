@@ -50,7 +50,15 @@ public sealed class RecalculationService(
 
     // Q-17: власність введених комірок таблиць «місяці в колонках». Необов'язковий: прямі `new RecalculationService(...)`
     // у тестах його не передають; DI підставляє роутер, а вимкнений прапор (за замовчуванням) означає «не застосовується».
-    IMonthColumnRouter? monthRouter = null) : ISubmitRecalculation
+    IMonthColumnRouter? monthRouter = null,
+
+    // ✎ D-461: позначки «ручне значення замість формули». Необов'язковий: прямі `new RecalculationService(...)` у тестах
+    // його не передають (ручних значень тоді немає); DI підставляє сховище.
+    IFormulaOverrideStore? formulaOverrides = null,
+
+    // RPT-STABLE Part B: збережена мапа перейменування колонок (псевдонім на межі версій). Необов'язковий: без нього
+    // колонка зі зміненим кодом на межі версій не знаходиться (NULL), як і колонка, якої немає.
+    IColumnRenameMap? columnRenames = null) : ISubmitRecalculation
 {
     /// <summary>
     /// LP-40: джерела знімків довідників цього екземпляра сервісу (скоуп = один прогін задачі чи запит):
@@ -239,6 +247,7 @@ public sealed class RecalculationService(
 
         var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
 
+        // RS: правка комірки копії — «вид» цієї копії (instance.SheetCopyId), правка оригіналу — оригінал.
         return await RunAsync(
                 instance, dirty, ct, changedColumns: changedColumns, approverEditSheets: approverEditSheets,
                 inputColumns: inputColumns, shared: shared)
@@ -281,15 +290,34 @@ public sealed class RecalculationService(
             : await shared.InstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
 
         var written = 0;
-        foreach (var group in instances.GroupBy(i => i.TemplateVersionId).OrderBy(g => g.Key))
+        foreach (var (representative, _) in ScopeRepresentatives(instances, ScopeFilter.All))
         {
             written += await RunAsync(
-                    group.First(), dirty: null, ct, sheetDefId: null, heldSheetDefId: null, instances,
+                    representative, dirty: null, ct, sheetDefId: null, heldSheet: null, instances,
                     changedColumns, sources, shared: shared)
                 .ConfigureAwait(false);
         }
 
         return written;
+    }
+
+    /// <summary>
+    /// RS: по одному представнику на (версія шаблону × «вид»): оригінал і кожна копія документа рахуються окремо,
+    /// бо кожна має власні екземпляри таблиць свого аркуша.
+    /// </summary>
+    private static IEnumerable<(TableInstanceRef Representative, long? CopyId)> ScopeRepresentatives(
+        IReadOnlyList<TableInstanceRef> instances, ScopeFilter filter)
+    {
+        foreach (var group in instances.GroupBy(i => i.TemplateVersionId).OrderBy(g => g.Key))
+        {
+            foreach (var byCopy in group.GroupBy(i => i.SheetCopyId).OrderBy(g => g.Key ?? 0))
+            {
+                if (filter.Includes(byCopy.Key))
+                {
+                    yield return (byCopy.First(), byCopy.Key);
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -330,7 +358,7 @@ public sealed class RecalculationService(
     public Task<int> RecalculateAllAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct, int? sheetDefId = null,
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null)
-        => RecalculateDocumentAsync(documentId, periodKey, sheetDefId, heldSheetDefId: null, ct, changedColumns);
+        => RecalculateDocumentAsync(documentId, periodKey, sheetDefId, heldSheet: null, ScopeFilter.All, ct, changedColumns);
 
     /// <inheritdoc />
     /// <remarks>
@@ -342,12 +370,14 @@ public sealed class RecalculationService(
     /// не той (<c>ApprovalState.Submit</c>), — тоді відкотиться й цей запис.
     /// </remarks>
     public Task<int> RecalculateSheetUnderSubmitLockAsync(
-        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
-        => RecalculateDocumentAsync(documentId, periodKey, sheetDefId, heldSheetDefId: sheetDefId, ct);
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct, long? sheetCopyId = null)
+        => RecalculateDocumentAsync(
+            documentId, periodKey, sheetDefId, heldSheet: (sheetDefId, sheetCopyId), ScopeFilter.Of(sheetCopyId), ct);
 
     /// <summary>Спільне тіло повного прогону документа (або одного аркуша).</summary>
     private async Task<int> RecalculateDocumentAsync(
-        long documentId, PeriodKey periodKey, int? sheetDefId, int? heldSheetDefId, CancellationToken ct,
+        long documentId, PeriodKey periodKey, int? sheetDefId, (int SheetDefId, long? CopyId)? heldSheet,
+        ScopeFilter scopes, CancellationToken ct,
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null)
     {
         var instances = await rowStore
@@ -364,10 +394,10 @@ public sealed class RecalculationService(
         // на весь знімок структури. Прогін на кожен екземпляр перерахував би
         // ті самі формули стільки разів, скільки в документі таблиць.
         var written = 0;
-        foreach (var group in instances.GroupBy(i => i.TemplateVersionId).OrderBy(g => g.Key))
+        foreach (var (representative, _) in ScopeRepresentatives(instances, scopes))
         {
             written += await RunAsync(
-                    group.First(), dirty: null, ct, sheetDefId, heldSheetDefId, instances, changedColumns)
+                    representative, dirty: null, ct, sheetDefId, heldSheet, instances, changedColumns)
                 .ConfigureAwait(false);
         }
 
@@ -386,8 +416,8 @@ public sealed class RecalculationService(
     /// каскад за аркушем означало б не порахувати залежну формулу сусіднього
     /// аркуша, на яку саме каскад і розрахований.
     /// </param>
-    /// <param name="heldSheetDefId">
-    /// Аркуш, виняткове блокування якого ВЖЕ тримає викликач у цій самій
+    /// <param name="heldSheet">
+    /// Аркуш (і його копія; <c>null</c> — оригінал), виняткове блокування якого ВЖЕ тримає викликач у цій самій
     /// транзакції (подання); <c>null</c> — таких немає.
     /// </param>
     /// <param name="knownInstances">
@@ -405,7 +435,7 @@ public sealed class RecalculationService(
     /// <param name="shared">L2: спільні читання проходу (екземпляри, залежності); <c>null</c> — читати напряму.</param>
     private async Task<int> RunAsync(
         TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null,
-        int? heldSheetDefId = null, IReadOnlyList<TableInstanceRef>? knownInstances = null,
+        (int SheetDefId, long? CopyId)? heldSheet = null, IReadOnlyList<TableInstanceRef>? knownInstances = null,
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null,
         IReadOnlyCollection<CrossPeriodSource>? crossPeriodSources = null,
         IReadOnlySet<int>? approverEditSheets = null,
@@ -428,10 +458,37 @@ public sealed class RecalculationService(
         // сталася правка. Формула сусідньої таблиці, яка читає цю, живе в
         // СВОЄМУ екземплярі: з одним переліком рядків вона не отримала б ані
         // ребра графа, ані місця для запису — і мовчки не перераховувалася б.
-        var instances = knownInstances
+        var allInstances = knownInstances
             ?? (shared is null
                 ? await rowStore.GetTableInstancesAsync(instance.DocumentId, periodKey, ct).ConfigureAwait(false)
                 : await shared.InstancesAsync(instance.DocumentId, periodKey, ct).ConfigureAwait(false));
+
+        // ⛔ RS: «вид» прогону. Оригінал бачить лише оригінали; копія — свої таблиці зі своїх екземплярів, решту з
+        // оригіналів. Далі за текстом `instances` — уже вид, тож ключування за TableDefId однозначне.
+        var snapshotIndex = RecalculationPlanBuilder.SnapshotIndex.For(snapshot);
+        var tables = snapshotIndex.Tables;
+        var formulas = snapshotIndex.Formulas;
+
+        CopyScope? copyScope = null;
+        if (instance.SheetCopyId is { } copyId && tables.TryGetValue(instance.TableDefId, out var copyTable))
+        {
+            copyScope = new CopyScope(
+                copyId, copyTable.SheetDefId,
+                tables.Values.Where(t => t.SheetDefId == copyTable.SheetDefId).Select(t => t.Id).ToHashSet());
+
+            // Повний прогін, звужений до іншого аркуша, копію цього аркуша не чіпає.
+            if (sheetDefId is { } narrowed && narrowed != copyScope.SheetDefId)
+            {
+                return 0;
+            }
+        }
+
+        var instances = CopyScope.Apply(allInstances, copyScope);
+
+        // Формула копії пише лише в таблиці СВОГО аркуша: решта виду — оригінали, їх рахує прогін оригіналу.
+        bool InScope(int formulaId)
+            => copyScope is null
+               || (formulas.TryGetValue(formulaId, out var scoped) && scoped.Table.SheetDefId == copyScope.SheetDefId);
 
         // ⛔ Q-166 (аудит фази 2, продуктивність): ОДИН пакетний запит на
         // рядки ВСІХ таблиць документа замість запиту на кожну — цей прогін
@@ -493,15 +550,16 @@ public sealed class RecalculationService(
         // повного прогону за аркушем потребує знати, якій таблиці належить
         // кожна формула, ДО того, як список цілей уже сформований.
         // L2b: словники таблиць і живих формул — з індексу знімка (будується раз на знімок, не на кожен прогін).
-        var snapshotIndex = RecalculationPlanBuilder.SnapshotIndex.For(snapshot);
-        var tables = snapshotIndex.Tables;
-        var formulas = snapshotIndex.Formulas;
+        // (індекс знімка `tables`/`formulas` побудовано вище — разом із видом копії)
 
         // ⛔ Q-17.3: колонки з ЧУЖИМ власником для екземплярів цього прогону. Введену комірку такої колонки пише лише
         // власник (прогін його екземпляра рахує її формули сам); цей прогін її не перезаписує — див. `Evaluate`.
         // Прапор вимкнено / проєкт не Monthly / таблиця поза маршрутизацією — порожньо, поведінка попередня.
-        var foreignByTable = await ForeignColumnsByTableAsync(instance.DocumentId, instances, tables, periodKey, ct)
-            .ConfigureAwait(false);
+        // RS: копії Q-17 не підтримують (їхні введені значення лежать у власних екземплярах, а не в «власника» року).
+        var foreignByTable = copyScope is not null
+            ? null
+            : await ForeignColumnsByTableAsync(instance.DocumentId, instances, tables, periodKey, ct)
+                .ConfigureAwait(false);
 
         List<int> targets;
 
@@ -511,8 +569,8 @@ public sealed class RecalculationService(
             // ребром на змінену колонку, плюс усе, що в межах періоду читає їхній результат.
             // Знімки (`IsSnapshot`) не чіпаються, як і в `Plan`; повний прогін документа тут не
             // потрібен — це і є ціль coalescing/fan-out (шторм перерахунків).
-            targets = CrossPeriodReaders.Targets(
-                dependencies, crossPeriodSources, periodKey.Sequence, plan, formulas.Keys);
+            targets = [.. CrossPeriodReaders.Targets(
+                dependencies, crossPeriodSources, periodKey.Sequence, plan, formulas.Keys).Where(InScope)];
         }
         else if (dirty is null)
         {
@@ -529,13 +587,14 @@ public sealed class RecalculationService(
             // раніше.
             targets = [.. plan.AllFormulas()
                 .Where(id => !plan.IsSnapshot(id)
+                             && InScope(id)
                              && (sheetDefId is null
                                  || (formulas.TryGetValue(id, out var owned)
                                      && owned.Table.SheetDefId == sheetDefId)))];
         }
         else
         {
-            var affected = Plan(dirty, plan);
+            var affected = WithSeedWriters(Plan(dirty, plan), dirty, plan, snapshot, formulas, rowIdsByTable);
 
             // ⛔ Крос-аркушні rollup рахуються ТУТ САМО, а не «колись».
             // Відкладення має сенс на інтерактивному шляху, де людина чекає на
@@ -543,7 +602,8 @@ public sealed class RecalculationService(
             // порахувати ніколи — саме те, чим був увесь `A7-63`.
             var rollups = TakeDeferredRollups(plan);
 
-            targets = [.. affected, .. rollups];
+            // RS: каскад від копії лишається всередині копії (формули інших аркушів читали б її як «оригінал»).
+            targets = [.. affected.Where(InScope), .. rollups.Where(InScope)];
         }
 
         // D-230: версія з активним Rollup/Check не виходить тут, навіть коли формул немає: джерело Rollup
@@ -554,6 +614,21 @@ public sealed class RecalculationService(
         {
             return 0;
         }
+
+        // ✎ D-461: комірки з ручним значенням замість формули — ОДИН запит на прогін (індекс за періодом × екземпляром),
+        // далі O(1) на комірку в `Evaluate`. Прогін їх не перезаписує НІКОЛИ (і після вимкнення прапорця формули), а
+        // залежні формули читають ручне значення (воно вже в `values` зі сховища).
+        // ⚠ Продуктивність (храповик `FormulaJobFixedCostTests`): версія, де жодна формула не дозволяє ручне значення
+        // і позначок немає, не платить НІЧОГО — ні читання позначок, ні блокування перед записом. «Позначки є» —
+        // похідне від версії (один EXISTS на ревізію знімка, `GetDerivedAsync`): позначка з'являється лише за
+        // увімкненого прапорця, а перемикач піднімає ревізію, тож після вимкнення EXISTS перечитується.
+        var overridesActive = targets.Count > 0
+            && await OverridesActiveAsync(snapshot, formulas.Values.Select(f => f.Formula), ct).ConfigureAwait(false);
+        IReadOnlySet<CellAddress>? overridden = !overridesActive
+            ? null
+            : await formulaOverrides!
+                .ReadKeysAsync([.. instances.Select(i => i.TableInstanceId)], periodKey, ct)
+                .ConfigureAwait(false);
 
         // ⛔ Директива №14 частина 3, `CAL-03`. Розбір винесено СЮДИ з
         // `Evaluate` не заради економії: класифікатор рядкової локальності
@@ -622,7 +697,7 @@ public sealed class RecalculationService(
         var periodReads = RecalculationReadScope.PeriodReferences(parsed.Values.Select(p => p.Root));
 
         var (values, stored) = await LoadValuesAsync(
-            instance, scope, (instances, rowIdsBatch), periodReads, ct).ConfigureAwait(false);
+            instance, scope, (instances, rowIdsBatch), periodReads, ct, copyScope).ConfigureAwait(false);
 
         // ⛔ Знімок довідника одиниць передається В КОНТЕКСТ, а не читається
         // ним самим: `IEvaluationContext.Convert` — синхронний метод діалекту
@@ -734,7 +809,7 @@ public sealed class RecalculationService(
                 Evaluate(
                     owner.Table, owner.Formula, expression, rows, rowFilter,
                     periodKey, context, values, stored, sink,
-                    foreignByTable?.GetValueOrDefault(owner.Table.Id));
+                    foreignByTable?.GetValueOrDefault(owner.Table.Id), overridden);
             }
         }
 
@@ -759,6 +834,14 @@ public sealed class RecalculationService(
 
             foreach (var relationWrite in relationWrites)
             {
+                // RS: прогін копії пише лише в екземпляри цієї копії (rollup/check в оригінали рахує прогін оригіналу).
+                if (copyScope is not null
+                    && !instances.Any(i => i.TableInstanceId == relationWrite.TargetInstanceId
+                                           && i.SheetCopyId == copyScope.CopyId))
+                {
+                    continue;
+                }
+
                 if (!byInstance.TryGetValue(relationWrite.TargetInstanceId, out var relationSink))
                 {
                     byInstance[relationWrite.TargetInstanceId] = relationSink = [];
@@ -796,7 +879,7 @@ public sealed class RecalculationService(
             {
                 var cascade = Plan(rollupSeeds, plan);
                 var deferredCascade = TakeDeferredRollups(plan);
-                var cascadeIds = cascade.Concat(deferredCascade).Distinct().ToList();
+                var cascadeIds = cascade.Concat(deferredCascade).Where(InScope).Distinct().ToList();
                 cascadeIds.Sort((a, b) => plan.EvaluationOrder(a).CompareTo(plan.EvaluationOrder(b)));
 
                 var cascadeUnknown = new List<int>();
@@ -840,7 +923,7 @@ public sealed class RecalculationService(
                         instance, extraScope, (instances, rowIdsBatch),
                         RecalculationReadScope.PeriodReferences(
                             cascadeTargets.Where(parsed.ContainsKey).Select(id => parsed[id].Root)),
-                        ct).ConfigureAwait(false);
+                        ct, copyScope).ConfigureAwait(false);
                     foreach (var (key, value) in extraValues)
                     {
                         values.TryAdd(key, value);
@@ -893,7 +976,7 @@ public sealed class RecalculationService(
         // «документ × аркуш × період» (`ISheetEditGate`).
         var sheetOfInstance = instances
             .Where(t => byInstance.ContainsKey(t.TableInstanceId) && tables.ContainsKey(t.TableDefId))
-            .ToDictionary(t => t.TableInstanceId, t => tables[t.TableDefId].SheetDefId);
+            .ToDictionary(t => t.TableInstanceId, t => (tables[t.TableDefId].SheetDefId, t.SheetCopyId));
 
         // ⚠ Рахується ВСЕРЕДИНІ транзакції: аркуш, поданий, поки прогін рахував,
         // не пишеться, і повернути «записано N» за нього означало б збрехати.
@@ -924,12 +1007,12 @@ public sealed class RecalculationService(
             // власником): формули, пораховані за старою версією, після переносу
             // не пишуться під старими `ColumnDefId`.
             Documents.DocumentStructure.EnsureUnchanged(
-                await sheetGate.EnterStructureAsync(instance.DocumentId, exclusive: false, token).ConfigureAwait(false),
+                await sheetGate.EnterStructureForPeriodAsync(instance.DocumentId, exclusive: false, instance.PeriodKey, token).ConfigureAwait(false),
                 instance.TemplateVersionId,
                 instance.DocumentId);
 
             var writable = await EnterSheetsAsync(
-                    instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheetDefId, token, approverEditSheets)
+                    instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheet, token, approverEditSheets)
                 .ConfigureAwait(false);
 
             // ⛔ O2 (ФВ-9.8, замір I2). Доти тіло нижче виконувалося НА КОЖЕН
@@ -948,7 +1031,7 @@ public sealed class RecalculationService(
                 // зрізі подання й не змінюються (ФВ-9.17, `RecalculationWritePolicy`):
                 // шлях змінити подане — Reopen. Екземпляр без відомого аркуша не
                 // пишеться з тієї самої причини — перевірити його нема чим.
-                if (!sheetOfInstance.TryGetValue(target, out var sheetDefId) || !writable.Contains(sheetDefId))
+                if (!sheetOfInstance.TryGetValue(target, out var sheetKey) || !writable.Contains(sheetKey))
                 {
                     continue;
                 }
@@ -978,7 +1061,8 @@ public sealed class RecalculationService(
             if (batch.Count > 0)
             {
                 await WriteBatchAsync(
-                    instance.DocumentId, batch, rowKeyByRowIdByInstance, isLateEdit, now, token).ConfigureAwait(false);
+                    instance.DocumentId, batch, rowKeyByRowIdByInstance, isLateEdit, now, token, overridesActive)
+                    .ConfigureAwait(false);
             }
 
             await uow.SaveChangesAsync(token).ConfigureAwait(false);
@@ -996,6 +1080,7 @@ public sealed class RecalculationService(
     /// <param name="rowKeyByRowIdByInstance">Ключ рядка за його ідентифікатором — для аудиту.</param>
     /// <param name="isLateEdit">Зміна в <c>Grace</c> (<c>D-70</c>).</param>
     /// <param name="now">Мить зміни для аудиту.</param>
+    /// <param name="lockOverrides">✎ D-461: блокувати й перечитати позначки ручних значень перед записом (лише коли вони можливі).</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⚠ Виконується ВСЕРЕДИНІ транзакції запису, під спільними блокуваннями
@@ -1015,11 +1100,35 @@ public sealed class RecalculationService(
         Dictionary<long, Dictionary<long, string>> rowKeyByRowIdByInstance,
         bool isLateEdit,
         DateTime now,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool lockOverrides = false)
     {
         // ⚠ Старі значення читаються ДО запису — після `ApplyBatchAsync` їх уже
         // немає ніде, а саме вони й становлять половину запису аудиту
         // (той самий порядок, що в `PatchCellsHandler.ReadPreviousValuesAsync`).
+        // ✎ D-461: ручне значення, поставлене ПАРАЛЕЛЬНО з цим прогоном (після читання позначок на старті), не
+        // перезаписується: позначки адрес запису блокуються до коміту й перечитуються — та, що вже є, знімає адресу з
+        // пакета; правка, що ставить нову, чекає на цей коміт і пише ручне значення після. Одна команда на пакет.
+        if (lockOverrides && formulaOverrides is not null)
+        {
+            var locked = await formulaOverrides
+                .LockKeysAsync([.. batch.SelectMany(item => item.Records.Select(r => r.Address))], ct)
+                .ConfigureAwait(false);
+            if (locked.Count > 0)
+            {
+                var unlocked = batch
+                    .Select(item => (item.Target, Records: (IReadOnlyList<CellRecord>)[.. item.Records.Where(r => !locked.Contains(r.Address))]))
+                    .Where(item => item.Records.Count > 0)
+                    .ToArray();
+                if (unlocked.Length == 0)
+                {
+                    return;
+                }
+
+                batch = unlocked;
+            }
+        }
+
         var previous = await cellStore
             .ReadCellsAsync([.. batch.SelectMany(item => item.Records.Select(r => r.Address))], ct)
             .ConfigureAwait(false);
@@ -1088,9 +1197,9 @@ public sealed class RecalculationService(
     /// </summary>
     /// <param name="documentId">Документ прогону.</param>
     /// <param name="periodKey">Період прогону.</param>
-    /// <param name="sheetDefIds">Аркуші екземплярів, у які прогін пише (з повторами).</param>
-    /// <param name="heldSheetDefId">
-    /// Аркуш, виняткове блокування якого вже тримає викликач (подання): не
+    /// <param name="sheets">Аркуші екземплярів (з копією; <c>null</c> — оригінал), у які прогін пише (з повторами).</param>
+    /// <param name="heldSheet">
+    /// Аркуш (з копією), виняткове блокування якого вже тримає викликач (подання): не
     /// блокується вдруге і вважається придатним до запису.
     /// </param>
     /// <param name="ct">Токен скасування.</param>
@@ -1134,33 +1243,41 @@ public sealed class RecalculationService(
     /// записаних входів. <c>Approved</c> не пишеться ніколи (затвердження бере ВИНЯТКОВЕ блокування й
     /// перераховує аркуш саме, <c>ApprovalSnapshotRefresh</c>); інші подані аркуші — так само пропускаються.
     /// </param>
-    private async Task<IReadOnlySet<int>> EnterSheetsAsync(
-        long documentId, PeriodKey periodKey, IEnumerable<int> sheetDefIds, int? heldSheetDefId, CancellationToken ct,
+    private async Task<IReadOnlySet<(int SheetDefId, long? CopyId)>> EnterSheetsAsync(
+        long documentId, PeriodKey periodKey, IEnumerable<(int SheetDefId, long? CopyId)> sheets,
+        (int SheetDefId, long? CopyId)? heldSheet, CancellationToken ct,
         IReadOnlySet<int>? approverEditSheets = null)
     {
-        var writable = new HashSet<int>();
+        var writable = new HashSet<(int SheetDefId, long? CopyId)>();
         var holdsAny = false;
 
-        foreach (var sheetDefId in sheetDefIds.Distinct().Order())
+        // RS: ключ блокування — (аркуш, копія); копії йдуть після оригіналу свого аркуша за зростанням Id.
+        foreach (var sheet in sheets.Distinct().OrderBy(s => s.SheetDefId).ThenBy(s => s.CopyId ?? 0))
         {
+            var (sheetDefId, copyId) = sheet;
+
             // ⛔ Аркуш, чиє ВИНЯТКОВЕ блокування вже тримає викликач (подання),
             // повторно не блокується: це той самий власник, і стан аркуша під
             // цим блокуванням змінює сам викликач.
-            if (sheetDefId == heldSheetDefId)
+            if (heldSheet is { } held && held == sheet)
             {
-                writable.Add(sheetDefId);
+                writable.Add(sheet);
                 continue;
             }
 
-            var status = holdsAny
-                ? await sheetGate.EnterEditNoWaitAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false)
-                : await sheetGate.EnterEditAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false);
+            var status = (holdsAny, copyId) switch
+            {
+                (true, null) => await sheetGate.EnterEditNoWaitAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false),
+                (false, null) => await sheetGate.EnterEditAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false),
+                (true, { } c) => await sheetGate.EnterCopyEditNoWaitAsync(documentId, sheetDefId, periodKey, c, ct).ConfigureAwait(false),
+                (false, { } c) => await sheetGate.EnterCopyEditAsync(documentId, sheetDefId, periodKey, c, ct).ConfigureAwait(false),
+            };
             holdsAny = true;
 
             if (status is not (Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved)
                 || (status == Domain.Enums.DocumentStatus.Submitted && approverEditSheets?.Contains(sheetDefId) == true))
             {
-                writable.Add(sheetDefId);
+                writable.Add(sheet);
             }
         }
 
@@ -1185,7 +1302,8 @@ public sealed class RecalculationService(
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
         Dictionary<CellKey, CellValueData> stored,
         Dictionary<CellAddress, CellRecord> upserts,
-        HashSet<int>? foreignColumns = null)
+        HashSet<int>? foreignColumns = null,
+        IReadOnlySet<CellAddress>? overridden = null)
     {
         // ФВ-0.2: діапазони цієї формули — за ключами, зафіксованими при публікації.
         context.UseFormula(formula, parsed.Root);
@@ -1202,10 +1320,10 @@ public sealed class RecalculationService(
             // значення двома шляхами. Обчислена комірка тієї ж колонки (формула рівня комірки в рядку підсумків)
             // лишається справою екземпляра перегляду: власник бачить лише ВВЕДЕНІ комірки, тож пропуск лишив би
             // дірку у формулах, що читають весь рядок.
-            if (foreignColumns is not null
-                && foreignColumns.Contains(columnDefId)
-                && stored.TryGetValue(new CellKey(0, table.Id, rowKey, columnDefId), out var ownerInput)
-                && !ownerInput.IsCalculated)
+            // ✎ D-461: ОДНЕ правило «введене людиною в ціль формули не перезаписується» на два випадки — Q-17.3
+            // (введена комірка власника в колонці з чужим власником) і ручне значення замість формули
+            // (`doc.CellFormulaOverride`). Перевірка — O(1) за вже прочитаними наборами, без запитів на комірку.
+            if (IsManualTarget(table.Id, rowKey, rowId, columnDefId, periodKey, stored, foreignColumns, overridden))
             {
                 continue;
             }
@@ -1301,6 +1419,164 @@ public sealed class RecalculationService(
 
             upserts[address] = new CellRecord(address, table.Id, data);
         }
+    }
+
+    /// <summary>Похідне від версії: «у документах версії є позначки ручних значень».</summary>
+    private sealed record OverrideMarksPresence(bool Any);
+
+    /// <summary>
+    /// ✎ D-461: чи доводиться прогону дивитися на ручні значення: формула версії дозволяє ручне значення (зі знімка,
+    /// без запиту) АБО в документах версії є позначки (EXISTS раз на ревізію знімка — кеш похідних версії).
+    /// </summary>
+    private async Task<bool> OverridesActiveAsync(
+        Domain.Entities.Configuration.TemplateVersionSnapshot snapshot,
+        IEnumerable<Domain.Entities.Configuration.FormulaDef> formulas,
+        CancellationToken ct)
+    {
+        if (formulaOverrides is null)
+        {
+            return false;
+        }
+
+        if (formulas.Any(f => f.AllowManualOverride))
+        {
+            return true;
+        }
+
+        var presence = await metadata
+            .GetDerivedAsync(
+                snapshot.TemplateVersionId,
+                "d461-override-marks",
+                async token => new OverrideMarksPresence(
+                    await formulaOverrides.AnyForVersionAsync(snapshot.TemplateVersionId, token).ConfigureAwait(false)),
+                ct,
+
+                // ✎ Аудит 31.10 (F3): «позначок немає» — не довше за вікно ревізії й на опублікованій версії: перша
+                // позначка ревізії не піднімає (гонка з вимкненням прапорця), і кешована на години відповідь «немає»
+                // ховала б її від перерахунку. Застаріле «є» коштує лише зайвого читання позначок.
+                shortLived: p => !p.Any)
+            .ConfigureAwait(false);
+
+        return presence.Any;
+    }
+
+    /// <summary>
+    /// ✎ D-461: ціль формули, яку прогін НЕ перезаписує: ручне значення замість формули (позначка) або (Q-17.3)
+    /// введена комірка власника в колонці з чужим власником.
+    /// </summary>
+    private static bool IsManualTarget(
+        int tableDefId,
+        string rowKey,
+        long rowId,
+        int columnDefId,
+        PeriodKey periodKey,
+        Dictionary<CellKey, CellValueData> stored,
+        HashSet<int>? foreignColumns,
+        IReadOnlySet<CellAddress>? overridden)
+        => (overridden is { Count: > 0 } && overridden.Contains(new CellAddress(periodKey, rowId, columnDefId)))
+           || (foreignColumns is not null
+               && foreignColumns.Contains(columnDefId)
+               && stored.TryGetValue(new CellKey(0, tableDefId, rowKey, columnDefId), out var ownerInput)
+               && !ownerInput.IsCalculated);
+
+    /// <summary>
+    /// ✎ D-461: до формул, що ЧИТАЮТЬ насіння, додає формули, що його ПИШУТЬ (колонки — на обчислюваній колонці,
+    /// комірки), і все, що читає їхній результат. Інакше повернення формули (видалення ручного значення) лишило б
+    /// комірку порожньою до наступної правки входу.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Звичайна правка вводу формулу-«автора» не має (у комірку формули без ручного значення писати не можна), тож
+    /// для неї набір не змінюється. Для ручного значення автор рахується, але сама ручна комірка пропускається в
+    /// <see cref="Evaluate"/> — дешево й однаково. Рядкова локальність (`CAL-03`) звужує автора до рядків насіння.
+    /// Колонка → таблиця — за знімком (O(1)); ключ рядка — лише для комірочних формул тієї колонки.
+    /// </remarks>
+    private static IReadOnlyList<int> WithSeedWriters(
+        IReadOnlyList<int> affected,
+        DirtySet dirty,
+        RecalculationPlan plan,
+        Domain.Entities.Configuration.TemplateVersionSnapshot snapshot,
+        Dictionary<int, (Domain.Entities.Configuration.TableDef Table, Domain.Entities.Configuration.FormulaDef Formula)> formulas,
+        Dictionary<int, IReadOnlyDictionary<string, long>> rowIdsByTable)
+    {
+        HashSet<int>? writers = null;
+        Dictionary<int, List<(int Id, Domain.Entities.Configuration.FormulaDef Formula, Domain.Entities.Configuration.TableDef Table)>>? byColumn = null;
+        Dictionary<int, Dictionary<long, string>>? keyByRowId = null;
+
+        foreach (var seed in dirty.Seeds)
+        {
+            if (!snapshot.ColumnsById.TryGetValue(seed.ColumnDefId, out var column))
+            {
+                continue;
+            }
+
+            byColumn ??= formulas
+                .Where(p => p.Value.Formula.ColumnDefId is not null
+                            && p.Value.Formula.Scope is Domain.Enums.FormulaScope.Column or Domain.Enums.FormulaScope.Cell)
+                .GroupBy(p => p.Value.Formula.ColumnDefId!.Value)
+                .ToDictionary(g => g.Key, g => g.Select(p => (p.Key, p.Value.Formula, p.Value.Table)).ToList());
+
+            if (!byColumn.TryGetValue(column.Id, out var candidates))
+            {
+                continue;
+            }
+
+            foreach (var (id, formula, table) in candidates)
+            {
+                if (plan.IsSnapshot(id))
+                {
+                    continue;
+                }
+
+                if (formula.Scope == Domain.Enums.FormulaScope.Column)
+                {
+                    if (column.IsComputed)
+                    {
+                        (writers ??= []).Add(id);
+                    }
+
+                    continue;
+                }
+
+                // Комірочна: лише якщо рядок насіння — рядок формули.
+                keyByRowId ??= [];
+                if (!keyByRowId.TryGetValue(table.Id, out var keys))
+                {
+                    keys = rowIdsByTable.TryGetValue(table.Id, out var byKey)
+                        ? byKey.ToDictionary(p => p.Value, p => p.Key)
+                        : [];
+                    keyByRowId[table.Id] = keys;
+                }
+
+                if (keys.TryGetValue(seed.TableRowId, out var seedKey)
+                    && formula.RowDefId is { } rowDefId
+                    && table.Rows.FirstOrDefault(r => r.Id == rowDefId)?.RowKeyValue == seedKey)
+                {
+                    (writers ??= []).Add(id);
+                }
+            }
+        }
+
+        if (writers is null)
+        {
+            return affected;
+        }
+
+        var all = new HashSet<int>(affected);
+        var queue = new Queue<int>(writers.Where(all.Add));
+        while (queue.Count > 0)
+        {
+            foreach (var dependent in plan.DependentsOfFormula(queue.Dequeue()))
+            {
+                if (!plan.IsSnapshot(dependent) && !plan.IsCrossSheet(dependent) && all.Add(dependent))
+                {
+                    queue.Enqueue(dependent);
+                }
+            }
+        }
+
+        var ordered = all.ToList();
+        ordered.Sort((a, b) => plan.EvaluationOrder(a).CompareTo(plan.EvaluationOrder(b)));
+        return ordered;
     }
 
     /// <summary>
@@ -1427,6 +1703,7 @@ public sealed class RecalculationService(
     /// документо-період.
     /// </param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="copyScope">RS: вид копії для ІНШИХ періодів (та сама копія); <c>null</c> — оригінали.</param>
     private async Task<(
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> Values,
         Dictionary<CellKey, CellValueData> Stored)> LoadValuesAsync(
@@ -1435,7 +1712,8 @@ public sealed class RecalculationService(
         (IReadOnlyList<TableInstanceRef> Instances,
             IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> RowIds) current,
         (HashSet<int> Offsets, HashSet<int> Absolutes)? periodReads,
-        CancellationToken ct)
+        CancellationToken ct,
+        CopyScope? copyScope = null)
     {
         var values = new Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue>();
 
@@ -1453,7 +1731,8 @@ public sealed class RecalculationService(
         var periodKey = new PeriodKey(instance.PeriodKey);
 
         await LoadPeriodAsync(
-                values, stored, instance.DocumentId, periodKey, offset: 0, scope.TableDefIds, ct, current)
+                values, stored, instance.DocumentId, periodKey, offset: 0, scope.TableDefIds, ct, current,
+                copyScope: copyScope)
             .ConfigureAwait(false);
 
         // ⛔ Попередній період завантажується, коли він існує. `[Period:-1]` у
@@ -1503,11 +1782,69 @@ public sealed class RecalculationService(
 
             await LoadPeriodAsync(
                     values, stored: null, instance.DocumentId, new PeriodKey(periodKey.Value + offset), offset,
-                    scope.TableDefIds, ct)
+                    scope.TableDefIds, ct, known: null, currentVersionId: instance.TemplateVersionId,
+                    copyScope: copyScope)
                 .ConfigureAwait(false);
         }
 
         return (values, stored);
+    }
+
+    /// <summary>
+    /// Таблиці/колонки екземплярів ІНШОЇ версії → відповідники у версії <paramref name="currentVersion"/> (за кодами аркуша,
+    /// таблиці й колонки; код, що змінився, - через збережену мапу перейменувань). Екземпляр без таблиці-відповідника
+    /// у результат не потрапляє.
+    /// </summary>
+    private async Task<Dictionary<long, (int TableDefId, Dictionary<int, int> Columns)>> TranslateForeignInstancesAsync(
+        IReadOnlyList<TableInstanceRef> all, int currentVersion, CancellationToken ct)
+    {
+        var result = new Dictionary<long, (int, Dictionary<int, int>)>();
+        var current = await metadata.GetAsync(currentVersion, ct).ConfigureAwait(false);
+        var (forward, backward) = columnRenames is null
+            ? ((IReadOnlyDictionary<int, int>)new Dictionary<int, int>(), (IReadOnlyDictionary<int, int>)new Dictionary<int, int>())
+            : await columnRenames.GetAsync(ct).ConfigureAwait(false);
+
+        foreach (var foreign in all.Where(t => t.TemplateVersionId != currentVersion))
+        {
+            var other = await metadata.GetAsync(foreign.TemplateVersionId, ct).ConfigureAwait(false);
+            var source = other.Sheets
+                .SelectMany(s => s.Tables.Select(t => (Sheet: s, Table: t)))
+                .FirstOrDefault(x => x.Table.Id == foreign.TableDefId);
+            if (source.Table is null)
+            {
+                continue;
+            }
+
+            var target = current.Sheets
+                .Where(s => !s.IsDeleted && string.Equals(s.Code, source.Sheet.Code, StringComparison.Ordinal))
+                .SelectMany(s => s.Tables)
+                .FirstOrDefault(t => !t.IsDeleted && string.Equals(t.Code, source.Table.Code, StringComparison.Ordinal));
+            if (target is null)
+            {
+                continue;
+            }
+
+            var targetByCode = target.Columns.Where(c => !c.IsDeleted).ToDictionary(c => c.Code, c => c.Id, StringComparer.Ordinal);
+            var map = new Dictionary<int, int>();
+            foreach (var column in source.Table.Columns)
+            {
+                if (targetByCode.TryGetValue(column.Code, out var same))
+                {
+                    map[column.Id] = same;
+                }
+                else if ((forward.TryGetValue(column.Id, out var renamed)
+                          && current.ColumnsById.TryGetValue(renamed, out var asNew) && asNew.TableDefId == target.Id)
+                         || (backward.TryGetValue(column.Id, out renamed)
+                             && current.ColumnsById.TryGetValue(renamed, out asNew) && asNew.TableDefId == target.Id))
+                {
+                    map[column.Id] = renamed;
+                }
+            }
+
+            result[foreign.TableInstanceId] = (target.Id, map);
+        }
+
+        return result;
     }
 
     /// <summary>Значення всіх таблиць документа за один період.</summary>
@@ -1530,6 +1867,11 @@ public sealed class RecalculationService(
     /// переліку інших не залежать, тож підмножина надмножини — те саме, що
     /// окремий запит на підмножину.
     /// </param>
+    /// <param name="currentVersionId">
+    /// Версія періоду, що рахується (RPT-STABLE Part B): екземпляри суміжного періоду на іншій версії розвʼязуються
+    /// за кодами в її таблиці/колонки; <c>null</c> - без розвʼязання (поточний період).
+    /// </param>
+    /// <param name="copyScope">RS: вид копії (її таблиці — зі своїх екземплярів); <c>null</c> — лише оригінали.</param>
     private async Task LoadPeriodAsync(
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
         Dictionary<CellKey, CellValueData>? stored,
@@ -1539,10 +1881,32 @@ public sealed class RecalculationService(
         IReadOnlySet<int>? tableDefIds,
         CancellationToken ct,
         (IReadOnlyList<TableInstanceRef> Instances,
-            IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> RowIds)? known = null)
+            IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> RowIds)? known = null,
+        int? currentVersionId = null,
+        CopyScope? copyScope = null)
     {
         var all = known?.Instances
                   ?? await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
+
+        // ✎ RPT-STABLE Part B: суміжний період на ІНШІЙ версії шаблону (шкала версій проєкту) - таблиця й колонки
+        // розвʼязуються за КОДОМ у версію періоду, що рахується (+ збережена мапа перейменувань як псевдонім); колонка,
+        // якої в тій версії немає, дає NULL (не 0 і не помилку) - ключа в `values` просто немає.
+        Dictionary<long, (int TableDefId, Dictionary<int, int> Columns)>? translations = null;
+        if (currentVersionId is { } currentVersion && all.Any(t => t.TemplateVersionId != currentVersion))
+        {
+            translations = await TranslateForeignInstancesAsync(all, currentVersion, ct).ConfigureAwait(false);
+            all =
+            [
+                .. all.Where(t => t.TemplateVersionId == currentVersion || translations.ContainsKey(t.TableInstanceId))
+                    .Select(t => translations.TryGetValue(t.TableInstanceId, out var tr)
+                        ? t with { TableDefId = tr.TableDefId, TemplateVersionId = currentVersion }
+                        : t),
+            ];
+        }
+
+        // ⛔ RS: вид копії для ІНШОГО періоду — та сама копія (її Id наскрізний для документа), решта — оригінали.
+        // Після перекладу версій: TableDefId уже у версії прогону, на якій побудовано `copyScope.TableDefIds`.
+        all = CopyScope.Apply(all, copyScope);
 
         // ⛔ `CAL-02`. Фільтр стоїть ДО обох пакетних запитів, а не після них:
         // сенс рядка саме в тому, скільки комірок віддає база, а не скільки з
@@ -1586,7 +1950,15 @@ public sealed class RecalculationService(
                     continue;
                 }
 
-                var key = new CellKey(offset, table.TableDefId, rowKey, cell.Address.ColumnDefId);
+                var columnId = cell.Address.ColumnDefId;
+                if (translations is not null
+                    && translations.TryGetValue(table.TableInstanceId, out var translated)
+                    && !translated.Columns.TryGetValue(columnId, out columnId))
+                {
+                    continue;   // колонки немає у версії періоду, що рахується
+                }
+
+                var key = new CellKey(offset, table.TableDefId, rowKey, columnId);
                 values[key] = FromCellValue(cell.Value);
 
                 if (stored is not null)

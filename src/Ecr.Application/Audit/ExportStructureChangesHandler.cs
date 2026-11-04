@@ -89,10 +89,12 @@ public sealed class ExportStructureChangesHandler(
                 TargetRoleId: null,
                 JsonSerializer.Serialize(new
                 {
+                    tab = "structure",
                     from = filter.From,
                     to = filter.To,
                     entityType = filter.EntityType,
                     changedByUserId = filter.ChangedByUserId,
+                    sort = filter.Sort.ToString(),
                     rows = total,
                 }),
                 currentUser.UserId ?? 0,

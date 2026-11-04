@@ -19,12 +19,16 @@ export { fileNameOf };
 /**
  * Походження зміни — ті самі значення, що пише `aud.CellChange.Origin`.
  * ✎ D-442: `ApproverEdit` — правка погоджувача поточного кроку на поданому аркуші до погодження.
+ * ✎ D-461: `FormulaOverride` — ручне значення замість формули (з причиною); `FormulaRestored` — ручне значення
+ * прибрано, комірку знову рахує формула (серверні `CellChangeOrigins.FormulaOverride`/`FormulaRestored`).
  */
 export const cellChangeOrigins = [
   'UserEdit',
   'ApproverEdit',
   'Import',
   'ImportOverwrite',
+  'FormulaOverride',
+  'FormulaRestored',
   'Recalculation',
   'Migration',
 ] as const;
@@ -37,11 +41,40 @@ export const cellChangeOrigins = [
  * хто їх запустив), але ім'я біля числа, яке порахувала формула, читалося б як «це ввів він».
  * А імпорт — навпаки: число з книги ввела й застосувала конкретна людина, і «система» ховала б її.
  */
-export const humanCellChangeOrigins: readonly string[] = ['UserEdit', 'ApproverEdit', 'Import', 'ImportOverwrite'];
+export const humanCellChangeOrigins: readonly string[] = [
+  'UserEdit',
+  'ApproverEdit',
+  'Import',
+  'ImportOverwrite',
+  // ✎ D-461: як і на сервері (`IsHuman`), обидва — людські: ручне значення ставить і прибирає людина з правом.
+  'FormulaOverride',
+  'FormulaRestored',
+];
 
 /** Чи зробила зміну з цим походженням людина (`humanCellChangeOrigins`). */
 export function isHumanOrigin(origin: string | null | undefined): boolean {
   return origin !== null && origin !== undefined && humanCellChangeOrigins.includes(origin);
+}
+
+/**
+ * ✎ D-461: причина, з якою перенос версії шаблону повертає формулу замість ручного значення
+ * (`FormulaOverrideMigration.Reason` на сервері — незмінна константа, як і «Excel import»).
+ */
+export const VersionMigrationReason = 'Version migration';
+
+/**
+ * Чи зробила зміну КОМІРКИ людина — за походженням і, для повернення формули, за причиною.
+ *
+ * ✎ D-461 (рішення людини 30.10): `FormulaRestored`, який записав ПЕРЕНОС ВЕРСІЇ (`reason = "Version migration"`), —
+ * дія системи: автор показується як «Система», а того, хто запустив перенос, видно в підказці (рядок журналу
+ * зберігає його `changedByUserId` — нічого не переписується). Сервер це походження вважає людським
+ * (`CellChangeOrigins.IsHuman`): на ньому стоять правила «ручне не перезаписувати» й `HumanOriginsSql`, тож
+ * розрізнення лише для ПОКАЗУ живе тут, а не зміною класу походження в журналі.
+ */
+export function isHumanCellChange(change: { readonly origin: string | null | undefined; readonly reason?: string | null | undefined }): boolean {
+  if (change.origin === 'FormulaRestored' && change.reason === VersionMigrationReason) return false;
+
+  return isHumanOrigin(change.origin);
 }
 
 /**
@@ -137,8 +170,24 @@ function windowEnd(value: string): string {
   return instant(value, 1);
 }
 
+/**
+ * Порядок сторінок журналів аудиту — ТІЛЬКИ серверний (клієнтське сортування однієї сторінки було б хибним між
+ * сторінками). Типовий — найновіші першими; курсор прив'язаний до порядку, тож зміна порядку скидає курсор.
+ */
+export type AuditSort = components['schemas']['AuditSort'];
+
+/** Типовий порядок: сервер віддає його, коли `sort` не задано, тож у адресу він не потрапляє. */
+export const DefaultAuditSort: AuditSort = 'ChangedAtDesc';
+
+/** Додає `sort` у запит, якщо порядок не типовий (адреса лишається читабельною). */
+function applySort(params: URLSearchParams, sort: AuditSort | null | undefined): void {
+  if (sort !== null && sort !== undefined && sort !== DefaultAuditSort) params.set('sort', sort);
+}
+
 /** Фільтр журналу змін комірок. */
 interface CellChangeFilter {
+  /** Порядок сторінок; `undefined` — типовий (найновіші першими). */
+  readonly sort?: AuditSort | null;
   /** Початок вікна (`YYYY-MM-DD` або ISO); **обов'язковий**. Дата — ВКЛЮЧНО. */
   readonly from: string;
   /** Кінець вікна; **обов'язковий**. Дата — ВКЛЮЧНО: названий день у вікні (див. `windowEnd`). */
@@ -224,9 +273,22 @@ export function cellChangesQuery(filter: CellChangeFilter): string {
     params.set('periodKey', String(filter.periodKey));
   }
 
+  applySort(params, filter.sort);
+
   if (filter.cursor !== null && filter.cursor !== undefined && filter.cursor.length > 0) {
     params.set('cursor', filter.cursor);
   }
+
+  return params.toString();
+}
+
+/**
+ * Рядок запиту CSV-експорту журналу комірок: ті самі фільтри й порядок, що в переліку, БЕЗ `limit` і `cursor` —
+ * експорт віддає всю видачу фільтра (до стелі сервера), а не сторінку.
+ */
+function cellsExportQuery(filter: CellChangeFilter): string {
+  const params = new URLSearchParams(cellChangesQuery({ ...filter, cursor: null }));
+  params.delete('limit');
 
   return params.toString();
 }
@@ -243,6 +305,7 @@ interface StructureChangeFilter {
   readonly entityType?: string | null;
   /** Автор зміни — `UserId`, не SID. */
   readonly changedByUserId?: number | null;
+  readonly sort?: AuditSort | null;
   readonly limit?: number;
   readonly cursor?: string | null;
 }
@@ -265,6 +328,8 @@ export function structureChangesQuery(filter: StructureChangeFilter): string {
   if (filter.changedByUserId !== null && filter.changedByUserId !== undefined) {
     params.set('changedByUserId', String(filter.changedByUserId));
   }
+
+  applySort(params, filter.sort);
 
   if (filter.cursor !== null && filter.cursor !== undefined && filter.cursor.length > 0) {
     params.set('cursor', filter.cursor);
@@ -312,6 +377,102 @@ export async function fetchStructureExport(filter: StructureChangeFilter): Promi
   };
 }
 
+/** CSV журналу змін комірок (гаряче + архів); ті самі `fetch` → blob і розбір відмов, що в `fetchStructureExport`. */
+export async function fetchCellsExport(filter: CellChangeFilter): Promise<StructureExportFile> {
+  const query = cellsExportQuery(filter);
+  const response = await apiFetchResponse(`/api/v1/audit/cells/export.csv?${query}`, {
+    method: 'GET',
+  });
+
+  return {
+    blob: await response.blob(),
+    fileName: fileNameOf(response.headers.get('Content-Disposition')),
+  };
+}
+
+/** CSV журналу подій безпеки. */
+export async function fetchSecurityExport(filter: SecurityEventFilter): Promise<StructureExportFile> {
+  const params = new URLSearchParams(securityEventsQuery({ ...filter, cursor: null }));
+  params.delete('limit');
+  const response = await apiFetchResponse(`/api/v1/audit/security/export.csv?${params.toString()}`, {
+    method: 'GET',
+  });
+
+  return {
+    blob: await response.blob(),
+    fileName: fileNameOf(response.headers.get('Content-Disposition')),
+  };
+}
+
+/** Сторінка журналу подій погодження (`wf.ApprovalEvent`): подання, затвердження, відхилення, повернення. */
+export type WorkflowEventPage = components['schemas']['PagedResultOfWorkflowEventView'];
+
+/** Фільтр журналу подій погодження; вікно **обов'язкове**. */
+interface WorkflowEventFilter {
+  readonly from: string;
+  readonly to: string;
+  /** `Submit` | `Approve` | `ApproveStep` | `Reject` | `Reopen` | `Recall`. */
+  readonly action?: string | null;
+  /** Автор дії — `UserId`. */
+  readonly changedByUserId?: number | null;
+  readonly documentId?: number | null;
+  readonly sort?: AuditSort | null;
+  readonly limit?: number;
+  readonly cursor?: string | null;
+}
+
+/** Рядок запиту журналу подій погодження: вікно/курсор/порядок — як у решти журналів. */
+export function workflowEventsQuery(filter: WorkflowEventFilter): string {
+  const params = new URLSearchParams();
+  params.set('from', windowStart(filter.from));
+  params.set('to', windowEnd(filter.to));
+  params.set('limit', String(filter.limit ?? 100));
+
+  if (filter.action !== null && filter.action !== undefined && filter.action.length > 0) {
+    params.set('action', filter.action);
+  }
+
+  if (filter.changedByUserId !== null && filter.changedByUserId !== undefined) {
+    params.set('changedByUserId', String(filter.changedByUserId));
+  }
+
+  if (filter.documentId !== null && filter.documentId !== undefined) {
+    params.set('documentId', String(filter.documentId));
+  }
+
+  applySort(params, filter.sort);
+
+  if (filter.cursor !== null && filter.cursor !== undefined && filter.cursor.length > 0) {
+    params.set('cursor', filter.cursor);
+  }
+
+  return params.toString();
+}
+
+/** Сторінка журналу подій погодження. */
+export function useWorkflowEvents(filter: WorkflowEventFilter): UseQueryResult<WorkflowEventPage> {
+  const query = workflowEventsQuery(filter);
+
+  return useQuery({
+    queryKey: ['audit-workflow', query],
+    queryFn: () => apiFetch<WorkflowEventPage>(`/api/v1/audit/workflow?${query}`),
+  });
+}
+
+/** CSV журналу подій погодження. */
+export async function fetchWorkflowExport(filter: WorkflowEventFilter): Promise<StructureExportFile> {
+  const params = new URLSearchParams(workflowEventsQuery({ ...filter, cursor: null }));
+  params.delete('limit');
+  const response = await apiFetchResponse(`/api/v1/audit/workflow/export.csv?${params.toString()}`, {
+    method: 'GET',
+  });
+
+  return {
+    blob: await response.blob(),
+    fileName: fileNameOf(response.headers.get('Content-Disposition')),
+  };
+}
+
 /** Сторінка журналу подій безпеки (`aud.SecurityEvent`, ФВ-5.24). */
 export type SecurityEventPage = components['schemas']['PagedResultOfSecurityEventView'];
 
@@ -319,6 +480,7 @@ export type SecurityEventPage = components['schemas']['PagedResultOfSecurityEven
 interface SecurityEventFilter {
   readonly from: string;
   readonly to: string;
+  readonly sort?: AuditSort | null;
   /** Тип події (`AccessDenied`, …). */
   readonly eventType?: string | null;
   /** Хто спричинив подію — `UserId`, не SID. */
@@ -334,6 +496,7 @@ export function securityEventsQuery(filter: SecurityEventFilter): string {
       from: filter.from,
       to: filter.to,
       changedByUserId: filter.changedByUserId ?? null,
+      sort: filter.sort ?? null,
       limit: filter.limit ?? 100,
       cursor: filter.cursor ?? null,
     }),

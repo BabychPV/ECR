@@ -16,9 +16,17 @@ public static class DependencyInjection
     /// ⛔ <c>IExternalDataSink</c> не реєструється ніколи — його не існує
     /// (D-44): система читає із зовнішніх джерел і не пише в них.
     /// </remarks>
-    public static IServiceCollection AddPiAfAdapters(this IServiceCollection services)
+    /// <param name="services">Контейнер.</param>
+    /// <param name="collection">Нарізка й видалення зниклих точок (D-462); <c>null</c> — типові значення продукту.</param>
+    /// <param name="piSqlClient">Налаштування PI SQL Client (D-462); <c>null</c> — типові.</param>
+    public static IServiceCollection AddPiAfAdapters(
+        this IServiceCollection services,
+        CollectionRunnerOptions? collection = null,
+        PiSqlClientOptions? piSqlClient = null)
     {
         ArgumentNullException.ThrowIfNull(services);
+
+        services.AddSingleton(piSqlClient ?? new PiSqlClientOptions(null));
 
         // HttpClient через фабрику: власноруч створений і збережений у полі
         // клієнт тримає з'єднання після зміни DNS, і збір починає ходити на
@@ -65,7 +73,17 @@ public static class DependencyInjection
         services.AddScoped<CatchUpPlanner>();
         services.AddScoped<PiAfCatalogReader>();
         services.AddScoped<ISourceCatalogReader>(sp => sp.GetRequiredService<PiAfCatalogReader>());
-        services.AddScoped<ICollectionRunner, CollectionRunner>();
+
+        // ⚠ Фабрикою, а не `AddScoped<ICollectionRunner, CollectionRunner>()`: налаштування D-462 — record, і
+        // контейнер не підставляв би його в необов'язковий параметр збирача (решта необов'язкових — дефолти тестів).
+        var runnerOptions = collection ?? CollectionRunnerOptions.Default;
+        services.AddScoped<ICollectionRunner>(sp => new CollectionRunner(
+            sp.GetServices<IExternalDataSource>(),
+            sp.GetRequiredService<SourceUnitConverter>(),
+            sp.GetRequiredService<CatchUpPlanner>(),
+            sp.GetRequiredService<ICollectionStore>(),
+            logger: sp.GetService<Microsoft.Extensions.Logging.ILogger<CollectionRunner>>(),
+            options: runnerOptions));
 
         return services;
     }

@@ -5,8 +5,8 @@ using Xunit;
 namespace Ecr.Architecture.Tests;
 
 /// <summary>
-/// Секції «змінені тексти» і «прибрані ключі» у <c>09-seed.sql</c> не
-/// розходяться з каталогом.
+/// Секції «змінені тексти» і «прибрані ключі» сіду (спільні списки прологу і порції
+/// <c>#UiChanged</c>/<c>#UiRemoved</c> файлів <c>seed/features</c>) не розходяться з каталогом.
 /// </summary>
 /// <remarks>
 /// ⛔ Секція оновлює «старе → нове» на вже розгорнутих базах. «Нове», що не
@@ -16,7 +16,7 @@ namespace Ecr.Architecture.Tests;
 /// </remarks>
 public sealed partial class SeedTextUpdateTests
 {
-    private const string SeedFile = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedFile = SeedSql.DisplayPath;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -24,8 +24,7 @@ public sealed partial class SeedTextUpdateTests
     [Trait("Requirement", "ФВ-14.9")]
     public void Нове_значення_кожного_оновлення_збігається_з_каталогом()
     {
-        var text = File.ReadAllText(
-            Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar)));
+        var text = SeedSql.Text;
 
         var updates = UpdateRows(text);
         var catalog = CatalogRows(text);
@@ -73,10 +72,10 @@ public sealed partial class SeedTextUpdateTests
     [Trait("Requirement", "ФВ-14.9")]
     public void Прибраного_ключа_немає_в_каталозі()
     {
-        var text = File.ReadAllText(
-            Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar)));
+        var text = SeedSql.Text;
 
         var removed = Section(text, RemovedTail, RemovedRow())
+            .Concat(FeatureRows(text, FeatureRemovedInsert, RemovedRow()))
             .Select(m => (Key: Unquote(m.Groups[1].Value), Lang: m.Groups[2].Value))
             .ToList();
         var catalog = CatalogRows(text);
@@ -98,12 +97,38 @@ public sealed partial class SeedTextUpdateTests
             + string.Join(", ", both));
     }
 
-    /// <summary>Рядки секції змінених текстів: ключ, мова, старе, нове.</summary>
+    /// <summary>
+    /// Рядки змінених текстів: спільна секція прологу плюс порції
+    /// <c>INSERT INTO #UiChanged</c> файлів <c>seed/features</c> (їх застосовує епілог).
+    /// </summary>
     private static List<(string Key, string Lang, string Old, string New)> UpdateRows(string text)
         => Section(text, UpdateTail, UpdateRow())
+            .Concat(FeatureRows(text, FeatureChangedInsert, UpdateRow()))
             .Select(m => (Unquote(m.Groups[1].Value), m.Groups[2].Value,
                           Unquote(m.Groups[3].Value), Unquote(m.Groups[4].Value)))
             .ToList();
+
+    /// <summary>
+    /// Рядки порцій <c>INSERT INTO #UiChanged|#UiRemoved</c> (до найближчого <c>GO</c>).
+    /// </summary>
+    private static List<Match> FeatureRows(string text, string insert, Regex row)
+    {
+        var result = new List<Match>();
+        var pos = 0;
+        while ((pos = text.IndexOf(insert, pos, StringComparison.Ordinal)) >= 0)
+        {
+            var stop = text.IndexOf("\nGO", pos, StringComparison.Ordinal);
+            Assert.True(stop > pos, $"Порція «{insert}» у {SeedFile} не закінчується GO.");
+            result.AddRange(row.Matches(text[pos..stop]));
+            pos = stop;
+        }
+
+        return result;
+    }
+
+    private const string FeatureChangedInsert = "INSERT INTO #UiChanged";
+
+    private const string FeatureRemovedInsert = "INSERT INTO #UiRemoved";
 
     /// <summary>Рядки <c>VALUES</c> секції, що закінчується <paramref name="tail"/>.</summary>
     private static MatchCollection Section(string text, string tail, Regex row)
@@ -117,17 +142,14 @@ public sealed partial class SeedTextUpdateTests
         return row.Matches(text[start..end]);
     }
 
-    /// <summary>Рядки <c>MERGE sys_ecr.UiString AS t</c>: (ключ, мова) → значення.</summary>
+    /// <summary>Рядки en-каталогу (порції <c>INSERT INTO #UiEn</c>) і перекладів: (ключ, мова) → значення.</summary>
     private static Dictionary<(string, string), string> CatalogRows(string text)
     {
-        var start = text.IndexOf("MERGE sys_ecr.UiString AS t", StringComparison.Ordinal);
-        Assert.True(start >= 0, $"У {SeedFile} немає блоку MERGE sys_ecr.UiString AS t.");
-
-        var end = text.IndexOf("WHEN NOT MATCHED", start, StringComparison.Ordinal);
-        Assert.True(end > start, $"Блок MERGE sys_ecr.UiString AS t у {SeedFile} не закінчується.");
+        var block = SeedSql.EnCatalogOf(text);
+        Assert.True(block.Length > 0, $"У {SeedFile} немає порцій en-каталогу ({SeedSql.EnCatalogInsert}).");
 
         var rows = new Dictionary<(string, string), string>();
-        foreach (Match m in CatalogRow().Matches(text[start..end]))
+        foreach (Match m in CatalogRow().Matches(block))
         {
             rows[(Unquote(m.Groups[1].Value), m.Groups[2].Value)] = Unquote(m.Groups[3].Value);
         }

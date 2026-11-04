@@ -19,7 +19,7 @@ namespace Ecr.Calculations.Tests;
 /// </remarks>
 public sealed class Nm3UnitsTests
 {
-    private const string SeedPath = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedPath = SeedSql.DisplayPath;
     private const string SectionStart = "-- HSE301:NM3 ──";
     private const string SectionEnd = "-- HSE301:NM3 ── кінець секції";
 
@@ -93,7 +93,7 @@ public sealed class Nm3UnitsTests
     [Trait("Requirement", "ФВ-16.2")]
     public void Сід_тримає_той_самий_фактор_що_й_дзеркало()
     {
-        var text = File.ReadAllText(Path.Combine(SolutionRoot(), SeedPath.Replace('/', Path.DirectorySeparatorChar)));
+        var text = SeedSql.Text;
         var start = text.IndexOf(SectionStart, StringComparison.Ordinal);
         var end = text.IndexOf(SectionEnd, StringComparison.Ordinal);
         Assert.True(start >= 0 && end > start, "Секції `-- HSE301:NM3` у 09-seed.sql немає.");

@@ -54,11 +54,18 @@ test.describe('інспектор документа', () => {
     await grid.locator('revogr-data [data-rgcol]').first().click();
     await expect(page.locator('[data-formula-bar="cell"]').first()).toBeVisible();
 
-    await page.locator('[data-inspector-triggers]').getByRole('button').nth(1).click();
+    // ✎ TC: between Issues and History now sits the "Discussion" button (when the chat exists), so not by index.
+    await page.locator('[data-inspector-triggers]').getByRole('button', { name: /History/i }).click();
     const aside = page.getByRole('complementary');
     await expect(aside).toBeVisible();
     await expect(page).toHaveURL(/[?&]panel=history/);
     await expect(aside.locator('[data-inspector-address]')).toBeVisible();
+
+    // Вибір комірки не підміняє вміст: History лишається журналом аркуша, «This cell» доступний і веде до історії комірки.
+    await expect(aside.getByRole('radio', { name: 'Sheet log' })).toBeChecked();
+    await expect(aside.getByRole('radio', { name: 'This cell' })).toBeEnabled();
+    await aside.locator('label', { hasText: 'This cell' }).click();
+    await expect(aside.locator('[data-inspector-scope]')).toContainText(/^Cell: /);
 
     await aside.getByRole('tab').nth(2).click();
     await expect(aside.locator('[data-inspector-info]')).toBeVisible();

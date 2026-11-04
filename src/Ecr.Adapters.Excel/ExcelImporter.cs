@@ -561,7 +561,7 @@ public sealed class ExcelImporter(
                 // `sheet-edit`). Аркуші вище прочитано за версією ДО транзакції;
                 // перенос, що зафіксувався відтоді, — відмова, а не блокування
                 // аркушів старої структури.
-                var locked = await sheetGate.EnterStructureAsync(documentId, exclusive: false, innerCt)
+                var locked = await sheetGate.EnterStructureForPeriodAsync(documentId, exclusive: false, plan.PeriodKey, innerCt)
                     .ConfigureAwait(false);
                 foreach (var version in templateVersions)
                 {
@@ -641,7 +641,11 @@ public sealed class ExcelImporter(
                             .Select(g => new PatchRow(
                                 g.Key,
                                 BaseRowVersion(diff.RowVersions, g.Key),
-                                [.. g.Select(c => new PatchCell(c.ColumnCode, c.NewValue))]))]))
+                                [.. g.Select(c => new PatchCell(
+                                    c.ColumnCode,
+                                    c.NewValue,
+                                    // ✎ D-461: ручне значення замість формули з книги — фіксована причина імпорту.
+                                    OverrideReason: c.ReplacesFormula ? PatchCellsHandler.ExcelImportOverrideReason : null))]))]))
                     .ToList();
 
                 IReadOnlyList<PatchCellsResponse> responses;
@@ -1190,7 +1194,7 @@ public sealed class ExcelImporter(
     /// відмова вже має код і ключ, а ClosedXML не бачить непридатного пакета
     /// взагалі.
     /// </remarks>
-    private static XLWorkbook Open(Stream file)
+    internal static XLWorkbook Open(Stream file)
     {
         XlsxSafetyGate.EnsureSafe(file);
 

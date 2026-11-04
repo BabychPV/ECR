@@ -63,6 +63,32 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
   очікування `/health/live`) він завершиться червоним «Служба не відповіла…» — це очікувано,
   не збій (далі — `Start-Service`, розділ 4). Тоді в SQL Server має бути логін комп'ютера/`NT AUTHORITY\SYSTEM` з
   доступом до бази.
+- **DBA: виконати скрипт прав облікового запису служби** — після кроку 2 (схема) `deploy-ecr.ps1` і до першого
+  старту служби (якщо служба вже впала на «The EXECUTE permission was denied…» — після скрипту `Start-Service`
+  повторно). `[<DB>]` — база, `[<SERVICE_ACCOUNT>]` — логін служби; `db_owner` не потрібен. Блок генерується з
+  переліку прав (`tools\gen-install-docs.ps1`), руками не правити; пояснення — `11-install-guide.md`, п. 2.3.
+
+<!-- generated:grants -->
+```sql
+USE [<DB>];
+IF DATABASE_PRINCIPAL_ID(N'<SERVICE_ACCOUNT>') IS NULL
+    CREATE USER [<SERVICE_ACCOUNT>] FOR LOGIN [<SERVICE_ACCOUNT>];
+ALTER ROLE db_datareader ADD MEMBER [<SERVICE_ACCOUNT>];
+ALTER ROLE db_datawriter ADD MEMBER [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::doc.TableInstanceSeq TO [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::doc.TableRowSeq TO [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::calc.CalculationResultSeq TO [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::dic.RegistryEntryCodeSeq TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON TYPE::doc.CellValueTvp TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON TYPE::aud.CellChangeTvp TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::arc.usp_ArchiveYear TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::arc.usp_EnsureAuditPartitions TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::arc.usp_ArchiveAudit TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::rpt.usp_GenerateTemplateViews TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::rpt.usp_GenerateStableViews TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::doc.fn_VersionOf TO [<SERVICE_ACCOUNT>];
+```
+<!-- /generated:grants -->
 
 ## 3. Сертифікат для стенда (якщо замовник ще не видав)
 

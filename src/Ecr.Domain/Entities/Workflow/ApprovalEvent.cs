@@ -55,6 +55,7 @@ public sealed class ApprovalEvent : Entity<long>
     /// <param name="at">Момент дії, UTC.</param>
     /// <param name="reason">Причина відхилення або повернення в роботу.</param>
     /// <param name="stepOrdinal">Порядковий номер кроку маршруту, якщо маршрут є.</param>
+    /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал (RS).</param>
     public ApprovalEvent(
         long documentId,
         int sheetDefId,
@@ -65,11 +66,13 @@ public sealed class ApprovalEvent : Entity<long>
         int? byUserId,
         DateTime at,
         string? reason = null,
-        int? stepOrdinal = null)
+        int? stepOrdinal = null,
+        long? sheetCopyId = null)
     {
         DocumentId = documentId;
         SheetDefId = sheetDefId;
         PeriodKey = periodKey;
+        SheetCopyId = sheetCopyId;
         FromStatus = fromStatus;
         ToStatus = toStatus;
         Action = action;
@@ -82,6 +85,13 @@ public sealed class ApprovalEvent : Entity<long>
     public long DocumentId { get; private set; }
     public int SheetDefId { get; private set; }
     public int PeriodKey { get; private set; }
+
+    /// <summary>
+    /// Копія аркуша; <c>null</c> — оригінал (RS). ⚠ Без FK навмисно: журнал — історія, він переживає
+    /// видалення копії так само, як зрізи.
+    /// </summary>
+    public long? SheetCopyId { get; private set; }
+
     public DocumentStatus FromStatus { get; private set; }
     public DocumentStatus ToStatus { get; private set; }
     public ApprovalAction Action { get; private set; }
@@ -114,6 +124,6 @@ public sealed class ApprovalEvent : Entity<long>
 
         return new ApprovalEvent(
             state.DocumentId, state.SheetDefId, state.PeriodKey,
-            fromStatus, state.Status, action, byUserId, at, reason, stepOrdinal);
+            fromStatus, state.Status, action, byUserId, at, reason, stepOrdinal, state.SheetCopyId);
     }
 }

@@ -169,6 +169,9 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Audit:ExportMaxRows` | 100000 | межа експорту аудиту CSV |
 | `Campaign:AtRiskDays` | 3 | за скільки днів до терміну проєкт вважається «під загрозою» |
 | `Collection:MonthColumnRouting` | `false` | Q-17: єдине джерело правди для таблиць «місяці в колонках» місячного проєкту: значення стовпця місяця m живуть в екземплярі періоду m, введені не-місячні стовпці — в екземплярі «якоря року». Вимкнено — читання/запис як до Q-17 (повна сумісність). Вмикати ЛИШЕ після перенесення даних (`tools/q17`) і слова людини; читається на початку кожного запиту. Рішення — `D-457`. Порядок: (1) бекап і пауза фонових джобів; (2) Apply перенесення (`admin-guide.md` §12) — на живому стенді лише словом людини; (3) перерахунок змінених документів; (4) ввімкнути прапор і перезапустити API; (5) за потреби `-PurgeCopies` окремою фазою. Після влиття коду `Q-17` очікуваний `UiString` стенда +9 (`err.ECR-ROW-0409.monthDataLocked`, `err.ECR-ACCS-0403.addRowAnchorPeriod`, `err.ECR-ACCS-0403.deleteRowAnchorPeriod`, по en/ru/kz) |
+| `Collection:ChunkDays` | 7 | `D-462`: довжина шматка збору PI, діб. Діапазон, що вміщається в шматок, читається одним інтервалом, як до `D-462` (плановий прогін із `LookbackDays` = 7 — один запит на тег); довші (ручний збір за місяці, довга прогалина наздоганяння) — шматками, покриття за кожен дочитаний. Розклад із `LookbackDays` понад це значення нарізався б — підніміть ключ. `0` — без нарізки. Ручний діапазон, що не вклався в 15 хв, продовжується задачею з місця зупинки (до 100 продовжень) |
+| `Collection:DeleteMissingPoints` | `true` | `D-462`: видаляти з `ext.RawDataPoint` точки, яких PI більше не віддає, — лише за шматок запитаного діапазону, повністю й успішно прочитаний (жодної помилки, відмови, часткової відмови, обриву годинником); успішна порожня відповідь видаляє всі наші точки шматка — кількість на тег/шматок у журналі сервера (Information, «… сирих точок атрибута … видалено»). Якщо в періоді не лишилося жодної точки поля, комірку очищено (порожньо) і перераховано; правки людини, закриті періоди, подані аркуші не чіпаються. З Q-17 і закритим якорем року комірки колонок якоря пропускаються з подією `SkippedPeriodClosed`, решта пишеться. Поданий/затверджений аркуш запису інтеграції не приймає (подія `cellRejected`, задача не падає); після повернення аркуша в роботу (відхилення, відкликання, перевідкриття) його комірки перематеріалізуються за весь період. ⚠ Розклад перечитує PI лише за `LookbackDays` (типово 7, допустимо 1–366): виправлення в PI, старші за вікно, підхоплює лише ручний «Зібрати» з межами або повернення аркуша; збільшувати `LookbackDays` можна, але кожен прогін тоді перечитує все вікно (понад `Collection:ChunkDays` — шматками по запиту на тег), тож для річного вікна — лише рідкий (нічний) cron. `false` — сирі точки лише додаються/оновлюються |
+| `Collection:DeleteMissingOnSecondary` | `false` | ✎ Аудит 31.10 (`D-462`): видаляти зниклі точки й за шматок, який обслужила ЗАПАСНА адреса (`SecondaryEndpoint`). Запасний сервер може відставати від основного: його порожня чи неповна відповідь не доводить, що точок у PI немає, тож типово видалення за таким шматком пропускається (попередження в журнал сервера «… НЕ видалено … secondary»), прочитане зберігається. Так само пропускається видалення, коли мітка точки виходить за запитаний шматок (ознака зсуву поясу PI SQL Client — перевірте текст запиту) або PI Web API віддав нерозбірні чи лише помилкові елементи. `true` — лише коли запасна адреса гарантовано синхронна з основною |
 | `Notifications:WebhookAllowedHostSuffixes` | `.webhook.office.com;.logic.azure.com;.powerplatform.com` | дозволені хости вебхуків (`;` або `,`) |
 | `Smtp:Host`, `Smtp:From` | немає | **запасний** транспорт пошти: діє, лише поки налаштування SMTP у застосунку (`/admin/notifications`, `D-263`) вимкнені чи неповні. Без обох пошта не йде (`notifications-runbook.md`) |
 | `Smtp:Port` | (587) | |
@@ -178,6 +181,11 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Secrets:<ім'я>` | немає | секрети джерел і каналів. **Лише змінні оточення** |
 | `PiSqlClient:CatalogQuery` / `TemplateQuery` / `ValueQuery` | немає (вбудовані) | перевизначення запитів адаптера PI SQL Client. `InterpolatedQuery`, `SummaryQuery`, `CurrentValueQuery`, `ElementListQuery`, `EventQuery`, `EventTemplateQuery` — без вбудованого тексту |
 | `PiSqlClient:<код джерела>:<Query>` | немає | запит для ОДНОГО джерела (інша база AF на тому ж сервері), перекриває спільний `PiSqlClient:<Query>` — для будь-якого із запитів вище; напр. `PiSqlClient:AIR:ElementListQuery`. ⚠ Усі `PiSqlClient:*` адаптер читає через канал секретів, тобто фізично це `Secrets:PiSqlClient:…` — змінна `ECR_Secrets__PiSqlClient__AIR__ElementListQuery` |
+| `PiSqlClient:<…>ElementListQuery` — колонка `TemplateName` | необов'язкова | ✎ 03.11 (типи вузлів НАЕ): для типізованого імпорту дерева НАЕ запит повертає колонку `TemplateName` — ім'я шаблону елемента AF (`Air_Region`, `Air_OnShoreOffShore`, `Air_Area`, `Air_Unit`, `Equipment`). Без неї імпорт через PI SQL Client розміщує вузли за шляхом (як раніше), PI Web API шаблон віддає сам. Прикладу запиту в репозиторії немає — ім'я стовпця шаблону в схемі AF вказує PI-адміністратор. Див. `11-install-guide.md` §2.8 |
+| `PiSqlClient:EventQueryTimeoutSeconds` | 300 | `D-464`: тайм-аут команди читання подій (Event Frames, `EventQuery`), с; від 1; кожна з трьох спроб (найгірша сторінка — до ~15 хв). Синк подій перечитує ВЕСЬ відкритий (річний) період одним запитом на шаблон, тож 60 с тегів йому замало. З'єднання ODBC — з оренди в усіх читаннях адаптера (одне на задачу; після відмови закривається) |
+| `PiSqlClient:EventQueryChunk` | `None` | `D-464`: `Month` — синк подій читає вікно помісячно (календарні місяці UTC, кожен — свій запит і своя стеля сторінок); події через межу місяця й незакриті зливаються за ідентифікатором; видалення зниклих — лише якщо прочитано повністю ВСІ місяці. Вмикати, коли рік не вміщається в стелю сторінок чи в тайм-аут. `None` — один запит на вікно |
+| `Collection:MaxEventPages` | 10 | `D-464`: скільки сторінок по 2 000 подій дочитувати за одне читання шаблону (за шматок, якщо `EventQueryChunk = Month`); від 1. Понад стелю — подія журналу покриття `coverageEvents.eventsTruncatedCap` (стеля і як її підняти), пізніші події не синхронізуються, видалення зниклих вимкнено — підніміть ключ або ввімкніть `Month`. Вікно синку — від найранішого відкритого періоду, у якому документ мапінгу має таблицю; вікно понад 400 діб — попередження в журналі сервера (закрийте забутий період). Поданий/затверджений аркуш — одна зведена подія на період; після повернення / відкликання / перевідкриття аркуша й відкриття періоду синк подій ставиться одразу. Масове видалення понад ліміт підтверджується у вкладці «Події з PI» («Підтвердити видалення», журнал змін) |
+| `PiSqlClient:CommandTimeoutSeconds` | 60 | `D-462`: тайм-аут однієї команди ODBC (кожної спроби з трьох), с; від 1. З'єднання ODBC одне на задачу збору. `SecondaryEndpoint` джерела вмикається сам при відмові з'єднання з основною адресою (не при відмові облікових даних) — у журналі сервера попередження «до кінця прогону джерело обслуговує ЗАПАСНА адреса» |
 | `Sql:CatalogQuery` / `Sql:ValueQuery` | немає (вбудовані) | те саме для SQL-джерела |
 | `Integration:AfTimeZoneId` | (порожньо = UTC) | ✎ 2026-09-30, D-212 PR-7: пояс, у якому AF віддає дати дії записів довідника без поясу (Windows або IANA, напр. `Asia/Atyrau`). Діє лише для синку темпорального довідника з атрибутами дат у політиці. Невідомий пояс зупиняє старт з ім'ям ключа. ⚠ Пояс серверів AF замовника — відкрите питання PI-адміністратору |
 | `PiWebApi:AllowedHosts` | `[]` (порожньо) | ✎ 2026-10-01: перелік хостів PI Web API, до яких дозволено підключати джерела. Елемент — точне ім'я хоста або `*.domain` (лише піддомени; сам `domain` не збігається); без урахування регістра. **Порожньо = без обмеження, окрім блок-листа** (loopback, link-local і хмарний metadata 169.254.x, unspecified, multicast — діє завжди, для всіх режимів автентифікації; перевіряється по кожній розв'язаній A/AAAA-адресі, у момент підключення — отже DNS rebinding не обійде). Приватні IP-літерали (`10.x`, `172.16–31.x`, `192.168.x`, `fc00::/7`) заборонені лише для джерел з Negotiate (потрібне ім'я хоста для Kerberos SPN). Адресу Negotiate-джерела можна змінити лише з явним `confirmEndpointChange: true` у запиті (в інтерфейсі — діалог підтвердження). Відповідь PI понад 50 МБ відхиляється. Масив задається так: у `appsettings.Production.json` — `"PiWebApi": { "AllowedHosts": [ "<хост PI Web API>", "*.<домен замовника>" ] }`, або змінними служби `ECR_PiWebApi__AllowedHosts__0`, `ECR_PiWebApi__AllowedHosts__1`, … ⚠ Інсталятор і `deploy-ecr.ps1` цього ключа не пишуть — задає адміністратор замовника вручну; імена хостів PI — дані замовника, у продукті їх немає (дефолт порожній; сторож `PiWebApiAllowedHostsDefaultTests`). Для вашого середовища кандидати allowlist: `ncatdevv08`, `ncatuatv12`, `ncatappv0154`; задає адміністратор замовника через `appsettings.Production.json` / `ECR_PiWebApi__AllowedHosts__0`. ⚠ Negotiate-джерело без списку: Warning у журнал і картка `sources` Degraded (`health.sources.negotiateNoAllowlist`, п. 3.1) — заповніть список. Після зміни — перезапуск `EcrApi` |
@@ -239,6 +247,127 @@ ORDER BY [Ts];
 ⛔ `ORDER BY [Ts]` у тексті запиту обов'язковий незалежно від поясу: мітки
 мають іти неспадно, інакше адаптер відмовляє помилкою `ECR-INT-0422`
 (`timestampsOutOfOrder`) замість мовчазного сортування в пам'яті.
+
+### Усі ключі конфігурації {#2-ключі-конфігурації}
+
+<!-- generated:config -->
+Таблиця згенерована `tools/gen-install-docs.ps1` з `src/Ecr.Api/Options/EcrConfigurationValidation.cs` (що службі перевіряється на старті) і `src/Ecr.Api/appsettings.json` (типові значення). Руками не правити: `powershell -File tools/gen-install-docs.ps1`. «—» у «Типово» означає, що значення за замовчуванням задає код, а не `appsettings.json`. Порожнє значення будь-якого ключа — «не задано» (дефолт коду).
+
+| Ключ | Обов'язковий | Типово | Значення |
+|---|---|---|---|
+| `AirLimits:AreaRegistryCode` | ні | `AIR_AREA` | Значення на старті не перевіряється. |
+| `AirLimits:NaeRegistryCode` | ні | `NAE_TREE` | Значення на старті не перевіряється. |
+| `AirLimits:RegionRegistryCode` | ні | `LAND_REGION` | Значення на старті не перевіряється. |
+| `AirLimits:SubstanceRegistryCode` | ні | `LAND_AIR_SUBSTANCE` | Значення на старті не перевіряється. |
+| `AllowedHosts` | ні | `*` | Значення на старті не перевіряється. |
+| `Audit:ExportMaxRows` | ні | `100000` | Ціле число, не менше 1. |
+| `Auth:CookieName` | ні | `ecr.auth` | Значення на старті не перевіряється. |
+| `Auth:DataProtection:AllowUnprotectedKeys` | ні | — | `true` або `false`. |
+| `Auth:EnableNegotiate` | ні | `true` | `true` або `false`. |
+| `Auth:RequireHttps` | ні | `true` | `true` або `false`. |
+| `Auth:SlidingHours` | ні | `8` | Ціле число, не менше 1. |
+| `Auth:StampCacheSeconds` | ні | `5` | Ціле число, не менше 0. |
+| `Cache:AccessProfileSlidingMinutes` | ні | `60` | Ціле число, не менше 1. |
+| `Cache:MetadataSlidingMinutes` | ні | `240` | Ціле число, не менше 1. |
+| `Cache:SchemaName` | ні | `dbo` | Значення на старті не перевіряється. |
+| `Cache:TableName` | ні | `Cache` | Значення на старті не перевіряється. |
+| `Calculations:FullYearWarnSeconds` | ні | `600` | Ціле число, не менше 1. |
+| `Calculations:MaxInputCellsPerBinding` | ні | `300000` | Ціле число, не менше 1. |
+| `Calculations:MaxParallelism` | ні | `4` | Ціле число, не менше 1. |
+| `Calculations:SupersededPurge:BatchSize` | ні | `500` | Ціле число, не менше 1. |
+| `Calculations:SupersededPurge:CheckpointEveryBatches` | ні | `50` | Ціле число, не менше 1. |
+| `Calculations:SupersededPurge:DeleteEnabled` | ні | `false` | `true` або `false`. |
+| `Calculations:SupersededPurge:Enabled` | ні | `false` | `true` або `false`. |
+| `Calculations:SupersededPurge:IncludeTrace` | ні | `true` | `true` або `false`. |
+| `Calculations:SupersededPurge:LogPauseSeconds` | ні | `30` | Ціле число, не менше 0. |
+| `Calculations:SupersededPurge:LogPauseThresholdPercent` | ні | `60` | Ціле число, не менше 1. |
+| `Calculations:SupersededPurge:MaxBatchesPerRun` | ні | `2000` | Ціле число, не менше 1. |
+| `Calculations:SupersededPurge:MaxLogPauses` | ні | `20` | Ціле число, не менше 0. |
+| `Calculations:SupersededPurge:PauseMilliseconds` | ні | `50` | Ціле число, не менше 0. |
+| `Calculations:SupersededPurge:RebuildAfter` | ні | `false` | `true` або `false`. |
+| `Campaign:AtRiskDays` | ні | `3` | Ціле число, не менше 0. |
+| `Collection:ChunkDays` | ні | `7` | Ціле число, не менше 0. |
+| `Collection:DeleteMissingOnSecondary` | ні | `false` | `true` або `false`. |
+| `Collection:DeleteMissingPoints` | ні | `true` | `true` або `false`. |
+| `Collection:MaxEventPages` | ні | — | Ціле число, не менше 1. |
+| `Collection:MonthColumnRouting` | ні | `false` | `true` або `false`. |
+| `ConnectionStrings:Ecr` | так (секрет: лише змінна оточення `ECR_ConnectionStrings__Ecr`) | *порожньо* | Значення на старті не перевіряється. |
+| `Database:BulkBatchSize` | ні | `50000` | Ціле число, не менше 1. |
+| `Database:CommandTimeoutSeconds` | ні | `60` | Ціле число, не менше 0. |
+| `Database:EditionMode` | ні | `Auto` | Одне з: Auto, Standard, Enterprise. |
+| `Database:MaxPoolSize` | ні | `200` | Ціле число, не менше 1. |
+| `Database:RecalcCommandTimeoutSeconds` | ні | `180` | Ціле число, не менше 30. |
+| `Database:SheetLockTimeoutSeconds` | ні | `30` | Ціле число, не менше 0. |
+| `Documents:StaleMapWarm:Enabled` | ні | `true` | `true` або `false`. |
+| `Documents:StaleMapWarm:HotPeriodLimit` | ні | `2` | Ціле число, не менше 1. |
+| `Documents:StaleMapWarm:IntervalSeconds` | ні | `60` | Ціле число, не менше 10. |
+| `Documents:StaleMapWarm:RingIntervalSeconds` | ні | `600` | Ціле число, не менше 60. |
+| `Documents:VersionMigration:FromMonthEnabled` | ні | `false` | `true` або `false`. |
+| `Health:RawDataPointWarnRows` | ні | `20000000` | Ціле число, не менше 0. |
+| `Health:WarmupOnStart` | ні | `true` | `true` або `false`. |
+| `Integration:AfTimeZoneId` | ні | — | Формат перевіряється на старті (див. текст відмови служби). |
+| `Integration:CatalogTimeoutSeconds` | ні | `10` | Ціле число, не менше 1. |
+| `Integration:RawDataExportMaxRows` | ні | `100000` | Ціле число, не менше 1. D-463: нуль — кожен експорт «Даних з PI» відмовою, а не «без стелі». |
+| `Jobs:Excel:MaxConcurrency` | ні | `2` | Ціле число, не менше 1. |
+| `Jobs:NightlyRecalculation:Enabled` | ні | `false` | `true` або `false`. |
+| `Jobs:Quartz:ThreadCount` | ні | `16` | Ціле число, не менше 1. |
+| `Jobs:Queue:Mode` | ні | `Quartz` | Одне з: Quartz, Database. |
+| `Jobs:QueueDepth:RefreshSeconds` | ні | `15` | Ціле число, не менше 5. |
+| `Jobs:Recalculation:Executor` | ні | `InProcess` | Одне з: InProcess, Worker. |
+| `Jobs:Recalculation:FanOutMaxConcurrency` | ні | — | Ціле число, не менше 1. |
+| `Jobs:ShutdownTimeoutSeconds` | ні | `120` | Ціле число, не менше 1. |
+| `Localization:ImportMaxBytes` | ні | `1048576` | Ціле число, не менше 1. |
+| `Logging:File:Directory` | ні | `%ProgramData%\ECR\logs` | Значення на старті не перевіряється. |
+| `Logging:File:FileSizeLimitMb` | ні | `100` | Ціле число, не менше 1. |
+| `Logging:File:Json` | ні | `true` | `true` або `false`. |
+| `Logging:File:RetainedFiles` | ні | `30` | Ціле число, не менше 1. |
+| `Logging:LogLevel:Default` | ні | `Information` | Значення на старті не перевіряється. |
+| `Logging:LogLevel:Microsoft.AspNetCore` | ні | `Warning` | Значення на старті не перевіряється. |
+| `Logging:LogLevel:Microsoft.EntityFrameworkCore.Database.Command` | ні | `Warning` | Значення на старті не перевіряється. |
+| `NaeTree:RegionSourceRegistryCode` | ні | `LAND_REGION` | Значення на старті не перевіряється. |
+| `Notifications:PublicBaseUrl` | ні | *порожньо* | Значення на старті не перевіряється. |
+| `Notifications:WebhookAllowedHostSuffixes` | ні | `.webhook.office.com;.logic.azure.com;.powerplatform.com` | Значення на старті не перевіряється. |
+| `PiSqlClient:CommandTimeoutSeconds` | ні | — | Ціле число, не менше 1. |
+| `PiSqlClient:EventQueryChunk` | ні | — | Одне з: None, Month. |
+| `PiSqlClient:EventQueryTimeoutSeconds` | ні | — | Ціле число, не менше 1. |
+| `PiWebApi:AllowedHosts` | ні | `[]` | Значення на старті не перевіряється. |
+| `Registries:ExportMaxRows` | ні | `50000` | Ціле число, не менше 1. |
+| `Registries:ImportMaxBytes` | ні | `1048576` | Ціле число, не менше 1. |
+| `Retention:SubmissionSnapshots:BatchSize` | ні | `10` | Ціле число, не менше 1. |
+| `Retention:SubmissionSnapshots:DeleteEnabled` | ні | `false` | `true` або `false`. |
+| `Retention:SubmissionSnapshots:Enabled` | ні | `true` | `true` або `false`. |
+| `Retention:SubmissionSnapshots:MaxBatchesPerRun` | ні | `200` | Ціле число, не менше 1. |
+| `Retention:SubmissionSnapshots:PauseMilliseconds` | ні | `500` | Ціле число, не менше 0. |
+| `Retention:SubmissionSnapshots:RetainSnapshots` | ні | `5` | Ціле число, не менше 2. |
+| `Schema:StartupMode` | ні | `Validate` | Одне з: Validate, Migrate. |
+| `Security:Csp:Enforce` | ні | `false` | `true` або `false`. |
+| `Security:Csp:ReportOnly` | ні | `true` | `true` або `false`. |
+| `Security:Csp:ReportUri` | ні | `/api/v1/csp-report` | Формат перевіряється на старті (див. текст відмови служби). |
+| `Security:RateLimit:ChangePasswordPermitPerMinute` | ні | — | Ціле число, не менше 1. |
+| `Security:RateLimit:CspReportPermitPerMinute` | ні | `120` | Ціле число, не менше 1. |
+| `Security:RateLimit:HealthReadyPermitPerMinute` | ні | `60` | Ціле число, не менше 1. |
+| `Security:RateLimit:ImportPreviewConcurrency` | ні | `2` | Ціле число, не менше 1. |
+| `Security:RateLimit:ImportPreviewQueueLimit` | ні | `4` | Ціле число, не менше 0. |
+| `Security:RateLimit:KnownProxies` | ні | *порожньо* | Формат перевіряється на старті (див. текст відмови служби). |
+| `Security:RateLimit:LoginPermitPerMinute` | ні | `60` | Ціле число, не менше 1. |
+| `Security:RateLimit:RecalculatePermitPerMinute` | ні | `6` | Ціле число, не менше 1. |
+| `Security:RateLimit:RecalculateUserPermitPerMinute` | ні | `30` | Ціле число, не менше 1. |
+| `Security:RateLimit:SearchPermit` | ні | `30` | Ціле число, не менше 1. |
+| `Security:RateLimit:SearchWindowSeconds` | ні | `10` | Ціле число, не менше 1. |
+| `Security:RateLimit:SmtpTestPermitPerMinute` | ні | `5` | Ціле число, не менше 1. |
+| `Security:RateLimit:SmtpTestSystemPermitPerHour` | ні | `30` | Ціле число, не менше 1. |
+| `Security:RateLimit:TrustForwardedFor` | ні | `false` | `true` або `false`. |
+| `Security:RateLimit:ValidatePermitPerMinute` | ні | `100` | Ціле число, не менше 1. |
+| `Security:RateLimit:VerifyPermitPerMinute` | ні | `100` | Ціле число, не менше 1. |
+| `Smtp:AllowedPorts` | ні | `[]` | Формат перевіряється на старті (див. текст відмови служби). |
+| `Telemetry:Enabled` | ні | `false` | `true` або `false`. |
+| `Telemetry:ExportIntervalSeconds` | ні | `60` | Ціле число, не менше 5. |
+| `Telemetry:OtlpEndpoint` | так, якщо `Telemetry:Enabled` = true | *порожньо* | Формат перевіряється на старті (див. текст відмови служби). |
+| `Telemetry:OtlpProtocol` | ні | `Grpc` | Одне з: значення переліку OtlpExportProtocol (зовнішня бібліотека). |
+| `Telemetry:ServiceName` | ні | `ecr-api` | Значення на старті не перевіряється. |
+| `Transport:Https:CertificateThumbprint` | ні | *порожньо* | Значення на старті не перевіряється. |
+| `Transport:Https:Port` | ні | `0` | Ціле число, не менше 0. |
+<!-- /generated:config -->
 
 ## 3. Моніторинг і логи
 
@@ -982,6 +1111,11 @@ DECLARE @a int; EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = 12, @Added = @
 ```
 
 `09-seed.sql` виконує застосунок на старті. Скрипти запускати не треба.
+
+⚠ ✎ 2026-11-02 (`DB-1`): служба під логіном без `db_owner` потребує перед стартом нової версії трьох нових
+`EXECUTE` — на `doc.fn_VersionOf`, `rpt.usp_GenerateTemplateViews`, `rpt.usp_GenerateStableViews` (скрипт —
+абзац «Права облікового запису служби» в п. 7, нотатка `docs/release-notes/db-service-account-grants.md`). Без
+першого падає кожен запис рядка й комірки.
 
 ⛔ ✎ 2026-10-09 (S2-04, HU-13 Q3): **копія і зупинка служб.** Без `-SkipSchema` крок 2/7:
 
@@ -2220,7 +2354,29 @@ powershell -File tools\setup-dev-db.ps1 -Server localhost -Database EcrDev -View
 
 ⚠ Через DENY на стовпці члени `ecr_viewer` отримають відмову на `SELECT * FROM sec.[User]` — перелічуйте стовпці явно (без `PasswordHash`, `SecurityStamp`; висновок із семантики column-DENY SQL Server, тестом не перевірено). Зашифровані секрети каналів сповіщень і пароль SMTP роль читає лише як шифротекст: ключі Data Protection їй закриті.
 
-**Права облікового запису служби** в базі скрипти **не** видають — це робить DBA (`deploy-ecr.ps1` виконує DDL під обліковим записом DBA, не під `-ServiceAccount`; у службі DDL немає, `D-66`). За кодом потрібні: `SELECT/INSERT/UPDATE/DELETE` на таблицях (сід виконується на кожному старті), `UPDATE` на послідовностях, `EXECUTE` на TVP-типах `doc.CellValueTvp`, `aud.CellChangeTvp` і на `arc.usp_ArchiveYear`, `arc.usp_EnsureAuditPartitions`, `arc.usp_ArchiveAudit` (п. 7, 7.3–7.4; усі три — `WITH EXECUTE AS OWNER`, DDL-прав служба не потребує). Чи досить `db_datareader` + `db_datawriter` + `EXECUTE`, не перевірено (відкрите питання DBA, `DB-1`).
+**Права облікового запису служби** в базі скрипти **не** видають — це робить DBA (`deploy-ecr.ps1` виконує DDL під обліковим записом DBA, не під `-ServiceAccount`; у службі DDL немає, `D-66`). За кодом потрібні: `SELECT/INSERT/UPDATE/DELETE` на таблицях (сід виконується на кожному старті), `UPDATE` на послідовностях, `EXECUTE` на TVP-типах `doc.CellValueTvp`, `aud.CellChangeTvp`, на процедурах `arc.usp_ArchiveYear`, `arc.usp_EnsureAuditPartitions`, `arc.usp_ArchiveAudit` (п. 7, 7.3–7.4), `rpt.usp_GenerateTemplateViews`, `rpt.usp_GenerateStableViews` (вʼюхи SSRS на старті й після публікації версії; усі п'ять — `WITH EXECUTE AS OWNER`, DDL-прав служба не потребує) і на скалярній функції `doc.fn_VersionOf` (версія шаблону за період у запитах запису й читання; `db_datareader` права EXECUTE на скалярні функції не дає). `db_datareader` + `db_datawriter` + ці `GRANT` — достатньо: перевірено тестом `ServiceAccountLeastPrivilegeTests` (користувач без входу рівно з цими правами проходить старт, сід, додавання й видалення рядка, правку комірки, подання, нічну перевірку партицій і читання `rpt.v_DocumentCells`; `DB-1` закрито). Без права на `doc.fn_VersionOf` падає кожен запис рядка й комірки («The EXECUTE permission was denied on the object 'fn_VersionOf'»), без прав на `rpt.usp_Generate*` — генерація вʼюх (`reportviews` = Degraded). Скрипт прав нижче (той самий — у `docs/build/11-install-guide.md`, п. 2.3, крок перед першим стартом служби): `[<DB>]` — база ECR, `[<SERVICE_ACCOUNT>]` — логін служби (напр. `DOMAIN\ecr-svc$`). ⛔ Блок **генерується** з `ServiceAccountGrants` (`powershell -File tools\gen-install-docs.ps1`) — руками не правити; сторож `ServiceAccountGrantsRunbookTests` червоніє, якщо будь-яка копія розійшлася з переліком.
+
+<!-- generated:grants -->
+```sql
+USE [<DB>];
+IF DATABASE_PRINCIPAL_ID(N'<SERVICE_ACCOUNT>') IS NULL
+    CREATE USER [<SERVICE_ACCOUNT>] FOR LOGIN [<SERVICE_ACCOUNT>];
+ALTER ROLE db_datareader ADD MEMBER [<SERVICE_ACCOUNT>];
+ALTER ROLE db_datawriter ADD MEMBER [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::doc.TableInstanceSeq TO [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::doc.TableRowSeq TO [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::calc.CalculationResultSeq TO [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::dic.RegistryEntryCodeSeq TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON TYPE::doc.CellValueTvp TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON TYPE::aud.CellChangeTvp TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::arc.usp_ArchiveYear TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::arc.usp_EnsureAuditPartitions TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::arc.usp_ArchiveAudit TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::rpt.usp_GenerateTemplateViews TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::rpt.usp_GenerateStableViews TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::doc.fn_VersionOf TO [<SERVICE_ACCOUNT>];
+```
+<!-- /generated:grants -->
 
 Перевірка:
 

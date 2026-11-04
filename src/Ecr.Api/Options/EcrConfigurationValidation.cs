@@ -88,6 +88,15 @@ public static partial class EcrConfigurationValidation
         ("Registries:ExportMaxRows", 1),
         ("Campaign:AtRiskDays", 0),
         ("Integration:CatalogTimeoutSeconds", 1),
+        ("Integration:RawDataExportMaxRows", 1), // D-463: нуль — кожен експорт «Даних з PI» відмовою, а не «без стелі».
+
+        // D-462: 0 — без нарізки (інтервал цілком); від'ємне — помилка. Тайм-аут команди ODBC — від секунди.
+        (Ecr.Adapters.PiAf.CollectionRunnerOptions.ChunkDaysKey, 0),
+        (Ecr.Adapters.PiAf.PiSqlClientOptions.CommandTimeoutSecondsKey, 1),
+
+        // D-464: тайм-аут читання подій — від секунди; стеля сторінок подій — від однієї (нуль = нічого не читати).
+        (Ecr.Adapters.PiAf.PiSqlClientOptions.EventQueryTimeoutSecondsKey, 1),
+        (Ecr.Infrastructure.Jobs.SourceEventSyncOptions.MaxEventPagesKey, 1),
         ("Logging:File:RetainedFiles", 1),
         ("Logging:File:FileSizeLimitMb", 1),
 
@@ -139,6 +148,15 @@ public static partial class EcrConfigurationValidation
 
         // Q-17: читається `GetValue<bool>` у DependencyInjection (Infrastructure).
         "Collection:MonthColumnRouting",
+
+        // D-462: видалення сирих точок, яких PI більше не віддає (повністю перечитаний шматок вікна).
+        Ecr.Adapters.PiAf.CollectionRunnerOptions.DeleteMissingPointsKey,
+
+        // ✎ Аудит 31.10 (G5): видаляти зниклі точки й за відповіддю запасної адреси (типово false).
+        Ecr.Adapters.PiAf.CollectionRunnerOptions.DeleteMissingOnSecondaryKey,
+
+        // RPT-STABLE Part B: перенос версії «з місяця» (типово вимкнено).
+        Ecr.Application.Documents.VersionMigration.VersionMigrationOptions.FromMonthEnabledKey,
         Ecr.Api.Startup.StaleMapWarmService.EnabledKey,
         "Jobs:NightlyRecalculation:Enabled",
         "Logging:File:Json",
@@ -161,6 +179,9 @@ public static partial class EcrConfigurationValidation
         (Infrastructure.Jobs.DbBackgroundJobScheduler.ModeKey, Enum.GetNames<Infrastructure.Jobs.JobQueueMode>()),
         (Infrastructure.Jobs.JobLaneMap.ExecutorKey, Enum.GetNames<Infrastructure.Jobs.RecalculationExecutor>()),
         (Ecr.Api.Observability.TelemetrySetup.ProtocolKey, Enum.GetNames<OpenTelemetry.Exporter.OtlpExportProtocol>()),
+
+        // D-464: «Month» — помісячне читання вікна подій; «Mnth» інакше мовчки лишав би одне читання на рік.
+        (Ecr.Infrastructure.Jobs.SourceEventSyncOptions.EventQueryChunkKey, Enum.GetNames<Ecr.Infrastructure.Jobs.SourceEventQueryChunk>()),
     ];
 
     /// <summary>Ключ додаткових портів SMTP (ent6 S4).</summary>

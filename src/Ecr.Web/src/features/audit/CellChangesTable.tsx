@@ -2,12 +2,16 @@ import { memo, type JSX, type ReactNode } from 'react';
 import { Badge, Box, Group, Table, Text, VisuallyHidden } from '@mantine/core';
 import type { CellChangePage } from '@/api/types';
 import { cellAuthorHint, cellAuthorName } from '@/features/audit/authorOptions';
+import { DefaultAuditSort, type AuditSort } from '@/features/audit/api';
+import { SortableTh } from '@/features/audit/SortableTh';
 import { decimalDelta } from '@/features/audit/changeDelta';
+import { NumericTypes, auditValueText } from '@/features/audit/auditValue';
+import { cellChangeReasonText } from '@/features/audit/cellChangeReason';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { TwoLine } from '@/shared/ui/TwoLine';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
-import { formatDate, formatDecimal, formatPeriodKey } from '@/shared/format';
+import { formatDecimal, formatPeriodKey } from '@/shared/format';
 import './auditTable.css';
 
 /**
@@ -24,36 +28,7 @@ import './auditTable.css';
 
 export type CellChange = CellChangePage['items'][number];
 
-/** Типи колонок, чиє значення — число (`U-05`: одне правило подачі числа). */
-const NumericTypes: readonly string[] = ['Decimal', 'Int', 'Formula', 'Calculated'];
-
-/**
- * Значення журналу — за правилом показу, а не у форматі сховища (`X-35`).
- *
- * ⛔ Журнал показував «Was 53.1771000000000000»: `aud.CellChange` зберігає
- * число з повним масштабом колонки сховища (`decimal(34,16)`, `D-148`).
- * Людина набирала `53.1771` і шукає в журналі саме його. Хвостові нулі
- * прибирає той самий `formatDecimal`, що й сітка (`U-05`/`U-24`), розряди —
- * мовою інтерфейсу.
- *
- * ⚠ Нерозібране значення показується ЯК Є: журнал — доказ, і сховати дивне
- * значення за «—» означало б сховати саму розбіжність.
- */
-export function auditValueText(value: string | null | undefined, dataType: string | null | undefined): string {
-  if (value === null || value === undefined) return '—';
-  if (dataType === null || dataType === undefined) return value;
-
-  if (NumericTypes.includes(dataType)) return formatDecimal(value) ?? value;
-
-  if (dataType === 'Date') {
-    const day = /^\d{4}-\d{2}-\d{2}/.exec(value)?.[0];
-    const shown = day === undefined ? '' : formatDate(day);
-
-    return shown.length > 0 ? shown : value;
-  }
-
-  return value;
-}
+export { auditValueText };
 
 /**
  * Δ для показу: зі знаком «+» для зростання, мовою інтерфейсу; `null` — не число або немає «було».
@@ -105,6 +80,10 @@ const OriginIcons: Readonly<Record<string, string>> = {
   Recalculation: 'M18 7V5H6l7 7-7 7h12v-2',
   Migration:
     'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
+  // ✎ D-461: ручне значення замість формули — олівець правки людини (причина стоїть поруч словами);
+  // повернення формули — знак перерахунку. Назва з каталогу каже решту.
+  FormulaOverride: 'M4 20l4-1L19 8l-3-3L5 16z',
+  FormulaRestored: 'M18 7V5H6l7 7-7 7h12v-2',
 };
 
 /** Назва походження мовою інтерфейсу; невідоме серверу значення показується як є (журнал — доказ). */
@@ -149,14 +128,14 @@ function WasBecomes({ change }: { readonly change: CellChange }): JSX.Element {
         td={first ? undefined : 'line-through'}
         data-audit-was=""
       >
-        {auditValueText(change.oldValue, change.columnDataType)}
+        {auditValueText(change.oldValue, change.columnDataType, change.columnScale)}
       </Text>
       <Box component="span" c="var(--ecr-faint)" display="inline-flex">
         <Glyph d={ArrowPath} />
       </Box>
       <VisuallyHidden>{t('import.becomes')}</VisuallyHidden>
       <Text span inherit fw={500} data-audit-becomes="">
-        {auditValueText(change.newValue, change.columnDataType)}
+        {auditValueText(change.newValue, change.columnDataType, change.columnScale)}
       </Text>
       {first ? (
         <Badge size="xs" variant="light" color="brand" data-audit-new="">
@@ -196,23 +175,49 @@ export function showsOverwriteMark(change: Pick<CellChange, 'isOverwrite' | 'ori
   return change.isOverwrite && change.origin !== 'ImportOverwrite';
 }
 
+/**
+ * ✎ D-461: причина зміни (`reason`) — під походженням, коли вона є. Довга причина людини (до 1000 символів)
+ * обрізається двома рядками; повний текст — у підказці. Слово «Причина» — прихованим текстом для читалки.
+ */
+function Reason({ reason }: { readonly reason: string | null | undefined }): ReactNode {
+  const text = cellChangeReasonText(reason);
+  if (text === null) return null;
+
+  return (
+    <Text
+      fz="xs"
+      c="var(--ecr-muted)"
+      lineClamp={2}
+      title={`${t('audit.reason')}: ${text}`}
+      style={{ overflowWrap: 'anywhere' }}
+      data-audit-reason=""
+    >
+      <VisuallyHidden>{`${t('audit.reason')}: `}</VisuallyHidden>
+      {text}
+    </Text>
+  );
+}
+
 function OriginCell({ change }: { readonly change: CellChange }): JSX.Element {
   return (
-    <Group gap="xs" wrap="nowrap">
-      <Origin origin={change.origin} />
-      {showsOverwriteMark(change) && (
-        <Badge
-          size="xs"
-          variant="outline"
-          color="statusWarning"
-          leftSection={<Glyph d={OverwritePath} size={10} />}
-          title={t('audit.overwriteHint')}
-          data-audit-overwrite=""
-        >
-          {t('audit.overwriteMark')}
-        </Badge>
-      )}
-    </Group>
+    <>
+      <Group gap="xs" wrap="nowrap">
+        <Origin origin={change.origin} />
+        {showsOverwriteMark(change) && (
+          <Badge
+            size="xs"
+            variant="outline"
+            color="statusWarning"
+            leftSection={<Glyph d={OverwritePath} size={10} />}
+            title={t('audit.overwriteHint')}
+            data-audit-overwrite=""
+          >
+            {t('audit.overwriteMark')}
+          </Badge>
+        )}
+      </Group>
+      <Reason reason={change.reason} />
+    </>
   );
 }
 
@@ -243,15 +248,29 @@ function Late({ change }: { readonly change: CellChange }): ReactNode {
  */
 export const CellChangesTable = memo(function CellChangesTable({
   items,
+  sort = DefaultAuditSort,
+  onSort,
 }: {
   readonly items: readonly CellChange[];
+  /** Порядок видачі (серверний); заголовки «Changed at» і «By user» його перемикають через `onSort`. */
+  readonly sort?: AuditSort;
+  readonly onSort?: (next: AuditSort) => void;
 }): JSX.Element {
   return (
     <Table striped className="ecr-sticky-head ecr-audit-table" aria-label={t('audit.title')}>
       <Table.Thead>
         <Table.Tr>
-          <Table.Th>{t('audit.when')}</Table.Th>
-          <Table.Th>{t('audit.who')}</Table.Th>
+          {onSort === undefined ? (
+            <>
+              <Table.Th>{t('audit.when')}</Table.Th>
+              <Table.Th>{t('audit.who')}</Table.Th>
+            </>
+          ) : (
+            <>
+              <SortableTh label={t('audit.when')} column="time" sort={sort} onSort={onSort} />
+              <SortableTh label={t('audit.who')} column="user" sort={sort} onSort={onSort} />
+            </>
+          )}
           <Table.Th>{t('audit.documentCell')}</Table.Th>
           <Table.Th>{t('audit.wasBecomes')}</Table.Th>
           <Table.Th>{t('audit.origin')}</Table.Th>

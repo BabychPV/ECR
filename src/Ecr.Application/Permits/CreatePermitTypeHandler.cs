@@ -42,6 +42,19 @@ public sealed class CreatePermitTypeHandler(
 
         var profile = await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         var userId = SaveRegistryDefinitionHandler.RequireUser(currentUser);
+        return await ApplyAsync(request, new PermitTypeActor(userId, profile, currentUser.CorrelationId), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ AIRSYS01: те саме без перевірки прав — для автора, якого вже перевірив викликач (запит) або який є системою
+    /// (<see cref="PermitTypeActor.System"/>, лише крок старту). Доменні перевірки — ті самі.
+    /// </summary>
+    internal async Task<PermitTypeDto> ApplyAsync(CreatePermitTypeRequest request, PermitTypeActor actor, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(actor);
+        var profile = actor.Profile;
+        var userId = actor.UserId;
 
         var code = EcrCode.Create(request.Code);
         var category = PermitTypeDefinitionValidator.ValidateDetails(request.NameL10n, request.Category);
@@ -85,8 +98,8 @@ public sealed class CreatePermitTypeHandler(
                     OldJson: null,
                     NewJson: type.DraftJson,
                     ChangeReason: null,
-                    ChangedByUserId: userId,
-                    CorrelationId: currentUser.CorrelationId),
+                    ChangedByUserId: actor.AuditUserId,
+                    CorrelationId: actor.CorrelationId),
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 

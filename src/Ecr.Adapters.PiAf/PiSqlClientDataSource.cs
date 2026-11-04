@@ -23,9 +23,52 @@ namespace Ecr.Adapters.PiAf;
 /// </remarks>
 public sealed partial class PiSqlClientDataSource(
     ICollectionStore store, ISecretProvider secrets, ISecretProvider? settings = null,
-    ILogger<PiSqlClientDataSource>? logger = null) : IExternalDataSource
+    ILogger<PiSqlClientDataSource>? logger = null, PiSqlClientOptions? options = null)
+    : IExternalDataSource, IAsyncDisposable, IDisposable
 {
     private readonly ILogger log = (ILogger?)logger ?? NullLogger.Instance;
+
+    /// <summary>Тайм-аут команди ODBC (D-462); без налаштування — <see cref="PiSqlClientOptions.DefaultCommandTimeoutSeconds"/>.</summary>
+    private readonly int commandTimeoutSeconds = options?.CommandTimeoutSeconds is > 0 and var seconds
+        ? seconds
+        : PiSqlClientOptions.DefaultCommandTimeoutSeconds;
+
+    /// <summary>
+    /// D-464: тайм-аут читання подій; без налаштування — <see cref="PiSqlClientOptions.DefaultEventQueryTimeoutSeconds"/>.
+    /// </summary>
+    private readonly int eventQueryTimeoutSeconds = options?.EventQueryTimeoutSeconds is > 0 and var eventSeconds
+        ? eventSeconds
+        : PiSqlClientOptions.DefaultEventQueryTimeoutSeconds;
+
+    /// <summary>Чинний тайм-аут команди тега/каталогу, с (для тестів налаштування).</summary>
+    internal int CommandTimeoutSeconds => commandTimeoutSeconds;
+
+    /// <summary>Чинний тайм-аут читання подій, с (D-464; для тестів налаштування).</summary>
+    internal int EventQueryTimeoutSeconds => eventQueryTimeoutSeconds;
+
+    /// <summary>Перемикання на запасну адресу при відмові зв'язку з основною (D-462).</summary>
+    private EndpointFailover Failover => failover ??= new EndpointFailover(log, nameof(PiSqlClientDataSource));
+
+    private EndpointFailover? failover;
+
+    /// <summary>Роль адреси, що відкрила останнє з'єднання (<c>primary</c>/<c>secondary</c>); для діагностики.</summary>
+    internal string? LastServedBy => failover?.LastServedBy;
+
+    /// <summary>
+    /// Відкрите з'єднання, що чекає наступного читання того самого джерела (D-462); <c>null</c> — немає.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Раніше КОЖНА сторінка кожного атрибута відкривала нове з'єднання ODBC (з повторами відкриття) і
+    /// перечитувала шаблон елемента — сотні рукостискань RTQP на прогін. Тепер з'єднання живе екземпляр
+    /// адаптера (scope задачі) і повертається сюди після УСПІШНОГО читання; читання з помилкою своє з'єднання
+    /// закриває (зламане ODBC-з'єднання далі не використовується). Одночасні читання не ділять з'єднання:
+    /// хто не взяв вільне — відкриває власне, а «зайве» при поверненні закривається.
+    /// </remarks>
+    private IdleConnection? idle;
+
+    /// <summary>Шаблони елементів, уже знайдені цим екземпляром: (джерело, елемент) → шаблон.</summary>
+    /// <remarks>⚠ Лише знайдені однозначно: «немає» і «неоднозначно» перепитуються — їх може виправити людина в AF.</remarks>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(int SourceId, string Element), string> templates = new();
 
     /// <summary>Стеля рядків каталогу за один обхід.</summary>
     /// <remarks>
@@ -117,8 +160,15 @@ public sealed partial class PiSqlClientDataSource(
         var source = await store.FindDataSourceAsync(dataSourceId, ct).ConfigureAwait(false)
                      ?? throw Unavailable($"Джерело {dataSourceId} не існує або вимкнене.", dataSourceId);
 
-        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
-        using var command = connection.CreateCommand();
+        return await WithConnectionAsync(source, connection => ReadCatalogAsync(connection, source, ct), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Каталог елементів і атрибутів відкритим з'єднанням (D-464: з'єднання — з оренди).</summary>
+    private async Task<IReadOnlyList<SourceEntityDescriptor>> ReadCatalogAsync(
+        OdbcConnection connection, Domain.Entities.External.DataSource source, CancellationToken ct)
+    {
+        using var command = NewCommand(connection);
         command.CommandText = Query(source.Code, CatalogQueryKey, DefaultCatalogQuery);
 
         var result = new List<SourceEntityDescriptor>();
@@ -188,27 +238,49 @@ public sealed partial class PiSqlClientDataSource(
 
         var (element, attribute) = Split(request.SourcePath);
 
-        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
+        var result = await WithConnectionAsync(
+                source,
+                connection => ReadPageAsync(connection, source, request, queryText, element, attribute, ct),
+                ct)
+            .ConfigureAwait(false);
 
-        var lookup = await TemplateAsync(connection, source.Code, element, ct).ConfigureAwait(false);
+        // ✎ Аудит 31.10 (G5): відповідь запасної адреси — не доказ відсутності точок (видалення зниклих — збирач).
+        return result with { ServedBySecondary = Failover.IsOnSecondary(source.Id) };
+    }
 
-        if (lookup.Ambiguous)
+    /// <summary>Одна сторінка значень атрибута відкритим з'єднанням (D-462: з'єднання — з оренди).</summary>
+    private async Task<CollectionResult> ReadPageAsync(
+        OdbcConnection connection,
+        Domain.Entities.External.DataSource source,
+        CollectionRequest request,
+        string? queryText,
+        string element,
+        string attribute,
+        CancellationToken ct)
+    {
+        if (!templates.TryGetValue((source.Id, element), out var template))
         {
-            throw ElementNameAmbiguous(source.Code, request.SourcePath);
+            var lookup = await TemplateAsync(connection, source.Code, element, ct).ConfigureAwait(false);
+
+            if (lookup.Ambiguous)
+            {
+                throw ElementNameAmbiguous(source.Code, request.SourcePath);
+            }
+
+            if (lookup.Template is null)
+            {
+                // Елемента за таким іменем немає. Порожній результат тут був би
+                // гіршим за відмову: він записав би покриття за інтервал, у якому
+                // даних не буде ніколи.
+                return new CollectionResult(
+                    [], [new TimeInterval(request.FromUtc, request.ToUtc)], SourceUnavailable);
+            }
+
+            template = lookup.Template;
+            templates[(source.Id, element)] = template;
         }
 
-        var template = lookup.Template;
-
-        if (template is null)
-        {
-            // Елемента за таким іменем немає. Порожній результат тут був би
-            // гіршим за відмову: він записав би покриття за інтервал, у якому
-            // даних не буде ніколи.
-            return new CollectionResult(
-                [], [new TimeInterval(request.FromUtc, request.ToUtc)], SourceUnavailable);
-        }
-
-        using var command = connection.CreateCommand();
+        using var command = NewCommand(connection);
         command.CommandText = queryText is null
             ? ValueQuery(source.Code, template, attribute)
             : Fill(queryText, template, attribute);
@@ -292,8 +364,23 @@ public sealed partial class PiSqlClientDataSource(
 
         var (element, attribute) = Split(request.SourcePath);
 
-        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
+        return await WithConnectionAsync(
+                source,
+                connection => ReadSummaryAsync(connection, source, request, configured, element, attribute, ct),
+                ct)
+            .ConfigureAwait(false);
+    }
 
+    /// <summary>Summary вікна відкритим з'єднанням (D-464: з'єднання — з оренди).</summary>
+    private async Task<WindowResult> ReadSummaryAsync(
+        OdbcConnection connection,
+        Domain.Entities.External.DataSource source,
+        WindowRequest request,
+        string configured,
+        string element,
+        string attribute,
+        CancellationToken ct)
+    {
         var lookup = await TemplateAsync(connection, source.Code, element, ct).ConfigureAwait(false);
 
         if (lookup.Ambiguous)
@@ -309,7 +396,7 @@ public sealed partial class PiSqlClientDataSource(
                 [new TimeInterval(request.FromUtc, request.ToUtc)], SourceUnavailable);
         }
 
-        using var command = connection.CreateCommand();
+        using var command = NewCommand(connection);
         command.CommandText = SummaryQuery(configured, template, attribute, request.Summary);
         command.Parameters.Add(new OdbcParameter("element", OdbcType.NVarChar) { Value = element });
         command.Parameters.Add(new OdbcParameter("from", OdbcType.DateTime) { Value = request.FromUtc });
@@ -428,13 +515,14 @@ public sealed partial class PiSqlClientDataSource(
 
         var queryText = ConfiguredOrRefuse(source.Code, CurrentValueQueryKey, "CurrentValue");
 
-        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
-
-        return await ReadCurrentPathsAsync(
-                paths,
-                element => TemplateAsync(connection, source.Code, element, ct),
-                (path, element, template, attribute) => ReadCurrentPointAsync(
-                    connection, source.Code, queryText, path, element, template, attribute, ct))
+        return await WithConnectionAsync(
+                source,
+                connection => ReadCurrentPathsAsync(
+                    paths,
+                    element => TemplateAsync(connection, source.Code, element, ct),
+                    (path, element, template, attribute) => ReadCurrentPointAsync(
+                        connection, source.Code, queryText, path, element, template, attribute, ct)),
+                ct)
             .ConfigureAwait(false);
     }
 
@@ -509,7 +597,7 @@ public sealed partial class PiSqlClientDataSource(
         string attribute,
         CancellationToken ct)
     {
-        using var command = connection.CreateCommand();
+        using var command = NewCommand(connection);
         command.CommandText = Fill(queryText, template, attribute);
         command.Parameters.Add(new OdbcParameter("element", OdbcType.NVarChar) { Value = element });
 
@@ -582,18 +670,26 @@ public sealed partial class PiSqlClientDataSource(
 
         var text = EventQueryOrRefuse(EventQueryKey, IExternalDataSource.EventQueryKind, source.Code);
 
-        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
-        using var command = connection.CreateCommand();
-        command.CommandText = EventQuery(text, query.Template);
-        command.Parameters.Add(new OdbcParameter("from", OdbcType.DateTime) { Value = from });
-        command.Parameters.Add(new OdbcParameter("to", OdbcType.DateTime) { Value = to });
+        return await WithConnectionAsync(
+                source,
+                async connection =>
+                {
+                    // ⛔ D-464: власний тайм-аут читання подій (`PiSqlClient:EventQueryTimeoutSeconds`, типово 300 с):
+                    // повна звірка річного періоду — один запит на весь рік, і 60 с сторінки тега для нього замало.
+                    using var command = NewCommand(connection, eventQueryTimeoutSeconds);
+                    command.CommandText = EventQuery(text, query.Template);
+                    command.Parameters.Add(new OdbcParameter("from", OdbcType.DateTime) { Value = from });
+                    command.Parameters.Add(new OdbcParameter("to", OdbcType.DateTime) { Value = to });
 
-        using var reader = await RetryAsync(
-            () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
-            IsTransientOdbcFailure,
-            ct).ConfigureAwait(false);
+                    using var reader = await RetryAsync(
+                        () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
+                        IsTransientOdbcFailure,
+                        ct).ConfigureAwait(false);
 
-        return await ReadEventRowsAsync(reader, source.Code, query.Template, query.MaxEvents, query.Attributes, ct)
+                    return await ReadEventRowsAsync(reader, source.Code, query.Template, query.MaxEvents, query.Attributes, ct)
+                        .ConfigureAwait(false);
+                },
+                ct)
             .ConfigureAwait(false);
     }
 
@@ -606,16 +702,22 @@ public sealed partial class PiSqlClientDataSource(
 
         var text = EventQueryOrRefuse(EventTemplateQueryKey, IExternalDataSource.EventTemplateQueryKind, source.Code);
 
-        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
-        using var command = connection.CreateCommand();
-        command.CommandText = text;
+        return await WithConnectionAsync(
+                source,
+                async connection =>
+                {
+                    using var command = NewCommand(connection);
+                    command.CommandText = text;
 
-        using var reader = await RetryAsync(
-            () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
-            IsTransientOdbcFailure,
-            ct).ConfigureAwait(false);
+                    using var reader = await RetryAsync(
+                        () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
+                        IsTransientOdbcFailure,
+                        ct).ConfigureAwait(false);
 
-        return await ReadEventTemplatesAsync(reader, ct).ConfigureAwait(false);
+                    return await ReadEventTemplatesAsync(reader, ct).ConfigureAwait(false);
+                },
+                ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Події з результату запиту подій (контракт колонок — <see cref="EventQueryKey"/>).</summary>
@@ -832,22 +934,28 @@ public sealed partial class PiSqlClientDataSource(
 
         var queryText = ConfiguredOrRefuse(source.Code, ElementListQueryKey, IExternalDataSource.ElementListQueryKind);
 
-        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
-        using var command = connection.CreateCommand();
-        command.CommandText = queryText;
-        command.Parameters.Add(new OdbcParameter("root", OdbcType.NVarChar) { Value = root });
+        return await WithConnectionAsync(
+                source,
+                async connection =>
+                {
+                    using var command = NewCommand(connection);
+                    command.CommandText = queryText;
+                    command.Parameters.Add(new OdbcParameter("root", OdbcType.NVarChar) { Value = root });
 
-        using var reader = await RetryAsync(
-            () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
-            IsTransientOdbcFailure,
-            ct).ConfigureAwait(false);
+                    using var reader = await RetryAsync(
+                        () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
+                        IsTransientOdbcFailure,
+                        ct).ConfigureAwait(false);
 
-        return await ReadElementsAsync(reader, MaxCatalogRows, ct).ConfigureAwait(false);
+                    return await ReadElementsAsync(reader, MaxCatalogRows, ct).ConfigureAwait(false);
+                },
+                ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
     /// Елементи з результату <see cref="ElementListQueryKey"/>: <c>ElementId</c>, <c>ElementName</c>,
-    /// необов'язкова <c>ElementPath</c>; адреса читання — ім'я.
+    /// необов'язкові <c>ElementPath</c> і <c>TemplateName</c> (шаблон AF, дерево НАЕ); адреса читання — ім'я.
     /// </summary>
     /// <remarks>Публічний для тестів: <c>OdbcDataReader</c> ззовні не зробиш.</remarks>
     /// <param name="reader">Відкритий результат запиту.</param>
@@ -876,7 +984,7 @@ public sealed partial class PiSqlClientDataSource(
                 continue;
             }
 
-            elements.Add(new SourceElement(id, name, Column(row, "ElementPath") as string, name));
+            elements.Add(new SourceElement(id, name, Column(row, "ElementPath") as string, name, Column(row, "TemplateName") as string));
         }
 
         return new SourceElementsResult(elements, complete && rows < ceiling);
@@ -1013,9 +1121,9 @@ public sealed partial class PiSqlClientDataSource(
     /// ⚠ Лише літерали й відомі metadata-імена: ім'я, що розв'язується на link-local, ловить
     /// збереження (є `INetworkResolver`); повторного розв'язання тут немає — залишковий ризик DNS-rebinding.
     /// </remarks>
-    private static void RequireAllowedAddress(Domain.Entities.External.DataSource source)
+    private static void RequireAllowedAddress(string sourceCode, string endpoint)
     {
-        var verdict = DataSourceEndpointPolicy.CheckSqlServerAddress(source.Endpoint);
+        var verdict = DataSourceEndpointPolicy.CheckSqlServerAddress(endpoint);
 
         if (verdict == EndpointVerdict.Allowed)
         {
@@ -1025,12 +1133,12 @@ public sealed partial class PiSqlClientDataSource(
         // ⚠ Відмова називає джерело й вердикт, а не вміст рядка з'єднання.
         throw new BusinessRuleException(
             SourceUnavailable,
-            $"Адресу джерела {source.Code} відхилено політикою адреси ({verdict}): збір не з'єднується.",
+            $"Адресу джерела {sourceCode} відхилено політикою адреси ({verdict}): збір не з'єднується.",
             new Dictionary<string, object?>
             {
                 // Той самий ключ, що SqlDataSource.cs: той самий факт («адресу відхилено політикою»).
                 ["messageKey"] = "err.ECR-INT-0503.endpointForbidden",
-                ["dataSource"] = source.Code,
+                ["dataSource"] = sourceCode,
             });
     }
 
@@ -1045,14 +1153,27 @@ public sealed partial class PiSqlClientDataSource(
     /// переїзді середовища (ER-I-01).
     /// </para>
     /// </remarks>
-    private async Task<OdbcConnection> OpenAsync(
+    private Task<OdbcConnection> OpenAsync(
         Domain.Entities.External.DataSource source, CancellationToken ct)
+        => Failover.RunAsync(source, (endpoint, token) => OpenEndpointAsync(source, endpoint, token), IsConnectFailure, ct);
+
+    /// <summary>
+    /// Відмова ЗВ'ЯЗКУ з адресою — лише <c>connectFailed</c> (ODBC не з'єднався після всіх повторів). Облікові
+    /// дані (SQLSTATE 28000), зіпсований рядок з'єднання й відхилена політикою адреса — ні (D-462).
+    /// </summary>
+    internal static bool IsConnectFailure(Exception ex)
+        => ex is BusinessRuleException { Details: { } details }
+           && details.GetValueOrDefault("messageKey") is "err.ECR-INT-0503.connectFailed";
+
+    /// <summary>Відкриває з'єднання з однією адресою джерела (основною чи запасною).</summary>
+    private async Task<OdbcConnection> OpenEndpointAsync(
+        Domain.Entities.External.DataSource source, string endpoint, CancellationToken ct)
     {
         OdbcConnectionStringBuilder builder;
 
         try
         {
-            builder = new OdbcConnectionStringBuilder(source.Endpoint);
+            builder = new OdbcConnectionStringBuilder(endpoint);
         }
         catch (ArgumentException ex)
         {
@@ -1073,7 +1194,7 @@ public sealed partial class PiSqlClientDataSource(
                 });
         }
 
-        RequireAllowedAddress(source);
+        RequireAllowedAddress(source.Code, endpoint);
 
         if (secrets.Find(source.SecretName) is { } secret)
         {
@@ -1398,7 +1519,7 @@ public sealed partial class PiSqlClientDataSource(
     private async Task<TemplateLookup> TemplateAsync(
         OdbcConnection connection, string dataSourceCode, string element, CancellationToken ct)
     {
-        using var command = connection.CreateCommand();
+        using var command = NewCommand(connection);
         command.CommandText = Query(dataSourceCode, TemplateQueryKey, DefaultTemplateQuery);
         command.Parameters.Add(new OdbcParameter("element", OdbcType.NVarChar) { Value = element });
 
@@ -1523,6 +1644,101 @@ public sealed partial class PiSqlClientDataSource(
             ? (sourcePath[..separator], sourcePath[(separator + 1)..])
             : (sourcePath, sourcePath);
     }
+
+    /// <summary>Команда з тайм-аутом із налаштування (D-462), а не типовими 30 с драйвера.</summary>
+    private OdbcCommand NewCommand(OdbcConnection connection) => NewCommand(connection, commandTimeoutSeconds);
+
+    /// <summary>Команда з заданим тайм-аутом (D-464: читання подій має власний).</summary>
+    private static OdbcCommand NewCommand(OdbcConnection connection, int timeoutSeconds)
+    {
+        var command = connection.CreateCommand();
+        command.CommandTimeout = timeoutSeconds;
+        return command;
+    }
+
+    /// <summary>
+    /// D-464: читання орендованим з'єднанням — кожен метод читання адаптера, а не лише сторінка тега (D-462).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Раніше події, шаблони подій, поточні значення, перелік елементів, summary вікна й каталог відкривали
+    /// НОВЕ з'єднання ODBC (з повторами відкриття й перемиканням адрес) на кожен виклик — синк подій, що читає
+    /// кілька шаблонів і сторінок, робив стільки ж рукостискань RTQP. Тепер з'єднання одне на екземпляр адаптера
+    /// (scope задачі). ⚠ Повертається на повторне використання лише після УСПІШНОГО читання: будь-яка відмова
+    /// (тайм-аут, обрив, відмова даних) закриває своє з'єднання, і наступне читання відкриває нове — тим самим
+    /// <see cref="OpenAsync"/>, тобто з тим самим перемиканням на запасну адресу (D-462).
+    /// </remarks>
+    private async Task<T> WithConnectionAsync<T>(
+        Domain.Entities.External.DataSource source, Func<OdbcConnection, Task<T>> read, CancellationToken ct)
+    {
+        var connection = await LeaseAsync(source, ct).ConfigureAwait(false);
+        var reusable = false;
+
+        try
+        {
+            var result = await read(connection).ConfigureAwait(false);
+            reusable = true;
+            return result;
+        }
+        finally
+        {
+            await ReturnAsync(connection, source, reusable).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Вільне з'єднання і джерело, з яким його відкрито.</summary>
+    /// <param name="Connection">Відкрите з'єднання.</param>
+    /// <param name="SourceId">Джерело.</param>
+    /// <param name="Address">Обидві адреси джерела на момент відкриття: змінене джерело — нове з'єднання.</param>
+    private sealed record IdleConnection(OdbcConnection Connection, int SourceId, string Address);
+
+    private static string AddressOf(Domain.Entities.External.DataSource source)
+        => source.Endpoint + "\u001f" + source.SecondaryEndpoint;
+
+    /// <summary>Бере вільне з'єднання цього джерела або відкриває нове.</summary>
+    private async Task<OdbcConnection> LeaseAsync(Domain.Entities.External.DataSource source, CancellationToken ct)
+    {
+        if (Interlocked.Exchange(ref idle, null) is { } free)
+        {
+            if (free.SourceId == source.Id
+                && string.Equals(free.Address, AddressOf(source), StringComparison.Ordinal)
+                && free.Connection.State == ConnectionState.Open)
+            {
+                return free.Connection;
+            }
+
+            await free.Connection.DisposeAsync().ConfigureAwait(false);
+        }
+
+        return await OpenAsync(source, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Повертає з'єднання на повторне використання або закриває його.</summary>
+    /// <param name="connection">З'єднання з оренди.</param>
+    /// <param name="source">Джерело.</param>
+    /// <param name="reusable"><c>false</c> — читання впало: з'єднання могло зламатися, закриваємо.</param>
+    private async Task ReturnAsync(OdbcConnection connection, Domain.Entities.External.DataSource source, bool reusable)
+    {
+        if (reusable
+            && connection.State == ConnectionState.Open
+            && Interlocked.CompareExchange(ref idle, new IdleConnection(connection, source.Id, AddressOf(source)), null) is null)
+        {
+            return;
+        }
+
+        await connection.DisposeAsync().ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref idle, null) is { } free)
+        {
+            await free.Connection.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => Interlocked.Exchange(ref idle, null)?.Connection.Dispose();
 
     private static BusinessRuleException Unavailable(string message, int dataSourceId)
         => new(

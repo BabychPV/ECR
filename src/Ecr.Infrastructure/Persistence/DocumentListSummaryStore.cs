@@ -115,6 +115,7 @@ public sealed class DocumentListSummaryStore(
                                      WHERE sdp.Id = s.SheetDefId)
                     LEFT JOIN wf.ApprovalState a
                       ON a.DocumentId = s.DocumentId AND a.SheetDefId = s.SheetDefId AND a.PeriodKey = {periodKey}
+                     AND (a.SheetCopyId = s.Id OR (a.SheetCopyId IS NULL AND s.CopyOfId IS NULL))
                     WHERE {restrict} = 0
                        OR d.ProjectId IN (SELECT CAST(j.value AS int) FROM OPENJSON({projectsJson}) j)
                        OR (d.Id IN (SELECT CAST(pd.value AS bigint) FROM OPENJSON({participantDocsJson}) pd)

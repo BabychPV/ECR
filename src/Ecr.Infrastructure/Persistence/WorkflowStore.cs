@@ -1,9 +1,11 @@
+using System.Data;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Ecr.Infrastructure.Persistence;
 
@@ -145,14 +147,29 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     }
 
     /// <inheritdoc />
-    public async Task<ApprovalState> GetOrCreateAsync(
+    public Task<ApprovalState> GetOrCreateAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        => GetOrCreateCoreAsync(documentId, sheetDefId, periodKey, null, ct);
+
+    /// <inheritdoc />
+    public Task<ApprovalState> GetOrCreateCopyAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => GetOrCreateCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct);
+
+    /// <summary>Стан оригіналу (<paramref name="sheetCopyId"/> = <c>null</c>) або копії аркуша за період.</summary>
+    /// <remarks>
+    /// ⛔ RS: фільтр за копією обов'язковий і для оригіналу — без нього <c>FirstOrDefault</c> міг би повернути стан
+    /// КОПІЇ, і подання оригіналу змінило б не той рядок.
+    /// </remarks>
+    private async Task<ApprovalState> GetOrCreateCoreAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
     {
         var existing = await db.ApprovalStates
             .FirstOrDefaultAsync(
                 s => s.DocumentId == documentId
                      && s.SheetDefId == sheetDefId
-                     && s.PeriodKey == periodKey.Value,
+                     && s.PeriodKey == periodKey.Value
+                     && s.SheetCopyId == sheetCopyId,
                 ct)
             .ConfigureAwait(false);
 
@@ -163,7 +180,7 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
 
         // Відсутній рядок означає Draft, а не помилку: стан з'являється в
         // момент першої дії, а не разом із документом.
-        var created = new ApprovalState(documentId, sheetDefId, periodKey.Value);
+        var created = new ApprovalState(documentId, sheetDefId, periodKey.Value, sheetCopyId);
         db.ApprovalStates.Add(created);
         return created;
     }
@@ -178,7 +195,7 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<ApprovalEventRecord>> GetHistoryAsync(
-        long documentId, PeriodKey periodKey, int limit, CancellationToken ct)
+        long documentId, PeriodKey periodKey, int limit, CancellationToken ct, long? sheetCopyId = null)
     {
         // ⚠ Користувач приєднується ЛІВИМ з'єднанням: `ByUserId = null` — це
         // системний перехід, і внутрішнє з'єднання мовчки викинуло б його з журналу.
@@ -189,10 +206,12 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             join u in db.Users.AsNoTracking() on e.ByUserId equals (int?)u.Id into users
             from user in users.DefaultIfEmpty()
             where e.DocumentId == documentId && e.PeriodKey == periodKey.Value
+                  && e.SheetCopyId == sheetCopyId
             orderby e.At descending, e.Id descending
             select new ApprovalEventRecord(
                 sheet.Code, e.FromStatus, e.ToStatus, e.Action, e.ByUserId,
                 user == null ? null : user.DisplayName, e.At, e.Reason, e.StepOrdinal,
+                // RS: подання тієї самої КОПІЇ (null — оригінал), що й погодження.
                 // ⛔ D-440: «погоджено автором подання» — з ЖУРНАЛУ, а не з `ApprovalState.SubmittedByUserId`:
                 // рядок стану тримає лише останнє подання, і після повторного подання іншою людиною стара
                 // подія погодження змінила б позначку заднім числом. Подання — найближче ПЕРЕД цією подією
@@ -201,10 +220,13 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
                 && e.ByUserId != null
                 && db.ApprovalEvents
                     .Where(s => s.DocumentId == e.DocumentId && s.SheetDefId == e.SheetDefId
+                                && s.SheetCopyId == e.SheetCopyId
                                 && s.PeriodKey == e.PeriodKey && s.Action == ApprovalAction.Submit && s.Id < e.Id)
                     .OrderByDescending(s => s.Id)
                     .Select(s => s.ByUserId)
-                    .FirstOrDefault() == e.ByUserId);
+                    .FirstOrDefault() == e.ByUserId,
+                e.Id,
+                e.SheetCopyId);
 
         return await query.Take(limit).ToListAsync(ct).ConfigureAwait(false);
     }
@@ -220,7 +242,7 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
 
     /// <inheritdoc />
     public async Task<SubmissionCalendar?> GetSubmissionCalendarAsync(
-        long documentId, int sheetDefId, DateTime utcNow, CancellationToken ct)
+        long documentId, int sheetDefId, DateTime utcNow, CancellationToken ct, long? sheetCopyId = null)
     {
         var project = await (
                 from d in db.Documents.AsNoTracking()
@@ -250,9 +272,10 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // RS: календар подання — оригіналу аркуша або заданої копії (`sheetCopyId`).
         var statuses = await db.ApprovalStates
             .AsNoTracking()
-            .Where(s => s.DocumentId == documentId && s.SheetDefId == sheetDefId)
+            .Where(s => s.DocumentId == documentId && s.SheetDefId == sheetDefId && s.SheetCopyId == sheetCopyId)
             .Select(s => new { s.PeriodKey, s.Status })
             .ToDictionaryAsync(s => s.PeriodKey, s => s.Status, ct)
             .ConfigureAwait(false);
@@ -324,7 +347,8 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             snapshot.PayloadJson,
             Convert.FromHexString(snapshot.ContentHash),
             snapshot.SubmittedAt,
-            snapshot.SubmittedByUserId);
+            snapshot.SubmittedByUserId,
+            snapshot.SheetCopyId);
 
         db.SubmissionSnapshots.Add(entity);
 
@@ -336,13 +360,24 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<SubmissionSnapshotRecord>> GetSnapshotsAsync(
+    public Task<IReadOnlyList<SubmissionSnapshotRecord>> GetSnapshotsAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        => GetSnapshotsCoreAsync(documentId, sheetDefId, periodKey, null, ct);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<SubmissionSnapshotRecord>> GetCopySnapshotsAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => GetSnapshotsCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct);
+
+    /// <summary>Зрізи оригіналу або копії аркуша (RS: зрізи копії окремі).</summary>
+    private async Task<IReadOnlyList<SubmissionSnapshotRecord>> GetSnapshotsCoreAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
         => await db.SubmissionSnapshots
             .AsNoTracking()
             .Where(s => s.DocumentId == documentId
                         && s.SheetDefId == sheetDefId
-                        && s.PeriodKey == periodKey.Value)
+                        && s.PeriodKey == periodKey.Value
+                        && s.SheetCopyId == sheetCopyId)
             .OrderByDescending(s => s.SubmittedAt)
             .Select(s => new SubmissionSnapshotRecord(
                 s.DocumentId,
@@ -355,20 +390,32 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
                 s.PayloadJson,
                 Convert.ToHexStringLower(s.ContentHash),
                 s.SubmittedAt,
-                s.SubmittedByUserId))
+                s.SubmittedByUserId,
+                s.SheetCopyId))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
     /// <inheritdoc />
-    public async Task<(long Id, string ContentHash)?> GetLatestSnapshotKeyAsync(
+    public Task<(long Id, string ContentHash)?> GetLatestSnapshotKeyAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        => GetLatestSnapshotKeyCoreAsync(documentId, sheetDefId, periodKey, null, ct);
+
+    /// <inheritdoc />
+    public Task<(long Id, string ContentHash)?> GetLatestCopySnapshotKeyAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => GetLatestSnapshotKeyCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct);
+
+    /// <summary>Ключ найновішого зрізу оригіналу або копії аркуша.</summary>
+    private async Task<(long Id, string ContentHash)?> GetLatestSnapshotKeyCoreAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
     {
         // Без PayloadJson у проєкції: у вибірку йдуть лише Id і хеш (32 байти).
         var row = await db.SubmissionSnapshots
             .AsNoTracking()
             .Where(s => s.DocumentId == documentId
                         && s.SheetDefId == sheetDefId
-                        && s.PeriodKey == periodKey.Value)
+                        && s.PeriodKey == periodKey.Value
+                        && s.SheetCopyId == sheetCopyId)
             .OrderByDescending(s => s.SubmittedAt)
             .ThenByDescending(s => s.Id)
             .Select(s => new { s.Id, s.ContentHash })
@@ -379,13 +426,43 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ PERF (AN-135): НЕ через EF <c>FirstOrDefaultAsync</c>. Асинхронне читання ~10 МБ <c>nvarchar(max)</c>
+    /// у звичайному (не послідовному) режимі SqlClient коштувало 11–12 с проти ~0,15 с синхронного: кожен
+    /// наступний мережевий пакет перечитує вже накопичене значення. Тут — сирий запит у тій самій
+    /// транзакції з <see cref="CommandBehavior.SequentialAccess"/> і потоковим <c>GetTextReader</c>: зовнішній
+    /// API лишається асинхронним, а значення читається частинами без квадратичного буфера.
+    /// </remarks>
     public async Task<string?> GetSnapshotPayloadAsync(long snapshotId, CancellationToken ct)
-        => await db.SubmissionSnapshots
-            .AsNoTracking()
-            .Where(s => s.Id == snapshotId)
-            .Select(s => s.PayloadJson)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
+    {
+        await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            command.CommandText = "SELECT TOP (1) PayloadJson FROM calc.SubmissionSnapshot WHERE Id = @id;";
+            var id = command.CreateParameter();
+            id.ParameterName = "@id";
+            id.DbType = DbType.Int64;
+            id.Value = snapshotId;
+            command.Parameters.Add(id);
+
+            await using var reader = await command
+                .ExecuteReaderAsync(CommandBehavior.SequentialAccess | CommandBehavior.SingleRow, ct)
+                .ConfigureAwait(false);
+            if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                return null;
+            }
+
+            using var text = reader.GetTextReader(0);
+            return await text.ReadToEndAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+        }
+    }
 
     /// <inheritdoc />
     public Task<bool> HasSubmittedSheetsAsync(int projectId, PeriodKey periodKey, CancellationToken ct)

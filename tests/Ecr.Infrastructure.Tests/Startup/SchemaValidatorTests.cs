@@ -377,6 +377,56 @@ public sealed class SchemaValidatorTests(SqlServerFixture sql)
         return builder.ConnectionString;
     }
 
+    /// <summary>
+    /// Sql-only procedures (created by deploy-ecr step 2, not by EF): missing => non-fatal warning with names (server log only);
+    /// present => none; metadata not visible (canary absent) => none; full startup validation still passes.
+    /// Mutation: drop the entry from <c>SqlOnlyProcedures</c> - the missing case is red.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Відсутня_Sql_only_процедура_дає_нефатальне_попередження_присутня_і_невизначена_ні()
+    {
+        await using (var db = CreateContext())
+        {
+            var present = new SchemaValidator(db, Capabilities(), Clock);
+            await present.ValidateSqlOnlyProceduresAsync(CancellationToken.None);
+            Assert.DoesNotContain(present.Warnings, w => w.Contains("deploy-ecr", StringComparison.Ordinal));
+        }
+
+        // Indeterminate: a database without the canary table (metadata not visible) - no warning, no exception.
+        await using (var bare = CreateContext(await CreateBareDatabaseAsync()))
+        {
+            var unknown = new SchemaValidator(bare, Capabilities(), Clock);
+            await unknown.ValidateSqlOnlyProceduresAsync(CancellationToken.None);
+            Assert.Empty(unknown.Warnings);
+        }
+
+        try
+        {
+            await ExecuteAsync("DROP PROCEDURE rpt.usp_GenerateStableViews");
+            await using var db = CreateContext();
+            var missing = new SchemaValidator(db, Capabilities(), Clock);
+            await missing.ValidateAsync("Validate", CancellationToken.None);   // startup is not stopped
+            var warning = Assert.Single(missing.Warnings, w => w.Contains("deploy-ecr", StringComparison.Ordinal));
+            Assert.Contains("usp_GenerateStableViews", warning, StringComparison.Ordinal);
+            Assert.DoesNotContain("usp_GenerateTemplateViews", warning, StringComparison.Ordinal);
+        }
+        finally
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "Persistence", "Sql", "05-rpt-views.sql");
+            await using var connection = new SqlConnection(sql.ConnectionString);
+            await connection.OpenAsync();
+            foreach (var batch in SqlBatches.Split(await File.ReadAllTextAsync(path)))
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = batch;
+                command.CommandTimeout = 300;
+                await command.ExecuteNonQueryAsync();
+            }
+        }
+    }
+
     private EcrDbContext CreateContext(string? connectionString = null)
         => new(new DbContextOptionsBuilder<EcrDbContext>()
             .UseSqlServer(connectionString ?? sql.ConnectionString)

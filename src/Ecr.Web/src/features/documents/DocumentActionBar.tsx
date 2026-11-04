@@ -31,6 +31,8 @@ interface DocumentActionBarProps {
   readonly sheetDefId: number;
   /** Код активного аркуша — для банера «хто, коли» (UI-26). */
   readonly sheetCode: string;
+  /** RS: копія активного аркуша; `null`/не задано — оригінал. */
+  readonly sheetCopyId?: number | null;
   readonly sheetName: string;
   /** Стан активного аркуша за період. */
   readonly state: string;
@@ -80,6 +82,7 @@ export function DocumentActionBar({
   periodKey,
   sheetDefId,
   sheetCode,
+  sheetCopyId = null,
   sheetName,
   state,
   lock,
@@ -96,7 +99,7 @@ export function DocumentActionBar({
   resultsStaleSince,
   staleReminderHost,
 }: DocumentActionBarProps): JSX.Element {
-  const actions = useSheetActions({ documentId, sheetDefId, sheetName, periodKey, state, lock });
+  const actions = useSheetActions({ documentId, sheetDefId, sheetCopyId, sheetName, periodKey, state, lock });
   useStaleResultsReminder(documentId, resultsStale === true, actions.recalculate !== null, staleReminderHost);
   // ✎ D-441 CLS: доки сервер не відповів, ЧИ і ЯКИЙ період подавати, остаточна форма рядка дій невідома
   // (кнопка «Подати: <період>», ▾, «Next to submit: …» або нічого) — скелет замість дій (`DocumentToolbar`,
@@ -107,6 +110,8 @@ export function DocumentActionBar({
   //   місці, а «Подати» недоступна (`submit.checking`), доки не прийде ціль нового;
   // - ✎ людина без права подання скелета не бачить: «Подати» їй не буде за будь-якої відповіді.
   const actionsPending = actions.submitPending;
+  // ✎ LIVE-STATUS: чужий перехід, новий стан у дорозі — кнопки процесу на місці, але недоступні (фокус лишається).
+  const staleProps = actions.stale ? { 'data-disabled': true, 'aria-disabled': true } : {};
   const openImport = useRef<((returnTo?: HTMLElement | null) => void) | null>(null);
   const startExport = useExportStarter();
 
@@ -182,7 +187,7 @@ export function DocumentActionBar({
       </Menu.Item>
     ) : null,
     actions.recall !== null ? (
-      <Menu.Item key="recall" onClick={actions.recall.ask}>
+      <Menu.Item key="recall" disabled={actions.stale} onClick={actions.recall.ask}>
         {t('workflow.recall')}
       </Menu.Item>
     ) : null,
@@ -207,6 +212,7 @@ export function DocumentActionBar({
         color="statusSuccess"
         loading={actions.approve.loading}
         onClick={actions.approve.ask}
+        {...staleProps}
       >
         {t('workflow.approve')}
       </Button>
@@ -242,7 +248,7 @@ export function DocumentActionBar({
 
         {/* ⛔ Затвердження і відхилення — пара: «Reject» поруч з «Approve». */}
         {actions.reject !== null && (
-          <Button color="statusError" variant="outline" onClick={actions.reject.ask}>
+          <Button color="statusError" variant="outline" onClick={actions.reject.ask} {...staleProps}>
             {t('workflow.reject')}
           </Button>
         )}
@@ -250,7 +256,7 @@ export function DocumentActionBar({
         {/* ⚠ На затвердженому аркуші головної дії немає — повернення в роботу
             (окреме небезпечне право, причина обов'язкова) лишається видимим. */}
         {actions.reopen !== null && (
-          <Button variant="default" onClick={actions.reopen.ask}>
+          <Button variant="default" onClick={actions.reopen.ask} {...staleProps}>
             {t('workflow.reopen')}
           </Button>
         )}
@@ -263,6 +269,7 @@ export function DocumentActionBar({
         documentId={documentId}
         periodKey={periodKey}
         sheetCode={sheetCode}
+        sheetCopyId={sheetCopyId}
         state={state}
         lock={lock}
         canDecide={actions.approve !== null || actions.reject !== null}

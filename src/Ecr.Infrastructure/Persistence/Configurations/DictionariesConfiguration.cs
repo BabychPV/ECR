@@ -76,6 +76,22 @@ public sealed class RegistryEntryConfiguration : IEntityTypeConfiguration<Regist
         builder.HasOne<RegistryEntry>().WithMany().HasForeignKey(x => x.ParentEntryId)
                .HasConstraintName("FK_RegEntry_Parent");
 
+        // NAE plan N1 (hierarchical registries). The FK to the parent had NO supporting index: every children lookup (tree
+        // childCount, subtree walk for move/retire, delete guard) and every FK check scanned the registry. Filtered on
+        // ParentEntryId IS NOT NULL (roots need no lookup); INCLUDE covers the tree read without touching the heap.
+        builder.HasIndex(x => new { x.RegistryDefId, x.ParentEntryId })
+               .HasDatabaseName("IX_RegistryEntry_Parent")
+               .HasFilter("[ParentEntryId] IS NOT NULL")
+               .IncludeProperties(x => new { x.Ordinal, x.Code, x.IsActive, x.IsDeleted, x.LevelId });
+
+        // Level in use? (level removal / reorder guard); small filtered index, flat registries pay nothing.
+        builder.Property(x => x.LevelId);
+        builder.HasIndex(x => x.LevelId)
+               .HasDatabaseName("IX_RegistryEntry_Level")
+               .HasFilter("[LevelId] IS NOT NULL");
+        builder.HasOne<RegistryLevelDef>().WithMany().HasForeignKey(x => x.LevelId)
+               .HasConstraintName("FK_RegEntry_Level");
+
         // RK02 (D-157): коди записів довідників із `CodeMode = Auto` — `E` + 9
         // цифр цієї послідовності (§4.8). Одна на всі довідники: код унікальний
         // лише в межах довідника, тож пропуски між довідниками нічого не

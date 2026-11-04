@@ -16,10 +16,13 @@ export interface ChoicesFromProps {
   readonly onChange: (next: PermitTypeColumn) => void;
 }
 
-/** Значення списку «лише для типу» з тексту: по одному в рядку, порожні відкинуто. */
+/**
+ * Значення списку «лише для типу» з тексту: по одному в рядку АБО через «;» (людина 02.11: «через крапку з комою»), обидва
+ * способи разом; пробіли по краях обрізано, порожні відкинуто.
+ */
 export function choicesFromText(text: string): string[] {
   return text
-    .split(/\r?\n/)
+    .split(/[\n;]/)
     .map((line) => line.trim())
     .filter((line) => line !== '');
 }

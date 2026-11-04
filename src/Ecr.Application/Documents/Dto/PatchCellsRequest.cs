@@ -152,7 +152,14 @@ public sealed record PatchRow(
 /// <param name="ColumnCode">Код колонки.</param>
 /// <param name="Value">Значення; <c>null</c> = стерти.</param>
 /// <param name="IsEmpty">Явна порожнеча.</param>
+/// <param name="OverrideReason">
+/// ✎ D-461: причина ручного значення замість формули — обов'язкова, коли комірку рахує формула, що дозволяє ручне
+/// значення (і в користувача є право <c>Document.OverrideFormula</c>); обрізається, до 1000 символів, без керівних
+/// символів, крім переносу рядка. Для звичайних комірок ігнорується. Видалення значення (<c>value: null</c>) у ручній
+/// комірці повертає формулу — причина не потрібна.
+/// </param>
 public sealed record PatchCell(
     string ColumnCode,
     object? Value,
-    bool IsEmpty = false);
+    bool IsEmpty = false,
+    string? OverrideReason = null);

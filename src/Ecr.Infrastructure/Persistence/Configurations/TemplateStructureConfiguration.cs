@@ -45,6 +45,7 @@ public sealed class SheetDefConfiguration : IEntityTypeConfiguration<SheetDef>
         // неможливо прибрати скриптом, не з'ясувавши спершу його
         // випадкове ім'я на конкретній базі.
         builder.Property(x => x.IsMandatory).HasDefaultValue(false, "DF_SheetDef_Mand");
+        builder.Property(x => x.IsCopyable).HasDefaultValue(false, "DF_SheetDef_Copy");
         builder.Property(x => x.IsVisible).HasDefaultValue(true, "DF_SheetDef_Vis");
         builder.Property(x => x.IsDeleted).HasDefaultValue(false, "DF_SheetDef_Del");
         builder.LocalizedText(x => x.NameL10n);

@@ -67,6 +67,7 @@ public sealed class StatusNumberingTests
         // Сирі вʼюхи не фільтрують за статусом: він лише колонка (довга й широка).
         Assert.DoesNotContain("a.Status IN", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("a.Status =", sql, StringComparison.Ordinal);
-        Assert.Equal(2, System.Text.RegularExpressions.Regex.Count(sql, @"COALESCE\(a\.Status, 0\)"));
+        // довга, широка (_vN) і широка стабільна (RPT-STABLE) вʼюхи: статус - колонка в кожній
+        Assert.Equal(3, System.Text.RegularExpressions.Regex.Count(sql, @"COALESCE\(a\.Status, 0\)"));
     }
 }

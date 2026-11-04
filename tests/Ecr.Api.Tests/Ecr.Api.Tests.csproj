@@ -12,6 +12,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The synthetic ERA table 3.3 workbook (NAE plan N3/N4) is shared with the adapter tests, not copied. -->
+    <Compile Include="..\Ecr.Adapters.Tests\Excel\RegistryImport\SyntheticEraTable33.cs" Link="Shared\SyntheticEraTable33.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />

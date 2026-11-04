@@ -11,7 +11,13 @@ export const PermitsPaths = {
   lists: '/admin/permits/lists',
   groups: '/admin/permits/groups',
   bindings: '/admin/permits/bindings',
+  nae: '/admin/permits/nae',
 } as const;
+
+/** Майстер імпорту лімітів із Excel для дозволу (NAE-план N5): `/admin/permits/:id/import`. */
+export function permitImportPath(permitId: number): string {
+  return `${PermitsPaths.permits}/${String(permitId)}/import`;
+}
 
 /** Адреса редактора типу за кодом (код — літери, цифри й `_`, але кодується про всяк випадок). */
 export function typeEditorPath(code: string): string {

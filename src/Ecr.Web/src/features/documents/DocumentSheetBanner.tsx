@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { Alert } from '@mantine/core';
-import { useWorkflowHistory, type WorkflowEvent } from '@/features/workflow/api';
+import { isEventOfSheet, useWorkflowHistory, type WorkflowEvent } from '@/features/workflow/api';
 import { formatDate } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
 import { DocumentLockBanner } from './DocumentLockBanner';
@@ -11,6 +11,8 @@ interface DocumentSheetBannerProps {
   readonly periodKey: number;
   /** Код активного (видимого цій ролі) аркуша. */
   readonly sheetCode: string;
+  /** ✎ RS: Id копії активного аркуша; `null`/не задано — оригінал. */
+  readonly sheetCopyId?: number | null;
   /** Стан активного аркуша за період. */
   readonly state: string;
   readonly lock: DocumentLock | null;
@@ -37,17 +39,18 @@ export function DocumentSheetBanner({
   documentId,
   periodKey,
   sheetCode,
+  sheetCopyId = null,
   state,
   lock,
   canDecide,
 }: DocumentSheetBannerProps): JSX.Element | null {
   const contextual =
     !widerLock(lock) && (lock === 'sheetSubmitted' || lock === 'sheetApproved' || state === 'Rejected');
-  const history = useWorkflowHistory(documentId, periodKey, contextual);
+  const history = useWorkflowHistory(documentId, periodKey, contextual, sheetCopyId);
 
   if (!contextual) return <DocumentLockBanner lock={lock} periodKey={periodKey} />;
 
-  const event = latestInto(history.data, sheetCode, state);
+  const event = latestInto(history.data, sheetCode, sheetCopyId, state);
   const who = event === null ? null : { name: event.byDisplayName, date: formatDate(event.at) };
 
   if (lock === 'sheetSubmitted') {
@@ -105,9 +108,14 @@ function widerLock(lock: DocumentLock | null): boolean {
 }
 
 /** Найновіша подія переходу аркуша в цей стан (журнал — найновіші перші). */
-function latestInto(events: readonly WorkflowEvent[] | undefined, sheetCode: string, state: string): WorkflowEvent | null {
+function latestInto(
+  events: readonly WorkflowEvent[] | undefined,
+  sheetCode: string,
+  sheetCopyId: number | null,
+  state: string,
+): WorkflowEvent | null {
   // ⚠ Відповідь не масив (старіший сервер, заглушка) — журналу немає.
   if (!Array.isArray(events)) return null;
 
-  return events.find((event) => event.sheetCode === sheetCode && event.toState === state) ?? null;
+  return events.find((event) => isEventOfSheet(event, sheetCode, sheetCopyId) && event.toState === state) ?? null;
 }

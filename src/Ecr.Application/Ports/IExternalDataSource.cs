@@ -290,7 +290,11 @@ public sealed record SourceElementsResult(IReadOnlyList<SourceElement> Elements,
 /// Що стоїть перед <c>|атрибут</c> у шляху для <see cref="IExternalDataSource.ReadCurrentAsync"/>:
 /// PI Web API — шлях, PI SQL Client — ім'я (RTQP шукає елемент <c>WHERE e.Name = ?</c>).
 /// </param>
-public sealed record SourceElement(string ExternalId, string Name, string? Path, string ReadAddress);
+/// <param name="TemplateName">
+/// Шаблон елемента AF (PI Web API — <c>TemplateName</c>, PI SQL Client — необов'язкова колонка <c>TemplateName</c>);
+/// <c>null</c> — джерело його не дає. Читає завантаження дерева НАЕ за шаблоном (людина 03.11); синк довідників його не бере.
+/// </param>
+public sealed record SourceElement(string ExternalId, string Name, string? Path, string ReadAddress, string? TemplateName = null);
 
 /// <summary>Шлях, поточне значення якого не прочитано.</summary>
 /// <param name="SourcePath">Шлях атрибута.</param>
@@ -467,7 +471,23 @@ public sealed record CollectionRequest(
 public sealed record CollectionResult(
     IReadOnlyList<SourceDataPoint> Points,
     IReadOnlyList<TimeInterval> FailedIntervals,
-    string? ErrorCode);
+    string? ErrorCode)
+{
+    /// <summary>
+    /// ✎ Аудит 31.10 (G5, D-462): відповідь дала ЗАПАСНА адреса джерела (<c>SecondaryEndpoint</c>). Запасний сервер
+    /// може відставати: його порожня чи неповна відповідь не доводить, що точок у PI більше немає, тож видалення
+    /// зниклих точок за такий шматок вимкнене (<c>Collection:DeleteMissingOnSecondary</c>, типово <c>false</c>).
+    /// </summary>
+    public bool ServedBySecondary { get; init; }
+
+    /// <summary>
+    /// ✎ Аудит 31.10 (G6, D-462): відповідь успішна, але як доказ «чого в джерелі немає» не годиться — частину
+    /// елементів не прочитано (мітка не розбирається) або вона складається лише з помилок (усі елементи
+    /// <c>Good: false</c>, системне значення на кшталт мітки 1970 року). Прочитане зберігається, видалення зниклих
+    /// точок за шматок — ні.
+    /// </summary>
+    public bool DeletionUnsafe { get; init; }
+}
 
 /// <summary>Одна прочитана точка — рядок <c>ext.RawDataPoint</c> до збереження.</summary>
 /// <param name="SourcePath">Шлях атрибута.</param>

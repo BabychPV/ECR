@@ -1,6 +1,5 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readSeedEnCatalog } from '@/test/seedSql';
 
 /**
  * `U-06`: підпис над деревом аркушів існує В КАТАЛОЗІ й каже, що рахується.
@@ -25,18 +24,8 @@ import { describe, expect, it } from 'vitest';
  * значення та вже видалені ключі.
  */
 function seedMergeBlock(): string {
-  const seed = readFileSync(
-    path.resolve(process.cwd(), '../../src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql'),
-    'utf8',
-  );
-
-  const start = seed.indexOf('MERGE sys_ecr.UiString AS t');
-  const end = seed.indexOf(') AS s ([Key], Lang, Val, Scope)', start);
-
-  expect(start, '09-seed.sql: не знайдено блоку MERGE sys_ecr.UiString').toBeGreaterThan(-1);
-  expect(end, '09-seed.sql: не знайдено кінця блоку MERGE').toBeGreaterThan(start);
-
-  return seed.slice(start, end);
+  // ✎ en-каталог — порції `#UiEn` файлів seed/features (readSeedEnCatalog).
+  return readSeedEnCatalog();
 }
 
 /** Значення ключа `document.tablesFilledInDocument` для `en` у блоці MERGE. */

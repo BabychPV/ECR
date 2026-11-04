@@ -59,6 +59,9 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
     /// <summary><c>CorrelationId</c> в усіх таблицях <c>aud.*</c> — <c>nvarchar(64)</c>.</summary>
     private const int CorrelationIdLength = 64;
 
+    /// <summary>✎ D-461: довжина <c>aud.CellChange.Reason</c> — причина ручного значення замість формули.</summary>
+    private const int ReasonLength = Domain.Entities.Documents.CellFormulaOverride.MaxReasonLength;
+
     /// <summary><c>EntityType</c>/<c>EventType</c> — <c>nvarchar(64)</c>.</summary>
     private const int EntityTypeLength = 64;
 
@@ -125,6 +128,7 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
         new("CorrelationId", SqlDbType.NVarChar, CorrelationIdLength),
         new("IsOutOfWindow", SqlDbType.Bit),
         new("IsOverwrite", SqlDbType.Bit),
+        new("Reason", SqlDbType.NVarChar, ReasonLength),
     ];
 
     /// <inheritdoc />
@@ -163,6 +167,7 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
             EnsureFits(nameof(CellChangeRecord.RowKey), change.RowKey, RowKeyLength);
             EnsureFits(nameof(CellChangeRecord.Origin), change.Origin, OriginLength);
             EnsureFits(nameof(CellChangeRecord.CorrelationId), change.CorrelationId, CorrelationIdLength);
+            EnsureFits(nameof(CellChangeRecord.Reason), change.Reason, ReasonLength);
         }
 
         await using var command = CreateCommand();
@@ -174,9 +179,9 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
         command.CommandText = """
             INSERT INTO aud.CellChange
                 (ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId,
-                 OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow, IsOverwrite)
+                 OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow, IsOverwrite, Reason)
             SELECT ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId,
-                   OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow, IsOverwrite
+                   OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow, IsOverwrite, Reason
             FROM @changes;
             """;
 
@@ -227,6 +232,7 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
             SetText(row, 11, c.CorrelationId);
             row.SetBoolean(12, c.IsOutOfWindow);
             row.SetBoolean(13, c.IsOverwrite);
+            SetText(row, 14, c.Reason);
 
             yield return row;
         }
@@ -299,6 +305,47 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
         AddText(command, "@x", change.CorrelationId, CorrelationIdLength);
 
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Рядків структурних змін за один <c>INSERT</c>: 11 параметрів на рядок, ліміт SQL Server — 2100.</summary>
+    private const int MaxStructureChangesPerBatch = 150;
+
+    /// <inheritdoc />
+    public async Task WriteStructureChangesAsync(IReadOnlyList<StructureChangeRecord> changes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+
+        for (var offset = 0; offset < changes.Count; offset += MaxStructureChangesPerBatch)
+        {
+            var count = Math.Min(MaxStructureChangesPerBatch, changes.Count - offset);
+            await using var command = CreateCommand();
+            var values = new string[count];
+            for (var i = 0; i < count; i++)
+            {
+                var change = changes[offset + i];
+                ArgumentNullException.ThrowIfNull(change);
+                AddTimestamp(command, $"@t{i}", change.ChangedAt);
+                AddInt32(command, $"@v{i}", change.TemplateVersionId);
+                AddText(command, $"@et{i}", change.EntityType, EntityTypeLength);
+                AddInt32(command, $"@ei{i}", change.EntityId);
+                command.Parameters.Add($"@cc{i}", SqlDbType.TinyInt).Value = (byte)change.ChangeClass;
+                AddText(command, $"@op{i}", change.Operation, OperationLength);
+                AddText(command, $"@oj{i}", change.OldJson, UnboundedLength);
+                AddText(command, $"@nj{i}", change.NewJson, UnboundedLength);
+                AddText(command, $"@cr{i}", change.ChangeReason, UnboundedLength);
+                AddInt32(command, $"@u{i}", change.ChangedByUserId);
+                AddText(command, $"@x{i}", change.CorrelationId, CorrelationIdLength);
+                values[i] = $"(@t{i}, @v{i}, @et{i}, @ei{i}, @cc{i}, @op{i}, @oj{i}, @nj{i}, @cr{i}, @u{i}, @x{i})";
+            }
+
+            command.CommandText = $"""
+                INSERT INTO aud.StructureChange
+                    (ChangedAt, TemplateVersionId, EntityType, EntityId, ChangeClass, Operation,
+                     OldJson, NewJson, ChangeReason, ChangedByUserId, CorrelationId)
+                VALUES {string.Join(",\n", values)};
+                """;
+            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
     }
 
     /// <inheritdoc />

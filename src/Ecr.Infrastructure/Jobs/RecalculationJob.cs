@@ -951,6 +951,7 @@ public sealed partial class RecalculationJob(
         // тобто гірше, — тому не доданий.
         var instances = await db.TableInstances
             .AsNoTracking()
+            .OriginalOnly()   // RS: методології прив'язані до таблиць оригіналу; копії рахує лише фаза формул
             .Where(i => i.DocumentId == request.DocumentId
                         && scopeKeys.Contains(i.PeriodKeyValue))
             .OrderBy(i => i.PeriodKeyValue)
@@ -1146,6 +1147,7 @@ public sealed partial class RecalculationJob(
                         .ConfigureAwait(false)
                     : await db.ApprovalStates
                         .AsNoTracking()
+                        .OriginalOnly()
                         .Where(a => a.DocumentId == guard.DocumentId && a.SheetDefId == sheetDefId && a.PeriodKey == period)
                         .Select(a => (Domain.Enums.DocumentStatus?)a.Status)
                         .FirstOrDefaultAsync(ct)
@@ -1242,6 +1244,7 @@ public sealed partial class RecalculationJob(
                 ? []
                 : await db.TableInstances
                     .AsNoTracking()
+                    .OriginalOnly()
                     .Where(i => i.DocumentId == request.DocumentId && submittedPeriods.Contains(i.PeriodKeyValue))
                     .Join(db.TableDefs, i => i.TableDefId, td => td.Id, (i, td) => new { i.PeriodKeyValue, td.SheetDefId })
                     .Distinct()
@@ -1291,8 +1294,10 @@ public sealed partial class RecalculationJob(
     private async Task<Dictionary<int, HashSet<int>>> SubmittedSheetsAsync(
         RecalculationRequest request, int? periodKey, CancellationToken ct)
     {
+        // RS: стан копії не робить поданим аркуш-оригінал; копії мають власні ворота у фазі формул (EnterSheetsAsync).
         var rows = await db.ApprovalStates
             .AsNoTracking()
+            .OriginalOnly()
             .Where(s => s.DocumentId == request.DocumentId
                         && (periodKey == null || s.PeriodKey == periodKey)
                         && (s.Status == Domain.Enums.DocumentStatus.Submitted

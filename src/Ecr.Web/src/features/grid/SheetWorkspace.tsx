@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { useMediaQuery } from '@mantine/hooks';
 import { useTableStatus } from '@/features/documents/api';
 import { focusSoon } from '@/shared/a11y/focus';
@@ -7,6 +7,7 @@ import { t } from '@/shared/i18n';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { GridHScroll } from './GridHScroll';
 import { GridKeyHint } from './GridKeyHint';
+import { useSheetLiveRefresh } from './liveRefresh/SheetLiveRefresh';
 import { SheetTables, type SheetTablesProps } from './SheetTables';
 import { Icon, TableNavigator, tableName } from './TableNavigator';
 import { buildTableTree, resolveTable, tableUrlKey } from './tableTreeModel';
@@ -90,6 +91,8 @@ export function SheetWorkspace({
   const [tableKey, setTableKey] = useUrlState('table');
   const [fullParam, setFullParam] = useUrlState(FullParam);
   const status = useTableStatus(documentId, periodKey);
+  // LIVE-REFRESH B2/B3: "Refresh" (Shift+F5) and the polite banner about other users' changes on this sheet.
+  const live = useSheetLiveRefresh({ documentId, periodKey, tables });
 
   const narrow = useMediaQuery(NarrowNavigatorQuery, false, { getInitialValueInEffect: false }) === true;
   // `null` — людина стан не обирала: аркуш з однією таблицею згорнутий, решта — розгорнуті.
@@ -139,8 +142,22 @@ export function SheetWorkspace({
     focusSoon(split.current?.querySelector<HTMLElement>(selector));
   }, [navigatorOpen]);
 
+  // Останній ВІДОМИЙ стан режиму: те, що вже закомічено, або те, що щойно запитано (`setFull`).
+  //
+  // ⛔ Флейк e2e `sheetFocus.spec.ts:121` (run 41186933182, спроба 1): react-router оновлює адресу
+  // одразу, а рендер — у `startTransition`; на повільному CI після виходу (Ctrl+Shift+Enter) дерево ще
+  // ~200 мс показувало «Exit full screen», і клік по кнопці, що брав рішення з відрендереного `full`,
+  // вдруге ВИМИКАВ уже вимкнений режим (адреса не мінялась). Тепер обидва входи (кнопка й клавіші)
+  // перемикають від цього ref: `setFull` пише в нього одразу, а рендер синхронізує лише при зміні `full`
+  // (layout-ефект — після коміту), тож застарілий перерендер старого дерева запит не перетирає.
+  const fullRef = useRef(full);
+  useLayoutEffect(() => {
+    fullRef.current = full;
+  }, [full]);
+
   const setFull = useCallback(
     (next: boolean, refocus: boolean) => {
+      fullRef.current = next;
       setFullParam(next ? '1' : null);
       if (refocus) focusSoon(fullBtn.current);
     },
@@ -157,8 +174,6 @@ export function SheetWorkspace({
   // (`defaultPrevented`), другий слухач пропускає.
   const setFullRef = useRef(setFull);
   setFullRef.current = setFull;
-  const fullRef = useRef(full);
-  fullRef.current = full;
 
   useEffect(() => {
     if (view === 'all') return;
@@ -221,7 +236,11 @@ export function SheetWorkspace({
       panel.current?.querySelector<HTMLElement>(focusedSlot === null ? '[data-table-mounted="true"]' : `[data-table-slot="${focusedSlot}"]`) ?? null;
     return (
       <>
-        <GridKeyHint readOnly={readOnly} />
+        {live.banner}
+        <div className="ecr-live-row">
+          <GridKeyHint readOnly={readOnly} />
+          {live.button}
+        </div>
         <div
           ref={panel}
           className={panelClass}
@@ -282,7 +301,7 @@ export function SheetWorkspace({
       data-testid="sheet-full-toggle"
       data-full={full ? 'true' : 'false'}
       onClick={() => {
-        setFull(!full, false);
+        setFull(!fullRef.current, false);
       }}
     >
       <Icon path={full ? CollapseIcon : ExpandIcon} size={16} />
@@ -334,6 +353,7 @@ export function SheetWorkspace({
         aria-label={full && selected !== undefined ? tableName(selected) : undefined}
         data-sheet-full={full ? '' : undefined}
       >
+        {live.banner}
         <div ref={panel} className={panelClass}>
           <SheetTables
             documentId={documentId}
@@ -357,6 +377,7 @@ export function SheetWorkspace({
                   </span>
                 )}
                 <GridKeyHint readOnly={readOnly} />
+                {live.button}
                 {fullButton}
               </>
             }

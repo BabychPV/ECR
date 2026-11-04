@@ -4,6 +4,7 @@ using Ecr.Application.Ports;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace Ecr.Infrastructure.Reporting;
@@ -47,16 +48,40 @@ public sealed partial class ReportViewGenerator(
 
         try
         {
-            await db.Database.ExecuteSqlRawAsync(
-                "EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId, @MonthRouting",
-                [
-                    new SqlParameter("@TemplateVersionId", System.Data.SqlDbType.Int)
-                    {
-                        Value = (object?)templateVersionId ?? DBNull.Value,
-                    },
-                    new SqlParameter("@MonthRouting", System.Data.SqlDbType.Bit) { Value = routed },
-                ],
-                ct).ConfigureAwait(false);
+            // ✎ RPT-STABLE: спершу _vN (без змін), потім стабільні вʼюхи без версії. Збій першого не відміняє другого
+            // (одна задовга таблиця не лишає без вʼюх решту), але перша помилка кидається викликачу.
+            SqlException? first = null;
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync(
+                    "EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId, @MonthRouting",
+                    [
+                        new SqlParameter("@TemplateVersionId", System.Data.SqlDbType.Int)
+                        {
+                            Value = (object?)templateVersionId ?? DBNull.Value,
+                        },
+                        new SqlParameter("@MonthRouting", System.Data.SqlDbType.Bit) { Value = routed },
+                    ],
+                    ct).ConfigureAwait(false);
+            }
+            catch (SqlException ex)
+            {
+                first = ex;
+            }
+
+            try
+            {
+                await GenerateStableAsync(templateVersionId, routed, ct).ConfigureAwait(false);
+            }
+            catch (SqlException ex)
+            {
+                first ??= ex;
+            }
+
+            if (first is not null)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(first).Throw();
+            }
         }
         catch (SqlException ex)
         {
@@ -89,6 +114,53 @@ public sealed partial class ReportViewGenerator(
         status?.Succeeded(templateVersionId);
     }
 
+    /// <summary>
+    /// ✎ RPT-STABLE: <c>rpt.usp_GenerateStableViews</c> — вʼюхи без версії (шаблон, аркуш, таблиця) по всіх опублікованих версіях.
+    /// Попередження процедури (конфлікт типу колонки між версіями → nvarchar) пишуться в журнал.
+    /// </summary>
+    private async Task GenerateStableAsync(int? templateVersionId, bool routed, CancellationToken ct)
+    {
+        var connection = db.Database.GetDbConnection();
+        var wasClosed = connection.State != System.Data.ConnectionState.Open;
+        if (wasClosed)
+        {
+            await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "EXEC rpt.usp_GenerateStableViews @TemplateVersionId, @MonthRouting";
+            command.CommandTimeout = db.Database.GetCommandTimeout() ?? 30;
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            command.Parameters.Add(new SqlParameter("@TemplateVersionId", System.Data.SqlDbType.Int)
+            {
+                Value = (object?)templateVersionId ?? DBNull.Value,
+            });
+            command.Parameters.Add(new SqlParameter("@MonthRouting", System.Data.SqlDbType.Bit) { Value = routed });
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                if (!reader.IsDBNull(2) && logger is not null)
+                {
+                    LogStableWarning(logger, reader.GetString(0), reader.GetString(2));
+                }
+            }
+        }
+        finally
+        {
+            if (wasClosed)
+            {
+                await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "ReportViewGenerator: стабільна вʼюха rpt.{ViewName}: {Warning}.")]
+    private static partial void LogStableWarning(ILogger logger, string viewName, string warning);
+
     [LoggerMessage(
         Level = LogLevel.Warning,
         Message = "ReportViewGenerator: генерація в'юх (версія {TemplateVersionId}) не вдалася, помилка SQL Server {ErrorNumber}; кореляція {CorrelationId}.")]
@@ -109,5 +181,19 @@ public sealed partial class ReportViewGenerator(
     internal static string SafeMessage(SqlException ex, string correlationId)
         => ex.Number >= FirstUserDefinedError
             ? ex.Message
-            : $"SQL Server error {ex.Number.ToString(System.Globalization.CultureInfo.InvariantCulture)}; the details are in the server log (correlation {correlationId}).";
+            : $"SQL Server error {ex.Number.ToString(System.Globalization.CultureInfo.InvariantCulture)}; the details are in the server log (correlation {correlationId})."
+              + (ex.Number == MissingProcedureError ? MissingProcedureHint : string.Empty);
+
+    /// <summary>SQL Server 2812: «Could not find stored procedure».</summary>
+    private const int MissingProcedureError = 2812;
+
+    /// <summary>
+    /// ✎ Upgrade gap (RPT-STABLE): <c>Sql/*.sql</c> reach a customer database only through step 2 of <c>deploy-ecr.ps1</c>
+    /// (every script, idempotent, on each deploy/upgrade; never from the application or EF migrations). A database updated
+    /// without that step (<c>-SkipSchema</c>, manual EF-only update) lacks the report-view procedures. The application
+    /// has no right to create them (D-66: EXECUTE only), so the message tells the operator what to run. No object names (SEC TIER2).
+    /// </summary>
+    private const string MissingProcedureHint =
+        " The report-view procedures are missing from this database: the Sql scripts of this release were not applied. "
+        + "Run deploy-ecr.ps1 with the schema step (without -SkipSchema, runbook section 8) and restart the application.";
 }

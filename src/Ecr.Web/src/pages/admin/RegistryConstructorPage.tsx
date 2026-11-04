@@ -21,10 +21,13 @@ import {
 } from '@/features/registries/RegistryConstructor';
 import { RegistryDraftPanel, type SaveRegistryDraftBody } from '@/features/registries/RegistryDraftPanel';
 import { CompositionEditorLink } from '@/features/registries/rc816/CompositionEditorLink';
+import { getRegistryHierarchy } from '@/features/registries/tree/treeApi';
 import { RegistryUsagePanel } from '@/features/registries/RegistryUsage';
 import {
   buildSaveRequest,
+  draftLevelEdits,
   draftLinkEdits,
+  type LevelEdits,
   type LinkEdits,
   emptyField,
   emptyRule,
@@ -92,6 +95,7 @@ export function RegistryConstructorPage(): JSX.Element {
   const [newFields, setNewFields] = useState<FieldDraft[]>([]);
   const [reason, setReason] = useState('');
   const [linkEdits, setLinkEdits] = useState<LinkEdits>({});
+  const [levelEdits, setLevelEdits] = useState<LevelEdits>({});
   const [tab, setTab] = useState('fields');
 
   const definition = useQuery({
@@ -125,6 +129,26 @@ export function RegistryConstructorPage(): JSX.Element {
     refetchOnWindowFocus: false,
     staleTime: Number.POSITIVE_INFINITY,
   });
+
+  /**
+   * Рівні ієрархії - для вибору типу вузла (рівня), якому належить поле (НАЕ, 03.11). Плаский довідник відповідає порожнім
+   * переліком або відмовою: тоді колонки й вибору рівня просто немає, а сторінку це не ламає.
+   */
+  const hierarchy = useQuery({
+    queryKey: queryKeys.registries.hierarchy(code),
+    queryFn: () => getRegistryHierarchy(code),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const levelOptions = useMemo(
+    () =>
+      hierarchy.data?.isHierarchical === true
+        ? [...hierarchy.data.levels]
+            .sort((a, b) => a.ordinal - b.ordinal)
+            .map((level) => ({ value: level.code, label: localized(level.name) || level.code }))
+        : [],
+    [hierarchy.data],
+  );
 
   const history = useQuery({
     queryKey: queryKeys.registries.history(code),
@@ -260,6 +284,7 @@ export function RegistryConstructorPage(): JSX.Element {
       setRules(definition.data.rules.map((rule) => toDraft(rule, language())));
       setNewFields([]);
       setLinkEdits({});
+      setLevelEdits({});
       setReason('');
       return;
     }
@@ -267,6 +292,7 @@ export function RegistryConstructorPage(): JSX.Element {
     setRules(draftRules(saved, language()));
     setNewFields(draftNewFields(saved, language()));
     setLinkEdits(draftLinkEdits(saved.fields, definition.data));
+    setLevelEdits(draftLevelEdits(saved.fields, definition.data));
     setReason(saved.reason);
   }, [definition.data, draft.data, draft.isPending]);
 
@@ -290,9 +316,9 @@ export function RegistryConstructorPage(): JSX.Element {
   const request = useMemo<SaveRegistryDefinitionDto | null>(
     () =>
       ready && definition.data !== undefined
-        ? buildSaveRequest(definition.data, rules, newFields, reason, language(), linkEdits)
+        ? buildSaveRequest(definition.data, rules, newFields, reason, language(), linkEdits, levelEdits)
         : null,
-    [ready, definition.data, rules, newFields, reason, linkEdits],
+    [ready, definition.data, rules, newFields, reason, linkEdits, levelEdits],
   );
 
   // ⚠ Ефект засіву читає поточну форму через ref: у залежностях `request` засів спрацьовував би
@@ -401,6 +427,9 @@ export function RegistryConstructorPage(): JSX.Element {
                   registryOptions={registryOptions}
                   unitOptions={unitOptions}
                   entryCount={entryCount}
+                  levelOptions={levelOptions}
+                  levelEdits={levelEdits}
+                  onChangeLevel={(fieldId, levelCode) => setLevelEdits((all) => ({ ...all, [fieldId]: levelCode }))}
                   onAddField={() => setNewFields((all) => [...all, emptyField()])}
                   onChangeField={(index, field) =>
                     setNewFields((all) => all.map((item, i) => (i === index ? field : item)))

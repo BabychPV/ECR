@@ -92,18 +92,58 @@ public sealed class ListDocumentsHandler(
     /// </param>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+    public Task<PagedResult<DocumentSummary>> HandleAsync(
         int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
         string? query, bool? resultsStale, string? staleBy, int? ownerUserId, CursorRequest page, CancellationToken ct)
+        => HandleAsync(
+            projectId, periodKey, state, mine, hasLateEdits, query, resultsStale, staleBy, ownerUserId,
+            sort: null, templateVersions: null, page, ct);
+
+    /// <summary>Допустиме значення <c>sort</c>: за версією шаблону; з префіксом «-» — у зворотному порядку.</summary>
+    public const string SortTemplateVersion = "templateVersion";
+
+    /// <summary>Скільки версій приймає фільтр <c>templateVersions</c>.</summary>
+    public const int MaxTemplateVersions = 20;
+
+    /// <summary>Довжина однієї версії у фільтрі <c>templateVersions</c> (як у <c>cfg.TemplateVersion.Version</c>).</summary>
+    public const int MaxTemplateVersionLength = 20;
+
+    /// <summary>Те саме, з сортуванням і фільтром за версією шаблону (колонка «Version»).</summary>
+    /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі.</param>
+    /// <param name="periodKey">Період; версія береться за нього (як у колонці), без періоду — типова версія проєкту.</param>
+    /// <param name="state">Зведений стан; порожньо — будь-який.</param>
+    /// <param name="mine">Лише документи, де користувач — автор або подавав аркуш.</param>
+    /// <param name="hasLateEdits">Фільтр пізніх правок; <c>null</c> — без фільтра.</param>
+    /// <param name="query">Пошук за кодом і назвою; порожній — без пошуку.</param>
+    /// <param name="resultsStale">Фільтр застарілих результатів; <c>null</c> — без фільтра.</param>
+    /// <param name="staleBy"><c>me</c> — лише застарілі через правки поточного користувача.</param>
+    /// <param name="ownerUserId">Лише документи цього власника; <c>null</c> — будь-якого.</param>
+    /// <param name="sort">
+    /// <c>templateVersion</c> або <c>-templateVersion</c> (версії порівнюються «по-людськи»: 2.10 після 2.9; документи без
+    /// версії — в кінці в обох напрямках); порожньо — за <c>Id</c>. Інше значення — 422. Другий ключ — завжди <c>Id</c>.
+    /// </param>
+    /// <param name="templateVersions">
+    /// Версії через кому (точний збіг, до <see cref="MaxTemplateVersions"/>); порожньо — без фільтра. Занадто довге чи
+    /// надто багато — 422. Невідома версія просто нічого не знаходить.
+    /// </param>
+    /// <param name="page">Курсорна пагінація.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+        int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
+        string? query, bool? resultsStale, string? staleBy, int? ownerUserId,
+        string? sort, string? templateVersions, CursorRequest page, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
 
         var profile = await ProfileAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         var staleByMe = ParseStaleBy(staleBy, resultsStale, periodKey);
         ValidateOwner(ownerUserId, mine);
+        var versionSort = ParseVersionSort(sort);
+        var versions = ParseTemplateVersions(templateVersions);
         var filter = new DocumentListFilter(
             ParseState(state, periodKey), mine ? profile.UserId : null, hasLateEdits, Query: NormalizeQuery(query),
-            ResultsStale: resultsStale, StaleByUserId: staleByMe ? profile.UserId : null, OwnerUserId: ownerUserId);
+            ResultsStale: resultsStale, StaleByUserId: staleByMe ? profile.UserId : null, OwnerUserId: ownerUserId,
+            TemplateVersions: versions, VersionSort: versionSort);
 
         // ⛔ Родина REQ, а не CELL (`P-25`, рядок 1): хибний `limit` — це
         // помилка параметра запиту, і показувати її в обробнику помилок
@@ -278,6 +318,31 @@ public sealed class ListDocumentsHandler(
     }
 
     /// <summary>
+    /// Усі версії шаблону серед документів, які читач бачить, — для вибору у фільтрі «Version». Право <c>Document.View</c>.
+    /// </summary>
+    /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі видимі.</param>
+    /// <param name="periodKey">Період, за яким береться версія (як у колонці); <c>null</c> — чинна версія проєкту.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Видимість — тим самим шляхом, що й перелік (<see cref="ReaderBoundsAsync"/> + базовий запит сховища): версія, що є
+    /// лише в невидимих документах, не називається.
+    /// </remarks>
+    public async Task<Dto.DocumentTemplateVersionsResponse> HandleTemplateVersionsAsync(
+        int? projectId, int? periodKey, CancellationToken ct)
+    {
+        var profile = await ProfileAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var visibleProjects = ReadableProjects(profile, Permission);
+        var (filter, _, _, _) = await ReaderBoundsAsync(profile, visibleProjects, projectId, periodKey, default, ct)
+            .ConfigureAwait(false);
+
+        var options = await documents
+            .ListTemplateVersionsAsync(projectId, new PeriodKeyFilter(periodKey), filter, visibleProjects, ct)
+            .ConfigureAwait(false);
+
+        return new Dto.DocumentTemplateVersionsResponse(options.Items, options.WithoutVersionCount);
+    }
+
+    /// <summary>
     /// ✎ D-450: <c>ownerUserId</c> — додатне ціле й не разом із <c>mine</c>; інакше 422 тієї самої родини REQ, що й
     /// решта параметрів переліку.
     /// </summary>
@@ -306,6 +371,54 @@ public sealed class ListDocumentsHandler(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.ownerWithMine" });
         }
     }
+
+    /// <summary><c>sort</c>: порожньо — без сортування за версією; інше, ніж два допустимі значення, — 422.</summary>
+    private static DocumentVersionSort? ParseVersionSort(string? sort)
+    {
+        var value = sort?.Trim();
+        if (string.IsNullOrEmpty(value))
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            SortTemplateVersion => DocumentVersionSort.Ascending,
+            "-" + SortTemplateVersion => DocumentVersionSort.Descending,
+            _ => throw MalformedListParameter(),
+        };
+    }
+
+    /// <summary><c>templateVersions</c>: перелік через кому без порожніх і дублів; завеликий — 422; порожній — <c>null</c>.</summary>
+    private static string[]? ParseTemplateVersions(string? templateVersions)
+    {
+        if (string.IsNullOrWhiteSpace(templateVersions))
+        {
+            return null;
+        }
+
+        var parts = templateVersions.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (parts.Length == 0)
+        {
+            return null;
+        }
+
+        if (parts.Length > MaxTemplateVersions || parts.Any(p => p.Length > MaxTemplateVersionLength))
+        {
+            throw MalformedListParameter();
+        }
+
+        return parts;
+    }
+
+    /// <summary>422 тієї самої родини REQ з наявним ключем каталогу (нових кодів і ключів не заводимо).</summary>
+    private static BusinessRuleException MalformedListParameter()
+        => new(
+            ErrorCodes.RequestInvalid,
+            "Параметр sort чи templateVersions має недопустиме значення.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.malformedRequest" });
 
     /// <summary>Обрізає пробіли й довжину; порожній пошук — <c>null</c> (без фільтра).</summary>
     internal static string? NormalizeQuery(string? query)

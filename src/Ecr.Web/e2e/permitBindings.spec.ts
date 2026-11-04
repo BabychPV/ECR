@@ -22,6 +22,9 @@ const Admin = { user: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
 
 async function signIn(page: Page): Promise<void> {
+  // PERMIT-USAGE п. 1: вкладку «Permit binding» сховано прапорцем `ecr.feature.permitSheetBindings` (типово вимкнено);
+  // цей сценарій перевіряє сам старий шлях, тож вмикає прапорець у своєму браузері (`features/permits/permitFeatures.ts`).
+  await page.addInitScript(() => window.localStorage.setItem('ecr.feature.permitSheetBindings', 'on'));
   await page.goto('/login');
   await expect(page.getByRole('heading').first(), 'сторінка входу не відрендерилася').toBeVisible({
     timeout: 30_000,

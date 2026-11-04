@@ -58,6 +58,16 @@ public static class DependencyInjection
         services.AddScoped<Security.GetAccessDiagnosticsHandler>();
         services.AddScoped<Security.GetEffectiveAccessHandler>();
         services.AddScoped<DiffTemplateVersionsHandler>();
+
+        // NAE plan N3: Air Limits Import permits.
+        services.AddScoped<Permits.AirLimits.ProvisionAirLimitsHandler>();
+        services.AddScoped<Permits.AirLimits.AirImportProfileHandler>();
+        services.AddScoped<Permits.AirLimits.AirLimitsImportHandler>();
+        services.AddScoped<Permits.AirLimits.GetAirLimitsPermitHandler>();
+        services.AddScoped<Permits.AirLimits.GetAirScopeCodesHandler>();
+        services.AddScoped<Permits.AirLimits.AirScopeColumns>();
+        services.AddScoped<Permits.AirLimits.GetAirScopeFieldsHandler>();
+        services.AddScoped<Permits.AirLimits.AirTypeSystemProvisioner>();
         services.AddScoped<PatchPresentationHandler>();
         services.AddScoped<ReplaceHeaderGroupsHandler>();
 
@@ -100,6 +110,7 @@ public static class DependencyInjection
 
         // П'ятий зріз — формула колонки чи рядка (W5.3), за зразком вище.
         services.AddScoped<SaveFormulaDefHandler>();
+        services.AddScoped<FormulaManualOverrideHandler>(); // ✎ D-461
         services.AddScoped<DeleteFormulaDefHandler>();
 
         // Шостий і сьомий зрізи (W5.4): правила валідації таблиці
@@ -134,6 +145,7 @@ public static class DependencyInjection
         // Документи і комірки (модуль 1.8)
         services.AddScoped<CreateDocumentHandler>();
         services.AddScoped<GetDocumentTemplateHandler>();
+        services.AddScoped<Projects.GetProjectTemplateTimelineHandler>();
         services.AddScoped<ListDocumentsHandler>();
         services.AddScoped<GetDocumentListSummaryHandler>();
         services.AddScoped<GetDocumentHandler>();
@@ -194,6 +206,10 @@ public static class DependencyInjection
         services.AddScoped<Audit.GetStructureChangesHandler>();
         services.AddScoped<Audit.GetSecurityEventsHandler>();
         services.AddScoped<Audit.ExportStructureChangesHandler>();
+        services.AddScoped<Audit.GetWorkflowEventsHandler>();
+        services.AddScoped<Audit.ExportCellChangesHandler>();
+        services.AddScoped<Audit.ExportSecurityEventsHandler>();
+        services.AddScoped<Audit.ExportWorkflowEventsHandler>();
         services.AddScoped<Consistency.GetConsistencyIssuesHandler>();
         services.AddScoped<Consistency.GetConsistencySummaryHandler>();
         services.AddScoped<Consistency.RunConsistencyCheckHandler>();
@@ -221,9 +237,12 @@ public static class DependencyInjection
         services.AddScoped<Workflow.ApproveSheetHandler>();
         services.AddScoped<Workflow.ReopenDocumentHandler>();
         services.AddScoped<Documents.DeleteDocumentHandler>();
+        services.AddScoped<Documents.DocumentSheetCopyHandler>();
         services.AddScoped<Documents.ChangeDocumentKeyHandler>();
         services.AddScoped<Documents.VersionMigration.MigrateDocumentVersionHandler>();
         services.AddScoped<Workflow.GetWorkflowHistoryHandler>();
+        services.AddScoped<Audit.SheetActivityQuery>();
+        services.AddScoped<Audit.GetSheetActivityHandler>();
         services.AddScoped<Documents.ListDocumentVersionsHandler>();
         services.AddScoped<Documents.CompareDocumentVersionsHandler>();
         services.AddScoped<Workflow.RecallSheetHandler>();
@@ -248,6 +267,13 @@ public static class DependencyInjection
         // D-443: передача власника документа (учасники документа).
         services.AddScoped<Documents.EditAssignments.TransferDocumentOwnerHandler>();
 
+        // Чат таблиці документа (TC): читання й запис; лише контракт у першому коміті лінії.
+        services.AddScoped<Documents.Discussions.TableDiscussionQueries>();
+        services.AddScoped<Documents.Discussions.TableDiscussionCommands>();
+
+        // Живе оновлення сітки: маркер змін аркуша (опитування).
+        services.AddScoped<Documents.SheetChanges.GetSheetChangesHandler>();
+
         // Локалізація (модуль 3.7)
         services.AddScoped<Localization.GetUiStringsHandler>();
 
@@ -259,6 +285,17 @@ public static class DependencyInjection
         services.AddScoped<Registries.UpsertRegistryEntryHandler>();
         services.AddScoped<Registries.GetRegistryEntryHandler>();
         services.AddScoped<Registries.SetEntryValidityHandler>();
+        services.AddScoped<Registries.Hierarchy.GetRegistryHierarchyHandler>();
+        services.AddScoped<Registries.Hierarchy.SaveRegistryHierarchyHandler>();
+        services.AddScoped<Registries.Hierarchy.GetRegistryTreeHandler>();
+        services.AddScoped<Registries.Hierarchy.MoveRegistryEntryHandler>();
+        services.AddScoped<Registries.Hierarchy.RetireRegistryEntryHandler>();
+        services.AddScoped<Registries.Nae.ImportNaeFromAfHandler>();
+        services.AddScoped<Registries.Nae.GetRegistryEntryReferencesHandler>();
+        services.AddScoped<Registries.Nae.NaeTreeProvisioner>();
+        services.AddScoped<Registries.Nae.NaeTreeNodePolicy>();
+        services.AddScoped<Registries.Nae.NaeTreeManualHandler>();
+        services.AddScoped<Registries.Nae.NaeTreeNodeApplier>();
         services.AddScoped<Registries.SwitchRegistrySourceHandler>();
         services.AddScoped<Registries.DeleteRegistryEntryHandler>();
         services.AddScoped<Preferences.ListUserPreferencesHandler>();
@@ -320,6 +357,7 @@ public static class DependencyInjection
         // PERMITS: permits — екземпляри дозволів і життєвий цикл (PM-04)
         services.AddScoped<Permits.CreatePermitHandler>();
         services.AddScoped<Permits.GetPermitHandler>();
+        services.AddScoped<Permits.GetPermitUsagesHandler>();
         services.AddScoped<Permits.ListPermitsHandler>();
         services.AddScoped<Permits.UpdatePermitHandler>();
         services.AddScoped<Permits.DeletePermitHandler>();
@@ -383,6 +421,9 @@ public static class DependencyInjection
         services.AddScoped<Calculations.DeleteMethodologyCategoryRuleHandler>();
         services.AddScoped<Calculations.ListMethodologySubstancesHandler>();
         services.AddScoped<Calculations.SaveMethodologySubstancesHandler>();
+        services.AddScoped<Calculations.ListMethodologyCategoriesHandler>();
+        services.AddScoped<Calculations.SaveMethodologyCategoryHandler>();
+        services.AddScoped<Calculations.DeleteMethodologyCategoryHandler>();
         services.AddScoped<Calculations.ListMethodologyRequiredInputsHandler>();
         services.AddScoped<Calculations.SaveMethodologyRequiredInputHandler>();
         services.AddScoped<Calculations.ListMethodologyOutputsHandler>();
@@ -476,6 +517,11 @@ public static class DependencyInjection
 
         // Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
         services.AddScoped<Sources.PreviewMappingHandler>();
+
+        // D-463: «Дані з PI» (адміністратор інтеграції) і «Звідки це значення» (комірка документа).
+        services.AddScoped<Integration.RawData.RawDataHandler>();
+        services.AddScoped<Integration.RawData.CellSourceHandler>();
+        services.AddScoped<Integration.RawData.PiEventDataHandler>();
 
         // Заведення мапінгу поля джерела (Прогалина 1 директиви паритету).
         services.AddScoped<Sources.CreateEntityFieldMapHandler>();

@@ -113,7 +113,15 @@ public sealed record ImportChange(
     object? NewValue,
     string? TableCode = null,
     Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null,
-    object? RoundedFrom = null);
+    object? RoundedFrom = null)
+{
+    /// <summary>
+    /// ✎ D-461: «буде замінено формулу» — значення ляже як РУЧНЕ ЗНАЧЕННЯ ЗАМІСТЬ ФОРМУЛИ (формула дозволяє, у
+    /// користувача є право <c>Document.OverrideFormula</c>); причина журналу — «Excel import». <c>NewValue = null</c> у
+    /// такій комірці — повернення формули.
+    /// </summary>
+    public bool ReplacesFormula { get; init; }
+}
 
 /// <summary>Відхилена комірка з причиною — користувач має бачити, які саме (ФВ-4.4).</summary>
 /// <param name="RowKey">Рядок; <c>—</c> — причина не про рядок.</param>

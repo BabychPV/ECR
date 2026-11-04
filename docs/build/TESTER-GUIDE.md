@@ -82,7 +82,7 @@ PI AF система лише **читає** (запису в AF немає, `D-
 | RCSI | `READ_COMMITTED_SNAPSHOT` обов'язковий (`D-29`); вмикає `06-rcsi.sql` у складі розгортання. Без RCSI перевірка `db` — `Unhealthy` |
 | Collation бази | `Latin1_General_100_CI_AS_SC`; з `-CreateDatabaseIfMissing` скрипт створює базу сам |
 | Права виконавця розгортання | облікові дані того, хто запускає `deploy-ecr.ps1`/майстер (`-SqlLogin` або інтегровані) — потрібне право `CREATE DATABASE` (для створення бази) і виконання DDL. Сам `-ServiceAccount` у DDL-кроці **не бере участі** (`D-66`) |
-| Права облікового запису служби на базу | У репозиторії немає жодного `GRANT`/`CREATE USER`/`db_datareader`; вимога лише негативна: **без DDL** (`D-66`, `Schema:StartupMode=Validate`). Мінімум **за кодом** (не задекларований, **не перевірений на замкненому логіні**): `SELECT/INSERT/UPDATE/DELETE` на таблицях (застосунок сам виконує `09-seed.sql` на кожному старті); `UPDATE` на послідовностях (`NEXT VALUE FOR`, `sp_sequence_get_range`); `EXECUTE` на TVP-типах `doc.CellValueTvp`, `aud.CellChangeTvp`; `EXECUTE` на `arc.usp_ArchiveYear` (процедура `WITH EXECUTE AS OWNER`: `TRUNCATE … PARTITIONS` і ключі — від імені власника, викликачу досить `EXECUTE`, аудит L10-08); `sp_getapplock` (доступний `public`); читання `sys.filegroups` і `partition_*`. `db_owner` за кодом не потрібен. **Чи вистачить `db_datareader` + `db_datawriter` + `EXECUTE` — не встановлено: питання DBA.** Порада: `DENY` на `sec.DataProtectionKey` усім, крім облікового запису служби (`DatabaseHealthCheck.cs:37`). Якщо на стенді служба падає з `permission denied`, це дефект **документації**, а не обов'язково продукту — запишіть точну відмову й об'єкт |
+| Права облікового запису служби на базу | Скрипти розгортання прав не видають (DBA; вимога **без DDL**, `D-66`, `Schema:StartupMode=Validate`). ✎ 2026-11-02 (`DB-1`, закрито): `db_datareader` + `db_datawriter` + `UPDATE` на чотирьох послідовностях + `EXECUTE` на TVP `doc.CellValueTvp`, `aud.CellChangeTvp`, процедурах `arc.usp_ArchiveYear`, `arc.usp_EnsureAuditPartitions`, `arc.usp_ArchiveAudit`, `rpt.usp_GenerateTemplateViews`, `rpt.usp_GenerateStableViews` і функції `doc.fn_VersionOf` — **достатньо**, перевірено тестом `ServiceAccountLeastPrivilegeTests` на користувачі без входу (старт, сід, рядки, комірки, подання, нічна перевірка партицій, `rpt.v_DocumentCells`). Готовий скрипт `GRANT` — runbook, абзац «Права облікового запису служби». `db_owner` не потрібен. Порада: `DENY` на `sec.DataProtectionKey` усім, крім облікового запису служби (`DatabaseHealthCheck.cs:37`). Якщо на стенді служба падає з `permission denied`, це дефект **документації**, а не обов'язково продукту — запишіть точну відмову й об'єкт |
 | Інстанс | для іменованого екземпляра — `<Сервер>\<Екземпляр>`, не голий `localhost` |
 | Без Docker | не потрібен ні для інсталяції, ні для роботи |
 
@@ -1284,12 +1284,13 @@ D2, `D-226…D-239`). Раніше: Negotiate, одиниці в методол�
   кожного `msiexec` — повторний `deploy-ecr.ps1`, а `ECR_Jobs__Workers__*`,
   `ECR_Secrets__*` і власні змінні — вручну (п. 3.c). Для `EcrWorker`
   окремого виміру CI не робив, механізм той самий.
-- **Права облікового запису служби на БД не задекларовані й не перевірені на
-  замкненому логіні** (п. 2.2). Питання до DBA: чи вистачить
-  `db_datareader` + `db_datawriter` + `EXECUTE`. `arc.usp_ArchiveYear`
-  тепер `WITH EXECUTE AS OWNER` (аудит L10-08): викликачу досить `EXECUTE`
-  (перевірено тестом на користувачі без логіна); нічний розклад архівації не
-  вмикався.
+- ✎ 2026-11-02: **права облікового запису служби на БД задекларовані й
+  перевірені** (`DB-1` закрито, п. 2.2): `db_datareader` + `db_datawriter` +
+  `GRANT` зі скрипту runbook (абзац «Права облікового запису служби») —
+  тест `ServiceAccountLeastPrivilegeTests` на користувачі без входу. Нові
+  відносно попереднього переліку: `EXECUTE` на `doc.fn_VersionOf`,
+  `rpt.usp_GenerateTemplateViews`, `rpt.usp_GenerateStableViews`. Нічний
+  розклад архівації не вмикався.
 - Підпис `Ecr.msi` — окремий крок (`sign-msi.ps1`, потрібен сертифікат), у
   збірку не входить: **[перевірити: чи підписані артефакти, які видають]**;
   непідписаний файл дасть попередження Windows SmartScreen/UAC. Питання оплати
@@ -1675,7 +1676,7 @@ F-2 на вашій збірці, звірте окремим сценарієм
 |---|---|---|
 | 1 | Хеш і `Version` збірки; канал артефакта | `Version` — параметр збірки; хеш — з артефакта; канал — релиз-менеджер (п. 1) |
 | 2 | .NET 10 на Server 2012 R2; `sqlcmd` | не з'ясовано (ризик ICU); `sqlcmd` — лише наявність (п. 2.1, 7.2) |
-| 3 | Права облікового запису служби | мінімум за кодом, не перевірений; питання DBA (п. 2.2) |
+| 3 | Права облікового запису служби | ✎ 2026-11-02: перелік у runbook, перевірено тестом `ServiceAccountLeastPrivilegeTests` (п. 2.2, `DB-1` закрито) |
 | 4 | Самопідписаний сертифікат DP | допустимий (п. 2.4) |
 | 5 | HTTPS до Kestrel; `Secure` cookie на `localhost` | реалізовано три транспорти: `-HttpsThumbprint` / `-BehindHttpsProxy` / `-AllowHttp` (п. 2.4); на живому сертифікаті не перевірено; `-AllowHttp` → `SameAsRequest`, сесія на http працює |
 | 6 | Підтримувані браузери | Chromium/Chrome; Edge окремо не перевірявся; Firefox/Safari — не гарантуються (п. 2.5) |
@@ -1692,7 +1693,8 @@ F-2 на вашій збірці, звірте окремим сценарієм
 
 1. Хеш і `Version` збірки; канал передавання артефакта (релиз-менеджер).
 2. Підтримка .NET 10 на Windows Server 2012 R2 (не визначається з коду).
-3. Права облікового запису служби на БД на замкненому логіні (DBA).
+3. ~~Права облікового запису служби на БД на замкненому логіні (DBA).~~
+   ✎ 2026-11-02: перевірено тестом `ServiceAccountLeastPrivilegeTests` (користувач без входу); на живому логіні замовника — за скриптом runbook.
 4. Живий HTTPS: справжній сертифікат замовника, право служби на закритий ключ
    (поведінка Kestrel без права), `-HttpRedirectPort` на живому Kestrel, екран
    «Transport (HTTPS)» майстра; відповіді замовника про проксі/IIS, ім'я

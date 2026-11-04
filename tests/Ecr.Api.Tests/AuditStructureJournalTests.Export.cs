@@ -41,7 +41,7 @@ public sealed partial class AuditStructureJournalTests
         // ⛔ Мутація: прибрати `AND EntityType = @entityType` — приїде рядок «Other».
         var lines = Encoding.UTF8.GetString(bytes[3..]).Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal("changedAtUtc,entityType,entityId,operation,changeReason,changedByUserId,oldJson,newJson", lines[0]);
-        Assert.Equal(["First", "Second"], lines[1..].Select(l => l.Split(',')[3]));
+        Assert.Equal(["Second", "First"], lines[1..].Select(l => l.Split(',')[3]));
         Assert.All(lines[1..], l => Assert.Matches("^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z,", l));
 
         // Факт експорту — у журналі безпеки: хто, фільтр, кількість.

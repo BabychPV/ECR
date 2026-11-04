@@ -116,6 +116,22 @@
 буде нічого з переліку вище — сервер отримує РІВНО один готовий `.exe`,
 більше нічого.
 
+**Версії (генеруються з репозиторію):**
+
+<!-- generated:prereqs -->
+Версії згенеровано `tools/gen-install-docs.ps1` з репозиторію (`global.json`, `Directory.Build.props`, `Directory.Packages.props`, `tools/deploy-ecr.ps1`, `tools/build-msi.ps1`, `installer/Ecr.Installer/Package.wxs`, `.github/workflows/ci.yml`). Руками не правити.
+
+| Що | Де потрібне | Версія |
+|---|---|---|
+| .NET Runtime | сервер, куди ставиться MSI | не потрібен: публікація self-contained, рантайм усередині пакета |
+| Windows | сервер, куди ставиться MSI | Windows 8.1 / Server 2012 R2 і новіша, x64 (NT 6.3) |
+| SQL Server | сервер БД | не нижче 2016 SP1 (`13.0.4001`), редакція зі SQL Server Agent (Standard і вище) |
+| .NET SDK | лише машина збірки | `10.0.100` (`rollForward`: `latestFeature`), цільова платформа `net10.0` |
+| WiX CLI | лише машина збірки | `5.0.2` |
+| dotnet-ef | лише машина збірки (генерує `migration.sql`) | `10.0.13` |
+| Node.js | лише розробка й збірка клієнта; на сервері з MSI НЕ потрібен | `22` |
+<!-- /generated:prereqs -->
+
 ---
 
 ## 1. Збірка інсталятора {#1-збірка}
@@ -415,6 +431,30 @@ Invoke-WebRequest 'https://<ім''я з сертифіката HTTPS>/health/liv
 Якщо потрібно, щоб `deploy-ecr.ps1` сам довів справу до працюючої
 служби за один виклик, без ручного `Start-Service` — дивись 2.3.
 
+#### Порядок SQL-скриптів (для DBA, який накочує вручну) {#2-2-порядок-sql}
+
+<!-- generated:sql-order -->
+Порядок розгортання SQL-скриптів згенеровано `tools/gen-install-docs.ps1` з `$scripts` у `tools/deploy-ecr.ps1` і `tools/setup-dev-db.ps1` (вони мусять збігатися). Руками не правити. Кожен файл виконується окремою транзакцією `sqlcmd`; DBA, що накочує вручну, дотримується цього порядку:
+
+1. `01-filegroups.sql`
+2. `02-partitions.sql`
+3. `migration.sql` — міграції EF (ідемпотентний скрипт `dotnet ef migrations script --idempotent`)
+4. `11-audit-tables.sql`
+5. `07-partition-tables.sql`
+6. `08-system-tables.sql`
+7. `12-archive-tables.sql`
+8. `13-cache-table.sql`
+9. `03-archive-proc.sql`
+10. `04-partition-maintenance.sql`
+11. `05-rpt-views.sql`
+12. `15-cell-tvp.sql`
+13. `10-triggers.sql`
+14. `06-rcsi.sql`
+15. `14-agent-jobs.sql` — лише з `-FirstDeployment` (одноразово, завдання SQL Agent у `msdb`)
+
+Сід (`Sql/seed/**`) у цей перелік не входить: його виконує сам застосунок при першому старті.
+<!-- /generated:sql-order -->
+
 ### 2.3 Якщо служба має працювати під окремим обліковим записом {#2-3-обліковий-запис}
 
 Через майстер (2.1) — поле «Обліковий запис служби» на екрані 2. Через
@@ -436,6 +476,42 @@ $svcPass = Read-Host -AsSecureString -Prompt 'Пароль облікового 
 годиться лише для стенда, де після кожного перезавантаження й оновлення хтось вручну стартує `EcrApi`
 **і** `EcrWorker` (блок «Далі вручну» в 2.2), і лише якщо `LocalSystem` має доступ до SQL Server
 (Windows-автентифікація комп'ютера). Робочий контур — з `-ServiceAccount`.
+
+#### DBA: виконати скрипт прав облікового запису служби (перед першим стартом служби) {#2-3-права-служби}
+
+`deploy-ecr.ps1` і MSI прав служби в базі **не видають** (`D-66`): логін служби (`-ServiceAccount`, напр.
+`DOMAIN\ecr-svc$`) має бути на SQL Server (`CREATE LOGIN … FROM WINDOWS` — DBA), а в базі ECR — користувачем рівно з
+правами нижче. `db_owner` не потрібен; достатність перевіряє тест `ServiceAccountLeastPrivilegeTests` (старт, сід,
+рядки, комірки, подання, нічні задачі). Скрипт посилається на об'єкти, які створює крок 2 (схема) `deploy-ecr.ps1`:
+на чистій базі — виконати одразу після кроку 2 і до старту служб; якщо служба вже стартувала й упала на правах
+(«The EXECUTE permission was denied…»), — після скрипту стартувати `EcrApi` і `EcrWorker` повторно. Повторне
+виконання безпечне. `[<DB>]` — база ECR, `[<SERVICE_ACCOUNT>]` — логін служби. Під `LocalSystem` (стенд) —
+логін комп'ютера `DOMAIN\<ім'я>$` або `NT AUTHORITY\SYSTEM`.
+
+⛔ Блок **генерується** з переліку `ServiceAccountGrants` (`powershell -File tools\gen-install-docs.ps1`) — руками не
+правити; той самий скрипт — у `docs/admin/operations-runbook.md` (абзац «Права облікового запису служби»).
+
+<!-- generated:grants -->
+```sql
+USE [<DB>];
+IF DATABASE_PRINCIPAL_ID(N'<SERVICE_ACCOUNT>') IS NULL
+    CREATE USER [<SERVICE_ACCOUNT>] FOR LOGIN [<SERVICE_ACCOUNT>];
+ALTER ROLE db_datareader ADD MEMBER [<SERVICE_ACCOUNT>];
+ALTER ROLE db_datawriter ADD MEMBER [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::doc.TableInstanceSeq TO [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::doc.TableRowSeq TO [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::calc.CalculationResultSeq TO [<SERVICE_ACCOUNT>];
+GRANT UPDATE ON OBJECT::dic.RegistryEntryCodeSeq TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON TYPE::doc.CellValueTvp TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON TYPE::aud.CellChangeTvp TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::arc.usp_ArchiveYear TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::arc.usp_EnsureAuditPartitions TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::arc.usp_ArchiveAudit TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::rpt.usp_GenerateTemplateViews TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::rpt.usp_GenerateStableViews TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::doc.fn_VersionOf TO [<SERVICE_ACCOUNT>];
+```
+<!-- /generated:grants -->
 
 ⚠ **Кілька екземплярів на одному хості.** Дві служби ECR **однієї ролі**
 (дві Api чи перекритий рецикл пулу; два воркери) на **ту саму** базу на одній
@@ -700,6 +776,17 @@ Development жовтим не світяться (перевірка жовті�
 | Після оновлення MSI служба знову слухає не той порт / без HTTPS | `Environment` служби стерто оновленням (розділ 4) | повторити `deploy-ecr.ps1` з тим самим параметром транспорту |
 | `/health/ready`: `transport` Degraded | `-AllowHttp` у Production, або сертифікат спливає / прострочений | HTTPS із сертифіката замовника, або заміна сертифіката (вище) |
 
+### 2.8 Типізоване дерево НАЕ через PI SQL Client: колонка `TemplateName` {#2-8-nae-templatename}
+
+Імпорт дерева НАЕ з AF ставить елемент на рівень (Region / Area / Site / група обладнання / джерело) за **іменем шаблону
+елемента AF** (`Air_Region`, `Air_OnShoreOffShore`, `Air_Area`, `Air_Unit`, `Equipment`). PI Web API віддає шаблон сам. Для
+джерела типу **PI SQL Client** запит `ElementListQuery` (ключ `PiSqlClient:<код джерела>:ElementListQuery` або спільний
+`PiSqlClient:ElementListQuery`, див. `operations-runbook.md`) **має повертати додаткову колонку `TemplateName`** — ім'я
+шаблону елемента AF (текст). Без неї імпорт мовчки лишається на розміщенні за шляхом (як до типів вузлів), без помилки.
+Готового прикладу запиту в репозиторії немає (тексти RTQP — у PI-адміністратора), тому ім'я таблиці/стовпця шаблону
+в SQL-схемі AF бере адміністратор джерела; вимога лише одна: колонка зветься `TemplateName` і містить саме ім'я шаблону.
+Докладніше — `docs/build/NAE-NODE-TYPES.md`.
+
 ---
 
 ## 3. Перший вхід у систему {#3-перший-вхід}
@@ -736,6 +823,18 @@ Windows-обліковий запис: є звичайна форма логін
 ---
 
 ## 4. Оновлення на нову версію {#4-оновлення}
+
+⚠ ✎ 2026-11-02 (`DB-1`): **служба під логіном без `db_owner` — три нові права до старту нової версії.** Без
+першого падає кожен запис рядка й комірки, без двох інших не генеруються вʼюхи SSRS (`reportviews` = Degraded).
+Виконати після кроку 2 (схема) `deploy-ecr.ps1` і до старту служб; повний перелік — п. 2.3, нотатка —
+`docs/release-notes/db-service-account-grants.md`:
+
+```sql
+USE [<DB>];
+GRANT EXECUTE ON OBJECT::doc.fn_VersionOf TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::rpt.usp_GenerateTemplateViews TO [<SERVICE_ACCOUNT>];
+GRANT EXECUTE ON OBJECT::rpt.usp_GenerateStableViews TO [<SERVICE_ACCOUNT>];
+```
 
 ⛔ **Перед оновленням на цю версію (S11, 2026-09-29) — один раз, до запуску
 оновлення.** Відтепер служба в Production не стартує, доки ключі кільця

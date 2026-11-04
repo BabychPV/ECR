@@ -98,6 +98,7 @@ public static class DependencyInjection
             sp.GetRequiredService<IMetadataCache>(),
             sp.GetRequiredService<EcrDbContext>()));
         services.AddScoped<ICellStyleStore, CellStyleStore>();
+        services.AddScoped<IFormulaOverrideStore, FormulaOverrideStore>(); // ✎ D-461: ручне значення замість формули
         services.AddScoped<IRowStore, RowStore>();
         services.AddScoped<IDocumentHeaderStore, DocumentHeaderStore>();
         services.AddScoped<ITableFillStore, TableFillStore>();
@@ -118,6 +119,7 @@ public static class DependencyInjection
             ReadInt(configuration, "Database:RecalcCommandTimeoutSeconds", 180)));
         services.AddScoped<IRecalcCommandTimeout, Jobs.RecalcCommandTimeout>();
         services.AddScoped<IAuditWriter, AuditWriter>();
+        services.AddScoped<IRowChangeAudit, RowChangeAudit>();
         services.AddScoped<IWorkflowStore, WorkflowStore>();
         services.AddScoped<ISheetEditGate, SheetEditGate>();
         services.AddSingleton(new SheetEditGatePolicy(TimeSpan.FromSeconds(Math.Clamp(
@@ -130,18 +132,37 @@ public static class DependencyInjection
         services.AddScoped<IConsistencyIssueReader, ConsistencyIssueReader>();
         services.AddScoped<IDocumentStore, DocumentStore>();
         services.AddScoped<IDocumentDeletionStore, DocumentDeletionStore>();
+        services.AddScoped<IDocumentSheetCopyStore, DocumentSheetCopyStore>();
         services.AddScoped<IDocumentKeyStore, DocumentKeyStore>();
         services.AddScoped<IEditAssignmentStore, EditAssignmentStore>();
         services.AddScoped<IEditorSetStore, EditorSetStore>();
         services.AddScoped<IEditAssignmentManagementStore, EditAssignmentManagementStore>();
+        services.AddScoped<ITableDiscussionStore, TableDiscussionStore>();
+        services.AddScoped<ISheetChangeStore, SheetChangeStore>();
         services.AddScoped<IApprovalQueueStore, ApprovalQueueStore>();
         services.AddScoped<IColumnDefSearchStore, ColumnDefSearchStore>();
         services.AddScoped<ISearchStore, SearchStore>();
         services.AddScoped<IValidationResultStore, ValidationResultStore>();
         services.AddScoped<IProjectStore, ProjectStore>();
         services.AddScoped<IRegistryStore, RegistryStore>();
+        services.AddScoped<IRegistryHierarchyStore, RegistryHierarchyStore>();
+        services.AddScoped<INaeAfReader, Integration.PiAfNaeReader>();
+        services.AddScoped<IRegistryEntryReferenceReader, Application.Permits.AirLimits.AirLimitsReferenceReader>();
+        services.AddScoped<IRegistryImportProfileStore, RegistryImportProfileStore>();
+        services.AddSingleton(new Application.Permits.AirLimits.AirLimitsSettings(
+            configuration["AirLimits:NaeRegistryCode"] is { Length: > 0 } nae ? nae : Application.Permits.AirLimits.AirLimitsSettings.Default.NaeRegistryCode,
+            configuration["AirLimits:SubstanceRegistryCode"] is { Length: > 0 } substances ? substances : Application.Permits.AirLimits.AirLimitsSettings.Default.SubstanceRegistryCode,
+            configuration["AirLimits:RegionRegistryCode"] is { Length: > 0 } region ? region : Application.Permits.AirLimits.AirLimitsSettings.Default.RegionRegistryCode,
+            configuration["AirLimits:AreaRegistryCode"] is { Length: > 0 } area ? area : Application.Permits.AirLimits.AirLimitsSettings.Default.AreaRegistryCode));
+        services.AddScoped<Application.Permits.AirLimits.AirLimitsSettingsAccessor>();
+        services.AddScoped<Application.RegistryImport.IRegistryImportTarget, Application.Permits.AirLimits.AirLimitsImportTarget>();
+        services.AddScoped<Application.RegistryImport.IReferenceResolver, Application.Permits.AirLimits.NaeReferenceResolver>();
+        services.AddScoped<Application.RegistryImport.IReferenceResolver, Application.Permits.AirLimits.SubstanceReferenceResolver>();
         services.AddScoped<IRegistryUseStore, RegistryUseStore>(); // RT-23b
         services.AddScoped<IRegistryImpactStore, RegistryImpactStore>(); // RT-25
+        services.AddSingleton(new Application.Registries.Nae.NaeTreeSettings(
+            configuration["AirLimits:NaeRegistryCode"] is { Length: > 0 } naeTree ? naeTree : Application.Registries.Nae.NaeTreeSettings.Default.RegistryCode,
+            configuration["NaeTree:RegionSourceRegistryCode"] is { Length: > 0 } regions ? regions : Application.Registries.Nae.NaeTreeSettings.Default.RegionSourceRegistryCode));
         services.AddScoped<IRegistryDraftStore, RegistryDraftStore>();
         services.AddScoped<IRegistryExternalKeyStore, RegistryExternalKeyStore>(); // FEATURE-REGISTRY-SYNC S2
         services.AddScoped<IUnitCatalog, UnitCatalog>();
@@ -214,6 +235,19 @@ public static class DependencyInjection
             sp.GetRequiredService<EcrDbContext>(),
             sp.GetRequiredService<CacheLifetimes>(),
             sp.GetRequiredService<Caching.SingleFlight<TemplateVersionSnapshot>>()));
+
+        // ✎ RPT-STABLE Part B: часова шкала версій проєкту — ЄДИНА відповідь «яка версія за період».
+        services.AddScoped<IProjectVersionTimeline>(sp => new ProjectVersionTimelineService(
+            sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+            sp.GetRequiredService<EcrDbContext>()));
+
+        services.AddScoped<IColumnRenameMap, ColumnRenameMap>();
+
+        // RPT-STABLE Part B: прапор переносу «з місяця» (типово вимкнено до B2).
+        services.AddSingleton(new Ecr.Application.Documents.VersionMigration.VersionMigrationOptions(
+            bool.TryParse(
+                configuration[Ecr.Application.Documents.VersionMigration.VersionMigrationOptions.FromMonthEnabledKey],
+                out var fromMonthEnabled) && fromMonthEnabled));
 
         // ⛔ `ITemplateStructure`/`CachedTemplateStructure` тут БІЛЬШЕ НЕМАЄ
         // (`Q-192`, `AR-06`, `unreachable-mechanisms.md` §4a). Порт існував
@@ -476,6 +510,9 @@ public static class DependencyInjection
         // HSE301 A5b: синк подій джерела в рядки таблиць. Ставить його `CollectionJob` (сутність із
         // активним `SourceEventMap`) — за маркером, як решту задач у черзі.
         services.AddScoped<ISourceEventSyncJob, Jobs.SourceEventSyncJob>();
+
+        // D-464: стеля сторінок (`Collection:MaxEventPages`) і нарізка читання подій (`PiSqlClient:EventQueryChunk`).
+        services.AddSingleton(Jobs.SourceEventSyncOptions.From(configuration));
         services.AddScoped<IRegistryImpactRecalculationJob, Jobs.RegistryImpactRecalculationJob>(); // RT-25: батьківська задача перерахунку зачеплених
 
         // HSE301:A1 — підтягування значень PI за вікном рядка (§4.4). Задачу ставить хук запису комірок
@@ -509,6 +546,9 @@ public static class DependencyInjection
         services.AddScoped<IDataSourceStore, DataSourceStore>();
         services.AddScoped<ICollectionRunReader, CollectionRunReader>();
         services.AddScoped<Ecr.Application.Sources.IMappingPreviewStore, MappingPreviewStore>();
+        services.AddScoped<Ecr.Application.Integration.RawData.IRawDataReader, RawDataReader>(); // D-463
+        services.AddScoped<Ecr.Application.Integration.RawData.ICellSourceStore, CellSourceStore>(); // D-463
+        services.AddScoped<Ecr.Application.Integration.RawData.ISourceEventViewStore, SourceEventViewStore>(); // D-465
         services.AddScoped<IStyleCatalog, StyleCatalog>();
         services.AddScoped<IConditionalFormatStore, ConditionalFormatStore>();
         services.AddScoped<IReportDefinitionStore, ReportDefinitionStore>();

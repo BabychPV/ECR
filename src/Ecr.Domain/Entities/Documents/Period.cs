@@ -146,6 +146,37 @@ public sealed class Period : Entity<int>
         return new UtcRange(ToUtc(periodStart, siteTimeZone), ToUtc(periodEnd.AddDays(1), siteTimeZone));
     }
 
+    /// <summary>
+    /// Вікно згортки точок PI для колонки в періоді (<c>D-462</c>, <c>D-463</c>): звичайна колонка — увесь період;
+    /// колонка місяця <paramref name="monthNumber"/> — лише цей місяць усередині періоду; місяць поза періодом —
+    /// <c>null</c> (не комірка цього періоду; з Q-17 її згортає період-власник).
+    /// </summary>
+    /// <param name="periodStart">Перший день періоду.</param>
+    /// <param name="periodEnd">Останній день періоду, включно.</param>
+    /// <param name="monthNumber">Місяць колонки (<c>ColumnDef.MonthNumber</c> за <c>IsMonthColumn</c>); <c>null</c> — звичайна колонка.</param>
+    /// <param name="siteTimeZone">Пояс майданчика (проєкту).</param>
+    /// <remarks>
+    /// ⛔ ОДНЕ місце правила: його читають і матеріалізація (<c>MaterializeCollectedDataJob</c>), і «Звідки це
+    /// значення» (<c>CellSourceHandler</c>). Дві копії розійшлися б першою ж правкою, і комірка показувала б точки
+    /// не того вікна, з якого її згорнуто.
+    /// </remarks>
+    public static UtcRange? FoldBounds(DateOnly periodStart, DateOnly periodEnd, int? monthNumber, TimeZoneInfo siteTimeZone)
+    {
+        ArgumentNullException.ThrowIfNull(siteTimeZone);
+
+        if (monthNumber is not { } month || month is < 1 or > 12)
+        {
+            return UtcBounds(periodStart, periodEnd, siteTimeZone);
+        }
+
+        var first = new DateOnly(periodStart.Year, month, 1);
+        var last = first.AddMonths(1).AddDays(-1);
+        var from = first > periodStart ? first : periodStart;
+        var to = last < periodEnd ? last : periodEnd;
+
+        return from > to ? null : UtcBounds(from, to, siteTimeZone);
+    }
+
     /// <summary>Напіввідкритий інтервал <c>[StartUtc, EndUtc)</c> у UTC.</summary>
     /// <param name="StartUtc">Початок, включно.</param>
     /// <param name="EndUtc">Кінець, виключно.</param>

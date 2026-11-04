@@ -66,6 +66,10 @@ public sealed class MigrateDocumentVersionJob(
         var reporter = new ThrottledReporter(progress, scopes, clock);
 
         handler.BackupConfirmation = task.BackupConfirmation;
+        handler.Range = Enum.TryParse<VersionMigrationRange>(task.Range, ignoreCase: true, out var range)
+            ? range
+            : VersionMigrationRange.WholeProject;
+        handler.FromPeriodKey = task.FromPeriodKey;
         var report = await handler
             .RunQueuedAsync(
                 task.DocumentId, task.TargetVersionId, mode, task.TableRenames, task.AcceptGuardedOverwrite,

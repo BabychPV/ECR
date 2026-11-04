@@ -232,12 +232,25 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
       }),
   };
 
+  // ⛔ Esc над вкладеним вікном закриває ЛИШЕ його: `Modal` і `Drawer` Mantine обидва слухають `keydown` на
+  // `window`, і без цього одна клавіша в майстрі кликала і `setDialog(null)`, і `setPanel(null)` — шторка
+  // зникала разом із майстром (e2e `editAssignments.spec.ts`, «Cancel, X і Esc»). Раніше це ховав сам
+  // `useUrlState`: другий сеттер у тому самому тіку будував адресу зі старого знімка й відкочував перший.
+  const nestedOpen =
+    (opened && dialog === WizardDialogId) ||
+    participantOpen ||
+    ownerOpen ||
+    validating !== null ||
+    returning !== null ||
+    removing !== null;
+
   return (
     <>
       <DetailDrawer
         panelId={EditAssignmentsPanelId}
         title={t('editAssign.title')}
         closeLabel={t('editAssign.close')}
+        closeOnEscape={!nestedOpen}
         size="xl"
         footer={
           data?.canManage === true && !simulating ? (

@@ -105,6 +105,9 @@ public sealed class DocumentReadScope
 
     private static readonly IReadOnlyList<ParticipationGrant> NoGrants = [];
 
+    /// <summary>✎ D-461: проєкт документа — для проєктних прав зрізу (<c>Document.OverrideFormula</c>).</summary>
+    public int ProjectId => _projectId;
+
     /// <summary>Чи враховано в межах надання учасника документа (D-443).</summary>
     public bool HasParticipation => _grants.Count > 0;
 
@@ -122,11 +125,68 @@ public sealed class DocumentReadScope
 
     /// <summary>Чи бачить профіль ресурс аркуша — з кодом аркуша й періодом (D-214) і наданнями учасника (D-443).</summary>
     private bool Readable(int sheetDefId, int tableDefId, int columnDefId)
+        => Readable(sheetDefId, tableDefId, columnDefId, _period);
+
+    private bool Readable(int sheetDefId, int tableDefId, int columnDefId, PeriodKey? period)
     {
         var sheetCode = _sheetCodes.GetValueOrDefault(sheetDefId);
         return EditRules.CanReadIn(
-            _profile, _projectId, sheetDefId, sheetCode, tableDefId, columnDefId, _period,
-            ParticipationAt(sheetCode, tableDefId));
+            _profile, _projectId, sheetDefId, sheetCode, tableDefId, columnDefId, period,
+            ParticipationAt(sheetCode, tableDefId, period));
+    }
+
+    private readonly Dictionary<string, int> _tableIdByCode = [];
+    private readonly Dictionary<(int TableDefId, int Period), bool> _tablesInPeriod = [];
+
+    /// <summary>Чи бачить профіль таблицю за КОДОМ (без періоду, як <see cref="CanReadTable"/>).</summary>
+    /// <param name="tableCode">Код таблиці; невідомий знімку — невидима.</param>
+    public bool CanReadTableCode(string tableCode)
+        => TableIdOf(tableCode) is { } id && CanReadTable(id);
+
+    /// <summary>Коди всіх таблиць структури (видимих чи ні).</summary>
+    public IReadOnlyCollection<string> TableCodes() => [.. _tableCodes.Values.Distinct(StringComparer.Ordinal)];
+
+    /// <summary>Чи знає знімок таблицю з таким кодом (видима вона чи ні).</summary>
+    /// <param name="tableCode">Код таблиці.</param>
+    public bool KnowsTableCode(string tableCode) => TableIdOf(tableCode) is not null;
+
+    /// <summary>
+    /// Те саме, що <c>InPeriod(period).CanReadTable</c>, але БЕЗ побудови нової області: індекси знімка спільні,
+    /// рішення кешується по парі «таблиця × період» (чат таблиці, роль, звужена періодами).
+    /// </summary>
+    /// <param name="tableCode">Код таблиці.</param>
+    /// <param name="period">Період.</param>
+    public bool CanReadTableCodeIn(string tableCode, PeriodKey period)
+    {
+        if (TableIdOf(tableCode) is not { } tableDefId)
+        {
+            return false;
+        }
+
+        if (_tablesInPeriod.TryGetValue((tableDefId, period.Value), out var known))
+        {
+            return known;
+        }
+
+        var readable = _sheetOfTable.TryGetValue(tableDefId, out var sheetDefId)
+                       && (Readable(sheetDefId, tableDefId, columnDefId: 0, period)
+                           || _columnsOfTable[tableDefId].Exists(c => Readable(sheetDefId, tableDefId, c, period)));
+
+        _tablesInPeriod[(tableDefId, period.Value)] = readable;
+        return readable;
+    }
+
+    private int? TableIdOf(string tableCode)
+    {
+        if (_tableIdByCode.Count == 0)
+        {
+            foreach (var (id, code) in _tableCodes)
+            {
+                _tableIdByCode.TryAdd(code, id);
+            }
+        }
+
+        return _tableIdByCode.TryGetValue(tableCode, out var found) ? found : null;
     }
 
     /// <summary>
@@ -134,7 +194,7 @@ public sealed class DocumentReadScope
     /// будь-яке надання на аркуш чи його таблицю — щоб аркуш з'явився; таблицю й колонку — лише надання, що
     /// покриває саме цю таблицю (решта таблиць аркуша лишається схованою).
     /// </summary>
-    private GrantLevel ParticipationAt(string? sheetCode, int tableDefId)
+    private GrantLevel ParticipationAt(string? sheetCode, int tableDefId, PeriodKey? period)
     {
         if (_grants.Count == 0)
         {
@@ -143,13 +203,13 @@ public sealed class DocumentReadScope
 
         if (tableDefId == 0)
         {
-            return DocumentParticipation.OpensSheet(_grants, sheetCode, _period) ? GrantLevel.Read : GrantLevel.None;
+            return DocumentParticipation.OpensSheet(_grants, sheetCode, period) ? GrantLevel.Read : GrantLevel.None;
         }
 
         var tableCode = _tableCodes.GetValueOrDefault(tableDefId);
         return tableCode is null
             ? GrantLevel.None
-            : DocumentParticipation.LevelAt(_grants, sheetCode, tableCode, _period);
+            : DocumentParticipation.LevelAt(_grants, sheetCode, tableCode, period);
     }
 
     /// <summary>Чи бачить профіль колонку (і, отже, її значення).</summary>
@@ -269,6 +329,62 @@ public sealed class DocumentReadScope
     /// <summary>Колонки структури, які профіль БАЧИТЬ, — за зростанням (фільтр журналу змін у SQL, R-11).</summary>
     public IReadOnlyList<int> VisibleColumnIds()
         => [.. _tableOfColumn.Keys.Where(CanReadColumn).Order()];
+
+    /// <summary>Код аркуша знімка; <c>null</c> — аркуша в знімку немає.</summary>
+    /// <param name="sheetDefId">Аркуш версії шаблону.</param>
+    public string? SheetCodeOf(int sheetDefId) => _sheetCodes.GetValueOrDefault(sheetDefId);
+
+    /// <summary>
+    /// Колонки аркуша, які профіль БАЧИТЬ, — за зростанням (журнал аркуша, SQL-фільтр до <c>TOP</c>);
+    /// <c>null</c> — аркуша немає в знімку або він закритий цілком.
+    /// </summary>
+    /// <param name="sheetDefId">Аркуш версії шаблону.</param>
+    /// <remarks>
+    /// ⛔ Колонки закритих таблиць НЕ входять (<see cref="CanReadColumn"/> їх відсікає), тож їхніх змін немає ні
+    /// на сторінці, ні в курсорі. Межі періоду - ті, що задав <see cref="InPeriod"/>.
+    /// </remarks>
+    public IReadOnlyList<int>? VisibleColumnIdsOfSheet(int sheetDefId)
+    {
+        if (!_tablesOfSheet.TryGetValue(sheetDefId, out var tables) || !CanReadSheet(sheetDefId))
+        {
+            return null;
+        }
+
+        return [.. tables.SelectMany(t => _columnsOfTable[t]).Where(CanReadColumn).Order()];
+    }
+
+    /// <summary>
+    /// Таблиці аркуша, які профіль БАЧИТЬ (<c>tableDefId → код</c>), і сховані колонки цих таблиць; <c>null</c> —
+    /// аркуша немає в знімку або він закритий цілком (маркер змін аркуша, живе оновлення сітки).
+    /// </summary>
+    /// <param name="sheetDefId">Аркуш версії шаблону.</param>
+    /// <remarks>⛔ Схована таблиця сюди не потрапляє ні кодом, ні ідентифікатором. Межі періоду — ті, що задав <see cref="InPeriod"/>.</remarks>
+    public (IReadOnlyDictionary<int, string> Tables, IReadOnlyList<int> HiddenColumnIds)? VisibleTablesOfSheet(int sheetDefId)
+    {
+        if (!_tablesOfSheet.TryGetValue(sheetDefId, out var tables) || !CanReadSheet(sheetDefId))
+        {
+            return null;
+        }
+
+        var visible = tables.Where(CanReadTable).ToDictionary(t => t, t => _tableCodes[t]);
+        var hidden = visible.Keys.SelectMany(t => _columnsOfTable[t]).Where(c => !CanReadColumn(c)).Order().ToList();
+        return (visible, hidden);
+    }
+
+    /// <summary>
+    /// Таблиці аркуша, які профіль БАЧИТЬ (<see cref="CanReadTable"/>), — за зростанням (журнал рядків аркуша, SQL-фільтр
+    /// до <c>TOP</c>); <c>null</c> — аркуша немає в знімку або він закритий цілком.
+    /// </summary>
+    /// <param name="sheetDefId">Аркуш версії шаблону.</param>
+    public IReadOnlyList<int>? VisibleTableIdsOfSheet(int sheetDefId)
+    {
+        if (!_tablesOfSheet.TryGetValue(sheetDefId, out var tables) || !CanReadSheet(sheetDefId))
+        {
+            return null;
+        }
+
+        return [.. tables.Where(CanReadTable).Order()];
+    }
 
     /// <summary>Чи бачить профіль таблицю, якій належить колонка.</summary>
     /// <param name="columnDefId">Колонка версії шаблону.</param>

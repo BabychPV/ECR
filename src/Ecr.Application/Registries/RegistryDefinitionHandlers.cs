@@ -31,8 +31,10 @@ public sealed class GetRegistryDefinitionHandler(
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IPermitTypeStore? permits = null,
-    IPermitGroupStore? permitGroups = null)
+    IPermitGroupStore? permitGroups = null,
+    IRegistryHierarchyStore? hierarchy = null)
 {
+    // ⚠ `hierarchy` — лише для коду рівня поля (типи вузлів НАЕ); без нього `LevelCode` порожній, `LevelId` є завжди.
     // ⚠ `permits`/`permitGroups` (Permits, PRMG) потрібні лише для ознаки `Kind` (шапка дозволу / група); необов'язкові
     // для тестів, що будують обробник руками, - контейнер підставляє їх завжди.
 
@@ -87,6 +89,11 @@ public sealed class GetRegistryDefinitionHandler(
             }
         }
 
+        var levelCodes = definition.IsHierarchical && hierarchy is not null
+            ? (await hierarchy.ListLevelsAsync(definition.Id, ct).ConfigureAwait(false)).ToDictionary(l => l.Id, l => l.Code)
+            : [];
+        var naeTree = Nae.NaeTreeNodePolicy.IsNaeTree(definition);
+
         return new RegistryDefinitionDto(
             definition.Id,
             definition.Code,
@@ -102,7 +109,10 @@ public sealed class GetRegistryDefinitionHandler(
 
                     // ⛔ L5-08: числовий Id забороненої цілі, як і її код, не віддається.
                     VisibleTarget(profile, f.RefRegistryDefId),
-                    f.UnitId))
+                    f.UnitId,
+                    f.LevelId,
+                    f.LevelId is { } levelId ? levelCodes.GetValueOrDefault(levelId) : null,
+                    naeTree && Nae.NaeTreeSchema.ReadOnlyFields.Contains(f.Code)))
                 .ToList(),
             Relations(definition, fields, byId, linkKinds, profile),
             rules
@@ -389,8 +399,10 @@ public sealed class SaveRegistryDefinitionHandler(
     IUnitCatalog units,
     IRegistryKeyStore keys,
     Keys.RegistryKeyService keyService,
-    Rules.RegistryRuleCompiler? ruleCompiler = null)
+    Rules.RegistryRuleCompiler? ruleCompiler = null,
+    IRegistryHierarchyStore? hierarchy = null)
 {
+    // ⚠ `hierarchy` (типи вузлів НАЕ) — лише для прив'язки поля до рівня (`LevelCode`); контейнер підставляє його завжди.
     // ⚠ `ruleCompiler` (RT-17a) необов'язковий лише для тестів, що будують обробник руками: їхні
     // правила — вирази до рушія (`[Limit] > 0`), і перевіряти їх граматикою правил там нічого.
     // Контейнер підставляє компілятор завжди; справжній шлях тримає `RegistryRulesHttpTests`.
@@ -427,6 +439,25 @@ public sealed class SaveRegistryDefinitionHandler(
             .ConfigureAwait(false);
 
         var userId = RequireUser(currentUser);
+        return await SaveForAuthorAsync(code, dto, userId, profile, ifMatch, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ AIRSYS02: the same direct save for an author already checked by the caller, or for the SYSTEM at start (author 0
+    /// «system», <c>NaeTreeProvisioner.EnsureAsSystemAsync</c>). <c>internal</c>: no controller can reach it.
+    /// </summary>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="dto">Повний стан опису після правки.</param>
+    /// <param name="userId">Автор (0 — система).</param>
+    /// <param name="profile">Профіль автора (заборони довідників).</param>
+    /// <param name="ifMatch"><c>definitionVersion</c>, від якої зберігають.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<int> SaveForAuthorAsync(
+        string code, SaveRegistryDefinitionDto dto, int userId, Security.AccessProfile profile, string? ifMatch, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        ArgumentNullException.ThrowIfNull(profile);
+
         RequireReason(dto.Reason);
         RequireNoEmptyItems(dto.Fields, dto.Rules, dto.Keys);
 
@@ -593,6 +624,7 @@ public sealed class SaveRegistryDefinitionHandler(
         await GuardLookupRetargetAsync(definition, dto.Fields, profile, ct).ConfigureAwait(false);
 
         ApplyFields(definition, dto.Fields, newFieldsMayBeRequired);
+        await BindLevelsAsync(definition, dto.Fields, ct).ConfigureAwait(false);
 
         IReadOnlyList<RegistryDef>? graph = null;
 
@@ -1225,6 +1257,30 @@ public sealed class SaveRegistryDefinitionHandler(
                 ["messageKey"] = messageKey,
                 ["fieldCode"] = fieldCode,
             });
+    /// <summary>
+    /// Прив'язує поля до рівнів ієрархії (типи вузлів НАЕ, людина 03.11): <c>LevelCode</c> — код рівня ЦЬОГО довідника,
+    /// порожній рядок — усі рівні, <c>null</c> — без змін.
+    /// </summary>
+    /// <exception cref="BusinessRuleException"><c>422 levelUnknown</c>: рівня немає або довідник не ієрархічний.</exception>
+    private async Task BindLevelsAsync(RegistryDef definition, IReadOnlyList<RegistryFieldSaveDto> wanted, CancellationToken ct)
+    {
+        if (wanted.All(w => w.LevelCode is null))
+        {
+            return;
+        }
+
+        IReadOnlyList<RegistryLevelDef> levels = definition.IsHierarchical && hierarchy is not null
+            ? await hierarchy.ListLevelsAsync(definition.Id, ct).ConfigureAwait(false)
+            : [];
+        foreach (var w in wanted.Where(w => w.LevelCode is not null))
+        {
+            var field = definition.Fields.First(f => string.Equals(f.Code, w.Code, StringComparison.Ordinal));
+            field.BindToLevel(w.LevelCode!.Trim().Length == 0
+                ? null
+                : Hierarchy.RegistryHierarchyPlacement.LevelByCode(levels, w.LevelCode).Id);
+        }
+    }
+
     /// <summary>Застосовує перелік полів до опису.</summary>
     /// <param name="definition">Довідник.</param>
     /// <param name="wanted">Поля після правки.</param>
@@ -1501,6 +1557,16 @@ public sealed class SaveRegistryDefinitionHandler(
         return result;
     }
 
+    /// <summary>
+    /// Знімок опису для журналу в тій самій формі, що в <c>SaveDefinition</c>/<c>Publish</c> (одне місце формату). <c>internal</c>:
+    /// його викликає разове оновлення дерева НАЕ на старті.
+    /// </summary>
+    /// <param name="definition">Довідник (поточний стан у пам'яті).</param>
+    /// <param name="rules">Його правила.</param>
+    /// <param name="existingKeys">Його ключі.</param>
+    internal static string AuditSnapshot(RegistryDef definition, IReadOnlyList<RegistryRuleDef> rules, IReadOnlyList<RegistryKeyDef> existingKeys)
+        => Snapshot(definition, rules, KeySnapshots(definition, existingKeys, []));
+
     /// <summary>Знімок опису для журналу: саме він відповідає «що змінилося».</summary>
     /// <param name="definition">Довідник.</param>
     /// <param name="rules">Його правила.</param>
@@ -1523,6 +1589,10 @@ public sealed class SaveRegistryDefinitionHandler(
                     f.UnitId,
                     relationKind = f.RelationKind.ToString(),
                     onParentDelete = f.RelationKind == RegistryRelationKind.Composition ? f.OnParentDelete.ToString() : null,
+
+                    // Типи вузлів НАЕ (03.11): прив'язка поля до рівня — частина опису; без неї журнал не пояснював би, чому
+                    // поле перестало вимагатися (чи показуватися) на іншому рівні.
+                    f.LevelId,
                 })
                 .ToList(),
             keys,

@@ -381,7 +381,8 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
     /// ФВ-5.20a: 26 → 27 (один пошук Reopen-стану аркушів для <c>IsLateEdit</c>).
     /// L6-02: 27 → 28 (блокування структури документа разом із версією шаблону, одним пакетом).
     /// N-3: 28 → 29 (<c>SET LOCK_TIMEOUT</c> у <c>LockWaitGuard</c>, один раз на пакет).
-    private const long BookExecutions = 29;
+    /// Журнал рядків: 29 → 30 (один <c>INSERT aud.RowChange</c> на всі нові рядки книги, до 150 рядків).
+    private const long BookExecutions = 30;
 
     private async Task AssertRejectedAsync<TException>(
         World world, AccessProfile profile, List<PatchCellsRequest> requests, Table guilty, string code, string messageKey)
@@ -635,7 +636,8 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
             clock,
             gate?.Invoke(sheetGate) ?? sheetGate,
             new UnitCatalog(db),
-            rowWindows);
+            rowWindows,
+            rowAudit: new RowChangeAudit(db));
     }
 
     private RowStore Rows(EcrDbContext db, IClock? clock = null)

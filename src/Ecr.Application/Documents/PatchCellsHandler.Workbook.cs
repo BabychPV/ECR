@@ -280,6 +280,12 @@ public sealed partial class PatchCellsHandler
         foreach (var item in active)
         {
             item.Planned = Blamed(item.Id, () => BuildCellChanges(item.Context, numberCulture));
+
+            // ✎ D-461: значення з книги в комірці формули, що дозволяє ручне значення, — ручне значення (причина —
+            // `ExcelImportOverrideReason`, її ставить імпорт); видалення в ручній комірці — повернення формули.
+            var planned = item.Planned;
+            item.Planned = await BlamedAsync(item.Id, () => PlanFormulaOverridesAsync(item.Request, item.Context, planned, ct))
+                .ConfigureAwait(false);
         }
 
         // ⚠ Межі періоду — одні на книгу (документ × період) і лише тоді, коли
@@ -326,7 +332,9 @@ public sealed partial class PatchCellsHandler
                 documentId, [.. active.Select(x => x.Context.Table.SheetDefId).Distinct()], period.Value, ct,
                 [.. active.SelectMany(x => x.Context.ColumnPeriods).Distinct()],
                 active.Exists(x => x.Context.InstancePeriodGoverns),
-                [.. active.SelectMany(x => x.Context.AnnualPeriods).Distinct()])
+                [.. active.SelectMany(x => x.Context.AnnualPeriods).Distinct()],
+                includesOriginal: active.Exists(x => x.Context.Instance.SheetCopyId is null),
+                sheetCopyIds: [.. active.Select(x => x.Context.Instance.SheetCopyId).OfType<long>().Distinct()])
             .ConfigureAwait(false);
 
         await uow.ExecuteInTransactionAsync(
@@ -560,11 +568,16 @@ public sealed partial class PatchCellsHandler
         // версію — тоді другого звернення немає.
         if (heldSheetStatuses is null)
         {
-            var locked = await sheetGate.EnterStructureAsync(documentId, exclusive: false, ct).ConfigureAwait(false);
-            foreach (var item in active)
+            // ✎ RPT-STABLE B2: версія під блокуванням - версія ПЕРІОДУ (шкала); один виклик на період книги (зазвичай один).
+            foreach (var byPeriod in active.GroupBy(x => x.Context.Instance.PeriodKey).OrderBy(g => g.Key))
             {
-                Blamed(item.Id, () => DocumentStructure.EnsureUnchanged(
-                    locked, item.Context.Instance.TemplateVersionId, documentId));
+                var locked = await sheetGate
+                    .EnterStructureForPeriodAsync(documentId, exclusive: false, byPeriod.Key, ct).ConfigureAwait(false);
+                foreach (var item in byPeriod)
+                {
+                    Blamed(item.Id, () => DocumentStructure.EnsureUnchanged(
+                        locked, item.Context.Instance.TemplateVersionId, documentId));
+                }
             }
         }
 
@@ -702,6 +715,13 @@ public sealed partial class PatchCellsHandler
             {
                 creating[i].Applied = WithRealRowIds(creating[i].Context, creating[i].Planned, newIds[i]);
             }
+
+            // ⛔ Журнал рядків — у транзакції книги: відкат будь-якого аркуша забирає й «додано рядок».
+            await WriteRowAuditAsync(
+                [.. creating.SelectMany((x, i) => RowAddedRecords(
+                    x.Request, x.Context.Instance, x.Context.PeriodKey, x.Context.Creations, newIds[i], userId, now,
+                    x.Context.ApproverEdit, AuditCorrelationId()))],
+                ct).ConfigureAwait(false);
         }
 
         // ✎ Q-17: комірки колонок з іншим власником (за прапором) йдуть в екземпляри власників. Набори ОДНОГО
@@ -739,6 +759,12 @@ public sealed partial class PatchCellsHandler
         }
 
         batchSets.AddRange(ownerSetsById.Values);
+
+        // ✎ D-461: позначки ручних значень — тією самою транзакцією й ПЕРЕД значеннями (див. поштучний шлях).
+        foreach (var item in active)
+        {
+            await ApplyFormulaOverrideMarksAsync(item.Context, item.Applied!, now, ct).ConfigureAwait(false);
+        }
 
         IReadOnlyDictionary<long, IReadOnlyDictionary<long, string>> written;
         try
@@ -816,10 +842,12 @@ public sealed partial class PatchCellsHandler
             [.. active.SelectMany(x =>
             {
                 var changes = routedItems.TryGetValue(x.Id, out var routed) ? routed.Physical : x.Applied!;
+                var (overrideReasons, restored) = AuditOverrides(x.Context, x.Applied!);
                 return BuildAuditRecords(
                     x.Request, changes.Upserts, changes.Deletes, userId, now, documentId,
                     changes.RowKeyById, auditPrevious, isLateEdit, AuditCorrelationId(), x.Context.OutOfWindow,
-                    x.OverwrittenRowKeys, approverEdit: x.Context.ApproverEdit);
+                    x.OverwrittenRowKeys, approverEdit: x.Context.ApproverEdit,
+                    overrideReasons: overrideReasons, restored: restored);
             })],
             ct).ConfigureAwait(false);
 

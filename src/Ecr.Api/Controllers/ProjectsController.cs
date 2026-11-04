@@ -27,8 +27,26 @@ public sealed class ProjectsController(
     RunCalculationHandler recalculate,
     Ecr.Application.Workflow.GetApprovalRouteHandler getRoute,
     Ecr.Application.Workflow.ReplaceApprovalRouteHandler replaceRoute,
-    Ecr.Application.Documents.GetDocumentTemplateHandler documentTemplate) : ControllerBase
+    Ecr.Application.Documents.GetDocumentTemplateHandler documentTemplate,
+    Ecr.Application.Projects.GetProjectTemplateTimelineHandler templateTimeline) : ControllerBase
 {
+    /// <summary>
+    /// Часова шкала версій шаблону проєкту (RPT-STABLE Part B): з якого періоду яка версія діє. Право
+    /// <c>Document.View</c> і видимий проєкт.
+    /// </summary>
+    /// <remarks>
+    /// Порожній <c>items</c> — проєкт на одній (чинній) версії всі періоди. <c>currentVersionId</c> — версія для НОВИХ
+    /// періодів. Невидимий проєкт — той самий <c>404</c>, що й неіснуючий.
+    /// </remarks>
+    /// <param name="id">Проєкт.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:int}/template-versions")]
+    [ProducesResponseType<Ecr.Application.Projects.ProjectTemplateTimelineDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<Ecr.Application.Projects.ProjectTemplateTimelineDto>> TemplateVersions(
+        int id, CancellationToken ct)
+        => Ok(await templateTimeline.HandleAsync(id, ct).ConfigureAwait(false));
+
     /// <summary>Перелік проєктів. Право <c>Document.View</c>.</summary>
     [HttpGet]
     // ⛔ Тип відповіді оголошений явно — інакше клієнт описує її рукописним

@@ -54,6 +54,11 @@ public sealed record SourceEventFieldDto(
 /// <c>rowVersion</c> запиту на зміну, і пауза зі застарілого рядка переліку дає <c>409</c>,
 /// а не мовчки відкочує чужу правку полів.
 /// </param>
+/// <param name="MonthColumnFieldIds">
+/// D-465: Id полів, що цілять у колонку місяця (подія EF — окремий рядок; місячні підсумки — формулами шаблону). Нове
+/// таке поле збереження відхиляє; наявні лише позначаються попередженням. <c>null</c> — не обчислювалось (відповідь
+/// на зміну).
+/// </param>
 public sealed record SourceEventMapDto(
     int Id,
     int SourceEntityId,
@@ -65,7 +70,8 @@ public sealed record SourceEventMapDto(
     SourceEventVolumeMode VolumeMode,
     bool IsActive,
     IReadOnlyList<SourceEventFieldDto> Fields,
-    string RowVersion);
+    string RowVersion,
+    IReadOnlyList<int>? MonthColumnFieldIds = null);
 
 /// <summary>Явна відповідність значення у запиті на збереження мапінгу.</summary>
 /// <param name="SourceValue">Значення атрибута в джерелі.</param>
@@ -131,6 +137,30 @@ public sealed record UpdateSourceEventMapCommand(
 /// <summary>Спільні кроки обробників мапінгу подій (HSE301 A6).</summary>
 internal static class SourceEventMapSupport
 {
+    /// <summary>
+    /// D-465: Id полів мапінгу, що цілять у колонку місяця (такі поля збереження відхиляє; наявні — попередження
+    /// в переліку мапінгів, без автоматичного виправлення).
+    /// </summary>
+    public static async Task<IReadOnlySet<int>> MonthColumnTargetsAsync(
+        ISourceEventMapStore store, IReadOnlyCollection<SourceEventMap> maps, CancellationToken ct)
+    {
+        var ids = maps.SelectMany(m => m.Fields).Select(f => f.TargetColumnDefId).Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return new HashSet<int>();
+        }
+
+        var columns = await store.FindColumnsAsync(ids, ct).ConfigureAwait(false);
+        return columns.Values.Where(c => c.IsMonthColumn).Select(c => c.Id).ToHashSet();
+    }
+
+    /// <summary>DTO мапінгу з позначкою полів на колонки місяця.</summary>
+    public static SourceEventMapDto ToDto(SourceEventMap map, IReadOnlySet<int> monthColumns)
+        => ToDto(map) with
+        {
+            MonthColumnFieldIds = [.. map.Fields.Where(f => monthColumns.Contains(f.TargetColumnDefId)).OrderBy(f => f.Id).Select(f => f.Id)],
+        };
+
     /// <summary>DTO мапінгу.</summary>
     public static SourceEventMapDto ToDto(SourceEventMap map) => new(
         map.Id,
@@ -294,6 +324,23 @@ internal static class SourceEventMapSupport
                     });
             }
 
+            // ⛔ D-465 (рішення власника продукту — варіант A): кожна подія EF — окремий рядок, який обробляє методика;
+            // місячні підсумки (якщо потрібні) рахують формули шаблону. Атрибут чи `$`-поле в колонку місяця
+            // (`MonthsInColumns`) синк записав би в один місяць рядка події — тихо хибна місячна розкладка.
+            if (column.IsMonthColumn)
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.SourceUnitChanged,
+                    $"Колонка «{column.Code}» — колонка місяця: подія EF записується окремим рядком, місячні підсумки "
+                    + "рахуйте формулами шаблону.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-INT-0422.eventMapMonthColumn",
+                        ["targetColumn"] = column.Code,
+                        ["columnDefId"] = field.TargetColumnDefId.ToString(CultureInfo.InvariantCulture),
+                    });
+            }
+
             foreach (var unitId in new[] { field.SourceUnitId, field.TargetUnitId }.OfType<int>())
             {
                 if (!await sources.UnitExistsAsync(unitId, ct).ConfigureAwait(false))
@@ -389,7 +436,8 @@ public sealed class ListSourceEventMapsHandler(
             }
         }
 
-        return [.. visible.OrderBy(m => m.Id).Select(SourceEventMapSupport.ToDto)];
+        var monthColumns = await SourceEventMapSupport.MonthColumnTargetsAsync(store, visible, ct).ConfigureAwait(false);
+        return [.. visible.OrderBy(m => m.Id).Select(m => SourceEventMapSupport.ToDto(m, monthColumns))];
     }
 
     /// <summary>Один мапінг; немає — 404.</summary>
@@ -401,8 +449,9 @@ public sealed class ListSourceEventMapsHandler(
             .RequireAnyAsync(access, currentUser, [ListDataSourcesHandler.Permission, SaveDataSourceHandler.Permission], ct)
             .ConfigureAwait(false);
 
-        return SourceEventMapSupport.ToDto(
-            await SourceEventMapSupport.RequireVisibleMapAsync(store, access, profile, id, ct).ConfigureAwait(false));
+        var map = await SourceEventMapSupport.RequireVisibleMapAsync(store, access, profile, id, ct).ConfigureAwait(false);
+        var monthColumns = await SourceEventMapSupport.MonthColumnTargetsAsync(store, [map], ct).ConfigureAwait(false);
+        return SourceEventMapSupport.ToDto(map, monthColumns);
     }
 }
 

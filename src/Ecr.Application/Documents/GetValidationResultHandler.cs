@@ -108,7 +108,7 @@ public sealed class GetValidationResultHandler(
         var unresolved = new HashSet<ValidationMessage>(ReferenceEqualityComparer.Instance);
         if (readable is not null && stored.Exists(m => IsLegacyCheck(m)))
         {
-            var versionId = await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
+            var versionId = await DocumentPeriodVersion.GetAsync(documents, documentId, periodKey.Value, ct).ConfigureAwait(false);
             var sources = new Dictionary<string, (int Table, string? Column)>(StringComparer.Ordinal);
             foreach (var relation in await templateVersions.ListTableRelationsAsync(versionId, ct).ConfigureAwait(false))
             {
@@ -153,7 +153,7 @@ public sealed class GetValidationResultHandler(
         // ⛔ B-11 follow-up: перерезолвити Message мовою ПОТОЧНОГО читача за
         // живим знімком версії шаблону, а не довіряти застарілому тексту,
         // збереженому мовою того, хто запустив перевірку.
-        var templateVersionId = await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
+        var templateVersionId = await DocumentPeriodVersion.GetAsync(documents, documentId, periodKey.Value, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
 
         var rulesByKey = snapshot.Sheets

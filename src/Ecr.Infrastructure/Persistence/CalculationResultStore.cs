@@ -403,7 +403,10 @@ public sealed partial class CalculationResultStore(
                     snapshot.Id,
                     snapshot.ReportVersionId,
                     snapshot.ProjectId,
-                    project.TemplateVersionId,
+                    // ✎ RPT-STABLE B2: зріз за період - версія ПЕРІОДУ (шкала); зріз без періоду - чинна версія проєкту.
+                    snapshot.PeriodKey == null
+                        ? project.TemplateVersionId
+                        : EcrDbContext.VersionOf(project.Id, snapshot.PeriodKey.Value),
                     snapshot.PeriodKey,
                     snapshot.Status.ToString(),
                     snapshot.BuiltAt))

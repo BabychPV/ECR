@@ -5,6 +5,7 @@ import {
   ruleCoverageCell,
   ruleCoverageOtherRules,
   ruleCoverageWindowEmpty,
+  ruleCoverageWindowProblem,
 } from '../ruleCoverage';
 
 /**
@@ -66,7 +67,16 @@ describe('ruleCoverage: вікно за замовчуванням', () => {
   it('минулий і поточний календарні роки', () => {
     const window = defaultRuleCoverageWindow(new Date('2026-05-17T00:00:00Z'));
 
-    expect(window).toEqual({ tableDefId: null, periodFrom: 202501, periodTo: 202699 });
+    // ✎ lane/integ-methodology-ui: верхня межа — дійсний periodKey (`PeriodPicker`), а не `YYYY99`.
+    expect(window).toEqual({ tableDefId: null, periodFrom: 202501, periodTo: 202612 });
+  });
+
+  it('вікно без межі — «missing», перевернуте — «reversed», рівні межі — без зауважень', () => {
+    expect(ruleCoverageWindowProblem(null, 202612)).toBe('missing');
+    expect(ruleCoverageWindowProblem(202601, null)).toBe('missing');
+    expect(ruleCoverageWindowProblem(202612, 202601)).toBe('reversed');
+    expect(ruleCoverageWindowProblem(202601, 202601)).toBeNull();
+    expect(ruleCoverageWindowProblem(202512, 202601)).toBeNull();
   });
 
   it('порожнім вважається лише вікно, де нижня межа вища за верхню', () => {

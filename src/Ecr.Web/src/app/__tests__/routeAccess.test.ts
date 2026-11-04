@@ -46,6 +46,12 @@ describe('canAccessRoute — «permission АБО будь-яке з alsoPermitte
     expect(canAccessRoute(meWith([]), routes.adminSources.handle)).toBe(false);
     expect(canAccessRoute(meWith(['Integration.View']), routes.adminMapping.handle)).toBe(false);
   });
+
+  it('D-463: /admin/pi-data — View або Manage, як серверний RawDataHandler; Document.View не відкриває', () => {
+    expect(canAccessRoute(meWith(['Integration.View']), routes.adminPiData.handle)).toBe(true);
+    expect(canAccessRoute(meWith(['Integration.Manage']), routes.adminPiData.handle)).toBe(true);
+    expect(canAccessRoute(meWith(['Document.View']), routes.adminPiData.handle)).toBe(false);
+  });
 });
 
 describe('canAccessRoute — «… І кожне з alsoRequires» (A2)', () => {

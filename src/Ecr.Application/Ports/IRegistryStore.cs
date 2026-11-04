@@ -364,6 +364,15 @@ public interface IRegistryStore
         int registryDefId, IReadOnlyCollection<string> codes, CancellationToken ct);
 
     /// <summary>
+    /// Записи за набором Id — пакетом, з відстеженням (NAE N3b, масове видалення). Видалені логічно
+    /// теж повертаються; чого немає в базі, того немає й у відповіді.
+    /// </summary>
+    /// <param name="registryEntryIds">Записи; дублікати допустимі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RegistryEntry>> FindEntriesByIdsAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct);
+
+    /// <summary>
     /// Значення полів набору записів — пакетом (<c>B-10</c>), з відстеженням,
     /// як <see cref="ListValuesAsync"/>.
     /// </summary>

@@ -686,6 +686,11 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.RegistryEntryChanged =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ Типи вузлів НАЕ (людина 03.11, Q3): «номер НАЕ вже зайнятий у своїй області» (`ECR-REG-4094`) — конфлікт стану, а
+        // не невірні дані: повторювати марно, треба інший номер чи інше місце вузла.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.NaeCodeTaken =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // ⛔ Та сама родина, і арм з'явився разом із маршрутом
         // `DELETE /registries/{code}/entries/{id}` (директива №15, BE-01):
         // доти `ECR-REG-0409` не доїжджав до HTTP узагалі — обробник існував,

@@ -48,6 +48,12 @@ export function applySliceCachePolicy(client: QueryClient): void {
   client.setQueryDefaults(queryKeys.slices.all(), {
     staleTime: SliceStaleTime,
     refetchOnWindowFocus: false,
+    // ⛔ Perf: `replaceEqualDeep` (structural sharing, query-core 5.62.9) робить `keys.includes(key)` на кожен ключ
+    // плоскої мапи, тобто O(n²): `cellPermissions` ~77 тис. ключів на аркуші Land — 7–25 с заморозки головного
+    // потоку на КОЖЕН перезапит зрізу (і ~150 мс на кожен `setQueryData` у `onMutate`). Зріз і так замінюється
+    // цілком, а посилальну стабільність частин (`cellPermissions` тощо) тримає `sliceApply`/`applyStylePatches`
+    // через spread, тож порівнювати вміст нема навіщо. Діє і на `setQueryData` (опції запиту).
+    structuralSharing: false,
   });
 }
 
@@ -146,6 +152,41 @@ async function invalidateScopes(client: QueryClient, scopes: readonly SliceScope
     predicate: (query) => isSliceKey(query.queryKey) && (!inScope(query) || isHiddenSlice(query)),
     refetchType: 'none',
   });
+}
+
+/**
+ * LIVE-REFRESH B2/B3: перечитати РІВНО названі зрізи (кнопка «Refresh» аркуша, банер «Updated by …»).
+ *
+ * ⚠ Ті самі ключі кешу, що тримає `DocumentGrid`: перезапит без перезавантаження сторінки. Видимий
+ * змонтований зріз перезапитується; прихований (`C1-01`) лише стає застарілим і дочитується при показі
+ * (`takeMissedInvalidation`); незмонтований — застарілий, прочитає свіже сам при монтуванні.
+ *
+ * ⚠ Незбережені правки живуть НЕ в зрізі, а в `pendingStore` — перезапит їх не чіпає; комірка, яку
+ * тим часом змінив хтось інший, іде чинним правилом конфлікту (`knownVersions.ts`, AN-39/L8-20).
+ */
+export async function refreshSlices(
+  client: QueryClient,
+  periodKey: number,
+  tableInstanceIds: Iterable<number>,
+): Promise<void> {
+  const ids = new Set(tableInstanceIds);
+  if (ids.size === 0) return;
+
+  const named = (query: Query): boolean => {
+    const address = sliceAddressOf(query.queryKey);
+
+    return address !== null && address.periodKey === periodKey && ids.has(address.tableInstanceId);
+  };
+
+  for (const query of client.getQueryCache().findAll({ predicate: (candidate) => named(candidate) && isHiddenSlice(candidate) })) {
+    const address = sliceAddressOf(query.queryKey);
+    if (address !== null) missedWhileHidden.add(sliceId(address.tableInstanceId, address.periodKey));
+  }
+
+  await Promise.all([
+    client.invalidateQueries({ predicate: (query) => named(query) && !isHiddenSlice(query) }),
+    client.invalidateQueries({ predicate: (query) => named(query) && isHiddenSlice(query), refetchType: 'none' }),
+  ]);
 }
 
 /**

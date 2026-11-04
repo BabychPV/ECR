@@ -76,4 +76,20 @@ public sealed class GetSecurityEventsHandler(
 
         return await audit.ReadSecurityEventsAsync(filter, page, ct).ConfigureAwait(false);
     }
+
+    /// <summary>Кількість подій за фільтром (стеля експорту); ті самі право й перевірки вікна.</summary>
+    /// <param name="filter">Вікно й звуження журналу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<int> CountAsync(SecurityEventFilter filter, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        await ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
+        AuditWindow.Require(filter.From, filter.To, MaxWindow, page: null);
+
+        return await audit.CountSecurityEventsAsync(filter, ct).ConfigureAwait(false);
+    }
 }

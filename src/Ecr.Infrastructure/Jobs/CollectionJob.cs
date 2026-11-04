@@ -187,6 +187,24 @@ public sealed class CollectionJob(
             // повторило б запит.
             throw;
         }
+        catch (Exception failure) when (failure is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // ⛔ Аудит 31.10 (D-462): прогін упав ПІСЛЯ того, як частину шматків уже записано й зниклі точки видалено
+            // (кожен шматок комітиться сам). Без матеріалізації комірки лишалися б зі старими числами, а наступний
+            // прогін тих точок уже не бачить — перерахувати їх нема кому. Тож вікно прогону (видалення — лише в ньому)
+            // ставиться на матеріалізацію й тоді; збій постановки не ховає справжньої причини.
+            try
+            {
+                await EnqueueMaterializationAsync(request.SourceEntityId, from, to, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Найкраща спроба: причина задачі — `failure`, вона летить далі.
+            }
+
+            throw;
+        }
 
         // ⛔ I1-06: `Degraded` (джерело відмовило чи не вклалося в час; діапазон непокритий і піде в наздоганяння) -
         // НЕ успішний прогін розкладу. `LastRunAt` читає залежність (ФВ-13.15: «спершу залежний, потім цей»), і
@@ -210,6 +228,71 @@ public sealed class CollectionJob(
         {
             await EnqueueEventSyncAsync(request, ct).ConfigureAwait(false);
         }
+
+        await ContinueAsync(request, from, to, summary, progress, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Скільки разів поспіль продовжується ОДИН ручний діапазон (D-462).</summary>
+    /// <remarks>
+    /// ⚠ Запобіжник, а не робочий режим: кожне продовження мусить просунутися (<c>resume &gt; from</c>), тож
+    /// ланцюг скінченний і без стелі; стеля лише не дає джерелу, що віддає по краплі, тримати чергу добу.
+    /// Сто прогонів по 15 хв — понад добу читання одного діапазону.
+    /// </remarks>
+    public const int MaxContinuations = 100;
+
+    /// <summary>
+    /// Ставить продовження ручного діапазону, який прогін не встиг прочитати до кінця за ліміт (D-462).
+    /// </summary>
+    /// <param name="request">Завдання цього прогону.</param>
+    /// <param name="from">Початок прочитаного діапазону.</param>
+    /// <param name="to">Кінець діапазону — фіксований для всього ланцюга.</param>
+    /// <param name="summary">Підсумок прогону: <see cref="CollectionRunSummary.ResumeFromUtc"/> — місце зупинки.</param>
+    /// <param name="progress">Прогрес задачі; несе її ідентифікатор (автор продовження — автор задачі).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ P1 аудиту PI: ручний збір довгого діапазону, що не вкладався в 15 хв, обривався і наступного разу
+    /// починав спочатку — і обривався там само; наздоганяння бачить лише 45 діб. Тепер продовження стоїть у черзі
+    /// (стійка контрольна точка — сам payload: <c>FromUtc</c> = місце зупинки), і кожен прогін читає далі.
+    /// <para>
+    /// ⚠ Лише явний діапазон (кнопка «Зібрати» з межами): плановий прогін за годинником продовжується наступним
+    /// тиком і наздоганянням — шматки, прочитані до обриву, уже покриті. Продовження — звичайна задача збору:
+    /// той самий лок запису точок і та сама ідемпотентність (природний ключ), тож паралельний ручний чи
+    /// плановий збір тієї ж сутності нічого не подвоїть.
+    /// </para>
+    /// </remarks>
+    private async Task ContinueAsync(
+        CollectionJobRequest request,
+        DateTime from,
+        DateTime to,
+        CollectionRunSummary? summary,
+        IJobProgress progress,
+        CancellationToken ct)
+    {
+        if (request.FromUtc is null
+            || summary?.ResumeFromUtc is not { } resume
+            || resume <= from
+            || resume >= to)
+        {
+            return;
+        }
+
+        var next = (request.Continuation ?? 0) + 1;
+
+        if (next > MaxContinuations)
+        {
+            return;
+        }
+
+        var author = progress is IJobIdentity identity
+            ? await jobs.GetCreatedByUserIdAsync(identity.JobId, ct).ConfigureAwait(false)
+            : null;
+
+        await jobs
+            .EnqueueAsync<ICollectionJob>(
+                new CollectionJobRequest(request.SourceEntityId, resume, to, Manual: true, Continuation: next),
+                ct,
+                author)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -559,7 +642,17 @@ public sealed class CollectionJob(
 /// <param name="FromUtc">Початок; <c>null</c> — за <c>LookbackDays</c> розкладу.</param>
 /// <param name="ToUtc">Кінець; <c>null</c> — «зараз».</param>
 /// <param name="Manual"><c>true</c> — запуск людиною (кнопка «Зібрати»): залежність розкладу не перевіряється (ФВ-13.15).</param>
-public sealed record CollectionJobRequest(int SourceEntityId, DateTime? FromUtc, DateTime? ToUtc, bool? Manual = null)
+/// <param name="Continuation">
+/// D-462: порядковий номер продовження ручного діапазону, що не вклався в ліміт прогону; <c>null</c> — перший прогін.
+/// ⚠ <c>null</c> не серіалізується — payload планового збору (ключ періодичної задачі) лишається тим самим.
+/// </param>
+public sealed record CollectionJobRequest(
+    int SourceEntityId,
+    DateTime? FromUtc,
+    DateTime? ToUtc,
+    bool? Manual = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    int? Continuation = null)
 {
     /// <summary>Налаштування розбору; спільні на всі виклики.</summary>
     private static readonly System.Text.Json.JsonSerializerOptions Options =

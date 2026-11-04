@@ -71,9 +71,16 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     /// <c>SourceEventSyncJob</c>, L3-04): інший рядок ресурсу був би іншим блокуванням, і подання
     /// його не чекало б.
     /// </remarks>
+    /// <param name="sheetCopyId">
+    /// Копія аркуша (RS); <c>null</c> — оригінал. ⛔ Ім'я оригіналу НЕ змінюється (його беруть і писарі повз
+    /// цей клас, <c>SourceEventSyncJob</c>); копія — суфікс <c>:c{copyId}</c>: її правки й подання не чекають
+    /// на оригінал і навпаки.
+    /// </param>
     /// <returns>Рядок ресурсу.</returns>
-    public static string ResourceOf(long documentId, int sheetDefId, int periodKey)
-        => string.Create(CultureInfo.InvariantCulture, $"ecr:sheet-edit:{documentId}:{sheetDefId}:{periodKey}");
+    public static string ResourceOf(long documentId, int sheetDefId, int periodKey, long? sheetCopyId = null)
+        => sheetCopyId is { } copy
+            ? string.Create(CultureInfo.InvariantCulture, $"ecr:sheet-edit:{documentId}:{sheetDefId}:{periodKey}:c{copy}")
+            : string.Create(CultureInfo.InvariantCulture, $"ecr:sheet-edit:{documentId}:{sheetDefId}:{periodKey}");
 
     /// <summary>Ім'я ресурсу <c>sp_getapplock</c> СТРУКТУРИ документа (L6-02).</summary>
     /// <param name="documentId">Документ.</param>
@@ -88,7 +95,25 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     /// <inheritdoc />
     public Task<DocumentStatus> EnterEditAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
-        => EnterSharedAsync(documentId, sheetDefId, periodKey, _lockTimeout, ct);
+        => EnterSharedAsync(documentId, sheetDefId, periodKey, null, _lockTimeout, ct);
+
+    /// <inheritdoc />
+    public Task<DocumentStatus> EnterCopyEditAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => EnterSharedAsync(documentId, sheetDefId, periodKey, sheetCopyId, _lockTimeout, ct);
+
+    /// <inheritdoc />
+    public Task<DocumentStatus> EnterCopyEditNoWaitAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => EnterSharedAsync(documentId, sheetDefId, periodKey, sheetCopyId, TimeSpan.Zero, ct);
+
+    /// <inheritdoc />
+    public Task EnterCopySubmitAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+    {
+        ThrowIfGone(documentId);
+        return AcquireAsync(documentId, sheetDefId, periodKey, sheetCopyId, ExclusiveMode, _lockTimeout, ct);
+    }
 
     /// <inheritdoc />
     /// <remarks>
@@ -98,13 +123,13 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     /// </remarks>
     public Task<DocumentStatus> EnterEditNoWaitAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
-        => EnterSharedAsync(documentId, sheetDefId, periodKey, TimeSpan.Zero, ct);
+        => EnterSharedAsync(documentId, sheetDefId, periodKey, null, TimeSpan.Zero, ct);
 
     private async Task<DocumentStatus> EnterSharedAsync(
-        long documentId, int sheetDefId, PeriodKey periodKey, TimeSpan lockTimeout, CancellationToken ct)
+        long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, TimeSpan lockTimeout, CancellationToken ct)
     {
         ThrowIfGone(documentId);
-        await AcquireAsync(documentId, sheetDefId, periodKey, SharedMode, lockTimeout, ct).ConfigureAwait(false);
+        await AcquireAsync(documentId, sheetDefId, periodKey, sheetCopyId, SharedMode, lockTimeout, ct).ConfigureAwait(false);
 
         // ⛔ Стан читається ПІСЛЯ блокування і окремим запитом: під RCSI знімок
         // береться на початку ОПЕРАТОРА, тож цей оператор бачить подання, яке
@@ -113,7 +138,9 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
             .AsNoTracking()
             .Where(a => a.DocumentId == documentId
                         && a.SheetDefId == sheetDefId
-                        && a.PeriodKey == periodKey.Value)
+                        && a.PeriodKey == periodKey.Value
+                        // RS: стан КОПІЇ окремий — затвердження оригіналу копію не замикає (і навпаки).
+                        && a.SheetCopyId == sheetCopyId)
             .Select(a => (DocumentStatus?)a.Status)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
@@ -125,15 +152,20 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     public Task EnterSubmitAsync(long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
     {
         ThrowIfGone(documentId);
-        return AcquireAsync(documentId, sheetDefId, periodKey, ExclusiveMode, _lockTimeout, ct);
+        return AcquireAsync(documentId, sheetDefId, periodKey, null, ExclusiveMode, _lockTimeout, ct);
     }
 
     /// <inheritdoc />
-    public async Task<int?> EnterStructureAsync(long documentId, bool exclusive, CancellationToken ct)
+    public Task<int?> EnterStructureAsync(long documentId, bool exclusive, CancellationToken ct)
+        => EnterStructureForPeriodAsync(documentId, exclusive, periodKey: null, ct);
+
+    /// <inheritdoc />
+    public async Task<int?> EnterStructureForPeriodAsync(long documentId, bool exclusive, int? periodKey, CancellationToken ct)
     {
         var mode = exclusive ? ExclusiveMode : SharedMode;
         var resource = StructureResourceOf(documentId);
-        var (code, version, migrating) = await GetAppLockAsync(resource, mode, documentId, _lockTimeout, ct).ConfigureAwait(false);
+        var (code, version, migrating) = await GetAppLockAsync(resource, mode, documentId, _lockTimeout, ct, periodKey)
+            .ConfigureAwait(false);
 
         // ⚠ Хто чекав, той і читає відмову: перенос — на записи документа, запис — на перенос.
         ThrowIfRefused(code, resource, mode, () => DocumentBusy(
@@ -190,9 +222,10 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     }
 
     private async Task AcquireAsync(
-        long documentId, int sheetDefId, PeriodKey periodKey, string mode, TimeSpan lockTimeout, CancellationToken ct)
+        long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, string mode, TimeSpan lockTimeout,
+        CancellationToken ct)
     {
-        var resource = ResourceOf(documentId, sheetDefId, periodKey.Value);
+        var resource = ResourceOf(documentId, sheetDefId, periodKey.Value, sheetCopyId);
         var (code, _, _) = await GetAppLockAsync(resource, mode, versionOfDocument: null, lockTimeout, ct).ConfigureAwait(false);
         ThrowIfRefused(code, resource, mode, () => Busy(documentId, sheetDefId, periodKey, mode, code));
     }
@@ -244,7 +277,7 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     /// бачить перенос, що зафіксувався, поки ми чекали на блокування.
     /// </remarks>
     private async Task<(int Code, int? Version, bool Migrating)> GetAppLockAsync(
-        string resource, string mode, long? versionOfDocument, TimeSpan lockTimeout, CancellationToken ct)
+        string resource, string mode, long? versionOfDocument, TimeSpan lockTimeout, CancellationToken ct, int? periodKey = null)
     {
         var transaction = db.Database.CurrentTransaction
                           ?? throw new InvalidOperationException(
@@ -261,7 +294,7 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
                                        @LockOwner = 'Transaction', @LockTimeout = @LockTimeout;
             SET @Result = @code;
             IF @code >= 0 AND @DocumentId IS NOT NULL
-                SELECT @Version = p.TemplateVersionId,
+                SELECT @Version = CASE WHEN @PeriodKey IS NULL THEN p.TemplateVersionId ELSE doc.fn_VersionOf(p.Id, @PeriodKey) END,
                        @Migrating = CASE WHEN p.ExternalSettingsJson LIKE '%"migratingTo"%' THEN 1 ELSE 0 END
                 FROM   doc.Document d
                 JOIN   doc.Project  p ON p.Id = d.ProjectId
@@ -277,6 +310,10 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
         command.Parameters.Add(new SqlParameter("@DocumentId", SqlDbType.BigInt)
         {
             Value = versionOfDocument is { } id ? id : DBNull.Value,
+        });
+        command.Parameters.Add(new SqlParameter("@PeriodKey", SqlDbType.Int)
+        {
+            Value = periodKey is { } period ? period : DBNull.Value,
         });
         var result = new SqlParameter("@Result", SqlDbType.Int) { Direction = ParameterDirection.Output };
         var version = new SqlParameter("@Version", SqlDbType.Int) { Direction = ParameterDirection.Output };

@@ -55,6 +55,18 @@ public sealed class PublishPermitTypeHandler(
 
         var profile = await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         var userId = SaveRegistryDefinitionHandler.RequireUser(currentUser);
+        return await ApplyAsync(code, request, new PermitTypeActor(userId, profile, currentUser.CorrelationId), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ AIRSYS01: те саме без перевірки прав (автора перевірив викликач або це система). Склад, причина, токен і
+    /// ядро реєстрів перевіряються так само; автор системи — NULL у типі, 0 «system» у журналах.
+    /// </summary>
+    internal async Task<PermitTypeDto> ApplyAsync(string code, PublishPermitTypeRequest request, PermitTypeActor actor, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(actor);
+        var profile = actor.Profile;
 
         PermitTypeDefinitionValidator.ValidateReason(request.Reason);
 
@@ -82,7 +94,7 @@ public sealed class PublishPermitTypeHandler(
         try
         {
             await uow.ExecuteInTransactionAsync(
-                innerCt => PublishAsync(type, content, request.Reason.Trim(), userId, profile, innerCt), ct).ConfigureAwait(false);
+                innerCt => PublishAsync(type, content, request.Reason.Trim(), actor, innerCt), ct).ConfigureAwait(false);
         }
         catch (ConcurrencyConflictException ex) when (ex.ErrorCode == Ecr.Domain.Errors.ErrorCodes.CellConflict)
         {
@@ -99,8 +111,11 @@ public sealed class PublishPermitTypeHandler(
     }
 
     private async Task PublishAsync(
-        PermitTypeDef type, PermitTypeContent content, string reason, int userId, Security.AccessProfile profile, CancellationToken ct)
+        PermitTypeDef type, PermitTypeContent content, string reason, PermitTypeActor actor, CancellationToken ct)
     {
+        // Реєстри й їхні журнали: користувач або 0 — «system» (там немає FK на sec.User).
+        var userId = actor.AuditUserId;
+        var profile = actor.Profile;
         var existingTables = (await permits.ListTablesAsync(type.Id, ct).ConfigureAwait(false)).ToDictionary(t => t.Code, StringComparer.OrdinalIgnoreCase);
         var metas = (await permits.ListFieldMetasAsync(type.Id, ct).ConfigureAwait(false)).ToDictionary(m => m.RegistryFieldDefId);
 
@@ -154,11 +169,11 @@ public sealed class PublishPermitTypeHandler(
         type.ApplyDetails(Localized(content.NameL10n), category);
         if (type.Status == PermitTypeStatus.Draft)
         {
-            type.Publish(userId, clock.UtcNow);
+            type.Publish(actor.UserId, clock.UtcNow);
         }
         else
         {
-            type.Republish(userId, clock.UtcNow);
+            type.Republish(actor.UserId, clock.UtcNow);
         }
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -175,7 +190,7 @@ public sealed class PublishPermitTypeHandler(
                 NewJson: draftJson,
                 ChangeReason: reason,
                 ChangedByUserId: userId,
-                CorrelationId: currentUser.CorrelationId),
+                CorrelationId: actor.CorrelationId),
             ct).ConfigureAwait(false);
     }
 

@@ -57,6 +57,31 @@ internal static class SubmissionPayloadSource
             headerByCode);
     }
 
+    /// <summary>
+    /// RS: екземпляри документа для подання/затвердження аркуша або його копії — таблиці ЦЬОГО аркуша лише тієї копії
+    /// (<paramref name="sheetCopyId"/>; <c>null</c> — оригінал), решта документа як є.
+    /// </summary>
+    /// <param name="instances">Усі екземпляри документа за період (оригінали й копії).</param>
+    /// <param name="sheet">Аркуш, що подається; <c>null</c> — аркуша немає у версії (нічого не відсіюється).</param>
+    /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+    /// <remarks>
+    /// ⛔ Без цього зріз і валідація оригіналу брали б і екземпляри його копій (ті самі <c>TableDefId</c>): правка копії
+    /// «змінювала» б затверджений оригінал (<see cref="ApprovalSnapshotRefresh.SheetChanged"/>), а словники за
+    /// таблицею мовчки змішували б оригінал і копію.
+    /// </remarks>
+    public static IReadOnlyList<TableInstanceRef> ForSheetCopy(
+        IReadOnlyList<TableInstanceRef> instances, Domain.Entities.Configuration.SheetDef? sheet, long? sheetCopyId)
+    {
+        ArgumentNullException.ThrowIfNull(instances);
+        if (sheet is null)
+        {
+            return sheetCopyId is null ? instances : [.. instances.Where(i => i.SheetCopyId is null)];
+        }
+
+        var sheetTables = sheet.Tables.Select(t => t.Id).ToHashSet();
+        return [.. instances.Where(i => !sheetTables.Contains(i.TableDefId) || i.SheetCopyId == sheetCopyId)];
+    }
+
     /// <summary>Контрольна сума payload (<c>calc.SubmissionSnapshot.ContentHash</c>), hex у нижньому регістрі.</summary>
     public static string Hash(string payload)
         => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));

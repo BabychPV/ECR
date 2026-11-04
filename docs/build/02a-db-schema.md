@@ -923,6 +923,37 @@ CREATE TABLE cfg.RegistryImportProfile
 );
 GO
 
+-- Ієрархічні довідники (NAE plan N1, міграція NAE1_HierarchicalRegistry). RegistryDef.IsHierarchical
+-- вмикає дерево; рівні — cfg.RegistryLevelDef (1..6, порядок = глибина, пропустити можна лише
+-- необов'язкові); запис несе dic.RegistryEntry.LevelId. Правила розміщення (порядок рівнів, цикли,
+-- піддерево) перевіряє застосунок на свіжих даних під блокуванням рядка RegistryDef; база тримає
+-- унікальність (RegistryDefId, Ordinal|Code) і FK. Ordinal >= 1 (а не 1..6): тимчасові «паркувальні»
+-- ординали >6 дозволяють поміняти рівні місцями без порушення унікального індексу.
+-- Індекси: IX_RegistryEntry_Parent (RegistryDefId, ParentEntryId) відфільтрований, покриваючий —
+-- діти вузла, піддерево, перевірка FK_RegEntry_Parent (раніше без індексу); IX_RegistryEntry_Level —
+-- «чи використовується рівень». Унікальність Code лишається в межах довідника (UQ_RegistryEntry).
+CREATE TABLE cfg.RegistryLevelDef
+(
+    Id            int           IDENTITY(1,1) NOT NULL,
+    RegistryDefId int           NOT NULL,
+    Ordinal       int           NOT NULL,
+    Code          nvarchar(64)  NOT NULL,
+    NameL10n      nvarchar(max) NOT NULL,
+    IsOptional    bit           NOT NULL CONSTRAINT DF_RegLevel_Opt DEFAULT (0),
+    CONSTRAINT PK_RegistryLevelDef PRIMARY KEY (Id),
+    CONSTRAINT CK_RegLevel_Ordinal CHECK (Ordinal >= 1),
+    CONSTRAINT UQ_RegistryLevelDef_Ordinal UNIQUE (RegistryDefId, Ordinal),
+    CONSTRAINT UQ_RegistryLevelDef_Code UNIQUE (RegistryDefId, Code),
+    CONSTRAINT FK_RegLevel_Registry FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id)
+);
+ALTER TABLE cfg.RegistryDef ADD IsHierarchical bit NOT NULL CONSTRAINT DF_RegDef_Hier DEFAULT (0);
+ALTER TABLE dic.RegistryEntry ADD LevelId int NULL
+    CONSTRAINT FK_RegEntry_Level FOREIGN KEY REFERENCES cfg.RegistryLevelDef (Id);
+CREATE INDEX IX_RegistryEntry_Parent ON dic.RegistryEntry (RegistryDefId, ParentEntryId)
+    INCLUDE (Ordinal, Code, IsActive, IsDeleted, LevelId) WHERE ParentEntryId IS NOT NULL;
+CREATE INDEX IX_RegistryEntry_Level ON dic.RegistryEntry (LevelId) WHERE LevelId IS NOT NULL;
+GO
+
 -- Дозволи (Permits, PM-02, міграція PRM01_Permits; FEATURE-REGISTRY-TABLES §3, §4.8).
 -- Тип дозволу = реєстр шапки + упорядкований склад таблиць-реєстрів. Сам механізм
 -- реєстрів (cfg.RegistryDef / RegistryFieldDef) НЕ змінюється: усе, чого полю
@@ -2220,6 +2251,12 @@ CREATE TABLE ext.EntityFieldMap
 );
 GO
 
+-- D-463 «Звідки це значення»: мапінги, що цілять у комірку (колонка + рядок). Міграція D463RawDataReadIndexes.
+CREATE INDEX IX_EntityFieldMap_TargetCell
+    ON ext.EntityFieldMap (TargetColumnDefId, TargetRowKey)
+    WHERE TargetColumnDefId IS NOT NULL;
+GO
+
 CREATE TABLE ext.CollectionSchedule
 (
     Id             int          IDENTITY(1,1) NOT NULL,
@@ -2487,6 +2524,39 @@ GO
 -- елемент. Фільтрований: старі зв'язки (PrimaryElement NULL) не входять і не переписуються.
 CREATE UNIQUE INDEX UX_SEL_NaturalKey ON ext.SourceEventLink (SourceEventMapId, StartUtc, PrimaryElement)
     WHERE PrimaryElement IS NOT NULL;
+GO
+
+-- D-465 (міграція D465SourceEventAttributeValues): «Дані з PI → Події» — сторінка зв'язків ОДНОГО мапінгу за вікном
+-- початку, новіші першими (keyset StartUtc, Id). UX_SEL_NaturalKey фільтрований (старі зв'язки без елемента не входять),
+-- тож без цього індексу — скан усіх зв'язків мапінгу за рік. Фільтри списку — у INCLUDE (без Key Lookup).
+CREATE INDEX IX_SEL_MapStart ON ext.SourceEventLink (SourceEventMapId, StartUtc, Id)
+    INCLUDE ([Status], PrimaryElement, EventName);
+GO
+
+-- D-465: значення атрибутів події PI за ОСТАННІМ прочитанням синку — те, що перегляд показує поруч із коміркою рядка
+-- події. Пише лише SourceEventSyncJob одним MERGE (OPENJSON) на сторінку з 500 зв'язків і ЛИШЕ змінене (ValueHash —
+-- SHA-256 канонічного вигляду; незмінене не переписується, ChangedAt — момент, коли значення вперше побачили), тож
+-- щопрогінне перечитування року не дає записів. Атрибут, якого джерело для зв'язку сторінки більше не повертає,
+-- знімається. ⚠ Без FK на ext.SourceEventLink (усі ключі моделі Restrict, а зв'язок видаляє синк): значення
+-- знімаються тим самим кроком — у тій самій ADO-транзакції видалення рядка повною звіркою і тим самим прогоном для
+-- зв'язку, знятого без рядка (передача братньому шаблону). Не партиційована й не посилається на doc.*, тож архівація
+-- (TRUNCATE … WITH (PARTITIONS)) її не зачіпає.
+CREATE TABLE ext.SourceEventAttributeValue
+(
+    LinkId            bigint          NOT NULL,   -- ext.SourceEventLink.Id
+    Scope             tinyint         NOT NULL,   -- SourceEventAttributeScope: 0 Event, 1 PrimaryElement
+    Attribute         nvarchar(200)   NOT NULL,
+    ValueNumeric      decimal(34,16)  NULL,       -- одиниця джерела; поза діапазоном — лише текстом
+    ValueText         nvarchar(4000)  NULL,
+    IsTruncated       bit             NOT NULL,   -- текст довший за 4000: збережено початок, порівняння не робиться
+    SourceUnit        nvarchar(64)    NULL,
+    ValueHash         binary(32)      NOT NULL,
+    SourceModifiedUtc datetime2(3)    NULL,       -- Modified події в PI на момент прочитання
+    ChangedAt         datetime2(3)    NOT NULL,
+    RunId             varchar(32)     NOT NULL,
+    CONSTRAINT PK_SourceEventAttributeValue PRIMARY KEY (LinkId, Scope, Attribute),
+    CONSTRAINT CK_SEAV_Scope CHECK (Scope BETWEEN 0 AND 1)
+);
 GO
 
 CREATE TABLE ext.ConsistencyRule
@@ -3053,6 +3123,15 @@ CREATE INDEX IX_CollectionCoverage_SourceEntity_CoveredTo
     ON itg.CollectionCoverage (SourceEntityId, CoveredTo)
     INCLUDE (CoveredFrom)
     WHERE [Status] IS NULL;
+GO
+
+-- D-463 «Звідки це значення»: події матеріалізації однієї сутності за період (неповне покриття,
+-- немає даних, стеля точок) — seek замість скану журналу на кожне відкриття інспектора.
+-- Міграція D463RawDataReadIndexes.
+CREATE INDEX IX_CollectionCoverage_PeriodEvents
+    ON itg.CollectionCoverage (SourceEntityId, PeriodKey, Id)
+    INCLUDE (Status, Details, CoveredFrom)
+    WHERE [Status] IS NOT NULL AND [PeriodKey] IS NOT NULL;
 GO
 
 CREATE TABLE itg.ArchiveRun

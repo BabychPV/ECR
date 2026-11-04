@@ -954,7 +954,12 @@ public sealed class AccessDecisionService(
         var scope = await db.Documents
             .AsNoTracking()
             .Where(d => d.Id == documentId)
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.ProjectId, p.TemplateVersionId })
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new
+            {
+                d.ProjectId,
+                p.TemplateVersionId,
+                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId),
+            })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false)
             ?? throw new NotFoundException(
@@ -966,7 +971,7 @@ public sealed class AccessDecisionService(
                     ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
 
-        var snapshot = await metadata.GetAsync(scope.TemplateVersionId, ct).ConfigureAwait(false);
+        var snapshot = await ProjectReadSnapshotAsync(scope.ProjectId, scope.TemplateVersionId, scope.Multi, ct).ConfigureAwait(false);
 
         // ✎ D-443: межі документа з наданнями учасника саме в ньому (лише для профілю-учасника; заборона проєкту
         // перемагає — тоді межі як за ролями, тобто закриті).
@@ -976,6 +981,55 @@ public sealed class AccessDecisionService(
 
         return DocumentReadScope.ForParticipant(
             profile, scope.ProjectId, snapshot, grants.TryGetValue(documentId, out var mine) ? mine : null);
+    }
+
+    /// <summary>
+    /// RPT-STABLE Part B: знімок для ЧИТАННЯ документа проєкту. У проєкті з кількома версіями за періодами (шкала) це
+    /// обʼєднання аркушів/колонок усіх версій шкали: таблиці періоду на старій версії мають свої Id, і знімок лише чинної
+    /// версії не впізнав би їх (читання повертало б порожнє). Проєкт з однією версією - звичайний знімок (+1 малий запит).
+    /// </summary>
+    private async Task<TemplateVersionSnapshot> ProjectReadSnapshotAsync(
+        int projectId, int currentVersionId, bool multiVersion, CancellationToken ct)
+    {
+        var current = await metadata.GetAsync(currentVersionId, ct).ConfigureAwait(false);
+        if (!multiVersion)
+        {
+            return current;   // ознака приїхала у вже наявному запиті документа: зайвого звернення на звичайному шляху немає
+        }
+
+        var others = await db.ProjectTemplateVersions
+            .AsNoTracking()
+            .Where(t => t.ProjectId == projectId && t.TemplateVersionId != currentVersionId)
+            .Select(t => t.TemplateVersionId)
+            .Distinct()
+            .OrderBy(v => v)
+            .Take(200)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (others.Count == 0)
+        {
+            return current;
+        }
+
+        var sheets = new List<Ecr.Domain.Entities.Configuration.SheetDef>(current.Sheets);
+        var columns = new Dictionary<int, Ecr.Domain.Entities.Configuration.ColumnDef>(current.ColumnsById);
+        var rows = new Dictionary<(int TableDefId, string RowKey), Ecr.Domain.Entities.Configuration.RowDef>(current.RowsByKey);
+        foreach (var versionId in others)
+        {
+            var other = await metadata.GetAsync(versionId, ct).ConfigureAwait(false);
+            sheets.AddRange(other.Sheets);
+            foreach (var column in other.ColumnsById)
+            {
+                columns.TryAdd(column.Key, column.Value);
+            }
+
+            foreach (var row in other.RowsByKey)
+            {
+                rows.TryAdd(row.Key, row.Value);
+            }
+        }
+
+        return current with { Sheets = sheets, ColumnsById = columns, RowsByKey = rows };
     }
 
     /// <inheritdoc />
@@ -999,7 +1053,7 @@ public sealed class AccessDecisionService(
         var rows = await db.Documents
             .AsNoTracking()
             .Where(d => ids.Contains(d.Id))
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.Id, d.ProjectId, p.TemplateVersionId })
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.Id, d.ProjectId, p.TemplateVersionId, Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId) })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -1007,13 +1061,13 @@ public sealed class AccessDecisionService(
                 profile, [.. rows.Where(r => !profile.DeniesProject(r.ProjectId)).Select(r => r.Id)], ct)
             .ConfigureAwait(false);
 
-        var snapshots = new Dictionary<int, TemplateVersionSnapshot>();
+        var snapshots = new Dictionary<(int ProjectId, int VersionId), TemplateVersionSnapshot>();
         foreach (var row in rows)
         {
-            if (!snapshots.TryGetValue(row.TemplateVersionId, out var snapshot))
+            if (!snapshots.TryGetValue((row.ProjectId, row.TemplateVersionId), out var snapshot))
             {
-                snapshot = await metadata.GetAsync(row.TemplateVersionId, ct).ConfigureAwait(false);
-                snapshots[row.TemplateVersionId] = snapshot;
+                snapshot = await ProjectReadSnapshotAsync(row.ProjectId, row.TemplateVersionId, row.Multi, ct).ConfigureAwait(false);
+                snapshots[(row.ProjectId, row.TemplateVersionId)] = snapshot;
             }
 
             result[row.Id] = DocumentReadScope.ForParticipant(
@@ -1653,6 +1707,10 @@ public sealed class AccessDecisionService(
             RowIsReadOnly = def?.IsReadOnly ?? false,
             // WW-02: комірку рахує комірочна формула — ознака рівня КОМІРКИ, не колонки й не рядка.
             CellIsComputed = !ignoreColumnFlags && slice.ComputedCells.Contains((rowKey, column.Id)),
+
+            // ✎ D-461: формула комірки дозволяє ручне значення, або комірка вже ручна (її можна повернути до формули й
+            // після вимкнення прапорця). Право `Document.OverrideFormula` перевіряє `EditRules.CanEdit`.
+            FormulaOverridable = !ignoreColumnFlags && slice.Overrides.Overridable(rowKey, column),
         };
 
         // ⛔ EA-B: «передача місяця». Факти правила — на КОЖНУ комірку (місяць
@@ -1822,6 +1880,9 @@ public sealed class AccessDecisionService(
         /// іншим власником перевіряється за періодом ВЛАСНИКА, а не періодом екземпляра запиту.
         /// </summary>
         public bool RoutesOwnership { get; init; }
+
+        /// <summary>✎ D-461: які комірки зрізу можна замінити ручним значенням (за формулою чи наявною позначкою).</summary>
+        public FormulaOverrideFacts Overrides { get; init; } = FormulaOverrideFacts.None;
     }
 
     private static readonly IReadOnlySet<(string RowKey, int ColumnDefId)> NoComputedCells =
@@ -1919,7 +1980,7 @@ public sealed class AccessDecisionService(
         var instances = await RowStore.FindTableInstancesAsync(
                 db,
                 ids,
-                q => q.Select(t => new { t.Id, t.DocumentId, t.TableDefId, t.PeriodKeyValue }),
+                q => q.Select(t => new { t.Id, t.DocumentId, t.TableDefId, t.PeriodKeyValue, t.SheetCopyId }),
                 i => i.Id,
                 ct)
             .ConfigureAwait(false);
@@ -1956,7 +2017,8 @@ public sealed class AccessDecisionService(
             // редаговним на єдиному шляху, яким запис і йде (<c>PatchCellsHandler</c>).
             // Перевірка в <see cref="EditRules"/> була, тести на неї були — а
             // викликати її ніхто не міг (`A7-51`).
-            var sheetOf = group.ToDictionary(i => i.Id, i => SheetOf(snapshot, i.TableDefId));
+            // RS: одиниця стану — (аркуш, копія): екземпляр копії бачить стан своєї копії, а не оригіналу.
+            var sheetOf = group.ToDictionary(i => i.Id, i => new SheetKey(SheetOf(snapshot, i.TableDefId), i.SheetCopyId));
 
             // ⚠ Спільні для зрізу умови рахуються ОДИН раз. Поштучний виклик
             // CanEditCellAsync у циклі — антипатерн: на таблиці 500×60 це 30 000
@@ -1991,17 +2053,24 @@ public sealed class AccessDecisionService(
                 .ConfigureAwait(false);
 
             // ✎ D-442: погоджувач поточного кроку — ОДИН раз на поданий аркуш групи, не на комірку.
-            var approverOf = new Dictionary<int, bool>();
+            var approverOf = new Dictionary<SheetKey, bool>();
 
             // ⛔ P2-A: стани періодів місячних колонок — ОДИН раз на групу (проєкт + періоди року) і на аркуш (стани
             // аркуша), а не на таблицю чи комірку; лише для таблиць `MonthsInColumns` (решта не платить нічого).
             var monthEnvironmentRead = false;
             MonthEnvironment? monthEnvironment = null;
-            var monthStatesBySheet = new Dictionary<int, IReadOnlyDictionary<byte, MonthState>>();
+            var monthStatesBySheet = new Dictionary<SheetKey, IReadOnlyDictionary<byte, MonthState>>();
+
+            // ✎ D-461: що з комірок групи можна замінити ручним значенням — ОДИН запит позначок на групу, і лише для
+            // таблиць, де взагалі є формули колонки/комірки (більшість таблиць не платить нічого).
+            var overrideFacts = await FormulaOverrideFacts
+                .LoadAsync(db, snapshot, [.. group.Select(i => (i.Id, i.TableDefId))], periodKey, ct)
+                .ConfigureAwait(false);
 
             foreach (var instance in group)
             {
-                var sheetDefId = sheetOf[instance.Id];
+                var sheetKey = sheetOf[instance.Id];
+                var sheetDefId = sheetKey.SheetDefId;
 
                 var columns = snapshot.ColumnsById.Values
                     .Where(c => c.TableDefId == instance.TableDefId)
@@ -2016,7 +2085,7 @@ public sealed class AccessDecisionService(
 
                 // ✎ D-443: рівень надання — на аркуш (погоджувач поточного кроку, як `CanApproveAsync`) і на таблицю
                 // зрізу (рішення комірок).
-                var shared = sharedBySheet[sheetDefId] with
+                var shared = sharedBySheet[sheetKey] with
                 {
                     SheetCode = sheetCode,
                     ParticipatesInDocument = grants.Count > 0,
@@ -2025,11 +2094,11 @@ public sealed class AccessDecisionService(
 
                 if (approverEdits && shared.SheetStatus == DocumentStatus.Submitted)
                 {
-                    if (!approverOf.TryGetValue(sheetDefId, out var isApprover))
+                    if (!approverOf.TryGetValue(sheetKey, out var isApprover))
                     {
                         isApprover = await IsCurrentApproverAsync(profile, documentId, periodKey, shared, ct)
                             .ConfigureAwait(false);
-                        approverOf[sheetDefId] = isApprover;
+                        approverOf[sheetKey] = isApprover;
                     }
 
                     shared = shared with { IsCurrentApprover = isApprover };
@@ -2067,7 +2136,7 @@ public sealed class AccessDecisionService(
                 var annualRouting = isMonthsTable && monthRouter is { Enabled: true };
                 if (hasOtherMonthColumn || annualRouting)
                 {
-                    if (!monthStatesBySheet.TryGetValue(sheetDefId, out var monthStates))
+                    if (!monthStatesBySheet.TryGetValue(sheetKey, out var monthStates))
                     {
                         if (!monthEnvironmentRead)
                         {
@@ -2077,9 +2146,9 @@ public sealed class AccessDecisionService(
 
                         monthStates = monthEnvironment is null
                             ? new Dictionary<byte, MonthState>()
-                            : await MonthStatesAsync(monthEnvironment, documentId, sheetDefId, periodKey, ct)
+                            : await MonthStatesAsync(monthEnvironment, documentId, sheetKey, periodKey, ct)
                                 .ConfigureAwait(false);
-                        monthStatesBySheet[sheetDefId] = monthStates;
+                        monthStatesBySheet[sheetKey] = monthStates;
                     }
 
                     // Q-17: річний агрегат — за місяцями, що мають рядок періоду в календарі (разом із місяцем екземпляра).
@@ -2138,6 +2207,7 @@ public sealed class AccessDecisionService(
                     Delegation = delegation,
                     DocumentHasAssignments = documentHasAssignments,
                     ComputedCells = ComputedCellsOf(snapshot, instance.TableDefId),
+                    Overrides = overrideFacts.GetValueOrDefault(instance.Id) ?? FormulaOverrideFacts.None,
                     MonthShared = monthShared,
                     Annual = annual,
                     RoutesOwnership = annualRouting,
@@ -2208,13 +2278,16 @@ public sealed class AccessDecisionService(
     /// <c>Submitted</c>/<c>Approved</c>/<c>Closed</c> місяця це не відкриває — вони лишаються самі собою.
     /// </remarks>
     private async Task<IReadOnlyDictionary<byte, MonthState>> MonthStatesAsync(
-        MonthEnvironment environment, long documentId, int sheetDefId, PeriodKey instancePeriod, CancellationToken ct)
+        MonthEnvironment environment, long documentId, SheetKey sheet, PeriodKey instancePeriod, CancellationToken ct)
     {
         var first = environment.Year * 100;
+        var sheetDefId = sheet.SheetDefId;
+        var sheetCopyId = sheet.SheetCopyId;
         var statuses = await db.ApprovalStates
             .AsNoTracking()
             .Where(a => a.DocumentId == documentId
                         && a.SheetDefId == sheetDefId
+                        && a.SheetCopyId == sheetCopyId // RS: стани місяців — тієї самої копії
                         && a.PeriodKey > first
                         && a.PeriodKey <= first + 12)
             .Select(a => new { a.PeriodKey, a.Status })
@@ -2285,7 +2358,7 @@ public sealed class AccessDecisionService(
     /// </summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
-    /// <param name="sheetDefIds">Аркуші; щонайменше один.</param>
+    /// <param name="sheets">Аркуші з копіями (RS; копія <c>null</c> — оригінал); щонайменше один.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Аркуш → умови, рівні тим, що дав би <see cref="BuildContextAsync"/> з цим аркушем.</returns>
     /// <remarks>
@@ -2296,50 +2369,58 @@ public sealed class AccessDecisionService(
     /// запитом до <c>wf.ApprovalState</c> з тим самим фільтром і тим самим
     /// правилом «немає рядка — <c>Draft</c>».
     /// </remarks>
-    private async Task<IReadOnlyDictionary<int, CellAccessContext>> SheetContextsAsync(
-        long documentId, PeriodKey periodKey, IReadOnlyList<int> sheetDefIds, CancellationToken ct)
+    private async Task<IReadOnlyDictionary<SheetKey, CellAccessContext>> SheetContextsAsync(
+        long documentId, PeriodKey periodKey, IReadOnlyList<SheetKey> sheets, CancellationToken ct)
     {
         var first = await BuildContextAsync(
-                documentId, periodKey, sheetDefIds[0], columnDefId: 0,
-                evaluateAccessWindow: false, ct)
+                documentId, periodKey, sheets[0].SheetDefId, columnDefId: 0,
+                evaluateAccessWindow: false, ct, sheets[0].SheetCopyId)
             .ConfigureAwait(false);
 
-        var result = new Dictionary<int, CellAccessContext>(sheetDefIds.Count) { [sheetDefIds[0]] = first };
+        var result = new Dictionary<SheetKey, CellAccessContext>(sheets.Count) { [sheets[0]] = first };
 
-        if (sheetDefIds.Count == 1)
+        if (sheets.Count == 1)
         {
             return result;
         }
 
-        var others = sheetDefIds.Skip(1).ToList();
+        var others = sheets.Skip(1).ToList();
+        var otherSheetIds = others.Select(s => s.SheetDefId).Distinct().ToList();
         var periodValue = periodKey.Value;
 
+        // RS: стани оригіналів і копій тих самих аркушів — одним запитом; ключ — (аркуш, копія).
         var states = await db.ApprovalStates
             .AsNoTracking()
             .Where(a => a.DocumentId == documentId
                         && a.PeriodKey == periodValue
-                        && others.Contains(a.SheetDefId))
-            .Select(a => new { a.SheetDefId, a.Status })
+                        && otherSheetIds.Contains(a.SheetDefId))
+            .Select(a => new { a.SheetDefId, a.SheetCopyId, a.Status })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var statuses = new Dictionary<int, DocumentStatus>();
+        var statuses = new Dictionary<SheetKey, DocumentStatus>();
         foreach (var state in states)
         {
-            statuses.TryAdd(state.SheetDefId, state.Status);
+            statuses.TryAdd(new SheetKey(state.SheetDefId, state.SheetCopyId), state.Status);
         }
 
-        foreach (var sheetDefId in others)
+        foreach (var sheet in others)
         {
-            result[sheetDefId] = first with
+            result[sheet] = first with
             {
-                SheetDefId = sheetDefId,
-                SheetStatus = statuses.TryGetValue(sheetDefId, out var status) ? status : DocumentStatus.Draft,
+                SheetDefId = sheet.SheetDefId,
+                SheetCopyId = sheet.SheetCopyId,
+                SheetStatus = statuses.TryGetValue(sheet, out var status) ? status : DocumentStatus.Draft,
             };
         }
 
         return result;
     }
+
+    /// <summary>Аркуш і його копія (RS; <c>null</c> — оригінал): одиниця стану й умов доступу.</summary>
+    /// <param name="SheetDefId">Аркуш шаблону.</param>
+    /// <param name="SheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+    private readonly record struct SheetKey(int SheetDefId, long? SheetCopyId);
 
     private static readonly IReadOnlyDictionary<int, SourceValidity> EmptyWindows
         = new Dictionary<int, SourceValidity>();
@@ -2520,20 +2601,31 @@ public sealed class AccessDecisionService(
             return false;
         }
 
-        var step = await CurrentApprovalStepAsync(documentId, sheetContext.SheetDefId, periodKey, ct)
+        var step = await CurrentApprovalStepCoreAsync(
+                documentId, sheetContext.SheetDefId, periodKey, sheetContext.SheetCopyId, ct)
             .ConfigureAwait(false);
 
         return EditRules.CanApprove(profile, sheetContext, step?.RoleId).IsAllowed;
     }
 
     /// <inheritdoc />
-    public async Task<EditDecision> CanSubmitAsync(
+    public Task<EditDecision> CanSubmitAsync(
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        => CanSubmitCoreAsync(profile, documentId, sheetDefId, periodKey, null, ct);
+
+    /// <inheritdoc />
+    public Task<EditDecision> CanSubmitCopyAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => CanSubmitCoreAsync(profile, documentId, sheetDefId, periodKey, sheetCopyId, ct);
+
+    /// <summary>Подання аркуша (копія — <c>null</c>) або копії: стан — саме цієї копії (RS).</summary>
+    private async Task<EditDecision> CanSubmitCoreAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
         var context = await BuildContextAsync(
-                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
+                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct, sheetCopyId)
             .ConfigureAwait(false);
         context = await WithSheetCodeAsync(profile, documentId, context, ct).ConfigureAwait(false);
         context = await WithParticipationAsync(profile, documentId, context, ct).ConfigureAwait(false);
@@ -2558,13 +2650,23 @@ public sealed class AccessDecisionService(
     }
 
     /// <inheritdoc />
-    public async Task<EditDecision> CanApproveAsync(
+    public Task<EditDecision> CanApproveAsync(
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        => CanApproveCoreAsync(profile, documentId, sheetDefId, periodKey, null, ct);
+
+    /// <inheritdoc />
+    public Task<EditDecision> CanApproveCopyAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => CanApproveCoreAsync(profile, documentId, sheetDefId, periodKey, sheetCopyId, ct);
+
+    /// <summary>Затвердження аркуша або копії (RS).</summary>
+    private async Task<EditDecision> CanApproveCoreAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
         var context = await BuildContextAsync(
-                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
+                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct, sheetCopyId)
             .ConfigureAwait(false);
         context = await WithSheetCodeAsync(profile, documentId, context, ct).ConfigureAwait(false);
         context = await WithParticipationAsync(profile, documentId, context, ct).ConfigureAwait(false);
@@ -2576,20 +2678,30 @@ public sealed class AccessDecisionService(
 
         // ⚠ Маршрут читається ЛИШЕ при затвердженні, а не в кожному рішенні
         // про доступ: затверджують рідко, а комірки читають тисячами.
-        var step = await CurrentApprovalStepAsync(documentId, sheetDefId, periodKey, ct)
+        var step = await CurrentApprovalStepCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct)
             .ConfigureAwait(false);
 
         return EditRules.CanApprove(profile, context, step?.RoleId);
     }
 
     /// <inheritdoc />
-    public async Task<EditDecision> CanReopenAsync(
+    public Task<EditDecision> CanReopenAsync(
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        => CanReopenCoreAsync(profile, documentId, sheetDefId, periodKey, null, ct);
+
+    /// <inheritdoc />
+    public Task<EditDecision> CanReopenCopyAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => CanReopenCoreAsync(profile, documentId, sheetDefId, periodKey, sheetCopyId, ct);
+
+    /// <summary>Повернення в роботу аркуша або копії (RS).</summary>
+    private async Task<EditDecision> CanReopenCoreAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
         var context = await BuildContextAsync(
-                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
+                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct, sheetCopyId)
             .ConfigureAwait(false);
         context = await WithSheetCodeAsync(profile, documentId, context, ct).ConfigureAwait(false);
         context = await WithParticipationAsync(profile, documentId, context, ct).ConfigureAwait(false);
@@ -2607,7 +2719,7 @@ public sealed class AccessDecisionService(
             && EditRules.Effective(profile, context with { TableDefId = 0, ColumnDefId = 0 }) >= GrantLevel.Approve)
         {
             requiredRoleId = context.SheetStatus == DocumentStatus.Submitted
-                ? (await CurrentApprovalStepAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false))?.RoleId
+                ? (await CurrentApprovalStepCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct).ConfigureAwait(false))?.RoleId
                 : await LastApprovalStepRoleAsync(documentId, ct).ConfigureAwait(false);
         }
 
@@ -2635,13 +2747,24 @@ public sealed class AccessDecisionService(
     }
 
     /// <inheritdoc />
-    public async Task<ApprovalStepView?> CurrentApprovalStepAsync(
+    public Task<ApprovalStepView?> CurrentApprovalStepAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        => CurrentApprovalStepCoreAsync(documentId, sheetDefId, periodKey, null, ct);
+
+    /// <inheritdoc />
+    public Task<ApprovalStepView?> CurrentCopyApprovalStepAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
+        => CurrentApprovalStepCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct);
+
+    /// <summary>Крок маршруту аркуша або копії (RS): копія має власний крок за період.</summary>
+    private async Task<ApprovalStepView?> CurrentApprovalStepCoreAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
     {
         var scope = await db.Documents
             .AsNoTracking()
             .Where(d => d.Id == documentId)
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (_, p) => new { p.Id, p.TemplateVersionId })
+            // ✎ RPT-STABLE B2: маршрут - версії ПЕРІОДУ аркуша (шкала), не чинної версії проєкту.
+            .Select(d => new { Id = d.ProjectId, TemplateVersionId = EcrDbContext.VersionOf(d.ProjectId, periodKey.Value) })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -2664,7 +2787,8 @@ public sealed class AccessDecisionService(
             .AsNoTracking()
             .Where(a => a.DocumentId == documentId
                         && a.SheetDefId == sheetDefId
-                        && a.PeriodKey == periodKey.Value)
+                        && a.PeriodKey == periodKey.Value
+                        && a.SheetCopyId == sheetCopyId)
             .Select(a => a.CurrentStepId)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
@@ -2695,6 +2819,7 @@ public sealed class AccessDecisionService(
     /// <param name="sheetDefId">Аркуш; <c>null</c> — рішення не про аркуш.</param>
     /// <param name="columnDefId">Колонка; <c>0</c> — рішення не про комірку.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="sheetCopyId">Копія аркуша (RS) для стану; <c>null</c> — оригінал.</param>
     /// <param name="evaluateAccessWindow">
     /// Чи рахувати спрощене вікно доступу тут. <c>false</c> — виклик робить це
     /// сам через <see cref="PeriodAccessRules"/>, маючи повні факти (рядок,
@@ -2702,7 +2827,7 @@ public sealed class AccessDecisionService(
     /// </param>
     private async Task<CellAccessContext> BuildContextAsync(
         long documentId, PeriodKey periodKey, int? sheetDefId, int columnDefId,
-        bool evaluateAccessWindow, CancellationToken ct)
+        bool evaluateAccessWindow, CancellationToken ct, long? sheetCopyId = null)
     {
         // ⚠ `WR-04` п. 5: документ, проєкт, період і стан аркуша — ОДНИМ
         // запитом. Доти це були чотири окремі звернення з тим самим ключем
@@ -2725,7 +2850,9 @@ public sealed class AccessDecisionService(
                     d.ProjectId,
                     p.Status,
                     p.IsArchiving,
-                    p.TemplateVersionId,
+
+                    // ✎ RPT-STABLE Part B: структура рішення - версія ПЕРІОДУ (шкала), не чинна версія проєкту.
+                    TemplateVersionId = EcrDbContext.VersionOf(p.Id, periodValue),
 
                     // ⚠ ФВ-1.8: річне вікно — з того самого рядка проєкту, без
                     // окремого звернення (храповик `PatchCellsQueryCountTests`).
@@ -2744,7 +2871,9 @@ public sealed class AccessDecisionService(
                         .AsNoTracking()
                         .Where(a => a.DocumentId == documentId
                                     && a.SheetDefId == sheetForStatus
-                                    && a.PeriodKey == periodValue)
+                                    && a.PeriodKey == periodValue
+                                    // RS: стан САМЕ цієї копії (null — оригінал): затвердження оригіналу копію не замикає.
+                                    && a.SheetCopyId == sheetCopyId)
                         .Select(a => (DocumentStatus?)a.Status)
                         .FirstOrDefault(),
                 })
@@ -2835,6 +2964,7 @@ public sealed class AccessDecisionService(
             SheetCode = sheetCode,
             Period = periodKey,
             HasEditAssignments = state.HasAssignments,
+            SheetCopyId = sheetCopyId,
         };
     }
 
@@ -2993,14 +3123,20 @@ public sealed class AccessDecisionService(
     /// <summary>Знімок структури шаблону документа.</summary>
     private async Task<TemplateVersionSnapshot> SnapshotAsync(long documentId, CancellationToken ct)
     {
-        var templateVersionId = await db.Documents
+        var scope = await db.Documents
             .AsNoTracking()
             .Where(d => d.Id == documentId)
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (_, p) => p.TemplateVersionId)
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new
+            {
+                d.ProjectId,
+                p.TemplateVersionId,
+                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId),
+            })
             .FirstAsync(ct)
             .ConfigureAwait(false);
 
-        return await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+        // ✎ RPT-STABLE Part B: проєкт з кількома версіями за періодами - знімок-обʼєднання (колонки старих періодів теж відомі).
+        return await ProjectReadSnapshotAsync(scope.ProjectId, scope.TemplateVersionId, scope.Multi, ct).ConfigureAwait(false);
     }
 }
 

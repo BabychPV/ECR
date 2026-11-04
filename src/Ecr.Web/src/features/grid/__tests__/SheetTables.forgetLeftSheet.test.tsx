@@ -25,6 +25,8 @@ vi.mock('@/features/grid/DocumentGrid', () => ({
 function table(index: number, sheetDefId: number): DocumentTableDto {
   return {
     allowsDynamicRows: false,
+    copyOrdinal: 1,
+    isCopyable: false,
     maxDynamicRows: null,
     sheetCode: `S${String(sheetDefId)}`,
     sheetDefId,

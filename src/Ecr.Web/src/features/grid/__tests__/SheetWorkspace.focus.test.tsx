@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JSX } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import type { DocumentTableDto } from '@/api/types';
 import { isFullToggleKey, SheetWorkspace, shouldExitOnEscape } from '../SheetWorkspace';
@@ -17,9 +18,23 @@ vi.mock('@/features/grid/DocumentGrid', () => ({
 
 vi.mock('@/features/documents/api', () => ({ useTableStatus: () => ({ data: [] }) }));
 
+// ⚠ Опитування маркера змін (setInterval 30 с) під `vi.runAllTimers()` крутилося б без кінця; його перевіряє
+// `liveRefresh/__tests__`, тут — лише панель і повний екран.
+vi.mock('@/features/grid/liveRefresh/useSheetChanges', () => ({
+  useSheetChanges: () => ({
+    change: null,
+    statusChange: null,
+    stopped: false,
+    clear: () => undefined,
+    rebase: () => Promise.resolve(),
+  }),
+}));
+
 function table(ordinal: number): DocumentTableDto {
   return {
     allowsDynamicRows: false,
+    copyOrdinal: 1,
+    isCopyable: false,
     maxDynamicRows: null,
     sheetCode: 'S1',
     sheetDefId: 1,
@@ -45,10 +60,13 @@ function Probe(): null {
 function show(tables: DocumentTableDto[], entry = '/documents/1?periodKey=202610'): void {
   render(
     <MantineProvider>
-      <MemoryRouter initialEntries={[entry]}>
-        <SheetWorkspace documentId={1} periodKey={202610} readOnly={false} tables={tables} />
-        <Probe />
-      </MemoryRouter>
+      {/* LIVE-REFRESH: «Refresh» і маркер змін аркуша працюють через кеш запитів. */}
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={[entry]}>
+          <SheetWorkspace documentId={1} periodKey={202610} readOnly={false} tables={tables} />
+          <Probe />
+        </MemoryRouter>
+      </QueryClientProvider>
     </MantineProvider>,
   );
 }
@@ -184,6 +202,26 @@ describe('таблиця на весь екран', () => {
     expect(new URLSearchParams(search).get('full')).toBeNull();
     expect(document.activeElement).toBe(screen.getByTestId('sheet-full-toggle'));
     vi.useRealTimers();
+  });
+
+  it('клік, що прийшов ДО перемальовки після виходу, знову вмикає режим (а не вимикає вдруге)', () => {
+    // ⛔ Флейк e2e sheetFocus.spec.ts:121 (run 41186933182): адреса вже без `full=1`, але рендер
+    // (перехід react-router, `startTransition`) ще не закомічений — кнопка показує «Exit full screen».
+    // Клік рішення брав зі ЗАСТАРІЛОГО `full` і вдруге «вимикав» уже вимкнений режим. Тут обидві
+    // події в одному `act`: між ними React не перемальовує, як і в повільному переході на CI.
+    show(Three, '/documents/1?periodKey=202610&full=1');
+    const button = screen.getByTestId('sheet-full-toggle');
+
+    act(() => {
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }),
+      );
+      expect(button.getAttribute('data-full')).toBe('true');
+      button.click();
+    });
+
+    expect(new URLSearchParams(search).get('full')).toBe('1');
+    expect(screen.getByTestId('sheet-full-toggle').getAttribute('data-full')).toBe('true');
   });
 
   it('Esc у редакторі комірки НЕ виходить з повного екрана і не перехоплюється', async () => {

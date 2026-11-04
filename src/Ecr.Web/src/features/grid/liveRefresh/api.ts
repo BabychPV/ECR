@@ -1,0 +1,64 @@
+import { apiFetch, apiFetchIfChanged, EcrApiError, type Conditional } from '@/api/client';
+import type { components } from '@/api/schema';
+
+/** LIVE-REFRESH B1: answer of the change marker of a sheet (`SheetChangesController`). */
+export type SheetChanges = components['schemas']['SheetChangesDto'];
+
+/** Poll interval of the change marker while the tab is visible (LIVE-REFRESH B2: 30 s). */
+export const SheetChangesPollMs = 30_000;
+
+/*
+ * ⛔ The address is a LITERAL template in the call itself: `EndpointCoverageTests` reads the code with a regular
+ * expression and does not see addresses assembled by helpers.
+ */
+
+/** Query tail of the marker: `since` and, for a sheet copy, `sheetCopyId` (without it — the original). */
+function changesTail(since: string | null, sheetCopyId: number | null): string {
+  return (since === null ? '' : `&since=${encodeURIComponent(since)}`) + (sheetCopyId === null ? '' : `&sheetCopyId=${String(sheetCopyId)}`);
+}
+
+/**
+ * Change marker of the sheet data for a period. Without `since` — only the current marker (`changed = false`);
+ * with it — whether SOMEBODY ELSE changed the visible tables since then (own PATCHes only move the marker).
+ */
+export function getSheetChanges(
+  documentId: number,
+  sheetDefId: number,
+  periodKey: number,
+  since: string | null,
+  sheetCopyId: number | null = null,
+): Promise<SheetChanges> {
+  const tail = changesTail(since, sheetCopyId);
+
+  return apiFetch<SheetChanges>(
+    `/api/v1/documents/${String(documentId)}/sheets/${String(sheetDefId)}/changes?periodKey=${String(periodKey)}${tail}`,
+  );
+}
+
+/**
+ * ✎ LIVE-STATUS: the same marker as a conditional request — `If-None-Match` with the previous `ETag`; `null` is
+ * `304` (neither the data nor the approval state changed for this reader: keep the previous marker, do nothing).
+ */
+export function pollSheetChanges(
+  documentId: number,
+  sheetDefId: number,
+  periodKey: number,
+  since: string | null,
+  etag: string | null,
+  sheetCopyId: number | null = null,
+): Promise<Conditional<SheetChanges> | null> {
+  const tail = changesTail(since, sheetCopyId);
+
+  return apiFetchIfChanged<SheetChanges>(
+    `/api/v1/documents/${String(documentId)}/sheets/${String(sheetDefId)}/changes?periodKey=${String(periodKey)}${tail}`,
+    etag,
+  );
+}
+
+/**
+ * `404` (hidden sheet / document not visible) and `422` (period the sheet does not accept): asking again will not
+ * help — the poll stops for this sheet and period, without a banner and without a retry storm.
+ */
+export function isFinalChangesError(error: unknown): boolean {
+  return error instanceof EcrApiError && (error.problem.status === 404 || error.problem.status === 422);
+}

@@ -82,6 +82,7 @@ const Structure: TemplateStructureDto = {
       sheetGroup: null,
       isMandatory: true,
       isVisible: true,
+      isCopyable: false,
       tables: [
         {
           id: 30,

@@ -129,6 +129,9 @@ public sealed class ImportDiffBuilder
 
         var columnsById = table.Columns.ToDictionary(c => c.Id);
 
+        // ✎ D-461: формули таблиці, що дозволяють ручне значення (зі знімка, без запитів).
+        var overridePolicy = Ecr.Application.Documents.FormulaOverride.FormulaOverridePolicy.For(table);
+
         var changes = new List<ImportChange>();
         var rejected = new List<ImportRejection>();
         var overwritable = new List<ImportChange>();
@@ -232,7 +235,16 @@ public sealed class ImportDiffBuilder
                 // Комірка книги збігається з відбитком експорту — її не чіпали,
                 // число змінила система (перерахунок після вивантаження): книга
                 // застаріла, правити в ній нічого. Інакше — правку вніс користувач.
-                if (IsCalculated(definition))
+                // ✎ D-461: комірка формули, що ЗАРАЗ дозволяє ручне значення, і рішення доступу дозволило запис саме як
+                // ручне значення (право `Document.OverrideFormula`, решта правил) — значення з книги стає ручним
+                // значенням замість формули («буде замінено формулу» в перегляді), а не відмовою.
+                var replacesFormula = rowIds.TryGetValue(row.RowKey, out var overrideRowId)
+                    && decisions.TryGetValue(new CellAddress(period, overrideRowId, column.ColumnDefId), out var overrideDecision)
+                    && overrideDecision.IsAllowed
+                    && overrideDecision.ViaFormulaOverride
+                    && (incoming is null || overridePolicy.Allows(row.RowKey, definition));
+
+                if (IsCalculated(definition) && !replacesFormula)
                 {
                     var stale = CalculatedCellFingerprint.Unchanged(row, block.Columns, column, cell);
 
@@ -245,6 +257,23 @@ public sealed class ImportDiffBuilder
                         stale ? ImportMessageKeys.CalculatedStale : ImportMessageKeys.Calculated,
                         excelCell));
 
+                    continue;
+                }
+
+                // ⛔ Аудит 31.10 (F1, D-461). Комірка формули, яку можна замінити ручним значенням, але в книзі вона
+                // та сама, що поклав ЕКСПОРТ (відбиток збігся), — НЕ правка людини: різниця «книга ≠ поточне» тут
+                // означає лише, що система перерахувала комірку після вивантаження. Доти такий застарілий результат
+                // формули ставав ручним значенням («Excel import»), і перерахунок далі обходив його назавжди. Тепер —
+                // пропуск, як незмінена введена комірка (AN-118, «лише змінені комірки»): формула рахує далі, а
+                // відмова `CalculatedStale` тут зупинила б увесь пакет («усе або нічого») через комірку, якої людина
+                // не чіпала й записати яку ніхто не просить. Відбиток — за класифікацією колонки в карті ЕКСПОРТУ:
+                // обчислювана тоді — `Calc`, введена (стала формулою пізніше) — `Cells`. ⚠ Книга без відбитків
+                // (до P3/AN-118): обидва `Unchanged` дають `false` — розбіжність, як і доти, вважається правкою людини
+                // й стає ручним значенням; перегляд показує її як `replacesFormula`, тож людина бачить, що замінить.
+                if (replacesFormula
+                    && (CalculatedCellFingerprint.Unchanged(row, block.Columns, column, cell)
+                        || EnteredCellFingerprint.Unchanged(row, block.Columns, column, cell)))
+                {
                     continue;
                 }
 
@@ -502,7 +531,10 @@ public sealed class ImportDiffBuilder
 
                     overwritable.Add(new ImportChange(
                         row.RowKey, column.Code, Display(existing, definition), incoming, table.Code, table.NameL10n,
-                        roundedFrom));
+                        roundedFrom)
+                    {
+                        ReplacesFormula = replacesFormula,
+                    });
 
                     continue;
                 }
@@ -519,7 +551,10 @@ public sealed class ImportDiffBuilder
 
                 changes.Add(new ImportChange(
                     row.RowKey, column.Code, Display(existing, definition), incoming, table.Code, table.NameL10n,
-                    roundedFrom));
+                    roundedFrom)
+                {
+                    ReplacesFormula = replacesFormula,
+                });
             }
         }
 

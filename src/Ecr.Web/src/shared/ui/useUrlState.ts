@@ -1,5 +1,61 @@
-import { useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useCallback, useLayoutEffect, useRef } from 'react';
+import { useLocation, useNavigate, type Location } from 'react-router-dom';
+
+type Updates = Record<string, string | number | null>;
+
+/**
+ * Запит, який сеттери цього файлу вже ВІДПРАВИЛИ, але дерево ще не відрендерило.
+ *
+ * ⛔ Не `setSearchParams((current) => …)`. У react-router 7.18 `current` — це
+ * `new URLSearchParams(searchParams)`, де `searchParams` — `useMemo` над
+ * `location.search` ОСТАННЬОГО РЕНДЕРУ хука (`react-router/dist/development/
+ * chunk-BV7QT456.mjs`, `useSearchParams`: `nextInit(new URLSearchParams(searchParams))`,
+ * залежності `[navigate, searchParams]`). Сеттер, викликаний до перерендеру
+ * (слухач, зареєстрований один раз; дерево, яке `RouterProvider` оновлює у
+ * `startTransition`; другий сеттер у тому самому обробнику), перебудовував
+ * запит зі старого знімка й мовчки відкочував щойно змінений параметр.
+ *
+ * ⚠ Ключ — САМ об'єкт локації, від якої рахувався запит (react-router тримає
+ * його ідентичність до наступного переходу). Поки дерево показує ту саму
+ * локацію, наступний сеттер будує від цього запиту; щойно перехід
+ * закомічено — від нової локації. Інший роутер (інша вкладка тесту) має інший
+ * об'єкт локації, тож запит із нього сюди не протікає.
+ */
+let pending: { from: Location; search: string } | null = null;
+
+/** Спільне ядро всіх сеттерів: застосувати `updates` до ЖИВОЇ адреси одним переходом. */
+function useApplyUrlUpdates(): (updates: Updates) => void {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // ⚠ Ref, а не замикання: сеттер мусить бачити останню закомічену локацію,
+  // навіть якщо його самого захопили кілька рендерів тому.
+  const live = useRef({ location, navigate });
+  useLayoutEffect(() => {
+    live.current = { location, navigate };
+  }, [location, navigate]);
+
+  return useCallback((updates: Updates) => {
+    const { location: current, navigate: go } = live.current;
+    const base = pending !== null && pending.from === current ? pending.search : current.search;
+    const next = new URLSearchParams(base);
+
+    for (const [name, value] of Object.entries(updates)) {
+      // ⚠ Порожнє значення ПРИБИРАЄ параметр, а не пише `?code=`: адреса
+      // з порожніми хвостами накопичує їх і стає нечитабельною за три
+      // зміни фільтра.
+      if (value === null || value === '') {
+        next.delete(name);
+      } else {
+        next.set(name, String(value));
+      }
+    }
+
+    const search = `?${next.toString()}`;
+    pending = { from: current, search };
+    go(search, { replace: true });
+  }, []);
+}
 
 /**
  * Вибір користувача живе **в адресі сторінки** (`ФВ-14.29`).
@@ -16,31 +72,17 @@ import { useSearchParams } from 'react-router-dom';
 export function useUrlState(
   name: string,
 ): [string | null, (value: string | null) => void] {
-  const [params, setParams] = useSearchParams();
+  const location = useLocation();
+  const apply = useApplyUrlUpdates();
 
   const set = useCallback(
     (value: string | null) => {
-      setParams(
-        (current) => {
-          const next = new URLSearchParams(current);
-
-          // ⚠ Порожнє значення ПРИБИРАЄ параметр, а не пише `?code=`: адреса
-          // з порожніми хвостами накопичує їх і стає нечитабельною за три
-          // зміни фільтра.
-          if (value === null || value.length === 0) {
-            next.delete(name);
-          } else {
-            next.set(name, value);
-          }
-
-          return next;
-        },
-        { replace: true },
-      );
+      apply({ [name]: value });
     },
-    [name, setParams],
+    [name, apply],
   );
 
+  const params = new URLSearchParams(location.search);
   return [params.get(name), set];
 }
 
@@ -77,38 +119,13 @@ export function useUrlNumber(name: string): [number | null, (value: number | nul
  *
  * ⛔ UI-аудит, lane 3: два окремі виклики сеттера `useUrlState` в одному
  * обробнику (наприклад, `setPeriodKey(value)` одразу за ним `setCursor(null)`)
- * НЕ компонуються — react-router's `setSearchParams`, викликаний двічі
- * синхронно в тому самому тіку, губить ОБИДВІ зміни, а не лише другу
- * (підтверджено ізольованим тестом на голому `useSearchParams`, без жодної
- * обгортки цього файлу: другий виклик не «перемагає» перший — обидва
- * зникають). Наслідок у `DocumentsPage.tsx` — поле «Period» набирало
- * значення на екрані (некерований DOM встигав його показати), але жоден
- * запит ніколи не бачив `periodKey` в адресі. Коли треба змінити більш ніж
- * один параметр за одну дію — використовуй цей хук, а не два окремі
- * `useUrlState`.
+ * колись НЕ компонувалися: другий будував запит зі знімка ДО першого й мовчки
+ * відкочував його (див. `pending` вгорі файлу). Наслідок у `DocumentsPage.tsx` —
+ * поле «Period» набирало значення на екрані, але жоден запит не бачив
+ * `periodKey` в адресі. Тепер окремі сеттери компонуються, але один перехід
+ * усе одно чесніший: одна зміна адреси замість кількох `replace` поспіль. Коли
+ * треба змінити більш ніж один параметр за одну дію — використовуй цей хук.
  */
-export function useUrlParamsSetter(): (updates: Record<string, string | number | null>) => void {
-  const [, setParams] = useSearchParams();
-
-  return useCallback(
-    (updates: Record<string, string | number | null>) => {
-      setParams(
-        (current) => {
-          const next = new URLSearchParams(current);
-
-          for (const [name, value] of Object.entries(updates)) {
-            if (value === null || value === '') {
-              next.delete(name);
-            } else {
-              next.set(name, String(value));
-            }
-          }
-
-          return next;
-        },
-        { replace: true },
-      );
-    },
-    [setParams],
-  );
+export function useUrlParamsSetter(): (updates: Updates) => void {
+  return useApplyUrlUpdates();
 }

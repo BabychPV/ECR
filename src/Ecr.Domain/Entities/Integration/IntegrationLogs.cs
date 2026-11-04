@@ -229,6 +229,19 @@ public sealed class CollectionCoverage : Entity<long>
     /// </summary>
     public const string SourceDataRefused = "SourceDataRefused";
 
+    /// <summary>
+    /// ✎ Аудит 31.10 (G4, D-462): СЛУЖБОВА позначка «за інтервал [<c>CoveredFrom</c>, <c>CoveredTo</c>) з атрибута
+    /// <c>Details</c> видалено зниклі в джерелі сирі точки». Пише її те саме SQL, що видаляє точки
+    /// (<c>CollectionStore.DeleteMissingRawPointsAsync</c>), у тій самій транзакції. Матеріалізація очищує комірку
+    /// лише тоді, коли у вікні згортки немає точок І є така позначка, — інакше «точок не було ніколи» (новий
+    /// мапінг, місяць поза наздоганянням) мовчки стирав би значення комірки.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ НЕ подія для людини: поза <see cref="KnownStatuses"/>, журнал подій і зведення сповіщень її не показують;
+    /// острови покриття (<c>Status IS NULL</c>) її не бачать.
+    /// </remarks>
+    public const string PointsRemoved = "PointsRemoved";
+
     /// <summary>Статуси подій синку довідника — підмножина <see cref="KnownStatuses"/>.</summary>
     public static readonly IReadOnlyList<string> RegistryStatuses =
     [

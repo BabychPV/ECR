@@ -40,7 +40,7 @@ public sealed partial class DenyReadTests
         var pages = 0;
         do
         {
-            var url = AuditUrl(s.Doc.DocumentId, "&limit=1" + (cursor is null ? "" : "&cursor=" + Uri.EscapeDataString(cursor)));
+            var url = AuditUrl(s.Doc.DocumentId, "&limit=1&sort=ChangedAtAsc" + (cursor is null ? "" : "&cursor=" + Uri.EscapeDataString(cursor)));
             var (status, body) = await GetAsync(reader, url).ConfigureAwait(true);
             Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
 

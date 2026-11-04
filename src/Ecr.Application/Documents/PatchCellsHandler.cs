@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Calculations;
+using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
@@ -78,7 +78,15 @@ public sealed partial class PatchCellsHandler(
 
     // ✎ Q-17: запис у стовпці з іншим власником (`Collection:MonthColumnRouting`). `null` або вимкнений прапор —
     // поведінка до Q-17 (усе пишеться в екземпляр запиту).
-    IMonthColumnRouter? monthRouter = null)
+    IMonthColumnRouter? monthRouter = null,
+
+    // ✎ D-461: позначки «ручне значення замість формули». `null` (прямий конструктор у тестах) — ручних значень немає:
+    // запис у комірку формули без позначки не обробляється (доступ однаково відмовляє без права).
+    IFormulaOverrideStore? formulaOverrides = null,
+
+    // ✎ Журнал рядків (`aud.RowChange`): нові рядки батчу (сітка, імпорт, книга) — «додано рядок» у журналі аркуша,
+    // тією самою транзакцією. `null` — лише прямі конструктори тестів.
+    IRowChangeAudit? rowAudit = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -146,6 +154,9 @@ public sealed partial class PatchCellsHandler(
         // Справжні `TableRow.Id` з'являються лише всередині транзакції запису
         // (<see cref="MaterializeNewRowsAsync"/>).
         var changes = BuildCellChanges(context, Localization.NumberCulture.ForLanguage(currentUser.Language));
+
+        // ✎ D-461: комірки формул — «ручне значення» (з причиною) чи «повернути формулу».
+        changes = await PlanFormulaOverridesAsync(request, context, changes, ct).ConfigureAwait(false);
         var requiredInputMessages = await EnforceRequiredInputsAsync(context, changes, request.Origin, ct)
             .ConfigureAwait(false);
 
@@ -177,7 +188,9 @@ public sealed partial class PatchCellsHandler(
         var now = clock.UtcNow;
         var isLateEdit = await DetermineIsLateEditAsync(
                 context.Instance.DocumentId, [context.Table.SheetDefId], request.PeriodKey, ct,
-                context.ColumnPeriods, context.InstancePeriodGoverns, context.AnnualPeriods)
+                context.ColumnPeriods, context.InstancePeriodGoverns, context.AnnualPeriods,
+                includesOriginal: context.Instance.SheetCopyId is null,
+                sheetCopyIds: context.Instance.SheetCopyId is { } copy ? [copy] : null)
             .ConfigureAwait(false);
 
         // ⚠ `BE-05`: ідентифікатор поставленої задачі їде клієнтові у відповіді.
@@ -387,6 +400,15 @@ public sealed partial class PatchCellsHandler(
 
         /// <summary>AN-142: колонки текстових комірок якоря - їхні правки не ставлять перерахунок.</summary>
         public HashSet<int> AnnualTextColumns { get; } = [];
+
+        /// <summary>
+        /// ✎ D-461: комірки батчу <c>(RowKey, ColumnDefId)</c>, писати які дозволено САМЕ як ручне значення замість
+        /// формули (<see cref="EditDecision.ViaFormulaOverride"/>). Наповнює <c>CheckAccess</c>.
+        /// </summary>
+        public HashSet<(string RowKey, int ColumnDefId)> OverrideCells { get; } = [];
+
+        /// <summary>✎ D-461: план ручних значень/повернень формули; <c>null</c> — у батчі їх немає.</summary>
+        public FormulaOverridePlan? OverridePlan { get; set; }
     }
 
     /// <summary>Розподіл змін по upsert/delete разом із супутнім станом.</summary>
@@ -1133,6 +1155,7 @@ public sealed partial class PatchCellsHandler(
         if (addresses.Count > 0)
         {
             decisions ??= new Dictionary<CellAddress, EditDecision>();
+            Dictionary<long, string>? rowKeyById = null;
 
             // Перевіряємо лише ті адреси, які справді змінюються: рішення
             // приходять лише на них, але явний цикл (а не голе "усе allowed")
@@ -1190,6 +1213,15 @@ public sealed partial class PatchCellsHandler(
                 if (decision.IsAllowed && decision.ByApprover)
                 {
                     context.ByApprover = true;
+                }
+
+                if (decision.IsAllowed && decision.ViaFormulaOverride)
+                {
+                    rowKeyById ??= context.RowIds.ToDictionary(p => p.Value, p => p.Key);
+                    if (rowKeyById.TryGetValue(address.TableRowId, out var overrideRowKey))
+                    {
+                        NoteFormulaOverride(context, decision, overrideRowKey, address.ColumnDefId);
+                    }
                 }
             }
         }
@@ -1262,6 +1294,8 @@ public sealed partial class PatchCellsHandler(
                     {
                         context.AssignmentsPresent = true;
                     }
+
+                    NoteFormulaOverride(context, decision, row.RowKey, columnDefId);
                 }
             }
         }
@@ -1454,7 +1488,7 @@ public sealed partial class PatchCellsHandler(
     /// бачити тимчасові адреси, а не вже підмінені першою.
     /// </remarks>
     private async Task<CellChangeLists> MaterializeNewRowsAsync(
-        PatchCellsRequest request, RequestContext context, CellChangeLists planned, CancellationToken ct)
+        PatchCellsRequest request, RequestContext context, CellChangeLists planned, DateTime now, CancellationToken ct)
     {
         if (context.Creations.Count == 0)
         {
@@ -1466,6 +1500,14 @@ public sealed partial class PatchCellsHandler(
                 request.TableInstanceId, context.PeriodKey,
                 [.. context.Creations.Select(row => RowKey.Create(row.RowKey))], ordinal: 0, ct)
             .ConfigureAwait(false);
+
+        // ⛔ Журнал рядків — у ЦІЙ транзакції (відкат батчу забирає й «додано рядок»); `ApproverEdit` уже
+        // вирішено під блокуванням аркуша (`EnsureSheetStillEditableAsync` іде раніше).
+        await WriteRowAuditAsync(
+            RowAddedRecords(
+                request, context.Instance, context.PeriodKey, context.Creations, newIds, context.UserId, now,
+                context.ApproverEdit, AuditCorrelationId()),
+            ct).ConfigureAwait(false);
 
         return WithRealRowIds(context, planned, newIds);
     }
@@ -1865,7 +1907,7 @@ public sealed partial class PatchCellsHandler(
     {
         var messages = Validate(
             context.Snapshot, context.Instance.TableDefId, request, changes.Upserts, changes.RowKeyById, headerValues,
-            registryFields);
+            registryFields, address => IsManualOverride(context, changes, address));
         var visible = await VisibleMessagesFilterAsync(
             context, request, messages.Concat(requiredInputMessages), ct).ConfigureAwait(false);
 
@@ -2363,10 +2405,13 @@ public sealed partial class PatchCellsHandler(
         CancellationToken ct,
         IEnumerable<int>? columnPeriods = null,
         bool instancePeriodGoverns = true,
-        SortedSet<int>? annualPeriods = null)
+        SortedSet<int>? annualPeriods = null,
+        bool includesOriginal = true,
+        IReadOnlyCollection<long>? sheetCopyIds = null)
     {
         if (instancePeriodGoverns
-            && await IsLateEditInPeriodAsync(documentId, sheetDefIds, periodKeyValue, ct).ConfigureAwait(false))
+            && await IsLateEditInPeriodAsync(documentId, sheetDefIds, periodKeyValue, ct, includesOriginal, sheetCopyIds)
+                .ConfigureAwait(false))
         {
             return true;
         }
@@ -2391,7 +2436,8 @@ public sealed partial class PatchCellsHandler(
 
         foreach (var columnPeriod in columnPeriods ?? [])
         {
-            if (await IsLateEditInPeriodAsync(documentId, sheetDefIds, columnPeriod, ct).ConfigureAwait(false))
+            if (await IsLateEditInPeriodAsync(documentId, sheetDefIds, columnPeriod, ct, includesOriginal, sheetCopyIds)
+                    .ConfigureAwait(false))
             {
                 return true;
             }
@@ -2401,7 +2447,8 @@ public sealed partial class PatchCellsHandler(
     }
 
     private async Task<bool> IsLateEditInPeriodAsync(
-        long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKeyValue, CancellationToken ct)
+        long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKeyValue, CancellationToken ct,
+        bool includesOriginal = true, IReadOnlyCollection<long>? sheetCopyIds = null)
     {
         var periodState = await periods
             .FindPeriodStateAsync(documentId, periodKeyValue, ct)
@@ -2411,9 +2458,23 @@ public sealed partial class PatchCellsHandler(
             return true;
         }
 
-        return await periods
-            .HasReopenedSheetAsync(documentId, sheetDefIds, periodKeyValue, ct)
-            .ConfigureAwait(false);
+        // RS: «перевідкритий» — стан ТОГО аркуша, у який пишуть: оригінал або власне копія (не будь-яка з них).
+        if (includesOriginal
+            && await periods.HasReopenedSheetAsync(documentId, sheetDefIds, periodKeyValue, ct).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        foreach (var copyId in sheetCopyIds ?? [])
+        {
+            if (await periods.HasReopenedSheetCopyAsync(documentId, sheetDefIds, periodKeyValue, copyId, ct)
+                    .ConfigureAwait(false))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -2628,7 +2689,13 @@ public sealed partial class PatchCellsHandler(
 
             // ⛔ `DAT-04` п. 1: рядки — ПІСЛЯ блокування аркуша й усіх відмов,
             // у цій самій транзакції. Див. <see cref="MaterializeNewRowsAsync"/>.
-            var changes = await MaterializeNewRowsAsync(request, context, planned, innerCt).ConfigureAwait(false);
+            var changes = await MaterializeNewRowsAsync(request, context, planned, now, innerCt).ConfigureAwait(false);
+
+            // ✎ D-461: позначки ручних значень — тією самою транзакцією, і ПЕРЕД значеннями: перерахунок бере
+            // блокування позначок (`IFormulaOverrideStore.LockKeysAsync`) до свого MERGE, тож або він чекає на коміт
+            // цієї правки й бачить позначку, або правка чекає на нього й пише ручне значення ПІСЛЯ — ручне не
+            // перезаписується ніколи. Порядок «позначки → рядки → комірки» однаковий у обох — без циклу (AN-139).
+            await ApplyFormulaOverrideMarksAsync(context, changes, now, innerCt).ConfigureAwait(false);
 
             // ✎ Q-17: комірки колонок з іншим власником (місячний m / якір року) йдуть в екземпляр власника, решта
             // — як і раніше. `null` — прапор вимкнено або чужих комірок у батчі немає: старий шлях БЕЗ змін.
@@ -2739,7 +2806,7 @@ public sealed partial class PatchCellsHandler(
         // версії тримає її винятково, тож запис або йде до переносу цілком, або
         // бачить нову версію і відмовляє, а не пише під старим `ColumnDefId`.
         DocumentStructure.EnsureUnchanged(
-            await sheetGate.EnterStructureAsync(context.Instance.DocumentId, exclusive: false, ct).ConfigureAwait(false),
+            await sheetGate.EnterStructureForPeriodAsync(context.Instance.DocumentId, exclusive: false, context.Instance.PeriodKey, ct).ConfigureAwait(false),
             context.Instance.TemplateVersionId,
             context.Instance.DocumentId);
 
@@ -2754,12 +2821,15 @@ public sealed partial class PatchCellsHandler(
             {
                 // ⛔ Y7-03: відмова «зайнято» — про рядки, а не про подання (див. `RowWriteLock`).
                 await RowWriteLock
-                    .EnterAsync(sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
+                    .EnterAsync(sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct, context.Instance.SheetCopyId)
                     .ConfigureAwait(false);
             }
 
+            // RS: копія аркуша — власне блокування й власний стан (у кожному періоді та сама копія).
             lockedStatuses[lockedPeriod] = await sheetGate
-                .EnterEditAsync(context.Instance.DocumentId, context.Table.SheetDefId, new PeriodKey(lockedPeriod), ct)
+                .EnterEditOfAsync(
+                    context.Instance.DocumentId, context.Table.SheetDefId, new PeriodKey(lockedPeriod),
+                    context.Instance.SheetCopyId, ct)
                 .ConfigureAwait(false);
         }
 
@@ -2866,7 +2936,8 @@ public sealed partial class PatchCellsHandler(
     /// </remarks>
     private Task<bool> StillCurrentApproverAsync(RequestContext context, CancellationToken ct)
         => ApproverEditRule.IsCurrentStepApproverAsync(
-            access, context.Profile, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct);
+            access, context.Profile, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct,
+            context.Instance.SheetCopyId);
 
     /// <summary>
     /// EA-B: передача зрізу повторно — під блокуванням аркуша, у транзакції запису.
@@ -3075,11 +3146,12 @@ public sealed partial class PatchCellsHandler(
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
         CancellationToken ct)
     {
+        var (overrideReasons, restored) = AuditOverrides(context, changes);
         await audit.WriteCellChangesAsync(
             BuildAuditRecords(
                 request, changes.Upserts, changes.Deletes, context.UserId, now, context.Instance.DocumentId,
                 changes.RowKeyById, previous, isLateEdit, AuditCorrelationId(), context.OutOfWindow,
-                approverEdit: context.ApproverEdit),
+                approverEdit: context.ApproverEdit, overrideReasons: overrideReasons, restored: restored),
             ct).ConfigureAwait(false);
     }
 
@@ -3304,7 +3376,8 @@ public sealed partial class PatchCellsHandler(
         List<CellRecord> upserts,
         IReadOnlyDictionary<long, string> byRowId,
         IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> headerValues,
-        IReadOnlyDictionary<long, IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>>? registryFields)
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>>? registryFields,
+        Func<CellAddress, bool>? manualOverride = null)
     {
         var table = snapshot.Sheets
             .SelectMany(s => s.Tables)
@@ -3326,8 +3399,10 @@ public sealed partial class PatchCellsHandler(
             }
 
             var rowKey = byRowId.GetValueOrDefault(record.Address.TableRowId);
+            // ✎ D-461: ручне значення в комірці формули — структурна перевірка без «обчислювана не приймає запису».
             foreach (var message in validation.ValidateCell(
-                         column, record.Value, rules, headerValues, currentUser.Language, registryFields))
+                         column, record.Value, rules, headerValues, currentUser.Language, registryFields,
+                         manualOverride?.Invoke(record.Address) == true))
             {
                 messages.Add(message with { RowKey = rowKey });
             }
@@ -3477,6 +3552,41 @@ public sealed partial class PatchCellsHandler(
                     ["columnCode"] = code,
                 });
 
+    /// <summary>
+    /// Походження батчу в журналі: D-442/D-445 — правка або імпорт погоджувача на поданому аркуші пишеться як
+    /// <see cref="CellChangeOrigins.ApproverEdit"/>; інакше — походження запиту.
+    /// </summary>
+    internal static string BatchOrigin(string requestOrigin, bool approverEdit)
+        => approverEdit
+           && (string.Equals(requestOrigin, UserEditOrigin, StringComparison.Ordinal)
+               || string.Equals(requestOrigin, CellChangeOrigins.Import, StringComparison.Ordinal))
+            ? CellChangeOrigins.ApproverEdit
+            : requestOrigin;
+
+    /// <summary>
+    /// Записи журналу рядків (<c>aud.RowChange</c>) для нових рядків батчу: по одному на створений рядок, з тим самим
+    /// походженням, що й значення цих рядків у <c>aud.CellChange</c> (<see cref="BatchOrigin"/>).
+    /// </summary>
+    internal static List<RowChangeRecord> RowAddedRecords(
+        PatchCellsRequest request, TableInstanceRef instance, PeriodKey periodKey, IReadOnlyList<PatchRow> creations,
+        IReadOnlyList<long> newIds, int userId, DateTime now, bool approverEdit, string? correlationId)
+    {
+        var origin = BatchOrigin(request.Origin, approverEdit);
+        var records = new List<RowChangeRecord>(creations.Count);
+        for (var i = 0; i < creations.Count; i++)
+        {
+            records.Add(new RowChangeRecord(
+                now, instance.DocumentId, periodKey.Value, instance.TableInstanceId, instance.TableDefId, newIds[i],
+                creations[i].RowKey, RowChangeAction.Added, userId, origin, correlationId));
+        }
+
+        return records;
+    }
+
+    /// <summary>Записує журнал рядків; без сховища (прямі конструктори тестів) — нічого.</summary>
+    private Task WriteRowAuditAsync(List<RowChangeRecord> records, CancellationToken ct)
+        => rowAudit is null || records.Count == 0 ? Task.CompletedTask : rowAudit.WriteRowChangesAsync(records, ct);
+
     /// <summary>Записи аудиту для застосованого батчу.</summary>
     /// <remarks>
     /// ⛔ Три поля тут стояли константами і робили журнал непридатним рівно
@@ -3505,18 +3615,16 @@ public sealed partial class PatchCellsHandler(
         string? correlationId,
         HashSet<CellAddress>? outOfWindow = null,
         IReadOnlySet<string>? overwrittenRowKeys = null,
-        bool approverEdit = false)
+        bool approverEdit = false,
+        IReadOnlyDictionary<CellAddress, string>? overrideReasons = null,
+        IReadOnlySet<CellAddress>? restored = null)
     {
         var records = new List<CellChangeRecord>(upserts.Count + deletes.Count);
 
         // ✎ D-442: правка погоджувача на поданому аркуші — позначка «правка погоджувача» в журналі
         // (`Origin = ApproverEdit`). Замість `UserEdit` (сітка) і, ✎ D-445, замість `Import` (книга Excel):
         // D-442 вимагає позначки на КОЖНІЙ правці погоджувача, хоч би яким шляхом вона прийшла.
-        var batchOrigin = approverEdit
-                          && (string.Equals(request.Origin, UserEditOrigin, StringComparison.Ordinal)
-                              || string.Equals(request.Origin, CellChangeOrigins.Import, StringComparison.Ordinal))
-            ? CellChangeOrigins.ApproverEdit
-            : request.Origin;
+        var batchOrigin = BatchOrigin(request.Origin, approverEdit);
 
         // ✎ AN-114 (D-338): свідомий перезапис чужої правки (рядок змінено після
         // експорту книги, людина позначила «перезаписати») — власним походженням
@@ -3562,14 +3670,21 @@ public sealed partial class PatchCellsHandler(
                 continue;
             }
 
+            // ✎ D-461: ручне значення замість формули — власне походження й причина (перемагає ApproverEdit/Import).
+            var overrideReason = overrideReasons?.GetValueOrDefault(u.Address);
             records.Add(new CellChangeRecord(
                 now, u.Address, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty),
                 OldValue: Was(previous, u.Address), NewValue: Describe(u.Value),
-                userId, OriginOf(rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty)), isLateEdit,
+                userId,
+                overrideReason is null
+                    ? OriginOf(rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty))
+                    : CellChangeOrigins.FormulaOverride,
+                isLateEdit,
                 CorrelationId: correlationId,
                 IsOutOfWindow: outOfWindow?.Contains(u.Address) == true,
-                IsOverwrite: IsOverwriteOf(rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty))));
+                IsOverwrite: IsOverwriteOf(rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty)),
+                Reason: overrideReason));
         }
 
         foreach (var d in deletes)
@@ -3586,7 +3701,11 @@ public sealed partial class PatchCellsHandler(
                 now, d, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty),
                 OldValue: Was(previous, d), NewValue: null,
-                userId, OriginOf(rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty)), isLateEdit,
+                userId,
+                restored?.Contains(d) == true
+                    ? CellChangeOrigins.FormulaRestored
+                    : OriginOf(rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty)),
+                isLateEdit,
                 CorrelationId: correlationId,
                 IsOutOfWindow: outOfWindow?.Contains(d) == true,
                 IsOverwrite: IsOverwriteOf(rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty))));

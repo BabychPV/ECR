@@ -49,6 +49,24 @@ public interface IRegistryKeyStore
     public Task<IReadOnlyList<RegistryEntryKey>> ListEntryKeysAsync(long registryEntryId, CancellationToken ct);
 
     /// <summary>
+    /// Рядки ключів набору записів — пакетом, відстежувані (NAE N3b, масове видалення). За
+    /// замовчуванням — поштучно через <see cref="ListEntryKeysAsync"/>; сховище перевизначає пакетом.
+    /// </summary>
+    /// <param name="registryEntryIds">Збережені записи.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<IReadOnlyList<RegistryEntryKey>> ListKeysForEntriesAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct)
+    {
+        var all = new List<RegistryEntryKey>();
+        foreach (var id in registryEntryIds)
+        {
+            all.AddRange(await ListEntryKeysAsync(id, ct).ConfigureAwait(false));
+        }
+
+        return all;
+    }
+
+    /// <summary>
     /// Живі записи з тим самим хешем ключа, крім <paramref name="exceptEntryId"/>. Читає під
     /// <c>UPDLOCK, HOLDLOCK</c>: паралельний запис того самого ключа чекає кінця транзакції,
     /// навіть коли ключ ще вільний (блокується діапазон, а не лише знайдені рядки).

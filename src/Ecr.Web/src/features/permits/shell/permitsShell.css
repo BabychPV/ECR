@@ -9,7 +9,10 @@
   display: flex;
   gap: var(--mantine-spacing-md);
   flex: none;
-  overflow-x: auto;
+  /* 500 px: шість посилань не вміщаються в рядок - переносимо, а не ховаємо в прихованій прокрутці («NAE structure» був відрізаний). */
+  flex-wrap: wrap;
+  column-gap: var(--mantine-spacing-md);
+  row-gap: 0;
   margin-bottom: var(--mantine-spacing-md);
   border-bottom: 1px solid var(--mantine-color-default-border);
 }

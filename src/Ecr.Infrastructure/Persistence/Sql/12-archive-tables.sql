@@ -102,6 +102,7 @@ CREATE TABLE arc.CellChange
     CorrelationId   nvarchar(64)   NULL,
     IsOutOfWindow   bit            NOT NULL CONSTRAINT DF_arc_CellChange_OutOfWindow DEFAULT (0),
     IsOverwrite     bit            NOT NULL CONSTRAINT DF_arc_CellChange_Overwrite DEFAULT (0),
+    Reason          nvarchar(1000) NULL,
     INDEX CCI_arc_CellChange CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];
 GO
@@ -116,6 +117,12 @@ GO
 IF COL_LENGTH(N'arc.CellChange', N'IsOverwrite') IS NULL
     ALTER TABLE arc.CellChange
         ADD IsOverwrite bit NOT NULL CONSTRAINT DF_arc_CellChange_Overwrite DEFAULT (0);
+GO
+
+-- ✎ D-461: дзеркало aud.CellChange.Reason для наявних баз (сторож ArchiveMirrorTests).
+IF COL_LENGTH(N'arc.CellChange', N'Reason') IS NULL
+    ALTER TABLE arc.CellChange
+        ADD Reason nvarchar(1000) NULL;
 GO
 
 IF OBJECT_ID(N'arc.CalculationResult', N'U') IS NULL
@@ -205,6 +212,13 @@ IF COL_LENGTH(N'arc.TableRow', N'IsOrphaned') IS NULL
         ADD IsOrphaned bit NOT NULL CONSTRAINT DF_arc_TableRow_Orph DEFAULT (0);
 GO
 
+-- RS (копії аркушів, міграція RS1_SheetCopies): дзеркало doc.TableInstance.SheetCopyId для наявних баз. Без нього
+-- архівування+відновлення злило б екземпляр копії з оригіналом (UQ_TableInstance (PeriodKey, DocumentId, TableDefId,
+-- SheetCopyId) — дубль на відновленні). Копіюють `usp_ArchiveYear`/`usp_RestoreYear`.
+IF COL_LENGTH(N'arc.TableInstance', N'SheetCopyId') IS NULL
+    ALTER TABLE arc.TableInstance ADD SheetCopyId bigint NULL;
+GO
+
 -- D-247 / НФ-8.4b: архів аудиту — SWITCH партицій aud.* у дзеркала arc.Audit*.
 --
 -- ⛔ Чому НЕ існуючий arc.CellChange: він clustered columnstore на [DATA_ARCHIVE],
@@ -237,6 +251,7 @@ BEGIN
         CorrelationId   nvarchar(64)   NULL,
         IsOutOfWindow   bit            NOT NULL CONSTRAINT DF_arcAudCellChange_OutOfWindow DEFAULT(0),
         IsOverwrite     bit            NOT NULL CONSTRAINT DF_arcAudCellChange_Overwrite DEFAULT(0),
+        Reason          nvarchar(1000) NULL,
         CONSTRAINT PK_arcAuditCellChange PRIMARY KEY CLUSTERED (ChangedAt, Id) ON ps_AuditByMonth(ChangedAt)
     ) ON ps_AuditByMonth(ChangedAt);
 END
@@ -254,6 +269,13 @@ GO
 IF COL_LENGTH(N'arc.AuditCellChange', N'IsOverwrite') IS NULL
     ALTER TABLE arc.AuditCellChange
         ADD IsOverwrite bit NOT NULL CONSTRAINT DF_arcAudCellChange_Overwrite DEFAULT(0);
+GO
+
+-- ✎ D-461: дзеркало aud.CellChange.Reason для наявних баз. ⛔ ПІСЛЯ IsOverwrite, як і в джерелі
+-- (11-audit-tables.sql): SWITCH вимагає тих самих колонок тим самим порядком.
+IF COL_LENGTH(N'arc.AuditCellChange', N'Reason') IS NULL
+    ALTER TABLE arc.AuditCellChange
+        ADD Reason nvarchar(1000) NULL;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_OutOfWindow'

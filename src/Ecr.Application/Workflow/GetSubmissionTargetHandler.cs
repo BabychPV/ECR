@@ -64,8 +64,9 @@ public sealed class GetSubmissionTargetHandler(
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="periodKey">Період, відкритий на екрані: його рік задає місяці колонок.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="sheetCopyId">Копія аркуша (RS): стани періодів — її власні; <c>null</c> — оригінал.</param>
     public async Task<SubmissionTargetDto> HandleAsync(
-        long documentId, int sheetDefId, int periodKey, CancellationToken ct)
+        long documentId, int sheetDefId, int periodKey, CancellationToken ct, long? sheetCopyId = null)
     {
         var key = PeriodKey.Parse(periodKey);
         var userId = EditAssignmentAccess.RequireUser(currentUser);
@@ -83,13 +84,13 @@ public sealed class GetSubmissionTargetHandler(
             .ConfigureAwait(false);
 
         var calendar = await workflow
-                           .GetSubmissionCalendarAsync(documentId, sheetDefId, clock.UtcNow, ct)
+                           .GetSubmissionCalendarAsync(documentId, sheetDefId, clock.UtcNow, ct, sheetCopyId)
                            .ConfigureAwait(false)
                        ?? throw DocumentVisibility.DocumentNotFound(documentId);
 
         var choice = SubmissionPeriodSelector.Choose(calendar);
 
-        var templateVersionId = await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
+        var templateVersionId = await Documents.DocumentPeriodVersion.GetAsync(documents, documentId, key.Value, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
         var sheet = snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId);
 

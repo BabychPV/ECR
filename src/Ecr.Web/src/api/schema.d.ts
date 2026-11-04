@@ -4,6 +4,355 @@
  */
 
 export interface paths {
+    "/api/v1/air-limits/import-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Import profiles of the sources table. Permission `Registry.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ImportProfileSummaryDto"][];
+                        "text/json": components["schemas"]["ImportProfileSummaryDto"][];
+                        "text/plain": components["schemas"]["ImportProfileSummaryDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/air-limits/import-profiles/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One import profile with its specification. Permission `Registry.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Profile code. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ImportProfileDto"];
+                        "text/json": components["schemas"]["ImportProfileDto"];
+                        "text/plain": components["schemas"]["ImportProfileDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Creates or replaces an import profile. Permission `Registry.EditDefinition`. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Profile code. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveImportProfileRequest"];
+                    "application/json": components["schemas"]["SaveImportProfileRequest"];
+                    "text/json": components["schemas"]["SaveImportProfileRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ImportProfileDto"];
+                        "text/json": components["schemas"]["ImportProfileDto"];
+                        "text/plain": components["schemas"]["ImportProfileDto"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/air-limits/import/analyse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Wizard steps 1-3: reads the workbook with a profile (or an unsaved specification) and reports the header block, the
+         *     mapped and unmapped columns, counts and findings. Stateless: nothing is stored. Permission `Registry.EditData`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    } & {
+                        request?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirLimitsAnalysisDto"];
+                        "text/json": components["schemas"]["AirLimitsAnalysisDto"];
+                        "text/plain": components["schemas"]["AirLimitsAnalysisDto"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/air-limits/provision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Makes sure the permit type `AIR_LIMITS` ("Air Limits Import") is published with its two tables and that the built-in
+         *     import profile `ERA_TABLE_33` exists. Needs `Permit.EditType` and `Permit.PublishType`.
+         * @description Idempotent: a published type is left as it is (it is never edited by this call). The substance registry the type points at
+         *     (`LAND_AIR_SUBSTANCE` by default) must exist, otherwise `422 ECR-PRM-0422`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirLimitsProvisionReport"];
+                        "text/json": components["schemas"]["AirLimitsProvisionReport"];
+                        "text/plain": components["schemas"]["AirLimitsProvisionReport"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/air-limits/scope-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Region codes and, per region, area codes used by the NAE tree (with the names of its group nodes) - what the import wizard
+         *     offers instead of free text. Permission `Registry.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirScopeCodesDto"];
+                        "text/json": components["schemas"]["AirScopeCodesDto"];
+                        "text/plain": components["schemas"]["AirScopeCodesDto"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/air-limits/scope-fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * ✎ AIR-ON-AIR: the import scope columns REGION and AREA as configured on the AIR permit type (`Text`, `Registry`
+         *     or `List`) with the values to pick from, each mapped to the NAE tree. Permission `Registry.View`.
+         * @description A missing registry is not created: `registryFound = false`, no options (empty state).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirScopeFieldsDto"];
+                        "text/json": components["schemas"]["AirScopeFieldsDto"];
+                        "text/plain": components["schemas"]["AirScopeFieldsDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit/cells": {
         parameters: {
             query?: never;
@@ -61,6 +410,8 @@ export interface paths {
                     q?: string;
                     /** @description Звітний період змін (AN-98); без нього — усі. Чужі періоди відсіює сервер до сторінки. */
                     periodKey?: number;
+                    /** @description Порядок: `ChangedAtDesc` (типово, найновіші першими), `ChangedAtAsc`, `UserAsc`, `UserDesc`; курсор прив'язаний до порядку. */
+                    sort?: components["schemas"]["AuditSort"];
                 };
                 header?: never;
                 path?: never;
@@ -110,6 +461,86 @@ export interface paths {
                         "application/json": components["schemas"]["ProblemDetails"];
                         "text/json": components["schemas"]["ProblemDetails"];
                         "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit/cells/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Експорт журналу змін комірок у CSV (гаряче + архів). Право й фільтри — як у `cells`; порядок — `sort`.
+         * @description Потік сторінками, стеля `Audit:ExportMaxRows` (типово 100 000); понад неї — `422 auditExportTooLarge`.
+         *     UTF-8 з BOM; час — UTC ISO 8601; значення, що починаються з `= + - @`, нейтралізуються. Експорт сам
+         *     пишеться подією безпеки `AuditCellsExported`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    from?: string;
+                    to?: string;
+                    documentId?: number;
+                    rowKey?: string;
+                    columnDefId?: number;
+                    author?: number;
+                    origin?: string;
+                    lateOnly?: boolean;
+                    q?: string;
+                    periodKey?: number;
+                    sort?: components["schemas"]["AuditSort"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -238,6 +669,8 @@ export interface paths {
                     limit?: number;
                     /** @description Курсор наступної сторінки. */
                     cursor?: string;
+                    /** @description Порядок: `ChangedAtDesc` (типово, найновіші першими), `ChangedAtAsc`, `UserAsc`, `UserDesc`; курсор прив'язаний до порядку. */
+                    sort?: components["schemas"]["AuditSort"];
                 };
                 header?: never;
                 path?: never;
@@ -299,6 +732,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audit/security/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Експорт журналу подій безпеки у CSV. Право й фільтри — як у `security`; порядок — `sort`.
+         * @description Ті самі стеля, кодування й захист, що в `cells/export.csv`; подія безпеки `AuditSecurityExported`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    from?: string;
+                    to?: string;
+                    eventType?: string;
+                    changedByUserId?: number;
+                    sort?: components["schemas"]["AuditSort"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit/structure": {
         parameters: {
             query?: never;
@@ -327,6 +832,8 @@ export interface paths {
                     limit?: number;
                     /** @description Курсор наступної сторінки. */
                     cursor?: string;
+                    /** @description Порядок: `ChangedAtDesc` (типово, найновіші першими), `ChangedAtAsc`, `UserAsc`, `UserDesc`; курсор прив'язаний до порядку. */
+                    sort?: components["schemas"]["AuditSort"];
                 };
                 header?: never;
                 path?: never;
@@ -412,6 +919,167 @@ export interface paths {
                     entityType?: string;
                     /** @description Автор зміни — `UserId`. */
                     changedByUserId?: number;
+                    /** @description Порядок: `ChangedAtDesc` (типово, найновіші першими), `ChangedAtAsc`, `UserAsc`, `UserDesc`; курсор прив'язаний до порядку. */
+                    sort?: components["schemas"]["AuditSort"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit/workflow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Журнал подій погодження аркушів (`wf.ApprovalEvent`): подання, затвердження, відхилення, повернення,
+         *     відкликання — з коментарем. Право `Security.ViewAudit`; вікно обов'язкове й обмежене, як у `cells`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна в UTC, включно. */
+                    from?: string;
+                    /** @description Кінець вікна в UTC, виключно. */
+                    to?: string;
+                    /** @description Дія: `Submit`, `Approve`, `ApproveStep`, `Reject`, `Reopen`, `Recall`. */
+                    action?: string;
+                    /** @description Автор дії — `UserId`. */
+                    changedByUserId?: number;
+                    /** @description Документ. */
+                    documentId?: number;
+                    /** @description Розмір сторінки; `0` — 50. */
+                    limit?: number;
+                    /** @description Курсор наступної сторінки (прив'язаний до sort). */
+                    cursor?: string;
+                    /** @description Порядок; типово найновіші першими. */
+                    sort?: components["schemas"]["AuditSort"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfWorkflowEventView"];
+                        "text/json": components["schemas"]["PagedResultOfWorkflowEventView"];
+                        "text/plain": components["schemas"]["PagedResultOfWorkflowEventView"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit/workflow/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Експорт журналу подій погодження у CSV; ті самі правила, що в `cells/export.csv`. */
+        get: {
+            parameters: {
+                query?: {
+                    from?: string;
+                    to?: string;
+                    action?: string;
+                    changedByUserId?: number;
+                    documentId?: number;
+                    sort?: components["schemas"]["AuditSort"];
                 };
                 header?: never;
                 path?: never;
@@ -2213,6 +2881,8 @@ export interface paths {
                     resultsStale?: boolean;
                     staleBy?: string;
                     ownerUserId?: number;
+                    sort?: string;
+                    templateVersions?: string;
                 };
                 header?: never;
                 path?: never;
@@ -2363,6 +3033,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/template-versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Усі версії шаблону серед документів, які користувач бачить, — для вибору у фільтрі переліку «Version». Право
+         *     `Document.View`.
+         * @description ⛔ Та сама межа видимості, що й перелік: версія, наявна лише в невидимих документах, не називається. Версія — за
+         *     `periodKey` (без нього — чинна версія проєкту), як у колонці «Version». Не більше 200 версій.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    projectId?: number;
+                    periodKey?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentTemplateVersionsResponse"];
+                        "text/json": components["schemas"]["DocumentTemplateVersionsResponse"];
+                        "text/plain": components["schemas"]["DocumentTemplateVersionsResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{documentId}/cells": {
         parameters: {
             query?: never;
@@ -2433,6 +3149,69 @@ export interface paths {
                 };
             };
         };
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/discussions/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Підсумок чатів усіх таблиць документа одним запитом (лічильники й «непрочитано»).
+         * @description Віддає лише таблиці, які користувач бачить і де є повідомлення. `404 ECR-DOC-0404` — документ невидимий.
+         *     Кожен рядок несе `revision` чату (росте на нове/правку/видалення). Відповідь несе `ETag` з усіх
+         *     полів; `If-None-Match` → `304` без тіла (опитування живого оновлення).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TableDiscussionSummaryDto"];
+                        "text/json": components["schemas"]["TableDiscussionSummaryDto"];
+                        "text/plain": components["schemas"]["TableDiscussionSummaryDto"];
+                    };
+                };
+                /** @description Not Modified */
+                304: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/documents/{documentId}/edit-assignments": {
@@ -3336,6 +4115,455 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{documentId}/tables/{tableCode}/mention-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Кандидати у згадки: лише користувачі, які самі бачать цю таблицю (і період `periodKey`, якщо задано) (≥ 2 символи, до 20).
+         * @description Імена користувачів без доступу не повертаються ніколи. `404` — таблиця невидима.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    q?: string;
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    documentId: number;
+                    tableCode: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TableDiscussionMentionCandidateDto"][];
+                        "text/json": components["schemas"]["TableDiscussionMentionCandidateDto"][];
+                        "text/plain": components["schemas"]["TableDiscussionMentionCandidateDto"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/tables/{tableCode}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Повідомлення чату таблиці: сторінка за ключем (`before`) або опитування (`after`).
+         * @description Відповідь несе `ETag` (ревізія чату + права читача); `If-None-Match` → `304` без тіла.
+         *     `422 ECR-REQ-0422` — `before` разом з `after`, недійсні межі. `404` — документ чи таблиця невидимі.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Повернути повідомлення з `id` менше за це (старіші); без параметрів — найновіші. */
+                    before?: number;
+                    /** @description Повернути повідомлення з `id` більше за це (опитування; зростання). */
+                    after?: number;
+                    /** @description 1..100, за замовчуванням 50. */
+                    limit?: number;
+                    /** @description Лише повідомлення цього періоду (фільтр «лише цей період»). */
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    documentId: number;
+                    /** @description Код таблиці (стабільний між версіями шаблону). */
+                    tableCode: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TableDiscussionPageDto"];
+                        "text/json": components["schemas"]["TableDiscussionPageDto"];
+                        "text/plain": components["schemas"]["TableDiscussionPageDto"];
+                    };
+                };
+                /** @description Not Modified */
+                304: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Пише повідомлення в чат таблиці. Право `Document.Discuss`.
+         * @description `403 ECR-AUTH-0403` — немає `Document.Discuss`; `403 ECR-ACCS-0403` (`discussionPeriodForbidden`) —\n    /// роль, звужена періодами, не бачить цей період; `404 ECR-DOC-0404` — документ чи таблиця невидимі;
+         *     `422 ECR-REQ-0422` (`discussionBodyInvalid`) — порожній чи задовгий текст, недійсний період,
+         *     забагато згадок; `409 ECR-PRD-0409` (`projectArchivedNoChat`) — проєкт заархівований, чат лише для читання;
+         *     `429` — ліміт запитів. Повтор з тим самим `clientMessageId` — `200` з існуючим повідомленням. Згадки користувачів без доступу мовчки відкидаються — у відповіді
+         *     лише прийняті.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                    tableCode: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["PostTableDiscussionMessageRequest"];
+                    "application/json": components["schemas"]["PostTableDiscussionMessageRequest"];
+                    "text/json": components["schemas"]["PostTableDiscussionMessageRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TableDiscussionMessageDto"];
+                        "text/json": components["schemas"]["TableDiscussionMessageDto"];
+                        "text/plain": components["schemas"]["TableDiscussionMessageDto"];
+                    };
+                };
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TableDiscussionMessageDto"];
+                        "text/json": components["schemas"]["TableDiscussionMessageDto"];
+                        "text/plain": components["schemas"]["TableDiscussionMessageDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/tables/{tableCode}/messages/{messageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * М'яке видалення: власне повідомлення або будь-яке — з правом `Document.DiscussModerate`.
+         * @description Повторне видалення — `204` без змін. `403 ECR-ACCS-0403` (`discussionDeleteForbidden`) — чуже без
+         *     права модерації; `404` — таблиця невидима чи повідомлення немає в цьому чаті.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                    tableCode: string;
+                    messageId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Правка свого повідомлення впродовж 15 хвилин після створення.
+         * @description `403 ECR-ACCS-0403` (`discussionEditForbidden`) — повідомлення чуже; `422 ECR-REQ-0422`
+         *     (`discussionEditWindowClosed`) — вікно закрито, (`discussionMessageDeleted`) — вже видалено,
+         *     (`discussionBodyInvalid`) — текст недійсний; `404` — таблиця невидима чи повідомлення немає в цьому чаті.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                    tableCode: string;
+                    messageId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["EditTableDiscussionMessageRequest"];
+                    "application/json": components["schemas"]["EditTableDiscussionMessageRequest"];
+                    "text/json": components["schemas"]["EditTableDiscussionMessageRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TableDiscussionMessageDto"];
+                        "text/json": components["schemas"]["TableDiscussionMessageDto"];
+                        "text/plain": components["schemas"]["TableDiscussionMessageDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/tables/{tableCode}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Позначка «прочитано до» (монотонна); знімає згадки користувача до цього повідомлення.
+         * @description Значення понад найбільший `id` чату зрізається до нього. `404` — таблиця невидима.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                    tableCode: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["MarkTableDiscussionReadRequest"];
+                    "application/json": components["schemas"]["MarkTableDiscussionReadRequest"];
+                    "text/json": components["schemas"]["MarkTableDiscussionReadRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{documentId}/tables/{tableInstanceId}": {
         parameters: {
             query?: never;
@@ -3372,6 +4600,248 @@ export interface paths {
                 };
                 /** @description Forbidden */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Мапінги, що живлять комірку: тег, згортка, одиниці, вікно періоду, останній збір, події покриття. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Ключ рядка. */
+                    rowKey?: string;
+                    /** @description Колонка (`ColumnDto.id` зрізу). */
+                    columnDefId?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    documentId: number;
+                    /** @description Екземпляр таблиці документа. */
+                    tableInstanceId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CellSourceView"];
+                        "text/json": components["schemas"]["CellSourceView"];
+                        "text/plain": components["schemas"]["CellSourceView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-source/points": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Сторінка сирих точок тега мапінгу за період комірки, новіші першими. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Ключ рядка. */
+                    rowKey?: string;
+                    /** @description Колонка. */
+                    columnDefId?: number;
+                    /** @description Мапінг із `sources[].mapId`; чужий — `404`. */
+                    mapId?: number;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                    /** @description Розмір сторінки 1..500; `0` — 100. */
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    documentId: number;
+                    /** @description Екземпляр таблиці. */
+                    tableInstanceId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfRawPointView"];
+                        "text/json": components["schemas"]["PagedResultOfRawPointView"];
+                        "text/plain": components["schemas"]["PagedResultOfRawPointView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-source/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Згорнутий ряд тега мапінгу за період комірки (≤ buckets кошиків). */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Ключ рядка. */
+                    rowKey?: string;
+                    /** @description Колонка. */
+                    columnDefId?: number;
+                    /** @description Мапінг із `sources[].mapId`. */
+                    mapId?: number;
+                    /** @description Кількість кошиків 1..2000; `0` — 500. */
+                    buckets?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    documentId: number;
+                    /** @description Екземпляр таблиці. */
+                    tableInstanceId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RawSeriesView"];
+                        "text/json": components["schemas"]["RawSeriesView"];
+                        "text/plain": components["schemas"]["RawSeriesView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -3735,6 +5205,8 @@ export interface paths {
                     sheetDefId?: number;
                     /** @description Період. */
                     periodKey?: number;
+                    /** @description Копія аркуша (RS); без нього - оригінал (для журналу - лише події оригіналів). */
+                    sheetCopyId?: number;
                 };
                 header?: never;
                 path: {
@@ -4595,6 +6067,7 @@ export interface paths {
                 query?: {
                     sheetDefId?: number;
                     periodKey?: number;
+                    sheetCopyId?: number;
                 };
                 header?: never;
                 path: {
@@ -4746,6 +6219,430 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/sheet-copies/{sheetCopyId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Видаляє копію аркуша з даними всіх періодів; решта копій групи перенумеровується. Право `Document.Create` + запис у проєкт.
+         * @description `409` `ECR-DOC-0409`: `sheetCopyIsOriginal` — це оригінал; `sheetCopyHasWorkflow` — копія подана чи
+         *     затверджена хоч в одному періоді (`periodKey`, `status`). Зрізи подань лишаються.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                    /** @description Копія (`sheetCopyId` з `GET …/tables`). */
+                    sheetCopyId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/sheets/{sheetDefId}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Журнал дій на аркуші за період (панель History): правки значень людьми (сітка, імпорт, правка погоджувача)
+         *     і дії процесу з коментарем; найновіші перші, keyset (50 за замовчуванням, до 100). Право `Document.View`;
+         *     аркуш, закритий читачеві, - `404`, як неіснуючий документ; закриті таблиці в журнал не потрапляють. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Період. */
+                    periodKey?: number;
+                    /** @description Лише дії цього користувача (`UserId`); без нього - усі. */
+                    author?: number;
+                    /** @description Додати системні зміни значень (перерахунок, інтеграція, міграція); типово - лише дії людей. */
+                    includeSystem?: boolean;
+                    /** @description Розмір сторінки; `0` - 50. */
+                    limit?: number;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                    /** @description Аркуш. */
+                    sheetDefId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SheetActivityPage"];
+                        "text/json": components["schemas"]["SheetActivityPage"];
+                        "text/plain": components["schemas"]["SheetActivityPage"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/sheets/{sheetDefId}/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Маркер змін даних аркуша за період. Право `Document.View`; доступ — як на читання аркуша.
+         * @description `changed = true` — після `since` дані видимих таблиць аркуша змінив хтось інший; власні записи
+         *     викликача лише пересувають маркер. Схована таблиця не потрапляє в `changedTables`; невидимий документ і
+         *     схований аркуш — `404 ECR-DOC-0404`. Зіпсований маркер — як перше опитування. `Cache-Control: no-store`.
+         *     ✎ LIVE-STATUS: `sheetStatus`/`statusRevision` — стан погодження аркуша; `statusChanged` — він
+         *     змінився після `since` (будь-який перехід). Відповідь несе `ETag` (усе, крім маркера); `If-None-Match`
+         *     зі збігом — `304` без тіла (стан і дані аркуша для читача ті самі; маркер лишається попередній).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Період (рік*100+номер). */
+                    periodKey?: number;
+                    /** @description Маркер попереднього опитування; без нього — лише поточний маркер (`changed = false`). */
+                    since?: string;
+                    /** @description RS: копія аркуша (`sheetCopyId` з `GET …/tables`); без нього — оригінал. */
+                    sheetCopyId?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                    /** @description Аркуш. */
+                    sheetDefId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SheetChangesDto"];
+                        "text/json": components["schemas"]["SheetChangesDto"];
+                        "text/plain": components["schemas"]["SheetChangesDto"];
+                    };
+                };
+                /** @description Not Modified */
+                304: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/sheets/{sheetDefId}/copies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Додає порожню копію аркуша («Додати копію»): ті самі таблиці й формули, без даних, у КОЖНОМУ періоді. Право
+         *     `Document.Create` + запис у проєкт.
+         * @description `422` `ECR-DOC-0422` (`sheetNotCopyable`) — шаблон не дозволяє копіювати аркуш; `404` — аркуша немає у
+         *     складі; `409` — проєкт у архіві. Відповідь — Id копії (він же `sheetCopyId` у даних) і її номер у групі
+         *     («&lt;Назва&gt; N»).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                    /** @description Аркуш-оригінал (джерело копії — завжди оригінал). */
+                    sheetDefId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SheetCopyCreated"];
+                        "text/json": components["schemas"]["SheetCopyCreated"];
+                        "text/plain": components["schemas"]["SheetCopyCreated"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/sheets/{sheetDefId}/name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Перейменовує групу аркуша: оригінал і всі копії стають «&lt;Назва&gt; N». Право `Document.Create` + запис у проєкт. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                    /** @description Аркуш-оригінал. */
+                    sheetDefId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["RenameSheetGroupRequest"];
+                    "application/json": components["schemas"]["RenameSheetGroupRequest"];
+                    "text/json": components["schemas"]["RenameSheetGroupRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/submission-target": {
         parameters: {
             query?: never;
@@ -4761,6 +6658,8 @@ export interface paths {
                     sheetDefId?: number;
                     /** @description Період, відкритий на екрані; його рік задає місяці колонок. */
                     periodKey?: number;
+                    /** @description Копія аркуша (RS); без нього - оригінал (для журналу - лише події оригіналів). */
+                    sheetCopyId?: number;
                 };
                 header?: never;
                 path: {
@@ -5172,6 +7071,8 @@ export interface paths {
                 query?: {
                     /** @description Період. */
                     periodKey?: number;
+                    /** @description Копія аркуша (RS); без нього - оригінал (для журналу - лише події оригіналів). */
+                    sheetCopyId?: number;
                 };
                 header?: never;
                 path: {
@@ -6889,6 +8790,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/table-discussion-mentions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Непрочитані згадки, найновіші першими; лише таблиці, які користувач досі бачить. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 1..100, за замовчуванням 50. */
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TableDiscussionMentionTasksDto"];
+                        "text/json": components["schemas"]["TableDiscussionMentionTasksDto"];
+                        "text/plain": components["schemas"]["TableDiscussionMentionTasksDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies": {
         parameters: {
             query?: never;
@@ -7594,6 +9536,200 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/versions/{vid}/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Перелік категорій констант версії з кількістю констант під кожною. Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyCategoryDto"][];
+                        "text/json": components["schemas"]["MethodologyCategoryDto"][];
+                        "text/plain": components["schemas"]["MethodologyCategoryDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/categories/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Заводить категорію в переліку версії-чернетки або змінює її опис, порядок, стан. Право
+         *     `Calculation.EditConstant`.
+         * @description ⛔ Перейменування немає: код — адреса. Той самий код в іншому регістрі — `409 categoryRename`; вивести з
+         *     ужитку категорію з константами — `409 categoryInUse`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія-чернетка. */
+                    vid: number;
+                    /** @description Код категорії — ключ зіставлення, точно як його повертає правило категорії. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveMethodologyCategoryRequest"];
+                    "application/json": components["schemas"]["SaveMethodologyCategoryRequest"];
+                    "text/json": components["schemas"]["SaveMethodologyCategoryRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyCategoryDto"];
+                        "text/json": components["schemas"]["MethodologyCategoryDto"];
+                        "text/plain": components["schemas"]["MethodologyCategoryDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Прибирає категорію з переліку версії-чернетки. Право `Calculation.EditConstant`.
+         * @description ⛔ Категорію, під якою є константи, не прибирають: `409 categoryInUse` з кількістю.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія-чернетка. */
+                    vid: number;
+                    /** @description Код категорії. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/versions/{vid}/category-rule": {
         parameters: {
             query?: never;
@@ -7776,10 +9912,28 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Константи версії. Право `Calculation.View`. */
+        /**
+         * Константи версії. Право `Calculation.View`.
+         * @description ✎ План CONST-CATEGORY: фільтр і сортування — на сервері; без параметрів відповідь — уся версія за кодом,
+         *     далі категорією і початком дії. Рядок несе `category` і `substanceEntryId`.
+         */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Точні коди категорій (повторюваний параметр); порожньо — без фільтра. */
+                    category?: string[];
+                    /** @description `true` — спільні (без категорії) теж (з category) або лише вони (без нього);
+                     *     `false` — без спільних. */
+                    shared?: boolean;
+                    /** @description Частина коду константи, без регістру. */
+                    code?: string;
+                    /** @description Речовина звуження. */
+                    substanceEntryId?: number;
+                    /** @description `Code` (типово), `Category`, `ValidFrom`. */
+                    sort?: components["schemas"]["MethodologyConstantSort"];
+                    /** @description Зворотний порядок першого ключа. */
+                    desc?: boolean;
+                };
                 header?: never;
                 path: {
                     /** @description Методологія. */
@@ -9226,6 +11380,461 @@ export interface paths {
             };
         };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nae-tree/af-import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Loads the NAE tree from the PI AF equipment tree (elements with `Region` / `On_Offshore` attributes). Needs
+         *     `Registry.EditDefinition` and `Registry.EditData`.
+         * @description Idempotent and create-only: after the first load ECR owns the tree, so existing nodes are never changed or moved.
+         *     `dryRun` builds the report without writing anything (not even the registry). The first applied call also creates
+         *     the registry `NAE_TREE` (levels, fields, composite key) when it does not exist.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ImportNaeFromAfRequest"];
+                    "application/json": components["schemas"]["ImportNaeFromAfRequest"];
+                    "text/json": components["schemas"]["ImportNaeFromAfRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NaeAfImportReport"];
+                        "text/json": components["schemas"]["NaeAfImportReport"];
+                        "text/plain": components["schemas"]["NaeAfImportReport"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nae-tree/import/analyse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reads an NAE tree workbook (the template layout) and reports rows, planned nodes and file findings. The database is not
+         *     consulted and nothing is written. Permission `Registry.EditData`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NaeTreeImportReportDto"];
+                        "text/json": components["schemas"]["NaeTreeImportReportDto"];
+                        "text/plain": components["schemas"]["NaeTreeImportReportDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nae-tree/import/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Applies the NAE tree import in ONE transaction: all planned nodes or none. Permission `Registry.EditData` (and
+         *     `Registry.EditDefinition` when the registry does not exist yet).
+         * @description An error finding (`422 naeImportHasErrors`) or a plan that differs from the previewed one (`422 regPlanChanged`)
+         *     writes nothing. Existing nodes are never changed: a second apply of the same file is a no-op (`applied = false`).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    } & {
+                        request?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NaeTreeImportReportDto"];
+                        "text/json": components["schemas"]["NaeTreeImportReportDto"];
+                        "text/plain": components["schemas"]["NaeTreeImportReportDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nae-tree/import/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview of the NAE tree import over the stored tree: nodes to create, nodes already there (left untouched; a differing
+         *     stored name is a warning), conflicts by business key (NAE code + region + area). Nothing is written. Permission
+         *     `Registry.EditData`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    } & {
+                        request?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NaeTreeImportReportDto"];
+                        "text/json": components["schemas"]["NaeTreeImportReportDto"];
+                        "text/plain": components["schemas"]["NaeTreeImportReportDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nae-tree/import/template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Empty Excel template of the NAE tree import: `Region | Area | Site | Equipment | NAE code | Name_En | Name_Ru |
+         *     Name_Kz | On_Offshore`. Permission `Registry.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nae-tree/roots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Creates a region root (and, optionally, one area under it) of the NAE tree by hand — the first node of an empty tree
+         *     without AF. Needs `Registry.EditData`; the call that provisions the registry also needs
+         *     `Registry.EditDefinition`.
+         * @description Idempotent and create-only: a region or area that already exists (technical code `R_&lt;REGION&gt;` /
+         *     `A_&lt;REGION&gt;_&lt;AREA&gt;`, the same as the AF load) is returned as it is, never renamed.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateNaeRootRequest"];
+                    "application/json": components["schemas"]["CreateNaeRootRequest"];
+                    "text/json": components["schemas"]["CreateNaeRootRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NaeRootResultDto"];
+                        "text/json": components["schemas"]["NaeRootResultDto"];
+                        "text/plain": components["schemas"]["NaeRootResultDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nae-tree/seed-roots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Creates one region root per live entry of the `LAND_REGION` registry. Only for an EMPTY tree (otherwise
+         *     `422 naeTreeNotEmpty`); an explicit action, never automatic. Same permissions as `POST nae-tree/roots`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NaeSeedRootsResultDto"];
+                        "text/json": components["schemas"]["NaeSeedRootsResultDto"];
+                        "text/plain": components["schemas"]["NaeSeedRootsResultDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -11536,6 +14145,302 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/permits/{id}/usages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** «Де використано»: документи, період, аркуш-таблиця-рядок чи поле шапки, де дозвіл обрано значенням. Право
+         *     `Registry.View`; у відповідь потрапляють лише документи проєктів, які читач бачить (`Document.View`). */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Лише цей період (`YYYYNN`): комірки періоду й шапки документів з таблицями в ньому. */
+                    periodKey?: number;
+                    /** @description Розмір переліку 1..500 (типово 200); лічильники рахують усе. */
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор дозволу. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitUsageDto"];
+                        "text/json": components["schemas"]["PermitUsageDto"];
+                        "text/plain": components["schemas"]["PermitUsageDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permits/{permitId}/air-limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Permit card content: sources (NAE) with their substances and totals per substance. Permission `Registry.View` or grant
+         *     `Read` on the permit's registry. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Permit (header registry entry id). */
+                    permitId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirLimitsPermitDto"];
+                        "text/json": components["schemas"]["AirLimitsPermitDto"];
+                        "text/plain": components["schemas"]["AirLimitsPermitDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permits/{permitId}/air-limits/import/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Wizard step 5: applies the import in ONE transaction (delete the replaced rows, create the missing NAE nodes, insert).
+         *     Permission `Registry.EditData`.
+         * @description All or nothing: an error row, an unconfirmed replacement of another permit (`regReplaceNotConfirmed`) or a plan that
+         *     differs from the previewed one (`regPlanChanged`) writes nothing.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Permit (header registry entry id). */
+                    permitId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    } & {
+                        request?: string;
+                    } & {
+                        /** Format: int64 */
+                        regionEntryId?: number;
+                    } & {
+                        /** Format: int64 */
+                        areaEntryId?: number;
+                    } & {
+                        region?: string;
+                    } & {
+                        area?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirLimitsImportResultDto"];
+                        "text/json": components["schemas"]["AirLimitsImportResultDto"];
+                        "text/plain": components["schemas"]["AirLimitsImportResultDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permits/{permitId}/air-limits/import/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Wizard step 4: preview of the import into a permit. Nothing is written. Permission `Registry.EditData` on the permit's
+         *     tables.
+         * @description Errors block the apply (`canApply = false`); warnings (for example an empty `tonsPerYear`) are listed per row and do
+         *     not. `replace` lists the permit's own rows and the rows of OTHER permits for the same NAE that the apply would replace.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Permit (header registry entry id). */
+                    permitId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    } & {
+                        request?: string;
+                    } & {
+                        /** Format: int64 */
+                        regionEntryId?: number;
+                    } & {
+                        /** Format: int64 */
+                        areaEntryId?: number;
+                    } & {
+                        region?: string;
+                    } & {
+                        area?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirLimitsPreviewDto"];
+                        "text/json": components["schemas"]["AirLimitsPreviewDto"];
+                        "text/plain": components["schemas"]["AirLimitsPreviewDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects": {
         parameters: {
             query?: never;
@@ -12330,6 +15235,63 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/template-versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Часова шкала версій шаблону проєкту (RPT-STABLE Part B): з якого періоду яка версія діє. Право
+         *     `Document.View` і видимий проєкт.
+         * @description Порожній `items` — проєкт на одній (чинній) версії всі періоди. `currentVersionId` — версія для НОВИХ
+         *     періодів. Невидимий проєкт — той самий `404`, що й неіснуючий.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Проєкт. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectTemplateTimelineDto"];
+                        "text/json": components["schemas"]["ProjectTemplateTimelineDto"];
+                        "text/plain": components["schemas"]["ProjectTemplateTimelineDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -13677,6 +16639,228 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/{code}/entries/{id}/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Moves an entry within the tree. Permission `Registry.EditData` or grant `Write`.
+         * @description `422 ECR-REG-0422`: level order violated (a node sits only on a deeper level than its parent, skipped levels
+         *     must be optional), cycle, depth. One audit record (`Move`) per move.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Registry code. */
+                    code: string;
+                    /** @description Entry. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["MoveRegistryEntryRequest"];
+                    "application/json": components["schemas"]["MoveRegistryEntryRequest"];
+                    "text/json": components["schemas"]["MoveRegistryEntryRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MoveRegistryEntryResponse"];
+                        "text/json": components["schemas"]["MoveRegistryEntryResponse"];
+                        "text/plain": components["schemas"]["MoveRegistryEntryResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registries/{code}/entries/{id}/references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Where a registry entry is used (permits, type, validity, substance count). Permission `Registry.View` or grant
+         *     `Read`.
+         * @description Empty until the permit tables point at registry entries (plan N3). An entry of another registry is the same 404 as a
+         *     missing one.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Registry code. */
+                    code: string;
+                    /** @description Entry. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryEntryReferencesDto"];
+                        "text/json": components["schemas"]["RegistryEntryReferencesDto"];
+                        "text/plain": components["schemas"]["RegistryEntryReferencesDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registries/{code}/entries/{id}/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retires a node softly. Permission `Registry.EditData` or grant `Write`.
+         * @description Never deletes: the validity window is closed (documents keep reading the node through `asOf`).
+         *     A node with live children is `409 ECR-REG-0409 nodeHasLiveChildren` unless `cascade`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Registry code. */
+                    code: string;
+                    /** @description Entry. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["RetireRegistryEntryRequest"];
+                    "application/json": components["schemas"]["RetireRegistryEntryRequest"];
+                    "text/json": components["schemas"]["RetireRegistryEntryRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RetireRegistryEntryResponse"];
+                        "text/json": components["schemas"]["RetireRegistryEntryResponse"];
+                        "text/plain": components["schemas"]["RetireRegistryEntryResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries/{code}/entries/{id}/validity": {
         parameters: {
             query?: never;
@@ -14052,6 +17236,128 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/{code}/hierarchy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Hierarchy settings and levels. Permission `Registry.View` or grant `Read`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Registry code. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryHierarchyDto"];
+                        "text/json": components["schemas"]["RegistryHierarchyDto"];
+                        "text/plain": components["schemas"]["RegistryHierarchyDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /**
+         * Saves hierarchy settings (all-or-nothing replacement of the level list). Permission `Registry.EditDefinition`
+         *     or grant `Write`.
+         * @description A level in use cannot be removed (`409 ECR-REG-0409 levelInUse`); a change that would leave an entry in an
+         *     invalid place is `422 ECR-REG-0422`. At most `MaxDepth` levels.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Registry code. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveRegistryHierarchyRequest"];
+                    "application/json": components["schemas"]["SaveRegistryHierarchyRequest"];
+                    "text/json": components["schemas"]["SaveRegistryHierarchyRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryHierarchyDto"];
+                        "text/json": components["schemas"]["RegistryHierarchyDto"];
+                        "text/plain": components["schemas"]["RegistryHierarchyDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries/{code}/history": {
         parameters: {
             query?: never;
@@ -14399,6 +17705,65 @@ export interface paths {
                 };
                 /** @description Unprocessable Entity */
                 422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registries/{code}/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The tree as a flat node list. Permission `Registry.View` or grant `Read`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Only nodes valid on this day; default — today. */
+                    asOf?: string;
+                    /** @description Also nodes outside the window and switched-off nodes. */
+                    includeRetired?: boolean;
+                    /** @description Case-insensitive substring of code or name; matches are returned with their ancestors. */
+                    q?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Registry code. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryTreeDto"];
+                        "text/json": components["schemas"]["RegistryTreeDto"];
+                        "text/plain": components["schemas"]["RegistryTreeDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -16974,6 +20339,729 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sources/{id}/raw-data/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Покриття вікна збором: злиті зібрані інтервали, прогалини, останній прогін і останній успіх. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна. */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (≤ 400 діб від початку). */
+                    toUtc?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність збору. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RawCoverageView"];
+                        "text/json": components["schemas"]["RawCoverageView"];
+                        "text/plain": components["schemas"]["RawCoverageView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/raw-data/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Сторінка подій мапінгу за вікном початку, новіші першими (курсор за початком і Id). */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Мапінг; `null` — перший мапінг сутності. */
+                    mapId?: number;
+                    /** @description Початок вікна (UTC, включно). */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (UTC, виключно); ≤ 400 діб від початку. */
+                    toUtc?: string;
+                    /** @description Стани зв'язку; порожньо — усі. */
+                    status?: components["schemas"]["SourceEventLinkStatus"][];
+                    /** @description Первинний елемент починається з (без регістру). */
+                    element?: string;
+                    /** @description Назва події містить. */
+                    name?: string;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                    /** @description 1..200; `0` — 50. */
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність-шаблон подій. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfPiEventView"];
+                        "text/json": components["schemas"]["PagedResultOfPiEventView"];
+                        "text/plain": components["schemas"]["PagedResultOfPiEventView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/raw-data/events/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Події мапінгу × поля у CSV потоком.
+         * @description Стеля `Integration:RawDataExportMaxRows` (типово 100 000 рядків «подія × поле»); понад неї —
+         *     `422 auditExportTooLarge` до першого байта. UTF-8 з BOM; час — UTC ISO 8601; текст джерела й комірок
+         *     нейтралізується від формул. Подія безпеки `PiEventDataExported` (без значень). Комірки документа, якого
+         *     читач не бачить, — порожні.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Мапінг; `null` — перший. */
+                    mapId?: number;
+                    /** @description Початок вікна. */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (≤ 400 діб). */
+                    toUtc?: string;
+                    /** @description Стани зв'язку. */
+                    status?: components["schemas"]["SourceEventLinkStatus"][];
+                    /** @description Первинний елемент починається з. */
+                    element?: string;
+                    /** @description Назва містить. */
+                    name?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність-шаблон подій. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/raw-data/events/maps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Мапінги подій сутності й періоди, що перетинають вікно. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна (UTC); `null` — 7 діб до кінця. */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (UTC, виключно); `null` — «зараз». Вікно ≤ 400 діб. */
+                    toUtc?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність-шаблон подій. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PiEventMapsView"];
+                        "text/json": components["schemas"]["PiEventMapsView"];
+                        "text/plain": components["schemas"]["PiEventMapsView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/raw-data/events/removed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Журнал видалень рядків подій сутності (повна звірка) за вікно моменту видалення, новіші першими. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна. */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (≤ 400 діб). */
+                    toUtc?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність-шаблон подій. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PiEventRemovalsView"];
+                        "text/json": components["schemas"]["PiEventRemovalsView"];
+                        "text/plain": components["schemas"]["PiEventRemovalsView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/raw-data/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Точки тега у CSV потоком, за зростанням часу.
+         * @description Стеля `Integration:RawDataExportMaxRows` (типово 100 000); понад неї — `422 auditExportTooLarge`
+         *     до першого байта. UTF-8 з BOM; час — UTC ISO 8601; текстові значення, що починаються з `= + - @`,
+         *     нейтралізуються. Експорт пишеться подією безпеки `PiRawDataExported` (без значень).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Тег. */
+                    path?: string;
+                    /** @description Початок вікна. */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (≤ 400 діб від початку). */
+                    toUtc?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність збору. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/raw-data/points": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Сторінка точок тега, новіші першими (курсор за міткою часу). */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Тег — шлях атрибута в джерелі (1..400 символів, дослівно). */
+                    path?: string;
+                    /** @description Початок вікна (UTC, включно); `null` — 7 діб до кінця. */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (UTC, виключно); `null` — «зараз». Вікно ≤ 400 діб. */
+                    toUtc?: string;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                    /** @description Розмір сторінки 1..500; `0` — 100. */
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність збору. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfRawPointView"];
+                        "text/json": components["schemas"]["PagedResultOfRawPointView"];
+                        "text/plain": components["schemas"]["PagedResultOfRawPointView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/raw-data/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Згорнутий ряд тега для графіка: ≤ buckets кошиків (кількість, мін, макс, середнє)
+         *     на все вікно — розмір відповіді не залежить від кількості точок. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Тег. */
+                    path?: string;
+                    /** @description Початок вікна. */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (≤ 400 діб від початку). */
+                    toUtc?: string;
+                    /** @description Кількість кошиків 1..2000; `0` — 500. */
+                    buckets?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність збору. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RawSeriesView"];
+                        "text/json": components["schemas"]["RawSeriesView"];
+                        "text/plain": components["schemas"]["RawSeriesView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/raw-data/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Сутність і її теги (поля мапінгів; без мапінгів — шлях самої сутності). */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Сутність збору. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RawDataTagsView"];
+                        "text/json": components["schemas"]["RawDataTagsView"];
+                        "text/plain": components["schemas"]["RawDataTagsView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sources/{id}/registry": {
         parameters: {
             query?: never;
@@ -17248,7 +21336,8 @@ export interface paths {
         /**
          * «Отримати з PI зараз»: ставить синхронізацію подій сутності в чергу. Право `Integration.Manage`.
          * @description Повторне натискання зливається з задачею, що вже чекає чи виконується (ціль `source-events-e{id}`), — та
-         *     сама задача, що й за розкладом. Немає активного мапінгу подій — `422`.
+         *     сама задача, що й за розкладом; підтверджена — власна ціль `source-events-e{id}-confirm`. Немає активного
+         *     мапінгу подій — `422`.
          */
         post: {
             parameters: {
@@ -17260,7 +21349,14 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Скасування. */
+            requestBody?: {
+                content: {
+                    "application/*+json": null | components["schemas"]["SourceEventSyncBody"];
+                    "application/json": null | components["schemas"]["SourceEventSyncBody"];
+                    "text/json": null | components["schemas"]["SourceEventSyncBody"];
+                };
+            };
             responses: {
                 /** @description Accepted */
                 202: {
@@ -17623,6 +21719,83 @@ export interface paths {
             };
         };
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/template-versions/{id}/formulas/{formulaId}/manual-override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Вмикає/вимикає ручне значення замість формули; `dryRun` — лише лічильник наявних ручних значень
+         *     (для попередження перед вимкненням).
+         * @description `403` — немає `Template.Edit`; `404 ECR-TMPL-0404` — у версії немає такої (живої) формули.
+         *     Вимкнення наявні ручні значення не стирає — лише забороняє нові.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія шаблону (будь-який стан). */
+                    id: number;
+                    /** @description Формула версії. */
+                    formulaId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SetFormulaManualOverrideRequest"];
+                    "application/json": components["schemas"]["SetFormulaManualOverrideRequest"];
+                    "text/json": components["schemas"]["SetFormulaManualOverrideRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FormulaManualOverrideResult"];
+                        "text/json": components["schemas"]["FormulaManualOverrideResult"];
+                        "text/plain": components["schemas"]["FormulaManualOverrideResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -22234,6 +26407,374 @@ export interface components {
         };
         /** @enum {unknown} */
         AggregationKind: "Sum" | "Avg" | "Min" | "Max" | "Last" | "First" | "TimeWeightedAvg" | "TimeIntegral" | null;
+        /** @description One area of a region. */
+        AirAreaCodeDto: {
+            /** @description Normalised area code (what `area` of the import options takes). */
+            code: string;
+            /** @description Name of the area group node, when the tree has one. */
+            name: null | string;
+        };
+        /** @description Result of `POST /api/v1/air-limits/import/analyse`: layout of the file, no database. */
+        AirLimitsAnalysisDto: {
+            /** @description Header block, mapped and unmapped columns, counts, findings. */
+            analysis: components["schemas"]["ImportAnalysis"];
+            /** @description Profile used; `null` for an unsaved specification. */
+            profileCode: null | string;
+        };
+        /** @description Result of `POST /api/v1/permits/{permitId}/air-limits/import/apply`. */
+        AirLimitsImportResultDto: {
+            /** @description Area code. */
+            area: string;
+            /**
+             * Format: int64
+             * @description Area registry entry; `null` — none.
+             */
+            areaEntryId?: null | number;
+            /**
+             * Format: int32
+             * @description NAE nodes created in the tree.
+             */
+            createdNae: number;
+            /** @description New / changed / unchanged / removed counts. */
+            diff: components["schemas"]["ImportDiffCounts"];
+            /** @description Hash of the uploaded file. */
+            fileSha256: string;
+            /** @description Fingerprint of the applied plan (equals the preview's). */
+            fingerprint: string;
+            /**
+             * Format: int64
+             * @description Permit.
+             */
+            permitId: number;
+            /** @description Permit number. */
+            permitNumber: string;
+            /** @description Region code. */
+            region: string;
+            /**
+             * Format: int64
+             * @description Region registry entry the import was scoped to.
+             */
+            regionEntryId?: null | number;
+            /** @description Rows of OTHER permits that were replaced (confirmed), per permit. */
+            replacedOthers: components["schemas"]["OwnerReplace"][];
+            /**
+             * Format: int32
+             * @description The permit's own source rows that were replaced.
+             */
+            replacedOwn: number;
+            /**
+             * Format: int32
+             * @description Source rows now in the permit for this region and area.
+             */
+            sources: number;
+            /**
+             * Format: int32
+             * @description Substance rows inserted.
+             */
+            substances: number;
+        };
+        /** @description Result of `GET /api/v1/permits/{permitId}/air-limits`: the permit card content. */
+        AirLimitsPermitDto: {
+            /**
+             * Format: int64
+             * @description Permit.
+             */
+            permitId: number;
+            /** @description Permit number. */
+            permitNumber: string;
+            /** @description Sources with substances, by NAE code. */
+            sources: components["schemas"]["AirSourceDto"][];
+            /**
+             * Format: int32
+             * @description Substance rows in all sources.
+             */
+            substanceRows: number;
+            /** @description Totals per substance, by code. */
+            totals: components["schemas"]["AirTotalDto"][];
+            /** @description Permit type code. */
+            typeCode: string;
+            /**
+             * Format: date
+             * @description First valid day.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description First NOT valid day.
+             */
+            validTo: null | string;
+        };
+        /** @description Result of `POST /api/v1/permits/{permitId}/air-limits/import/preview`. */
+        AirLimitsPreviewDto: {
+            /** @description Area code (`-` — none). */
+            area: string;
+            /**
+             * Format: int64
+             * @description Area registry entry; `null` — none.
+             */
+            areaEntryId?: null | number;
+            /**
+             * Format: int64
+             * @description Permit.
+             */
+            permitId: number;
+            /** @description Permit number. */
+            permitNumber: string;
+            /** @description Counts, findings (errors block, warnings do not), missing NAE and substances, replace scope, fingerprint. */
+            preview: components["schemas"]["RegistryImportPreview"];
+            /** @description Profile used; `null` for an unsaved specification. */
+            profileCode: null | string;
+            /** @description Region code the import is scoped to. */
+            region: string;
+            /**
+             * Format: int64
+             * @description Region registry entry the import is scoped to (stored on each source row).
+             */
+            regionEntryId?: null | number;
+            /**
+             * @description The region (and area) map to the NAE tree; `false` — «region/area not in NAE tree»: NAE codes are matched without the tree scope.
+             * @default true
+             */
+            scopeInNaeTree: boolean;
+        };
+        /** @description Result of `POST /api/v1/air-limits/provision`. */
+        AirLimitsProvisionReport: {
+            /** @description Built-in import profile (`ERA_TABLE_33`). */
+            profileCode: string;
+            /** @description The profile row was created by this call. */
+            profileCreated: boolean;
+            /** @description The type is published (permits can be created). */
+            published: boolean;
+            /** @description Registry code of the `AIR_SOURCES` table (what the generic registry rows API takes). */
+            sourcesRegistryCode: string;
+            /** @description Registry code of the `AIR_SOURCE_SUBSTANCES` table. */
+            substancesRegistryCode: string;
+            /** @description Permit type code (`AIR_LIMITS`). */
+            typeCode: string;
+            /** @description The type was created by this call. */
+            typeCreated: boolean;
+            /**
+             * Format: int32
+             * @description Published version of the type.
+             */
+            version: number;
+        };
+        /** @description One region. */
+        AirRegionCodeDto: {
+            /** @description Areas used in the region, by code (`-` style "no area" code included when NAE exist without one). */
+            areas: components["schemas"]["AirAreaCodeDto"][];
+            /** @description Normalised region code (what `region` of the import options takes). */
+            code: string;
+            /** @description Name of the region group node, when the tree has one. */
+            name: null | string;
+        };
+        /** @description Region and area codes of the NAE tree. */
+        AirScopeCodesDto: {
+            /** @description Regions, by code. */
+            regions: components["schemas"]["AirRegionCodeDto"][];
+        };
+        /** @description One value the import wizard offers for a scope column, with the NAE tree scope it maps to. */
+        AirScopeEntryDto: {
+            /** @description Entry code (`REG_001`, `OFFSHORE`) or the choice text. */
+            code: string;
+            /**
+             * Format: int64
+             * @description Registry entry id (Registry kind: what `regionEntryId`/`areaEntryId` take); `null` for a List choice.
+             */
+            entryId: null | number;
+            /** @description NAE tree area code (AREA column; only where the tree region has areas: `Offshore` → `OFFSHORE`); `null` — match by
+             *     region only. */
+            naeArea: null | string;
+            /** @description NAE tree region code the value maps to (REGION column; by normalised name); `null` — not in the NAE tree. */
+            naeRegion: null | string;
+            /** @description Name (default language) or the choice text. */
+            name: string;
+        };
+        /** @description ✎ AIR-ON-AIR: one scope column of the AIR permit's sources table (REGION or AREA) as configured on the AIR type with the SAME
+         *     column settings as any permit-type column (data type + list scope): `Text` (String), `Registry` (Lookup, shared
+         *     registry), `List` (Lookup, values of the type, entered separated by «;»). */
+        AirScopeFieldDto: {
+            /** @description Column code (`REGION`, `AREA`). */
+            columnCode: string;
+            /** @description `Text`, `Registry` or `List`. */
+            kind: string;
+            /** @description Values to pick from (Registry / List), by code; empty for Text. */
+            options: components["schemas"]["AirScopeEntryDto"][];
+            /** @description Registry the value comes from (Registry: `LAND_REGION`, `AIR_AREA`; List: the type's own list registry). */
+            registryCode: null | string;
+            /** @description The registry exists; `false` — empty state, the import cannot use this column's values. */
+            registryFound: boolean;
+            /** @description A value is required (REGION) or optional (AREA). */
+            required: boolean;
+        };
+        /** @description Result of `GET /api/v1/air-limits/scope-fields`: how the import scope is configured on the AIR type, with values. */
+        AirScopeFieldsDto: {
+            /** @description The AREA scope column. */
+            area: components["schemas"]["AirScopeFieldDto"];
+            /** @description The REGION scope column. */
+            region: components["schemas"]["AirScopeFieldDto"];
+            /** @description Permit type (`AIR`). */
+            typeCode: string;
+        };
+        /** @description One source (NAE) of a permit with its substances. */
+        AirSourceDto: {
+            /** @description Area code (`-` — none). */
+            area: null | string;
+            /** @description Its code (`AREA_018`). */
+            areaEntryCode?: null | string;
+            /**
+             * Format: int64
+             * @description Area registry entry; `null` — none.
+             */
+            areaEntryId?: null | number;
+            /**
+             * Format: decimal
+             * @description Diameter, m.
+             */
+            diameter: null | string;
+            /** @description Emission point name. */
+            emissionPointName: null | string;
+            /**
+             * Format: decimal
+             * @description Height, m.
+             */
+            height: null | string;
+            /**
+             * Format: decimal
+             * @description Hours per year.
+             */
+            hoursPerYear: null | string;
+            /**
+             * Format: int64
+             * @description Row id in `AIR_SOURCES`.
+             */
+            id: number;
+            /** @description Normalised NAE code. */
+            naeCode: string;
+            /**
+             * Format: int64
+             * @description Node in the NAE tree.
+             */
+            naeEntryId: number;
+            /** @description Production code (column A). */
+            productionCode: null | string;
+            /**
+             * Format: decimal
+             * @description Number of sources.
+             */
+            quantity: null | string;
+            /** @description Region code. */
+            region: null | string;
+            /** @description Its code (`REG_001`). */
+            regionEntryCode?: null | string;
+            /**
+             * Format: int64
+             * @description Region registry entry of the import block this row came from.
+             */
+            regionEntryId?: null | number;
+            /** @description Production / site label from the group row of the file. */
+            siteLabel: null | string;
+            /** @description Source name. */
+            sourceName: null | string;
+            /** @description Canonical type: `T` (point) or `P1` (diffuse), Latin letters; the UI maps the label. */
+            sourceType: null | string;
+            /** @description Substances, by code. */
+            substances: components["schemas"]["AirSubstanceDto"][];
+            /**
+             * Format: decimal
+             * @description Gas temperature.
+             */
+            temperature: null | string;
+            /**
+             * Format: decimal
+             * @description Gas velocity.
+             */
+            velocity: null | string;
+            /**
+             * Format: decimal
+             * @description Gas volume.
+             */
+            volume: null | string;
+            /**
+             * Format: decimal
+             * @description Coordinate X1.
+             */
+            x1: null | string;
+            /**
+             * Format: decimal
+             * @description Coordinate X2.
+             */
+            x2: null | string;
+            /**
+             * Format: decimal
+             * @description Coordinate Y1.
+             */
+            y1: null | string;
+            /**
+             * Format: decimal
+             * @description Coordinate Y2.
+             */
+            y2: null | string;
+        };
+        /** @description One substance limit of a source. */
+        AirSubstanceDto: {
+            /**
+             * Format: decimal
+             * @description g/s.
+             */
+            gramsPerSecond: null | string;
+            /**
+             * Format: int64
+             * @description Row id in `AIR_SOURCE_SUBSTANCES`.
+             */
+            id: number;
+            /**
+             * Format: decimal
+             * @description mg/nm3.
+             */
+            mgPerNm3: null | string;
+            /** @description Normalised substance code (4 digits). */
+            substanceCode: string;
+            /**
+             * Format: int64
+             * @description Entry in the substance registry.
+             */
+            substanceEntryId: number;
+            /** @description Name from the registry (default language). */
+            substanceName: null | string;
+            /**
+             * Format: decimal
+             * @description t/year (full precision, no rounding).
+             */
+            tonsPerYear: null | string;
+        };
+        /** @description Total of one substance over all sources of the permit (computed, never stored). */
+        AirTotalDto: {
+            /**
+             * Format: decimal
+             * @description Sum of g/s.
+             */
+            gramsPerSecond: string;
+            /**
+             * Format: int32
+             * @description Sources that limit the substance.
+             */
+            sources: number;
+            /** @description Substance code. */
+            substanceCode: string;
+            /**
+             * Format: int64
+             * @description Entry in the substance registry.
+             */
+            substanceEntryId: number;
+            /** @description Name from the registry. */
+            substanceName: null | string;
+            /**
+             * Format: decimal
+             * @description Sum of t/year.
+             */
+            tonsPerYear: string;
+        };
         /** @description Тіло «застосувати набір до зрізів». */
         ApplyEditorSetRequest: {
             /**
@@ -22343,6 +26884,11 @@ export interface components {
             /** @description Причина; обов'язкова при відхиленні. */
             reason: null | string;
             /**
+             * Format: int64
+             * @description RS: копія аркуша; `null` — оригінал.
+             */
+            sheetCopyId?: null | number;
+            /**
              * Format: int32
              * @description Аркуш.
              */
@@ -22378,6 +26924,11 @@ export interface components {
              */
             validTo?: null | string;
         };
+        /**
+         * @description Порядок сторінок журналів аудиту (вкладки Cell changes / Structure changes / Security events / Workflow events).
+         * @enum {unknown}
+         */
+        AuditSort: "ChangedAtDesc" | "ChangedAtAsc" | "UserAsc" | "UserDesc";
         /**
          * @description Провайдер автентифікації. Нижче рівня входу не використовується.
          * @enum {unknown}
@@ -22765,6 +27316,12 @@ export interface components {
              */
             columnDefId: number;
             columnHeaderL10n?: null | components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Масштаб колонки (`cfg.ColumnDef.Scale`): клієнт показує число з НЕ МЕНШЕ стількома знаками після коми, як
+             *     сітка (U-05); `null` — масштабу не задано або колонки вже немає.
+             */
+            columnScale?: null | number;
             /** @description Бізнес-ключ документа; `null` — документа вже немає. */
             documentBusinessKey?: null | string;
             /**
@@ -22805,6 +27362,9 @@ export interface components {
              * @description Звітний період.
              */
             periodKey: number;
+            /** @description ✎ D-461: причина ручного значення замість формули (`aud.CellChange.Reason`, `Origin = FormulaOverride`);
+             *     `null` — інші походження. */
+            reason?: null | string;
             /** @description Ключ рядка — щоб журнал читався без join. */
             rowKey: string;
             rowLabelL10n?: null | components["schemas"]["LocalizedText"];
@@ -22854,6 +27414,57 @@ export interface components {
          * @enum {unknown}
          */
         CellDataType: "String" | "Int" | "Decimal" | "Bool" | "Date" | "Lookup" | "Formula" | "Unit" | "Calculated";
+        /** @description Подія PI, що веде рядок комірки (`D-465`). */
+        CellEventSourceItem: {
+            /** @description Атрибут цієї колонки: прочитане з PI, що записав би синк, що в комірці, порівняння. */
+            attribute: components["schemas"]["PiEventAttributeView"];
+            /** @description Подія (ідентичність, час, стан зв'язку, останній синк). */
+            event: components["schemas"]["PiEventView"];
+            /**
+             * Format: int32
+             * @description Мапінг подій.
+             */
+            mapId: number;
+            /** @description Мапінг діє. */
+            mapIsActive: boolean;
+            /** @description Код шаблону. */
+            sourceEntityCode: string;
+            /**
+             * Format: int32
+             * @description Сутність-шаблон подій.
+             */
+            sourceEntityId: number;
+            /** @description Підпис сутності. */
+            sourceEntityName: null | string;
+        };
+        /** @description Значення за правилом згортки поруч зі значенням комірки. */
+        CellFoldView: {
+            /** @description CellFoldComparison: `Match`; `ManualEdit` — інше значення, останній запис людини;
+             *             `NotUpdated` — інше значення, останній запис машини (точки змінилися після запису); `NotWritten` —
+             *             записів у комірку не було (значення збору не записано); `NotComparable` — числа за правилом немає. */
+            comparison: string;
+            /**
+             * Format: decimal
+             * @description Частка придатних точок / покритого часу.
+             */
+            percentGood: null | string;
+            /** @description Стан згортки (CellFoldState). */
+            state: string;
+            /**
+             * Format: date-time
+             * @description Коли (UTC).
+             */
+            storedAt: null | string;
+            /** @description Хто записав (`Integration`, `UserEdit`, `Import`…). */
+            storedOrigin: null | string;
+            /** @description Значення в комірці за останнім записом журналу змін; `null` — записів немає. */
+            storedValue: null | string;
+            /**
+             * Format: decimal
+             * @description Значення в одиниці документа — те, що записала б матеріалізація.
+             */
+            value: null | string;
+        };
         /** @description Результат спрацювання правила умовного форматування (ФВ-2.6/2.7): колір
          *     `#rrggbb` (або `null` — колір теми) і жирність. */
         CellFormatDto: {
@@ -22866,6 +27477,92 @@ export interface components {
             /** @description Штрих (`hatch` — «неактуальна комірка»); лише від умовного форматування, `null` — немає.
              *     ⚠ Додано в L6 останнім необов'язковим полем: клієнт, що його не знає, малює решту як раніше. */
             pattern?: null | string;
+        };
+        /** @description Подія журналу покриття. */
+        CellSourceEvent: {
+            /**
+             * Format: date-time
+             * @description Коли записано (UTC).
+             */
+            at: string;
+            /** @description Конверт `{"k":…,"p":{…}}` або старий текст. */
+            details: null | string;
+            /**
+             * Format: int64
+             * @description Ідентифікатор рядка.
+             */
+            id: number;
+            /** @description Статус (`CollectionCoverage.KnownStatuses`). */
+            status: string;
+        };
+        /** @description Один мапінг, що живить комірку. */
+        CellSourceItem: {
+            /** @description Згортка періоду. */
+            aggregation: null | string;
+            /** @description Події покриття даних тега за період, новіші першими. */
+            events: components["schemas"]["CellSourceEvent"][];
+            fold: null | components["schemas"]["CellFoldView"];
+            /** @description Мапінг діє. */
+            isActive: boolean;
+            /** @description Останній прогін сутності й останній успіх. */
+            lastCollection: components["schemas"]["RawCollectionStatus"];
+            /**
+             * Format: int32
+             * @description Мапінг — ключ для точок і графіка.
+             */
+            mapId: number;
+            /**
+             * Format: int64
+             * @description Зібраних точок тега за вікно.
+             */
+            pointCount: number;
+            /** @description Код сутності. */
+            sourceEntityCode: string;
+            /**
+             * Format: int32
+             * @description Сутність збору.
+             */
+            sourceEntityId: number;
+            /** @description Підпис сутності. */
+            sourceEntityName: null | string;
+            /** @description Тег. */
+            sourcePath: string;
+            /** @description Одиниця джерела. */
+            sourceUnitCode: null | string;
+            /** @description Одиниця документа. */
+            targetUnitCode: null | string;
+        };
+        /** @description Звідки комірка отримує значення з PI. */
+        CellSourceView: {
+            /** @description D-465: події PI, що ведуть рядок комірки (рядок `EF-…`); порожньо — не рядок події. */
+            eventSources: components["schemas"]["CellEventSourceItem"][];
+            /**
+             * Format: date-time
+             * @description Початок вікна згортки (UTC); `null` — колонка місяця поза періодом без власника.
+             */
+            periodFromUtc: null | string;
+            /**
+             * Format: int32
+             * @description Період екземпляра комірки.
+             */
+            periodKey: number;
+            /**
+             * Format: date-time
+             * @description Кінець вікна згортки (UTC, виключно).
+             */
+            periodToUtc: null | string;
+            /** @description Мапінги, що живлять комірку; порожньо — значення не з PI. */
+            sources: components["schemas"]["CellSourceItem"][];
+            /**
+             * Format: int32
+             * @description Місяць колонки місяця (1..12): вікно — лише цей місяць періоду (D-462); `null` — увесь період.
+             */
+            windowMonth: null | number;
+            /**
+             * Format: int32
+             * @description Період, у якому згортається комірка (Q-17 — період-власник колонки).
+             */
+            windowPeriodKey: number;
         };
         /** @description Чи можна фарбувати комірки таблиці (CELL-STYLE P1A): те, що клієнт має знати, щоб не вмикати «Заливку»/«Колір
          *     тексту» там, де `PATCH …/cell-styles` однаково відмовить 403. */
@@ -23621,6 +28318,19 @@ export interface components {
             /** @description Номер нової версії; унікальний у межах методології (`UQ_MethodologyVersion`). */
             versionNumber: string;
         };
+        /** @description Creates a root of the NAE tree by hand (no AF): a region and, optionally, one area under it. */
+        CreateNaeRootRequest: {
+            /** @description Area code (`OFFSHORE`); `null` or empty — only the region. */
+            areaCode: null | string;
+            /** @description English name of the deepest created node; `null` — the code as written. */
+            nameEn: null | string;
+            /** @description Kazakh name of the deepest created node. */
+            nameKz: null | string;
+            /** @description Russian name of the deepest created node. */
+            nameRu: null | string;
+            /** @description Region code (`ATYRAU`); normalised to upper case. */
+            regionCode: string;
+        };
         /** @description Тіло створення каналу. */
         CreateNotificationChannelRequest: {
             /** @description Транспорт; після створення не змінюється. */
@@ -24039,6 +28749,11 @@ export interface components {
             sourceEntities: number;
             transport: components["schemas"]["ExternalTransport"];
         };
+        /**
+         * @description Вид елемента похідного списку аргументів.
+         * @enum {unknown}
+         */
+        DeclaredArgumentKind: "Argument" | "Constant" | "Formula";
         /** @description Видалений рядок динамічної таблиці (D3). */
         DeleteRowResponse: {
             /** @description Задача перерахунку, поставлена видаленням; `null` — таблиця без колонок. */
@@ -24361,8 +29076,18 @@ export interface components {
              *     його не несе (сховище заповнює завжди; як і стан — порожньо без періоду). */
             sheets?: null | components["schemas"]["DocumentSheetState"][];
             /** @description RC15: версія шаблону проєкту документа (`TemplateVersion.Version`, рядок). Адитивне поле; метадані шаблону не секрет,
-             *     тож звуження читача його не знімає. Заповнює лише шлях картки (`FindAsync`); перелік віддає `null`. */
+             *     тож звуження читача його не знімає. ~~Заповнює лише шлях картки (`FindAsync`); перелік віддає `null`.~~
+             *     ✎ RPT-STABLE: заповнюють і картка, і перелік (колонка «Версія» переліку документів) — це ТИПОВА версія документа;
+             *     періоди, що відрізняються, називає TemplateVersionByPeriod. */
             templateVersion?: null | string;
+            /** @description ✎ RPT-STABLE (Part A, контракт під Part B «міграція з обраного місяця»): РІДКА карта «ключ періоду → версія шаблону»
+             *     лише для періодів, версія яких ВІДРІЗНЯЄТЬСЯ від TemplateVersion (ключ — рядок `YYYYMM`, значення —
+             *     `TemplateVersion.Version`). `null` = усі періоди документа на TemplateVersion (так є зараз:
+             *     версія живе лише в проєкті); непорожня карта = документ «змішаний». Версія періоду = карта[період] ?? TemplateVersion.
+             *     Адитивне; метадані шаблону не секрет — звуження читача не знімає. */
+            templateVersionByPeriod?: null | {
+                [key: string]: string;
+            };
             /**
              * Format: int32
              * @description Попередження звідти ж; `null` — за тим самим правилом.
@@ -24375,12 +29100,30 @@ export interface components {
             allowsDynamicRows: boolean;
             /**
              * Format: int32
+             * @description RS: номер у групі — 1 оригінал, 2… копії; копії діляться `sheetCode`/`sheetOrdinal` з оригіналом.
+             * @default 1
+             */
+            copyOrdinal: number;
+            displayNameL10n?: null | components["schemas"]["LocalizedText"];
+            /**
+             * @description RS: шаблон дозволяє копіювати аркуш («Додати копію»).
+             * @default false
+             */
+            isCopyable: boolean;
+            /**
+             * Format: int32
              * @description Стеля кількості рядків; `null` — без стелі.
              */
             maxDynamicRows: null | number;
             permitBinding?: null | components["schemas"]["DocumentTablePermitBindingDto"];
             /** @description Код аркуша; він же ключ у `DocumentSummary.SheetStates`. */
             sheetCode: string;
+            /**
+             * Format: int64
+             * @description RS: копія аркуша (`doc.DocumentSheet.Id`), якій належить екземпляр; `null` — оригінал. Саме нею подають,
+             *     затверджують і повертають копію (`sheetCopyId` у запитах), а в `SheetStates` вона має ключ `КОД#sheetCopyId`.
+             */
+            sheetCopyId?: null | number;
             /**
              * Format: int32
              * @description Аркуш; ним подають і затверджують.
@@ -24447,12 +29190,37 @@ export interface components {
              * @description Ідентифікатор `SheetDef` — те, що йде в `sheetDefIds`.
              */
             id: number;
+            /**
+             * @description RS: аркуш можна копіювати в документі.
+             * @default false
+             */
+            isCopyable: boolean;
             /** @description Чи обов'язковий аркуш. */
             isMandatory: boolean;
             /** @description Назва всіма мовами каталогу. */
             nameL10n: components["schemas"]["LocalizedText"];
             /** @description Група для правил складу; `null` — поза групами. */
             sheetGroup: null | string;
+        };
+        /** @description Версія шаблону серед видимих читачеві документів — варіант фільтра «Version». */
+        DocumentTemplateVersionOption: {
+            /**
+             * Format: int32
+             * @description Скільки видимих читачеві документів мають цю версію.
+             */
+            count: number;
+            /** @description Версія (як у колонці переліку). */
+            version: string;
+        };
+        /** @description Усі версії шаблону серед видимих читачеві документів — варіанти фільтра переліку «Version». */
+        DocumentTemplateVersionsResponse: {
+            /** @description Версії за природним порядком (2.9 перед 2.10) з кількістю документів; не більше 200. */
+            items: components["schemas"]["DocumentTemplateVersionOption"][];
+            /**
+             * Format: int32
+             * @description Скільки видимих документів без версії.
+             */
+            withoutVersionCount: number;
         };
         /** @description Версія документа — зріз подання аркуша (ФВ-5.22). */
         DocumentVersionDto: {
@@ -24491,6 +29259,18 @@ export interface components {
             documentId: number;
             /** @description Сухий прогін: нічого не змінено. */
             dryRun: boolean;
+            /**
+             * Format: int32
+             * @description Період, з якого перенос реально діє: для `FromMonth` збігається з X, окрім випадку «рік-сімейство Q-17» —
+             *     тоді січень року X (див. Warnings); для `WholeProject` — перший період проєкту; `null`,
+             *     якщо в проєкті ще немає періодів.
+             */
+            effectiveFromPeriodKey?: null | number;
+            /**
+             * Format: int32
+             * @description Запитаний період X (`FromMonth`); `null` для `WholeProject`.
+             */
+            fromPeriodKey?: null | number;
             /** @description Її номер. */
             fromVersion: string;
             /**
@@ -24569,6 +29349,13 @@ export interface components {
             lookupRemapped?: null | number;
             /**
              * Format: int64
+             * @description ✎ D-461: скільки ручних значень замість формул НЕ переїде як ручні (формула цільової версії ручного значення не
+             *     дозволяє або колонки немає): комірки знову рахує формула, журнал — FormulaRestored. Перенос не блокує; пункти
+             *     звіту — Kind OverrideLost. null — таких немає.
+             */
+            lostFormulaOverrides?: null | number;
+            /**
+             * Format: int64
              * @description Скільки введених значень зникло б.
              */
             lostValues: number;
@@ -24613,6 +29400,7 @@ export interface components {
              * @description Його проєкт — версія живе на проєкті, тож переносяться всі його документи.
              */
             projectId: number;
+            range?: null | components["schemas"]["VersionMigrationRange"];
             /** @description Причини відмови: `structural`, `dataLoss`, `guardedWithData`, `sheetsLocked`, `projectArchived`. */
             refusals: string[];
             /** @description Її номер. */
@@ -24627,6 +29415,9 @@ export interface components {
              * @description Скільки введених значень переїде.
              */
             transferredValues: number;
+            /** @description Попередження (не відмови): `effectiveFromShiftedToJanuary` (ключ `documents.migrateWarnEffectiveFromJanuary`,
+             *     параметри `requested`, `effective`); `null` — немає. */
+            warnings?: null | components["schemas"]["VersionMigrationWarning"][];
         };
         /** @description Куди можна перенести документ: поточна версія й опубліковані версії того самого шаблону. */
         DocumentVersionMigrationTargetsDto: {
@@ -24637,6 +29428,12 @@ export interface components {
              * @description Поточна версія проєкту.
              */
             currentVersionId: number;
+            /**
+             * @description RPT-STABLE Part B: чи доступний перенос «з місяця» (прапор `Documents:VersionMigration:FromMonthEnabled`,
+             *     типово `false`); `false` - діалог показує лише «увесь проєкт».
+             * @default false
+             */
+            fromMonthEnabled: boolean;
             /**
              * Format: int32
              * @description Проєкт документа — переноситься весь.
@@ -24794,6 +29591,13 @@ export interface components {
          * @enum {unknown}
          */
         EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow" | "InsufficientGrantLevel" | "LockedByOwner" | "AssignmentFilled" | "AssignmentValidated" | "AssignmentExpired" | "NotAssignedToYou";
+        /** @description Тіло правки повідомлення. */
+        EditTableDiscussionMessageRequest: {
+            /** @description Новий текст. */
+            body: string;
+            /** @description Повний набір згаданих після правки; `null` — лишити як було. */
+            mentionUserIds?: null | number[];
+        };
         /** @description Набір виконавців власника. */
         EditorSetDto: {
             /**
@@ -25066,8 +29870,15 @@ export interface components {
             /** Format: date-time */
             lastModified?: null | string;
         };
+        /**
+         * @description Empty-cell fill rule.
+         * @enum {unknown}
+         */
+        FillDown: "None" | "Merge" | "Blank";
         /** @description Формула для відповіді клієнту. */
         FormulaDto: {
+            /** @description ✎ D-461: «Дозволити ручне значення» (змінює `PUT …/formulas/{formulaId}/manual-override`). */
+            allowManualOverride?: boolean;
             /**
              * Format: int32
              * @description Колонка, якщо `Scope == Column` чи `Cell`.
@@ -25094,6 +29905,55 @@ export interface components {
              * @description Таблиця, якій належить формула.
              */
             tableDefId: number;
+        };
+        /** @description ✎ D-461: ручне значення в комірці формули — для підказки «хто, коли, чому». */
+        FormulaManualCellDto: {
+            /** @description Причина. */
+            reason: string;
+            /**
+             * Format: date-time
+             * @description Коли (UTC).
+             */
+            setAt: string;
+            /** @description Ім'я автора; `null` — користувача вже немає. */
+            setBy: null | string;
+        };
+        /** @description ✎ D-461: відповідь на зміну «Дозволити ручне значення». */
+        FormulaManualOverrideResult: {
+            /** @description Прапорець ПІСЛЯ виклику. */
+            allowManualOverride: boolean;
+            /** @description Чи прапорець справді змінився (`false` — dryRun або вже був таким). */
+            changed: boolean;
+            /**
+             * Format: int32
+             * @description Формула.
+             */
+            formulaId: number;
+            /**
+             * Format: int32
+             * @description Скільки комірок усього.
+             */
+            overriddenCells: number;
+            /**
+             * Format: int32
+             * @description У скількох документах версії зараз є ручні значення замість цієї формули.
+             */
+            overriddenDocuments: number;
+        };
+        /** @description ✎ D-461: що клієнту треба знати, щоб замінити формулу ручним значенням (з причиною) і повернути формулу. */
+        FormulaOverrideSliceDto: {
+            /** @description У користувача є право `Document.OverrideFormula` у проєкті документа. Без нього комірки формул лишаються
+             *     `CalculatedCell` у IReadOnlyDictionary&lt;string, string&gt; TableSliceDto.CellPermissions. */
+            canOverride: boolean;
+            /** @description Комірки, де зараз стоїть ручне значення замість формули: ключ `"{rowKey}:{columnCode}"`. Видно й після
+             *     вимкнення прапорця (значення лишається, його можна лише повернути до формули — видаленням). */
+            manualCells: {
+                [key: string]: components["schemas"]["FormulaManualCellDto"];
+            };
+            /** @description Комірки комірочних формул (`"{rowKey}:{columnCode}"`), що ЗАРАЗ дозволяють ручне значення. */
+            overridableCells: string[];
+            /** @description Коди обчислюваних колонок, формула яких ЗАРАЗ дозволяє ручне значення (прапорець увімкнено). */
+            overridableColumns: string[];
         };
         /**
          * @description Тип результату формули методології (директива ПК-1 №05, поправка 2-біс).
@@ -25187,6 +30047,19 @@ export interface components {
              */
             validTo: null | string;
         };
+        /** @description A group row is a data-area row with no keys whose only content is a label in one column. */
+        GroupRowSpec: {
+            /**
+             * Format: int32
+             * @description 1-based column that holds the label.
+             */
+            column?: number;
+            /**
+             * Format: int32
+             * @description A label counts as a group when its cell is merged across at least this many columns, or when it is the only filled cell in the row.
+             */
+            minMergedColumns?: number;
+        };
         /** @description SID групи з квитка і те, що він дав. */
         GroupSidView: {
             /** @description Чи знайшлося ЧИННЕ призначення на цей SID. */
@@ -25253,6 +30126,19 @@ export interface components {
             /** @description Код батьківської групи тієї ж таблиці; `null` — корінь. */
             parentCode: null | string;
         };
+        /** @description Where the header block is. */
+        HeaderSpec: {
+            /**
+             * Format: int32
+             * @description First header row; `null` - detected from the column-number row.
+             */
+            fromRow?: null | number;
+            /**
+             * Format: int32
+             * @description Last header row; `null` - detected.
+             */
+            toRow?: null | number;
+        };
         /** @description Одна перевірка у звіті. */
         HealthCheckDto: {
             /** @description Подробиці перевірки; текст винятку сюди не потрапляє (ФВ-6.11). */
@@ -25285,6 +30171,29 @@ export interface components {
         };
         /** Format: binary */
         IFormFile: string;
+        /** @description What the layout analysis of a file found (wizard steps 1-3): nothing is read from or written to the database. */
+        ImportAnalysis: {
+            /** @description The header was found and no finding is an error. */
+            canContinue: boolean;
+            /**
+             * Format: int32
+             * @description Findings beyond the limit.
+             */
+            droppedIssues: number;
+            /** @description Hash of the uploaded file. */
+            fileSha256: string;
+            /** @description Group rows. */
+            groups: components["schemas"]["ImportGroupRow"][];
+            header: null | components["schemas"]["ImportHeaderReport"];
+            /** @description Findings (columns not found, values that do not read). */
+            issues: components["schemas"]["ImportIssue"][];
+            /** @description Sheet that was read. */
+            sheetName: string;
+            /** @description Visible sheets of the workbook. */
+            sheetNames: string[];
+            /** @description Counters of the parse. */
+            stats: components["schemas"]["ImportStats"];
+        };
         /** @description Запит на застосування імпорту. */
         ImportApplyRequest: {
             /** @description ✎ AN-114 (D-338). Рядки, для яких людина свідомо перезаписує чужі правки,
@@ -25305,6 +30214,10 @@ export interface components {
             newValue: unknown;
             /** @description Поточне значення; `null` — порожньо. */
             oldValue: unknown;
+            /** @description ✎ D-461: «буде замінено формулу» — значення ляже як РУЧНЕ ЗНАЧЕННЯ ЗАМІСТЬ ФОРМУЛИ (формула дозволяє, у
+             *     користувача є право `Document.OverrideFormula`); причина журналу — «Excel import». `NewValue = null` у
+             *     такій комірці — повернення формули. */
+            replacesFormula?: boolean;
             /** @description Число з файлу ДО округлення до `Scale` колонки (ФВ-9.16b); `null` — не
              *     округлювалось. `NewValue` — вже округлене: саме воно буде записано. */
             roundedFrom?: unknown;
@@ -25317,6 +30230,158 @@ export interface components {
             tableCode?: null | string;
             tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
+        /** @description Counts of the diff between the file and the stored rows of the owner. */
+        ImportDiffCounts: {
+            /**
+             * Format: int32
+             * @description In both, different.
+             */
+            changedParents: number;
+            /**
+             * Format: int32
+             * @description Child rows that will be inserted.
+             */
+            children: number;
+            /**
+             * Format: int32
+             * @description In the file only.
+             */
+            newParents: number;
+            /**
+             * Format: int32
+             * @description Stored for the owner in the bucket, not in the file (deleted by the replace).
+             */
+            removedParents: number;
+            /**
+             * Format: int32
+             * @description Left out by a human decision.
+             */
+            skippedParents: number;
+            /**
+             * Format: int32
+             * @description In both, equal.
+             */
+            unchangedParents: number;
+        };
+        /** @description One mapped field. */
+        ImportFieldSpec: {
+            /** @description Allowed values for ImportParser.Choice: file text (folded) to canonical value. */
+            choices?: {
+                [key: string]: string;
+            };
+            /** @description Explicit column letter that bypasses header matching. */
+            column?: null | string;
+            /**
+             * Format: decimal
+             * @description Multiplier applied to ImportParser.Decimal values (unit conversion).
+             */
+            factor?: null | string;
+            /** @description How an empty cell is filled. */
+            fillDown?: components["schemas"]["FillDown"];
+            /** @description Read and validated but not stored: left out of the comparison with stored rows (e.g. a name the registry owns). */
+            informational?: boolean;
+            /** @description Parent (source) or child (substance) level. */
+            level?: components["schemas"]["ImportLevel"];
+            /** @description Unique field name (the target property). */
+            name?: string;
+            /** @description Every row must carry a value. */
+            nonEmpty?: boolean;
+            /** @description A negative ImportParser.Decimal is an error. */
+            nonNegative?: boolean;
+            /**
+             * Format: int32
+             * @description Code width for ImportParser.Code (numeric codes are left-padded with zeros).
+             */
+            pad?: number;
+            /** @description How a cell is read. */
+            parser?: components["schemas"]["ImportParser"];
+            /** @description Header variants (any may match). Folded (case, Latin/Cyrillic look-alikes, spaces, hyphens, punctuation ignored);
+             *     `a...b` or `a*b` means "a, then b later in the combined header". */
+            patterns?: string[];
+            /** @description Reference kind to validate against the target registry (`nae`, `substance`); `null` - plain value. */
+            reference?: null | string;
+            /** @description The column must be found in the header. */
+            required?: boolean;
+            /** @description The text of the LAST header row must equal one of these (e.g. the unit row `г/с`); empty - not checked. */
+            unitQualifier?: string[];
+            /** @description Unit aliases for ImportParser.Unit: file text (folded) to canonical unit code. */
+            units?: {
+                [key: string]: string;
+            };
+            /** @description An empty value is allowed but reported as a per-row WARNING in the preview (not an error, not silent). */
+            warnIfEmpty?: boolean;
+        };
+        /** @description A group row. */
+        ImportGroupRow: {
+            /** @description Label text. */
+            label: string;
+            /**
+             * Format: int32
+             * @description Excel row.
+             */
+            row: number;
+        };
+        /** @description What the header detection found. */
+        ImportHeaderReport: {
+            /**
+             * Format: int32
+             * @description First data row.
+             */
+            dataFromRow: number;
+            /**
+             * Format: int32
+             * @description First header row.
+             */
+            headerFromRow: number;
+            /**
+             * Format: int32
+             * @description Last header row.
+             */
+            headerToRow: number;
+            /** @description Matched columns. */
+            mapped: components["schemas"]["MappedColumn"][];
+            /** @description Columns with a header that no field uses. */
+            unmapped: components["schemas"]["UnmappedColumn"][];
+        };
+        /** @description A finding of the parser or the planner. */
+        ImportIssue: {
+            /** @description Placeholders of the catalog text. */
+            args?: null | {
+                [key: string]: string;
+            };
+            /** @description Excel column letter. */
+            column?: null | string;
+            /** @description Field name. */
+            field?: null | string;
+            /** @description Catalog key. */
+            messageKey: string;
+            /**
+             * Format: int32
+             * @description Excel row, when the finding is about one.
+             */
+            row?: null | number;
+            /** @description Warning or error. */
+            severity: components["schemas"]["ImportSeverity"];
+        };
+        /**
+         * @description Field level.
+         * @enum {unknown}
+         */
+        ImportLevel: "Parent" | "Child";
+        /** @description One-time load of the NAE tree from the PI AF element tree (NAE plan N2). */
+        ImportNaeFromAfRequest: {
+            /**
+             * Format: int32
+             * @description PI AF data source to read.
+             */
+            dataSourceId: number;
+            /** @description `true` — build the report only: nothing is created or changed (not even the registry). */
+            dryRun: boolean;
+            /** @description Target registry; `null` — string NaeTreeSchema.RegistryCode (`NAE_TREE`). */
+            registryCode: null | string;
+            /** @description AF element that holds the equipment tree; `null` — string NaeTreeSchema.DefaultAfRoot (`ECR_01_Air Equipment`). */
+            rootPath: null | string;
+        };
         /** @description Рядок книги, для якого людина свідомо перезаписує чужу правку, зроблену
          *     після експорту (AN-114, D-338). */
         ImportOverwriteRow: {
@@ -25325,6 +30390,11 @@ export interface components {
             /** @description Таблиця (як `tableCode` відмови-конфлікту перегляду). */
             tableCode: string;
         };
+        /**
+         * @description Cell parsers.
+         * @enum {unknown}
+         */
+        ImportParser: "Text" | "Decimal" | "Integer" | "Code" | "Choice" | "Date" | "Unit";
         /** @description Результат попереднього перегляду імпорту. */
         ImportPreview: {
             /** @description Комірки, які зміняться. */
@@ -25351,6 +30421,42 @@ export interface components {
              *     чіпали, можуть повернути новіші чужі. `null` — попереджень немає. */
             warnings?: null | string[];
         };
+        /** @description A stored import profile with its specification. */
+        ImportProfileDto: {
+            /** @description Shipped with the system. */
+            builtIn: boolean;
+            /** @description Profile code. */
+            code: string;
+            /** @description Name by language. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /** @description Concurrency token for the next `PUT`. */
+            rowVersion: string;
+            /** @description The specification: header block, fields with header patterns, group rows, fill rules, parsers. */
+            spec: components["schemas"]["RegistryImportSpec"];
+            /**
+             * Format: date-time
+             * @description Last change, UTC.
+             */
+            updatedAt: string;
+        };
+        /** @description A stored import profile in a list. */
+        ImportProfileSummaryDto: {
+            /** @description Shipped with the system (`ERA_TABLE_33`); a built-in profile is reset by provisioning when it is deleted but can be edited. */
+            builtIn: boolean;
+            /** @description Profile code. */
+            code: string;
+            /** @description Name by language. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: date-time
+             * @description Last change, UTC.
+             */
+            updatedAt: string;
+        };
         /** @description Відхилена комірка з причиною — користувач має бачити, які саме (ФВ-4.4). */
         ImportRejection: {
             /** @description Колонка; для відмови цілої таблиці — її код. */
@@ -25374,6 +30480,39 @@ export interface components {
             /** @description Таблиця відмови (`V-10`, як і в ImportChange). */
             tableCode?: null | string;
             tableNameL10n?: null | components["schemas"]["LocalizedText"];
+        };
+        /**
+         * @description Issue severity.
+         * @enum {unknown}
+         */
+        ImportSeverity: "Warning" | "Error";
+        /** @description Counters of a parse. */
+        ImportStats: {
+            /**
+             * Format: int32
+             * @description Child rows.
+             */
+            children: number;
+            /**
+             * Format: int32
+             * @description Distinct child keys.
+             */
+            distinctChildKeys: number;
+            /**
+             * Format: int32
+             * @description Group rows.
+             */
+            groupRows: number;
+            /**
+             * Format: int32
+             * @description Parent rows.
+             */
+            parents: number;
+            /**
+             * Format: int32
+             * @description Non-data rows with content (totals, notes).
+             */
+            skippedRows: number;
         };
         /** @description Тіла відповідей, спільні для кількох контролерів. */
         JobAcceptedResponse: {
@@ -25412,6 +30551,7 @@ export interface components {
             error: null | string;
             /** @description Код каталогу помилок провалу (BE-08). */
             errorCode?: null | string;
+            eventRemovalBlocked?: null | components["schemas"]["SourceEventRemovalBlock"];
             fanOut?: null | components["schemas"]["FanOutStatus"];
             /** @description Ідентифікатор. */
             jobId: string;
@@ -25632,6 +30772,22 @@ export interface components {
              */
             unmappedValues: number;
         };
+        /** @description A field matched to a column. */
+        MappedColumn: {
+            /**
+             * Format: int32
+             * @description 1-based column.
+             */
+            column: number;
+            /** @description Column letter. */
+            columnLetter: string;
+            /** @description Field name. */
+            field: string;
+            /** @description The combined header text that matched. */
+            headerText: string;
+            /** @description Parent or child. */
+            level: components["schemas"]["ImportLevel"];
+        };
         /** @description Підсумок одного мапінгу. */
         MappedFieldPreview: {
             /** @description Спосіб згортання точок періоду. */
@@ -25745,6 +30901,14 @@ export interface components {
             /** @description Текст для нечислових атрибутів. */
             valueString: null | string;
         };
+        /** @description Тіло позначки «прочитано». */
+        MarkTableDiscussionReadRequest: {
+            /**
+             * Format: int64
+             * @description Ідентифікатор останнього побаченого повідомлення (поріг; не зменшує наявну позначку).
+             */
+            lastReadMessageId: number;
+        };
         /** @description Зміна календарної конвенції (ФВ-16.11). */
         MethodologyCalendarChange: {
             /** @description Конвенція нової. */
@@ -25753,6 +30917,30 @@ export interface components {
             before: components["schemas"]["CalendarMode"];
             /** @description Чи змінилася конвенція. */
             isChanged?: boolean;
+        };
+        /** @description Категорія констант версії (план CONST-CATEGORY). */
+        MethodologyCategoryDto: {
+            /** @description Код — значення `category` константи і ключ, який повертає правило категорії. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Скільки рядків констант версії стоїть під цією категорією.
+             */
+            constantCount: number;
+            /** @description Опис; `null` — немає. */
+            description: null | string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description Виведена з ужитку: нова константа її не вибирає. */
+            isRetired: boolean;
+            /**
+             * Format: int32
+             * @description Порядок у переліку.
+             */
+            ordinal: number;
         };
         /** @description Правило категорії константи версії (L-2, `calc.CategoryRule`): вираз «рядок → ключ категорії». */
         MethodologyCategoryRuleDto: {
@@ -25782,6 +30970,11 @@ export interface components {
             kind: components["schemas"]["ConstantKind"];
             /** @description Звідки взято значення. */
             source: null | string;
+            /**
+             * Format: int64
+             * @description Речовина звуження (запис довідника); `null` — спільна. Код речовини — з `GET …/substances` версії.
+             */
+            substanceEntryId?: null | number;
             /** @description Текст або сирий рядок джерела. */
             textValue: null | string;
             /**
@@ -25805,6 +30998,8 @@ export interface components {
              */
             value: null | string;
         };
+        /** @enum {unknown} */
+        MethodologyConstantSort: "Code" | "Category" | "ValidFrom" | null;
         /** @description Покриття версії: які виходи куди лягають і які колонки чекають на вихід (`BE-25`). */
         MethodologyCoverageDto: {
             /**
@@ -25907,12 +31102,24 @@ export interface components {
             /** @description Версії з їхніми вікнами дії. */
             versions: components["schemas"]["MethodologyVersionDto"][];
         };
+        /** @description Елемент похідного списку аргументів формули (лише читання). */
+        MethodologyFormulaArgumentDto: {
+            /** @description Маркер `?` у виразі (`@A?`) — аргумент без комірки дає `null`. */
+            isOptional: boolean;
+            /** @description `Argument` (`@A`), `Constant` (`CST.K`) чи `Formula` (`!F`). */
+            kind: components["schemas"]["DeclaredArgumentKind"];
+            /** @description Ім'я як у виразі, без префікса й маркера. */
+            name: string;
+            /** @description Запис, як у `argumentsCsv`: `@A?`, `CST.K`, `!F`. */
+            text: string;
+        };
         /** @description Формула версії методології, як її бачить конфігуратор. */
         MethodologyFormulaDto: {
-            /** @description Оголошені аргументи — `;`-список, як у `FInfo_Arguments`;
-             *     `null` — списку немає. ⛔ Не те саме, що порожній рядок: `null`
-             *     глушить звірку пастки 2 (`ECR-CALC-0432`), а порожній оголошує «нуль
-             *     аргументів», і тоді будь-який токен у виразі є порушенням. */
+            /** @description Похідний список структуровано (лише читання): вид, ім'я, маркер «необов'язковий» — у порядку першої появи у виразі. */
+            arguments: components["schemas"]["MethodologyFormulaArgumentDto"][];
+            /** @description ✎ 2026-11-02 (похідні аргументи): ПОХІДНИЙ від Expression`;`-список
+             *     (`@A?;CST.K;!F`), лише для читання. Той самий текст, що лежить у `calc.MethodologyFormula.ArgumentsCsv`;
+             *     рантайм бере з нього маркери `?` (об'єднання по версії). */
             argumentsCsv: null | string;
             /** @description Код — те, на що посилається `!Name`. */
             code: string;
@@ -26470,6 +31677,11 @@ export interface components {
             backupConfirmation?: null | string;
             /** @description `true` — лише звіт, без змін (завжди синхронно: швидкий). */
             dryRun: boolean;
+            /**
+             * Format: int32
+             * @description Період X (`Рік*100+№`) для `Range = FromMonth`; для `WholeProject` ігнорується.
+             */
+            fromPeriodKey?: null | number;
             /** @description Необов'язкові мапи записів Lookup по полях ШАПКИ: `[{target:{kind:"header",code}, mappings:[{from,to}]}]`, де
              *     `from` — запис вихідного довідника, `to` — запису довідника цільової версії. Діють лише для поля, чий
              *     довідник між версіями змінився (інакше ціль у звіті має `applied = false`). Повна мапа (кожне вжите значення
@@ -26479,6 +31691,7 @@ export interface components {
              *     не підтримуються (`422 migrateLookupRemapInvalid`). Перерахунок не ставиться. Без поля поведінка незмінна. */
             lookupRemaps?: null | components["schemas"]["VersionMigrationLookupRemap"][];
             mode: null | components["schemas"]["VersionMigrationMode"];
+            range?: null | components["schemas"]["VersionMigrationRange"];
             /** @description Необов'язкова мапа «було → стало» кодів таблиць (і колонок) для структури, перейменованої в цільовій версії
              *     (напр. `T9a_03 → T9a_17a`): без неї таблиця з новим кодом — «нова», а стара — «зникла», і введені в неї
              *     значення блокують перенос (`dataLoss`). Діє лише там, де відповідника за кодом немає; суперечність парі
@@ -26499,6 +31712,23 @@ export interface components {
             documentId: number;
             /** @description Задача: `GET /jobs/{jobId}` дає прогрес і підсумок. */
             jobId: string;
+        };
+        /** @enum {unknown} */
+        MissingAction: "Skip" | "Create" | null;
+        /** @description A referenced code the target registry does not have. */
+        MissingReference: {
+            /** @description Normalised code. */
+            code: string;
+            /** @description Group-row label above (the site), for "create under". */
+            groupLabel: null | string;
+            /** @description Reference kind. */
+            kind: string;
+            resolved: null | components["schemas"]["MissingAction"];
+            /**
+             * Format: int32
+             * @description First Excel row.
+             */
+            row: number;
         };
         /** @description Статус місячної колонки (D-441): стан аркуша за період місяця колонки. */
         MonthColumnStatusDto: {
@@ -26521,6 +31751,41 @@ export interface components {
              * @description Таблиця.
              */
             tableDefId: number;
+        };
+        /** @description Move an entry (re-parent and/or re-level and/or re-order). */
+        MoveRegistryEntryRequest: {
+            /**
+             * Format: int64
+             * @description Place before this sibling; `null` — last among siblings.
+             */
+            beforeEntryId: null | number;
+            /** @description New level; `null` — keep the current one. */
+            levelCode: null | string;
+            /**
+             * Format: int64
+             * @description New parent; `null` — make it a root.
+             */
+            parentEntryId: null | number;
+        };
+        /** @description Result of a move. */
+        MoveRegistryEntryResponse: {
+            /**
+             * Format: int64
+             * @description Entry id.
+             */
+            id: number;
+            /** @description Level after the move. */
+            levelCode: string;
+            /**
+             * Format: int32
+             * @description Ordinal among siblings after the move.
+             */
+            ordinal: number;
+            /**
+             * Format: int64
+             * @description Parent after the move.
+             */
+            parentEntryId: null | number;
         };
         /** @description Моя задача як виконавця або очікування валідації як власника. */
         MyEditAssignmentDto: {
@@ -26570,6 +31835,143 @@ export interface components {
             assignedToMe: components["schemas"]["MyEditAssignmentDto"][];
             /** @description Усі виконавці заповнили — чекає валідації мною. */
             awaitingMyValidation: components["schemas"]["MyEditAssignmentDto"][];
+        };
+        /** @description Result of `POST /api/v1/nae-tree/af-import`. */
+        NaeAfImportReport: {
+            /** @description Something was written (never for a dry run or when there was nothing new). */
+            applied: boolean;
+            /** @description The request was a dry run. */
+            dryRun: boolean;
+            /**
+             * Format: int32
+             * @description AF elements read under the root.
+             */
+            elementsRead: number;
+            /** @description Findings, at most 200 (the rest is counted in Skipped). */
+            issues: components["schemas"]["NaeAfIssueDto"][];
+            /** @description Per level: created and existing nodes (levels with no nodes are present with zeros). */
+            levels: components["schemas"]["NaeAfLevelCountDto"][];
+            /** @description Target registry. */
+            registryCode: string;
+            /** @description The registry (fields, key, levels) was created by this call. */
+            registryProvisioned: boolean;
+            /**
+             * Format: int32
+             * @description Elements not loaded (see Issues).
+             */
+            skipped: number;
+            /** @description The AF listing is complete (`false` — it may have been truncated). */
+            sourceComplete: boolean;
+        };
+        /** @description One finding of the import: an element that was skipped or a rule that fired. */
+        NaeAfIssueDto: {
+            /** @description `noCode` (empty NAE code), `noRegion` (no Region attribute), `duplicateBusinessKey` (same NAE code, region and
+             *             area twice in AF), `pathFlattened` (more than two grouping levels under the area), `existingElsewhere`
+             *             (the business key already belongs to another node), `sourceIncomplete` (AF listing may be truncated). */
+            code: string;
+            /** @description Short explanation for the report (English; the UI shows its own text per `Code`). */
+            detail: string;
+            /** @description AF path of the element (or empty for a whole-source finding). */
+            path: string;
+            /** @description `warning` (loaded with a caveat) or `skipped` (not loaded). */
+            severity: string;
+        };
+        /** @description Count of nodes of one level in an import report. */
+        NaeAfLevelCountDto: {
+            /**
+             * Format: int32
+             * @description Nodes that are created (dry run: would be created).
+             */
+            create: number;
+            /**
+             * Format: int32
+             * @description Nodes that already exist and are left untouched (ECR owns the tree after the first load).
+             */
+            existing: number;
+            /** @description Level code (`REGION`, `AREA`, `SITE`, `EQUIP`, `SRC`). */
+            levelCode: string;
+        };
+        /** @description Result of `POST /api/v1/nae-tree/roots`. */
+        NaeRootResultDto: {
+            /**
+             * Format: int64
+             * @description The area node; `null` when no area was asked.
+             */
+            areaEntryId: null | number;
+            /** @description Something was created (`false` — every asked node already existed; nothing was changed). */
+            created: boolean;
+            /**
+             * Format: int64
+             * @description The region node (created or already there).
+             */
+            regionEntryId: number;
+            /** @description Registry (`NAE_TREE`). */
+            registryCode: string;
+            /** @description The registry (fields, key, levels) was created by this call. */
+            registryProvisioned: boolean;
+        };
+        /** @description Result of `POST /api/v1/nae-tree/seed-roots`. */
+        NaeSeedRootsResultDto: {
+            /** @description Region codes created as roots, in order. */
+            created: string[];
+            /** @description Registry (`NAE_TREE`). */
+            registryCode: string;
+            /** @description The registry was created by this call. */
+            registryProvisioned: boolean;
+            /** @description Registry the region list was read from (`LAND_REGION`). */
+            sourceRegistryCode: string;
+        };
+        /** @description One finding of the Excel import of the NAE tree. */
+        NaeTreeImportIssueDto: {
+            /** @description `headerNotFound`, `regionRequired`, `siteRequired`, `badCode`, `areaMismatch` (Area and On_Offshore
+             *             differ), `duplicateInFile`, `existingElsewhere` (the business key belongs to a node under another parent),
+             *             `codeTaken` (the technical code belongs to another node), `nameDiffers` (warning: the stored name differs; names are
+             *             not overwritten). */
+            code: string;
+            /** @description Template column name (`NAE code`), when the finding is about one cell. */
+            column: null | string;
+            /** @description Short explanation (English; the UI shows its own text per `Code`). */
+            detail: string;
+            /** @description Normalised NAE code of the row, when it has one. */
+            naeCode: null | string;
+            /**
+             * Format: int32
+             * @description Excel row (1-based); 0 — the whole file.
+             */
+            row: number;
+            /** @description `error` (blocks the apply) or `warning` (reported, the apply is allowed). */
+            severity: string;
+        };
+        /** @description Result of the NAE tree Excel import (analyse, preview and apply return the same shape). */
+        NaeTreeImportReportDto: {
+            /** @description Something was written (apply only; never when there was nothing new). */
+            applied: boolean;
+            /** @description No error finding (analyse: the file itself is clean; the database is not consulted). */
+            canApply: boolean;
+            /**
+             * Format: int32
+             * @description Findings beyond the limit.
+             */
+            droppedIssues: number;
+            /** @description Hash of the uploaded file. */
+            fileSha256: string;
+            /** @description Hash of the plan; pass it back to apply as `expectedFingerprint`. */
+            fingerprint: string;
+            /** @description Findings, at most 200. */
+            issues: components["schemas"]["NaeTreeImportIssueDto"][];
+            /** @description Per level: nodes to create (applied: created) and nodes already in the tree (left untouched). */
+            levels: components["schemas"]["NaeAfLevelCountDto"][];
+            /** @description Registry (`NAE_TREE`). */
+            registryCode: string;
+            /** @description The registry was created by this call (apply only). */
+            registryProvisioned: boolean;
+            /**
+             * Format: int32
+             * @description Data rows read (empty rows not counted).
+             */
+            rowsRead: number;
+            /** @description Sheet that was read. */
+            sheetName: string;
         };
         /**
          * @description Транспорт каналу сповіщень. Числа зберігаються в базі — не перенумеровувати.
@@ -26732,6 +32134,23 @@ export interface components {
          * @enum {unknown}
          */
         OutOfWindowBehavior: "Hide" | "ReadOnly" | "Warn" | "AllowWithConfirmation";
+        /** @description Stored parents of one owner a replace touches. */
+        OwnerReplace: {
+            /**
+             * Format: int32
+             * @description Child rows.
+             */
+            children: number;
+            /** @description Human label (permit number). */
+            label: null | string;
+            /** @description Owner. */
+            ownerKey: string;
+            /**
+             * Format: int32
+             * @description Parent rows.
+             */
+            parents: number;
+        };
         /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
          *     перевіряється архітектурним тестом. */
         PagedResultOfCellChangeView: {
@@ -26825,9 +32244,35 @@ export interface components {
         };
         /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
          *     перевіряється архітектурним тестом. */
+        PagedResultOfPiEventView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["PiEventView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
         PagedResultOfProjectSummary: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["ProjectSummary"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
+        PagedResultOfRawPointView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["RawPointView"][];
             /** @description Курсор наступної сторінки; `null` — кінець. */
             nextCursor: null | string;
             /**
@@ -26953,6 +32398,19 @@ export interface components {
              */
             totalCount: null | number;
         };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
+        PagedResultOfWorkflowEventView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["WorkflowEventView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
         /** @enum {unknown} */
         ParentDeletePolicy: "Restrict" | "Cascade" | null;
         /** @description Зміна однієї комірки. Три різні операції (R-B4):
@@ -26966,6 +32424,11 @@ export interface components {
              * @default false
              */
             isEmpty: boolean;
+            /** @description ✎ D-461: причина ручного значення замість формули — обов'язкова, коли комірку рахує формула, що дозволяє ручне
+             *     значення (і в користувача є право `Document.OverrideFormula`); обрізається, до 1000 символів, без керівних
+             *     символів, крім переносу рядка. Для звичайних комірок ігнорується. Видалення значення (`value: null`) у ручній
+             *     комірці повертає формулу — причина не потрібна. */
+            overrideReason?: null | string;
             /** @description Значення; `null` = стерти. */
             value: unknown;
         };
@@ -27560,6 +33023,8 @@ export interface components {
             nameL10n: {
                 [key: string]: string;
             };
+            /** @description Перші 4 чинні значення в порядку показу (для `SamePermitTable` - порожньо; `null` - попередній перегляд не передбачено). */
+            preview?: null | components["schemas"]["PermitListValueDto"][];
             /** @description Код довідника зі значеннями (для `SharedRegistry` і `TypeOnly` - прихованого); для таблиці дозволу `null`. */
             registryCode: null | string;
             /** @description `SharedRegistry`, `TypeOnly` або `SamePermitTable`. */
@@ -27639,6 +33104,12 @@ export interface components {
             updatedAt: null | string;
             /** @description Хто змінив. */
             updatedByDisplayName: null | string;
+            /**
+             * Format: int32
+             * @description У скількох документах (проєктів, що читач бачить) дозвіл обраний значенням шапки чи комірки; 0 - ніде.
+             * @default 0
+             */
+            usedInDocumentCount: number;
             /**
              * Format: date
              * @description Перший чинний день.
@@ -27909,6 +33380,13 @@ export interface components {
             updatedByDisplayName: null | string;
             /**
              * Format: int32
+             * @description У скількох документах (проєктів, документи яких читач бачить) обрано значенням шапки чи комірки бодай один дозвіл
+             *     типу; 0 — ніде (або читач не бачить жодного проєкту).
+             * @default 0
+             */
+            usedInDocumentCount: number;
+            /**
+             * Format: int32
              * @description Версія: опублікована, а для ніколи не опублікованого типу — майбутня перша.
              */
             version: number;
@@ -27978,6 +33456,319 @@ export interface components {
             instanceCount: number;
             /** @description Опубліковані таблиці з кількістю рядків; таблиць, що лише в чернетці, тут немає. */
             tables: components["schemas"]["PermitTypeTableUsageDto"][];
+            /**
+             * Format: int32
+             * @description У скількох документах (проєктів, документи яких читач бачить) обрано значенням шапки чи комірки бодай один дозвіл
+             *     типу; 0 — ніде (або читач не бачить жодного проєкту).
+             * @default 0
+             */
+            usedInDocumentCount: number;
+        };
+        /** @description «Де використано» дозвіл: документи, у яких він обраний значенням поля шапки чи колонки таблиці. Лише документи
+         *     проєктів, які читач бачить (`Document.View`); решта не рахується й не називається. */
+        PermitUsageDto: {
+            /**
+             * Format: int32
+             * @description Скільки різних документів посилаються на дозвіл (під фільтром періоду).
+             */
+            documentCount: number;
+            /** @description Місця посилань: за документом, періодом, шапка перед таблицями. */
+            items: components["schemas"]["PermitUsageItemDto"][];
+            /**
+             * Format: int32
+             * @description Скільки місць (полів шапки й комірок) посилаються на дозвіл.
+             */
+            linkCount: number;
+            /**
+             * Format: int64
+             * @description Дозвіл.
+             */
+            permitId: number;
+            /** @description `true`, якщо Items обрізано лімітом `limit`. */
+            truncated: boolean;
+        };
+        /** @description Одне місце, де дозвіл стоїть значенням: поле шапки або комірка рядка таблиці документа. */
+        PermitUsageItemDto: {
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /** @description Бізнес-ключ документа. */
+            documentKey: string;
+            /** @description Код поля шапки або колонки. */
+            fieldCode: string;
+            /** @description Підпис поля шапки або заголовок колонки мовами каталогу. */
+            fieldLabelL10n: {
+                [key: string]: string;
+            };
+            /** @description `header` або `cell` (PermitUsageKinds). */
+            kind: string;
+            /**
+             * Format: int32
+             * @description Період комірки (`YYYYMM`-подібний ключ); `null` для шапки - вона належить документу цілком.
+             */
+            periodKey: null | number;
+            /** @description Код проєкту. */
+            projectCode: string;
+            /**
+             * Format: int32
+             * @description Проєкт документа.
+             */
+            projectId: number;
+            /** @description Бізнес-ключ рядка; `null` для шапки. */
+            rowKey: null | string;
+            /**
+             * Format: int32
+             * @description Порядок рядка на екрані; `null` для шапки.
+             */
+            rowOrdinal: null | number;
+            /** @description Код аркуша; `null` для шапки. */
+            sheetCode: null | string;
+            /** @description Назва аркуша мовами каталогу; `null` для шапки. */
+            sheetNameL10n: null | {
+                [key: string]: string;
+            };
+            /** @description Код таблиці; `null` для шапки. */
+            tableCode: null | string;
+            /** @description Назва таблиці мовами каталогу; `null` для шапки. */
+            tableNameL10n: null | {
+                [key: string]: string;
+            };
+        };
+        /** @description Атрибут події: що прочитано з PI, що записав би синк, що в комірці. */
+        PiEventAttributeView: {
+            /** @description Атрибут або `$start`/`$end`/`$name`. */
+            attribute: string;
+            /** @description Хто записав комірку востаннє (`Integration`, `UserEdit`…). */
+            cellOrigin: null | string;
+            /** @description Що в комірці; `null` — порожньо чи приховано. */
+            cellValue: null | string;
+            /** @description Код колонки. */
+            columnCode: null | string;
+            /**
+             * Format: int32
+             * @description Колонка; `null` — атрибут прочитано, але не мапиться (звуження тощо).
+             */
+            columnDefId: null | number;
+            /** @description PiValueComparison; `null` — атрибут не мапиться в колонку. */
+            comparison: null | string;
+            /** @description Що записав би синк (одиниця й пояс документа); `null` — нічого. */
+            expectedValue: null | string;
+            /**
+             * Format: date-time
+             * @description Коли синк уперше прочитав це значення (UTC).
+             */
+            piChangedAt: null | string;
+            /** @description UOM джерела. */
+            piUnit: null | string;
+            /**
+             * Format: decimal
+             * @description Число з PI (одиниця джерела).
+             */
+            piValueNumeric: null | string;
+            /** @description Текст із PI (для дат — ISO UTC). */
+            piValueText: null | string;
+            /** @description Текст PI довший за сховище — показано початок. */
+            piValueTruncated: boolean;
+            /** @description PiValueReason; `null` — без причини. */
+            reason: null | string;
+            /** @description Де лежить атрибут. */
+            scope: components["schemas"]["SourceEventAttributeScope"];
+        };
+        /** @description Поле мапінгу подій. */
+        PiEventMapField: {
+            /** @description Код колонки; `null` — колонку видалено. */
+            columnCode: null | string;
+            /**
+             * Format: int32
+             * @description Колонка.
+             */
+            columnDefId: number;
+            /** @description Колонка місяця (D-465: такі поля збереження відхиляє; наявні — попередження). */
+            isMonthColumn: boolean;
+            /** @description Де лежить атрибут. */
+            scope: components["schemas"]["SourceEventAttributeScope"];
+            /** @description Атрибут або `$start`/`$end`/`$name`. */
+            sourceAttribute: string;
+        };
+        /** @description Мапінг подій. */
+        PiEventMapView: {
+            /**
+             * Format: int64
+             * @description Документ — лише якщо видимий.
+             */
+            documentId: null | number;
+            /** @description Бізнес-ключ — лише якщо видимий. */
+            documentKey: null | string;
+            /** @description Читач бачить документ (і таблицю) мапінгу. */
+            documentVisible: boolean;
+            /** @description Поля. */
+            fields: components["schemas"]["PiEventMapField"][];
+            /** @description Є поля на колонки місяця (D-465: варто прибрати). */
+            hasMonthColumnFields: boolean;
+            /** @description Діє. */
+            isActive: boolean;
+            /**
+             * Format: int32
+             * @description Мапінг.
+             */
+            mapId: number;
+            /** @description Код таблиці. */
+            tableCode: string;
+        };
+        /** @description Мапінги подій сутності для перемикача «Дані з PI → Події». */
+        PiEventMapsView: {
+            /** @description Код шаблону. */
+            code: string;
+            /** @description Підпис. */
+            displayName: null | string;
+            /** @description Мапінги (документ — лише видимий читачеві). */
+            maps: components["schemas"]["PiEventMapView"][];
+            /** @description Періоди проєктів мапінгів, що перетинають вікно, — для журналу покриття за період. */
+            periods: components["schemas"]["PiEventPeriodView"][];
+            /**
+             * Format: int32
+             * @description Сутність-шаблон.
+             */
+            sourceEntityId: number;
+        };
+        /** @description Період проєкту, що перетинає вікно. */
+        PiEventPeriodView: {
+            /** Format: date-time */
+            fromUtc: string;
+            /** Format: int32 */
+            periodKey: number;
+            state: string;
+            /** Format: date-time */
+            toUtc: string;
+        };
+        /** @description Запис журналу видалення рядка події. */
+        PiEventRemovalView: {
+            eventId: null | string;
+            eventName: null | string;
+            /** Format: date-time */
+            eventStartUtc: null | string;
+            /** Format: int32 */
+            mapId: null | number;
+            /** Format: int32 */
+            periodKey: null | number;
+            /** Format: date-time */
+            removedAt: string;
+            row: null | components["schemas"]["PiEventRowView"];
+            rowHidden: boolean;
+            runId: null | string;
+        };
+        /** @description Журнал видалень за вікно. */
+        PiEventRemovalsView: {
+            /** @description Записів більше за стелю. */
+            isTruncated: boolean;
+            /** @description Записи, новіші першими. */
+            items: components["schemas"]["PiEventRemovalView"][];
+        };
+        /** @description Рядок документа, у який лягла подія (лише для того, хто документ бачить). */
+        PiEventRowView: {
+            /** Format: int64 */
+            documentId: number;
+            documentKey: string;
+            /** Format: int32 */
+            periodKey: number;
+            rowKey: string;
+            /** Format: int64 */
+            tableInstanceId: number;
+        };
+        /** @description Подія PI з порівнянням атрибутів. */
+        PiEventView: {
+            /** @description Атрибути з порівнянням. */
+            attributes: components["schemas"]["PiEventAttributeView"][];
+            /**
+             * Format: date-time
+             * @description Кінець у поясі проєкту.
+             */
+            endLocal: null | string;
+            /**
+             * Format: date-time
+             * @description Кінець, UTC; `null` — триває.
+             */
+            endUtc: null | string;
+            /** @description ID події в PI. */
+            eventId: string;
+            /** @description Назва. */
+            eventName: null | string;
+            /**
+             * Format: date-time
+             * @description Уперше побачено.
+             */
+            firstSeenAt: string;
+            /**
+             * Format: date-time
+             * @description Востаннє повернуто джерелом.
+             */
+            lastSeenAt: string;
+            /**
+             * Format: date-time
+             * @description Останній прогін синку.
+             */
+            lastSyncAt: string;
+            /**
+             * Format: int64
+             * @description Зв'язок.
+             */
+            linkId: number;
+            /**
+             * Format: int32
+             * @description Мапінг.
+             */
+            mapId: number;
+            /**
+             * Format: int32
+             * @description Період, у який лягає початок події.
+             */
+            periodKey: null | number;
+            /** @description Первинний елемент (ключовий вигляд). */
+            primaryElement: null | string;
+            /** @description Причина на рівні події (PiValueReason). */
+            reason: null | string;
+            row: null | components["schemas"]["PiEventRowView"];
+            /** @description Рядок є, але документ читачеві не видно. */
+            rowHidden: boolean;
+            /**
+             * Format: date-time
+             * @description `Modified` події в PI.
+             */
+            sourceModifiedUtc: null | string;
+            /**
+             * Format: date-time
+             * @description Початок у поясі проєкту.
+             */
+            startLocal: string;
+            /**
+             * Format: date-time
+             * @description Початок, UTC.
+             */
+            startUtc: string;
+            /** @description Стан зв'язку. */
+            status: string;
+            /** @description Пояс проєкту. */
+            timeZoneId: string;
+        };
+        /** @description Тіло створення повідомлення. */
+        PostTableDiscussionMessageRequest: {
+            /** @description Простий текст, 1..4000 символів після нормалізації (керівні символи прибираються). */
+            body: string;
+            /**
+             * Format: uuid
+             * @description Необов'язковий GUID клієнта для безпечного повтору: повторний POST з тим самим значенням (той самий автор, документ і
+             *     таблиця) повертає ІСНУЮЧЕ повідомлення з `200`, а не створює друге; нове повідомлення — `201`.
+             */
+            clientMessageId?: null | string;
+            /** @description Згадані користувачі (до 10). Ті, хто не бачить таблицю, мовчки відкидаються. */
+            mentionUserIds?: null | number[];
+            /**
+             * Format: int32
+             * @description Період, у якому пишуть (рік*100+номер).
+             */
+            periodKey: number;
         };
         /** @description Нова ревізія презентаційного шару. */
         PresentationRevisionResponse: {
@@ -28069,6 +33860,38 @@ export interface components {
             /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Atyrau`). */
             timeZoneId: string;
         };
+        /** @description Часова шкала версій шаблону проєкту: з якого періоду яка версія діє. */
+        ProjectTemplateTimelineDto: {
+            /**
+             * Format: int32
+             * @description Чинна (остання) версія — за нею створюються НОВІ періоди.
+             */
+            currentVersionId: number;
+            /** @description Рядки шкали за зростанням початку; порожньо — проєкт має одну (чинну) версію на всі періоди. */
+            items: components["schemas"]["ProjectTemplateTimelineItemDto"][];
+            /**
+             * Format: int32
+             * @description Проєкт.
+             */
+            projectId: number;
+        };
+        /** @description Рядок часової шкали версій шаблону проєкту (RPT-STABLE Part B). */
+        ProjectTemplateTimelineItemDto: {
+            /**
+             * Format: int32
+             * @description Перший період дії версії (`Рік*100+№`).
+             */
+            fromPeriodKey: number;
+            /** @description Код шаблону. */
+            templateCode: null | string;
+            /**
+             * Format: int32
+             * @description Версія шаблону.
+             */
+            templateVersionId: number;
+            /** @description Номер версії (як у переліку документів). */
+            version: string;
+        };
         /** @description Публічні дані екрана входу. */
         PublicBootstrapResponse: {
             /** @description Увімкнені мови реєстру в порядку показу. */
@@ -28117,6 +33940,195 @@ export interface components {
              *     має бути відповідь, а не літерал `"Publish"`, однаковий для кожної
              *     публікації. */
             reason: string;
+        };
+        /** @description Стан збору сутності. */
+        RawCollectionStatus: {
+            /**
+             * Format: date-time
+             * @description Завершення останнього прогону; `null` — триває.
+             */
+            lastRunFinishedAt: null | string;
+            /**
+             * Format: int64
+             * @description Останній прогін; `null` — збору ще не було.
+             */
+            lastRunId: null | number;
+            /**
+             * Format: date-time
+             * @description Початок останнього прогону (UTC).
+             */
+            lastRunStartedAt: null | string;
+            /** @description `Running`/`Succeeded`/`Degraded`/`Failed`. */
+            lastRunStatus: null | string;
+            /**
+             * Format: date-time
+             * @description Завершення останнього успішного (`Succeeded`/`Degraded`) прогону.
+             */
+            lastSucceededAt: null | string;
+        };
+        /** @description Покриття вікна збором: що зібрано, де прогалини, коли збирали востаннє. */
+        RawCoverageView: {
+            /** @description Злиті покриті інтервали, обрізані вікном. */
+            covered: components["schemas"]["RawInterval"][];
+            /**
+             * Format: date-time
+             * @description Початок вікна.
+             */
+            fromUtc: string;
+            /** @description Прогалини вікна — часу, за який збір не відзвітував успіхом. */
+            gaps: components["schemas"]["RawInterval"][];
+            /** @description Інтервалів більше за стелю: прогалини після останнього не обчислено. */
+            isTruncated: boolean;
+            /** @description Останній прогін і останній успіх. */
+            lastCollection: components["schemas"]["RawCollectionStatus"];
+            /**
+             * Format: date-time
+             * @description Кінець вікна (виключно).
+             */
+            toUtc: string;
+        };
+        /** @description Тег сутності — поле мапінгу. */
+        RawDataTag: {
+            /** @description Згортка періоду (`Sum`, `Avg`, …); `null` — не задана. */
+            aggregation: null | string;
+            /** @description Мапінг діє; `false` — призупинений. */
+            isActive: boolean;
+            /**
+             * Format: int32
+             * @description Мапінг; `null` — тег сутності без мапінгу (сама сутність).
+             */
+            mapId: null | number;
+            /** @description Шлях атрибута в джерелі. */
+            sourcePath: string;
+            /** @description Одиниця джерела; `null` — не оголошена. */
+            sourceUnitCode: null | string;
+            /** @description Колонка документа; `null` — не матеріалізується чи колонку видалено. */
+            targetColumnCode: null | string;
+            /** @description Рядок документа; `null` — точки лишаються сирими. */
+            targetRowKey: null | string;
+        };
+        /** @description Сутність збору і її теги (`GET /sources/{id}/raw-data/tags`). */
+        RawDataTagsView: {
+            /** @description Код у джерелі. */
+            code: string;
+            /** @description Підпис; `null` — не задано. */
+            displayName: null | string;
+            /**
+             * Format: int32
+             * @description D-465: мапінгів подій (Event Frames) у сутності; більше нуля — сутність-шаблон подій, і екран показує «Події».
+             */
+            eventMapCount: number;
+            /** @description Чи сутність діє. */
+            isActive: boolean;
+            /** @description Тегів більше за стелю. */
+            isTruncated: boolean;
+            /**
+             * Format: int32
+             * @description Сутність.
+             */
+            sourceEntityId: number;
+            /** @description Теги: поля мапінгів; без мапінгів — шлях самої сутності. */
+            tags: components["schemas"]["RawDataTag"][];
+        };
+        /** @description Інтервал часу `[FromUtc, ToUtc)`. */
+        RawInterval: {
+            /**
+             * Format: date-time
+             * @description Початок.
+             */
+            fromUtc: string;
+            /**
+             * Format: date-time
+             * @description Кінець.
+             */
+            toUtc: string;
+        };
+        /** @description Точка для таблиці «Дані з PI». */
+        RawPointView: {
+            /**
+             * Format: int64
+             * @description Прогін збору, що її приніс.
+             */
+            collectionRunId: number;
+            /** @description Якість за класифікацією джерела; `null` — не повідомлена. */
+            quality: null | string;
+            /**
+             * Format: date-time
+             * @description Коли точку отримано (UTC).
+             */
+            retrievedAt: string;
+            /**
+             * Format: date-time
+             * @description Мітка часу точки (UTC).
+             */
+            timestamp: string;
+            /** @description Код одиниці джерела; `null` — не повідомлена. */
+            unitCode: null | string;
+            /**
+             * Format: decimal
+             * @description Число в одиниці ДЖЕРЕЛА (ФВ-16.10); конверсія — лише при записі в документ.
+             */
+            valueNumeric: null | string;
+            /** @description Текст для нечислових атрибутів. */
+            valueString: null | string;
+        };
+        /** @description Кошик графіка. */
+        RawSeriesBucket: {
+            /**
+             * Format: decimal
+             * @description Середнє арифметичне числових.
+             */
+            avg: null | string;
+            /**
+             * Format: decimal
+             * @description Максимум числових.
+             */
+            max: null | string;
+            /**
+             * Format: decimal
+             * @description Мінімум числових; `null` — числових немає.
+             */
+            min: null | string;
+            /**
+             * Format: int64
+             * @description Усіх точок.
+             */
+            points: number;
+            /**
+             * Format: date-time
+             * @description Початок кошика.
+             */
+            startUtc: string;
+        };
+        /** @description Згорнутий ряд для графіка: не більше заданого числа кошиків незалежно від довжини вікна. */
+        RawSeriesView: {
+            /**
+             * Format: int64
+             * @description Ширина кошика.
+             */
+            bucketSeconds: number;
+            /** @description Непорожні кошики за зростанням часу. */
+            buckets: components["schemas"]["RawSeriesBucket"][];
+            /**
+             * Format: date-time
+             * @description Початок вікна.
+             */
+            fromUtc: string;
+            /**
+             * Format: int64
+             * @description З них числових — лише вони на графіку.
+             */
+            numericPoints: number;
+            /**
+             * Format: date-time
+             * @description Кінець вікна (виключно).
+             */
+            toUtc: string;
+            /**
+             * Format: int64
+             * @description Усіх точок у вікні.
+             */
+            totalPoints: number;
         };
         /** @description Запит на перерахунок документа (Q-331). */
         RecalculateDocumentRequest: {
@@ -28224,6 +34236,11 @@ export interface components {
             periodKey: number;
             /** @description Причина; обов'язкова. */
             reason: string;
+            /**
+             * Format: int64
+             * @description RS: копія аркуша; `null` — оригінал.
+             */
+            sheetCopyId?: null | number;
             /**
              * Format: int32
              * @description Аркуш.
@@ -28515,6 +34532,8 @@ export interface components {
              * @description Ідентифікатор.
              */
             id: number;
+            /** @description Level code in a hierarchical registry; `null` in a flat one. */
+            levelCode?: null | string;
             /**
              * Format: int64
              * @description Батьківський запис; `null` — корінь.
@@ -28677,6 +34696,52 @@ export interface components {
              *     (`dryRun`) правил не виконує: воно нічого не записує. */
             warnings?: components["schemas"]["RegistryRuleViolationDto"][];
         };
+        /** @description One place where a registry entry is used (the "where used" panel of the NAE tree). */
+        RegistryEntryReferenceDto: {
+            /** @description `permit` (the only kind today; others may follow). */
+            kind: string;
+            /**
+             * Format: int64
+             * @description Permit header entry id.
+             */
+            permitId: number;
+            /** @description Permit number as shown to the user. */
+            permitNumber: string;
+            /** @description Permit type code. */
+            permitTypeCode: string;
+            /**
+             * Format: int32
+             * @description Substances limited for the entry in this permit.
+             */
+            substanceCount: number;
+            /**
+             * Format: date
+             * @description First valid day of the permit.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description First NOT valid day of the permit (exclusive).
+             */
+            validTo: null | string;
+        };
+        /** @description Where a registry entry is used. */
+        RegistryEntryReferencesDto: {
+            /**
+             * Format: int64
+             * @description Entry.
+             */
+            entryId: number;
+            /** @description Uses, permit number then id; empty while no permit table points at the entry. */
+            items: components["schemas"]["RegistryEntryReferenceDto"][];
+            /** @description Registry code. */
+            registryCode: string;
+            /**
+             * Format: int32
+             * @description Number of uses.
+             */
+            total: number;
+        };
         /** @description Створення або оновлення запису довідника. */
         RegistryEntryUpsertDto: {
             /** @description Стабільний код; не змінюється при перейменуванні (`ФВ-8.8`). */
@@ -28688,6 +34753,9 @@ export interface components {
              * @description `null` — створення нового запису; інакше — оновлення наявного.
              */
             id: null | number;
+            /** @description Level code in a hierarchical registry (required for a new entry there, ignored in a flat registry);
+             *     `null` on update keeps the current level. */
+            levelCode?: null | string;
             /**
              * Format: int64
              * @description Батьківський запис в ієрархії; `null` — корінь.
@@ -28750,11 +34818,22 @@ export interface components {
              * @description Ідентифікатор поля.
              */
             id: number;
+            /** @description Значення веде сервер, а не користувач (НАЕ: `RegionCode`/`AreaCode` виводяться з предків, `AfPath` пише
+             *     завантаження з AF); введене в запиті ігнорується. `null` — відповідь, що ознаки не рахує (не опис довідника); опис дає її завжди. */
+            isReadOnly?: null | boolean;
             /** @description Обов'язковість. */
             isRequired: boolean;
             /** @description Чи можна звужувати доступ за цим полем. Саме ці поля бере
              *     `RoleAssignment.ScopeJson`; решта для звуження недоступна. */
             isScopeField: boolean;
+            /** @description Код того самого рівня; `null` — поле всіх рівнів (або читач без рівнів). */
+            levelCode?: null | string;
+            /**
+             * Format: int32
+             * @description Рівень ієрархічного довідника, якому належить поле (типи вузлів НАЕ, 03.11): форма вузла показує лише поля свого рівня і
+             *     поля всіх рівнів; `null` — поле всіх рівнів.
+             */
+            levelId?: null | number;
             /**
              * Format: int32
              * @description Довідник-джерело для полів-посилань.
@@ -28783,6 +34862,10 @@ export interface components {
             isKey: boolean;
             /** @description Обов'язковість. */
             isRequired: boolean;
+            /** @description Рівень ієрархічного довідника, якому належить поле (типи вузлів НАЕ, 03.11): код рівня — прив'язати; порожній рядок —
+             *     поле всіх рівнів; `null` — без змін (клієнт, що про рівні не знає, прив'язку не знімає; нове поле — усі рівні).
+             *     Обов'язковість прив'язаного поля діє лише для записів його рівня. */
+            levelCode?: null | string;
             /**
              * Format: int32
              * @description Довідник-джерело; у наявного змінюється чи знімається (`null`), лише поки жодне значення поля не вказує на запис (ФВ-8.12).
@@ -28802,6 +34885,20 @@ export interface components {
              * @description Одиниця значення.
              */
             unitId: null | number;
+        };
+        /** @description Hierarchy settings of a registry. */
+        RegistryHierarchyDto: {
+            /** @description Entries form a tree with declared levels. */
+            isHierarchical: boolean;
+            /** @description Levels ordered by ordinal (empty for a flat registry). */
+            levels: components["schemas"]["RegistryLevelDto"][];
+            /**
+             * Format: int32
+             * @description Hard limit on the number of levels (and so on the tree depth).
+             */
+            maxDepth: number;
+            /** @description Registry code. */
+            registryCode: string;
         };
         /** @description Запис історії довідника (`ФВ-8.12`). */
         RegistryHistoryEntryDto: {
@@ -28856,6 +34953,42 @@ export interface components {
             total: number;
             /** @description `true` — вибірка вперлась у стелю, реальних документів більше. */
             truncated: boolean;
+        };
+        /** @description What a preview shows. */
+        RegistryImportPreview: {
+            canApply: boolean;
+            diff: components["schemas"]["ImportDiffCounts"];
+            /** Format: int32 */
+            droppedIssues: number;
+            fingerprint: string;
+            groups: components["schemas"]["ImportGroupRow"][];
+            header: null | components["schemas"]["ImportHeaderReport"];
+            issues: components["schemas"]["ImportIssue"][];
+            missing: components["schemas"]["MissingReference"][];
+            replace: components["schemas"]["ReplaceScope"];
+            stats: components["schemas"]["ImportStats"];
+        };
+        /** @description Layout and mapping of an Excel file onto a two-level target (parent rows with child rows),
+         *     stored as `cfg.RegistryImportProfile.SpecJson` (FEATURE-REGISTRY-TABLES 4.6, NAE/permits plan N4). */
+        RegistryImportSpec: {
+            /** @description Name of the field whose filled cell starts a child row. */
+            childKeyField?: string;
+            /**
+             * Format: int32
+             * @description Explicit first data row; `null` - right after the header (and the column-number row).
+             */
+            dataStartRow?: null | number;
+            /** @description Field mapping. */
+            fields?: components["schemas"]["ImportFieldSpec"][];
+            groupRows?: null | components["schemas"]["GroupRowSpec"];
+            /** @description Header block position; auto-detected by default. */
+            header?: components["schemas"]["HeaderSpec"];
+            /** @description Texts treated as "no value" for numbers and dates (compared folded); `null` - the defaults. */
+            naMarkers?: null | string[];
+            /** @description Name of the field whose filled cell starts a new parent. */
+            parentKeyField?: string;
+            /** @description Worksheet name; `null` - the first worksheet. */
+            sheet?: null | string;
         };
         /** @description Запит живої перевірки дублікатів ключа до збереження (§4.5). */
         RegistryKeyCheckRequest: {
@@ -28938,6 +35071,44 @@ export interface components {
             isPrimary: boolean;
             /** @description Назва мовами каталогу; змінюється. */
             nameL10n: components["schemas"]["LocalizedText"];
+        };
+        /** @description One declared level of a hierarchical registry (NAE plan N1). */
+        RegistryLevelDto: {
+            /** @description A node of this level may sit under a node of the same level (NAE: a site inside a site); the server always fills it (nullable only to keep older clients' fixtures valid). */
+            allowsSelfNesting?: null | boolean;
+            /** @description Level code, unique within the registry. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Live entries placed on this level.
+             */
+            entryCount: number;
+            /**
+             * Format: int32
+             * @description Level id (stable while the level code is kept).
+             */
+            id: number;
+            /** @description A node may skip this level (child on a deeper level than `parent + 1`). */
+            isOptional: boolean;
+            /** @description Level name, all languages. */
+            name: components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description 1-based depth: roots sit on the lowest ordinal present on their path.
+             */
+            ordinal: number;
+        };
+        /** @description Level in a save request; its position in the list is its ordinal. */
+        RegistryLevelInput: {
+            /** @description A node of this level may sit under a node of the same level; `null` — unchanged for an existing level, `false` for
+             *     a new one (a client that does not know the flag does not switch it off). */
+            allowsSelfNesting?: null | boolean;
+            /** @description Level code (EcrCode); an existing code keeps the level id. */
+            code: string;
+            /** @description A node may skip this level. */
+            isOptional: boolean;
+            /** @description Name; `en` is required. */
+            name: components["schemas"]["LocalizedText"];
         };
         /** @description Мапінг зовнішнього поля на поле довідника. */
         RegistryMappingDto: {
@@ -29125,12 +35296,81 @@ export interface components {
             /** @description Назва мовами каталогу. */
             nameL10n: components["schemas"]["LocalizedText"];
         };
+        /** @description The tree of a hierarchical registry. */
+        RegistryTreeDto: {
+            /**
+             * Format: int32
+             * @description Registry data revision (cache key).
+             */
+            dataRevision: number;
+            /** @description Registry is hierarchical. */
+            isHierarchical: boolean;
+            /** @description Levels by ordinal. */
+            levels: components["schemas"]["RegistryLevelDto"][];
+            /** @description Nodes ordered by (parent, ordinal, code). */
+            nodes: components["schemas"]["RegistryTreeNodeDto"][];
+            /** @description Registry code. */
+            registryCode: string;
+        };
+        /** @description One node of the tree (flat list; the client assembles the tree by `ParentEntryId`). */
+        RegistryTreeNodeDto: {
+            /**
+             * Format: int32
+             * @description Live direct children (all, regardless of the filter).
+             */
+            childCount: number;
+            /** @description Entry code. */
+            code: string;
+            /** @description Name in the reader's language. */
+            display: string;
+            /**
+             * Format: int64
+             * @description Entry id.
+             */
+            id: number;
+            /** @description Entry is switched on. */
+            isActive: boolean;
+            /** @description The node itself matches the `q` filter (ancestors of matches are included, unmarked). */
+            isMatch: boolean;
+            /** @description Level code; `null` for an entry that has no level yet. */
+            levelCode: null | string;
+            /** @description Value of the string field `NaeCode` when the registry has one and the node has a value (NAE plan N2: sources render
+             *     as `NaeCode · name`); `null` otherwise. */
+            naeCode?: null | string;
+            /**
+             * Format: int32
+             * @description Position among siblings.
+             */
+            ordinal: number;
+            /**
+             * Format: int64
+             * @description Parent; `null` for a root.
+             */
+            parentEntryId: null | number;
+            /**
+             * Format: date
+             * @description First valid day.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description First NOT valid day (exclusive).
+             */
+            validTo: null | string;
+        };
         /** @description Новий код ролі — для перейменування і для клона. */
         RenameRoleRequest: {
             /** @description Код. */
             code: string;
             /** @description Назва мовами каталогу; без неї перейменування лишає чинну. */
             nameL10n?: null | {
+                [key: string]: string;
+            };
+        };
+        /** @description Нова назва групи аркуша (оригінал і копії). */
+        RenameSheetGroupRequest: {
+            /** @description Назва за мовами — така сама форма, як `SaveSheetDefRequest.NameL10n`. */
+            nameL10n: {
                 [key: string]: string;
             };
         };
@@ -29158,6 +35398,11 @@ export interface components {
             periodKey: number;
             /** @description Причина; обов'язкова. */
             reason: string;
+            /**
+             * Format: int64
+             * @description RS: копія аркуша; `null` — оригінал.
+             */
+            sheetCopyId?: null | number;
             /**
              * Format: int32
              * @description Аркуш.
@@ -29232,6 +35477,15 @@ export interface components {
             rules: components["schemas"]["PermitTypeRuleDto"][];
             /** @description Повний склад таблиць після правки. */
             tables: components["schemas"]["PermitTypeTableDto"][];
+        };
+        /** @description What the apply will replace; shown BEFORE it (legacy semantics with an explicit confirmation). */
+        ReplaceScope: {
+            /** @description Other owners are touched: the apply needs their keys in IReadOnlyList&lt;string&gt;? ImportRequest.ConfirmedOtherOwners. */
+            confirmationRequired: boolean;
+            /** @description Rows of OTHER owners for the same keys (superseded), per owner. */
+            otherOwners: components["schemas"]["OwnerReplace"][];
+            /** @description The owner's own rows in the bucket (all of them are replaced). */
+            thisOwner: components["schemas"]["OwnerReplace"];
         };
         /** @description Запит на заміну набору ролей користувача. */
         ReplaceUserRolesRequest: {
@@ -29482,6 +35736,26 @@ export interface components {
         ResourceKind: "Project" | "Sheet" | "Table" | "Column" | "Registry";
         /** @enum {unknown} */
         ResultsStaleUndeterminedReason: "PartiallyHidden" | null;
+        /** @description Retire a node (soft: closes the validity window, never deletes). */
+        RetireRegistryEntryRequest: {
+            /** @description Retire the whole live subtree; without it a node with live children is refused. */
+            cascade: boolean;
+            /**
+             * Format: date
+             * @description First day the node is NOT valid (exclusive); `null` — today.
+             */
+            on: null | string;
+        };
+        /** @description Result of a retire. */
+        RetireRegistryEntryResponse: {
+            /**
+             * Format: int32
+             * @description Document rows flagged as orphaned by the closed windows.
+             */
+            affectedRows: number;
+            /** @description Entries whose window was closed (node first, then descendants). */
+            retiredIds: number[];
+        };
         /** @description Тіло повернення на доопрацювання. */
         ReturnEditAssignmentRequest: {
             /** @description Версія передачі, яку бачив власник. */
@@ -30073,6 +36347,29 @@ export interface components {
              */
             ordinal: null | number;
         };
+        /** @description Body of `PUT /api/v1/air-limits/import-profiles/{code}` (create or replace). */
+        SaveImportProfileRequest: {
+            /** @description Name by language. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /** @description Token read with the profile; `null` when the profile is new. */
+            rowVersion: null | string;
+            /** @description The specification (validated; an invalid one is `422 regSpecInvalid`). */
+            spec: components["schemas"]["RegistryImportSpec"];
+        };
+        /** @description Запит на запис категорії переліку версії-чернетки (план CONST-CATEGORY). */
+        SaveMethodologyCategoryRequest: {
+            /** @description Опис для методолога; `null` — зняти. До 400 символів. */
+            description: null | string;
+            /** @description Вивести з ужитку; `null` — не змінювати. Категорію з константами — 409. */
+            isRetired: null | boolean;
+            /**
+             * Format: int32
+             * @description Порядок у переліку; `null` — нова в кінець, наявна не зсувається.
+             */
+            ordinal: null | number;
+        };
         /** @description Правило категорії константи версії (L-2): вираз діалекту Methodology. */
         SaveMethodologyCategoryRuleRequest: {
             /** @description Вираз, що з рядка документа дає ключ категорії (текст). */
@@ -30119,14 +36416,11 @@ export interface components {
         };
         /** @description Запит на запис формули версії-чернетки. */
         SaveMethodologyFormulaRequest: {
-            /** @description Оголошені аргументи — `;`-список, як у `FInfo_Arguments`;
-             *     `null` — списку немає. ⛔ Це **джерело істини про аргументи**, а не
-             *     текст виразу (директива ПК-1 №05 §7, пастка 2): збірка підставляє рівно
-             *     перелічене, і токен поза списком у вираз не потрапляє — формула рахується з
-             *     невизначеним параметром і повертає правдоподібне число, а не помилку.
-             *     ⚠ `null` і порожній рядок — різні стани: перший глушить звірку
-             *     (`ECR-CALC-0432`), другий оголошує «нуль аргументів». */
-            argumentsCsv: null | string;
+            /** @description ⚠ ЗАСТАРІЛЕ (похідні аргументи, 2026-11-02; приймається ОДИН реліз, далі — прибрати з запиту). Список
+             *     аргументів більше не вводиться: відповідь несе ПОХІДНИЙ від виразу `argumentsCsv`/`arguments`.
+             *     Із цього поля беруться лише маркери `Name?` і переносяться у вираз як `@Name?`; решта ігнорується.
+             *     Необов'язковий аргумент пишеться прямо у виразі: `@Land_Measure_RunningHours?`. */
+            argumentsCsv?: null | string;
             /** @description Вираз діалекту методологій. */
             expression: string;
             /**
@@ -30296,6 +36590,13 @@ export interface components {
             /** @description Повний перелік правил після правки. */
             rules: components["schemas"]["RegistryRuleSaveDto"][];
         };
+        /** @description Save hierarchy settings: all-or-nothing replacement of the level list. */
+        SaveRegistryHierarchyRequest: {
+            /** @description `false` is accepted only when no entry has a level. */
+            isHierarchical: boolean;
+            /** @description 1..`MaxDepth` levels when hierarchical; empty otherwise. */
+            levels: components["schemas"]["RegistryLevelInput"][];
+        };
         /** @description Налаштування рядка фіксованої таблиці чернетки (`W5.2`). */
         SaveRowDefRequest: {
             /** @description Заборона ручного вводу. */
@@ -30321,6 +36622,9 @@ export interface components {
         };
         /** @description Налаштування аркуша чернетки (`ФВ-2.1`). */
         SaveSheetDefRequest: {
+            /** @description RS: аркуш можна копіювати в документі. `null` — не змінювати (новий аркуш — ні); так старий клієнт, що поля не знає,
+             *     не скидає позначку при збереженні. Зняття позначки наявних копій не видаляє. */
+            isCopyable?: null | boolean;
             /** @description Чи обов'язковий аркуш для складу документа. */
             isMandatory: boolean;
             /** @description Видимість аркуша. */
@@ -30507,6 +36811,16 @@ export interface components {
             /** @description Причина закріплення; потрапляє в аудит. */
             reason: null | string;
         };
+        /** @description ✎ D-461: тіло `PUT …/formulas/{formulaId}/manual-override`. */
+        SetFormulaManualOverrideRequest: {
+            /** @description Дозволити ручне значення. */
+            allow: boolean;
+            /**
+             * @description `true` — нічого не змінювати, лише порахувати наявні ручні значення.
+             * @default false
+             */
+            dryRun: boolean;
+        };
         /** @description Запит на зміну режимів обчислення версії-чернетки. */
         SetMethodologyModesRequest: {
             /** @description Джерело тривалості періоду (ФВ-16.11). */
@@ -30558,6 +36872,123 @@ export interface components {
              */
             to: null | string;
         };
+        /** @description Рядок журналу дій на аркуші: правка комірки (людини), додавання/видалення рядка або дія робочого процесу. */
+        SheetActivityItem: {
+            /** @description Процес: `Submit`, `Approve`, `ApproveStep`, `Reject`, `Reopen`, `Recall`;
+             *     рядок: `RowAdded`, `RowDeleted`. */
+            action: null | string;
+            /**
+             * Format: date-time
+             * @description Момент дії, UTC.
+             */
+            at: string;
+            /** @description Ім'я виконавця; `system` — системний перехід; зниклий користувач — `#id`. */
+            byDisplayName: string;
+            /** @description Лише правка: код колонки. */
+            columnCode: null | string;
+            /** @description Лише правка: тип колонки (для показу значення за правилом показу). */
+            columnDataType: null | string;
+            /**
+             * Format: int32
+             * @description Лише правка: колонка.
+             */
+            columnDefId: null | number;
+            columnHeaderL10n: null | components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Лише правка: масштаб колонки — значення показується з НЕ МЕНШЕ стількома знаками після коми, як у сітці (U-05);
+             *     `null` — масштабу немає.
+             */
+            columnScale?: null | number;
+            /** @description Лише процес: стан до. */
+            fromState: null | string;
+            /** @description `CellEdit`, `RowChange` або `Workflow` (SheetActivityKinds). */
+            kind: string;
+            /** @description Лише правка: значення після. */
+            newValue: null | string;
+            /** @description Лише правка: значення до. */
+            oldValue: null | string;
+            /** @description Правка й рядок: `UserEdit`, `Import`, `ImportOverwrite`, `ApproverEdit`. */
+            origin: null | string;
+            /**
+             * Format: int32
+             * @description Звітний період.
+             */
+            periodKey: number;
+            /** @description Лише процес: коментар (причина відхилення, повернення, відкликання); звичайний текст. */
+            reason: null | string;
+            /** @description Правка й рядок: ключ рядка. */
+            rowKey: null | string;
+            rowLabelL10n: null | components["schemas"]["LocalizedText"];
+            /** @description Правка й рядок: код таблиці. */
+            tableCode: null | string;
+            tableNameL10n: null | components["schemas"]["LocalizedText"];
+            /** @description Лише процес: стан після. */
+            toState: null | string;
+        };
+        /** @description Сторінка журналу дій аркуша. */
+        SheetActivityPage: {
+            /** @description Рядки, найновіші перші. */
+            items: components["schemas"]["SheetActivityItem"][];
+            /** @description Непрозорий курсор наступної сторінки; `null` — далі нічого немає. */
+            nextCursor: null | string;
+        };
+        /** @description Таблиця аркуша, дані якої змінив хтось інший після маркера. */
+        SheetChangedTableDto: {
+            /** @description Код таблиці (стабільний між версіями шаблону). */
+            tableCode: string;
+            /**
+             * Format: int64
+             * @description Екземпляр таблиці за період — той, за яким клієнт читає зріз.
+             */
+            tableInstanceId: number;
+        };
+        /** @description Відповідь опитування змін аркуша (живе оновлення сітки). */
+        SheetChangesDto: {
+            /** @description Після `since` дані видимих таблиць аркуша змінив ХТОСЬ ІНШИЙ (людина, імпорт, інтеграція, дозвіл; не сам
+             *     викликач і не перерахунок як такий). Власні записи викликача маркер просто пересувають. */
+            changed: boolean;
+            /** @description Видимі таблиці з чужими змінами (і перерахованими слідом за ними); порожньо, коли `changed = false`.
+             *     Схована від викликача таблиця сюди не потрапляє ніколи. */
+            changedTables: components["schemas"]["SheetChangedTableDto"][];
+            /**
+             * Format: date-time
+             * @description Час найсвіжішої чужої зміни (UTC); `null` — невідомий.
+             */
+            lastChangedAt: null | string;
+            /** @description Його ім'я для відображення; `null` — невідомий чи системний запис. */
+            lastChangedBy: null | string;
+            /**
+             * Format: int32
+             * @description Автор найсвіжішої чужої зміни; `null` — невідомий (зміна без журналу значень).
+             */
+            lastChangedByUserId: null | number;
+            /** @description Непрозорий маркер; наступне опитування передає його в `since`. Без `since` (перше опитування) — лише
+             *     маркер, `changed = false`. */
+            marker: string;
+            /** @description ✎ LIVE-STATUS: поточний стан погодження аркуша за період (`Draft`, якщо подань не було). */
+            sheetStatus: components["schemas"]["DocumentStatus"];
+            /** @description Після `since` стан погодження аркуша змінився (будь-ким, і самим викликачем теж — сторінка іншої вкладки має
+             *     оновитися). Окремо від `changed` (дані): клієнт розрізняє зміну стану й зміну комірок. */
+            statusChanged: boolean;
+            /** @description Ревізія стану погодження (непрозора, hex): змінюється на КОЖНОМУ переході — подання, відхилення, затвердження й
+             *     крок маршруту (стан той самий, кнопки — інші), повернення в роботу, відкликання. Інша ревізія — перечитати стан
+             *     аркуша (банер, кнопки дій); дані комірок від цього не змінюються. */
+            statusRevision: string;
+        };
+        /** @description Результат додавання копії аркуша. */
+        SheetCopyCreated: {
+            /**
+             * Format: int16
+             * @description Номер у групі (2…): назва копії — «&lt;Назва&gt; N».
+             */
+            ordinal: number;
+            /**
+             * Format: int64
+             * @description Id копії (`doc.DocumentSheet.Id`) — він же `sheetCopyId` у даних копії.
+             */
+            sheetCopyId: number;
+        };
         SheetDto: {
             /** @description Код — ідентичність аркуша й адреса в `PUT …/sheets/{code}`. */
             code: string;
@@ -30566,6 +36997,11 @@ export interface components {
              * @description Ідентифікатор.
              */
             id: number;
+            /**
+             * @description RS: аркуш можна копіювати в документі («Додати копію»); за замовчуванням ні.
+             * @default false
+             */
+            isCopyable: boolean;
             /** @description Чи обов'язковий аркуш для складу документа. */
             isMandatory: boolean;
             /** @description Видимість; презентаційне поле (`ФВ-7.2`). */
@@ -30607,6 +37043,11 @@ export interface components {
              * @description Період.
              */
             periodKey: number;
+            /**
+             * Format: int64
+             * @description RS: копія аркуша (`sheetCopyId` з `GET …/tables`); `null` — оригінал.
+             */
+            sheetCopyId?: null | number;
             /**
              * Format: int32
              * @description Аркуш.
@@ -31067,6 +37508,10 @@ export interface components {
             id: number;
             /** @description Чи діє синхронізація за мапінгом. */
             isActive: boolean;
+            /** @description D-465: Id полів, що цілять у колонку місяця (подія EF — окремий рядок; місячні підсумки — формулами шаблону). Нове
+             *     таке поле збереження відхиляє; наявні лише позначаються попередженням. `null` — не обчислювалось (відповідь
+             *     на зміну). */
+            monthColumnFieldIds?: null | number[];
             /** @description Версія для оптимістичного блокування (hex, AN-40 / L9-06): клієнт повертає її в
              *     `rowVersion` запиту на зміну, і пауза зі застарілого рядка переліку дає `409`,
              *     а не мовчки відкочує чужу правку полів. */
@@ -31131,6 +37576,48 @@ export interface components {
             toUtc: string;
             /** @description Подій було більше за стелю проби. */
             truncated: boolean;
+        };
+        /** @description D-464: масове видалення зниклих подій, заблоковане лімітом «повної звірки» за прогін синку
+         *     (`JobStatus.eventRemovalBlocked`): скільки подій чекають підтвердження і яка межа. */
+        SourceEventRemovalBlock: {
+            /**
+             * Format: int32
+             * @description Скільки рядків було б видалено (сума за заблокованими мапінгами).
+             */
+            candidates: number;
+            /**
+             * Format: int32
+             * @description Дозволено без підтвердження (сума меж заблокованих мапінгів).
+             */
+            limit: number;
+            /**
+             * Format: int32
+             * @description Зв'язків-з-рядками у вікні (сума за заблокованими мапінгами) — база відсотка.
+             */
+            linked: number;
+            /**
+             * Format: int32
+             * @description Скільки мапінгів прогону заблоковано.
+             */
+            maps: number;
+            /** @description ✎ Аудит 31.10 (G3): заблоковані мапінги поіменно — саме їх (і не більше кандидатів) підтверджує людина
+             *     (`POST …/source-events/sync` з `confirmRemovals`); `null` — конверт до цієї правки. */
+            perMap?: null | components["schemas"]["SourceEventRemovalConfirmation"][];
+        };
+        /** @description ✎ Аудит 31.10 (G3): підтвердження масового видалення, прив'язане до того, що людина бачила: мапінг і скільки
+         *     кандидатів на видалення в ньому було заблоковано. Задача видаляє понад ліміт лише в цьому мапінгу й лише якщо
+         *     кандидатів зараз не більше; інакше — звичайні межі й новий банер. */
+        SourceEventRemovalConfirmation: {
+            /**
+             * Format: int32
+             * @description Скільки рядків людина погодилась видалити (кандидатів у заблокованому прогоні).
+             */
+            candidates: number;
+            /**
+             * Format: int32
+             * @description Мапінг подій.
+             */
+            mapId: number;
         };
         /** @description Рядок таблиці подій: зв'язок «подія джерела ↔ рядок документа» зі станом (HSE301 A6). */
         SourceEventRowDto: {
@@ -31217,6 +37704,12 @@ export interface components {
             timeZoneId: string;
             /** @description Значення без відповідника в довіднику. */
             unmapped: components["schemas"]["SourceEventUnmappedItem"][];
+        };
+        /** @description ✎ Аудит 31.10 (G3): тіло «Отримати з PI зараз» (`POST /sources/{id}/source-events/sync`); порожнє — звичайний синк. */
+        SourceEventSyncBody: {
+            /** @description Підтвердження масового видалення — мапінги й кількість кандидатів із `eventRemovalBlocked.perMap` задачі, яку
+             *     людина бачила (D-464); `null` чи порожньо — без підтвердження. */
+            confirmRemovals?: null | components["schemas"]["SourceEventRemovalConfirmation"][];
         };
         /** @description Шаблон подій джерела з атрибутами — для конфігуратора. */
         SourceEventTemplate: {
@@ -31333,6 +37826,8 @@ export interface components {
              * @description Ідентифікатор сутності; `0` — операція над набором.
              */
             entityId: number;
+            /** @description Читабельний підпис сутності (код/назва на цей момент); `null` — не визначено або сутність видалено: показується ідентифікатор. */
+            entityLabel?: null | string;
             /** @description Сутність: `cfg.RegistryDef`, `cfg.RegistryRuleDef`. */
             entityType: string;
             /** @description Стан після зміни. */
@@ -31495,7 +37990,187 @@ export interface components {
              */
             gaps: number;
         };
+        /** @description Кандидат у згадку: лише користувач, який бачить таблицю. */
+        TableDiscussionMentionCandidateDto: {
+            /** @description Відображуване ім'я. */
+            name: string;
+            /**
+             * Format: int32
+             * @description Користувач.
+             */
+            userId: number;
+        };
+        /** @description Згадка в повідомленні: лише користувач, який сам бачить таблицю. */
+        TableDiscussionMentionDto: {
+            /** @description Відображуване ім'я. */
+            name: string;
+            /**
+             * Format: int32
+             * @description Користувач.
+             */
+            userId: number;
+        };
+        /** @description Непрочитана згадка поточного користувача («Мої задачі»). */
+        TableDiscussionMentionTaskDto: {
+            /** @description Ім'я автора. */
+            authorName: string;
+            /**
+             * Format: int32
+             * @description Автор.
+             */
+            authorUserId: number;
+            /**
+             * Format: date-time
+             * @description Коли написано (UTC).
+             */
+            createdAt: string;
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /**
+             * Format: int64
+             * @description Повідомлення.
+             */
+            messageId: number;
+            /**
+             * Format: int32
+             * @description Період повідомлення.
+             */
+            periodKey: number;
+            /** @description Початок тексту (до 160 символів). */
+            snippet: string;
+            /** @description Код таблиці. */
+            tableCode: string;
+        };
+        /** @description Непрочитані згадки поточного користувача, найновіші першими. */
+        TableDiscussionMentionTasksDto: {
+            /** @description Згадки в таблицях, які користувач досі бачить. */
+            items: components["schemas"]["TableDiscussionMentionTaskDto"][];
+        };
+        /** @description Повідомлення чату таблиці. */
+        TableDiscussionMessageDto: {
+            /** @description Ім'я автора. */
+            authorName: string;
+            /**
+             * Format: int32
+             * @description Автор.
+             */
+            authorUserId: number;
+            /** @description Простий текст (ніколи не HTML). `null` для видаленого — текст видаленого клієнту не віддається. */
+            body: null | string;
+            /** @description Поточний користувач може видалити (автор або модератор). */
+            canDelete: boolean;
+            /** @description Поточний користувач може правити зараз (автор і вікно 15 хв ще відкрите). */
+            canEdit: boolean;
+            /**
+             * Format: date-time
+             * @description Коли написано (UTC).
+             */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description Коли видалено (UTC); `null` — живе.
+             */
+            deletedAt: null | string;
+            /**
+             * Format: date-time
+             * @description До якого моменту (UTC) можна правити; `null` — правка недоступна.
+             */
+            editableUntil: null | string;
+            /**
+             * Format: date-time
+             * @description Коли правлено (UTC); `null` — не правлено.
+             */
+            editedAt: null | string;
+            /**
+             * Format: int64
+             * @description Ідентифікатор; зростає з часом (ключ пагінації).
+             */
+            id: number;
+            /** @description Видалено: UI показує «повідомлення видалено». */
+            isDeleted: boolean;
+            /** @description Згадані користувачі (лише ті, хто бачить таблицю). */
+            mentions: components["schemas"]["TableDiscussionMentionDto"][];
+            /**
+             * Format: int32
+             * @description Період, у якому написано (рік*100+номер).
+             */
+            periodKey: number;
+            /** @description Код таблиці. */
+            tableCode: string;
+        };
+        /** @description Сторінка повідомлень чату таблиці. */
+        TableDiscussionPageDto: {
+            /** @description Поточний користувач може видаляти чужі повідомлення (`Document.DiscussModerate`). */
+            canModerate: boolean;
+            /** @description Поточний користувач може писати (`Document.Discuss` і доступ до таблиці). */
+            canWrite: boolean;
+            /** @description Є старіші за першу повідомлену (для `before`). */
+            hasMoreBefore: boolean;
+            /**
+             * Format: int64
+             * @description Найбільший `id` чату; для `after` і для «прочитано».
+             */
+            lastMessageId: number;
+            /**
+             * Format: int64
+             * @description До якого повідомлення поточний користувач прочитав чат.
+             */
+            lastReadMessageId: number;
+            /** @description Повідомлення за зростанням `id` (старіші першими). */
+            messages: components["schemas"]["TableDiscussionMessageDto"][];
+            /**
+             * Format: int64
+             * @description Ревізія чату (та сама, що в `ETag`): зростає на кожну зміну, включно з правкою й видаленням.
+             */
+            revision: number;
+        };
+        /** @description Підсумок чатів усіх таблиць документа, які бачить користувач; таблиці без розмов — відсутні. */
+        TableDiscussionSummaryDto: {
+            /** @description Користувач має право `Document.Discuss` у проєкті документа. */
+            canWrite: boolean;
+            /** @description Таблиці з хоча б одним повідомленням. */
+            items: components["schemas"]["TableDiscussionSummaryItemDto"][];
+        };
+        /** @description Підсумок чату однієї таблиці. */
+        TableDiscussionSummaryItemDto: {
+            /**
+             * Format: date-time
+             * @description Коли написано останнє живе (UTC); `null` — чат порожній.
+             */
+            lastAt: null | string;
+            /**
+             * Format: int64
+             * @description Найбільший `id` чату.
+             */
+            lastMessageId: number;
+            /** @description Є непрочитана згадка поточного користувача. */
+            mentionedMe: boolean;
+            /**
+             * Format: int64
+             * @description Ревізія чату: росте на кожне нове, правлене чи видалене повідомлення (та сама, що в ETag сторінки повідомлень).
+             *     Опитування порівнює її з попередньою і перечитує сторінку лише тоді, коли вона змінилась.
+             */
+            revision: number;
+            /** @description Код таблиці. */
+            tableCode: string;
+            /**
+             * Format: int32
+             * @description Скільки живих повідомлень.
+             */
+            total: number;
+            /**
+             * Format: int32
+             * @description Скільки чужих живих повідомлень після позначки «прочитано».
+             */
+            unread: number;
+        };
         TableDto: {
+            /** @description ✎ D-461: формули окремих КОМІРОК таблиці (область `Cell`) — Id для
+             *     `PUT …/formulas/{formulaId}/manual-override` і стан «Дозволити ручне значення». Порожній — таких немає. */
+            cellFormulas?: components["schemas"]["TemplateCellFormulaDto"][];
             /** @description Код — ідентичність таблиці й адреса в `PUT …/sheets/{sheetCode}/tables/{code}`. */
             code: string;
             /** @description Колонки таблиці в порядку `Ordinal`. */
@@ -31626,6 +38301,7 @@ export interface components {
             };
             /** @description Опис колонок таблиці. */
             columns: components["schemas"]["ColumnDto"][];
+            formulaOverride?: null | components["schemas"]["FormulaOverrideSliceDto"];
             /** @description Групи заголовків видимих колонок (плоский список). Лише групи, у піддереві яких є хоч одна видима
              *     колонка зрізу (прихована/заборонена колонка випадає зі спану, група без видимих — не віддається).
              *     Порожній — груп немає. */
@@ -31725,6 +38401,27 @@ export interface components {
             /** @description Назва мовами каталогу. */
             nameL10n: components["schemas"]["LocalizedText"];
         };
+        /** @description ✎ D-461: формула однієї комірки таблиці в структурі шаблону. */
+        TemplateCellFormulaDto: {
+            /** @description «Дозволити ручне значення». */
+            allowManualOverride: boolean;
+            /**
+             * Format: int32
+             * @description Колонка комірки.
+             */
+            columnDefId: number;
+            /** @description Діалект виразу. */
+            dialect: components["schemas"]["ExpressionDialect"];
+            /** @description Вираз. */
+            expression: string;
+            /**
+             * Format: int32
+             * @description Id формули.
+             */
+            formulaId: number;
+            /** @description Рядок комірки. */
+            rowKey: string;
+        };
         TemplateChangeDto: {
             /** @description Клас ризику; `Breaking` у версії з документами — відмова. */
             changeClass: components["schemas"]["ChangeClass"];
@@ -31739,6 +38436,8 @@ export interface components {
         };
         /** @description Колонка в СТРУКТУРІ шаблону — опис для адміністратора. */
         TemplateColumnDto: {
+            /** @description ✎ D-461: формула колонки дозволяє ручне значення; `false` і без формули. */
+            allowManualOverride?: boolean;
             /** @description Код колонки — ідентичність, у патчі не змінюється. */
             code: string;
             /** @description Тип даних; змінюється лише клоном версії. */
@@ -31755,6 +38454,11 @@ export interface components {
              *     завжди відкривала порожній редактор, навіть коли формула вже збережена:
              *     вираз ніде не приходив клієнту без окремого запиту, якого не існувало. */
             formulaExpression: null | string;
+            /**
+             * Format: int32
+             * @description ✎ D-461: Id формули колонки (для `PUT …/formulas/{formulaId}/manual-override`); `null` — формули немає.
+             */
+            formulaId?: null | number;
             /**
              * Format: int32
              * @description Найглибша група заголовків колонки (`TableDto.HeaderGroups`); `null` — без групи; презентаційне поле.
@@ -31864,10 +38568,18 @@ export interface components {
         };
         /** @description Рядок у СТРУКТУРІ шаблону — опис, а не дані. */
         TemplateRowDto: {
+            /** @description ✎ D-461: формула рядка дозволяє ручне значення. ⚠ Цілі формули рядка в колонках вводу редагуються й без
+             *     прапорця (поведінка до D-461 не змінена) — прапорець для них зберігається, але на редагування не впливає. */
+            allowManualOverride?: boolean;
             formulaDialect: null | components["schemas"]["ExpressionDialect"];
             /** @description Текст наявної формули рядка, якщо вона є; `null` — формули ще
              *     немає. Той самий фікс, що й string? TemplateColumnDto.FormulaExpression. */
             formulaExpression: null | string;
+            /**
+             * Format: int32
+             * @description ✎ D-461: Id формули рядка; `null` — формули немає.
+             */
+            formulaId?: null | number;
             /**
              * Format: int32
              * @description Ідентифікатор; ним адресується презентаційний патч (`ФВ-2.6`, порядок рядків).
@@ -32290,6 +39002,20 @@ export interface components {
              *     «не знаю» не те саме, що «ніде»). Знімок каталогу його не несе.
              */
             usedIn?: null | number;
+        };
+        /** @description A non-empty column no field uses. */
+        UnmappedColumn: {
+            /**
+             * Format: int32
+             * @description 1-based column.
+             */
+            column: number;
+            /** @description Column letter. */
+            columnLetter: string;
+            /** @description There is data under it. */
+            hasData: boolean;
+            /** @description Combined header text. */
+            headerText: string;
         };
         /** @description Поле джерела, яке не лягає нікуди. */
         UnmappedSourceField: {
@@ -32855,6 +39581,8 @@ export interface components {
          * @enum {unknown}
          */
         VersionMigrationMode: "Safe" | "Presentation";
+        /** @enum {unknown} */
+        VersionMigrationRange: "WholeProject" | "FromMonth" | null;
         /** @description Перейменування таблиці між версіями: «було → стало» за кодом таблиці (і, за потреби, колонок). */
         VersionMigrationTableRename: {
             /** @description Перейменування колонок цієї таблиці; `null` — колонки збігаються за кодами. */
@@ -32865,6 +39593,18 @@ export interface components {
             sheetCode?: null | string;
             /** @description Код таблиці в цільовій версії; рівний FromTableCode — лише перейменування колонок. */
             toTableCode: string;
+        };
+        /** @description Попередження переносу (не відмова): зміст для діалогу — ключ повідомлення і, за потреби, період. */
+        VersionMigrationWarning: {
+            /** @description Короткий код: `effectiveFromShiftedToJanuary`. */
+            code: string;
+            /** @description Ключ UiString (`migration.warn.*`) у каталозі en/ru/kz. */
+            messageKey: string;
+            /**
+             * Format: int32
+             * @description Період, якого стосується (напр. ефективний початок).
+             */
+            periodKey?: null | number;
         };
         /** @description Подія журналу переходів стану аркуша (`BE-11b`). */
         WorkflowEventDto: {
@@ -32886,12 +39626,69 @@ export interface components {
             /** @description Код аркуша. */
             sheetCode: string;
             /**
+             * Format: int64
+             * @description RS: копія аркуша, якої стосується подія; `null` — оригінал (код аркуша в копії той самий).
+             */
+            sheetCopyId?: null | number;
+            /**
              * Format: int32
              * @description Крок маршруту, якщо маршрут є.
              */
             stepOrdinal: null | number;
             /** @description Стан після дії. */
             toState: string;
+        };
+        /** @description Подія переходу стану аркуша (`wf.ApprovalEvent`) у журналі аудиту. */
+        WorkflowEventView: {
+            /** @description Дія: `Submit`, `Approve`, `ApproveStep`, `Reject`, `Reopen`, `Recall`. */
+            action: string;
+            /**
+             * Format: date-time
+             * @description Момент дії в UTC.
+             */
+            changedAt: string;
+            /** @description Ім'я автора; `null` — система або запису користувача вже немає. */
+            changedByDisplayName: null | string;
+            /**
+             * Format: int32
+             * @description Хто виконав — <b>UserId</b>; `null` — системний перехід.
+             */
+            changedByUserId: null | number;
+            /** @description Причина/коментар (звичайний текст); `null` — дія без коментаря. */
+            comment: null | string;
+            /** @description Бізнес-ключ документа; `null` — документа вже немає. */
+            documentBusinessKey: null | string;
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /** @description Стан до дії. */
+            fromStatus: string;
+            /**
+             * Format: int32
+             * @description Звітний період.
+             */
+            periodKey: number;
+            /** @description Код аркуша; `null` — визначення вже немає. */
+            sheetCode: null | string;
+            /**
+             * Format: int64
+             * @description RS: копія аркуша, якої стосується подія; `null` — оригінал (код аркуша в копії той самий).
+             */
+            sheetCopyId?: null | number;
+            /**
+             * Format: int32
+             * @description Аркуш.
+             */
+            sheetDefId: number;
+            /**
+             * Format: int32
+             * @description Крок маршруту, якщо маршрут є.
+             */
+            stepOrdinal: null | number;
+            /** @description Стан після дії. */
+            toStatus: string;
         };
     };
     responses: never;

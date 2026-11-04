@@ -1,5 +1,4 @@
 using System.Data;
-using System.Reflection;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -11,10 +10,13 @@ namespace Ecr.Infrastructure.Persistence;
 /// прав, ані базових одиниць.
 /// </summary>
 /// <remarks>
-/// Скрипт лежить у <c>Persistence/Sql/09-seed.sql</c> і **вбудований у
-/// збірку**: інакше застосунок можна було б запустити з чужою або застарілою
-/// копією seed, і розбіжність вилізла б не тут, а на першому вході, де немає
-/// підписів кнопок.
+/// Скрипт лежить у <c>Persistence/Sql/seed/</c> (пролог → файли фіч за іменем →
+/// епілог, <see cref="SeedScript"/>) і **вбудований у збірку**: інакше
+/// застосунок можна було б запустити з чужою або застарілою копією seed, і
+/// розбіжність вилізла б не тут, а на першому вході, де немає підписів кнопок.
+/// Частини склеюються в один скрипт і виконуються однією транзакцією на одному
+/// з'єднанні, як колишній <c>09-seed.sql</c>: тимчасові таблиці прологу
+/// (<c>#UiEn</c>, <c>#I18N</c>, <c>#UiChanged</c>, <c>#UiRemoved</c>) живуть до епілогу.
 ///
 /// ⚠ Це <b>єдиний</b> випадок, коли застосунок сам виконує SQL-скрипт. Решта
 /// (<c>01</c>–<c>08</c>) — DDL, а DDL-прав у застосунку немає (<c>D-66</c>).
@@ -30,12 +32,10 @@ namespace Ecr.Infrastructure.Persistence;
 /// </param>
 public sealed partial class SeedRunner(EcrDbContext db, ILogger? logger = null)
 {
-    private const string ResourceName = "Ecr.Infrastructure.Persistence.Sql.09-seed.sql";
-
     /// <summary>Виконує seed. Повторний запуск не створює дублікатів.</summary>
     public async Task RunAsync(CancellationToken ct)
     {
-        var batches = SqlBatches.Split(ReadScript());
+        var batches = SqlBatches.Split(SeedScript.ReadEmbedded());
 
         // Одна транзакція на весь seed. Кожен MERGE ідемпотентний і сам по
         // собі, але напівзастосований seed — це база, яка стартує і мовчки
@@ -105,16 +105,4 @@ public sealed partial class SeedRunner(EcrDbContext db, ILogger? logger = null)
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Seed: {Message}")]
     private static partial void LogSeedPrint(ILogger logger, string message);
-
-    private static string ReadScript()
-    {
-        var assembly = Assembly.GetExecutingAssembly();
-        using var stream = assembly.GetManifestResourceStream(ResourceName)
-            ?? throw new InvalidOperationException(
-                $"Ресурс '{ResourceName}' не вбудований у збірку. " +
-                "Перевірте <EmbeddedResource> у Ecr.Infrastructure.csproj.");
-
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
-    }
 }

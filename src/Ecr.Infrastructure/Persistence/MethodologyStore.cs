@@ -403,6 +403,18 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> GetCategoryCodesAsync(int methodologyVersionId, CancellationToken ct)
+        => await db.MethodologyCategories
+            .AsNoTracking()
+            .Where(c => c.MethodologyVersionId == methodologyVersionId)
+            .OrderBy(c => c.Ordinal)
+            .ThenBy(c => c.Id)
+            .Select(c => c.Code)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<MethodologyRequiredInput>> GetRequiredInputsAsync(
         int methodologyVersionId, CancellationToken ct)
         => await db.MethodologyRequiredInputs

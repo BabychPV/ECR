@@ -66,10 +66,11 @@ public sealed class FormulaRecalculationJob(
                 continue;
             }
 
-            item.Dirty.Add(new CellAddress(new PeriodKey(cellPeriod), cell.RowId, cell.ColumnDefId));
-            item.InstanceId = item.InstanceId != 0
-                ? item.InstanceId
-                : cell.TableInstanceId ?? (cellPeriod == request.PeriodKey ? request.TableInstanceId : 0);
+            var seedInstance = cell.TableInstanceId ?? (cellPeriod == request.PeriodKey ? request.TableInstanceId : 0);
+            var seed = new CellAddress(new PeriodKey(cellPeriod), cell.RowId, cell.ColumnDefId);
+            item.Dirty.Add(seed);
+            item.AddDirty(seedInstance, seed);
+            item.InstanceId = item.InstanceId != 0 ? item.InstanceId : seedInstance;
 
             // ✎ D-442: подані аркуші, правлені погоджувачем поточного кроку (позначка з насіння PATCH). Лише їх
             // каскад пише попри `Submitted`; решту поданих/затверджених пропускає, як і доти.
@@ -141,18 +142,13 @@ public sealed class FormulaRecalculationJob(
             {
                 if (!item.Dirty.IsEmpty)
                 {
-                    var instanceId = item.InstanceId;
-                    if (instanceId == 0)
+                    // RS: насіння оригіналу й кожної копії рахується окремим «видом» (самопосилання копії читає копію).
+                    foreach (var (instanceId, dirty) in await DirtyByScopeAsync(item, documentId, periodKey, shared, ct)
+                                 .ConfigureAwait(false))
                     {
-                        instanceId = (await shared.InstancesAsync(documentId, periodKey, ct).ConfigureAwait(false))
-                            .Select(i => i.TableInstanceId).FirstOrDefault();
-                    }
-
-                    if (instanceId != 0)
-                    {
-                        periodWritten = await recalculation
+                        periodWritten += await recalculation
                             .RecalculateAsync(
-                                instanceId, item.Dirty, ct, changed, item.ApproverSheets, inputColumns, shared)
+                                instanceId, dirty, ct, changed, item.ApproverSheets, inputColumns, shared)
                             .ConfigureAwait(false);
                     }
                 }
@@ -245,6 +241,54 @@ public sealed class FormulaRecalculationJob(
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// RS: насіння періоду, розкладене за «видами» — оригінал і кожна копія аркуша (екземпляр-представник + його насіння).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Звичайний випадок (насіння одного екземпляра або копій у документі немає) — рівно один виклик, як і доти.
+    /// Екземпляр без відомого Id (<c>0</c>) відноситься до оригіналу.
+    /// </remarks>
+    private static async Task<IReadOnlyList<(long InstanceId, DirtySet Dirty)>> DirtyByScopeAsync(
+        PeriodWork item, long documentId, PeriodKey periodKey, RecalculationSharedLoad shared, CancellationToken ct)
+    {
+        if (item.DirtyByInstance.Count <= 1 && item.InstanceId != 0)
+        {
+            return [(item.InstanceId, item.Dirty)];
+        }
+
+        var instances = await shared.InstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
+
+        if (item.DirtyByInstance.Count <= 1 || instances.All(i => i.SheetCopyId is null))
+        {
+            var only = item.InstanceId != 0
+                ? item.InstanceId
+                : instances.Select(i => i.TableInstanceId).FirstOrDefault();
+
+            return only == 0 ? [] : [(only, item.Dirty)];
+        }
+
+        var copyOf = instances.ToDictionary(i => i.TableInstanceId, i => i.SheetCopyId);
+        var scopes = new SortedDictionary<long, (long InstanceId, DirtySet Dirty)>();
+        foreach (var (seedInstance, seeds) in item.DirtyByInstance)
+        {
+            var copyId = copyOf.GetValueOrDefault(seedInstance);
+            if (!scopes.TryGetValue(copyId ?? 0, out var scope))
+            {
+                var representative = seedInstance != 0
+                    ? seedInstance
+                    : instances.Where(i => i.SheetCopyId is null).Select(i => i.TableInstanceId).FirstOrDefault();
+                scopes[copyId ?? 0] = scope = (representative, new DirtySet());
+            }
+
+            foreach (var seed in seeds.Seeds)
+            {
+                scope.Dirty.Add(seed);
+            }
+        }
+
+        return [.. scopes.Values.Where(s => s.InstanceId != 0)];
+    }
+
     /// <summary>Стеля проходів одного запуску: (ланки ланцюжка + 1) × періоди року + запас; страховка від циклу.</summary>
     internal const int MaxPasses = (CrossPeriodFanOut.MaxHops + 1) * 13;
 
@@ -254,6 +298,19 @@ public sealed class FormulaRecalculationJob(
         private readonly HashSet<CrossPeriodSource> _known = [];
 
         public DirtySet Dirty { get; } = new();
+
+        /// <summary>RS: те саме насіння за екземпляром комірки (<c>0</c> — екземпляр невідомий).</summary>
+        public Dictionary<long, DirtySet> DirtyByInstance { get; } = [];
+
+        public void AddDirty(long instanceId, CellAddress address)
+        {
+            if (!DirtyByInstance.TryGetValue(instanceId, out var set))
+            {
+                DirtyByInstance[instanceId] = set = new DirtySet();
+            }
+
+            set.Add(address);
+        }
 
         public List<CrossPeriodSource> Sources { get; } = [];
 

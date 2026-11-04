@@ -171,6 +171,16 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('coverageEvents.eventRemovalSheetSubmitted', params);
     case 'coverageEvents.eventsTruncated':
       return t('coverageEvents.eventsTruncated', params);
+    // D-464: стеля сторінок і як її підняти; зведена подія поданого аркуша; відкрита на момент закриття періоду;
+    // початок події переїхав в інший період (рядок лишився).
+    case 'coverageEvents.eventsTruncatedCap':
+      return t('coverageEvents.eventsTruncatedCap', params);
+    case 'coverageEvents.eventSheetLocked':
+      return t('coverageEvents.eventSheetLocked', params);
+    case 'coverageEvents.eventOpenAtPeriodClose':
+      return t('coverageEvents.eventOpenAtPeriodClose', params);
+    case 'coverageEvents.eventPeriodChanged':
+      return t('coverageEvents.eventPeriodChanged', params);
     case 'coverageEvents.skippedDependency':
       return t('coverageEvents.skippedDependency', params);
     // D2-02: матеріалізація скінченого періоду — неповне покриття (число записано) і «немає даних».

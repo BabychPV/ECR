@@ -78,6 +78,14 @@ public readonly record struct EditDecision(
     /// <summary>AN-142: поблажка справді спрацювала (аркуш був Submitted) - лише тоді правка не ставить перерахунок.</summary>
     public bool AnnualTextRelaxed { get; init; }
 
+    /// <summary>
+    /// ✎ D-461: комірку рахує формула, і писати в неї дозволено лише як РУЧНЕ ЗНАЧЕННЯ ЗАМІСТЬ ФОРМУЛИ (формула дозволяє
+    /// або комірка вже має ручне значення, і в користувача є право <c>Document.OverrideFormula</c>). Без цього
+    /// рішення було б <see cref="EditDenyReason.CalculatedCell"/>. Запис вимагає причину, пише <c>IsCalculated = 0</c> і
+    /// позначку <c>doc.CellFormulaOverride</c>; видалення значення повертає формулу.
+    /// </summary>
+    public bool ViaFormulaOverride { get; init; }
+
     public static EditDecision Allow() => new(true, EditDenyReason.None);
 
     /// <summary>Дозволено погоджувачеві поточного кроку правити поданий аркуш (D-442).</summary>

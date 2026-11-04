@@ -51,7 +51,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// </list>
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
+public sealed partial class SourceEventSyncJobTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 2, 5, 9, 0, 0, DateTimeKind.Utc);
 
@@ -987,7 +987,7 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
             Convert.ToInt32(
                 await ScalarAsync(
                     $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} "
-                    + "AND Status = N'SourceDataRefused' AND Details LIKE N'%coverageEvents.eventsTruncated%'"),
+                    + "AND Status = N'SourceDataRefused' AND Details LIKE N'%coverageEvents.eventsTruncatedCap%'"),
                 CultureInfo.InvariantCulture));
     }
 
@@ -1137,6 +1137,77 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
 
         Assert.Equal(["EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey));
         Assert.Equal(1, await JournalCountAsync(stand));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "L6-02")]
+    public async Task ВидаленняРядківПодій_СтруктураЗмінилась_ПокиЧекали_НічогоНеВидаляє()
+    {
+        // ⛔ L6-02 (писар): аркуш таблиці читається ПІСЛЯ блокування `doc-structure`, а не до нього. Перенос версії,
+        // що зафіксувався, поки видалення чекало, міняє аркуш таблиці; прочитаний до очікування `sheetDefId` був би
+        // застарілим, і гард «аркуш поданий» перевіряв би не той аркуш.
+        // Жорстке видалення cfg.TableDef неможливе (14 зовнішніх ключів), тому перенос моделюємо його реальним
+        // наслідком: таблиця переїжджає на інший аркуш (нова версія шаблону), де період уже ПОДАНО. Повторне
+        // читання після блокування бачить новий аркуш і відмовляє; читання до блокування видалило б рядок.
+        // Мутація: перенести ReadSheetDefIdAsync перед TryAppLockAsync(StructureResourceOf) — тест червоний.
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+
+        var oldSheetId = Convert.ToInt32(
+            await ScalarAsync($"SELECT SheetDefId FROM cfg.TableDef WHERE Id = {stand.TableDefId}"), CultureInfo.InvariantCulture);
+        var versionId = Convert.ToInt32(
+            await ScalarAsync($"SELECT TemplateVersionId FROM cfg.SheetDef WHERE Id = {oldSheetId}"), CultureInfo.InvariantCulture);
+
+        // Новий аркуш і поданий на ньому січень — заздалегідь, до блокування (бачиться лише після «переносу»).
+        int newSheetId;
+        await using (var db = sql.CreateContext())
+        {
+            var sheet = new SheetDef(
+                versionId, EcrCode.Create("MOVED" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()), Name("Moved sheet"), 2);
+            db.SheetDefs.Add(sheet);
+            await db.SaveChangesAsync();
+            newSheetId = sheet.Id;
+
+            var state = new ApprovalState(stand.DocumentId, newSheetId, 202601);
+            state.Submit(stand.HumanId, Now);
+            db.ApprovalStates.Add(state);
+            await db.SaveChangesAsync();
+        }
+
+        await using var holder = new SqlConnection(sql.ConnectionString);
+        await holder.OpenAsync();
+        await using var tx = (SqlTransaction)await holder.BeginTransactionAsync();
+        await using (var take = holder.CreateCommand())
+        {
+            take.Transaction = tx;
+            take.CommandText = "DECLARE @r int; EXEC @r = sp_getapplock @Resource = @res, @LockMode = 'Exclusive', "
+                               + "@LockOwner = 'Transaction', @LockTimeout = 0; SELECT @r;";
+            take.Parameters.AddWithValue("@res", SheetEditGate.StructureResourceOf(stand.DocumentId));
+            Assert.True(Convert.ToInt32(await take.ExecuteScalarAsync(), CultureInfo.InvariantCulture) >= 0);
+        }
+
+        var job = RunAsync(stand, source);
+        var first = await Task.WhenAny(job, Task.Delay(TimeSpan.FromSeconds(4)));
+        Assert.NotSame(job, first);
+
+        // «Перенос версії» у транзакції утримувача: таблиця переїжджає на новий аркуш.
+        await using (var move = holder.CreateCommand())
+        {
+            move.Transaction = tx;
+            move.CommandText = $"UPDATE cfg.TableDef SET SheetDefId = {newSheetId} WHERE Id = {stand.TableDefId};";
+            Assert.Equal(1, await move.ExecuteNonQueryAsync());
+        }
+
+        await tx.CommitAsync();
+        await job;
+
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(0, await JournalCountAsync(stand));
     }
 
     [Fact]
@@ -1313,7 +1384,8 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     [Trait("Directive", "HSE301-EFSYNC")]
     [Trait("Finding", "audit-B3")]
     [InlineData(3, 4, false)] // 75 %, але ≤ 10 — дозволено (мінімум)
-    [InlineData(10, 10, false)] // рівно мінімум
+    [InlineData(10, 10, true)] // ✎ G2: усі рядки вікна — лише з підтвердженням, хоч і в межах мінімуму
+    [InlineData(10, 11, false)] // рівно мінімум, не всі
     [InlineData(11, 11, true)] // 11 із 11 > max(10, 2.2)
     [InlineData(11, 100, false)] // 11 % від 100 і > 10, але ≤ 20 % → дозволено
     [InlineData(21, 100, true)] // 21 % > 20 %
@@ -1370,7 +1442,7 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         }
 
         // Підтвердження вручну (Integration.Manage ставить прапор у payload) — видалення виконується.
-        await RunAsync(stand, source, trigger: trigger, confirm: true);
+        await RunAsync(stand, source, trigger: trigger, confirm: [new SourceEventRemovalConfirmation(stand.MapId, 14)]);
         Assert.Equal(["EF-M01", "EF-M02"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
         Assert.Equal(14, await JournalCountAsync(stand));
     }
@@ -1404,12 +1476,22 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
         Assert.Equal(0, await JournalCountAsync(stand));
         Assert.Empty(trigger.ReceivedCalls());
+
+        // D-464: поданий аркуш — ОДНА зведена подія на період (запис E2 і видалення E1 пропущено), а не по події.
         Assert.Equal(
             1,
             Convert.ToInt32(
                 await ScalarAsync(
                     $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} "
-                    + "AND Status = N'SkippedPeriodClosed' AND Details LIKE N'%eventRemovalSheetSubmitted%'"),
+                    + "AND Status = N'SkippedPeriodClosed' AND Details LIKE N'%eventSheetLocked%' "
+                    + "AND Details LIKE N'%\"writes\":\"1\"%' AND Details LIKE N'%\"removals\":\"1\"%'"),
+                CultureInfo.InvariantCulture));
+        Assert.Equal(
+            0,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} "
+                    + "AND (Details LIKE N'%eventRemovalSheetSubmitted%' OR Details LIKE N'%eventWriteFailed%')"),
                 CultureInfo.InvariantCulture));
     }
 
@@ -1687,7 +1769,8 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     private async Task RunAsync(
         Stand stand, FakeEventSource source, bool freshContainer = false, ICalculationTrigger? trigger = null,
         ILogger<SourceEventSyncJob>? logger = null, int? entityId = null,
-        DateTime? from = null, DateTime? to = null, bool confirm = false, bool clearTrackerOnWrite = false,
+        DateTime? from = null, DateTime? to = null, IReadOnlyList<SourceEventRemovalConfirmation>? confirm = null,
+        bool clearTrackerOnWrite = false,
         Func<Task>? afterRemovalDecision = null, ICellPatcher? patcherOverride = null,
         Application.Permits.Groups.ILookupTargetResolver? groups = null)
     {
@@ -1721,7 +1804,7 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
             groups);
 
         await job.ExecuteAsync(
-            new SourceEventSyncRequest(entityId ?? stand.EntityId, from ?? From, to ?? Now, confirm),
+            new SourceEventSyncRequest(entityId ?? stand.EntityId, from ?? From, to ?? Now, confirm is { Count: > 0 }, confirm),
             Substitute.For<IJobProgress>(),
             CancellationToken.None);
     }

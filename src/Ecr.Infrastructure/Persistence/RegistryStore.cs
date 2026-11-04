@@ -824,6 +824,25 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<RegistryEntry>> FindEntriesByIdsAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(registryEntryIds);
+
+        var found = new List<RegistryEntry>();
+        foreach (var chunk in registryEntryIds.Distinct().Chunk(LookupChunkSize))
+        {
+            var wanted = chunk.ToList();
+            found.AddRange(await db.RegistryEntries
+                .Where(e => wanted.Contains(e.Id))
+                .ToListAsync(ct)
+                .ConfigureAwait(false));
+        }
+
+        return found;
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<RegistryValue>> ListValuesForEntriesAsync(
         IReadOnlyCollection<long> registryEntryIds, CancellationToken ct)
     {

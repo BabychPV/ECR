@@ -47,6 +47,9 @@ public sealed class FormulaDefConfiguration : IEntityTypeConfiguration<FormulaDe
         builder.Property(x => x.IsSnapshot).HasDefaultValue(false, "DF_Formula_Snap");
         builder.Property(x => x.IsDeleted).HasDefaultValue(false, "DF_Formula_Del");
 
+        // ✎ D-461: «Дозволити ручне значення». ADD з DEFAULT на наявній таблиці — лише метадані.
+        builder.Property(x => x.AllowManualOverride).HasDefaultValue(false, "DF_Formula_AllowOverride");
+
         // ⛔ `.WithMany(t => t.Formulas)` обов'язково: інакше `TableDef.Formulas`
         // лишається неоголошеною навігацією, і EF заводить ДРУГИЙ, тіньовий
         // зовнішній ключ (`TableDefId1`) саме під неї — з ним публікація
@@ -285,11 +288,38 @@ public sealed class RegistryDefConfiguration : IEntityTypeConfiguration<Registry
         // вставок повз EF.
         builder.Property(x => x.CodeMode).HasConversion<byte>()
                .HasDefaultValueSql("0", "DF_RegDef_CodeMode").ValueGeneratedNever();
+        builder.Property(x => x.IsHierarchical).HasDefaultValue(false, "DF_RegDef_Hier");
         builder.Property(x => x.DataChangedAt).HasColumnType("datetime2(3)");
         builder.Property(x => x.DefinitionUpdatedAt).HasColumnType("datetime2(3)");
 
         builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_RegistryDef");
         builder.Navigation(x => x.Fields).UsePropertyAccessMode(PropertyAccessMode.Field);
+    }
+}
+
+/// <summary>Configuration of <see cref="RegistryLevelDef"/> — levels of a hierarchical registry (NAE plan N1).</summary>
+public sealed class RegistryLevelDefConfiguration : IEntityTypeConfiguration<RegistryLevelDef>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<RegistryLevelDef> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("RegistryLevelDef", "cfg", t => t.HasCheckConstraint(
+            "CK_RegLevel_Ordinal", "Ordinal >= 1"));
+        builder.HasKey(x => x.Id).HasName("PK_RegistryLevelDef");
+        builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
+        builder.LocalizedText(x => x.NameL10n);
+        builder.Property(x => x.IsOptional).HasDefaultValue(false, "DF_RegLevel_Opt");
+        builder.Property(x => x.AllowsSelfNesting).HasDefaultValue(false, "DF_RegLevel_SelfNest");
+
+        builder.HasIndex(x => new { x.RegistryDefId, x.Ordinal })
+               .IsUnique().HasDatabaseName("UQ_RegistryLevelDef_Ordinal");
+        builder.HasIndex(x => new { x.RegistryDefId, x.Code })
+               .IsUnique().HasDatabaseName("UQ_RegistryLevelDef_Code");
+
+        builder.HasOne<RegistryDef>().WithMany().HasForeignKey(x => x.RegistryDefId)
+               .HasConstraintName("FK_RegLevel_Registry");
     }
 }
 
@@ -338,6 +368,13 @@ public sealed class RegistryFieldDefConfiguration : IEntityTypeConfiguration<Reg
         // і перевірка ключа при видаленні одиниці сканує її за мілісекунди.
         builder.HasOne<Unit>().WithMany().HasForeignKey(x => x.UnitId)
                .HasConstraintName("FK_RegField_Unit");
+
+        // NAE node types (human 03.11): a field belongs to one level of its hierarchical registry (null — all levels).
+        // NO ACTION: a level with bound fields is refused by the hierarchy save (409 levelHasFields) before the delete.
+        builder.HasOne<RegistryLevelDef>().WithMany().HasForeignKey(x => x.LevelId)
+               .OnDelete(DeleteBehavior.Restrict)
+               .HasConstraintName("FK_RegField_Level");
+        builder.HasIndex(x => x.LevelId).HasDatabaseName("IX_RegistryFieldDef_Level").HasFilter("[LevelId] IS NOT NULL");
     }
 }
 

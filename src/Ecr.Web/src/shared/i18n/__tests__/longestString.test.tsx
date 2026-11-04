@@ -1,6 +1,4 @@
-﻿import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { describe, it, expect, vi, afterEach } from 'vitest';
+﻿import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -8,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import type { JSX, ReactNode } from 'react';
 import { loadCatalog, t } from '@/shared/i18n';
 import { DocumentsPage } from '@/pages/DocumentsPage';
+import { readSeedEnCatalog } from '@/test/seedSql';
 
 /**
  * Розмітка не ламається від довжини тексту (`ФВ-14.30`).
@@ -25,22 +24,13 @@ import { DocumentsPage } from '@/pages/DocumentsPage';
  * Візуальна перевірка лишається ручною: `/_kitchen-sink` містить розділ
  * «Довгий рядок» саме для неї.
  */
-const seed = readFileSync(
-  path.resolve(process.cwd(), '../../src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql'),
-  'utf8',
-);
-
 /**
- * Усі значення каталогу — лише з блоку MERGE `sys_ecr.UiString`. ⚠ Над ним
- * лежать секції «змінені тексти» (старе значення) і «прибрані ключі» того ж
- * вигляду `(N'key', N'en', N'…'`: без обрізки вони потрапили б у кандидати.
+ * Усі значення каталогу — лише з en-каталогу (порції `#UiEn`). ⚠ Секції
+ * «змінені тексти» (старе значення) і «прибрані ключі» мають той самий
+ * вигляд `(N'key', N'en', N'…'`: без обрізки вони потрапили б у кандидати.
  */
 function catalogValues(): { key: string; lang: string; value: string }[] {
-  const start = seed.indexOf('MERGE sys_ecr.UiString AS t');
-  const end = seed.indexOf(') AS s ([Key], Lang, Val, Scope)', start);
-  if (start < 0 || end < 0) throw new Error('09-seed.sql: не знайдено блоку MERGE sys_ecr.UiString');
-
-  const rows = [...seed.slice(start, end).matchAll(/\(N'([^']+)',\s*N'([a-z]{2})',\s*N'([^']*)'/g)];
+  const rows = [...readSeedEnCatalog().matchAll(/\(N'([^']+)',\s*N'([a-z]{2})',\s*N'([^']*)'/g)];
 
   return rows.map((row) => ({ key: row[1] ?? '', lang: row[2] ?? '', value: row[3] ?? '' }));
 }

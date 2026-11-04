@@ -1,4 +1,4 @@
-import type { CellFormatDto, CellStyleChange, CellStyleDto, TableSliceDto } from '@/api/types';
+import type { CellFormatDto, CellStyleChange, CellStyleDto, PatchCellStylesResponse, TableSliceDto } from '@/api/types';
 import { cellAppearanceOf } from './cellAppearance';
 import { luminance } from '@/shared/theme/contrast';
 import { isHexColour } from '@/shared/theme/cellPalette';
@@ -297,6 +297,63 @@ export function applyStylePatches(slice: TableSliceDto, patches: readonly CellSt
 
     if (merged.backgroundHex === null && merged.foregroundHex === null && !merged.isBold) delete next[key];
     else next[key] = merged;
+  }
+
+  return { ...slice, cellStyles: next };
+}
+
+/**
+ * Ключі комірок, які клієнт оптимістично зафарбував, а сервер відмовив у часткову відмову області (`scope`);
+ * `null` — відповідь не зводиться до кешу (лічильники розійшлися або комірки відмови не встановлюються однозначно).
+ *
+ * Сервер у відповіді дає лише ЛІЧИЛЬНИКИ (`deniedByReason`), а не комірки. Але причина відмови комірки — те саме значення,
+ * що лежить у `slice.cellPermissions[комірка]` (`LockedByOwner` тощо): оптимістичні комірки з такою причиною вважаються
+ * відмовленими, і відповідь зводиться до кешу лише тоді, коли решта (`applied + reset + skipped`) дорівнює кількості
+ * решти оптимістичних комірок. Інакше — `null`, перечитування.
+ */
+export function deniedCellKeys(
+  slice: Pick<TableSliceDto, 'cellPermissions'>,
+  cells: readonly Pick<CellStylePatch, 'rowKey' | 'columnCode'>[],
+  response: PatchCellStylesResponse,
+): string[] | null {
+  const allowed = response.appliedCells + response.resetCells + (response.skippedCells ?? 0);
+  const reasons = response.deniedByReason ?? {};
+  const painted: string[] = [];
+  const perReason = new Map<string, number>();
+
+  for (const cell of cells) {
+    const key = cellKey(cell.rowKey, cell.columnCode);
+    const permission = slice.cellPermissions[key];
+
+    if (permission === undefined || reasons[permission] === undefined) continue;
+
+    painted.push(key);
+    perReason.set(permission, (perReason.get(permission) ?? 0) + 1);
+  }
+
+  // Дозволене сервером == намальоване клієнтом без відмовлених, і відмовлених причин не більше, ніж назвав сервер
+  // (решта відмовлених комірок — поза оптимістикою: клієнт їх і не малював, напр. колонки з `styleAccess`).
+  if (allowed !== cells.length - painted.length) return null;
+  if (painted.length > (response.deniedCells ?? 0)) return null;
+
+  for (const [reason, count] of perReason) if (count > (reasons[reason] ?? 0)) return null;
+
+  return painted;
+}
+
+/** Повертає оформлення вказаних комірок до значення `previous` (немає там — знімає): відкат відмовлених сервером. */
+export function revertCellStyles(
+  slice: TableSliceDto,
+  keys: readonly string[],
+  previous: Pick<TableSliceDto, 'cellStyles'> | undefined,
+): TableSliceDto {
+  const next: Record<string, UserCellFormat> = { ...(slice.cellStyles ?? {}) };
+
+  for (const key of keys) {
+    const before = previous?.cellStyles?.[key];
+
+    if (before === undefined) delete next[key];
+    else next[key] = before;
   }
 
   return { ...slice, cellStyles: next };

@@ -109,12 +109,12 @@ public sealed class PermitTypeDef : Entity<int>
 
     /// <summary>Зберігає чернетку визначення (перша чернетка типу чи заміна наявної).</summary>
     /// <param name="json">Визначення типу як JSON.</param>
-    /// <param name="userId">Автор.</param>
+    /// <param name="userId">Автор; <c>null</c> — система (✎ AIRSYS01: дія розгортання, як сід; у журналі — «system»).</param>
     /// <param name="utcNow">Момент зміни в UTC.</param>
-    public void SaveDraft(string json, int userId, DateTime utcNow)
+    public void SaveDraft(string json, int? userId, DateTime utcNow)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(userId);
+        EnsureActor(userId);
         EnsureUtc(utcNow);
 
         DraftJson = json;
@@ -140,10 +140,10 @@ public sealed class PermitTypeDef : Entity<int>
 
     /// <summary>Відкриває нову версію опублікованого типу: чернетка стартує з його поточного складу.</summary>
     /// <param name="json">Поточне опубліковане визначення як JSON.</param>
-    /// <param name="userId">Автор.</param>
+    /// <param name="userId">Автор; <c>null</c> — система.</param>
     /// <param name="utcNow">Момент у UTC.</param>
     /// <exception cref="InvalidOperationException">Тип ще не опубліковано або чернетка вже є.</exception>
-    public void OpenNewVersion(string json, int userId, DateTime utcNow)
+    public void OpenNewVersion(string json, int? userId, DateTime utcNow)
     {
         if (Status != PermitTypeStatus.Published)
         {
@@ -179,12 +179,12 @@ public sealed class PermitTypeDef : Entity<int>
     /// <summary>
     /// Публікує нову версію вже опублікованого типу: <see cref="Version"/> зростає, чернетка зникає.
     /// </summary>
-    /// <param name="userId">Хто публікує.</param>
+    /// <param name="userId">Хто публікує; <c>null</c> — система.</param>
     /// <param name="utcNow">Момент публікації в UTC.</param>
     /// <exception cref="InvalidOperationException">Тип ще не опубліковано (перша публікація — <see cref="Publish"/>).</exception>
-    public void Republish(int userId, DateTime utcNow)
+    public void Republish(int? userId, DateTime utcNow)
     {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(userId);
+        EnsureActor(userId);
         EnsureUtc(utcNow);
 
         if (Status != PermitTypeStatus.Published)
@@ -201,13 +201,13 @@ public sealed class PermitTypeDef : Entity<int>
     }
 
     /// <summary>Публікує тип: <see cref="PermitTypeStatus.Draft"/> → <see cref="PermitTypeStatus.Published"/>.</summary>
-    /// <param name="userId">Хто публікує.</param>
+    /// <param name="userId">Хто публікує; <c>null</c> — система.</param>
     /// <param name="utcNow">Момент публікації; має бути в UTC.</param>
     /// <exception cref="InvalidOperationException">Тип уже опубліковано: назад і вдруге перехід не діє.</exception>
     /// <exception cref="ArgumentException">Момент не в UTC.</exception>
-    public void Publish(int userId, DateTime utcNow)
+    public void Publish(int? userId, DateTime utcNow)
     {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(userId);
+        EnsureActor(userId);
         EnsureUtc(utcNow);
 
         // ⛔ Перехід лише вгору: опублікований тип заморожений, бо на нього вже
@@ -220,6 +220,15 @@ public sealed class PermitTypeDef : Entity<int>
         UpdatedAt = utcNow;
         UpdatedByUserId = userId;
         DraftJson = null;
+    }
+
+    /// <summary>Автор — справжній користувач (Id &gt; 0) або система (<c>null</c>); 0 і від'ємні — помилка виклику.</summary>
+    private static void EnsureActor(int? userId)
+    {
+        if (userId is { } id)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(id, nameof(userId));
+        }
     }
 
     private static void EnsureUtc(DateTime utcNow)

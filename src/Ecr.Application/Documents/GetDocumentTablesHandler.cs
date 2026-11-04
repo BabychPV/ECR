@@ -2,6 +2,7 @@
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Documents;
@@ -27,7 +28,10 @@ public sealed class GetDocumentTablesHandler(
     IPermitBindingStore permitBindings,
     IMetadataCache metadata,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    // RS: назви груп і копії аркушів; необов'язковий лише заради тестів, що конструюють обробник вручну (без нього копій
+    // у відповіді немає — лише оригінали).
+    IDocumentSheetCopyStore? sheetCopies = null)
 {
     /// <summary>Право на перегляд документа (`02-contracts.md` §9).</summary>
     public const string Permission = "Document.View";
@@ -100,30 +104,56 @@ public sealed class GetDocumentTablesHandler(
                 .ToDictionary(b => b.SheetTableDefId)
             : new Dictionary<int, PermitBindingSummary>();
 
-        var byTableDef = instances.ToDictionary(i => i.TableDefId);
+        // ⛔ RS: екземпляр — за (таблиця, копія); `0` — оригінал. Копії стоять ПІСЛЯ оригінала свого аркуша за номером
+        // (`sheetOrdinal`, потім `copyOrdinal`) і ділять з ним `sheetCode`/`sheetOrdinal`.
+        var byTableCopy = instances.ToDictionary(i => (i.TableDefId, CopyKey: i.SheetCopyId ?? 0));
+        var groupOf = sheetCopies is null
+            ? new Dictionary<int, SheetCopyGroupInfo>()
+            : (await sheetCopies.ListGroupsAsync(documentId, ct).ConfigureAwait(false)).ToDictionary(g => g.SheetDefId);
         var result = new List<DocumentTableDto>(instances.Count);
 
         foreach (var sheet in snapshot.Sheets.Where(s => !s.IsDeleted).OrderBy(s => s.Ordinal))
         {
-            foreach (var table in sheet.Tables.Where(t => !t.IsDeleted && readable.CanReadTable(t.Id)).OrderBy(t => t.Ordinal))
-            {
-                if (!byTableDef.TryGetValue(table.Id, out var instance))
-                {
-                    // Таблиця описана в шаблоні, але екземпляра за цей період
-                    // немає: аркуш до документа не входить (ФВ-3.2).
-                    continue;
-                }
+            groupOf.TryGetValue(sheet.Id, out var group);
+            var groupName = SheetCopyNaming.Effective(sheet.NameL10n, group?.NameOverride);
+            var hasCopies = group is { Copies.Count: > 0 };
 
-                result.Add(new DocumentTableDto(
-                    sheet.Id,
-                    sheet.Code,
-                    sheet.NameL10n,
-                    sheet.Ordinal,
-                    instance.TableInstanceId,
-                    table.Id,
-                    table.Code,
-                    table.NameL10n,
-                    table.Ordinal,
+            var copyKeys = Enumerable.Repeat(0L, 1)
+                .Concat(sheet.Tables
+                    .Where(t => !t.IsDeleted)
+                    .SelectMany(t => instances.Where(i => i.TableDefId == t.Id && i.SheetCopyId is not null))
+                    .Select(i => i.SheetCopyId!.Value)
+                    .Distinct()
+                    .OrderBy(id => group?.Copies.FirstOrDefault(c => c.SheetCopyId == id)?.Ordinal ?? short.MaxValue)
+                    .ThenBy(id => id));
+
+            foreach (var copyKey in copyKeys)
+            {
+                var ordinal = copyKey == 0
+                    ? DocumentSheet.OriginalOrdinal
+                    : group?.Copies.FirstOrDefault(c => c.SheetCopyId == copyKey)?.Ordinal
+                      ?? (short)(DocumentSheet.OriginalOrdinal + 1);
+                var display = SheetCopyNaming.Display(groupName, ordinal, hasCopies);
+
+                foreach (var table in sheet.Tables.Where(t => !t.IsDeleted && readable.CanReadTable(t.Id)).OrderBy(t => t.Ordinal))
+                {
+                    if (!byTableCopy.TryGetValue((table.Id, copyKey), out var instance))
+                    {
+                        // Таблиця описана в шаблоні, але екземпляра за цей період
+                        // немає: аркуш до документа не входить (ФВ-3.2).
+                        continue;
+                    }
+
+                    result.Add(new DocumentTableDto(
+                        sheet.Id,
+                        sheet.Code,
+                        sheet.NameL10n,
+                        sheet.Ordinal,
+                        instance.TableInstanceId,
+                        table.Id,
+                        table.Code,
+                        table.NameL10n,
+                        table.Ordinal,
 
                     // ⛔ Віддається ВІДПОВІДЬ домену, а не режим таблиці.
                     // Клієнту потрібна кнопка «додати рядок», і питання, на
@@ -135,9 +165,16 @@ public sealed class GetDocumentTablesHandler(
                     // `Mixed` цілком.
                     table.AllowsDynamicRows,
                     table.MaxDynamicRows,
-                    bindings.TryGetValue(table.Id, out var binding)
+
+                    // Q5: рядки з дозволу — лише оригінал; копія — порожня форма без прив'язки.
+                    copyKey == 0 && bindings.TryGetValue(table.Id, out var binding)
                         ? new DocumentTablePermitBindingDto(binding.Code, binding.Mode, binding.PermitTypeCode)
-                        : null));
+                        : null,
+                    instance.SheetCopyId,
+                    ordinal,
+                    display,
+                    sheet.IsCopyable));
+                }
             }
         }
 
@@ -161,6 +198,16 @@ public sealed class GetDocumentTablesHandler(
 /// PM-11b: таблиця прив'язана до дозволу у версії шаблону ДОКУМЕНТА; <c>null</c> - ні. Лише ознака (код, режим, тип) -
 /// даних дозволу тут немає й бути не може (вони за <c>Registry.View</c>).
 /// </param>
+/// <param name="SheetCopyId">
+/// RS: копія аркуша (<c>doc.DocumentSheet.Id</c>), якій належить екземпляр; <c>null</c> — оригінал. Саме нею подають,
+/// затверджують і повертають копію (<c>sheetCopyId</c> у запитах), а в <c>SheetStates</c> вона має ключ <c>КОД#sheetCopyId</c>.
+/// </param>
+/// <param name="CopyOrdinal">RS: номер у групі — 1 оригінал, 2… копії; копії діляться <c>sheetCode</c>/<c>sheetOrdinal</c> з оригіналом.</param>
+/// <param name="DisplayNameL10n">
+/// RS: назва аркуша для показу — «&lt;Назва&gt; N» (оригінал «&lt;Назва&gt; 1», коли копії є; без копій — назва як є).
+/// <paramref name="SheetNameL10n"/> лишається назвою з шаблону.
+/// </param>
+/// <param name="IsCopyable">RS: шаблон дозволяє копіювати аркуш («Додати копію»).</param>
 public sealed record DocumentTableDto(
     int SheetDefId,
     string SheetCode,
@@ -173,7 +220,11 @@ public sealed record DocumentTableDto(
     int TableOrdinal,
     bool AllowsDynamicRows,
     int? MaxDynamicRows,
-    DocumentTablePermitBindingDto? PermitBinding = null);
+    DocumentTablePermitBindingDto? PermitBinding = null,
+    long? SheetCopyId = null,
+    int CopyOrdinal = 1,
+    Domain.ValueObjects.LocalizedText? DisplayNameL10n = null,
+    bool IsCopyable = false);
 
 /// <summary>Ознака прив'язки таблиці документа до дозволу (PM-11b): без даних дозволу.</summary>
 /// <param name="Code">Код прив'язки.</param>

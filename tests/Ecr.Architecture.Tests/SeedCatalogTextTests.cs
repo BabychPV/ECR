@@ -33,7 +33,7 @@ namespace Ecr.Architecture.Tests;
 public sealed partial class SeedCatalogTextTests
 {
     /// <summary>Сід каталогу рядків відносно кореня репозиторію.</summary>
-    private const string SeedFile = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
+    private const string SeedFile = SeedSql.DisplayPath;
 
     /// <summary>Мова, якою заводяться рядки збірки (ФВ-14.9, <c>D-95</c>).</summary>
     private const string DefaultLanguage = "en";
@@ -153,21 +153,12 @@ public sealed partial class SeedCatalogTextTests
     /// </remarks>
     private static List<(string Key, string Language, string Value)> Rows()
     {
-        var text = File.ReadAllText(
-            Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar)));
+        // ✎ en-каталог — порції `INSERT INTO #UiEn` файлів seed/features (SeedSql.EnCatalog);
+        // порожній розбір падає на `Assert.NotEmpty` вище, а не зеленіє мовчки.
+        var block = SeedSql.EnCatalog;
+        Assert.True(block.Length > 0, $"У {SeedFile} немає порцій en-каталогу — сторож дивиться не туди.");
 
-        // ⚠ Саме `AS t`, а не голе `MERGE sys_ecr.UiString`: на сорок рядків
-        // вище стоїть `MERGE sys_ecr.UiStringRevision`, і префікс збігається.
-        // Сторож, націлений на нього, брав блок у 96 символів, не знаходив
-        // жодного рядка — і впав на `Assert.NotEmpty` замість того, щоб мовчки
-        // позеленіти. Саме для цього та перевірка й стоїть.
-        var start = text.IndexOf("MERGE sys_ecr.UiString AS t", StringComparison.Ordinal);
-        Assert.True(start >= 0, $"У {SeedFile} немає блоку MERGE sys_ecr.UiString AS t — сторож дивиться не туди.");
-
-        var end = text.IndexOf("WHEN NOT MATCHED", start, StringComparison.Ordinal);
-        Assert.True(end > start, $"Блок MERGE sys_ecr.UiString AS t у {SeedFile} не закінчується — сторож дивиться не туди.");
-
-        return SeedRow().Matches(text[start..end])
+        return SeedRow().Matches(block)
             .Select(m => (
                 Key: m.Groups[1].Value,
                 Language: m.Groups[2].Value,

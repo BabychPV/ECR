@@ -20,6 +20,8 @@ import {
 function table(ordinal: number, code = `T${String(ordinal)}`, instance = 100 + ordinal, def = ordinal): DocumentTableDto {
   return {
     allowsDynamicRows: false,
+    copyOrdinal: 1,
+    isCopyable: false,
     maxDynamicRows: null,
     sheetCode: 'S1',
     sheetDefId: 1,

@@ -81,11 +81,18 @@ export function SheetStrip({ sheets, activeCode, onSelect, children }: SheetStri
   }, [sheets.length]);
 
   // Активна вкладка завжди у видимій зоні смуги.
+  // ⛔ PERIODNAV: лише ГОРИЗОНТАЛЬНО, у самій смузі. `scrollIntoView` крутив і сторінку: після зміни періоду
+  // смуга монтується знову, і вкладка під краєм екрана тягла прокрутку сторінки донизу.
   useEffect(() => {
-    list.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.scrollIntoView?.({
-      inline: 'nearest',
-      block: 'nearest',
-    });
+    const strip = list.current;
+    const tab = strip?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (strip === null || strip === undefined || tab === null || tab === undefined) return;
+
+    const tabBox = tab.getBoundingClientRect();
+    const tabLeft = tabBox.left - strip.getBoundingClientRect().left + strip.scrollLeft;
+    const tabRight = tabLeft + tabBox.width;
+    if (tabLeft < strip.scrollLeft) strip.scrollLeft = tabLeft;
+    else if (tabRight > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = tabRight - strip.clientWidth;
   }, [activeCode]);
 
   return (

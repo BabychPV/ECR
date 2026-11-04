@@ -1,8 +1,7 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { loadCatalog } from '@/shared/i18n';
 import { permissionLabel, permissionLabelKey } from '@/features/security/permissionLabel';
+import { readSeedSql } from '@/test/seedSql';
 
 /**
  * `U-11`: 41 колонка матриці прав була підписана сирим кодом сервера.
@@ -80,10 +79,7 @@ describe('Назва права проти коду права (U-11)', () => {
  * колонка знову підписана кодом, і жодна перевірка не червона.
  */
 describe('Сід покриває ВЕСЬ каталог прав (U-11)', () => {
-  const seed = readFileSync(
-    path.resolve(process.cwd(), '../Ecr.Infrastructure/Persistence/Sql/09-seed.sql'),
-    'utf8',
-  );
+  const seed = readSeedSql();
 
   /** Блок `MERGE sec.Permission` — саме він є каталогом прав. */
   const start = seed.indexOf('MERGE sec.Permission');
@@ -104,8 +100,10 @@ describe('Сід покриває ВЕСЬ каталог прав (U-11)', () =
   // ✎ 2026-09-29: 42-ге — `Report.ViewSnapshot` (рішення людини: вміст регуляторного зрізу).
   // ✎ 2026-10-05: 43-тє — `Document.Submit` (D-285, подання для рівня Write).
   // ✎ 2026-10-19: 45-те — `Permit.EditType`, `Permit.PublishType` (PM-04, група `Permit`).
-  it('у каталозі 45 прав — рівно стільки колонок і має матриця', () => {
-    expect(codes.size).toBe(45);
+  // ✎ 2026-10-29: 47-ме — `Document.Discuss`, `Document.DiscussModerate` (чат таблиці документа, TC).
+  // ✎ 2026-10-30: 48-ме — `Document.OverrideFormula` (D-461, ручне значення замість формули).
+  it('у каталозі 48 прав — рівно стільки колонок і має матриця', () => {
+    expect(codes.size).toBe(48);
   });
 
   it('кожне право має назву в каталозі рядків', () => {

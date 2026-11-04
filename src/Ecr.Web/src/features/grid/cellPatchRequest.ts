@@ -4,6 +4,7 @@ import { queryKeys } from '@/api/queryKeys';
 import type { PatchCell, PatchCellsRequest, PatchCellsResponse, TableSliceDto } from '@/api/types';
 import { applyPatchToSlice } from './sliceApply';
 import { hasConfirmed } from './confirmedEdits';
+import { overrideReasonOf } from './overrideReasons';
 import { calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
 
 /*
@@ -63,10 +64,17 @@ export function buildRequest(
     // розрізняє три наміри прапорцем `isEmpty`, а не наявністю поля: сама
     // комірка потрапляє в запит лише тоді, коли її змінюють, і «поля немає»
     // означало б «не чіпати» — тобто порожній намір у списку змін.
+    // ✎ D-461: причина ручного значення замість формули — з діалогу (`overrideReasons.ts`), лише для ЗНАЧЕННЯ:
+    // видалення в ручній комірці повертає формулу без причини.
+    const value = edit.isEmpty ? null : edit.value;
+    const overrideReason =
+      value === null || value === undefined ? undefined : overrideReasonOf(tableInstanceId, periodKey, edit);
+
     row.cells.push({
       columnCode: edit.columnCode,
-      value: edit.isEmpty ? null : edit.value,
+      value,
       isEmpty: edit.isEmpty,
+      ...(overrideReason === undefined ? {} : { overrideReason }),
     });
 
     rows.set(edit.rowKey, row);
@@ -156,7 +164,15 @@ export function applyPatchLocally(
   const racing = queryClient.getQueryState(key)?.fetchStatus === 'fetching';
 
   queryClient.setQueryData<TableSliceDto>(key, (slice) =>
-    slice === undefined ? slice : applyPatchToSlice(slice, request, response),
+    slice === undefined
+      ? slice
+      : applyPatchToSlice(
+          slice,
+          request,
+          response,
+          // ✎ D-461: автор ручного значення для підказки — з уже прочитаного `/me` (без запиту).
+          queryClient.getQueryData<{ userName?: string | null }>(['me'])?.userName ?? null,
+        ),
   );
 
   // ⚠ І зріз позначається застарілим — БЕЗ запиту (`refetchType: 'none'`).

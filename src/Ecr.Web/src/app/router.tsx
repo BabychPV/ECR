@@ -17,6 +17,7 @@ import {
   HealthPage,
   JobsPage,
   MappingPreviewPage,
+  PiDataPage,
   PipelinePage,
   MethodologiesPage,
   MethodologyVersionsPage,
@@ -120,8 +121,14 @@ const PermitBindingsPage = lazy(async () => ({
 const PermitBindingPage = lazy(async () => ({
   default: (await import('@/pages/admin/PermitBindingPage')).PermitBindingPage,
 }));
+const PermitNaePage = lazy(async () => ({
+  default: (await import('@/pages/admin/PermitNaePage')).PermitNaePage,
+}));
 const PermitPage = lazy(async () => ({
   default: (await import('@/pages/admin/PermitPage')).PermitPage,
+}));
+const PermitAirImportPage = lazy(async () => ({
+  default: (await import('@/pages/admin/PermitAirImportPage')).PermitAirImportPage,
 }));
 
 /**
@@ -444,9 +451,19 @@ export const router = createBrowserRouter([
             handle: routes.adminPermitBinding.handle,
           },
           {
+            path: relativePath(routes.adminPermitNae, 'admin'),
+            element: guarded(routes.adminPermitNae.handle, <PermitNaePage />),
+            handle: routes.adminPermitNae.handle,
+          },
+          {
             path: relativePath(routes.adminPermit, 'admin'),
             element: guarded(routes.adminPermit.handle, <PermitPage />),
             handle: routes.adminPermit.handle,
+          },
+          {
+            path: relativePath(routes.adminPermitImport, 'admin'),
+            element: guarded(routes.adminPermitImport.handle, <PermitAirImportPage />),
+            handle: routes.adminPermitImport.handle,
           },
           {
             path: relativePath(routes.adminMethodologies, 'admin'),
@@ -482,6 +499,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminMapping, 'admin'),
             element: guarded(routes.adminMapping.handle, <MappingPreviewPage />),
             handle: routes.adminMapping.handle,
+          },
+          {
+            path: relativePath(routes.adminPiData, 'admin'),
+            element: guarded(routes.adminPiData.handle, <PiDataPage />),
+            handle: routes.adminPiData.handle,
           },
           {
             path: relativePath(routes.adminPipeline, 'admin'),

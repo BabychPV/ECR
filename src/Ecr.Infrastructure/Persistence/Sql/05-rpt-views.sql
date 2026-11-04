@@ -63,7 +63,16 @@ SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
        cv.ValueRegistryEntryId, cv.ValueUnitId, vu.Code AS ValueUnitCode,
        cu.Code AS ColumnUnitCode,
        cv.IsCalculated,
-       CAST(COALESCE(a.Status, 0) AS tinyint) AS Status
+       CAST(COALESCE(a.Status, 0) AS tinyint) AS Status,
+       -- ⛔ RS (копії аркушів, людина 03.11): SheetCopyOrdinal — номер у групі (1 — оригінал, 2… — копія); SheetDisplayName —
+       -- «<Назва> N»: назва групи (в документі або з шаблону, мова en, інакше код аркуша), з номером лише коли в групі є
+       -- копії. Стан подання й дані копії — окремі від оригінала (SheetCopyId на екземплярі й на стані).
+       CAST(COALESCE(dsh.CopyOrdinal, 1) AS smallint) AS SheetCopyOrdinal,
+       (SELECT CONCAT(COALESCE(JSON_VALUE(MAX(CASE WHEN g.CopyOfId IS NULL THEN g.NameOverrideL10n END), N'$.en'),
+                               JSON_VALUE(sd.NameL10n, N'$.en'), sd.Code),
+                      CASE WHEN ti.SheetCopyId IS NOT NULL OR MAX(CASE WHEN g.CopyOfId IS NOT NULL THEN 1 ELSE 0 END) = 1
+                           THEN CONCAT(N' ', COALESCE(dsh.CopyOrdinal, 1)) ELSE N'' END)
+        FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = sd.Id) AS SheetDisplayName
 FROM doc.CellValue          AS cv
 JOIN doc.TableRow           AS r  ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId AND r.IsDeleted = 0
 JOIN doc.TableInstance      AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
@@ -77,6 +86,8 @@ JOIN cfg.Template           AS t  ON t.Id = tv.TemplateId
 LEFT JOIN uom.Unit          AS vu ON vu.Id = cv.ValueUnitId
 LEFT JOIN uom.Unit          AS cu ON cu.Id = cd.UnitId
 LEFT JOIN wf.ApprovalState  AS a  ON a.DocumentId = d.Id AND a.SheetDefId = sd.Id AND a.PeriodKey = cv.PeriodKey
+                                 AND (a.SheetCopyId = ti.SheetCopyId OR (a.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
+LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId
 WHERE cv.IsEmpty = 0;
 GO
 
@@ -218,6 +229,8 @@ BEGIN
     DECLARE @rvPack nvarchar(max), @rvChoose nvarchar(max), @rvExprs nvarchar(max), @rvPred bit, @rvDer nvarchar(max), @rvOwn nvarchar(max), @rvGen nvarchar(max),
             @plainAgg nvarchar(max), @plainCnt int, @numRef nvarchar(64), @strRef nvarchar(64),
             @famAgg nvarchar(max), @pkExpr nvarchar(16), @rvRef nvarchar(8), @fromSql nvarchar(max), @tiAp nvarchar(max), @rowApply nvarchar(max);
+    -- RS (копії аркушів): службові колонки _SheetCopyOrdinal/_SheetDisplayName — у КІНЦІ списку (адитивні, як <Код>_Text).
+    DECLARE @sheetNameLit nvarchar(max), @copyCols nvarchar(max);
 
     DECLARE cur_views CURSOR LOCAL FAST_FORWARD FOR
         SELECT TableDefId, SheetDefId, Header, ViewName FROM @tables ORDER BY TableDefId;
@@ -597,6 +610,18 @@ JOIN doc.Document      AS d ON d.Id = ti.DocumentId
 JOIN doc.Project       AS p ON p.Id = d.ProjectId' + @tiAp + CASE WHEN @rowApply <> N'' THEN @rowApply ELSE N'
 JOIN doc.TableRow      AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id AND r.IsDeleted = 0' END END;
 
+        -- ⛔ RS (копії аркушів, людина 03.11): стан подання — СВОЄЇ копії (SheetCopyId екземпляра), номер у групі і назва
+        -- «<Назва> N» (мова en, інакше код аркуша; з номером лише коли в групі є копії). Назва аркуша версії — літерал
+        -- (опублікована версія незмінна); група шукається за аркушем ЦІЄЇ версії.
+        SET @sheetNameLit = N'N''' + REPLACE(COALESCE((SELECT COALESCE(JSON_VALUE(sdn.NameL10n, N'$.en'), sdn.Code)
+                                                         FROM cfg.SheetDef AS sdn WHERE sdn.Id = @sheet), N''), N'''', N'''''') + N'''';
+        SET @copyCols = CONCAT(N',
+       CAST(COALESCE(dsh.CopyOrdinal, 1) AS smallint) AS _SheetCopyOrdinal,
+       (SELECT CONCAT(COALESCE(JSON_VALUE(MAX(CASE WHEN g.CopyOfId IS NULL THEN g.NameOverrideL10n END), N''$.en''), ', @sheetNameLit, N'),
+                      CASE WHEN ti.SheetCopyId IS NOT NULL OR MAX(CASE WHEN g.CopyOfId IS NOT NULL THEN 1 ELSE 0 END) = 1
+                           THEN CONCAT(N'' '', COALESCE(dsh.CopyOrdinal, 1)) ELSE N'''' END)
+        FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = ', CAST(@sheet AS nvarchar(10)), N') AS _SheetDisplayName');
+
         SET @sql = CONCAT(
 N'CREATE OR ALTER VIEW rpt.', QUOTENAME(@view), N'
 AS
@@ -605,10 +630,12 @@ SELECT p.Id AS _ProjectId, p.Code AS _ProjectCode,
        d.Id AS _DocumentId, d.BusinessKey AS _DocumentKey,
        ', @pkExpr, N' AS _PeriodKey,
        CAST(COALESCE(a.Status, 0) AS tinyint) AS _Status,
-       r.Id AS _RowId, r.RowKey AS _RowKey, r.Ordinal AS _RowOrdinal', @select, N'
+       r.Id AS _RowId, r.RowKey AS _RowKey, r.Ordinal AS _RowOrdinal', @select, @copyCols, N'
 ', @fromSql, N'
 LEFT JOIN wf.ApprovalState AS a ON a.DocumentId = d.Id AND a.SheetDefId = ', CAST(@sheet AS nvarchar(10)),
-N' AND a.PeriodKey = ti.PeriodKey', @joins, N'
+N' AND a.PeriodKey = ti.PeriodKey
+                               AND (a.SheetCopyId = ti.SheetCopyId OR (a.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
+LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId', @joins, N'
 WHERE ti.TableDefId = ', CAST(@id AS nvarchar(10)), N';');
 
         -- ⚠ Порівнюється текст від позначки, а не весь: заголовок
@@ -653,6 +680,609 @@ next_table:
 
     SELECT TableDefId, N'rpt.' + ViewName AS ViewName, Action FROM @result ORDER BY TableDefId;
 END;
+GO
+
+-- ══ RPT-STABLE (Part A): version-less report views ═══════════════════════════
+-- One view per (Template, Sheet, Table) across ALL Published/Deprecated versions: rpt.v_<Tpl>_<Sheet>_<Table> (no version
+-- suffix, same sanitising / 128-char hash rule as the _vN views). The _vN views and rpt.usp_GenerateTemplateViews are NOT
+-- touched (D-53 contract kept, golden guard stays byte-identical); this is a separate procedure called by the application
+-- right after it (ReportViewGenerator), or by a DBA:  EXEC rpt.usp_GenerateStableViews [@TemplateVersionId], [@MonthRouting = 1].
+--   * rows       : WHERE ti.TableDefId IN (that table in every published version);
+--   * columns    : UNION by ColumnDef.Code over those versions, ordered by first appearance (version creation order, Id),
+--                  NEVER removed (a column dropped in v3 stays, NULL for rows of v3);
+--   * read       : ONE pass - a single OUTER APPLY pc over doc.CellValue with MAX(CASE WHEN ColumnDefId IN (<ids of the code>) ..)
+--                  instead of a LEFT JOIN per column; month-routed (Q-17) columns use the same sv/sc/fam owner scheme as _vN;
+--   * _TemplateVersion : service column, nvarchar, taken PER ROW from the version of the row's own TableDef (a constant CASE
+--                  over ti.TableDefId, no extra join), never from Project.TemplateVersionId - one project may show some periods
+--                  as v1 and later periods as v2;
+--   * type conflict : a code whose storage family differs between versions (e.g. string in v1, number in v2) becomes nvarchar
+--                  (every value converted to text); the proc returns a Warning for it; such a column is not month-routed and
+--                  not overlaid with methodology results;
+--   * limits     : more than 1000 columns (SQL Server view limit 1024) -> 50422 for that table, the others are generated;
+--   * names      : a stable name equal to another stable name or to any _vN name is NOT generated (50409 at the end).
+-- Idempotent: the text is a pure function of the structure; an equal existing view is left alone (Unchanged).
+-- Result set: ViewName, Action (Created / Altered / Unchanged), Warning (nullable).
+CREATE OR ALTER PROCEDURE rpt.usp_GenerateStableViews
+    @TemplateVersionId int = NULL,
+    @MonthRouting bit = 0
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @result TABLE (ViewName sysname NOT NULL, Action nvarchar(16) NOT NULL, Warning nvarchar(2000) NULL);
+
+    -- Every table of every published version.
+    DECLARE @gt TABLE (
+        TableDefId int NOT NULL PRIMARY KEY, SheetDefId int NOT NULL, TemplateVersionId int NOT NULL, TemplateId int NOT NULL,
+        TemplateCode nvarchar(64) NOT NULL, SheetCode nvarchar(64) NOT NULL, TableCode nvarchar(64) NOT NULL,
+        VersionText nvarchar(20) NOT NULL, LayoutKind tinyint NOT NULL, GroupId int NULL);
+    INSERT INTO @gt (TableDefId, SheetDefId, TemplateVersionId, TemplateId, TemplateCode, SheetCode, TableCode, VersionText, LayoutKind)
+    SELECT td.Id, sd.Id, tv.Id, t.Id, t.Code, sd.Code, td.Code, tv.[Version], td.LayoutKind
+      FROM cfg.TableDef AS td
+      JOIN cfg.SheetDef AS sd ON sd.Id = td.SheetDefId
+      JOIN cfg.TemplateVersion AS tv ON tv.Id = sd.TemplateVersionId
+      JOIN cfg.Template AS t ON t.Id = tv.TemplateId
+     WHERE tv.Status IN (1, 2) AND td.IsDeleted = 0 AND sd.IsDeleted = 0;
+
+    DECLARE @groups TABLE (
+        GroupId int IDENTITY(1, 1) PRIMARY KEY, TemplateId int NOT NULL, TemplateCode nvarchar(64) NOT NULL,
+        SheetCode nvarchar(64) NOT NULL, TableCode nvarchar(64) NOT NULL, Header nvarchar(400) NOT NULL, ViewName nvarchar(400) NOT NULL);
+    INSERT INTO @groups (TemplateId, TemplateCode, SheetCode, TableCode, Header, ViewName)
+    SELECT g.TemplateId, g.TemplateCode, g.SheetCode, g.TableCode,
+           CONCAT(N'template ', g.TemplateCode, N', sheet ', g.SheetCode, N', table ', g.TableCode, N', all versions'),
+           CONCAT(N'v_', g.TemplateCode, N'_', g.SheetCode, N'_', g.TableCode)
+      FROM (SELECT DISTINCT TemplateId, TemplateCode, SheetCode, TableCode FROM @gt) AS g;
+    UPDATE x SET GroupId = g.GroupId
+      FROM @gt AS x
+      JOIN @groups AS g ON g.TemplateId = x.TemplateId AND g.SheetCode = x.SheetCode AND g.TableCode = x.TableCode;
+
+    -- Names: stable ('S') and per-version ('V') names go through the same sanitising / hashing rule as the _vN views.
+    DECLARE @nm TABLE (Kind char(1) NOT NULL, Ref int NOT NULL, Name nvarchar(400) NOT NULL, PRIMARY KEY (Kind, Ref));
+    INSERT INTO @nm (Kind, Ref, Name)
+    SELECT 'S', GroupId, ViewName FROM @groups
+    UNION ALL
+    SELECT 'V', TableDefId, CONCAT(N'v_', TemplateCode, N'_', SheetCode, N'_', TableCode, N'_v', VersionText) FROM @gt;
+
+    DECLARE @k char(1), @ref int, @raw nvarchar(400), @pos int;
+    DECLARE cur_names CURSOR LOCAL FAST_FORWARD FOR SELECT Kind, Ref FROM @nm;
+    OPEN cur_names;
+    FETCH NEXT FROM cur_names INTO @k, @ref;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SELECT @raw = Name FROM @nm WHERE Kind = @k AND Ref = @ref;
+        SET @pos = PATINDEX(N'%[^A-Za-z0-9_]%', @raw COLLATE Latin1_General_BIN2);
+        WHILE @pos > 0
+        BEGIN
+            SET @raw = STUFF(@raw, @pos, 1, N'_');
+            SET @pos = PATINDEX(N'%[^A-Za-z0-9_]%', @raw COLLATE Latin1_General_BIN2);
+        END
+        IF LEN(@raw) > 128
+            SET @raw = LEFT(@raw, 115) + N'_' + LEFT(CONVERT(varchar(64), HASHBYTES('SHA2_256', @raw), 2), 12);
+        UPDATE @nm SET Name = @raw WHERE Kind = @k AND Ref = @ref;
+        FETCH NEXT FROM cur_names INTO @k, @ref;
+    END
+    CLOSE cur_names;
+    DEALLOCATE cur_names;
+
+    UPDATE g SET ViewName = n.Name FROM @groups AS g JOIN @nm AS n ON n.Kind = 'S' AND n.Ref = g.GroupId;
+
+    -- A stable name that equals another stable name or any _vN name is not generated (collation of the database, as the server compares names).
+    -- As in the _vN proc, only the template of the requested version matters: a clash elsewhere does not block this call.
+    DELETE FROM @groups
+     WHERE @TemplateVersionId IS NOT NULL
+       AND TemplateId <> (SELECT TemplateId FROM cfg.TemplateVersion WHERE Id = @TemplateVersionId);
+    DECLARE @clashNames TABLE (Name nvarchar(400) NOT NULL);
+    INSERT INTO @clashNames
+    SELECT n.Name FROM @nm AS n GROUP BY n.Name
+     HAVING COUNT(*) > 1 AND MAX(CASE n.Kind WHEN 'S' THEN 1 ELSE 0 END) = 1
+        AND n.Name IN (SELECT g.ViewName FROM @groups AS g);
+    DECLARE @clash nvarchar(400) = (SELECT TOP (1) Name FROM @clashNames ORDER BY Name);
+    DECLARE @clashWho nvarchar(1500) = STUFF((
+        SELECT N'; ' + g.Header FROM @groups AS g WHERE g.ViewName = @clash ORDER BY g.GroupId
+        FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
+    DELETE FROM @groups WHERE ViewName IN (SELECT Name FROM @clashNames);
+
+    DECLARE @g int, @header nvarchar(400), @view sysname, @tids nvarchar(max), @sheetCase nvarchar(max), @verCase nvarchar(max);
+    DECLARE @select nvarchar(max), @selectText nvarchar(max), @joins nvarchar(max), @sql nvarchar(max), @existing nvarchar(max), @message nvarchar(2048);
+    DECLARE @marker nvarchar(64) = N'-- Згенеровано rpt.usp_GenerateStableViews';
+    DECLARE @failure nvarchar(2048), @warning nvarchar(2000);
+    DECLARE @seq int, @colCode nvarchar(64), @colType tinyint, @isMonth bit, @monthNo tinyint, @conflict bit, @ids nvarchar(max), @pred nvarchar(max);
+    DECLARE @n int, @plainCnt int, @plainAgg nvarchar(max), @valueCol nvarchar(max), @valueColRv nvarchar(max), @numRef nvarchar(64), @strRef nvarchar(64), @raw1 nvarchar(64);
+    DECLARE @routedGroup bit, @routed bit, @layoutOk bit, @monthMask int, @needAnchor bit, @ownerRows nvarchar(max), @ownerCells nvarchar(max);
+    DECLARE @agg nvarchar(max), @aggBody nvarchar(max), @aggList nvarchar(max), @ownerNo int, @famAgg nvarchar(max), @pkExpr nvarchar(16), @fromSql nvarchar(max), @rowApply nvarchar(max);
+    DECLARE @selectRv nvarchar(max), @selectTextRv nvarchar(max), @rvIds nvarchar(max), @rvApply nvarchar(max), @rvAgg nvarchar(max), @rvPack nvarchar(max), @rvExprs nvarchar(max);
+    DECLARE @rvPred bit, @rvRef nvarchar(8), @conflictCodes nvarchar(1500), @hasText bit, @hasId bit, @extra int;
+    -- RS (копії аркушів): службові колонки _SheetCopyOrdinal/_SheetDisplayName — у КІНЦІ списку (адитивні).
+    DECLARE @sheetNameCase nvarchar(max), @copyCols nvarchar(max);
+    DECLARE @pv TABLE (OwnerNo int NOT NULL, ColNo int NOT NULL, Agg nvarchar(max) NOT NULL);
+
+    -- Columns of one group: one row per ColumnDef (all versions), then one row per code.
+    DECLARE @ci TABLE (ColId int NOT NULL PRIMARY KEY, Code nvarchar(64) NOT NULL, DataType tinyint NOT NULL, Fam tinyint NOT NULL,
+                       IsMonth bit NOT NULL, MonthNo tinyint NULL, Ord bigint NOT NULL);
+    DECLARE @cols TABLE (Seq int IDENTITY(1, 1) PRIMARY KEY, Code nvarchar(64) NOT NULL, FirstOrd bigint NOT NULL);
+    -- RPT-STABLE Part B: code aliases of one group from the persisted rename map (cfg.ColumnRename): a renamed column is
+    -- exposed under BOTH names, each reading the data of every id of the whole alias class (transitive closure).
+    DECLARE @alias TABLE (Code nvarchar(64) NOT NULL, Other nvarchar(64) NOT NULL, PRIMARY KEY (Code, Other));
+
+    DECLARE cur_views CURSOR LOCAL FAST_FORWARD FOR
+        SELECT GroupId, Header, ViewName FROM @groups ORDER BY GroupId;
+    OPEN cur_views;
+    FETCH NEXT FROM cur_views INTO @g, @header, @view;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SELECT @select = N'', @selectText = N'', @joins = N'', @n = 0, @plainCnt = 0, @plainAgg = N'', @ownerRows = N'', @ownerCells = N'',
+               @monthMask = 0, @needAnchor = 0, @famAgg = N'', @selectRv = N'', @selectTextRv = N'', @rvIds = N'', @rvApply = N'',
+               @rvAgg = N'', @rvPack = N'', @rvExprs = N'', @rowApply = N'', @conflictCodes = N'', @extra = 0;
+        DELETE FROM @pv;
+        DELETE FROM @ci;
+        DELETE FROM @cols;
+
+        SET @tids = STUFF((SELECT N',' + CAST(TableDefId AS nvarchar(10)) FROM @gt WHERE GroupId = @g ORDER BY TableDefId
+                           FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
+        SET @sheetCase = N'CASE ti.TableDefId' + (SELECT N' WHEN ' + CAST(TableDefId AS nvarchar(10)) + N' THEN ' + CAST(SheetDefId AS nvarchar(10))
+                           FROM @gt WHERE GroupId = @g ORDER BY TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END';
+        SET @verCase = N'CAST(CASE ti.TableDefId' + (SELECT N' WHEN ' + CAST(TableDefId AS nvarchar(10)) + N' THEN N' + QUOTENAME(VersionText, '''')
+                           FROM @gt WHERE GroupId = @g ORDER BY TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END AS nvarchar(20))';
+
+        -- Month routing needs the MonthsInColumns layout (0) in EVERY version of the table.
+        SET @routedGroup = CASE WHEN @MonthRouting = 1 AND NOT EXISTS (SELECT 1 FROM @gt WHERE GroupId = @g AND LayoutKind <> 0) THEN 1 ELSE 0 END;
+        SET @rvPred = CASE WHEN EXISTS (SELECT 1 FROM cfg.CalculationBinding AS cb JOIN @gt AS x ON x.TableDefId = cb.TableDefId
+                                         WHERE x.GroupId = @g AND cb.IsActive = 1 AND REPLACE(cb.MatchJson, CHAR(32), N'') <> N'{}') THEN 1 ELSE 0 END;
+        SET @rvRef = CASE WHEN @rvPred = 0 THEN N'r' ELSE N'rv' END;
+
+        INSERT INTO @ci (ColId, Code, DataType, Fam, IsMonth, MonthNo, Ord)
+        SELECT cd.Id, cd.Code, cd.DataType,
+               CASE cd.DataType WHEN 0 THEN 0 WHEN 3 THEN 3 WHEN 4 THEN 4 WHEN 5 THEN 5 WHEN 7 THEN 7 ELSE 1 END,
+               cd.IsMonthColumn, cd.MonthNumber,
+               CAST(x.TemplateVersionId AS bigint) * 4294967296 + cd.Id
+          FROM cfg.ColumnDef AS cd JOIN @gt AS x ON x.TableDefId = cd.TableDefId
+         WHERE x.GroupId = @g AND cd.IsDeleted = 0;
+        INSERT INTO @cols (Code, FirstOrd) SELECT Code, MIN(Ord) FROM @ci GROUP BY Code ORDER BY MIN(Ord);
+
+        DELETE FROM @alias;
+        INSERT INTO @alias (Code, Other)
+        SELECT DISTINCT a.Code, b.Code FROM cfg.ColumnRename AS r
+          JOIN @ci AS a ON a.ColId = r.FromColumnDefId JOIN @ci AS b ON b.ColId = r.ToColumnDefId WHERE a.Code <> b.Code
+        UNION
+        SELECT DISTINCT b.Code, a.Code FROM cfg.ColumnRename AS r
+          JOIN @ci AS a ON a.ColId = r.FromColumnDefId JOIN @ci AS b ON b.ColId = r.ToColumnDefId WHERE a.Code <> b.Code;
+        WHILE @@ROWCOUNT > 0
+            INSERT INTO @alias (Code, Other)
+            SELECT DISTINCT x.Code, y.Other FROM @alias AS x JOIN @alias AS y ON y.Code = x.Other
+             WHERE x.Code <> y.Other AND NOT EXISTS (SELECT 1 FROM @alias AS z WHERE z.Code = x.Code AND z.Other = y.Other);
+
+        SET @seq = (SELECT MIN(Seq) FROM @cols);
+        WHILE @seq IS NOT NULL
+        BEGIN
+            SET @colCode = (SELECT Code FROM @cols WHERE Seq = @seq);
+            SET @n = @n + 1;
+            -- Type / month placement come from the LATEST version that has the code.
+            SELECT TOP (1) @colType = DataType, @isMonth = IsMonth, @monthNo = MonthNo
+              FROM @ci WHERE Code = @colCode ORDER BY Ord DESC;
+            SET @conflict = CASE WHEN (SELECT COUNT(DISTINCT Fam) FROM @ci WHERE Code = @colCode) > 1 THEN 1 ELSE 0 END;
+            SET @ids = STUFF((SELECT N',' + CAST(ColId AS nvarchar(10)) FROM @ci
+                               WHERE Code = @colCode OR Code IN (SELECT Other FROM @alias WHERE Code = @colCode) ORDER BY ColId
+                              FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
+            SET @pred = CASE WHEN CHARINDEX(N',', @ids) > 0 THEN N'x.ColumnDefId IN (' + @ids + N')' ELSE N'x.ColumnDefId = ' + @ids END;
+            SET @raw1 = CASE @colType WHEN 0 THEN N'ValueString' WHEN 3 THEN N'ValueBool' WHEN 4 THEN N'ValueDate'
+                                      WHEN 5 THEN N'ValueRegistryEntryId' WHEN 7 THEN N'ValueUnitId' ELSE N'ValueNumeric' END;
+            SET @numRef = N'pc.v' + CAST(@n AS nvarchar(10));
+            SET @strRef = N'pc.s' + CAST(@n AS nvarchar(10));
+            SET @routed = CASE WHEN @routedGroup = 1 AND @conflict = 0 AND @colType NOT IN (6, 8)
+                                    AND (@isMonth = 0 OR @monthNo BETWEEN 1 AND 12) THEN 1 ELSE 0 END;
+
+            IF @conflict = 1
+            BEGIN
+                -- Type conflict across versions: every value as text, one aggregate per storage family.
+                SET @conflictCodes = @conflictCodes + CASE WHEN @conflictCodes = N'' THEN N'' ELSE N', ' END + @colCode;
+                SET @agg = STUFF((SELECT N', MAX(CASE WHEN x.ColumnDefId IN (' + f.Ids + N') THEN '
+                                    + CASE f.Fam WHEN 0 THEN N'x.ValueString'
+                                                 WHEN 3 THEN N'CASE WHEN x.ValueBool = 1 THEN N''1'' WHEN x.ValueBool = 0 THEN N''0'' END'
+                                                 WHEN 4 THEN N'CONVERT(nvarchar(30), x.ValueDate, 126)'
+                                                 WHEN 5 THEN N'CONVERT(nvarchar(20), x.ValueRegistryEntryId)'
+                                                 WHEN 7 THEN N'CONVERT(nvarchar(20), x.ValueUnitId)'
+                                                 ELSE N'CONVERT(nvarchar(64), x.ValueNumeric)' END + N' END)'
+                                    FROM (SELECT c1.Fam,
+                                                 STUFF((SELECT N',' + CAST(c2.ColId AS nvarchar(10)) FROM @ci AS c2
+                                                         WHERE c2.Code = c1.Code AND c2.Fam = c1.Fam ORDER BY c2.ColId
+                                                           FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'') AS Ids
+                                            FROM @ci AS c1 WHERE c1.Code = @colCode GROUP BY c1.Code, c1.Fam) AS f
+                                   ORDER BY f.Fam FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
+                SET @plainAgg = @plainAgg + N', COALESCE(' + @agg + N') AS v' + CAST(@n AS nvarchar(10));
+                SET @plainCnt = @plainCnt + 1;
+                SET @valueCol = @numRef;
+                SET @colType = 0;   -- no companion, no methodology overlay
+            END
+            ELSE IF @routed = 0
+            BEGIN
+                -- One shared apply pc reads every non-routed column of the row by the cell key (PeriodKey, TableRowId); the cell key
+                -- is unique, so MAX(CASE ..) is the value itself. bit is read as tinyint and returned as CAST(.. AS bit).
+                SET @plainAgg = @plainAgg + N', '
+                    + CASE WHEN @colType = 3
+                           THEN N'MAX(CAST(CASE WHEN ' + @pred + N' THEN x.' + @raw1 + N' END AS tinyint))'
+                           ELSE N'MAX(CASE WHEN ' + @pred + N' THEN x.' + @raw1 + N' END)' END
+                    + N' AS v' + CAST(@n AS nvarchar(10));
+                IF @colType IN (6, 8)
+                    SET @plainAgg = @plainAgg + N', MAX(CASE WHEN ' + @pred + N' THEN x.ValueString END) AS s' + CAST(@n AS nvarchar(10));
+                SET @plainCnt = @plainCnt + 1;
+                SET @valueCol = CASE WHEN @colType = 3 THEN N'CAST(' + @numRef + N' AS bit)' ELSE @numRef END;
+            END
+            ELSE
+            BEGIN
+                -- Month-routed (Q-17) input column: own computed cell (sc) > owner family value (fam) > own copy (sv); same scheme as _vN.
+                SET @aggBody = CASE WHEN @colType = 3
+                                THEN N'MAX(CAST(CASE WHEN ' + @pred + N' THEN x.' + @raw1 + N' END AS tinyint))'
+                                ELSE N'MAX(CASE WHEN ' + @pred + N' THEN x.' + @raw1 + N' END)' END;
+                SET @agg = @aggBody + N' AS v' + CAST(@n AS nvarchar(10));
+                IF @isMonth = 1
+                    SET @monthMask = 1;
+                ELSE
+                    SET @needAnchor = 1;
+                INSERT INTO @pv (OwnerNo, ColNo, Agg) VALUES
+                    (-2, @n, @aggBody + N' AS cv' + CAST(@n AS nvarchar(10))),
+                    (-1, @n, @agg);
+                SET @famAgg = @famAgg + N', ' + CASE WHEN @colType = 3
+                    THEN N'MAX(CAST(CASE WHEN ' + @pred + N' AND ' + CASE WHEN @isMonth = 1 THEN N'oi.PeriodKey % 100 = ' + CAST(@monthNo AS nvarchar(3)) ELSE N'oi.PeriodKey = pa.AnchorKey' END + N' THEN x.' + @raw1 + N' END AS tinyint))'
+                    ELSE N'MAX(CASE WHEN ' + @pred + N' AND ' + CASE WHEN @isMonth = 1 THEN N'oi.PeriodKey % 100 = ' + CAST(@monthNo AS nvarchar(3)) ELSE N'oi.PeriodKey = pa.AnchorKey' END + N' THEN x.' + @raw1 + N' END)' END
+                    + N' AS v' + CAST(@n AS nvarchar(10));
+                SET @valueCol = N'COALESCE(sc.cv' + CAST(@n AS nvarchar(10)) + N', fam.v' + CAST(@n AS nvarchar(10)) + N', sv.v' + CAST(@n AS nvarchar(10)) + N')';
+                IF @colType = 3
+                    SET @valueCol = N'CAST(' + @valueCol + N' AS bit)';
+            END
+
+            -- Calculated (8): the methodology result (as in the API slice and _vN), materialised value as the fallback.
+            SET @valueColRv = @valueCol;
+            IF @colType = 8
+            BEGIN
+                SET @valueColRv = N'COALESCE(' + @rvRef + N'.rv' + CAST(@n AS nvarchar(10)) + N', ' + @valueCol + N')';
+                SET @rvIds = @rvIds + N', ' + @ids;
+                SET @rvAgg = @rvAgg + N', CAST(NULLIF(SUBSTRING(MAX(CASE WHEN q.ColumnDefId IN (' + @ids
+                           + N') THEN q.Pack END), 11, 60), ''N'') AS decimal(34, 16)) AS rv' + CAST(@n AS nvarchar(10));
+                SET @rvPack = @rvPack + N', MAX(CASE WHEN q.ColumnDefId IN (' + @ids + N') THEN q.Pack END) AS p' + CAST(@n AS nvarchar(10));
+                SET @rvExprs = @rvExprs + N', CASE WHEN SUBSTRING(rvx.p' + CAST(@n AS nvarchar(10)) + N', 5, 1) = 0x01 THEN CAST(SUBSTRING(rvx.p'
+                             + CAST(@n AS nvarchar(10)) + N', 6, 20) AS decimal(34, 16)) END AS rv' + CAST(@n AS nvarchar(10));
+            END
+
+            SET @select = @select + N',
+       ' + @valueCol + N' AS ' + QUOTENAME(@colCode);
+            SET @hasText = CASE WHEN @colType IN (6, 8) AND NOT EXISTS (SELECT 1 FROM @cols WHERE Code = @colCode + N'_Text') THEN 1 ELSE 0 END;
+            IF @hasText = 1
+            BEGIN
+                SET @selectText = @selectText + N',
+       CASE WHEN ' + @numRef + N' IS NULL THEN ' + @strRef + N' END AS ' + QUOTENAME(@colCode + N'_Text');
+                SET @selectTextRv = @selectTextRv + N',
+       CASE WHEN ' + CASE WHEN @colType = 8 THEN N'COALESCE(' + @rvRef + N'.rv' + CAST(@n AS nvarchar(10)) + N', ' + @numRef + N')' ELSE @numRef END
+                                + N' IS NULL THEN ' + @strRef + N' END AS ' + QUOTENAME(@colCode + N'_Text');
+            END
+            SET @selectRv = @selectRv + N',
+       ' + @valueColRv + N' AS ' + QUOTENAME(@colCode);
+            -- PERMUSE: a Lookup column also exposes its record id under the explicit name <Code>_Id (the id is what SSRS joins on:
+            -- permit id, NAE id, substance id). <Code> itself is unchanged (the same id), so existing reports keep working and the
+            -- join key keeps its name if <Code> ever becomes the readable value. Skipped when the template already has a <Code>_Id
+            -- column or the column is a type-conflict nvarchar column (@colType was reset to 0 above).
+            SET @hasId = CASE WHEN @colType = 5 AND NOT EXISTS (SELECT 1 FROM @cols WHERE Code = @colCode + N'_Id') THEN 1 ELSE 0 END;
+            IF @hasId = 1
+            BEGIN
+                SET @selectText = @selectText + N',
+       ' + @valueCol + N' AS ' + QUOTENAME(@colCode + N'_Id');
+                SET @selectTextRv = @selectTextRv + N',
+       ' + @valueColRv + N' AS ' + QUOTENAME(@colCode + N'_Id');
+                SET @extra = @extra + 1;
+            END
+            SET @seq = (SELECT MIN(Seq) FROM @cols WHERE Seq > @seq);
+        END
+        SET @select = @select + @selectText;
+        SET @selectRv = @selectRv + @selectTextRv;
+
+        IF @n + @extra > 1000
+        BEGIN
+            SET @failure = COALESCE(@failure, CONCAT(N'rpt.usp_GenerateStableViews: ', @header, N' has ', @n + @extra,
+                                  N' columns, the view holds at most 1000.'));
+            GOTO next_group;
+        END
+
+        IF @plainCnt > 0
+            SET @joins = @joins + N'
+OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc';
+
+        IF @monthMask <> 0 OR @needAnchor = 1
+        BEGIN
+            -- Owner values (monthly: instance of the column month; entered non-monthly: year anchor) are collected ONCE per
+            -- (document, year, RowKey) by one set-based pass, as in the _vN views (Q-17.perf2).
+            SET @ownerRows = N'
+LEFT HASH JOIN (SELECT oi.DocumentId, oi.PeriodKey / 100 AS Yr, ow.RowKey' + @famAgg + N'
+                  FROM doc.TableInstance AS oi
+                  JOIN doc.Document AS od ON od.Id = oi.DocumentId
+                  LEFT JOIN (SELECT ProjectId, PeriodKey / 100 AS Yr, MIN(PeriodKey) AS AnchorKey
+                               FROM doc.Period GROUP BY ProjectId, PeriodKey / 100) AS pa
+                         ON pa.ProjectId = od.ProjectId AND pa.Yr = oi.PeriodKey / 100
+                  JOIN doc.TableRow AS ow ON ow.PeriodKey = oi.PeriodKey AND ow.TableInstanceId = oi.Id AND ow.IsDeleted = 0
+                  JOIN doc.CellValue AS x ON x.PeriodKey = ow.PeriodKey AND x.TableRowId = ow.Id
+                 WHERE oi.TableDefId IN (' + @tids + N')
+                 GROUP BY oi.DocumentId, oi.PeriodKey / 100, ow.RowKey) AS fam
+       ON p.PeriodKind = 0 AND fam.DocumentId = ti.DocumentId AND fam.Yr = ti.PeriodKey / 100 AND fam.RowKey = r.RowKey';
+            SET @ownerCells = N'';
+            SET @ownerNo = -2;
+            WHILE @ownerNo IS NOT NULL
+            BEGIN
+                SET @aggList = STUFF((SELECT N', ' + Agg FROM @pv WHERE OwnerNo = @ownerNo ORDER BY ColNo
+                                      FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
+                SET @ownerCells = @ownerCells + N'
+OUTER APPLY (SELECT ' + @aggList + N' FROM doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id'
+                    + CASE WHEN @ownerNo = -2 THEN N' AND x.IsCalculated = 1' ELSE N'' END
+                    + N') AS ' + CASE WHEN @ownerNo = -1 THEN N'sv' ELSE N'sc' END;
+                SET @ownerNo = (SELECT MIN(OwnerNo) FROM @pv WHERE OwnerNo > @ownerNo);
+            END
+            SET @joins = @ownerRows + @joins + @ownerCells;
+        END
+
+        -- Methodology results for Calculated columns: same set-based read as _vN (Q-17.recalc / perf / rvshape), over the
+        -- bindings of ANY version of the table (the binding names the ColumnDef of its own version).
+        IF @rvIds <> N'' AND @rvPred = 0
+        BEGIN
+            SET @rowApply = N'
+CROSS APPLY (SELECT r0.Id, r0.RowKey, r0.Ordinal, r0.PeriodKey' + @rvExprs + N'
+             FROM doc.TableRow AS r0
+             LEFT HASH JOIN (SELECT q.SourceRowKey' + @rvPack + N'
+                  FROM (SELECT t.SourceRowKey, t.ColumnDefId,
+                               CAST(t.BindingId AS binary(4)) + CAST(CASE WHEN t.Total IS NULL THEN 0 ELSE 1 END AS binary(1))
+                               + CAST(COALESCE(t.Total, 0) AS binary(20)) AS Pack
+                        FROM (SELECT g.SourceRowKey, g.BindingId, g.ColumnDefId,
+                                     CASE WHEN MAX(g.Own) = 1
+                                          THEN CASE WHEN MAX(CASE WHEN g.Own = 1 THEN g.Amb END) = 1 THEN NULL ELSE SUM(CASE WHEN g.Own = 1 THEN g.SubTotal END) END
+                                          ELSE CASE WHEN MAX(CASE WHEN g.Own = 0 THEN g.Amb END) = 1 THEN NULL ELSE SUM(CASE WHEN g.Own = 0 THEN g.SubTotal END) END
+                                     END AS Total
+                              FROM (SELECT u.SourceRowKey, u.BindingId, u.ColumnDefId, u.Own, MIN(u.Value) AS SubTotal,
+                                           CASE WHEN MIN(u.Value) <> MAX(u.Value) OR MIN(u.UnitId) <> MAX(u.UnitId) THEN 1 ELSE 0 END AS Amb
+                                    FROM (SELECT cr.SourceRowKey, b.Id AS BindingId, b.ColumnDefId, cr.SubstanceEntryId, cr.Value, cr.UnitId,
+                                                 CASE WHEN cr.TableInstanceId IS NULL THEN 0 ELSE 1 END AS Own
+                                          FROM calc.CalculationRun AS ru
+                                          INNER LOOP JOIN calc.CalculationResult AS cr ON cr.PeriodKey = ti.PeriodKey AND cr.DocumentId = d.Id AND cr.CalculationRunId = ru.Id
+                                          INNER HASH JOIN (SELECT bb.Id, bb.ColumnDefId, bb.OutputCode, mv.Id AS MvId
+                                                             FROM cfg.CalculationBinding AS bb
+                                                             JOIN calc.MethodologyVersion AS mv ON mv.MethodologyId = bb.MethodologyId
+                                                            WHERE bb.IsActive = 1 AND bb.TableDefId IN (' + @tids + N') AND bb.ColumnDefId IN (' + STUFF(@rvIds, 1, 2, N'') + N')
+                                                              AND REPLACE(bb.MatchJson, CHAR(32), N'''') = N''{}'') AS b
+                                               ON b.MvId = cr.MethodologyVersionId AND b.OutputCode = cr.OutputCode
+                                          WHERE ru.ProjectId = d.ProjectId AND ru.Status = N''Current'' AND ru.PeriodKey = ti.PeriodKey
+                                            AND (ru.DocumentId = d.Id
+                                                 OR (ru.DocumentId IS NULL AND NOT EXISTS (SELECT 1 FROM calc.CalculationRun AS ru2
+                                                      WHERE ru2.ProjectId = d.ProjectId AND ru2.Status = N''Current''
+                                                        AND ru2.DocumentId = d.Id AND ru2.PeriodKey = ti.PeriodKey)))
+                                            AND (cr.TableInstanceId = ti.Id
+ OR cr.TableInstanceId IS NULL)) AS u
+                                    GROUP BY u.SourceRowKey, u.BindingId, u.ColumnDefId, u.Own, u.SubstanceEntryId) AS g
+                              GROUP BY g.SourceRowKey, g.BindingId, g.ColumnDefId) AS t) AS q
+                  GROUP BY q.SourceRowKey) AS rvx ON rvx.SourceRowKey = r0.RowKey
+             WHERE r0.PeriodKey = ti.PeriodKey AND r0.TableInstanceId = ti.Id AND r0.IsDeleted = 0) AS r';
+            SET @select = @selectRv;
+        END
+        ELSE IF @rvIds <> N'' AND @rvPred = 1
+        BEGIN
+            SET @rvApply = N'
+OUTER APPLY (SELECT ' + STUFF(@rvAgg, 1, 2, N'') + N'
+             FROM (SELECT t.ColumnDefId, RIGHT(N''0000000000'' + CAST(t.BindingId AS nvarchar(10)), 10) + COALESCE(CONVERT(nvarchar(60), t.Total), N''N'') AS Pack
+                   FROM (SELECT g.BindingId, g.ColumnDefId,
+                                CASE WHEN MAX(g.Own) = 1
+                                     THEN CASE WHEN MAX(CASE WHEN g.Own = 1 THEN g.Amb END) = 1 THEN NULL ELSE SUM(CASE WHEN g.Own = 1 THEN g.SubTotal END) END
+                                     ELSE CASE WHEN MAX(CASE WHEN g.Own = 0 THEN g.Amb END) = 1 THEN NULL ELSE SUM(CASE WHEN g.Own = 0 THEN g.SubTotal END) END
+                                END AS Total
+                         FROM (SELECT u.BindingId, u.ColumnDefId, u.Own, MIN(u.Value) AS SubTotal,
+                                      CASE WHEN MIN(u.Value) <> MAX(u.Value) OR MIN(u.UnitId) <> MAX(u.UnitId) THEN 1 ELSE 0 END AS Amb
+                               FROM (SELECT b.Id AS BindingId, b.ColumnDefId, cr.SubstanceEntryId, cr.Value, cr.UnitId,
+                                            CASE WHEN cr.TableInstanceId IS NULL THEN 0 ELSE 1 END AS Own
+                                     FROM cfg.CalculationBinding AS b
+                                     JOIN calc.MethodologyVersion AS mv ON mv.MethodologyId = b.MethodologyId
+                                     JOIN calc.CalculationResult AS cr ON cr.PeriodKey = ti.PeriodKey AND cr.DocumentId = d.Id
+                                          AND cr.MethodologyVersionId = mv.Id AND cr.OutputCode = b.OutputCode AND cr.SourceRowKey = r.RowKey
+                                     JOIN (SELECT ru.Id FROM calc.CalculationRun AS ru
+                                            WHERE ru.ProjectId = d.ProjectId AND ru.Status = N''Current'' AND ru.PeriodKey = ti.PeriodKey
+                                              AND (ru.DocumentId = d.Id
+                                                   OR (ru.DocumentId IS NULL AND NOT EXISTS (SELECT 1 FROM calc.CalculationRun AS ru2
+                                                        WHERE ru2.ProjectId = d.ProjectId AND ru2.Status = N''Current''
+                                                          AND ru2.DocumentId = d.Id AND ru2.PeriodKey = ti.PeriodKey)))) AS rr
+                                          ON rr.Id = cr.CalculationRunId
+                                     WHERE b.IsActive = 1 AND b.TableDefId IN (' + @tids + N') AND b.ColumnDefId IN (' + STUFF(@rvIds, 1, 2, N'') + N')
+                                       AND (cr.TableInstanceId = ti.Id OR cr.TableInstanceId IS NULL)';
+            SET @rvApply = @rvApply + N'
+                                       AND (REPLACE(b.MatchJson, CHAR(32), N'''') = N''{}''
+                                            OR (ISJSON(b.MatchJson) = 1 AND LEFT(LTRIM(b.MatchJson), 1) = N''{''
+                                                AND NOT EXISTS (SELECT 1 FROM OPENJSON(CASE WHEN ISJSON(b.MatchJson) = 1 THEN b.MatchJson ELSE N''{}'' END) AS j
+                                                     WHERE NOT EXISTS (SELECT 1 FROM doc.CellValue AS m
+                                                          WHERE m.PeriodKey = r.PeriodKey AND m.TableRowId = r.Id
+                                                            AND CAST(m.ColumnDefId AS nvarchar(20)) = j.[key] COLLATE Latin1_General_BIN2
+                                                            AND COALESCE(m.ValueString, CONVERT(nvarchar(64), m.ValueNumeric), CONVERT(nvarchar(20), m.ValueRegistryEntryId),
+                                                                         CASE m.ValueBool WHEN 1 THEN N''True'' WHEN 0 THEN N''False'' END) COLLATE Latin1_General_BIN2
+                                                              = CASE WHEN j.[type] = 3 THEN CASE j.[value] WHEN N''true'' THEN N''True'' ELSE N''False'' END ELSE j.[value] END COLLATE Latin1_General_BIN2))))) AS u
+                               GROUP BY u.BindingId, u.ColumnDefId, u.Own, u.SubstanceEntryId) AS g
+                         GROUP BY g.BindingId, g.ColumnDefId) AS t) AS q) AS rv';
+            SET @joins = @joins + @rvApply;
+            SET @select = @selectRv;
+        END
+
+        SET @pkExpr = CASE WHEN @rowApply = N'' THEN N'r.PeriodKey' ELSE N'ti.PeriodKey' END;
+        SET @fromSql = CASE WHEN @rowApply = N'' THEN N'FROM doc.TableInstance AS ti
+JOIN doc.TableRow      AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id AND r.IsDeleted = 0
+JOIN doc.Document      AS d ON d.Id = ti.DocumentId
+JOIN doc.Project       AS p ON p.Id = d.ProjectId'
+            ELSE N'FROM doc.TableInstance AS ti
+JOIN doc.Document      AS d ON d.Id = ti.DocumentId
+JOIN doc.Project       AS p ON p.Id = d.ProjectId' + @rowApply END;
+
+        -- ⛔ RS (копії аркушів, людина 03.11): стан подання — СВОЄЇ копії; номер у групі і назва «<Назва> N» (мова en, інакше
+        -- код аркуша). Назва аркуша кожної версії групи — літерал у CASE за таблицею; група шукається за аркушем версії рядка.
+        SET @sheetNameCase = N'CASE ti.TableDefId' + (SELECT N' WHEN ' + CAST(x.TableDefId AS nvarchar(10)) + N' THEN N'''
+                                    + REPLACE(COALESCE(JSON_VALUE(sn.NameL10n, N'$.en'), sn.Code), N'''', N'''''') + N''''
+                           FROM @gt AS x JOIN cfg.SheetDef AS sn ON sn.Id = x.SheetDefId
+                           WHERE x.GroupId = @g ORDER BY x.TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END';
+        SET @copyCols = CONCAT(N',
+       CAST(COALESCE(dsh.CopyOrdinal, 1) AS smallint) AS _SheetCopyOrdinal,
+       (SELECT CONCAT(COALESCE(JSON_VALUE(MAX(CASE WHEN g.CopyOfId IS NULL THEN g.NameOverrideL10n END), N''$.en''), ', @sheetNameCase, N'),
+                      CASE WHEN ti.SheetCopyId IS NOT NULL OR MAX(CASE WHEN g.CopyOfId IS NOT NULL THEN 1 ELSE 0 END) = 1
+                           THEN CONCAT(N'' '', COALESCE(dsh.CopyOrdinal, 1)) ELSE N'''' END)
+        FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = ', @sheetCase, N') AS _SheetDisplayName');
+
+        SET @sql = CONCAT(
+N'CREATE OR ALTER VIEW rpt.', QUOTENAME(@view), N'
+AS
+', @marker, N': ', @header, N'. Не редагувати руками.
+SELECT p.Id AS _ProjectId, p.Code AS _ProjectCode,
+       d.Id AS _DocumentId, d.BusinessKey AS _DocumentKey,
+       ', @pkExpr, N' AS _PeriodKey,
+       CAST(COALESCE(a.Status, 0) AS tinyint) AS _Status,
+       r.Id AS _RowId, r.RowKey AS _RowKey, r.Ordinal AS _RowOrdinal,
+       ', @verCase, N' AS _TemplateVersion', @select, @copyCols, N'
+', @fromSql, N'
+LEFT JOIN wf.ApprovalState AS a ON a.DocumentId = d.Id AND a.SheetDefId = ', @sheetCase,
+N' AND a.PeriodKey = ti.PeriodKey
+                               AND (a.SheetCopyId = ti.SheetCopyId OR (a.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
+LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId', @joins, N'
+WHERE ti.TableDefId IN (', @tids, N');');
+
+        SET @warning = CASE WHEN @conflictCodes = N'' THEN NULL
+                            ELSE LEFT(CONCAT(N'type conflict across versions, exposed as nvarchar: ', @conflictCodes), 2000) END;
+        SET @existing = OBJECT_DEFINITION(OBJECT_ID(N'rpt.' + QUOTENAME(@view), N'V'));
+        SET @pos = CHARINDEX(@marker, @existing);
+
+        IF @existing IS NULL
+        BEGIN
+            EXEC sys.sp_executesql @sql;
+            INSERT INTO @result VALUES (@view, N'Created', @warning);
+        END
+        ELSE IF @pos = 0
+             OR SUBSTRING(@existing, @pos, LEN(@existing)) COLLATE Latin1_General_BIN2
+                <> SUBSTRING(@sql, CHARINDEX(@marker, @sql), LEN(@sql)) COLLATE Latin1_General_BIN2
+        BEGIN
+            EXEC sys.sp_executesql @sql;
+            INSERT INTO @result VALUES (@view, N'Altered', @warning);
+        END
+        ELSE
+            INSERT INTO @result VALUES (@view, N'Unchanged', @warning);
+
+next_group:
+        FETCH NEXT FROM cur_views INTO @g, @header, @view;
+    END
+    CLOSE cur_views;
+    DEALLOCATE cur_views;
+
+    IF @clash IS NOT NULL
+    BEGIN
+        SET @message = CONCAT(
+            N'rpt.usp_GenerateStableViews: the stable view name rpt.', @clash, N' collides with another view (', @clashWho,
+            N'). Change the template, sheet or table code so that they differ by more than punctuation, case or a _v<N> suffix.');
+        THROW 50409, @message, 1;
+    END
+
+    IF @failure IS NOT NULL
+        THROW 50422, @failure, 1;
+
+    SELECT ViewName, Action, Warning FROM @result ORDER BY ViewName;
+END;
+GO
+
+-- ══ PERMUSE: стабільні вʼюхи ДАНИХ ДОЗВОЛІВ для SSRS ═══════════════════════════
+-- Дозвіл звʼязується з даними документів ЗНАЧЕННЯМ (поле шапки чи колонка Lookup → довідник дозволів). SSRS поєднує
+-- «факт» (стабільна вʼюха таблиці документа, колонка `<Код>_Id`) з «лімітом» (вʼюхи нижче) за ідентифікатором дозволу,
+-- НАЕ та речовини: ON a.<Дозвіл>_Id = s.PermitId AND a.<НАЕ>_Id = s.NaeId AND a.<Речовина>_Id = s.SubstanceId.
+-- Ідентифікатори вʼюх — це Id записів довідників (ті самі, що `ValueRegistryEntryId` комірок і `<Код>_Id`).
+--   rpt.v_Permit                  — шапка дозволу (один рядок на дозвіл будь-якого опублікованого типу);
+--   rpt.v_PermitAirSource         — рядки AIR_SOURCES типу AIR (джерело/НАЕ дозволу; ✎ AIR-ON-AIR: таблиці перенесено з
+--                                    окремого типу AIR_LIMITS у тип AIR; Region/Area — код запису довідника або текст,
+--                                    RegionId/AreaId — Id запису (вид поля Registry/List), NULL для Text);
+--   rpt.v_PermitAirSourceSubstance — рядки AIR_SOURCE_SUBSTANCES (ліміт речовини по НАЕ дозволу).
+-- ⚠ Лише живі (не видалені логічно) записи; чернетки дозволів теж віддаються — відсіює звіт за `IsActive`/датами.
+-- ⚠ `ValidTo` — ПЕРШИЙ НЕчинний день (півінтервал [ValidFrom, ValidTo)), як у застосунку.
+CREATE OR ALTER VIEW rpt.v_Permit
+AS
+SELECT e.Id AS PermitId, pt.Code AS TypeCode, e.Code AS EntryCode,
+       COALESCE(h.PermitNumber, e.Code) AS PermitNumber, h.Location, h.IssueDate,
+       e.ValidFrom, e.ValidTo, h.ActualEnd, e.IsActive,
+       h.Form300, h.Form301, h.Form302, h.Tox
+  FROM cfg.PermitTypeDef AS pt
+  JOIN dic.RegistryEntry AS e ON e.RegistryDefId = pt.HeaderRegistryDefId AND e.IsDeleted = 0
+ OUTER APPLY (SELECT MAX(CASE WHEN f.Code = N'Permit_Number' THEN v.ValueString END) AS PermitNumber,
+                     MAX(CASE WHEN f.Code = N'Location' THEN v.ValueString END) AS Location,
+                     CAST(MAX(CASE WHEN f.Code = N'Issue_Date' THEN v.ValueDate END) AS date) AS IssueDate,
+                     CAST(MAX(CASE WHEN f.Code = N'Actual_End_Date' THEN v.ValueDate END) AS date) AS ActualEnd,
+                     CAST(MAX(CASE WHEN f.Code = N'Form_300' THEN CAST(v.ValueBool AS tinyint) END) AS bit) AS Form300,
+                     CAST(MAX(CASE WHEN f.Code = N'Form_301' THEN CAST(v.ValueBool AS tinyint) END) AS bit) AS Form301,
+                     CAST(MAX(CASE WHEN f.Code = N'Form_302' THEN CAST(v.ValueBool AS tinyint) END) AS bit) AS Form302,
+                     CAST(MAX(CASE WHEN f.Code = N'TOx' THEN CAST(v.ValueBool AS tinyint) END) AS bit) AS Tox
+                FROM dic.RegistryValue AS v
+                JOIN cfg.RegistryFieldDef AS f ON f.Id = v.RegistryFieldDefId
+               WHERE v.RegistryEntryId = e.Id) AS h
+ WHERE pt.Status = 1;   -- Published
+GO
+
+CREATE OR ALTER VIEW rpt.v_PermitAirSource
+AS
+SELECT r.Id AS SourceId, a.PermitId, a.NaeId, nc.NaeCode,
+       COALESCE(a.Region, re.Code) AS Region, COALESCE(a.Area, ae.Code) AS Area,
+       a.SiteLabel, a.ProductionCode, a.SourceName,
+       a.Quantity, a.HoursPerYear, a.PointName, a.SourceType, a.Height, a.Diameter, a.Velocity, a.Volume, a.Temperature,
+       a.X1, a.Y1, a.X2, a.Y2,
+       a.RegionId, a.AreaId
+  FROM cfg.PermitTypeDef AS pt
+  JOIN cfg.PermitTypeTable AS ptt ON ptt.PermitTypeDefId = pt.Id AND ptt.Code = N'AIR_SOURCES'
+  JOIN dic.RegistryEntry AS r ON r.RegistryDefId = ptt.RegistryDefId AND r.IsDeleted = 0
+ OUTER APPLY (SELECT MAX(CASE WHEN f.Code = N'PERMIT' THEN v.ValueRefEntryId END) AS PermitId,
+                     MAX(CASE WHEN f.Code = N'NAE' THEN v.ValueRefEntryId END) AS NaeId,
+                     MAX(CASE WHEN f.Code = N'REGION' THEN v.ValueString END) AS Region,
+                     MAX(CASE WHEN f.Code = N'AREA' THEN v.ValueString END) AS Area,
+                     MAX(CASE WHEN f.Code = N'REGION' THEN v.ValueRefEntryId END) AS RegionId,
+                     MAX(CASE WHEN f.Code = N'AREA' THEN v.ValueRefEntryId END) AS AreaId,
+                     MAX(CASE WHEN f.Code = N'SITE_LABEL' THEN v.ValueString END) AS SiteLabel,
+                     MAX(CASE WHEN f.Code = N'PRODUCTION_CODE' THEN v.ValueString END) AS ProductionCode,
+                     MAX(CASE WHEN f.Code = N'SOURCE_NAME' THEN v.ValueString END) AS SourceName,
+                     MAX(CASE WHEN f.Code = N'QUANTITY' THEN v.ValueNumeric END) AS Quantity,
+                     MAX(CASE WHEN f.Code = N'HOURS_PER_YEAR' THEN v.ValueNumeric END) AS HoursPerYear,
+                     MAX(CASE WHEN f.Code = N'POINT_NAME' THEN v.ValueString END) AS PointName,
+                     MAX(CASE WHEN f.Code = N'SOURCE_TYPE' THEN v.ValueString END) AS SourceType,
+                     MAX(CASE WHEN f.Code = N'HEIGHT' THEN v.ValueNumeric END) AS Height,
+                     MAX(CASE WHEN f.Code = N'DIAMETER' THEN v.ValueNumeric END) AS Diameter,
+                     MAX(CASE WHEN f.Code = N'VELOCITY' THEN v.ValueNumeric END) AS Velocity,
+                     MAX(CASE WHEN f.Code = N'VOLUME' THEN v.ValueNumeric END) AS Volume,
+                     MAX(CASE WHEN f.Code = N'TEMPERATURE' THEN v.ValueNumeric END) AS Temperature,
+                     MAX(CASE WHEN f.Code = N'X1' THEN v.ValueNumeric END) AS X1,
+                     MAX(CASE WHEN f.Code = N'Y1' THEN v.ValueNumeric END) AS Y1,
+                     MAX(CASE WHEN f.Code = N'X2' THEN v.ValueNumeric END) AS X2,
+                     MAX(CASE WHEN f.Code = N'Y2' THEN v.ValueNumeric END) AS Y2
+                FROM dic.RegistryValue AS v
+                JOIN cfg.RegistryFieldDef AS f ON f.Id = v.RegistryFieldDefId
+               WHERE v.RegistryEntryId = r.Id) AS a
+ OUTER APPLY (SELECT MAX(nv.ValueString) AS NaeCode
+                FROM dic.RegistryValue AS nv
+                JOIN cfg.RegistryFieldDef AS nf ON nf.Id = nv.RegistryFieldDefId AND nf.Code = N'NaeCode'
+               WHERE nv.RegistryEntryId = a.NaeId) AS nc
+  LEFT JOIN dic.RegistryEntry AS re ON re.Id = a.RegionId
+  LEFT JOIN dic.RegistryEntry AS ae ON ae.Id = a.AreaId
+ WHERE pt.Code = N'AIR' AND pt.Status = 1;
+GO
+
+CREATE OR ALTER VIEW rpt.v_PermitAirSourceSubstance
+AS
+SELECT r.Id AS SourceSubstanceId, a.PermitId, a.SourceId, s.NaeId, s.NaeCode, a.SubstanceId, sc.SubstanceCode,
+       a.GramsPerSecond, a.MgPerNm3, a.TonsPerYear
+  FROM cfg.PermitTypeDef AS pt
+  JOIN cfg.PermitTypeTable AS ptt ON ptt.PermitTypeDefId = pt.Id AND ptt.Code = N'AIR_SOURCE_SUBSTANCES'
+  JOIN dic.RegistryEntry AS r ON r.RegistryDefId = ptt.RegistryDefId AND r.IsDeleted = 0
+ OUTER APPLY (SELECT MAX(CASE WHEN f.Code = N'PERMIT' THEN v.ValueRefEntryId END) AS PermitId,
+                     MAX(CASE WHEN f.Code = N'SOURCE' THEN v.ValueRefEntryId END) AS SourceId,
+                     MAX(CASE WHEN f.Code = N'SUBSTANCE' THEN v.ValueRefEntryId END) AS SubstanceId,
+                     MAX(CASE WHEN f.Code = N'GRAMS_PER_SECOND' THEN v.ValueNumeric END) AS GramsPerSecond,
+                     MAX(CASE WHEN f.Code = N'MG_PER_NM3' THEN v.ValueNumeric END) AS MgPerNm3,
+                     MAX(CASE WHEN f.Code = N'TONS_PER_YEAR' THEN v.ValueNumeric END) AS TonsPerYear
+                FROM dic.RegistryValue AS v
+                JOIN cfg.RegistryFieldDef AS f ON f.Id = v.RegistryFieldDefId
+               WHERE v.RegistryEntryId = r.Id) AS a
+  LEFT JOIN rpt.v_PermitAirSource AS s ON s.SourceId = a.SourceId
+ OUTER APPLY (SELECT MAX(COALESCE(sv.ValueString, CONVERT(nvarchar(64), sv.ValueNumeric))) AS SubstanceCode
+                FROM dic.RegistryValue AS sv
+                JOIN cfg.RegistryFieldDef AS sf ON sf.Id = sv.RegistryFieldDefId AND sf.Code = N'SUBSTANCE_CODE'
+               WHERE sv.RegistryEntryId = a.SubstanceId) AS sc
+ WHERE pt.Code = N'AIR' AND pt.Status = 1;
 GO
 
 -- ⛔ Право читання для ОБЛІКОВОГО ЗАПИСУ SSRS — роль бази `rpt_reader`:

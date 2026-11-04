@@ -1,4 +1,7 @@
+using System.Runtime.ExceptionServices;
+using System.Text.Json;
 using Ecr.Application.Ports;
+using Ecr.Application.Security;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Workflow;
@@ -47,11 +50,13 @@ public sealed class ApprovalSnapshotRefresh(
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task EnterAsync(long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+    /// <param name="sheetCopyId">Копія аркуша (RS); <c>null</c> — оригінал.</param>
+    public async Task EnterAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct, long? sheetCopyId = null)
     {
         await sheetGate.EnterStructureAsync(documentId, exclusive: false, ct).ConfigureAwait(false);
         await sheetGate.EnterHeaderAsync(documentId, exclusive: false, ct).ConfigureAwait(false);
-        await sheetGate.EnterSubmitAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false);
+        await sheetGate.EnterSubmitOfAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -63,15 +68,21 @@ public sealed class ApprovalSnapshotRefresh(
     /// <param name="userId">Погоджувач — автор нового зрізу.</param>
     /// <param name="now">Момент затвердження.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="sheetCopyId">Копія аркуша (RS); <c>null</c> — оригінал. Зрізи копії окремі.</param>
     /// <returns><c>true</c> — зріз знято.</returns>
     public async Task<bool> RefreshAsync(
-        long documentId, int sheetDefId, PeriodKey periodKey, int userId, DateTime now, CancellationToken ct)
+        long documentId, int sheetDefId, PeriodKey periodKey, int userId, DateTime now, CancellationToken ct,
+        long? sheetCopyId = null)
     {
-        var instances = await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
-        var templateVersionId = instances.Count > 0
-            ? instances[0].TemplateVersionId
-            : await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
+        var allInstances = await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        var templateVersionId = allInstances.Count > 0
+            ? allInstances[0].TemplateVersionId
+            : await Documents.DocumentPeriodVersion.GetAsync(documents, documentId, periodKey.Value, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+
+        // RS: таблиці цього аркуша — лише своєї копії (див. SubmissionPayloadSource.ForSheetCopy).
+        var instances = SubmissionPayloadSource.ForSheetCopy(
+            allInstances, snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId), sheetCopyId);
 
         var sheetTables = snapshot.Sheets
             .Where(s => s.Id == sheetDefId)
@@ -94,7 +105,7 @@ public sealed class ApprovalSnapshotRefresh(
         // зрізів аркуша за період (~10 МБ кожен на документі з 91 таблицею; кожне подання додає зріз) —
         // затвердження 268→493 с і росло з числом подань. Хеш живих даних збігся з хешем найновішого зрізу
         // (той самий `SubmissionPayloadSource`) — дані байт-у-байт ті самі, зміни немає, payload не читаємо.
-        var latestKey = await workflow.GetLatestSnapshotKeyAsync(documentId, sheetDefId, periodKey, ct)
+        var latestKey = await workflow.GetLatestSnapshotKeyOfAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct)
             .ConfigureAwait(false);
         if (latestKey is { } key
             && string.Equals(key.ContentHash, SubmissionPayloadSource.Hash(live), StringComparison.Ordinal))
@@ -111,8 +122,9 @@ public sealed class ApprovalSnapshotRefresh(
             return false;
         }
 
+        // ⛔ RS: рахується «вид» своєї копії (оригінал для sheetCopyId = null).
         await recalculation
-            .RecalculateSheetUnderSubmitLockAsync(documentId, sheetDefId, periodKey, ct)
+            .RecalculateSheetUnderSubmitLockAsync(documentId, sheetDefId, periodKey, ct, sheetCopyId)
             .ConfigureAwait(false);
 
         var payload = await SubmissionPayloadSource
@@ -130,7 +142,8 @@ public sealed class ApprovalSnapshotRefresh(
                 PayloadJson: payload,
                 ContentHash: SubmissionPayloadSource.Hash(payload),
                 SubmittedAt: now,
-                SubmittedByUserId: userId),
+                SubmittedByUserId: userId,
+                SheetCopyId: sheetCopyId),
             ct).ConfigureAwait(false);
 
         return true;
@@ -153,9 +166,73 @@ public sealed class ApprovalSnapshotRefresh(
             return true;
         }
 
-        var before = SubmissionPayload.Read(latestPayload).Where(c => sheetColumns.Contains(c.Column)).ToHashSet();
-        var after = SubmissionPayload.Read(livePayload).Where(c => sheetColumns.Contains(c.Column)).ToHashSet();
+        // ⛔ PERF (AN-135): кожен payload розбирається ОДИН раз (SubmissionPayload.Read), а множини будуються лише
+        // тоді, коли відфільтровані послідовності не збіглися поелементно. Обидва payload пише
+        // SubmissionPayload.Write у тому самому порядку (рядок, колонка), тож поелементна рівність — звичайний
+        // випадок «аркуш не змінено»; вона ж достатня для рівності множин. Інакше — рівно старе порівняння
+        // множин (дублікати й порядок не мають значення).
+        // Два незалежні розбори по ~10 МБ — паралельно (чисті функції над незмінними рядками). Помилка розбору
+        // виходить та сама й у тому самому порядку, що й доти (спершу зрізу, потім живих), — без AggregateException.
+        List<SubmissionPayloadCell> before = [], after = [];
+        ExceptionDispatchInfo? beforeError = null, afterError = null;
+        Parallel.Invoke(
+            () =>
+            {
+                try
+                {
+                    before = Filter(SubmissionPayload.Read(latestPayload), sheetColumns);
+                }
+                catch (JsonException ex)
+                {
+                    beforeError = ExceptionDispatchInfo.Capture(ex);
+                }
+            },
+            () =>
+            {
+                try
+                {
+                    after = Filter(SubmissionPayload.Read(livePayload), sheetColumns);
+                }
+                catch (JsonException ex)
+                {
+                    afterError = ExceptionDispatchInfo.Capture(ex);
+                }
+            });
+        beforeError?.Throw();
+        afterError?.Throw();
 
-        return !before.SetEquals(after);
+        if (before.Count == after.Count && SequenceEqual(before, after))
+        {
+            return false;
+        }
+
+        return !before.ToHashSet().SetEquals(after);
+    }
+
+    private static List<SubmissionPayloadCell> Filter(IReadOnlyList<SubmissionPayloadCell> cells, IReadOnlySet<int> columns)
+    {
+        var result = new List<SubmissionPayloadCell>(cells.Count);
+        foreach (var cell in cells)
+        {
+            if (columns.Contains(cell.Column))
+            {
+                result.Add(cell);
+            }
+        }
+
+        return result;
+    }
+
+    private static bool SequenceEqual(List<SubmissionPayloadCell> left, List<SubmissionPayloadCell> right)
+    {
+        for (var i = 0; i < left.Count; i++)
+        {
+            if (!left[i].Equals(right[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

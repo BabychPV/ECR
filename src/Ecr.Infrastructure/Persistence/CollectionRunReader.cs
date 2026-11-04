@@ -111,6 +111,9 @@ public sealed class CollectionRunReader(EcrDbContext db) : ICollectionRunReader
 
             // ⛔ Лише рядки зі статусом: звичайне покриття — не подія.
             .Where(r => r.Status != null)
+
+            // ✎ Аудит 31.10 (G4): службова позначка видалення точок — не подія для людини.
+            .Where(r => r.Status != Ecr.Domain.Entities.Integration.CollectionCoverage.PointsRemoved)
             .Where(r => r.Id < before)
             .Where(r => dataSourceId == null || r.DataSourceId == dataSourceId)
             .Where(r => sourceEntityId == null || r.SourceEntityId == sourceEntityId)

@@ -24,8 +24,15 @@ public sealed class CreateRowHandler(
 
     // ✎ Q-17: дзеркальні рядки таблиць «місяці в колонках» (`Collection:MonthColumnRouting`). `null` або вимкнений
     // прапор — поведінка до Q-17 (рядок лише в екземплярі запиту).
-    IMonthColumnRouter? monthRouter = null)
+    IMonthColumnRouter? monthRouter = null,
+
+    // ✎ Журнал рядків (`aud.RowChange`): «додано рядок» у журналі аркуша — тією самою транзакцією, що й вставка.
+    // Контейнер передає завжди; `null` — лише прямі конструктори тестів.
+    IRowChangeAudit? rowAudit = null)
 {
+    /// <summary>Походження запису журналу рядків для POST row — правка людини.</summary>
+    public const string RowAuditOrigin = CellChangeOrigins.UserEdit;
+
     /// <summary>Створює рядок і повертає його ключ.</summary>
     /// <exception cref="Errors.BusinessRuleException">
     /// Таблиця не дозволяє динамічні рядки, перевищено <c>MaxDynamicRows</c>,
@@ -191,7 +198,7 @@ public sealed class CreateRowHandler(
     {
         // ⛔ L6-02: структура документа — першою, до блокування аркуша.
         DocumentStructure.EnsureUnchanged(
-            await sheetGate.EnterStructureAsync(instance.DocumentId, exclusive: false, ct).ConfigureAwait(false),
+            await sheetGate.EnterStructureForPeriodAsync(instance.DocumentId, exclusive: false, instance.PeriodKey, ct).ConfigureAwait(false),
             instance.TemplateVersionId,
             instance.DocumentId);
 
@@ -220,9 +227,9 @@ public sealed class CreateRowHandler(
         foreach (var period in periodsToLock)
         {
             var periodKey = new PeriodKey(period);
-            await RowWriteLock.EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, periodKey, ct).ConfigureAwait(false);
+            await RowWriteLock.EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, periodKey, ct, instance.SheetCopyId).ConfigureAwait(false);
             statuses[period] = await sheetGate
-                .EnterEditAsync(instance.DocumentId, table.SheetDefId, periodKey, ct)
+                .EnterEditOfAsync(instance.DocumentId, table.SheetDefId, periodKey, instance.SheetCopyId, ct)
                 .ConfigureAwait(false);
         }
 
@@ -280,10 +287,18 @@ public sealed class CreateRowHandler(
             batches.Add(new RowCreationBatch(target.TableInstanceId, targetPeriod, [key], ordinal));
         }
 
-        await rowStore.CreateRowsBatchAsync(batches, ct).ConfigureAwait(false);
+        var created = await rowStore.CreateRowsBatchAsync(batches, ct).ConfigureAwait(false);
+
+        // Журнал рядків — кожен створений екземпляр (свій період): у журналі аркуша кожного місяця видно, звідки рядок.
+        var now = clock.UtcNow;
+        await WriteRowAuditAsync(
+            [.. batches.SelectMany((batch, i) => created[i].Select(rowId => new RowChangeRecord(
+                now, instance.DocumentId, batch.PeriodKey.Value, batch.TableInstanceId, instance.TableDefId, rowId,
+                key.Value, RowChangeAction.Added, profile.UserId, RowAuditOrigin, CorrelationId: null)))],
+            ct).ConfigureAwait(false);
 
         await documents
-            .TouchAsync(instance.DocumentId, profile.UserId, clock.UtcNow, ct)
+            .TouchAsync(instance.DocumentId, profile.UserId, now, ct)
             .ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -394,16 +409,16 @@ public sealed class CreateRowHandler(
     {
         // ⛔ L6-02: структура документа — першою, до блокування аркуша.
         DocumentStructure.EnsureUnchanged(
-            await sheetGate.EnterStructureAsync(instance.DocumentId, exclusive: false, ct).ConfigureAwait(false),
+            await sheetGate.EnterStructureForPeriodAsync(instance.DocumentId, exclusive: false, instance.PeriodKey, ct).ConfigureAwait(false),
             instance.TemplateVersionId,
             instance.DocumentId);
 
         // ⛔ Y7-03: відмова «зайнято» — про рядок, а не про подання (див. `RowWriteLock`).
         await RowWriteLock
-            .EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct)
+            .EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct, instance.SheetCopyId)
             .ConfigureAwait(false);
         var status = await sheetGate
-            .EnterEditAsync(instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct)
+            .EnterEditOfAsync(instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), instance.SheetCopyId, ct)
             .ConfigureAwait(false);
 
         var stateReason = status switch
@@ -462,8 +477,15 @@ public sealed class CreateRowHandler(
 
         // 7. Id береться з SEQUENCE ДО вставки — саме це дозволяє вантажити
         //    рядок і його комірки одним проходом SqlBulkCopy.
-        await rowStore.CreateRowAsync(tableInstanceId, PeriodKeyOf(instance), key,
+        var rowId = await rowStore.CreateRowAsync(tableInstanceId, PeriodKeyOf(instance), key,
                                       ordinal, ct).ConfigureAwait(false);
+
+        // ⛔ Журнал рядків — у ЦІЙ транзакції: відкат вставки забирає і запис «додано рядок».
+        await WriteRowAuditAsync(
+            [new RowChangeRecord(
+                clock.UtcNow, instance.DocumentId, instance.PeriodKey, tableInstanceId, instance.TableDefId, rowId,
+                key.Value, RowChangeAction.Added, profile.UserId, RowAuditOrigin, CorrelationId: null)],
+            ct).ConfigureAwait(false);
 
         // ⛔ Новий рядок — це зміна документа (`H-23d`). Без цього «додав рядок»
         // не змінювало ані `ModifiedAt`, ані автора: у переліку документ
@@ -479,6 +501,10 @@ public sealed class CreateRowHandler(
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
+
+    /// <summary>Запис журналу рядків; без сховища (прямі конструктори тестів) — нічого.</summary>
+    private Task WriteRowAuditAsync(IReadOnlyList<RowChangeRecord> records, CancellationToken ct)
+        => rowAudit is null || records.Count == 0 ? Task.CompletedTask : rowAudit.WriteRowChangesAsync(records, ct);
 
     /// <summary>Відмова «досягнуто межу динамічних рядків» — спільна для звичайного й дзеркального шляху.</summary>
     private static Errors.BusinessRuleException RowLimitReached(TableDef table, int max)

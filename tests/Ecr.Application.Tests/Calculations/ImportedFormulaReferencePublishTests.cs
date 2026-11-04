@@ -308,14 +308,16 @@ public sealed class ImportedFormulaReferencePublishTests
         Assert.Equal("ECR-CALC-0438", error.ErrorCode);
         Assert.False(_version.IsPublished);
 
-        // З маркером: та сама версія публікується.
-        var optional = Formula(103, "Total", "@Flow * 2");
-        optional.SetArguments("Flow?");
+        // З маркером: та сама версія публікується. ✎ 2026-11-02 (похідні аргументи): маркер — у ВИРАЗІ
+        // (`@Flow?`); список, що лишився старим (`Flow`), публікація перезаписує похідним.
+        var optional = Formula(103, "Total", "@Flow? * 2");
+        optional.SetArguments("Flow");
         Formulas([optional]);
 
         var diff = await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
 
         Assert.True(_version.IsPublished);
+        Assert.Equal("@Flow?", optional.ArgumentsCsv);
 
         // Q-OA-5: optional без колонки в жодній прив'язаній таблиці — лише попередження, не відмова.
         var warning = Assert.Single(diff.Warnings ?? [], w => w.Contains("Optional argument", StringComparison.Ordinal));
@@ -328,8 +330,7 @@ public sealed class ImportedFormulaReferencePublishTests
     {
         BindTable(44, ["Volume", "Flow"]);
 
-        var formula = Formula(103, "Total", "@Flow * 2");
-        formula.SetArguments("Flow?");
+        var formula = Formula(103, "Total", "@Flow? * 2");
         Formulas([formula]);
 
         var diff = await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);

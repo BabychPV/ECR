@@ -43,7 +43,8 @@ public sealed class AuditReaderCellJournalOrderTests(SqlServerFixture sql)
         await writer.WriteCellChangesAsync([Change(doc, "r5", 202603, At.AddMinutes(5))], CancellationToken.None);
 
         var reader = new AuditReader(db);
-        var filter = new CellChangeFilter(At.AddMinutes(-1), At.AddHours(1), DocumentId: doc.DocumentId);
+        // ⚠ Порядок названо явно: типовий тепер — найновіші першими (`AuditSortPagingTests`), а цей доказ про прямий обхід.
+        var filter = new CellChangeFilter(At.AddMinutes(-1), At.AddHours(1), DocumentId: doc.DocumentId, Sort: AuditSort.ChangedAtAsc);
 
         // Гортаємо по 2 — межа сторінки падає всередину групи з однаковим ChangedAt.
         var keys = new List<string>();

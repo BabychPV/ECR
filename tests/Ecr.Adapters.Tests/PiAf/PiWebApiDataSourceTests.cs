@@ -391,6 +391,66 @@ public sealed class PiWebApiDataSourceTests
     // Спільне налаштування.
     // ─────────────────────────────────────────────────────────────────────
 
+    // ─────────────────────────────────────────────────────────────────────
+    // ✎ Аудит 31.10 (G6, D-462): відповідь, що не доводить відсутності точок.
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>Тіло без <c>Items</c> — відмова всього інтервалу, а не «порожній період» (інакше — стирання шматка).</summary>
+    [Fact]
+    [Trait("Decision", "D-462")]
+    public async Task ReadAsync_ТілоБезItems_ВідмоваІнтервалу_АНеПорожнійПеріод()
+    {
+        var handler = new QueueHttpMessageHandler()
+            .Enqueue(HttpStatusCode.OK, AttributeJson)
+            .Enqueue(HttpStatusCode.OK, "{\"Links\":{}}");
+        var sut = CreateSut(handler, out _);
+
+        var result = await sut.ReadAsync(new CollectionRequest(1, 42, "tag", From, To, MaxPoints: 10), CancellationToken.None);
+
+        Assert.Empty(result.Points);
+        Assert.Equal([new TimeInterval(From, To)], result.FailedIntervals);
+        Assert.NotNull(result.ErrorCode);
+    }
+
+    /// <summary>Нерозбірна мітка: добрі точки зберігаються, але видаляти за цією відповіддю не можна.</summary>
+    [Fact]
+    [Trait("Decision", "D-462")]
+    public async Task ReadAsync_НерозбірнаМітка_ТочкиЗберігаються_ВидаленняНебезпечне()
+    {
+        var recordedJson =
+            "{\"Items\":[{\"Timestamp\":\"2026-01-01T00:00:00Z\",\"Value\":1},{\"Timestamp\":\"not-a-date\",\"Value\":2}]}";
+        var handler = new QueueHttpMessageHandler()
+            .Enqueue(HttpStatusCode.OK, AttributeJson)
+            .Enqueue(HttpStatusCode.OK, recordedJson);
+        var sut = CreateSut(handler, out _);
+
+        var result = await sut.ReadAsync(new CollectionRequest(1, 42, "tag", From, To, MaxPoints: 10), CancellationToken.None);
+
+        Assert.Single(result.Points);
+        Assert.True(result.DeletionUnsafe);
+    }
+
+    /// <summary>Відповідь лише з помилок (системне значення 1970 р., <c>Good: false</c>) — не «даних немає».</summary>
+    [Fact]
+    [Trait("Decision", "D-462")]
+    public async Task ReadAsync_ЛишеПомилковіЕлементи_ВидаленняНебезпечне_АЗвичайнаВідповідьБезпечна()
+    {
+        var errorOnly =
+            "{\"Items\":[{\"Timestamp\":\"1970-01-01T00:00:00Z\",\"Value\":{\"Name\":\"Pt Created\",\"Value\":-1},\"Good\":false}]}";
+        var handler = new QueueHttpMessageHandler()
+            .Enqueue(HttpStatusCode.OK, AttributeJson)
+            .Enqueue(HttpStatusCode.OK, errorOnly)
+            .Enqueue(HttpStatusCode.OK, RecordedJson(From, count: 3));
+        var sut = CreateSut(handler, out _);
+
+        var bad = await sut.ReadAsync(new CollectionRequest(1, 42, "tag", From, To, MaxPoints: 10), CancellationToken.None);
+        var good = await sut.ReadAsync(new CollectionRequest(1, 42, "tag", From, To, MaxPoints: 10), CancellationToken.None);
+
+        Assert.True(bad.DeletionUnsafe);
+        Assert.False(good.DeletionUnsafe);
+        Assert.False(good.ServedBySecondary);
+    }
+
     private static PiWebApiDataSource CreateSut(
         HttpMessageHandler handler, out ISecretProvider secrets, string? secretValue = "")
     {

@@ -1,0 +1,19 @@
+-- COLL:an43fix ── ru/kz D-285: окремий текст відмови подання; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'deny.InsufficientGrantLevel.Submit', N'ru', N'Уровень вашего доступа недостаточен для подачи этого листа: нужен уровень «Подача» либо уровень «Запись» вместе с правом «Подача документов» в этом проекте. Попросите администратора повысить уровень или выдать право.'),
+    (N'deny.InsufficientGrantLevel.Submit', N'kz', N'Бұл парақты тапсыру үшін қолжетімділік деңгейіңіз жеткіліксіз: осы жобада «Тапсыру» деңгейі не «Жазу» деңгейі мен «Құжаттарды тапсыру» құқығы қажет. Әкімшіден деңгейді арттыруды немесе құқық беруді сұраңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an43fix ── кінець секції ──
+-- COLL:an43fix ── D-285: окремий текст відмови подання (reasonKey deny.InsufficientGrantLevel.Submit); ru/kz — порцією COLL:an43fix у блоці I18N нижче ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'deny.InsufficientGrantLevel.Submit', N'en', N'Your access level is too low to submit this sheet: you need the Submit level, or the Write level together with the Submit documents right in this project. Ask an administrator to raise the level or grant the right.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:an43fix ── кінець секції ──

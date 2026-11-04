@@ -1,12 +1,11 @@
-﻿import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { vi, beforeEach, afterEach } from 'vitest';
+﻿import { vi, beforeEach, afterEach } from 'vitest';
 import type { JSX, ReactNode } from 'react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { act } from '@testing-library/react';
 import { mantineProviderProps } from '@/shared/theme/provider';
+import { readSeedEnCatalog } from '@/test/seedSql';
 
 /**
  * Спільні прилади для розбитого набору перевірки доступності (`ФВ-14.16`,
@@ -222,19 +221,12 @@ export const Themes: readonly ('light' | 'dark')[] =
  * файлу — див. коментар там-таки в git-історії).
  */
 function seededStrings(): Record<string, string> {
-  const seed = readFileSync(
-    path.resolve(process.cwd(), '../../src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql'),
-    'utf8',
-  );
-
-  // Лише блок MERGE: секції «змінені тексти»/«прибрані ключі» над ним мають
+  // Лише en-каталог (порції #UiEn): секції «змінені тексти»/«прибрані ключі» мають
   // той самий вигляд рядка і несуть старі значення та видалені ключі.
-  const start = seed.indexOf('MERGE sys_ecr.UiString AS t');
-  const end = seed.indexOf(') AS s ([Key], Lang, Val, Scope)', start);
-  if (start < 0 || end < 0) throw new Error('09-seed.sql: не знайдено блоку MERGE sys_ecr.UiString');
+  const block = readSeedEnCatalog();
 
   const strings: Record<string, string> = {};
-  for (const row of seed.slice(start, end).matchAll(/\(N'([^']+)',\s*N'[a-z]{2}',\s*N'([^']*)'/g)) {
+  for (const row of block.matchAll(/\(N'([^']+)',\s*N'[a-z]{2}',\s*N'([^']*)'/g)) {
     strings[row[1] ?? ''] = row[2] ?? '';
   }
 

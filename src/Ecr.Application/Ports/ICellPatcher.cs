@@ -73,8 +73,10 @@ public interface ICellPatcher
 /// <summary>Одне згорнуте значення для запису.</summary>
 /// <param name="RowKey">Рядок-адресат із мапінгу.</param>
 /// <param name="ColumnDefId">Колонка-адресат.</param>
-/// <param name="Value">Згорнуте значення.</param>
-public sealed record IntegrationCellValue(string RowKey, int ColumnDefId, decimal Value);
+/// <param name="Value">
+/// Згорнуте значення; <c>null</c> — ОЧИСТИТИ комірку (D-462: усі точки періоду видалено в джерелі; порожньо, не 0).
+/// </param>
+public sealed record IntegrationCellValue(string RowKey, int ColumnDefId, decimal? Value);
 
 /// <summary>Рядок від інтеграції: ключ і типізовані значення колонок (HSE301 A5a).</summary>
 /// <param name="RowKey">Ключ рядка; для події — <see cref="EventRowKey"/>.</param>
@@ -200,12 +202,17 @@ public enum IntegrationValueKind
 /// (чужий, відсутній, видалений, вимкнений, нечинний на кінець періоду):
 /// <c>rowKey:columnCode</c>. Не записані, решта рядка — записана. <c>null</c> — таких немає.
 /// </param>
+/// <param name="SkippedClosedPeriod">
+/// D-462 (Q-17, варіант A): комірки колонок, чий власник — ЗАКРИТИЙ період (якір року), не записані:
+/// <c>rowKey:columnCode@periodKey</c>; решту батча записано. <c>null</c> — таких немає.
+/// </param>
 public sealed record IntegrationWriteResult(
     int Applied,
     IReadOnlyList<string> KeptManual,
     IReadOnlyList<string>? AwaitingConfirmation = null,
     IReadOnlyList<string>? WriteConflicts = null,
-    IReadOnlyList<string>? Rejected = null);
+    IReadOnlyList<string>? Rejected = null,
+    IReadOnlyList<string>? SkippedClosedPeriod = null);
 
 /// <summary>
 /// Журнал покриття збору (<c>itg.CollectionCoverage</c>).

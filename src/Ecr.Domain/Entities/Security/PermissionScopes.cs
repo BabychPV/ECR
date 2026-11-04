@@ -76,6 +76,15 @@ public static class PermissionScopes
         "Document.Export",
         "Document.Import",
         "Document.Reopen",
+
+        // TC: чат таблиці. Рішення про таблицю (аркуш × період) приймає межа читання, а не лише право, тож роль,
+        // звужена аркушем, пише/модерує саме в доступних їй таблицях.
+        "Document.Discuss",
+        "Document.DiscussModerate",
+
+        // ✎ D-461: ручне значення замість формули — рішення про КОМІРКУ, що далі проходить межі аркуша й періоду та
+        // грант Write (`EditRules.CanEdit`); роль, звужена аркушем, замінює формули лише там, де їй дозволено писати.
+        "Document.OverrideFormula",
     };
 
     /// <summary>Чи дає право роль, звужена аркушами чи періодами.</summary>

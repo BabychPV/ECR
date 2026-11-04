@@ -82,6 +82,8 @@ public sealed partial class DenyLeakGuardTests
     /// </remarks>
     private static readonly Dictionary<string, (int Count, string Why)> Reviewed = new(StringComparer.Ordinal)
     {
+        ["src/Ecr.Application/Integration/RawData/PiEventDataHandler.cs | деталь eventMapId | mapId.Value.ToString(CultureInfo.InvariantCulture)"] =
+            (1, "D-465: ехо параметра запиту mapId (ідентифікатор мапінгу) адміністратору інтеграції ПІСЛЯ права Integration.View/Manage; не колонка і не значення комірки"),
         ["src/Ecr.Application/Documents/EditAssignments/EditAssignmentHandlers.cs | деталь sheetCodes | own.VisibleSheetCodes"] =
             (1, "коди аркушів, які передавач САМ бачить (DocumentReadScope.CanReadSheetCode) і не може писати; схований аркуш не називається, а лише дає перевищення без імені"),
         ["src/Ecr.Application/Consistency/GetConsistencyIssuesHandler.cs | деталь severity | severity.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)"] =
@@ -121,7 +123,11 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Workflow/SubmitSheetHandler.cs | текст | emptyCodes.Count"] =
             (1, "D-PS: число порожніх обов'язкових полів шапки, не колонка і не значення"),
         ["src/Ecr.Application/Documents/GetTableSliceHandler.cs | текст | code"] =
-            (3, "ключ «рядок:колонка» лише для колонок, що пройшли CanReadColumn; CELL-STYLE L3b — оформлення комірок лише видимих колонок відповіді"),
+            (4, "ключ «рядок:колонка» лише для колонок, що пройшли CanReadColumn; CELL-STYLE L3b — оформлення комірок лише видимих колонок відповіді; D-461 — ручні значення лише видимих колонок відповіді"),
+        ["src/Ecr.Application/Documents/GetTableSliceHandler.cs | текст | visibleCodeById[cell.ColumnDefId]"] =
+            (1, "D-461: комірки формул, що дозволяють ручне значення, — лише видимих колонок відповіді (visibleCodeById)"),
+        ["src/Ecr.Application/Documents/PatchCellsHandler.FormulaOverride.cs | деталь columnCode | columnCode"] =
+            (1, "D-461: колонку назвав сам запит, і запис у неї рішення доступу вже дозволило (заборона читання забороняє й запис); причину не повертаємо"),
         ["src/Ecr.Application/Documents/GetTableSliceHandler.cs | текст | column.Code"] =
             (1, "ключ формату по колонках зрізу, вже відфільтрованих CanReadColumn"),
         ["src/Ecr.Application/Documents/PatchCellsHandler.cs | текст | code"] =

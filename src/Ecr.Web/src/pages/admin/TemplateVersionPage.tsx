@@ -1211,6 +1211,7 @@ function TemplateVersionEditor(): JSX.Element {
                       onConditionalFormat={() => setConditionalFormatTable(table)}
                       onManageGroups={() => setGroupsTable(table)}
                       canEditPresentation={can(session.data, 'Template.Edit')}
+                      canToggleManualOverride={can(session.data, 'Template.Edit')}
                       onDelete={() =>
                         setPendingDelete({
                           kind: 'table',

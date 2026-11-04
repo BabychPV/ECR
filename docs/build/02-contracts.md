@@ -944,6 +944,42 @@ public sealed record CellChangeSet(
 ```
 
 ```csharp
+// src/Ecr.Application/Ports/IProjectVersionTimeline.cs (RPT-STABLE Part B)
+
+namespace Ecr.Application.Ports;
+
+/// <summary>
+/// Часова шкала версій шаблону проєкту: ЄДИНА відповідь «яка версія діє за період».
+/// Рядок шкали — <c>doc.ProjectTemplateVersion(ProjectId, FromPeriodKey, TemplateVersionId)</c>;
+/// версія періоду = найбільший <c>FromPeriodKey ≤ periodKey</c> (SQL-відповідник — <c>doc.fn_VersionOf</c>).
+/// <c>Project.TemplateVersionId</c> — «чинна/остання» версія для НОВИХ періодів.
+/// </summary>
+public interface IProjectVersionTimeline
+{
+    Task<int> VersionOfAsync(int projectId, int periodKey, CancellationToken ct);
+    Task<int> VersionOfFreshAsync(int projectId, int periodKey, CancellationToken ct);
+    Task<IReadOnlyList<TimelineEntry>> GetAsync(int projectId, CancellationToken ct);
+    Task<int?> CurrentVersionAsync(int projectId, CancellationToken ct);
+    void Invalidate(int projectId);
+}
+```
+
+```csharp
+// src/Ecr.Application/Ports/IColumnRenameMap.cs (RPT-STABLE Part B)
+
+namespace Ecr.Application.Ports;
+
+/// <summary>
+/// Збережена мапа перейменування колонок між версіями шаблону (<c>cfg.ColumnRename</c>): псевдонім для вʼюх SSRS
+/// і міжперіодних формул на межі версій. Пишеться переносом версії з <c>tableRenames</c>.
+/// </summary>
+public interface IColumnRenameMap
+{
+    Task<(IReadOnlyDictionary<int, int> Forward, IReadOnlyDictionary<int, int> Backward)> GetAsync(CancellationToken ct);
+}
+```
+
+```csharp
 // src/Ecr.Application/Ports/IMetadataCache.cs
 
 using Ecr.Domain.Entities.Configuration;
@@ -2185,6 +2221,19 @@ public interface IAuditWriter
 }
 ```
 
+#### `IRowChangeAudit`
+
+Журнал додавання й видалення рядків таблиць документа (`aud.RowChange`, `11-audit-tables.sql`): запис — у ТІЙ САМІЙ транзакції, що й зміна рядка (POST row, DELETE row, нові рядки PATCH і книги Excel); читання — третє джерело журналу аркуша (`SheetActivityQuery`, тег 2) з межами читання за видимими таблицями до `TOP`. Окремий порт, а не метод `IAuditWriter`, щоб обгортки того порту в тестах не мусили знати про новий журнал. `Action` 3 (`Restored`) зарезервовано — шляху відновлення рядка ще немає.
+
+```csharp
+public interface IRowChangeAudit
+{
+    public Task WriteRowChangesAsync(IReadOnlyList<RowChangeRecord> changes, CancellationToken ct);
+    public Task<IReadOnlyList<RowChangeView>> ReadRowChangesAsync(
+        RowChangeFilter filter, int take, (DateTime At, long Id)? after, CancellationToken ct);
+}
+```
+
 #### `ICalculationRunner`
 
 Виконавець прогону розрахунку.
@@ -2371,6 +2420,31 @@ public interface IDocumentDeletionStore
     public Task<DocumentWorkflowFacts> LockWorkflowFactsAsync(long documentId, CancellationToken ct);
     public Task<DocumentFreezeFacts> LockFreezeFactsAsync(long documentId, CancellationToken ct);
     public Task<int> DeleteAsync(long documentId, CancellationToken ct);
+}
+```
+
+#### `IDocumentSheetCopyStore`
+
+Копії аркушів документа (RS, рішення людини 03.11; обробник `DocumentSheetCopyHandler`, право `Document.Create` +
+грант запису в проєкт). Усі методи — в одній транзакції під ВИНЯТКОВИМ блокуванням структури документа
+(`ISheetEditGate.EnterStructureAsync(exclusive: true)`): додати порожню копію оригіналу (наступний номер 2…),
+перейменувати групу (назва — на оригіналі; показується «<Назва> N»), видалити копію. Видалення — явне й по періодах
+(екземпляри, рядки, комірки), потім стани й журнал подій копії, рядок складу, перенумерація решти (3→2); зрізи подань
+лишаються. Відмови: `409 ECR-DOC-0409` — `sheetCopyIsOriginal` (це оригінал), `sheetCopyHasWorkflow` (копія подана/затверджена
+хоч в одному періоді; `periodKey`, `status`), `sheetCopyProjectArchived`; `422 ECR-DOC-0422` — `sheetNotCopyable`,
+`sheetNameInvalid`; `404 ECR-DOC-0404` — `sheetCopy`. Операції лягають в `aud.SecurityEvent` (`DocumentSheetCopyAdded`,
+`DocumentSheetGroupRenamed`, `DocumentSheetCopyDeleted`).
+
+```csharp
+public interface IDocumentSheetCopyStore
+{
+    public Task<IReadOnlyList<SheetCopyGroupInfo>> ListGroupsAsync(long documentId, CancellationToken ct);
+    public Task<SheetCopyGroup?> FindGroupAsync(long documentId, int sheetDefId, CancellationToken ct);
+    public Task<SheetCopyRef?> FindAsync(long documentId, long sheetCopyId, CancellationToken ct);
+    public Task<(long SheetCopyId, short Ordinal)> AddCopyAsync(long documentId, int sheetDefId, CancellationToken ct);
+    public Task RenameGroupAsync(long documentId, int sheetDefId, LocalizedText name, CancellationToken ct);
+    public Task<SheetCopyWorkflowBlock?> FindBlockingStateAsync(long documentId, long sheetCopyId, CancellationToken ct);
+    public Task<int> DeleteCopyAsync(long documentId, long sheetCopyId, CancellationToken ct);
 }
 ```
 
@@ -2834,6 +2908,48 @@ public interface IRegistryDraftStore
 }
 ```
 
+#### `IRegistryHierarchyStore`
+
+Рівні ієрархічних довідників `cfg.RegistryLevelDef` і читання дерева (NAE plan N1). Правила розміщення
+(порядок рівнів, пропуск лише необов'язкових, цикли) живуть в `RegistryHierarchyRules`, не в сховищі.
+
+```csharp
+public interface IRegistryHierarchyStore
+{
+    public Task<IReadOnlyList<RegistryLevelDef>> ListLevelsAsync(int registryDefId, CancellationToken ct);
+    public void AddLevel(RegistryLevelDef level);
+    public void RemoveLevel(RegistryLevelDef level);
+    public Task<IReadOnlyDictionary<int, int>> CountEntriesByLevelAsync(int registryDefId, CancellationToken ct);
+    public Task<IReadOnlyList<RegistryEntry>> ListLiveEntriesAsync(int registryDefId, CancellationToken ct);
+    public Task<IReadOnlyList<RegistryEntry>> ListChildrenTrackedAsync(int registryDefId, long? parentEntryId, CancellationToken ct);
+    public Task LockTreeAsync(int registryDefId, CancellationToken ct); // N2: UPDLOCK на рядок опису до кінця транзакції
+}
+```
+
+#### `INaeAfReader`
+
+Читання дерева обладнання AF для разового завантаження дерева НАЕ (NAE plan N2). Лише читання (D-44);
+у тестах — підміна. Реалізація — `PiAfNaeReader` (`DiscoverElementsAsync` + `ReadCurrentAsync`).
+
+```csharp
+public interface INaeAfReader
+{
+    public Task<NaeAfSnapshot> ReadAsync(int dataSourceId, string rootPath, CancellationToken ct);
+}
+```
+
+#### `IRegistryEntryReferenceReader`
+
+«Де використано» запису довідника (дозволи, тип, чинність, кількість речовин). До N3 повертає порожній
+список — таблиць дозволів, що посилаються на вузол НАЕ, ще немає.
+
+```csharp
+public interface IRegistryEntryReferenceReader
+{
+    public Task<IReadOnlyList<RegistryEntryReferenceDto>> ListAsync(int registryDefId, long entryId, CancellationToken ct);
+}
+```
+
 #### `IRegistryKeyStore`
 
 Складені ключі довідника при записі (RT-10a, FEATURE-REGISTRY-TABLES §4.3, D-151…D-153).
@@ -3100,6 +3216,13 @@ AN-120: побудова відмовляє `ECR-RPT-0422` (`err.ECR-RPT-0422.sn
 Ідемпотентна: незмінну вʼюху не чіпає; нова версія = нові вʼюхи, старі
 лишаються (D-53). Читання — роль бази `rpt_reader` (SELECT на схему `rpt`).
 
+RS (копії аркушів, рішення людини 03.11): копія аркуша — окремі екземпляри таблиць зі СВОЇМ станом подання, тож вʼюхи
+віддають її рядки окремо від оригінала. Стан (`Status`/`_Status`) з'єднується за копією екземпляра
+(`a.SheetCopyId = ti.SheetCopyId OR (обидва NULL)`); у кінці списку колонок — `SheetCopyOrdinal`/`SheetDisplayName` у
+довгій вʼюсі та `_SheetCopyOrdinal`/`_SheetDisplayName` у широких (номер у групі: 1 — оригінал, 2… — копії; назва
+«&lt;Назва&gt; N» — мова `en`, інакше код аркуша; з номером лише коли в групі є копії; група шукається за аркушем версії
+вʼюхи). Текст вʼюх змінився, тож наступний запуск генератора їх переписує (`Altered`).
+
 ```csharp
 public interface IReportViewGenerator
 {
@@ -3281,6 +3404,32 @@ public interface ICellStyleStore
 }
 ```
 
+#### `IFormulaOverrideStore`
+
+✎ D-461: «ручне значення замість формули». Прапорець формули `cfg.FormulaDef.AllowManualOverride` (сирий UPDATE лише цього
+стовпця — тригер незмінності пропускає його й у Published/Deprecated) і позначки комірок `doc.CellFormulaOverride`
+(`PeriodKey, TableRowId, ColumnDefId` → `TableInstanceId, Reason ≤ 1000, SetByUserId, SetAt`; партиція `ps_ByPeriodKey`, без
+зовнішніх ключів — як `doc.CellStyle`). Значення лежить у `doc.CellValue` з `IsCalculated = 0`; позначка робить його
+однозначним і тримає чинну причину для підказки. Записи — набором (одна команда на батч), у поточній транзакції; правка пише
+позначки ПЕРЕД значеннями, перерахунок блокує позначки адрес запису (`LockKeysAsync`, `UPDLOCK, HOLDLOCK`) перед своїм MERGE —
+ручне значення не перезаписується паралельним прогоном.
+
+```csharp
+public interface IFormulaOverrideStore
+{
+    public Task<FormulaOverrideTarget?> FindFormulaAsync(int templateVersionId, int formulaId, CancellationToken ct);
+    public Task SetAllowManualOverrideAsync(int formulaId, bool allow, CancellationToken ct);
+    public Task<FormulaOverrideCounts> CountAsync(FormulaOverrideTarget target, CancellationToken ct);
+    public Task<IReadOnlyList<FormulaOverrideMark>> ReadInstanceAsync(long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
+    public Task<IReadOnlyDictionary<CellAddress, CellFormulaOverride>> ReadAsync(IReadOnlyCollection<CellAddress> addresses, CancellationToken ct);
+    public Task<IReadOnlySet<CellAddress>> ReadKeysAsync(IReadOnlyCollection<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct);
+    public Task<IReadOnlySet<CellAddress>> LockKeysAsync(IReadOnlyCollection<CellAddress> addresses, CancellationToken ct);
+    public Task<IReadOnlyList<ProjectFormulaOverride>> ReadProjectAsync(int projectId, CancellationToken ct);
+    public Task ReleaseAsync(IReadOnlyList<CellAddress> addresses, CancellationToken ct);
+    public Task ApplyAsync(IReadOnlyList<CellFormulaOverride> upserts, IReadOnlyList<CellAddress> removals, CancellationToken ct);
+}
+```
+
 **Правила `PATCH …/cell-styles` (CELL-STYLE L3b).**
 
 - Поле `null`/відсутнє — не чіпати; `""` — зняти; `#rrggbb` — задати. `isBold: false` означає «не задано» (жирність колонки так не зняти), а не «зняти жирність».
@@ -3437,6 +3586,67 @@ public interface ICollectionRunReader
 }
 ```
 
+#### `IRawDataReader` і `ICellSourceStore` (`D-463`)
+
+Читаюча сторона зібраних точок PI (`ext.RawDataPoint`): «Дані з PI» (адміністратор інтеграції) і «Звідки це
+значення» (комірка документа). ⛔ Кожен метод над `ext.RawDataPoint` адресує РІВНО ОДИН ряд «сутність + шлях»
+у напіввідкритому вікні — префікс `UQ_RawDataPoint`, тобто seek (`WITH (FORCESEEK)`, параметри `nvarchar(400)` /
+`datetime2(3)`); результат обмежений стелею або числом кошиків (≤ 2000). `ICellSourceStore` нічого не вирішує
+про доступ — його кличе `CellSourceHandler` після перевірки доступу до самої комірки.
+
+```csharp
+public interface IRawDataReader
+{
+    public Task<RawSourceEntity?> FindEntityAsync(int sourceEntityId, CancellationToken ct);
+    public Task<IReadOnlyList<RawDataTag>> ListTagsAsync(int sourceEntityId, int max, CancellationToken ct);
+    public Task<IReadOnlyList<RawPoint>> PageAsync(RawSeriesKey key, DateTime? before, int take, CancellationToken ct);
+    public Task<IReadOnlyList<RawPoint>> PageAscendingAsync(RawSeriesKey key, DateTime? after, int take, CancellationToken ct);
+    public Task<long> CountAsync(RawSeriesKey key, CancellationToken ct);
+    public Task<IReadOnlyList<RawBucket>> BucketsAsync(RawSeriesKey key, long bucketSeconds, CancellationToken ct);
+    public Task<IReadOnlyList<RawInterval>> CoveredAsync(int sourceEntityId, DateTime fromUtc, DateTime toUtc, int take, CancellationToken ct);
+    public Task<RawCollectionStatus> LastCollectionAsync(int sourceEntityId, CancellationToken ct);
+    public Task<int> CountEventMapsAsync(int sourceEntityId, CancellationToken ct); // D-465: перемикач «Події»
+}
+
+public interface ICellSourceStore
+{
+    public Task<IReadOnlyList<CellSourceMap>> MapsAsync(int columnDefId, string rowKey, int max, CancellationToken ct);
+    public Task<CellPeriodWindow?> PeriodAsync(long documentId, int periodKey, CancellationToken ct);
+    public Task<IReadOnlyList<CellSourceEvent>> PeriodEventsAsync(int sourceEntityId, int periodKey, int take, CancellationToken ct);
+}
+```
+
+#### `ISourceEventViewStore` (`D-465`)
+
+Читаюча сторона подій PI (Event Frames), уже синхронізованих у рядки: «Дані з PI → Події» і «Звідки це значення» для
+комірки рядка `EF-…`. ⛔ Лише сховище — у PI наживо порт не ходить: значення атрибутів — останнє прочитання синку
+(`ext.SourceEventAttributeValue`). Порт нічого не вирішує про доступ (документ/колонку маскує обробник). Звернень на
+сторінку — сталий набір: зв'язки — seek `IX_SEL_MapStart`, значення — префікс `PK_SourceEventAttributeValue`, комірки —
+ключ рядка + `PK_CellValue` + `IX_CellChange_Cell`, видалення — кластерний ключ `aud.StructureChange` за часом.
+«Що записав би синк» рахує `PiEventComparison` тим самим `SourceEventRowBuilder`, що й запис (поля — тим самим
+`SourceEventFieldPlans.LoadAsync`).
+
+```csharp
+public interface ISourceEventViewStore
+{
+    public Task<IReadOnlyList<PiEventMap>> MapsAsync(int sourceEntityId, CancellationToken ct);
+    public Task<PiEventMap?> MapAsync(int mapId, CancellationToken ct);
+    public Task<PiEventMapContext> ContextAsync(PiEventMap map, CancellationToken ct);
+    public Task<IReadOnlyList<SourceEventPeriod>> PeriodsAsync(PiEventMap map, CancellationToken ct);
+    public Task<IReadOnlyList<PiEventLink>> LinksAsync(int mapId, PiEventFilter filter, PiEventCursor? before, int take, CancellationToken ct);
+    public Task<int> CountLinksAsync(int mapId, PiEventFilter filter, CancellationToken ct);
+    public Task<IReadOnlyList<PiEventLink>> LinksOfRowAsync(long tableInstanceId, string rowKey, int take, CancellationToken ct);
+    public Task<IReadOnlyList<PiObservedValue>> ValuesAsync(IReadOnlyCollection<long> linkIds, CancellationToken ct);
+    public Task<IReadOnlyList<PiCellValue>> CellsAsync(IReadOnlyList<PiRowAddress> rows, IReadOnlyCollection<int> columnDefIds, CancellationToken ct);
+    public Task<IReadOnlyList<PiEventRemoval>> RemovalsAsync(int sourceEntityId, DateTime fromUtc, DateTime toUtc, int take, CancellationToken ct);
+}
+```
+
+Порівняння (`comparison`): `Match` | `ManualEdit` (причина `KeptManual`) | `NotWritten` (причини `Open`, `OpenAtPeriodClose`,
+`PeriodClosed`, `PeriodNotOpen`, `SheetLocked`, `RowLimit`, `Unmapped`, `PeriodChanged`, `Missing`) | `NotUpdated`
+(`Pending` — PI дав нове значення після останнього синку) | `NoSourceValue` | `NotComparable` (текст PI довший за
+4 000) | `Hidden` (документ чи колонку читач не бачить).
+
 #### `IDataSourceStore`
 
 Конфігурація підключень (`ext.DataSource`) для екрана джерел (`BE-21`,
@@ -3505,7 +3715,7 @@ public interface ISourceCatalogReader
 | `GET /data-sources/{id}/event-templates` | `Integration.View`/`Manage` | каталог шаблонів подій і атрибутів (`DiscoverEventTemplatesAsync`); без запиту каталогу — `422 ECR-INT-0422` (`eventQueryNotConfigured`, `queryKindNotConfigured`, `queryKindNotSupported`); `503 ECR-INT-0503` (`catalogTimeout`/`catalogUnavailable`) |
 | `POST /data-sources/{id}/probe-events` | `Integration.Manage` | пробне читання подій шаблону, **нічого не пише**; тіло `{ template, fromUtc?, toUtc?, attributes?, maxEvents? }`, типово 30 днів і 20 подій, до 92 днів і 100; `422 err.ECR-REQ-0422.probeEventsInvalid`, `503 probeTimeout/probeUnavailable` |
 | `GET /sources/{id}/source-events` | `Read` на документ мапінгу | таблиця подій: стан `Synced`/`Open`/`Missing`/`PeriodClosed`/`PeriodChanged`/`PeriodNotOpen`/`Unmapped`/`RowLimit`, час у поясі проєкту й UTC, ключ рядка `EF-…`, документ і період, `keptManual`, `unmapped`; фільтри `mapId`, `documentId`, `status`(×N), `fromUtc`, `toUtc`, `periodKey`; курсор, `limit` 1–500. Документ, якого користувач не бачить, не існує: його події поза відповіддю й `totalCount`, `mapId` невидимого — `404` |
-| `POST /sources/{id}/source-events/sync` | `Integration.Manage` | «Отримати з PI зараз»: `EnqueueCoalescedAsync<ISourceEventSyncJob>`, ціль `source-events-e{id}`, `202 { jobId }`; без активного мапінгу — `422 err.ECR-INT-0422.eventSyncNoMap` |
+| `POST /sources/{id}/source-events/sync` | `Integration.Manage` | «Отримати з PI зараз»: `EnqueueCoalescedAsync<ISourceEventSyncJob>`, ціль `source-events-e{id}`, `202 { jobId }`; без активного мапінгу — `422 err.ECR-INT-0422.eventSyncNoMap`. D-464: тіло `{ confirmRemovals: [{ mapId, candidates }] }` (✎ аудит 31.10, G3; порожнє тіло — звичайний синк; `?confirmRemoval=true` прибрано) — підтвердити масове видалення зниклих у PI подій, заблоковане лімітом (`max(10, 20 %)`, ≤ 200 за мапінг; усі рядки вікна мапінгу — завжди), рівно в показаних мапінгах і не більше показаних кандидатів (інакше задача лишає звичайні межі й новий блок): власна ціль `source-events-e{id}-confirm`, запис `aud.StructureChange` (`ext.SourceEntity`, `SourceEventRemovalConfirmed`, `NewJson` з `jobId` і `maps`); невалідне підтвердження — `422 err.ECR-INT-0422.eventRemovalConfirmInvalid`. Підсумок завершеної задачі (`GET /jobs/{id}`) несе `eventRemovalBlocked: { maps, candidates, limit, linked, perMap: [{ mapId, candidates }] \| null } \| null` (`SourceEventSyncOutcome`, із сирого конверта `jobs.sourceEventsDone`, параметр `removalMaps`) |
 | `GET`/`POST source-event-maps`, `GET`/`PUT`/`DELETE source-event-maps/{id}` | `Integration.View`/`Manage` + грант `Manage` на проєкт документа | CRUD мапінгу; `PUT` — повна заміна (режим об'єму, звуження, поля з відповідностями значень, `isActive` — пауза); слід у `aud.StructureChange` (`ext.SourceEventMap`); `DELETE` зі зв'язками — `409 err.ECR-INT-0409.eventMapHasLinks` |
 
 ```csharp
@@ -4023,6 +4233,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-TMPL-4091` | 409 | відв'язка (`PUT …/bindings/…`, `isActive=false`) забрала б у колонки типу `Formula` опублікованої (`Published`/`Deprecated`) версії шаблону останнє джерело — ні формули шаблону, ні іншої активної прив'язки (HSE301 C5b, `D-215`, `lastSourceOfPublishedColumn`); джерела рахуються ПІСЛЯ зміни під блоком версії, тож заміна «прив'язати нове → відв'язати старе» проходить. Константа — `ErrorCodes.LastSourceOfPublishedColumn` |
 | `ECR-EXPR-0422` | 422 | дерево виразу надто глибоке для обходу на стеку потоку (L7-01): сторож стека рекурсивного обходу (`RuntimeHelpers.EnsureSufficientExecutionStack`, `TraversalStackGuard`) кинув `InsufficientExecutionStackException` замість переповнення стека, що валить процес; `messageKey` = `expr.tooComplex` («розбийте на кілька формул»). Фонова задача з цією причиною **не повторюється** (`JobRetryPolicy`) і падає один раз із цим кодом. Константа — `ErrorCodes.ExpressionTooComplex` |
 | `ECR-AUTH-0409` | 409 | небезпечний запит (`POST`/`PUT`/`PATCH`/`DELETE`) несе заголовок `X-Ecr-User` (id користувача з `/me`, якого бачила вкладка), а cookie сеансу належить іншому користувачу — у сусідній вкладці увійшов інший (AN-108 / S2-05, `sessionUserChanged`); відмова до обробника (`SessionUserMiddleware`), клієнт покидає сеанс вкладки, як після виходу. Без заголовка (скрипти, служби, старі клієнти) і на вході/виході — не перевіряється. Константа — `ErrorCodes.SessionUserMismatch` |
+| `ECR-REG-4094` | 409 | номер НАЕ вже зайнятий у своїй області (типи вузлів НАЕ, людина 03.11, Q3): `NaeCode` вузла SRC унікальний у межах (предок REGION, предок AREA), а де регіон без поділу On/Offshore — у межах REGION. Перевіряє upsert `POST /registries/{code}/entries` під блокуванням дерева; `messageKey` `naeCodeTaken` |
 
 ### 7.1 Суфікси `messageKey` (`err.<код>.<суфікс>`) нових випадків
 
@@ -4035,6 +4246,18 @@ public sealed class NotFoundException(string errorCode, string message)
 | `messageKey` | HTTP | Коли |
 |---|---|---|
 | `err.ECR-ACCS-0403.importDeniedCells` | 403 | `POST /documents/{id}/import/apply` (і постановка у чергу): перегляд побудовано виконавцем із чинною передачею місяця (EA), і в ньому є хоч одна комірка, заборонена йому правами, — ВЕСЬ перегляд відхилено, нічого не записано («все або нічого», рішення людини 12.10). `deniedCount` — усі заборонені комірки (рядок); `cells` — до 20 тих, що виконавець бачить (`tableCode`, `rowKey`, `columnCode`, `excelCell`, `messageKey`), комірки прихованих колонок лише в `deniedCount`. Перегляд (`import/preview`) показує ті самі комірки в `rejected` і далі відповідає 200; для решти користувачів — без змін (заборонені комірки показані, решта застосовується). ⚠ **Лише відмови ПРАВАМИ** (`ECR-ACCS-0403`) вмикають «все або нічого»: не-правові відмови перегляду (`ECR-CELL-4221` обчислювана, тип/межі/довжина/точність, `ECR-ROW-0404`, `ECR-CELL-0409` конфлікт версій, відмови довідників) його НЕ вмикають і застосовуються як раніше (показані в `rejected`, решта пишеться) — прийнятий дефолт, питання про розширення — до людини. Виконавцем вважається користувач, у якого хоч одне рішення доступу дозволене через передачу або відмовлене станом передачі (Заповнено/Валідовано/Строк минув/«не передано вам»); у змішаному випадку (виконавець + власні права через роль у цьому ж документі) відхиляється весь файл |
+| `err.ECR-REQ-0422.rawDataRange` | 422 | D-463: вікно «Даних з PI» порожнє або перевернуте (`fromUtc` ≥ `toUtc`); деталі `fromUtc`, `toUtc` |
+| `err.ECR-REQ-0422.rawDataRangeTooLong` | 422 | D-463: вікно «Даних з PI» довше за `maxDays` (400) діб |
+| `err.ECR-REQ-0422.rawDataPath` | 422 | D-463: шлях тега порожній або довший за `max` (400) символів |
+| `err.ECR-REQ-0422.rawDataBuckets` | 422 | D-463: кількість кошиків графіка поза 1..`max` (2000) |
+| `err.ECR-REQ-0422.piEventFilter` | 422 | D-465: фільтр назви чи елемента подій довший за `max` (200) символів |
+| `err.ECR-INT-0422.eventMapMonthColumn` | 422 | D-465: поле мапінгу подій цілить у колонку місяця (`IsMonthColumn`) — подія EF записується окремим рядком, місячні підсумки рахують формули шаблону; `targetColumn`, `columnDefId` |
+| `err.ECR-CALC-0404.category` | 404 | `DELETE …/methodologies/{id}/versions/{vid}/categories/{code}`: категорії з цим кодом (точно, з регістром) у переліку версії немає; деталі `category` |
+| `err.ECR-CALC-0409.categoryInUse` | 409 | перелік категорій версії: категорію, під якою є константи, прибирають (`DELETE`) або виводять з ужитку (`isRetired=true`) — код є ключем зіставлення констант; деталі `category`, `count` |
+| `err.ECR-CALC-0409.categoryRename` | 409 | `PUT …/categories/{code}`: той самий код уже є в іншому регістрі — коди категорій не перейменовуються; деталі `category`, `existing` |
+| `err.ECR-CALC-0422.categoryCodeInvalid` | 422 | `PUT …/categories/{code}`: код порожній, довший за 64 або з пробілами по краях, чи опис довший за 400; деталі `category`, `maxLength` |
+| `err.ECR-CALC-0422.constantCategoryUnknown` | 422 | `PUT …/constants/{code}`: категорії константи немає в переліку версії (порівняння точне, з регістром, як у резолвері); порожня категорія = спільна; деталі `constantCode`, `category` |
+| `err.ECR-CALC-0422.constantCategoryRetired` | 422 | `PUT …/constants/{code}`: категорію виведено з ужитку; деталі `constantCode`, `category` |
 | `err.ECR-CALC-0422.methodologyImportBlocked` | 422 | пакет методологій має блокери (нерезолвні посилання тощо) — запис не виконується (`POST /methodologies/import`) |
 | `err.ECR-CALC-0422.methodologyImportTimeZone` | 422 | пояс дат AF в імпорті пакета невідомий |
 | `err.ECR-CALC-0409.methodologyImportConflict` | 409 | пакет змінює вже наявну версію методології без нового номера версії |
@@ -4057,6 +4280,12 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-SCHM-0422.migrateLookupNotMapped` | 422 | мапа Lookup не покриває всі вжиті значення шапки придатним записом (запису немає в мапі, або `to` відсутній/з чужого довідника/неактивний/видалений/нечинний у вікні проєкту; `refusals` має `lookupValuesNotMapped`); нічого не записано; звіт несе id записів без відповідника (`lookupRemapReport[].unmappedEntryIds`, `targetNotUsable`) |
 | `err.ECR-SCHM-0422.migrateLookupLockedDocuments` | 422 | мапа Lookup переписала б шапку документів із поданими/затвердженими аркушами без згоди (`allowLockedDocuments` не `true`; `refusals` має `lookupLockedDocuments`; `details.lockedDocumentCount` — кількість документів); нічого не записано. Рішення людини 21.10 («давай А») |
 | `err.ECR-SCHM-0422.migrateBackupRequired` | 422 | великий перенос (від 500 000 значень, `MigrateDocumentVersionHandler.BackupConfirmationThreshold`) без `backupConfirmation` у запиті (шлях і/або час резервної копії, ≤ 500 символів); `details.transferredValues`, `details.threshold`; нічого не записано, маркер не ставиться. Значення пишеться в журнал безпеки (`DocumentVersionMigrationStarted`, `DocumentVersionMigrated`). Рішення людини 21.10 («б») |
+| `err.ECR-SCHM-0422.migrateFromMonthDisabled` | 422 | RPT-STABLE Part B: `range = FromMonth`, а прапор `Documents:VersionMigration:FromMonthEnabled` = `false` (типово до B2); стан прапора віддає `GET /documents/{id}/migrate-version` (`fromMonthEnabled`) |
+| `err.ECR-SCHM-0422.migrateFromMonthRequired` | 422 | RPT-STABLE Part B: `range = FromMonth` без `fromPeriodKey`; нічого не змінено |
+| `err.ECR-SCHM-0422.migrateFromMonthInvalid` | 422 | `fromPeriodKey` не є періодом проєкту (`details.periodKey`); нічого не змінено |
+| `err.ECR-SCHM-0422.migrateFromMonthBeforeSegment` | 422 | `fromPeriodKey` раніше початку останнього сегмента шкали версій проєкту (`details.periodKey`, `details.segmentFrom`) |
+| `err.ECR-SCHM-0422.migrateWholeProjectMultiVersion` | 422 | `range = WholeProject`, але шкала проєкту має кілька сегментів — використати `FromMonth` |
+| `err.ECR-SCHM-0422.migrateTargetNotPublished` | 422 | цільова версія — чернетка (рядок шкали не може вказувати на неопубліковану версію) |
 | `err.ECR-SCHM-0422.migrateResumeMismatch` | 422 | перенос проєкту обірвано (маркер `migratingTo` у `doc.Project.ExternalSettingsJson`); повтор іде з ІНШОЮ мапою (колонки, рядки, таблиці, аркуші, шапка, нові рядки, Lookup), ніж збережена (відбиток `planHash`); нічого не змінено. Ручне зняття маркера — лише DBA, SQL у коміті переносу |
 | `err.ECR-SCHM-0422.migrateBindingsNotMapped` | 422 | D-13: активна прив'язка виходу методології (`cfg.CalculationBinding`) до колонки вихідної версії не має відповідника в цільовій — колонки там немає або на ній нема активної прив'язки тієї ж методології й виходу (`refusals` має `bindingsNotMapped`); клон версії шаблону тепер копіює прив'язки сам |
 | `err.ECR-SCHM-0422.migrateMethodologyKeysNotMapped` | 422 | D1: методологія, прив'язана до цільової версії, має опубліковану версію, чиї правила (`MatchJson`) або обов'язкові входи посилаються на колонки ІНШОЇ версії того самого шаблону (`refusals` має `methodologyKeysNotMapped`); 422 несе `details.methodologyKeys` — до 20 підписів «методологія версія правило\|вхід: аркуш.таблиця.колонка»; сухий прогін дає лише `canApply=false`; публікацію шаблону не блокує |
@@ -4086,6 +4315,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-INT-0422.eventMapTargetNotDynamic` | 422 | ціль мапінгу подій — не динамічна таблиця |
 | `err.ECR-INT-0422.eventMapValueKindMismatch` | 422 | тип значення атрибута не відповідає типу колонки |
 | `err.ECR-INT-0422.eventMapValueMapNotAllowed` | 422 | `ValueMap` недопустимий для цього типу колонки |
+| `err.ECR-INT-0422.eventRemovalConfirmInvalid` | 422 | ✎ аудит 31.10 (G3): підтвердження видалення без мапінгу чи з кількістю ≤ 0, або понад `{max}` мапінгів |
 | `err.ECR-INT-0422.eventSyncNoMap` | 422 | «Отримати з PI зараз» без активного мапінгу подій |
 | `err.ECR-INT-0422.rowWindowTargetNotInTable` | 422 | колонка-ціль вікна рядка не належить таблиці |
 | `err.ECR-REQ-0422.probeEventsInvalid` | 422 | параметри проби подій (`probe-events`) поза межами |
@@ -4106,6 +4336,12 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-TMPL-0404.effectiveAccessNotInProject` | 404 | розріз: ресурс не з версії шаблону проєкту |
 | `err.ECR-REQ-0422.reportPublishReason` | 422 | публікація версії звіту без причини |
 | `err.ECR-REQ-0422.validationScope` | 422 | область виконання перевірок (validation) задано невалідно |
+| `err.ECR-REG-4094.naeCodeTaken` | 409 | типи вузлів НАЕ (людина 03.11, Q3): номер НАЕ вузла SRC уже має інший живий вузол у тій самій області — предок REGION + предок AREA, або лише REGION, де регіон не ділиться на On/Offshore; деталі `naeCode`, `regionCode`, `areaCode` (`-` без району), `entryId`, `entryCode` тримача |
+| `err.ECR-REG-0422.naeNameEnRequired` | 422 | вузол дерева НАЕ без англійської назви (Q1: en обов'язкова, ru/kz — ні); деталь `levelCode` |
+| `err.ECR-REG-0422.naeMoveChangesScope` | 422 | перенос вузла дерева НАЕ (`POST …/entries/{id}/move` або upsert з іншим батьком) змінив би регіон/район джерела НАЕ в його піддереві; деталі `entryCode`, `sourceCode` |
+| `err.ECR-REG-0422.fieldLevelMismatch` | 422 | непорожнє значення поля, прив'язаного до іншого рівня, ніж рівень запису (`RegistryFieldDef.LevelId`); деталі `registryCode`, `fields` |
+| `err.ECR-REG-0409.levelHasFields` | 409 | збереження рівнів прибирає рівень, до якого прив'язані поля опису; деталі `levelCode`, `fields` |
+| `err.ECR-REG-0422.naeSourceLevelChange` | 422 | вузол SRC дерева НАЕ змінює тип на інший (move `levelCode` або upsert): джерело, на яке дивляться дозволи, не стає групою — його закривають і заводять групу; деталі `entryCode`, `levelCode`. Зміна типу В SRC: збережений номер обов'язковий (`requiredFieldsMissing`) і вільний (`ECR-REG-4094`), регіон/район — похідні |
 
 ---
 
@@ -4140,6 +4376,20 @@ public sealed class NotFoundException(string errorCode, string message)
 
 **Сортування:** `?sort=code,-createdAt` (мінус = спадання). Дозволені поля
 перелічені для кожного ендпоінта; інше — `400`.
+
+* `GET /api/v1/documents` (колонка «Version» переліку документів): `sort=templateVersion` (зростання) або
+  `sort=-templateVersion` (спадання) і фільтр `templateVersions=2.9.0,2.10.0` (точний збіг, до 20 версій через кому).
+  Версія — за `periodKey` (версія періоду або типова версія проєкту, як у `templateVersion` /
+  `templateVersionByPeriod` рядка); без періоду — типова. Версії порівнюються «по-людськи» (2.10 після 2.9), документи
+  без версії — в кінці в обох напрямках, другий ключ — завжди `id` (сторінкування детерміноване); `nextCursor`
+  непрозорий і діє лише з тим самим `sort`. Діють ЗАПИТОМ, поруч з межею видимості (чужих документів не додають).
+  Недопустиме значення `sort`, понад 20 версій чи версія довша за 20 символів — `422 ECR-REQ-0422`
+  (`messageKey` `err.ECR-REQ-0422.malformedRequest`; нових кодів немає). Невідома версія просто нічого не знаходить.
+* `GET /api/v1/documents/template-versions?projectId=&periodKey=` (варіанти фільтра «Version»): ВСІ версії шаблону серед
+  документів, які читач бачить (та сама межа видимості, що й перелік; версія лише в невидимих документах не називається).
+  Відповідь `{ items: [{ version, count }], withoutVersionCount }`: версії в природному порядку (2.9 перед 2.10), `count` —
+  видимі документи цієї версії, `withoutVersionCount` — видимі документи без версії; не більше 200 версій. Версія — за
+  `periodKey` (без нього — чинна версія проєкту), як у колонці й у фільтрі `templateVersions` переліку.
 
 **Ідемпотентність:** мутації, які можна повторити (імпорт, запуск задачі),
 приймають заголовок `Idempotency-Key`.
@@ -4206,6 +4456,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/{scope}/{target}` | `Template.Edit` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/cell/{rowKey}/{columnDefId}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/cell/{rowKey}/{columnDefId}` | `Template.Edit` | 7 |
+| `PUT` | `/api/v1/template-versions/{id}/formulas/{formulaId}/manual-override` | `Template.Edit` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/tables/{tableId}/validation-rules` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableId}/validation-rules/{code}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableId}/validation-rules/{code}` | `Template.Edit` | 7 |
@@ -4226,6 +4477,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/projects/{id}/current-period` | `Period.Configure` | 3 |
 | `PUT` | `/api/v1/projects/{id}/timezone` | `Project.Manage` | 8 |
 | `GET` | `/api/v1/projects/{id}/periods` | `Document.View` | 3 |
+| `GET` | `/api/v1/projects/{id}/template-versions` | `Document.View` | 3 |
 | `POST` | `/api/v1/projects/{id}/recalculate` | `Calculation.Recalculate` | 3 |
 | `GET` | `/api/v1/projects/{id}/recalculation-approvals` | `Calculation.Recalculate` | 4 |
 | `POST` | `/api/v1/projects/{id}/recalculation-approvals` | `Calculation.Recalculate` | 4 |
@@ -4234,6 +4486,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/documents` | `Document.View` | 1 |
 | `GET` | `/api/v1/documents/summary` | `Document.View` | 6 |
 | `GET` | `/api/v1/documents/owners` | `Document.View` (✎ D-450: власники лише серед видимих викликачу документів; без імені — поза переліком) | 6 |
+| `GET` | `/api/v1/documents/template-versions` | `Document.View` (усі версії шаблону лише серед видимих викликачу документів; `projectId`, `periodKey` → `{ items: [{ version, count }], withoutVersionCount }`, природний порядок, ≤ 200) | 6 |
 | `POST` | `/api/v1/documents` | `Document.Create` | 1 |
 | `GET` | `/api/v1/documents/{id}` | `Document.View` | 1 |
 | `DELETE` | `/api/v1/documents/{id}` | `Document.Delete` | 6 |
@@ -4243,6 +4496,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/documents/{id}/header` | `Document.View` | 8 |
 | `PATCH` | `/api/v1/documents/{id}/header` | — (через грант Write на проєкт) | 8 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}` | `Document.View` | 1 |
+| `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}/cell-source` | `Document.View` (D-463 «Звідки це значення»: `rowKey`, `columnDefId`; доступ рівно до комірки — видимість документа, право в проєкті, Deny аркуша/таблиці/колонки, прихована колонка, Q-17, існування рядка; невидиме — та сама `404 err.ECR-DOC-0404.document`, що й у зрізу; комірка без мапінгу — `200` з порожнім `sources`; вікно — `Period.FoldBounds`, як у матеріалізації: колонка місяця — лише свій місяць (`windowMonth`), Q-17 — період-власник (`windowPeriodKey`), поза періодом — `periodFromUtc = null`; `sources[].fold` — значення за правилом згортки тим самим кодом (`CollectedFold`, ≤ 50 000 точок, інакше `TooManyPoints`) і порівняння з останнім записом журналу змін комірки: `Match`/`ManualEdit`/`NotUpdated`/`NotWritten`/`NotComparable`; D-465: `eventSources[]` — для рядка події `EF-…`: подія (ID, назва, час у поясі проєкту й UTC, елемент, `Modified`, стан зв'язку, останній синк), шаблон, атрибут колонки, значення PI за останнім прочитанням, «що записав би синк», комірка, `comparison`/`reason`; інші рядки — порожньо без жодного звернення) | 5 |
+| `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}/cell-source/points` | `Document.View` (D-463: те саме + `mapId` мапінгу комірки (чужий — та сама 404); точки лише вікна періоду комірки; `limit` 1..500) | 5 |
+| `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}/cell-source/series` | `Document.View` (D-463: те саме + `mapId`; ≤ `buckets` (1..2000) кошиків за період комірки) | 5 |
 | `PATCH` | `/api/v1/documents/{id}/cells` | — (через `IAccessDecisionService`) | 1 |
 | `PATCH` | `/api/v1/documents/{id}/tables/{tableInstanceId}/cell-styles` | — (грант `Write` на комірку через `IAccessDecisionService`, як `PATCH …/cells`; документ/період редаговані; 12.10 — користувацька заливка/колір тексту/жирність) | 1 |
 | `POST` | `/api/v1/documents/{id}/rows` | — | 1 |
@@ -4254,6 +4510,11 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/approve` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/reopen` | `Document.Reopen` | 3 |
 | `GET` | `/api/v1/documents/{id}/workflow/history` | `Document.View` | 3 |
+| `POST` | `/api/v1/documents/{id}/sheets/{sheetDefId}/copies` | `Document.Create` + запис у проєкті (додає порожню копію аркуша, позначеного в шаблоні `isCopyable`; → 201 `{ sheetCopyId, ordinal }`; не копіювальний аркуш — 422 `ECR-DOC-0422`; джерело завжди оригінал) | 8 |
+| `PUT` | `/api/v1/documents/{id}/sheets/{sheetDefId}/name` | `Document.Create` + запис у проєкті (перейменовує групу «<Назва> N» для всіх копій; тіло `{ nameL10n }`; → 204) | 8 |
+| `DELETE` | `/api/v1/documents/{id}/sheet-copies/{sheetCopyId}` | `Document.Create` + запис у проєкті (видаляє копію в усіх періодах і перенумеровує решту; оригінал — 409 `ECR-DOC-0409` `sheetCopyIsOriginal`; копія з поданням/затвердженням/зрізом у будь-якому періоді — 409 `sheetCopyHasWorkflow`; → 204) | 8 |
+| `GET` | `/api/v1/documents/{id}/sheets/{sheetDefId}/activity` | `Document.View` | 3 |
+| `GET` | `/api/v1/documents/{id}/sheets/{sheetDefId}/changes` | `Document.View` (живе оновлення сітки: `periodKey`, `since` — маркер попереднього опитування; → `SheetChangesDto { marker, changed, lastChangedByUserId, lastChangedBy, lastChangedAt, changedTables: [{ tableCode, tableInstanceId }] }`; власні записи викликача лише пересувають маркер; схована таблиця не потрапляє в `changedTables`; невидимий документ і схований аркуш — 404; `Cache-Control: no-store`) | 8 |
 | `GET` | `/api/v1/documents/{id}/submission-target` | `Document.View` | 3 |
 | `GET` | `/api/v1/documents/{id}/versions` | `Document.View` | 3 |
 | `GET` | `/api/v1/documents/{id}/compare` | `Document.View` | 3 |
@@ -4269,6 +4530,14 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/edit-assignments/copy` | — (автор документа ∨ `Manage` проєкту; обробник) | 8 |
 | `GET` | `/api/v1/me/edit-assignments` | — (лише рядки самого викликача) | 8 |
 | `POST` | `/api/v1/documents/{id}/owner` | — (власник документа ∨ `Manage` проєкту; обробник; D-443: передача власника, подія `DocumentOwnerTransferred`) | 8 |
+| `GET` | `/api/v1/documents/{id}/discussions/summary` | `Document.View` (чат таблиці, TC: лічильники всіх таблиць документа одним запитом; лише таблиці, які викликач бачить, і лише з повідомленнями; невидимий документ — 404; рядок несе `revision` чату; `ETag` з усіх полів → `If-None-Match` дає 304) | 8 |
+| `GET` | `/api/v1/documents/{id}/tables/{tableCode}/messages` | `Document.View` (TC: те саме рішення про доступ, що й зріз таблиці — схована таблиця = 404 `ECR-DOC-0404`; `before`/`after`/`limit`/`periodKey`; `ETag` → 304) | 8 |
+| `GET` | `/api/v1/documents/{id}/tables/{tableCode}/mention-candidates` | `Document.Discuss` (TC: лише користувачі, які бачать таблицю (і період `periodKey`); імена решти не повертаються) | 8 |
+| `POST` | `/api/v1/documents/{id}/tables/{tableCode}/messages` | `Document.Discuss` (TC: будь-який стан документа; простий текст ≤ 4000; згадки без доступу відкидаються; роль, звужена періодами, пише лише у видимі періоди, інакше 403 `discussionPeriodForbidden`; бачить лише повідомлення видимих періодів) | 8 |
+| `PATCH` | `/api/v1/documents/{id}/tables/{tableCode}/messages/{messageId}` | `Document.Discuss` (TC: лише автор, впродовж 15 хв) | 8 |
+| `DELETE` | `/api/v1/documents/{id}/tables/{tableCode}/messages/{messageId}` | `Document.Discuss` ∨ `Document.DiscussModerate` (TC: м'яке видалення; автор або модератор) | 8 |
+| `PUT` | `/api/v1/documents/{id}/tables/{tableCode}/read` | `Document.View` (TC: «прочитано до», монотонно; знімає згадки) | 8 |
+| `GET` | `/api/v1/me/table-discussion-mentions` | — (TC: лише непрочитані згадки самого викликача в таблицях, які він досі бачить) | 8 |
 | `GET` | `/api/v1/me/approval-queue` | — (лише аркуші, які викликач може затвердити зараз; обробник) | 8 |
 | `GET` | `/api/v1/me/returned-sheets` | — (✎ D-449: лише аркуші, повернені на доопрацювання власнику документа, учаснику з наданням ≥ Write або останньому подавачу з правом писати; обробник) | 8 |
 | `GET` | `/api/v1/me/editor-sets` | — (лише власні набори) | 8 |
@@ -4320,6 +4589,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/category-rule` | `Calculation.EditRule` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/substances` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/substances` | `Calculation.EditFormula` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/categories` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/categories/{code}` | `Calculation.EditConstant` | 7 |
+| `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/categories/{code}` | `Calculation.EditConstant` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs/{columnDefId}` | `Calculation.ManageRequiredInputs` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/outputs` | `Calculation.View` | 7 |
@@ -4359,6 +4631,10 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/audit/structure` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/audit/structure/export.csv` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/audit/security` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/cells/export.csv` | `Security.ViewAudit` (історія однієї комірки — `Document.View`) | 7 |
+| `GET` | `/api/v1/audit/security/export.csv` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/workflow` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/workflow/export.csv` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/consistency/issues` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/consistency/summary` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/consistency/run` | `System.RunJob` | 5 |
@@ -4376,6 +4652,15 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/sources/{id}/registry/policy` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/sources/{id}/collect` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/sources/{id}/mapping/preview` | `Integration.Manage` | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/tags` | `Integration.View` (або `Integration.Manage`; D-463: теги сутності — поля мапінгів, без мапінгів — шлях сутності) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/points` | `Integration.View` (або `Integration.Manage`; D-463: `path` 1..400, вікно `fromUtc`/`toUtc` ≤ 400 діб, типово 7 діб; keyset за міткою часу, новіші першими; `limit` 1..500, типово 100) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/series` | `Integration.View` (або `Integration.Manage`; D-463: ≤ `buckets` (1..2000, типово 500) кошиків мін/макс/середнє на все вікно, згортка в SQL) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/coverage` | `Integration.View` (або `Integration.Manage`; D-463: злиті покриті інтервали, прогалини вікна, останній прогін і останній успіх) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/export.csv` | `Integration.View` (або `Integration.Manage`; D-463: потоком, стеля `Integration:RawDataExportMaxRows` (100 000) — понад неї `422 auditExportTooLarge` до першого байта; подія безпеки `PiRawDataExported` без значень) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/events/maps` | `Integration.View` (або `Integration.Manage`; D-465: мапінги подій сутності-шаблону (документ — лише якщо читач його бачить: інакше `documentVisible=false` без `documentId`/`documentKey`), `hasMonthColumnFields`, періоди проєктів, що перетинають вікно ≤ 400 діб) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/events` | `Integration.View` (або `Integration.Manage`; D-465: зв'язки ОДНОГО мапінгу (`mapId`, типово перший) за вікном початку ≤ 400 діб, keyset (початок, Id), новіші першими, `limit` 1..200 (типово 50), фільтри `status[]`, `element` (префікс), `name` (містить, ≤ 200); кожна подія — значення атрибутів за останнім прочитанням синку, «що записав би синк», комірка (лише видимого документа й колонки), `comparison`/`reason`; чужий `mapId` — 404) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/events/removed` | `Integration.View` (або `Integration.Manage`; D-465: журнал `aud.StructureChange` `SourceEventRowRemoved` сутності за вікном моменту видалення, ≤ 200 записів, без значень комірок; рядок — лише видимого документа) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/events/export.csv` | `Integration.View` (або `Integration.Manage`; D-465: «подія × поле мапінгу» потоком, ті самі фільтри; стеля `Integration:RawDataExportMaxRows` → `422 auditExportTooLarge` до першого байта; захист від формул; подія безпеки `PiEventDataExported` без значень; комірки невидимого документа — порожні) | 5 |
 | `GET` | `/api/v1/collection-schedules` | `Integration.EditSchedule` | 7 |
 | `POST` | `/api/v1/collection-schedules` | `Integration.EditSchedule` | 7 |
 | `PUT` | `/api/v1/collection-schedules/{id}` | `Integration.EditSchedule` | 7 |
@@ -4467,6 +4752,31 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/entries/batch?dryRun=` | `Registry.EditData` | 8 |
 | `GET` | `/api/v1/registries/{code}/entries/{id}/history?cursor=&limit=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/registries/{code}/export?format=&asOf=` | `Registry.View` | 8 |
+| `GET` | `/api/v1/registries/{code}/hierarchy` | `Registry.View` або грант `Read` на довідник | 8 |
+| `PUT` | `/api/v1/registries/{code}/hierarchy` | `Registry.EditDefinition` або грант `Write` на довідник | 8 |
+| `GET` | `/api/v1/registries/{code}/tree?asOf=&includeRetired=&q=` | `Registry.View` або грант `Read` на довідник | 8 |
+| `POST` | `/api/v1/registries/{code}/entries/{id}/move` | `Registry.EditData` або грант `Write` на довідник | 8 |
+| `POST` | `/api/v1/registries/{code}/entries/{id}/retire` | `Registry.EditData` або грант `Write` на довідник | 8 |
+| `GET` | `/api/v1/registries/{code}/entries/{id}/references` | `Registry.View` або грант `Read` на довідник | 8 |
+| `POST` | `/api/v1/nae-tree/af-import` | `Registry.EditDefinition` + `Registry.EditData` | 8 |
+| `POST` | `/api/v1/nae-tree/roots` | `Registry.EditData`; +`Registry.EditDefinition` і `Registry.Publish`, коли довідник створюється | 8 |
+| `POST` | `/api/v1/nae-tree/seed-roots` | `Registry.EditData`; +`Registry.EditDefinition` і `Registry.Publish`, коли довідник створюється | 8 |
+| `GET` | `/api/v1/nae-tree/import/template` | `Registry.View` | 8 |
+| `POST` | `/api/v1/nae-tree/import/analyse` | `Registry.EditData` | 8 |
+| `POST` | `/api/v1/nae-tree/import/preview` | `Registry.EditData` | 8 |
+| `POST` | `/api/v1/nae-tree/import/apply` | `Registry.EditData`; +`Registry.EditDefinition` і `Registry.Publish`, коли довідник створюється | 8 |
+| `POST` | `/api/v1/air-limits/provision` | `Permit.EditType` + `Permit.PublishType` | 8 |
+| `GET` | `/api/v1/air-limits/import-profiles` | `Registry.View` | 8 |
+| `GET` | `/api/v1/air-limits/import-profiles/{code}` | `Registry.View` | 8 |
+| `PUT` | `/api/v1/air-limits/import-profiles/{code}` | `Registry.EditDefinition` | 8 |
+| `POST` | `/api/v1/air-limits/import/analyse` | `Registry.EditData` | 8 |
+| `POST` | `/api/v1/permits/{permitId}/air-limits/import/preview` | `Registry.EditData` + грант `Write` на таблиці дозволу | 8 |
+| `POST` | `/api/v1/permits/{permitId}/air-limits/import/apply` | `Registry.EditData` + грант `Write` на таблиці дозволу | 8 |
+| `GET` | `/api/v1/permits/{permitId}/air-limits` | `Registry.View` або грант `Read` на реєстр шапки | 8 |
+| `GET` | `/api/v1/air-limits/scope-codes` | `Registry.View` | 8 |
+| `GET` | `/api/v1/air-limits/scope-fields` | `Registry.View` | 8 |
+
+Порт NAE N3: `IRegistryImportProfileStore` - збережені профілі імпорту таблиці `AIR_SOURCES` (`cfg.RegistryImportProfile`): список, пошук за кодом, додавання, перевірка `RowVersion` для `PUT …/import-profiles/{code}`.
 | `GET` | `/api/v1/permit-types?category=&status=&q=&limit=&cursor=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types/{code}` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types/{code}/usage` | `Registry.View` | 8 |
@@ -4493,6 +4803,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/permits?type=&status=&q=&asOf=&limit=&cursor=` | `Registry.View` | 8 |
 | `POST` | `/api/v1/permits` | `Registry.EditData` | 8 |
 | `GET` | `/api/v1/permits/{id}?asOf=` | `Registry.View` | 8 |
+| `GET` | `/api/v1/permits/{id}/usages?periodKey=&limit=` | `Registry.View` (+ `Document.View` у проєкті документа: чужі документи не рахуються) | 8 |
 | `PUT` | `/api/v1/permits/{id}` | `Registry.EditData` | 8 |
 | `DELETE` | `/api/v1/permits/{id}` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/permits/{id}/activate` | `Registry.EditData` | 8 |
@@ -4506,6 +4817,22 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/registries/{code}/external-keys?entryId=&dataSourceId=&cursor=&limit=` | `Registry.View` | 8 |
 | `POST` | `/api/v1/registries/{code}/external-keys` | `Registry.EditData` | 8 |
 | `DELETE` | `/api/v1/registries/{code}/external-keys/{id}` | `Registry.EditData` | 8 |
+
+> ✎ 2026-11-02 (методології, похідні аргументи + перелік категорій; lane `integ-methodology`). **Формула:**
+> список аргументів більше не вводиться. Необов'язковий аргумент пишеться у виразі маркером упритул за іменем —
+> `@Land_Measure_RunningHours?` (лише діалект методологій; тернарний оператор над голим аргументом — з пробілом,
+> `@A ? 1 : 2`). Відповіді `GET …/formulas` і `PUT …/formulas/{code}` несуть похідний `argumentsCsv`
+> (`@A?;CST.K;!F`, лише читання) і структурований `arguments[]` (`kind` = `Argument`/`Constant`/`Formula`, `name`,
+> `isOptional`, `text`). Поле запиту `argumentsCsv` — **застаріле, приймається один реліз**: з нього беруться лише
+> маркери `Name?` і переносяться у вираз, решта ігнорується. Рантайм не змінено: маркери читаються з похідного
+> `ArgumentsCsv` і об'єднуються по версії (`OptionalArguments`). Старі списки вирівнює крок старту
+> `MethodologyArgumentsBackfill` (звіт — у журнал старту). **Категорії:** `GET …/categories` → `[{ id, code,
+> description, ordinal, isRetired, constantCount }]`; `PUT …/categories/{code}` з тілом `{ description?, ordinal?,
+> isRetired? }` створює або змінює (код не перейменовується); `DELETE` — лише невживаної. Категорія константи
+> (`PUT …/constants/{code}`) — з переліку або порожня (= спільна). `GET …/constants` приймає `category` (повторюваний),
+> `shared`, `code`, `substanceEntryId`, `sort` (`Code`/`Category`/`ValidFrom`), `desc`; рядок несе
+> `substanceEntryId`. Публікація попереджає (`publish.warning.categoryRuleLiteralNoCategory`) про літерал, який
+> правило категорії може повернути, без категорії в переліку.
 
 > ✎ 2026-10-22 (Permits PRMG, групи типів дозволів): група («Вода» = `WATER_DISCHARGE` + `WATER_INTAKE` + `WATER_GENERAL`) є ціллю Lookup колонки шаблону чи поля шапки. Ціль зберігається як `LookupRegistryDefId` ПРИХОВАНОГО реєстру `PRMG_<код>` (без полів і записів; префікс зарезервований); значення в комірці — id запису реєстру шапки `PRM_<TYPE>` типу зі складу групи. `GET /permit-groups` → `PermitGroupDto[]` (`code`, `nameL10n`, `descriptionL10n`, `isActive`, `registryCode`, `registryDefId`, `types[]`, `usedInColumns`, `usedInTemplates`, `rowVersion`, `updatedAt`); `POST` створює групу разом із реєстром (склад необов'язковий), `PUT {code}` змінює назву, опис і `isActive` (деактивація; `rowVersion` обов'язковий, `409 ECR-PRM-4099`), `PUT {code}/types` замінює склад цілком — коди ОПУБЛІКОВАНИХ типів у порядку показу (`422 ECR-PRM-0422`, `messageKey` `permitGroupMemberUnknown`/`permitGroupMemberNotPublished`/`permitGroupMemberDuplicate`; тип може бути в кількох групах), `DELETE {code}` лише для невикористаної групи (`409 ECR-PRM-4098` — тоді лише деактивація). Інші `422 ECR-PRM-0422`: `permitGroupNameRequired`, `permitGroupCodeInvalid` (код ≤ 59 символів), `permitGroupTextTooLong`. Права: читання `Registry.View` (+ заборона S18 на реєстр групи → `404 ECR-PRM-0405`), зміна `Permit.EditType`. Склад змінюється ЛИШЕ через `PUT {code}/types`. `RegistryDefDto` (`GET /registries`) отримав `descriptionL10n` (опис групи; для решти `null`) і `kind` (`Dictionary` / `PermitHeader` / `PermitGroup`) — вид цілі визначає сервер, клієнт не розпізнає його за префіксом коду; ту саму ознаку віддає `GET /registries/{code}/definition` (опція «unlisted» для цілі поза переліком). `GET /registries?includePermitHeaders=true` додатково віддає групи (без прапора їх немає). `RegistryEntryDto` отримав `typeCode` і `typeName` (піклер групи: підпис «номер — тип»; для решти `null`). Правила чекають значення: уже обрані значення лишаються в комірці при виході типу з групи, PATCH перевіряє лише змінені; неактивна група не приймає нових значень (відмова — та сама «немає запису», `ECR-CELL-4223`/`ECR-HDR-4223`). **Неоднозначність номера:** номер унікальний лише в межах типу, тому при імпорті Excel номер, що збігається у кількох типах групи, ВІДХИЛЯЄТЬСЯ з переліком кандидатів (тип + номер), без пріоритету типу й без вгадування. Порт для споживачів — `IPermitGroupResolver` (він же `ILookupTargetResolver`): `EnsureFreshAsync`, `IsGroup`, `Accepts(target, entryRegistryId)`, `AcceptsFor(profile, …)`, `MemberRegistryIds`, `ExpandRegistryIds`; порівняння `entry.RegistryDefId == target` лишається першим, порт кличеться лише при незбігу.
 
@@ -5452,6 +5779,13 @@ public sealed record RowDto(
 
 ### Передача місяця виконавцям (EA)
 
+#### `ITableDiscussionStore`
+
+Сховище чатів таблиць документа (TC; `doc.TableDiscussionMessage`, `doc.TableDiscussion`, `doc.TableDiscussionRead`, `doc.TableDiscussionMention`, міграція `TC01_TableDiscussion`). Порт не знає про права: рішення про доступ (документ видимий, таблиця читається межею читання, період у межах звуженої ролі) приймає обробник ДО звернення. Чат ключується `(DocumentId, TableDefCode)` — код таблиці стабільний між версіями шаблону. `SummaryAsync` — підсумок усіх таблиць документа ОДНІЄЮ командою (таблиці з повним доступом — зі зведень `doc.TableDiscussion` + корельовані лічильники «непрочитано» по індексу чату; таблиці, видимі лише в частині періодів, — з повідомлень дозволених періодів, `UNION ALL` у тій самій команді). `LockStateAsync` — зведення під `UPDLOCK, HOLDLOCK`: ревізія (ETag опитування) і лічильник оновлюються в ТІЙ САМІЙ транзакції, що й повідомлення. Видалення м'яке (`DeletedAt`), текст лишається в рядку й у журналі безпеки. Порт НЕ торкається комірок, розрахунків і станів аркушів. Видалення документа прибирає чат явно (`DocumentDeletionStore`).
+
+#### `ISheetChangeStore`
+
+Маркер змін даних аркуша для живого оновлення сітки (`GET …/sheets/{sheetDefId}/changes`). Лише читання, без нових індексів і колонок. Маркер — `rowversion` рядків `doc.TableRow` (кожна зміна комірки «торкається» рядка, B04 §2.4); межа — `MIN_ACTIVE_ROWVERSION()`, прочитана окремим оператором ДО знімка рядків (RCSI), тож зміна довгої транзакції не губиться між опитуваннями; змінене — напівінтервал `[since, marker)`. `ProbeAsync` — екземпляри видимих таблиць документа за період (`UQ_TableInstance`) → рядки (`UQ_TableRow_Key` + key lookup версії), до 50 найсвіжіших змінених рядків на екземпляр. `AttributeAsync` — авторство цих рядків за `aud.CellChange` (`IX_CellChange_Cell`, вікно від моменту видачі маркера мінус 15 хв) за ОСТАННЬОЮ не-перерахунковою зміною кожного рядка: «своє» (викликач) і перерахунок не є чужими (власна правка рядка, який хтось правив перед маркером, банера не дає); сховані колонки в авторство не входять; рядок без жодного запису журналу — чужий з невідомим автором. Порт не знає про права — видимі таблиці й сховані колонки називає обробник.
 #### `IEditAssignmentStore`, `IEditorSetStore`, `IEditAssignmentManagementStore`
 
 Сховища передач зрізу документа виконавцям (`doc.EditAssignment*`, міграція `EA1EditAssignment`) і наборів виконавців власника (`doc.EditorSet*`). Вибірка конкретної передачі — завжди за парою `(DocumentId, Id)`, набору — `(OwnerUserId, Id)`: чужа чи відсутня дає `null` (одна відповідь «не знайдено»). `FindForUpdateAsync` — рядок передачі під `UPDLOCK` для переходів станів (Fill/Validate/Return). `ReadFactsForGateAsync` — факти передач документа для користувача, що пише, під `REPEATABLEREAD, ROWLOCK` на передачах І на його рядку виконавця: повторна перевірка в транзакції запису під блокуванням аркуша (`PatchCellsHandler`, `CreateRowHandler`); спільні блокування тримаються до коміту, тож перехід станів чекає запис, а зафіксований перехід видно (блокуюче читання не користується RCSI-знімком). Рішення «підйом Read → Write / `LockedByOwner` / `AssignmentFilled` / `AssignmentValidated` / `AssignmentExpired`» — чиста функція `EditAssignmentGuard` у `EditRules.CanEdit`; `AccessDecisionService` читає передачі лише для документа, у якого вони є (ознака — `EXISTS` у запиті умов доступу).
@@ -5463,6 +5797,8 @@ public sealed record RowDto(
 **Черга «До погодження» (ФВ-12.5, рішення людини 12.10 17:12Z, квіз 6, №4).** `GET /api/v1/me/approval-queue?limit=&cursor=` → `ApprovalQueueDto { items: ApprovalQueueItemDto[], nextCursor: string | null }`. Елемент: `documentId` (int64), `documentKey` (string), `projectCode` (string), `templateCode` (string), `sheetDefId` (int32), `sheetCode` (string), `periodKey` (int32, `Рік*100+№`), `submittedAt` (UTC), `submittedByDisplayName` (string | null), `stepOrdinal` / `stepCount` / `stepRoleCode` (int | null / int | null / string | null — `null`, коли маршруту погодження немає й затвердження одноетапне). У списку рівно ті аркуші, які викликач МОЖЕ затвердити зараз (`POST …/approve` дав би `204`), тож окремого `canApprove` немає: аркуш Submitted; проєкт документа видимий викликачу (`SeesDocumentsOf`), а за обмежень нижче проєкту — аркуш у складі документа й читається в цьому періоді (як `RequireSheetVisible`); крок маршруту — роль викликача (`RoleIdsAt`, лише чинний маршрут `ApprovalRoute.Resolve`, ЄДИНИЙ вибір із затвердженням); рівень гранта на аркуш у періоді ≥ `Approve` (`EditRules.CanApprove`); ~~подав не сам викликач (F-25)~~ — ✎ 2026-10-23 (D-440, AN-127): власне подання викликача в черзі ЛИШАЄТЬСЯ, і він затверджує його сам, якщо роль кроку й грант це дають (`err.ECR-ACCS-0403.approveOwnSubmission` виведено). Невидиме не розкривається: ні назви, ні існування документа/аркуша, схованого від викликача, у відповіді немає. Симуляція «очима користувача» й профіль інтеграції — порожня черга. Порядок — за давністю подання (`submittedAt`, далі внутрішній id), `limit` 1..200 (за замовчуванням 50; поза межами — стискається), `cursor` — непрозорий рядок з `nextCursor`; зіпсований `cursor` → `422 ECR-REQ-0422` `err.ECR-REQ-0422.approvalQueueCursorInvalid`. Сторінка може бути коротшою за `limit` при непорожньому `nextCursor` (за один запит переглядається обмежена кількість кандидатів — продовжувати за курсором). Читання — порт `IApprovalQueueStore` (проєкти, чинні маршрути з кодами ролей, подані аркуші keyset-порціями; рішення — в пам'яті обробника, без звернень на кандидата). Міграції немає.
 
 **Журнал аркуша: позначка «погоджено автором подання» (D-440, AN-127, ✎ 2026-10-23).** `GET /api/v1/documents/{id}/workflow/history?periodKey=` → `WorkflowEventDto[]`; до полів додано `approvedBySubmitter` (bool, обов'язкове): `true` лише для `Approve`/`ApproveStep`, які виконав той самий користувач, що й найближче ПОПЕРЕДНЄ `Submit` цього аркуша за період (за журналом `wf.ApprovalEvent`, не за рядком стану — повторне подання іншою людиною позначку старої події не змінює). Клієнт (`WorkflowHistory`) показує підпис `workflow.historyApprovedBySubmitter`. Міграції немає.
+
+**✎ D-461: ручне значення замість формули (рішення людини 30.10).** `PUT /template-versions/{id}/formulas/{formulaId}/manual-override` `{allow, dryRun}` → `200 {formulaId, allowManualOverride, changed, overriddenDocuments, overriddenCells}` — і на опублікованій версії (без нової версії; `aud.StructureChange`); `404 ECR-TMPL-0404` (`formulaById`). `PATCH …/cells`: поле комірки `overrideReason` — обов'язкове для запису в комірку формули, що дозволяє ручне значення, за правом `Document.OverrideFormula` (без права/прапорця — `403 ECR-ACCS-0403 CalculatedCell`; без причини — `422 ECR-CELL-0422 overrideReasonRequired`); `value: null`/`isEmpty` у ручній комірці повертає формулу. Зріз: `formulaOverride {canOverride, overridableColumns[], overridableCells[], manualCells{"rowKey:code": {reason, setBy, setAt}}}` (лише таблиці з формулами колонки/комірки). Структура: `formulaId`/`allowManualOverride` колонки й рядка, `cellFormulas[]` таблиці. Журнал: `reason`, походження `FormulaOverride`/`FormulaRestored`. Імпорт: `replacesFormula` у змінах перегляду. Перенос версії: `lostFormulaOverrides`, пункти `OverrideLost`.
 
 **Запис у таблицю документа: нерозкриття існування (EA6-D1, рішення «Аудиту» 12.10).** `PATCH …/documents/{id}/cells` (екземпляр таблиці — з тіла) віддає ТЕ САМЕ тіло `404 ECR-DOC-0404`, `err.ECR-DOC-0404.document`, що й `POST …/rows` і `DELETE …/rows/{rowKey}` (D3-A S-4), для: відсутнього екземпляра, екземпляра ЧУЖОГО документа, невидимого й неіснуючого документа — байт у байт з точністю до id (`DocumentVisibility.ResolveInDocumentAsync`). Перебором пар (документ, екземпляр) існування чужих документів і екземплярів не розкривається. Схована від читача таблиця ВИДИМОГО документа лишається `err.ECR-DOC-0404.tableInstance` (D-6; те саме в поштучному записі, книзі й читанні зрізу). Читання зрізу (`GET …/tables/{id}`) лишає окремий `tableInstanceNotInDocument` — не писальний шлях.
 **Видимість виконавця, причина «не передано вам», копіювання без примітки (RC20 D-2/D-3/D-4).** (1) `EditAssignmentRecipientDto.visibility` (enum `RecipientVisibility`: `Unknown` | `Visible` | `NotVisible`): чи бачить виконавець документ (і аркуш передачі) за ПРЯМИМИ призначеннями ролей — профіль будується так само, як при передачі. Доменний обліковий запис без видимості за профілем — `Unknown` (групи AD чужої людини з токена його сесії невідомі, P-02), а не `NotVisible`. Обчислюється лише в переліку `GET …/edit-assignments` (стеля 200 профілів, решта — `Unknown`); у відповідях upsert/fill/validate/return/copy поле — `Unknown`. Прихований від виконавця аркуш НЕ блокує створення передачі (як і раніше): клієнт показує позначку. (2) Нова причина відмови запису `EditDenyReason.NotAssignedToYou` (текст `deny.NotAssignedToYou`): виконавець хоча б однієї діючої передачі цього документа (в межах того ж аркуша/таблиці/періоду, делегатор активний), у якого за роллю лише `Read`, у комірці поза своїми передачами. Замінює `InsufficientGrantLevel` лише для виконавця; дозволів не змінює, рівень рядка (створення) і `NoGrant` — як були. (3) `POST …/edit-assignments/copy` НЕ переносить `note` джерела (вона писана про місяць джерела): нова цільова передача — без примітки, примітка наявної цільової лишається (раніше перезаписувалась приміткою джерела).

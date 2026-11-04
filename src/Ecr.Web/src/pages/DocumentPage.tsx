@@ -1,6 +1,8 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { isPeriodOutsideProject, nearestPeriod } from '@/features/documents/periodBounds';
+import { formatPeriodKey } from '@/shared/format';
 import { isHeaderFinding } from '@/features/documents/inspector/headerFinding';
-import { Alert, Skeleton, Stack, Tabs, Text } from '@mantine/core';
+import { Alert, Button, Group, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -46,6 +48,8 @@ import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useProjectCurrentPeriodDefault } from '@/features/documents/useProjectCurrentPeriodDefault';
 import { SheetStrip } from '@/features/documents/SheetStrip';
+import { copyFieldsOf, sheetTabKey } from '@/features/documents/sheetCopies/sheetCopyTypes';
+import { groupBySheet, sheetItemsOf, stateOfGroup } from '@/features/documents/sheetCopies/sheetGroups';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/settleEdits';
@@ -71,7 +75,12 @@ import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/sett
  * навколо нього.
  */
 
-const loadCalculationResultsPanel = () => import('@/features/methodologies/CalculationResultsPanel');
+/** ✎ копії аркушів: дії «Add copy / Rename / Delete copy» над смугою вкладок — лінивий чанк (`D-132`). */
+const SheetCopyBar = lazy(async () => ({
+  default: (await import('@/features/documents/sheetCopies/SheetCopyBar')).SheetCopyBar,
+}));
+
+const loadCalculationResultsPanel =() => import('@/features/methodologies/CalculationResultsPanel');
 const CalculationResultsPanel = lazy(async () => ({
   default: (await loadCalculationResultsPanel()).CalculationResultsPanel,
 }));
@@ -100,6 +109,11 @@ const loadDocumentInspector = () => import('@/features/documents/inspector/Docum
 const DocumentInspector = lazy(async () => ({
   default: (await loadDocumentInspector()).DocumentInspector,
 }));
+
+/** ✎ TC: чат таблиці — кнопка «Discussion» і права панель; обидва в лінивому чанку (`D-132`), панель — у другому всередині. */
+const loadTableChat = () => import('@/features/tableChat/TableChatEntry');
+const TableChatButton = lazy(async () => ({ default: (await loadTableChat()).TableChatButton }));
+const TableChatHost = lazy(async () => ({ default: (await loadTableChat()).TableChatHost }));
 
 /**
  * Поле періоду в шапці — за `import()` (`D-132`): воно тягне `NumberInput`
@@ -403,8 +417,8 @@ export function DocumentPage(): JSX.Element {
    * створює її видимість.
    */
   const sheets = useMemo(() => groupBySheet(tables.data ?? []), [tables.data]);
-  const active = sheets.find((s) => s.code === sheet) ?? sheets[0];
-  const activeCode = active?.code;
+  const active = sheets.find((s) => s.key === sheet) ?? sheets[0];
+  const activeCode = active?.key;
 
   // AN-28 P2-1: дія заблокована утриманою (відхиленою) коміркою - показати її:
   // аркуш, прокрутка, фокус і підсвітка - тим самим шляхом, що й зауваження (`ФВ-5.6`).
@@ -419,7 +433,8 @@ export function DocumentPage(): JSX.Element {
       const target = tables.data?.find((table) => table.tableInstanceId === held.tableInstanceId);
       if (target === undefined) return;
 
-      if (target.sheetCode !== activeCode) setSheet(target.sheetCode);
+      const targetKey = sheetTabKey(target.sheetCode, copyFieldsOf(target).sheetCopyId);
+      if (targetKey !== activeCode) setSheet(targetKey);
       void import('@/features/grid/cellNavigation').then((module) =>
         module.requestCellNavigation({
           tableDefId: target.tableDefId,
@@ -455,13 +470,13 @@ export function DocumentPage(): JSX.Element {
     revealHeld(held);
   }, [periodKey, tables.data, revealHeld]);
 
-  // ⚠ Стан береться з `SheetStates` документа за КОДОМ аркуша: скалярного
+  // ⚠ Стан береться з `SheetStates` документа за ключом аркуша (`КОД` для оригіналу, `КОД#sheetCopyId` для копії): скалярного
   // статусу документа не існує (D-93) — аркуші за один період бувають у
   // різних станах одночасно.
   const state =
     active === undefined || summary.data === undefined
       ? ''
-      : (summary.data.sheetStates[active.code] ?? 'Draft');
+      : stateOfGroup(active, summary.data.sheetStates);
   // ⛔ Редагованість — питання ОДНОГО стану аркуша, і відповідає на нього
   // таблиця переходів (`features/workflow/transitions.ts`), а не порівняння
   // рядків тут. Порівняння на місці — це друга копія машини станів домену, і
@@ -478,7 +493,23 @@ export function DocumentPage(): JSX.Element {
    * Доки відповіді немає — причини немає: закрити дії через невідомість
    * означало б сховати їх на кожному відкритті на час запиту.
    */
-  const projectId = summary.data?.projectId ?? null;
+  // ⛔ PERIODNAV: період поза проєктом (`ECR-PRD-0422`) лишає екран без `summary`, а отже без проєкту й
+  // календаря - тупик. Проєкт беремо з картки БЕЗ періоду (`periodKey` необов'язковий), а на час перемикання
+  // періоду тримаємо останній відомий (інакше календар зникає на кожному кроці).
+  // ⚠ Сервер відхиляє період там, де вперше перевіряє його (`…/tables`, інколи й картка); `summary` при цьому може
+  // бути вже прочитаним - тоді проєкт відомий і без запиту нижче.
+  const periodRejected =
+    (summary.data === undefined && isPeriodOutsideProject(summary.error)) ||
+    (tables.data === undefined && isPeriodOutsideProject(tables.error));
+  const baseSummary = useQuery({
+    queryKey: ['document', documentId, 'base'],
+    queryFn: () => apiFetch<DocumentSummary>(`/api/v1/documents/${documentId}`),
+    enabled: periodRejected && summary.data === undefined,
+  });
+  const knownProject = useRef<{ documentId: number; projectId: number } | null>(null);
+  const loadedProjectId = summary.data?.projectId ?? baseSummary.data?.projectId;
+  if (loadedProjectId !== undefined) knownProject.current = { documentId, projectId: loadedProjectId };
+  const projectId = knownProject.current?.documentId === documentId ? knownProject.current.projectId : null;
 
   const projects = useQuery({
     queryKey: queryKeys.projects.all(),
@@ -495,6 +526,60 @@ export function DocumentPage(): JSX.Element {
   });
 
   useProjectCurrentPeriodDefault(urlPeriod, calendar.data?.periods, setPeriodKey);
+
+  // PERIODNAV: допустимі періоди проєкту (за зростанням) - стрілки й сітка не виходять за них.
+  const projectPeriods = useMemo(
+    () => calendar.data?.periods?.map((period) => period.periodKey).sort((a, b) => a - b),
+    [calendar.data],
+  );
+  const lastValidPeriod = projectPeriods?.[projectPeriods.length - 1] ?? null;
+  const nearestValid =
+    periodRejected && projectPeriods !== undefined && !projectPeriods.includes(periodKey)
+      ? nearestPeriod(projectPeriods, periodKey)
+      : null;
+
+  // Адреса з періодом поза проєктом (сервер його відхилив) сама веде на найближчий допустимий; кнопка в стані
+  // помилки нижче - запасний шлях, якщо календар не завантажився.
+  useEffect(() => {
+    if (nearestValid !== null) setPeriodKey(nearestValid);
+  }, [nearestValid, setPeriodKey]);
+
+  // PERIODNAV: перемикання періоду міняє ключі запитів, і сторінка на мить стає скелетом (нижчим за документ) -
+  // браузер притискає прокрутку, а ефекти монтування (фокус заголовка, вкладка аркуша) її зсувають. Пам'ятаємо
+  // позицію на момент зміни періоду й повертаємо, щойно документ знову намальовано.
+  const scrollAtSwitch = useRef<{ periodKey: number; y: number } | null>(null);
+  const seenPeriod = useRef(periodKey);
+  if (seenPeriod.current !== periodKey) {
+    seenPeriod.current = periodKey;
+    scrollAtSwitch.current = { periodKey, y: window.scrollY };
+  }
+  const periodSettled = summary.data !== undefined && tables.data !== undefined;
+  useLayoutEffect(() => {
+    const saved = scrollAtSwitch.current;
+    if (saved === null || saved.periodKey !== periodKey || !periodSettled) return;
+    scrollAtSwitch.current = null;
+    window.scrollTo({ top: saved.y });
+
+    // Висота документа добирається ще кілька кадрів (слоти таблиць, смуга аркушів): повторюємо, доки людина
+    // сама не прокрутила (колесо, дотик, клавіша, клік) - її рух важливіший за збережену позицію.
+    let frames = 0;
+    let frame = 0;
+    const userScroll = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+    const stop = (): void => {
+      window.cancelAnimationFrame(frame);
+      for (const type of userScroll) window.removeEventListener(type, stop);
+    };
+    for (const type of userScroll) window.addEventListener(type, stop, { passive: true, once: true });
+    const retry = (): void => {
+      if (Math.abs(window.scrollY - saved.y) > 1) window.scrollTo({ top: saved.y });
+      frames += 1;
+      if (frames < 40) frame = window.requestAnimationFrame(retry);
+      else stop();
+    };
+    frame = window.requestAnimationFrame(retry);
+
+    return stop;
+  }, [periodKey, periodSettled]);
 
   // ⛔ D1-02: дата чинності довідників у сітці — календарний кінець періоду ІЗ СЕРВЕРА.
   // `periodKey` для квартальних/річних проєктів — не `YYYYMM`, тож виводити дату з нього не можна.
@@ -526,7 +611,7 @@ export function DocumentPage(): JSX.Element {
    * лише читання: відкрити сітку через невідомість означало б показати дію, якої може не бути.
    */
   const deferredToServer = editsDeferToServer(state) && active !== undefined;
-  const approverEdit = useApproverEditAvailability(documentId, active?.sheetDefId ?? 0, periodKey, deferredToServer);
+  const approverEdit = useApproverEditAvailability(documentId, active?.sheetDefId ?? 0, periodKey, deferredToServer, active?.sheetCopyId ?? null);
   const approverEditable =
     deferredToServer && approverEdit.data?.canApproverEdit === true && !locksDataActions(lock) && !narrow;
   const gridReadOnly = readOnly && !approverEditable;
@@ -594,7 +679,25 @@ export function DocumentPage(): JSX.Element {
     void tables.refetch();
   };
 
-  return (
+  // PERIODNAV: період поза проєктом - не глухий кут: повідомлення сервера лишається, а поруч - перехід до
+  // найближчого допустимого періоду й вибір періоду (лише з переліку проєкту).
+  const recoveryTarget = nearestValid ?? lastValidPeriod;
+  const recovery =
+    periodRejected && projectPeriods !== undefined && recoveryTarget !== null ? (
+      <Stack data-testid="period-recovery">
+        <ErrorAlert error={summary.error ?? tables.error} onRetry={refetchBoth} />
+        <Group align="flex-end">
+          <Button onClick={() => setPeriodKey(recoveryTarget)} data-testid="period-recovery-go">
+            {t('document.periodGoTo', { period: formatPeriodKey(recoveryTarget) })}
+          </Button>
+          <Suspense fallback={<Skeleton h={52} w={190} />}>
+            <PeriodPicker size="xs" miw={110} value={periodKey} periods={projectPeriods} onChange={(value) => setPeriodKey(value ?? periodKey)} />
+          </Suspense>
+        </Group>
+      </Stack>
+    ) : null;
+
+  return recovery ?? (
     /*
      * ⛔ Обгортка навколо ВСЬОГО екрана: заголовок — це бізнес-ключ документа,
      * тобто теж дані. Помилки обох запитів зведені разом, бо екран без
@@ -648,6 +751,7 @@ export function DocumentPage(): JSX.Element {
               size="xs"
               miw={110}
               value={periodKey}
+              periods={projectPeriods}
               onChange={(value) => setPeriodKey(value ?? periodKey)}
             />
           </Suspense>
@@ -664,6 +768,7 @@ export function DocumentPage(): JSX.Element {
           periodKey={periodKey}
           sheetDefId={active.sheetDefId}
           sheetCode={active.code}
+          sheetCopyId={active.sheetCopyId}
           sheetName={active.name}
           state={state}
           lock={lock}
@@ -690,8 +795,8 @@ export function DocumentPage(): JSX.Element {
               <DocumentProgress
                 documentId={documentId}
                 periodKey={periodKey}
-                sheets={sheets.map((s) => ({ code: s.code, name: s.name, state: document.sheetStates[s.code] ?? 'Draft' }))}
-                activeCode={active.code}
+                sheets={sheetItemsOf(sheets, document.sheetStates)}
+                activeCode={active.key}
                 // ✎ UI-25 (інспектор): «K issues» — кнопка інспектора нижче, лічильник
                 // за ВИДИМИМИ таблицями (`inspectorModel.ts`); тут другого немає.
                 issues={null}
@@ -835,6 +940,28 @@ export function DocumentPage(): JSX.Element {
           tables={tables.data ?? []}
           messages={shownValidation?.messages ?? null}
           validatedSeq={validatedSeq}
+          extraTriggers={
+            <Suspense fallback={null}>
+              <TableChatButton documentId={documentId} />
+            </Suspense>
+          }
+          sheet={active === undefined ? null : { sheetDefId: active.sheetDefId, code: active.code, name: active.name }}
+          onOpenCell={(target) => {
+            // Журнал аркуша веде в комірку ТІЄЇ Ж таблиці активного аркуша: той самий шлях, що й зауваження.
+            const table = tables.data?.find(
+              (candidate) => candidate.sheetCode === target.sheetCode && candidate.tableCode === target.tableCode,
+            );
+            if (table === undefined) return;
+
+            void import('@/features/grid/cellNavigation').then((module) =>
+              module.requestCellNavigation({
+                tableDefId: table.tableDefId,
+                tableInstanceId: table.tableInstanceId,
+                rowKey: target.rowKey,
+                columnCode: target.columnCode,
+              }),
+            );
+          }}
           onSelectFinding={(finding) => {
             // Знахідка шапки (`tableDefId` 0) веде до панелі шапки, а не в клітинку.
             if (isHeaderFinding(finding)) {
@@ -849,11 +976,21 @@ export function DocumentPage(): JSX.Element {
 
             // ⚠ Лише коли аркуш інший: зміна адреси — це навігація, і на
             // активному аркуші вона нічого не дає, крім зайвого рендеру сторінки.
-            if (target.sheetCode !== active?.code) setSheet(target.sheetCode);
+            const targetKey = sheetTabKey(target.sheetCode, copyFieldsOf(target).sheetCopyId);
+            if (targetKey !== active?.key) setSheet(targetKey);
             void import('@/features/grid/cellNavigation').then((module) =>
               module.requestCellNavigation(finding),
             );
           }}
+        />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <TableChatHost
+          documentId={documentId}
+          periodKey={periodKey}
+          tables={tables.data ?? []}
+          activeTables={active?.tables ?? []}
         />
       </Suspense>
 
@@ -863,7 +1000,26 @@ export function DocumentPage(): JSX.Element {
           `.statusbar` > `.sheet-tabs`; KIT §1.5), а не вкладками над нею. Список
           стоїть після панелей і липне до низу вікна (`documentSheetStrip.css`).
           ⛔ Аркуші — лише ті, що повернув API (видимі цьому користувачу, P1). */}
-      <Tabs value={active?.code ?? null} onChange={setSheet} inverted>
+      {/* Чанк вантажиться лише для аркуша, що копіюється, або копії. */}
+      {active !== undefined && (active.isCopyable || active.sheetCopyId !== null) && (
+        <Suspense fallback={null}>
+          <SheetCopyBar
+            documentId={documentId}
+            target={{
+              sheetDefId: active.sheetDefId,
+              sheetCode: active.code,
+              label: active.name,
+              groupNameValues: active.groupNameValues,
+              sheetCopyId: active.sheetCopyId,
+              isCopyable: active.isCopyable,
+            }}
+            canAdd={!readOnly}
+            onSelect={setSheet}
+          />
+        </Suspense>
+      )}
+
+      <Tabs value={active?.key ?? null} onChange={setSheet} inverted>
 
         {/* ⛔ Кожна вкладка має СВОЮ панель: Mantine ставить вкладці
             `aria-controls` на id панелі, і без панелі посилання висіло в
@@ -876,9 +1032,9 @@ export function DocumentPage(): JSX.Element {
             перемонтовувало б сітку (важкий RevoGrid і стан лінивого
             монтажу). Так, як і раніше, сітка лише отримує нові `tables`. */}
         {sheets
-          .filter((s) => s.code !== active?.code)
+          .filter((s) => s.key !== active?.key)
           .map((s) => (
-            <Tabs.Panel key={s.code} value={s.code}>
+            <Tabs.Panel key={s.key} value={s.key}>
               {null}
             </Tabs.Panel>
           ))}
@@ -886,7 +1042,7 @@ export function DocumentPage(): JSX.Element {
         {/* ⚠ `pt="md"` і `Stack` відтворюють відступи, які раніше давав
             зовнішній `Stack` сторінки між вкладками й сіткою. */}
         {active !== undefined && (
-          <Tabs.Panel value={active.code} pt="md">
+          <Tabs.Panel value={active.key} pt="md">
             <Stack>
               {/* ⚠ Три стани чанка сітки замість `<Suspense>`: вантажиться —
                   заглушка ПО ОДНІЙ НА ТАБЛИЦЮ (кількість таблиць відома до
@@ -942,7 +1098,7 @@ export function DocumentPage(): JSX.Element {
                   tables={active.tables}
                   // ✎ ui-sheet-bottom: смуга аркушів — у нижньому рядку панелі таблиці, поруч із її прокруткою.
                   bottomBar={(scroll) => (
-                    <SheetStrip sheets={sheetItemsOf(sheets, document.sheetStates)} activeCode={active.code} onSelect={setSheet}>
+                    <SheetStrip sheets={sheetItemsOf(sheets, document.sheetStates)} activeCode={active.key} onSelect={setSheet}>
                       {scroll}
                     </SheetStrip>
                   )}
@@ -956,7 +1112,7 @@ export function DocumentPage(): JSX.Element {
         {(gridModule.component === null || active === undefined) && (
           <SheetStrip
             sheets={sheetItemsOf(sheets, document.sheetStates)}
-            activeCode={active?.code}
+            activeCode={active?.key}
             onSelect={setSheet}
           />
         )}
@@ -1000,49 +1156,6 @@ export function DocumentPage(): JSX.Element {
  */
 function isNotValidatedYet(error: unknown): boolean {
   return error instanceof EcrApiError && error.problem.status === 404;
-}
-
-/** Аркуш із його таблицями. */
-function sheetItemsOf(
-  sheets: readonly SheetGroup[],
-  states: Readonly<Record<string, string>>,
-): { code: string; name: string; state: string }[] {
-  return sheets.map((s) => ({ code: s.code, name: s.name, state: states[s.code] ?? 'Draft' }));
-}
-
-interface SheetGroup {
-  sheetDefId: number;
-  code: string;
-  name: string;
-  ordinal: number;
-  tables: DocumentTableDto[];
-}
-
-/**
- * Групує таблиці за аркушами.
- *
- * ⚠ Сервер віддає плоский перелік екземплярів: так його можна віддати одним
- * запитом і не вигадувати вкладену структуру, яка все одно розбирається на
- * клієнті.
- */
-function groupBySheet(tables: DocumentTableDto[]): SheetGroup[] {
-  const sheets = new Map<string, SheetGroup>();
-
-  for (const table of tables) {
-    const group = sheets.get(table.sheetCode) ?? {
-      sheetDefId: table.sheetDefId,
-      code: table.sheetCode,
-      // ✎ b4b (P1 приховані аркуші): назва — лише з даних API; немає — «—», а не код.
-      name: localized(table.sheetNameL10n) || '—',
-      ordinal: table.sheetOrdinal,
-      tables: [],
-    };
-
-    group.tables.push(table);
-    sheets.set(table.sheetCode, group);
-  }
-
-  return [...sheets.values()].sort((a, b) => a.ordinal - b.ordinal);
 }
 
 /**

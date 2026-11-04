@@ -91,7 +91,7 @@ public static class AstPrinter
             case SymbolReferenceNode symbol:
                 text.Append(symbol.Kind switch
                 {
-                    SymbolKind.Argument => "@" + symbol.Name,
+                    SymbolKind.Argument => "@" + symbol.Name + (symbol.IsOptional ? "?" : string.Empty),
                     SymbolKind.Constant => "CST." + symbol.Name,
                     SymbolKind.Formula => "!" + symbol.Name,
                     _ => "HDR." + symbol.Name,

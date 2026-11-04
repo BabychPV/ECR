@@ -1,7 +1,15 @@
 import type { JSX } from 'react';
 import { Button, Select, Table, Text, TextInput } from '@mantine/core';
-import { securityEventsQuery, useSecurityEvents, type SecurityEventPage } from '@/features/audit/api';
+import {
+  fetchSecurityExport,
+  securityEventsQuery,
+  useSecurityEvents,
+  type SecurityEventPage,
+} from '@/features/audit/api';
+import { AuditExportButton } from '@/features/audit/AuditExportButton';
 import { authorName, useAuthorOptions } from '@/features/audit/authorOptions';
+import { useAuditSort } from '@/features/audit/auditSort';
+import { SortableTh } from '@/features/audit/SortableTh';
 import { FilterHints, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -26,8 +34,9 @@ export function SecurityEventsPanel({ from, to }: { from: string; to: string }):
   const appliedEventType = useDebouncedFilter(eventType);
   const appliedChangedBy = useDebouncedFilter(changedBy);
   const eventTypeField = useFieldDraft(eventType ?? '');
+  const [sort, setSort] = useAuditSort();
 
-  const applied = { from, to, eventType: appliedEventType, changedByUserId: appliedChangedBy, limit: 100 };
+  const applied = { from, to, eventType: appliedEventType, changedByUserId: appliedChangedBy, sort, limit: 100 };
   const [cursor, setCursor] = useFilterCursor(securityEventsQuery(applied));
 
   const events = useSecurityEvents({ ...applied, cursor });
@@ -67,6 +76,14 @@ export function SecurityEventsPanel({ from, to }: { from: string; to: string }):
 
       <FilterHints texts={[t('audit.authorHint')]} />
 
+      <AuditExportButton
+        tab="security"
+        from={from}
+        to={to}
+        fallbackName="audit-security.csv"
+        load={() => fetchSecurityExport(applied)}
+      />
+
       <AsyncBoundary<SecurityEventPage>
         isPending={events.isPending}
         error={events.error}
@@ -82,8 +99,8 @@ export function SecurityEventsPanel({ from, to }: { from: string; to: string }):
             <Table striped className="ecr-sticky-head ecr-audit-table">
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>{t('audit.when')}</Table.Th>
-                  <Table.Th>{t('audit.who')}</Table.Th>
+                  <SortableTh label={t('audit.when')} column="time" sort={sort} onSort={setSort} />
+                  <SortableTh label={t('audit.who')} column="user" sort={sort} onSort={setSort} />
                   <Table.Th>{t('audit.eventType')}</Table.Th>
                   <Table.Th>{t('audit.details')}</Table.Th>
                   <Table.Th>{t('audit.correlation')}</Table.Th>

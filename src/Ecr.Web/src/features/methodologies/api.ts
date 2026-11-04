@@ -237,6 +237,56 @@ export function methodologyConstantUsage(
   );
 }
 
+/** Категорія констант версії (план CONST-CATEGORY). */
+export type MethodologyCategoryDto = components['schemas']['MethodologyCategoryDto'];
+
+/** Тіло запису категорії переліку версії-чернетки. */
+export type SaveMethodologyCategoryRequest = components['schemas']['SaveMethodologyCategoryRequest'];
+
+/**
+ * Перелік категорій констант версії з кількістю констант під кожною. Право `Calculation.View`.
+ *
+ * ⚠ Категорія константи — значення ЛИШЕ з цього переліку або порожнє (= спільна): описка в
+ * категорії доти тихо робила константу мертвою (план CONST-CATEGORY).
+ */
+export function methodologyCategories(
+  methodologyId: number,
+  versionId: number,
+): Promise<MethodologyCategoryDto[]> {
+  return apiFetch<MethodologyCategoryDto[]>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/categories`,
+  );
+}
+
+/**
+ * Заводить категорію або змінює її опис, порядок, стан. Право `Calculation.EditConstant`.
+ *
+ * ⛔ Код — адреса, перейменування немає (`409 categoryRename`); вивести з ужитку зайняту — `409 categoryInUse`.
+ */
+export function saveMethodologyCategory(
+  methodologyId: number,
+  versionId: number,
+  code: string,
+  body: SaveMethodologyCategoryRequest,
+): Promise<MethodologyCategoryDto> {
+  return apiFetch<MethodologyCategoryDto>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/categories/${encodeURIComponent(code)}`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+  );
+}
+
+/** Прибирає незайняту категорію з переліку чернетки (`409 categoryInUse` — є константи). */
+export function deleteMethodologyCategory(
+  methodologyId: number,
+  versionId: number,
+  code: string,
+): Promise<void> {
+  return apiFetch<void>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/categories/${encodeURIComponent(code)}`,
+    { method: 'DELETE' },
+  );
+}
+
 /** Правила відбору рядків версії — включно з вимкненими. */
 export function methodologyRules(
   methodologyId: number,

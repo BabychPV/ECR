@@ -1,6 +1,7 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
+import { versionSortParam, versionsToParam, type VersionSort } from './documentVersion';
 
 /**
  * Заповненість однієї таблиці документа (`BE-10`).
@@ -134,6 +135,10 @@ interface DocumentListParams {
   projectId?: number | null;
   /** `'me'` - застарілість через правки поточного користувача; ⚠ лише разом із `resultsStale`. */
   staleBy?: 'me';
+  /** Колонка «Version»: лише документи цих версій шаблону (за період; `templateVersions=1.0,2.3`); порожньо — без фільтра. */
+  templateVersions?: readonly string[];
+  /** Колонка «Version»: сортування за версією (`sort=templateVersion` / `sort=-templateVersion`); `null` — за Id. */
+  versionSort?: VersionSort | null;
 }
 
 /**
@@ -156,6 +161,10 @@ export function listDocuments(params: DocumentListParams): Promise<DocumentListP
   if (params.q) query.set('q', params.q);
   if (params.projectId) query.set('projectId', String(params.projectId));
   if (params.staleBy) query.set('staleBy', params.staleBy);
+  const templateVersions = versionsToParam(params.templateVersions ?? []);
+  if (templateVersions !== null) query.set('templateVersions', templateVersions);
+  const sort = versionSortParam(params.versionSort ?? null);
+  if (sort !== null) query.set('sort', sort);
 
   return apiFetch<DocumentListPage>(`/api/v1/documents?${query.toString()}`);
 }
@@ -183,6 +192,38 @@ export function listDocumentOwners(params: {
   return apiFetch<components['schemas']['DocumentOwnersResponse']>(`/api/v1/documents/owners?${query.toString()}`).then(
     (response) => response.items,
   );
+}
+
+/** Варіанти фільтра «Version»: усі версії видимих документів у природному порядку і кількість документів без версії. */
+export interface DocumentTemplateVersionOptions {
+  readonly versions: readonly string[];
+  readonly withoutVersionCount: number;
+}
+
+/**
+ * Усі версії шаблону серед документів, які я бачу (та сама межа видимості, що й перелік), — варіанти фільтра «Version».
+ * Версія — за `periodKey` (без нього — чинна версія проєкту), як у колонці.
+ *
+ * ⚠ Адреса — через `URLSearchParams` у шаблоні з одним літералом, як у `listDocumentOwners`.
+ */
+export function listDocumentTemplateVersions(params: {
+  readonly projectId: number | null;
+  readonly periodKey: number | null;
+}): Promise<DocumentTemplateVersionOptions> {
+  const query = new URLSearchParams();
+  if (params.projectId !== null) query.set('projectId', String(params.projectId));
+  if (params.periodKey !== null) query.set('periodKey', String(params.periodKey));
+
+  return apiFetch<components['schemas']['DocumentTemplateVersionsResponse']>(
+    `/api/v1/documents/template-versions?${query.toString()}`,
+  ).then((response) => {
+    // Відповідь не за контрактом (немає рядкових версій) - це відмова: сторінка лишається на версіях завантаженого переліку.
+    if (!Array.isArray(response.items) || response.items.some((item) => typeof item.version !== 'string')) {
+      throw new Error('template-versions: unexpected response');
+    }
+
+    return { versions: response.items.map((item) => item.version), withoutVersionCount: response.withoutVersionCount };
+  });
 }
 
 /** Лічильники над переліком документів (`BE-09`); тип — зі згенерованої схеми. */

@@ -70,6 +70,28 @@ export function cellAppearanceOf(style: CellStyleDto | null | undefined): CSSPro
 }
 
 /**
+ * ЯВНИЙ колір тексту, який людина обрала в тулбарі («Колір тексту»), — діє БЕЗ перевірки контрасту.
+ *
+ * ⛔ P1 (Land, 29.10): «колір тексту не застосовується». Причина — `cellAppearanceOf` відкидає колір, що не дає `AA.text`
+ * (4.5:1) на світлій/темній поверхні, а НА ЗАЛИТІЙ комірці замінює його `bestTextOn(заливка)`: на помаранчевій заливці
+ * майже жоден колір палітри не проходить 4.5:1, тож будь-який вибір мовчки скасовувався (виміряно на стенді: обраний
+ * `#c00000` на `#ffc000` давав `rgb(0, 0, 0)`). Ця перевірка рятує КОЛЬОРИ АВТОРА шаблону (підібрані під світлий Excel);
+ * власний вибір людини вона не має права ігнорувати — як в Excel, «Авто» (скидання) лишається способом повернути колір
+ * теми. Колір умовного формату, як і раніше, сильніший (рішення Аудиту 12.10) — тоді нічого не змінюємо.
+ */
+export function withExplicitTextColour(
+  appearance: CSSProperties | undefined,
+  hex: string | null | undefined,
+  conditionalHex: string | null | undefined,
+): CSSProperties | undefined {
+  if (hex === null || hex === undefined || hex === '' || (conditionalHex !== null && conditionalHex !== undefined && conditionalHex !== '')) {
+    return appearance;
+  }
+
+  return { ...(appearance ?? {}), '--ecr-cell-fg-light': hex, '--ecr-cell-fg-dark': hex, '--ecr-cell-fill-fg': hex } as CSSProperties;
+}
+
+/**
  * Класи, якими `cellEditors.css` застосовує змінні `cellAppearanceOf` (`X-10`).
  *
  * @returns `null` — колір і заливку автор не задавав.

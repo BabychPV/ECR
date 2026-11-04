@@ -80,8 +80,10 @@ public interface IApprovalQueueStore
 /// <param name="TemplateCode">Код шаблону.</param>
 /// <param name="Status">Статус проєкту.</param>
 /// <param name="IsArchiving">Іде архівація.</param>
+/// <param name="MultiVersion">RPT-STABLE B2: частина періодів проєкту на іншій версії шаблону (шкала версій).</param>
 public sealed record ApprovalQueueProject(
-    int ProjectId, string ProjectCode, int TemplateVersionId, string TemplateCode, ProjectStatus Status, bool IsArchiving);
+    int ProjectId, string ProjectCode, int TemplateVersionId, string TemplateCode, ProjectStatus Status, bool IsArchiving,
+    bool MultiVersion = false);
 
 /// <summary>Чинні маршрути з кроками й кодами ролей.</summary>
 /// <param name="Routes">Маршрути з кроками.</param>
@@ -110,7 +112,11 @@ public sealed record ApprovalQueueCandidate(
     DateTime SubmittedAt,
     int? SubmittedByUserId,
     string? SubmittedByDisplayName,
-    int? CurrentStepId);
+    int? CurrentStepId)
+{
+    /// <summary>Копія аркуша (RS); <c>null</c> — оригінал.</summary>
+    public long? SheetCopyId { get; init; }
+}
 
 /// <summary>Позиція в порядку черги: момент подання (тики UTC) і ключ стану.</summary>
 /// <param name="SubmittedAtTicks">Тики моменту подання.</param>
@@ -150,6 +156,9 @@ public sealed record ReturnedSheetCandidate(
 
     /// <summary>Вид повернення.</summary>
     public ReturnKind Kind { get; init; } = ReturnKind.Rejected;
+
+    /// <summary>Копія аркуша (RS); <c>null</c> — оригінал.</summary>
+    public long? SheetCopyId { get; init; }
 }
 
 /// <summary>✎ D-449: вид повернення на доопрацювання.</summary>

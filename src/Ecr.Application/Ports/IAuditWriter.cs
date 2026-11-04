@@ -30,6 +30,19 @@ public interface IAuditWriter
     /// <summary>Записує структурну зміну.</summary>
     public Task WriteStructureChangeAsync(StructureChangeRecord change, CancellationToken ct);
 
+    /// <summary>
+    /// Записує групу структурних змін — по запису на зміну, як <see cref="WriteStructureChangeAsync"/>, але за
+    /// мінімум походів до сервера. За замовчуванням — поштучно; сховище перевизначає пакетним <c>INSERT</c>.
+    /// </summary>
+    public async Task WriteStructureChangesAsync(IReadOnlyList<StructureChangeRecord> changes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+        foreach (var change in changes)
+        {
+            await WriteStructureChangeAsync(change, ct).ConfigureAwait(false);
+        }
+    }
+
     /// <summary>Записує подію безпеки.</summary>
     public Task WriteSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct);
 
@@ -76,6 +89,10 @@ public interface IAuditWriter
 /// (AN-114/D-338, <c>overwrittenRowKeys</c>). Окремо від <paramref name="Origin"/>: на поданому
 /// аркуші погоджувача <c>Origin = ApproverEdit</c>, і без цього прапорця позначка перезапису губилася.
 /// </param>
+/// <param name="Reason">
+/// ✎ D-461: причина ручного значення замість формули (<c>Origin = FormulaOverride</c>, <c>aud.CellChange.Reason</c>);
+/// <c>null</c> — для решти походжень.
+/// </param>
 public sealed record CellChangeRecord(
     DateTime ChangedAt,
     CellAddress Address,
@@ -88,7 +105,8 @@ public sealed record CellChangeRecord(
     bool IsLateEdit,
     string? CorrelationId,
     bool IsOutOfWindow = false,
-    bool IsOverwrite = false);
+    bool IsOverwrite = false,
+    string? Reason = null);
 
 /// <summary>Структурна зміна метаданих.</summary>
 public sealed record StructureChangeRecord(

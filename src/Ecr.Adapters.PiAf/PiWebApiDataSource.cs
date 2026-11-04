@@ -24,10 +24,20 @@ namespace Ecr.Adapters.PiAf;
 /// в тестах, що підміняють транспорт одним обробником: тоді Negotiate іде тим
 /// самим <paramref name="http"/>.
 /// </param>
+/// <param name="logger">Журнал перемикання на запасну адресу (D-462); <c>null</c> — тести.</param>
 public sealed partial class PiWebApiDataSource(
-    HttpClient http, ICollectionStore store, ISecretProvider secrets, IHttpClientFactory? clients = null)
+    HttpClient http, ICollectionStore store, ISecretProvider secrets, IHttpClientFactory? clients = null,
+    Microsoft.Extensions.Logging.ILogger<PiWebApiDataSource>? logger = null)
     : IExternalDataSource, IHierarchicalCatalogSource, IBatchCollectionSource
 {
+    /// <summary>Перемикання на запасну адресу при відмові зв'язку з основною (D-462).</summary>
+    private readonly EndpointFailover failover = new(
+        (Microsoft.Extensions.Logging.ILogger?)logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+        nameof(PiWebApiDataSource));
+
+    /// <summary>Роль адреси, що обслужила останній запит (<c>primary</c>/<c>secondary</c>); для тестів і діагностики.</summary>
+    internal string? LastServedBy => failover.LastServedBy;
+
     /// <summary>Скільки разів повторювати запит, який відмовив через 5xx або таймаут.</summary>
     /// <remarks>
     /// ⚠ Три, а не «поки не вийде». Джерело, яке лежить, від наполегливості
@@ -76,16 +86,24 @@ public sealed partial class PiWebApiDataSource(
     public async Task<IReadOnlyList<SourceEntityDescriptor>> BrowseAsync(
         int dataSourceId, string? parentPath, CancellationToken ct)
     {
+        var (source, collection) = await ChildrenCollectionAsync(dataSourceId, parentPath, ct).ConfigureAwait(false);
+        return await ItemsAsync(source, collection, Descriptor, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Джерело і колекція прямих дітей вузла (<c>null</c> — корінь бази).</summary>
+    private async Task<(Domain.Entities.External.DataSource Source, string Collection)> ChildrenCollectionAsync(
+        int dataSourceId, string? parentPath, CancellationToken ct)
+    {
         var source = await SourceAsync(dataSourceId, ct).ConfigureAwait(false);
 
         var collection = string.IsNullOrWhiteSpace(parentPath)
             ? $"assetdatabases/{Uri.EscapeDataString(source.Catalog ?? string.Empty)}/elements"
             : $"elements/{Uri.EscapeDataString(await ElementWebIdAsync(source, parentPath, ct).ConfigureAwait(false))}/elements";
+        return (source, collection + "?searchFullHierarchy=false");
+    }
 
-        return await ItemsAsync(
-            source,
-            collection + "?searchFullHierarchy=false",
-            item => new SourceEntityDescriptor(
+    private static SourceEntityDescriptor Descriptor(JsonElement item)
+        => new(
                 Text(item, "Name") ?? string.Empty,
                 Text(item, "Description"),
                 Text(item, "Path"),
@@ -94,9 +112,7 @@ public sealed partial class PiWebApiDataSource(
 
                 // GUID елемента, а не WebId: WebId кодує ще й сервер і формат
                 // (WebID 2.0), тож змінюється разом із ними; GUID — ні (S1).
-                ExternalId: Text(item, "Id")),
-            ct).ConfigureAwait(false);
-    }
+                ExternalId: Text(item, "Id"));
 
     /// <inheritdoc />
     /// <remarks>
@@ -106,12 +122,15 @@ public sealed partial class PiWebApiDataSource(
     /// </remarks>
     public async Task<SourceElementsResult> DiscoverElementsAsync(int dataSourceId, string root, CancellationToken ct)
     {
-        var children = await BrowseAsync(dataSourceId, root, ct).ConfigureAwait(false);
+        // Шаблон елемента (`TemplateName`) — разом із дескриптором: за ним дерево НАЕ мапить тип вузла (людина 03.11).
+        var (source, collection) = await ChildrenCollectionAsync(dataSourceId, root, ct).ConfigureAwait(false);
+        var children = await ItemsAsync(source, collection, item => (Descriptor: Descriptor(item), Template: Text(item, "TemplateName")), ct)
+            .ConfigureAwait(false);
 
         var complete = children.Count < MaxItemsPerLevel;
         var elements = new List<SourceElement>(children.Count);
 
-        foreach (var child in children)
+        foreach (var (child, template) in children)
         {
             if (string.IsNullOrWhiteSpace(child.ExternalId) || string.IsNullOrWhiteSpace(child.EntityPath))
             {
@@ -119,7 +138,8 @@ public sealed partial class PiWebApiDataSource(
                 continue;
             }
 
-            elements.Add(new SourceElement(child.ExternalId, child.Code, child.EntityPath, child.EntityPath));
+            elements.Add(new SourceElement(
+                child.ExternalId, child.Code, child.EntityPath, child.EntityPath, string.IsNullOrWhiteSpace(template) ? null : template));
         }
 
         return new SourceElementsResult(elements, complete);
@@ -167,7 +187,7 @@ public sealed partial class PiWebApiDataSource(
         Domain.Entities.External.DataSource source, string path, CancellationToken ct)
     {
         using var element = await GetAsync(
-            source.Endpoint, $"elements?path={Uri.EscapeDataString(path)}", source.SecretName, ct)
+            source, $"elements?path={Uri.EscapeDataString(path)}", ct)
             .ConfigureAwait(false);
 
         var id = Text(element.RootElement, "Id");
@@ -189,13 +209,13 @@ public sealed partial class PiWebApiDataSource(
     /// ⛔ <c>Links.Next</c> іде лише на той самий хост, що й джерело: інакше
     /// заголовок автентифікації пішов би за адресою, яку назвала відповідь.
     /// </remarks>
-    private async Task<List<SourceEntityDescriptor>> ItemsAsync(
+    private async Task<List<T>> ItemsAsync<T>(
         Domain.Entities.External.DataSource source,
         string path,
-        Func<JsonElement, SourceEntityDescriptor> map,
+        Func<JsonElement, T> map,
         CancellationToken ct)
     {
-        var result = new List<SourceEntityDescriptor>();
+        var result = new List<T>();
         var origin = new Uri($"{source.Endpoint.TrimEnd('/')}/");
         Uri? next = new(origin, path);
 
@@ -262,14 +282,14 @@ public sealed partial class PiWebApiDataSource(
         }
 
         using var recorded = await GetAsync(
-            source.Endpoint,
+            source,
             $"streams/{Uri.EscapeDataString(attribute.WebId)}/recorded"
             + $"?startTime={Iso(request.FromUtc)}&endTime={Iso(request.ToUtc)}"
             + $"&maxCount={request.MaxPoints.ToString(CultureInfo.InvariantCulture)}",
-            source.SecretName,
             ct).ConfigureAwait(false);
 
-        return Batch(Points(recorded.RootElement, request.SourcePath, attribute.DefaultUnits), request);
+        return Batch(Points(recorded.RootElement, request.SourcePath, attribute.DefaultUnits), request)
+            with { ServedBySecondary = failover.IsOnSecondary(source.Id) };
     }
 
     /// <summary>Атрибута за шляхом немає — увесь інтервал у відмову.</summary>
@@ -288,16 +308,36 @@ public sealed partial class PiWebApiDataSource(
     /// ⚠ Порожній батч НЕ вважається обрізаним: із MaxPoints = 0 умова
     /// «набрали стелю» була б істинною завжди, і points[^1] упало б на
     /// порожньому списку — на діапазоні, у якому просто немає даних.
+    /// <para>
+    /// ✎ Аудит 31.10 (G6): тіло без <c>Items</c> — не «порожній період», а незрозуміла відповідь: увесь інтервал у
+    /// відмову (як <see cref="Unresolved"/>), інакше видалення зниклих точок (D-462) стерло б наші точки шматка.
+    /// Пропущені (нерозбірні) елементи чи відповідь із самих помилок — <see cref="CollectionResult.DeletionUnsafe"/>.
+    /// </para>
     /// </remarks>
-    private static CollectionResult Batch(List<SourceDataPoint> points, CollectionRequest request)
+    private static CollectionResult Batch(ParsedPoints parsed, CollectionRequest request)
     {
+        if (parsed.MissingItems)
+        {
+            return Unresolved(request);
+        }
+
+        var points = parsed.Points;
         var truncated = points.Count > 0 && points.Count >= request.MaxPoints;
 
         return new CollectionResult(
             points,
             truncated ? [new TimeInterval(points[^1].Timestamp, request.ToUtc)] : [],
-            null);
+            null)
+        {
+            DeletionUnsafe = parsed.Unreliable,
+        };
     }
+
+    /// <summary>Розібрані точки відповіді та ознаки її придатності як доказу відсутності (G6).</summary>
+    /// <param name="Points">Точки.</param>
+    /// <param name="MissingItems">У тілі немає масиву <c>Items</c>.</param>
+    /// <param name="Unreliable">Частину елементів пропущено або всі елементи — помилки (<c>Good: false</c>).</param>
+    private sealed record ParsedPoints(List<SourceDataPoint> Points, bool MissingItems, bool Unreliable);
 
     /// <inheritdoc />
     /// <remarks>
@@ -334,7 +374,7 @@ public sealed partial class PiWebApiDataSource(
             try
             {
                 using var attribute = await GetAsync(
-                    source.Endpoint, $"attributes?path={Uri.EscapeDataString(path)}", source.SecretName, ct)
+                    source, $"attributes?path={Uri.EscapeDataString(path)}", ct)
                     .ConfigureAwait(false);
                 webId = Text(attribute.RootElement, "WebId");
                 defaultUnits = Text(attribute.RootElement, "DefaultUnitsName");
@@ -352,7 +392,7 @@ public sealed partial class PiWebApiDataSource(
             }
 
             using var value = await GetAsync(
-                source.Endpoint, $"streams/{Uri.EscapeDataString(webId)}/value", source.SecretName, ct)
+                source, $"streams/{Uri.EscapeDataString(webId)}/value", ct)
                 .ConfigureAwait(false);
 
             if (CurrentPoint(value.RootElement, path, defaultUnits) is { } point)
@@ -431,6 +471,31 @@ public sealed partial class PiWebApiDataSource(
     private Task<JsonDocument> GetAsync(
         string endpoint, string path, string secretName, CancellationToken ct)
         => GetAsync(new Uri($"{endpoint.TrimEnd('/')}/{path}"), path, secretName, ct);
+
+    /// <summary>GET до джерела: основна адреса, а при відмові ЗВ'ЯЗКУ — запасна (D-462).</summary>
+    /// <remarks>
+    /// ⚠ Обидві адреси йдуть тим самим клієнтом і тим самим обробником: <c>GuardedSocketConnect</c> (заборонені
+    /// IP) і таймаут Q-250 діють на запасну так само, як на основну.
+    /// </remarks>
+    private Task<JsonDocument> GetAsync(
+        Domain.Entities.External.DataSource source, string path, CancellationToken ct)
+        => failover.RunAsync(
+            source,
+            (endpoint, token) => GetAsync(endpoint, path, source.SecretName, token),
+            IsConnectionFailure,
+            ct);
+
+    /// <summary>
+    /// Відмова ЗВ'ЯЗКУ: мережева (без коду відповіді) або тайм-аут після всіх спроб. Код відповіді (4xx/5xx),
+    /// автентифікація й завелика відповідь — ні: сервер відповів, і інша адреса того самого PI відповіла б так само.
+    /// </summary>
+    internal static bool IsConnectionFailure(Exception ex) => ex switch
+    {
+        SourceAuthenticationException => false,
+        HttpRequestException { StatusCode: null } => true,
+        BusinessRuleException rule => rule.Details?.GetValueOrDefault("messageKey") is "err.ECR-INT-0503.piWebApiTimeout",
+        _ => false,
+    };
 
     private async Task<JsonDocument> GetAsync(
         Uri uri, string path, string secretName, CancellationToken ct)
@@ -645,20 +710,33 @@ public sealed partial class PiWebApiDataSource(
         => status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
 
     /// <summary>Точки батча в одиниці ДЖЕРЕЛА (ФВ-16.10).</summary>
-    private static List<SourceDataPoint> Points(JsonElement root, string sourcePath, string? defaultUnits)
+    private static ParsedPoints Points(JsonElement root, string sourcePath, string? defaultUnits)
     {
         var points = new List<SourceDataPoint>();
 
-        if (!root.TryGetProperty("Items", out var items))
+        if (!root.TryGetProperty("Items", out var items) || items.ValueKind != JsonValueKind.Array)
         {
-            return points;
+            return new ParsedPoints(points, MissingItems: true, Unreliable: true);
         }
+
+        var skipped = false;
+        var total = 0;
+        var bad = 0;
 
         foreach (var item in items.EnumerateArray())
         {
+            total++;
+            if (item.ValueKind == JsonValueKind.Object
+                && item.TryGetProperty("Good", out var good) && good.ValueKind == JsonValueKind.False)
+            {
+                bad++;
+            }
+
             if (!item.TryGetProperty("Timestamp", out var stamp)
                 || !stamp.TryGetDateTime(out var timestamp))
             {
+                // ⚠ G6: нерозбірна мітка — точку не записати, але й відсутністю її не вважати.
+                skipped = true;
                 continue;
             }
 
@@ -673,7 +751,8 @@ public sealed partial class PiWebApiDataSource(
                 Quality(item)));
         }
 
-        return points;
+        // ⚠ G6: відповідь лише з помилок (кожен елемент `Good: false`) — збій джерела, а не дані.
+        return new ParsedPoints(points, MissingItems: false, Unreliable: skipped || (total > 0 && bad == total));
     }
 
     /// <summary>Значення точки: число або текст, ніколи обидва.</summary>

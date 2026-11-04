@@ -48,7 +48,10 @@ public sealed class ListMyReturnedSheetsHandler(
     IApprovalQueueStore store,
     IAccessDecisionService access,
     IMetadataCache metadata,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+
+    // ✎ RPT-STABLE B2: версія за періодом (шкала версій). `null` (прямий конструктор у тестах) - чинна версія.
+    IProjectVersionTimeline? timeline = null)
 {
     /// <summary>Розмір сторінки за замовчуванням.</summary>
     public const int DefaultLimit = 50;
@@ -104,7 +107,7 @@ public sealed class ListMyReturnedSheetsHandler(
         var participatedIds = participations.Keys.ToList();
 
         var snapshots = new Dictionary<int, TemplateVersionSnapshot>();
-        var scopes = new Dictionary<int, DocumentReadScope>();
+        var scopes = new Dictionary<(int ProjectId, int VersionId), DocumentReadScope>();
 
         var found = new List<(ReturnedSheetItemDto Item, ReturnedSheetsCursor Position)>();
         var scanned = 0;
@@ -143,10 +146,14 @@ public sealed class ListMyReturnedSheetsHandler(
                     continue;
                 }
 
-                if (!snapshots.TryGetValue(project.TemplateVersionId, out var snapshot))
+                // ✎ RPT-STABLE B2: аркуш належить версії ПЕРІОДУ (шкала), а не чинній версії проєкту.
+                var versionId = timeline is null || !project.MultiVersion
+                    ? project.TemplateVersionId
+                    : await timeline.VersionOfAsync(project.ProjectId, row.PeriodKey, ct).ConfigureAwait(false);
+                if (!snapshots.TryGetValue(versionId, out var snapshot))
                 {
-                    snapshot = await metadata.GetAsync(project.TemplateVersionId, ct).ConfigureAwait(false);
-                    snapshots[project.TemplateVersionId] = snapshot;
+                    snapshot = await metadata.GetAsync(versionId, ct).ConfigureAwait(false);
+                    snapshots[versionId] = snapshot;
                 }
 
                 var item = Evaluate(row, project, snapshot, profile, restricted, scopes, owner, submitter, grants);
@@ -191,7 +198,7 @@ public sealed class ListMyReturnedSheetsHandler(
         TemplateVersionSnapshot snapshot,
         AccessProfile profile,
         bool restricted,
-        Dictionary<int, DocumentReadScope> scopes,
+        Dictionary<(int ProjectId, int VersionId), DocumentReadScope> scopes,
         bool owner,
         bool submitter,
         IReadOnlyList<ParticipationGrant>? grants)
@@ -224,10 +231,10 @@ public sealed class ListMyReturnedSheetsHandler(
             {
                 scope = DocumentReadScope.ForParticipant(profile, project.ProjectId, snapshot, grants);
             }
-            else if (!scopes.TryGetValue(project.ProjectId, out scope))
+            else if (!scopes.TryGetValue((project.ProjectId, snapshot.TemplateVersionId), out scope))
             {
                 scope = DocumentReadScope.For(profile, project.ProjectId, snapshot);
-                scopes[project.ProjectId] = scope;
+                scopes[(project.ProjectId, snapshot.TemplateVersionId)] = scope;
             }
 
             var inPeriod = period is { } p ? scope.InPeriod(p) : scope;

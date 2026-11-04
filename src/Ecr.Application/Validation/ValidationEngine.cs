@@ -39,10 +39,12 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     /// <see cref="TableValidation.LoadRegistryFieldsAsync"/>; <c>null</c> —
     /// порожній знімок, <c>REGFIELD</c> дасть <c>#REF</c>.
     /// </param>
+    /// <param name="manualOverride">✎ D-461: значення — ручне значення замість формули (<c>ColumnDef.ValidateManualOverride</c>).</param>
     public IReadOnlyList<ValidationMessage> ValidateCell(
         ColumnDef column, Domain.ValueObjects.CellValueData value, IReadOnlyList<ValidationRule> rules,
         IReadOnlyDictionary<string, ExpressionValue> headers, string language,
-        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null)
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null,
+        bool manualOverride = false)
     {
         ArgumentNullException.ThrowIfNull(column);
         ArgumentNullException.ThrowIfNull(value);
@@ -60,7 +62,8 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
 
         // Спершу СТРУКТУРНА перевірка: тип, обов'язковість, довідник, одиниця.
         // Вона не залежить від конфігурації правил і тому не може «зламатися».
-        if (column.ValidateValue(value) is { } structural)
+        // ✎ D-461: ручне значення замість формули — та сама перевірка значення, лише без «обчислювана не приймає запису».
+        if ((manualOverride ? column.ValidateManualOverride(value) : column.ValidateValue(value)) is { } structural)
         {
             var (text, key, parameters) = StructuralMessage(column, value, structural, language);
             messages.Add(new ValidationMessage(

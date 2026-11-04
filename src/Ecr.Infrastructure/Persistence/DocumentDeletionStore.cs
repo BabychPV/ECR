@@ -157,6 +157,11 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
             .Where(s => rows.Any(r => r.Id == s.TableRowId && r.PeriodKeyValue == s.PeriodKeyValue))
             .ExecuteDeleteAsync(ct).ConfigureAwait(false);
 
+        // ✎ D-461: позначки «ручне значення замість формули» — без зовнішнього ключа (як doc.CellStyle), видаляються явно.
+        await db.CellFormulaOverrides
+            .Where(o => instances.Any(i => i.Id == o.TableInstanceId && i.PeriodKeyValue == o.PeriodKeyValue))
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
         // ⛔ L10-06: значення PI за вікном рядка ключуються екземпляром таблиці
         // без зовнішнього ключа — після видалення екземплярів їх уже не знайти.
         await db.RowWindowValues
@@ -271,6 +276,12 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
             .Select(d => d.Id)
             .Take(1)
             .ToListAsync(ct).ConfigureAwait(false);
+
+        // TC: чат таблиць іде разом з документом (текст видалених повідомлень лишається в журналі аудиту).
+        await db.TableDiscussionMentions.Where(m => m.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await db.TableDiscussionReads.Where(r => r.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await db.TableDiscussionMessages.Where(m => m.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await db.TableDiscussions.Where(s => s.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
 
         // EA-1: передачі зрізу (виконавці — листя, передача — корінь); FK без каскаду, як усі решта.
         await db.EditAssignmentRecipients

@@ -1,9 +1,25 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent, type RefObject } from 'react';
-import { ActionIcon, Badge, Box, Button, Group, Tabs, Text } from '@mantine/core';
+import {
+  Suspense,
+  lazy,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from 'react';
+import { ActionIcon, Badge, Box, Button, Group, SegmentedControl, Tabs, Text } from '@mantine/core';
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
-import { isHumanOrigin, useCellChanges } from '@/features/audit/api';
+import { useCellChanges } from '@/features/audit/api';
+import { cellAuthorHint, cellAuthorName } from '@/features/audit/authorOptions';
+import { cellChangeReasonText } from '@/features/audit/cellChangeReason';
 import { useTableStatus } from '@/features/documents/api';
 import { formatDateOnly } from '@/shared/format/dateOnly';
+import { formatPeriodKey } from '@/shared/format/periodKey';
 import { formatCount } from '@/shared/format/plural';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -21,7 +37,18 @@ import {
   tableTitleOf,
   type InspectorIssueGroup,
 } from './inspectorModel';
+import { SheetLog, type InspectorSheet, type SheetLogTarget } from './SheetLog';
 import './inspector.css';
+
+export type { InspectorSheet, SheetLogTarget } from './SheetLog';
+
+/**
+ * D-463 «Звідки це значення» — лінивий чанк (`D-132`): секцію бачать лише у вкладці Info і лише для комірки,
+ * яку живить мапінг PI; решта комірок не платить ні байтом бандла.
+ */
+const CellSourceSection = lazy(async () => ({
+  default: (await import('@/features/piData/CellSourceSection')).CellSourceSection,
+}));
 
 /**
  * Інспектор документа справа: вкладки Issues / History / Info (`UI-25`).
@@ -67,6 +94,15 @@ export interface DocumentInspectorProps {
    * відкривається сам (макет: `runValidate` → `openInspector('issues')`).
    */
   readonly validatedSeq?: number | undefined;
+  /**
+   * ✎ TC: extra buttons of the same row, between "Issues" and "History" (the "Discussion" button of the table chat,
+   * mockup order Issues · Discussion · History). The inspector does not know what they are.
+   */
+  readonly extraTriggers?: ReactNode;
+  /** Активний аркуш сторінки: його журнал показує History без вибраної комірки; `null` - аркуша немає. */
+  readonly sheet?: InspectorSheet | null | undefined;
+  /** Перехід у комірку з рядка журналу аркуша (той самий шлях, що й для зауважень). */
+  readonly onOpenCell?: ((target: SheetLogTarget) => void) | undefined;
 }
 
 export function DocumentInspector({
@@ -76,8 +112,12 @@ export function DocumentInspector({
   messages,
   onSelectFinding,
   validatedSeq,
+  extraTriggers,
+  sheet = null,
+  onOpenCell,
 }: DocumentInspectorProps): JSX.Element {
   const [panel, setPanel] = useUrlState(PanelParam);
+  const [historyMode, setHistoryMode] = useState<HistoryMode>('sheet');
   const tab = asTab(panel);
   const opened = tab !== null;
 
@@ -172,6 +212,12 @@ export function DocumentInspector({
   // ⛔ Комірка іншого документа, періоду чи таблиці, якої тут немає, — не ця комірка.
   const shownCell = cellTable === undefined ? null : cell;
 
+  // Комірки немає - режим «This cell» неможливий: перемикач повертається на журнал аркуша і лишається узгодженим,
+  // а наступний вибір комірки його сам НЕ вмикає (вміст не підміняється без дії людини).
+  useEffect(() => {
+    if (shownCell === null && historyMode === 'cell') setHistoryMode('sheet');
+  }, [shownCell, historyMode]);
+
   return (
     <>
       <InspectorTriggers
@@ -180,6 +226,7 @@ export function DocumentInspector({
         issuesButton={issuesButton}
         onIssues={() => toggle('issues')}
         onHistory={() => toggle('history')}
+        extra={extraTriggers}
       />
 
       {opened && (
@@ -226,7 +273,15 @@ export function DocumentInspector({
               <IssuesTab groups={groups} onSelect={onSelectIssue} />
             </Tabs.Panel>
             <Tabs.Panel value="history" className="ecr-insp-body">
-              <HistoryTab documentId={documentId} periodKey={periodKey} cell={shownCell} />
+              <HistoryTab
+                documentId={documentId}
+                periodKey={periodKey}
+                cell={shownCell}
+                sheet={sheet}
+                mode={historyMode}
+                onModeChange={setHistoryMode}
+                onOpenCell={onOpenCell}
+              />
             </Tabs.Panel>
             <Tabs.Panel value="info" className="ecr-insp-body">
               <InfoTab documentId={documentId} periodKey={periodKey} cell={shownCell} table={cellTable} />
@@ -245,12 +300,14 @@ function InspectorTriggers({
   issuesButton,
   onIssues,
   onHistory,
+  extra,
 }: {
   counts: ReturnType<typeof countIssues> | null;
   tab: InspectorTab | null;
   issuesButton: RefObject<HTMLButtonElement | null>;
   onIssues: () => void;
   onHistory: () => void;
+  extra?: ReactNode;
 }): JSX.Element {
   const tone = counts === null || counts.all === 0 ? 'gray' : counts.errors > 0 ? 'statusError' : 'statusWarning';
   const label =
@@ -292,6 +349,7 @@ function InspectorTriggers({
       >
         {label}
       </Button>
+      {extra}
       <ActionIcon
         size="sm"
         variant={tab === 'history' ? 'light' : 'subtle'}
@@ -426,7 +484,76 @@ function historyWindow(): { from: string; to: string } {
   return { from: formatDateOnly(from), to: formatDateOnly(today) };
 }
 
+export type HistoryMode = 'sheet' | 'cell';
+
+/**
+ * Вкладка History: ДВА явні режими - журнал аркуша («Sheet log») і історія вибраної комірки («This cell»).
+ *
+ * ⛔ Вибір комірки НЕ підміняє вміст мовчки: режим змінює лише людина перемикачем. «This cell» вимкнений, поки комірки
+ * немає; зняття вибору в режимі комірки повертає на журнал аркуша (стан перемикача лишається узгодженим).
+ * Заголовок щоразу називає, ЧИЮ історію видно (аркуш і період або комірка і колонка).
+ */
 function HistoryTab({
+  documentId,
+  periodKey,
+  cell,
+  sheet,
+  mode,
+  onModeChange,
+  onOpenCell,
+}: {
+  documentId: number;
+  periodKey: number;
+  cell: InspectedCell | null;
+  sheet: InspectorSheet | null;
+  mode: HistoryMode;
+  onModeChange: (mode: HistoryMode) => void;
+  onOpenCell: ((target: SheetLogTarget) => void) | undefined;
+}): JSX.Element {
+  const effective: HistoryMode = mode === 'cell' && cell !== null ? 'cell' : 'sheet';
+  const period = formatPeriodKey(periodKey) || String(periodKey);
+  const scope =
+    effective === 'cell' && cell !== null
+      ? t('inspector.history.scopeCell', {
+          cell: addressChip(cell.rowKey, cell.columnCode),
+          column: cell.columnHeader.length > 0 ? cell.columnHeader : cell.columnCode,
+        })
+      : t('inspector.history.scopeSheet', { sheet: sheet?.name ?? '—', period });
+
+  return (
+    <div data-inspector-history-mode={effective}>
+      <Box px="sm" pt="xs" pb="xs" className="ecr-insp-scope">
+        <SegmentedControl
+          size="xs"
+          fullWidth
+          aria-label={t('inspector.history.modeLabel')}
+          value={effective}
+          onChange={(value) => onModeChange(value === 'cell' ? 'cell' : 'sheet')}
+          data={[
+            { value: 'sheet', label: t('inspector.history.modeSheet') },
+            { value: 'cell', label: t('inspector.history.modeCell'), disabled: cell === null },
+          ]}
+        />
+        <Text size="xs" c="dimmed" mt="xs" role="status" data-inspector-scope="">
+          {scope}
+        </Text>
+        {effective === 'sheet' && cell === null && (
+          <Text size="xs" c="dimmed" data-inspector-select-hint="">
+            {t('inspector.sheetHistoryHint')}
+          </Text>
+        )}
+      </Box>
+
+      {effective === 'cell' ? (
+        <CellHistory documentId={documentId} periodKey={periodKey} cell={cell} />
+      ) : (
+        <SheetLog documentId={documentId} periodKey={periodKey} sheet={sheet} onOpenCell={onOpenCell} />
+      )}
+    </div>
+  );
+}
+
+function CellHistory({
   documentId,
   periodKey,
   cell,
@@ -484,10 +611,13 @@ function HistoryTab({
         <div key={`${change.changedAt}:${String(change.changedByUserId)}:${change.newValue ?? ''}`} role="listitem" className="ecr-insp-hist">
           <Group justify="space-between" gap="xs" wrap="nowrap">
             {/* AN-115: правка й імпорт — ім'я людини; перерахунок/інтеграція/міграція — «Система». */}
-            <Text size="sm" fw={500} data-inspector-author="">
-              {isHumanOrigin(change.origin)
-                ? (change.changedByDisplayName ?? t('inspector.unknownAuthor', { id: change.changedByUserId }))
-                : t('audit.systemAuthor')}
+            {/* ✎ D-461: та сама підказка, що й у журналі: для системної зміни — хто її запустив. */}
+            <Text size="sm" fw={500} data-inspector-author="" title={cellAuthorHint(change)}>
+              {cellAuthorName({
+                ...change,
+                changedByDisplayName:
+                  change.changedByDisplayName ?? t('inspector.unknownAuthor', { id: change.changedByUserId }),
+              })}
             </Text>
             <Text size="xs" c="dimmed">
               <Timestamp value={change.changedAt} />
@@ -508,9 +638,23 @@ function HistoryTab({
               </Badge>
             )}
           </Group>
+          {/* ✎ D-461: причина ручного значення замість формули — словами під походженням. */}
+          <HistoryReason reason={change.reason} />
         </div>
       ))}
     </div>
+  );
+}
+
+/** ✎ D-461: «Причина: …» рядка історії комірки; без причини — нічого (`cellChangeReasonText`). */
+function HistoryReason({ reason }: { readonly reason: string | null | undefined }): JSX.Element | null {
+  const text = cellChangeReasonText(reason);
+  if (text === null) return null;
+
+  return (
+    <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-line', overflowWrap: 'anywhere' }} data-inspector-reason="">
+      {`${t('audit.reason')}: ${text}`}
+    </Text>
   );
 }
 
@@ -569,6 +713,16 @@ function InfoTab({
   return (
     <Box p="sm" data-inspector-info="">
       <KeyValue items={items} />
+      <Suspense fallback={null}>
+        <CellSourceSection
+          cell={{
+            documentId,
+            tableInstanceId: cell.tableInstanceId,
+            rowKey: cell.rowKey,
+            columnDefId: cell.columnDefId,
+          }}
+        />
+      </Suspense>
     </Box>
   );
 }

@@ -37,7 +37,10 @@ public sealed class RecallSheetHandler(
     Reporting.ReportSnapshotSync reports,
     IUnitOfWork uow,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    // D-462: повернутий аркуш знову редагований — комірки наздоганяють сирий шар (SheetMaterializationTrigger);
+    // `null` — тестові фабрики обробника без черги.
+    IMaterializationScheduler? materialization = null)
 {
     /// <summary>Відкликає аркуш.</summary>
     /// <param name="documentId">Документ.</param>
@@ -48,8 +51,19 @@ public sealed class RecallSheetHandler(
     /// <exception cref="AccessDeniedException">Немає рівня <c>Submit</c> або відкликає не автор подання.</exception>
     /// <exception cref="ConcurrencyConflictException">Аркуш не поданий або крок уже підписано — <c>ECR-DOC-0409</c>.</exception>
     /// <exception cref="DomainException">Причина порожня — <c>ECR-DOC-0422</c>.</exception>
-    public async Task HandleAsync(
+    public Task HandleAsync(
         long documentId, int sheetDefId, int periodKey, string reason, CancellationToken ct)
+        => HandleAsync(documentId, sheetDefId, periodKey, reason, sheetCopyId: null, ct);
+
+    /// <summary>Відкликає аркуш або його КОПІЮ (RS: власний стан копії за період).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="reason">Причина; обов'язкова.</param>
+    /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task HandleAsync(
+        long documentId, int sheetDefId, int periodKey, string reason, long? sheetCopyId, CancellationToken ct)
     {
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
@@ -70,7 +84,9 @@ public sealed class RecallSheetHandler(
 
         // ⛔ Та сама перевірка складу, що й у поданні: `GetOrCreateAsync` створює
         // рядок стану для БУДЬ-ЯКОГО ідентифікатора аркуша (`S-17`).
-        if (!await documents.HasSheetAsync(documentId, sheetDefId, ct).ConfigureAwait(false))
+        if (!await documents.HasSheetAsync(documentId, sheetDefId, ct).ConfigureAwait(false)
+            || (sheetCopyId is { } copy
+                && !await documents.HasSheetCopyAsync(documentId, sheetDefId, copy, ct).ConfigureAwait(false)))
         {
             throw new NotFoundException(
                 "ECR-DOC-0404",
@@ -111,7 +127,7 @@ public sealed class RecallSheetHandler(
             await ClosedPeriodGuard.RequireNotClosedAsync(workflow, documentId, key, clock.UtcNow, innerCt)
                 .ConfigureAwait(false);
 
-            var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
+            var state = await workflow.GetOrCreateOfAsync(documentId, sheetDefId, key, sheetCopyId, innerCt).ConfigureAwait(false);
 
             // ⛔ Відкликає ЛИШЕ той, хто подав. Колега з тим самим грантом має
             // для цього `Reopen` — окреме право з окремим слідом. На неподаному
@@ -157,16 +173,31 @@ public sealed class RecallSheetHandler(
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             await reports.RefreshAsync(documentId, key, innerCt).ConfigureAwait(false);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            // RS (Q5): збір пише лише в оригінал — для копії наздоганяти нічого.
+            if (sheetCopyId is null)
+            {
+                await SheetMaterializationTrigger
+                    .InsideTransactionAsync(materialization, documentId, sheetDefId, periodKey, innerCt)
+                    .ConfigureAwait(false);
+            }
         }, ct).ConfigureAwait(false);
+
+        if (sheetCopyId is null)
+        {
+            await SheetMaterializationTrigger
+                .AfterCommitAsync(materialization, documentId, sheetDefId, periodKey, ct)
+                .ConfigureAwait(false);
+        }
     }
 
-    /// <summary>Чи пропустив би <see cref="HandleAsync"/> цього користувача саме зараз.</summary>
+    /// <summary>Чи пропустив би <see cref="HandleAsync(long, int, int, string, long?, CancellationToken)"/> цього користувача саме зараз.</summary>
     /// <remarks>
     /// ⚠ Відповідає <c>false</c>, а не відмовою: це підказка для кнопки. Стан
     /// періоду сюди не входить — закритий період пояснює сама відмова дії.
     /// </remarks>
     public async Task<RecallAvailabilityDto> CanRecallAsync(
-        long documentId, int sheetDefId, int periodKey, CancellationToken ct)
+        long documentId, int sheetDefId, int periodKey, CancellationToken ct, long? sheetCopyId = null)
     {
         if (currentUser.UserId is not { } userId)
         {
@@ -183,7 +214,8 @@ public sealed class RecallSheetHandler(
         }
 
         var sheets = await workflow.GetSheetsAsync(documentId, key, ct).ConfigureAwait(false);
-        var state = sheets.FirstOrDefault(s => s.SheetDefId == sheetDefId);
+        // ⛔ RS: стан САМЕ цієї копії (null — оригінал): без фільтра перший рядок аркуша міг бути станом копії.
+        var state = sheets.FirstOrDefault(s => s.SheetDefId == sheetDefId && s.SheetCopyId == sheetCopyId);
 
         if (state is null || state.SubmittedByUserId != userId)
         {

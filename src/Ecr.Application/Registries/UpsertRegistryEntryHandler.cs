@@ -27,8 +27,12 @@ public sealed class UpsertRegistryEntryHandler(
     ICurrentUser currentUser,
     RegistryEntryWriter writer,
     IUnitOfWork? uow = null,
-    Rules.IRegistryRuleEngine? rules = null)
+    Rules.IRegistryRuleEngine? rules = null,
+    IRegistryHierarchyStore? hierarchy = null,
+    Nae.NaeTreeNodePolicy? nae = null)
 {
+    // ⚠ `nae` (типи вузлів НАЕ, людина 03.11) — правила дерева НАЕ: назва en, похідні RegionCode/AreaCode, унікальність номера
+    // в області. Контейнер підставляє його завжди; без нього (ручні тести) дерево НАЕ пишеться як звичайний довідник.
     // ⚠ `uow` і `rules` необов'язкові лише для тестів, що будують обробник руками (довідники без
     // правил) — той самий прийом, що `keys` у RegistryEntryWriter. Контейнер підставляє обидва
     // завжди; що правила на справжньому шляху виконуються, тримає `RegistryRulesHttpTests`.
@@ -163,7 +167,33 @@ public sealed class UpsertRegistryEntryHandler(
         // в запиті немає, лишається як була; мова з порожнім текстом —
         // свідомо прибирається (так клієнт каже «цей переклад видалено»).
         entry.Rename(dto.Id is null ? WithoutEmpty(dto.Display) : Merge(entry.DisplayL10n, dto.Display));
-        entry.SetParent(dto.ParentEntryId);
+        (IReadOnlyList<RegistryLevelDef> Levels, RegistryLevelDef Level)? placement = null;
+        var naeTree = nae is not null && Nae.NaeTreeNodePolicy.IsNaeTree(definition);
+        if (definition.IsHierarchical)
+        {
+            if (naeTree && entry.IsPersisted)
+            {
+                // A changed parent moves the subtree: the region/area of its NAE sources must not change (before SetParent).
+                await nae!.EnsureMoveKeepsScopeAsync(definition, entry.Id, dto.ParentEntryId, ct).ConfigureAwait(false);
+            }
+
+            var oldLevelId = entry.LevelId;
+            placement = await ApplyHierarchyAsync(definition, entry, dto, ct).ConfigureAwait(false);
+            if (naeTree)
+            {
+                // Out of SRC — refused; INTO SRC — the usual SRC rules below (number required and free, derived region/area).
+                if (entry.IsPersisted)
+                {
+                    Nae.NaeTreeNodePolicy.EnsureNotLeavingSource(placement.Value.Levels, oldLevelId, placement.Value.Level, entry.Code);
+                }
+
+                values = await nae!.PrepareAsync(definition, entry, placement.Value.Level, dto.ParentEntryId, values, ct).ConfigureAwait(false);
+            }
+        }
+        else
+        {
+            entry.SetParent(dto.ParentEntryId);
+        }
 
         var changes = await writer.ApplyValuesAsync(definition, entry, values, prefetch: null, ct).ConfigureAwait(false);
 
@@ -176,9 +206,15 @@ public sealed class UpsertRegistryEntryHandler(
         // транзакції збереження, і ОДНА подія аудиту на всі змінені поля — після коміту.
         if (rules is null || uow is null)
         {
+            IReadOnlyList<RegistryEntryUpdate> plain = naeTree && placement is { } pl
+                ? await nae!.PlanScopeCascadeAsync(definition, entry, pl.Level, values, changes, ct).ConfigureAwait(false)
+                : Array.Empty<RegistryEntryUpdate>();
             await writer.SaveEntryAsync(definition, entry, changes, userId, ct).ConfigureAwait(false);
+            await ApplyScopeCascadeAsync(definition, plain, ct).ConfigureAwait(false);
             return new RegistryEntryUpsertResult(entry.Id, []);
         }
+
+        IReadOnlyList<RegistryEntryUpdate> cascade = [];
 
         // ⛔ RT-17a (§6): правила — ПІСЛЯ збереження, у ТІЙ САМІЙ транзакції: знімок довідників
         // бачить запис таким, яким він ляже, а порушення рівня Error відкочує і запис, і його
@@ -187,13 +223,80 @@ public sealed class UpsertRegistryEntryHandler(
         await uow.ExecuteInTransactionAsync(
             async token =>
             {
+                // N2: the placement was validated before the transaction; take the tree lock (the row move/retire write) and
+                // validate once more on fresh data, so a concurrent move cannot slip a cycle or a wrong level past the check.
+                if (placement is { } p && hierarchy is not null)
+                {
+                    await hierarchy.LockTreeAsync(definition.Id, token).ConfigureAwait(false);
+                    await Hierarchy.RegistryHierarchyPlacement.EnsureAsync(
+                        hierarchy, definition.Id, p.Levels, entry.IsPersisted ? entry.Id : null, dto.ParentEntryId, p.Level, token)
+                        .ConfigureAwait(false);
+
+                    // NAE Q3 (03.11): the number is free in its region/area — under the same tree lock, so two concurrent
+                    // creates of one number cannot both pass.
+                    if (naeTree)
+                    {
+                        await nae!.EnsureCodeFreeAsync(definition, entry, p.Level, dto.ParentEntryId, values, token).ConfigureAwait(false);
+
+                        // Coordinator 03.11: a changed RegionCode (REGION) / AreaCode (AREA) cascades to the stored codes of the
+                        // sources below — pre-checked here (409 naeCodeTaken, nothing written), written after the node.
+                        cascade = await nae.PlanScopeCascadeAsync(definition, entry, p.Level, values, changes, token).ConfigureAwait(false);
+                    }
+                }
+
                 await writer.SaveEntryAsync(definition, entry, changes, userId, token).ConfigureAwait(false);
+                await ApplyScopeCascadeAsync(definition, cascade, token).ConfigureAwait(false);
                 check = await rules.EvaluateAsync(definition, [entry.Id], [], businessDate: null, token).ConfigureAwait(false);
                 check.ThrowIfErrors();
             },
             ct).ConfigureAwait(false);
 
         return new RegistryEntryUpsertResult(entry.Id, check.Warnings);
+    }
+
+    /// <summary>
+    /// Writes the planned region/area updates of NAE sources through the registry writer (the same path as an upsert: value
+    /// checks, composite key, data revision and one <c>RegistryValueChanged</c> audit event per source).
+    /// </summary>
+    private async Task ApplyScopeCascadeAsync(RegistryDef definition, IReadOnlyList<RegistryEntryUpdate> cascade, CancellationToken ct)
+    {
+        if (cascade.Count == 0)
+        {
+            return;
+        }
+
+        var result = await writer.UpdateAsync(new RegistryEntryUpdateBatch(definition.Id, cascade), ct).ConfigureAwait(false);
+        if (result.Errors.Count > 0)
+        {
+            var first = result.Errors[0];
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"NAE scope cascade failed for entry {first.Key}: {first.MessageKey}.",
+                new Dictionary<string, object?> { ["messageKey"] = first.MessageKey });
+        }
+    }
+
+    /// <summary>
+    /// Places an entry of a hierarchical registry (NAE plan N1): level, parent, order of levels, cycles, subtree — validated
+    /// against fresh data before the entry is saved (<c>422 ECR-REG-0422</c>).
+    /// </summary>
+    private async Task<(IReadOnlyList<RegistryLevelDef> Levels, RegistryLevelDef Level)> ApplyHierarchyAsync(
+        RegistryDef definition, RegistryEntry entry, RegistryEntryUpsertDto dto, CancellationToken ct)
+    {
+        var store = hierarchy
+            ?? throw new InvalidOperationException("IRegistryHierarchyStore is required for hierarchical registries.");
+        var levels = await store.ListLevelsAsync(definition.Id, ct).ConfigureAwait(false);
+
+        var level = dto.LevelCode is not null
+            ? Hierarchy.RegistryHierarchyPlacement.LevelByCode(levels, dto.LevelCode)
+            : levels.FirstOrDefault(l => l.Id == entry.LevelId) ?? throw Hierarchy.RegistryHierarchyPlacement.LevelRequired();
+
+        await Hierarchy.RegistryHierarchyPlacement.EnsureAsync(
+            store, definition.Id, levels, entry.IsPersisted ? entry.Id : null, dto.ParentEntryId, level, ct).ConfigureAwait(false);
+
+        entry.SetParent(dto.ParentEntryId);
+        entry.SetLevel(level.Id);
+        return (levels, level);
     }
 
     /// <summary>Наявна назва, поверх якої лягли мови з запиту (X-03).</summary>

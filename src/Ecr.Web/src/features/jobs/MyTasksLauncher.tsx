@@ -51,6 +51,11 @@ const EditAssignmentsSection = lazy(async () => ({
   default: (await import('./EditAssignmentsSection')).EditAssignmentsSection,
 }));
 
+// ✎ TC: @згадки в чатах таблиць - так само окремий чанк, запит іде лише при відкритій шухляді.
+const MentionTasksSection = lazy(async () => ({
+  default: (await import('@/features/tableChat/MentionTasksSection')).MentionTasksSection,
+}));
+
 function prefetchDrawer(): void {
   loadDrawer().catch(() => undefined);
 }
@@ -166,6 +171,9 @@ export function MyTasksLauncher(): JSX.Element {
                 {/* ✎ D-449: повернута робота - найтерміновіше для автора, тому першою. */}
                 <Suspense fallback={null}>
                   <ReturnedSheetsSection opened={opened} onNavigate={() => setOpened(false)} />
+                </Suspense>
+                <Suspense fallback={null}>
+                  <MentionTasksSection opened={opened} onNavigate={() => setOpened(false)} />
                 </Suspense>
                 <Suspense fallback={null}>
                   <ApprovalQueueSection opened={opened} onNavigate={() => setOpened(false)} />
