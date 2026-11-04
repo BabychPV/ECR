@@ -1,4 +1,4 @@
-import { expect, test, type APIResponse, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type APIResponse, type Browser, type Page } from '@playwright/test';
 import { signIn } from './multiSheet';
 
 /**
@@ -51,6 +51,62 @@ function column(ordinal: number, header: string, dataType: string): Record<strin
   };
 }
 
+/**
+ * ⚠ Роль стенда `E2EAdmin` не має `Calculation.EditRule` (правило відбору рядків, прив'язка), а роль стенда тут не
+ * змінюється. Тому — свій методолог (прийом `methodologyCategories.spec.ts`): тимчасова роль із правами методології
+ * і користувач із нею; прибирання — у `finally` тесту (роль знімається з користувача, потім видаляється).
+ */
+const Stamp = Date.now().toString(36).toUpperCase().slice(-6);
+const EditorRole = `E2ECI${Stamp}`;
+const Editor = {
+  userName: `e2e-ci-${Stamp.toLowerCase()}`,
+  issued: 'E2E-Meth0d-2026!',
+  password: 'E2E-Meth0d-Work-2026!',
+};
+const EditorPermissions = ['Calculation.View', 'Calculation.EditFormula', 'Calculation.EditRule', 'Calculation.Publish'];
+
+async function editorContext(browser: Browser, password: string): Promise<{ request: APIRequestContext; close: () => Promise<void> }> {
+  const context = await browser.newContext();
+  const login = await context.request.post('/api/v1/login/local', { data: { userName: Editor.userName, password } });
+  expect(login.ok(), `вхід методолога: ${String(login.status())} ${await login.text()}`).toBe(true);
+
+  return { request: context.request, close: () => context.close() };
+}
+
+/** Роль і користувач-методолог; пароль одразу змінюється з разового на робочий. Повертає їхні ідентифікатори. */
+async function createEditor(page: Page, browser: Browser): Promise<{ roleId: number; userId: number }> {
+  const role = await ok<{ roleId: number }>(
+    await page.request.post('/api/v1/roles', {
+      data: { code: EditorRole, nameL10n: { en: 'E2E calc issues editor' }, permissionCodes: EditorPermissions },
+    }),
+    'роль методолога',
+  );
+  const user = await ok<{ userId: number }>(
+    await page.request.post('/api/v1/users', {
+      data: {
+        userName: Editor.userName,
+        provider: 'Local',
+        sid: null,
+        displayName: 'E2E calc issues editor',
+        initialPassword: Editor.issued,
+        roleCodes: [EditorRole],
+      },
+    }),
+    'користувач-методолог',
+  );
+  const first = await editorContext(browser, Editor.issued);
+  try {
+    await ok(
+      await first.request.post('/api/v1/auth/change-password', { data: { currentPassword: Editor.issued, newPassword: Editor.password } }),
+      'пароль методолога',
+    );
+  } finally {
+    await first.close();
+  }
+
+  return { roleId: role.roleId, userId: user.userId };
+}
+
 interface IssuesResponse {
   items: { tableCode: string; rowNumber: number; rowKey: string; kind: string; methodologyCode: string | null }[];
 }
@@ -63,7 +119,7 @@ interface Arranged {
 }
 
 /** Шаблон, документ, два рядки, опублікована методологія з правилом і прив'язкою. Перерахунок — окремо. */
-async function arrange(page: Page): Promise<Arranged> {
+async function arrange(page: Page, editor: APIRequestContext): Promise<Arranged> {
   const stamp = String(Date.now());
 
   // 1. Шаблон: аркуш S1 з двома таблицями.
@@ -195,39 +251,39 @@ async function arrange(page: Page): Promise<Arranged> {
   );
 
   // 4. Методологія: вихід, формула, правило «KIND = Gas», золотий тест, прив'язка до OUT, публікація.
-  const units = await ok<{ id: number; code: string }[]>(await page.request.get('/api/v1/units'), 'одиниці');
+  const units = await ok<{ id: number; code: string }[]>(await editor.get('/api/v1/units'), 'одиниці');
   const unitId = (units.find((unit) => unit.code === 't') ?? units[0])?.id ?? 0;
   const methodologyCode = `E2ECI_${stamp}`;
   const methodology = await ok<{ id: number }>(
-    await page.request.post('/api/v1/methodologies', {
+    await editor.post('/api/v1/methodologies', {
       data: { code: methodologyCode, group: null, kind: 'DataDriven', nameL10n: { en: `E2E calc issues ${stamp}` } },
     }),
     'методологія',
   );
   const draftVersion = await ok<{ id: number }>(
-    await page.request.post(`/api/v1/methodologies/${String(methodology.id)}/versions`, {
+    await editor.post(`/api/v1/methodologies/${String(methodology.id)}/versions`, {
       data: { versionNumber: '1.0', copyFromVersionId: null, level: 'Configuration' },
     }),
     'чернетка методології',
   );
   const mBase = `/api/v1/methodologies/${String(methodology.id)}`;
   const vBase = `${mBase}/versions/${String(draftVersion.id)}`;
-  await ok(await page.request.put(`${vBase}/outputs/EMISSION`, { data: { unitId, ordinal: 1 } }), 'вихід EMISSION');
+  await ok(await editor.put(`${vBase}/outputs/EMISSION`, { data: { unitId, ordinal: 1 } }), 'вихід EMISSION');
   await ok(
-    await page.request.put(`${vBase}/formulas/EMISSION`, {
+    await editor.put(`${vBase}/formulas/EMISSION`, {
       // ⛔ Без argumentsCsv звірка списку аргументів мовчить, а золотий тест читає аргумент A.
       data: { expression: '@A * 2', resultType: 'Number', outputUnitId: unitId, argumentsCsv: 'A' },
     }),
     'формула EMISSION',
   );
   await ok(
-    await page.request.put(`${vBase}/rules/ONLY_GAS`, {
+    await editor.put(`${vBase}/rules/ONLY_GAS`, {
       data: { matchJson: JSON.stringify({ [String(columnId('KIND'))]: 'Gas' }), priority: 1, isActive: true },
     }),
     'правило ONLY_GAS',
   );
   await ok(
-    await page.request.put(`${vBase}/tests/GOLDEN`, {
+    await editor.put(`${vBase}/tests/GOLDEN`, {
       data: {
         inputJson: JSON.stringify({
           documentId: document.documentId,
@@ -243,12 +299,12 @@ async function arrange(page: Page): Promise<Arranged> {
     'золотий тест',
   );
   await ok(
-    await page.request.put(`${mBase}/bindings/${String(columnId('OUT'))}/EMISSION`, { data: { matchJson: '{}', isActive: true } }),
+    await editor.put(`${mBase}/bindings/${String(columnId('OUT'))}/EMISSION`, { data: { matchJson: '{}', isActive: true } }),
     'прив’язка до OUT',
   );
   // ⛔ Дата чинності — раніше за період: версію добирають за датою ПЕРІОДУ.
   await ok(
-    await page.request.post(`${vBase}/publish`, {
+    await editor.post(`${vBase}/publish`, {
       data: { changeReason: 'e2e: AN-69 проблеми розрахунку', effectiveFrom: `${String(Math.floor(periodKey / 100) - 1)}-01-01` },
     }),
     'публікація методології',
@@ -276,10 +332,30 @@ async function recalculate(page: Page, arranged: Arranged): Promise<void> {
     .toBe('Succeeded');
 }
 
-test('AN-69 calculation issues (проблеми розрахунку): row without a matching rule shows the badge in the table tree and the panel; a click selects the table', async ({ page }) => {
+test('AN-69 calculation issues (проблеми розрахунку): row without a matching rule shows the badge in the table tree and the panel; a click selects the table', async ({ page, browser }) => {
   await signIn(page);
   await page.setViewportSize({ width: 1440, height: 900 });
-  const arranged = await arrange(page);
+  const created = { roleId: 0, userId: 0 };
+  try {
+    await runScenario(page, browser, created);
+  } finally {
+    // Користувач лишається без ролей (видалити його API не дає); роль видаляється ПІСЛЯ зняття (інакше 409).
+    if (created.userId !== 0) await page.request.put(`/api/v1/users/${String(created.userId)}/roles`, { data: { roleCodes: [] } });
+    if (created.roleId !== 0) await page.request.delete(`/api/v1/roles/${String(created.roleId)}`);
+  }
+});
+
+async function runScenario(page: Page, browser: Browser, created: { roleId: number; userId: number }): Promise<void> {
+  const ids = await createEditor(page, browser);
+  created.roleId = ids.roleId;
+  created.userId = ids.userId;
+  const editor = await editorContext(browser, Editor.password);
+  let arranged: Arranged;
+  try {
+    arranged = await arrange(page, editor.request);
+  } finally {
+    await editor.close();
+  }
   await recalculate(page, arranged);
 
   // 1. Сервер: рівно одна проблема — рядок Coal (№ 2) таблиці TCALC; Gas правилом закрито.
@@ -326,4 +402,4 @@ test('AN-69 calculation issues (проблеми розрахунку): row with
   await item.getByRole('button').click();
   await expect(page).toHaveURL(new RegExp(`[?&]table=${TableCalc}(&|$)`));
   await expect(calcItem).toHaveAttribute('aria-selected', 'true');
-});
+}
