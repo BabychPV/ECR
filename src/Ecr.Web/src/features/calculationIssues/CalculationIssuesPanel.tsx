@@ -59,7 +59,7 @@ export function CalculationIssuesPanel({
         </Text>
         <Button
           variant="subtle"
-          size="compact-sm"
+          size="xs"
           aria-expanded={opened}
           aria-controls={listId}
           onClick={toggle}
