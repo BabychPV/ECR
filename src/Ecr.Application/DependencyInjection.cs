@@ -440,6 +440,7 @@ public static class DependencyInjection
         services.AddScoped<Calculations.CompareMethodologyVersionsHandler>();
         services.AddScoped<Documents.GetCalculationResultsHandler>();
         services.AddScoped<Documents.GetCalculationRunStatusHandler>();
+        services.AddScoped<Documents.GetCalculationIssuesHandler>();
         services.AddScoped<Calculations.RunCalculationHandler>();
         services.AddScoped<Calculations.RecalculationApprovalHandlers>();
         services.AddScoped<Localization.SetUiStringHandler>();

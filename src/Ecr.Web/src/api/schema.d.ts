@@ -5328,6 +5328,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/calculation-issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Поточні проблеми розрахунку документа за період і копію аркуша: рядки без правила (AN-69). Право `Document.View`.
+         * @description ⚠ Лише поточні проблеми останнього проходу; без `sheetCopyId` — оригінал аркуша. Рядки схованих таблиць
+         *     у відповіді відсутні; невидимий документ — 404.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    periodKey?: number;
+                    sheetCopyId?: number;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CalculationIssuesDto"];
+                        "text/json": components["schemas"]["CalculationIssuesDto"];
+                        "text/plain": components["schemas"]["CalculationIssuesDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/calculation-results": {
         parameters: {
             query?: never;
@@ -27012,6 +27059,37 @@ export interface components {
              */
             tableDefId: number;
             tableNameL10n?: null | components["schemas"]["LocalizedText"];
+        };
+        /** @description Одна поточна проблема розрахунку: рядок, який правило методології не охопило (AN-69). */
+        CalculationIssueDto: {
+            /**
+             * Format: date-time
+             * @description Коли виявлено (UTC).
+             */
+            detectedAt: string;
+            /** @description Вид проблеми; нині `NoMatchingRule`. */
+            kind: string;
+            /** @description Методологія прив'язки таблиці; `null` — невідома. */
+            methodologyCode: null | string;
+            /** @description Публічний ключ рядка. */
+            rowKey: string;
+            /**
+             * Format: int32
+             * @description Номер рядка, з 1, у порядку створення.
+             */
+            rowNumber: number;
+            /**
+             * Format: int64
+             * @description Копія аркуша; `null` — оригінал.
+             */
+            sheetCopyId: null | number;
+            /** @description Код таблиці шаблону. */
+            tableCode: string;
+        };
+        /** @description Поточні проблеми розрахунку документа за період (AN-69). */
+        CalculationIssuesDto: {
+            /** @description Проблеми видимих читачеві таблиць; порожньо — проблем немає. */
+            items: components["schemas"]["CalculationIssueDto"][];
         };
         /**
          * @description Рівень драбини виразності для методології (ФВ-9.2).
