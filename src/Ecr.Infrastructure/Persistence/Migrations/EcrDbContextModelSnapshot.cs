@@ -3030,6 +3030,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("PK_RegistryValue");
 
+                    b.HasIndex("ValueRefEntryId")
+                        .HasDatabaseName("IX_RegistryValue_ValueRef")
+                        .HasFilter("[ValueRefEntryId] IS NOT NULL");
+
                     b.HasIndex("RegistryEntryId", "RegistryFieldDefId")
                         .IsUnique()
                         .HasDatabaseName("UQ_RegistryValue");
