@@ -1,5 +1,4 @@
 // src/Ecr.Application/Documents/StepApproversResolver.cs
-using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.ValueObjects;
@@ -16,8 +15,9 @@ namespace Ecr.Application.Documents;
 /// (видимість, стан <c>Submitted</c>, роль ПОТОЧНОГО кроку, грант <c>Approve</c>, область ролі, надання учасника).
 /// Заборона самопогодження (<c>D-278</c>) скасована <c>D-440</c>: подавач у списку, якщо рішення його пропускає, —
 /// рівно як і при затвердженні. Друга копія предиката розійшлася б із першою мовчки.
-/// ⚠ Ціна обмежена: не більше <see cref="MaxCandidates"/> кандидатів, кожен — за профілем (кеш) і рішенням лише для
-/// тих кроків, роль яких він несе; перший дозвіл зупиняє перебір його кроків.
+/// ⚠ Ціна обмежена й НЕ росте з числом кандидатів (≤ <see cref="MaxCandidates"/>): профілі читаються пакетом
+/// (<see cref="IAccessDecisionService.BuildProfilesAsync"/>), рішення — пакетом на крок
+/// (<see cref="IAccessDecisionService.CanApproveManyAsync"/>: те саме правило, умови аркуша й маршрут — раз).
 /// ⛔ Звужений читач цього класу не викликає (обробник віддає <c>null</c>): ім'я погоджувача — розкриття людини.
 /// </remarks>
 public sealed class StepApproversResolver(IStepApproverStore store, IAccessDecisionService access)
@@ -47,41 +47,36 @@ public sealed class StepApproversResolver(IStepApproverStore store, IAccessDecis
             return (null, false);
         }
 
+        // Профілі всіх кандидатів — одним пакетом (вимкнений між вибіркою і профілем у результаті відсутній).
+        var users = facts.Candidates.GroupBy(c => c.UserId).ToList();
+        var profiles = await access.BuildProfilesAsync([.. users.Select(u => u.Key)], ct).ConfigureAwait(false);
+
         var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var user in facts.Candidates.GroupBy(c => c.UserId))
+        var listed = new HashSet<int>();
+        foreach (var step in facts.Steps)
         {
-            var roles = user.Where(c => c.RoleId is not null).Select(c => c.RoleId!.Value).ToHashSet();
-            var participant = user.Any(c => c.RoleId is null);
-
+            // Кандидати цього кроку: несуть роль кроку (або це учасник документа / маршруту немає) і ще не названі.
             // Ролі, якої крок вимагає, кандидат не несе і не учасник — рішення відмовило б; не платимо за нього.
-            var steps = facts.Steps
-                .Where(s => s.RoleId is null || participant || roles.Contains(s.RoleId.Value))
+            var pending = users
+                .Where(u => !listed.Contains(u.Key) && profiles.ContainsKey(u.Key)
+                            && (step.RoleId is null || u.Any(c => c.RoleId is null || c.RoleId == step.RoleId)))
                 .ToList();
-            if (steps.Count == 0)
+            if (pending.Count == 0)
             {
                 continue;
             }
 
-            AccessProfile profile;
-            try
+            // Одне пакетне рішення на крок: умови аркуша й маршрут читаються раз, а не на кожного кандидата.
+            var decisions = await access
+                .CanApproveManyAsync(
+                    [.. pending.Select(u => profiles[u.Key])], documentId, step.SheetDefId, key, step.SheetCopyId, new KnownStepRole(step.RoleId), ct)
+                .ConfigureAwait(false);
+            for (var i = 0; i < pending.Count; i++)
             {
-                profile = await access.BuildProfileAsync(user.Key, ct).ConfigureAwait(false);
-            }
-            catch (AccessDeniedException)
-            {
-                // Обліковий запис вимкнено між вибіркою і профілем — погоджувачем бути не може.
-                continue;
-            }
-
-            foreach (var step in steps)
-            {
-                var decision = await access
-                    .CanApproveOfAsync(profile, documentId, step.SheetDefId, key, step.SheetCopyId, ct)
-                    .ConfigureAwait(false);
-                if (decision.IsAllowed)
+                if (decisions[i].IsAllowed)
                 {
-                    names.Add(user.First().DisplayName);
-                    break;
+                    listed.Add(pending[i].Key);
+                    names.Add(pending[i].First().DisplayName);
                 }
             }
         }
