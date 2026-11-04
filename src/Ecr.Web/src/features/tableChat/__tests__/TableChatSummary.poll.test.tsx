@@ -33,7 +33,7 @@ const seen: Seen[] = [];
 
 function body(): string {
   return JSON.stringify({
-    items: [{ tableCode: 'T1', total: 3, unread, lastAt: null, lastMessageId: 3, mentionedMe: false, revision }],
+    items: [{ tableCode: 'T1', key: 'T1', sheetCopyId: null, total: 3, unread, lastAt: null, lastMessageId: 3, mentionedMe: false, revision }],
     canWrite: true,
   });
 }

@@ -47,6 +47,9 @@ function tableOf(tableInstanceId: number, copy: Record<string, unknown>): Record
 
 const requestedUrls: string[] = [];
 
+/** TC02: `chatMessageCount` of the copy's tables in `GET …/tables` (`null` for originals). */
+let copyChatMessageCount: number | null = 0;
+
 function mockFetch(sheetStates: Record<string, string> = { GEN: 'Draft' }): void {
   requestedUrls.length = 0;
   vi.stubGlobal(
@@ -87,7 +90,7 @@ function mockFetch(sheetStates: Record<string, string> = { GEN: 'Draft' }): void
       if (url.includes('/tables')) {
         return jsonResponse([
           tableOf(1, { sheetCopyId: null, copyOrdinal: 1 }),
-          tableOf(2, { sheetCopyId: 77, copyOrdinal: 2 }),
+          tableOf(2, { sheetCopyId: 77, copyOrdinal: 2, chatMessageCount: copyChatMessageCount }),
         ]);
       }
 
@@ -111,6 +114,40 @@ function mockFetch(sheetStates: Record<string, string> = { GEN: 'Draft' }): void
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  copyChatMessageCount = 0;
+});
+
+function renderAt(search: string): void {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <MantineProvider theme={testTheme}>
+      <MemoryRouter initialEntries={[`/documents/1?periodKey=${String(Period)}${search}`]}>
+        <QueryClientProvider client={client}>
+          <Routes>
+            <Route path="/documents/:id" element={<DocumentPage />} />
+          </Routes>
+        </QueryClientProvider>
+      </MemoryRouter>
+    </MantineProvider>,
+  );
+}
+
+describe('DocumentPage: чат копії аркуша (TC02)', () => {
+  it(
+    'посилання згадки ?table=КОД#sheetCopyId без ?sheet= відкриває вкладку саме цієї копії',
+    async () => {
+      mockFetch();
+      renderAt('&table=T2%2377');
+
+      const second = await screen.findByRole('tab', { name: /General 2/ }, { timeout: SlowEnvTimeout });
+
+      await waitFor(() => {
+        expect(second.getAttribute('aria-selected')).toBe('true');
+      });
+    },
+    SlowEnvTimeout,
+  );
+
 });
 
 describe('DocumentPage: копії аркуша', () => {
