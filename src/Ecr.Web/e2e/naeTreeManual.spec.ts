@@ -277,7 +277,7 @@ test.describe('NAE tree manual', () => {
     const area = nodes.find((node) => node.levelCode === 'AREA' && node.display.includes(`E2E NAE ${Stamp}`))!;
     await page.goto(`/admin/permits/nae?node=${String(area.id)}`);
     const form = page.getByRole('form', { name: 'Node attributes' });
-    await expect(form.getByLabel('Name (English)')).toHaveValue(`E2E NAE ${Stamp}`, { timeout: 30_000 });
+    await expect(form.getByRole('textbox', { name: 'Name · English' })).toHaveValue(`E2E NAE ${Stamp}`, { timeout: 30_000 });
     await expect(form.locator('[data-nae-derived-field="RegionCode"]')).toHaveCount(0);
     await expect(form.locator('[data-nae-derived-field="AreaCode"]')).toHaveCount(0);
     await context.close();
