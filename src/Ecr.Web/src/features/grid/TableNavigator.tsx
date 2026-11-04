@@ -24,6 +24,8 @@ export interface TableNavigatorProps {
   readonly hidden?: boolean;
   /** Кнопка «‹ Сховати» у шапці панелі (✎ ui-sheet-focus): без неї перемикач був лише іконкою в рядку таблиці. */
   readonly onCollapse?: () => void;
+  /** AN-69: скільки рядків таблиці (за кодом) розрахунок не охопив жодним правилом; немає запису - позначки немає. */
+  readonly issueCounts?: ReadonlyMap<string, number>;
 }
 
 /** Назва таблиці мовою інтерфейсу; без перекладу — код. */
@@ -51,6 +53,7 @@ export function TableNavigator({
   onSelect,
   hidden = false,
   onCollapse,
+  issueCounts,
 }: TableNavigatorProps): JSX.Element {
   const [query, setQuery] = useState('');
   const [errorsOnly, setErrorsOnly] = useState(false);
@@ -207,6 +210,9 @@ export function TableNavigator({
             const state = stateText(item);
             const selected = tableId === selectedTableInstanceId;
             const number = tableNumber(item.table, allTables);
+            // AN-69: рядки без правила методології - окремо від помилок перевірки; у назві рядка дерева теж.
+            const noRule = issueCounts?.get(item.table.tableCode) ?? 0;
+            const noRuleText = noRule > 0 ? t('calculationIssues.badgeLabel', { count: noRule }) : null;
 
             return (
               <div
@@ -214,8 +220,8 @@ export function TableNavigator({
                 role="treeitem"
                 aria-level={1}
                 aria-selected={selected}
-                aria-label={`${String(number)} ${name}, ${state}`}
-                title={`${String(number)} ${name} · ${item.table.tableCode} — ${state}`}
+                aria-label={`${String(number)} ${name}, ${state}${noRuleText === null ? '' : `, ${noRuleText}`}`}
+                title={`${String(number)} ${name} · ${item.table.tableCode} — ${state}${noRuleText === null ? '' : ` — ${noRuleText}`}`}
                 tabIndex={tableId === tabStop ? 0 : -1}
                 className="ecr-tnav-item"
                 data-tree-table={tableId}
@@ -236,6 +242,11 @@ export function TableNavigator({
                   {name}
                 </span>
                 {/* Макет: у рядку — лише число помилок; попередження — у тексті стану. */}
+                {noRule > 0 && (
+                  <span className="ecr-tnav-norule" aria-hidden="true" title={noRuleText ?? undefined} data-testid="table-no-rule-badge">
+                    {noRule}
+                  </span>
+                )}
                 {item.errors !== null && item.errors > 0 && (
                   <span className="ecr-tnav-count" aria-hidden="true">
                     {item.errors}

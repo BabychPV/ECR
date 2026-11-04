@@ -40,6 +40,8 @@ public sealed partial class SheetCopyQuerySitesTests
             "стан, зрізи, журнал — за копією; календар подання — оригінал (копія — коміт 8)",
         ["src/Ecr.Infrastructure/Persistence/ApprovalQueueStore.cs"] = "кандидати несуть SheetCopyId; склад і журнал — своєї копії",
         ["src/Ecr.Infrastructure/Jobs/SubmissionSnapshotRetentionJob.cs"] = "ранжування й зрізи погодження — на (аркуш, копія)",
+        ["src/Ecr.Infrastructure/Persistence/CalculationIssueStore.cs"] =
+            "AN-69: прохід замінює проблеми на (документ, таблиця, копія); читання — за sheetCopyId, null — оригінал",
 
         // ── лише оригінал (Q5: інтеграція, збір, події джерел, дозволи) ──
         ["src/Ecr.Infrastructure/Integration/IntegrationCellPatcher.cs"] = "запис у екземпляр копії відхиляється",

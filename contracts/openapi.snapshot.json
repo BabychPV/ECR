@@ -1521,6 +1521,74 @@
         ],
         "type": "object"
       },
+      "CalculationIssueDto": {
+        "description": "Одна поточна проблема розрахунку: рядок, який правило методології не охопило (AN-69).",
+        "properties": {
+          "detectedAt": {
+            "description": "Коли виявлено (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Вид проблеми; нині `NoMatchingRule`.",
+            "type": "string"
+          },
+          "methodologyCode": {
+            "description": "Методологія прив'язки таблиці; `null` — невідома.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rowKey": {
+            "description": "Публічний ключ рядка.",
+            "type": "string"
+          },
+          "rowNumber": {
+            "description": "Номер рядка, з 1, у порядку створення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetCopyId": {
+            "description": "Копія аркуша; `null` — оригінал.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "tableCode": {
+            "description": "Код таблиці шаблону.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tableCode",
+          "sheetCopyId",
+          "rowNumber",
+          "rowKey",
+          "kind",
+          "methodologyCode",
+          "detectedAt"
+        ],
+        "type": "object"
+      },
+      "CalculationIssuesDto": {
+        "description": "Поточні проблеми розрахунку документа за період (AN-69).",
+        "properties": {
+          "items": {
+            "description": "Проблеми видимих читачеві таблиць; порожньо — проблем немає.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationIssueDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "CalculationLevel": {
         "description": "Рівень драбини виразності для методології (ФВ-9.2).",
         "enum": [
@@ -36498,6 +36566,65 @@
           }
         },
         "summary": "Змінює бізнес-ключ документа (ФВ-3.9). Право `Document.ChangeKey`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/calculation-issues": {
+      "get": {
+        "description": "⚠ Лише поточні проблеми останнього проходу; без `sheetCopyId` — оригінал аркуша. Рядки схованих таблиць\nу відповіді відсутні; невидимий документ — 404.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sheetCopyId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationIssuesDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationIssuesDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationIssuesDto"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Поточні проблеми розрахунку документа за період і копію аркуша: рядки без правила (AN-69). Право `Document.View`.",
         "tags": [
           "Documents"
         ]

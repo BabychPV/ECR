@@ -201,6 +201,20 @@
   color: var(--ecr-danger);
 }
 
+/* AN-69: рядки без правила методології - тон `warning` макета; текст кольору теми, щоб тримати контраст. */
+.ecr-tnav-norule {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font: 500 12px/1 var(--mantine-font-family-monospace);
+  background: var(--ecr-warning-soft);
+  box-shadow: inset 0 0 0 1px var(--ecr-warning);
+  color: var(--ecr-text);
+}
+
 /* Крапки стану — `index.html` макета (`.dot.*`). */
 .ecr-dot {
   flex: none;

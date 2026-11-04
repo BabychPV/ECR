@@ -102,3 +102,25 @@ public sealed record UnmatchedRowItemDto(long TableInstanceId, int RowNumber, st
 /// <param name="FinishedAt">Коли прогін завершився (UTC).</param>
 /// <param name="UnmatchedRows">Рядки без правила; <c>null</c> — таких немає, а також для читача зі звуженою видимістю.</param>
 public sealed record CalculationRunStatusDto(long? RunId, DateTime? FinishedAt, UnmatchedRowsDto? UnmatchedRows);
+
+/// <summary>Поточні проблеми розрахунку документа за період (AN-69).</summary>
+/// <param name="Items">Проблеми видимих читачеві таблиць; порожньо — проблем немає.</param>
+public sealed record CalculationIssuesDto(IReadOnlyList<CalculationIssueDto> Items);
+
+/// <summary>Одна поточна проблема розрахунку: рядок, який правило методології не охопило (AN-69).</summary>
+/// <remarks>Значень комірок тут немає навмисно — лише адреса рядка.</remarks>
+/// <param name="TableCode">Код таблиці шаблону.</param>
+/// <param name="SheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+/// <param name="RowNumber">Номер рядка, з 1, у порядку створення.</param>
+/// <param name="RowKey">Публічний ключ рядка.</param>
+/// <param name="Kind">Вид проблеми; нині <c>NoMatchingRule</c>.</param>
+/// <param name="MethodologyCode">Методологія прив'язки таблиці; <c>null</c> — невідома.</param>
+/// <param name="DetectedAt">Коли виявлено (UTC).</param>
+public sealed record CalculationIssueDto(
+    string TableCode,
+    long? SheetCopyId,
+    int RowNumber,
+    string RowKey,
+    string Kind,
+    string? MethodologyCode,
+    DateTime DetectedAt);

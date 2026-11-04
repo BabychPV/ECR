@@ -239,6 +239,11 @@ public sealed class CalculationOrchestrator(
         }
 
         profile.RecordUnmatched(UnmatchedRowsOf(rowMatches, documentId));
+
+        // AN-69: таблиці, чиї рядки зіставлено з правилами (версія без правил рядків не бачить) - їхні попередні
+        // проблеми замінюються навіть тоді, коли поточних немає.
+        profile.RecordEvaluatedTables(
+            rowMatches.Where(s => s.AllRowKeys is not null).Select(s => s.TableInstanceId).Distinct());
         profile.RecordRejected(rejected.OrderBy(r => r.TableInstanceId).ThenBy(r => r.RowNumber));
 
         return profile;
@@ -262,7 +267,8 @@ public sealed class CalculationOrchestrator(
         long TableInstanceId,
         IReadOnlyCollection<string> MatchedKeys,
         IReadOnlyList<string>? AllRowKeys,
-        IReadOnlyCollection<string>? ExcludedKeys = null);
+        IReadOnlyCollection<string>? ExcludedKeys = null,
+        int? MethodologyId = null);
 
     /// <summary>
     /// Рядки, яким не підійшло жодне правило жодної прив'язки своєї таблиці (L-4).
@@ -289,11 +295,18 @@ public sealed class CalculationOrchestrator(
             var matched = table
                 .SelectMany(s => s.MatchedKeys.Concat(s.ExcludedKeys ?? []))
                 .ToHashSet(StringComparer.Ordinal);
+
+            // AN-69: методологія - з найменшим Id серед прив'язок таблиці, що бачили рядки (ConcurrentBag не має порядку).
+            int? methodology = table
+                .Where(s => s.AllRowKeys is not null && s.MethodologyId is not null)
+                .Select(s => s.MethodologyId)
+                .Order()
+                .FirstOrDefault();
             for (var i = 0; i < all.Count; i++)
             {
                 if (!matched.Contains(all[i]))
                 {
-                    unmatched.Add(new UnmatchedRow(table.Key, i + 1, all[i], documentId));
+                    unmatched.Add(new UnmatchedRow(table.Key, i + 1, all[i], documentId, methodology));
                 }
             }
         }
@@ -348,7 +361,8 @@ public sealed class CalculationOrchestrator(
             .MatchRowsDetailedAsync(binding.Descriptor.MethodologyVersionId, binding.TableInstanceId, ct)
             .ConfigureAwait(false);
         IReadOnlyList<string> rowKeys = [.. outcome.Matches.Select(m => m.RowKey)];
-        rowMatches.Add(new RowMatchSummary(binding.TableInstanceId, rowKeys, outcome.AllRowKeys, outcome.Excluded));
+        rowMatches.Add(new RowMatchSummary(
+            binding.TableInstanceId, rowKeys, outcome.AllRowKeys, outcome.Excluded, binding.Descriptor.MethodologyId));
 
         // 4. Входи ПАКЕТНО: один запит на методологію × період, не N на рядок.
         var inputs = await scopedInputBuilder

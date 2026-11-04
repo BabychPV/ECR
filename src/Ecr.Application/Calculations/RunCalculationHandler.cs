@@ -29,7 +29,8 @@ public sealed class RunCalculationHandler(
     IRecalculationApprovalStore approvals,
     IAuditWriter audit,
     IJobQueue? queue = null,
-    IJobLeaseContext? lease = null)
+    IJobLeaseContext? lease = null,
+    ICalculationIssueStore? issues = null)
 {
     // ⛔ Константи `RecalculateClosedPermission` тут більше немає (`A7-20`).
     // Вона оголошувала право `Calculation.RecalculateClosed`, якого немає в
@@ -311,6 +312,20 @@ public sealed class RunCalculationHandler(
         var superseded = await results
             .SwitchCurrentRunAsync(calculationRunId, profile.ToJson(), ct)
             .ConfigureAwait(false);
+
+        // AN-69: поточні проблеми проходу - у ТІЙ САМІЙ транзакції, що й результати й перемикання. Прогін, відмовлений
+        // як старіший за актуальний (`Superseded`), нічого не замінює: його прохід застарів.
+        if (issues is not null && !superseded.Any(s => s.RunId == calculationRunId))
+        {
+            _ = await issues
+                .ReplaceAsync(
+                    calculationRunId,
+                    [.. profile.EvaluatedTables],
+                    [.. profile.UnmatchedRows.Select(r => new CalculationIssueInput(
+                        r.TableInstanceId, r.RowNumber, r.RowKey, r.MethodologyId))],
+                    ct)
+                .ConfigureAwait(false);
+        }
 
         var invalidated = await results
             .InvalidateReportSnapshotsAsync(calculationRunId, ct)
