@@ -37,6 +37,7 @@ const row: DocumentSummary = {
   sheetCount: 1,
   sheetStates: {},
   hasLateEdits: true,
+  stepApproverNamesTruncated: false,
 };
 
 describe('listDocuments', () => {
