@@ -230,8 +230,14 @@ public sealed partial class PatchCellsHandler(
                 return;
             }
 
+            // PM-PASS-A-P3 п.10а: комірки з тим самим значенням, що вже стояло, насіння не дають - PATCH без змін не
+            // ставить зайвого перерахунку. Ручні значення формул (D-461) відсіву не мають: їхня позначка міняється й
+            // без зміни числа.
+            var seedSource = request.Rows.Any(r => r.Cells.Any(c => c.OverrideReason is not null))
+                ? applied
+                : WithoutUnchanged(applied, previous);
             var seeds = WithoutAnnualText(
-                context, BuildRecalculationSeeds(applied, context.ApproverEdit ? context.Table.SheetDefId : null));
+                context, BuildRecalculationSeeds(seedSource, context.ApproverEdit ? context.Table.SheetDefId : null));
             if (seeds.Count == 0)
             {
                 return; // AN-142: лише текст якоря - задачі немає, recalculationJobId лишається null
@@ -269,6 +275,15 @@ public sealed partial class PatchCellsHandler(
         return await BuildResponseAsync(request, context, changes, messages, recalculationJobId, ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>Зміни без комірок, чиє значення рівне попередньому (стерти відсутню комірку теж нема чого).</summary>
+    private static CellChangeLists WithoutUnchanged(
+        CellChangeLists applied, IReadOnlyDictionary<CellAddress, CellValueData> previous)
+        => applied with
+        {
+            Upserts = [.. applied.Upserts.Where(u => !(previous.TryGetValue(u.Address, out var was) && was == u.Value))],
+            Deletes = [.. applied.Deletes.Where(previous.ContainsKey)],
+        };
 
     /// <summary>AN-142: насіння без текстових комірок якоря (вони не входять у числа, тож каскаду не потребують).</summary>
     private static List<RecalculationSeed> WithoutAnnualText(RequestContext context, IReadOnlyList<RecalculationSeed> seeds)

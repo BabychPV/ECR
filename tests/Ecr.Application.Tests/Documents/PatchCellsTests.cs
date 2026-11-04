@@ -1630,6 +1630,29 @@ public sealed class PatchCellsTests
     }
 
     /// <summary>
+    /// PM-PASS-A-P3 п.10а: PATCH зі значенням, що вже стоїть у комірці, не ставить перерахунку; зміна - ставить.
+    /// ⛔ Мутація: у <c>EnqueueAsync</c> брати насіння з усіх <c>Upserts</c> без відсіву - перший рядок червоніє.
+    /// </summary>
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [InlineData(12500, 0)]
+    [InlineData(12501, 1)]
+    public async Task Перерахунок_не_ставиться_коли_значення_не_змінилося(int value, int expectedJobs)
+    {
+        _cells.ReadCellsAsync(Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<CellAddress, CellValueData>
+              {
+                  [new CellAddress(PeriodKey.Parse(Period), 1001L, VolumeColumnId)] = new() { ValueNumeric = 12500m },
+              });
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", (decimal)value)])),
+            CancellationToken.None);
+
+        await _jobs.Received(expectedJobs).EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+    }
+
+    /// <summary>
     /// MI-02 (в): момент постановки задає планувальник — черга в базі ставить
     /// ВСЕРЕДИНІ транзакції запису, Quartz — ПІСЛЯ її завершення.
     /// </summary>
