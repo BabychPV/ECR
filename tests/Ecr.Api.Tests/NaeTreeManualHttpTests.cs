@@ -334,11 +334,15 @@ public sealed class NaeTreeManualHttpTests(SqlServerFixture sql)
         public Task WritePublicationEventAsync(PublicationEventRecord evt, CancellationToken ct) => inner.WritePublicationEventAsync(evt, ct);
     }
 
+    /// <summary>The Area list is chosen from (human 04.11); these tests type areas freely, so they point at a list that does not exist.</summary>
+    private static Ecr.Application.Permits.AirLimits.AirLimitsSettings NoAreaList()
+        => Ecr.Application.Permits.AirLimits.AirLimitsSettings.Default with { AreaRegistryCode = "NOAREAS_" + Guid.NewGuid().ToString("N")[..10].ToUpperInvariant() };
+
     private static string NewCode() => $"NAEM{Guid.NewGuid():N}"[..14].ToUpperInvariant();
 
     private EcrApiFactory Factory(string code, string regions)
     {
-        var app = new EcrApiFactory(sql) { ExtraServices = s => s.AddSingleton(new NaeTreeSettings(code, regions)) };
+        var app = new EcrApiFactory(sql) { ExtraServices = s => { s.AddSingleton(new NaeTreeSettings(code, regions)); s.AddSingleton(NoAreaList()); } };
         serverErrors = () => app.ErrorsText;
         return app;
     }

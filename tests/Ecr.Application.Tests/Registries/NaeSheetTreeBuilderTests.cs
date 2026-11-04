@@ -82,11 +82,22 @@ public sealed class NaeSheetTreeBuilderTests
         Assert.Equal(expected, plan.Nodes.Single(n => n.LevelCode == NaeTreeSchema.LevelSource).Fields[NaeTreeSchema.AreaField]);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public void Site_is_optional__equipment_and_nae_hang_under_the_area_without_it()
+    {
+        var plan = NaeSheetTreeBuilder.Build(Sheet(Row("Atyrau", "Offshore", null, "Comp 1", "1085")));
+
+        Assert.Empty(plan.Issues);
+        Assert.DoesNotContain(plan.Nodes, n => n.LevelCode == NaeTreeSchema.LevelSite);
+        var equip = Assert.Single(plan.Nodes, n => n.LevelCode == NaeTreeSchema.LevelEquipment);
+        Assert.Equal("A|ATYRAU|OFFSHORE", equip.ParentKey);
+        Assert.Equal(equip.Key, Assert.Single(plan.Nodes, n => n.LevelCode == NaeTreeSchema.LevelSource).ParentKey);
+    }
+
     public static TheoryData<string?[], string> BadRows => new()
     {
         { Row(null, "Offshore", "Island_A", null, "1085"), "regionRequired" },
-        { Row("Atyrau", "Offshore", null, null, "1085"), "siteRequired" },
-        { Row("Atyrau", "Offshore", null, "Comp 1"), "siteRequired" },
         { Row("Atyrau", "Offshore", "Island_A", null, "1.5"), "badCode" },
         { Row("Atyrau", "Offshore", "Island_A", null, "1085", onOff: "Onshore"), "areaMismatch" },
     };

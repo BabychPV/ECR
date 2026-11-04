@@ -49,7 +49,7 @@ public sealed class NaeTreeProvisioner(
     [
         (NaeTreeSchema.LevelRegion, "Region", "Регион", false),
         (NaeTreeSchema.LevelArea, "Area", "Район", true),
-        (NaeTreeSchema.LevelSite, "Site", "Площадка", false),
+        (NaeTreeSchema.LevelSite, "Site", "Площадка", true),
         (NaeTreeSchema.LevelEquipment, "Equipment group", "Группа оборудования", true),
         (NaeTreeSchema.LevelSource, "NAE source", "Источник НАЕ", false),
     ];
@@ -112,6 +112,8 @@ public sealed class NaeTreeProvisioner(
         {
             // NAE node types (human 03.11): an existing tree from before the node types is upgraded once, idempotently.
             await uow.ExecuteInTransactionAsync(token => UpgradeNodeTypesAsync(code, system.AuditUserId, token), ct).ConfigureAwait(false);
+            await uow.ExecuteInTransactionAsync(token => MakeSiteOptionalAsync(code, system.AuditUserId, token), ct).ConfigureAwait(false);
+            await uow.ExecuteInTransactionAsync(token => RepairScopeCodesAsync(code, system.AuditUserId, token), ct).ConfigureAwait(false);
             return false;
         }
 
@@ -278,6 +280,155 @@ public sealed class NaeTreeProvisioner(
             ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
         return true;
+    }
+
+    /// <summary>Operation of the «SITE became optional» row in <c>aud.StructureChange</c> (AN-158).</summary>
+    internal const string SiteOptionalOperation = "NaeSiteOptional";
+
+    /// <summary>
+    /// Human 04.11 («тип site не має бути обовʼязковим після area»): the SITE level of an existing tree stops being required, so an
+    /// equipment group / NAE may hang straight under an area. Data only (no schema change); idempotent — a level that is already
+    /// optional is not touched, so a second start changes nothing.
+    /// </summary>
+    /// <param name="code">Registry code.</param>
+    /// <param name="userId">Author recorded in the audit (0 — system).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Whether anything changed.</returns>
+    internal async Task<bool> MakeSiteOptionalAsync(string code, int userId, CancellationToken ct)
+    {
+        var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false);
+        if (definition is null || !NaeTreeNodePolicy.IsNaeTree(definition))
+        {
+            return false;
+        }
+
+        var site = (await hierarchy.ListLevelsAsync(definition.Id, ct).ConfigureAwait(false))
+            .FirstOrDefault(l => string.Equals(l.Code, NaeTreeSchema.LevelSite, StringComparison.OrdinalIgnoreCase));
+        if (site is null || site.IsOptional)
+        {
+            return false;
+        }
+
+        site.Update(site.Ordinal, site.NameL10n, true);
+        await audit.WriteStructureChangeAsync(
+            new StructureChangeRecord(
+                ChangedAt: clock.UtcNow,
+                TemplateVersionId: 0,
+                EntityType: "cfg.RegistryDef",
+                EntityId: definition.Id,
+                ChangeClass: ChangeClass.Guarded,
+                Operation: SiteOptionalOperation,
+                OldJson: "{\"site\":{\"isOptional\":false}}",
+                NewJson: "{\"site\":{\"isOptional\":true}}",
+                ChangeReason: "NAE structure: SITE level is optional (human 04.11)",
+                ChangedByUserId: userId,
+                CorrelationId: currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>Operation of the scope-code repair row in <c>aud.StructureChange</c> (AN-158).</summary>
+    internal const string RepairOperation = "RepairScopeCodes";
+
+    /// <summary>
+    /// AN-158: a REGION/AREA node created without its own <c>RegionCode</c>/<c>AreaCode</c> (manual root, Excel/AF load before the fix)
+    /// gets it backfilled from the code derived from its technical code — once derivation is stable, later renames cannot change it.
+    /// A node whose derived code carries no letter or digit (a non-ASCII code flattened to <c>_____</c>) is left EMPTY: the original
+    /// text is lost and is never invented — an administrator sets the code on the node (the 03.11 cascade updates the sources).
+    /// Idempotent: a node that already stores its code is not touched, a second start changes nothing.
+    /// </summary>
+    /// <param name="code">Registry code.</param>
+    /// <param name="userId">Author recorded in the audit (0 — system).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Number of codes written.</returns>
+    internal async Task<int> RepairScopeCodesAsync(string code, int userId, CancellationToken ct)
+    {
+        var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false);
+        if (definition is null || !NaeTreeNodePolicy.IsNaeTree(definition))
+        {
+            return 0;
+        }
+
+        var levels = (await hierarchy.ListLevelsAsync(definition.Id, ct).ConfigureAwait(false))
+            .ToDictionary(l => l.Code, StringComparer.OrdinalIgnoreCase);
+        if (!levels.TryGetValue(NaeTreeSchema.LevelRegion, out var regionLevel) || !levels.TryGetValue(NaeTreeSchema.LevelArea, out var areaLevel))
+        {
+            return 0;
+        }
+
+        var nodes = (await hierarchy.ListLiveEntriesAsync(definition.Id, ct).ConfigureAwait(false)).ToDictionary(e => e.Id);
+        var groups = nodes.Values.Where(n => n.LevelId == regionLevel.Id || n.LevelId == areaLevel.Id).ToList();
+        if (groups.Count == 0)
+        {
+            return 0;
+        }
+
+        var fieldByCode = definition.Fields.ToDictionary(f => f.Code, StringComparer.OrdinalIgnoreCase);
+        var stored = (await registries.ListValuesForEntriesAsync([.. groups.Select(g => g.Id)], ct).ConfigureAwait(false))
+            .Where(v => v.ValueString is { Length: > 0 })
+            .Select(v => (v.RegistryEntryId, v.RegistryFieldDefId))
+            .ToHashSet();
+
+        bool Has(long entryId, string field) => stored.Contains((entryId, fieldByCode[field].Id));
+        string RegionOf(RegistryEntry node)
+        {
+            for (var cursor = (long?)node.Id; cursor is { } id && nodes.TryGetValue(id, out var n); cursor = n.ParentEntryId)
+            {
+                if (n.LevelId == regionLevel.Id)
+                {
+                    return NaeTreeSchema.DerivedRegion(n.Code);
+                }
+            }
+
+            return "";
+        }
+
+        var written = 0;
+        var skipped = 0;
+        foreach (var node in groups.OrderBy(n => n.Id))
+        {
+            var isRegion = node.LevelId == regionLevel.Id;
+            var field = isRegion ? NaeTreeSchema.RegionField : NaeTreeSchema.AreaField;
+            if (!fieldByCode.TryGetValue(field, out var def) || Has(node.Id, field))
+            {
+                continue;
+            }
+
+            var derived = isRegion ? NaeTreeSchema.DerivedRegion(node.Code) : NaeTreeSchema.DerivedArea(node.Code, RegionOf(node));
+            if (derived.Length == 0)
+            {
+                skipped++;
+                continue;
+            }
+
+            var value = new RegistryValue(node.Id, def.Id);
+            value.Set(def.DataType, derived, def.UnitId);
+            registries.AddValue(value);
+            written++;
+        }
+
+        if (written == 0)
+        {
+            return 0;
+        }
+
+        await audit.WriteStructureChangeAsync(
+            new StructureChangeRecord(
+                ChangedAt: clock.UtcNow,
+                TemplateVersionId: 0,
+                EntityType: "cfg.RegistryDef",
+                EntityId: definition.Id,
+                ChangeClass: ChangeClass.Guarded,
+                Operation: RepairOperation,
+                OldJson: null,
+                NewJson: JsonSerializer.Serialize(new { written, leftEmpty = skipped }),
+                ChangeReason: "NAE scope codes: own RegionCode/AreaCode backfilled on REGION/AREA nodes on start",
+                ChangedByUserId: userId,
+                CorrelationId: currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        return written;
     }
 
     private static LocalizedText Name(string en, string ru)

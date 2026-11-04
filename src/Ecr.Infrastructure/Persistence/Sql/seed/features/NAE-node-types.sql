@@ -15,7 +15,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REG-0409.levelHasFields', N'ru', N'К уровню «{levelCode}» привязаны поля ({fields}): сначала отвяжите их.'),
     (N'err.ECR-REG-0409.levelHasFields', N'kz', N'«{levelCode}» деңгейіне өрістер байланған ({fields}): алдымен оларды ажыратыңыз.'),
     (N'err.ECR-REG-0422.naeSourceLevelChange', N'ru', N'Источник НАЕ {entryCode} нельзя превратить в узел типа {levelCode}: выведите его из действия и создайте группу.'),
-    (N'err.ECR-REG-0422.naeSourceLevelChange', N'kz', N'{entryCode} НАЕ көзін {levelCode} түріндегі түйінге айналдыруға болмайды: оны қолданыстан шығарып, топ жасаңыз.')
+    (N'err.ECR-REG-0422.naeSourceLevelChange', N'kz', N'{entryCode} НАЕ көзін {levelCode} түріндегі түйінге айналдыруға болмайды: оны қолданыстан шығарып, топ жасаңыз.'),
+    (N'err.ECR-REG-0422.naeAreaNotInList', N'ru', N'Район «{areaCode}» не найден среди действующих записей справочника «{registryCode}». Выберите район из списка.'),
+    (N'err.ECR-REG-0422.naeAreaNotInList', N'kz', N'«{areaCode}» ауданы «{registryCode}» анықтамалығының қолданыстағы жазбаларында жоқ. Ауданды тізімнен таңдаңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -30,7 +32,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-REG-0422.naeMoveChangesScope', N'en', N'Moving node {entryCode} would change the region or area of NAE source {sourceCode}. Create the source again in the right place.', 1),
     (N'err.ECR-REG-0422.fieldLevelMismatch', N'en', N'Fields {fields} belong to another node type of registry «{registryCode}».', 1),
     (N'err.ECR-REG-0409.levelHasFields', N'en', N'Fields are bound to level «{levelCode}» ({fields}): unbind them first.', 1),
-    (N'err.ECR-REG-0422.naeSourceLevelChange', N'en', N'NAE source {entryCode} cannot become a {levelCode} node: retire it and create the group instead.', 1)
+    (N'err.ECR-REG-0422.naeSourceLevelChange', N'en', N'NAE source {entryCode} cannot become a {levelCode} node: retire it and create the group instead.', 1),
+    (N'err.ECR-REG-0422.naeAreaNotInList', N'en', N'Area «{areaCode}» is not an active entry of the list «{registryCode}». Choose the area from the list.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

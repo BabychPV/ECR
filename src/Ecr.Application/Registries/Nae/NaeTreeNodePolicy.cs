@@ -27,7 +27,8 @@ namespace Ecr.Application.Registries.Nae;
 /// </list>
 /// The registry is recognised by its shape (<see cref="IsNaeTree"/>), not by the configured code: the AF load may write any code.
 /// </remarks>
-public sealed class NaeTreeNodePolicy(IRegistryStore registries, IRegistryHierarchyStore hierarchy, IClock clock)
+public sealed class NaeTreeNodePolicy(
+    IRegistryStore registries, IRegistryHierarchyStore hierarchy, IClock clock, Permits.AirLimits.AirLimitsSettings airSettings)
 {
     /// <summary>A node without an English name.</summary>
     internal const string NameEnRequiredKey = "err.ECR-REG-0422.naeNameEnRequired";
@@ -179,6 +180,12 @@ public sealed class NaeTreeNodePolicy(IRegistryStore registries, IRegistryHierar
 
             var own = string.Equals(NaeTreeSchema.OwnLevelOfScopeField(field), level.Code, StringComparison.OrdinalIgnoreCase);
             var text = own ? Permits.AirLimits.AirLimitsSchema.NormalizeScope(CellValueReader.Normalize(scopeRaw) as string, "") : "";
+            if (text.Length > 0 && string.Equals(field, NaeTreeSchema.AreaField, StringComparison.OrdinalIgnoreCase))
+            {
+                // The area of an AREA node is chosen from the Area list (human 04.11).
+                text = (await NaeAreaChoice.ResolveAsync(registries, airSettings, text, ct).ConfigureAwait(false)).Code;
+            }
+
             if (text.Length == 0)
             {
                 _ = result.Remove(field);
