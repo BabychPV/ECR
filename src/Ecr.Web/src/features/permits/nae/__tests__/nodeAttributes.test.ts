@@ -9,6 +9,7 @@ import {
   isServerField,
   serverFieldProblem,
   serverNaeCodeHolder,
+  showsServerField,
   targetLevelCode,
   validateNode,
   type NodeDetail,
@@ -74,6 +75,14 @@ describe('fieldsForLevel / isServerField / targetLevelCode', () => {
     // Інші поля йдуть за ознакою поля, а не за рівнем.
     expect(isServerField({ code: 'AfPath', isReadOnly: true }, 'REGION')).toBe(true);
     expect(isServerField({ code: 'Comment', isReadOnly: false }, 'REGION')).toBe(false);
+  });
+
+  it('AN-161: виведені регіон і район - лише в картці SRC; інші поля сервера - на кожному рівні', () => {
+    for (const code of ['RegionCode', 'AreaCode']) {
+      expect(showsServerField({ code }, 'SRC')).toBe(true);
+      for (const other of ['REGION', 'AREA', 'SITE', 'EQUIP', null]) expect(showsServerField({ code }, other), `${code} на ${String(other)}`).toBe(false);
+    }
+    expect(showsServerField({ code: 'SourceType' }, 'EQUIP')).toBe(true);
   });
 
   it('рівень форми: нового вузла - вибраний, наявного - власний', () => {
