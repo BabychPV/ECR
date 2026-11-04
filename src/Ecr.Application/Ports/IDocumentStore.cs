@@ -106,6 +106,18 @@ namespace Ecr.Application.Ports;
 /// <paramref name="ResultsStale"/>. Сама причина нічого не розкриває понад це: вона залежить лише від меж читача, а не
 /// від того, чи результати справді застаріли.
 /// </param>
+/// <param name="StepApproverNames">
+/// AN-59 (варіант C, D-466): відображувані імена (<c>D-86</c>) тих, хто МОЖЕ діяти на ПОТОЧНОМУ кроці погодження
+/// кожного поданого (<c>Submitted</c>) аркуша документа за запитаний період, копії аркушів включно: об'єднання,
+/// без повторів, за іменем (інваріантна культура), не більше 20. Лише імена: ні id, ні логінів, ні пошти.
+/// <c>null</c> — немає поданих аркушів, період не задано, або читач звужений нижче проєкту
+/// (<c>DocumentSheetVisibility.For</c>, як <paramref name="OwnerDisplayName"/>). Рахується ЛИШЕ для картки одного
+/// документа (<c>GET /documents/{id}</c>), перелік поле не несе. Склад — те саме рішення, що й затвердження кроку
+/// (<c>CanApproveAsync</c>), а не друга копія правил.
+/// </param>
+/// <param name="StepApproverNamesTruncated">
+/// <c>true</c> — список обрізано (понад 20 імен або понад 100 кандидатів): справжніх погоджувачів може бути більше.
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -131,7 +143,9 @@ public sealed record DocumentSummary(
     [property: System.Text.Json.Serialization.JsonIgnore] bool ProjectIsReadOnly = false,
     string? PeriodKind = null,
     ResultsStaleUndeterminedReason? ResultsStaleUndetermined = null,
-    IReadOnlyDictionary<string, string>? TemplateVersionByPeriod = null);
+    IReadOnlyDictionary<string, string>? TemplateVersionByPeriod = null,
+    IReadOnlyList<string>? StepApproverNames = null,
+    bool StepApproverNamesTruncated = false);
 
 /// <summary>
 /// ✎ D-446: чому застарілість результатів документа читачеві не визначається
