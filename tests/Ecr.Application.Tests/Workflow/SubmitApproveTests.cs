@@ -607,7 +607,8 @@ public sealed class SubmitApproveTests
     [Theory]
     [InlineData(EditDenyReason.InsufficientGrantLevel, "deny.InsufficientGrantLevel.Submit")]
     [InlineData(EditDenyReason.PeriodNotOpenYet, "deny.PeriodNotOpenYet.Submit")] // D-441 (AN-128)
-    [InlineData(EditDenyReason.NoGrant, "deny.NoGrant")]
+    [InlineData(EditDenyReason.NoGrant, "deny.submit.NoRight")] // PM-PASS-A-P3 п.7b
+    [InlineData(EditDenyReason.BusinessRule, "deny.BusinessRule")]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Decision", "D-285")]
     public async Task Відмова_у_поданні_несе_ключ_причини_подання(EditDenyReason reason, string expectedKey)
@@ -1560,6 +1561,8 @@ public sealed class SubmitApproveTests
             () => Reopen().HandleAsync(Document, Water, Period, "причина", CancellationToken.None));
 
         Assert.Equal("ECR-ACCS-0403", denied.ErrorCode);
+        // PM-PASS-A-P3 п.7a: ключ каталогу для локалізації `detail`.
+        Assert.Equal("deny.NoGrant", denied.Details!["reasonKey"]);
 
         // ⚠ Аркуш лишається Submitted — відмова стається ДО будь-якої зміни
         // стану, не після.
