@@ -110,6 +110,11 @@ public sealed class GetDocumentTablesHandler(
         var groupOf = sheetCopies is null
             ? new Dictionary<int, SheetCopyGroupInfo>()
             : (await sheetCopies.ListGroupsAsync(documentId, ct).ConfigureAwait(false)).ToDictionary(g => g.SheetDefId);
+        // TC02: скільки живих повідомлень чату в кожній копії — для підтвердження видалення (ОДИН запит до зведень чату,
+        // лише коли в документі є копії).
+        var chatCounts = sheetCopies is not null && groupOf.Values.Any(g => g.Copies.Count > 0)
+            ? await sheetCopies.ChatMessageCountsAsync(documentId, ct).ConfigureAwait(false)
+            : new Dictionary<long, int>();
         var result = new List<DocumentTableDto>(instances.Count);
 
         foreach (var sheet in snapshot.Sheets.Where(s => !s.IsDeleted).OrderBy(s => s.Ordinal))
@@ -173,7 +178,8 @@ public sealed class GetDocumentTablesHandler(
                     instance.SheetCopyId,
                     ordinal,
                     display,
-                    sheet.IsCopyable));
+                    sheet.IsCopyable,
+                    copyKey == 0 ? null : chatCounts.GetValueOrDefault(copyKey)));
                 }
             }
         }
@@ -208,6 +214,10 @@ public sealed class GetDocumentTablesHandler(
 /// <paramref name="SheetNameL10n"/> лишається назвою з шаблону.
 /// </param>
 /// <param name="IsCopyable">RS: шаблон дозволяє копіювати аркуш («Додати копію»).</param>
+/// <param name="ChatMessageCount">
+/// TC02: живих повідомлень чату цієї копії в усіх її таблицях (видалення копії забирає їх разом з даними); <c>null</c> — оригінал,
+/// 0 — чат копії порожній. Клієнт показує число ДО підтвердження видалення.
+/// </param>
 public sealed record DocumentTableDto(
     int SheetDefId,
     string SheetCode,
@@ -224,7 +234,8 @@ public sealed record DocumentTableDto(
     long? SheetCopyId = null,
     int CopyOrdinal = 1,
     Domain.ValueObjects.LocalizedText? DisplayNameL10n = null,
-    bool IsCopyable = false);
+    bool IsCopyable = false,
+    int? ChatMessageCount = null);
 
 /// <summary>Ознака прив'язки таблиці документа до дозволу (PM-11b): без даних дозволу.</summary>
 /// <param name="Code">Код прив'язки.</param>

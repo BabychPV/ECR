@@ -14,8 +14,9 @@ public sealed class TableDiscussionMention
     private TableDiscussionMention() { }
 
     /// <summary>Створює згадку; документ і код — копія з повідомлення, щоб «Мої задачі» читали без з'єднання.</summary>
-    public TableDiscussionMention(long messageId, int userId, long documentId, string tableDefCode)
+    public TableDiscussionMention(long messageId, int userId, long documentId, string tableDefCode, long sheetCopyKey = 0)
     {
+        SheetCopyKey = sheetCopyKey;
         MessageId = messageId;
         UserId = userId;
         DocumentId = documentId;
@@ -30,6 +31,9 @@ public sealed class TableDiscussionMention
 
     /// <summary>Документ повідомлення.</summary>
     public long DocumentId { get; private set; }
+
+    /// <summary>TC02: чат копії аркуша (<c>doc.DocumentSheet.Id</c> копії); <c>0</c> — оригінал.</summary>
+    public long SheetCopyKey { get; private set; }
 
     /// <summary>Код таблиці повідомлення.</summary>
     public string TableDefCode { get; private set; } = null!;

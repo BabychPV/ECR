@@ -4530,14 +4530,14 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/edit-assignments/copy` | — (автор документа ∨ `Manage` проєкту; обробник) | 8 |
 | `GET` | `/api/v1/me/edit-assignments` | — (лише рядки самого викликача) | 8 |
 | `POST` | `/api/v1/documents/{id}/owner` | — (власник документа ∨ `Manage` проєкту; обробник; D-443: передача власника, подія `DocumentOwnerTransferred`) | 8 |
-| `GET` | `/api/v1/documents/{id}/discussions/summary` | `Document.View` (чат таблиці, TC: лічильники всіх таблиць документа одним запитом; лише таблиці, які викликач бачить, і лише з повідомленнями; невидимий документ — 404; рядок несе `revision` чату; `ETag` з усіх полів → `If-None-Match` дає 304) | 8 |
-| `GET` | `/api/v1/documents/{id}/tables/{tableCode}/messages` | `Document.View` (TC: те саме рішення про доступ, що й зріз таблиці — схована таблиця = 404 `ECR-DOC-0404`; `before`/`after`/`limit`/`periodKey`; `ETag` → 304) | 8 |
+| `GET` | `/api/v1/documents/{id}/discussions/summary` | `Document.View` (чат таблиці, TC: лічильники всіх таблиць документа одним запитом; лише таблиці, які викликач бачить, і лише з повідомленнями; невидимий документ — 404; рядок несе `revision` чату; `ETag` з усіх полів → `If-None-Match` дає 304; ✎ TC02: чат копії аркуша — окремий рядок із `sheetCopyId` і ключем `key` = `КОД` (оригінал) / `КОД#<sheetCopyId>` (копія), як `sheetStates`) | 8 |
+| `GET` | `/api/v1/documents/{id}/tables/{tableCode}/messages` | `Document.View` (TC: те саме рішення про доступ, що й зріз таблиці — схована таблиця = 404 `ECR-DOC-0404`; `before`/`after`/`limit`/`periodKey`; `ETag` → 304; ✎ TC02: необов'язковий query `sheetCopyId` (`doc.DocumentSheet.Id` копії; немає — оригінал) на КОЖНОМУ маршруті чату таблиці нижче; `sheetCopyId`, що не є копією аркуша цієї таблиці у цьому документі, — та сама 404, що й схована таблиця; копія видима, коли видима таблиця; права `Document.Discuss`/`DiscussModerate` ті самі) | 8 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableCode}/mention-candidates` | `Document.Discuss` (TC: лише користувачі, які бачать таблицю (і період `periodKey`); імена решти не повертаються) | 8 |
 | `POST` | `/api/v1/documents/{id}/tables/{tableCode}/messages` | `Document.Discuss` (TC: будь-який стан документа; простий текст ≤ 4000; згадки без доступу відкидаються; роль, звужена періодами, пише лише у видимі періоди, інакше 403 `discussionPeriodForbidden`; бачить лише повідомлення видимих періодів) | 8 |
 | `PATCH` | `/api/v1/documents/{id}/tables/{tableCode}/messages/{messageId}` | `Document.Discuss` (TC: лише автор, впродовж 15 хв) | 8 |
 | `DELETE` | `/api/v1/documents/{id}/tables/{tableCode}/messages/{messageId}` | `Document.Discuss` ∨ `Document.DiscussModerate` (TC: м'яке видалення; автор або модератор) | 8 |
 | `PUT` | `/api/v1/documents/{id}/tables/{tableCode}/read` | `Document.View` (TC: «прочитано до», монотонно; знімає згадки) | 8 |
-| `GET` | `/api/v1/me/table-discussion-mentions` | — (TC: лише непрочитані згадки самого викликача в таблицях, які він досі бачить) | 8 |
+| `GET` | `/api/v1/me/table-discussion-mentions` | — (TC: лише непрочитані згадки самого викликача в таблицях, які він досі бачить; ✎ TC02: елемент несе `sheetCopyId` (`null` — чат оригінала)) | 8 |
 | `GET` | `/api/v1/me/approval-queue` | — (лише аркуші, які викликач може затвердити зараз; обробник) | 8 |
 | `GET` | `/api/v1/me/returned-sheets` | — (✎ D-449: лише аркуші, повернені на доопрацювання власнику документа, учаснику з наданням ≥ Write або останньому подавачу з правом писати; обробник) | 8 |
 | `GET` | `/api/v1/me/editor-sets` | — (лише власні набори) | 8 |
@@ -4546,7 +4546,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/me/editor-sets/{setId}` | — (лише власні набори; чужий — 404) | 8 |
 | `GET` | `/api/v1/documents/{id}/recall` | — | 3 |
 | `GET` | `/api/v1/documents/{id}/approver-edit` | `Document.View` (✎ D-448: чи може викликач правити поданий аркуш як погоджувач поточного кроку; невидимий документ — 404) | 3 |
-| `GET` | `/api/v1/documents/{id}/tables` | `Document.View` | 6 |
+| `GET` | `/api/v1/documents/{id}/tables` | `Document.View` (✎ TC02: таблиця копії несе `chatMessageCount` (оригінал — `null`) — живих повідомлень чату цієї копії в усіх її таблицях; клієнт показує число ДО підтвердження видалення копії, яка забирає чат разом з даними; `DELETE …/sheet-copies/{sheetCopyId}` пише його в журнал безпеки як `chatMessages`) | 6 |
 | `GET` | `/api/v1/documents/{id}/tables/status` | `Document.View` | 6 |
 | `POST` | `/api/v1/documents/{id}/export` | `Document.Export` | 5 |
 | `GET` | `/api/v1/documents/{id}/export/{exportId}` | `Document.Export` | 5 |

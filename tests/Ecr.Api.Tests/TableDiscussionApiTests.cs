@@ -35,7 +35,7 @@ namespace Ecr.Api.Tests;
 /// </list>
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class TableDiscussionApiTests(SqlServerFixture sql)
+public sealed partial class TableDiscussionApiTests(SqlServerFixture sql)
 {
     private const string Password = "Api-TableChat-2026!";
     private const int Nov = 202611;
@@ -839,7 +839,7 @@ public sealed class TableDiscussionApiTests(SqlServerFixture sql)
             Denied: await NewUserAsync("tcd", writer, ResourceKind.Sheet, sheet2.Id).ConfigureAwait(false),
             Stranger: await NewUserAsync("tcs", [], grant: false).ConfigureAwait(false),
             NovemberOnly: await NewUserAsync("tcn", writer, only: new PeriodKey(Nov)).ConfigureAwait(false),
-            Manager: await NewUserAsync("tcg", [.. writer, "Document.Delete"], level: GrantLevel.Manage).ConfigureAwait(false));
+            Manager: await NewUserAsync("tcg", [.. writer, "Document.Delete", "Document.Create"], level: GrantLevel.Manage).ConfigureAwait(false));
     }
 
     private static LocalizedText Text(string value) => new(new Dictionary<string, string> { ["en"] = value });

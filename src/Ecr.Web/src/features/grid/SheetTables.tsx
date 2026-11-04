@@ -412,7 +412,7 @@ export function SheetTables({
                   {localized(table.tableNameL10n)}
                 </Text>
                 {/* ✎ TC: чат таблиці - лічильник «повідомлень · нових» у назві (читає те, що опублікувала кнопка шапки). */}
-                <TableChatBadge documentId={documentId} tableCode={table.tableCode} />
+                <TableChatBadge documentId={documentId} tableCode={table.tableCode} sheetCopyId={table.sheetCopyId ?? null} />
                 {titleEnd}
               </Group>
             ) : (
@@ -421,7 +421,7 @@ export function SheetTables({
                 <Text fw={600} data-table-title tabIndex={-1}>
                   {localized(table.tableNameL10n)}
                 </Text>
-                <TableChatBadge documentId={documentId} tableCode={table.tableCode} />
+                <TableChatBadge documentId={documentId} tableCode={table.tableCode} sheetCopyId={table.sheetCopyId ?? null} />
               </Group>
             )}
 

@@ -39,6 +39,40 @@ public sealed class DocumentSheetCopyStore(EcrDbContext db) : IDocumentSheetCopy
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<long, int>> ChatMessageCountsAsync(long documentId, CancellationToken ct)
+        => await db.TableDiscussions.AsNoTracking()
+            .Where(s => s.DocumentId == documentId && s.SheetCopyKey != 0 && s.MessageCount > 0)
+            .GroupBy(s => s.SheetCopyKey)
+            .Select(g => new { g.Key, Count = g.Sum(s => s.MessageCount) })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<int> DeleteChatAsync(long documentId, long sheetCopyId, CancellationToken ct)
+    {
+        var live = await db.TableDiscussions.AsNoTracking()
+            .Where(s => s.DocumentId == documentId && s.SheetCopyKey == sheetCopyId)
+            .SumAsync(s => (int?)s.MessageCount, ct)
+            .ConfigureAwait(false) ?? 0;
+
+        // Листя → корінь (усі FK без каскаду): згадки, позначки, повідомлення, зведення.
+        await db.TableDiscussionMentions
+            .Where(m => m.DocumentId == documentId && m.SheetCopyKey == sheetCopyId)
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await db.TableDiscussionReads
+            .Where(r => r.DocumentId == documentId && r.SheetCopyKey == sheetCopyId)
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await db.TableDiscussionMessages
+            .Where(m => m.DocumentId == documentId && m.SheetCopyKey == sheetCopyId)
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await db.TableDiscussions
+            .Where(s => s.DocumentId == documentId && s.SheetCopyKey == sheetCopyId)
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
+        return live;
+    }
+
+    /// <inheritdoc />
     public async Task<SheetCopyGroup?> FindGroupAsync(long documentId, int sheetDefId, CancellationToken ct)
     {
         var original = await db.DocumentSheets.AsNoTracking()

@@ -1,5 +1,6 @@
 import type { DocumentTableDto } from '@/api/types';
 import type { TableStatus } from '@/features/documents/api';
+import { parseChatKey } from '@/features/tableChat/chatKey';
 
 /**
  * Модель дерева таблиць аркуша (`UI-22`): стан кожної таблиці, фільтр, ключ в адресі.
@@ -173,9 +174,14 @@ export function resolveTable(
   const ordered = [...tables].sort((a, b) => a.tableOrdinal - b.tableOrdinal);
 
   if (key !== null && key.length > 0) {
+    // TC02: `КОД#sheetCopyId` names the table of that COPY of the sheet (a mention link); a bare code - any sheet.
+    const parsed = parseChatKey(key);
     const found = key.startsWith('#')
       ? ordered.find((table) => String(table.tableInstanceId) === key.slice(1))
-      : ordered.find((table) => table.tableCode === key);
+      : ordered.find(
+          (table) =>
+            table.tableCode === parsed.tableCode && (parsed.sheetCopyId === null || (table.sheetCopyId ?? null) === parsed.sheetCopyId),
+        );
 
     if (found !== undefined) return found;
   }

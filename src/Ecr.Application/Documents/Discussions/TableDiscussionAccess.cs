@@ -19,8 +19,9 @@ namespace Ecr.Application.Documents.Discussions;
 /// <param name="AllowedPeriods">
 /// <c>null</c> — таблиця читається в УСІХ періодах; інакше — лише ці періоди (роль, звужена періодами, D-214).
 /// </param>
+/// <param name="SheetCopyKey">TC02: чат копії аркуша — <c>doc.DocumentSheet.Id</c> копії; <c>0</c> — оригінал.</param>
 internal sealed record TableChatAccess(
-    AccessProfile Profile, int UserId, DocumentReadScope Scope, IReadOnlyCollection<int>? AllowedPeriods)
+    AccessProfile Profile, int UserId, DocumentReadScope Scope, IReadOnlyCollection<int>? AllowedPeriods, long SheetCopyKey = 0)
 {
     /// <summary>Чи видимий період.</summary>
     public bool CanSeePeriod(int periodKey) => AllowedPeriods is null || AllowedPeriods.Contains(periodKey);
@@ -43,7 +44,7 @@ internal static class TableDiscussionAccess
     /// <summary>Читає доступ до чату таблиці; кидає 404 для невидимого документа/таблиці.</summary>
     public static async Task<TableChatAccess> ResolveAsync(
         IAccessDecisionService access, ICurrentUser currentUser, ITableDiscussionStore store,
-        long documentId, string tableCode, CancellationToken ct)
+        IDocumentSheetCopyStore sheetCopies, long documentId, string tableCode, long? sheetCopyId, CancellationToken ct)
     {
         var profile = await PermissionCheck
             .RequireInAnyProjectAsync(access, currentUser, "Document.View", ct).ConfigureAwait(false);
@@ -56,9 +57,24 @@ internal static class TableDiscussionAccess
             throw DocumentVisibility.DocumentNotFound(documentId);
         }
 
+        // TC02: копія мусить бути копією аркуша, якому належить ця таблиця; інакше — та сама 404, що й схована таблиця.
+        var copyKey = 0L;
+        if (sheetCopyId is { } requested)
+        {
+            var copy = requested > 0
+                ? await sheetCopies.FindAsync(documentId, requested, ct).ConfigureAwait(false)
+                : null;
+            if (copy is not { IsCopy: true } || scope.SheetDefIdOfTableCode(tableCode) != copy.SheetDefId)
+            {
+                throw DocumentVisibility.DocumentNotFound(documentId);
+            }
+
+            copyKey = copy.Id;
+        }
+
         if (scope.CanReadTableCode(tableCode))
         {
-            return new TableChatAccess(profile, currentUser.UserId!.Value, scope, null);
+            return new TableChatAccess(profile, currentUser.UserId!.Value, scope, null, copyKey);
         }
 
         if (!scope.KnowsTableCode(tableCode))
@@ -80,7 +96,7 @@ internal static class TableDiscussionAccess
 
         return allowed.Count == 0
             ? throw DocumentVisibility.DocumentNotFound(documentId)
-            : new TableChatAccess(profile, currentUser.UserId!.Value, scope, allowed);
+            : new TableChatAccess(profile, currentUser.UserId!.Value, scope, allowed, copyKey);
     }
 
     /// <summary>Чи може профіль бути обмежений ПЕРІОДОМ (звужена роль D-214 або надання учасника документа).</summary>

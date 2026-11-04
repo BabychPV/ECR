@@ -51,6 +51,14 @@ public interface IDocumentSheetCopyStore
     /// <returns>Лише групи з назвою в документі або з копіями; решта показується за шаблоном.</returns>
     public Task<IReadOnlyList<SheetCopyGroupInfo>> ListGroupsAsync(long documentId, CancellationToken ct);
 
+    /// <summary>
+    /// TC02: скільки живих (не видалених) повідомлень чату в кожній копії документа (за зведеннями чату, всі таблиці
+    /// копії); копії без чату відсутні. Читання для показу, блокування не потрібне.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyDictionary<long, int>> ChatMessageCountsAsync(long documentId, CancellationToken ct);
+
     /// <summary>Група аркуша в складі документа; <c>null</c> — аркуша в складі немає.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="sheetDefId">Аркуш.</param>
@@ -94,4 +102,14 @@ public interface IDocumentSheetCopyStore
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Скільки комірок видалено.</returns>
     public Task<int> DeleteCopyAsync(long documentId, long sheetCopyId, CancellationToken ct);
+
+    /// <summary>
+    /// TC02: видаляє чат копії (згадки, позначки «прочитано», повідомлення, зведення всіх її таблиць) у транзакції
+    /// викликача; журнал безпеки, де тексти видалених повідомлень уже лежать, лишається.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetCopyId">Копія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки живих повідомлень видалено разом з чатом.</returns>
+    public Task<int> DeleteChatAsync(long documentId, long sheetCopyId, CancellationToken ct);
 }

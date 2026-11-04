@@ -12,6 +12,7 @@ import { showApiError } from '@/shared/ui/notify';
 import { deleteMessage, editMessage, markRead, postMessage } from './api';
 import { ChatComposer } from './ChatComposer';
 import { ChatMessageItem } from './ChatMessageItem';
+import { chatKey } from './chatKey';
 import { isUnread } from './chatModel';
 import type { DiscussionMessage, PostMessageRequest } from './types';
 import { useChatWindow } from './useChatWindow';
@@ -51,8 +52,13 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
   const me = session.data?.userId;
   const queryClient = useQueryClient();
 
+  // TC02: a copy of a sheet has its OWN chat under the same table code: every call carries the copy, and the chat key
+  // (not the code) tells the panel that the table changed.
+  const sheetCopyId = table.sheetCopyId ?? null;
+  const key = chatKey(table.tableCode, sheetCopyId);
+
   const [filter, setFilter] = useState<'all' | 'period'>('all');
-  const chat = useChatWindow(documentId, table.tableCode, filter === 'period' ? periodKey : null);
+  const chat = useChatWindow(documentId, table.tableCode, sheetCopyId, filter === 'period' ? periodKey : null);
   const { state } = chat;
 
   const periodText = formatPeriodKey(periodKey);
@@ -89,7 +95,7 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
 
   const post = useMutation({
     meta: { handled: true },
-    mutationFn: (request: PostMessageRequest) => postMessage(documentId, table.tableCode, request),
+    mutationFn: (request: PostMessageRequest) => postMessage(documentId, table.tableCode, request, sheetCopyId),
     onSuccess: (message) => {
       stick.current = true;
       chat.upsert(message);
@@ -102,10 +108,13 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
   const edit = useMutation({
     meta: { handled: true },
     mutationFn: (variables: { message: DiscussionMessage; body: string; mentionUserIds: number[] }) =>
-      editMessage(documentId, table.tableCode, variables.message.id, {
-        body: variables.body,
-        mentionUserIds: variables.mentionUserIds,
-      }),
+      editMessage(
+        documentId,
+        table.tableCode,
+        variables.message.id,
+        { body: variables.body, mentionUserIds: variables.mentionUserIds },
+        sheetCopyId,
+      ),
     onSuccess: (message) => {
       chat.upsert(message);
       void chat.reload();
@@ -115,7 +124,7 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
 
   const remove = useMutation({
     meta: { handled: true },
-    mutationFn: (message: DiscussionMessage) => deleteMessage(documentId, table.tableCode, message.id),
+    mutationFn: (message: DiscussionMessage) => deleteMessage(documentId, table.tableCode, message.id, sheetCopyId),
     onSuccess: () => {
       void chat.reload();
       refreshSummary();
@@ -133,7 +142,7 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
     const target = state.lastMessageId;
     const timer = window.setTimeout(() => {
       markedUpTo.current = target;
-      markRead(documentId, table.tableCode, target)
+      markRead(documentId, table.tableCode, target, sheetCopyId)
         .then(() => {
           chat.markReadLocally(target);
           refreshSummary();
@@ -146,14 +155,14 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
 
     return () => window.clearTimeout(timer);
     // `chat` and `refreshSummary` are fresh each render on purpose: the trigger is the ids, not the callbacks.
-  }, [state.status, state.lastMessageId, state.lastReadMessageId, documentId, table.tableCode]);
+  }, [state.status, state.lastMessageId, state.lastReadMessageId, documentId, key]);
 
   // A new table or a new filter starts at the bottom.
   useEffect(() => {
     stick.current = true;
     markedUpTo.current = 0;
     setNewBelow(0);
-  }, [table.tableCode, filter]);
+  }, [key, filter]);
 
   const firstId = state.messages[0]?.id;
   const lastId = state.messages.at(-1)?.id;
@@ -210,10 +219,10 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
 
   // The read mark of the FIRST load of this table: "new" marks survive a filter switch and the mark-read of the poll.
   const baselineRef = useRef<{ readonly table: string; readonly value: number } | null>(null);
-  if (state.status === 'ready' && baselineRef.current?.table !== table.tableCode) {
-    baselineRef.current = { table: table.tableCode, value: state.readBaseline };
+  if (state.status === 'ready' && baselineRef.current?.table !== key) {
+    baselineRef.current = { table: key, value: state.readBaseline };
   }
-  const readBaseline = baselineRef.current?.table === table.tableCode ? baselineRef.current.value : state.readBaseline;
+  const readBaseline = baselineRef.current?.table === key ? baselineRef.current.value : state.readBaseline;
 
   const unreadCount = useMemo(
     () => state.messages.filter((message) => isUnread(message, readBaseline, me)).length,
@@ -243,6 +252,7 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
       aria-label={t('tableChat.panelTitle')}
       data-chat-panel=""
       data-chat-table={table.tableCode}
+      data-chat-key={key}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           event.stopPropagation();
@@ -381,6 +391,7 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
           <ChatComposer
             documentId={documentId}
             tableCode={table.tableCode}
+            sheetCopyId={sheetCopyId}
             periodKey={periodKey}
             periodText={periodText}
             onSubmit={submit}

@@ -11,8 +11,10 @@ namespace Ecr.Application.Ports;
 /// <param name="LastMessageId">Найбільший id чату.</param>
 /// <param name="MentionedMe">Є непрочитана згадка читача.</param>
 /// <param name="Revision">Ревізія чату (<c>doc.TableDiscussion.Revision</c>): росте на кожне нове, правлене й видалене.</param>
+/// <param name="SheetCopyKey">TC02: чат копії аркуша (<c>doc.DocumentSheet.Id</c> копії); 0 — оригінал.</param>
 public sealed record TableDiscussionSummaryRow(
-    string TableCode, int Total, int Unread, DateTime? LastAt, long LastMessageId, bool MentionedMe, long Revision);
+    string TableCode, int Total, int Unread, DateTime? LastAt, long LastMessageId, bool MentionedMe, long Revision,
+    long SheetCopyKey = 0);
 
 /// <summary>Повідомлення з іменем автора для відповіді.</summary>
 public sealed record TableDiscussionMessageRow(
@@ -27,12 +29,13 @@ public sealed record TableDiscussionStateRow(long Revision, long LastMessageId);
 /// <summary>Згадка для «Моїх задач».</summary>
 public sealed record TableDiscussionMentionRow(
     long MessageId, long DocumentId, string TableCode, int PeriodKey, int AuthorUserId, string AuthorName,
-    string Body, DateTime CreatedAt);
+    string Body, DateTime CreatedAt, long SheetCopyKey = 0);
 
 /// <summary>
 /// Сховище чатів таблиць. Читання — без відстеження; запис іде в транзакції викликача (<see cref="IUnitOfWork"/>).
 /// </summary>
 /// <remarks>
+/// TC02: чат — це трійка (документ, код таблиці, <c>sheetCopyKey</c>): 0 — оригінал, інакше <c>doc.DocumentSheet.Id</c> копії.
 /// ⛔ Порт нічого не знає про права: усі рішення про доступ приймає обробник ДО звернення сюди. Порт не торкається
 /// комірок, розрахунків і станів — лише <c>doc.TableDiscussion*</c>.
 /// </remarks>
@@ -50,26 +53,26 @@ public interface ITableDiscussionStore
     public Task<IReadOnlyList<int>> DocumentPeriodsAsync(long documentId, CancellationToken ct);
 
     /// <summary>Ревізія чату (один пошук за ключем); немає — ревізія 0.</summary>
-    public Task<TableDiscussionStateRow> GetStateAsync(long documentId, string tableCode, CancellationToken ct);
+    public Task<TableDiscussionStateRow> GetStateAsync(long documentId, string tableCode, long sheetCopyKey, CancellationToken ct);
 
     /// <summary>Позначка «прочитано до» користувача (0 — не було).</summary>
-    public Task<long> GetLastReadAsync(int userId, long documentId, string tableCode, CancellationToken ct);
+    public Task<long> GetLastReadAsync(int userId, long documentId, string tableCode, long sheetCopyKey, CancellationToken ct);
 
     /// <summary>
     /// Повідомлення: <paramref name="after"/> — за зростанням id; інакше найновіші (або старіші за <paramref name="before"/>)
     /// за спаданням. Береться <paramref name="take"/> рядків.
     /// </summary>
     public Task<IReadOnlyList<TableDiscussionMessageRow>> ListAsync(
-        long documentId, string tableCode, long? before, long? after, int? periodKey,
+        long documentId, string tableCode, long sheetCopyKey, long? before, long? after, int? periodKey,
         IReadOnlyCollection<int>? allowedPeriods, int take, CancellationToken ct);
 
     /// <summary>Повідомлення автора з цим <c>clientMessageId</c> у цьому чаті (повтор POST); <c>null</c> — немає.</summary>
     public Task<TableDiscussionMessageRow?> FindByClientIdAsync(
-        long documentId, string tableCode, int authorUserId, Guid clientMessageId, CancellationToken ct);
+        long documentId, string tableCode, long sheetCopyKey, int authorUserId, Guid clientMessageId, CancellationToken ct);
 
     /// <summary>Найбільший id повідомлення чату, видимий читачеві (у дозволених періодах; <c>null</c> — усі).</summary>
     public Task<long> MaxVisibleIdAsync(
-        long documentId, string tableCode, IReadOnlyCollection<int>? allowedPeriods, CancellationToken ct);
+        long documentId, string tableCode, long sheetCopyKey, IReadOnlyCollection<int>? allowedPeriods, CancellationToken ct);
 
     /// <summary>Згадані користувачі за повідомленнями (id → користувачі).</summary>
     public Task<IReadOnlyDictionary<long, IReadOnlyList<int>>> MentionsAsync(
@@ -84,11 +87,11 @@ public interface ITableDiscussionStore
     // ── запис (у транзакції викликача) ─────────────────────────────────────────────
 
     /// <summary>Зведення чату під блокуванням оновлення; створює, якщо немає.</summary>
-    public Task<TableDiscussionState> LockStateAsync(long documentId, string tableCode, CancellationToken ct);
+    public Task<TableDiscussionState> LockStateAsync(long documentId, string tableCode, long sheetCopyKey, CancellationToken ct);
 
     /// <summary>Повідомлення під блокуванням оновлення; <c>null</c> — немає в цьому чаті.</summary>
     public Task<TableDiscussionMessage?> FindMessageForUpdateAsync(
-        long documentId, string tableCode, long messageId, CancellationToken ct);
+        long documentId, string tableCode, long sheetCopyKey, long messageId, CancellationToken ct);
 
     /// <summary>Додає нове повідомлення до контексту (id з'явиться після <c>SaveChanges</c>).</summary>
     public void Add(TableDiscussionMessage message);
@@ -101,8 +104,9 @@ public interface ITableDiscussionStore
     public Task RemoveMentionsAsync(long messageId, CancellationToken ct);
 
     /// <summary>Час останнього живого повідомлення чату (після зміни); <c>null</c> — живих немає.</summary>
-    public Task<DateTime?> LastLiveAtAsync(long documentId, string tableCode, CancellationToken ct);
+    public Task<DateTime?> LastLiveAtAsync(long documentId, string tableCode, long sheetCopyKey, CancellationToken ct);
 
     /// <summary>Піднімає «прочитано до» й знімає згадки користувача до цього повідомлення.</summary>
-    public Task MarkReadAsync(int userId, long documentId, string tableCode, long upTo, CancellationToken ct);
+    public Task MarkReadAsync(
+        int userId, long documentId, string tableCode, long sheetCopyKey, long upTo, CancellationToken ct);
 }
