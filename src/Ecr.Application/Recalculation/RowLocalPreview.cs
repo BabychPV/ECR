@@ -1,4 +1,5 @@
 // src/Ecr.Application/Recalculation/RowLocalPreview.cs
+using System.Runtime.CompilerServices;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries;
@@ -227,7 +228,11 @@ public sealed class RowLocalPreview(
 
     /// <summary>Збирає колонки, які читає вираз; <c>false</c> - у виразі є невідома колонка чи вузол поза доведеною множиною.</summary>
     private static bool CollectReads(AstNode node, Dictionary<string, ColumnDef> columnsByCode, HashSet<int> reads)
-        => node switch
+    {
+        // ⛔ L7-01: рекурсія за довжиною ланцюга виразу.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
+        return node switch
         {
             LiteralNode or PeriodPropertyNode => true,
             UnaryNode unary => CollectReads(unary.Operand, columnsByCode, reads),
@@ -239,6 +244,7 @@ public sealed class RowLocalPreview(
             CellReferenceNode r when columnsByCode.TryGetValue(r.ColumnSelector, out var column) => AddRead(reads, column.Id),
             _ => false,
         };
+    }
 
     private static bool AddRead(HashSet<int> reads, int columnId)
     {
@@ -290,6 +296,8 @@ public sealed class RowLocalPreview(
     /// <summary>Виклики <c>REGFIELD([Col], 'Field')</c> у виразі.</summary>
     private static IEnumerable<(string ColumnSelector, string Field)> RegFieldCalls(AstNode node)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         switch (node)
         {
             case FunctionNode f:

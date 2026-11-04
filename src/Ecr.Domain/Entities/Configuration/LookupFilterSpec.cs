@@ -13,7 +13,7 @@ public static partial class LookupFilterSpec
     /// <summary>Єдиний підтримуваний ключ.</summary>
     public const string LevelKey = "level";
 
-    [GeneratedRegex(@"^level=([A-Za-z0-9_.\-]{1,64})$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\Alevel=([A-Za-z0-9_.\-]{1,64})\z", RegexOptions.CultureInvariant)]
     private static partial Regex LevelPattern();
 
     /// <summary>Розбирає фільтр.</summary>

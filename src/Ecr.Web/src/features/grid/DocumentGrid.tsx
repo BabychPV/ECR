@@ -39,6 +39,7 @@ import { cellStateClass, cellStateOf, gridReadOnlyFor, rowsLockedBySheet, sheetL
 import { isMissingColumns, isSliceEmpty } from './emptiness';
 import { columnWidth, widthsFromEvent } from './columnWidths';
 import { createLookupCellEditor, lookupCellDisplay, lookupIdOfText } from './LookupCellEditor';
+import { entriesOfLevel, sharedLookupLevel } from './lookupLevel';
 import { unlistedIdsOf, useUnlistedLookupLabels } from './unlistedLookupEntries';
 import { boolCellDisplay, createBoolCellEditor } from './BoolCellEditor';
 import { createUnitCellEditor, unitCellDisplay, unitIdOfCode } from './UnitCellEditor';
@@ -1157,9 +1158,13 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const [, bumpAsOfRequired] = useState(0);
 
   const lookupEntriesQueries = useQueries({
-    queries: lookupRegistryCodes.map(({ code, isTemporal }) => {
+    queries: lookupRegistryCodes.map(({ id, code, isTemporal }) => {
       const needsAsOf = isTemporal || asOfRequiredCodes.has(code);
       const asOf = needsAsOf ? lookupAsOf : null;
+
+      // HSE401: усі Lookup-колонки довідника мають один фільтр `level=X` - звужуємо перелік на сервері (`?level=`);
+      // інакше перелік спільний, а кожна колонка звужує його сама (`entriesOfLevel`).
+      const level = sharedLookupLevel(data?.columns ?? [], id);
 
       // ⛔ Темпоральний довідник без дати не питається взагалі: запит без
       // `asOf` сервер відхиляє (`422`), а будь-яка «здогадана» дата показала б
@@ -1173,10 +1178,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       const baseUrl = `/api/v1/registries/${encodeURIComponent(code)}/entries`;
 
       return {
-        queryKey: [...queryKeys.registries.entries(code), asOf],
+        queryKey: level === null ? [...queryKeys.registries.entries(code), asOf] : [...queryKeys.registries.entries(code), asOf, level],
         queryFn: async () => {
           try {
-            return await apiFetch<RegistryEntryDto[]>(asOf === null ? baseUrl : `${baseUrl}?asOf=${asOf}`);
+            const params = new URLSearchParams();
+            if (asOf !== null) params.set('asOf', asOf);
+            if (level !== null) params.set('level', level);
+            const query = params.toString();
+
+            return await apiFetch<RegistryEntryDto[]>(query === '' ? baseUrl : `${baseUrl}?${query}`);
           } catch (error) {
             // D1-06: «asOf обов'язковий» для довідника, якого ми вважали нетемпоральним, — запам'ятати й
             // перебудувати запит уже з датою (ключ запиту міняється разом із нею).
@@ -3259,7 +3269,7 @@ export function gridColumns(
     // інпутом на секунду вантаження, не помилкою на екрані.
     const lookupEntries =
       column.dataType === 'Lookup' && column.lookupRegistryDefId !== null
-        ? (lookupEntriesByRegistryId.get(column.lookupRegistryDefId) ?? [])
+        ? entriesOfLevel(lookupEntriesByRegistryId.get(column.lookupRegistryDefId) ?? [], column.lookupFilter)
         : null;
 
     // ⚠ Для РЕДАКТОРА «ще їде» і «порожньо» — різні стани (`X-13`); для

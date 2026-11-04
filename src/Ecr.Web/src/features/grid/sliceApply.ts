@@ -56,6 +56,15 @@ export function applyPatchToSlice(
   const byRowKey = new Map(request.rows.map((row) => [row.rowKey, row] as const));
   if (byRowKey.size === 0) return slice;
 
+  // HSE401: перегляд рядково-локальних формул (`computedCells`) - похідні колонки (Компонент/Фаза за кодом) з'являються
+  // одразу; фоновий перерахунок лишається істиною і перепише їх тим самим значенням.
+  const computedByRow = new Map<string, NonNullable<PatchCellsResponse['computedCells']>>();
+  for (const cell of response.computedCells ?? []) {
+    const list = computedByRow.get(cell.rowKey) ?? [];
+    list.push(cell);
+    computedByRow.set(cell.rowKey, list);
+  }
+
   let changed = false;
 
   const rows = slice.rows.map((row) => {
@@ -66,7 +75,7 @@ export function applyPatchToSlice(
 
     return {
       ...row,
-      cells: applyCells(row.cells, patched.cells),
+      cells: applyComputed(applyCells(row.cells, patched.cells), computedByRow.get(row.rowKey)),
 
       // ⚠ Версія — З ВІДПОВІДІ, і лише якщо сервер її назвав. Лишити стару
       // означало б, що наступний патч того самого рядка піде зі старим
@@ -115,6 +124,19 @@ function withManualCells(
   }
 
   return manual === null ? info : { ...info, manualCells: manual };
+}
+
+/** HSE401: значення обчислених комірок перегляду поверх рядка (`null` - комірку очищено). */
+function applyComputed(
+  cells: Record<string, unknown>,
+  computed: readonly { columnCode: string; value?: unknown }[] | undefined,
+): Record<string, unknown> {
+  if (computed === undefined || computed.length === 0) return cells;
+
+  const next = { ...cells };
+  for (const cell of computed) next[cell.columnCode] = cell.value ?? null;
+
+  return next;
 }
 
 /**
