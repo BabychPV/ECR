@@ -267,6 +267,36 @@ test.describe('uiMinorP3: дрібні пункти проходу C', () => {
     }
   });
 
+  test('uiMinorP3-assert: CL-18/CL-21 - вибір періоду >= 24 px, axe target-size, без штриховки read-only на 500 px', async ({ page }) => {
+    await signIn(page);
+
+    for (const size of [Narrow, Wide]) {
+      await page.setViewportSize(size);
+      await openDocument(page);
+
+      const targets = page.locator(
+        '.ecr-period > button, .ecr-period-calendar, .mantine-CloseButton-root:visible, .ecr-chat-badge, .ecr-cell-color-swatch',
+      );
+      const count = await targets.count();
+      for (let index = 0; index < count; index += 1) {
+        const target = targets.nth(index);
+        if (!(await target.isVisible())) continue;
+        const box = await target.boundingBox();
+        expect(box?.width ?? 0, `${String(size.width)} px: ширина цілі #${String(index)}`).toBeGreaterThanOrEqual(24);
+        expect(box?.height ?? 0, `${String(size.width)} px: висота цілі #${String(index)}`).toBeGreaterThanOrEqual(24);
+      }
+
+      expect(await axeViolations(page, 'target-size'), `${String(size.width)} px: axe target-size на документі`).toEqual([]);
+    }
+
+    // CL-21: на вузькому екрані штриховка комірок «лише читання» вимкнена (замок і фон лишаються формою стану).
+    await page.setViewportSize(Narrow);
+    await openDocument(page);
+    const locked = page.locator('.ecr-cell--read-only').first();
+    if ((await locked.count()) > 0) {
+      expect(await locked.evaluate((node) => getComputedStyle(node).backgroundImage), 'штриховка на 500 px').toBe('none');
+    }
+  });
   test('uiMinorP3-assert: CL-22 - після Esc у «Return for edits» фокус на кнопці-відкривачі - N/5', async ({ page }) => {
     await signIn(page);
     await pasteOneValue(page);
