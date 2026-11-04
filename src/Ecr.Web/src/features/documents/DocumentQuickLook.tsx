@@ -1,5 +1,5 @@
 import type { JSX, ReactNode } from 'react';
-import { Box, Button, Group, Skeleton, Stack, Text, Title } from '@mantine/core';
+import { Alert, Box, Button, Group, Skeleton, Stack, Text, Title } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -84,11 +84,15 @@ export function DocumentQuickLook({
       apiFetch<DocumentSummary>(
         `/api/v1/documents/${String(documentId)}` + (periodKey === null ? '' : `?periodKey=${String(periodKey)}`),
       ),
-    enabled: valid && listReady && fromList === undefined,
+    // D-466: `stepApproverNames` віддає лише картка одного документа, перелік поля не несе - тож картку дочитуємо
+    // завжди (і коли рядок уже є на сторінці), а решта шторки лишається з рядка переліку.
+    enabled: valid && listReady,
   });
 
   // ⚠ `?? undefined`: порожня відповідь (`null`) — це «документа немає», а не документ.
   const document = fromList ?? fetched.data ?? undefined;
+  // Поля кроку - лише з картки: рядок переліку їх не має, і «не прочиталось» ≠ «нікого немає».
+  const stepApprovers = fetched.data ?? undefined;
 
   if (!valid) return null;
 
@@ -133,7 +137,7 @@ export function DocumentQuickLook({
           <Skeleton height={120} radius="sm" />
         )
       ) : (
-        <QuickLookBody document={document} periodKey={periodKey} />
+        <QuickLookBody document={document} periodKey={periodKey} detail={stepApprovers} />
       )}
     </DetailDrawer>
   );
@@ -142,9 +146,12 @@ export function DocumentQuickLook({
 function QuickLookBody({
   document,
   periodKey,
+  detail,
 }: {
   readonly document: DocumentSummary;
   readonly periodKey: number | null;
+  /** Картка документа (`GET /documents/{id}`) - лише вона несе `stepApproverNames`. */
+  readonly detail?: DocumentSummary | undefined;
 }): JSX.Element {
   const withStates = periodKey !== null && hasSheetStates(document);
 
@@ -157,6 +164,8 @@ function QuickLookBody({
           {t('documents.quickLookNoPeriod')}
         </Text>
       )}
+
+      {withStates && <StepApprovers names={detail?.stepApproverNames} truncated={detail?.stepApproverNamesTruncated} />}
 
       <Section title={t('documents.quickLookResponsible')}>
         <KeyValue
@@ -174,6 +183,36 @@ function QuickLookBody({
 
       {withStates && <LatestChanges documentId={document.id} periodKey={periodKey} sheets={sheetLabels(document)} />}
     </Stack>
+  );
+}
+
+/**
+ * D-466 (AN-59, варіант C): хто МОЖЕ діяти на поточному кроці погодження поданих аркушів і копій.
+ * `null` - нічого не подано / немає періоду / звужений читач: блоку немає зовсім (не порожній рядок).
+ * `[]` - подано, але діяти не може ніхто: текстове застереження (не лише колір). Подавач може бути в списку (D-440).
+ */
+function StepApprovers({
+  names,
+  truncated,
+}: {
+  readonly names: readonly string[] | null | undefined;
+  readonly truncated: boolean | undefined;
+}): JSX.Element | null {
+  if (names === null || names === undefined) return null;
+
+  return (
+    <Section title={t('documents.quickLookStepApprovers')}>
+      {names.length === 0 ? (
+        <Alert color="statusWarning" variant="light" data-quick-look-step-approvers-none="">
+          {t('documents.quickLookStepApproversNone')}
+        </Alert>
+      ) : (
+        <Text size="sm" data-quick-look-step-approvers="">
+          {names.join(', ')}
+          {truncated === true && <> {t('documents.quickLookStepApproversMore')}</>}
+        </Text>
+      )}
+    </Section>
   );
 }
 
