@@ -148,6 +148,7 @@ public static class DependencyInjection
         services.AddScoped<Projects.GetProjectTemplateTimelineHandler>();
         services.AddScoped<ListDocumentsHandler>();
         services.AddScoped<GetDocumentListSummaryHandler>();
+        services.AddScoped<StepApproversResolver>();
         services.AddScoped<GetDocumentHandler>();
         services.AddScoped<GetTableSliceHandler>();
         services.AddScoped<CreateRowHandler>();
