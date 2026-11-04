@@ -73,6 +73,57 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("CalculationInput", "calc");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.CalculationIssue", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("CalculationRunId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("DetectedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("MethodologyCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("PeriodKey")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RowKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("RowNumber")
+                        .HasColumnType("int");
+
+                    b.Property<long?>("SheetCopyId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("TableDefId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentId", "PeriodKey", "TableDefId", "SheetCopyId")
+                        .HasDatabaseName("IX_CalculationIssue_Address");
+
+                    b.ToTable("CalculationIssue", "calc");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.CalculationResult", b =>
                 {
                     b.Property<int>("PeriodKey")
