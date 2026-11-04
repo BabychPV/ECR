@@ -1492,14 +1492,28 @@ public sealed partial class RecalculationJob(
             ", ",
             unmatched.Take(NoMatchingRuleRowsShown).Select(r => r.RowNumber.ToString(CultureInfo.InvariantCulture)));
 
-        return new JobProgressMessageEnvelope(
-            "jobs.recalcNoMatchingRule",
-            new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["count"] = unmatched.Count.ToString(CultureInfo.InvariantCulture),
-                ["rows"] = unmatched.Count > NoMatchingRuleRowsShown ? shown + ", …" : shown,
-            });
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["count"] = unmatched.Count.ToString(CultureInfo.InvariantCulture),
+            ["rows"] = unmatched.Count > NoMatchingRuleRowsShown ? shown + ", …" : shown,
+        };
+
+        // AN-69: понад стелю на таблицю в `calc.CalculationIssue` потрапляє не все - повідомлення це каже.
+        var truncated = TruncatedIssues(unmatched);
+        if (truncated > 0)
+        {
+            parameters["truncated"] = truncated.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return new JobProgressMessageEnvelope("jobs.recalcNoMatchingRule", parameters);
     }
+
+    /// <summary>Скільки рядків без правила не збережено в <c>calc.CalculationIssue</c> через стелю на таблицю (AN-69).</summary>
+    /// <param name="unmatched">Рядки без правила за весь прогін.</param>
+    internal static int TruncatedIssues(IEnumerable<UnmatchedRow> unmatched)
+        => unmatched
+            .GroupBy(r => r.TableInstanceId)
+            .Sum(g => Math.Max(0, g.Count() - Application.Ports.ICalculationIssueStore.MaxPerTable));
 
     /// <summary>
     /// Конверт «правило категорії відхилило рядки» (<c>jobs.recalcCategoryRuleRejected</c>, L2-6):

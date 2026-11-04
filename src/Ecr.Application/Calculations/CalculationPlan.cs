@@ -120,6 +120,7 @@ public sealed class ModuleProfile
     private readonly List<UnmatchedRow> _unmatched = [];
     private readonly List<RejectedRow> _rejected = [];
     private readonly List<int> _skippedUnpublished = [];
+    private readonly HashSet<long> _evaluatedTables = [];
 
     /// <summary>Записує виконання одного модуля.</summary>
     /// <param name="moduleCode">Код модуля.</param>
@@ -155,6 +156,7 @@ public sealed class ModuleProfile
 
         _unmatched.AddRange(other._unmatched);
         _rejected.AddRange(other._rejected);
+        _evaluatedTables.UnionWith(other._evaluatedTables);
         RecordSkippedUnpublished(other._skippedUnpublished);
 
         foreach (var stat in other._stats.Values)
@@ -189,6 +191,21 @@ public sealed class ModuleProfile
         ArgumentNullException.ThrowIfNull(rows);
 
         _unmatched.AddRange(rows);
+    }
+
+    /// <summary>
+    /// Екземпляри таблиць, чиї рядки прохід зіставив з правилами (AN-69), зокрема без жодного рядка без правила.
+    /// У JSON профілю не потрапляє: потрібні лише для заміни <c>calc.CalculationIssue</c> у транзакції завершення.
+    /// </summary>
+    public IReadOnlyCollection<long> EvaluatedTables => _evaluatedTables;
+
+    /// <summary>Записує екземпляри таблиць, чиї рядки зіставлено з правилами.</summary>
+    /// <param name="tableInstanceIds">Екземпляри таблиць.</param>
+    public void RecordEvaluatedTables(IEnumerable<long> tableInstanceIds)
+    {
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+
+        _evaluatedTables.UnionWith(tableInstanceIds);
     }
 
     /// <summary>
@@ -345,7 +362,9 @@ public sealed record ModuleStat(string Code, TimeSpan Elapsed, int Rows, int Cal
 /// <param name="RowNumber">Номер рядка, з 1, у порядку створення (за <c>TableRow.Id</c>).</param>
 /// <param name="RowKey">Публічний ключ рядка.</param>
 /// <param name="DocumentId">Документ прогону (D14): прогін проєкту зводить профілі багатьох документів в один.</param>
-public sealed record UnmatchedRow(long TableInstanceId, int RowNumber, string RowKey, long DocumentId = 0);
+/// <param name="MethodologyCode">Методологія прив'язки таблиці (AN-69); <c>null</c> — невідома. У профіль не пишеться.</param>
+public sealed record UnmatchedRow(
+    long TableInstanceId, int RowNumber, string RowKey, long DocumentId = 0, string? MethodologyCode = null);
 
 /// <summary>
 /// Рядок, відхилений правилом категорії (L2-6): ключ категорії не отримано (порожній, помилка обчислення,

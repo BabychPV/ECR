@@ -191,6 +191,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<CalculationInputRow> CalculationInputs => Set<CalculationInputRow>();
     public DbSet<CalculationStep> CalculationSteps => Set<CalculationStep>();
 
+    /// <summary>Поточні проблеми розрахунку (AN-69): лише останній прохід.</summary>
+    public DbSet<CalculationIssue> CalculationIssues => Set<CalculationIssue>();
+
     // rpt
     public DbSet<ReportDef> ReportDefs => Set<ReportDef>();
     public DbSet<ReportVersion> ReportVersions => Set<ReportVersion>();

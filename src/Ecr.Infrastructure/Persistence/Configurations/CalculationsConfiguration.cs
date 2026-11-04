@@ -579,6 +579,27 @@ public sealed class CalculationRunConfiguration : IEntityTypeConfiguration<Calcu
     }
 }
 
+/// <summary>Конфігурація <see cref="CalculationIssue"/> (AN-69): лише поточні проблеми розрахунку.</summary>
+public sealed class CalculationIssueConfiguration : IEntityTypeConfiguration<CalculationIssue>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<CalculationIssue> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("CalculationIssue", "calc");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.RowKey).HasMaxLength(CalculationIssue.MaxRowKeyLength).IsRequired();
+        builder.Property(x => x.Kind).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.MethodologyCode).HasMaxLength(64);
+        builder.Property(x => x.DetectedAt).HasColumnType("datetime2(3)").IsRequired();
+
+        // Читання аркуша й заміна проходу йдуть за однією адресою: документ × період × таблиця × копія.
+        builder.HasIndex(x => new { x.DocumentId, x.PeriodKey, x.TableDefId, x.SheetCopyId })
+               .HasDatabaseName("IX_CalculationIssue_Address");
+    }
+}
+
 /// <summary>Конфігурація <see cref="CalculationResult"/> — партиційованої таблиці.</summary>
 /// <remarks>
 /// ⚠ Ключ складений із <c>PeriodKey</c> і <c>Id</c>: партиційна функція
