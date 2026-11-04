@@ -15,6 +15,7 @@ import type { TreeNode } from '@/shared/ui/TreeEditor';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import {
   EmptyNodeForm,
+  NaeAreaField,
   NaeCodeField,
   buildNodeBody,
   fieldsForLevel,
@@ -33,6 +34,7 @@ import {
   type NodeFormTarget,
   type ServerFieldProblem,
 } from './nodeAttributes';
+import { AreaSelect } from './AreaSelect';
 
 type EntryIdResponse = components['schemas']['RegistryEntryIdResponse'];
 type RegistryField = components['schemas']['RegistryFieldDto'];
@@ -289,7 +291,19 @@ function Form({
               </Text>
             )}
 
-            {inputFields.map((field) => (
+            {inputFields.map((field) => field.code === NaeAreaField ? (
+              <AreaSelect
+                key={field.id}
+                label={localized(field.nameL10n) || field.code}
+                value={values[field.code] ?? ''}
+                error={fieldError(field)}
+                onChange={(next) => {
+                  setValues((previous) => ({ ...previous, [field.code]: next }));
+                  setServerProblem(null);
+                }}
+                data-nae-area=""
+              />
+            ) : (
               <TextInput
                 key={field.id}
                 label={localized(field.nameL10n) || field.code}

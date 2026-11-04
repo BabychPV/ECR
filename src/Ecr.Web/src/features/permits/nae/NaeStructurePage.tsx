@@ -2,6 +2,7 @@ import { Suspense, lazy, useState, type JSX } from 'react';
 import { Button, Group, Stack, Text } from '@mantine/core';
 import { EcrApiError } from '@/api/client';
 import { useRegistryDefinition } from '@/features/registries/rc812/data';
+import { useRegistryTree } from '@/features/registries/tree/useRegistryTree';
 import { RegistryTreeEditor } from '@/features/registries/tree/RegistryTreeEditor';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
@@ -11,7 +12,7 @@ import type { TreeLevel, TreeNode, TreeNodeId } from '@/shared/ui/TreeEditor';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { useMayWritePermits } from '../list/permitListRights';
 import { PermitsSubnav } from '../shell/PermitsSubnav';
-import { NaeEmptyState } from './NaeEmptyState';
+import { NaeEmptyState, NaeSeedRootsButton } from './NaeEmptyState';
 import { NaeRegistryCode } from './nodeAttributes';
 import { WhereUsed } from './WhereUsed';
 import './naeStructure.css';
@@ -73,13 +74,10 @@ export function NaeStructurePage(): JSX.Element {
   // Вузли без AF (корінь, регіони з довідника, Excel): завжди EditData; якщо виклик має СТВОРИТИ довідник NAE_TREE (він
   // ще не існує) - ще й EditDefinition + Publish (сервер: NaeTreeManualHandler). Без них - підказка «до адміністратора».
   const canManual = canEdit && (!notProvisioned || (canImport && can(session.data, 'Registry.Publish')));
-  const emptyState = (
-    <NaeEmptyState
-      canManual={canManual}
-      onAddRegion={() => setAddRegionOpen(true)}
-      onImportExcel={() => setExcelOpen(true)}
-    />
-  );
+  const emptyState = <NaeEmptyState canManual={canManual} />;
+  // Дерево порожнє (або довідника ще немає): лише тоді на панелі є «Create regions from registries». Той самий запит, що й у редактора.
+  const tree = useRegistryTree(registryCode);
+  const treeEmpty = notProvisioned || (!tree.isPending && tree.nodes.length === 0 && tree.query === '');
 
   const selected: TreeNodeId | null = nodeParam === null || nodeParam === '' ? null : Number(nodeParam);
   const registry = definition.data;
@@ -122,6 +120,7 @@ export function NaeStructurePage(): JSX.Element {
               {t('permits.nae.import.open')}
             </Button>
           )}
+          {canManual && treeEmpty && <NaeSeedRootsButton />}
         </Group>
       )}
       {canImport && importOpen && (
@@ -165,6 +164,7 @@ export function NaeStructurePage(): JSX.Element {
         canEdit={canEdit}
         hideEntryCode={codeAutomatic}
         emptyState={canEdit ? emptyState : undefined}
+        hideAddRoot={registryCode === NaeRegistryCode}
         selectedId={selected}
         onSelect={(id) => setNodeParam(id === null ? null : String(id))}
         onAddChild={

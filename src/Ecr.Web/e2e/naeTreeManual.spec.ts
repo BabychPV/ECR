@@ -148,7 +148,7 @@ async function chooseFile(page: Page, file: Buffer): Promise<void> {
 
 async function openExcel(page: Page): Promise<void> {
   await page.goto('/admin/permits/nae');
-  await page.locator('[data-nae-excel-open], [data-nae-empty-excel]').first().click();
+  await page.locator('[data-nae-excel-open]').click();
   await expect(page.locator('[data-nae-excel]')).toBeVisible();
 }
 
@@ -236,7 +236,7 @@ test.describe('NAE tree manual', () => {
     await page.goto('/admin/permits/nae');
     if (initialEmpty) {
       await expect(page.getByText('The NAE tree is empty')).toBeVisible();
-      for (const way of [/Sync from PI AF/, /Import from Excel:/, /By hand/]) await expect(page.getByText(way)).toBeVisible();
+      for (const way of [/Load from PI AF/, /Import from Excel:/, /By hand/]) await expect(page.getByText(way)).toBeVisible();
       const seeded = page.waitForResponse((response) => response.url().includes('/nae-tree/seed-roots'));
       await page.locator('[data-nae-seed-roots]').click();
       const seedResponse = await seeded;
@@ -260,7 +260,7 @@ test.describe('NAE tree manual', () => {
   test('NAE tree manual: add region', async ({ browser }) => {
     const { page, context } = await openAs(browser, { user: Editor.user, password: Editor.password }, 'light');
     await page.goto('/admin/permits/nae');
-    await page.locator('[data-nae-add-region-open], [data-nae-empty-add]').first().click();
+    await page.locator('[data-nae-add-region-open]').click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel(/^Region/).selectOption(Region);
     await dialog.getByLabel(/^Area/).fill(Area);

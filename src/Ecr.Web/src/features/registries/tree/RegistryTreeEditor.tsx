@@ -13,6 +13,8 @@ export interface RegistryTreeEditorProps {
   readonly canEdit: boolean;
   /** Форму нового вузла показує сторінка (атрибути довідника - її справа); без неї «Додати» не малюється. */
   readonly onAddChild?: ((parent: TreeNode | null, level: TreeLevel) => void) | undefined;
+  /** Кнопку додавання кореня дерева не малювати (її дає сторінка). */
+  readonly hideAddRoot?: boolean | undefined;
   /** Додаткові блоки під відомостями вузла (атрибути, «де використано»). */
   readonly renderPanelExtra?: ((node: TreeNode) => ReactNode) | undefined;
   /** Код запису технічний (довідник із `CodeMode = Auto`): у рядках і панелі його не показують. */
@@ -34,6 +36,7 @@ export function RegistryTreeEditor({
   label,
   canEdit,
   onAddChild,
+  hideAddRoot,
   renderPanelExtra,
   hideEntryCode = false,
   selectedId,
@@ -80,6 +83,7 @@ export function RegistryTreeEditor({
       onMove={tree.move}
       onRetire={tree.retire}
       onAddChild={onAddChild}
+      hideAddRoot={hideAddRoot}
       canEdit={canEdit}
       busy={tree.isMutating}
       loading={loadingLate}

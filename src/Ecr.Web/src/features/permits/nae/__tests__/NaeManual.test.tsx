@@ -65,6 +65,9 @@ beforeEach(() => {
     if (path.includes('/registries/LAND_REGION/rows')) {
       return Promise.resolve({ items: [{ id: 1, code: 'KZ-ATY', display: 'Атырау' }, { id: 2, code: 'KZ-MAN', display: 'Мангистау' }], nextCursor: null, totalCount: 2 });
     }
+    if (path.includes('/registries/AIR_AREA/rows')) {
+      return Promise.resolve({ items: [{ id: 11, code: 'OFFSHORE', display: 'Offshore' }, { id: 12, code: 'ONSHORE', display: 'Onshore' }], nextCursor: null, totalCount: 2 });
+    }
     if (/\/registries\/LAND_REGION\/entries\/\d+$/.test(path)) {
       const id = Number(path.split('/').pop());
 
@@ -97,8 +100,14 @@ describe('порожнє дерево НВ', () => {
     for (const key of ['wayAf', 'wayExcel', 'wayManual']) {
       expect(screen.getByText(`permits.nae.manual.${key}`)).toBeTruthy();
     }
-    expect(document.querySelector('[data-nae-seed-roots]')).not.toBeNull();
-    expect(document.querySelector('[data-nae-empty-add]')).not.toBeNull();
+    // Кнопки одні, на панелі інструментів (людина 04.11): у порожньому стані їх немає, «Add top-level node» теж.
+    expect(document.querySelectorAll('[data-nae-seed-roots]')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-nae-add-region-open]')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-nae-excel-open]')).toHaveLength(1);
+    expect(document.querySelector('[data-nae-empty-add]')).toBeNull();
+    expect(document.querySelector('[data-nae-empty-excel]')).toBeNull();
+    expect(document.querySelector('[data-nae-empty] button')).toBeNull();
+    expect(document.querySelector('[data-testid="tree-add-root"]')).toBeNull();
   });
 
   it('довідник створюється викликом (404), є EditDefinition, але немає Publish: підказка, без дій створення', async () => {
@@ -174,7 +183,10 @@ describe('AddRegionModal', () => {
     const select = (await screen.findByLabelText(/permits\.nae\.manual\.region/)) as HTMLSelectElement;
     await waitFor(() => expect(select.options.length).toBe(2));
     await user.selectOptions(select, 'KZ-MAN');
-    await user.type(screen.getByLabelText(/permits\.nae\.manual\.area$/), 'OFFSHORE');
+    // Район - вибір зі списку AIR_AREA (людина 04.11), порожній варіант - лише регіон.
+    const area = screen.getByLabelText(/permits\.nae\.manual\.area$/) as HTMLSelectElement;
+    await waitFor(() => expect(area.options.length).toBe(3));
+    await user.selectOptions(area, 'OFFSHORE');
     await user.type(screen.getByLabelText('permits.nae.manual.nameEn'), 'Mangystau shelf');
     await user.click(screen.getByText('permits.nae.manual.addRegionSubmit'));
 

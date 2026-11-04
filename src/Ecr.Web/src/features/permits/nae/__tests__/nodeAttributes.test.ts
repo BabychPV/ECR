@@ -49,9 +49,9 @@ function errorWithKey(messageKey: string, extra: Record<string, unknown> = {}): 
 
 describe('fieldsForLevel / isServerField / targetLevelCode', () => {
   it('поля свого рівня й поля всіх рівнів; чужий рівень не показується', () => {
-    expect(fieldsForLevel(allFields, 'SRC').map((f: { code: string }) => f.code)).toEqual(['NaeCode', 'RegionCode', 'AreaCode', 'AfPath', 'SourceType', 'Comment']);
-    expect(fieldsForLevel(allFields, 'AREA').map((f: { code: string }) => f.code)).toEqual(['AfPath', 'Comment']);
-    expect(fieldsForLevel(allFields, null).map((f: { code: string }) => f.code)).toEqual(['AfPath', 'Comment']);
+    expect(fieldsForLevel(allFields, 'SRC').map((f: { code: string }) => f.code)).toEqual(['NaeCode', 'RegionCode', 'AreaCode', 'SourceType', 'Comment']);
+    expect(fieldsForLevel(allFields, 'AREA').map((f: { code: string }) => f.code)).toEqual(['Comment']);
+    expect(fieldsForLevel(allFields, null).map((f: { code: string }) => f.code)).toEqual(['Comment']);
   });
 
   it('поле сервера - лише isReadOnly=true; відсутня ознака - поле вводу', () => {

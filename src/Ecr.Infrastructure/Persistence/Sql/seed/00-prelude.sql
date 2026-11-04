@@ -812,6 +812,13 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- AN-158 (людина 04.11): район NAE вибирається зі списку; одна назва дії AF — «Load from PI AF».
+    (N'permits.nae.manual.areaHint', N'en', N'Area code under the region, for example OFFSHORE. Leave empty to add only the region.', N'The area is chosen from the «Air permit areas» list. Choose «No area» to add only the region.'),
+    (N'permits.nae.manual.areaHint', N'ru', N'Код района под регионом, например OFFSHORE. Оставьте пустым, чтобы добавить только регион.', N'Район выбирается из справочника «Air permit areas». Выберите «Без района», чтобы добавить только регион.'),
+    (N'permits.nae.manual.areaHint', N'kz', N'Аймақ астындағы аудан коды, мысалы OFFSHORE. Тек аймақты қосу үшін бос қалдырыңыз.', N'Аудан «Air permit areas» анықтамалығынан таңдалады. Тек аймақты қосу үшін «Аудансыз» таңдаңыз.'),
+    (N'permits.nae.manual.wayAf', N'en', N'Sync from PI AF: loads the whole structure from the AF server.', N'Load from PI AF: loads the whole structure from the AF server.'),
+    (N'permits.nae.manual.wayAf', N'ru', N'Синхронизация с PI AF: вся структура загружается с сервера AF.', N'Загрузка из PI AF: вся структура загружается с сервера AF.'),
+    (N'permits.nae.manual.wayAf', N'kz', N'PI AF-пен синхрондау: барлық құрылым AF серверінен жүктеледі.', N'PI AF-тен жүктеу: барлық құрылым AF серверінен жүктеледі.'),
     -- COLL:ui-methodology-categories: похідні аргументи (2026-11-02) — «оголошеного аргументу» більше немає, необов'язковий вхід пишеться @Name?.
     (N'methodologies.syntaxHelp.refArgument', N'en', N'An input of the formula: a column of the bound row or a declared argument. The name may contain dots.', N'An input of the formula: a column of the bound row. The name may contain dots; @Name? marks an optional input.'),
     (N'methodologies.syntaxHelp.refArgument', N'ru', N'Входное значение формулы: колонка связанной строки или объявленный аргумент. Имя может содержать точки.', N'Входное значение формулы: колонка связанной строки. Имя может содержать точки; @Name? помечает необязательное входное значение.'),

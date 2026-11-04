@@ -28,6 +28,9 @@ export const NaeCodeField = 'NaeCode';
 export const NaeRegionField = 'RegionCode';
 export const NaeAreaField = 'AreaCode';
 
+/** Шлях AF: сервер зберігає його для синку з AF, але в картці вузла його немає (людина 04.11: «навіщо показувати Path AF»). */
+export const NaeAfPathField = 'AfPath';
+
 /** Мова, назва якою обов'язкова на кожному вузлі дерева NAE (Q1, 03.11); `ru` і `kz` - за бажанням. */
 export const RequiredNameLanguage = 'en';
 
@@ -41,7 +44,9 @@ export function targetLevelCode(target: NodeFormTarget): string | null {
  * ⛔ Фільтр потрібен і сервер його знає: непорожнє значення поля чужого рівня - `422 fieldLevelMismatch`.
  */
 export function fieldsForLevel(fields: readonly RegistryField[], levelCode: string | null): RegistryField[] {
-  return fields.filter((field) => field.levelCode === undefined || field.levelCode === null || field.levelCode === levelCode);
+  return fields.filter(
+    (field) => field.code !== NaeAfPathField && (field.levelCode === undefined || field.levelCode === null || field.levelCode === levelCode),
+  );
 }
 
 /**
