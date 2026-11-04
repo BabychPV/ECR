@@ -31,7 +31,8 @@ namespace Ecr.Application.Recalculation;
 /// <c>AcceptsRange</c> (<c>FunctionRegistry.cs:44-58</c>): <c>CONVERT</c>,
 /// <c>ROUND</c>, <c>ABS</c>, <c>IF</c>, <c>IFERROR</c>. Агрегати
 /// (<c>SUM</c>, <c>AVERAGE</c>, <c>MIN</c>, <c>MAX</c>, <c>COUNT</c>,
-/// <c>PRODUCT</c>, <c>SUMIF</c>) і будь-яке невідоме ім'я — нелокальні;</item>
+/// <c>PRODUCT</c>, <c>SUMIF</c>) — локальні лише коли ВСІ аргументи є
+/// <c>[Col]</c> власного рядка (HSE401); невідоме ім'я — нелокальне;</item>
 /// <item>посилання на комірку виду <c>[Col]</c>, тобто
 /// <c>RowSelector.Current</c> без коду аркуша й таблиці та зі зсувом періоду
 /// <c>0</c> (<c>02b</c> §3.1 рядок «колонка в тому самому рядку»).</item>
@@ -45,11 +46,10 @@ namespace Ecr.Application.Recalculation;
 /// <c>Current</c> інакше, ціна помилки тут — мовчки неперерахована комірка.
 ///
 /// ⚠ Усе інше — <c>SymbolReferenceNode</c> (<c>HDR.*</c>, <c>@Arg</c>,
-/// <c>CST.*</c>, <c>!Formula</c>) і <c>PeriodPropertyNode</c>
-/// (<c>[Period].Days</c>) — нелокальне. Календарний контекст і шапка
-/// однакові для всіх рядків, тобто теоретично локальності не псують; але
-/// «теоретично» тут не перевага: вузол, якого класифікатор не бачив, мусить
-/// отримувати відповідь «ні».
+/// <c>CST.*</c>, <c>!Formula</c>) — нелокальне (шапка теоретично однакова для
+/// всіх рядків, але вузол, якого класифікатор не бачив, мусить отримувати
+/// «ні»). HSE401: <c>PeriodPropertyNode</c> без зсуву (<c>[Period].Days</c>) —
+/// локальний: однаковий для всіх рядків періоду документа.
 /// </remarks>
 public static class RowLocalFormulaClassifier
 {
@@ -87,12 +87,33 @@ public static class RowLocalFormulaClassifier
                 IsLocal(conditional.Condition)
                 && IsLocal(conditional.WhenTrue)
                 && IsLocal(conditional.WhenFalse),
-            FunctionNode function =>
-                Functions.GetSignature(function.Name) is { AcceptsRange: false }
-                && function.Arguments.All(IsLocal),
+            FunctionNode function => IsLocalFunction(function),
             CellReferenceNode reference => IsOwnRowCell(reference),
+
+            // HSE401: календарний контекст документа ([Period].Days тощо) однаковий
+            // для всіх рядків періоду; нелокальним лишається лише зсув періоду.
+            PeriodPropertyNode period => period.PeriodOffset == 0,
             _ => false,
         };
+    }
+
+    /// <summary>
+    /// Скалярна функція — локальна, якщо локальні аргументи. Агрегат
+    /// (<c>AcceptsRange</c>) — лише коли ВСІ його аргументи є посиланнями на
+    /// власний рядок <c>[Col]</c> (HSE401: <c>SUM([D1],[D2],[D3])</c>): діапазонів,
+    /// чужих рядків і таблиць там немає, тож результат залежить лише від рядка.
+    /// </summary>
+    private static bool IsLocalFunction(FunctionNode function)
+    {
+        if (Functions.GetSignature(function.Name) is not { } signature)
+        {
+            return false;
+        }
+
+        return signature.AcceptsRange
+            ? function.Arguments.Count > 0
+              && function.Arguments.All(a => a is CellReferenceNode r && IsOwnRowCell(r))
+            : function.Arguments.All(IsLocal);
     }
 
     /// <summary>Посилання <c>[Col]</c> — колонка того самого рядка тієї самої таблиці.</summary>
