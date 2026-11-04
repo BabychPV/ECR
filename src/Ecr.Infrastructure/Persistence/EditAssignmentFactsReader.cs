@@ -201,25 +201,111 @@ internal static class EditAssignmentFactsReader
         var result = new Dictionary<long, (int, IReadOnlyList<EditAssignmentFact>)>();
         foreach (var group in rows.GroupBy(r => r.DocumentId))
         {
-            var facts = group
-                .Select(r => new EditAssignmentFact(
-                    r.SheetCode,
-                    r.TableCode,
-                    r.MonthNumber,
-                    r.PeriodKeyValue is { } p ? new PeriodKey(p) : null,
-                    r.IsExclusive,
-                    r.ValidationStatus == EditAssignmentValidationStatus.Validated,
-                    r.DelegatorActive,
-                    r.DelegatedByUserId,
-                    r.ExpiresAt,
-                    r.Mine is { } status ? ToProgress(status) : null,
-                    r.Level))
-                .ToList();
+            var facts = group.Select(ToFact).ToList();
 
             result[group.Key] = (group.First().OwnerUserId, facts);
         }
 
         return result;
+    }
+
+    private static EditAssignmentFact ToFact(FactRow r)
+        => new(
+            r.SheetCode,
+            r.TableCode,
+            r.MonthNumber,
+            r.PeriodKeyValue is { } p ? new PeriodKey(p) : null,
+            r.IsExclusive,
+            r.ValidationStatus == EditAssignmentValidationStatus.Validated,
+            r.DelegatorActive,
+            r.DelegatedByUserId,
+            r.ExpiresAt,
+            r.Mine is { } status ? ToProgress(status) : null,
+            r.Level);
+
+    /// <summary>Передачі ОДНОГО документа для кількох користувачів (AN-59): спільні факти й стан кожного виконавця.</summary>
+    /// <param name="OwnerUserId">Автор документа.</param>
+    /// <param name="Shared">Факти передач зі станом виконавця <c>null</c> (від користувача не залежать).</param>
+    /// <param name="ByUser">Користувач → ті самі факти, зі станом САМЕ цього користувача (позиція в позицію з <paramref name="Shared"/>).</param>
+    public sealed record ManyFacts(
+        int OwnerUserId, IReadOnlyList<EditAssignmentFact> Shared,
+        IReadOnlyDictionary<int, IReadOnlyList<EditAssignmentFact>> ByUser);
+
+    /// <summary>
+    /// <see cref="LoadAsync"/> (без блокування) для КІЛЬКОХ користувачів одним документом: два запити на весь виклик —
+    /// передачі з автором і делегаторами, рядки виконавців усіх користувачів. Той самий склад і порядок фактів, що
+    /// у поштучному читанні (тест еквівалентності — <c>CanApproveManyEquivalenceTests</c>).
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="userIds">Користувачі.</param>
+    /// <param name="utcNow">Поточний час для блокування делегатора.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>null</c> — передач у документі немає.</returns>
+    public static async Task<ManyFacts?> LoadManyAsync(
+        EcrDbContext db, long documentId, IReadOnlyCollection<int> userIds, DateTime utcNow, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(userIds);
+
+        var assignments = await (
+                from a in db.EditAssignments.AsNoTracking()
+                where a.DocumentId == documentId
+                join d in db.Documents.AsNoTracking() on a.DocumentId equals d.Id
+                join u in db.Users.AsNoTracking() on a.DelegatedByUserId equals u.Id
+                orderby a.Id
+                select new
+                {
+                    a.Id,
+                    a.DocumentId,
+                    a.SheetCode,
+                    a.TableCode,
+                    a.MonthNumber,
+                    a.PeriodKeyValue,
+                    a.IsExclusive,
+                    a.ValidationStatus,
+                    a.DelegatedByUserId,
+                    a.ExpiresAt,
+                    DelegatorActive = u.IsActive && (u.LockedUntil == null || u.LockedUntil <= utcNow),
+                    Owner = d.CreatedByUserId,
+                    a.Level,
+                })
+            .Take(EditAssignment.MaxPerDocument)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (assignments.Count == 0)
+        {
+            return null;
+        }
+
+        var ids = assignments.Select(a => a.Id).ToList();
+        var users = userIds.Distinct().ToList();
+        var mine = (await db.EditAssignmentRecipients.AsNoTracking()
+                .Where(r => users.Contains(r.UserId) && ids.Contains(r.AssignmentId))
+                .Select(r => new { r.AssignmentId, r.UserId, r.Status })
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .ToLookup(r => r.UserId);
+
+        var shared = assignments
+            .Select(a => ToFact(new FactRow(
+                a.DocumentId, a.SheetCode, a.TableCode, a.MonthNumber, a.PeriodKeyValue, a.IsExclusive,
+                a.ValidationStatus, a.DelegatedByUserId, a.ExpiresAt, a.DelegatorActive, a.Owner, null, a.Level)))
+            .ToList();
+
+        var byUser = new Dictionary<int, IReadOnlyList<EditAssignmentFact>>(users.Count);
+        foreach (var user in users)
+        {
+            var statuses = mine[user].ToDictionary(r => r.AssignmentId, r => r.Status);
+            byUser[user] = assignments
+                .Select(a => ToFact(new FactRow(
+                    a.DocumentId, a.SheetCode, a.TableCode, a.MonthNumber, a.PeriodKeyValue, a.IsExclusive,
+                    a.ValidationStatus, a.DelegatedByUserId, a.ExpiresAt, a.DelegatorActive, a.Owner,
+                    statuses.TryGetValue(a.Id, out var status) ? status : (EditAssignmentRecipientStatus?)null, a.Level)))
+                .ToList();
+        }
+
+        return new ManyFacts(assignments[0].Owner, shared, byUser);
     }
 
     /// <summary>
