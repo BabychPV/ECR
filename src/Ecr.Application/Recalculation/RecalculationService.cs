@@ -2159,6 +2159,13 @@ public sealed class RecalculationService(
                 decimal.Round(number, Documents.CellValueReader.StorageScale, MidpointRounding.AwayFromZero))
             : value;
 
+    /// <summary>Число виразу до масштабу сховища - для <see cref="RowLocalPreview"/> (те саме правило, що в прогоні).</summary>
+    internal static Ecr.Expressions.Evaluation.ExpressionValue AsStoredScale(Ecr.Expressions.Evaluation.ExpressionValue value)
+        => AsStored(value);
+
+    /// <summary>Значення виразу як значення комірки - для <see cref="RowLocalPreview"/>.</summary>
+    internal static CellValueData? ToStoredCell(Ecr.Expressions.Evaluation.ExpressionValue value) => ToCellValue(value);
+
     /// <summary>Значення виразу як значення комірки; <c>null</c> — записувати нічого.</summary>
     private static CellValueData? ToCellValue(Ecr.Expressions.Evaluation.ExpressionValue value)
         => value.Type switch

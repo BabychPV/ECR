@@ -54,6 +54,9 @@ public sealed partial class PatchCellsHandler(
     // Необов'язковий лише для прямого конструювання в тестах запису; контейнер його завжди передає.
     IRowWindowTrigger? rowWindows = null,
 
+    // HSE401: синхронний перегляд рядково-локальних формул у відповіді; необов'язковий (тести, що будують обробник руками).
+    Recalculation.IRowLocalPreview? preview = null,
+
     // ⛔ C1: правила й вимоги методології ключуються Id колонок тієї версії шаблону, у якій їх писали; документ на
     // клон-версії має інші Id тих самих колонок. Контейнер передає завжди; `null` (прямий конструктор у тестах) —
     // Id вважаються локальними.
@@ -271,8 +274,45 @@ public sealed partial class PatchCellsHandler(
             await rowWindows.RowsChangedAsync(ChangedColumns(context.Instance, changes), ct).ConfigureAwait(false);
         }
 
-        return await BuildResponseAsync(request, context, changes, messages, recalculationJobId, ct)
+        var response = await BuildResponseAsync(request, context, changes, messages, recalculationJobId, ct)
             .ConfigureAwait(false);
+
+        var computed = await PreviewComputedAsync(context, changes, ct).ConfigureAwait(false);
+        return computed is null ? response : response with { ComputedCells = computed };
+    }
+
+    /// <summary>
+    /// HSE401: перегляд рядково-локальних формул для відредагованих рядків (≤ <see cref="Recalculation.IRowLocalPreview.MaxRows"/>).
+    /// Лише для вигляду - збій перегляду НІКОЛИ не валить уже збережений PATCH; істина - фоновий перерахунок.
+    /// </summary>
+    private async Task<IReadOnlyList<ComputedCellDto>?> PreviewComputedAsync(
+        RequestContext context, CellChangeLists changes, CancellationToken ct)
+    {
+        // Запис у стовпці з іншим власником (Q-17) ішов у чужі екземпляри - перегляд для таких не рахуємо.
+        if (preview is null || changes.Routed is { Count: > 0 } || changes.Touched.Count == 0)
+        {
+            return null;
+        }
+
+        var edited = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (var rowId in changes.Touched)
+        {
+            if (changes.RowKeyById.TryGetValue(rowId, out var rowKey))
+            {
+                edited[rowKey] = rowId;
+            }
+        }
+
+        try
+        {
+            return await preview.PreviewAsync(context.Instance, edited, ct).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // перегляд не має права валити збережений запис
+        catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            return null;
+        }
     }
 
     /// <summary>

@@ -203,7 +203,10 @@ public sealed class PatchCellsTests
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock,
-               _gate, Units(), columnMapper: _columnMapper, rowActivity: _rowActivity);
+               _gate, Units(), columnMapper: _columnMapper, rowActivity: _rowActivity, preview: _preview);
+
+    /// <summary>HSE401: синхронний перегляд рядково-локальних формул; <c>null</c> - перегляду немає.</summary>
+    private Ecr.Application.Recalculation.IRowLocalPreview? _preview;
 
     /// <summary>D-425: фільтр активності рядків методології; <c>null</c> — фільтра немає.</summary>
     private IRowActivityFilterSource? _rowActivity;
@@ -1598,6 +1601,32 @@ public sealed class PatchCellsTests
             CancellationToken.None);
 
         Assert.Equal(2, response.AppliedCells);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task HSE401_відповідь_несе_перегляд_обчислених_комірок_а_збій_перегляду_запис_не_валить()
+    {
+        var preview = Substitute.For<Ecr.Application.Recalculation.IRowLocalPreview>();
+        preview.PreviewAsync(
+                Arg.Any<TableInstanceRef>(), Arg.Any<IReadOnlyDictionary<string, long>>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<ComputedCellDto>?>([new ComputedCellDto("7001001", "Component", 12.5m)]));
+        _preview = preview;
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 5m)])), CancellationToken.None);
+
+        var cell = Assert.Single(response.ComputedCells!);
+        Assert.Equal(("7001001", "Component", 12.5m), (cell.RowKey, cell.ColumnCode, cell.Value));
+
+        preview.PreviewAsync(
+                Arg.Any<TableInstanceRef>(), Arg.Any<IReadOnlyDictionary<string, long>>(), Arg.Any<CancellationToken>())
+            .Returns<Task<IReadOnlyList<ComputedCellDto>?>>(_ => throw new InvalidOperationException("перегляд зламався"));
+
+        var failed = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 6m)])), CancellationToken.None);
+
+        Assert.Equal(1, failed.AppliedCells);
+        Assert.Null(failed.ComputedCells);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
