@@ -1,5 +1,13 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
+/**
+ * Перша комірка ДАНИХ сітки: прокручуваний в'юпорт (`rgCol`), не закріплена зона. Закріплена зліва (`colPinStart`) колонка
+ * підпису рядка не має коду в зрізі, рядок формули на ній лишається `empty`, а чи закріплена вона - залежить від
+ * налаштувань, які лишили попередні сценарії шарда (05.11: нестабільне падіння `[data-formula-bar="cell"]`).
+ */
+function firstDataCell(grid: Locator): Locator {
+  return grid.locator('revogr-viewport-scroll.rgCol revogr-data[type="rgRow"] .rgCell').first();
+}
 /**
  * Інспектор документа (`UI-25`) на живому стенді: закритий за замовчуванням,
  * кнопка зауважень відкриває його, `Esc` закриває й повертає фокус, History
@@ -51,7 +59,7 @@ test.describe('інспектор документа', () => {
 
     const grid = page.locator('revo-grid').first();
     await expect(grid).toBeVisible({ timeout: 60_000 });
-    await grid.locator('revogr-data [data-rgcol]').first().click();
+    await firstDataCell(grid).click();
     await expect(page.locator('[data-formula-bar="cell"]').first()).toBeVisible();
 
     // ✎ TC: between Issues and History now sits the "Discussion" button (when the chat exists), so not by index.
