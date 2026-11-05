@@ -102,4 +102,29 @@ public sealed class ProjectCurrentPeriodTests
         project.SetCurrentPeriodAutomatically(periodId: 999, Now.AddHours(2));
         Assert.Equal(999, project.CurrentPeriodId);
     }
+
+    /// <summary>
+    /// W15f (Аудит-2): прохід задачі з тим самим періодом не переписує «змінено о» - інакше позначка означала б
+    /// «перевірено о». Мутація: прибрати перевірку «той самий період» у <c>SetCurrentPeriodAutomatically</c> - червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void Авто_з_тим_самим_періодом_не_переписує_час_зміни()
+    {
+        var project = Make(out var period);
+
+        project.SetCurrentPeriodAutomatically(period.Id, Now);
+        Assert.Equal(Now, project.CurrentPeriodChangedAt);
+
+        project.SetCurrentPeriodAutomatically(period.Id, Now.AddMinutes(46));
+        Assert.Equal(Now, project.CurrentPeriodChangedAt);
+
+        project.SetCurrentPeriodAutomatically(periodId: 999, Now.AddHours(1));
+        Assert.Equal(999, project.CurrentPeriodId);
+        Assert.Equal(Now.AddHours(1), project.CurrentPeriodChangedAt);
+
+        project.SetCurrentPeriodAutomatically(periodId: null, Now.AddHours(2));
+        Assert.Null(project.CurrentPeriodId);
+        Assert.Equal(Now.AddHours(2), project.CurrentPeriodChangedAt);
+    }
 }
