@@ -153,14 +153,50 @@ powershell -File tools\hse401\Build-Hse401Registries.ps1 -Target Live -BaseUrl h
 
 `Build-Hse401Template.ps1` наявного не перестворює, тож зміни моделі (колонка Excel L = `H_NAE` «MPE number / ПДВ номер», `H_MPE` прибрано,
 назви «Emission Source Type» / «Work Days», формати показу R/S `0.000000000000` і BC/BD `0.0000`) на живу версію цей скрипт доносить сам:
-клон опублікованої версії -> PATCH presentation (назви, формати, порядок) + DELETE колонки `H_MPE` (м'яке видалення в чернетці) -> publish ->
-migrate-version документів проєкту HSE401_2026 (dry-run для всіх; будь-який `canApply=false` зупиняє) -> тиша перерахунку -> `Compare-Hse401.ps1` (REAL = 0, інакше код виходу 3).
-Другий запуск нічого не робить (різниця порожня, документи вже на останній версії).
+клон опублікованої версії -> PATCH presentation (назви, формати, порядок, `IsHidden`) -> publish -> migrate-version документів проєкту HSE401_2026
+(dry-run для всіх; будь-який `canApply=false` зупиняє) -> тиша перерахунку -> `Compare-Hse401.ps1` (REAL = 0, інакше код виходу 3).
 
-    # лише GET, звіт різниці, нічого не пишеться
-    powershell -File tools\hse401\Update-Hse401Template.ps1 -Target Live -BaseUrl <url> -Database <база> -ConfirmStand <база> -CredentialFile <файл> -PreviewOnly
-    # застосування (ті самі параметри без -PreviewOnly); -HideInsteadOfDelete - сховати H_MPE замість видалення, якщо видалення з даними блокує перенос
+**Прибрана з моделі колонка (`H_MPE`) за замовчуванням ХОВАЄТЬСЯ** (`IsHidden=true`), значення лишаються. Видалення колонки з даними Safe-перенос
+відхиляє (`canApply=false`, `refusals:["dataLoss"]`), а опублікована версія незворотна - стенд застряє. Видалення лишилось лише за явним
+`-DeleteRemovedColumns` (з гучним попередженням); тоді до clone/publish скрипт дивиться `GET /documents/{id}/tables/status?periodKey=` і за будь-якого
+`rowCount > 0` зупиняється ДО publish. `-HideInsteadOfDelete` - застарілий порожній ключ (сумісність).
 
+**Повторний запуск - порожня операція.** Версію документа скрипт порівнює рядком: `templateVersion` з `GET /documents/{id}` (напр. `1.0.0.3`) проти `version`
+останньої опублікованої з `GET /templates/{id}/versions`; «схована колонка, якої немає в моделі» вважається виконаною; `422 ECR-TMPL-0422 migrateSameVersion`
+трактується як «вже перенесено», не помилка.
+
+**Файл стану обов'язковий** (`out\hse401-state.json`, для Live `out\hse401-state.live.json`; ключі `templateId, versionId, sheetDefId, tableDefId, columnIds,
+projectId, documentId, tableInstanceId`). Його пише `Build-Hse401Template.ps1`. На стенді, де документ уже є, а файла немає, **не збирайте його руками**:
+`-RebuildState` знаходить усе з API за кодами (шаблон `HSE401`, проєкт `HSE401_2026`) і записує файл з міткою стенда (у `-PreviewOnly` - лише в пам'яті).
+
+Порядок (Live; спершу репетиція на копії, див. «Правило репетиції»). `<ціль>` = `-Target Live -BaseUrl <url> -Database <база> -ConfirmStand <база> -CredentialFile <файл>`:
+
+    # 0) свіжий витяг книги (потрібен кроку NAE і зворотному заповненню)
+    powershell -File tools\hse401\Extract-Hse401.ps1                      # -> out\hse401-extract.json
+    # 1) шаблон: лише GET, звіт різниці; стан збирається з API, якщо файла немає
+    powershell -File tools\hse401\Update-Hse401Template.ps1 <ціль> -RebuildState -PreviewOnly
+    # 2) застосування (ті самі параметри без -PreviewOnly); H_MPE буде схована
+    powershell -File tools\hse401\Update-Hse401Template.ps1 <ціль> -RebuildState
+    # (лише для порожнього документа, свідомо:) ... -DeleteRemovedColumns
+    # 3) NAE: нові вузли (display = "<MPE> — <назва>")
+    powershell -File tools\hse401\Import-Hse401Nae.ps1 <ціль>
+    # 4) NAE: наявні вузли SRC (лічильники без запису; потім із запису)
+    powershell -File tools\hse401\Backfill-Hse401NaeDisplay.ps1 <ціль> -PreviewOnly
+    powershell -File tools\hse401\Backfill-Hse401NaeDisplay.ps1 <ціль>
+    # 5) офлайн-перевірка запобіжників і Pester
+    powershell -File tools\hse401\Test-Hse401Guards.ps1 ; Invoke-Pester -Path tools\tests
+
+(у PowerShell `$T` не розгортається в окремі аргументи - підставте параметри цілі прямо в команди.)
+
+### NAE: показ вузла SRC
+
+Колонка `H_NAE` - Lookup на `NAE_TREE level=SRC`, сітка показує `entry.display`. Display вузла SRC = `<MPE> — <назва>` (`<MPE>` - точний текст колонки L Excel, регістр
+джерела; назва = MPE або порожня -> просто `<MPE>`), як у `LAND_AIR_SUBSTANCE` (`Format-Hse401NaeDisplay` в `Hse401Nae.Lib.ps1`, ідемпотентно, без подвійного префікса).
+Нові вузли: `Import-Hse401Nae.ps1` кладе це в `Name_En`. Наявні: `Backfill-Hse401NaeDisplay.ps1` - лише чинні SRC (вилучені в переліку відсутні й не чіпаються), MPE береться з
+витягу книги за кодом вузла (`N_<РЕГІОН>_<СУША/МОРЕ>_<MPE>`; вузол поза витягом - хвіст коду, рахується окремо). Перейменування -
+`POST /api/v1/registries/NAE_TREE/entries` з `id` вузла, `registryDefId`, `code` і `levelCode` як є, **`parentEntryId` обов'язково як є** (інакше вузол піде в корінь),
+`display.values` лише змінені мови (назва зливається по мовах), `values = {}`; нового часового рядка немає, окремої «версії» - теж (ревізія запису + подія аудиту).
+Другий запуск - 0 змін. `Compare-Hse401.ps1` звіряє L з хвостом КОДУ вузла, не з display; клієнтське правило вставки приймає частину до « — ».
 Формат показу (`ColumnDef.DisplayFormat`, до 50 знаків) - довільний рядок формату Excel: ExcelExporter ставить його в NumberFormat як є; грамліки
 й валідації немає (є лише межа довжини). Сітка клієнта його не читає (там правило `Scale` <= 6 = доповнення нулями), тож формати R/S/BC/BD діють на експорт.
 Compare для колонки L порівнює текст Excel із хвостом коду вузла SRC (`N_<РЕГІОН>_<СУША/МОРЕ>_<MPE>`) зі збереженням нулів зліва.

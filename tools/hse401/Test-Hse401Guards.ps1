@@ -82,18 +82,32 @@ foreach ($mc in $mcols) {
     if ($mc.Code -eq 'H_NAE') { $o++; $live += New-LiveCol 'H_MPE' $o 'MPE number' 'ПДВ номер' $null $false }
 }
 $d = @(Get-HseTemplateDiff -LiveColumns $live -ModelColumns $mcols)
-Check 'Diff: видалення H_MPE' (@($d | Where-Object { $_.Kind -eq 'RemoveColumn' -and $_.Code -eq 'H_MPE' }).Count -eq 1)
+Check 'Diff: за замовчуванням H_MPE ховається, не видаляється' (@($d | Where-Object { $_.Kind -eq 'HideColumn' -and $_.Code -eq 'H_MPE' }).Count -eq 1 -and @($d | Where-Object { $_.Kind -eq 'RemoveColumn' }).Count -eq 0)
 Check 'Diff: 4 формати' (@($d | Where-Object { $_.Kind -eq 'DisplayFormat' }).Count -eq 4)
 Check 'Diff: H_NAE перейменовано (en і ru)' (@($d | Where-Object { $_.Kind -eq 'Retitle' -and $_.Code -eq 'H_NAE' }).Count -eq 2)
 Check 'Diff: 15 назв (12 Work Days + K + H_NAE en/ru)' (@($d | Where-Object { $_.Kind -eq 'Retitle' }).Count -eq 15)
 Check 'Diff: порядок не змінився (видалення не є перестановкою)' (@($d | Where-Object { $_.Kind -eq 'Reorder' }).Count -eq 0)
-$dh = @(Get-HseTemplateDiff -LiveColumns $live -ModelColumns $mcols -HideInsteadOfDelete)
-Check 'Diff: -HideInsteadOfDelete -> HideColumn' (@($dh | Where-Object { $_.Kind -eq 'HideColumn' }).Count -eq 1 -and @($dh | Where-Object { $_.Kind -eq 'RemoveColumn' }).Count -eq 0)
+$dh = @(Get-HseTemplateDiff -LiveColumns $live -ModelColumns $mcols -DeleteRemoved)
+Check 'Diff: -DeleteRemoved -> RemoveColumn' (@($dh | Where-Object { $_.Kind -eq 'RemoveColumn' -and $_.Code -eq 'H_MPE' }).Count -eq 1 -and @($dh | Where-Object { $_.Kind -eq 'HideColumn' }).Count -eq 0)
+# H_MPE схована (isHidden) у версії, якої в моделі немає -> виконано, другий запуск порожній
+$liveHid = @(); $o = 0
+foreach ($mc in $mcols) { $o++; $liveHid += New-LiveCol $mc.Code $o $mc.En $mc.Ru $mc.DisplayFormat $false; if ($mc.Code -eq 'H_NAE') { $o++; $liveHid += New-LiveCol 'H_MPE' $o 'MPE number' 'ПДВ номер' $null $true } }
+Check 'Diff: модель без H_MPE + у версії H_MPE схована = виконано (порожньо)' (@(Get-HseTemplateDiff -LiveColumns $liveHid -ModelColumns $mcols).Count -eq 0)
+Check 'Diff: схована H_MPE + -DeleteRemoved -> RemoveColumn' (@(Get-HseTemplateDiff -LiveColumns $liveHid -ModelColumns $mcols -DeleteRemoved | Where-Object { $_.Kind -eq 'RemoveColumn' }).Count -eq 1)
+# версія документа: рядок templateVersion проти version опублікованої
+Import-HseFunction 'Update-Hse401Template.ps1' @('Test-HseDocOnVersion', 'Test-HseMigrateSameVersion')
+Check 'Документ: templateVersion = версії -> на ній' (Test-HseDocOnVersion -DocTemplateVersion '1.0.0.3' -PublishedVersion '1.0.0.3')
+Check 'Документ: старіша версія -> не на ній' (-not (Test-HseDocOnVersion -DocTemplateVersion '1.0.0.2' -PublishedVersion '1.0.0.3'))
+Check 'Документ: порожній templateVersion -> не на ній (не -1 і не збіг)' (-not (Test-HseDocOnVersion -DocTemplateVersion '' -PublishedVersion '1.0.0.3') -and -not (Test-HseDocOnVersion -DocTemplateVersion $null -PublishedVersion $null))
+Check '422 migrateSameVersion = вже зроблено' (Test-HseMigrateSameVersion ([pscustomobject]@{ Status = 422; Text = '{"code":"ECR-TMPL-0422","messageKey":"err.ECR-TMPL-0422.migrateSameVersion"}' }))
+Check '422 іншої причини - не "вже зроблено"; 200 - теж ні' (-not (Test-HseMigrateSameVersion ([pscustomobject]@{ Status = 422; Text = '{"refusals":["dataLoss"]}' })) -and -not (Test-HseMigrateSameVersion ([pscustomobject]@{ Status = 200; Text = 'migrateSameVersion' })))
 # ідемпотентність: живий знімок = модель (без H_MPE) -> порожньо
 $live2 = @(); $o = 0
 foreach ($mc in $mcols) { $o++; $live2 += New-LiveCol $mc.Code $o $mc.En $mc.Ru $mc.DisplayFormat $false }
 Check 'Diff: повторний запуск порожній' (@(Get-HseTemplateDiff -LiveColumns $live2 -ModelColumns $mcols).Count -eq 0)
 Check 'Diff: колонка моделі відсутня у версії -> MissingColumn' (@(Get-HseTemplateDiff -LiveColumns ($live2 | Select-Object -Skip 1) -ModelColumns $mcols | Where-Object { $_.Kind -eq 'MissingColumn' }).Count -eq 1)
+$cmpSrc = [IO.File]::ReadAllText((Join-Path $here 'Compare-Hse401.ps1'))
+Check 'Compare: колонка L звіряється з КОДОМ вузла (entry.code), не з display' ($cmpSrc.Contains('[string]$ne.code') -and -not $cmpSrc.Contains('$ne.display'))
 Check 'Версія: 1.0.0.2 -> 1.0.0.3, наявну пропускає' ((Get-HseNextVersion '1.0.0.2' @()) -eq '1.0.0.3' -and (Get-HseNextVersion '1.0.0.2' @('1.0.0.3')) -eq '1.0.0.4')
 
 if ($script:failures -gt 0) { Write-Host "Падінь: $script:failures"; exit 1 }
