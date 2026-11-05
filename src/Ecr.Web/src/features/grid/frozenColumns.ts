@@ -28,6 +28,12 @@ export const MaxDefaultFrozenDataColumns = 4;
  */
 export const MaxDefaultFrozenWidthPx = 600;
 
+/**
+ * Типове закріплення діє лише на ШИРОКИХ таблицях: менше колонок даних - не закріплюється нічого.
+ * На таблиці з 3-5 колонок воно безглузде (прокручувати нічого). Явний вибір користувача діє на будь-якій.
+ */
+export const MinDataColumnsForDefaultFreeze = 12;
+
 /** Скільки перших колонок пропонує випадний список «Freeze columns». */
 export const MaxFrozenChoices = 8;
 
@@ -111,6 +117,8 @@ export function defaultFrozenCount(
 ): number {
   const total = (hasRowLabel ? 1 : 0) + probes.length;
   const labelCount = hasRowLabel ? 1 : 0;
+
+  if (probes.length < MinDataColumnsForDefaultFreeze) return 0;
 
   let run = 0;
   while (run < probes.length && probes[run]?.numeric === false) run += 1;

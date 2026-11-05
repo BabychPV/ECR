@@ -12,8 +12,9 @@ import { expect, test, type Page } from '@playwright/test';
  * користувача (`/me/preferences`) тримаються в `sessionStorage` — вони переживають `page.reload()`, як на сервері.
  * Запуск без стенда: `ECR_E2E_OPTIONAL=1 npx playwright test e2e/gridFrozenColumns.spec.ts`.
  *
- * ⚠ Фікстура: підпис рядка + CODE, NAME (рядкові, вузькі) + M1..M8 (десяткові). Типово закріплюються підпис, CODE,
- * NAME (3 колонки); M1 - перша прокручувана. Ширина підпису стиснута налаштуванням користувача (90 px), щоб у стенді
+ * ⚠ Фікстура: підпис рядка + CODE, NAME (рядкові, вузькі) + M1..M10 (десяткові) = 12 колонок даних, тобто таблиця ШИРОКА
+ * (`MinDataColumnsForDefaultFreeze`). Типово закріплюються підпис, CODE,
+ * NAME (3 колонки); M1 - перша прокручувана. Вузька таблиця (менше 12 колонок даних) типово НЕ закріплює нічого. Ширина підпису стиснута налаштуванням користувача (90 px), щоб у стенді
  * шириною 480 px лишалася прокручувана частина.
  */
 const DocStand = '/_key-commit-gate/document';
@@ -28,7 +29,7 @@ interface StandProbe {
 }
 
 /** Виконується У БРАУЗЕРІ до скриптів застосунку: широкий зріз, PATCH, довідники, налаштування користувача. */
-function installWideStand(config: { documentId: number; tableInstanceId: number; tableDefId: number; rows: number }): void {
+function installWideStand(config: { documentId: number; tableInstanceId: number; tableDefId: number; rows: number; numeric: number }): void {
   const w = window as unknown as StandProbe & { __standFetchInstalled?: boolean };
   w.__standFetchInstalled = true;
   w.__patches = [];
@@ -64,7 +65,7 @@ function installWideStand(config: { documentId: number; tableInstanceId: number;
   const columns = [
     column('CODE', 0, 'String', 90),
     column('NAME', 1, 'String', 90),
-    ...Array.from({ length: 8 }, (_, i) => column(`M${String(i + 1)}`, i + 2, 'Decimal', null)),
+    ...Array.from({ length: config.numeric }, (_, i) => column(`M${String(i + 1)}`, i + 2, 'Decimal', null)),
   ];
   const stored = new Map<string, Record<string, unknown>>();
 
@@ -78,7 +79,7 @@ function installWideStand(config: { documentId: number; tableInstanceId: number;
     rows: Array.from({ length: config.rows }, (_, index) => {
       const rowKey = `R${String(index + 1)}`;
       const cells: Record<string, unknown> = { CODE: `C${String(index + 1)}`, NAME: String(101 + index) };
-      for (let m = 1; m <= 8; m += 1) cells[`M${String(m)}`] = String(m);
+      for (let m = 1; m <= config.numeric; m += 1) cells[`M${String(m)}`] = String(m);
 
       return {
         cells: { ...cells, ...stored.get(rowKey) },
@@ -141,16 +142,19 @@ function installWideStand(config: { documentId: number; tableInstanceId: number;
   };
 }
 
-async function open(page: Page, scheme: 'light' | 'dark' = 'light'): Promise<void> {
+/** `numeric` - скільки десяткових колонок після CODE і NAME: 10 -> 12 колонок даних (широка), 3 -> 5 (вузька). */
+async function open(page: Page, scheme: 'light' | 'dark' = 'light', numeric = 10): Promise<void> {
   await page.emulateMedia({ colorScheme: scheme });
   await page.addInitScript(installWideStand, {
     documentId: 9_001,
     tableInstanceId: 9_001,
     tableDefId: TableDefId,
     rows: Rows,
+    numeric,
   });
   await page.goto(DocStand);
-  await expect(pinnedCell(page, 0, 2)).toBeVisible({ timeout: 30_000 });
+  await expect(scrolledCell(page, 0, 0)).toBeVisible({ timeout: 30_000 });
+  if (numeric >= 10) await expect(pinnedCell(page, 0, 2)).toBeVisible({ timeout: 30_000 });
 }
 
 /**
@@ -331,4 +335,16 @@ test('межа має різний колір у світлій і темній 
   const dark = await edgeColor();
 
   expect(dark).not.toBe(light);
+});
+
+test('вузька таблиця (менше 12 колонок даних): типово нічого не закріплено, явний вибір закріплює', async ({ page }) => {
+  await open(page, 'light', 3);
+
+  await expect(page.locator('revo-grid revogr-viewport-scroll.colPinStart .rgCell')).toHaveCount(0);
+  await expect(freezeSelect(page)).toHaveValue('default');
+
+  // 1 підпис, 2 CODE, 3 NAME.
+  await freezeSelect(page).selectOption('3');
+  await expect(pinnedCell(page, 0, 2)).toHaveText('101');
+  await expect(freezeSelect(page)).toHaveValue('3');
 });

@@ -6,6 +6,7 @@ import {
   FrozenNoneChoice,
   MaxDefaultFrozenDataColumns,
   MaxFrozenChoices,
+  MinDataColumnsForDefaultFreeze,
   applyFrozenColumns,
   clampFrozenCount,
   defaultFrozenCount,
@@ -21,21 +22,37 @@ import {
 const text = (width = 140, groupId: number | null = null): FrozenColumnProbe => ({ numeric: false, width, groupId });
 const num = (width = 140, groupId: number | null = null): FrozenColumnProbe => ({ numeric: true, width, groupId });
 
+/** Доповнює ведучі колонки до порога «широка таблиця» (інакше типове закріплення вимкнене). */
+const wide = (lead: FrozenColumnProbe[], filler: () => FrozenColumnProbe = num): FrozenColumnProbe[] => {
+  const probes = [...lead];
+  while (probes.length < MinDataColumnsForDefaultFreeze) probes.push(filler());
+
+  return probes;
+};
+
 describe('defaultFrozenCount: типове закріплення', () => {
+  it('вузька таблиця (менше порога) - типово нічого не закріплюється; на порозі закріплення діє', () => {
+    const lead = [text(), text()];
+
+    expect(MinDataColumnsForDefaultFreeze).toBe(12);
+    expect(defaultFrozenCount(true, [...lead, ...Array.from({ length: 9 }, () => num())], 260)).toBe(0); // 11 колонок
+    expect(defaultFrozenCount(true, [...lead, ...Array.from({ length: 10 }, () => num())], 260)).toBe(3); // 12 колонок
+    expect(defaultFrozenCount(false, [...lead, ...Array.from({ length: 10 }, () => num())])).toBe(2);
+  });
+
   it('колонка підпису + ведучі нечислові колонки до першої числової', () => {
-    // label + 2 текстові + числові: закріплюється label і 2 колонки даних = 3
-    expect(defaultFrozenCount(true, [text(), text(), num(), text()], 260)).toBe(3);
+    expect(defaultFrozenCount(true, wide([text(), text(), num(), text()]), 260)).toBe(3);
     // Без колонки підпису - лише ведучі колонки даних.
-    expect(defaultFrozenCount(false, [text(), num(), num()])).toBe(1);
+    expect(defaultFrozenCount(false, wide([text(), num(), num()]))).toBe(1);
   });
 
   it('першою йде числова колонка - закріплюється лише колонка підпису (або нічого)', () => {
-    expect(defaultFrozenCount(true, [num(), text()], 260)).toBe(1);
-    expect(defaultFrozenCount(false, [num(), text()])).toBe(0);
+    expect(defaultFrozenCount(true, wide([num(), text()]), 260)).toBe(1);
+    expect(defaultFrozenCount(false, wide([num(), text()]))).toBe(0);
   });
 
   it('не більше чотирьох колонок даних', () => {
-    const probes = [text(80), text(80), text(80), text(80), text(80), text(80), num()];
+    const probes = wide([text(80), text(80), text(80), text(80), text(80), text(80)]);
 
     expect(MaxDefaultFrozenDataColumns).toBe(4);
     expect(defaultFrozenCount(false, probes)).toBe(4);
@@ -43,36 +60,35 @@ describe('defaultFrozenCount: типове закріплення', () => {
   });
 
   it('ведучий пробіг покриває ВСІ колонки - лише колонка підпису, а не «усе закріплено»', () => {
-    expect(defaultFrozenCount(true, [text(), text(), text()], 260)).toBe(1);
-    expect(defaultFrozenCount(false, [text(), text()])).toBe(0);
+    expect(defaultFrozenCount(true, wide([], text), 260)).toBe(1);
+    expect(defaultFrozenCount(false, wide([], text))).toBe(0);
   });
 
   it('закріплена частина не ширша за стелю: надто широкі колонки не закріплюються', () => {
     // 260 (підпис) + 300 = 560 <= 600, ще 300 вже 860 > 600
-    expect(defaultFrozenCount(true, [text(300), text(300), num()], 260)).toBe(2);
+    expect(defaultFrozenCount(true, wide([text(300), text(300), num()]), 260)).toBe(2);
     // Одна надширока колонка не вміщується зовсім.
-    expect(defaultFrozenCount(true, [text(500), num()], 260)).toBe(1);
+    expect(defaultFrozenCount(true, wide([text(500), num()]), 260)).toBe(1);
   });
 
   it('межа не розрізає групу шапки: відступає до початку групи', () => {
-    // колонки 0,1 - група 7; колонки 2,3 - група 8; закріплення «2 колонки + розріз у групі 8» (3 текстові) відступає до 2
-    const probes = [text(100, 7), text(100, 7), text(100, 8), text(100, 8), num(100, 9)];
+    const probes = wide([text(100, 7), text(100, 7), text(100, 8), text(100, 8), num(100, 9)]);
 
     expect(defaultFrozenCount(false, probes)).toBe(4); // група 8 ціла (2,3), межа між групами 8 і 9
-    const cut = [text(100, 7), text(100, 7), text(100, 8), text(100, 8), text(100, 8), num(100, 9)];
+    const cut = wide([text(100, 7), text(100, 7), text(100, 8), text(100, 8), text(100, 8), num(100, 9)]);
     // 4 колонки даних перерізали б групу 8 (2,3 | 4) -> відступ до початку групи 8
     expect(defaultFrozenCount(false, cut)).toBe(2);
     // Група, що охоплює весь пробіг, відступає до нуля колонок даних (лишається лише підпис).
-    expect(defaultFrozenCount(true, [text(100, 5), text(100, 5), text(100, 5), text(100, 5), text(100, 5), num()], 260)).toBe(1);
+    expect(defaultFrozenCount(true, wide([text(100, 5), text(100, 5), text(100, 5), text(100, 5), text(100, 5), num()]), 260)).toBe(1);
   });
 
   it('жодної групи (groupId null) відступу не викликає', () => {
-    expect(defaultFrozenCount(false, [text(), text(), num()])).toBe(2);
+    expect(defaultFrozenCount(false, wide([text(), text(), num()]))).toBe(2);
   });
 
   it('завжди лишає хоч одну прокручувану колонку', () => {
     expect(defaultFrozenCount(true, [], 260)).toBe(0);
-    expect(defaultFrozenCount(true, [num()], 260)).toBe(1);
+    expect(defaultFrozenCount(true, [num()], 260)).toBe(0);
     expect(defaultFrozenCount(false, [text()])).toBe(0);
   });
 });

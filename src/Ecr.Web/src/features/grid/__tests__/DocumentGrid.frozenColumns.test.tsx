@@ -8,6 +8,7 @@ import { cancelAutosave } from '../autosave';
 import { resetFocus } from '../focusStore';
 import { resetPending } from '../pendingStore';
 import { DocumentGrid } from '../DocumentGrid';
+import type { CellNavigationRequest } from '../cellNavigation';
 
 /**
  * Закріплені ключові колонки (`frozenColumns.ts`): сітка отримує `pin: 'colPinStart'`, а події RevoGrid з
@@ -18,6 +19,11 @@ import { DocumentGrid } from '../DocumentGrid';
  */
 let stub: HTMLElement | null = null;
 let lastColumns: ColumnRegular[] = [];
+const revo = {
+  componentOnReady: vi.fn(() => Promise.resolve()),
+  scrollToCoordinate: vi.fn(() => Promise.resolve()),
+  setCellsFocus: vi.fn(() => Promise.resolve()),
+};
 
 vi.mock('@revolist/react-datagrid', () => ({
   RevoGrid: (props: { columns?: ColumnRegular[] }) => {
@@ -27,7 +33,10 @@ vi.mock('@revolist/react-datagrid', () => ({
       <div
         data-testid="revogrid-stub"
         ref={(node) => {
-          if (node !== null) stub = node;
+          if (node === null) return;
+          stub = node;
+          // Для «переходу до комірки»: справжні методи `revo-grid`, які викликає `revealGridCell`.
+          if (node.querySelector('revo-grid') === null) node.append(Object.assign(document.createElement('revo-grid'), revo));
         }}
       />
     );
@@ -75,7 +84,8 @@ function sliceFixture(): TableSliceDto {
 const patched: { rowKey: string; cells: { columnCode: string; value: unknown }[] }[] = [];
 const preferenceWrites: { method: string; path: string; body: unknown }[] = [];
 
-function mockServer(): void {
+/** Збережений вибір користувача (ключ grid.frozenColumns.1); без нього таблиця (5 колонок) вузька й типово не закріплюється. */
+function mockServer(frozen?: number): void {
   patched.length = 0;
   preferenceWrites.length = 0;
 
@@ -97,7 +107,10 @@ function mockServer(): void {
           preferenceWrites.push({ method: init.method, path: String(path), body: init.body === undefined ? null : JSON.parse(String(init.body)) });
         }
 
-        return new Response(init?.method === 'GET' || init?.method === undefined ? '[]' : null, {
+        const isRead = init?.method === 'GET' || init?.method === undefined;
+        const saved = frozen === undefined ? [] : [{ key: 'grid.frozenColumns.1', value: frozen, updatedAt: '2026-11-05T00:00:00Z' }];
+
+        return new Response(isRead ? JSON.stringify(saved) : null, {
           status: init?.method === 'DELETE' ? 204 : 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -108,7 +121,7 @@ function mockServer(): void {
   );
 }
 
-function show(): void {
+function show(navigateTo?: CellNavigationRequest): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
@@ -122,6 +135,7 @@ function show(): void {
           readOnly={false}
           allowsDynamicRows={false}
           maxDynamicRows={null}
+          {...(navigateTo === undefined ? {} : { navigateTo })}
         />
       </QueryClientProvider>
     </MantineProvider>,
@@ -165,26 +179,34 @@ afterEach(() => {
   stub = null;
   lastColumns = [];
   localStorage.clear();
+  revo.componentOnReady.mockClear();
+  revo.scrollToCoordinate.mockClear();
+  revo.setCellsFocus.mockClear();
   vi.unstubAllGlobals();
 });
 
 describe('DocumentGrid: закріплені колонки', () => {
-  it('типово закріплені підпис і ведучі нечислові колонки до першої числової', async () => {
+  it('вузька таблиця: типово нічого не закріплено; явний вибір «до колонки C2» закріплює підпис, C1, C2', async () => {
     mockServer();
     show();
     await screen.findByTestId('revogrid-stub');
 
-    // підпис, C1, C2 - закріплені; C3 (числова) і C4 - прокручувані
     await waitFor(() => expect(lastColumns).toHaveLength(5));
-    expect(pinnedProps()).toEqual(['colPinStart', 'colPinStart', 'colPinStart', undefined, undefined]);
+    expect(pinnedProps()).toEqual([undefined, undefined, undefined, undefined, undefined]);
     expect(lastColumns.map((c) => c.prop)).toEqual(['__rowLabel', 'C1', 'C2', 'C3', 'C4']);
+
+    const select = await screen.findByRole('combobox', { name: /grid\.frozenColumns\.label/ });
+    fireEvent.change(select, { target: { value: '3' } });
+
+    await waitFor(() => expect(pinnedProps()).toEqual(['colPinStart', 'colPinStart', 'colPinStart', undefined, undefined]));
   });
 
   it('вставка з закріпленої колонки лягає у правильні колонки через межу в\'юпортів', async () => {
-    mockServer();
+    mockServer(3);
     show();
     const grid = await screen.findByTestId('revogrid-stub');
     await waitFor(() => expect(lastColumns).toHaveLength(5));
+    await waitFor(() => expect(pinnedProps()[2]).toBe('colPinStart'));
 
     // Закріплений в'юпорт: x=2 - це C2 (0 - підпис, 1 - C1).
     focus('colPinStart', 2, 1);
@@ -196,10 +218,11 @@ describe('DocumentGrid: закріплені колонки', () => {
   });
 
   it('фокус у прокручуваному в\'юпорті зсувається на кількість закріплених: rgCol x=0 - це C3', async () => {
-    mockServer();
+    mockServer(3);
     show();
     const grid = await screen.findByTestId('revogrid-stub');
     await waitFor(() => expect(lastColumns).toHaveLength(5));
+    await waitFor(() => expect(pinnedProps()[2]).toBe('colPinStart'));
 
     focus('rgCol', 0, 0);
     fireEvent.paste(grid, clipboard('9\tz\n'));
@@ -210,10 +233,11 @@ describe('DocumentGrid: закріплені колонки', () => {
   });
 
   it('копіювання діапазону всередині кожного боку віддає свої колонки', async () => {
-    mockServer();
+    mockServer(3);
     show();
     const grid = await screen.findByTestId('revogrid-stub');
     await waitFor(() => expect(lastColumns).toHaveLength(5));
+    await waitFor(() => expect(pinnedProps()[2]).toBe('colPinStart'));
 
     range('colPinStart', 1, 0, 2, 1);
     const pinnedCopy = clipboard('');
@@ -227,10 +251,11 @@ describe('DocumentGrid: закріплені колонки', () => {
   });
 
   it('вибір «None» знімає закріплення, пишеться в кеш і на сервер; події рахуються без зсуву', async () => {
-    mockServer();
+    mockServer(3);
     show();
     const grid = await screen.findByTestId('revogrid-stub');
     await waitFor(() => expect(lastColumns).toHaveLength(5));
+    await waitFor(() => expect(pinnedProps()[2]).toBe('colPinStart'));
 
     const select = await screen.findByRole('combobox', { name: /grid\.frozenColumns\.label/ });
     fireEvent.change(select, { target: { value: '0' } });
@@ -250,21 +275,39 @@ describe('DocumentGrid: закріплені колонки', () => {
   });
 
   it('вибір «до колонки C3» закріплює чотири перші колонки; «Default» повертає типове й видаляє ключ', async () => {
-    mockServer();
+    mockServer(3);
     show();
     await screen.findByTestId('revogrid-stub');
     await waitFor(() => expect(lastColumns).toHaveLength(5));
+    await waitFor(() => expect(pinnedProps()[2]).toBe('colPinStart'));
 
     const select = await screen.findByRole('combobox', { name: /grid\.frozenColumns\.label/ });
     fireEvent.change(select, { target: { value: '4' } });
     await waitFor(() => expect(pinnedProps()).toEqual(['colPinStart', 'colPinStart', 'colPinStart', 'colPinStart', undefined]));
 
     fireEvent.change(select, { target: { value: 'default' } });
-    await waitFor(() => expect(pinnedProps()).toEqual(['colPinStart', 'colPinStart', 'colPinStart', undefined, undefined]));
+    await waitFor(() => expect(pinnedProps()).toEqual([undefined, undefined, undefined, undefined, undefined]));
     expect(localStorage.getItem('ecr.frozenColumns.def:1')).toBeNull();
     await waitFor(() => expect(preferenceWrites.map((w) => w.method)).toEqual(['PUT', 'DELETE']));
   });
 
+  it('перехід до комірки: прокручувана ціль іде в rgCol зі зсувом, закріплена - в colPinStart', async () => {
+    mockServer(3);
+    show({ tableDefId: 1, rowKey: 'r2', columnCode: 'C3', seq: 1 });
+
+    // C3 - глобальна колонка 3; 3 закріплені (підпис, C1, C2), тож це перша колонка rgCol: x=0.
+    await waitFor(() => expect(revo.setCellsFocus).toHaveBeenCalledWith({ x: 0, y: 1 }, { x: 0, y: 1 }));
+    expect(revo.scrollToCoordinate).toHaveBeenCalledWith({ x: 0, y: 1 });
+  });
+
+  it('перехід до закріпленої колонки: фокус у colPinStart зі своїм x, без прокрутки по x', async () => {
+    mockServer(3);
+    show({ tableDefId: 1, rowKey: 'r1', columnCode: 'C2', seq: 1 });
+
+    // C2 - глобальна колонка 2, у закріпленому в'юпорті x=2.
+    await waitFor(() => expect(revo.setCellsFocus).toHaveBeenCalledWith({ x: 2, y: 0 }, { x: 2, y: 0 }, 'colPinStart'));
+    expect(revo.scrollToCoordinate).toHaveBeenCalledWith({ y: 0 });
+  });
   it('випадний список має підпис і пункти: Default, None, «до колонки» для перших колонок', async () => {
     mockServer();
     show();
