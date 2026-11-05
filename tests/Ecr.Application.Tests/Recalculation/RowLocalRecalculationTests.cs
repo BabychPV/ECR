@@ -71,11 +71,17 @@ public sealed class RowLocalRecalculationTests
     [InlineData("ROUND([C1] / [C2], 2)", true)]
     [InlineData("IF([C1] > [C2], [C1], [C2])", true)]
     [InlineData("-[C1] + 1", true)]
-    [InlineData("SUM([C1])", false)]
+    [InlineData("SUM([C1])", true)]
+    [InlineData("SUM([C1], [C2])", true)]
+    [InlineData("AVERAGE([C1], [C2], [C1])", true)]
+    [InlineData("SUM([C1], 1)", false)]
+    [InlineData("SUM([C1], [Ext].[R1].[V])", false)]
     [InlineData("SUM([R1:R3].[C1])", false)]
+    [InlineData("[C1] + [Period].Days", true)]
+    [InlineData("[C2] / IF([C1] = NULL, [Period].Days, [C1]) * [C1]", true)]
+    [InlineData("SUM([C1], [C2], [C1]) / IF([C1] = NULL, [Period].Days, [C1])", true)]
     [InlineData("[C1] + [Ext].[R1].[V]", false)]
     [InlineData("[C1] + [Period:-1].[C1]", false)]
-    [InlineData("[C1] + [Period].Days", false)]
     [InlineData("[C1] + HDR.Train", false)]
     public void Класифікатор_визнає_локальними_лише_посилання_на_свій_рядок(string expression, bool expected)
     {
@@ -118,7 +124,7 @@ public sealed class RowLocalRecalculationTests
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "CAL-03")]
-    [InlineData("SUM([C1])", false, false)]
+    [InlineData("SUM([C1], [Ext].[R1].[V])", true, false)]
     [InlineData("[C1] + [Ext].[R1].[V]", true, false)]
     [InlineData("[C1] + [Period:-1].[C1]", false, true)]
     public async Task Нелокальна_формула_рахується_в_КОЖНОМУ_рядку(
@@ -152,7 +158,7 @@ public sealed class RowLocalRecalculationTests
         // `C4 = [C3] * 2` — рядково-локальна, і якби її звузили до брудного
         // рядка, дев'ять рядків `C4` лишилися б порахованими зі старого `C3`.
         // Саме такий дефект і виглядає як «звіт майже правильний».
-        Arrange("SUM([C1])", rowCount: 10, withDependentLocalFormula: true);
+        Arrange("[C1] + [Ext].[R1].[V]", rowCount: 10, external: true, withDependentLocalFormula: true);
 
         var written = await Service().RecalculateAsync(MainInstance, Dirty(), CancellationToken.None);
 
@@ -165,9 +171,28 @@ public sealed class RowLocalRecalculationTests
         var c4 = Applied().Where(u => u.Address.ColumnDefId == _c4Id).ToList();
         Assert.Equal(_rowCount, c4.Count);
 
-        // Рядок i: C3 = i, C4 = 2i. Перевіряємо найдальший від брудного.
+        // C3 = i + 100 (чужа таблиця), C4 = 2·(i + 100).
+        // Перевіряємо найдальший від брудного.
         var last = c4.Single(u => u.Address.TableRowId == FirstRowId + _rowCount - 1);
-        Assert.Equal(2m * _rowCount, last.Value.ValueNumeric);
+        Assert.Equal(2m * (_rowCount + 100m), last.Value.ValueNumeric);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "CAL-03")]
+    [InlineData("[C2] / IF([C1] = NULL, [Period].Days, [C1]) * [C1]")]
+    [InlineData("SUM([C1], [C2], [C1])")]
+    public async Task HSE401_правка_одного_рядка_рахує_формулу_з_Period_і_агрегатом_ОДИН_раз(string expression)
+    {
+        // Раніше [Period].X і SUM(...) робили формулу нелокальною, і правка
+        // однієї комірки перераховувала всі рядки таблиці.
+        Arrange(expression, rowCount: 500);
+
+        var written = await Service().RecalculateAsync(MainInstance, Dirty(), CancellationToken.None);
+
+        Assert.Equal(1, _engine.EvaluateCalls);
+        Assert.Equal(1, written);
+        Assert.Equal(FirstRowId, Assert.Single(Applied()).Address.TableRowId);
     }
 
     [Fact]

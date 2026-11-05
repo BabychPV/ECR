@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Calculations;
+using Ecr.Application.Calculations;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -351,7 +351,8 @@ public sealed class GetTableSliceHandler(
                 c.Precision, c.Scale, requiredByMethodology.Contains(c.Id), StyleOf(styleById, c.StyleId), c.WidthPx,
                 ColumnExpressionVisibility.Visible(
                     columnFormulas.GetValueOrDefault(c.Id), table, c.Id, snapshot, readable, formulaEngine),
-                c.HeaderGroupId))
+                c.HeaderGroupId,
+                c.LookupFilter))
             .ToList();
 
         // Групи заголовків: лише ті, у піддереві яких є видима колонка; колонка без групи/з невідомою — без групи.
@@ -439,6 +440,14 @@ public sealed class GetTableSliceHandler(
         //    і що дозволене лише з підтвердженням (`ФВ-2.16`, `#43`), — без
         //    другого запиту в обох випадках.
         var permissions = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        // HSE401: колонки формул (обчислювані) - їхню нередагованість клієнт виводить сам з типу колонки
+        // (`permissions.ts`: Formula/Calculated без запису = `CalculatedCell`; ручне значення D-461 сервер знімає ключем
+        // і `formulaOverride`). Тож ключ `CalculatedCell` на КОЖНУ таку комірку (6 428 x 31 = ~200k ключів) не віддається.
+        var computedColumns = columns
+            .Where(c => c.DataType is nameof(Domain.Enums.CellDataType.Formula) or nameof(Domain.Enums.CellDataType.Calculated))
+            .Select(c => c.Id)
+            .ToHashSet();
         var confirmations = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (address, decision) in decisions)
         {
@@ -457,6 +466,12 @@ public sealed class GetTableSliceHandler(
 
             if (!decision.IsAllowed)
             {
+                if (decision.Reason == Domain.Enums.EditDenyReason.CalculatedCell
+                    && computedColumns.Contains(address.ColumnDefId))
+                {
+                    continue;
+                }
+
                 permissions[key] = decision.Reason.ToString();
                 continue;
             }

@@ -433,8 +433,9 @@ public sealed record RegistryTemplateUsage(int Columns, int Templates);
 /// <param name="IsDeleted">Чи видалений логічно.</param>
 /// <param name="ValidFrom">Перший чинний день; <c>null</c> — від початку.</param>
 /// <param name="ValidTo">Перший НЕчинний день (виключно); <c>null</c> — без обмеження.</param>
+/// <param name="LevelCode">Код рівня запису ієрархічного довідника (HSE401: фільтр <c>level=</c>); <c>null</c> - плоский чи без рівня.</param>
 public sealed record RegistryEntryStanding(
-    long Id, int RegistryDefId, bool IsActive, bool IsDeleted, DateOnly? ValidFrom, DateOnly? ValidTo)
+    long Id, int RegistryDefId, bool IsActive, bool IsDeleted, DateOnly? ValidFrom, DateOnly? ValidTo, string? LevelCode = null)
 {
     /// <summary>Чинний на дату — те саме вікно, що <c>RegistryEntry.IsValidOn</c>.</summary>
     /// <param name="date">Дата.</param>

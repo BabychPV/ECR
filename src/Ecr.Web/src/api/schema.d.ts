@@ -16240,6 +16240,8 @@ export interface paths {
                     /** @description Документ, у шапку якого обирається запис: перелік звужується до записів, придатних у вікні проєкту документа
                      *     (активні, чинні бодай один день вікна), а asOf не потрібен. Невидимий документ - 404. */
                     documentId?: number;
+                    /** @description HSE401: код рівня ієрархічного довідника (`level=` із фільтра колонки) - лише записи цього рівня. */
+                    level?: string;
                 };
                 header?: never;
                 path: {
@@ -28201,6 +28203,7 @@ export interface components {
             isRequired: boolean;
             /** @default false */
             isRequiredByMethodology: boolean;
+            lookupFilter?: null | string;
             /** Format: int32 */
             lookupRegistryDefId: null | number;
             /** Format: int32 */
@@ -28237,6 +28240,15 @@ export interface components {
              * @description Батько; `null` — корінь.
              */
             parentId: null | number;
+        };
+        /** @description Обчислена комірка перегляду рядково-локальних формул (HSE401). */
+        ComputedCellDto: {
+            /** @description Колонка-ціль формули. */
+            columnCode: string;
+            /** @description Рядок. */
+            rowKey: string;
+            /** @description Значення в тій самій формі, що й комірка зрізу; `null` - комірку очищено. */
+            value: unknown;
         };
         /** @description Правило умовного форматування (дзеркало клієнтського `ConditionalRule`). */
         ConditionalFormatRuleDto: {
@@ -32791,6 +32803,10 @@ export interface components {
              * @description Скільки комірок записано.
              */
             appliedCells: number;
+            /** @description HSE401: ПЕРЕГЛЯД результатів рядково-локальних формул для відредагованих рядків (≤ 20), щоб похідні колонки
+             *     (Компонент/Фаза за кодом забруднювача) з'являлися одразу. Лише для вигляду: єдине джерело істини - фоновий
+             *     перерахунок (`RecalculationJobId`); `null` - перегляду немає. */
+            computedCells?: null | components["schemas"]["ComputedCellDto"][];
             /** @description Адреси `rowKey:columnCode` комірок, записаних за політикою `Warn`
              *     поза вікном доступу (`ФВ-2.16`, `D-239`): у журналі вони
              *     позначені `IsOutOfWindow`. Порожній — таких не було. */
@@ -34846,6 +34862,8 @@ export interface components {
              * @description Ідентифікатор запису (це значення зберігається в комірці).
              */
             id: number;
+            /** @description Код рівня запису ієрархічного довідника; `null` - плоский довідник чи запис без рівня. */
+            levelCode?: null | string;
             /**
              * Format: int64
              * @description Батьківський запис ієрархії.

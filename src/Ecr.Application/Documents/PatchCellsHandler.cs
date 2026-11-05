@@ -1,4 +1,4 @@
-using Ecr.Application.Calculations;
+﻿using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
@@ -53,6 +53,9 @@ public sealed partial class PatchCellsHandler(
     // ⛔ HSE301 A1: хук підтягування вікон рядків з PI — ОДНА точка виклику нижче, після запису.
     // Необов'язковий лише для прямого конструювання в тестах запису; контейнер його завжди передає.
     IRowWindowTrigger? rowWindows = null,
+
+    // HSE401: синхронний перегляд рядково-локальних формул у відповіді; необов'язковий (тести, що будують обробник руками).
+    Recalculation.IRowLocalPreview? preview = null,
 
     // ⛔ C1: правила й вимоги методології ключуються Id колонок тієї версії шаблону, у якій їх писали; документ на
     // клон-версії має інші Id тих самих колонок. Контейнер передає завжди; `null` (прямий конструктор у тестах) —
@@ -271,8 +274,56 @@ public sealed partial class PatchCellsHandler(
             await rowWindows.RowsChangedAsync(ChangedColumns(context.Instance, changes), ct).ConfigureAwait(false);
         }
 
-        return await BuildResponseAsync(request, context, changes, messages, recalculationJobId, ct)
+        var response = await BuildResponseAsync(request, context, changes, messages, recalculationJobId, ct)
             .ConfigureAwait(false);
+
+        var computed = await PreviewComputedAsync(context, changes, ct).ConfigureAwait(false);
+        return computed is null ? response : response with { ComputedCells = computed };
+    }
+
+    /// <summary>
+    /// HSE401: перегляд рядково-локальних формул для відредагованих рядків (≤ <see cref="Recalculation.IRowLocalPreview.MaxRows"/>).
+    /// Лише для вигляду - збій перегляду НІКОЛИ не валить уже збережений PATCH; істина - фоновий перерахунок.
+    /// </summary>
+    private async Task<IReadOnlyList<ComputedCellDto>?> PreviewComputedAsync(
+        RequestContext context, CellChangeLists changes, CancellationToken ct)
+    {
+        // Запис у стовпці з іншим власником (Q-17) ішов у чужі екземпляри - перегляд для таких не рахуємо.
+        if (preview is null || changes.Routed is { Count: > 0 } || changes.Touched.Count == 0)
+        {
+            return null;
+        }
+
+        var edited = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (var rowId in changes.Touched)
+        {
+            if (changes.RowKeyById.TryGetValue(rowId, out var rowKey))
+            {
+                edited[rowKey] = rowId;
+            }
+        }
+
+        try
+        {
+            var computed = await preview.PreviewAsync(context.Instance, edited, ct).ConfigureAwait(false);
+            if (computed is not { Count: > 0 })
+            {
+                return computed;
+            }
+
+            // ⛔ F13-p158: перегляд — те саме читання, що й зріз (GetTableSliceHandler): прихована колонка чи колонка
+            // поза межами читання автора не повертається, інакше відповідь PATCH стала б оракулом її значення.
+            var scope = (await access.ReadScopeAsync(context.Profile, context.Instance.DocumentId, ct)
+                .ConfigureAwait(false)).InPeriod(new PeriodKey(context.Instance.PeriodKey));
+            return [.. computed.Where(cell => context.ColumnDefs.TryGetValue(cell.ColumnCode, out var column)
+                && !column.IsDeleted && !column.IsHidden && scope.CanReadColumn(column.Id))];
+        }
+#pragma warning disable CA1031 // перегляд не має права валити збережений запис
+        catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -2111,13 +2162,18 @@ public sealed partial class PatchCellsHandler(
     {
         // PRMG: ціль-група приймає записи реєстрів складу (збіг реєстру - швидкий шлях без резолвера; Deny - як «немає»).
         // Рішення людини 25.10: без Registry.View вибір запису - теж «немає» (проєкт документа - лише для scoped-ролей).
+        // HSE401: фільтр колонки `level=X` - запис іншого рівня відмовляється тією самою відповіддю, що й чужий довідник
+        // (без оракула: рівень чужого запису не розкривається).
         var foreign = changed
             .Where(cell => !Permits.Groups.LookupTargetMatcher.Belongs(
                 groups,
                 context.Profile,
                 context.Snapshot.ColumnsById[cell.Address.ColumnDefId].LookupRegistryDefId,
                 standings[cell.EntryId!.Value].RegistryDefId,
-                viewProjectId))
+                viewProjectId)
+                || !MatchesLevelFilter(
+                    context.Snapshot.ColumnsById[cell.Address.ColumnDefId].LookupFilter,
+                    standings[cell.EntryId!.Value].LevelCode))
             .Select(cell => DescribeLookup(context, cell))
             .ToList();
 
@@ -2129,6 +2185,11 @@ public sealed partial class PatchCellsHandler(
             throw MissingEntryRefusal(foreign);
         }
     }
+
+    /// <summary>Чи запис рівня <paramref name="entryLevel"/> проходить фільтр колонки <c>level=X</c> (немає фільтра - проходить).</summary>
+    private static bool MatchesLevelFilter(string? lookupFilter, string? entryLevel)
+        => LookupFilterSpec.LevelOf(lookupFilter) is not { } required
+           || string.Equals(required, entryLevel, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Проєкт документа для перевірки <c>Registry.View</c> у scoped-ролі; для решти - <c>null</c> без запиту.</summary>
     private async Task<int?> LookupViewProjectAsync(RequestContext context, CancellationToken ct)

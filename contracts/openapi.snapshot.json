@@ -3547,6 +3547,12 @@
             "default": false,
             "type": "boolean"
           },
+          "lookupFilter": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "lookupRegistryDefId": {
             "format": "int32",
             "type": [
@@ -3655,6 +3661,28 @@
           "parentId",
           "ordinal",
           "label"
+        ],
+        "type": "object"
+      },
+      "ComputedCellDto": {
+        "description": "Обчислена комірка перегляду рядково-локальних формул (HSE401).",
+        "properties": {
+          "columnCode": {
+            "description": "Колонка-ціль формули.",
+            "type": "string"
+          },
+          "rowKey": {
+            "description": "Рядок.",
+            "type": "string"
+          },
+          "value": {
+            "description": "Значення в тій самій формі, що й комірка зрізу; `null` - комірку очищено."
+          }
+        },
+        "required": [
+          "rowKey",
+          "columnCode",
+          "value"
         ],
         "type": "object"
       },
@@ -13305,6 +13333,16 @@
             "format": "int32",
             "type": "integer"
           },
+          "computedCells": {
+            "description": "HSE401: ПЕРЕГЛЯД результатів рядково-локальних формул для відредагованих рядків (≤ 20), щоб похідні колонки\n(Компонент/Фаза за кодом забруднювача) з'являлися одразу. Лише для вигляду: єдине джерело істини - фоновий\nперерахунок (`RecalculationJobId`); `null` - перегляду немає.",
+            "items": {
+              "$ref": "#/components/schemas/ComputedCellDto"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "outOfWindow": {
             "description": "Адреси `rowKey:columnCode` комірок, записаних за політикою `Warn`\nпоза вікном доступу (`ФВ-2.16`, `D-239`): у журналі вони\nпозначені `IsOutOfWindow`. Порожній — таких не було.",
             "items": {
@@ -17675,6 +17713,13 @@
             "description": "Ідентифікатор запису (це значення зберігається в комірці).",
             "format": "int64",
             "type": "integer"
+          },
+          "levelCode": {
+            "description": "Код рівня запису ієрархічного довідника; `null` - плоский довідник чи запис без рівня.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "parentEntryId": {
             "description": "Батьківський запис ієрархії.",
@@ -51656,6 +51701,14 @@
             "schema": {
               "format": "int64",
               "type": "integer"
+            }
+          },
+          {
+            "description": "HSE401: код рівня ієрархічного довідника (`level=` із фільтра колонки) - лише записи цього рівня.",
+            "in": "query",
+            "name": "level",
+            "schema": {
+              "type": "string"
             }
           }
         ],

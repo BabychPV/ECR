@@ -27,7 +27,8 @@ public sealed class GetRegistryEntriesHandler(
     IPeriodStore? periods = null,
     IPermitGroupStore? groupStore = null,
     Permits.Groups.IPermitGroupResolver? groups = null,
-    IPermitTypeStore? permitTypes = null)
+    IPermitTypeStore? permitTypes = null,
+    IRegistryHierarchyStore? hierarchy = null)
 {
     // ⚠ `documents` і `periods` потрібні лише режиму «вікно документа» (`documentId`); `groupStore`, `groups` і `permitTypes` -
     // піклеру ГРУПИ типів дозволів (PRMG). Необов'язкові для тестів, що будують обробник руками, - контейнер підставляє їх завжди.
@@ -56,8 +57,22 @@ public sealed class GetRegistryEntriesHandler(
     /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException">Довідника чи документа немає - <c>ECR-REG-0404</c> / <c>ECR-DOC-0404</c>.</exception>
-    public async Task<IReadOnlyList<RegistryEntryDto>> HandleAsync(
+    public Task<IReadOnlyList<RegistryEntryDto>> HandleAsync(
         string registryCode, DateOnly asOf, long? parentEntryId, long? documentId, CancellationToken ct)
+        => HandleAsync(registryCode, asOf, parentEntryId, documentId, levelCode: null, ct);
+
+    /// <summary>Читає записи довідника (див. вище) зі звуженням до одного рівня ієрархічного довідника.</summary>
+    /// <param name="registryCode">Код довідника.</param>
+    /// <param name="asOf">Дата періоду.</param>
+    /// <param name="parentEntryId">Обраний батьківський запис для каскаду.</param>
+    /// <param name="documentId">Документ для режиму «вікно проєкту».</param>
+    /// <param name="levelCode">
+    /// HSE401: код рівня (<c>level=</c> із <c>ColumnDef.LookupFilter</c>); задано - лише записи цього рівня.
+    /// Невідомий рівень і плоский довідник дають порожній перелік. Фільтр застосовується ПІСЛЯ кешу переліку.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<IReadOnlyList<RegistryEntryDto>> HandleAsync(
+        string registryCode, DateOnly asOf, long? parentEntryId, long? documentId, string? levelCode, CancellationToken ct)
     {
         // ⚠ Глобальне право АБО ресурсний грант рівня Read на ЦЕЙ довідник
         // (A7-58). Всередині `RegistryAccess.RequireAsync` довідник з коду
@@ -216,14 +231,33 @@ public sealed class GetRegistryEntriesHandler(
 
         // Id і Display: у комірці зберігається Id (ФВ-8.8), Display лише
         // показується. Тому перейменування не змінює історичних даних.
-        return selected
+        // HSE401: рівні читаються лише для ієрархічного довідника (плоский не платить зайвим запитом).
+        var levelCodes = new Dictionary<int, string>();
+        if (definition.IsHierarchical && hierarchy is not null)
+        {
+            foreach (var level in await hierarchy.ListLevelsAsync(definition.Id, ct).ConfigureAwait(false))
+            {
+                levelCodes[level.Id] = level.Code;
+            }
+        }
+
+        string? LevelOf(RegistryEntry e) => e.LevelId is { } id && levelCodes.TryGetValue(id, out var code) ? code : null;
+
+        IEnumerable<RegistryEntry> result = selected;
+        if (!string.IsNullOrWhiteSpace(levelCode))
+        {
+            result = result.Where(e => string.Equals(LevelOf(e), levelCode.Trim(), StringComparison.OrdinalIgnoreCase));
+        }
+
+        return result
             .Select(e => new RegistryEntryDto(
                 e.Id,
                 e.Code,
                 e.DisplayL10n.Get(currentUser.Language) ?? e.Code,
                 e.ParentEntryId,
                 e.ValidFrom,
-                e.ValidTo))
+                e.ValidTo,
+                LevelCode: LevelOf(e)))
             .ToList();
     }
 

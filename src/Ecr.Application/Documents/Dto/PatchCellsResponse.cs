@@ -18,6 +18,11 @@ namespace Ecr.Application.Documents.Dto;
 /// Ідентифікатор поставленої задачі перерахунку формул; <c>null</c> —
 /// перерахунку НЕ поставлено (`BE-05`).
 /// </param>
+/// <param name="ComputedCells">
+/// HSE401: ПЕРЕГЛЯД результатів рядково-локальних формул для відредагованих рядків (≤ 20), щоб похідні колонки
+/// (Компонент/Фаза за кодом забруднювача) з'являлися одразу. Лише для вигляду: єдине джерело істини - фоновий
+/// перерахунок (<c>RecalculationJobId</c>); <c>null</c> - перегляду немає.
+/// </param>
 /// <remarks>
 /// ⛔ <c>RecalculationJobId</c> існує тому, що без нього клієнт міг лише
 /// вгадувати таймером, коли обчислені колонки оновляться: відповідь казала
@@ -37,7 +42,14 @@ public sealed record PatchCellsResponse(
     IReadOnlyDictionary<string, string> RowVersions,
     IReadOnlyList<ValidationMessageDto> Validation,
     string? RecalculationJobId = null,
-    IReadOnlyList<string>? OutOfWindow = null);
+    IReadOnlyList<string>? OutOfWindow = null,
+    IReadOnlyList<ComputedCellDto>? ComputedCells = null);
+
+/// <summary>Обчислена комірка перегляду рядково-локальних формул (HSE401).</summary>
+/// <param name="RowKey">Рядок.</param>
+/// <param name="ColumnCode">Колонка-ціль формули.</param>
+/// <param name="Value">Значення в тій самій формі, що й комірка зрізу; <c>null</c> - комірку очищено.</param>
+public sealed record ComputedCellDto(string RowKey, string ColumnCode, object? Value);
 
 /// <summary>Повідомлення валідації.</summary>
 /// <param name="Severity">Рівень: <c>Info</c>/<c>Warning</c>/<c>Error</c>.</param>
