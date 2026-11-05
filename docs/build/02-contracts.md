@@ -5541,7 +5541,7 @@ namespace Ecr.Application.Documents.Dto;
 
 /// <summary>Результат пакетної зміни.</summary>
 /// <param name="AppliedCells">Скільки комірок записано.</param>
-/// <param name="RowVersions">Нові версії зачеплених рядків: <c>RowKey</c> → hex.</param>
+/// <param name="RowVersions">Нові версії рядків, зачеплених цим запитом (не всієї таблиці): <c>RowKey</c> → Base64 (AN-162).</param>
 /// <param name="Validation">Результати валідації рівнів, які не блокують запис (R-B3).</param>
 public sealed record PatchCellsResponse(
     int AppliedCells,

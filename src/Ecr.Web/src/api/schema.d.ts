@@ -32814,8 +32814,8 @@ export interface components {
             /** @description Ідентифікатор поставленої задачі перерахунку формул; `null` —
              *     перерахунку НЕ поставлено (`BE-05`). */
             recalculationJobId?: null | string;
-            /** @description Нові версії зачеплених рядків: `RowKey` → `rowversion` у Base64 (`Convert.ToBase64String`),
-             *     не hex. Base64 розрізняє регістр: клієнт повертає значення в `baseVersion` дослівно, а сервер порівнює
+            /** @description Нові версії рядків, зачеплених цим запитом (оновлені й створені), а НЕ всієї таблиці: `RowKey` →
+             *     `rowversion` у Base64 (`Convert.ToBase64String`), не hex. Клієнт зливає їх у свій кеш версій. Base64 розрізняє регістр: клієнт повертає значення в `baseVersion` дослівно, а сервер порівнює
              *     його `Ordinal` — переписане в нижній чи верхній регістр, воно дало б хибний конфлікт `409`. */
             rowVersions: {
                 [key: string]: string;

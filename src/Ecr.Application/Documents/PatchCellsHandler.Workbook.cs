@@ -219,8 +219,7 @@ public sealed partial class PatchCellsHandler
             // HSE301 A1: одна зміна на таблицю; хук кличе викликач після коміту (L6-11).
             rowWindowChanges.Add(ChangedColumns(item.Context.Instance, applied));
 
-            var versions = (IReadOnlyDictionary<string, string>?)MergedRowVersions(item.Context, applied)
-                           ?? await rowStore.GetRowVersionsAsync(item.Id, period, ct).ConfigureAwait(false);
+            var versions = await TouchedRowVersionsAsync(item.Id, item.Context, applied, ct).ConfigureAwait(false);
             responses.Add(ToResponse(
                 applied, item.Messages, recalculationJobId: null, versions, OutOfWindowKeys(item.Context, applied)));
         }
