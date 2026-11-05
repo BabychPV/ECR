@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -25,6 +25,7 @@ const SeededStrings: Record<string, string> = {
   'version.title': 'Template version',
   'version.publish': 'Publish',
   'version.deprecate': 'Withdraw from use',
+  'version.discard': 'Discard draft',
   'version.clone': 'Clone version',
   'version.relations': 'Table relations',
   'periodRules.title': 'Period access rules',
@@ -151,6 +152,30 @@ describe('TemplateVersionPage: Publish/Withdraw відповідають ста�
     fireEvent.click(await screen.findByTestId('version-more'));
     expect(await screen.findByText('Withdraw from use')).not.toBeNull();
     expect(screen.queryByText('Publish')).toBeNull();
+    // Відкинути (DELETE версії) — лише чернетку: опубліковану не видаляють.
+    expect(screen.queryByText('Discard draft')).toBeNull();
+  });
+
+  it('Draft-версія має в меню «Discard draft», і підтвердження шле DELETE версії', async () => {
+    stubFetch('Draft');
+    await loadCatalog('en', 'public');
+    await loadCatalog('en', 'private');
+
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('version-more'));
+    fireEvent.click(await screen.findByText('Discard draft'));
+
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Discard draft' }));
+
+    const fetchMock = vi.mocked(fetch);
+    await waitFor(() => {
+      const deletes = fetchMock.mock.calls.filter(
+        ([, init]) => (init as RequestInit | undefined)?.method === 'DELETE',
+      );
+      expect(deletes.map(([url]) => String(url))).toEqual(['/api/v1/template-versions/1']);
+    });
   });
 
   it('Deprecated-версія не показує ні «Publish», ні «Withdraw from use»', async () => {
