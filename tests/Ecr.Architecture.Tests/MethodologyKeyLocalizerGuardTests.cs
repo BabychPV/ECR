@@ -34,6 +34,8 @@ public sealed class MethodologyKeyLocalizerGuardTests
         ["src/Ecr.Infrastructure/Persistence/MethodologyStore.cs"] =
             "сховище, що віддає правила як є; переклад робить споживач",
         ["src/Ecr.Infrastructure/Persistence/EcrDbContext.cs"] = "оголошення DbSet",
+        ["src/Ecr.Infrastructure/Persistence/RegistryStore.cs"] =
+            "NAE purge: лише пошук id запису текстом у MatchJson (чи вживається), умови не розбираються й з комірками не звіряються",
         ["src/Ecr.Infrastructure/Persistence/WhereUsedStore.cs"] =
             "«де використовується» шукає за СІМ'ЄЮ колонки (відповідники за шляхом у версіях шаблону) - ColumnFamilyAsync",
     };

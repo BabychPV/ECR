@@ -16775,6 +16775,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/{code}/entries/{id}/purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Deletes a retired or deleted entry for good, if nothing uses it. Permission `Registry.EditData` or grant
+         *     `Write` (the same as retire).
+         * @description Physical delete of the entry, its values and key rows. An active entry is `409 ECR-REG-0409 purgeActive` (retire it
+         *     first); any use of the id (cells, header values, other entries' values, children in any state, links, methodology, event
+         *     maps, submission snapshots, the archive) is `409 ECR-REG-0409 entryUsed` with `referenceKinds`. External
+         *     registries are refused (D-211). Audited (`Purge`, the deleted row and values in `OldJson`).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Registry code. */
+                    code: string;
+                    /** @description Entry. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries/{code}/entries/{id}/references": {
         parameters: {
             query?: never;
@@ -16904,6 +16983,95 @@ export interface paths {
                 };
                 /** @description Unprocessable Entity */
                 422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registries/{code}/entries/{id}/unretire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restores a retired node. Permission `Registry.EditData` or grant `Write` (the same as retire).
+         * @description Reopens the node's validity window and switches it on; children stay retired. A retired ancestor is
+         *     `409 ECR-REG-0409 parentRetired` (with `ancestorIds`) unless `withAncestors`. A restored NAE source whose number
+         *     is now taken is `409 ECR-REG-4094 naeCodeTaken`; a registry key held by a live entry is `409 ECR-REG-4092`.
+         *     A live node is a no-op (empty `restoredIds`). Audited (`Unretire`).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Registry code. */
+                    code: string;
+                    /** @description Entry. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UnretireRegistryEntryRequest"];
+                    "application/json": components["schemas"]["UnretireRegistryEntryRequest"];
+                    "text/json": components["schemas"]["UnretireRegistryEntryRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UnretireRegistryEntryResponse"];
+                        "text/json": components["schemas"]["UnretireRegistryEntryResponse"];
+                        "text/plain": components["schemas"]["UnretireRegistryEntryResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -39178,6 +39346,21 @@ export interface components {
             count: number;
             /** @description До 10 рядків за зростанням таблиці й номера. */
             rows: components["schemas"]["UnmatchedRowItemDto"][];
+        };
+        /** @description Restore a retired node (reopens its validity window; children stay retired). */
+        UnretireRegistryEntryRequest: {
+            /** @description Also restore the retired ancestors up to the first live one; without it a retired parent is refused. */
+            withAncestors: null | boolean;
+        };
+        /** @description Result of a restore. */
+        UnretireRegistryEntryResponse: {
+            /**
+             * Format: int32
+             * @description Document rows re-checked by the orphan scan for the restored entries.
+             */
+            affectedRows: number;
+            /** @description Entries whose window was reopened (topmost ancestor first, the node last); empty — it was live. */
+            restoredIds: number[];
         };
         /** @description Тіло зміни розкладу. */
         UpdateCollectionScheduleRequest: {

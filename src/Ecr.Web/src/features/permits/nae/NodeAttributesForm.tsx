@@ -25,6 +25,7 @@ import {
   serverFieldProblem,
   serverKeyHolder,
   serverNaeCodeHolder,
+  showsServerField,
   targetLevelCode,
   validateNode,
   type NaeCodeHolder,
@@ -137,7 +138,7 @@ function Form({
   const levelFields = fieldsForLevel(fields, targetLevelCode(target));
   const levelCode = targetLevelCode(target);
   const inputFields = levelFields.filter((field) => !isServerField(field, levelCode));
-  const serverFields = levelFields.filter((field) => isServerField(field, levelCode));
+  const serverFields = levelFields.filter((field) => isServerField(field, levelCode) && showsServerField(field, levelCode));
 
   const current: NodeFormState = { code, display, values };
   const problems: NodeFormProblems = validateNode(inputFields, current, codeAutomatic);

@@ -466,6 +466,42 @@ describe('NodeAttributesForm: відмова ділового ключа', () =>
     // Відмова - саме на полі коду регіону (його опис помилки), а не лише сповіщенням.
     expect(region.getAttribute('aria-describedby') ?? '').toContain(message.closest('[id]')?.id ?? 'missing');
   });
+
+  it('AN-161: виведені регіон і район показані лише на SRC; на EQUIP/SITE/REGION/AREA порожнього «—» немає', () => {
+    // Поля всіх рівнів (як у живому NAE_TREE): сервер зберігає виведені коди лише на джерелах.
+    const allLevelFields = [
+      { id: 2, code: 'RegionCode', nameL10n: { values: { en: 'Region code' } }, dataType: 'String', isRequired: false, levelCode: null, isReadOnly: false },
+      { id: 3, code: 'AreaCode', nameL10n: { values: { en: 'Area code' } }, dataType: 'String', isRequired: false, levelCode: null, isReadOnly: false },
+    ];
+    vi.mocked(apiFetch).mockImplementation((path: string) =>
+      path.endsWith('/languages') ? Promise.resolve([{ code: 'en', nameNative: 'English', isDefault: true }]) : Promise.reject(new Error(`unexpected ${path}`)),
+    );
+    const derivedAt = (level: string): string[] => {
+      const view = renderWithQuery(
+        <MemoryRouter>
+          <NodeAttributesForm
+            registryCode="NAE_TREE"
+            registryId={9}
+            codeAutomatic
+            fields={allLevelFields as never}
+            target={{ mode: 'create', parent: null, level: { code: level, ordinal: 1, name: level, isOptional: false } }}
+            readOnly={false}
+            onSaved={vi.fn()}
+          />
+        </MemoryRouter>,
+      );
+      const codes = [...view.container.querySelectorAll('[data-nae-derived-field]')].map((el) => el.getAttribute('data-nae-derived-field') ?? '');
+      view.unmount();
+
+      return codes;
+    };
+
+    expect(derivedAt('SRC')).toEqual(['RegionCode', 'AreaCode']);
+    expect(derivedAt('EQUIP')).toEqual([]);
+    expect(derivedAt('SITE')).toEqual([]);
+    expect(derivedAt('REGION')).toEqual([]);
+    expect(derivedAt('AREA')).toEqual([]);
+  });
 });
 
 describe('WhereUsed', () => {

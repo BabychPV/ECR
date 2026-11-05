@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type APIResponse, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { ensureNaeTree, ensureSubstances } from './airScope';
 import { buildXlsx, type Cell } from './airXlsx';
 
 /**
@@ -56,8 +57,8 @@ function name(code: string): { values: Record<string, string> } {
   return { values: { en: code } };
 }
 
-async function treeNodes(api: APIRequestContext): Promise<TreeNode[]> {
-  const response = await api.get(`/api/v1/registries/${NaeTree}/tree`);
+async function treeNodes(api: APIRequestContext, includeRetired = false): Promise<TreeNode[]> {
+  const response = await api.get(`/api/v1/registries/${NaeTree}/tree${includeRetired ? '?includeRetired=true' : ''}`);
   if (response.status() === 404) return [];
 
   return (await ok<{ nodes: TreeNode[] }>(response, 'дерево НВ')).nodes;
@@ -162,6 +163,12 @@ test.describe('NAE tree manual', () => {
     admin = await playwright.request.newContext(baseURL === undefined ? {} : { baseURL });
     await login(admin, Admin);
     await ensureLandRegion(admin);
+    // Район вузла - вибір зі списку AIR_AREA (OFFSHORE/ONSHORE), а його створює провізіонування AIR. Окремий прогін спеку
+    // (без airLimitsReal/airParams перед ним) інакше не має AIR_AREA. Провізіонування ідемпотентне; без NAE_TREE і довідника
+    // речовин сервер відмовляє 422 sharedRegistryUnknown - їх заводять ті самі помічники, що й у специфікаціях AIR.
+    await ensureNaeTree(admin);
+    await ensureSubstances(admin);
+    await ok(await admin.post('/api/v1/air-limits/provision'), 'провізіонування AIR (AIR_AREA)');
 
     const before = await treeNodes(admin);
     initialIds = new Set(before.map((node) => node.id));
@@ -192,8 +199,8 @@ test.describe('NAE tree manual', () => {
     test.setTimeout(180_000);
     const problems: string[] = [];
 
-    // Вузли, яких не було на старті: найглибші першими.
-    const nodes = await treeNodes(admin);
+    // Вузли, яких не було на старті (і закриті тестом Restore/Delete): найглибші першими.
+    const nodes = await treeNodes(admin, true);
     const mine = nodes.filter((node) => !initialIds.has(node.id));
     const parent = new Map(nodes.map((node) => [node.id, node.parentEntryId]));
     const depth = (id: number): number => {
@@ -272,6 +279,14 @@ test.describe('NAE tree manual', () => {
     const nodes = await treeNodes(admin);
     expect(nodes.some((node) => node.levelCode === 'REGION' && node.display.includes(Region)), 'вузол регіону').toBe(true);
     expect(nodes.some((node) => node.levelCode === 'AREA' && node.display.includes(`E2E NAE ${Stamp}`)), 'вузол району з назвою').toBe(true);
+
+    // AN-161: картка району без порожнього «Region —» - виведені коди сервер зберігає лише на джерелах (SRC).
+    const area = nodes.find((node) => node.levelCode === 'AREA' && node.display.includes(`E2E NAE ${Stamp}`))!;
+    await page.goto(`/admin/permits/nae?node=${String(area.id)}`);
+    const form = page.getByRole('form', { name: 'Node attributes' });
+    await expect(form.getByRole('textbox', { name: 'Name · English' })).toHaveValue(`E2E NAE ${Stamp}`, { timeout: 30_000 });
+    await expect(form.locator('[data-nae-derived-field="RegionCode"]')).toHaveCount(0);
+    await expect(form.locator('[data-nae-derived-field="AreaCode"]')).toHaveCount(0);
     await context.close();
   });
 
@@ -309,6 +324,61 @@ test.describe('NAE tree manual', () => {
     await page.getByRole('button', { name: 'Preview', exact: true }).click();
     await expect(page.locator('[data-nae-excel-issues="warning"]')).toBeVisible({ timeout: 30_000 });
     expect(await page.locator('[data-nae-excel-issues="warning"]').innerText()).toContain('Names are not overwritten');
+    await context.close();
+  });
+
+  test('NAE tree manual: retired node - restore, restore with parents, delete for good', async ({ browser }) => {
+    // Вузли з імпорту Excel вище: обладнання «Pumps» і два джерела під ним.
+    const live = await treeNodes(admin);
+    const pump1 = live.find((node) => node.display.includes(`Pump ${Digits}1`))!;
+    const pump2 = live.find((node) => node.display.includes(`Pump ${Digits}2`))!;
+    expect(pump1, 'джерело з імпорту').toBeDefined();
+    expect(pump2, 'джерело з імпорту').toBeDefined();
+    const equipId = pump1.parentEntryId!;
+    const retire = async (id: number, cascade: boolean): Promise<void> => {
+      await ok(await admin.post(`/api/v1/registries/${NaeTree}/entries/${String(id)}/retire`, { data: { on: null, cascade } }), `закрити ${String(id)}`);
+    };
+    const { page, context } = await openAs(browser, { user: Editor.user, password: Editor.password }, 'light');
+    const openRetired = async (id: number): Promise<void> => {
+      await page.goto(`/admin/permits/nae?node=${String(id)}`);
+      await page.getByTestId('tree-show-retired').click();
+      await expect(page.locator('[data-nae-lifecycle]')).toBeVisible({ timeout: 30_000 });
+    };
+
+    // 1. Закрите джерело - «Restore» повертає його в обіг.
+    await retire(pump1.id, false);
+    await openRetired(pump1.id);
+    await page.locator('[data-nae-restore]').click();
+    await expect(page.getByText('Nodes restored: 1.')).toBeVisible({ timeout: 15_000 });
+    expect((await treeNodes(admin)).some((node) => node.id === pump1.id), 'джерело знову діє').toBe(true);
+
+    // 2. Закрите обладнання з дітьми не видалити: причина й вид посилань у діалозі, підтвердження недоступне.
+    await retire(equipId, true);
+    await openRetired(equipId);
+    await page.locator('[data-nae-purge]').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('cannot be undone');
+    await dialog.getByRole('button', { name: 'Delete for good' }).click();
+    await expect(dialog.locator('[data-nae-purge-blocked]')).toContainText('Child entries', { timeout: 15_000 });
+    await expect(dialog.getByRole('button', { name: 'Delete for good' })).toBeDisabled();
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    expect((await treeNodes(admin, true)).some((node) => node.id === equipId), 'обладнання лишилось').toBe(true);
+
+    // 3. Джерело під закритим обладнанням: відмова біля кнопки і «Restore with parents».
+    await openRetired(pump2.id);
+    await page.locator('[data-nae-restore]').click();
+    await expect(page.locator('[data-nae-restore-refused]')).toBeVisible({ timeout: 15_000 });
+    await page.locator('[data-nae-restore-with-parents]').click();
+    await expect(page.getByText('Nodes restored: 2.')).toBeVisible({ timeout: 15_000 });
+    const after = await treeNodes(admin);
+    expect(after.some((node) => node.id === equipId) && after.some((node) => node.id === pump2.id), 'обладнання і джерело діють').toBe(true);
+
+    // 4. Невживане закрите джерело (діти лишаються закритими після повернення батька) - видаляється остаточно.
+    await openRetired(pump1.id);
+    await page.locator('[data-nae-purge]').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete for good' }).click();
+    await expect(page.getByText('The node is deleted for good.')).toBeVisible({ timeout: 15_000 });
+    expect((await treeNodes(admin, true)).some((node) => node.id === pump1.id), 'джерела більше немає').toBe(false);
     await context.close();
   });
 

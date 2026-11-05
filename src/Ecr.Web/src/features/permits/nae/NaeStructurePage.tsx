@@ -24,6 +24,9 @@ import './naeStructure.css';
 const NodeAttributesForm = lazy(async () => ({
   default: (await import('./NodeAttributesForm')).NodeAttributesForm,
 }));
+const NodeLifecycleActions = lazy(async () => ({
+  default: (await import('./NodeLifecycleActions')).NodeLifecycleActions,
+}));
 const AfImportPanel = lazy(async () => ({
   default: (await import('./AfImportPanel')).AfImportPanel,
 }));
@@ -172,6 +175,17 @@ export function NaeStructurePage(): JSX.Element {
         }
         renderPanelExtra={(node) => (
           <div className="nae-panel-extra">
+            {/* Закритий вузол (перемикач «Retired»): повернути або остаточно видалити невживаний (людина 04.11). */}
+            {canEdit && node.retired === true && (
+              <Suspense fallback={null}>
+                <NodeLifecycleActions
+                  key={`life-${String(node.id)}`}
+                  registryCode={registryCode}
+                  node={node}
+                  onPurged={() => setNodeParam(null)}
+                />
+              </Suspense>
+            )}
             {registry !== undefined && (
               <Suspense fallback={null}>
                 <NodeAttributesForm

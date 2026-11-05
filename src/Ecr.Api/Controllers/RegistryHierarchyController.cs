@@ -17,7 +17,9 @@ public sealed class RegistryHierarchyController(
     SaveRegistryHierarchyHandler saveHierarchy,
     GetRegistryTreeHandler getTree,
     MoveRegistryEntryHandler move,
-    RetireRegistryEntryHandler retire) : ControllerBase
+    RetireRegistryEntryHandler retire,
+    UnretireRegistryEntryHandler unretire,
+    PurgeRegistryEntryHandler purge) : ControllerBase
 {
     /// <summary>Hierarchy settings and levels. Permission <c>Registry.View</c> or grant <c>Read</c>.</summary>
     /// <param name="code">Registry code.</param>
@@ -107,5 +109,52 @@ public sealed class RegistryHierarchyController(
     {
         ArgumentNullException.ThrowIfNull(request);
         return Ok(await retire.HandleAsync(code, id, request, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>Restores a retired node. Permission <c>Registry.EditData</c> or grant <c>Write</c> (the same as retire).</summary>
+    /// <param name="code">Registry code.</param>
+    /// <param name="id">Entry.</param>
+    /// <param name="request">Whether to restore the retired ancestors too.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <remarks>
+    /// Reopens the node's validity window and switches it on; children stay retired. A retired ancestor is
+    /// <c>409 ECR-REG-0409 parentRetired</c> (with <c>ancestorIds</c>) unless <c>withAncestors</c>. A restored NAE source whose number
+    /// is now taken is <c>409 ECR-REG-4094 naeCodeTaken</c>; a registry key held by a live entry is <c>409 ECR-REG-4092</c>.
+    /// A live node is a no-op (empty <c>restoredIds</c>). Audited (<c>Unretire</c>).
+    /// </remarks>
+    [HttpPost("entries/{id:long}/unretire")]
+    [ProducesResponseType<UnretireRegistryEntryResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<UnretireRegistryEntryResponse>> Unretire(
+        string code, long id, [FromBody] UnretireRegistryEntryRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Ok(await unretire.HandleAsync(code, id, request, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Deletes a retired or deleted entry for good, if nothing uses it. Permission <c>Registry.EditData</c> or grant
+    /// <c>Write</c> (the same as retire).
+    /// </summary>
+    /// <param name="code">Registry code.</param>
+    /// <param name="id">Entry.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <remarks>
+    /// Physical delete of the entry, its values and key rows. An active entry is <c>409 ECR-REG-0409 purgeActive</c> (retire it
+    /// first); any use of the id (cells, header values, other entries' values, children in any state, links, methodology, event
+    /// maps, submission snapshots, the archive) is <c>409 ECR-REG-0409 entryUsed</c> with <c>referenceKinds</c>. External
+    /// registries are refused (D-211). Audited (<c>Purge</c>, the deleted row and values in <c>OldJson</c>).
+    /// </remarks>
+    [HttpDelete("entries/{id:long}/purge")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Purge(string code, long id, CancellationToken ct)
+    {
+        await purge.HandleAsync(code, id, ct).ConfigureAwait(false);
+        return NoContent();
     }
 }

@@ -27386,6 +27386,45 @@
         ],
         "type": "object"
       },
+      "UnretireRegistryEntryRequest": {
+        "description": "Restore a retired node (reopens its validity window; children stay retired).",
+        "properties": {
+          "withAncestors": {
+            "description": "Also restore the retired ancestors up to the first live one; without it a retired parent is refused.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          }
+        },
+        "required": [
+          "withAncestors"
+        ],
+        "type": "object"
+      },
+      "UnretireRegistryEntryResponse": {
+        "description": "Result of a restore.",
+        "properties": {
+          "affectedRows": {
+            "description": "Document rows re-checked by the orphan scan for the restored entries.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "restoredIds": {
+            "description": "Entries whose window was reopened (topmost ancestor first, the node last); empty — it was live.",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "restoredIds",
+          "affectedRows"
+        ],
+        "type": "object"
+      },
       "UpdateCollectionScheduleRequest": {
         "description": "Тіло зміни розкладу.",
         "properties": {
@@ -52387,6 +52426,102 @@
         ]
       }
     },
+    "/api/v1/registries/{code}/entries/{id}/purge": {
+      "delete": {
+        "description": "Physical delete of the entry, its values and key rows. An active entry is `409 ECR-REG-0409 purgeActive` (retire it\nfirst); any use of the id (cells, header values, other entries' values, children in any state, links, methodology, event\nmaps, submission snapshots, the archive) is `409 ECR-REG-0409 entryUsed` with `referenceKinds`. External\nregistries are refused (D-211). Audited (`Purge`, the deleted row and values in `OldJson`).",
+        "parameters": [
+          {
+            "description": "Registry code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Entry.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Deletes a retired or deleted entry for good, if nothing uses it. Permission `Registry.EditData` or grant\n`Write` (the same as retire).",
+        "tags": [
+          "RegistryHierarchy"
+        ]
+      }
+    },
     "/api/v1/registries/{code}/entries/{id}/references": {
       "get": {
         "description": "Empty until the permit tables point at registry entries (plan N3). An entry of another registry is the same 404 as a\nmissing one.",
@@ -52589,6 +52724,140 @@
           }
         },
         "summary": "Retires a node softly. Permission `Registry.EditData` or grant `Write`.",
+        "tags": [
+          "RegistryHierarchy"
+        ]
+      }
+    },
+    "/api/v1/registries/{code}/entries/{id}/unretire": {
+      "post": {
+        "description": "Reopens the node's validity window and switches it on; children stay retired. A retired ancestor is\n`409 ECR-REG-0409 parentRetired` (with `ancestorIds`) unless `withAncestors`. A restored NAE source whose number\nis now taken is `409 ECR-REG-4094 naeCodeTaken`; a registry key held by a live entry is `409 ECR-REG-4092`.\nA live node is a no-op (empty `restoredIds`). Audited (`Unretire`).",
+        "parameters": [
+          {
+            "description": "Registry code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Entry.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnretireRegistryEntryRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnretireRegistryEntryRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnretireRegistryEntryRequest"
+              }
+            }
+          },
+          "description": "Cancellation token.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnretireRegistryEntryResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnretireRegistryEntryResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnretireRegistryEntryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Restores a retired node. Permission `Registry.EditData` or grant `Write` (the same as retire).",
         "tags": [
           "RegistryHierarchy"
         ]
