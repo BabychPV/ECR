@@ -8,7 +8,9 @@
 .PARAMETER BatchSize  рядків у пачці (за замовчуванням 1000).
 #>
 [CmdletBinding()]
-param([int]$Limit = 0, [int]$BatchSize = 1000, [int]$StartAt = 1, [switch]$DryRun)
+param([int]$Limit = 0, [int]$BatchSize = 1000, [int]$StartAt = 1, [switch]$DryRun,
+    [ValidateSet('Scratch', 'Live')][string]$Target = 'Scratch', [string]$BaseUrl, [string]$Database, [string]$ConfirmStand, [string]$CredentialFile,
+    [switch]$PreviewOnly, [switch]$AcceptNaePreview)
 $ErrorActionPreference = 'Stop'
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 . (Join-Path $here 'Hse401Stand.Lib.ps1')
@@ -16,13 +18,55 @@ $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvoca
 . (Join-Path $here 'Hse401Xlsx.Lib.ps1')
 . (Join-Path $here 'Hse401Model.Lib.ps1')
 . (Join-Path $here 'Hse401Rows.Lib.ps1')
+Set-Hse401Target -Target $Target -BaseUrl $BaseUrl -Database $Database -ConfirmStand $ConfirmStand -CredentialFile $CredentialFile -PreviewOnly:$PreviewOnly -AcceptNaePreview:$AcceptNaePreview
+$preview = Test-Hse401Preview
 $out = Get-Hse401OutDir
-$state = Read-HseJson (Join-Path $out 'hse401-state.json')
+$stateFile = Get-Hse401StateFile
 Connect-Hse
 Add-Type -AssemblyName System.Net.Http
 
 $data = Read-HseJson (Join-Path $out 'hse401-extract.json')
-$maps = Get-HseLookupMaps -Extract $data -NaeMapFile (Join-Path $out 'hse401-nae-map.json')
+
+if ($preview) {
+    # Лише підрахунок: скільки вхідних комірок пішло б у PATCH (усі підстановки довідників вважаються знайденими). Жодного запису.
+    $pm = @{}
+    foreach ($l in @(@('C', 'region', 'REG'), @('E', 'onoff', 'OON'), @('F', 'area', 'ARE'), @('G', 'facility', 'FAC'), @('H', 'activity', 'ACT'), @('I', 'permit', 'PRM'), @('J', 'equip', 'EQT'), @('K', 'srctype', 'SRT'))) {
+        $m = @{}
+        foreach ($it in (Get-HseListPlan -Extract $data -Key $l[1] -Pfx $l[2] -Xl $l[0])) { $m[$it.Norm] = 0L }
+        $pm[$l[0]] = $m
+    }
+    $pol = @{}
+    foreach ($p in $data['dictionaries']['pollutant']) { $pol[('E' + ([string]$p['code']).Trim()).ToUpperInvariant()] = 0L }
+    $pm['O'] = $pol
+    $nae = @{}
+    foreach ($row in $data['rows']) {
+        $v = $row['v']
+        if ($v.ContainsKey('C') -and $v.ContainsKey('E') -and $v.ContainsKey('L')) { $nae["$(ConvertTo-HseEn $v['C'])|$(ConvertTo-HseEn $v['E'])|$(ConvertTo-HseNaeCode $v['L'])"] = 0L }
+    }
+    $pm['NAE'] = $nae
+    $plog = [pscustomobject]@{ unmapped = (New-Object System.Collections.Generic.List[object]); round = (New-Object System.Collections.Generic.List[object]) }
+    $cnt = 0
+    foreach ($row in $data['rows']) { $cnt += (Get-HseRowCells -Row $row -Maps $pm -Log $plog).Count }
+    $nrows = $data['rows'].Count
+    $existingRows = $null
+    $found = Find-Hse401Document
+    if ($null -ne $found -and $null -ne $found['tableInstanceId']) {
+        $sl = Invoke-HseOk GET "/api/v1/documents/$($found['documentId'])/tables/$($found['tableInstanceId'])?periodKey=$($found['periodKey'])"
+        $existingRows = @($sl.Json.rows).Count
+    }
+    Save-Hse401PlanSection 'load' ([ordered]@{
+            rows = $nrows; inputCells = $cnt; batchSize = $BatchSize; batches = [int][Math]::Ceiling($nrows / [double]$BatchSize)
+            documentExists = ($null -ne $found -and $null -ne $found['documentId']); existingRowsInDocument = $existingRows
+            roundingsExpected = $plog.round.Count
+            note = 'PATCH створює рядки з baseVersion=null: у документі з уже наявними рядками пачка дасть конфлікт 409 - спершу переконайтеся, що existingRowsInDocument = 0 або null.'
+        })
+    Write-HseLog ("[preview] завантаження: рядків {0}, вхідних комірок {1}, пачок {2}, рядків у документі вже: {3}" -f $nrows, $cnt, [int][Math]::Ceiling($nrows / [double]$BatchSize), $existingRows)
+    return
+}
+
+$state = Read-HseJson $stateFile
+Assert-Hse401StateMatches $state
+$maps = Get-HseLookupMaps -Extract $data -NaeMapFile (Get-Hse401NaeMapFile)
 $log = [pscustomobject]@{ unmapped = (New-Object System.Collections.Generic.List[object]); round = (New-Object System.Collections.Generic.List[object]) }
 
 $rows = $data['rows']
@@ -80,4 +124,4 @@ if ($log.unmapped.Count -gt 0) {
 }
 $state['loadSeconds'] = [math]::Round($loadSec, 1); $state['loadRows'] = $rowsDone; $state['loadCells'] = $cellsTotal
 $state['batches'] = $batchLog.ToArray()
-if (-not $DryRun) { [IO.File]::WriteAllText((Join-Path $out 'hse401-state.json'), (ConvertTo-HseJson -Value $state).ToString(), (New-Object Text.UTF8Encoding($false))) }
+if (-not $DryRun) { $state['standKey'] = Get-Hse401StandKey; [IO.File]::WriteAllText($stateFile, (ConvertTo-HseJson -Value $state).ToString(), (New-Object Text.UTF8Encoding($false))) }

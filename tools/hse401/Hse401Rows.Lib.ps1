@@ -155,6 +155,8 @@ function ConvertTo-HsePatchJson {
 function Invoke-HseRawJson {
     <# PATCH/POST з готовим JSON-текстом через HttpClient сесії EcrApi (з повтором на 429/503). #>
     param([string]$Method, [string]$Path, [string]$Json)
+    Assert-Hse401MethodAllowed -Method $Method -Path $Path
+    if (-not $script:EcrStandConfirmed) { throw "Відмова: $Method $Path без підтвердження стенда (Set-EcrStandConfirmation)." }
     for ($try = 0; $try -lt 40; $try++) {
         $req = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::new($Method), ((Get-Hse401BaseUrl) + $Path))
         $req.Content = New-Object System.Net.Http.StringContent($Json, [System.Text.Encoding]::UTF8, 'application/json')

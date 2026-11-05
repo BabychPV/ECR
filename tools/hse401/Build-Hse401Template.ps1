@@ -7,20 +7,59 @@
     Template | Project | All (за замовчуванням All). Повтор безпечний: наявне не перестворюється.
 #>
 [CmdletBinding()]
-param([ValidateSet('Template', 'Project', 'All')][string]$Stage = 'All', [int]$Year = 2026)
+param([ValidateSet('Template', 'Project', 'All')][string]$Stage = 'All', [int]$Year = 2026,
+    [ValidateSet('Scratch', 'Live')][string]$Target = 'Scratch', [string]$BaseUrl, [string]$Database, [string]$ConfirmStand, [string]$CredentialFile,
+    [switch]$PreviewOnly, [switch]$AcceptNaePreview)
 $ErrorActionPreference = 'Stop'
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 . (Join-Path $here 'Hse401Stand.Lib.ps1')
 . (Join-Path $here 'Hse401Json.Lib.ps1')
 . (Join-Path $here 'Hse401Model.Lib.ps1')
+Set-Hse401Target -Target $Target -BaseUrl $BaseUrl -Database $Database -ConfirmStand $ConfirmStand -CredentialFile $CredentialFile -PreviewOnly:$PreviewOnly -AcceptNaePreview:$AcceptNaePreview
+$preview = Test-Hse401Preview
 $out = Get-Hse401OutDir
-$stateFile = Join-Path $out 'hse401-state.json'
-function Get-State { if (Test-Path $stateFile) { return Read-HseJson $stateFile } else { return @{} } }
-function Save-State($s) { [IO.File]::WriteAllText($stateFile, (ConvertTo-HseJson -Value $s).ToString(), (New-Object Text.UTF8Encoding($false))) }
+$stateFile = Get-Hse401StateFile
+function Get-State { if (Test-Path $stateFile) { $s0 = Read-HseJson $stateFile; Assert-Hse401StateMatches $s0; return $s0 } else { return @{} } }
+function Save-State($s) { $s['standKey'] = Get-Hse401StandKey; [IO.File]::WriteAllText($stateFile, (ConvertTo-HseJson -Value $s).ToString(), (New-Object Text.UTF8Encoding($false))) }
 $state = Get-State
 
 Connect-Hse
 $code = $script:HseTemplateCode
+
+if ($preview) {
+    # лише GET: що вже існує на стенді і що було б створено
+    if ($Stage -in 'Template', 'All') {
+        $t = (Invoke-HseOk GET ("/api/v1/templates?limit=50&q=$code")).Json
+        $tpl = @($t.items) | Where-Object { $_.code -eq $code } | Select-Object -First 1
+        $pubV = $null; $drfV = $null
+        if ($null -ne $tpl) {
+            $vers = @((Invoke-HseOk GET "/api/v1/templates/$($tpl.id)/versions?limit=100").Json.items)
+            $pub = $vers | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Descending | Select-Object -First 1
+            $drf = $vers | Where-Object { $_.status -eq 'Draft' } | Sort-Object id -Descending | Select-Object -First 1
+            if ($null -ne $pub) { $pubV = [string]$pub.version }
+            if ($null -ne $drf) { $drfV = [string]$drf.version }
+        }
+        $cols = @(Get-Hse401Columns)
+        Save-Hse401PlanSection 'template' ([ordered]@{
+                templateCode = $code; templateExists = ($null -ne $tpl); publishedVersion = $pubV; draftVersion = $drfV
+                wouldCreateTemplate = ($null -eq $tpl); wouldBuildAndPublishVersion = ($null -eq $pubV -or $null -ne $drfV)
+                columns = $cols.Count; formulas = @($cols | Where-Object { $_.Kind -eq 'Formula' }).Count
+            })
+        Write-HseLog ("[preview] шаблон {0}: існує={1}, опублікована={2}, чернетка={3}" -f $code, ($null -ne $tpl), $pubV, $drfV)
+    }
+    if ($Stage -in 'Project', 'All') {
+        $pols = Get-HseItems (Invoke-HseOk GET '/api/v1/projects/period-policies').Json
+        $pol = $pols | Where-Object { $_.code -eq 'HSE401_OPEN' } | Select-Object -First 1
+        $found = Find-Hse401Document
+        Save-Hse401PlanSection 'project' ([ordered]@{
+                policyCode = 'HSE401_OPEN'; policyExists = ($null -ne $pol); projectCode = 'HSE401_2026'; projectExists = ($null -ne $found)
+                documentExists = ($null -ne $found -and $null -ne $found['documentId']); documentId = $(if ($null -ne $found) { $found['documentId'] } else { $null })
+                wouldCreatePolicy = ($null -eq $pol); wouldCreateProject = ($null -eq $found); wouldCreateDocument = ($null -eq $found -or $null -eq $found['documentId'])
+            })
+        Write-HseLog ("[preview] політика HSE401_OPEN існує={0}; проєкт HSE401_2026 існує={1}; документ існує={2}" -f ($null -ne $pol), ($null -ne $found), ($null -ne $found -and $null -ne $found['documentId']))
+    }
+    return
+}
 
 if ($Stage -in 'Template', 'All') {
     Write-HseLog '== Template =='
@@ -127,7 +166,7 @@ if ($Stage -in 'Project', 'All') {
     Write-HseLog ('  періоди: ' + ((@($per.periods) | ForEach-Object { "$($_.periodKey)=$($_.state)" }) -join ' '))
     $state['periodKey'] = [int](@($per.periods) | Select-Object -First 1).periodKey
 
-    $docs = Get-HseItems (Invoke-HseOk GET '/api/v1/documents?limit=200').Json
+    $docs = Get-HseItems (Invoke-HseOk GET "/api/v1/documents?limit=200&projectId=$($prj.id)").Json
     $doc = $docs | Where-Object { $_.projectId -eq $prj.id } | Select-Object -First 1
     if ($null -eq $doc) {
         $d = Invoke-HseOk POST '/api/v1/documents' @{ name = @{ en = "HSE401 $Year" }; projectId = [int]$prj.id; sheetDefIds = @([int]$sheet.id); templateVersionId = $vid }
