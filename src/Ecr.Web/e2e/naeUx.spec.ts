@@ -222,10 +222,16 @@ test.describe('NAE UX', () => {
     expect(query.get('level'), `запит пікера: ${request.url()}`).toBe(SourceLevel);
     expect(query.get('asOf'), 'темпоральний довідник вимагає asOf').toMatch(/^\d{4}-\d{2}-\d{2}$/);
 
-    await drawer.getByRole('textbox', { name: /^NAE/ }).click();
+    // ⚠ Клік ДО відповіді (поле ще «Loading…») відкривав порожній список, який закривався з приходом даних - 3/5
+    // прогонів (e2e 42004432050…41990). Спершу відповідь пікера, потім відкриття списку з повтором, доки є варіанти.
+    await (await request.response())?.finished();
+    const naeBox = drawer.getByRole('textbox', { name: /^NAE/ });
+    await expect(naeBox).not.toHaveAttribute('placeholder', /Loading/i, { timeout: 30_000 });
     const options = page.getByRole('listbox', { name: /^NAE/ }).getByRole('option');
-    await expect(options.first()).toBeVisible({ timeout: 30_000 });
-    const shown = (await options.allTextContents()).map((text) => text.trim());
+    await expect(async () => {
+      if (!(await options.first().isVisible())) await naeBox.click();
+      await expect(options.first()).toBeVisible({ timeout: 3_000 });
+    }).toPass({ timeout: 30_000 });
 
     // Еталон - дерево: рівно вузли джерела; підпис «номер · назва».
     const nodes = await treeNodes(admin);
@@ -234,6 +240,15 @@ test.describe('NAE UX', () => {
         .filter((node) => node.levelCode === SourceLevel)
         .map((node) => `${node.naeCode ?? node.code} · ${node.display}`),
     );
+    // ⚠ Номер NAE для підпису приходить окремим `/tree`; доки його немає, підпис - з коду запису. Чекаємо, доки всі
+    // підписи стануть еталонними (а не знімаємо перший кадр).
+    await expect
+      .poll(async () => (await options.allTextContents()).map((text) => text.trim()).every((label) => expected.has(label)), {
+        message: 'підписи пікера не збіглися з вузлами джерела «номер · назва»',
+        timeout: 30_000,
+      })
+      .toBe(true);
+    const shown = (await options.allTextContents()).map((text) => text.trim());
     expect(shown.length, 'пікер порожній').toBeGreaterThan(0);
     for (const label of shown) {
       expect(label, `підпис «${label}» не схожий на «номер · назва»`).toMatch(/^\S+ · .+/);
