@@ -438,7 +438,17 @@ public sealed partial class CalculationResultStore(
         // (`StaleResultsQuery`: `r0.PeriodKey = P`), а `Invalidate(db)` без періоду піднімав ГЛОБАЛЬНУ епоху - кеш
         // лічильників УСІХ періодів і проєктів скидався після кожного завершеного перерахунку. Прогін без періоду
         // (повний, `PeriodKey = null`) лишає глобальний підйом: його вплив на конкретні періоди не відомий.
-        staleEpoch?.Invalidate(db, run.PeriodKey is { } periodKey ? [periodKey] : null);
+        //
+        // AN-155b: відомий період - `InvalidateRunSwitch`: кеш лічильників скидається як і раніше, а карта застарілості
+        // (`StaleResultsMapCache`) бачить зміну набору актуальних прогонів і лікує лише документи цих прогонів.
+        if (run.PeriodKey is { } periodKey)
+        {
+            staleEpoch?.InvalidateRunSwitch(db, periodKey);
+        }
+        else
+        {
+            staleEpoch?.Invalidate(db, null);
+        }
 
         // ⚠ Обидві половини — в одній транзакції (ФВ-9.11; відкриває її
         // `RunCalculationHandler.CompleteAsync`). Між зняттям актуальності зі старого прогону і

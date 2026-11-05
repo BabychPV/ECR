@@ -43,6 +43,10 @@ function Step($name, [scriptblock]$body) {
     Write-HseLog ("=== {0}: {1} c ===" -f $name, $timings[$name])
 }
 if ($PreviewOnly) { Reset-Hse401Plan }
+# D4 (репетиція 05.11): стан іншого стенда має зупиняти прогін ДО першого запису (раніше - лише на кроці Template,
+# коли довідники й NAE вже були записані). Архівуйте out\*.live.* перед прогоном на новому стенді.
+$stateAtStart = Get-Hse401StateFile
+if (Test-Path $stateAtStart) { Assert-Hse401StateMatches (Read-HseJson $stateAtStart) }
 if ($Extract -or -not (Test-Path (Join-Path $out 'hse401-extract.json'))) { & (Join-Path $here 'Extract-Hse401.ps1') }
 Step 'Accounts' {
     if (Test-Hse401Live) { Write-HseLog 'Live: крок Accounts пропущено (без bootstrap, ролей і користувачів).' }
