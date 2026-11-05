@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    Крок 3 HSE401: довідники. LAND_AIR_SUBSTANCE (+ поля COMPONENT і PHASE; нового довідника речовин немає) і
+    Крок 3 HSE401: довідники. LAND_AIR_SUBSTANCE (+ поля COMPONENT і PHASE; нового довідника речовин немає; display = "<SUBSTANCE_CODE> — <назва>", наявні записи оновлюються ідемпотентно) і
     списки HSE401_* зі словників книги (регіон, суша/море, район, об'єкт, вид діяльності, дозвіл (+GUID), тип обладнання, тип джерела).
 
 .DESCRIPTION
@@ -20,6 +20,7 @@ $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvoca
 . (Join-Path $here 'Hse401Stand.Lib.ps1')
 . (Join-Path $here 'Hse401Json.Lib.ps1')
 . (Join-Path $here 'Hse401Rows.Lib.ps1')
+. (Join-Path $here '..\land\LandAirSubstances.Lib.ps1')   # Format-LandAirSubstanceDisplay
 Set-Hse401Target -Target $Target -BaseUrl $BaseUrl -Database $Database -ConfirmStand $ConfirmStand -CredentialFile $CredentialFile -PreviewOnly:$PreviewOnly -AcceptNaePreview:$AcceptNaePreview
 if (-not $ExtractFile) { $ExtractFile = Join-Path (Get-Hse401OutDir) 'hse401-extract.json' }
 $preview = Test-Hse401Preview
@@ -34,7 +35,8 @@ $plan = [ordered]@{
     fieldsToAdd        = [ordered]@{}
     entriesToCreate    = [ordered]@{}
     fills              = New-Object System.Collections.Generic.List[object]
-    alreadySet         = 0
+    displayFixes       = New-Object System.Collections.Generic.List[object]
+    alreadySet        = 0
     filled             = 0
 }
 $fillErrors = New-Object System.Collections.Generic.List[string]
@@ -167,9 +169,43 @@ foreach ($p in $dict['pollutant']) {
     if ([string]$p['phase']) { $vals.PHASE = [string]$p['phase'] }
     if ($phs.En) { $vals.PHYSICAL_STATE_EN = $phs.En }
     if ($phs.Ru) { $vals.PHYSICAL_STATE_RU = $phs.Ru }
-    $items += @{ Code = "E$code"; En = $comp.En; Ru = $comp.Ru; Values = $vals }
+    # Показ "<код> — <назва>" (у Excel колонка містить код; сітка показує entry.display). Ідемпотентно (без подвійного префікса).
+    $enName = Format-LandAirSubstanceDisplay -Code $code -Name ([string]$comp.En)
+    $ruName = if ([string]$comp.Ru) { Format-LandAirSubstanceDisplay -Code $code -Name ([string]$comp.Ru) } else { '' }
+    $items += @{ Code = "E$code"; En = $enName; Ru = $ruName; Values = $vals }
 }
 Add-Entries 'LAND_AIR_SUBSTANCE' $def $items -FillFields @('COMPONENT', 'PHASE')
+
+# Наявні записи: display (en, ru) без префікса "<SUBSTANCE_CODE> — " -> з префіксом. POST entries з Id: назва ЗЛИВАЄТЬСЯ по мовах
+# (передаємо лише змінені мови), values порожні (не чіпаємо), код/батько як є. Новий часовий рядок не створюється: запис довідника
+# перейменовується на місці (UpsertRegistryEntryHandler -> entry.Rename). Повторний запуск - 0 змін.
+$displayFixed = 0; $displayOk = 0; $displaySkipped = 0
+if ($existing.ContainsKey('LAND_AIR_SUBSTANCE')) {
+    foreach ($e in @((Get-EntryCodes 'LAND_AIR_SUBSTANCE').Values)) {
+        $dd = (Invoke-HseOk GET "/api/v1/registries/LAND_AIR_SUBSTANCE/entries/$($e.id)").Json
+        $sc = ''
+        if ($null -ne $dd.PSObject.Properties['values'] -and $null -ne $dd.values.PSObject.Properties['SUBSTANCE_CODE']) { $sc = ([string]$dd.values.SUBSTANCE_CODE).Trim() }
+        if ($sc -notmatch '^[0-9]{3,4}$') { $displaySkipped++; continue }
+        $cur = $dd.displayL10n.values
+        $changed = @{}
+        foreach ($lang in @('en', 'ru')) {
+            $p = $cur.PSObject.Properties[$lang]
+            if ($null -eq $p -or (Test-HseBlank $p.Value)) { continue }
+            $want = Format-LandAirSubstanceDisplay -Code $sc -Name ([string]$p.Value)
+            if ($want -cne ([string]$p.Value).Trim()) { $changed[$lang] = $want }
+        }
+        if ($changed.Count -eq 0) { $displayOk++; continue }
+        $plan.displayFixes.Add([ordered]@{ registry = 'LAND_AIR_SUBSTANCE'; code = [string]$e.code; entryId = [long]$e.id; display = $changed })
+        if ($preview) { continue }
+        $parentId = $null; if ($null -ne $dd.PSObject.Properties['parentEntryId']) { $parentId = $dd.parentEntryId }
+        $body = @{ id = [long]$e.id; registryDefId = $def.id; code = [string]$e.code; display = @{ values = $changed }; parentEntryId = $parentId; values = @{} }
+        $r = Invoke-Hse POST '/api/v1/registries/LAND_AIR_SUBSTANCE/entries' $body
+        if ($r.Status -in 200, 201) { $displayFixed++ }
+        else { $fillErrors.Add("display LAND_AIR_SUBSTANCE/$($e.code) -> $($r.Status) $(Get-EcrErrorCode $r)") }
+    }
+}
+if ($preview) { Write-HseLog ("  LAND_AIR_SUBSTANCE: [preview] display без префікса коду: {0}, вже з префіксом: {1}, пропущено (без SUBSTANCE_CODE): {2}" -f $plan.displayFixes.Count, $displayOk, $displaySkipped) }
+else { Write-HseLog ("  LAND_AIR_SUBSTANCE: display оновлено: {0}, вже з префіксом: {1}, пропущено (без SUBSTANCE_CODE): {2}" -f $displayFixed, $displayOk, $displaySkipped) }
 if ($preview) { Write-HseLog ("  LAND_AIR_SUBSTANCE: [preview] заповнити COMPONENT/PHASE: {0}, вже заповнено: {1}" -f $plan.fills.Count, $plan.alreadySet) }
 else { Write-HseLog ("  LAND_AIR_SUBSTANCE: дозаповнено значень COMPONENT/PHASE: {0}, вже було заповнено: {1}" -f $plan.filled, $plan.alreadySet) }
 
@@ -211,7 +247,7 @@ if ($fillErrors.Count -gt 0) {
 if ($preview) {
     Save-Hse401PlanSection 'registries' ([ordered]@{
             registriesToCreate = $plan.registriesToCreate.ToArray(); fieldsToAdd = $plan.fieldsToAdd; entriesToCreate = $plan.entriesToCreate
-            fills = $plan.fills.ToArray(); alreadySet = $plan.alreadySet
+            fills = $plan.fills.ToArray(); displayFixes = $plan.displayFixes.ToArray(); alreadySet = $plan.alreadySet
         })
     Write-HseLog 'Довідники: план записано (PreviewOnly).'
 }

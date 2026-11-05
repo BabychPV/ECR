@@ -297,6 +297,22 @@ describe('C1-03: пошук запису довідника й одиниці з
     expect(lookupIdOfText('  ', list)).toBeNull();
   });
 
+  it('показ «143 — назва»: голий код з Excel збігається за частиною до « — », лише якщо вона єдина', () => {
+    const list = [
+      { id: 1, code: 'E143', display: '143 — Aluminium oxide' },
+      { id: 2, code: 'E200', display: '200 — First' },
+      { id: 3, code: 'E201', display: '200 — Second' },
+      { id: 4, code: '143', display: 'Точний код' },
+    ] as RegistryEntryDto[];
+    const single = list.slice(0, 3);
+
+    expect(lookupIdOfText(' 143 ', single)).toBe(1);
+    expect(lookupIdOfText('200', single)).toBeNull(); // два записи з однаковою лівою частиною — неоднозначно
+    expect(lookupIdOfText('143 — aluminium oxide', single)).toBe(1); // точний показ
+    expect(lookupIdOfText('E143', single)).toBe(1); // точний код
+    expect(lookupIdOfText('143', list)).toBe(4); // точний код раніше за ліву частину показу
+  });
+
   it('2000 вставлених комірок по довіднику з 1000 записів не читають його 2000 разів', () => {
     const { list, reads } = counted(entries(1000));
 
