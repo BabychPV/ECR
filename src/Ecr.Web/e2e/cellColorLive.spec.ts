@@ -534,7 +534,8 @@ function cellAt(page: Page, target: { col: string }): Locator {
   return page
     .locator('revo-grid')
     .first()
-    .locator(`revogr-data[type="rgRow"] .rgCell[data-rgrow="0"][data-rgcol="${target.col}"]`);
+    // aria-colindex - глобальний; data-rgcol повторюється, коли широка таблиця закріплює ключові колонки.
+    .locator(`revogr-data[type="rgRow"] .rgCell[data-rgrow="0"][aria-colindex="${target.col}"]`);
 }
 
 async function selectCell(page: Page, target: { col: string }): Promise<void> {
@@ -550,7 +551,7 @@ async function selectColourableCell(page: Page): Promise<{ col: string }> {
 
   for (let index = 0; index < count; index += 1) {
     const cell = cells.nth(index);
-    const col = await cell.getAttribute('data-rgcol');
+    const col = await cell.getAttribute('aria-colindex');
     if (col === null) continue;
 
     await cell.click();

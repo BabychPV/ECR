@@ -205,14 +205,16 @@ async function sliceOf(context: BrowserContext, arranged: Arranged): Promise<Sli
 async function gridColumn(page: Page, header: string): Promise<string> {
   const cell = page.locator('revo-grid revogr-header .rgHeaderCell', { hasText: header }).first();
   await expect(cell, `заголовка «${header}» немає в сітці`).toBeVisible({ timeout: 60_000 });
-  const index = await cell.getAttribute('data-rgcol');
-  if (index === null) throw new Error(`заголовок «${header}» без data-rgcol`);
+  // ⚠ `aria-colindex` (глобальний), не `data-rgcol`: той рахується в межах в'юпорта, а широка таблиця закріплює
+  // ключові колонки (`colPinStart`) - тоді `data-rgcol="0"` є і в закріпленому, і в прокручуваному в'юпорті.
+  const index = await cell.getAttribute('aria-colindex');
+  if (index === null) throw new Error(`заголовок «${header}» без aria-colindex`);
 
   return index;
 }
 
 function dataCell(page: Page, index: string) {
-  return page.locator(`revo-grid revogr-data[type="rgRow"] .rgCell[data-rgrow="0"][data-rgcol="${index}"]`);
+  return page.locator(`revo-grid revogr-data[type="rgRow"] .rgCell[data-rgrow="0"][aria-colindex="${index}"]`);
 }
 
 test.describe('anchorTextSubmitted: текст якоря поданого року править, число — ні (AN-142)', () => {
