@@ -1,5 +1,13 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
+/**
+ * Перша комірка ДАНИХ сітки: прокручуваний в'юпорт (`rgCol`), не закріплена зона. Закріплена зліва (`colPinStart`) колонка
+ * підпису рядка не має коду в зрізі, рядок формули на ній лишається `empty`, а чи закріплена вона - залежить від
+ * налаштувань, які лишили попередні сценарії шарда (05.11: нестабільне падіння `[data-formula-bar="cell"]`).
+ */
+function firstDataCell(grid: Locator): Locator {
+  return grid.locator('revogr-viewport-scroll.rgCol revogr-data[type="rgRow"] .rgCell').first();
+}
 /**
  * D-463 на живому стенді: «Дані з PI» (адміністратор інтеграції) і «Звідки це значення» (комірка документа).
  *
@@ -67,7 +75,7 @@ test.describe('дані з PI', () => {
 
     // Вибрана комірка: її адресу (рядок, колонка) називає запит секції джерела у вкладці Info.
     let request = page.waitForRequest((r) => r.url().includes('/cell-source?'), { timeout: 30_000 });
-    await grid.locator('revogr-data [data-rgcol]').first().click();
+    await firstDataCell(grid).click();
     await expect(page.locator('[data-formula-bar="cell"]').first()).toBeVisible();
     await page.locator('[data-inspector-triggers]').getByRole('button', { name: /History/i }).click();
     const aside = page.getByRole('complementary');
@@ -112,7 +120,7 @@ test.describe('дані з PI', () => {
       // Кеш секції — на комірку: свіже читання — після перезавантаження, з тим самим курсором.
       await page.reload();
       await expect(grid).toBeVisible({ timeout: 60_000 });
-      await grid.locator('revogr-data [data-rgcol]').first().click();
+      await firstDataCell(grid).click();
       await expect(page.locator('[data-formula-bar="cell"]').first()).toBeVisible();
       for (let i = 1; i < attempts; i += 1) await page.keyboard.press('ArrowRight');
 

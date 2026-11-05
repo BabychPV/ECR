@@ -1,7 +1,9 @@
 // tests/Ecr.Infrastructure.Tests/Reporting/ReportViewStartupSkipTests.cs
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.ValueObjects;
+using Ecr.Infrastructure.Reporting;
 using Ecr.TestKit;
+using Microsoft.Extensions.Logging;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -56,6 +58,76 @@ public sealed class ReportViewStartupSkipTests : IAsyncLifetime
         var forced = await RunAsync(onlyIfChanged: false);
         Assert.DoesNotContain("Skipped", forced.Template);
         Assert.Contains("Unchanged", forced.Template);
+    }
+
+    /// <summary>
+    /// Знахідка Аудиту-2 (живий стенд, <c>Collection:MonthColumnRouting = true</c>): відбиток збігався, а стабільні вʼюхи
+    /// перегенеровувались на кожному старті. Той самий сценарій з <c>@MonthRouting = 1</c> на місячній таблиці.
+    /// </summary>
+    [Fact]
+    public async Task Повторний_старт_з_маршрутизацією_місяців_теж_пропускає_генерацію()
+    {
+        var doc = await new TestDocumentBuilder(_sql.ConnectionString).BuildAsync(columnCount: 2, rowCount: 1);
+        await PublishAsync(doc.TemplateVersionId);
+
+        var first = await RunAsync(onlyIfChanged: true, monthRouting: true);
+        Assert.DoesNotContain("Skipped", first.Stable);
+
+        var second = await RunAsync(onlyIfChanged: true, monthRouting: true);
+        Assert.Equal(["Skipped"], second.Template);
+        Assert.Equal(["Skipped"], second.Stable);
+
+        // Зміна прапора - інший відбиток: повна генерація, а не пропуск.
+        var flipped = await RunAsync(onlyIfChanged: true, monthRouting: false);
+        Assert.DoesNotContain("Skipped", flipped.Stable);
+    }
+
+    /// <summary>
+    /// Шлях старту через <see cref="ReportViewGenerator"/> (знахідка Аудиту-2: на живому стенді стабільні вʼюхи
+    /// перегенеровувались на кожному старті - @OnlyIfChanged додавався в параметри команди, але не в її текст).
+    /// Мутація: прибрати <c>, @OnlyIfChanged</c> з тексту виклику <c>usp_GenerateStableViews</c> - червоний.
+    /// </summary>
+    [Fact]
+    public async Task Генератор_на_другому_старті_пропускає_й_стабільні_вʼюхи()
+    {
+        var doc = await new TestDocumentBuilder(_sql.ConnectionString).BuildAsync(columnCount: 2, rowCount: 1);
+        await PublishAsync(doc.TemplateVersionId);
+
+        var log = new OutcomeLogger();
+        await using (var db = _sql.CreateContext())
+        {
+            await new ReportViewGenerator(db, logger: log).GenerateAsync(null, onlyIfChanged: true, CancellationToken.None);
+        }
+
+        await using (var db = _sql.CreateContext())
+        {
+            await new ReportViewGenerator(db, logger: log).GenerateAsync(null, onlyIfChanged: true, CancellationToken.None);
+        }
+
+        Assert.Equal(2, log.Outcomes.Count);
+        Assert.Contains("перегенеровано", log.Outcomes[0], StringComparison.Ordinal);
+        Assert.Contains("пропущено", log.Outcomes[1], StringComparison.Ordinal);
+    }
+
+    /// <summary>Записує лише рядки «вʼюхи rpt.v_* на старті — …» генератора.</summary>
+    private sealed class OutcomeLogger : ILogger<ReportViewGenerator>
+    {
+        public List<string> Outcomes { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            var text = formatter(state, exception);
+            if (text.Contains("на старті", StringComparison.Ordinal))
+            {
+                Outcomes.Add(text);
+            }
+        }
     }
 
     [Fact]
@@ -128,16 +200,16 @@ public sealed class ReportViewStartupSkipTests : IAsyncLifetime
     }
 
     /// <summary>Повна генерація (<c>@TemplateVersionId = NULL</c>) обох процедур; повертає дії кожної.</summary>
-    private async Task<(List<string> Template, List<string> Stable)> RunAsync(bool onlyIfChanged)
+    private async Task<(List<string> Template, List<string> Stable)> RunAsync(bool onlyIfChanged, bool monthRouting = false)
     {
         var template = await ActionsAsync(
-            "EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId = NULL, @MonthRouting = 0, @OnlyIfChanged = @o", 2, onlyIfChanged);
+            "EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId = NULL, @MonthRouting = @r, @OnlyIfChanged = @o", 2, onlyIfChanged, monthRouting);
         var stable = await ActionsAsync(
-            "EXEC rpt.usp_GenerateStableViews @TemplateVersionId = NULL, @MonthRouting = 0, @OnlyIfChanged = @o", 1, onlyIfChanged);
+            "EXEC rpt.usp_GenerateStableViews @TemplateVersionId = NULL, @MonthRouting = @r, @OnlyIfChanged = @o", 1, onlyIfChanged, monthRouting);
         return (template, stable);
     }
 
-    private async Task<List<string>> ActionsAsync(string text, int actionColumn, bool onlyIfChanged)
+    private async Task<List<string>> ActionsAsync(string text, int actionColumn, bool onlyIfChanged, bool monthRouting)
     {
         var result = new List<string>();
         await using var connection = new SqlConnection(_sql.ConnectionString);
@@ -146,6 +218,7 @@ public sealed class ReportViewStartupSkipTests : IAsyncLifetime
         command.CommandTimeout = 300;
         command.CommandText = text;
         command.Parameters.AddWithValue("@o", onlyIfChanged);
+        command.Parameters.AddWithValue("@r", monthRouting);
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {

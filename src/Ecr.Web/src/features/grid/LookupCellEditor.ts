@@ -70,12 +70,22 @@ export function lookupIdOfText(text: string, entries: readonly RegistryEntryDto[
   // на масив записів (як `displayIndexOf`); правило те саме: код раніше за назву, перший запис виграє.
   const index = textIndexOf(entries);
 
-  return index.byCode.get(wanted) ?? index.byDisplay.get(wanted) ?? null;
+  const exact = index.byCode.get(wanted) ?? index.byDisplay.get(wanted);
+  if (exact !== undefined) return exact;
+
+  // Показ «143 — Aluminium oxide»: в Excel стоїть лише `143`. Частина до « — » — лише якщо збіг єдиний.
+  const lead = index.byLead.get(wanted);
+  return lead !== undefined && lead !== AMBIGUOUS ? lead : null;
 }
+
+const AMBIGUOUS = -1;
+const LEAD_SEPARATOR = ' — ';
 
 interface TextIndex {
   readonly byCode: ReadonlyMap<string, number>;
   readonly byDisplay: ReadonlyMap<string, number>;
+  /** Частина показу до « — » → id; `AMBIGUOUS`, якщо таких записів кілька. */
+  readonly byLead: ReadonlyMap<string, number>;
 }
 
 const textCache = new WeakMap<readonly RegistryEntryDto[], TextIndex>();
@@ -86,15 +96,22 @@ function textIndexOf(entries: readonly RegistryEntryDto[]): TextIndex {
 
   const byCode = new Map<string, number>();
   const byDisplay = new Map<string, number>();
+  const byLead = new Map<string, number>();
   for (const entry of entries) {
     const code = entry.code.toLowerCase();
     if (!byCode.has(code)) byCode.set(code, entry.id);
 
     const display = entry.display.toLowerCase();
     if (!byDisplay.has(display)) byDisplay.set(display, entry.id);
+
+    const cut = display.indexOf(LEAD_SEPARATOR);
+    if (cut > 0) {
+      const lead = display.slice(0, cut).trim();
+      if (lead.length > 0) byLead.set(lead, byLead.has(lead) && byLead.get(lead) !== entry.id ? AMBIGUOUS : entry.id);
+    }
   }
 
-  const built = { byCode, byDisplay };
+  const built = { byCode, byDisplay, byLead };
   textCache.set(entries, built);
 
   return built;

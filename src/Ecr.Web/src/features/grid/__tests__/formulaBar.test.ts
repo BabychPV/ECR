@@ -142,6 +142,24 @@ describe('formulaBarModel: комірка під курсором', () => {
     expect(model?.unitSymbol).toBe('т');
   });
 
+  it('вираз із зрізу (`ColumnDto.expression`) показується без окремої мапи (HSE401, 05.11)', () => {
+    // Мутація: прибрати `column.expression` у formulaBarModel - червоний.
+    const withExpression: TableSliceDto = {
+      ...Slice,
+      columns: [column({ code: 'C1', dataType: 'Formula', expression: "REGFIELD([H_POLL], 'COMPONENT')" })],
+    };
+
+    const model = formulaBarModel({
+      slice: withExpression,
+      columns: [{ prop: 'C1' }],
+      rows: GridRows,
+      labelProp: '__rowLabel',
+      focus: { rowIndex: 0, columnIndex: 0 },
+    });
+
+    expect(model?.expression).toBe("REGFIELD([H_POLL], 'COMPONENT')");
+  });
+
   it('`Calculated` (вихід методології) — така сама обчислювана комірка, як `Formula`', () => {
     const calculated: TableSliceDto = { ...Slice, columns: [column({ code: 'C1', dataType: 'Calculated' })] };
 

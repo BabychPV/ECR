@@ -39,7 +39,7 @@ if ($preview) {
             if ($null -ne $pub) { $pubV = [string]$pub.version }
             if ($null -ne $drf) { $drfV = [string]$drf.version }
         }
-        $cols = @(Get-Hse401Columns)
+        $cols = Get-Hse401Columns
         Save-Hse401PlanSection 'template' ([ordered]@{
                 templateCode = $code; templateExists = ($null -ne $tpl); publishedVersion = $pubV; draftVersion = $drfV
                 wouldCreateTemplate = ($null -eq $tpl); wouldBuildAndPublishVersion = ($null -eq $pubV -or $null -ne $drfV)
@@ -103,7 +103,7 @@ if ($Stage -in 'Template', 'All') {
             $body = @{
                 headerL10n = (ConvertTo-HseL10n $c.En $c.Ru); ordinal = $ord; dataType = $dt; isRequired = $false; isReadOnly = ($c.Kind -eq 'Formula')
                 isHidden = [bool]$c.Hidden; precision = $(if ($null -ne $c.Precision -and $dt -eq 'Decimal') { [int]$c.Precision } else { $null }); scale = $(if ($null -ne $c.Scale -and $dt -eq 'Decimal') { [int]$c.Scale } else { $null })
-                defaultValue = $null; displayFormat = $null; styleId = $null; lookupRegistryDefId = $lookup; lookupFilter = $c.Filter; unitId = $null
+                defaultValue = $null; displayFormat = $(if ($c.DisplayFormat) { [string]$c.DisplayFormat } else { $null }); styleId = $null; lookupRegistryDefId = $lookup; lookupFilter = $c.Filter; unitId = $null
                 widthPx = $(if ($c.Width -gt 0) { [int]$c.Width } else { $null }); isMonthColumn = $false; monthNumber = $null }
             $cr = Invoke-HseOk PUT "/api/v1/template-versions/$vid/tables/$tid/columns/$($c.Code)" $body
             $colIds[$c.Code] = $(if ($cr.Json.id) { [int]$cr.Json.id } else { [int]$cr.Json.columnDefId })

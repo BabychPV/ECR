@@ -27,32 +27,14 @@ $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvoca
 . (Join-Path $here 'Hse401Json.Lib.ps1')
 . (Join-Path $here 'Hse401Xlsx.Lib.ps1')
 . (Join-Path $here 'Hse401XlsxWriter.Lib.ps1')
+. (Join-Path $here 'Hse401Nae.Lib.ps1')
 Set-Hse401Target -Target $Target -BaseUrl $BaseUrl -Database $Database -ConfirmStand $ConfirmStand -CredentialFile $CredentialFile -PreviewOnly:$PreviewOnly -AcceptNaePreview:$AcceptNaePreview
 $preview = Test-Hse401Preview
 $out = Get-Hse401OutDir
 if (-not $ExtractFile) { $ExtractFile = Join-Path $out 'hse401-extract.json' }
 
-function ConvertTo-NaeCode([string]$raw) {
-    $t = ([string]$raw -replace '\s+', ' ').Trim()
-    if ($t -match '^[0-9]+$' -and $t.Length -lt 4) { return $t.PadLeft(4, '0') }
-    return $t
-}
-function En([string]$s) { $b = Split-HseBilingual $s; if ($b.En) { return $b.En } else { return $s.Trim() } }
-
 $data = Read-HseJson $ExtractFile
-$sources = [ordered]@{}     # ключ -> @{ region; onoff; area; facility; mpe; name; paths; firstRow }
-foreach ($row in $data['rows']) {
-    $v = $row['v']
-    if (-not ($v['C'] -and $v['E'] -and $v['L'])) { continue }
-    $mpe = ConvertTo-NaeCode $v['L']
-    $key = "$(En $v['C'])|$(En $v['E'])|$mpe"
-    $path = "$(En $(if ($v['F']) { $v['F'] } else { '' }))|$(En $(if ($v['G']) { $v['G'] } else { '' }))"
-    if (-not $sources.Contains($key)) {
-        $sources[$key] = @{ region = (En $v['C']); onoff = (En $v['E']); area = $(if ($v['F']) { En $v['F'] } else { $null }); facility = $(if ($v['G']) { En $v['G'] } else { $null }); mpe = $mpe; name = $(if ($v['D']) { ($v['D'] -replace '\s+', ' ').Trim() } else { $null }); paths = @{}; firstRow = $row['r'] }
-    }
-    $s = $sources[$key]; $s.paths[$path] = 1
-    if (-not $s.name -and $v['D']) { $s.name = ($v['D'] -replace '\s+', ' ').Trim() }
-}
+$sources = Get-Hse401NaeSources $data   # ключ -> @{ region; onoff; area; facility; mpe; name; paths; firstRow }
 $multi = @($sources.Values | Where-Object { $_.paths.Count -gt 1 })
 Write-HseLog ("Джерел NAE (регіон|суша/море|MPE): {0}; із кількома шляхами F|G: {1}" -f $sources.Count, $multi.Count)
 
@@ -62,7 +44,8 @@ $rowToKey = @{}
 $i = 1
 foreach ($k in $sources.Keys) {
     $s = $sources[$k]; $i++
-    $xrows.Add(@($s.region, $s.onoff, $s.area, $s.facility, $s.mpe, $s.name, $null, $null, $null))
+    # Name_En = "<MPE> — <назва>" (або просто MPE): сітка показує entry.display, а в Excel (колонка L) стоїть лише MPE.
+    $xrows.Add(@($s.region, $s.onoff, $s.area, $s.facility, $s.mpe, (Format-Hse401NaeDisplay -Mpe $s.mpe -Name $s.name), $null, $null, $null))
     $rowToKey[$i] = $k
 }
 $xlsx = Join-Path $out $(if (Test-Hse401Live) { 'hse401-nae-tree.live.xlsx' } else { 'hse401-nae-tree.xlsx' })
@@ -146,7 +129,7 @@ $fileSrcCodes = @{}      # N_<REGION>_<ONOFF>_<MPE> -> ключ джерела
 $namesByLevel = @{ REGION = @{}; AREA = @{}; SITE = @{}; EQUIP = @{} }
 foreach ($k in $sources.Keys) {
     $s = $sources[$k]
-    $fileSrcCodes[("N_{0}_{1}_{2}" -f $s.region.ToUpperInvariant(), $s.onoff.ToUpperInvariant(), $s.mpe.ToUpperInvariant())] = $k
+    $fileSrcCodes[(Get-Hse401NaeSrcCode $s.region $s.onoff $s.mpe)] = $k
     $namesByLevel.REGION[$s.region.Trim().ToLowerInvariant()] = 1
     $namesByLevel.AREA[$s.onoff.Trim().ToLowerInvariant()] = 1
     if ($s.area) { $namesByLevel.SITE[$s.area.Trim().ToLowerInvariant()] = 1 }
@@ -240,7 +223,7 @@ $mapOut = [ordered]@{}
 $notFound = @()
 foreach ($k in $sources.Keys) {
     $s = $sources[$k]
-    $mk = ("N_{0}_{1}_{2}" -f $s.region.ToUpperInvariant(), $s.onoff.ToUpperInvariant(), $s.mpe.ToUpperInvariant())
+    $mk = Get-Hse401NaeSrcCode $s.region $s.onoff $s.mpe
     if ($map.ContainsKey($mk)) { $mapOut[$k] = $map[$mk] } else { $notFound += $k }
 }
 $mapJson = [ordered]@{ standKey = (Get-Hse401StandKey); map = $mapOut; unplaced = @($notFound); errors = @($unplaced | ForEach-Object { [ordered]@{ row = $_.row; code = $_.code; detail = $_.detail; source = $_.source } }); multiPath = @($multi | ForEach-Object { "$($_.region)|$($_.onoff)|$($_.mpe)" }) }

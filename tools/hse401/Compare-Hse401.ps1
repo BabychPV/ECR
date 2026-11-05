@@ -29,7 +29,15 @@ $inv = [Globalization.CultureInfo]::InvariantCulture
 $data = Read-HseJson (Join-Path $out 'hse401-extract.json')
 $rows = $data['rows']
 $cols = Get-Hse401Columns
-$cmp = @($cols | Where-Object { $_.Xl -and ($_.Kind -eq 'Formula' -or $_.Code -in 'H_LIMIT_T', 'H_LIMIT_GS', 'H_RAW_T', 'H_RUN_H' -or $_.Code -like 'H_D*') })
+$cmp = @($cols | Where-Object { $_.Xl -and ($_.Kind -eq 'Formula' -or $_.Code -in 'H_NAE', 'H_LIMIT_T', 'H_LIMIT_GS', 'H_RAW_T', 'H_RUN_H' -or $_.Code -like 'H_D*') })
+
+# H_NAE = колонка Excel L (текст "0081", "6354_DR"): порівнюємо з кодом вузла SRC у NAE_TREE (id -> код), відступи нулями зберігаються.
+$naeCodeById = @{}
+if (@($cmp | Where-Object { $_.Code -eq 'H_NAE' }).Count -gt 0) {
+    $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+    foreach ($ne in @(Get-HseItems (Invoke-HseOk GET "/api/v1/registries/NAE_TREE/entries?level=SRC&asOf=$today").Json)) { $naeCodeById[[string]$ne.id] = [string]$ne.code }
+    Write-HseLog "NAE_TREE (SRC): $($naeCodeById.Count) вузлів для порівняння колонки L"
+}
 
 # словник для класифікації VLOOKUP
 $pol = @{}
@@ -68,6 +76,19 @@ for ($i = 1; $i -le $rows.Count; $i++) {
         if ($null -ne $cells -and $cells.PSObject.Properties[$c.Code]) { $ecr = [string]$cells.($c.Code) }
         $isText = ($c.Type -eq 'String')
         $match = $false; $abs = 0.0
+        if ($c.Code -eq 'H_NAE') {
+            $isText = $true
+            $e = if ($null -eq $excel) { '' } else { $excel.Trim() }
+            $nodeCode = if ($null -ne $ecr -and $naeCodeById.ContainsKey($ecr.Trim())) { $naeCodeById[$ecr.Trim()] } else { '' }
+            $ecr = $nodeCode
+            # код вузла SRC = N_<РЕГІОН>_<СУША/МОРЕ>_<MPE> (Import-Hse401Nae); L мусить бути його хвостом дослівно (нулі зліва зберігаються)
+            $match = ($e -ne '' -and $nodeCode -like 'N_*' -and $nodeCode.EndsWith('_' + $e, [StringComparison]::OrdinalIgnoreCase))
+            if ($match) { Add-Class 'match' $c.Code ''; continue }
+            $ex = "row $($row['r']) H_NAE excel L=[$excel] ecr node=[$nodeCode]"
+            Add-Class 'REAL' $c.Code $ex   # колонка L - вхідна; розбіжність завжди REAL
+            $real.Add([pscustomobject]@{ excelRow = $row['r']; rowKey = ('r{0:0000}' -f $i); column = $c.Code; excelCol = $xl; excel = $excel; ecr = $nodeCode; basis = $row['basis']; code = $pcode })
+            continue
+        }
         if ($isText) {
             $e = if ($null -eq $excel) { '' } else { $excel.Trim() }; $a = if ($null -eq $ecr) { '' } else { $ecr.Trim() }
             $match = ($e -ceq $a)

@@ -7,22 +7,12 @@ import type { TotalsEdit } from './gridTotals';
 /**
  * Що показує рядок формули для комірки під курсором (`UI-08`).
  *
- * ⛔ Найважливіше про цей модуль — чого сервер НЕ дає. Тексту виразу в
- * контракті зрізу немає: `ColumnDto`
- * (`Ecr.Application/Documents/Dto/TableSliceDto.cs`) несе `DataType`,
- * `DisplayFormat`, `Scale` — і жодного поля з виразом. `FormulaDto` з
- * `Expression` існує, але доступний РІВНО одним маршрутом —
- * `PUT /api/v1/template-versions/{id}/tables/{tableDefId}/formulas/{scope}/{target}`
- * (право `Template.Edit`), тобто відповіддю на ЗАПИС; `GET` там оголошено
- * `never`. Другий шлях — `GET /methodologies/{id}/versions/{vid}/formulas` —
- * адресується версією методології, якої сторінка документа не знає й знати не
- * має.
- *
- * ⛔ Тому вираз сюди ПЕРЕДАЄТЬСЯ, а не вигадується. Поки сервер його не
- * віддає, `expressionByColumnCode` порожня, і рядок формули каже це прямо
- * (`grid.formulaBarNoExpression`), замість показати правдоподібний текст,
- * якого в шаблоні може не бути взагалі. Коли `ColumnDto` отримає поле виразу,
- * зміна тут — один рядок на місці виклику, а не переписування рядка формули.
+ * ⛔ Вираз береться з контракту зрізу, а не вигадується: `ColumnDto.expression`
+ * (UI-25, B4; `Ecr.Application/Documents/Dto/TableSliceDto.cs`). Сервер віддає
+ * `null`, коли формули немає або хоч одне посилання в ній читачеві не видне, —
+ * тоді рядок формули каже це прямо (`grid.formulaBarNoExpression`), замість
+ * показати правдоподібний текст. ✎ 05.11 (HSE401, людина «не бачу формул»):
+ * поле в зрізі було, але сюди не доходило - тепер читається напряму.
  *
  * ⚠ Модуль ЧИСТИЙ і не знає ні про RevoGrid, ні про React: він дістає комірку
  * за індексами з тих самих масивів, які сітка отримала пропсами. Арифметики
@@ -108,7 +98,9 @@ export function formulaBarModel(input: FormulaBarInput): FormulaBarModel | null 
     columnHeader: column.header,
     unitSymbol: column.unitSymbol,
     isCalculated: isCalculatedColumn(column.dataType),
-    expression: input.expressionByColumnCode?.get(columnCode) ?? null,
+    // UI-25 (B4): вираз приходить у зрізі (`ColumnDto.expression`; сервер віддає `null`, коли формули немає або
+    // посилання в ній читачеві не видне). Явна мапа - лише перекриття для тестів і майбутніх джерел.
+    expression: input.expressionByColumnCode?.get(columnCode) ?? column.expression ?? null,
 
     // ⛔ `cellText`, а не `cellDisplay`: рядок формули показує ЗАПИС значення,
     // як поле вводу в Excel, — без групування розрядів і без доповнення
