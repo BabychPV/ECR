@@ -177,6 +177,7 @@ public static class DependencyInjection
         services.AddScoped<IColumnPathMapper, ColumnPathMapper>();
         services.AddScoped<IMethodologyDraftStore, MethodologyDraftStore>();
         services.AddScoped<IMethodologyVersionDeletionStore, MethodologyVersionDeletionStore>();
+        services.AddScoped<ITemplateVersionDiscardStore, TemplateVersionDiscardStore>();
         services.AddScoped<IConstantStore, ConstantStore>();
         services.AddScoped<ICalculationResultStore, CalculationResultStore>();
         services.AddScoped<ICalculationIssueStore, CalculationIssueStore>();

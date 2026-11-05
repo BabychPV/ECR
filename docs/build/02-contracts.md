@@ -2502,6 +2502,26 @@ public interface IMethodologyVersionDeletionStore
 }
 ```
 
+#### `ITemplateVersionDiscardStore`
+
+Відкидання чернетки версії шаблону (`DELETE /api/v1/template-versions/{id}`, право
+`Template.Publish`). Усі три методи — в одній транзакції: версія під `UPDLOCK, HOLDLOCK`;
+домен (`TemplateVersion.EnsureDiscardable`) пропускає лише `Draft`; будь-яке посилання поза
+конфігурацією версії (проєкт, документ, маршрут погодження, зріз, мапінг `ext.*`, вхід
+методики, клон від неї) — відмова `409 err.ECR-TMPL-0409.discardVersionInUse` з переліком; лише
+тоді структура `cfg.*` і ресурсні гранти аркушів/таблиць/колонок видаляються одним пакетом (FK —
+`NO ACTION`). Слід — `aud.SecurityEvent` (`TemplateVersionDiscarded`). Повноту переліків проти
+живого графа FK тримає `TemplateVersionDiscardStoreTests`.
+
+```csharp
+public interface ITemplateVersionDiscardStore
+{
+    public Task<TemplateVersion?> LockAsync(int templateVersionId, CancellationToken ct);
+    public Task<IReadOnlyDictionary<string, int>> FindUsagesAsync(int templateVersionId, CancellationToken ct);
+    public Task<IReadOnlyDictionary<string, int>> DeleteAsync(int templateVersionId, CancellationToken ct);
+}
+```
+
 #### `IColumnDefSearchStore`
 
 Пошук колонок за назвою чи кодом, поза межами однієї таблиці (директива
@@ -4427,6 +4447,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/template-versions/{id}/clone` | `Template.Edit` | 1 |
 | `POST` | `/api/v1/template-versions/{id}/publish` | `Template.Publish` | 1 |
 | `POST` | `/api/v1/template-versions/{id}/deprecate` | `Template.Publish` | 1 |
+| `DELETE` | `/api/v1/template-versions/{id}` | `Template.Publish` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/diff/{otherId}` | `Template.View` | 1 |
 | `PATCH` | `/api/v1/template-versions/{id}/presentation` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/template-versions/{id}/structure` | `Template.View` | 1 |
