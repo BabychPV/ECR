@@ -27,12 +27,13 @@ public sealed class StaleCountsEpochMonotonicTests
             new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer("Server=localhost;Database=EcrNoConnect;Integrated Security=true;TrustServerCertificate=True").Options);
 
         using var stop = new CancellationTokenSource();
+        using var readerRunning = new ManualResetEventSlim();
         var dips = 0L;
         var reads = 0L;
         var reader = Task.Run(() =>
         {
             var last = epoch.HardValueFor(Period);
-            while (!stop.IsCancellationRequested)
+            do
             {
                 var now = epoch.HardValueFor(Period);
                 if (now < last)
@@ -42,9 +43,14 @@ public sealed class StaleCountsEpochMonotonicTests
 
                 last = now;
                 reads++;
+                readerRunning.Set();
             }
+            while (!stop.IsCancellationRequested);
         });
 
+        // Без часового вікна: письменник стартує, лише коли читач уже в циклі (під навантаженням CI потік читача міг не
+        // встигнути стартувати до кінця 400 тис. операцій - «читач не встиг прочитати», CI 42018285775).
+        Assert.True(readerRunning.Wait(TimeSpan.FromSeconds(30)), "читач не стартував");
         var writer = Task.Run(() =>
         {
             for (var i = 0; i < 400_000; i++)
