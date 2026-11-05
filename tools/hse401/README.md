@@ -147,3 +147,20 @@ powershell -File tools\hse401\Build-Hse401Registries.ps1 -Target Live -BaseUrl h
 Скрипти читають записи `NAE_TREE` за рівнем (`GET /registries/NAE_TREE/entries?level=SRC`) і використовують `LookupFilter` `level=SRC` у колонках шаблону.
 Потрібен сервер із комітом **33e23b50d** (фільтр `LookupFilter level=SRC` і `GET entries?level=`); на старішому сервері параметр `level` ігнорується або
 відхиляється, і мапа NAE/колонки шаблону будуть неправильні. Перевірте версію на копії до репетиції.
+
+
+## Оновлення вже завантаженого стенда: Update-Hse401Template.ps1 (05.11)
+
+`Build-Hse401Template.ps1` наявного не перестворює, тож зміни моделі (колонка Excel L = `H_NAE` «MPE number / ПДВ номер», `H_MPE` прибрано,
+назви «Emission Source Type» / «Work Days», формати показу R/S `0.000000000000` і BC/BD `0.0000`) на живу версію цей скрипт доносить сам:
+клон опублікованої версії -> PATCH presentation (назви, формати, порядок) + DELETE колонки `H_MPE` (м'яке видалення в чернетці) -> publish ->
+migrate-version документів проєкту HSE401_2026 (dry-run для всіх; будь-який `canApply=false` зупиняє) -> тиша перерахунку -> `Compare-Hse401.ps1` (REAL = 0, інакше код виходу 3).
+Другий запуск нічого не робить (різниця порожня, документи вже на останній версії).
+
+    # лише GET, звіт різниці, нічого не пишеться
+    powershell -File tools\hse401\Update-Hse401Template.ps1 -Target Live -BaseUrl <url> -Database <база> -ConfirmStand <база> -CredentialFile <файл> -PreviewOnly
+    # застосування (ті самі параметри без -PreviewOnly); -HideInsteadOfDelete - сховати H_MPE замість видалення, якщо видалення з даними блокує перенос
+
+Формат показу (`ColumnDef.DisplayFormat`, до 50 знаків) - довільний рядок формату Excel: ExcelExporter ставить його в NumberFormat як є; грамліки
+й валідації немає (є лише межа довжини). Сітка клієнта його не читає (там правило `Scale` <= 6 = доповнення нулями), тож формати R/S/BC/BD діють на експорт.
+Compare для колонки L порівнює текст Excel із хвостом коду вузла SRC (`N_<РЕГІОН>_<СУША/МОРЕ>_<MPE>`) зі збереженням нулів зліва.
