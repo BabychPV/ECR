@@ -373,9 +373,20 @@ test.describe('NAE UX', () => {
       element.scrollTop = 120;
     });
     await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBe(120);
-    const items = page.getByRole('treeitem');
     const before = new URL(page.url()).searchParams.get('node');
-    await items.nth(3).click();
+    // ⚠ Лише ПОВНІСТЮ видимий невибраний рядок: частково схований Playwright перед кліком сам докручує у видиму
+    // зону (змінює scrollTop) - тоді тест ловив би власну прокрутку, а не стрибок сторінки (e2e 42000591830).
+    const target = await viewport.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const rows = [...element.querySelectorAll('[role="treeitem"]')];
+      return rows.findIndex((row) => {
+        const rect = row.getBoundingClientRect();
+        return rect.top >= box.top + 1 && rect.bottom <= box.bottom - 1 && row.getAttribute('aria-selected') !== 'true';
+      });
+    });
+    expect(target, 'у вікні дерева немає повністю видимого невибраного вузла').toBeGreaterThanOrEqual(0);
+    expect(await viewport.evaluate((element) => element.scrollTop)).toBe(120);
+    await viewport.getByRole('treeitem').nth(target).click();
     await expect.poll(() => new URL(page.url()).searchParams.get('node'), { message: 'вибір вузла не змінив адресу' }).not.toBe(before);
     await expect(form).toBeVisible({ timeout: 30_000 });
 
