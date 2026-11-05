@@ -1076,7 +1076,8 @@ public sealed class SaveCalculationBindingHandler(
     Domain.Abstractions.IClock clock,
     ITemplateVersionStore templateVersions,
     IRepository<TableDef, int> tables,
-    IRepository<SheetDef, int> sheets)
+    IRepository<SheetDef, int> sheets,
+    ICalculationIssueStore? issues = null)
 {
     /// <summary>Право на редагування правил прив'язки (`02-contracts.md` §9).</summary>
     /// <remarks>
@@ -1269,6 +1270,14 @@ public sealed class SaveCalculationBindingHandler(
         // ⚠ Запис і журнал — у транзакції викликача (`HandleAsync`), тій самій,
         // що тримає блок версії: окрема транзакція тут відпустила б його раніше.
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // AN-160: щойно вимкнули прив'язку - якщо в таблиці не лишилось активних, її поточні проблеми розрахунку
+        // прибираються в цій самій транзакції (прохід таку таблицю більше не відвідає). Таблиці з іншою активною
+        // прив'язкою набір не зачіпає.
+        if (issues is not null && existing is not null && before!.IsActive && !binding.IsActive)
+        {
+            _ = await issues.DeleteForUnboundTablesAsync(null, null, [tableDefId], ct).ConfigureAwait(false);
+        }
 
         // ⛔ HSE301 C5b (D-215): відв'язка останнього джерела `Formula`-колонки
         // ОПУБЛІКОВАНОЇ версії — 409. Джерела рахуються ПІСЛЯ запису, у цій самій

@@ -11,6 +11,10 @@ import {
   useFrozenColumns,
 } from '../frozenColumnsSync';
 import { PreferencesQueryKey } from '../usePreferenceSync';
+import { MeQueryKey } from '@/shared/session/useSession';
+
+/** Поточний користувач тестів (власник кешу `localStorage`, `cacheUser.ts`). */
+const Me = 7;
 
 /**
  * Закріплені колонки: вибір користувача на ВИЗНАЧЕННЯ таблиці - ключ, кеш першого рендера,
@@ -31,8 +35,9 @@ function pref(key: string, value: unknown): UserPreference {
   return { key, value, updatedAt: '2026-11-05T00:00:00Z' } as UserPreference;
 }
 
-function makeClient(server?: UserPreference[]): QueryClient {
+function makeClient(server?: UserPreference[], userId: number | null = Me): QueryClient {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  if (userId !== null) client.setQueryData(MeQueryKey, { userId });
   if (server !== undefined) client.setQueryData(PreferencesQueryKey, server);
   return client;
 }
@@ -71,17 +76,17 @@ describe('ключ і розбір значення', () => {
 
 describe('useFrozenColumns', () => {
   it('сервер перемагає кеш; серверне стає кешем наступного першого рендера', () => {
-    localStorage.setItem(frozenColumnsCacheKey(9), '2');
+    localStorage.setItem(frozenColumnsCacheKey(Me, 9), '2');
     const client = makeClient([pref('grid.frozenColumns.9', 4)]);
 
     const { result } = renderHook(() => useFrozenColumns(9), { wrapper: wrapperFor(client) });
 
     expect(result.current.count).toBe(4);
-    expect(localStorage.getItem(frozenColumnsCacheKey(9))).toBe('4');
+    expect(localStorage.getItem(frozenColumnsCacheKey(Me, 9))).toBe('4');
   });
 
   it('поки сервер не відповів, перший рендер бере кеш', () => {
-    localStorage.setItem(frozenColumnsCacheKey(9), '2');
+    localStorage.setItem(frozenColumnsCacheKey(Me, 9), '2');
 
     const { result } = renderHook(() => useFrozenColumns(9), { wrapper: wrapperFor(makeClient()) });
 
@@ -89,13 +94,13 @@ describe('useFrozenColumns', () => {
   });
 
   it('сервер відповів без ключа - діє типове правило, застарілий кеш прибирається', () => {
-    localStorage.setItem(frozenColumnsCacheKey(9), '2');
+    localStorage.setItem(frozenColumnsCacheKey(Me, 9), '2');
     const client = makeClient([]);
 
     const { result } = renderHook(() => useFrozenColumns(9), { wrapper: wrapperFor(client) });
 
     expect(result.current.count).toBeUndefined();
-    expect(localStorage.getItem(frozenColumnsCacheKey(9))).toBeNull();
+    expect(localStorage.getItem(frozenColumnsCacheKey(Me, 9))).toBeNull();
   });
 
   it('вибір пишеться в кеш і одним PUT; 0 - це значення, не відсутність ключа', () => {
@@ -105,7 +110,7 @@ describe('useFrozenColumns', () => {
     act(() => result.current.setCount(0));
 
     expect(result.current.count).toBe(0);
-    expect(localStorage.getItem(frozenColumnsCacheKey(9))).toBe('0');
+    expect(localStorage.getItem(frozenColumnsCacheKey(Me, 9))).toBe('0');
     expect(put).toHaveBeenCalledTimes(1);
     expect(put).toHaveBeenCalledWith('grid.frozenColumns.9', 0);
     expect(remove).not.toHaveBeenCalled();
@@ -121,7 +126,7 @@ describe('useFrozenColumns', () => {
     act(() => result.current.setCount(undefined));
 
     expect(result.current.count).toBeUndefined();
-    expect(localStorage.getItem(frozenColumnsCacheKey(9))).toBeNull();
+    expect(localStorage.getItem(frozenColumnsCacheKey(Me, 9))).toBeNull();
     expect(remove).toHaveBeenCalledWith('grid.frozenColumns.9');
     expect(put).not.toHaveBeenCalled();
   });
@@ -148,8 +153,8 @@ describe('useFrozenColumns', () => {
   });
 
   it('інша таблиця - свій стан', () => {
-    localStorage.setItem(frozenColumnsCacheKey(1), '2');
-    localStorage.setItem(frozenColumnsCacheKey(2), '5');
+    localStorage.setItem(frozenColumnsCacheKey(Me, 1), '2');
+    localStorage.setItem(frozenColumnsCacheKey(Me, 2), '5');
 
     const { result, rerender } = renderHook(({ id }) => useFrozenColumns(id), {
       wrapper: wrapperFor(makeClient()),
@@ -180,5 +185,35 @@ describe('useFrozenColumns', () => {
       spy.mockRestore();
       setSpy.mockRestore();
     }
+  });
+});
+
+describe('P3 05.11: кеш localStorage належить користувачу', () => {
+  it('ключ кешу несе id користувача; вибір А не видно Б на спільному браузері, доки не прийде сервер', () => {
+    expect(frozenColumnsCacheKey(7, 9)).toBe('ecr.u:7.frozenColumns.def:9');
+    localStorage.setItem(frozenColumnsCacheKey(7, 9), '3');
+
+    const { result } = renderHook(() => useFrozenColumns(9), { wrapper: wrapperFor(makeClient(undefined, 8)) });
+
+    expect(result.current.count).toBeUndefined();
+  });
+
+  it('старий ключ без користувача не читається зовсім', () => {
+    localStorage.setItem('ecr.frozenColumns.def:9', '3');
+
+    const { result } = renderHook(() => useFrozenColumns(9), { wrapper: wrapperFor(makeClient()) });
+
+    expect(result.current.count).toBeUndefined();
+  });
+
+  it('профіль ще невідомий - кеш не читається й не пишеться (сервер усе одно отримує вибір)', () => {
+    localStorage.setItem(frozenColumnsCacheKey(Me, 9), '3');
+    const { result } = renderHook(() => useFrozenColumns(9), { wrapper: wrapperFor(makeClient([], null)) });
+
+    expect(result.current.count).toBeUndefined();
+    const before = localStorage.length;
+    act(() => result.current.setCount(2));
+    expect(localStorage.length).toBe(before);
+    expect(put).toHaveBeenCalledWith('grid.frozenColumns.9', 2);
   });
 });

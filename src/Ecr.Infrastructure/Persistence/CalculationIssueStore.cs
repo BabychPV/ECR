@@ -24,19 +24,24 @@ public sealed class CalculationIssueStore(EcrDbContext db, IClock clock) : ICalc
         ArgumentNullException.ThrowIfNull(evaluatedTableInstanceIds);
         ArgumentNullException.ThrowIfNull(issues);
 
-        if (evaluatedTableInstanceIds.Count == 0)
+        // Період — ключ проходу; прогін без періоду (рік без екземплярів) нічого не перераховував.
+        var run = await db.CalculationRuns
+            .AsNoTracking()
+            .Where(r => r.Id == calculationRunId)
+            .Select(r => new { Period = r.PeriodKey ?? 0, r.DocumentId })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        var period = run?.Period ?? 0;
+        if (period == 0)
         {
             return 0;
         }
 
-        // Період — ключ проходу; прогін без періоду (рік без екземплярів) нічого не перераховував.
-        var period = await db.CalculationRuns
-            .AsNoTracking()
-            .Where(r => r.Id == calculationRunId)
-            .Select(r => r.PeriodKey ?? 0)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
-        if (period == 0)
+        // AN-160: самолікування - проблеми таблиць без жодної активної прив'язки методики (прив'язки зняли, а прохід цю
+        // таблицю вже не відвідує) прибираються на кожному проході того самого документа й періоду.
+        _ = await DeleteForUnboundTablesAsync(run!.DocumentId, period, null, ct).ConfigureAwait(false);
+
+        if (evaluatedTableInstanceIds.Count == 0)
         {
             return 0;
         }
@@ -84,6 +89,37 @@ public sealed class CalculationIssueStore(EcrDbContext db, IClock clock) : ICalc
         }
 
         return dropped;
+    }
+
+    /// <inheritdoc />
+    public async Task<int> DeleteForUnboundTablesAsync(
+        long? documentId, int? periodKey, IReadOnlyCollection<int>? tableDefIds, CancellationToken ct)
+    {
+        if (tableDefIds is { Count: 0 })
+        {
+            return 0;
+        }
+
+        // Набір - один ExecuteDelete з NOT EXISTS по активних прив'язках; історії й аудиту тут немає (лише поточні рядки).
+        var query = db.CalculationIssues
+            .Where(i => !db.CalculationBindings.Any(b => b.TableDefId == i.TableDefId && b.IsActive));
+        if (documentId is { } doc)
+        {
+            query = query.Where(i => i.DocumentId == doc);
+        }
+
+        if (periodKey is { } period)
+        {
+            query = query.Where(i => i.PeriodKey == period);
+        }
+
+        if (tableDefIds is not null)
+        {
+            var ids = tableDefIds.Distinct().ToList();
+            query = query.Where(i => ids.Contains(i.TableDefId));
+        }
+
+        return await query.ExecuteDeleteAsync(ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

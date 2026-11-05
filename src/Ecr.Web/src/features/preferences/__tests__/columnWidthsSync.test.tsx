@@ -13,6 +13,10 @@ import {
 } from '../columnWidthsSync';
 import { PreferencesQueryKey } from '../usePreferenceSync';
 import { DefaultColumnWidth } from '@/features/grid/columnWidths';
+import { MeQueryKey } from '@/shared/session/useSession';
+
+/** Поточний користувач тестів (власник кешу `localStorage`, `cacheUser.ts`). */
+const Me = 7;
 
 /**
  * Ширини колонок на користувача й визначення таблиці (`ФВ-14.29`, `D-201`).
@@ -35,8 +39,9 @@ function pref(key: string, value: unknown): UserPreference {
   return { key, value, updatedAt: '2026-09-28T00:00:00Z' } as UserPreference;
 }
 
-function makeClient(server?: UserPreference[]): QueryClient {
+function makeClient(server?: UserPreference[], userId: number | null = Me): QueryClient {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  if (userId !== null) client.setQueryData(MeQueryKey, { userId });
   if (server !== undefined) client.setQueryData(PreferencesQueryKey, server);
   return client;
 }
@@ -85,6 +90,7 @@ describe('ФВ-14.29: відкладений запис на сервер', () =
         known = value;
         written.push(value);
       },
+      userId: Me,
     });
     return { instance, written };
   }
@@ -115,7 +121,7 @@ describe('ФВ-14.29: відкладений запис на сервер', () =
   });
 
   it('L9-12: стан сервера невідомий — зміни зливаються з локальним дзеркалом, чужі ширини не затираються', () => {
-    localStorage.setItem(columnWidthsCacheKey(5), JSON.stringify({ B: 300 }));
+    localStorage.setItem(columnWidthsCacheKey(Me, 5), JSON.stringify({ B: 300 }));
     const { instance } = writer(null);
 
     instance.change({ A: 200 });
@@ -182,18 +188,18 @@ describe('ФВ-14.29: відкладений запис на сервер', () =
 
 describe('ФВ-14.29: хук useColumnWidths', () => {
   it('ФВ-14.29: значення сервера перемагає кеш localStorage', () => {
-    localStorage.setItem(columnWidthsCacheKey(9), JSON.stringify({ NAME: 180 }));
+    localStorage.setItem(columnWidthsCacheKey(Me, 9), JSON.stringify({ NAME: 180 }));
     const client = makeClient([pref('grid.columnWidths.9', { NAME: 260 })]);
 
     const { result } = renderHook(() => useColumnWidths(9), { wrapper: wrapperFor(client) });
 
     expect(result.current.widths).toEqual({ NAME: 260 });
     // Серверне стає кешем наступного першого рендера.
-    expect(JSON.parse(localStorage.getItem(columnWidthsCacheKey(9)) ?? '{}')).toEqual({ NAME: 260 });
+    expect(JSON.parse(localStorage.getItem(columnWidthsCacheKey(Me, 9)) ?? '{}')).toEqual({ NAME: 260 });
   });
 
   it('ФВ-14.29: поки сервер не відповів, перший рендер бере кеш', () => {
-    localStorage.setItem(columnWidthsCacheKey(9), JSON.stringify({ NAME: 180 }));
+    localStorage.setItem(columnWidthsCacheKey(Me, 9), JSON.stringify({ NAME: 180 }));
     const client = makeClient();
 
     const { result } = renderHook(() => useColumnWidths(9), { wrapper: wrapperFor(client) });
@@ -209,7 +215,7 @@ describe('ФВ-14.29: хук useColumnWidths', () => {
     act(() => result.current.onResize({ NAME: 240 }));
 
     expect(result.current.widths).toEqual({ NAME: 240 });
-    expect(JSON.parse(localStorage.getItem(columnWidthsCacheKey(9)) ?? '{}')).toEqual({ NAME: 240 });
+    expect(JSON.parse(localStorage.getItem(columnWidthsCacheKey(Me, 9)) ?? '{}')).toEqual({ NAME: 240 });
     expect(put).not.toHaveBeenCalled();
 
     act(() => {
@@ -263,6 +269,39 @@ describe('ФВ-14.29: хук useColumnWidths', () => {
     expect(result.current.widths).toEqual({});
     expect(remove).toHaveBeenCalledWith('grid.columnWidths.9');
     expect(put).not.toHaveBeenCalled();
-    expect(localStorage.getItem(columnWidthsCacheKey(9))).toBeNull();
+    expect(localStorage.getItem(columnWidthsCacheKey(Me, 9))).toBeNull();
+  });
+});
+
+describe('P3 05.11: кеш localStorage належить користувачу', () => {
+  it('ключ кешу несе id користувача; ширини А не видно Б на спільному браузері, доки не прийде сервер', () => {
+    expect(columnWidthsCacheKey(7, 9)).toBe('ecr.u:7.columnWidths.def:9');
+    localStorage.setItem(columnWidthsCacheKey(7, 9), JSON.stringify({ NAME: 180 }));
+
+    // Б (id 8) відкриває ту саму таблицю, GET /me/preferences ще не прийшов.
+    const client = makeClient(undefined, 8);
+    const { result } = renderHook(() => useColumnWidths(9), { wrapper: wrapperFor(client) });
+
+    expect(result.current.widths).toEqual({});
+  });
+
+  it('старий ключ без користувача не читається зовсім', () => {
+    localStorage.setItem('ecr.columnWidths.def:9', JSON.stringify({ NAME: 180 }));
+    const client = makeClient();
+
+    const { result } = renderHook(() => useColumnWidths(9), { wrapper: wrapperFor(client) });
+
+    expect(result.current.widths).toEqual({});
+  });
+
+  it('профіль ще невідомий - кеш не читається й не пишеться', () => {
+    localStorage.setItem(columnWidthsCacheKey(Me, 9), JSON.stringify({ NAME: 180 }));
+    const client = makeClient([], null);
+    const { result } = renderHook(() => useColumnWidths(9), { wrapper: wrapperFor(client) });
+
+    expect(result.current.widths).toEqual({});
+    const before = localStorage.length;
+    act(() => result.current.onResize({ CODE: 70 }));
+    expect(localStorage.length).toBe(before);
   });
 });

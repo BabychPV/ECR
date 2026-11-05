@@ -11,6 +11,51 @@
   margin-top: var(--mantine-spacing-md);
   padding-top: var(--mantine-spacing-md);
   border-top: 1px solid var(--ecr-border);
+  /* Стабільне місце під атрибути: поки форма вантажиться (або вузол змінено), панель не стискається і не штовхає вміст. */
+  min-height: 20rem;
+}
+
+/*
+ * Дерево й панель вузла прокручуються НЕЗАЛЕЖНО, а сторінка - ні (людина 05.11: «стрибає вікно, коли гортаю до атрибутів
+ * вибраного вузла»). Причина стрибка: вибір вузла - `navigate(?node=, replace)` (`useUrlState`) -> нова `location.key`
+ * -> глобальний `<ScrollRestoration/>` (`AppLayout`) для невідомого ключа без хеша робить `scrollTo(0, 0)`. Довга панель
+ * змушувала гортати саме вікно, тож кожен вибір кидав його нагору. Тепер висота блоку = вікно мінус те, що над ним
+ * (`useSplitTop` міряє відступ), і гортати вікно нема чого.
+ * На вузькому екрані (панелі переносяться одна під одну) правило не діє: там сторінка гортається, як і раніше.
+ */
+@media (min-width: 48em) {
+  .nae-split {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - var(--nae-split-top, 0px) - var(--mantine-spacing-md));
+    min-height: 24rem;
+  }
+
+  .nae-split .ecr-tree {
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-wrap: nowrap;
+    align-items: stretch;
+  }
+
+  .nae-split .ecr-tree-pane,
+  .nae-split .ecr-tree-side {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* Дерево: шапка з пошуком лишається, прокручується лише список рядків. */
+  .nae-split .ecr-tree-pane {
+    overflow: hidden;
+  }
+
+  .nae-split .ecr-tree-viewport {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overscroll-behavior: contain;
+  }
 }
 
 .nae-used-table {

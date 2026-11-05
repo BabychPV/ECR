@@ -43,12 +43,16 @@ function Field({ field, form, errors, onChange, readOnly, picker, pickerPending,
 
   if (column.type === 'bool') {
     return (
-      <Switch
-        label={column.label}
-        checked={value === 'true'}
-        disabled={readOnly}
-        onChange={(event) => onChange(column.code, event.currentTarget.checked ? 'true' : 'false')}
-      />
+      <div className="pp-switch">
+        {/* Порожній рядок підпису: перемикач стоїть на лінії елементів керування сусідніх полів. Скринрідер його не бачить. */}
+        <span className="pp-label-spacer" aria-hidden="true" />
+        <Switch
+          label={column.label}
+          checked={value === 'true'}
+          disabled={readOnly}
+          onChange={(event) => onChange(column.code, event.currentTarget.checked ? 'true' : 'false')}
+        />
+      </div>
     );
   }
 
@@ -67,6 +71,9 @@ function Field({ field, form, errors, onChange, readOnly, picker, pickerPending,
         clearable={!required}
         error={error}
         description={scopeHint(field, scopeOf(column))}
+        // Підказка ПІД полем, штатно (Mantine сам рахує відступи): CSS `order` переставляв лише візуально, а відступ
+        // «підказка над полем» лишався - NAE стояв на 2 px нижче сусідів (e2e naeUx, 05.11).
+        inputWrapperOrder={['label', 'input', 'description', 'error']}
         placeholder={pickerPending ? t('common.loading') : undefined}
         nothingFoundMessage={t('permits.page.row.noValues')}
       />
@@ -144,7 +151,11 @@ export function RowFields(props: RowFieldsProps & { readonly isNew: boolean }): 
         const content = (
           <div className="pp-form-grid">
             {members.map((field) => (
-              <Field key={field.column.code} {...props} field={field} />
+              // `.pp-field` — клітинка сітки: підпис, елемент керування, підказка й помилка кожного поля стоять за
+              // одним правилом (permit.css), тож верх контролів збігається в рядку сітки, хай би що з полів мало підказку.
+              <div key={field.column.code} className="pp-field" data-pp-field={field.column.code}>
+                <Field {...props} field={field} />
+              </div>
             ))}
           </div>
         );
