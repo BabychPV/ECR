@@ -34,6 +34,21 @@ public interface ICalculationIssueStore
         IReadOnlyCollection<CalculationIssueInput> issues,
         CancellationToken ct);
 
+    /// <summary>
+    /// Видаляє поточні проблеми таблиць, у яких немає жодної активної прив'язки методики (AN-160).
+    /// </summary>
+    /// <param name="documentId">Лише цей документ; <c>null</c> - усі.</param>
+    /// <param name="periodKey">Лише цей період; <c>null</c> - усі.</param>
+    /// <param name="tableDefIds">Лише ці таблиці шаблону; <c>null</c> - усі; порожній набір - нічого.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки рядків видалено.</returns>
+    /// <remarks>
+    /// Ідемпотентно й набором; виконується одразу, у транзакції викликача. Рядки таблиць, що мають хоч одну активну
+    /// прив'язку, не чіпає.
+    /// </remarks>
+    public Task<int> DeleteForUnboundTablesAsync(
+        long? documentId, int? periodKey, IReadOnlyCollection<int>? tableDefIds, CancellationToken ct);
+
     /// <summary>Читає поточні проблеми документа за період і копію аркуша — ОДНИМ запитом.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>

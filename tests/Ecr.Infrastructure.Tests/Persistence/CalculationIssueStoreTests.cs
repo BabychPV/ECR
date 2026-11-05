@@ -59,6 +59,11 @@ public sealed class CalculationIssueStoreTests(SqlServerFixture sql)
         var store = new CalculationIssueStore(db, new TestClock(T0));
         var table = f.Document.TableInstanceId;
 
+        // AN-160: таблиця без активної прив'язки проблем не тримає - для цього тесту вона прив'язана.
+        db.CalculationBindings.Add(new Ecr.Domain.Entities.Configuration.CalculationBinding(
+            f.Document.TableDefId, f.Document.ColumnDefIds[0], f.MethodologyId, "OUT1", "{}"));
+        await db.SaveChangesAsync();
+
         // Проблема копії записана напряму (екземпляр копії вимагає ланцюга DocumentSheet, тут не потрібного).
         db.CalculationIssues.Add(new CalculationIssue(
             f.Document.DocumentId, f.Period, f.Document.TableDefId, sheetCopyId: 77, "RC", 9, null, run, T0));
