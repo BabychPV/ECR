@@ -412,6 +412,7 @@ function TemplateVersionEditor(): JSX.Element {
   const [publishing, setPublishing] = useState(false);
   const [publishProblems, setPublishProblems] = useState<DiagnosticInfo[]>([]);
   const [deprecating, setDeprecating] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const [editing, setEditing] = useState<TemplateColumnDto | null>(null);
 
   // ⚠ «Презентаційний редактор уже відкривали». Назад у `false` не вертається
@@ -491,6 +492,7 @@ function TemplateVersionEditor(): JSX.Element {
 
   const publishMounted = useEverOpened(publishing);
   const deprecateMounted = useEverOpened(deprecating);
+  const discardMounted = useEverOpened(discarding);
   const confirmMounted = useEverOpened(pendingDelete !== null);
 
   // ⛔ WCAG 2.4.3: відкривача «Withdraw from use» запам'ятовує сторінка — вона змонтована й бачить перехід на коміті
@@ -616,6 +618,27 @@ function TemplateVersionEditor(): JSX.Element {
       saved(t('version.deprecated'));
     },
     onError: showApiError,
+  });
+
+  /**
+   * Відкинути незавершену чернетку (`DELETE /template-versions/{id}`). Право `Template.Publish`.
+   *
+   * ⛔ Лише `Draft`; сервер відмовляє `409`, якщо на чернетку посилаються проєкт, документ чи клон,
+   * і перелік використань іде в текст відмови. Після видалення сторінки версії вже немає —
+   * повертаємося на картку шаблону.
+   */
+  const discard = useMutation({
+    mutationFn: () => apiFetch(`/api/v1/template-versions/${id}`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      setDiscarding(false);
+      await invalidateVersionLists();
+      saved(t('version.discarded'));
+      await navigate(`/admin/templates/${templateId ?? ''}`);
+    },
+    onError: (error: unknown) => {
+      setDiscarding(false);
+      showApiError(error);
+    },
   });
 
   /**
@@ -1002,6 +1025,10 @@ function TemplateVersionEditor(): JSX.Element {
                 canWithdraw && can(session.data, 'Template.Publish')
                   ? { key: 'deprecate', label: t('version.deprecate'), onClick: () => setDeprecating(true), danger: true }
                   : null,
+                // ⚠ Відкинути — лише чернетку, право публікації: дія незворотна.
+                canPublish && can(session.data, 'Template.Publish')
+                  ? { key: 'discard', label: t('version.discard'), onClick: () => setDiscarding(true), danger: true }
+                  : null,
               ]}
             />
 
@@ -1336,6 +1363,21 @@ function TemplateVersionEditor(): JSX.Element {
             isPending={deprecate.isPending}
             onConfirm={(reason) => deprecate.mutate(reason)}
             onClose={() => setDeprecating(false)}
+          />
+        </Suspense>
+      )}
+
+      {discardMounted && (
+        <Suspense fallback={null}>
+          <ConfirmModal
+            opened={discarding}
+            title={t('version.discardTitle', { version: versionSummary?.version ?? '' })}
+            text={t('version.discardText')}
+            verb={t('version.discard')}
+            danger
+            isPending={discard.isPending}
+            onConfirm={() => discard.mutate()}
+            onClose={() => setDiscarding(false)}
           />
         </Suspense>
       )}
