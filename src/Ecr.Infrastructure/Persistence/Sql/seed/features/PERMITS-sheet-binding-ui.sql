@@ -255,7 +255,10 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.sheetBinding.warning.cellNotFromPermit', N'ru', N'Часть ячеек не обновлена: их последнее изменение сделано не из разрешения.'),
     (N'permits.sheetBinding.warning.cellNotFromPermit', N'kz', N'Кейбір ұяшықтар жаңартылмады: олардың соңғы өзгерісі рұқсаттан жасалмаған.'),
     (N'permits.sheetBinding.warning.periodUnknown', N'ru', N'Границы периода неизвестны, поэтому строки из разрешения не созданы.'),
-    (N'permits.sheetBinding.warning.periodUnknown', N'kz', N'Кезең шекаралары белгісіз, сондықтан рұқсаттан жолдар жасалмады.')
+    (N'permits.sheetBinding.warning.periodUnknown', N'kz', N'Кезең шекаралары белгісіз, сондықтан рұқсаттан жолдар жасалмады.'),
+    -- CL-30: `binding.warning.periodClosed` (PermitBindingService) - свій текст замість сирого українського.
+    (N'permits.sheetBinding.warning.periodClosed', N'ru', N'Период закрыт, поэтому строки из разрешения не созданы.'),
+    (N'permits.sheetBinding.warning.periodClosed', N'kz', N'Кезең жабық, сондықтан рұқсаттан жолдар жасалмады.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -390,7 +393,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'permits.sheetBinding.warning.valueSkipped', N'en', N'A column value was not written: its data type is not supported.', 1),
     (N'permits.sheetBinding.warning.rowDeleted', N'en', N'A permit row was deleted in the document and its key is taken, so the row was not restored.', 1),
     (N'permits.sheetBinding.warning.cellNotFromPermit', N'en', N'Some cells were not updated: their last change was not made from the permit.', 1),
-    (N'permits.sheetBinding.warning.periodUnknown', N'en', N'The period boundaries are unknown, so no rows were created from the permit.', 1)
+    (N'permits.sheetBinding.warning.periodUnknown', N'en', N'The period boundaries are unknown, so no rows were created from the permit.', 1),
+    (N'permits.sheetBinding.warning.periodClosed', N'en', N'The period is closed, so no rows were created from the permit.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

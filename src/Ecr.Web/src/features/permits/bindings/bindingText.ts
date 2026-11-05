@@ -51,6 +51,8 @@ export function warningText(kind: WarningKind): string {
       return t('permits.sheetBinding.warning.cellNotFromPermit');
     case 'periodUnknown':
       return t('permits.sheetBinding.warning.periodUnknown');
+    case 'periodClosed':
+      return t('permits.sheetBinding.warning.periodClosed');
     case 'other':
       return t('permits.sheetBinding.warning.other');
   }
