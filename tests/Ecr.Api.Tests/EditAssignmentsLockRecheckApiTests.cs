@@ -27,9 +27,17 @@ namespace Ecr.Api.Tests;
 /// Без повторної перевірки передачу, видану вже пониженим делегатором, записано (200), а одержувачі отримують
 /// сповіщення про передачу, яка не діє.
 ///
-/// Мутаційний доказ (локально, не комітиться): прибрати виклик <c>RecheckDelegatorAsync</c> у
-/// <c>UpsertEditAssignmentHandler.CommitAsync</c> - червоніє <c>Делегатора_понижено_між_підготовкою_і_записом_…</c>
-/// (200 замість 403, передачу записано).
+/// Чому повторна перевірка бачить пониження попри кеш профілів: кеш не обходиться — <c>BuildProfileAsync</c> на КОЖЕН
+/// виклик читає штамп і рядки призначень ролей, а ключ кешу = користувач + штамп + відбиток груп і рядків призначень
+/// (AN-138). Пряме видалення рядка змінює відбиток, зняття через API ще й крутить штамп — обидва адресують новий запис.
+///
+/// Мутаційні докази (локально, не комітяться):
+/// <list type="bullet">
+/// <item>прибрати виклик <c>RecheckDelegatorAsync</c> у <c>UpsertEditAssignmentHandler.CommitAsync</c> - червоніють
+/// обидва тести пониження (200 замість 403, передачу записано);</item>
+/// <item>у <c>RecheckDelegatorAsync</c> брати профіль, побудований у <c>PrepareAsync</c> (кешований до пониження),
+/// замість нового - так само червоніють обидва.</item>
+/// </list>
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class EditAssignmentsLockRecheckApiTests(SqlServerFixture sql)
@@ -73,7 +81,56 @@ public sealed class EditAssignmentsLockRecheckApiTests(SqlServerFixture sql)
         Assert.Equal(0, await AssignmentCountAsync(s).ConfigureAwait(true));
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "PM-EDITASSIGN-P3-b")]
+    public async Task Ролі_делегатора_знято_через_API_між_підготовкою_і_записом_403_і_нічого_не_записано()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var adminName = await NewUserAdminAsync().ConfigureAwait(true);
+        var hook = new UsersLookupHook();
+        using var app = NewApp(hook);
+        using var delegator = await SignInAsync(app, s.Delegator.Name).ConfigureAwait(true);
+        using var admin = await SignInAsync(app, adminName).ConfigureAwait(true);
+
+        // Профіль делегатора вже в кеші (PrepareAsync); ролі знімає звичайний ендпоінт адміністрування, як у житті.
+        hook.Arm(async () =>
+        {
+            using var put = await admin.PutAsJsonAsync(
+                new Uri($"/api/v1/users/{s.Delegator.Id.ToString(CultureInfo.InvariantCulture)}/roles", UriKind.Relative),
+                new { roleCodes = Array.Empty<string>() }).ConfigureAwait(false);
+            Assert.True(put.IsSuccessStatusCode, $"зняття ролей: {put.StatusCode}: {app.ErrorsText}");
+        });
+
+        var body = await ExpectAsync(app, HttpStatusCode.Forbidden, PostAsync(delegator, s)).ConfigureAwait(true);
+
+        Assert.True(hook.Fired, "підміна не спрацювала - гонитву не відтворено");
+        Assert.Equal("err.ECR-ACCS-0403.notEditAssignmentManager", MessageKeyOf(body));
+        Assert.Equal(0, await AssignmentCountAsync(s).ConfigureAwait(true));
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
+
+    /// <summary>Адміністратор користувачів (лише <c>Security.ManageUsers</c>).</summary>
+    private async Task<string> NewUserAdminAsync()
+    {
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var name = $"ela_{Guid.NewGuid():N}"[..20];
+        var user = new User(name, name, AuthProvider.Local);
+        user.SetPassword(new PasswordHasher().Hash(Password));
+        db.Users.Add(user);
+
+        var role = new Role(
+            EcrCode.Create($"EA_{Guid.NewGuid():N}"[..20]),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "User admin" }));
+        db.Roles.Add(role);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        db.RolePermissions.Add(new RolePermission(role.Id, "Security.ManageUsers"));
+        db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        return name;
+    }
 
     private sealed record Person(int Id, string Name);
 
