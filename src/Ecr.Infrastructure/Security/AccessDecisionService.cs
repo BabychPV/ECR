@@ -929,15 +929,17 @@ public sealed class AccessDecisionService(
                     && Application.Documents.EditAssignments.DelegatorAuthority.MayManage(
                         delegator, scope.ProjectId, ownerUserId))
                 {
-                    valid = true;
-                    if (fact.Level != GrantLevel.Write)
-                    {
-                        snapshot ??= await metadata.GetAsync(scope.TemplateVersionId, ct).ConfigureAwait(false);
-                        var slice = EditAssignmentSlice.Create(
-                            fact.SheetCode, fact.TableCode, fact.MonthNumber, fact.Period?.Value);
-                        valid = Application.Documents.EditAssignments.DelegatorAuthority.OwnLevelReaches(
+                    snapshot ??= await metadata.GetAsync(scope.TemplateVersionId, ct).ConfigureAwait(false);
+                    var slice = EditAssignmentSlice.Create(
+                        fact.SheetCode, fact.TableCode, fact.MonthNumber, fact.Period?.Value);
+
+                    // ⛔ PM-EDITASSIGN-P3 (a): Write-передача діє, лише поки делегатор сам може редагувати кожен аркуш
+                    // області (як під час видачі); інші рівні — поки власний рівень делегатора їх сягає.
+                    valid = fact.Level == GrantLevel.Write
+                        ? Application.Documents.EditAssignments.DelegatorAuthority.WriteWithinOwnRights(
+                            delegator, scope.ProjectId, snapshot, slice)
+                        : Application.Documents.EditAssignments.DelegatorAuthority.OwnLevelReaches(
                             delegator, scope.ProjectId, snapshot, slice, fact.Level);
-                    }
                 }
             }
 

@@ -45,4 +45,25 @@ public static class DelegatorAuthority
             return false;
         }
     }
+
+    /// <summary>
+    /// PM-EDITASSIGN-P3 (a): чи може делегатор сам редагувати кожен аркуш області Write-передачі — те саме правило
+    /// «у межах власних прав», що й під час видачі (<c>SheetsBeyondOwnRights</c>); області, якої вже немає, — ні.
+    /// </summary>
+    /// <param name="delegator">Профіль делегатора.</param>
+    /// <param name="projectId">Проєкт документа.</param>
+    /// <param name="snapshot">Знімок шаблону документа.</param>
+    /// <param name="slice">Область передачі.</param>
+    public static bool WriteWithinOwnRights(
+        AccessProfile delegator, int projectId, TemplateVersionSnapshot snapshot, EditAssignmentSlice slice)
+    {
+        try
+        {
+            return !EditAssignmentAccess.SheetsBeyondOwnRights(delegator, projectId, snapshot, slice).Exceeds;
+        }
+        catch (BusinessRuleException)
+        {
+            return false;
+        }
+    }
 }
