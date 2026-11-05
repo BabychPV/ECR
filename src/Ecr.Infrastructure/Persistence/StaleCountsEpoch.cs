@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
@@ -43,6 +43,7 @@ public sealed class StaleCountsEpoch : DbTransactionInterceptor
     private readonly ConditionalWeakTable<DbContext, Pending> _pending = [];
     private readonly ConcurrentDictionary<int, long> _periods = new();
     private readonly ConcurrentDictionary<int, DirtyLog> _dirty = new();
+    private readonly ConcurrentDictionary<int, Counter> _runSwitches = new();
     private long _global;
     private long _value;
 
@@ -77,6 +78,47 @@ public sealed class StaleCountsEpoch : DbTransactionInterceptor
                 ? options.FindExtension<Microsoft.EntityFrameworkCore.Infrastructure.CoreOptionsExtension>()?
                     .Interceptors?.OfType<StaleCountsEpoch>().FirstOrDefault()
                 : null;
+
+    /// <summary>
+    /// AN-155b: «жорстка» епоха періоду - <see cref="ValueFor"/> БЕЗ підйомів від перемикання актуального прогону
+    /// (<see cref="InvalidateRunSwitch"/>). Перемикання прогону карта застарілості лікує точково (лише документи
+    /// зачеплених прогонів), тож її запис від такого підйому не скидається; усе інше (довідник, невідомий період,
+    /// глобальний підйом, повна епоха) рухає і її. Не спадає: лічильник перемикань росте РАНІШЕ за складову періоду.
+    /// </summary>
+    /// <param name="periodKey">Період.</param>
+    public long HardValueFor(int periodKey)
+        => Interlocked.Read(ref _global)
+           + (_periods.TryGetValue(periodKey, out var own) ? own : 0)
+           - (_runSwitches.TryGetValue(periodKey, out var switches) ? Interlocked.Read(ref switches.Count) : 0);
+
+    /// <summary>Підйом від перемикання прогону періоду: лічильник перемикань РАНІШЕ за складову періоду.</summary>
+    private void BumpRunSwitch(int periodKey)
+    {
+        Interlocked.Increment(ref _runSwitches.GetOrAdd(periodKey, static _ => new Counter()).Count);
+        Bump(periodKey);
+    }
+
+    /// <summary>
+    /// Перемикання актуального прогону ВІДОМОГО періоду (AN-155b): піднімає <see cref="ValueFor"/> (кеш лічильників
+    /// скидається, як і раніше), але НЕ <see cref="HardValueFor"/>. У транзакції - на коміті, поза нею - негайно.
+    /// </summary>
+    /// <param name="db">Контекст запису.</param>
+    /// <param name="periodKey">Період прогону.</param>
+    public void InvalidateRunSwitch(DbContext? db, int periodKey)
+    {
+        if (db is null)
+        {
+            return;
+        }
+
+        if (db.Database.CurrentTransaction is null)
+        {
+            BumpRunSwitch(periodKey);
+            return;
+        }
+
+        _pending.GetValue(db, static _ => new Pending()).RunSwitches.Add(periodKey);
+    }
 
     /// <summary>Піднімає ГЛОБАЛЬНУ епоху — всі періоди (O(1), без блокувань).</summary>
     public void Bump()
@@ -273,6 +315,11 @@ public sealed class StaleCountsEpoch : DbTransactionInterceptor
             MarkDirty(period, documents);
         }
 
+        foreach (var period in pending.RunSwitches)
+        {
+            BumpRunSwitch(period);
+        }
+
         if (pending.All)
         {
             Bump();
@@ -285,6 +332,12 @@ public sealed class StaleCountsEpoch : DbTransactionInterceptor
         }
     }
 
+    /// <summary>Лічильник перемикань прогону періоду (поле, бо <see cref="Interlocked"/> працює з <c>ref</c>).</summary>
+    private sealed class Counter
+    {
+        public long Count;
+    }
+
     /// <summary>Позначки контексту до коміту.</summary>
     private sealed class Pending
     {
@@ -293,6 +346,9 @@ public sealed class StaleCountsEpoch : DbTransactionInterceptor
 
         /// <summary>Періоди змін.</summary>
         public HashSet<int> Periods { get; } = [];
+
+        /// <summary>Періоди перемикання актуального прогону (AN-155b): піднімають лише <c>ValueFor</c>.</summary>
+        public HashSet<int> RunSwitches { get; } = [];
 
         /// <summary>Брудні документи по періодах: повної епохи не піднімають.</summary>
         public Dictionary<int, HashSet<long>> Dirty { get; } = [];

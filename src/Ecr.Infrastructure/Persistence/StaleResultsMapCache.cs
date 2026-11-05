@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using Ecr.Domain.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -37,6 +37,16 @@ namespace Ecr.Infrastructure.Persistence;
 /// наступний коміт, що змінює вхід предиката, змінює й відбиток, хоч би в якому порядку закомітились писачі.
 /// Відбиток, епоха й номер позначок читаються ДО запиту карти: запис, що закомітився між ними, лише зайвий раз
 /// ще раз полікує/скине кеш.
+///
+/// ⛔ AN-155b: перемикання актуального прогону НЕ скидає запис (виміряно на копії Land: кожне перемикання = повне
+/// завантаження ~779 тис. читань + 285 тис. авторів, 3-6 с очікування першого читача). Запис тримає набір актуальних
+/// прогонів періоду (<c>Id → DocumentId</c>). Коли з того, що в відбитку, змінилась ЛИШЕ прогонова частина (а
+/// «жорстка» епоха <see cref="StaleCountsEpoch.HardValueFor"/>, довідники й переповнення не змінились), читач бере
+/// симетричну різницю наборів і вузьким запитом перечитує документи цих прогонів (прогін документа зачіпає лише його).
+/// Повне завантаження лишається запасним: прогін УСЬОГО проєкту (<c>DocumentId = null</c>) чи понад
+/// <see cref="MaxRunSwitchDocuments"/> документів, запис без набору прогонів, інша зміна відбитка чи епохи.
+/// Припущення: результати прогону документа стосуються лише цього документа (інакше документ поза областю не
+/// буде перечитано); еквівалентність повному завантаженню доводить <c>StaleResultsMapRunSwitchTests</c>.
 ///
 /// ⚠ ПРОГАЛИНА, названа прямо: нові рядки <c>aud.CellChange</c>, записані ІНШИМ процесом (імпорт і збір у Worker;
 /// це не <c>Recalculation</c>, яку предикат ігнорує), відбитком і позначками не видно — дешевого відбитка стану
@@ -118,7 +128,16 @@ internal sealed partial class StaleResultsMapCache(
     /// </summary>
     private sealed record Entry(
         IReadOnlyDictionary<long, DateTime?>? Map, AuthorMaps? Authors, long Epoch, FingerprintRow Fingerprint,
-        DateTime ExpiresAt, TimeSpan Window, long DirtySeq);
+        DateTime ExpiresAt, TimeSpan Window, long DirtySeq, IReadOnlyDictionary<long, long?>? Runs = null);
+
+    /// <summary>Актуальний прогін періоду: <c>Id</c> і область (<c>DocumentId</c> - лише цей документ; <c>null</c> - увесь проєкт).</summary>
+    private sealed record RunRef(long Id, long? DocumentId);
+
+    /// <summary>
+    /// AN-155b: скільки документів ще лікує точкове оновлення після перемикання прогонів; більше - повне завантаження.
+    /// Id йдуть одним <c>IN (...)</c> (≤ 500 параметрів).
+    /// </summary>
+    public const int MaxRunSwitchDocuments = 500;
 
     /// <summary>
     /// Карти періоду для кількох фільтрів автора за ОДНЕ читання відбитка: <c>null</c> — будь-який автор,
@@ -145,7 +164,8 @@ internal sealed partial class StaleResultsMapCache(
             return result;
         }
 
-        var epochValue = epoch?.ValueFor(periodKey) ?? 0;
+        // AN-155b: ЖОРСТКА епоха - без підйомів від перемикання прогону (їх лікує точкове оновлення нижче).
+        var epochValue = epoch?.HardValueFor(periodKey) ?? 0;
         var dirtySeq = epoch?.DirtySeq(periodKey) ?? 0;
         var fingerprint = await FingerprintAsync(periodKey, ct).ConfigureAwait(false);
 
@@ -180,6 +200,16 @@ internal sealed partial class StaleResultsMapCache(
         CancellationToken ct)
     {
         var key = KeyFor(periodKey, authors);
+
+        // ⛔ AN-155b: змінився ЛИШЕ набір актуальних прогонів періоду (епоха жорстка, довідники ті самі) - карта
+        // не скидається, а лікується по документах зачеплених прогонів. Не вийшло - падаємо в повне завантаження.
+        if (cache!.TryGetValue(key, out Entry? stale) && stale is not null
+            && stale.Epoch == epochValue && stale.Fingerprint != fingerprint
+            && stale.Runs is not null && !IsOverflow(stale, authors)
+            && SameExceptRuns(stale.Fingerprint, fingerprint))
+        {
+            await RunSwitchHealAsync(key, authors, periodKey, stale, epochValue, fingerprint).ConfigureAwait(false);
+        }
 
         // ⛔ Епоха й відбиток ЗБІГАЮТЬСЯ: стан не змінювався ні цим процесом, ні іншим (крім правок комірок, які
         // лікує накладка). Зміна повної епохи чи відбитка - синхронне перезавантаження нижче.
@@ -220,8 +250,10 @@ internal sealed partial class StaleResultsMapCache(
             async () =>
             {
                 // ⚠ Токен читача сюди НЕ йде (див. remarks): лідер доводить власний контекст до кінця.
+                // AN-155b: набір актуальних прогонів читається ДО карти: зміна між ними лише дасть зайве точкове оновлення.
+                var runs = await LoadRunsAsync(periodKey, CancellationToken.None).ConfigureAwait(false);
                 var (map, byUser) = await LoadSnapshotAsync(authors, periodKey, CancellationToken.None).ConfigureAwait(false);
-                var entry = new Entry(map, byUser, epochValue, fingerprint, clock!.UtcNow + Ttl, keep, dirtySeq);
+                var entry = new Entry(map, byUser, epochValue, fingerprint, clock!.UtcNow + Ttl, keep, dirtySeq, runs);
                 cache!.Set(key, entry, Ttl + keep);
                 return entry;
             },
@@ -269,13 +301,89 @@ internal sealed partial class StaleResultsMapCache(
         return healed;
     }
 
+    private static bool SameExceptRuns(FingerprintRow a, FingerprintRow b)
+        => a.RegistryCount == b.RegistryCount && a.RegistryChecksum == b.RegistryChecksum
+           && a.UseCount == b.UseCount && a.UseIdSum == b.UseIdSum;
+
+    /// <summary>Актуальні прогони періоду: <c>Id → DocumentId</c> (дешевий запит: десятки-сотні рядків).</summary>
+    private async Task<IReadOnlyDictionary<long, long?>?> LoadRunsAsync(int periodKey, CancellationToken ct)
+    {
+        // Явна межа (LayerRules); понад неї набір не зберігається (null): точкове оновлення вимкнено, лишається повне.
+        var rows = await db.Database
+            .SqlQuery<RunRef>($"SELECT Id, DocumentId FROM calc.CalculationRun WHERE Status = N'Current' AND PeriodKey = {periodKey}")
+            .OrderBy(r => r.Id)
+            .Take(MaxTrackedRuns + 1)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        return rows.Count > MaxTrackedRuns ? null : rows.ToDictionary(r => r.Id, r => r.DocumentId);
+    }
+
+    private const int MaxTrackedRuns = 20_000;
+
+    /// <summary>
+    /// AN-155b: перемикання актуальних прогонів періоду без іншої зміни стану - ТОЧКОВЕ оновлення. Карта документа
+    /// залежить від прогону, чия область його охоплює: прогін ДОКУМЕНТА (<c>DocumentId</c>) зачіпає лише цей документ.
+    /// Змінені прогони = симетрична різниця старого й нового наборів; їхні документи перечитуються вузьким запитом
+    /// (як накладка D-432), решта карти лишається. Прогін усього проєкту (<c>DocumentId = null</c>), понад
+    /// <see cref="MaxRunSwitchDocuments"/> документів чи переповнення - <c>null</c>: повне завантаження.
+    /// </summary>
+    private Task<Entry?> RunSwitchHealAsync(
+        string key, bool authors, int periodKey, Entry old, long epochValue, FingerprintRow fingerprint)
+        => SingleFlightAsync(
+            $"{key}|{epochValue}|{fingerprint}|runs",
+            () => cache!.TryGetValue(key, out Entry? raced) && raced is not null
+                  && raced.Epoch == epochValue && raced.Fingerprint == fingerprint
+                ? raced
+                : null,
+            async () =>
+            {
+                var current = await LoadRunsAsync(periodKey, CancellationToken.None).ConfigureAwait(false);
+                if (current is null)
+                {
+                    return null;
+                }
+
+                var documents = new HashSet<long>();
+                foreach (var (_, documentId) in old.Runs!.Where(p => !current.ContainsKey(p.Key)).Concat(
+                    current.Where(p => !old.Runs!.ContainsKey(p.Key))))
+                {
+                    if (documentId is not { } scoped)
+                    {
+                        return null;
+                    }
+
+                    documents.Add(scoped);
+                }
+
+                if (documents.Count > MaxRunSwitchDocuments)
+                {
+                    return null;
+                }
+
+                var ids = documents.Order().ToList();
+                var healed = ids.Count == 0
+                    ? old
+                    : authors
+                        ? await HealAuthorsAsync(old, periodKey, ids, old.DirtySeq).ConfigureAwait(false)
+                        : await HealAllAsync(old, periodKey, ids, old.DirtySeq).ConfigureAwait(false);
+                if (healed is null)
+                {
+                    return null;
+                }
+
+                healed = healed with { Fingerprint = fingerprint, Runs = current };
+                cache!.Set(key, healed, Ttl + healed.Window);
+                return healed;
+            },
+            CancellationToken.None);
+
     private async Task<Entry?> HealAllAsync(Entry old, int periodKey, IReadOnlyList<long> ids, long seq)
     {
         var rows = await StaleResultsQuery.Documents(db, periodKey)
             .Where(r => ids.Contains(r.DocumentId))
             .TagWith(DeltaTag)
             .OrderBy(r => r.DocumentId)
-            .Take(MaxIncremental + 1)
+            .Take(Math.Max(MaxIncremental, ids.Count) + 1)
             .ToListAsync(CancellationToken.None)
             .ConfigureAwait(false);
 
@@ -463,12 +571,14 @@ internal sealed partial class StaleResultsMapCache(
             {
                 await using var scope = factory.CreateAsyncScope();
                 var backgroundDb = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
-                var (map, byUser) = await new StaleResultsMapCache(backgroundDb, null, null, null, log, max)
+                var loader = new StaleResultsMapCache(backgroundDb, null, null, null, log, max);
+                var runs = await loader.LoadRunsAsync(periodKey, CancellationToken.None).ConfigureAwait(false);
+                var (map, byUser) = await loader
                     .LoadSnapshotAsync(authors, periodKey, CancellationToken.None).ConfigureAwait(false);
 
                 // Не затирати запис новішої епохи, що встиг покласти синхронний читач. Запис із новішим номером
                 // позначок затирається безпечно: його номер лишається старим, наступний читач полікує дельту.
-                var entry = new Entry(map, byUser, epochValue, fingerprint, time.UtcNow + Ttl, window, dirtySeq);
+                var entry = new Entry(map, byUser, epochValue, fingerprint, time.UtcNow + Ttl, window, dirtySeq, runs);
                 if (!(memory.TryGetValue(key, out Entry? current) && current is not null && current.Epoch > epochValue))
                 {
                     memory.Set(key, entry, Ttl + window);

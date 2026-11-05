@@ -486,9 +486,9 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         Assert.Equal(first, second);
 
         // Перший виклик: агрегат + відбиток (прогони + довідники, D-430) + дві карти (усі / мої) + два підрахунки
-        // видимих = 7 запитів; другий - агрегат + прогонова частина відбитка + два підрахунки (4): карти періоду й
+        // видимих = 7 запитів, плюс по запиту набору актуальних прогонів на кожну з двох карт (AN-155b) = 9; другий - агрегат + прогонова частина відбитка + два підрахунки (4): карти періоду й
         // довідникова частина з кешу, журнал правок не чіпається.
-        Assert.Equal(7, afterFirst);
+        Assert.Equal(9, afterFirst);
         Assert.Equal(4, afterSecond - afterFirst);
     }
 
@@ -1174,9 +1174,9 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         }
 
         // Запит сторінки не робить запитів на документ: на теплому кеші - рівно на два менше, ніж на холодному
-        // (карта + довідникова частина відбитка, D-430), а холодний не залежить від числа документів (50 рядків -
+        // (карта + набір прогонів карти AN-155b + довідникова частина відбитка, D-430), а холодний не залежить від числа документів (50 рядків -
         // те саме число команд, що й 5).
-        Assert.Equal(coldTotal - 2, warmTotal);
+        Assert.Equal(coldTotal - 3, warmTotal);
 
         var counterSmall = new DbCommandCounter();
         await using var small = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
