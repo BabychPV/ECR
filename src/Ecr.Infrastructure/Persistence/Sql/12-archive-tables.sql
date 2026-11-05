@@ -303,6 +303,22 @@ BEGIN
 END
 GO
 
+-- CL-10b: дзеркало `IX_CellChange_DocPeriodChanged` з `11-audit-tables.sql` (без нього SWITCH партиції
+-- `aud.CellChange` → `arc.AuditCellChange` падає). ONLINE — як там.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_DocPeriodChanged'
+               AND object_id = OBJECT_ID(N'arc.AuditCellChange'))
+BEGIN
+    DECLARE @arcDocPeriodIndex nvarchar(max) =
+        N'CREATE INDEX IX_CellChange_DocPeriodChanged '
+        + N'ON arc.AuditCellChange (DocumentId, PeriodKey, ChangedAt) INCLUDE (Origin, ChangedByUserId)'
+        + CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8)
+               THEN N' WITH (ONLINE = ON)' ELSE N'' END
+        + N' ON ps_AuditByMonth(ChangedAt);';
+    PRINT @arcDocPeriodIndex;
+    EXEC sys.sp_executesql @arcDocPeriodIndex;
+END
+GO
+
 IF OBJECT_ID(N'arc.AuditStructureChange', N'U') IS NULL
 BEGIN
     CREATE TABLE arc.AuditStructureChange

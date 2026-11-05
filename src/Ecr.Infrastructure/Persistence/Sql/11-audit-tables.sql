@@ -141,6 +141,26 @@ BEGIN
 END
 GO
 
+-- CL-10b (замір на scratch-копії Land 05.11, 5,5 млн рядків): карта застарілості (`StaleResultsMapCache`,
+-- `StaleMap:authors`) з'єднує `c.DocumentId = x.DocumentId AND c.PeriodKey = @p AND c.ChangedAt > r.StartedAt` - без
+-- цього ключа кожен період читав 1,1-1,4 млн сторінок, підсумок історичного періоду після спливу кешу 3,8-5,8 с; з ним -
+-- 0,48-0,52 с. INCLUDE (Origin, ChangedByUserId) - фільтр `Origin <> 'Recalculation'` і автори без key lookup.
+-- ⛔ Вирівняний по ps_AuditByMonth і ДЗЕРКАЛЬНИЙ у `arc.AuditCellChange` (12-archive-tables.sql): без дзеркала SWITCH
+-- архівації падає (Msg 4913). Побудова на 5,5 млн: ONLINE 72 с, офлайн 20 с (журнал +0,4-1 ГБ). Ідемпотентний.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_DocPeriodChanged'
+               AND object_id = OBJECT_ID(N'aud.CellChange'))
+BEGIN
+    DECLARE @docPeriodIndex nvarchar(max) =
+        N'CREATE INDEX IX_CellChange_DocPeriodChanged '
+        + N'ON aud.CellChange (DocumentId, PeriodKey, ChangedAt) INCLUDE (Origin, ChangedByUserId)'
+        + CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8)
+               THEN N' WITH (ONLINE = ON)' ELSE N'' END
+        + N' ON ps_AuditByMonth(ChangedAt);';
+    PRINT @docPeriodIndex;
+    EXEC sys.sp_executesql @docPeriodIndex;
+END
+GO
+
 IF OBJECT_ID(N'aud.StructureChange', N'U') IS NULL
 BEGIN
     CREATE TABLE aud.StructureChange
