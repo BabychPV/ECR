@@ -47,8 +47,32 @@ public sealed class TemplateVersionsController(
     CreatePeriodAccessRuleHandler createPeriodAccessRule,
     SavePeriodAccessRuleHandler savePeriodAccessRule,
     DeletePeriodAccessRuleHandler deletePeriodAccessRule,
+    DiscardTemplateVersionHandler discard,
     Ecr.Api.Auth.CurrentUser currentUser) : ControllerBase
 {
+    /// <summary>
+    /// Відкидає незавершену чернетку разом з її структурою. Право <c>Template.Publish</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Лише <c>Draft</c>, на яку ніщо поза її конфігурацією не посилається (проєкт, документ,
+    /// маршрут погодження, мапінг, вхід методики, клон від неї) — інакше <c>409 ECR-TMPL-0409</c> з
+    /// переліком використань. Опубліковану версію не видаляють, а виводять з обігу (<c>deprecate</c>).
+    /// Аркуші, таблиці, колонки, рядки, формули, правила, стилі, поля шапки й ресурсні гранти
+    /// видаляються однією транзакцією разом із записом у журнал безпеки.
+    /// </remarks>
+    [HttpDelete]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Discard(int id, CancellationToken ct)
+    {
+        await discard.HandleAsync(id, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
     /// <summary>Клонує версію. Право <c>Template.Edit</c>.</summary>
     [HttpPost("clone")]
     [ProducesResponseType<Contracts.VersionIdResponse>(StatusCodes.Status201Created)]

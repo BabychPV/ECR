@@ -178,6 +178,32 @@ public sealed class TemplateVersion : Entity<int>
         DeprecatedByUserId = deprecatedByUserId;
     }
 
+    /// <summary>
+    /// Перевіряє, чи можна відкинути (видалити) версію: лише незавершену чернетку.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Опублікована й виведена з обігу версії не видаляються ніколи (<see cref="Deprecate"/>):
+    /// на них посилаються проєкти, подані форми, зрізи й аудит. Чернетка ще нікуди не потрапила —
+    /// її відкидають, щоб звільнити шаблон для нового клону.
+    /// </remarks>
+    /// <exception cref="DomainException">Версія не чернетка.</exception>
+    public void EnsureDiscardable()
+    {
+        if (Status != TemplateVersionStatus.Draft)
+        {
+            throw new DomainException(
+                "ECR-TMPL-0409",
+                $"Відкинути можна лише чернетку; версія {Version} у стані {Status}. " +
+                "Опубліковану версію виводять з обігу, а не видаляють (ФВ-7.8).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0409.discardRequiresDraft",
+                    ["version"] = Version,
+                    ["status"] = Status.ToString(),
+                });
+        }
+    }
+
     /// <summary>Момент виведення з обігу; <c>null</c> — версія в обігу.</summary>
     public DateTime? DeprecatedAt { get; private set; }
 

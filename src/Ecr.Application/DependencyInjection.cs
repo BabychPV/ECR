@@ -439,6 +439,7 @@ public static class DependencyInjection
         services.AddScoped<Calculations.ListCalculationBindingsHandler>();
         services.AddScoped<Calculations.SaveCalculationBindingHandler>();
         services.AddScoped<Calculations.DeleteMethodologyVersionHandler>();
+        services.AddScoped<Templates.DiscardTemplateVersionHandler>();
         services.AddScoped<Calculations.MethodologyCoverageHandler>();
         services.AddScoped<Calculations.RuleCoverageHandler>();
         services.AddScoped<Calculations.CompareMethodologyVersionsHandler>();
