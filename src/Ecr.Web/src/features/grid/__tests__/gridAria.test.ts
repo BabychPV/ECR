@@ -68,6 +68,28 @@ describe('GridAriaPlugin', () => {
     element.remove();
   });
 
+  it('закріплені колонки: aria-colindex лишається ГЛОБАЛЬНИМ порядком (закріплені, прокручувані, закріплені справа)', () => {
+    const element = grid();
+    const plugin = new GridAriaPlugin(element, {} as PluginProviders);
+    const column = (prop: string): ColumnRegular => ({ prop, columnProperties: () => ({}), cellProperties: () => ({}) });
+    const pinStart = [column('label'), column('type')];
+    const main = [column('q1'), column('q2'), column('q3')];
+    const pinEnd = [column('total')];
+
+    emit(element, 'beforecolumnsset', { columns: { colPinStart: pinStart, rgCol: main, colPinEnd: pinEnd } });
+
+    const indexOf = (item: ColumnRegular): unknown => (item.columnProperties as () => Record<string, unknown>)()['aria-colindex'];
+    const cellIndexOf = (item: ColumnRegular): unknown =>
+      (item.cellProperties as (...args: unknown[]) => Record<string, unknown>)({ type: 'rgRow', rowIndex: 0 })['aria-colindex'];
+
+    // Порядок для читалки: label=1, type=2, q1=3 ... q3=5, total=6 - так само, як без закріплення.
+    expect([...pinStart, ...main, ...pinEnd].map(indexOf)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect([...pinStart, ...main, ...pinEnd].map(cellIndexOf)).toEqual([1, 2, 3, 4, 5, 6]);
+
+    plugin.destroy();
+    element.remove();
+  });
+
   it('CL-17: прокручувана область даних (rgCol) стає фокусованою, закріплені — ні', () => {
     const element = grid();
     element.insertAdjacentHTML(

@@ -126,6 +126,26 @@ describe('прокрутка й фокус через API revo-grid', () => {
     expect(grid.setCellsFocus).toHaveBeenCalledWith({ x: 3, y: 1 }, { x: 3, y: 1 });
   });
 
+  it('закріплені колонки: прокручувана ціль іде в rgCol зі зсувом, закріплена - в colPinStart без прокрутки по x', async () => {
+    const container = document.createElement('div');
+    const grid = Object.assign(document.createElement('revo-grid'), {
+      componentOnReady: vi.fn(() => Promise.resolve()),
+      scrollToCoordinate: vi.fn(() => Promise.resolve()),
+      setCellsFocus: vi.fn(() => Promise.resolve()),
+    });
+    container.append(grid);
+
+    // Глобальна колонка 5 при 3 закріплених - це 3-тя колонка прокручуваного в'юпорту.
+    await revealGridCell(container, { x: 5, y: 2 }, 3);
+    expect(grid.scrollToCoordinate).toHaveBeenLastCalledWith({ x: 2, y: 2 });
+    expect(grid.setCellsFocus).toHaveBeenLastCalledWith({ x: 2, y: 2 }, { x: 2, y: 2 });
+
+    // Глобальна колонка 1 - у закріпленому в'юпорті; по x прокручувати нічого.
+    await revealGridCell(container, { x: 1, y: 2 }, 3);
+    expect(grid.scrollToCoordinate).toHaveBeenLastCalledWith({ y: 2 });
+    expect(grid.setCellsFocus).toHaveBeenLastCalledWith({ x: 1, y: 2 }, { x: 1, y: 2 }, 'colPinStart');
+  });
+
   it('без елемента сітки — false, без винятку', async () => {
     await expect(revealGridCell(document.createElement('div'), { x: 0, y: 0 })).resolves.toBe(false);
   });

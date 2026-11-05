@@ -148,15 +148,16 @@ test.describe('Number format: числа без формату — без хво
       const header = page.locator('revo-grid revogr-header .rgHeaderCell', { hasText: column.header }).first();
       await header.scrollIntoViewIfNeeded();
       await expect(header, `заголовка «${column.header}» немає в сітці`).toBeVisible({ timeout: 60_000 });
-      const index = await header.getAttribute('data-rgcol');
-      if (index === null) throw new Error(`заголовок «${column.header}» без data-rgcol`);
+      // ⚠ `aria-colindex` (глобальний), не `data-rgcol` (у межах в'юпорта): широка таблиця закріплює ключові колонки.
+      const index = await header.getAttribute('aria-colindex');
+      if (index === null) throw new Error(`заголовок «${column.header}» без aria-colindex`);
 
-      const cell = page.locator(`revo-grid revogr-data[type="rgRow"] .rgCell[data-rgrow="0"][data-rgcol="${index}"]`).first();
+      const cell = page.locator(`revo-grid revogr-data[type="rgRow"] .rgCell[data-rgrow="0"][aria-colindex="${index}"]`).first();
       await expect(cell).toHaveText('3', { timeout: 30_000 });
       await expect(cell).not.toHaveText(/3[.,]0{3,}/);
 
       // Рядок підсумків — якщо таблиця його має: той самий шаблон, без нулів сховища.
-      const total = page.locator(`revo-grid revogr-data[type="rowPinEnd"] .rgCell[data-rgcol="${index}"]`);
+      const total = page.locator(`revo-grid revogr-data[type="rowPinEnd"] .rgCell[aria-colindex="${index}"]`);
       if ((await total.count()) > 0) {
         await expect(total.first()).not.toHaveText(/[.,]0{7,}$/);
       }

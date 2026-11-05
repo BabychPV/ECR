@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { viewportOfColumn } from './selection';
 
 /**
  * Перехід від зауваження перевірки до комірки сітки (`ФВ-5.6`).
@@ -142,7 +143,7 @@ export function cellCoordinateOf(
 interface RevoGridNavigable {
   componentOnReady?: () => Promise<unknown>;
   scrollToCoordinate?: (cell: { x?: number; y?: number }) => Promise<void>;
-  setCellsFocus?: (start?: GridCellCoordinate, end?: GridCellCoordinate) => Promise<void>;
+  setCellsFocus?: (start?: GridCellCoordinate, end?: GridCellCoordinate, colType?: string) => Promise<void>;
 }
 
 /**
@@ -151,18 +152,32 @@ interface RevoGridNavigable {
  * ⚠ Через публічні методи веб-компонента, а не через DOM комірки: RevoGrid
  * віртуалізує рядки, і комірки за межами видимого вікна в DOM просто немає.
  *
+ * ⛔ `coordinate.x` - ГЛОБАЛЬНИЙ індекс колонки сітки; `pinnedStart` - скільки колонок закріплено зліва
+ * (`frozenColumns.ts`). RevoGrid ставить фокус у координатах СВОГО в'юпорту: для закріпленої колонки
+ * це `colPinStart` із `x` без змін, для решти - `rgCol` із `x - pinnedStart`; прокручується лише
+ * `rgCol` (закріплені колонки не прокручуються, тож для них - тільки рядок).
+ *
  * @returns `false`, якщо елемента сітки в контейнері немає.
  */
 export async function revealGridCell(
   container: ParentNode,
   coordinate: GridCellCoordinate,
+  pinnedStart = 0,
 ): Promise<boolean> {
   const grid = container.querySelector('revo-grid') as (Element & RevoGridNavigable) | null;
   if (grid === null) return false;
 
+  const target = viewportOfColumn(coordinate.x, pinnedStart);
+  const local: GridCellCoordinate = { x: target.x, y: coordinate.y };
+
   await grid.componentOnReady?.();
-  await grid.scrollToCoordinate?.({ x: coordinate.x, y: coordinate.y });
-  await grid.setCellsFocus?.(coordinate, coordinate);
+  if (target.colType === 'colPinStart') {
+    await grid.scrollToCoordinate?.({ y: coordinate.y });
+    await grid.setCellsFocus?.(local, local, 'colPinStart');
+  } else {
+    await grid.scrollToCoordinate?.(local);
+    await grid.setCellsFocus?.(local, local);
+  }
 
   return true;
 }

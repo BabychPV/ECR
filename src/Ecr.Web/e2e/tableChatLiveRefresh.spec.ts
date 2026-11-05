@@ -160,8 +160,9 @@ test.describe('Live refresh: two users on the stand', () => {
       const grid = page.locator('revo-grid').first();
       const firstCell = grid.locator('revogr-data[type="rgRow"] .rgCell[data-rgrow="0"]', { hasText: first });
       await expect(firstCell).toBeVisible({ timeout: 90_000 });
-      const col = await firstCell.getAttribute('data-rgcol');
-      if (col === null) throw new Error('the cell has no data-rgcol');
+      // aria-colindex is global; data-rgcol is per viewport and repeats once wide tables pin key columns.
+      const col = await firstCell.getAttribute('aria-colindex');
+      if (col === null) throw new Error('the cell has no aria-colindex');
       await expect(page.getByTestId('sheet-refresh')).toBeVisible();
 
       // Own edit in row 1 of the same column, held on its way to the server (in flight).
@@ -176,7 +177,7 @@ test.describe('Live refresh: two users on the stand', () => {
         await gate;
         return route.continue();
       });
-      const mine = grid.locator(`revogr-data[type="rgRow"] .rgCell[data-rgrow="1"][data-rgcol="${col}"]`);
+      const mine = grid.locator(`revogr-data[type="rgRow"] .rgCell[data-rgrow="1"][aria-colindex="${col}"]`);
       const own = `${String(700 + Math.floor(Math.random() * 99))}`;
       await mine.click();
       await page.waitForTimeout(300);
@@ -203,7 +204,7 @@ test.describe('Live refresh: two users on the stand', () => {
       await expect(mine).toHaveText(own);
       release();
 
-      const firstCellNow = grid.locator(`revogr-data[type="rgRow"] .rgCell[data-rgrow="0"][data-rgcol="${col}"]`);
+      const firstCellNow = grid.locator(`revogr-data[type="rgRow"] .rgCell[data-rgrow="0"][aria-colindex="${col}"]`);
       await expect(firstCellNow).toHaveText(second, { timeout: 30_000 });
       await expect(mine).toHaveText(own);
       await expect(banner).toHaveCount(0);

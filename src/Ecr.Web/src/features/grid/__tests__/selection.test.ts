@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   clampSelection,
   focusedCellOfEvent,
+  globalColumnOf,
   selectionOfFocusEvent,
   selectionOfRangeEvent,
   trackFocusedCell,
   trackSelection,
+  viewportOfColumn,
 } from '../selection';
 
 /**
@@ -59,15 +61,46 @@ describe('selectionOfFocusEvent: клік по комірці', () => {
     expect(selection?.anchor).toEqual({ rowIndex: 4, columnIndex: 1 });
   });
 
-  it('подія закріпленої секції ІГНОРУЄТЬСЯ', () => {
+  it('подія закріплених РЯДКІВ і колонок справа ІГНОРУЄТЬСЯ', () => {
     // ⛔ Індекси там відлічуються від своєї секції, не від зрізу: прийняти їх
     // як звичайні означало б записати вставку в зовсім інший рядок.
     expect(
       selectionOfFocusEvent({ rowType: 'rowPinStart', colType: 'rgCol', focus: { x: 0, y: 0 } }),
     ).toBeNull();
     expect(
-      selectionOfFocusEvent({ rowType: 'rgRow', colType: 'colPinStart', focus: { x: 0, y: 0 } }),
+      selectionOfFocusEvent({ rowType: 'rgRow', colType: 'colPinEnd', focus: { x: 0, y: 0 } }),
     ).toBeNull();
+  });
+
+  it('закріплені колонки зліва: `colPinStart` -> x, `rgCol` -> x + кількість закріплених', () => {
+    // ⛔ `x` відлічується від початку СВОГО в'юпорту. Без зсуву клік по 3-й прокручуваній колонці
+    // при 2 закріплених вказував би на 1-шу (глобальний індекс 0 замість 2).
+    const pinned = selectionOfFocusEvent(
+      { rowType: 'rgRow', colType: 'colPinStart', focus: { x: 1, y: 4 }, end: { x: 1, y: 4 } },
+      3,
+    );
+    expect(pinned?.anchor).toEqual({ rowIndex: 4, columnIndex: 1 });
+
+    const scrolled = selectionOfFocusEvent(
+      { rowType: 'rgRow', colType: 'rgCol', focus: { x: 0, y: 4 }, end: { x: 2, y: 5 } },
+      3,
+    );
+    expect(scrolled).toEqual({
+      anchor: { rowIndex: 4, columnIndex: 3 },
+      range: { fromRow: 4, toRow: 5, fromColumn: 3, toColumn: 5 },
+    });
+  });
+
+  it('globalColumnOf і viewportOfColumn - взаємно зворотні на межі закріплення', () => {
+    expect(globalColumnOf('colPinStart', 2, 3)).toBe(2);
+    expect(globalColumnOf('rgCol', 0, 3)).toBe(3);
+    expect(globalColumnOf(undefined, 4, 3)).toBe(7);
+    expect(globalColumnOf('colPinEnd', 0, 3)).toBeNull();
+    expect(globalColumnOf('rgCol', -1, 3)).toBeNull();
+
+    expect(viewportOfColumn(2, 3)).toEqual({ colType: 'colPinStart', x: 2 });
+    expect(viewportOfColumn(3, 3)).toEqual({ colType: 'rgCol', x: 0 });
+    expect(viewportOfColumn(5, 0)).toEqual({ colType: 'rgCol', x: 5 });
   });
 
   it('подія без координат або з неціліми/від\'ємними — `null`, а не (0,0)', () => {
@@ -99,6 +132,22 @@ describe('selectionOfRangeEvent: виділення діапазону', () => {
   it('неповний прямокутник — `null`', () => {
     expect(selectionOfRangeEvent({ x: 1, y: 1, x1: 2 })).toBeNull();
     expect(selectionOfRangeEvent(null)).toBeNull();
+  });
+
+  it('діапазон усередині прокручуваного в\'юпорту зсувається на кількість закріплених, закріпленого - ні', () => {
+    expect(selectionOfRangeEvent({ type: 'rgRow', x: 0, y: 1, x1: 1, y1: 2 }, 2, 'rgCol')?.range).toEqual({
+      fromRow: 1,
+      toRow: 2,
+      fromColumn: 2,
+      toColumn: 3,
+    });
+    expect(selectionOfRangeEvent({ type: 'rgRow', x: 0, y: 1, x1: 1, y1: 2 }, 2, 'colPinStart')?.range).toEqual({
+      fromRow: 1,
+      toRow: 2,
+      fromColumn: 0,
+      toColumn: 1,
+    });
+    expect(selectionOfRangeEvent({ x: 0, y: 0, x1: 0, y1: 0 }, 2, 'colPinEnd')).toBeNull();
   });
 });
 
@@ -157,6 +206,60 @@ describe('trackSelection: підписка на події, що виходят�
     document.body.removeChild(container);
   });
 
+  it('закріплені колонки: `setrange` бере в\'юпорт зі шляху події, зсув читається щоразу', () => {
+    const container = document.createElement('div');
+    container.innerHTML =
+      '<revogr-viewport-scroll class="colPinStart"><i id="pin"></i></revogr-viewport-scroll>' +
+      '<revogr-viewport-scroll class="rgCol"><i id="main"></i></revogr-viewport-scroll>';
+    document.body.appendChild(container);
+    const pin = container.querySelector('#pin') as HTMLElement;
+    const main = container.querySelector('#main') as HTMLElement;
+
+    let pinned = 2;
+    const report = vi.fn();
+    const stop = trackSelection(container, report, () => pinned);
+
+    const range = { type: 'rgRow', x: 0, y: 3, x1: 1, y1: 4 };
+    main.dispatchEvent(new CustomEvent('setrange', { bubbles: true, composed: true, detail: range }));
+    expect(report).toHaveBeenLastCalledWith({
+      anchor: { rowIndex: 3, columnIndex: 2 },
+      range: { fromRow: 3, toRow: 4, fromColumn: 2, toColumn: 3 },
+    });
+
+    pin.dispatchEvent(new CustomEvent('setrange', { bubbles: true, composed: true, detail: range }));
+    expect(report).toHaveBeenLastCalledWith({
+      anchor: { rowIndex: 3, columnIndex: 0 },
+      range: { fromRow: 3, toRow: 4, fromColumn: 0, toColumn: 1 },
+    });
+
+    // Людина змінила закріплення: наступна подія рахується з новим зсувом.
+    pinned = 4;
+    main.dispatchEvent(new CustomEvent('setrange', { bubbles: true, composed: true, detail: range }));
+    expect(report).toHaveBeenLastCalledWith({
+      anchor: { rowIndex: 3, columnIndex: 4 },
+      range: { fromRow: 3, toRow: 4, fromColumn: 4, toColumn: 5 },
+    });
+
+    stop();
+    document.body.removeChild(container);
+  });
+
+  it('`setrange` без шляху до в\'юпорту бере в\'юпорт останнього `focuscell`', () => {
+    const container = document.createElement('div');
+    const report = vi.fn();
+    trackSelection(container, report, () => 2);
+
+    container.dispatchEvent(
+      new CustomEvent('focuscell', { detail: { rowType: 'rgRow', colType: 'colPinStart', focus: { x: 1, y: 0 } } }),
+    );
+    container.dispatchEvent(new CustomEvent('setrange', { detail: { type: 'rgRow', x: 0, y: 0, x1: 1, y1: 0 } }));
+
+    expect(report).toHaveBeenLastCalledWith({
+      anchor: { rowIndex: 0, columnIndex: 0 },
+      range: { fromRow: 0, toRow: 0, fromColumn: 0, toColumn: 1 },
+    });
+  });
+
   it('подія без координат не «звалює» виділення в (0,0)', () => {
     const container = document.createElement('div');
     const report = vi.fn();
@@ -186,15 +289,41 @@ describe('focusedCellOfEvent: АКТИВНА комірка, не кут вид�
     });
   });
 
-  it('подія закріпленої секції ігнорується — індекси там від своєї секції', () => {
+  it('подія закріпленого рядка (підсумки) і колонок справа ігнорується — індекси там від своєї секції', () => {
     // ⛔ Рядок 0 закріпленої знизу секції — це рядок ПІДСУМКІВ (`UI-08`), а не
     // перший рядок таблиці.
     expect(
       focusedCellOfEvent({ rowType: 'rowPinEnd', colType: 'rgCol', focus: { x: 1, y: 0 } }),
     ).toBeNull();
     expect(
-      focusedCellOfEvent({ rowType: 'rgRow', colType: 'colPinStart', focus: { x: 0, y: 0 } }),
+      focusedCellOfEvent({ rowType: 'rgRow', colType: 'colPinEnd', focus: { x: 0, y: 0 } }),
     ).toBeNull();
+  });
+
+  it('закріплені колонки: фокус у `colPinStart` -> x, у `rgCol` -> x + кількість закріплених', () => {
+    expect(focusedCellOfEvent({ rowType: 'rgRow', colType: 'colPinStart', focus: { x: 1, y: 2 } }, 3)).toEqual({
+      rowIndex: 2,
+      columnIndex: 1,
+    });
+    expect(focusedCellOfEvent({ rowType: 'rgRow', colType: 'rgCol', focus: { x: 0, y: 2 } }, 3)).toEqual({
+      rowIndex: 2,
+      columnIndex: 3,
+    });
+  });
+
+  it('trackFocusedCell читає зсув закріплення в момент події', () => {
+    const container = document.createElement('div');
+    let pinned = 1;
+    const report = vi.fn();
+    trackFocusedCell(container, report, () => pinned);
+
+    const detail = { rowType: 'rgRow', colType: 'rgCol', focus: { x: 2, y: 0 } };
+    container.dispatchEvent(new CustomEvent('focuscell', { detail }));
+    pinned = 3;
+    container.dispatchEvent(new CustomEvent('focuscell', { detail }));
+
+    expect(report).toHaveBeenNthCalledWith(1, { rowIndex: 0, columnIndex: 3 });
+    expect(report).toHaveBeenNthCalledWith(2, { rowIndex: 0, columnIndex: 5 });
   });
 
   it('подія без координат — `null`, а не (0,0)', () => {
