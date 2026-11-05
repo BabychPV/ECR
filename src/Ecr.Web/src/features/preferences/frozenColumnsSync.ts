@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { deletePreference, getPreferences, putPreference, type UserPreference } from './api';
+import { cacheUserId } from './cacheUser';
 import { reportFailure } from './sync';
 import { PreferencesQueryKey } from './usePreferenceSync';
 
@@ -26,9 +27,12 @@ export function frozenColumnsKey(tableDefId: number): string {
   return `grid.frozenColumns.${String(tableDefId)}`;
 }
 
-/** Ключ кешу в `localStorage`. */
-export function frozenColumnsCacheKey(tableDefId: number): string {
-  return `ecr.frozenColumns.def:${String(tableDefId)}`;
+/**
+ * Ключ кешу в `localStorage` - на КОРИСТУВАЧА й визначення таблиці (`cacheUser.ts`); старий
+ * `ecr.frozenColumns.def:{id}` без користувача не читається.
+ */
+export function frozenColumnsCacheKey(userId: number, tableDefId: number): string {
+  return `ecr.u:${String(userId)}.frozenColumns.def:${String(tableDefId)}`;
 }
 
 /** Придатне значення - ціле `0..MaxStoredCount`; усе інше - «немає вибору». */
@@ -51,10 +55,11 @@ export function serverFrozenColumns(preferences: readonly UserPreference[], tabl
   return sanitizeFrozenCount(preferences.find((item) => item.key === key)?.value);
 }
 
-/** Кеш першого рендера. Ніколи не падає. */
-function readCachedCount(tableDefId: number): number | undefined {
+/** Кеш першого рендера. Ніколи не падає; користувач невідомий - кешу немає. */
+function readCachedCount(userId: number | null, tableDefId: number): number | undefined {
+  if (userId === null) return undefined;
   try {
-    const raw = globalThis.localStorage?.getItem(frozenColumnsCacheKey(tableDefId));
+    const raw = globalThis.localStorage?.getItem(frozenColumnsCacheKey(userId, tableDefId));
     if (raw === null || raw === undefined) return undefined;
 
     return sanitizeFrozenCount(JSON.parse(raw) as unknown);
@@ -63,10 +68,11 @@ function readCachedCount(tableDefId: number): number | undefined {
   }
 }
 
-/** Записує кеш; «немає вибору» прибирає ключ. */
-function writeCachedCount(tableDefId: number, count: number | undefined): void {
+/** Записує кеш; «немає вибору» прибирає ключ; користувач невідомий - нічого не пише. */
+function writeCachedCount(userId: number | null, tableDefId: number, count: number | undefined): void {
+  if (userId === null) return;
   try {
-    const key = frozenColumnsCacheKey(tableDefId);
+    const key = frozenColumnsCacheKey(userId, tableDefId);
     if (count === undefined) globalThis.localStorage?.removeItem(key);
     else globalThis.localStorage?.setItem(key, JSON.stringify(count));
   } catch {
@@ -114,16 +120,19 @@ export function useFrozenColumns(tableDefId: number): FrozenColumnsPreference {
     refetchOnWindowFocus: false,
   });
 
+  // Власник кешу `localStorage` (P3 05.11): без id профілю кеш не читається й не пишеться.
+  const userId = cacheUserId(queryClient);
+
   const [state, setState] = useState<LocalState>(() => ({
     tableDefId,
-    count: readCachedCount(tableDefId),
+    count: readCachedCount(userId, tableDefId),
     touched: false,
   }));
 
   // Інша таблиця - інший стан (похідний стан під час рендера, без ефекту).
   let local = state;
   if (state.tableDefId !== tableDefId) {
-    local = { tableDefId, count: readCachedCount(tableDefId), touched: false };
+    local = { tableDefId, count: readCachedCount(userId, tableDefId), touched: false };
     setState(local);
   }
 
@@ -138,15 +147,15 @@ export function useFrozenColumns(tableDefId: number): FrozenColumnsPreference {
 
   // Значення сервера стає кешем наступного першого рендера.
   useEffect(() => {
-    if (!local.touched && loaded) writeCachedCount(tableDefId, server);
-  }, [local.touched, loaded, server, tableDefId]);
+    if (!local.touched && loaded) writeCachedCount(userId, tableDefId, server);
+  }, [local.touched, loaded, server, tableDefId, userId]);
 
   const setCount = useCallback(
     (next: number | undefined) => {
       const clean = sanitizeFrozenCount(next);
       const key = frozenColumnsKey(tableDefId);
 
-      writeCachedCount(tableDefId, clean);
+      writeCachedCount(userId, tableDefId, clean);
       setState({ tableDefId, count: clean, touched: true });
 
       const data = queryClient.getQueryData<UserPreference[]>(PreferencesQueryKey);
@@ -163,7 +172,7 @@ export function useFrozenColumns(tableDefId: number): FrozenColumnsPreference {
         reportFailure(key, error);
       });
     },
-    [tableDefId, queryClient],
+    [tableDefId, queryClient, userId],
   );
 
   return { count, setCount };

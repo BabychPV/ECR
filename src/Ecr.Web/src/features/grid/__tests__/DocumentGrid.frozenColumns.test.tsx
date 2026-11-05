@@ -9,6 +9,11 @@ import { resetFocus } from '../focusStore';
 import { resetPending } from '../pendingStore';
 import { DocumentGrid } from '../DocumentGrid';
 import type { CellNavigationRequest } from '../cellNavigation';
+import { frozenColumnsCacheKey } from '@/features/preferences/frozenColumnsSync';
+import { MeQueryKey } from '@/shared/session/useSession';
+
+/** Поточний користувач (власник кешу `localStorage`, P3 05.11). */
+const Me = 11;
 
 /**
  * Закріплені ключові колонки (`frozenColumns.ts`): сітка отримує `pin: 'colPinStart'`, а події RevoGrid з
@@ -123,6 +128,7 @@ function mockServer(frozen?: number): void {
 
 function show(navigateTo?: CellNavigationRequest): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(MeQueryKey, { userId: Me });
 
   render(
     <MantineProvider>
@@ -261,7 +267,7 @@ describe('DocumentGrid: закріплені колонки', () => {
     fireEvent.change(select, { target: { value: '0' } });
 
     await waitFor(() => expect(pinnedProps()).toEqual([undefined, undefined, undefined, undefined, undefined]));
-    expect(localStorage.getItem('ecr.frozenColumns.def:1')).toBe('0');
+    expect(localStorage.getItem(frozenColumnsCacheKey(Me, 1))).toBe('0');
     await waitFor(() => expect(preferenceWrites).toHaveLength(1));
     expect(preferenceWrites[0]).toMatchObject({ method: 'PUT', body: 0 });
     expect(preferenceWrites[0]?.path).toContain('grid.frozenColumns.1');
@@ -287,7 +293,7 @@ describe('DocumentGrid: закріплені колонки', () => {
 
     fireEvent.change(select, { target: { value: 'default' } });
     await waitFor(() => expect(pinnedProps()).toEqual([undefined, undefined, undefined, undefined, undefined]));
-    expect(localStorage.getItem('ecr.frozenColumns.def:1')).toBeNull();
+    expect(localStorage.getItem(frozenColumnsCacheKey(Me, 1))).toBeNull();
     await waitFor(() => expect(preferenceWrites.map((w) => w.method)).toEqual(['PUT', 'DELETE']));
   });
 

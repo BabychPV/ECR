@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { DefaultColumnWidth } from '@/features/grid/columnWidths';
 import { deletePreference, getPreferences, putPreference, type UserPreference } from './api';
+import { cacheUserId } from './cacheUser';
 import { reportFailure } from './sync';
 import { PreferencesQueryKey } from './usePreferenceSync';
 
@@ -33,9 +34,12 @@ export function columnWidthsKey(tableDefId: number): string {
   return `grid.columnWidths.${String(tableDefId)}`;
 }
 
-/** Ключ кешу в `localStorage` (новий: старий `ecr.columnWidths:{tableInstanceId}` не читається). */
-export function columnWidthsCacheKey(tableDefId: number): string {
-  return `ecr.columnWidths.def:${String(tableDefId)}`;
+/**
+ * Ключ кешу в `localStorage` - на КОРИСТУВАЧА й визначення таблиці (`cacheUser.ts`). Старі ключі без користувача
+ * (`ecr.columnWidths.def:{id}`, ще давніші `ecr.columnWidths:{tableInstanceId}`) не читаються.
+ */
+export function columnWidthsCacheKey(userId: number, tableDefId: number): string {
+  return `ecr.u:${String(userId)}.columnWidths.def:${String(tableDefId)}`;
 }
 
 /**
@@ -83,10 +87,11 @@ export function serverColumnWidths(
   return entry === undefined ? undefined : sanitizeWidths(entry.value);
 }
 
-/** Кеш першого рендера. Ніколи не падає. */
-function readCachedWidths(tableDefId: number): Record<string, number> {
+/** Кеш першого рендера. Ніколи не падає; користувач невідомий - кешу немає. */
+function readCachedWidths(userId: number | null, tableDefId: number): Record<string, number> {
+  if (userId === null) return {};
   try {
-    const raw = globalThis.localStorage?.getItem(columnWidthsCacheKey(tableDefId));
+    const raw = globalThis.localStorage?.getItem(columnWidthsCacheKey(userId, tableDefId));
     if (raw === null || raw === undefined) return {};
 
     return sanitizeWidths(JSON.parse(raw) as unknown);
@@ -95,10 +100,11 @@ function readCachedWidths(tableDefId: number): Record<string, number> {
   }
 }
 
-/** Записує кеш; порожні ширини прибирають ключ. */
-function writeCachedWidths(tableDefId: number, widths: ColumnWidthMap): void {
+/** Записує кеш; порожні ширини прибирають ключ; користувач невідомий - нічого не пише. */
+function writeCachedWidths(userId: number | null, tableDefId: number, widths: ColumnWidthMap): void {
+  if (userId === null) return;
   try {
-    const key = columnWidthsCacheKey(tableDefId);
+    const key = columnWidthsCacheKey(userId, tableDefId);
     if (Object.keys(widths).length === 0) globalThis.localStorage?.removeItem(key);
     else globalThis.localStorage?.setItem(key, JSON.stringify(widths));
   } catch {
@@ -119,6 +125,8 @@ interface ColumnWidthsWriterDeps {
   put?(key: string, value: unknown): Promise<unknown>;
   /** `DELETE`; за замовчуванням — `api.ts`. */
   remove?(key: string): Promise<unknown>;
+  /** Власник локального дзеркала (`cacheUser.ts`); `null`/немає — дзеркала немає. */
+  readonly userId?: number | null;
 }
 
 /**
@@ -184,7 +192,7 @@ export class ColumnWidthsWriter {
 
     const key = columnWidthsKey(this.tableDefId);
     const server = this.deps.readServer();
-    const base = server === null ? readCachedWidths(this.tableDefId) : (server ?? {});
+    const base = server === null ? readCachedWidths(this.deps.userId ?? null, this.tableDefId) : (server ?? {});
     const next = widthDeviations({ ...base, ...changes }, this.defaultWidth);
 
     if (server !== null && JSON.stringify(next) === JSON.stringify(server ?? {})) return;
@@ -258,16 +266,19 @@ export function useColumnWidths(
     refetchOnWindowFocus: false,
   });
 
+  // Власник кешу `localStorage` (P3 05.11): без id профілю кеш не читається й не пишеться.
+  const userId = cacheUserId(queryClient);
+
   const [state, setState] = useState<LocalState>(() => ({
     tableDefId,
-    widths: readCachedWidths(tableDefId),
+    widths: readCachedWidths(userId, tableDefId),
     touched: false,
   }));
 
   // Інша таблиця — інший стан (похідний стан під час рендера, без ефекту).
   let local = state;
   if (state.tableDefId !== tableDefId) {
-    local = { tableDefId, widths: readCachedWidths(tableDefId), touched: false };
+    local = { tableDefId, widths: readCachedWidths(userId, tableDefId), touched: false };
     setState(local);
   }
 
@@ -281,8 +292,8 @@ export function useColumnWidths(
 
   // Значення сервера стає кешем наступного першого рендера.
   useEffect(() => {
-    if (!local.touched && server !== undefined) writeCachedWidths(tableDefId, server);
-  }, [local.touched, server, tableDefId]);
+    if (!local.touched && server !== undefined) writeCachedWidths(userId, tableDefId, server);
+  }, [local.touched, server, tableDefId, userId]);
 
   const writer = useRef<ColumnWidthsWriter | null>(null);
   useEffect(() => {
@@ -299,6 +310,7 @@ export function useColumnWidths(
             upsertPreference(old, key, value),
           );
         },
+        userId,
       },
       defaultWidth,
     );
@@ -309,7 +321,7 @@ export function useColumnWidths(
       current.flush();
       if (writer.current === current) writer.current = null;
     };
-  }, [tableDefId, defaultWidth, queryClient]);
+  }, [tableDefId, defaultWidth, queryClient, userId]);
 
   const onResize = useCallback(
     (changed: ColumnWidthMap) => {
@@ -317,17 +329,17 @@ export function useColumnWidths(
       if (Object.keys(clean).length === 0) return;
 
       const next = widthDeviations({ ...widths, ...clean }, defaultWidth);
-      writeCachedWidths(tableDefId, next);
+      writeCachedWidths(userId, tableDefId, next);
       setState({ tableDefId, widths: next, touched: true });
       writer.current?.change(clean);
     },
-    [widths, defaultWidth, tableDefId],
+    [widths, defaultWidth, tableDefId, userId],
   );
 
   const reset = useCallback(() => {
     const key = columnWidthsKey(tableDefId);
     writer.current?.discard();
-    writeCachedWidths(tableDefId, {});
+    writeCachedWidths(userId, tableDefId, {});
     setState({ tableDefId, widths: {}, touched: true });
 
     // Ключа на сервері вже немає — нічого видаляти (і кеш не вигадуємо).
@@ -340,7 +352,7 @@ export function useColumnWidths(
     void deletePreference(key).catch((error: unknown) => {
       reportFailure(key, error);
     });
-  }, [tableDefId, queryClient]);
+  }, [tableDefId, queryClient, userId]);
 
   return { widths, onResize, reset };
 }
