@@ -98,7 +98,9 @@ function Get-NaeEntriesAsOf([string]$asOf) {
     $r = Invoke-Hse GET "/api/v1/registries/NAE_TREE/entries?asOf=$asOf"
     if ($r.Status -eq 404) { return $null }   # дерева ще немає
     if ($r.Status -ne 200) { throw "GET NAE_TREE/entries?asOf=$asOf -> $($r.Status) $(Get-EcrErrorCode $r)" }
-    return @(Get-HseItems $r.Json)
+    # ⛔ Кома обов'язкова: порожній масив без неї PowerShell розгортає в $null, і «усі вузли вилучені» читалося як «дерева
+    # немає» - перевірка вилучених мовчки не виконувалась (репетиція 05.11, D1).
+    return , @(Get-HseItems $r.Json)
 }
 
 function Find-NaeRetired {
@@ -171,7 +173,22 @@ $srcExisting = 0
 foreach ($l in $pv.Json.levels) { if ([string]$l.levelCode -eq 'SRC') { $srcExisting = [int]$l.existing } }
 $hiddenSrc = [Math]::Max(0, $srcExisting - $activeSrcMatches)
 Write-HseLog ("NAE_TREE: чинних вузлів {0}, вилучених знайдено {1} (зрізів {2}); збігів файлу з вилученими: {3}; SRC preview.existing={4}, серед чинних знайдено {5}, прихованих {6}" -f $ret.Active.Count, $ret.Retired.Count, $ret.Scans, $retiredMatches.Count, $srcExisting, $activeSrcMatches, $hiddenSrc)
-$retiredBlocked = ($retiredMatches.Count -gt 0 -or $hiddenSrc -gt 0)
+# Другий запобіжник (D1): сервер зіставляє вузли за кодом і серед вилучених, тож «існує» на рівні більше, ніж там чинних
+# вузлів, означає перевикористання вилученого - незалежно від того, чи спрацювали зрізи вище.
+$activeByLevel = @{}
+foreach ($e in $ret.Active.Values) {
+    $lcA = if ($null -ne $e.PSObject.Properties['levelCode']) { [string]$e.levelCode } else { '' }
+    if (-not $activeByLevel.ContainsKey($lcA)) { $activeByLevel[$lcA] = 0 }
+    $activeByLevel[$lcA]++
+}
+$levelOverflow = New-Object System.Collections.Generic.List[object]
+foreach ($l in $pv.Json.levels) {
+    $lcP = [string]$l.levelCode
+    $act = if ($activeByLevel.ContainsKey($lcP)) { [int]$activeByLevel[$lcP] } else { 0 }
+    if ([int]$l.existing -gt $act) { $levelOverflow.Add([ordered]@{ levelCode = $lcP; existing = [int]$l.existing; active = $act }) }
+}
+foreach ($o in $levelOverflow) { Write-HseLog ("УВАГА: рівень {0}: preview.existing={1}, а чинних вузлів рівня {2} - збіг із вилученим вузлом." -f $o.levelCode, $o.existing, $o.active) }
+$retiredBlocked = ($retiredMatches.Count -gt 0 -or $hiddenSrc -gt 0 -or $levelOverflow.Count -gt 0)
 if ($retiredBlocked) {
     Write-HseLog 'УВАГА: файл збігається з вилученими вузлами NAE_TREE (вони не чіпаються ні в якому режимі):'
     foreach ($m in $retiredMatches) { Write-HseLog ("  {0} {1} '{2}' validTo={3}" -f $m.levelCode, $m.code, $m.display, $m.validTo) }
@@ -184,7 +201,7 @@ if ($preview) {
             levels = @($pv.Json.levels | ForEach-Object { [ordered]@{ levelCode = [string]$_.levelCode; create = [int]$_.create; existing = [int]$_.existing } })
             errors = @($errors | ForEach-Object { [ordered]@{ row = [int]$_.row; code = [string]$_.code; naeCode = [string]$_.naeCode; detail = [string]$_.detail; source = [string]$rowToKey[[int]$_.row] } })
             warnings = $warns.Count; droppedIssues = [int]$pv.Json.droppedIssues
-            retiredMatches = $retiredMatches.ToArray(); hiddenExistingSrc = $hiddenSrc; retiredBlocked = $retiredBlocked
+            retiredMatches = $retiredMatches.ToArray(); hiddenExistingSrc = $hiddenSrc; levelOverflow = $levelOverflow.ToArray(); retiredBlocked = $retiredBlocked
             retiredScan = [ordered]@{ activeNodes = $ret.Active.Count; retiredFound = $ret.Retired.Count; scans = $ret.Scans }
         })
     Write-HseLog 'NAE: PreviewOnly - apply пропущено, план записано.'

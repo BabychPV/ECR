@@ -76,6 +76,17 @@ $to = if ($Limit -gt 0) { [Math]::Min($total, $StartAt + $Limit - 1) } else { $t
 $docId = [int]$state['documentId']; $ti = [int]$state['tableInstanceId']; $pk = [int]$state['periodKey']
 Write-HseLog ("Документ {0}, tableInstance {1}, period {2}; рядки {3}..{4} з {5}" -f $docId, $ti, $pk, $from, $to, $total)
 
+# D3 (репетиція 05.11): PATCH створює рядки з baseVersion=null, тож у документі з рядками кожна пачка дає 409 rowKeysExist.
+# Повний прогін по вже завантаженому документу - no-op; дозавантаження частини (-StartAt/-Limit) - свідомий вибір викликача.
+if (-not $DryRun -and $StartAt -le 1 -and $Limit -le 0) {
+    $sl = Invoke-HseOk GET "/api/v1/documents/$docId/tables/${ti}?periodKey=$pk"
+    $existingRows = @($sl.Json.rows).Count
+    if ($existingRows -gt 0) {
+        Write-HseLog ("Документ уже має {0} рядків - завантаження пропущено (no-op). Дозавантаження - -StartAt/-Limit." -f $existingRows)
+        return
+    }
+}
+
 $sw = [Diagnostics.Stopwatch]::StartNew()
 $cellsTotal = 0; $rowsDone = 0; $failedBatches = 0
 $batchLog = New-Object System.Collections.Generic.List[object]
@@ -125,3 +136,4 @@ if ($log.unmapped.Count -gt 0) {
 $state['loadSeconds'] = [math]::Round($loadSec, 1); $state['loadRows'] = $rowsDone; $state['loadCells'] = $cellsTotal
 $state['batches'] = $batchLog.ToArray()
 if (-not $DryRun) { $state['standKey'] = Get-Hse401StandKey; [IO.File]::WriteAllText($stateFile, (ConvertTo-HseJson -Value $state).ToString(), (New-Object Text.UTF8Encoding($false))) }
+if ($failedBatches -gt 0) { throw ("Завантаження: пачок з помилкою {0} - див. лог вище; прогін НЕ успішний." -f $failedBatches) }
