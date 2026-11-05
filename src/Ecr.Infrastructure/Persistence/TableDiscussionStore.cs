@@ -23,21 +23,24 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
 
         var full = fullCodes.ToList();
 
-        // Таблиці з повним доступом: зведення (всього, останнє) + два корельованих підзапити по індексу чату.
+        // Таблиці з повним доступом: зведення (всього, останнє) + вказівник прочитаного РАЗ НА ТАБЛИЦЮ (OUTER APPLY TOP(1))
+        // + лічильник непрочитаного по індексу чату. ⚠ Не виносити lastRead в `let` усередину предиката Count: EF інлайнить
+        // його, і підзапит виконується для КОЖНОГО повідомлення (AN-155a: 33 354 читання на 82 x 200 проти 709).
         var fullQuery =
             from s in db.TableDiscussions.AsNoTracking()
             where s.DocumentId == documentId && s.MessageCount > 0 && full.Contains(s.TableDefCode)
-            let lastRead = db.TableDiscussionReads
+            from lr in db.TableDiscussionReads
                 .Where(r => r.UserId == userId && r.DocumentId == documentId && r.TableDefCode == s.TableDefCode
                             && r.SheetCopyKey == s.SheetCopyKey)
-                .Select(r => r.LastReadMessageId).FirstOrDefault()
+                .OrderBy(r => r.UserId) // ключ унікальний (≤ 1 рядок); OrderBy лише для детермінізму TOP(1), EfWarningGuard
+                .Select(r => (long?)r.LastReadMessageId).Take(1).DefaultIfEmpty()
             select new SummaryShape
             {
                 Code = s.TableDefCode,
                 Total = s.MessageCount,
                 Unread = db.TableDiscussionMessages.Count(m =>
-                    m.DocumentId == documentId && m.TableDefCode == s.TableDefCode && m.SheetCopyKey == s.SheetCopyKey && m.Id > lastRead
-                    && m.AuthorUserId != userId && m.DeletedAt == null),
+                    m.DocumentId == documentId && m.TableDefCode == s.TableDefCode && m.SheetCopyKey == s.SheetCopyKey
+                    && m.Id > (lr ?? 0L) && m.AuthorUserId != userId && m.DeletedAt == null),
                 LastAt = s.LastMessageAt,
                 LastId = s.LastMessageId,
                 Mentioned = db.TableDiscussionMentions.Any(x =>
