@@ -181,6 +181,12 @@ public sealed class RegistryValueConfiguration : IEntityTypeConfiguration<Regist
         builder.HasIndex(x => new { x.RegistryEntryId, x.RegistryFieldDefId })
                .IsUnique().HasDatabaseName("UQ_RegistryValue");
 
+        // FK_RegValue_Ref had NO supporting index: the registry-entry "where used" count and the FK check on deleting a
+        // dic.RegistryEntry row scanned all of dic.RegistryValue. Filtered: most values are not references.
+        builder.HasIndex(x => x.ValueRefEntryId)
+               .HasDatabaseName("IX_RegistryValue_ValueRef")
+               .HasFilter("[ValueRefEntryId] IS NOT NULL");
+
         builder.HasOne(x => x.Entry).WithMany().HasForeignKey(x => x.RegistryEntryId)
                .HasConstraintName("FK_RegValue_Entry");
         builder.HasOne<RegistryFieldDef>().WithMany().HasForeignKey(x => x.RegistryFieldDefId)
