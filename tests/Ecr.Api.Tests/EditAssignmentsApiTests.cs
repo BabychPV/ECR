@@ -257,6 +257,224 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
             HttpStatusCode.OK, app).ConfigureAwait(true);
     }
 
+    /// <summary>
+    /// P3 (g)(1): відмова «понад власний рівень» нічого не записує - ні рядка передачі, ні події аудиту; відповідь несе
+    /// запитаний і власний рівень (<c>level</c>, <c>ownLevel</c> = <c>None</c> через заборону колонки).
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ: прибрати <c>if (ownLevel &lt; level) throw …</c> у <c>UpsertEditAssignmentHandler.PrepareAsync</c> -
+    /// червоніє (200 замість 403; рядок і подія з'являються).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P3-ABOVE-OWN-NOTHING-WRITTEN")]
+    public async Task Відмова_понад_власний_рівень_403_нічого_не_записує_і_несе_рівні()
+    {
+        var s = await ArrangeAsync(denyColumnForManager: true).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var manager = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+
+        var refused = await manager.PostAsJsonAsync(ListUri(s), LevelBody(s, s.Executor.Id, "Approve")).ConfigureAwait(true);
+        var body = await refused.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(refused.StatusCode == HttpStatusCode.Forbidden, $"{refused.StatusCode}: {body}\n{app.ErrorsText}");
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-ACCS-0403", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-ACCS-0403.editAssignmentLevelAboveOwn", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("Approve", problem.GetProperty("level").GetString());
+        Assert.Equal("None", problem.GetProperty("ownLevel").GetString());
+
+        Assert.Equal(0, await ScalarAsync($"SELECT COUNT(*) FROM doc.EditAssignment WHERE DocumentId = {s.DocumentId.ToString(CultureInfo.InvariantCulture)}").ConfigureAwait(true));
+        Assert.Empty(await EventTypesAsync(s).ConfigureAwait(true));
+        var list = await JsonAsync(await manager.GetAsync(ListUri(s)).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Empty(list.GetProperty("assignments").EnumerateArray());
+    }
+
+    /// <summary>
+    /// P3 (g)(2): у ЗАКРИТОМУ періоді перемагає та сама відмова «понад власний рівень» (403), що й у відкритому. Видача
+    /// Read/Submit/Approve охоплює документ на всі періоди (місяць і період дозволені лише для Write, 422), тож шлях видачі
+    /// стан періоду не читає зовсім (<c>OwnLevelOver</c> міряє область з відкритим станом): закритий період не робить
+    /// видачу ні дозволеною, ні забороненою - вона 200 для того, хто має право, і 403 для того, хто його не має.
+    /// Закритий період працює на шляху ЗАПИСУ виконавця (<c>PeriodClosed</c>) - див. <c>EditAssignmentsDemotionApiTests</c>.
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ: той самий, що й у попередньому тесті (прибрати перевірку <c>ownLevel &lt; level</c>) - червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P3-ABOVE-OWN-CLOSED-PERIOD")]
+    public async Task У_закритому_періоді_понад_власний_рівень_403_а_видача_в_межах_власного_200()
+    {
+        var denied = await ArrangeAsync(denyColumnForManager: true).ConfigureAwait(true);
+        var plain = await ArrangeAsync().ConfigureAwait(true);
+        foreach (var scenario in new[] { denied, plain })
+        {
+            await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+            var closed = await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE doc.Period SET State = {(int)PeriodState.Closed} WHERE ProjectId = (SELECT ProjectId FROM doc.Document WHERE Id = {scenario.DocumentId})")
+                .ConfigureAwait(true);
+            Assert.True(closed >= 1, "Період документа не закрито.");
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var deniedManager = await SignedInAsync(app, denied.Manager.UserName).ConfigureAwait(true);
+        using var plainManager = await SignedInAsync(app, plain.Manager.UserName).ConfigureAwait(true);
+
+        foreach (var level in new[] { "Read", "Submit", "Approve" })
+        {
+            var refused = await deniedManager.PostAsJsonAsync(ListUri(denied), LevelBody(denied, denied.Executor.Id, level)).ConfigureAwait(true);
+            var refusedBody = await refused.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(refused.StatusCode == HttpStatusCode.Forbidden, $"{level}: {refused.StatusCode}: {refusedBody}\n{app.ErrorsText}");
+            Assert.Equal(
+                "err.ECR-ACCS-0403.editAssignmentLevelAboveOwn",
+                JsonDocument.Parse(refusedBody).RootElement.GetProperty("messageKey").GetString());
+        }
+
+        Assert.Equal(0, await ScalarAsync($"SELECT COUNT(*) FROM doc.EditAssignment WHERE DocumentId = {denied.DocumentId.ToString(CultureInfo.InvariantCulture)}").ConfigureAwait(true));
+
+        // Контроль: у тому ж закритому періоді делегатор без заборони видає Approve - стан періоду видачу не блокує.
+        var granted = await JsonAsync(
+            await plainManager.PostAsJsonAsync(ListUri(plain), LevelBody(plain, plain.Executor.Id, "Approve")).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Equal("Approve", granted.GetProperty("level").GetString());
+    }
+
+    /// <summary>
+    /// P3 (g)(3), видача: делегатор, якого знижено з Manage до Write/Read на проєкт (роль ЛИШИЛАСЬ), більше не керує
+    /// передачами (403 <c>notEditAssignmentManager</c>) - ні нова видача, ні перелік; уже видане НЕ видаляється (рядок
+    /// лишається, надання лише призупиняється, D-454/DESIGN-D443 §4); повернення Manage знову дозволяє видачу.
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ: у <c>EditAssignmentAccess.CanManage</c> замінити <c>level &gt;= GrantLevel.Write</c> на <c>true</c> -
+    /// червоніє (видача знижено-до-Read делегатором проходить 200).
+    /// </remarks>
+    [Theory]
+    [InlineData("Write")]
+    [InlineData("Read")]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P3-WRITE-AFTER-DOWNGRADE-GRANT")]
+    public async Task Знижений_до_Write_чи_Read_делегатор_не_видає_нових_надань_а_раніше_видане_лишається(string downgradeTo)
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var docId = s.DocumentId.ToString(CultureInfo.InvariantCulture);
+
+        using (var app = new EcrApiFactory(sql))
+        using (var manager = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true))
+        {
+            await JsonAsync(
+                await manager.PostAsJsonAsync(ListUri(s), LevelBody(s, s.Executor.Id, "Read")).ConfigureAwait(true),
+                HttpStatusCode.OK, app).ConfigureAwait(true);
+        }
+
+        await SetProjectLevelAsync(s.Manager, Enum.Parse<GrantLevel>(downgradeTo)).ConfigureAwait(true);
+
+        // Свіжий вузол: профіль не з кешу (рівень гранта змінено прямо в базі).
+        using (var app = new EcrApiFactory(sql))
+        using (var manager = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true))
+        {
+            var refused = await manager.PostAsJsonAsync(ListUri(s), LevelBody(s, s.OtherExecutor.Id, "Submit")).ConfigureAwait(true);
+            var refusedBody = await refused.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(refused.StatusCode == HttpStatusCode.Forbidden, $"{refused.StatusCode}: {refusedBody}\n{app.ErrorsText}");
+            Assert.Equal(
+                "err.ECR-ACCS-0403.notEditAssignmentManager",
+                JsonDocument.Parse(refusedBody).RootElement.GetProperty("messageKey").GetString());
+            Assert.Equal(HttpStatusCode.Forbidden, (await manager.GetAsync(ListUri(s)).ConfigureAwait(true)).StatusCode);
+
+            // Рядок раніше виданого надання не видалено.
+            Assert.Equal(1, await ScalarAsync($"SELECT COUNT(*) FROM doc.EditAssignment WHERE DocumentId = {docId}").ConfigureAwait(true));
+        }
+
+        await SetProjectLevelAsync(s.Manager, GrantLevel.Manage).ConfigureAwait(true);
+
+        using (var app = new EcrApiFactory(sql))
+        using (var manager = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true))
+        {
+            // Інший рівень (Submit) - окремий ключ області: не зміна наявного Read (яка вимагала б baseVersion).
+            await JsonAsync(
+                await manager.PostAsJsonAsync(ListUri(s), LevelBody(s, s.OtherExecutor.Id, "Submit")).ConfigureAwait(true),
+                HttpStatusCode.OK, app).ConfigureAwait(true);
+            Assert.Equal(2, await ScalarAsync($"SELECT COUNT(*) FROM doc.EditAssignment WHERE DocumentId = {docId}").ConfigureAwait(true));
+        }
+    }
+
+    /// <summary>
+    /// P3 (g)(4): «глобального адміна» як обходу немає. Ролі з правами безпеки/довідників/шаблонів, але БЕЗ ресурсного гранта на
+    /// проєкт, документа не бачать (404, не 403 «понад власний»); ті самі права ПОВЕРХ гранта Manage видають будь-який рівень
+    /// до Approve (стеля - власний рівень, а він Manage) і не обмежені «понад власний».
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ: у <c>RequireVisibleDocumentAsync</c>/<c>SeesDocumentsOf</c> дозволити видимість без гранта - червоніє
+    /// перша половина (200/403 замість 404); прибрати перевірку <c>ownLevel &lt; level</c> не червонить друге (позитивний
+    /// контроль), а збільшення рівня стелі понад Manage неможливе - Approve є найвищим видаваним рівнем.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P3-ADMIN-NOT-LIMITED")]
+    public async Task Адмін_без_гранта_на_проєкт_документа_не_бачить_а_з_грантом_Manage_видає_до_Approve()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var docId = s.DocumentId.ToString(CultureInfo.InvariantCulture);
+        var bare = await NewAdminAsync(s, withManageGrant: false).ConfigureAwait(true);
+        var managing = await NewAdminAsync(s, withManageGrant: true).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var bareClient = await SignedInAsync(app, bare.UserName).ConfigureAwait(true);
+        using var managingClient = await SignedInAsync(app, managing.UserName).ConfigureAwait(true);
+
+        var invisible = await bareClient.PostAsJsonAsync(ListUri(s), LevelBody(s, s.Executor.Id, "Approve")).ConfigureAwait(true);
+        var invisibleBody = await invisible.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(invisible.StatusCode == HttpStatusCode.NotFound, $"{invisible.StatusCode}: {invisibleBody}\n{app.ErrorsText}");
+        Assert.DoesNotContain("editAssignmentLevelAboveOwn", invisibleBody, StringComparison.Ordinal);
+        Assert.Equal(0, await ScalarAsync($"SELECT COUNT(*) FROM doc.EditAssignment WHERE DocumentId = {docId}").ConfigureAwait(true));
+
+        foreach (var level in new[] { "Read", "Submit", "Approve" })
+        {
+            var granted = await JsonAsync(
+                await managingClient.PostAsJsonAsync(ListUri(s), LevelBody(s, s.Executor.Id, level)).ConfigureAwait(true),
+                HttpStatusCode.OK, app).ConfigureAwait(true);
+            Assert.Equal(level, granted.GetProperty("level").GetString());
+        }
+    }
+
+    private async Task SetProjectLevelAsync(Person person, GrantLevel level)
+    {
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var roleIds = db.RoleAssignments.Where(a => a.UserId == person.Id).Select(a => a.RoleId);
+        var changed = await db.ResourceGrants
+            .Where(g => roleIds.Contains(g.RoleId) && g.ResourceKind == ResourceKind.Project && !g.IsDeny)
+            .ExecuteUpdateAsync(u => u.SetProperty(g => g.Level, level)).ConfigureAwait(false);
+        Assert.Equal(1, changed);
+    }
+
+    private async Task<Person> NewAdminAsync(Scenario s, bool withManageGrant)
+    {
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var projectId = await db.Documents.Where(d => d.Id == s.DocumentId).Select(d => d.ProjectId).SingleAsync().ConfigureAwait(false);
+
+        var userName = $"eaadm_{Guid.NewGuid():N}"[..20];
+        var user = new User(userName, userName, AuthProvider.Local);
+        user.SetPassword(new PasswordHasher().Hash(Password));
+        db.Users.Add(user);
+        var role = new Role(
+            EcrCode.Create($"EAA_{Guid.NewGuid():N}"[..20]),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Global admin" }));
+        db.Roles.Add(role);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        foreach (var permission in new[] { "Document.View", "Security.ManageUsers", "Security.ManageRoles", "Registry.View", "Template.View" })
+        {
+            db.RolePermissions.Add(new RolePermission(role.Id, permission));
+        }
+
+        db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
+        if (withManageGrant)
+        {
+            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, projectId, GrantLevel.Manage));
+        }
+
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        return new Person(user.Id, userName);
+    }
+
     private static Dictionary<string, object?> LevelBody(Scenario s, int recipient, string level)
         => new()
         {

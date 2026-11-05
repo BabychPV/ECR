@@ -87,6 +87,99 @@ public sealed class EditAssignmentsDemotionApiTests(SqlServerFixture sql)
 
     // ───────────────────────────── допоміжне ─────────────────────────────
 
+    /// <summary>
+    /// P3 (g)(3), запис: делегатор мав Manage і видав Write; його ПОНИЖЕНО до Write/Read на проєкт (роль лишилась).
+    /// CanManage вимагає Manage (або авторство, а автор документа тут інший) - надання перестає діяти: PATCH виконавця
+    /// 403 <c>InsufficientGrantLevel</c>, значення не змінилось; повернення Manage оживляє надання (D-454, DESIGN-D443 §4).
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ: у <c>DelegatorAuthority.MayManage</c> повертати <c>true</c> - червоніє (PATCH після пониження 200).
+    /// </remarks>
+    [Theory]
+    [InlineData("Write")]
+    [InlineData("Read")]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P3-WRITE-AFTER-DOWNGRADE-HTTP")]
+    public async Task Write_передача_після_пониження_делегатора_до_Write_чи_Read_не_діє_а_Manage_повертає(string downgradeTo)
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+
+        using (var app = new EcrApiFactory(sql))
+        using (var executor = await SignInAsync(app, s.Executor.Name).ConfigureAwait(true))
+        {
+            await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(executor, s, 1m)).ConfigureAwait(true);
+        }
+
+        await SetProjectLevelAsync(s.Delegator.Id, Enum.Parse<GrantLevel>(downgradeTo)).ConfigureAwait(true);
+
+        // Свіжий вузол: профілі не з кешу (рівень гранта змінено прямо в базі).
+        using (var app = new EcrApiFactory(sql))
+        using (var executor = await SignInAsync(app, s.Executor.Name).ConfigureAwait(true))
+        {
+            var denied = await ExpectAsync(app, HttpStatusCode.Forbidden, PatchAsync(executor, s, 2m)).ConfigureAwait(true);
+            Assert.Equal("err.ECR-ACCS-0403.deniedCells", MessageKeyOf(denied));
+            Assert.Equal("InsufficientGrantLevel", ReasonOf(denied));
+            Assert.Equal(1m, await StoredValueAsync(s).ConfigureAwait(true));
+        }
+
+        await SetProjectLevelAsync(s.Delegator.Id, GrantLevel.Manage).ConfigureAwait(true);
+
+        using (var app = new EcrApiFactory(sql))
+        using (var executor = await SignInAsync(app, s.Executor.Name).ConfigureAwait(true))
+        {
+            await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(executor, s, 2m)).ConfigureAwait(true);
+            Assert.Equal(2m, await StoredValueAsync(s).ConfigureAwait(true));
+        }
+    }
+
+    /// <summary>
+    /// P3 (g)(2), запис: передача не відкриває ЗАКРИТИЙ період - PATCH виконавця 403 <c>PeriodClosed</c>, не
+    /// <c>InsufficientGrantLevel</c> (делегатор при цьому має всі права, тож «понад власний» тут ні до чого).
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ: у рішенні про запис пропустити стан періоду для підйому передачі (<c>DelegatedWrite</c>) - червоніє
+    /// (200 замість 403, значення змінюється).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P3-CLOSED-PERIOD-HTTP")]
+    public async Task Write_передача_не_відкриває_закритий_період_PATCH_виконавця_403_PeriodClosed()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+
+        using (var app = new EcrApiFactory(sql))
+        using (var executor = await SignInAsync(app, s.Executor.Name).ConfigureAwait(true))
+        {
+            await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(executor, s, 1m)).ConfigureAwait(true);
+        }
+
+        await using (var db = s.Builder.CreateContext())
+        {
+            var closed = await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE doc.Period SET State = {(int)PeriodState.Closed} WHERE ProjectId = {s.Document.ProjectId} AND PeriodKey = {s.PeriodKey}")
+                .ConfigureAwait(true);
+            Assert.Equal(1, closed);
+        }
+
+        using (var app = new EcrApiFactory(sql))
+        using (var executor = await SignInAsync(app, s.Executor.Name).ConfigureAwait(true))
+        {
+            var denied = await ExpectAsync(app, HttpStatusCode.Forbidden, PatchAsync(executor, s, 2m)).ConfigureAwait(true);
+            Assert.Equal("PeriodClosed", ReasonOf(denied));
+            Assert.Equal(1m, await StoredValueAsync(s).ConfigureAwait(true));
+        }
+    }
+
+    private async Task SetProjectLevelAsync(int userId, GrantLevel level)
+    {
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var roleIds = db.RoleAssignments.Where(a => a.UserId == userId).Select(a => a.RoleId);
+        var changed = await db.ResourceGrants
+            .Where(g => roleIds.Contains(g.RoleId) && g.ResourceKind == ResourceKind.Project && !g.IsDeny)
+            .ExecuteUpdateAsync(u => u.SetProperty(g => g.Level, level)).ConfigureAwait(false);
+        Assert.Equal(1, changed);
+    }
+
     private static string MessageKeyOf(string body)
         => JsonDocument.Parse(body).RootElement.GetProperty("messageKey").GetString() ?? string.Empty;
 
