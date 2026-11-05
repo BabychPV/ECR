@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePollWhileVisible } from '@/shared/ui/usePollWhileVisible';
-import { DiscussionPollMs, MessagesPageSize, PollPageSize, getMessages } from './api';
+import { DiscussionPollMs, MessagesPageSize, PollPageSize, getMessages, withJitter } from './api';
 import { mergeMessages } from './chatModel';
 import type { DiscussionMessage, DiscussionPage } from './types';
 
@@ -185,7 +185,10 @@ export function useChatWindow(
     }
   }, [documentId, tableCode, sheetCopyId, periodFilter, reloadWindow]);
 
-  usePollWhileVisible(poll, DiscussionPollMs);
+  // AN-155c: one random 0-3 s addition per open chat (the shared interval hook takes a fixed period), so chats opened
+  // together drift apart instead of hitting the server on the same beat.
+  const [pollMs] = useState(() => withJitter(DiscussionPollMs));
+  usePollWhileVisible(poll, pollMs);
 
   const loadOlder = useCallback(async (): Promise<void> => {
     const current = stateRef.current;

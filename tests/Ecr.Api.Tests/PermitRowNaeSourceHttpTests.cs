@@ -60,7 +60,60 @@ public sealed class PermitRowNaeSourceHttpTests(SqlServerFixture sql)
         Assert.Equal(1, saved.GetProperty("added").GetInt32());
     }
 
-    private async Task<JsonElement> BatchAsync(HttpClient client, string type, long permitId, string name, long site)
+    /// <summary>
+    /// F13 (Аудит-2, 05.11): правило перевіряє лише НОВЕ чи ЗМІНЕНЕ посилання. Рядок, що посилається на вузол, який
+    /// уже не джерело (тут - вузол переведено на рівень SITE після запису), зберігається з тим самим значенням НАЕ при
+    /// правці іншого поля; зміна НАЕ на регіон - та сама відмова <c>naeSourceRequired</c>.
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ (виконаний локально): у <c>CheckPermitNaeSourceAsync</c> прибрати пропуск незміненого значення
+    /// (<c>current == id</c>) - правка назви старого рядка отримує <c>naeSourceRequired</c>, тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Наявний_рядок_зі_старим_не_джерелом_зберігається_без_зміни_НАЕ_а_зміна_на_регіон_відхиляється()
+    {
+        var tree = await SeedTreeAsync();
+        using var app = new EcrApiFactory(sql)
+        {
+            ExtraServices = s => s.AddSingleton(new NaeTreeSettings(tree.Code, NaeTreeSettings.Default.RegionSourceRegistryCode)),
+        };
+        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, AllRights);
+        var type = $"PNU{_tag}";
+        await PublishTypeAsync(client, type, tree.Code, ["A"]);
+        var permitId = await CreatePermitAsync(client, type);
+
+        var saved = await BatchAsync(client, type, permitId, "old", tree.Source);
+        Assert.True(saved.GetProperty("applied").GetBoolean(), saved.ToString());
+        var row = saved.GetProperty("rows")[0];
+        var entryId = row.GetProperty("entryId").GetInt64();
+        var version = row.GetProperty("version").GetString();
+
+        // Вузол рядка перестає бути джерелом (так виглядають рядки, записані до правила).
+        await using (var db = sql.CreateContext())
+        {
+            var node = await db.RegistryEntries.FindAsync(tree.Source);
+            node!.SetLevel(tree.SiteLevel);
+            await db.SaveChangesAsync();
+        }
+
+        // Правка назви з тим самим НАЕ - записується.
+        var renamed = await BatchAsync(client, type, permitId, "renamed", tree.Source, entryId, version);
+        Assert.True(renamed.GetProperty("applied").GetBoolean(), renamed.ToString());
+        Assert.Equal(1, renamed.GetProperty("updated").GetInt32());
+
+        // Зміна НАЕ на регіон - відмова рядка.
+        var newVersion = renamed.GetProperty("rows")[0].GetProperty("version").GetString();
+        var moved = await BatchAsync(client, type, permitId, "moved", tree.Region, entryId, newVersion);
+        Assert.False(moved.GetProperty("applied").GetBoolean(), moved.ToString());
+        var error = moved.GetProperty("rows")[0].GetProperty("errors")[0];
+        Assert.Equal(
+            ("ECR-REG-0422", "err.ECR-REG-0422.naeSourceRequired", "Site"),
+            (error.GetProperty("errorCode").GetString(), error.GetProperty("messageKey").GetString(), error.GetProperty("field").GetString()));
+    }
+
+    private async Task<JsonElement> BatchAsync(
+        HttpClient client, string type, long permitId, string name, long site, long? id = null, string? baseVersion = null)
     {
         var response = await client.PostAsJsonAsync(
             new Uri($"/api/v1/registries/PRM_{type}_Rows/entries/batch?dryRun=false", UriKind.Relative),
@@ -70,7 +123,7 @@ public sealed class PermitRowNaeSourceHttpTests(SqlServerFixture sql)
                 {
                     new
                     {
-                        clientRowId = name, op = "upsert", id = (long?)null, code = (string?)null, baseVersion = (string?)null,
+                        clientRowId = name, op = "upsert", id, code = (string?)null, baseVersion,
                         values = new Dictionary<string, string?>
                         {
                             ["PERMIT"] = permitId.ToString(CultureInfo.InvariantCulture),
@@ -95,7 +148,7 @@ public sealed class PermitRowNaeSourceHttpTests(SqlServerFixture sql)
     }
 
     /// <summary>Ієрархічний довідник рівнів REGION → SITE → SRC з трьома вузлами.</summary>
-    private async Task<(string Code, long Region, long Site, long Source)> SeedTreeAsync()
+    private async Task<(string Code, long Region, long Site, long Source, int SiteLevel)> SeedTreeAsync()
     {
         await using var db = sql.CreateContext();
         var registry = new RegistryDef(EcrCode.Create($"NAESG{_tag}"), Text($"NAE src guard {_tag}"), isTemporal: false);
@@ -128,6 +181,6 @@ public sealed class PermitRowNaeSourceHttpTests(SqlServerFixture sql)
             nodes[key] = entry;
         }
 
-        return (registry.Code, nodes["R1"].Id, nodes["S1"].Id, nodes["N1"].Id);
+        return (registry.Code, nodes["R1"].Id, nodes["S1"].Id, nodes["N1"].Id, levels["SITE"].Id);
     }
 }

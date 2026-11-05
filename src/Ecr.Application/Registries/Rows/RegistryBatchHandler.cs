@@ -1,4 +1,4 @@
-﻿// src/Ecr.Application/Registries/Rows/RegistryBatchHandler.cs
+// src/Ecr.Application/Registries/Rows/RegistryBatchHandler.cs
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Ecr.Application.Common;
@@ -326,12 +326,29 @@ public sealed partial class RegistryBatchHandler(
         }
 
         var levels = (await hierarchy.ListLevelsAsync(nae!.Id, ct).ConfigureAwait(false)).ToDictionary(l => l.Id, l => l.Code);
+
+        // ⚠ Лише НОВЕ чи ЗМІНЕНЕ посилання (F13 Аудит-2, 05.11): наявний рядок, що вже посилається не на джерело (до
+        // правила), інакше не можна було б зберегти взагалі - навіть правку іншого поля, коли клієнт шле всі значення.
+        var existingIds = upserts.Select(s => s.Entry?.Id).OfType<long>().ToList();
+        var naeFieldIds = naeFields.Select(f => f.Id).ToHashSet();
+        var stored = existingIds.Count == 0
+            ? []
+            : (await registries.ListValuesForEntriesAsync(existingIds, ct).ConfigureAwait(false))
+                .Where(v => naeFieldIds.Contains(v.RegistryFieldDefId) && v.ValueRefEntryId is not null)
+                .GroupBy(v => (v.RegistryEntryId, v.RegistryFieldDefId))
+                .ToDictionary(g => g.Key, g => g.First().ValueRefEntryId!.Value);
+
         Dictionary<long, RegistryEntry>? nodes = null;
         foreach (var state in upserts)
         {
             foreach (var field in naeFields)
             {
                 if (!state.Values.TryGetValue(field.Code, out var raw) || !TryEntryId(raw, out var id))
+                {
+                    continue;
+                }
+
+                if (state.Entry is { } entry && stored.TryGetValue((entry.Id, field.Id), out var current) && current == id)
                 {
                     continue;
                 }

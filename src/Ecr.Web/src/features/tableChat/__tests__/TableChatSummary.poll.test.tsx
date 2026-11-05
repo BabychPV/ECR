@@ -76,8 +76,12 @@ async function tick(ms: number): Promise<void> {
   });
 }
 
+// AN-155c: the interval carries a random 0-3 s addition; 0 keeps the exact-beat assertions below exact.
+let random: ReturnType<typeof vi.spyOn>;
+
 beforeEach(() => {
   vi.useFakeTimers();
+  random = vi.spyOn(Math, 'random').mockReturnValue(0);
   revision = 1;
   unread = 1;
   seen.length = 0;
@@ -87,6 +91,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   act(() => publishSummary(7, null));
+  random.mockRestore();
   vi.useRealTimers();
   Reflect.deleteProperty(document, 'visibilityState');
   vi.unstubAllGlobals();
@@ -118,6 +123,21 @@ describe('summary poll (LIVE-REFRESH A1)', () => {
     expect(seen).toHaveLength(3);
     expect(screen.getAllByRole('button', { name: 'Open discussion: 3 messages, 2 new' })).toHaveLength(2);
     expect(screen.getByRole('button', { name: 'Discussion, 2 unread' })).toBeTruthy();
+  });
+
+  it('AN-155c: the interval carries a random 0-3 s addition, so tabs opened together do not poll on the same beat', async () => {
+    random.mockReturnValue(0.5);
+    mount();
+    await tick(10);
+    expect(seen).toHaveLength(1);
+
+    // 30 s + 1.5 s: nothing at the bare 30 s beat...
+    await tick(30_500);
+    expect(seen).toHaveLength(1);
+
+    // ...and the request comes inside the 0-3 s window.
+    await tick(1_100);
+    expect(seen).toHaveLength(2);
   });
 
   it('a hidden tab does not poll; coming back asks at once', async () => {

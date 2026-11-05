@@ -306,6 +306,13 @@ public sealed class Project : Entity<int>
             return;
         }
 
+        // W15f (Аудит-2): той самий період - не зміна. Інакше кожен прохід задачі переписував позначку, і «змінено о»
+        // означало «перевірено о» (живий стенд: Project 4 переписаний на старті 11:05Z і 11:51Z без зміни періоду).
+        if (CurrentPeriodId == periodId)
+        {
+            return;
+        }
+
         CurrentPeriodId = periodId;
         CurrentPeriodChangedAt = utcNow;
     }

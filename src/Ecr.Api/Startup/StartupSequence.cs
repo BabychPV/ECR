@@ -127,8 +127,18 @@ public static partial class StartupSequence
         //     старту: вʼюхи потрібні SSRS, а не застосунку.
         try
         {
-            await scope.ServiceProvider.GetRequiredService<IReportViewGenerator>()
-                .GenerateAsync(templateVersionId: null, CancellationToken.None).ConfigureAwait(false);
+            // AN-155d: на старті — лише якщо входи вʼюх змінилися з останньої успішної повної генерації (інакше 12–20 с
+            // марної роботи на кожен старт). Публікація версії викликає інтерфейс як раніше — завжди повна генерація.
+            var generator = scope.ServiceProvider.GetRequiredService<IReportViewGenerator>();
+            if (generator is Ecr.Infrastructure.Reporting.ReportViewGenerator startupGenerator)
+            {
+                await startupGenerator.GenerateAsync(templateVersionId: null, onlyIfChanged: true, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                await generator.GenerateAsync(templateVersionId: null, CancellationToken.None).ConfigureAwait(false);
+            }
         }
         catch (SqlException ex)
         {

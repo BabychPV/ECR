@@ -383,6 +383,44 @@ public sealed partial class DocumentStaleResultsStoreTests
         Assert.Equal(all.Count * 2, w.Probe.Maps);
     }
 
+    /// <summary>
+    /// AN-155f: кільце чергує повні завантаження з паузою (не довше стелі) - після кожного періоду, крім останнього;
+    /// гарячий прохід пауз не робить. Мутація: прибрати очікування в <c>WarmOnceAsync</c> - червоний (0 пауз).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Кільце_робить_паузу_між_періодами_не_довшу_за_стелю_а_гарячий_прохід_ні()
+    {
+        var w = await WarmRigAsync();
+        using var cacheLease = w.R.Cache;
+        await using var providerLease = w.Provider;
+        _ = await SeedCurrentPeriodsAsync(w, 202501, 10);
+        var all = await ExpectedWarmAsync(ring: true, hotLimit: 2);
+
+        var pauses = new List<TimeSpan>();
+        var cap = TimeSpan.FromMilliseconds(3);
+        var warmer = new StaleMapWarmer(
+            w.Provider.GetRequiredService<IServiceScopeFactory>(), w.R.Cache, w.Clock, w.R.Epoch, NullLogger<StaleMapWarmer>.Instance)
+        {
+            RingPauseCap = cap,
+            Delay = (pause, _) =>
+            {
+                pauses.Add(pause);
+                return Task.CompletedTask;
+            },
+        };
+
+        _ = await warmer.WarmOnceAsync(CancellationToken.None, ring: false);
+        Assert.Empty(pauses);
+
+        w.Clock.Advance(StaleResultsMapCache.Ttl + TimeSpan.FromSeconds(1));
+        var warmed = await warmer.WarmOnceAsync(CancellationToken.None, ring: true);
+        Assert.Equal(all.Count, warmed.Count);
+        Assert.Equal(all.Count - 1, pauses.Count);
+        Assert.All(pauses, pause => Assert.InRange(pause, TimeSpan.Zero, cap));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

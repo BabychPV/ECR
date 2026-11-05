@@ -29,6 +29,16 @@ public sealed partial class StaleMapWarmer(
     public static readonly TimeSpan RingWindow = TimeSpan.FromMinutes(15);
 
     /// <summary>
+    /// AN-155f: стеля паузи між періодами кільця. Після кожного періоду (крім останнього) кільце чекає стільки, скільки
+    /// той період зайняв, але не довше за стелю: важкі повні завантаження (Land: 7 підряд, 6,2 млн читань) чергуються з
+    /// паузою для читачів, а попадання в кеш (мікросекунди) кільце майже не сповільнюють.
+    /// </summary>
+    public TimeSpan RingPauseCap { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>Очікування паузи кільця (тести підміняють, щоб рахувати паузи без реального часу).</summary>
+    public Func<TimeSpan, CancellationToken, Task> Delay { get; init; } = Task.Delay;
+
+    /// <summary>
     /// Один прохід: прогріває гарячі (або, при <paramref name="ring"/>, ВСІ періоди з актуальним прогоном) послідовно;
     /// повертає перелік успішно оброблених.
     /// </summary>
@@ -50,8 +60,9 @@ public sealed partial class StaleMapWarmer(
             return done;
         }
 
-        foreach (var period in periods)
+        for (var i = 0; i < periods.Count; i++)
         {
+            var period = periods[i];
             ct.ThrowIfCancellationRequested();
             var timer = Stopwatch.StartNew();
             try
@@ -73,6 +84,13 @@ public sealed partial class StaleMapWarmer(
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 LogWarmFailed(logger, period, ex.GetType().Name);
+            }
+
+            // AN-155f: лише кільце (гарячий прохід - 2-4 періоди, читачі чекають саме на них) і не після останнього.
+            if (ring && i < periods.Count - 1 && RingPauseCap > TimeSpan.Zero)
+            {
+                var spent = timer.Elapsed;
+                await Delay(spent < RingPauseCap ? spent : RingPauseCap, ct).ConfigureAwait(false);
             }
         }
 
