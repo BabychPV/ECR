@@ -27,8 +27,8 @@ public sealed class TableDiscussionStoreTests(SqlServerFixture sql, ITestOutputH
     private const int Tables = 150;
     private const int PerTable = 66;
     private const int Chats = Tables * 3;
-    private const int FullReadsCeiling = 2500; // виміряно 2256 (+10 %)
-    private const int MixedReadsCeiling = 2600; // виміряно 2361 (+10 %)
+    private const int FullReadsCeiling = 2850; // виміряно 2590 (+10 %); до AN-155a було 2256: OUTER APPLY додає ~0,7 читання на чат без позначки прочитаного
+    private const int MixedReadsCeiling = 2950; // виміряно 2694 (+10 %); до AN-155a було 2361
     private static readonly int[] FirstQuarter = [202601, 202602, 202603];
     private const int TablesPerChunk = 150;
     private const long CopyOne = 9_000_001;
