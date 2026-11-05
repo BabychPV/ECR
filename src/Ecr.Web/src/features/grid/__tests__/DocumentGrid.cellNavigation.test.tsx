@@ -192,12 +192,14 @@ describe('перехід до комірки в сітці (ФВ-5.6)', () => {
     await waitFor(() => expect(currentCellNavigation()).toBeNull());
   });
 
-  it('з колонкою підписів рядків фокус зсунутий на одну колонку праворуч', async () => {
+  it('з колонкою підписів рядків (вона закріплена) фокус іде в прокручуваний в\'юпорт зі зсувом на закріплену колонку', async () => {
     labeled = true;
     show(request({ tableDefId: 9, rowKey: 'r1', columnCode: 'C1' }));
 
-    // x=1: колонка 0 — підпис рядка, C1 — перша колонка даних.
-    await waitFor(() => expect(revo.setCellsFocus).toHaveBeenCalledWith({ x: 1, y: 0 }, { x: 1, y: 0 }));
+    // Глобальний індекс C1 = 1 (колонка 0 — підпис рядка). Підпис закріплений (числові колонки даних),
+    // тож C1 — перша колонка прокручуваного в'юпорту: x=0 у `rgCol`.
+    await waitFor(() => expect(revo.setCellsFocus).toHaveBeenCalledWith({ x: 0, y: 0 }, { x: 0, y: 0 }));
+    expect(revo.scrollToCoordinate).toHaveBeenCalledWith({ x: 0, y: 0 });
     await waitFor(() => expect(classOf('r1', 'C1')).toContain('ecr-cell-nav-target'));
   });
 

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createElement } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -76,16 +77,18 @@ vi.mock('@revolist/react-datagrid', () => ({
 
       {/*
        * ⚠ Кнопки нижче — для сценаріїв ІЗ колонкою підписів рядків
-       * (`hasRowLabels` істинна): вона вставляється ПЕРШОЮ в `gridColumns`,
-       * тож координата `x`, яку справді шле RevoGrid, зсунута на одиницю
-       * праворуч відносно того самого стовпця в `data.columns`. Саме тому тут
-       * `x=2`/`x1=3` там, де в кнопках вище (без підписів) було б `x=1`/`x1=2`.
+       * (`hasRowLabels` істинна): вона вставляється ПЕРШОЮ в `gridColumns` і за
+       * типовим правилом ЗАКРІПЛЕНА (`frozenColumns.ts`: у фікстурі всі
+       * колонки даних числові). Тож RevoGrid шле подію колонки підпису з
+       * `colType: 'colPinStart'` і `x=0`, а решти колонок - з `colType: 'rgCol'`
+       * і `x` від початку прокручуваного в'юпорту: C2 - це `x=1`, глобальний
+       * індекс 2 (1 закріплена + 1).
        */}
       <button
         type="button"
         onClick={(event) =>
-          // Клік по візуальній колонці C2 (грід-індекс 2 — підпис займає 0),
-          // рядок 3 (індекс 2).
+          // Клік по візуальній колонці C2 (глобальний індекс 2; у прокручуваному
+          // в'юпорті - x=1, бо підпис закріплений), рядок 3 (індекс 2).
           event.currentTarget.dispatchEvent(
             new CustomEvent('focuscell', {
               bubbles: true,
@@ -93,9 +96,9 @@ vi.mock('@revolist/react-datagrid', () => ({
               detail: {
                 rowType: 'rgRow',
                 colType: 'rgCol',
-                focus: { x: 2, y: 2 },
-                end: { x: 2, y: 2 },
-                range: { x: 2, y: 2, x1: 2, y1: 2 },
+                focus: { x: 1, y: 2 },
+                end: { x: 1, y: 2 },
+                range: { x: 1, y: 2, x1: 1, y1: 2 },
               },
             }),
           )
@@ -106,12 +109,13 @@ vi.mock('@revolist/react-datagrid', () => ({
       <button
         type="button"
         onClick={(event) =>
-          // Виділення діапазону C2..C3 (грід-індекси 2..3) × рядки 2..3.
+          // Виділення діапазону C2..C3 (глобальні індекси 2..3; у прокручуваному
+          // в'юпорті x=1..2) × рядки 2..3.
           event.currentTarget.dispatchEvent(
             new CustomEvent('setrange', {
               bubbles: true,
               composed: true,
-              detail: { type: 'rgRow', x: 2, y: 1, x1: 3, y1: 2 },
+              detail: { type: 'rgRow', x: 1, y: 1, x1: 2, y1: 2 },
             }),
           )
         }
@@ -121,14 +125,14 @@ vi.mock('@revolist/react-datagrid', () => ({
       <button
         type="button"
         onClick={(event) =>
-          // Клік по самій колонці підпису (грід-індекс 0), рядок 3.
+          // Клік по самій колонці підпису (глобальний індекс 0, закріплений в'юпорт), рядок 3.
           event.currentTarget.dispatchEvent(
             new CustomEvent('focuscell', {
               bubbles: true,
               composed: true,
               detail: {
                 rowType: 'rgRow',
-                colType: 'rgCol',
+                colType: 'colPinStart',
                 focus: { x: 0, y: 2 },
                 end: { x: 0, y: 2 },
                 range: { x: 0, y: 2, x1: 0, y1: 2 },
@@ -139,22 +143,27 @@ vi.mock('@revolist/react-datagrid', () => ({
       >
         focus-r3-label
       </button>
-      <button
-        type="button"
-        onClick={(event) =>
-          // Виділення, що зачіпає колонку підпису: грід-індекси 0..1 (підпис,
-          // C1) × рядки 2..3.
-          event.currentTarget.dispatchEvent(
-            new CustomEvent('setrange', {
-              bubbles: true,
-              composed: true,
-              detail: { type: 'rgRow', x: 0, y: 1, x1: 1, y1: 2 },
-            }),
-          )
-        }
-      >
-        select-range-label-included
-      </button>
+      {/* Діапазон RevoGrid не перетинає межу в'юпортів, тож «підпис + C1» одним виділенням неможливий:
+          діапазон по колонці підпису живе в закріпленому в'юпорті (шлях події містить його клас). */}
+      {createElement(
+        'revogr-viewport-scroll',
+        { class: 'colPinStart' },
+        <button
+          type="button"
+          onClick={(event) =>
+            // Виділення на самій колонці підпису: x=0..0 закріпленого в'юпорту × рядки 2..3.
+            event.currentTarget.dispatchEvent(
+              new CustomEvent('setrange', {
+                bubbles: true,
+                composed: true,
+                detail: { type: 'rgRow', x: 0, y: 1, x1: 0, y1: 2 },
+              }),
+            )
+          }
+        >
+          select-range-label-included
+        </button>,
+      )}
     </div>
   ),
 }));
@@ -459,8 +468,8 @@ describe('DocumentGrid: колонка підписів рядків не зсу
     const event = clipboard('');
     fireEvent.copy(stub, event);
 
-    // Виділення (грід-індекси 0..1: підпис, C1) у просторі даних клампиться
-    // до [0,0] — рівно C1, без нічого поза межею вибраного.
+    // Виділення колонки підпису (глобальний індекс 0..0, закріплений в'юпорт) у просторі даних
+    // клампиться до [0,0] — рівно C1, без нічого поза межею вибраного.
     expect(event.clipboardData.setData).toHaveBeenCalledWith('text/plain', 'r2-1\nr3-1\n');
   });
 

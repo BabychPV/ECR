@@ -14,6 +14,9 @@ import type {
   UnitRef,
 } from '@/api/types';
 import { useColumnWidths } from '@/features/preferences/columnWidthsSync';
+import { useFrozenColumns } from '@/features/preferences/frozenColumnsSync';
+import { applyFrozenColumns, defaultFrozenCount, frozenProbesOf, resolveFrozenCount } from './frozenColumns';
+import { FrozenColumnsSelect } from './FrozenColumnsSelect';
 import { cellAppearanceClassOf, cellAppearanceOf, withExplicitTextColour } from './cellAppearance';
 import { cellFormatOf, withCellFormat } from './conditionalAppearance';
 import { CellColorMenu, type ColourTarget } from './CellColorMenu';
@@ -194,6 +197,7 @@ import { useMonthColumnStatuses, type MarkedMonthStatus } from '@/features/grid/
 import '@/shared/theme/cell-states.css';
 import './cellEditors.css';
 import './headerGroups.css';
+import './frozenColumns.css';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
 import { lookupTargetsQuery } from '@/features/registries/lookupTargets';
@@ -975,6 +979,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // ключ `tableDefId`, а не `tableInstanceId`, інакше ширини губилися б на
   // кожному новому періоді. Хук сам скидає стан при зміні таблиці.
   const { widths, onResize: saveColumnWidths, reset: resetColumnWidths } = useColumnWidths(tableDefId);
+  // ✎ Закріплені ключові колонки: вибір користувача на таблицю (`frozenColumnsSync.ts`); `undefined` - типове правило.
+  const { count: frozenOverride, setCount: setFrozenOverride } = useFrozenColumns(tableDefId);
 
   const [historyRevision, setHistoryRevision] = useState(0);
   const touchHistory = useCallback(() => setHistoryRevision((value) => value + 1), []);
@@ -1377,10 +1383,40 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
   // Групові заголовки (до 3 рівнів): сітці йде дерево `ColumnData`; панелі формул і стану
   // лишаються на плоскому `columns`. Без груп — той самий масив, шапка в один рядок.
-  const gridColumnData = useMemo(
-    () => withHeaderGroups(columns, data?.headerGroups, data?.columns ?? []),
-    [columns, data?.headerGroups, data?.columns],
+  // ✎ Закріплення: типове правило залежить від ТИПІВ і шаблонних ширин колонок, не від ширин користувача
+  // (перетягування межі не має перекидати закріплення); вибір користувача перекриває типове.
+  const frozenDefault = useMemo(
+    () =>
+      data === undefined
+        ? 0
+        : defaultFrozenCount(
+            hasRowLabels(data),
+            frozenProbesOf(data.columns, data.headerGroups, (column) => columnWidth(undefined, column.widthPx)),
+            RowLabelColumnWidth,
+          ),
+    [data],
   );
+  const frozenCount = resolveFrozenCount(frozenOverride, frozenDefault, columns.length);
+  // ⛔ Скільки колонок закріплено, читають слухачі подій сітки (ставляться один раз у `gridContainerRef`):
+  // індекс у події RevoGrid відлічується від свого в'юпорту (`selection.ts: globalColumnOf`).
+  const pinnedStartRef = useRef(0);
+  pinnedStartRef.current = frozenCount;
+  const frozenColumns = useMemo(() => applyFrozenColumns(columns, frozenCount), [columns, frozenCount]);
+
+  const gridColumnData = useMemo(
+    () => withHeaderGroups(frozenColumns, data?.headerGroups, data?.columns ?? []),
+    [frozenColumns, data?.headerGroups, data?.columns],
+  );
+
+  // Зміна закріплення перебудовує в'юпорти: старе виділення/фокус (глобальні індекси) вказували б не туди.
+  const lastFrozenCount = useRef(frozenCount);
+  useEffect(() => {
+    if (lastFrozenCount.current === frozenCount) return;
+    lastFrozenCount.current = frozenCount;
+    selection.current = null;
+    publishFocus(tableInstanceId, periodKey, null);
+    publishSelection(tableInstanceId, periodKey, null);
+  }, [frozenCount, tableInstanceId, periodKey]);
 
   // ⚠ `overrides` перекриває значення зі зрізу лише для комірок, підтверджених
   // ЩОЙНО (`ФВ-2.16`, `#43`): сервер про них ще не знає, і без цього шару
@@ -2556,7 +2592,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           selection.current = next;
           // ✎ UI-23: рядок стану під сіткою читає виділення зі сховища.
           publishSelection(tableInstanceId, periodKey, next.range);
-        }),
+        }, () => pinnedStartRef.current),
 
         // ⛔ `UI-08`: фокус публікується у СХОВИЩЕ, а не в стан компонента.
         // Стан тут коштував би перебудови всього опису колонок (`gridColumns`,
@@ -2564,7 +2600,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // `GridFormulaBar` (`focusStore.ts`).
         trackFocusedCell(node, (cell) => {
           publishFocus(tableInstanceId, periodKey, cell);
-        }),
+        }, () => pinnedStartRef.current),
       ];
     },
     [tableInstanceId, periodKey],
@@ -2600,7 +2636,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       setNavigated({ key: cellKey(navigateTo.rowKey, column.code), seq: request.seq });
     }
 
-    void revealGridCell(node, coordinate)
+    void revealGridCell(node, coordinate, pinnedStartRef.current)
       .then((revealed) => {
         // ⛔ Програмний `setCellsFocus` НЕ шле DOM-подію `focuscell` (її шле лише курсор людини), тож без цього
         // рядок формули й інспектор (History «This cell», Info) не бачили б комірки, до якої перейшли від
@@ -2639,7 +2675,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       manualCursor.current = next;
       setNavigated({ key: cellKey(cell.rowKey, cell.columnCode), seq: -1 - next });
-      void revealGridCell(node, coordinate)
+      void revealGridCell(node, coordinate, pinnedStartRef.current)
         .then((revealed) => {
           if (revealed) publishFocus(tableInstanceId, periodKey, { rowIndex: coordinate.y, columnIndex: coordinate.x });
         })
@@ -2738,6 +2774,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
               : t('grid.formulaOverride.restore')}
           </Button>
         )}
+        <FrozenColumnsSelect
+          columnNames={columns.map((column) => String(column.name ?? ''))}
+          override={frozenOverride}
+          onChange={setFrozenOverride}
+        />
         {Object.keys(widths).length > 0 && (
           <Button variant="default" onClick={resetColumnWidths}>
             {t('grid.columnWidths.reset')}

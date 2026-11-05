@@ -1,0 +1,25 @@
+/*
+ * Межа закріплених колонок (`frozenColumns.ts`): права кромка + м'яка тінь, щоб було видно, де
+ * закінчується нерухома частина й починається прокручувана.
+ *
+ * ⚠ Лише змінні теми (`--ecr-border-strong`), без літеральних кольорів: темна й світла тема
+ * перемикають змінну, а не це правило. Кромка - псевдоелемент поверх в'юпорту, а не `border`/
+ * inset-тінь: фон комірок закрив би їх, а `border` змістив би розкладку в'юпорту й розійшовся
+ * із вимірами RevoGrid. Тінь іде ПРАВОРУЧ від кромки (на прокручувану частину).
+ */
+:root revo-grid[theme] revogr-viewport-scroll.colPinStart {
+  position: relative;
+  z-index: 2;
+}
+
+:root revo-grid[theme] revogr-viewport-scroll.colPinStart::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  pointer-events: none;
+  background-color: var(--ecr-border-strong);
+  box-shadow: 3px 0 6px -2px color-mix(in srgb, var(--ecr-border-strong) 70%, transparent);
+}

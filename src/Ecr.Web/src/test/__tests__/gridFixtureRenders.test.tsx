@@ -74,7 +74,11 @@ describe('Прилад a11y віддає сітку з КОМІРКАМИ, а н
     // не був доказом, що є що перевіряти.
     await waitFor(
       () => {
-        expect(container.querySelectorAll('.rgCell').length).toBeGreaterThan(0);
+        // ⚠ Закріплені колонки (`colPinStart`) малюються ОКРЕМИМ в'юпортом: під навантаженням він приходить раніше
+        // за `rgCol`, і «> 0 комірок» рахувало б лише закріплену частину; рядок підсумків (`pinnedBottomSource`)
+        // так само малюється по в'юпорту окремо й може прийти пізніше. Чекаємо всі комірки зрізу і всі підсумки.
+        expect(container.querySelectorAll('.rgCell:not([data-grid-totals])')).toHaveLength(6);
+        expect(container.querySelectorAll('.rgCell[data-grid-totals]')).toHaveLength(3);
       },
       { timeout: 5000 },
     );

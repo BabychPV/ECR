@@ -39,17 +39,26 @@ vi.mock('@revolist/react-datagrid', () => ({
 
 let stub: HTMLElement | null = null;
 
-/** Підіймає `focuscell` так, як його шле `revogr-overlay-selection`. */
+/**
+ * Підіймає `focuscell` так, як його шле `revogr-overlay-selection`.
+ *
+ * `columnIndex` - ГЛОБАЛЬНИЙ індекс колонки сітки. У цій таблиці є колонка підпису, і за типовим правилом
+ * (`frozenColumns.ts`; усі колонки даних числові) вона ЗАКРІПЛЕНА: фокус на ній - `colPinStart` із `x=0`,
+ * на решті - `rgCol` з `x`, відрахованим від початку прокручуваного в'юпорту.
+ */
 function focusCell(columnIndex: number, rowIndex: number): void {
+  const pinned = columnIndex === 0;
+  const x = pinned ? 0 : columnIndex - 1;
+
   stub?.dispatchEvent(
     new CustomEvent('focuscell', {
       bubbles: true,
       composed: true,
       detail: {
         rowType: 'rgRow',
-        colType: 'rgCol',
-        focus: { x: columnIndex, y: rowIndex },
-        end: { x: columnIndex, y: rowIndex },
+        colType: pinned ? 'colPinStart' : 'rgCol',
+        focus: { x, y: rowIndex },
+        end: { x, y: rowIndex },
       },
     }),
   );
