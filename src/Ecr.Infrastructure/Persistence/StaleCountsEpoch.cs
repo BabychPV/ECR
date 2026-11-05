@@ -43,7 +43,7 @@ public sealed class StaleCountsEpoch : DbTransactionInterceptor
     private readonly ConditionalWeakTable<DbContext, Pending> _pending = [];
     private readonly ConcurrentDictionary<int, long> _periods = new();
     private readonly ConcurrentDictionary<int, DirtyLog> _dirty = new();
-    private readonly ConcurrentDictionary<int, Counter> _runSwitches = new();
+    private readonly ConcurrentDictionary<int, long> _hard = new();
     private long _global;
     private long _value;
 
@@ -83,19 +83,22 @@ public sealed class StaleCountsEpoch : DbTransactionInterceptor
     /// AN-155b: «жорстка» епоха періоду - <see cref="ValueFor"/> БЕЗ підйомів від перемикання актуального прогону
     /// (<see cref="InvalidateRunSwitch"/>). Перемикання прогону карта застарілості лікує точково (лише документи
     /// зачеплених прогонів), тож її запис від такого підйому не скидається; усе інше (довідник, невідомий період,
-    /// глобальний підйом, повна епоха) рухає і її. Не спадає: лічильник перемикань росте РАНІШЕ за складову періоду.
+    /// глобальний підйом, повна епоха) рухає і її.
     /// </summary>
+    /// <remarks>
+    /// ⛔ Окремий лічильник, що лише росте, а не «складова періоду мінус перемикання»: два інкременти різних лічильників
+    /// не атомарні разом, і різниця між ними на мить спадала на 1 - читач у цю щілину брав старіший запис карти за чинний і
+    /// пропускав позначки застарілості до 15 с (TTL; знахідка Аудиту-2, F13 #733).
+    /// </remarks>
     /// <param name="periodKey">Період.</param>
     public long HardValueFor(int periodKey)
-        => Interlocked.Read(ref _global)
-           + (_periods.TryGetValue(periodKey, out var own) ? own : 0)
-           - (_runSwitches.TryGetValue(periodKey, out var switches) ? Interlocked.Read(ref switches.Count) : 0);
+        => Interlocked.Read(ref _global) + (_hard.TryGetValue(periodKey, out var own) ? own : 0);
 
-    /// <summary>Підйом від перемикання прогону періоду: лічильник перемикань РАНІШЕ за складову періоду.</summary>
+    /// <summary>Підйом від перемикання прогону періоду: лише <see cref="ValueFor"/>, жорстка епоха не рухається.</summary>
     private void BumpRunSwitch(int periodKey)
     {
-        Interlocked.Increment(ref _runSwitches.GetOrAdd(periodKey, static _ => new Counter()).Count);
-        Bump(periodKey);
+        _periods.AddOrUpdate(periodKey, 1, static (_, v) => v + 1);
+        Interlocked.Increment(ref _value);
     }
 
     /// <summary>
@@ -131,6 +134,7 @@ public sealed class StaleCountsEpoch : DbTransactionInterceptor
     /// <param name="periodKey">Період.</param>
     public void Bump(int periodKey)
     {
+        _hard.AddOrUpdate(periodKey, 1, static (_, v) => v + 1);
         _periods.AddOrUpdate(periodKey, 1, static (_, v) => v + 1);
         Interlocked.Increment(ref _value);
     }
@@ -330,12 +334,6 @@ public sealed class StaleCountsEpoch : DbTransactionInterceptor
         {
             Bump(period);
         }
-    }
-
-    /// <summary>Лічильник перемикань прогону періоду (поле, бо <see cref="Interlocked"/> працює з <c>ref</c>).</summary>
-    private sealed class Counter
-    {
-        public long Count;
     }
 
     /// <summary>Позначки контексту до коміту.</summary>
