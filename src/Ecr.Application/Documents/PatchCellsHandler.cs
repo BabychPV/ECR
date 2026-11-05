@@ -3369,25 +3369,49 @@ public sealed partial class PatchCellsHandler(
         string? recalculationJobId,
         CancellationToken ct)
     {
-        var newVersions = (IReadOnlyDictionary<string, string>?)MergedRowVersions(context, changes)
-                          ?? await rowStore.GetRowVersionsAsync(request.TableInstanceId, context.PeriodKey, ct)
-                              .ConfigureAwait(false);
+        var newVersions = await TouchedRowVersionsAsync(request.TableInstanceId, context, changes, ct)
+            .ConfigureAwait(false);
 
         return ToResponse(changes, messages, recalculationJobId, newVersions, OutOfWindowKeys(context, changes));
     }
 
     /// <summary>
-    /// Версії рядків на початок запиту поверх тих, що повернув запис;
-    /// <c>null</c> — сховище не назвало версію хоч одного «торкнутого» рядка.
+    /// AN-162: версії ЛИШЕ рядків, яких торкнувся запит (оновлені, нові) - не всієї таблиці (на HSE401 це 6 428 ключів,
+    /// 148 КБ на одну правку). Клієнт зливає їх у свій кеш, не замінює мапу.
     /// </summary>
-    private static Dictionary<string, string>? MergedRowVersions(RequestContext context, CellChangeLists changes)
+    private async Task<IReadOnlyDictionary<string, string>> TouchedRowVersionsAsync(
+        long tableInstanceId, RequestContext context, CellChangeLists changes, CancellationToken ct)
+    {
+        if (MergedRowVersions(changes) is { } merged)
+        {
+            return merged;
+        }
+
+        // Запасний шлях: сховище не назвало версію хоч одного «торкнутого» рядка - читаємо й відсіюємо за ключами.
+        var all = await rowStore.GetRowVersionsAsync(tableInstanceId, context.PeriodKey, ct).ConfigureAwait(false);
+        var touched = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var id in changes.Touched)
+        {
+            if (changes.RowKeyById.TryGetValue(id, out var rowKey) && all.TryGetValue(rowKey, out var version))
+            {
+                touched[rowKey] = version;
+            }
+        }
+
+        return touched;
+    }
+
+    /// <summary>
+    /// Нові версії «торкнутих» рядків, що повернув запис; <c>null</c> - сховище не назвало версію хоч одного з них.
+    /// </summary>
+    private static Dictionary<string, string>? MergedRowVersions(CellChangeLists changes)
     {
         if (changes.NewRowVersions is not { } written || !changes.Touched.TrueForAll(written.ContainsKey))
         {
             return null;
         }
 
-        var merged = new Dictionary<string, string>(context.Versions, StringComparer.Ordinal);
+        var merged = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var id in changes.Touched)
         {
             if (changes.RowKeyById.TryGetValue(id, out var rowKey))

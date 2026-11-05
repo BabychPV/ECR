@@ -357,11 +357,53 @@ public sealed class PatchCellsTests
         Assert.Equal("0x0B", response.RowVersions["7001001"]);
         Assert.Equal("0x0D", response.RowVersions["NEW-1"]);
 
-        // Рядок поза батчем лишається у відповіді — форма та сама, що й до WR-04.
-        Assert.Equal("0x0C", response.RowVersions["7001002"]);
+        // AN-162: рядок поза батчем у відповідь НЕ потрапляє (раніше віддавалися версії всієї таблиці).
+        Assert.False(response.RowVersions.ContainsKey("7001002"));
+        Assert.Equal(2, response.RowVersions.Count);
 
         await _rows.DidNotReceive().GetRowVersionsAsync(
             Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>AN-162: у таблиці три рядки, правиться один - відповідь має один ключ, а не три.</summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task AN162_Відповідь_містить_версії_лише_зачеплених_рядків()
+    {
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(RowStates(("7001001", 1001L, "0x0A"), ("7001002", 1002L, "0x0C"), ("7001003", 1003L, "0x0F")));
+        _cells.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<long, string> { [1001L] = "0x0B" });
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)])),
+            CancellationToken.None);
+
+        var only = Assert.Single(response.RowVersions);
+        Assert.Equal("7001001", only.Key);
+        Assert.Equal("0x0B", only.Value);
+    }
+
+    /// <summary>AN-162: запасний шлях (сховище не назвало версію) теж відсіює рядки поза батчем.</summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task AN162_Перечитування_відсіює_рядки_поза_батчем()
+    {
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(RowStates(("7001001", 1001L, "0x0A"), ("7001002", 1002L, "0x0C"), ("7001003", 1003L, "0x0F")));
+        _cells.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<long, string>());
+        _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new Dictionary<string, string>
+             {
+                 ["7001001"] = "0x0E", ["7001002"] = "0x0C", ["7001003"] = "0x0F",
+             });
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)])),
+            CancellationToken.None);
+
+        var only = Assert.Single(response.RowVersions);
+        Assert.Equal("7001001", only.Key);
+        Assert.Equal("0x0E", only.Value);
     }
 
     /// <summary>
