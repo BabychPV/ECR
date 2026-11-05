@@ -1609,14 +1609,14 @@ public sealed class PatchCellsTests
         var preview = Substitute.For<Ecr.Application.Recalculation.IRowLocalPreview>();
         preview.PreviewAsync(
                 Arg.Any<TableInstanceRef>(), Arg.Any<IReadOnlyDictionary<string, long>>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<ComputedCellDto>?>([new ComputedCellDto("7001001", "Component", 12.5m)]));
+            .Returns(Task.FromResult<IReadOnlyList<ComputedCellDto>?>([new ComputedCellDto("7001001", "SiteLink", 12.5m)]));
         _preview = preview;
 
         var response = await Handler().HandleAsync(
             Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 5m)])), CancellationToken.None);
 
         var cell = Assert.Single(response.ComputedCells!);
-        Assert.Equal(("7001001", "Component", 12.5m), (cell.RowKey, cell.ColumnCode, cell.Value));
+        Assert.Equal(("7001001", "SiteLink", 12.5m), (cell.RowKey, cell.ColumnCode, cell.Value));
 
         preview.PreviewAsync(
                 Arg.Any<TableInstanceRef>(), Arg.Any<IReadOnlyDictionary<string, long>>(), Arg.Any<CancellationToken>())
@@ -1627,6 +1627,33 @@ public sealed class PatchCellsTests
 
         Assert.Equal(1, failed.AppliedCells);
         Assert.Null(failed.ComputedCells);
+    }
+
+    /// <summary>
+    /// F13-p158: перегляд обчислених комірок читає так само, як зріз — прихована колонка і колонка під забороною
+    /// читання у відповідь PATCH не їдуть (інакше відповідь була б оракулом їхнього значення).
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task HSE401_перегляд_не_повертає_прихованої_колонки_і_колонки_під_забороною_читання()
+    {
+        var preview = Substitute.For<Ecr.Application.Recalculation.IRowLocalPreview>();
+        preview.PreviewAsync(
+                Arg.Any<TableInstanceRef>(), Arg.Any<IReadOnlyDictionary<string, long>>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<ComputedCellDto>?>(
+            [
+                new ComputedCellDto("7001001", "Volume", 1m),
+                new ComputedCellDto("7001001", "RegistryLink", 2m),
+                new ComputedCellDto("7001001", "SiteLink", 3m),
+            ]));
+        _preview = preview;
+        (await _metadata.GetAsync(2, CancellationToken.None)).ColumnsById[SiteLinkColumnId].SetHidden(true);
+        HiddenColumn(RegistryLinkColumnId);
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 5m)])), CancellationToken.None);
+
+        var cell = Assert.Single(response.ComputedCells!);
+        Assert.Equal("Volume", cell.ColumnCode);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]

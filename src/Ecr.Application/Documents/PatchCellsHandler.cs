@@ -1,4 +1,4 @@
-using Ecr.Application.Calculations;
+﻿using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
@@ -305,7 +305,18 @@ public sealed partial class PatchCellsHandler(
 
         try
         {
-            return await preview.PreviewAsync(context.Instance, edited, ct).ConfigureAwait(false);
+            var computed = await preview.PreviewAsync(context.Instance, edited, ct).ConfigureAwait(false);
+            if (computed is not { Count: > 0 })
+            {
+                return computed;
+            }
+
+            // ⛔ F13-p158: перегляд — те саме читання, що й зріз (GetTableSliceHandler): прихована колонка чи колонка
+            // поза межами читання автора не повертається, інакше відповідь PATCH стала б оракулом її значення.
+            var scope = (await access.ReadScopeAsync(context.Profile, context.Instance.DocumentId, ct)
+                .ConfigureAwait(false)).InPeriod(new PeriodKey(context.Instance.PeriodKey));
+            return [.. computed.Where(cell => context.ColumnDefs.TryGetValue(cell.ColumnCode, out var column)
+                && !column.IsDeleted && !column.IsHidden && scope.CanReadColumn(column.Id))];
         }
 #pragma warning disable CA1031 // перегляд не має права валити збережений запис
         catch (Exception ex) when (ex is not OperationCanceledException)
