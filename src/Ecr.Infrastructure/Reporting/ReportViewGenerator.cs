@@ -144,7 +144,9 @@ public sealed partial class ReportViewGenerator(
         try
         {
             await using var command = connection.CreateCommand();
-            command.CommandText = "EXEC rpt.usp_GenerateStableViews @TemplateVersionId, @MonthRouting";
+            // ⛔ AN-155d (знахідка Аудиту-2 на живому стенді): параметр @OnlyIfChanged мусить бути в ТЕКСТІ виклику - доданий лише
+            // в Parameters, він мовчки ігнорувався, і стабільні вʼюхи перегенеровувались на кожному старті.
+            command.CommandText = "EXEC rpt.usp_GenerateStableViews @TemplateVersionId, @MonthRouting, @OnlyIfChanged";
             command.CommandTimeout = db.Database.GetCommandTimeout() ?? 30;
             command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
             command.Parameters.Add(new SqlParameter("@TemplateVersionId", System.Data.SqlDbType.Int)
