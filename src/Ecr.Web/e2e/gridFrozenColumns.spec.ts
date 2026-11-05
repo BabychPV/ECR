@@ -153,15 +153,20 @@ async function open(page: Page, scheme: 'light' | 'dark' = 'light'): Promise<voi
   await expect(pinnedCell(page, 0, 2)).toBeVisible({ timeout: 30_000 });
 }
 
-/** Закріплений в'юпорт: `col` - 0 підпис, 1 CODE, 2 NAME. */
+/**
+ * Закріплений в'юпорт: `col` - 0 підпис, 1 CODE, 2 NAME.
+ * ⚠ Рядок підсумків (`pinnedBottomSource`) має ті самі `data-rgrow`/`data-rgcol` у власному ряду - виключено явно.
+ */
 const pinnedCell = (page: Page, row: number, col: number) =>
   page.locator(
-    `revo-grid revogr-viewport-scroll.colPinStart .rgCell[data-rgrow="${String(row)}"][data-rgcol="${String(col)}"]`,
+    `revo-grid revogr-viewport-scroll.colPinStart .rgCell:not([data-grid-totals])[data-rgrow="${String(row)}"][data-rgcol="${String(col)}"]`,
   );
 
-/** Прокручуваний в'юпорт: `col` - 0 M1, 1 M2, ... */
+/** Прокручуваний в'юпорт: `col` - 0 M1, 1 M2, ... (без рядка підсумків). */
 const scrolledCell = (page: Page, row: number, col: number) =>
-  page.locator(`revo-grid revogr-viewport-scroll.rgCol .rgCell[data-rgrow="${String(row)}"][data-rgcol="${String(col)}"]`);
+  page.locator(
+    `revo-grid revogr-viewport-scroll.rgCol .rgCell:not([data-grid-totals])[data-rgrow="${String(row)}"][data-rgcol="${String(col)}"]`,
+  );
 
 const header = (page: Page, name: string) =>
   page.locator('revo-grid revogr-header .rgHeaderCell').filter({ hasText: new RegExp(`^${name}$`) });
