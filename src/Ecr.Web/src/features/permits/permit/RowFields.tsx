@@ -71,6 +71,9 @@ function Field({ field, form, errors, onChange, readOnly, picker, pickerPending,
         clearable={!required}
         error={error}
         description={scopeHint(field, scopeOf(column))}
+        // Підказка ПІД полем, штатно (Mantine сам рахує відступи): CSS `order` переставляв лише візуально, а відступ
+        // «підказка над полем» лишався - NAE стояв на 2 px нижче сусідів (e2e naeUx, 05.11).
+        inputWrapperOrder={['label', 'input', 'description', 'error']}
         placeholder={pickerPending ? t('common.loading') : undefined}
         nothingFoundMessage={t('permits.page.row.noValues')}
       />
