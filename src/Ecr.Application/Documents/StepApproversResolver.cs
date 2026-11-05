@@ -19,6 +19,11 @@ namespace Ecr.Application.Documents;
 /// (<see cref="IAccessDecisionService.BuildProfilesAsync"/>), рішення — пакетом на крок
 /// (<see cref="IAccessDecisionService.CanApproveManyAsync"/>: те саме правило, умови аркуша й маршрут — раз).
 /// ⛔ Звужений читач цього класу не викликає (обробник віддає <c>null</c>): ім'я погоджувача — розкриття людини.
+/// ⚠ Обмеження (AN-159, рішення координатора 05.11, варіант A): хто має роль кроку ЛИШЕ через групу AD, у списку
+/// відсутній — членство в групах сервер не зберігає (SID групи є лише в куці власної сесії, і
+/// <see cref="IAccessDecisionService.BuildProfilesAsync"/> бере групи тільки для поточного користувача). Саме право
+/// затвердити не зачеплене. Групу окремим записом не показуємо: її не підтверджує те саме рішення (область, учасник,
+/// умови аркуша), а таблиця членства дала б застарілий і неповний список.
 /// </remarks>
 public sealed class StepApproversResolver(IStepApproverStore store, IAccessDecisionService access)
 {
