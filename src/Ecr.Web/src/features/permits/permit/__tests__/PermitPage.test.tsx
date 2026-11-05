@@ -593,7 +593,10 @@ describe('форма рядка', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     const dialog = await screen.findByRole('dialog', { name: 'New row' });
-    const message = await within(dialog).findByText('⟦err.ECR-REG-0422.naeSourceRequired⟧');
+    // Текст - з сіду NAE-src-guard.sql (каталог тестів читає сід), з підставленими параметрами відповіді.
+    const message = await within(dialog).findByText(
+      'Field «Substance»: node «T-7» is a «REGION» level node; a permit row can only reference an emission source (SRC).',
+    );
     // Текст стоїть у клітинці САМЕ цього поля (під списком), а не лише в загальному банері.
     expect(message.closest('[data-pp-field]')?.getAttribute('data-pp-field')).toBe('Substance');
     expect(screen.getByRole('dialog', { name: 'New row' })).toBeTruthy();
