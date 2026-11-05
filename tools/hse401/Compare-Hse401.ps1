@@ -8,15 +8,21 @@
     out/hse401-compare-real.csv (усі REAL), out/hse401-compare-classes.csv (кількості клас x колонка), консольна таблиця.
 #>
 [CmdletBinding()]
-param([string]$OutPrefix = 'hse401-compare')
+param([string]$OutPrefix = 'hse401-compare',
+    [ValidateSet('Scratch', 'Live')][string]$Target = 'Scratch', [string]$BaseUrl, [string]$Database, [string]$ConfirmStand, [string]$CredentialFile,
+    [switch]$PreviewOnly, [switch]$AcceptNaePreview)
 $ErrorActionPreference = 'Stop'
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 . (Join-Path $here 'Hse401Stand.Lib.ps1')
 . (Join-Path $here 'Hse401Json.Lib.ps1')
 . (Join-Path $here 'Hse401Xlsx.Lib.ps1')
 . (Join-Path $here 'Hse401Model.Lib.ps1')
+Set-Hse401Target -Target $Target -BaseUrl $BaseUrl -Database $Database -ConfirmStand $ConfirmStand -CredentialFile $CredentialFile -PreviewOnly:$PreviewOnly -AcceptNaePreview:$AcceptNaePreview
 $out = Get-Hse401OutDir
-$state = Read-HseJson (Join-Path $out 'hse401-state.json')
+if (Test-Hse401Preview) { Write-HseLog '[preview] порівняння пропущено: документ ще не завантажено (порівнювати є з чим лише після Load).'; return }
+$stateFile = Get-Hse401StateFile
+$state = Read-HseJson $stateFile
+Assert-Hse401StateMatches $state
 Connect-Hse
 $inv = [Globalization.CultureInfo]::InvariantCulture
 
@@ -131,4 +137,5 @@ if ($real.Count -gt 0) {
     $real | Select-Object -First 10 | ForEach-Object { Write-Host ("  Excel row {0} {1}({2}): excel=[{3}] ecr=[{4}] basis={5} code={6}" -f $_.excelRow, $_.column, $_.excelCol, $_.excel, $_.ecr, $_.basis, $_.code) }
 }
 $state['sliceSeconds'] = [math]::Round($sliceSec, 1); $state['sliceKB'] = [int]($r.Text.Length / 1KB)
-[IO.File]::WriteAllText((Join-Path $out 'hse401-state.json'), (ConvertTo-HseJson -Value $state).ToString(), (New-Object Text.UTF8Encoding($false)))
+$state['standKey'] = Get-Hse401StandKey
+[IO.File]::WriteAllText($stateFile, (ConvertTo-HseJson -Value $state).ToString(), (New-Object Text.UTF8Encoding($false)))
