@@ -17,7 +17,9 @@ param([switch]$Extract, [ValidateSet('Accounts', 'Registries', 'Nae', 'Template'
     [ValidateSet('Scratch', 'Live')][string]$Target = 'Scratch', [string]$BaseUrl, [string]$Database, [string]$ConfirmStand, [string]$CredentialFile,
     [switch]$PreviewOnly, [switch]$AcceptNaePreview)
 $ErrorActionPreference = 'Stop'
-$here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+# Кирилиця в перенаправленому виводі (Start-Process, логи живого прогону) - UTF-8, а не OEM-сторінка (S2, репетиція 05.11).
+try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+$here =if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 . (Join-Path $here 'Hse401Stand.Lib.ps1')
 . (Join-Path $here 'Hse401Json.Lib.ps1')
 Set-Hse401Target -Target $Target -BaseUrl $BaseUrl -Database $Database -ConfirmStand $ConfirmStand -CredentialFile $CredentialFile -PreviewOnly:$PreviewOnly -AcceptNaePreview:$AcceptNaePreview
@@ -62,7 +64,8 @@ Step 'Load' {
     $w = Wait-HseDocJobs -DocumentId ([int]$state['documentId']) -Since $since
     Write-HseLog ("перерахунок: задач {0}, невдалих {1}; кінець через {2} c після останнього PATCH; {3}" -f $w.Jobs, $w.Failed, [math]::Round($sw2.Elapsed.TotalSeconds, 1), ($w.Messages -join ' | '))
     $timings['RecalcWaitAfterLoadSec'] = [math]::Round($sw2.Elapsed.TotalSeconds, 1)
-    $timings['RecalcSpanFromFirstJobSec'] = [math]::Round(($w.LastUpdated - $w.FirstCreated).TotalSeconds, 1)
+    # D3: без нових задач перерахунку (повторний прогін) LastUpdated/FirstCreated порожні.
+    $timings['RecalcSpanFromFirstJobSec'] = if ($w.Jobs -gt 0 -and $null -ne $w.LastUpdated -and $null -ne $w.FirstCreated) { [math]::Round(($w.LastUpdated - $w.FirstCreated).TotalSeconds, 1) } else { 0 }
 }
 Step 'Compare' { & (Join-Path $here 'Compare-Hse401.ps1') @common }
 if ($PreviewOnly) { Write-Hse401PlanSummary; return }
