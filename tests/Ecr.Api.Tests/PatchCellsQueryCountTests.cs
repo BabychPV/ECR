@@ -79,8 +79,12 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
     /// їде EXISTS у тому самому запиті умов доступу (`BuildContextAsync`), а читання
     /// передач і повторна перевірка під блокуванням аркуша відбуваються лише для
     /// документа, у якого передачі є. Документ без передач платить +0.
+    /// 23 — AN-132a: факти документа (проєкт, версія шаблону, ознака кількох версій) читаються один раз на запит
+    /// (`AccessDecisionService.ScopeFactsAsync`): `ReadScopeAsync`, `SnapshotAsync`, `DocumentProjectIdAsync` більше
+    /// не питають їх окремо. Свіжі читання стану періоду/аркуша (`BuildContextAsync`, перевірка під блокуванням)
+    /// лишені навмисно.
     /// </remarks>
-    private const int MaxCommands = 24;
+    private const int MaxCommands = 23;
 
     private const string Password = "Api-Patch-Ratchet-2026!";
 

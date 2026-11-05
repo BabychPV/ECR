@@ -68,7 +68,8 @@ public sealed partial class ProjectTemplateVersionReadGuardTests
         // ProjectReadSnapshotAsync), 3 запити × 2 читання; (2) дійсність надання учасника - зріз за КОДАМИ аркуша/таблиці, а
         // гранти скопійовано на нові Id переносом (FinishSql), тож чинна версія достатня; (3) роль ОСТАННЬОГО кроку маршруту
         // документа (без періоду) - маршрут чинної версії. Поточний крок за періодом - уже doc.fn_VersionOf.
-        ["src/Ecr.Infrastructure/Security/AccessDecisionService.cs"] = (8, Kind.Current),
+        // AN-132a: (1) тепер ОДИН запит (`ScopeFactsAsync`, пам'ять запиту) × 2 читання замість трьох - 8 → 6.
+        ["src/Ecr.Infrastructure/Security/AccessDecisionService.cs"] = (6, Kind.Current),
     };
 
     [Fact]

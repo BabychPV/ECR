@@ -37,6 +37,46 @@ public sealed class AccessDecisionService(
     /// </summary>
     private static readonly Domain.Services.PeriodStateCalculator PeriodStates = new();
 
+    /// <summary>
+    /// AN-132a: «факти документа» (проєкт, версія шаблону, ознака кількох версій), прочитані в межах ЦЬОГО
+    /// екземпляра служби. Служба — Scoped, тобто HTTP-запит = один екземпляр: пам'ять не переходить між запитами
+    /// і користувачами. Ключ - лише id документа; значення не залежить від профілю. Відсутній документ не
+    /// кешується (кожен виклик знову дає ECR-DOC-0404).
+    /// </summary>
+    private readonly Dictionary<long, DocumentScopeFacts> scopeFacts = [];
+
+    /// <summary>Проєкт + версія шаблону проєкту + ознака кількох версій (один запит замість трьох на запит).</summary>
+    private readonly record struct DocumentScopeFacts(int ProjectId, int TemplateVersionId, bool Multi);
+
+    private async Task<DocumentScopeFacts?> ScopeFactsAsync(long documentId, CancellationToken ct)
+    {
+        if (scopeFacts.TryGetValue(documentId, out var known))
+        {
+            return known;
+        }
+
+        var scope = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new
+            {
+                d.ProjectId,
+                p.TemplateVersionId,
+                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId),
+            })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (scope is null)
+        {
+            return null;
+        }
+
+        var facts = new DocumentScopeFacts(scope.ProjectId, scope.TemplateVersionId, scope.Multi);
+        scopeFacts[documentId] = facts;
+        return facts;
+    }
+
     /// <inheritdoc />
     public async Task<AccessProfile> BuildProfileAsync(int userId, CancellationToken ct)
     {
@@ -981,17 +1021,8 @@ public sealed class AccessDecisionService(
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        var scope = await db.Documents
-            .AsNoTracking()
-            .Where(d => d.Id == documentId)
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new
-            {
-                d.ProjectId,
-                p.TemplateVersionId,
-                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId),
-            })
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false)
+        // ✎ AN-132a: факти документа - з пам'яті запиту (один запит на документ, спільний зі SnapshotAsync).
+        var scope = await ScopeFactsAsync(documentId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 "ECR-DOC-0404",
                 $"Документ {documentId} не знайдено.",
@@ -3335,20 +3366,11 @@ public sealed class AccessDecisionService(
 
     /// <summary>Проєкт документа.</summary>
     /// <inheritdoc />
-    public Task<int?> DocumentProjectIdAsync(long documentId, CancellationToken ct)
-        => db.Documents
-            .AsNoTracking()
-            .Where(d => d.Id == documentId)
-            .Select(d => (int?)d.ProjectId)
-            .FirstOrDefaultAsync(ct);
+    public async Task<int?> DocumentProjectIdAsync(long documentId, CancellationToken ct)
+        => (await ScopeFactsAsync(documentId, ct).ConfigureAwait(false))?.ProjectId;
 
     private async Task<int> ProjectIdAsync(long documentId, CancellationToken ct)
-        => await db.Documents
-            .AsNoTracking()
-            .Where(d => d.Id == documentId)
-            .Select(d => (int?)d.ProjectId)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false)
+        => (await ScopeFactsAsync(documentId, ct).ConfigureAwait(false))?.ProjectId
            ?? throw new NotFoundException(
                "ECR-DOC-0404",
                $"Документ {documentId} не знайдено.",
@@ -3361,17 +3383,10 @@ public sealed class AccessDecisionService(
     /// <summary>Знімок структури шаблону документа.</summary>
     private async Task<TemplateVersionSnapshot> SnapshotAsync(long documentId, CancellationToken ct)
     {
-        var scope = await db.Documents
-            .AsNoTracking()
-            .Where(d => d.Id == documentId)
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new
-            {
-                d.ProjectId,
-                p.TemplateVersionId,
-                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId),
-            })
-            .FirstAsync(ct)
-            .ConfigureAwait(false);
+        // ✎ AN-132a: ті самі факти, що й у ReadScopeAsync, - з пам'яті запиту. Раніше `FirstAsync` кидав
+        // InvalidOperationException для відсутнього документа; зберігаємо (не NotFound), щоб не змінити контракт.
+        var scope = await ScopeFactsAsync(documentId, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Sequence contains no elements");
 
         // ✎ RPT-STABLE Part B: проєкт з кількома версіями за періодами - знімок-обʼєднання (колонки старих періодів теж відомі).
         return await ProjectReadSnapshotAsync(scope.ProjectId, scope.TemplateVersionId, scope.Multi, ct).ConfigureAwait(false);
