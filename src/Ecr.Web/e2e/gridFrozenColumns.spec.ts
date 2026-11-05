@@ -155,18 +155,18 @@ async function open(page: Page, scheme: 'light' | 'dark' = 'light'): Promise<voi
 
 /**
  * Закріплений в'юпорт: `col` - 0 підпис, 1 CODE, 2 NAME.
- * ⚠ Рядок підсумків (`pinnedBottomSource`) має ті самі `data-rgrow`/`data-rgcol` у власному ряду - виключено явно.
+ * ⚠ Рядок підсумків (`pinnedBottomSource`) має ті самі `data-rgrow`/`data-rgcol`, а його комірка підпису - без
+ * `data-grid-totals`. Тому рядок даних вибирається за `aria-rowindex` (заголовок - 1, рядок даних `row` - `row + 2`;
+ * груп шапки у приладі немає).
  */
+const dataRow = (row: number) => `[aria-rowindex="${String(row + 2)}"]`;
+
 const pinnedCell = (page: Page, row: number, col: number) =>
-  page.locator(
-    `revo-grid revogr-viewport-scroll.colPinStart .rgCell:not([data-grid-totals])[data-rgrow="${String(row)}"][data-rgcol="${String(col)}"]`,
-  );
+  page.locator(`revo-grid revogr-viewport-scroll.colPinStart .rgCell${dataRow(row)}[data-rgcol="${String(col)}"]`);
 
 /** Прокручуваний в'юпорт: `col` - 0 M1, 1 M2, ... (без рядка підсумків). */
 const scrolledCell = (page: Page, row: number, col: number) =>
-  page.locator(
-    `revo-grid revogr-viewport-scroll.rgCol .rgCell:not([data-grid-totals])[data-rgrow="${String(row)}"][data-rgcol="${String(col)}"]`,
-  );
+  page.locator(`revo-grid revogr-viewport-scroll.rgCol .rgCell${dataRow(row)}[data-rgcol="${String(col)}"]`);
 
 const header = (page: Page, name: string) =>
   page.locator('revo-grid revogr-header .rgHeaderCell').filter({ hasText: new RegExp(`^${name}$`) });
