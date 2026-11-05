@@ -351,8 +351,32 @@ describe('the poll', () => {
     });
   }
 
+  // AN-155c: the chat poll carries a random 0-3 s addition fixed per open chat; 0 keeps the exact-beat assertions exact.
+  let random: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     vi.useFakeTimers();
+    random = vi.spyOn(Math, 'random').mockReturnValue(0);
+  });
+
+  afterEach(() => {
+    random.mockRestore();
+  });
+
+  it('AN-155c: an open chat polls at 10 s plus its own random 0-3 s, not on the bare 10 s beat', async () => {
+    random.mockReturnValue(0.9);
+    server.messages = [message(1), message(2)];
+    mount();
+    await tick(100);
+    const loads = server.of('GET', '/messages').length;
+
+    // 10 s + 2.7 s: nothing at the bare 10 s beat...
+    await tick(12_000);
+    expect(server.of('GET', '/messages')).toHaveLength(loads);
+
+    // ...and the poll comes inside the window.
+    await tick(1_000);
+    expect(server.of('GET', '/messages')).toHaveLength(loads + 1);
   });
 
   it('polls every 10 s with after=lastMessageId; 304 changes nothing; a new revision refetches the loaded window', async () => {

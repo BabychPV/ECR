@@ -35,6 +35,17 @@ export const DiscussionPollMs = 10_000;
  */
 export const SummaryPollMs = 30_000;
 
+/**
+ * Upper bound of the random addition to a poll interval (AN-155c). Five clients polling on the same beat gave a burst
+ * on the server (p95 1.9 s on the Land copy); a 0-3 s spread breaks the beat without changing what the user sees.
+ */
+export const PollJitterMs = 3_000;
+
+/** `base` plus a random `0..PollJitterMs` (AN-155c); `random` is injectable for tests. */
+export function withJitter(base: number, random: () => number = Math.random): number {
+  return base + Math.floor(Math.min(Math.max(random(), 0), 0.999_999) * PollJitterMs);
+}
+
 /** Body limit of the server (`TableDiscussionMessage.MaxBodyLength`). */
 export const MaxBodyLength = 4000;
 
@@ -222,7 +233,8 @@ export function useDiscussionSummary(documentId: number, enabled = true): UseQue
      * TanStack does not fire the interval while the tab is hidden (`refetchIntervalInBackground` is off); coming
      * back to the tab asks at once ('always': the 304 makes it cheap).
      */
-    refetchInterval: SummaryPollMs,
+    // AN-155c: a fresh 0-3 s addition on every cycle, so tabs opened together do not stay in step.
+    refetchInterval: () => withJitter(SummaryPollMs),
     refetchOnWindowFocus: 'always',
     // A 304 returns the same object; a 200 is a new body anyway — nothing to share structurally.
     structuralSharing: false,
@@ -238,7 +250,7 @@ export function useMentionTasks(opened: boolean): UseQueryResult<MentionTasks> {
     retry: false,
     staleTime: 0,
     // LIVE-REFRESH A3: a new @mention shows in the open My tasks within the summary interval (≤ 60 s by the plan).
-    refetchInterval: opened ? SummaryPollMs : false,
+    refetchInterval: opened ? () => withJitter(SummaryPollMs) : false,
   });
 }
 
