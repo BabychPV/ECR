@@ -126,7 +126,7 @@ if ($Stage -in 'Template', 'All') {
         foreach ($c in $cols) { if ($c.Group) { $changes += @{ entityType = 'ColumnDef'; entityId = [int]$colIds[$c.Code]; field = 'HeaderGroupId'; value = [string]$gid[$c.Group] } } }
         $null = Invoke-HseOk PATCH "/api/v1/template-versions/$vid/presentation" $changes
         Write-HseLog "  груп заголовків: $($groups.Count); колонок прив'язано: $($changes.Count)"
-        $p = Invoke-Hse POST "/api/v1/template-versions/$vid/publish" @{ reason = 'HSE401 scratch: перша версія' }
+        $p = Invoke-Hse POST "/api/v1/template-versions/$vid/publish" @{ reason = $(if (Test-Hse401Live) { 'HSE401: перша версія шаблону (завантаження з книги HSE401_v1.0.3.1)' } else { 'HSE401 scratch: перша версія' }) }
         if ($p.Status -notin 200, 201, 202, 204) { throw "publish -> $($p.Status) $(Get-EcrErrorCode $p) $($p.Text)" }
         Write-HseLog "  опубліковано версію id $vid"
         $state['templateId'] = [int]$tpl.id; $state['versionId'] = $vid; $state['tableDefId'] = $tid

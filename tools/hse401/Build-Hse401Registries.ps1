@@ -65,7 +65,9 @@ function Ensure-Registry {
         $bodies = @()
         $ordinal = 1
         foreach ($h in $have) {
-            $bodies += @{ id = $h.id; code = $h.code; nameL10n = @{ values = $h.nameL10n.values }; dataType = $h.dataType; ordinal = $ordinal++; isRequired = $h.isRequired; isKey = $h.isKey; lookupRegistryDefId = $h.lookupRegistryDefId; unitId = $h.unitId }
+            # GET definition віддає ключовість як isScopeField (RegistryFieldDto: IsScopeField = f.IsKey), збереження приймає isKey (D2, 05.11).
+            $hKey = if ($null -ne $h.PSObject.Properties['isKey']) { [bool]$h.isKey } else { [bool]$h.isScopeField }
+            $bodies += @{ id = $h.id; code = $h.code; nameL10n = @{ values = $h.nameL10n.values }; dataType = $h.dataType; ordinal = $ordinal++; isRequired = $h.isRequired; isKey = $hKey; lookupRegistryDefId = $h.lookupRegistryDefId; unitId = $h.unitId }
         }
         foreach ($f in $missing) {
             $bodies += @{ id = $null; code = $f.code; nameL10n = @{ values = @{ en = $f.en; ru = $f.ru } }; dataType = 'String'; ordinal = $ordinal++; isRequired = [bool]$f.key; isKey = [bool]$f.key; lookupRegistryDefId = $null; unitId = $null }
