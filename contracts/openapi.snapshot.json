@@ -58858,6 +58858,73 @@
         ]
       }
     },
+    "/api/v1/template-versions/{id}": {
+      "delete": {
+        "description": "⛔ Лише `Draft`, на яку ніщо поза її конфігурацією не посилається (проєкт, документ,\nмаршрут погодження, мапінг, вхід методики, клон від неї) — інакше `409 ECR-TMPL-0409` з\nпереліком використань. Опубліковану версію не видаляють, а виводять з обігу (`deprecate`).\nАркуші, таблиці, колонки, рядки, формули, правила, стилі, поля шапки й ресурсні гранти\nвидаляються однією транзакцією разом із записом у журнал безпеки.",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Відкидає незавершену чернетку разом з її структурою. Право `Template.Publish`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
     "/api/v1/template-versions/{id}/access-matrix": {
       "get": {
         "description": "⛔ Будується тим самим обчислювачем, що й доступ у документі\n(`ФВ-2.18`): друга реалізація «для перегляду» показувала б не те,\nщо система робить насправді, і перегляд перестав би ловити помилку в\nправилах — тобто робив би рівно протилежне тому, заради чого існує.",

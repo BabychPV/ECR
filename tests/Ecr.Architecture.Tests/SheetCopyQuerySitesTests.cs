@@ -44,6 +44,8 @@ public sealed partial class SheetCopyQuerySitesTests
         // ── лише оригінал (Q5: інтеграція, збір, події джерел, дозволи) ──
         ["src/Ecr.Infrastructure/Integration/IntegrationCellPatcher.cs"] = "запис у екземпляр копії відхиляється",
         ["src/Ecr.Infrastructure/Jobs/MaterializationScheduler.cs"] = "OriginalOnly",
+        ["src/Ecr.Infrastructure/Persistence/TemplateVersionDiscardStore.cs"] =
+            "лише факт існування рядків за аркушем/таблицею версії — і копія, і оригінал однаково блокують відкидання",
         ["src/Ecr.Infrastructure/Jobs/MaterializationTargets.cs"] = "OriginalOnly (адресати й відсутні екземпляри)",
         ["src/Ecr.Infrastructure/Jobs/MaterializeCollectedDataJob.cs"] = "OriginalOnly: задача на копію мапінгів не має",
         ["src/Ecr.Infrastructure/Jobs/SourceEventSyncJob.cs"] = "OriginalOnly (екземпляри, стан блокування, сирий SQL)",

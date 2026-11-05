@@ -21423,6 +21423,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Відкидає незавершену чернетку разом з її структурою. Право `Template.Publish`.
+         * @description ⛔ Лише `Draft`, на яку ніщо поза її конфігурацією не посилається (проєкт, документ,
+         *     маршрут погодження, мапінг, вхід методики, клон від неї) — інакше `409 ECR-TMPL-0409` з
+         *     переліком використань. Опубліковану версію не видаляють, а виводять з обігу (`deprecate`).
+         *     Аркуші, таблиці, колонки, рядки, формули, правила, стилі, поля шапки й ресурсні гранти
+         *     видаляються однією транзакцією разом із записом у журнал безпеки.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/access-matrix": {
         parameters: {
             query?: never;
