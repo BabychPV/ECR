@@ -33,7 +33,15 @@ public sealed partial class ReportViewGenerator(
     public const int RoutedGenerationTimeoutSeconds = 300;
 
     /// <inheritdoc />
-    public async Task GenerateAsync(int? templateVersionId, CancellationToken ct)
+    public Task GenerateAsync(int? templateVersionId, CancellationToken ct)
+        => GenerateAsync(templateVersionId, onlyIfChanged: false, ct);
+
+    /// <summary>
+    /// AN-155d: <paramref name="onlyIfChanged"/> — лише старт застосунку: процедури самі порівнюють відбиток входів (шаблони,
+    /// колонки, прив'язки, прапор, текст процедур) з відбитком останньої успішної повної генерації й пропускають роботу,
+    /// якщо нічого не змінилося. Публікація версії і DBA — завжди повна генерація (<c>false</c>).
+    /// </summary>
+    public async Task GenerateAsync(int? templateVersionId, bool onlyIfChanged, CancellationToken ct)
     {
         // ✎ Q-17 (QA3 D5): холодна генерація З прапором (~600 в'юх з приєднаннями власників) на живій базі може тривати
         // понад 60 с (41 с у тихій системі, 60 с — стеля команди за конкуренції) → SqlException, `reportviews` = Degraded.
@@ -54,13 +62,14 @@ public sealed partial class ReportViewGenerator(
             try
             {
                 await db.Database.ExecuteSqlRawAsync(
-                    "EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId, @MonthRouting",
+                    "EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId, @MonthRouting, @OnlyIfChanged",
                     [
                         new SqlParameter("@TemplateVersionId", System.Data.SqlDbType.Int)
                         {
                             Value = (object?)templateVersionId ?? DBNull.Value,
                         },
                         new SqlParameter("@MonthRouting", System.Data.SqlDbType.Bit) { Value = routed },
+                        new SqlParameter("@OnlyIfChanged", System.Data.SqlDbType.Bit) { Value = onlyIfChanged },
                     ],
                     ct).ConfigureAwait(false);
             }
@@ -71,7 +80,11 @@ public sealed partial class ReportViewGenerator(
 
             try
             {
-                await GenerateStableAsync(templateVersionId, routed, ct).ConfigureAwait(false);
+                var skipped = await GenerateStableAsync(templateVersionId, routed, onlyIfChanged, ct).ConfigureAwait(false);
+                if (logger is not null && onlyIfChanged)
+                {
+                    LogStartupViews(logger, skipped ? "пропущено: входи не змінилися" : "перегенеровано");
+                }
             }
             catch (SqlException ex)
             {
@@ -118,8 +131,9 @@ public sealed partial class ReportViewGenerator(
     /// ✎ RPT-STABLE: <c>rpt.usp_GenerateStableViews</c> — вʼюхи без версії (шаблон, аркуш, таблиця) по всіх опублікованих версіях.
     /// Попередження процедури (конфлікт типу колонки між версіями → nvarchar) пишуться в журнал.
     /// </summary>
-    private async Task GenerateStableAsync(int? templateVersionId, bool routed, CancellationToken ct)
+    private async Task<bool> GenerateStableAsync(int? templateVersionId, bool routed, bool onlyIfChanged, CancellationToken ct)
     {
+        var skipped = false;
         var connection = db.Database.GetDbConnection();
         var wasClosed = connection.State != System.Data.ConnectionState.Open;
         if (wasClosed)
@@ -138,9 +152,15 @@ public sealed partial class ReportViewGenerator(
                 Value = (object?)templateVersionId ?? DBNull.Value,
             });
             command.Parameters.Add(new SqlParameter("@MonthRouting", System.Data.SqlDbType.Bit) { Value = routed });
+            command.Parameters.Add(new SqlParameter("@OnlyIfChanged", System.Data.SqlDbType.Bit) { Value = onlyIfChanged });
             await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
+                if (string.Equals(reader.GetString(1), "Skipped", StringComparison.Ordinal))
+                {
+                    skipped = true;
+                }
+
                 if (!reader.IsDBNull(2) && logger is not null)
                 {
                     LogStableWarning(logger, reader.GetString(0), reader.GetString(2));
@@ -154,7 +174,12 @@ public sealed partial class ReportViewGenerator(
                 await db.Database.CloseConnectionAsync().ConfigureAwait(false);
             }
         }
+
+        return skipped;
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "ReportViewGenerator: вʼюхи rpt.v_* на старті — {Outcome}.")]
+    private static partial void LogStartupViews(ILogger logger, string outcome);
 
     [LoggerMessage(
         Level = LogLevel.Warning,

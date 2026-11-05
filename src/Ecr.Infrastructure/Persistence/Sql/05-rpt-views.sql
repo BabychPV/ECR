@@ -91,6 +91,54 @@ LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId
 WHERE cv.IsEmpty = 0;
 GO
 
+-- AN-155d: відбиток УСІХ входів, від яких залежить текст вʼюх rpt.v_*_vN та стабільних (обидві процедури нижче):
+--   * @MonthRouting;
+--   * визначення самих процедур і цієї функції (правка 05-rpt-views.sql => інший відбиток => перегенерація);
+--   * остання застосована міграція EF (dbo.__EFMigrationsHistory) — зміна таблиць під вʼюхами => перегенерація;
+--   * опубліковані/застарілі версії (Status 1,2): cfg.Template(Code), cfg.TemplateVersion(Id, TemplateId, Version);
+--   * їхні cfg.SheetDef(Id, Code, англ. назва NameL10n, IsDeleted=0), cfg.TableDef(Id, Code, LayoutKind, IsDeleted=0),
+--     cfg.ColumnDef(Id, Code, DataType, IsMonthColumn, MonthNumber, IsDeleted=0);
+--   * cfg.ColumnRename(From, To) (аліаси стабільних вʼюх);
+--   * по таблицях — чи є активна прив'язка cfg.CalculationBinding з предикатом MatchJson (змінює форму вʼюхи; решта прив'язки
+--     читається під час запиту).
+-- Чернетки (Status 0) у відбиток не входять: вʼюх вони не дають. Функція лише читає; викликається процедурами (EXECUTE AS OWNER).
+CREATE OR ALTER FUNCTION rpt.fn_ViewsFingerprint (@MonthRouting bit)
+RETURNS varchar(64)
+AS
+BEGIN
+    DECLARE @s nvarchar(max) = CONCAT(
+        N'mr=', CAST(COALESCE(@MonthRouting, 0) AS int),
+        -- Остання міграція EF: міграція може змінити таблиці, з яких читають вʼюхи (doc.*, calc.*) — перегенерувати один раз.
+        N';mig=', (SELECT MAX(h.MigrationId) FROM dbo.__EFMigrationsHistory AS h),
+        N';defs=', CONVERT(varchar(64), HASHBYTES('SHA2_256', CONCAT(
+            COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'rpt.usp_GenerateTemplateViews')), N''), N'|',
+            COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'rpt.usp_GenerateStableViews')), N''), N'|',
+            COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'rpt.fn_ViewsFingerprint')), N''))), 2),
+        N';tpl=', CAST((SELECT t.Id AS i, t.Code AS c, tv.Id AS v, tv.[Version] AS n
+                          FROM cfg.TemplateVersion AS tv JOIN cfg.Template AS t ON t.Id = tv.TemplateId
+                         WHERE tv.Status IN (1, 2) ORDER BY tv.Id FOR XML RAW(N'r'), TYPE) AS nvarchar(max)),
+        N';sh=', CAST((SELECT sd.Id AS i, sd.TemplateVersionId AS v, sd.Code AS c, JSON_VALUE(sd.NameL10n, N'$.en') AS e
+                         FROM cfg.SheetDef AS sd JOIN cfg.TemplateVersion AS tv ON tv.Id = sd.TemplateVersionId
+                        WHERE tv.Status IN (1, 2) AND sd.IsDeleted = 0 ORDER BY sd.Id FOR XML RAW(N'r'), TYPE) AS nvarchar(max)),
+        N';tb=', CAST((SELECT td.Id AS i, td.SheetDefId AS s, td.Code AS c, td.LayoutKind AS l
+                         FROM cfg.TableDef AS td JOIN cfg.SheetDef AS sd ON sd.Id = td.SheetDefId
+                         JOIN cfg.TemplateVersion AS tv ON tv.Id = sd.TemplateVersionId
+                        WHERE tv.Status IN (1, 2) AND sd.IsDeleted = 0 AND td.IsDeleted = 0 ORDER BY td.Id FOR XML RAW(N'r'), TYPE) AS nvarchar(max)),
+        N';co=', CAST((SELECT cd.Id AS i, cd.TableDefId AS t, cd.Code AS c, cd.DataType AS d, cd.IsMonthColumn AS m, cd.MonthNumber AS n
+                         FROM cfg.ColumnDef AS cd JOIN cfg.TableDef AS td ON td.Id = cd.TableDefId
+                         JOIN cfg.SheetDef AS sd ON sd.Id = td.SheetDefId
+                         JOIN cfg.TemplateVersion AS tv ON tv.Id = sd.TemplateVersionId
+                        WHERE tv.Status IN (1, 2) AND sd.IsDeleted = 0 AND td.IsDeleted = 0 AND cd.IsDeleted = 0
+                        ORDER BY cd.Id FOR XML RAW(N'r'), TYPE) AS nvarchar(max)),
+        N';rn=', CAST((SELECT r.FromColumnDefId AS f, r.ToColumnDefId AS t
+                         FROM cfg.ColumnRename AS r ORDER BY r.FromColumnDefId, r.ToColumnDefId FOR XML RAW(N'r'), TYPE) AS nvarchar(max)),
+        N';bp=', CAST((SELECT cb.TableDefId AS t FROM cfg.CalculationBinding AS cb
+                        WHERE cb.IsActive = 1 AND REPLACE(cb.MatchJson, CHAR(32), N'') <> N'{}'
+                        GROUP BY cb.TableDefId ORDER BY cb.TableDefId FOR XML RAW(N'r'), TYPE) AS nvarchar(max)));
+    RETURN CONVERT(varchar(64), HASHBYTES('SHA2_256', @s), 2);
+END;
+GO
+
 -- ⛔ D-14/D-66: застосунок DDL НЕ виконує. Він лише ВИКЛИКАЄ процедуру (при
 -- публікації версії шаблону — ПІСЛЯ коміту публікації, «найкращим зусиллям»:
 -- збій не відкочує публікацію, а лягає в журнал і в /health/ready; і на
@@ -125,14 +173,23 @@ GO
 -- Collection:MonthColumnRouting (застосунок передає його сам - ReportViewGenerator); за замовчуванням 0, і текст вʼюх
 -- БАЙТ-У-БАЙТ як до Q-17. DBA, що кличе процедуру руками на базі з увімкненим прапором, мусить передати @MonthRouting = 1:
 --     EXEC rpt.usp_GenerateTemplateViews @MonthRouting = 1;
+-- AN-155d: @OnlyIfChanged = 1 (лише старт застосунку; публікація й DBA лишають 0 = завжди генерувати) пропускає ГЕНЕРАЦІЮ ВСІХ
+-- версій (@TemplateVersionId IS NULL), якщо відбиток входів (rpt.fn_ViewsFingerprint) збігається з відбитком останньої
+-- УСПІШНОЇ повної генерації (розширена властивість схеми rpt, без таблиці й міграції) і всі очікувані вʼюхи є в базі.
+-- Пропуск повертає один рядок (0, N'', N'Skipped'). Відбиток пишеться ЛИШЕ після успішної повної генерації.
 CREATE OR ALTER PROCEDURE rpt.usp_GenerateTemplateViews
     @TemplateVersionId int = NULL,
-    @MonthRouting bit = 0
+    @MonthRouting bit = 0,
+    @OnlyIfChanged bit = 0
 WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    -- Відбиток входів рахується ДО генерації: зміна шаблону посеред неї не загубиться (наступний старт побачить різницю).
+    DECLARE @fp varchar(64) = rpt.fn_ViewsFingerprint(@MonthRouting);
+    DECLARE @fpName sysname = N'ecr.views.fingerprint';
 
     DECLARE @result TABLE (TableDefId int NOT NULL, ViewName sysname NOT NULL, Action nvarchar(16) NOT NULL);
     DECLARE @tables TABLE (
@@ -205,6 +262,16 @@ BEGIN
      WHERE ViewName IN (SELECT t2.ViewName FROM @tables AS t2 GROUP BY t2.ViewName HAVING COUNT(*) > 1);
 
     DELETE FROM @tables WHERE @TemplateVersionId IS NOT NULL AND TemplateVersionId <> @TemplateVersionId;
+
+    -- AN-155d: пропуск, якщо входи не змінилися з останньої успішної повної генерації й усі вʼюхи на місці.
+    IF @OnlyIfChanged = 1 AND @TemplateVersionId IS NULL
+       AND @fp = (SELECT CONVERT(varchar(64), ep.value) FROM sys.extended_properties AS ep
+                   WHERE ep.class = 3 AND ep.major_id = SCHEMA_ID(N'rpt') AND ep.minor_id = 0 AND ep.name = @fpName)
+       AND NOT EXISTS (SELECT 1 FROM @tables AS tt WHERE OBJECT_ID(N'rpt.' + QUOTENAME(tt.ViewName), N'V') IS NULL)
+    BEGIN
+        SELECT CAST(0 AS int) AS TableDefId, CAST(N'' AS nvarchar(400)) AS ViewName, CAST(N'Skipped' AS nvarchar(16)) AS Action;
+        RETURN;
+    END
 
     DECLARE @sheet int, @header nvarchar(400), @view sysname;
     DECLARE @select nvarchar(max), @selectText nvarchar(max), @joins nvarchar(max), @sql nvarchar(max), @existing nvarchar(max), @message nvarchar(2048);
@@ -678,6 +745,19 @@ next_table:
     IF @failure IS NOT NULL
         THROW 50422, @failure, 1;
 
+    -- AN-155d: відбиток пишемо лише після успішної ПОВНОЇ генерації; збій запису не ламає генерацію (наступний старт перегенерує).
+    IF @TemplateVersionId IS NULL
+    BEGIN TRY
+        IF EXISTS (SELECT 1 FROM sys.extended_properties WHERE class = 3 AND major_id = SCHEMA_ID(N'rpt') AND minor_id = 0 AND name = @fpName)
+            EXEC sys.sp_updateextendedproperty @name = @fpName, @value = @fp, @level0type = N'SCHEMA', @level0name = N'rpt';
+        ELSE
+            EXEC sys.sp_addextendedproperty @name = @fpName, @value = @fp, @level0type = N'SCHEMA', @level0name = N'rpt';
+    END TRY
+    BEGIN CATCH
+        -- нічого: без відбитка наступний старт просто згенерує все.
+        SET @fp = @fp;
+    END CATCH
+
     SELECT TableDefId, N'rpt.' + ViewName AS ViewName, Action FROM @result ORDER BY TableDefId;
 END;
 GO
@@ -702,14 +782,20 @@ GO
 --   * names      : a stable name equal to another stable name or to any _vN name is NOT generated (50409 at the end).
 -- Idempotent: the text is a pure function of the structure; an equal existing view is left alone (Unchanged).
 -- Result set: ViewName, Action (Created / Altered / Unchanged), Warning (nullable).
+-- AN-155d: @OnlyIfChanged = 1 — як у rpt.usp_GenerateTemplateViews (власна розширена властивість `ecr.stableviews.fingerprint`);
+-- пропуск повертає один рядок (N'', N'Skipped', NULL).
 CREATE OR ALTER PROCEDURE rpt.usp_GenerateStableViews
     @TemplateVersionId int = NULL,
-    @MonthRouting bit = 0
+    @MonthRouting bit = 0,
+    @OnlyIfChanged bit = 0
 WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    DECLARE @fp varchar(64) = rpt.fn_ViewsFingerprint(@MonthRouting);
+    DECLARE @fpName sysname = N'ecr.stableviews.fingerprint';
 
     DECLARE @result TABLE (ViewName sysname NOT NULL, Action nvarchar(16) NOT NULL, Warning nvarchar(2000) NULL);
 
@@ -783,6 +869,15 @@ BEGIN
         SELECT N'; ' + g.Header FROM @groups AS g WHERE g.ViewName = @clash ORDER BY g.GroupId
         FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
     DELETE FROM @groups WHERE ViewName IN (SELECT Name FROM @clashNames);
+
+    IF @OnlyIfChanged = 1 AND @TemplateVersionId IS NULL
+       AND @fp = (SELECT CONVERT(varchar(64), ep.value) FROM sys.extended_properties AS ep
+                   WHERE ep.class = 3 AND ep.major_id = SCHEMA_ID(N'rpt') AND ep.minor_id = 0 AND ep.name = @fpName)
+       AND NOT EXISTS (SELECT 1 FROM @groups AS gg WHERE OBJECT_ID(N'rpt.' + QUOTENAME(gg.ViewName), N'V') IS NULL)
+    BEGIN
+        SELECT CAST(N'' AS sysname) AS ViewName, CAST(N'Skipped' AS nvarchar(16)) AS Action, CAST(NULL AS nvarchar(2000)) AS Warning;
+        RETURN;
+    END
 
     DECLARE @g int, @header nvarchar(400), @view sysname, @tids nvarchar(max), @sheetCase nvarchar(max), @verCase nvarchar(max);
     DECLARE @select nvarchar(max), @selectText nvarchar(max), @joins nvarchar(max), @sql nvarchar(max), @existing nvarchar(max), @message nvarchar(2048);
@@ -1177,6 +1272,17 @@ next_group:
 
     IF @failure IS NOT NULL
         THROW 50422, @failure, 1;
+
+    IF @TemplateVersionId IS NULL
+    BEGIN TRY
+        IF EXISTS (SELECT 1 FROM sys.extended_properties WHERE class = 3 AND major_id = SCHEMA_ID(N'rpt') AND minor_id = 0 AND name = @fpName)
+            EXEC sys.sp_updateextendedproperty @name = @fpName, @value = @fp, @level0type = N'SCHEMA', @level0name = N'rpt';
+        ELSE
+            EXEC sys.sp_addextendedproperty @name = @fpName, @value = @fp, @level0type = N'SCHEMA', @level0name = N'rpt';
+    END TRY
+    BEGIN CATCH
+        SET @fp = @fp;
+    END CATCH
 
     SELECT ViewName, Action, Warning FROM @result ORDER BY ViewName;
 END;
