@@ -244,6 +244,7 @@ export type WarningKind =
   | 'rowDeleted'
   | 'cellNotFromPermit'
   | 'periodUnknown'
+  | 'periodClosed'
   | 'other';
 
 /** Випадок попередження за хвостом його коду (`binding.warning.inactive` → `inactive`). */
@@ -263,6 +264,8 @@ export function warningKind(warning: PermitPreviewWarning): WarningKind {
     case 'rowDeleted':
     case 'cellNotFromPermit':
     case 'periodUnknown':
+    // CL-30: `PermitBindingService` віддає `binding.warning.periodClosed`; без цього випадку - «other».
+    case 'periodClosed':
       return tail;
     case 'permitNotValidAtPeriodEnd':
       return 'notValidAtPeriodEnd';
