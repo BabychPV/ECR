@@ -9,8 +9,8 @@ function Format-LandAirSubstanceDisplay {
     .DESCRIPTION
         Ідемпотентно: назва, що вже починається з "<код> — ", не префіксується вдруге. Порожня назва або назва, що дорівнює коду, лишається кодом.
     #>
-    param([Parameter(Mandatory)][string]$Code, [AllowNull()][AllowEmptyString()][string]$Name)
-    $c = $Code.Trim()
+    param([Parameter(Mandatory)][string]$SubstanceCode, [AllowNull()][AllowEmptyString()][string]$Name)
+    $c = $SubstanceCode.Trim()
     $n = if ($null -eq $Name) { '' } else { $Name.Trim() }
     $prefix = $c + ' ' + [char]0x2014 + ' '
     if ($n.StartsWith($prefix, [System.StringComparison]::Ordinal)) { return $n }
@@ -51,8 +51,8 @@ function ConvertTo-LandAirSubstancePlan {
         $ru = if ([string]::IsNullOrWhiteSpace([string]$r.NameRu)) { '' } else { ([string]$r.NameRu).Trim() }
         if ($en.Length -eq 0) { $en = if ($ru.Length -gt 0) { $ru } else { $code } }
         # Показ "<код> — <назва>"; ліміт 200 символів рахується разом із префіксом.
-        $en = Format-LandAirSubstanceDisplay -Code $code -Name $en
-        if ($ru.Length -gt 0) { $ru = Format-LandAirSubstanceDisplay -Code $code -Name $ru }
+        $en = Format-LandAirSubstanceDisplay -SubstanceCode $code -Name $en
+        if ($ru.Length -gt 0) { $ru = Format-LandAirSubstanceDisplay -SubstanceCode $code -Name $ru }
         if ($en.Length -gt 200) { $en = $en.Substring(0, 200) }
         if ($ru.Length -gt 200) { $ru = $ru.Substring(0, 200) }
 

@@ -77,7 +77,7 @@ public sealed class LandAirSubstancesScriptTests
             'SKIPPED=' + $plan.Skipped
             'DUPS=' + $plan.Duplicates
             'NORM=' + $plan.Normalized
-            'BETA=' + (@($plan.Items | Where-Object { $_.Code -eq '304' } | ForEach-Object { $_.DisplayEn + '|' + $_.DisplayRu }) -join '')
+            'BETA=' + ((@($plan.Items | Where-Object { $_.Code -eq '304' } | ForEach-Object { $_.DisplayEn + '|' + $_.DisplayRu }) -join '') -replace [string][char]0x2014, '--')
             'LONG=' + (@($plan.Items | Where-Object { $_.Code -eq '2754' } | ForEach-Object { $_.DisplayEn.Length }) -join '')
             'EMPTY=' + (@((ConvertTo-LandAirSubstancePlan -Rows @()).Items).Count)
             """;
@@ -89,7 +89,8 @@ public sealed class LandAirSubstancesScriptTests
         Assert.Contains("SKIPPED=4", output, StringComparison.Ordinal);
         Assert.Contains("DUPS=1", output, StringComparison.Ordinal);
         Assert.Contains("NORM=1", output, StringComparison.Ordinal);
-        Assert.Contains("BETA=Beta-ru|Beta-ru", output, StringComparison.Ordinal);
+        // HSE401 05.11: показ «<код> — <назва>» (у сітці видно код, як в Excel); тире замінено на «--» лише для виводу консолі.
+        Assert.Contains("BETA=304 -- Beta-ru|304 -- Beta-ru", output, StringComparison.Ordinal);
         Assert.Contains("LONG=200", output, StringComparison.Ordinal);
         Assert.Contains("EMPTY=0", output, StringComparison.Ordinal);
     }

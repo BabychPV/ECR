@@ -170,8 +170,8 @@ foreach ($p in $dict['pollutant']) {
     if ($phs.En) { $vals.PHYSICAL_STATE_EN = $phs.En }
     if ($phs.Ru) { $vals.PHYSICAL_STATE_RU = $phs.Ru }
     # Показ "<код> — <назва>" (у Excel колонка містить код; сітка показує entry.display). Ідемпотентно (без подвійного префікса).
-    $enName = Format-LandAirSubstanceDisplay -Code $code -Name ([string]$comp.En)
-    $ruName = if ([string]$comp.Ru) { Format-LandAirSubstanceDisplay -Code $code -Name ([string]$comp.Ru) } else { '' }
+    $enName = Format-LandAirSubstanceDisplay -SubstanceCode $code -Name ([string]$comp.En)
+    $ruName = if ([string]$comp.Ru) { Format-LandAirSubstanceDisplay -SubstanceCode $code -Name ([string]$comp.Ru) } else { '' }
     $items += @{ Code = "E$code"; En = $enName; Ru = $ruName; Values = $vals }
 }
 Add-Entries 'LAND_AIR_SUBSTANCE' $def $items -FillFields @('COMPONENT', 'PHASE')
@@ -191,7 +191,7 @@ if ($existing.ContainsKey('LAND_AIR_SUBSTANCE')) {
         foreach ($lang in @('en', 'ru')) {
             $p = $cur.PSObject.Properties[$lang]
             if ($null -eq $p -or (Test-HseBlank $p.Value)) { continue }
-            $want = Format-LandAirSubstanceDisplay -Code $sc -Name ([string]$p.Value)
+            $want = Format-LandAirSubstanceDisplay -SubstanceCode $sc -Name ([string]$p.Value)
             if ($want -cne ([string]$p.Value).Trim()) { $changed[$lang] = $want }
         }
         if ($changed.Count -eq 0) { $displayOk++; continue }

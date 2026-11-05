@@ -8,12 +8,12 @@ Describe 'LandAirSubstances: показ "<код> — <назва>"' {
         $repo = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
         . (Join-Path $repo 'tools/land/LandAirSubstances.Lib.ps1')
         $dash = [string][char]0x2014
-        $once = Format-LandAirSubstanceDisplay -Code '143' -Name 'Aluminium oxide'
+        $once = Format-LandAirSubstanceDisplay -SubstanceCode '143' -Name 'Aluminium oxide'
         if ($once -cne "143 $dash Aluminium oxide") { throw "Очікувалось '143 $dash Aluminium oxide', отримано '$once'" }
-        $twice = Format-LandAirSubstanceDisplay -Code '143' -Name $once
+        $twice = Format-LandAirSubstanceDisplay -SubstanceCode '143' -Name $once
         if ($twice -cne $once) { throw "Подвійний префікс: '$twice'" }
-        if ((Format-LandAirSubstanceDisplay -Code '143' -Name '') -cne '143') { throw 'Порожня назва має лишитись кодом' }
-        if ((Format-LandAirSubstanceDisplay -Code '143' -Name '143') -cne '143') { throw 'Назва = код має лишитись кодом' }
+        if ((Format-LandAirSubstanceDisplay -SubstanceCode '143' -Name '') -cne '143') { throw 'Порожня назва має лишитись кодом' }
+        if ((Format-LandAirSubstanceDisplay -SubstanceCode '143' -Name '143') -cne '143') { throw 'Назва = код має лишитись кодом' }
     }
 
     It 'план імпорту: DisplayEn/DisplayRu з префіксом, ru порожня лишається порожньою' {
@@ -30,7 +30,7 @@ Describe 'LandAirSubstances: показ "<код> — <назва>"' {
         if ($a.DisplayEn -cne "143 $dash Aluminium oxide") { throw "EN: '$($a.DisplayEn)'" }
         if ($a.DisplayRu -cne "143 $dash Алюминий оксид") { throw "RU: '$($a.DisplayRu)'" }
         if ($b.DisplayRu -cne '') { throw "RU порожня має лишитись порожньою: '$($b.DisplayRu)'" }
-        $again = Format-LandAirSubstanceDisplay -Code '143' -Name $a.DisplayRu
+        $again = Format-LandAirSubstanceDisplay -SubstanceCode '143' -Name $a.DisplayRu
         if ($again -cne $a.DisplayRu) { throw 'Другий прогін змінив назву' }
     }
 }
