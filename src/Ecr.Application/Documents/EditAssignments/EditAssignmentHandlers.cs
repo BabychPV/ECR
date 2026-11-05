@@ -355,26 +355,7 @@ public sealed class UpsertEditAssignmentHandler(
         // «Лише в межах власних прав»: з даних шаблону, у сесії того, хто передає.
         var templateVersionId = await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
-        if (level == GrantLevel.Write)
-        {
-            var own = EditAssignmentAccess.SheetsBeyondOwnRights(profile, document.ProjectId, snapshot, slice);
-            if (own.Exceeds)
-            {
-                throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentDelegationExceedsOwnRights",
-                    "Передавати можна лише комірки, які ви самі можете редагувати.",
-                    new Dictionary<string, object?> { ["sheetCodes"] = own.VisibleSheetCodes });
-            }
-        }
-        else
-        {
-            // ⛔ D-443: видати рівень, вищий за власний на області, не можна — `Approve` видає лише той, хто сам має
-            // `Approve` на кожному аркуші й таблиці області (за ролями; заборона будь-де в області — відмова).
-            var ownLevel = EditAssignmentAccess.OwnLevelOver(profile, document.ProjectId, snapshot, slice);
-            if (ownLevel < level)
-            {
-                throw EditAssignmentAccess.LevelAboveOwn(level, ownLevel);
-            }
-        }
+        RequireWithinOwnRights(profile, document, snapshot, slice, level);
 
         // ✎ D-443: одержувачеві більше НЕ потрібна роль на проєкт — надання саме дає видимість (скасовано Q1 «одержувач
         // має Read»). Лишається: існує й активний; ознака «є/нема» не розкривається — однакова відповідь.
@@ -407,11 +388,54 @@ public sealed class UpsertEditAssignmentHandler(
             request.BaseVersion, overwrite)
         {
             Level = level,
+            Snapshot = snapshot,
             ExpiresAt = expiresAt,
             // Поле відсутнє в запиті (або пакетна дія) — термін наявної передачі не змінюється.
             KeepExpiresAt = keepExpiresAt || !request.ExpiresAtSpecified,
             KeepNote = keepNote,
         };
+    }
+
+    /// <summary>
+    /// «Лише в межах власних прав»: Write — кожен аркуш області має бути доступний передавачеві на запис; інші рівні —
+    /// не вищі за власний рівень передавача на області.
+    /// </summary>
+    private static void RequireWithinOwnRights(
+        AccessProfile profile, EditAssignmentDocumentRef document,
+        Domain.Entities.Configuration.TemplateVersionSnapshot snapshot, EditAssignmentSlice slice, GrantLevel level)
+    {
+        if (level == GrantLevel.Write)
+        {
+            var own = EditAssignmentAccess.SheetsBeyondOwnRights(profile, document.ProjectId, snapshot, slice);
+            if (own.Exceeds)
+            {
+                throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentDelegationExceedsOwnRights",
+                    "Передавати можна лише комірки, які ви самі можете редагувати.",
+                    new Dictionary<string, object?> { ["sheetCodes"] = own.VisibleSheetCodes });
+            }
+        }
+        else
+        {
+            // ⛔ D-443: видати рівень, вищий за власний на області, не можна — `Approve` видає лише той, хто сам має
+            // `Approve` на кожному аркуші й таблиці області (за ролями; заборона будь-де в області — відмова).
+            var ownLevel = EditAssignmentAccess.OwnLevelOver(profile, document.ProjectId, snapshot, slice);
+            if (ownLevel < level)
+            {
+                throw EditAssignmentAccess.LevelAboveOwn(level, ownLevel);
+            }
+        }
+    }
+
+    /// <summary>
+    /// ⛔ PM-EDITASSIGN-P3 (b): права передавача звіряються ще раз у транзакції запису — між підготовкою й записом
+    /// його могли понизити, і тоді передача, видана вже без прав, не записується (і одержувачі не отримують
+    /// сповіщення). Профіль будується заново: ключ кешу містить відбиток призначень ролей.
+    /// </summary>
+    private async Task RecheckDelegatorAsync(PreparedUpsert p, CancellationToken ct)
+    {
+        var profile = await access.BuildProfileAsync(p.UserId, ct).ConfigureAwait(false);
+        EditAssignmentAccess.RequireManager(profile, p.Document);
+        RequireWithinOwnRights(profile, p.Document, p.Snapshot, p.Slice, p.Level);
     }
 
     /// <summary>Записує підготовлену передачу в одній транзакції.</summary>
@@ -436,6 +460,7 @@ public sealed class UpsertEditAssignmentHandler(
             {
                 // Очікування блокувань обмежене (409 ECR-DOC-4091 замість висіння до CommandTimeout).
                 await store.LimitLockWaitAsync(innerCt).ConfigureAwait(false);
+                await RecheckDelegatorAsync(p, innerCt).ConfigureAwait(false);
 
                 // ⛔ Аудит P2-1: порядок блокувань — документ → передача, як у видалення документа (воно бере
                 // doc.Document першим). Тому існування зрізу читаємо БЕЗ блокування, і лише для нового зрізу
@@ -695,6 +720,9 @@ internal sealed record PreparedUpsert(
 
     /// <summary>Рівень учасника (D-443); за замовчуванням — передача місяця.</summary>
     public GrantLevel Level { get; init; } = GrantLevel.Write;
+
+    /// <summary>Знімок шаблону документа — для повторної перевірки «у межах власних прав» у транзакції запису.</summary>
+    public required Domain.Entities.Configuration.TemplateVersionSnapshot Snapshot { get; init; }
 
     /// <summary>Не чіпати термін наявної передачі (apply-set/copy).</summary>
     public bool KeepExpiresAt { get; init; }
