@@ -22,6 +22,8 @@ export const permitKeys = {
   type: (code: string) => ['permits', 'permit-type', code] as const,
   rows: (registryCode: string, permitId: number) => ['permits', 'rows', registryCode, permitId] as const,
   list: (code: string, scope: string) => ['permits', 'pick', code, scope] as const,
+  /** Записи одного рівня (`/entries?level=`), напр. лише джерела NAE: окремо від повного `list` (`/rows`) того ж реєстру. */
+  levelList: (code: string, level: string) => ['permits', 'pick', code, 'level', level] as const,
   scope: ['permits'] as const,
 };
 

@@ -562,6 +562,44 @@ describe('форма рядка', () => {
     expect(screen.getByRole('dialog', { name: 'New row' })).toBeTruthy();
   });
 
+  it('сервер відхилив значення списку NAE не рівня SRC (200, applied=false): текст біля цього поля, шторка відкрита, «збережено» немає', async () => {
+    saveBatch.mockResolvedValue({
+      added: 0,
+      applied: false,
+      deleted: 0,
+      dryRun: false,
+      rows: [
+        {
+          clientRowId: 'save',
+          entryId: null,
+          errors: [
+            {
+              errorCode: 'ECR-REG-0422',
+              field: 'Substance',
+              messageKey: 'err.ECR-REG-0422.naeSourceRequired',
+              params: { field: 'Substance', value: '7', entryCode: 'T-7', level: 'REGION' },
+            },
+          ],
+          status: 'error',
+          version: null,
+        },
+      ],
+      unchanged: 0,
+      updated: 0,
+    });
+    await addRow();
+    fireEvent.change(nameBox(), { target: { value: 'Outfall C' } });
+    fireEvent.change(annualBox(), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'New row' });
+    const message = await within(dialog).findByText('⟦err.ECR-REG-0422.naeSourceRequired⟧');
+    // Текст стоїть у клітинці САМЕ цього поля (під списком), а не лише в загальному банері.
+    expect(message.closest('[data-pp-field]')?.getAttribute('data-pp-field')).toBe('Substance');
+    expect(screen.getByRole('dialog', { name: 'New row' })).toBeTruthy();
+    expect(screen.queryByText(Catalog['permits.page.row.added'] ?? '⟦none⟧')).toBeNull();
+  });
+
   it('наявний рядок: форма заповнена, у пакеті лише змінене поле з baseVersion', async () => {
     await openLimits();
     fireEvent.click(screen.getByText('Outfall A'));

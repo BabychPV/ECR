@@ -1,3 +1,4 @@
+import { NaeRegistryCode, NaeSourceLevel } from '../nae/nodeAttributes';
 import { localName } from './names';
 import type { RegistryBatchItem, RegistryRow } from '@/features/registries/rows/api';
 import type { PermitTypeColumn, PermitTypeTable } from '../api/types';
@@ -246,6 +247,15 @@ export function pickerKey(column: PermitColumn, source: PermitTypeColumn): strin
   if (!isLookup(column)) return null;
   if (scopeOf(column) === 'permit') return source.siblingTableCode == null ? null : `permit:${source.siblingTableCode}`;
   return source.listRegistryCode ?? null;
+}
+
+/**
+ * Рівень, яким звужується спільний перелік стовпця-посилання (`null` — без звуження). Типи дозволів рівня не задають,
+ * тож правило клієнтське: стовпець на `NAE_TREE` пропонує лише вузли джерела (`SRC`), без регіонів, районів, майданчиків
+ * (людина 05.11: «має бути тільки nae»). Сервер тримає власну перевірку.
+ */
+export function pickerLevel(source: PermitTypeColumn): string | null {
+  return source.listScope === 'SharedRegistry' && source.listRegistryCode === NaeRegistryCode ? NaeSourceLevel : null;
 }
 
 /** Варіанти вибору стовпця: підпис + id запису; підпис без id у реєстрі відкидається (його не записати). */

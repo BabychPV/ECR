@@ -158,6 +158,54 @@ details.pp-group > summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: var(--mantine-spacing-sm);
+  /* Клітинки з різною висотою (підказка, помилка) не розтягуються одна під одну: верх у всіх спільний. */
+  align-items: start;
+}
+
+/*
+ * Вирівнювання полів форми рядка. Mantine кладе підказку МІЖ підписом і полем (label, description, input, error), тому
+ * поле з підказкою (Select зі «scope hint») стояло нижче сусіднього TextInput без неї. Підказка йде ПІД поле — лише
+ * порядок у flex-колонці (зв'язок `aria-describedby` і тексти не чіпаємо; прецедент — `.pp-fields` вище): тоді підпис
+ * і елемент керування кожного поля стоять на одній висоті, а підказка й помилка — під ними.
+ */
+.pp-field {
+  min-width: 0;
+}
+
+.pp-field .mantine-InputWrapper-root {
+  display: flex;
+  flex-direction: column;
+}
+
+.pp-field .mantine-InputWrapper-description {
+  order: 3;
+  margin-top: calc(var(--mantine-spacing-xs) / 2);
+}
+
+.pp-field .mantine-InputWrapper-error {
+  order: 4;
+}
+
+/* Перемикач Yes/No не має підпису над собою: порожній рядок підпису (aria-hidden) ставить його на лінію контролів. */
+.pp-switch {
+  display: flex;
+  flex-direction: column;
+}
+
+.pp-label-spacer {
+  display: block;
+  font-size: var(--mantine-font-size-sm);
+  line-height: var(--mantine-line-height);
+}
+
+.pp-label-spacer::before {
+  content: '\00a0';
+}
+
+.pp-switch .mantine-Switch-root {
+  display: flex;
+  align-items: center;
+  min-height: var(--ecr-ctl-height, 36px);
 }
 
 .pp-issues {

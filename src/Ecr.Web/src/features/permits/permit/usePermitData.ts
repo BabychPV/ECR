@@ -1,12 +1,15 @@
 import { useMemo } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
+import { apiFetch } from '@/api/client';
+import type { RegistryEntryDto } from '@/api/types';
 import { getRegistryRows } from '@/features/registries/rows/api';
 import type { RegistryRow } from '@/features/registries/rows/api';
+import { getRegistryTree } from '@/features/registries/tree/treeApi';
 import { todayDateOnly } from '@/shared/format/dateOnly';
 import type { Permit, PermitType } from '../api/types';
 import { permitKeys } from './permitQueries';
 import { createLimiter, PickerConcurrency } from './readLimiter';
-import { fieldsOf, loadRow, pickerKey, type LoadedRow, type PermitField, type PickerData } from './model';
+import { fieldsOf, loadRow, pickerKey, pickerLevel, type LoadedRow, type PermitField, type PickerData } from './model';
 
 // Ключі кешу й запити шапки — у `permitQueries.ts` (бюджет маршруту, D-132); реекспорт для наявних імпортів.
 export { permitKeys, usePermit, usePermitTypeDefinition, useUnitLabels } from './permitQueries';
@@ -16,6 +19,46 @@ const PageSize = 500;
 
 /** Спільний пул читань пікерів: усі `usePickerData` разом тримають у польоті не більше {@link PickerConcurrency} запитів. */
 export const pickerReads = createLimiter(PickerConcurrency);
+
+/** Запис пікера: id та підпис (для списку з `/rows` — `display`, для NAE — «номер · назва»). */
+export type PickRow = Pick<RegistryRow, 'id' | 'display'>;
+
+/**
+ * Записи довідника ОДНОГО рівня (`GET …/entries?asOf=&level=`): перелік NAE у формі рядка — лише вузли джерела (`SRC`),
+ * без регіонів, районів і майданчиків (людина 05.11: «має бути тільки nae»). Підпис — «<код> · <назва>».
+ *
+ * ⚠ Адреса без рядка запиту — окремим літералом: `EndpointCoverageTests` читає весь вміст між лапками як адресу.
+ */
+async function readEntriesOfLevel(
+  code: string,
+  level: string,
+  run: <T>(task: () => Promise<T>) => Promise<T>,
+): Promise<PickRow[]> {
+  const baseUrl = `/api/v1/registries/${encodeURIComponent(code)}/entries`;
+  // ⛔ `asOf` обов'язковий для темпорального довідника (як і в `readAll`).
+  const params = new URLSearchParams({ asOf: todayDateOnly(), level });
+  const entries = await run(() => apiFetch<RegistryEntryDto[]>(`${baseUrl}?${params.toString()}`));
+
+  // ⚠ Код запису довідника з автокодом технічний; бізнес-номер NAE — поле `NaeCode`, яке віддає лише дерево (`naeCode`).
+  // Дерево потрібне лише для підпису: збій його читання не ховає варіанти — підпис падає назад на код запису.
+  const naeCodes = new Map<number, string>();
+  try {
+    const tree = await run(() => getRegistryTree(code, false, ''));
+    for (const node of tree.nodes) {
+      if (node.naeCode != null && node.naeCode !== '') naeCodes.set(node.id, node.naeCode);
+    }
+  } catch {
+    // підпис із коду запису
+  }
+
+  return entries
+    .filter((entry) => entry.levelCode?.toLowerCase() === level.toLowerCase())
+    .map((entry) => {
+      const prefix = naeCodes.get(entry.id) ?? entry.code;
+
+      return { id: entry.id, display: prefix === '' ? entry.display : `${prefix} · ${entry.display}` };
+    });
+}
 
 async function readAll(
   code: string,
@@ -61,26 +104,35 @@ export function usePermitRows(registryCode: string, permitId: number, fields: re
  */
 export function usePickerData(permit: Permit, fields: readonly PermitField[], enabled: boolean) {
   const targets = useMemo(() => {
-    const found = new Map<string, { key: string; code: string; parent: number | undefined }>();
+    const found = new Map<string, { key: string; code: string; parent: number | undefined; level: string | null }>();
     for (const { column, source } of fields) {
       const key = pickerKey(column, source);
       if (key === null || found.has(key)) continue;
       if (key.startsWith('permit:')) {
         const table = permit.tables.find((candidate) => candidate.code === key.slice('permit:'.length));
-        if (table !== undefined) found.set(key, { key, code: table.registryCode, parent: permit.id });
+        if (table !== undefined) found.set(key, { key, code: table.registryCode, parent: permit.id, level: null });
       } else {
-        found.set(key, { key, code: key, parent: undefined });
+        found.set(key, { key, code: key, parent: undefined, level: pickerLevel(source) });
       }
     }
     return [...found.values()];
   }, [fields, permit]);
 
   const results = useQueries({
-    queries: targets.map((target) => ({
-      queryKey: permitKeys.list(target.code, String(target.parent ?? 'shared')),
-      queryFn: () => readAll(target.code, target.parent, pickerReads),
-      enabled,
-    })),
+    queries: targets.map((target) =>
+      target.level === null
+        ? {
+            queryKey: permitKeys.list(target.code, String(target.parent ?? 'shared')),
+            queryFn: (): Promise<PickRow[]> => readAll(target.code, target.parent, pickerReads),
+            enabled,
+          }
+        : {
+            // Окремий ключ: `/entries?level=` не ділить кеш із повним `/rows` того самого реєстру.
+            queryKey: permitKeys.levelList(target.code, target.level),
+            queryFn: (): Promise<PickRow[]> => readEntriesOfLevel(target.code, target.level ?? '', pickerReads),
+            enabled,
+          },
+    ),
   });
 
   const pending = enabled && results.some((result) => result.isPending);

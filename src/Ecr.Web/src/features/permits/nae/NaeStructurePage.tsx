@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState, type JSX } from 'react';
+import { Suspense, lazy, useRef, useState, type JSX } from 'react';
 import { Button, Group, Stack, Text } from '@mantine/core';
 import { EcrApiError } from '@/api/client';
 import { useRegistryDefinition } from '@/features/registries/rc812/data';
@@ -14,6 +14,7 @@ import { useMayWritePermits } from '../list/permitListRights';
 import { PermitsSubnav } from '../shell/PermitsSubnav';
 import { NaeEmptyState, NaeSeedRootsButton } from './NaeEmptyState';
 import { NaeRegistryCode } from './nodeAttributes';
+import { useSplitTop } from './useSplitTop';
 import { WhereUsed } from './WhereUsed';
 import './naeStructure.css';
 
@@ -81,6 +82,9 @@ export function NaeStructurePage(): JSX.Element {
   // Дерево порожнє (або довідника ще немає): лише тоді на панелі є «Create regions from registries». Той самий запит, що й у редактора.
   const tree = useRegistryTree(registryCode);
   const treeEmpty = notProvisioned || (!tree.isPending && tree.nodes.length === 0 && tree.query === '');
+
+  const splitRef = useRef<HTMLDivElement>(null);
+  useSplitTop(splitRef);
 
   const selected: TreeNodeId | null = nodeParam === null || nodeParam === '' ? null : Number(nodeParam);
   const registry = definition.data;
@@ -161,7 +165,8 @@ export function NaeStructurePage(): JSX.Element {
         definition.error !== null &&
         definition.error !== undefined && <ErrorAlert error={definition.error} onRetry={() => void definition.refetch()} />
       )}
-      {!notProvisioned && <RegistryTreeEditor
+      {!notProvisioned && <div className="nae-split" ref={splitRef} data-nae-split="">
+      <RegistryTreeEditor
         registryCode={registryCode}
         label={t('permits.nae.treeLabel')}
         canEdit={canEdit}
@@ -204,7 +209,8 @@ export function NaeStructurePage(): JSX.Element {
             <WhereUsed key={`used-${String(node.id)}`} registryCode={registryCode} entryId={Number(node.id)} />
           </div>
         )}
-      />}
+      />
+      </div>}
 
       {draft !== null && registry !== undefined && (
         <Suspense fallback={null}>
