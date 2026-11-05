@@ -1,7 +1,8 @@
-// src/Ecr.Application/Registries/Rows/RegistryBatchHandler.cs
+﻿// src/Ecr.Application/Registries/Rows/RegistryBatchHandler.cs
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Ecr.Application.Common;
+using Ecr.Application.Documents;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries.Keys;
@@ -43,7 +44,9 @@ public sealed partial class RegistryBatchHandler(
     DeleteRegistryEntryHandler deleter,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    Rules.IRegistryRuleEngine rules)
+    Rules.IRegistryRuleEngine rules,
+    IRegistryHierarchyStore? hierarchy = null,
+    Nae.NaeTreeSettings? naeTree = null)
 {
     /// <summary>Право на зміну даних довідника (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.EditData";
@@ -90,6 +93,7 @@ public sealed partial class RegistryBatchHandler(
         var states = items.Select(i => new RowState(i)).ToList();
         await ResolveAsync(definition, states, ct).ConfigureAwait(false);
         ParseNumbers(definition, states);
+        await CheckPermitNaeSourceAsync(definition, states, ct).ConfigureAwait(false);
 
         IReadOnlyList<RegistryEntryWriteRow> written = [];
         var ruleCheck = Rules.RegistryRuleCheck.None;
@@ -284,6 +288,94 @@ public sealed partial class RegistryBatchHandler(
                 [.. error.Details()
                     .Where(d => d.Key != "messageKey")
                     .Select(d => (d.Key, d.Value as string))]);
+        }
+    }
+
+    /// <summary>
+    /// Рядок таблиці дозволу (довідник <c>PRM_…</c> з полем-композицією <c>PERMIT</c>) посилається на НАЕ лише
+    /// джерелом: запис <c>NAE_TREE</c> іншого рівня (регіон, район, об'єкт, обладнання) — помилка рядка (звіт людини
+    /// про НАЕ, 05.11). Вузька версія: правило зашите для <c>NAE_TREE</c> → <c>SRC</c>, без налаштування колонки.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Шапка дозволу (<c>PRM_&lt;тип&gt;</c>, без поля <c>PERMIT</c>) посилається на регіон/район свідомо — її правило
+    /// не зачіпає. Неіснуючий чи чужий запис тут пропускається: його назве writer (<c>lookupEntryNotFound</c> /
+    /// <c>lookupWrongRegistry</c>), щоб відмова не дублювалась.
+    /// </remarks>
+    private async Task CheckPermitNaeSourceAsync(RegistryDef definition, List<RowState> states, CancellationToken ct)
+    {
+        if (hierarchy is null
+            || !definition.Code.StartsWith("PRM_", StringComparison.Ordinal)
+            || !definition.Fields.Any(f => f.Code == Permits.PermitHeaderFields.PermitFieldCode && f.RelationKind == RegistryRelationKind.Composition))
+        {
+            return;
+        }
+
+        var upserts = states.Where(s => s.Item.Op == "upsert" && s.Errors.Count == 0).ToList();
+        if (upserts.Count == 0)
+        {
+            return;
+        }
+
+        var nae = await registries.FindDefinitionAsync((naeTree ?? Nae.NaeTreeSettings.Default).RegistryCode, ct).ConfigureAwait(false);
+        var naeFields = nae is null
+            ? []
+            : definition.Fields.Where(f => f.DataType == CellDataType.Lookup && f.RefRegistryDefId == nae.Id).ToList();
+        if (naeFields.Count == 0)
+        {
+            return;
+        }
+
+        var levels = (await hierarchy.ListLevelsAsync(nae!.Id, ct).ConfigureAwait(false)).ToDictionary(l => l.Id, l => l.Code);
+        Dictionary<long, RegistryEntry>? nodes = null;
+        foreach (var state in upserts)
+        {
+            foreach (var field in naeFields)
+            {
+                if (!state.Values.TryGetValue(field.Code, out var raw) || !TryEntryId(raw, out var id))
+                {
+                    continue;
+                }
+
+                nodes ??= (await rows.ListEntriesAsync(nae.Id, asOfUtc: null, ct).ConfigureAwait(false)).ToDictionary(e => e.Id);
+                if (!nodes.TryGetValue(id, out var node))
+                {
+                    continue;
+                }
+
+                var level = node.LevelId is { } levelId && levels.TryGetValue(levelId, out var code) ? code : null;
+                if (!string.Equals(level, Nae.NaeTreeSchema.LevelSource, StringComparison.OrdinalIgnoreCase))
+                {
+                    state.Fail(
+                        field.Code, "ECR-REG-0422", "err.ECR-REG-0422.naeSourceRequired",
+                        ("field", field.Code), ("value", Invariant(id)), ("entryCode", node.Code), ("level", level ?? "—"));
+                }
+            }
+        }
+    }
+
+    /// <summary>Id запису з сирого значення Lookup (число чи рядок із числом); інше — не Id (тип перевірить writer).</summary>
+    private static bool TryEntryId(object? raw, out long id)
+    {
+        switch (CellValueReader.Normalize(raw))
+        {
+            case long l:
+                id = l;
+                return true;
+            case int i:
+                id = i;
+                return true;
+            case decimal d when d == decimal.Truncate(d) && d is >= long.MinValue and <= long.MaxValue:
+                id = (long)d;
+                return true;
+            case double f when f == Math.Truncate(f) && Math.Abs(f) < 9e15:
+                id = (long)f;
+                return true;
+            case string s when long.TryParse(s.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed):
+                id = parsed;
+                return true;
+            default:
+                id = 0;
+                return false;
         }
     }
 
