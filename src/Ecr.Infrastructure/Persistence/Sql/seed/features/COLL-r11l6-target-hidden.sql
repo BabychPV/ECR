@@ -1,8 +1,9 @@
--- COLL:r11l6-target-hidden ── ru: AN-94: ціль зв'язку недоступна читачеві; власна порція (kz — за термінологом) ──
+-- COLL:r11l6-target-hidden ── ru, kz: AN-94: ціль зв'язку недоступна читачеві; власна порція (kz — машинний переклад, AU-13) ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'registries.relationTargetHidden', N'ru', N'Справочник-цель вам недоступен')
+    (N'registries.relationTargetHidden', N'ru', N'Справочник-цель вам недоступен'),
+    (N'registries.relationTargetHidden', N'kz', N'Мақсатты анықтамалық сізге қолжетімсіз')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
