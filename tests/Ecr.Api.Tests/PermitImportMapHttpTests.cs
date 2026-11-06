@@ -36,7 +36,7 @@ namespace Ecr.Api.Tests;
 /// </list>
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class PermitImportMapHttpTests(SqlServerFixture sql)
+public sealed partial class PermitImportMapHttpTests(SqlServerFixture sql)
 {
     private static readonly string[] FreeText = ["free text"];
 

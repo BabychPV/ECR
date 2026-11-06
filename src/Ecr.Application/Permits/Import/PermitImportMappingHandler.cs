@@ -2,6 +2,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Common;
+using Ecr.Application.Documents.EditAssignments;
 using Ecr.Application.Errors;
 using Ecr.Application.Permits.AirLimits;
 using Ecr.Application.Ports;
@@ -109,6 +110,12 @@ public sealed class PermitImportMappingHandler(
         }
         catch (ConcurrencyConflictException)
         {
+            throw Changed(table.Code);
+        }
+        catch (Exception ex) when (EditAssignmentAccess.IsUniqueViolation(ex))
+        {
+            // Two FIRST saves at once: both read «no mapping» and add one; the second is refused by UQ_RegistryImportProfile
+            // (RegistryDefId, Code). The same answer as a stale If-Match - the mapping was saved by someone else meanwhile (not 500).
             throw Changed(table.Code);
         }
 
