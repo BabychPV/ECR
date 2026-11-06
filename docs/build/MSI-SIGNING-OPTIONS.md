@@ -1,7 +1,12 @@
 # Підпис `Ecr.msi`: три варіанти
 
 Стан на 2026-10-01. Рішення людини: «поки самопідписаний, або запропонуй інше» — тут три варіанти
-й рекомендація. Це довідка для вибору, не рішення: поки варіант не обрано, **MSI не підписується**.
+й рекомендація.
+
+✎ **2026-11-06, рішення людини (квіз, Q-6): «A+B зараз, потім C».** Видача: MSI підписується
+самопідписаним сертифікатом (варіант A), а SHA-256 підписаного файла йде в release notes (варіант B);
+корпоративний ЦС (C) — наступним кроком, коли замовник дасть шаблон Code Signing. Порядок видачі —
+розділ [«Видача: A+B»](#видача-ab) нижче.
 
 ## Що є в репозиторії
 
@@ -11,8 +16,12 @@
   `signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /n <ім'я>`. Потрібні `signtool`
   у `PATH`, сертифікат із закритим ключем у сховищі й доступ до сервера міток часу в інтернеті.
   У `sign-msi.ps1` ім'я підписанта — параметр, жодного сертифіката в репозиторії немає.
-- CI (`.github/workflows/ci.yml`, артефакт `ecr-msi`) збирає MSI **без підпису** і **без файлу хешу**;
-  хеш видно лише в журналі кроку «Збірка MSI». `Ecr-Setup-*.exe` не підписується жодним скриптом.
+- CI (`.github/workflows/ci.yml`, артефакт `ecr-msi`) збирає MSI **без підпису**; поруч лежить
+  `Ecr.msi.sha256` (еталон для `verify-msi.ps1`). Підпис — крок видачі на машині реліз-менеджера
+  (нижче), не CI: ключ не виходить із цієї машини. `Ecr-Setup-*.exe` не підписується жодним скриптом.
+- ✎ 06.11: `tools/new-codesign-cert.ps1` — створення самопідписаного сертифіката підпису й експорт `.cer`;
+  `tools/sign-msi.ps1 -Thumbprint` — `signtool sign /sha1 <відбиток> /fd SHA256` (без `signtool` у `PATH` —
+  `Set-AuthenticodeSignature -HashAlgorithm SHA256`) і перезапис `<msi>.sha256` хешем підписаного файла.
 - Інших засобів підпису (Azure/хмарні сервіси, HSM) у репозиторії немає — тут не пропонуються.
 
 ## Варіант A: самопідписаний сертифікат + довіра через GPO
@@ -58,8 +67,7 @@ Get-AuthenticodeSignature .\Ecr.msi | Format-List Status, SignerCertificate
 - **Ризики:** хеш захищає від пошкодження й підміни лише тоді, коли самого хеша отримано **іншим
   каналом**, ніж файл (інакше підмінити можна обидва). Особу видавця не доводить. Політика
   замовника «лише підписане ПЗ» цей варіант блокує.
-- **Ціна:** нуль; працює негайно, жодних змін у скриптах (CI варто додати файл `.sha256` до артефакта
-  — окрема дрібна задача, зараз його немає).
+- **Ціна:** нуль; працює негайно, жодних змін у скриптах (✎ CI уже кладе `Ecr.msi.sha256` в артефакт).
 
 ## Варіант C: підпис корпоративним ЦС замовника (AD CS)
 
@@ -87,3 +95,51 @@ Get-AuthenticodeSignature .\Ecr.msi | Format-List Status, SignerCertificate
 
 Відкриті питання до людини: чи є в замовника AD CS із шаблоном Code Signing; чи діє політика «лише
 підписане ПЗ»; чи дозволений вихід машини підпису до серверів міток часу.
+
+## Видача: A+B (рішення 06.11) {#видача-ab}
+
+**Один раз** (і на кожен перевипуск) — сертифікат на машині реліз-менеджера:
+
+```powershell
+.\tools\new-codesign-cert.ps1 -CerPath .\EcrCodeSigning.cer -WhatIf   # план
+.\tools\new-codesign-cert.ps1 -CerPath .\EcrCodeSigning.cer           # відбиток — у вивід
+```
+
+Ключ і файли:
+
+- закритий ключ типово **неекспортований** і живе лише в `Cert:\CurrentUser\My` реліз-менеджера: не
+  кладеться в репозиторій, CI чи спільні теки; втрата машини = новий сертифікат і новий `.cer`;
+- резервна копія ключа — лише свідомо: `-BackupPfxPath <файл> -PfxPassword (Read-Host -AsSecureString)`
+  (ключ тоді експортований); PFX зберігати офлайн, окремо від пароля;
+- розповсюджується лише `.cer` (відкрита частина) — його можна класти поруч із пакетом видачі;
+- строк — 2 роки (`-Years`); за місяць до кінця — перевипуск і повторне розповсюдження `.cer`;
+- щоб `verify-msi.ps1 -TrustedThumbprint` на цій самій машині дав `PASS`, а не `NotTrusted`, один раз
+  довірити власний `.cer` користувачу: `Import-Certificate -FilePath .\EcrCodeSigning.cer
+  -CertStoreLocation Cert:\CurrentUser\Root` (Windows попросить підтвердження).
+
+**На кожну видачу** (`Ecr.msi` — артефакт `ecr-msi` або `tools/build-msi.ps1`):
+
+```powershell
+.\tools\sign-msi.ps1   -MsiPath .\Ecr.msi -Thumbprint <відбиток>      # signtool /fd SHA256; переписує Ecr.msi.sha256
+.\tools\verify-msi.ps1 -MsiPath .\Ecr.msi -IntegrityOnly -RequireSignature -TrustedThumbprint <відбиток>
+Get-Content .\Ecr.msi.sha256                                            # цей хеш — у release notes
+```
+
+У release notes (`docs/release-notes/rc-<дата>.md`) — рядок `SHA256 = <хеш підписаного файла>` і
+відбиток сертифіката підпису. ⚠ Хеш із CI-артефакту після підпису вже НЕ збігається: публікується хеш
+із `sign-msi.ps1`. Хеш передається іншим каналом, ніж сам файл (варіант B).
+
+**Довіра на машинах замовника** (адміністратор домену; один раз на сертифікат):
+
+- GPO: `Computer Configuration → Policies → Windows Settings → Security Settings → Public Key Policies`
+  → імпорт `.cer` у **Trusted Publishers** і **Trusted Root Certification Authorities**;
+- або вручну (від адміністратора) на окремій машині:
+
+```bat
+certutil -addstore TrustedPublisher EcrCodeSigning.cer
+certutil -addstore Root EcrCodeSigning.cer
+```
+
+Перевірка на машині встановлення — та сама `verify-msi.ps1 -IntegrityOnly -RequireSignature
+-TrustedThumbprint <відбиток>` (або `Get-AuthenticodeSignature .\Ecr.msi` → `Status = Valid` після
+імпорту `.cer`).
