@@ -135,7 +135,8 @@ function Invoke-Sql {
     param([string] $Db, [string] $Query, [string] $File)
 
     $arguments = @('-S', $Server, '-E', '-C', '-b', '-I', '-d', $Db)
-    if ($File) { $arguments += @('-i', $File) } else { $arguments += @('-Q', $Query) }
+    # ⛔ `-f i:65001`: Sql/*.sql — UTF-8 без BOM, інакше кирилиця в THROW стає «Ð…».
+    if ($File) { $arguments += @('-f', 'i:65001', '-i', $File) } else { $arguments += @('-Q', $Query) }
 
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'

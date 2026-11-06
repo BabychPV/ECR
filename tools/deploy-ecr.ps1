@@ -1848,7 +1848,9 @@ function Invoke-DeploySql {
     )
 
     $arguments = @('-S', $SqlInstance) + $sqlAuth + $sqlTrust + @('-b', '-I', '-d', $TargetDb)
-    $arguments += if ($File) { @('-i', $File) } else { @('-Q', $Query) }
+    # ⛔ Sql/*.sql — UTF-8 без BOM: без `-f i:65001` sqlcmd читає їх у кодовій сторінці ANSI, і кирилиця
+    # в THROW тригерів/процедур стає «Ð…» (живий Land, 05.11). `i:` — лише вхід; вивід не змінюється.
+    $arguments += if ($File) { @('-f', 'i:65001', '-i', $File) } else { @('-Q', $Query) }
     $what = if ($File) { Split-Path -Leaf $File } else { $Query }
 
     if ($PSCmdlet.ShouldProcess("$SqlInstance / $TargetDb", "sqlcmd -i $what")) {
