@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Text, Title } from '@mantine/core';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { language, t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { PermitsPaths } from '../../shell/permitPaths';
-import type { AirAnalysis, AirImportResult, AirPreview } from '../airTypes';
+import type { AirAnalysis, AirImportResult, AirPreview, ImportSpec } from '../airTypes';
+import {
+  AddColumnError,
+  addPermitTableColumn,
+  AirType,
+  fieldFor,
+  withColumnField,
+  type AddColumnProblem,
+  type NewColumnRequest,
+} from './addColumn';
 import {
   useAirScopeCodes,
   useAirScopeFields,
@@ -42,6 +52,8 @@ export interface AirImportWizardProps {
   readonly mayImport: boolean;
   /** Право `Registry.EditDefinition`: збереження профілю імпорту. */
   readonly mayEditProfile: boolean;
+  /** Права `Permit.EditType` + `Permit.PublishType`: «Add as new column» (нова колонка таблиці дозволу). */
+  readonly mayAddColumn?: boolean;
 }
 
 function stepLabel(step: ImportStep): string {
@@ -79,7 +91,7 @@ function stepHint(step: ImportStep): string {
  * 3 Відповідність → 4 Перегляд (+ «Apply») → 5 Результат. Все, що змінюється на сервері, — лише кроком 4; кроки 1-3
  * нічого не пишуть.
  */
-export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProfile }: AirImportWizardProps): JSX.Element {
+export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProfile, mayAddColumn = false }: AirImportWizardProps): JSX.Element {
   const [step, setStep] = useState<ImportStep>('scope');
   const [scopeIssue, setScopeIssue] = useState<'region' | 'area' | null>(null);
   const [draft, setDraft] = useState<ImportDraft>(EmptyDraft);
@@ -111,6 +123,15 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
   const previewing = usePendingLoading(previewCall.isPending);
   const applying = usePendingLoading(apply.isPending);
   const saving = usePendingLoading(saveProfile.isPending);
+  const queryClient = useQueryClient();
+  const addColumn = useMutation<string, Error, NewColumnRequest>({
+    mutationKey: ['permits', 'types', AirType, 'add-column'],
+    mutationFn: (request) =>
+      addPermitTableColumn(request, t('permits.air.import.add.reason', { name: request.name, column: request.letter })),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['permits', 'types'] }),
+  });
+  const addingColumn = usePendingLoading(addColumn.isPending);
+  const [addProblem, setAddProblem] = useState<AddColumnProblem>(null);
 
   const patchDraft = useCallback((patch: Partial<ImportDraft>) => setDraft((current) => ({ ...current, ...patch })), []);
 
@@ -125,12 +146,15 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
     setStep(next);
   };
 
-  const runAnalyse = (then: ImportStep | null): void => {
+  /** Re-reads the file; `override` — with this specification (set into the draft at the same time). */
+  const runAnalyse = (then: ImportStep | null, override?: ImportSpec): void => {
     if (analyse.isPending || draft.file === null) return;
     setFailure(null);
-    const snapshot = draft.spec;
+    const current = override === undefined ? draft : { ...draft, spec: override };
+    if (override !== undefined) patchDraft({ spec: override });
+    const snapshot = current.spec;
     analyse.mutate(
-      { file: draft.file, options: buildOptions(draft) },
+      { file: draft.file, options: buildOptions(current) },
       {
         onSuccess: (data) => {
           setAnalysis(data);
@@ -187,6 +211,20 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
         },
       },
     );
+  };
+
+  const onAddColumn = (request: NewColumnRequest): void => {
+    const base = draft.spec ?? profile.data?.spec;
+    if (addColumn.isPending || base === undefined) return;
+    setFailure(null);
+    setAddProblem(null);
+    addColumn.mutate(request, {
+      onSuccess: (code) => {
+        showDone(t('permits.air.import.add.done', { name: request.name }));
+        runAnalyse(null, withColumnField(base, fieldFor(code, request)));
+      },
+      onError: (error) => (error instanceof AddColumnError ? setAddProblem(error.problem) : setFailure(error)),
+    });
   };
 
   const onSaveProfile = (code: string, name: string): void => {
@@ -275,6 +313,11 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           onSaveProfile={onSaveProfile}
           saving={saving}
           savedCode={savedCode}
+          onApplySpec={(spec) => runAnalyse(null, spec)}
+          mayAddColumn={mayAddColumn}
+          onAddColumn={onAddColumn}
+          addingColumn={addingColumn}
+          addProblem={addProblem}
         />
       )}
       {step === 'preview' && preview !== null && (

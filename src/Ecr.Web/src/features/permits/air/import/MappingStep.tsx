@@ -15,6 +15,8 @@ import {
   withoutField,
 } from './importModel';
 import { IssuesTable } from './IssuesTable';
+import type { AddColumnProblem, NewColumnRequest } from './addColumn';
+import { HeaderRowsForm, UnmappedColumns, type HeaderRows } from './LayoutControls';
 
 const ParserOptions = ['Text', 'Decimal', 'Integer', 'Code', 'Choice', 'Date', 'Unit'] as const;
 const LevelOptions = ['Parent', 'Child'] as const;
@@ -42,6 +44,23 @@ export interface MappingStepProps {
   readonly onSaveProfile: (code: string, name: string) => void;
   readonly saving: boolean;
   readonly savedCode: string | null;
+  /** Sets the specification and re-reads the file with it in one step (header rows, a new column). */
+  readonly onApplySpec: (spec: ImportSpec) => void;
+  /** Rights `Permit.EditType` + `Permit.PublishType`: «Add as new column». */
+  readonly mayAddColumn: boolean;
+  readonly onAddColumn: (request: NewColumnRequest) => void;
+  readonly addingColumn: boolean;
+  /** Why the last «Add as new column» was refused before anything was written. */
+  readonly addProblem?: AddColumnProblem;
+}
+
+/** The specification header rows apply to: the edited one, else the profile's. */
+function baseSpec(spec: ImportSpec | null, profile: ImportProfile | undefined): ImportSpec | null {
+  return spec ?? profile?.spec ?? null;
+}
+
+export function withHeaderRows(spec: ImportSpec, rows: HeaderRows): ImportSpec {
+  return { ...spec, header: { fromRow: rows.headerFrom, toRow: rows.headerTo }, dataStartRow: rows.dataFrom };
 }
 
 function SaveProfileForm({
@@ -217,13 +236,25 @@ function FieldEditor({
  */
 export function MappingStep(props: MappingStepProps): JSX.Element {
   const { analysis, profile, spec, onSpec, onReanalyse, reanalysing, mayEditProfile, onSaveProfile, saving, savedCode } = props;
+  const { onApplySpec, mayAddColumn, onAddColumn, addingColumn } = props;
   const body = analysis.analysis;
   const header = body.header;
   const problem = spec === null ? null : specProblem(spec);
   const [saveOpen, setSaveOpen] = useState(false);
+  const base = baseSpec(spec, profile);
 
   return (
     <div className="pi-page">
+      {header !== null && (
+        <HeaderRowsForm
+          // A new analysis (other rows found) restarts the form with what the server found.
+          key={`${String(header.headerFromRow)}-${String(header.headerToRow)}-${String(header.dataFromRow)}`}
+          detected={{ headerFrom: header.headerFromRow, headerTo: header.headerToRow, dataFrom: header.dataFromRow }}
+          busy={reanalysing}
+          disabled={base === null}
+          onApply={(rows) => base !== null && onApplySpec(withHeaderRows(base, rows))}
+        />
+      )}
       {header !== null && (
         <Text size="sm" data-testid="air-header-report">
           {t('permits.air.import.map.header', {
@@ -250,30 +281,43 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
         </div>
       </div>
 
-      {spec === null ? (
-        <div className="pi-panel">
-          <div className="pa-scroll" role="region" aria-label={t('permits.air.import.map.mappedAria')} tabIndex={0}>
-            <table className="pi-table">
-              <thead>
-                <tr>
-                  <th scope="col">{t('permits.air.import.map.field')}</th>
-                  <th scope="col">{t('permits.air.import.map.headerText')}</th>
-                  <th scope="col">{t('permits.air.import.map.matched')}</th>
-                  <th scope="col">{t('permits.air.import.map.level')}</th>
+      <div className="pi-panel">
+        <div className="pa-scroll" role="region" aria-label={t('permits.air.import.map.mappedAria')} tabIndex={0}>
+          <table className="pi-table">
+            <thead>
+              <tr>
+                <th scope="col">{t('permits.air.import.map.field')}</th>
+                <th scope="col">{t('permits.air.import.map.headerText')}</th>
+                <th scope="col">{t('permits.air.import.map.matched')}</th>
+                <th scope="col">{t('permits.air.import.map.level')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(header?.mapped ?? []).map((column) => (
+                <tr key={`${column.field}-${String(column.column)}`}>
+                  <th scope="row">{column.field}</th>
+                  <td>{column.headerText}</td>
+                  <td className="pa-code">{column.columnLetter}</td>
+                  <td>{column.level}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {(header?.mapped ?? []).map((column) => (
-                  <tr key={`${column.field}-${String(column.column)}`}>
-                    <th scope="row">{column.field}</th>
-                    <td>{column.headerText}</td>
-                    <td className="pa-code">{column.columnLetter}</td>
-                    <td>{column.level}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {props.addProblem != null && (
+        <Banner
+          tone="warning"
+          title={t('permits.air.import.add.problemTitle')}
+          text={props.addProblem === 'draftOpen' ? t('permits.air.import.add.draftOpen') : t('permits.air.import.add.noTable')}
+        />
+      )}
+      <UnmappedColumns columns={header?.unmapped ?? []} mayAdd={mayAddColumn && base !== null} onAdd={onAddColumn} busy={addingColumn} />
+
+      <details className="pi-panel" open={spec !== null ? true : undefined}>
+        <summary>{t('permits.air.import.advanced')}</summary>
+      {spec === null ? (
           <Button
             variant="default"
             disabled={profile === undefined}
@@ -282,7 +326,6 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
           >
             {t('permits.air.import.map.edit')}
           </Button>
-        </div>
       ) : (
         <>
           <FieldEditor spec={spec} analysis={analysis} onSpec={onSpec} />
@@ -309,24 +352,11 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
           {saveOpen && mayEditProfile && <SaveProfileForm onSave={onSaveProfile} saving={saving} />}
         </>
       )}
+      </details>
       {savedCode !== null && (
         <Text size="sm" role="status">
           {t('permits.air.import.save.done', { code: savedCode })}
         </Text>
-      )}
-
-      {(header?.unmapped ?? []).length > 0 && (
-        <details className="pi-panel">
-          <summary>{t('permits.air.import.map.unmapped', { count: formatNumber((header?.unmapped ?? []).length) })}</summary>
-          <ul>
-            {(header?.unmapped ?? []).map((column) => (
-              <li key={column.column}>
-                <span className="pa-code">{column.columnLetter}</span> {column.headerText}
-                {column.hasData ? ` · ${t('permits.air.import.map.hasData')}` : ''}
-              </li>
-            ))}
-          </ul>
-        </details>
       )}
 
       <IssuesTable issues={body.issues} dropped={body.droppedIssues} />
