@@ -21,13 +21,13 @@ async function ok<T>(response: APIResponse, what: string): Promise<T> {
   return (body.length > 0 ? JSON.parse(body) : {}) as T;
 }
 
-function column(ordinal: number, header: string, dataType: string): Record<string, unknown> {
+function column(ordinal: number, header: string, dataType: string, isReadOnly = false): Record<string, unknown> {
   return {
     headerL10n: { en: header },
     ordinal,
     dataType,
     isRequired: false,
-    isReadOnly: false,
+    isReadOnly,
     isHidden: false,
     precision: 18,
     scale: 2,
@@ -63,8 +63,11 @@ async function sliceOf(page: Page, arranged: Arranged): Promise<Slice> {
 
 const asNumber = (value: unknown): number => (value === null || value === undefined ? Number.NaN : Number(value));
 
-/** Шаблон із формулами, проєкт, документ, 5 рядків з A/B — через API (як `multiSheet.ts`). */
-async function arrange(page: Page): Promise<Arranged> {
+/**
+ * Шаблон із формулами, проєкт, документ, 5 рядків з A/B — через API (як `multiSheet.ts`).
+ * `readOnlyFormulas` — формульні колонки ще й «лише для читання», як їх створює `tools/hse401` (P1 06.11).
+ */
+async function arrange(page: Page, readOnlyFormulas = false): Promise<Arranged> {
   const stamp = String(Date.now());
   const template = await ok<{ templateId: number }>(
     await page.request.post('/api/v1/templates', { data: { code: `E2EFo${stamp}`, nameL10n: { en: `E2E formula override ${stamp}` } } }),
@@ -97,7 +100,9 @@ async function arrange(page: Page): Promise<Arranged> {
   ];
   for (const [index, [code, dataType]] of columns.entries()) {
     await ok(
-      await page.request.put(`${base}/tables/${String(table.id)}/columns/${code}`, { data: column(index, code, dataType) }),
+      await page.request.put(`${base}/tables/${String(table.id)}/columns/${code}`, {
+        data: column(index, code, dataType, readOnlyFormulas && dataType === 'Formula'),
+      }),
       `колонка ${code}`,
     );
   }
@@ -346,5 +351,26 @@ test.describe('D-461 formula override', () => {
       data: { sheetDefId: arranged.sheetDefId, periodKey: arranged.periodKey, acknowledgeWarnings: true },
     });
     expect(submit.status(), `submit: ${await submit.text()}`).toBe(204);
+  });
+
+  // P1 06.11 (живий тест людини, HSE401 v13): формульна колонка «лише для читання» + «Дозволити ручне значення» —
+  // комірка була заштрихована, але незмінна (сервер відхиляв ColumnReadOnly).
+  test('D-461 formula override: read-only formula column accepts a manual value', async ({ page }) => {
+    test.slow();
+    await signIn(page);
+    const arranged = await arrange(page, true);
+
+    await page.goto(`/documents/${String(arranged.documentId)}?periodKey=${String(arranged.periodKey)}`);
+    await expect(page.locator('revo-grid:visible').first()).toBeVisible({ timeout: 60_000 });
+    const initial = await sliceOf(page, arranged);
+    const colF1 = columnIndex(initial, 'F1');
+    await expect(cellAt(page, colF1, 0)).toHaveText(shows(2), { timeout: 30_000 });
+    await expect(cellAt(page, colF1, 0)).toHaveAttribute('title', /manual value/i);
+
+    await enterManual(page, colF1, 0, '77', 'Read-only formula column');
+    await expect(cellAt(page, colF1, 0)).toHaveAttribute('data-formula-manual', 'true', { timeout: 15_000 });
+    await expect
+      .poll(async () => asNumber((await sliceOf(page, arranged)).rows[0]?.cells['F1']), { timeout: 30_000 })
+      .toBe(77);
   });
 });
