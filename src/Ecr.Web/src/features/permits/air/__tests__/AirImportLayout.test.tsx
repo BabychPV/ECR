@@ -23,7 +23,7 @@ import { analysis, profile } from './airFixtures';
  *
  * Mutations (run, red): `addPermitTableColumn` without the `hasUnpublishedChanges` check — «someone else's draft is refused»;
  * `columnCode` without the reuse branch — «the same column again adds nothing»; `withHeaderRows` without `dataStartRow` —
- * «re-read with the chosen rows».
+ * «re-read with the chosen rows»; 07.11 `withHeaderRows` without `...sheet` — «the chosen sheet goes into the spec» (red, restored).
  */
 vi.mock('@/shared/i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/i18n')>()),
@@ -223,5 +223,51 @@ describe('MappingStep — where the table is, and «Add as new column»', () => 
     expect(spec.fields).toEqual(profile().spec.fields);
     expect(spec.header).toEqual({ fromRow: 4, toRow: 6 });
     expect(spec.dataStartRow).toBe(8);
+  });
+
+  it('withHeaderRows: the chosen sheet goes into the spec; another sheet with untouched rows drops the explicit rows', () => {
+    const base = { ...profile().spec, header: { fromRow: 4, toRow: 6 }, dataStartRow: 9 };
+
+    expect(withHeaderRows(base, { headerFrom: 5, headerTo: 6, dataFrom: 9, sheet: 'Table 3.3' })).toEqual({
+      ...base,
+      sheet: 'Table 3.3',
+      header: { fromRow: 5, toRow: 6 },
+    });
+    expect(withHeaderRows(base, { headerFrom: 4, headerTo: 6, dataFrom: 9, sheet: 'Summary', rowsAuto: true })).toEqual({
+      fields: profile().spec.fields,
+      sheet: 'Summary',
+    });
+  });
+
+  it('the sheet choice shows only for a workbook of several sheets', () => {
+    mount({ analysis: analysis({ sheetName: 'B', sheetNames: ['A', 'B'] }) });
+    expect(screen.getByRole('textbox', { name: text('permits.air.import.rows.sheet') })).not.toBeNull();
+    cleanup();
+    mount();
+    expect(screen.queryByRole('textbox', { name: text('permits.air.import.rows.sheet') })).toBeNull();
+  });
+
+  it('«Save as profile…» is one button outside «Advanced», also without edits; the form suggests the code from the name', () => {
+    const props = mount();
+
+    expect(screen.getAllByRole('button', { name: text('permits.air.import.map.saveProfile') })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.map.saveProfile') }));
+    fireEvent.change(screen.getByRole('textbox', { name: text('permits.air.import.save.name') }), { target: { value: 'ERA 3.3 (Atyrau) v2' } });
+    expect(screen.getByRole<HTMLInputElement>('textbox', { name: text('permits.air.import.save.code') }).value).toBe('ERA_3_3_ATYRAU_V2');
+    fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.save.submit') }));
+    expect(props.onSaveProfile).toHaveBeenCalledWith('ERA_3_3_ATYRAU_V2', 'ERA 3.3 (Atyrau) v2');
+  });
+
+  it('a Cyrillic name gives no code: the code must be entered, nothing is saved before', () => {
+    const props = mount();
+
+    fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.map.saveProfile') }));
+    fireEvent.change(screen.getByRole('textbox', { name: text('permits.air.import.save.name') }), { target: { value: 'Похожие файлы' } });
+    fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.save.submit') }));
+    expect(screen.getByText(text('permits.air.import.save.codeInvalid'))).not.toBeNull();
+    expect(props.onSaveProfile).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('textbox', { name: text('permits.air.import.save.code') }), { target: { value: 'similar' } });
+    fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.save.submit') }));
+    expect(props.onSaveProfile).toHaveBeenCalledWith('SIMILAR', 'Похожие файлы');
   });
 });

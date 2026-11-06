@@ -40,6 +40,7 @@ import {
   type ImportDraft,
   type ImportStep,
 } from './importModel';
+import { useAirColumnNames } from './fieldLabels';
 import { MappingStep } from './MappingStep';
 import { PreviewStep } from './PreviewStep';
 import '../air.css';
@@ -119,6 +120,7 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
       ? {}
       : scopeFormFields(scopeFields.data, scopeCodes.data, snapshot.region, snapshot.area);
   const profile = useImportProfile(step === 'mapping' ? draft.profileCode : undefined);
+  const columnNames = useAirColumnNames(step === 'mapping' || step === 'preview');
   const analysing = usePendingLoading(analyse.isPending);
   const previewing = usePendingLoading(previewCall.isPending);
   const applying = usePendingLoading(apply.isPending);
@@ -227,14 +229,23 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
     });
   };
 
+  /**
+   * The one «Save as profile…»: the current specification — edited (header rows, sheet, added columns, rules) or, untouched,
+   * the profile's own — goes into a new profile, which the wizard then uses (and the File step lists).
+   */
   const onSaveProfile = (code: string, name: string): void => {
-    if (saveProfile.isPending || draft.spec === null) return;
+    const spec = draft.spec ?? profile.data?.spec;
+    if (saveProfile.isPending || spec === undefined) return;
+    setFailure(null);
+    const analysed = draft.spec === analysedSpec;
     saveProfile.mutate(
-      { code, body: { nameL10n: { [language()]: name, en: name }, spec: draft.spec, rowVersion: null } },
+      { code, body: { nameL10n: { [language()]: name, en: name }, spec, rowVersion: null } },
       {
         onSuccess: (saved) => {
           setSavedCode(saved.code);
-          setAnalysedSpec(null); // збережена специфікація = та, з якою файл щойно розкладено
+          // The file was read with this very specification: it stays read (profile instead of spec). Edits that were not
+          // re-read yet still ask for a re-read before the preview.
+          setAnalysedSpec(analysed ? null : spec);
           patchDraft({ profileCode: saved.code, spec: null });
         },
         onError: setFailure,
@@ -318,6 +329,7 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           onAddColumn={onAddColumn}
           addingColumn={addingColumn}
           addProblem={addProblem}
+          columnNames={columnNames}
         />
       )}
       {step === 'preview' && preview !== null && (
@@ -331,12 +343,18 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           onApply={runApply}
           applying={applying}
           mayApply={mayImport}
+          columnNames={columnNames}
         />
       )}
       {step === 'apply' && result !== null && <ApplyStep result={result} permitId={permitId} />}
 
+      {step === 'mapping' && draft.spec !== analysedSpec && (
+        <Text size="sm" c="dimmed" role="status" className="pi-end">
+          {t('permits.air.import.map.reanalyseFirst')}
+        </Text>
+      )}
       {step !== 'apply' && (
-        <div className="pi-actions">
+        <div className="pi-actions pi-footer">
           {step === 'scope' ? (
             <Button component={Link} variant="default" to={`${PermitsPaths.permits}/${String(permitId)}?tab=air`}>
               {t('common.cancel')}
@@ -366,11 +384,6 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
             </Button>
           )}
         </div>
-      )}
-      {step === 'mapping' && draft.spec !== analysedSpec && (
-        <Text size="sm" c="dimmed" role="status">
-          {t('permits.air.import.map.reanalyseFirst')}
-        </Text>
       )}
     </div>
   );

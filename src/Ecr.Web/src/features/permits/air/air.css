@@ -161,11 +161,40 @@
   color: var(--mantine-color-text);
 }
 
+/*
+ * Поля майстра (07.11 «багато нерівностей в кнопках і полях»): однакова ширина колонок на всіх кроках (`auto-fill` тримає
+ * порожні треки — два поля не розтягуються на всю ширину), підказки під полем (`InputOrder`), тож рамки стоять в один ряд.
+ * Кнопки форм — окремим рядком `pi-actions` під полями; поле + кнопка в одному рядку — `pi-inline`.
+ */
 .pi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--mantine-spacing-sm);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  gap: var(--mantine-spacing-sm) var(--mantine-spacing-md);
   align-items: start;
+}
+
+.pi-wide {
+  grid-column: 1 / -1;
+}
+
+.pi-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--mantine-spacing-sm);
+}
+
+.pi-inline > .mantine-InputWrapper-root,
+.pi-inline > .mantine-TextInput-root {
+  flex: 0 1 280px;
+  min-width: min(100%, 200px);
+}
+
+.pi-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
 }
 
 .pi-split {
@@ -222,11 +251,61 @@
   font-size: var(--mantine-font-size-xs);
 }
 
+/* Рядок дій: як у спільного `Wizard` — праворуч, другорядні перед головною, одна головна (filled) на рядок. */
 .pi-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--mantine-spacing-sm);
   justify-content: flex-end;
+}
+
+/* Навігація майстра (Back/Cancel + Next) — відокремлена від дій кроку лінією. */
+.pi-footer {
+  padding-top: var(--mantine-spacing-sm);
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+
+.pi-end {
+  align-self: flex-end;
+  text-align: end;
+}
+
+.pi-panel > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.pi-unmapped {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Буква колонки · заголовок у файлі · кнопка — одна сітка, кнопки в одному стовпці. */
+.pi-unmapped li {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  font-size: var(--mantine-font-size-sm);
+}
+
+.pi-unmapped li > form {
+  grid-column: 1 / -1;
+}
+
+.pi-diff {
+  margin: 0;
+}
+
+.pi-diff dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .pi-sev {

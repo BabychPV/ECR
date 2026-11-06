@@ -6,6 +6,7 @@ import { Banner } from '@/shared/ui/Banner';
 import type { AirAnalysis, ImportProfile, ImportSpec } from '../airTypes';
 import {
   patternsToText,
+  profileCodeFrom,
   profileCodeProblem,
   specFields,
   specProblem,
@@ -16,6 +17,8 @@ import {
 } from './importModel';
 import { IssuesTable } from './IssuesTable';
 import type { AddColumnProblem, NewColumnRequest } from './addColumn';
+import { fieldLabel, NoColumnNames, type ColumnNames } from './fieldLabels';
+import { InputOrder } from './inputOrder';
 import { HeaderRowsForm, UnmappedColumns, type HeaderRows } from './LayoutControls';
 
 const ParserOptions = ['Text', 'Decimal', 'Integer', 'Code', 'Choice', 'Date', 'Unit'] as const;
@@ -52,6 +55,8 @@ export interface MappingStepProps {
   readonly addingColumn: boolean;
   /** Why the last «Add as new column» was refused before anything was written. */
   readonly addProblem?: AddColumnProblem;
+  /** Names of the AIR type columns: labels of the added fields (`FILE_*`). */
+  readonly columnNames?: ColumnNames;
 }
 
 /** The specification header rows apply to: the edited one, else the profile's. */
@@ -59,47 +64,84 @@ function baseSpec(spec: ImportSpec | null, profile: ImportProfile | undefined): 
   return spec ?? profile?.spec ?? null;
 }
 
+/**
+ * The specification with the layout chosen in «Where the table is in the file»: header rows and the first data row, and the
+ * sheet when the workbook has several. `rowsAuto` (another sheet, rows untouched) drops explicit rows — auto-detection.
+ */
 export function withHeaderRows(spec: ImportSpec, rows: HeaderRows): ImportSpec {
-  return { ...spec, header: { fromRow: rows.headerFrom, toRow: rows.headerTo }, dataStartRow: rows.dataFrom };
+  const sheet = rows.sheet === undefined ? {} : { sheet: rows.sheet };
+  if (rows.rowsAuto === true) {
+    const { header: _header, dataStartRow: _data, ...rest } = spec;
+
+    return { ...rest, ...sheet };
+  }
+
+  return { ...spec, ...sheet, header: { fromRow: rows.headerFrom, toRow: rows.headerTo }, dataStartRow: rows.dataFrom };
 }
 
+/**
+ * The one «Save as profile…» form: name, and a code suggested from it (editable, checked by `profileCodeProblem`). The profile
+ * keeps the whole specification — sheet, header rows, data start row, all fields including added columns.
+ */
 function SaveProfileForm({
   onSave,
+  onCancel,
   saving,
 }: {
   readonly onSave: (code: string, name: string) => void;
+  readonly onCancel: () => void;
   readonly saving: boolean;
 }): JSX.Element {
-  const [code, setCode] = useState('');
   const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [codeEdited, setCodeEdited] = useState(false);
   const [touched, setTouched] = useState(false);
-  const invalid = profileCodeProblem(code);
+  const shownCode = codeEdited ? code : profileCodeFrom(name);
+  const invalid = profileCodeProblem(shownCode);
+  const missingName = name.trim() === '';
 
   return (
     <form
-      className="pi-grid"
+      className="pi-panel"
+      aria-label={t('permits.air.import.save.title')}
       onSubmit={(event) => {
         event.preventDefault();
         setTouched(true);
-        if (!invalid && name.trim() !== '' && !saving) onSave(code, name.trim());
+        if (!invalid && !missingName && !saving) onSave(shownCode, name.trim());
       }}
     >
-      <TextInput
-        label={t('permits.air.import.save.code')}
-        description={t('permits.air.import.save.codeHint')}
-        value={code}
-        error={touched && invalid ? t('permits.air.import.save.codeInvalid') : null}
-        onChange={(event) => setCode(event.currentTarget.value.toLocaleUpperCase('en-US'))}
-      />
-      <TextInput
-        label={t('permits.air.import.save.name')}
-        value={name}
-        error={touched && name.trim() === '' ? t('permits.air.import.save.nameRequired') : null}
-        onChange={(event) => setName(event.currentTarget.value)}
-      />
-      <Button type="submit" loading={saving} style={{ alignSelf: 'end' }}>
-        {t('permits.air.import.save.submit')}
-      </Button>
+      <Text fw={600}>{t('permits.air.import.save.title')}</Text>
+      <Text size="sm" c="dimmed">
+        {t('permits.air.import.save.hint')}
+      </Text>
+      <div className="pi-grid">
+        <TextInput
+          label={t('permits.air.import.save.name')}
+          value={name}
+          error={touched && missingName ? t('permits.air.import.save.nameRequired') : null}
+          onChange={(event) => setName(event.currentTarget.value)}
+          data-autofocus
+        />
+        <TextInput
+          label={t('permits.air.import.save.code')}
+          description={t('permits.air.import.save.codeHint')}
+          inputWrapperOrder={InputOrder}
+          value={shownCode}
+          error={touched && invalid ? t('permits.air.import.save.codeInvalid') : null}
+          onChange={(event) => {
+            setCodeEdited(true);
+            setCode(event.currentTarget.value.toLocaleUpperCase('en-US'));
+          }}
+        />
+      </div>
+      <div className="pi-actions">
+        <Button variant="default" onClick={onCancel}>
+          {t('common.cancel')}
+        </Button>
+        <Button type="submit" loading={saving}>
+          {t('permits.air.import.save.submit')}
+        </Button>
+      </div>
     </form>
   );
 }
@@ -108,10 +150,12 @@ function FieldEditor({
   spec,
   analysis,
   onSpec,
+  columnNames,
 }: {
   readonly spec: ImportSpec;
   readonly analysis: AirAnalysis;
   readonly onSpec: (spec: ImportSpec) => void;
+  readonly columnNames: ColumnNames;
 }): JSX.Element {
   const fields = specFields(spec);
   const [newName, setNewName] = useState('');
@@ -139,12 +183,15 @@ function FieldEditor({
             {fields.map((field, index) => {
               const name = field.name ?? '';
               const column = mapped.get(name);
+              const label = fieldLabel(name, columnNames);
 
               return (
                 <tr key={`${name}-${String(index)}`}>
                   <td>
                     <TextInput
                       aria-label={t('permits.air.import.map.fieldName')}
+                      description={label === name ? undefined : label}
+                      inputWrapperOrder={InputOrder}
                       value={name}
                       onChange={(event) => onSpec(withField(spec, index, { name: event.currentTarget.value }))}
                     />
@@ -207,7 +254,7 @@ function FieldEditor({
         {t('permits.air.import.map.patternsHint')}
       </Text>
       <form
-        className="pi-actions"
+        className="pi-inline"
         onSubmit={(event) => {
           event.preventDefault();
           const name = newName.trim();
@@ -230,26 +277,44 @@ function FieldEditor({
   );
 }
 
+function levelLabel(level: string): string {
+  if (level === 'Parent') return t('permits.air.import.map.level.parent');
+  if (level === 'Child') return t('permits.air.import.map.level.child');
+
+  return level;
+}
+
 /**
  * Крок 2: розкладка файлу (блок шапки, змаплені й незмаплені колонки) і редактор відповідності `RegistryImportSpec`.
- * Редагується копія специфікації профілю; «Re-analyse» перечитує файл з нею, «Save as profile» кладе її в профіль.
+ * Редагується копія специфікації профілю; «Re-analyse» перечитує файл з нею. «Save as profile…» — одна форма поза
+ * «Advanced»: зберігає поточну специфікацію (змінену або профілю) з аркушем, рядками шапки й доданими полями.
  */
 export function MappingStep(props: MappingStepProps): JSX.Element {
   const { analysis, profile, spec, onSpec, onReanalyse, reanalysing, mayEditProfile, onSaveProfile, saving, savedCode } = props;
   const { onApplySpec, mayAddColumn, onAddColumn, addingColumn } = props;
+  const columnNames = props.columnNames ?? NoColumnNames;
   const body = analysis.analysis;
   const header = body.header;
   const problem = spec === null ? null : specProblem(spec);
   const [saveOpen, setSaveOpen] = useState(false);
+  const [seenSaved, setSeenSaved] = useState(savedCode);
   const base = baseSpec(spec, profile);
+
+  // A save that went through closes the form (the status line below says which profile is now selected).
+  if (savedCode !== seenSaved) {
+    setSeenSaved(savedCode);
+    if (savedCode !== null) setSaveOpen(false);
+  }
 
   return (
     <div className="pi-page">
       {header !== null && (
         <HeaderRowsForm
-          // A new analysis (other rows found) restarts the form with what the server found.
-          key={`${String(header.headerFromRow)}-${String(header.headerToRow)}-${String(header.dataFromRow)}`}
+          // A new analysis (other rows or sheet) restarts the form with what the server found.
+          key={`${body.sheetName}-${String(header.headerFromRow)}-${String(header.headerToRow)}-${String(header.dataFromRow)}`}
           detected={{ headerFrom: header.headerFromRow, headerTo: header.headerToRow, dataFrom: header.dataFromRow }}
+          sheets={body.sheetNames}
+          sheet={body.sheetName}
           busy={reanalysing}
           disabled={base === null}
           onApply={(rows) => base !== null && onApplySpec(withHeaderRows(base, rows))}
@@ -295,10 +360,10 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
             <tbody>
               {(header?.mapped ?? []).map((column) => (
                 <tr key={`${column.field}-${String(column.column)}`}>
-                  <th scope="row">{column.field}</th>
+                  <th scope="row">{fieldLabel(column.field, columnNames)}</th>
                   <td>{column.headerText}</td>
                   <td className="pa-code">{column.columnLetter}</td>
-                  <td>{column.level}</td>
+                  <td>{levelLabel(column.level)}</td>
                 </tr>
               ))}
             </tbody>
@@ -317,49 +382,51 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
 
       <details className="pi-panel" open={spec !== null ? true : undefined}>
         <summary>{t('permits.air.import.advanced')}</summary>
-      {spec === null ? (
-          <Button
-            variant="default"
-            disabled={profile === undefined}
-            onClick={() => profile !== undefined && onSpec(profile.spec)}
-            style={{ alignSelf: 'start' }}
-          >
-            {t('permits.air.import.map.edit')}
-          </Button>
-      ) : (
-        <>
-          <FieldEditor spec={spec} analysis={analysis} onSpec={onSpec} />
-          {problem !== null && (
-            <Banner
-              tone="warning"
-              title={t('permits.air.import.map.problemTitle')}
-              text={problem === 'nameRequired' ? t('permits.air.import.map.nameRequired') : t('permits.air.import.map.nameDuplicate')}
-            />
-          )}
+        {spec === null ? (
           <div className="pi-actions">
-            <Button variant="default" onClick={() => onSpec(null)}>
-              {t('permits.air.import.map.discard')}
+            <Button variant="default" disabled={profile === undefined} onClick={() => profile !== undefined && onSpec(profile.spec)}>
+              {t('permits.air.import.map.edit')}
             </Button>
-            <Button variant="default" loading={reanalysing} disabled={problem !== null} onClick={onReanalyse}>
-              {t('permits.air.import.map.reanalyse')}
-            </Button>
-            {mayEditProfile && (
-              <Button variant="default" disabled={problem !== null} onClick={() => setSaveOpen((open) => !open)} aria-expanded={saveOpen}>
-                {t('permits.air.import.map.saveProfile')}
-              </Button>
-            )}
           </div>
-          {saveOpen && mayEditProfile && <SaveProfileForm onSave={onSaveProfile} saving={saving} />}
-        </>
-      )}
+        ) : (
+          <>
+            <FieldEditor spec={spec} analysis={analysis} onSpec={onSpec} columnNames={columnNames} />
+            {problem !== null && (
+              <Banner
+                tone="warning"
+                title={t('permits.air.import.map.problemTitle')}
+                text={problem === 'nameRequired' ? t('permits.air.import.map.nameRequired') : t('permits.air.import.map.nameDuplicate')}
+              />
+            )}
+            <div className="pi-actions">
+              <Button variant="default" onClick={() => onSpec(null)}>
+                {t('permits.air.import.map.discard')}
+              </Button>
+              <Button variant="default" loading={reanalysing} disabled={problem !== null} onClick={onReanalyse}>
+                {t('permits.air.import.map.reanalyse')}
+              </Button>
+            </div>
+          </>
+        )}
       </details>
+
+      {mayEditProfile && base !== null && (
+        <div className="pi-actions">
+          <Button variant="default" disabled={problem !== null} onClick={() => setSaveOpen((open) => !open)} aria-expanded={saveOpen}>
+            {t('permits.air.import.map.saveProfile')}
+          </Button>
+        </div>
+      )}
+      {saveOpen && mayEditProfile && base !== null && (
+        <SaveProfileForm onSave={onSaveProfile} onCancel={() => setSaveOpen(false)} saving={saving} />
+      )}
       {savedCode !== null && (
         <Text size="sm" role="status">
           {t('permits.air.import.save.done', { code: savedCode })}
         </Text>
       )}
 
-      <IssuesTable issues={body.issues} dropped={body.droppedIssues} />
+      <IssuesTable issues={body.issues} dropped={body.droppedIssues} columnNames={columnNames} />
     </div>
   );
 }

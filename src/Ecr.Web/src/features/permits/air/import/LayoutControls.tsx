@@ -9,6 +9,12 @@ export interface HeaderRows {
   readonly headerFrom: number;
   readonly headerTo: number;
   readonly dataFrom: number;
+  /**
+   * Worksheet to read (`spec.sheet`); absent — the sheet is not chosen (a one-sheet workbook). With `rowsAuto` the rows are
+   * not sent: another sheet has its own header, which the server finds by itself.
+   */
+  readonly sheet?: string;
+  readonly rowsAuto?: boolean;
 }
 
 /** Rows go in order: header start ≤ header end < data start, all ≥ 1. */
@@ -28,18 +34,29 @@ function whole(value: string | number): number {
  */
 export function HeaderRowsForm({
   detected,
+  sheets,
+  sheet: readSheet,
   onApply,
   busy,
   disabled,
 }: {
   readonly detected: HeaderRows;
+  /** Visible sheets of the workbook; the choice is shown only when there is more than one. */
+  readonly sheets: readonly string[];
+  /** The sheet the server read. */
+  readonly sheet: string;
   readonly onApply: (rows: HeaderRows) => void;
   readonly busy: boolean;
   readonly disabled: boolean;
 }): JSX.Element {
   const [rows, setRows] = useState<HeaderRows>(detected);
+  const [sheet, setSheet] = useState(readSheet);
   const [touched, setTouched] = useState(false);
   const valid = headerRowsValid(rows);
+  const choose = sheets.length > 1;
+  const sameRows = rows.headerFrom === detected.headerFrom && rows.headerTo === detected.headerTo && rows.dataFrom === detected.dataFrom;
+  // Another sheet with the rows left as found on this one: the server finds the header of that sheet itself.
+  const rowsAuto = choose && sheet !== readSheet && sameRows;
 
   return (
     <form
@@ -48,7 +65,7 @@ export function HeaderRowsForm({
       onSubmit={(event) => {
         event.preventDefault();
         setTouched(true);
-        if (valid && !busy) onApply(rows);
+        if ((valid || rowsAuto) && !busy) onApply(choose ? { ...rows, sheet, rowsAuto } : rows);
       }}
     >
       <Text fw={600}>{t('permits.air.import.rows.title')}</Text>
@@ -56,6 +73,15 @@ export function HeaderRowsForm({
         {t('permits.air.import.rows.hint')}
       </Text>
       <div className="pi-grid">
+        {choose && (
+          <Select
+            label={t('permits.air.import.rows.sheet')}
+            allowDeselect={false}
+            data={[...sheets]}
+            value={sheet}
+            onChange={(value) => setSheet(value ?? readSheet)}
+          />
+        )}
         <NumberInput
           label={t('permits.air.import.rows.headerFrom')}
           min={1}
@@ -77,11 +103,13 @@ export function HeaderRowsForm({
           value={rows.dataFrom}
           onChange={(value) => setRows({ ...rows, dataFrom: whole(value) })}
         />
-        <Button type="submit" variant="default" loading={busy} disabled={disabled} style={{ alignSelf: 'end' }}>
+      </div>
+      <div className="pi-actions">
+        <Button type="submit" variant="default" loading={busy} disabled={disabled}>
           {t('permits.air.import.rows.apply')}
         </Button>
       </div>
-      {touched && !valid && (
+      {touched && !valid && !rowsAuto && (
         <Text size="sm" c="statusError" role="alert">
           {t('permits.air.import.rows.invalid')}
         </Text>
@@ -197,17 +225,22 @@ export function UnmappedColumns({
       <ul className="pi-unmapped">
         {columns.map((column) => (
           <li key={column.column}>
-            <span className="pa-code">{column.columnLetter}</span> {column.headerText}
-            {column.hasData ? ` · ${t('permits.air.import.map.hasData')}` : ''}
-            {mayAdd && open !== column.columnLetter && (
+            <span className="pa-code">{column.columnLetter}</span>
+            <span>
+              {column.headerText}
+              {column.hasData ? ` · ${t('permits.air.import.map.hasData')}` : ''}
+            </span>
+            {mayAdd && open !== column.columnLetter ? (
               <Button
-                variant="subtle"
+                variant="default"
                 size="xs"
                 aria-label={t('permits.air.import.add.buttonFor', { column: column.columnLetter })}
                 onClick={() => setOpen(column.columnLetter)}
               >
                 {t('permits.air.import.add.button')}
               </Button>
+            ) : (
+              <span />
             )}
             {open === column.columnLetter && (
               <AddColumnForm

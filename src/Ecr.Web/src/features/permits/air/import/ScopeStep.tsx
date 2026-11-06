@@ -6,6 +6,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { lookupLabel } from '@/features/registries/rc812/data';
 import type { AirScopeCodes, AirScopeEntry, AirScopeField, AirScopeFields } from '../airTypes';
 import type { ImportDraft } from './importModel';
+import { InputOrder } from './inputOrder';
 import { areaChoice, optionValue, regionOutsideTree, ScopeKind } from './scopeModel';
 
 export interface ScopeStepProps {
@@ -40,6 +41,7 @@ function ScopeInput({ field, options, label, description, value, error, onChange
       <TextInput
         label={label}
         description={description}
+        inputWrapperOrder={InputOrder}
         required={field.required}
         placeholder={t('permits.air.import.text.placeholder')}
         value={value}
@@ -59,6 +61,7 @@ function ScopeInput({ field, options, label, description, value, error, onChange
     <Select
       label={label}
       description={description}
+      inputWrapperOrder={InputOrder}
       required={field.required}
       data={data}
       value={value === '' ? null : value}
@@ -79,7 +82,7 @@ function MissingRegistry({ field }: { readonly field: AirScopeField }): JSX.Elem
   if (field.kind === ScopeKind.Text || field.registryFound) return null;
 
   return (
-    <div style={{ gridColumn: '1 / -1' }}>
+    <div className="pi-wide">
       <Banner
         tone="warning"
         title={t('permits.air.import.scope.empty')}
@@ -127,11 +130,11 @@ export function ScopeStep({ permitNumber, fields, codes, failure, onRetry, draft
       <MissingRegistry field={fields.region} />
       {area.show && <MissingRegistry field={fields.area} />}
       {regionOutsideTree(fields, draft.region) && (
-        <div style={{ gridColumn: '1 / -1' }}>
+        <div className="pi-wide">
           <Banner tone="warning" title={t('permits.air.import.scope.notInTreeTitle')} text={t('permits.air.import.scope.notInTreeText')} />
         </div>
       )}
-      <Text size="sm" c="dimmed" style={{ gridColumn: '1 / -1' }}>
+      <Text size="sm" c="dimmed" className="pi-wide">
         {t('permits.air.import.scopeNote')}
       </Text>
     </div>

@@ -4,9 +4,10 @@ import userEvent from '@testing-library/user-event';
 import { Catalog, Shell, Themes } from '@/test/__tests__/a11yFixtures';
 import { describe as describeViolations, findViolations } from '@/test/a11y';
 import * as airApi from '@/features/permits/air/airApi';
+import * as typesApi from '@/features/permits/api/typesApi';
 import { AirLimitsTab } from '../AirLimitsTab';
 import { AirImportWizard } from '../import/AirImportWizard';
-import { analysis, card, preview, profile, profiles, result, scopeCodes, scopeFields, tree, xlsx } from './airFixtures';
+import { airPermitType, analysis, card, preview, profile, profiles, result, scopeCodes, scopeFields, tree, xlsx } from './airFixtures';
 
 /**
  * Доступність картки лімітів і майстра імпорту в обох темах (`ФВ-14.16`): картка (згорнута, розкрита, підсумки) і
@@ -34,6 +35,7 @@ vi.mock('@/features/permits/air/airApi', () => ({
   getAirScopeCodes: vi.fn(),
   getAirScopeFields: vi.fn(),
 }));
+vi.mock('@/features/permits/api/typesApi', () => ({ getPermitType: vi.fn() }));
 
 const api = vi.mocked(airApi);
 const text = (key: string): string => Catalog[key] ?? key;
@@ -48,6 +50,7 @@ beforeEach(() => {
   api.getNaeTree.mockResolvedValue(tree());
   api.getAirScopeCodes.mockResolvedValue(scopeCodes());
   api.getAirScopeFields.mockResolvedValue(scopeFields());
+  vi.mocked(typesApi.getPermitType).mockResolvedValue(airPermitType());
 });
 afterEach(() => {
   cleanup();
@@ -102,6 +105,11 @@ describe('Air limits - доступність', { timeout: 300_000 }, () => {
       fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.analyse') }));
       await screen.findByTestId('air-header-report');
       await clean(container);
+
+      fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.map.saveProfile') }));
+      await screen.findByRole('form', { name: text('permits.air.import.save.title') });
+      await clean(container);
+      fireEvent.click(screen.getByRole('button', { name: text('common.cancel') }));
 
       fireEvent.click(await screen.findByRole('button', { name: text('permits.air.import.map.edit') }));
       await screen.findAllByLabelText(text('permits.air.import.map.fieldName'));

@@ -167,7 +167,9 @@ test.describe('Air real shape', () => {
     );
     const added = type.tables.find((t) => t.code === 'AIR_SOURCES')?.columns.find((c) => c.nameL10n['en'] === Workshop);
     expect(added?.code, 'the sources table has the new column').toMatch(/^FILE_B(_\d+)?$/);
-    await expect(page.getByRole('region', { name: 'Matched columns' }).getByText(added?.code ?? '-', { exact: true })).toBeVisible();
+    // The added field is shown by the column's name in the permit type, not by its code.
+    await expect(page.getByRole('region', { name: 'Matched columns' }).getByRole('rowheader', { name: Workshop, exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Matched columns' }).getByText(added?.code ?? '-', { exact: true })).toHaveCount(0);
 
     await page.getByRole('button', { name: /Next: preview/ }).click();
     await expect(page.getByRole('heading', { name: 'Preview', level: 2 })).toBeVisible({ timeout: 30_000 });

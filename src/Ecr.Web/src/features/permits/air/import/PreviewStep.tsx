@@ -17,6 +17,7 @@ import {
   type Resolution,
   type ResolutionChoice,
 } from './importModel';
+import type { ColumnNames } from './fieldLabels';
 import { IssuesTable } from './IssuesTable';
 import { nodeOptions } from './naeNodes';
 
@@ -31,6 +32,8 @@ export interface PreviewStepProps {
   readonly onApply: () => void;
   readonly applying: boolean;
   readonly mayApply: boolean;
+  /** Names of the AIR type columns: readable field names in the findings. */
+  readonly columnNames?: ColumnNames;
 }
 
 function ownerLine(owner: OwnerReplace): string {
@@ -79,7 +82,7 @@ function MissingTable({
       </Text>
       {tree.isError && <ErrorAlert error={tree.error} onRetry={() => void tree.refetch()} />}
       {open.length > 0 && (
-        <div className="pi-actions" style={{ justifyContent: 'flex-start' }}>
+        <div className="pi-toolbar">
           <Button variant="default" onClick={() => setAll({ choice: 'skip', createUnder: '' })}>
             {t('permits.air.import.missing.skipAll', { count: formatNumber(open.length) })}
           </Button>
@@ -289,7 +292,7 @@ export function PreviewStep(props: PreviewStepProps): JSX.Element {
             <Title order={2} size="h4" id="pi-issues-title">
               {t('permits.air.import.issues.title')}
             </Title>
-            <IssuesTable issues={body.issues} dropped={body.droppedIssues} />
+            <IssuesTable issues={body.issues} dropped={body.droppedIssues} columnNames={props.columnNames} />
           </section>
         </div>
         <div className="pi-page">

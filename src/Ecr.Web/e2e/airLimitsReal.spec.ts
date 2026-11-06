@@ -395,8 +395,10 @@ test.describe('Air limits real', () => {
     await page.getByRole('button', { name: /Next: analyse file/ }).click();
     await expect(page.getByRole('heading', { name: 'Mapping', level: 2 })).toBeVisible({ timeout: 30_000 });
     const matched = page.getByRole('table').first();
-    await expect(matched).toContainText('naeCode');
-    await expect(matched).toContainText('tonsPerYear');
+    // Readable target names (07.11), not the field codes naeCode / tonsPerYear.
+    await expect(matched).toContainText('NAE number');
+    await expect(matched).toContainText('t/year');
+    await expect(matched).not.toContainText('naeCode');
     await expect(page.getByText(/Header rows 2–3 · data from row 5/)).toBeVisible();
     await expectNoRawKeys(page);
 
@@ -405,9 +407,9 @@ test.describe('Air limits real', () => {
     await expect(page.getByRole('heading', { name: 'Preview', level: 2 })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('heading', { name: /NAE codes missing in the tree: 2/ })).toBeVisible();
     const issues = page.getByRole('region', { name: 'Import findings' });
-    await expect(issues.getByRole('row', { name: /Warning\s+6\s+I\s+tonsPerYear/ })).toBeVisible();
-    await expect(issues.getByRole('row', { name: /Error\s+7\s+B\s+naeCode/ })).toBeVisible();
-    await expect(issues.getByRole('row', { name: /Error\s+8\s+B\s+naeCode/ })).toBeVisible();
+    await expect(issues.getByRole('row', { name: /Warning\s+6\s+I\s+t\/year/ })).toBeVisible();
+    await expect(issues.getByRole('row', { name: /Error\s+7\s+B\s+NAE number/ })).toBeVisible();
+    await expect(issues.getByRole('row', { name: /Error\s+8\s+B\s+NAE number/ })).toBeVisible();
     await expectNoRawKeys(page);
     const apply = page.getByRole('button', { name: /Apply import/ });
     await expect(apply).toBeDisabled();

@@ -7,10 +7,12 @@ import { EcrApiError } from '@/api/client';
 import { Catalog } from '@/test/__tests__/a11yFixtures';
 import { TestProviders } from '@/test/render';
 import * as airApi from '@/features/permits/air/airApi';
+import * as typesApi from '@/features/permits/api/typesApi';
+import type { PermitType } from '@/features/permits/api/types';
 import { AirImportWizard } from '../import/AirImportWizard';
 import { EmptyDraft } from '../import/importModel';
 import { PreviewStep } from '../import/PreviewStep';
-import { analysis, preview, profile, profiles, result, scopeCodes, scopeFields, tree, xlsx } from './airFixtures';
+import { airPermitType, analysis, preview, profile, profiles, result, scopeCodes, scopeFields, tree, xlsx } from './airFixtures';
 
 /**
  * Майстер імпорту лімітів із Excel (NAE-план N5): файл -> відповідність -> перегляд -> застосування. API замоканий;
@@ -21,6 +23,9 @@ import { analysis, preview, profile, profiles, result, scopeCodes, scopeFields, 
  * - `buildOptions`: `expectedFingerprint` не передається валить «apply несе відбиток і власників»;
  * - `previewSignature`: рішення виключені з підпису валить «рішення про НАЕ застарюють перегляд»;
  * - `AirImportWizard.runApply`: прибрано `setForceStale(true)` валить «відмова apply вимагає нового перегляду».
+ * - 07.11 `withHeaderRows`: прибрано `...sheet` (аркуш не йде в специфікацію) валить «одна форма збереження: профіль
+ *   несе аркуш, рядки шапки, рядок даних і додане поле» і «вибір аркуша перечитує файл зі spec.sheet» (обидва червоні,
+ *   відновлено).
  */
 vi.mock('@/shared/i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/i18n')>()),
@@ -40,8 +45,17 @@ vi.mock('@/features/permits/air/airApi', () => ({
   getAirScopeCodes: vi.fn(),
   getAirScopeFields: vi.fn(),
 }));
+vi.mock('@/features/permits/api/typesApi', () => ({
+  getPermitType: vi.fn(),
+  openPermitTypeVersion: vi.fn(),
+  replacePermitType: vi.fn(),
+  publishPermitType: vi.fn(),
+}));
 
 const api = vi.mocked(airApi);
+const types = vi.mocked(typesApi);
+/** The AIR type as the server holds it: «Add as new column» changes it, the labels read it. */
+let airType: PermitType = airPermitType();
 const text = (key: string): string => Catalog[key] ?? key;
 
 beforeEach(() => {
@@ -53,19 +67,33 @@ beforeEach(() => {
   api.getNaeTree.mockResolvedValue(tree());
   api.getAirScopeCodes.mockResolvedValue(scopeCodes());
   api.getAirScopeFields.mockResolvedValue(scopeFields());
+  airType = airPermitType();
+  types.getPermitType.mockImplementation(() => Promise.resolve(airType));
+  types.openPermitTypeVersion.mockImplementation(() => Promise.resolve({ ...airType, rowVersion: 'rv-draft' }));
+  types.replacePermitType.mockImplementation((_code, body) => {
+    airType = { ...airType, tables: body.tables, rowVersion: 'rv-replaced' };
+    return Promise.resolve(airType);
+  });
+  types.publishPermitType.mockImplementation(() => Promise.resolve(airType));
 });
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
 
-function mount(props: { mayImport?: boolean; mayEditProfile?: boolean } = {}): void {
+function mount(props: { mayImport?: boolean; mayEditProfile?: boolean; mayAddColumn?: boolean } = {}): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <TestProviders>
       <QueryClientProvider client={client}>
         <MemoryRouter>
-          <AirImportWizard permitId={5} permitNumber="KZ87VCZ14622157" mayImport={props.mayImport ?? true} mayEditProfile={props.mayEditProfile ?? true} />
+          <AirImportWizard
+            permitId={5}
+            permitNumber="KZ87VCZ14622157"
+            mayImport={props.mayImport ?? true}
+            mayEditProfile={props.mayEditProfile ?? true}
+            mayAddColumn={props.mayAddColumn ?? false}
+          />
         </MemoryRouter>
       </QueryClientProvider>
     </TestProviders>,
@@ -92,8 +120,8 @@ async function fillFile(region = 'Atyrau', area = 'Offshore'): Promise<void> {
   await userEvent.upload(input, xlsx());
 }
 
-async function toMapping(): Promise<void> {
-  mount();
+async function toMapping(props: Parameters<typeof mount>[0] = {}): Promise<void> {
+  mount(props);
   await fillFile();
   fireEvent.click(button('permits.air.import.analyse'));
   await screen.findByTestId('air-header-report');
@@ -175,21 +203,131 @@ describe('крок 2: відповідність', () => {
     expect(button('permits.air.import.map.reanalyse').disabled).toBe(true);
   });
 
-  it('збереження як профілю: PUT із кодом, назвою й специфікацією; профіль вибирається', async () => {
+  it('збереження як профілю без змін: одна форма, код з назви, специфікація профілю; профіль вибирається', async () => {
     api.saveImportProfile.mockResolvedValue({ ...profile(), code: 'MY_PROFILE', builtIn: false });
     await toMapping();
-    fireEvent.click(await screen.findByRole('button', { name: text('permits.air.import.map.edit') }));
+    // Exactly one way to save: the button outside «Advanced»; the form opens only from it.
+    expect(screen.getAllByRole('button', { name: text('permits.air.import.map.saveProfile') })).toHaveLength(1);
+    expect(screen.queryByLabelText(text('permits.air.import.save.name'))).toBeNull();
     fireEvent.click(await screen.findByRole('button', { name: text('permits.air.import.map.saveProfile') }));
-    fireEvent.change(screen.getByLabelText(text('permits.air.import.save.code')), { target: { value: 'my_profile' } });
-    fireEvent.change(screen.getByLabelText(text('permits.air.import.save.name')), { target: { value: 'Mine' } });
+    fireEvent.change(screen.getByLabelText(text('permits.air.import.save.name')), { target: { value: 'My profile' } });
+    expect(screen.getByLabelText<HTMLInputElement>(text('permits.air.import.save.code')).value).toBe('MY_PROFILE');
     fireEvent.click(button('permits.air.import.save.submit'));
     await waitFor(() => expect(api.saveImportProfile).toHaveBeenCalledTimes(1));
     const [code, body] = api.saveImportProfile.mock.calls[0]!;
     expect(code).toBe('MY_PROFILE');
-    expect(body.nameL10n['en']).toBe('Mine');
+    expect(body.nameL10n['en']).toBe('My profile');
     expect(body.rowVersion).toBeNull();
-    expect(body.spec.fields).toHaveLength(2);
+    expect(body.spec).toEqual(profile().spec);
     expect(await screen.findByText('Profile MY_PROFILE saved and selected.')).toBeTruthy();
+    expect(screen.queryByLabelText(text('permits.air.import.save.name'))).toBeNull();
+    // Back in the File step the list is read anew and the saved profile is the chosen one.
+    api.listImportProfiles.mockResolvedValue([
+      ...profiles,
+      { code: 'MY_PROFILE', builtIn: false, nameL10n: { en: 'My profile' }, updatedAt: '2026-11-07T00:00:00Z' },
+    ]);
+    fireEvent.click(button('wizard.back'));
+    await waitFor(() => expect(api.listImportProfiles).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByRole<HTMLInputElement>('textbox', { name: new RegExp(`^${text('permits.air.import.profile.label')}`) }).value).toBe(
+        'My profile (MY_PROFILE)',
+      ),
+    );
+  });
+
+  it('одна форма збереження: профіль несе аркуш, рядки шапки, рядок даних і додане поле; далі імпорт іде цим профілем', async () => {
+    const twoSheets = analysis({ sheetName: 'Table 3.3', sheetNames: ['Summary', 'Table 3.3'] });
+    api.analyseAirImport.mockResolvedValue(twoSheets);
+    api.saveImportProfile.mockResolvedValue({ ...profile(), code: 'SIMILAR_FILES', builtIn: false });
+    await toMapping({ mayAddColumn: true });
+
+    // 1. Where the table is: the other sheet and the header one row lower, then re-read.
+    await pick(text('permits.air.import.rows.sheet'), /^Summary$/);
+    fireEvent.change(screen.getByRole('textbox', { name: text('permits.air.import.rows.headerFrom') }), { target: { value: '5' } });
+    fireEvent.click(button('permits.air.import.rows.apply'));
+    await waitFor(() => expect(api.analyseAirImport).toHaveBeenCalledTimes(2));
+
+    // 2. Column B of the file becomes a new column of the permit table and a field of the spec.
+    fireEvent.click(screen.getByRole('button', { name: 'Add file column B as a new column' }));
+    fireEvent.change(screen.getByRole('textbox', { name: text('permits.air.import.add.name') }), { target: { value: 'Workshop' } });
+    fireEvent.click(button('permits.air.import.add.submit'));
+    await waitFor(() => expect(api.analyseAirImport).toHaveBeenCalledTimes(3));
+
+    // 3. Save as profile…: everything above is in the saved spec.
+    fireEvent.click(button('permits.air.import.map.saveProfile'));
+    fireEvent.change(screen.getByLabelText(text('permits.air.import.save.name')), { target: { value: 'Similar files' } });
+    fireEvent.click(button('permits.air.import.save.submit'));
+    await waitFor(() => expect(api.saveImportProfile).toHaveBeenCalledTimes(1));
+    const [code, body] = api.saveImportProfile.mock.calls[0]!;
+    expect(code).toBe('SIMILAR_FILES');
+    expect(body.spec.sheet).toBe('Summary');
+    expect(body.spec.header).toEqual({ fromRow: 5, toRow: 6 });
+    expect(body.spec.dataStartRow).toBe(9);
+    expect(body.spec.fields?.map((field) => field.name)).toEqual(['NaeCode', 'TonsPerYear', 'FILE_B']);
+    expect(body.spec.fields?.[2]).toMatchObject({ column: 'B', level: 'Parent', parser: 'Text' });
+
+    // 4. The wizard uses the saved profile: the preview goes by its code, without a spec of its own.
+    await screen.findByText('Profile SIMILAR_FILES saved and selected.');
+    await waitFor(() => expect(button('permits.air.import.toPreview').disabled).toBe(false));
+    fireEvent.click(button('permits.air.import.toPreview'));
+    await waitFor(() => expect(api.previewAirImport).toHaveBeenCalledTimes(1));
+    expect(api.previewAirImport.mock.calls[0]![2]).toEqual({ profileCode: 'SIMILAR_FILES' });
+  });
+
+  it('вибір аркуша перечитує файл зі spec.sheet; рядки не чіпали — шапку того аркуша сервер знаходить сам', async () => {
+    api.analyseAirImport.mockResolvedValue(analysis({ sheetName: 'Table 3.3', sheetNames: ['Summary', 'Table 3.3'] }));
+    await toMapping();
+    await pick(text('permits.air.import.rows.sheet'), /^Summary$/);
+    fireEvent.click(button('permits.air.import.rows.apply'));
+    await waitFor(() => expect(api.analyseAirImport).toHaveBeenCalledTimes(2));
+    const options = api.analyseAirImport.mock.calls[1]![1];
+    expect(options.spec?.sheet).toBe('Summary');
+    expect(options.spec?.header).toBeUndefined();
+    expect(options.spec?.dataStartRow).toBeUndefined();
+    expect(options.spec?.fields).toEqual(profile().spec.fields);
+  });
+
+  it('один аркуш: вибору аркуша немає', async () => {
+    await toMapping();
+    expect(screen.queryByRole('textbox', { name: new RegExp(`^${text('permits.air.import.rows.sheet')}`) })).toBeNull();
+  });
+
+  it('«Matched columns» і знахідки — людськими назвами: вбудовані поля з каталогу, додане — назвою колонки типу, невідоме — як є', async () => {
+    airType = airPermitType([['FILE_B', 'Workshop']]);
+    api.analyseAirImport.mockResolvedValue(
+      analysis({
+        header: {
+          headerFromRow: 4,
+          headerToRow: 6,
+          dataFromRow: 9,
+          mapped: [
+            { column: 7, columnLetter: 'G', field: 'naeCode', headerText: 'Source number', level: 'Parent' },
+            { column: 9, columnLetter: 'I', field: 'hoursPerYear', headerText: 'Hours', level: 'Parent' },
+            { column: 27, columnLetter: 'AA', field: 'tonsPerYear', headerText: 't/year', level: 'Child' },
+            { column: 2, columnLetter: 'B', field: 'FILE_B', headerText: 'Shop', level: 'Parent' },
+            { column: 3, columnLetter: 'C', field: 'Remark', headerText: 'Note', level: 'Child' },
+          ],
+          unmapped: [],
+        },
+        issues: [{ severity: 'Warning', messageKey: 'err.ECR-IMP-0422.regValueEmpty', row: 31, column: 'G', field: 'naeCode', args: { row: '31' } }],
+      }),
+    );
+    await toMapping();
+    const mapped = screen.getByRole('region', { name: text('permits.air.import.map.mappedAria') });
+    const heads = within(mapped)
+      .getAllByRole('rowheader')
+      .map((cell) => cell.textContent);
+    expect(heads.slice(0, 3)).toEqual([
+      text('permits.air.import.field.naeCode'),
+      text('permits.air.sources.hours'),
+      text('permits.air.substances.ty'),
+    ]);
+    await waitFor(() => expect(within(mapped).getAllByRole('rowheader')[3]!.textContent).toBe('Workshop'));
+    expect(within(mapped).getAllByRole('rowheader')[4]!.textContent).toBe('Remark');
+    expect(mapped.textContent).not.toMatch(/naeCode|tonsPerYear|FILE_B/);
+    expect(within(mapped).getAllByText(text('permits.air.import.map.level.parent')).length).toBe(3);
+    const issues = screen.getByRole('region', { name: text('permits.air.import.issues.aria') });
+    expect(within(issues).getByText(text('permits.air.import.field.naeCode'))).toBeTruthy();
   });
 
   it('без права редагувати профілі кнопки збереження немає', async () => {
