@@ -65,7 +65,7 @@ function AddedCells({ columns, values }: { readonly columns: readonly AirAddedCo
 
 function EditButton({ label, onClick }: { readonly label: string; readonly onClick: () => void }): JSX.Element {
   return (
-    <Button size="compact-xs" variant="subtle" aria-label={label} onClick={onClick}>
+    <Button size="xs" variant="subtle" aria-label={label} onClick={onClick}>
       {t('permits.air.edit.button')}
     </Button>
   );

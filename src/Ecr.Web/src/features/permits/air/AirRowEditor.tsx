@@ -1,5 +1,6 @@
 import { useState, type JSX } from 'react';
 import { Button, Group, Modal, NumberInput, Stack, TextInput } from '@mantine/core';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { serverMessage } from '@/features/registries/rc816/serverMessage';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
@@ -36,6 +37,7 @@ export function AirRowEditor({
   const [draft, setDraft] = useState<Readonly<Record<string, string>>>(target.initial);
   const [rowErrors, setRowErrors] = useState<readonly string[]>([]);
   const save = useSaveAirRow(permitId);
+  const saving = usePendingLoading(save.isPending);
   const set = (code: string, value: string): void => setDraft((current) => ({ ...current, [code]: value }));
 
   const submit = (): void => {
@@ -125,7 +127,7 @@ export function AirRowEditor({
             <Button variant="default" onClick={onClose}>
               {t('common.cancel')}
             </Button>
-            <Button type="submit" loading={save.isPending}>
+            <Button type="submit" loading={saving}>
               {t('common.save')}
             </Button>
           </Group>

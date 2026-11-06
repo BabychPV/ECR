@@ -424,7 +424,8 @@ test.describe('Air limits real', () => {
     await expect(page.getByText('The preview is out of date')).toHaveCount(0, { timeout: 30_000 });
     await expect(page.getByRole('heading', { name: /NAE codes missing in the tree/ })).toBeVisible();
     await expect(issues.getByRole('row', { name: /Error/ })).toHaveCount(0);
-    await expect(issues.getByRole('row', { name: /Warning\s+6\s+I\s+tonsPerYear/ })).toBeVisible();
+    // Field shown by its readable name (07.11): «t/year», not tonsPerYear.
+    await expect(issues.getByRole('row', { name: /Warning\s+6\s+I\s+t\/year/ })).toBeVisible();
     await expect(apply).toBeEnabled();
 
     // 4 Apply -> result
