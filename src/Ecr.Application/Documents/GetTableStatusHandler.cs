@@ -116,9 +116,9 @@ public sealed class GetTableStatusHandler(
         // в статусі — її ідентифікатор, код аркуша, заповненість і кількість
         // зауважень теж факти про неї. «N з M» рахується по видимому.
         //
-        // ⚠ Колонка під забороною у ВИДИМІЙ таблиці лишається в лічильниках:
-        // віддається лише кількість (скільки комірок заповнено, скільки
-        // зауважень), не значення й не адреса. Знаменник — властивість таблиці.
+        // ⛔ Колонка під забороною у ВИДИМІЙ таблиці НЕ рахується в заповненості
+        // (AU-13 P3-5): кількість заповнених комірок схованої колонки — теж факт
+        // про неї. Зауваження (з підсумку перевірки) рахуються як і раніше.
         var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(key);
 
         var live = instances.Select(i => i.TableDefId).Where(readable.CanReadTable).ToHashSet();
@@ -140,14 +140,16 @@ public sealed class GetTableStatusHandler(
 
                 var columns = table.Columns.Where(c => !c.IsDeleted).ToList();
 
+                // ⛔ S6 (AU-13 P3-5): колонка, невидима глядачеві (Deny чи немає гранта), не входить ні в чисельник, ні в
+                // знаменник - інакше «3 з 6» замість «2 з 4» розкривав би, скільки комірок схованої колонки заповнено.
                 computedColumns.AddRange(columns
-                    .Where(c => c.IsComputed || c.IsReadOnly)
+                    .Where(c => c.IsComputed || c.IsReadOnly || !readable.CanReadColumn(c.Id))
                     .Select(c => c.Id));
 
                 shapes.Add(new TableShape(
                     table.Id,
                     sheet.Code,
-                    InputColumnCount: columns.Count(c => !c.IsComputed && !c.IsReadOnly),
+                    InputColumnCount: columns.Count(c => !c.IsComputed && !c.IsReadOnly && readable.CanReadColumn(c.Id)),
                     TemplateRowCount: table.Rows.Count(r => !r.IsDeleted),
                     IsClosed: Blocks(rules, profile, sheet.Id, table.Id, RowKind.Item, key),
                     ClosedRowDefCount: table.Rows.Count(
