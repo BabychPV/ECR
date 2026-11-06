@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { useRef, useState, type JSX } from 'react';
 import { Button, Group, SegmentedControl, Stack, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
@@ -69,7 +69,14 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
   const [validating, setValidating] = useState<EditAssignment | null>(null);
   const [returning, setReturning] = useState<EditAssignment | null>(null);
   const [removing, setRemoving] = useState<EditAssignment | null>(null);
-  const [participantOpen, setParticipantOpen] = useState(false);
+  const [participantOpen, setParticipantOpenState] = useState(false);
+  // PB2-P2-3: діалог учасника знімається з дерева одразу після закриття, і Mantine `returnFocus` не має куди
+  // повернути фокус - він падав на BODY. Повертаємо його кнопці «Додати учасника» (Grant, Esc, Cancel).
+  const participantTrigger = useRef<HTMLButtonElement>(null);
+  const setParticipantOpen = (open: boolean): void => {
+    setParticipantOpenState(open);
+    if (!open) setTimeout(() => participantTrigger.current?.focus(), 0);
+  };
   const [ownerOpen, setOwnerOpen] = useState(false);
 
   // Симуляція «очима користувача» - лише перегляд: жодних переходів (дизайн §2.4: ¬симуляція).
@@ -258,7 +265,7 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
               <Button onClick={() => openWizard(emptyAssignData)} data-autofocus>
                 {t('editAssign.assign')}
               </Button>
-              <Button variant="default" onClick={() => setParticipantOpen(true)} data-testid="add-participant">
+              <Button variant="default" ref={participantTrigger} onClick={() => setParticipantOpen(true)} data-testid="add-participant">
                 {t('editAssign.addParticipant')}
               </Button>
             </Group>
