@@ -46,7 +46,6 @@ public sealed partial class E2eStandPermissionsCoverageTests
         ["Report.Export"] = "експорт звітів e2e не перевіряє",
         ["Report.ViewSnapshot"] = "перегляд знімків звітів e2e не перевіряє (BuildSnapshot є)",
         ["Report.EditDefinition"] = "небезпечне (IsDangerous); видається явно, e2e не змінює визначення звітів",
-        ["Integration.EditSchedule"] = "розклади інтеграцій e2e не редагує",
         ["Uom.EditCatalog"] = "каталог одиниць e2e не редагує",
         ["System.RunJob"] = "небезпечне (IsDangerous); e2e не запускає фонові задачі вручну",
     };

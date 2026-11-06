@@ -669,19 +669,8 @@ public sealed class UpsertEditAssignmentHandler(
             currentUser.CorrelationId);
     }
 
-    private static bool IsUniqueViolation(Exception ex)
-    {
-        for (var e = ex; e is not null; e = e.InnerException)
-        {
-            // 2601 — дубль унікального індексу, 2627 — порушення обмеження UNIQUE.
-            if (e.GetType().Name == "SqlException" && e.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    // 2601 — дубль унікального індексу, 2627 — порушення обмеження UNIQUE: за номером, не за текстом (мова SQL Server).
+    private static bool IsUniqueViolation(Exception ex) => EditAssignmentAccess.IsUniqueViolation(ex);
 
     private static BusinessRuleException RecipientInvalid()
         => EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentRecipientInvalid", "Одного з виконавців не можна призначити на цей документ.");

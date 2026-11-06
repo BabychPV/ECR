@@ -107,11 +107,19 @@ internal static class EditAssignmentAccess
             new Dictionary<string, object?> { ["messageKey"] = "err.ECR-ACCS-0403.editorSetsForbidden" });
     }
     /// <summary>Чи виняток — порушення унікального індексу бази (2601/2627) у ланцюгу внутрішніх.</summary>
+    /// <remarks>
+    /// ⛔ За НОМЕРОМ помилки (<c>SqlException.Number</c>), а не за текстом «duplicate key»: текст залежить від мови
+    /// повідомлень SQL Server (ru/kz-інстанс дає «Не удается вставить повторяющуюся строку…»), і дубль ставав 500.
+    /// Шар застосунку не посилається на <c>Microsoft.Data.SqlClient</c>, тож номер читається рефлексією за іменем типу;
+    /// ланцюг <c>InnerException</c> проходиться повністю (<c>DbUpdateException</c> → <c>SqlException</c>).
+    /// </remarks>
     public static bool IsUniqueViolation(Exception ex)
     {
         for (var e = ex; e is not null; e = e.InnerException)
         {
-            if (e.GetType().Name == "SqlException" && e.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase))
+            if (e.GetType().Name == "SqlException"
+                && e.GetType().GetProperty("Number")?.GetValue(e) is int number
+                && number is DuplicateIndexKey or UniqueConstraintViolation)
             {
                 return true;
             }
@@ -119,6 +127,12 @@ internal static class EditAssignmentAccess
 
         return false;
     }
+
+    /// <summary>SQL Server 2601: дубль ключа унікального індексу.</summary>
+    public const int DuplicateIndexKey = 2601;
+
+    /// <summary>SQL Server 2627: порушення обмеження <c>UNIQUE</c>/<c>PRIMARY KEY</c>.</summary>
+    public const int UniqueConstraintViolation = 2627;
     /// <summary>
     /// Транзакція керування передачею. Вичерпане очікування блокування (<c>ECR-DOC-4091</c> від
     /// <c>UnitOfWork</c>) перекладається в нейтральний ключ передачі: спільний текст каталогу говорить про

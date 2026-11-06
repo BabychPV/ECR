@@ -11,6 +11,7 @@ import type { DataSource } from '@/features/integration/dataSourceApi';
 import { SourceEntitiesQueryKey } from '@/features/integration/sourceEntityApi';
 import { fetchEventTemplates, fetchSourceEventMaps, type SourceEventMap } from './sourceEventsApi';
 import { fetchDocuments, isEventsNotConfigured, SourceEventsKeys } from './sourceEventsData';
+import { SourceEventFrequency } from './SourceEventFrequency';
 import { SourceEventMapsPanel } from './SourceEventMapsPanel';
 import { SourceEventsTable } from './SourceEventsTable';
 
@@ -46,9 +47,16 @@ type Editing ={ readonly mode: 'create' } | { readonly mode: 'edit'; readonly ma
 export function SourceEventsTab({
   source,
   canManage,
+  canEditSchedule = false,
 }: {
   readonly source: DataSource;
   readonly canManage: boolean;
+
+  /**
+   * Q-2: `Integration.EditSchedule` поза симуляцією — частота синку подій (розклад сутності). Без права поля НЕМАЄ:
+   * перелік розкладів сервер віддає лише з ним.
+   */
+  readonly canEditSchedule?: boolean;
 }): JSX.Element {
   const [chosen, setChosen] = useState<number | null>(null);
   const [editing, setEditing] = useState<Editing | null>(null);
@@ -106,6 +114,11 @@ export function SourceEventsTab({
         onChange={(value) => setChosen(value === null ? null : Number(value))}
         data-source-events-entity=""
       />
+
+      {canEditSchedule && (
+        // ⚠ Нова сутність — нова форма: чернетка частоти однієї не переходить в іншу.
+        <SourceEventFrequency key={entity.id} sourceEntityId={entity.id} dataSource={source.code} />
+      )}
 
       {/* ⛔ «Не налаштовано» — інформаційний стан із текстом сервера (назва ключа налаштування), а не помилка
           і не порожній перелік; таблиця подій, уже синхронізованих раніше, лишається видимою. */}

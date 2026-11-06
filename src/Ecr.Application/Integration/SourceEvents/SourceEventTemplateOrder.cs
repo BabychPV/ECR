@@ -39,6 +39,15 @@ public static class SourceEventTemplateOrder
         return name.EndsWith("_Manual", StringComparison.OrdinalIgnoreCase) ? 2 : 4;
     }
 
+    /// <summary>
+    /// Чи шаблон — добова КОПІЯ (<c>…_Auto_Day</c>, <c>…_Manual_Day</c>). Відповідь людини на Q-1 (06.11, варіант «а»):
+    /// <c>_Day</c> — копія кореневої події з тими самими атрибутами, створена раз на добу, з ВЛАСНИМ ID. Синк бере лише
+    /// кореневі <c>_Auto</c>/<c>_Manual</c>: копія з іншим ID дедуплікацію за ID оминала б і подвоювала подію в рядках.
+    /// </summary>
+    /// <param name="template">Ім'я шаблону (код сутності джерела чи <c>TemplateName</c> події).</param>
+    public static bool IsDayCopy(string? template)
+        => !string.IsNullOrWhiteSpace(template) && Rank(template) is 1 or 3;
+
     /// <summary>Чи подія <paramref name="winner"/> має пріоритет над <paramref name="other"/> (менший ранг, далі ім'я).</summary>
     /// <param name="winner">Шаблон-кандидат на перемогу.</param>
     /// <param name="other">Другий шаблон.</param>

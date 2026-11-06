@@ -254,7 +254,7 @@ export function DataSourceDrawer({
           {canView && (
             <Tabs.Panel value="events" pt="sm">
               <Suspense fallback={<Loader size="sm" />}>
-                <SourceEventsTab source={source} canManage={canManage} />
+                <SourceEventsTab source={source} canManage={canManage} canEditSchedule={canEditSchedule} />
               </Suspense>
             </Tabs.Panel>
           )}

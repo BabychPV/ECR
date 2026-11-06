@@ -471,10 +471,23 @@ public sealed class CreateSourceEventMapHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     IClock clock,
-    Permits.Groups.ILookupTargetResolver? groups = null)
+    Permits.Groups.ILookupTargetResolver? groups = null,
+
+    // Q-2 (людина 06.11): типовий розклад синку подій — щогодини, якщо сутність розкладу ще не має. `null` — без
+    // типового розкладу (прямі тести).
+    ICollectionScheduleStore? schedules = null,
+    Integration.CollectionScheduleApplier? applier = null,
+    Microsoft.Extensions.Logging.ILogger<CreateSourceEventMapHandler>? log = null)
 {
     /// <summary>Операція в журналі структурних змін.</summary>
     public const string AuditOperation = "CreateSourceEventMap";
+
+    /// <summary>
+    /// Q-2 (людина 06.11: «це має бути параметр налаштування в UI»): типова частота синку подій — щогодини (cron Quartz).
+    /// Ставиться разом із ПЕРШИМ мапінгом сутності, якщо розкладу ще немає; далі частоту змінює людина на вкладці
+    /// «Події з PI» чи «Розклад» без міграції.
+    /// </summary>
+    public const string DefaultEventSyncCron = "0 0 * * * ?";
 
     /// <summary>Заводить мапінг.</summary>
     /// <param name="command">Налаштування мапінгу.</param>
@@ -554,6 +567,7 @@ public sealed class CreateSourceEventMapHandler(
         SourceEventMapSupport.AddValues(map, built);
 
         SourceEventMap? created = null;
+        CollectionSchedule? defaultSchedule = null;
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             created = await store.AddMapAsync(map, innerCt).ConfigureAwait(false);
@@ -563,8 +577,74 @@ public sealed class CreateSourceEventMapHandler(
                 oldJson: null, newJson: IntegrationConfigAudit.Snapshot(SourceEventMapSupport.ToDto(created)),
                 reason: IntegrationConfigAudit.Reason("integrationAudit.eventMapCreated", ("entity", command.SourceEntityId), ("document", command.DocumentId)),
                 innerCt).ConfigureAwait(false);
+
+            // ⚠ Свіжий екземпляр на кожну спробу (AN-101 (a)): трекер не відновлює `Added` після повтору транзакції.
+            defaultSchedule = await AddDefaultScheduleAsync(command.SourceEntityId, innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
+        if (defaultSchedule is not null && applier is not null)
+        {
+            await ApplyDefaultScheduleAsync(applier, defaultSchedule, ct).ConfigureAwait(false);
+        }
+
         return SourceEventMapSupport.ToDto(created!);
+    }
+
+    /// <summary>
+    /// Q-2: типовий щогодинний розклад сутності, у якої розкладу ще немає (і яка не власна форма ECR, і не добова
+    /// копія <c>_Day</c> — її синк не виконується, Q-1). Пишеться в ТІЙ САМІЙ транзакції, що й мапінг, з журналом.
+    /// </summary>
+    private async Task<CollectionSchedule?> AddDefaultScheduleAsync(int sourceEntityId, CancellationToken ct)
+    {
+        if (schedules is null)
+        {
+            return null;
+        }
+
+        var entity = await schedules.FindSourceEntityAsync(sourceEntityId, ct).ConfigureAwait(false);
+        if (entity is null || entity.ScheduleId is not null || entity.SourceKind == RegistrySourceKind.Local
+            || Integration.SourceEvents.SourceEventTemplateOrder.IsDayCopy(entity.Code))
+        {
+            return null;
+        }
+
+        var schedule = new CollectionSchedule(sourceEntityId, DefaultEventSyncCron);
+        schedules.Add(schedule);
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        await IntegrationConfigAudit.WriteAsync(
+            audit, clock, currentUser, IntegrationConfigAudit.ScheduleType, schedule.Id,
+            Integration.CreateCollectionScheduleHandler.AuditOperation,
+            oldJson: null, newJson: IntegrationConfigAudit.Snapshot(schedule),
+            reason: IntegrationConfigAudit.Reason("integrationAudit.scheduleCreated", ("id", schedule.Id), ("entity", entity.Code)),
+            ct).ConfigureAwait(false);
+
+        return schedule;
+    }
+
+    /// <summary>
+    /// Ставить типовий розклад у планувальник ПІСЛЯ коміту. Відмова планувальника мапінг не скасовує: розклад лишається
+    /// з позначкою помилки (видно на вкладці «Розклад»), як і в <c>ApplyOrFailAsync</c>, але без 422.
+    /// </summary>
+    private async Task ApplyDefaultScheduleAsync(
+        Integration.CollectionScheduleApplier scheduleApplier, CollectionSchedule schedule, CancellationToken ct)
+    {
+        try
+        {
+            await scheduleApplier.ApplyAsync(schedule, ct).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Відмова планувальника — стан розкладу, а не відмова створення мапінгу.
+        catch (Exception e) when (e is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            var correlationId = SafeErrorText.NewCorrelationId();
+            if (log is not null)
+            {
+                Integration.SchedulerApplyLog.Failed(log, schedule.Id, correlationId, e);
+            }
+
+            schedule.MarkInvalid(SafeErrorText.For(e, correlationId, "the scheduler call"), clock.UtcNow);
+            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
     }
 }

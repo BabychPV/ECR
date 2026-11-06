@@ -1392,6 +1392,10 @@ public sealed partial class SourceEventSyncJobTests(SqlServerFixture sql)
     [InlineData(20, 100, false)] // рівно 20 %
     [InlineData(201, 1500, true)] // ≤ 20 % (13 %), але > 200 абсолютно
     [InlineData(200, 1500, false)]
+    [InlineData(300, 5000, false)] // ✎ Q-3 («тисячі»): 6 % від 5 000 — звичайна чистка, стеля max(200, 10 %) = 500
+    [InlineData(500, 5000, false)] // рівно 10 %
+    [InlineData(501, 5000, true)] // > 10 % при 5 000 — блок
+    [InlineData(201, 2000, true)] // 10 % від 2 000 = 200: стеля не нижча за 200 і не вища
     public void B3_Ліміт_масового_видалення_відсоток_мінімум_і_абсолютна_стеля(int candidates, int linked, bool exceeds)
         => Assert.Equal(exceeds, SourceEventSyncJob.ExceedsRemovalLimit(candidates, linked, out _));
 
