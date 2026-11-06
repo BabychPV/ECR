@@ -1312,20 +1312,58 @@ public sealed class AccessDecisionService(
             foreach (var (tableInstanceId, slice) in byPeriod)
             {
                 var own = rows[tableInstanceId];
-                var decisions = new Dictionary<CellAddress, EditDecision>(own.Count() * slice.Columns.Count);
+                var columns = slice.Columns;
+                var decisions = new Dictionary<CellAddress, EditDecision>(own.Count() * columns.Count);
+
+                // ⚡ Перф зрізу (6 428 рядків × 31 колонка = ~200k комірок, ~2 с CPU на запит): `Decide` — чиста функція,
+                // і від РЯДКА вона залежить рівно через чотири входи — ознаки опису рядка (`IsReadOnly`, `RowKind`), вікна
+                // чинності довідника цього рядка, комірочна формула й ручне значення формули на (рядок, колонку). Рядки з
+                // однаковими ознаками опису, без вікон і без комірочних фактів дають ТЕ САМЕ рішення на ту саму колонку —
+                // воно рахується один раз на «клас рядка × колонку». Решта комірок (вікна, комірочна формула, ручне
+                // значення) рахуються поштучно, як і доти. Тотожність із поштучним шляхом (`CanEditCellsAsync` /
+                // `CanClearCellsAsync`, без мемо) стереже `AccessDecisionBatchEquivalenceTests.Мемо_зрізу_тотожне_…`.
+                var memo = new Dictionary<(bool ReadOnly, RowKind Kind), EditDecision?[]>();
+                var cellFacts = !ignoreColumnFlags && (slice.ComputedCells.Count > 0 || slice.Overrides.Policy.HasTargets);
 
                 foreach (var row in own)
                 {
                     // Вікна чинності записів довідника, на які посилається саме
                     // цей рядок: колонка → вікно. Порожньо — рядок нічого не обрав.
-                    var sourceValues = slice.Rules.SourceWindows.TryGetValue(row.Id, out var windows)
-                        ? windows
-                        : EmptyWindows;
-
-                    foreach (var column in slice.Columns)
+                    if (slice.Rules.SourceWindows.TryGetValue(row.Id, out var windows))
                     {
-                        decisions[new CellAddress(slice.PeriodKey, row.Id, column.Id)] =
-                            Decide(profile, slice, row.RowKey, column, sourceValues, ignoreColumnFlags);
+                        foreach (var column in columns)
+                        {
+                            decisions[new CellAddress(slice.PeriodKey, row.Id, column.Id)] =
+                                Decide(profile, slice, row.RowKey, column, windows, ignoreColumnFlags);
+                        }
+
+                        continue;
+                    }
+
+                    var def = RowDefOf(slice, row.RowKey);
+                    var rowClass = (def?.IsReadOnly ?? false, def?.RowKind ?? RowKind.Item);
+                    if (!memo.TryGetValue(rowClass, out var byColumn))
+                    {
+                        memo[rowClass] = byColumn = new EditDecision?[columns.Count];
+                    }
+
+                    for (var i = 0; i < columns.Count; i++)
+                    {
+                        var column = columns[i];
+                        EditDecision decision;
+
+                        if (cellFacts
+                            && (slice.ComputedCells.Contains((row.RowKey, column.Id))
+                                || slice.Overrides.Overridable(row.RowKey, column)))
+                        {
+                            decision = Decide(profile, slice, row.RowKey, column, EmptyWindows, ignoreColumnFlags);
+                        }
+                        else
+                        {
+                            decision = byColumn[i] ??= Decide(profile, slice, row.RowKey, column, EmptyWindows, ignoreColumnFlags);
+                        }
+
+                        decisions[new CellAddress(slice.PeriodKey, row.Id, column.Id)] = decision;
                     }
                 }
 

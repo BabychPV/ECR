@@ -18,6 +18,17 @@ public interface IRowActivityFilterSource
     public Task<RowActivityFilterResolution?> ResolveForMethodologyAsync(
         int methodologyId, IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
 
+    /// <summary>
+    /// <see cref="ResolveForMethodologyAsync"/> для кількох методологій — одним читанням прапорців; однаковий
+    /// прапорець (довідник/запис) розв'язується один раз.
+    /// </summary>
+    /// <param name="methodologyIds">Методології.</param>
+    /// <param name="tableDefIds">Таблиці.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Методологія → фільтр; методології без прапорця (і невідомої) у словнику немає або значення <c>null</c>.</returns>
+    public Task<IReadOnlyDictionary<int, RowActivityFilterResolution?>> ResolveForMethodologiesAsync(
+        IReadOnlyCollection<int> methodologyIds, IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
+
     /// <summary>Те саме за версією методології.</summary>
     /// <param name="methodologyVersionId">Версія методології.</param>
     /// <param name="tableDefIds">Таблиці.</param>

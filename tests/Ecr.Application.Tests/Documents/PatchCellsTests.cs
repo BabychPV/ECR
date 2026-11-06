@@ -754,14 +754,23 @@ public sealed class PatchCellsTests
 
         _methodologies.GetMethodologyIdsBoundToTableAsync(3, Arg.Any<CancellationToken>())
                       .Returns(Task.FromResult<IReadOnlyList<int>>([MethodologyId]));
-        _methodologies.GetPublishedVersionsAsync(MethodologyId, Arg.Any<CancellationToken>())
+        // ⚡ Gate читає методології пакетом (версії, правила, вимоги, підписи) — по одному зверненню на вид даних.
+        _methodologies.GetPublishedVersionsOfAsync(
+                          Arg.Is<IReadOnlyCollection<int>>(ids => ids.Contains(MethodologyId)), Arg.Any<CancellationToken>())
                       .Returns(Task.FromResult<IReadOnlyList<MethodologyVersion>>([version]));
-        _methodologies.GetRulesAsync(version.Id, Arg.Any<CancellationToken>())
+        _methodologies.GetRulesOfVersionsAsync(
+                          Arg.Is<IReadOnlyCollection<int>>(ids => ids.Contains(version.Id)), Arg.Any<CancellationToken>())
                       .Returns(Task.FromResult<IReadOnlyList<MethodologyRule>>([rule]));
-        _methodologies.GetRequiredInputsAsync(version.Id, Arg.Any<CancellationToken>())
+        _methodologies.GetRequiredInputsOfVersionsAsync(
+                          Arg.Is<IReadOnlyCollection<int>>(ids => ids.Contains(version.Id)), Arg.Any<CancellationToken>())
                       .Returns(Task.FromResult<IReadOnlyList<MethodologyRequiredInput>>([requiredInput]));
-        _methodologies.FindByVersionAsync(version.Id, Arg.Any<CancellationToken>())
-                      .Returns(Task.FromResult<Methodology?>(methodology));
+        _methodologies.GetVersionLabelsAsync(
+                          Arg.Is<IReadOnlyCollection<int>>(ids => ids.Contains(version.Id)), Arg.Any<CancellationToken>())
+                      .Returns(Task.FromResult<IReadOnlyDictionary<int, MethodologyVersionLabel>>(
+                          new Dictionary<int, MethodologyVersionLabel>
+                          {
+                              [version.Id] = new(version.Id, methodology.Code, version.Version),
+                          }));
 
         _periods.FindPeriodBoundsAsync(700, Period, Arg.Any<CancellationToken>())
                 .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
@@ -844,9 +853,16 @@ public sealed class PatchCellsTests
         WithMethodology(RequiredInputSeverity.Block);
 
         var source = Substitute.For<IRowActivityFilterSource>();
+        var resolution = new RowActivityFilterResolution(
+            "77", new Dictionary<int, IReadOnlyList<int>> { [3] = [14] });
         source.ResolveForMethodologyAsync(100, Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
-              .Returns(new RowActivityFilterResolution(
-                  "77", new Dictionary<int, IReadOnlyList<int>> { [3] = [14] }));
+              .Returns(resolution);
+
+        // ⚡ Gate читає фільтри пакетом на всі методології запиту.
+        source.ResolveForMethodologiesAsync(
+                  Arg.Is<IReadOnlyCollection<int>>(ids => ids.Contains(100)), Arg.Any<IReadOnlyCollection<int>>(),
+                  Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<int, RowActivityFilterResolution?> { [100] = resolution });
         _rowActivity = source;
 
         if (statusEntryId is { } entry)
@@ -1556,7 +1572,8 @@ public sealed class PatchCellsTests
         Assert.Equal(1, response.AppliedCells);
         Assert.Empty(response.Validation);
 
-        await _methodologies.DidNotReceive().GetPublishedVersionsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _methodologies.DidNotReceive().GetPublishedVersionsOfAsync(
+            Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]

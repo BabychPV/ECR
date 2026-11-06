@@ -25,6 +25,52 @@ public sealed class RowActivityFilterSource(EcrDbContext db) : IRowActivityFilte
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Прапорці — одним запитом; далі кожен РІЗНИЙ прапорець розв'язується тим самим <see cref="ResolveAsync"/>, що й
+    /// поштучно (Land: усі методології з тим самим «лише Running» — один розв'язок на запит, а не на методологію).
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<int, RowActivityFilterResolution?>> ResolveForMethodologiesAsync(
+        IReadOnlyCollection<int> methodologyIds, IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodologyIds);
+        ArgumentNullException.ThrowIfNull(tableDefIds);
+
+        var result = new Dictionary<int, RowActivityFilterResolution?>();
+        if (methodologyIds.Count == 0)
+        {
+            return result;
+        }
+
+        var ids = methodologyIds.Distinct().ToList();
+        var raws = await db.Methodologies
+            .AsNoTracking()
+            .Where(m => ids.Contains(m.Id))
+            .Select(m => new { m.Id, m.RowActivityFilter })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var bySpec = new Dictionary<string, RowActivityFilterResolution?>(StringComparer.Ordinal);
+        foreach (var raw in raws.OrderBy(r => r.Id))
+        {
+            if (raw.RowActivityFilter is null)
+            {
+                result[raw.Id] = null;
+                continue;
+            }
+
+            if (!bySpec.TryGetValue(raw.RowActivityFilter, out var resolution))
+            {
+                resolution = await ResolveAsync(raw.RowActivityFilter, tableDefIds, ct).ConfigureAwait(false);
+                bySpec[raw.RowActivityFilter] = resolution;
+            }
+
+            result[raw.Id] = resolution;
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
     public async Task<RowActivityFilterResolution?> ResolveForVersionAsync(
         int methodologyVersionId, IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
     {
