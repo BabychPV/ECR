@@ -156,18 +156,36 @@ public static class AirLimitsSchema
     public static IReadOnlyDictionary<string, string> ChildColumnsOf(Domain.Entities.Configuration.RegistryDef substances)
         => WithAddedColumns(ChildColumns, substances, SubstanceSystemColumns);
 
-    private static Dictionary<string, string> WithAddedColumns(
+    /// <summary>
+    /// Columns ADDED to AIR_SOURCES later (neither system nor built-in), in table order — the same rule as <see cref="ParentColumnsOf"/>;
+    /// the permit card shows them (P1 07.11: «the user must SEE ALL imported data»).
+    /// </summary>
+    /// <param name="sources">The AIR_SOURCES definition.</param>
+    public static IReadOnlyList<Domain.Entities.Configuration.RegistryFieldDef> AddedSourceColumns(Domain.Entities.Configuration.RegistryDef sources)
+        => AddedColumns(ParentColumns, sources, SourceSystemColumns);
+
+    /// <summary>Columns added to AIR_SOURCE_SUBSTANCES later, like <see cref="AddedSourceColumns"/>.</summary>
+    /// <param name="substances">The AIR_SOURCE_SUBSTANCES definition.</param>
+    public static IReadOnlyList<Domain.Entities.Configuration.RegistryFieldDef> AddedSubstanceColumns(Domain.Entities.Configuration.RegistryDef substances)
+        => AddedColumns(ChildColumns, substances, SubstanceSystemColumns);
+
+    private static List<Domain.Entities.Configuration.RegistryFieldDef> AddedColumns(
         IReadOnlyDictionary<string, string> builtIn, Domain.Entities.Configuration.RegistryDef table, HashSet<string> system)
     {
         ArgumentNullException.ThrowIfNull(table);
+        return [.. table.Fields
+            .Where(f => !system.Contains(f.Code) && !builtIn.Values.Contains(f.Code, StringComparer.OrdinalIgnoreCase))
+            .OrderBy(f => f.Ordinal)
+            .ThenBy(f => f.Id)];
+    }
+
+    private static Dictionary<string, string> WithAddedColumns(
+        IReadOnlyDictionary<string, string> builtIn, Domain.Entities.Configuration.RegistryDef table, HashSet<string> system)
+    {
         var result = new Dictionary<string, string>(builtIn, StringComparer.Ordinal);
-        foreach (var field in table.Fields)
+        foreach (var field in AddedColumns(builtIn, table, system))
         {
-            var code = field.Code;
-            if (!system.Contains(code) && !builtIn.Values.Contains(code, StringComparer.OrdinalIgnoreCase))
-            {
-                result.TryAdd(code, code);
-            }
+            result.TryAdd(field.Code, field.Code);
         }
 
         return result;

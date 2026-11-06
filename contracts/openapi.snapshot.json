@@ -269,6 +269,37 @@
           null
         ]
       },
+      "AirAddedColumnDto": {
+        "description": "A column added to a sources table of the AIR type (P1 06.11 «Add as new column»), for the card headers.",
+        "properties": {
+          "code": {
+            "description": "Column (registry field) code, e.g. `FILE_B`.",
+            "type": "string"
+          },
+          "dataType": {
+            "description": "`String`, `Int`, `Decimal`, `Date`, `Bool` or `Lookup`.",
+            "type": "string"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Display name by language.",
+            "type": "object"
+          },
+          "table": {
+            "description": "`sources` (AIR_SOURCES) or `substances` (AIR_SOURCE_SUBSTANCES).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "table",
+          "code",
+          "nameL10n",
+          "dataType"
+        ],
+        "type": "object"
+      },
       "AirAreaCodeDto": {
         "description": "One area of a region.",
         "properties": {
@@ -406,6 +437,16 @@
       "AirLimitsPermitDto": {
         "description": "Result of `GET /api/v1/permits/{permitId}/air-limits`: the permit card content.",
         "properties": {
+          "addedColumns": {
+            "description": "P1 07.11: columns added to the two tables (sources first, then substances), in table order.",
+            "items": {
+              "$ref": "#/components/schemas/AirAddedColumnDto"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "permitId": {
             "description": "Permit.",
             "format": "int64",
@@ -422,10 +463,24 @@
             },
             "type": "array"
           },
+          "sourcesRegistryCode": {
+            "description": "Registry of `AIR_SOURCES` — where the card writes an edited source row (generic batch).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "substanceRows": {
             "description": "Substance rows in all sources.",
             "format": "int32",
             "type": "integer"
+          },
+          "substancesRegistryCode": {
+            "description": "Registry of `AIR_SOURCE_SUBSTANCES`.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "totals": {
             "description": "Totals per substance, by code.",
@@ -737,6 +792,14 @@
       "AirSourceDto": {
         "description": "One source (NAE) of a permit with its substances.",
         "properties": {
+          "added": {
+            "additionalProperties": {},
+            "description": "P1 07.11: values of the columns added to `AIR_SOURCES`, by code (as the substance's `added`).",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
           "area": {
             "description": "Area code (`-` — none).",
             "type": [
@@ -885,6 +948,13 @@
               "string"
             ]
           },
+          "version": {
+            "description": "Row version — the `baseVersion` of the generic batch write.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "volume": {
             "description": "Gas volume.",
             "format": "decimal",
@@ -955,6 +1025,14 @@
       "AirSubstanceDto": {
         "description": "One substance limit of a source.",
         "properties": {
+          "added": {
+            "additionalProperties": {},
+            "description": "P1 07.11: values of the columns ADDED to `AIR_SOURCE_SUBSTANCES` (the card's `addedColumns`), by code:\nnumber (Int / Decimal), text, ISO date `yyyy-MM-dd`, bool or lookup entry id; a column without a value is absent.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
           "gramsPerSecond": {
             "description": "g/s.",
             "format": "decimal",
@@ -995,6 +1073,13 @@
           "tonsPerYear": {
             "description": "t/year (full precision, no rounding).",
             "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "version": {
+            "description": "Row version — the `baseVersion` of `POST /api/v1/registries/{code}/entries/batch`.",
             "type": [
               "null",
               "string"

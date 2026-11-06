@@ -382,44 +382,8 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         var ndvYear = $"NDV_YEAR_{stamp}";
         await AddColumnAsync(app, client, AirLimitsSchema.SourcesTable, pointCopy, "String");
         await AddColumnAsync(app, client, AirLimitsSchema.SubstancesTable, ndvYear, "Int");
-
-        var era = Ecr.Application.RegistryImport.BuiltInImportProfiles.EraTable33;
-        var spec = new Ecr.Application.RegistryImport.RegistryImportSpec
-        {
-            Sheet = era.Sheet,
-            Header = era.Header,
-            DataStartRow = era.DataStartRow,
-            GroupRows = era.GroupRows,
-            ParentKeyField = era.ParentKeyField,
-            ChildKeyField = era.ChildKeyField,
-            NaMarkers = era.NaMarkers,
-            Fields =
-            [
-                .. era.Fields,
-                new Ecr.Application.RegistryImport.ImportFieldSpec { Name = pointCopy, Level = Ecr.Application.RegistryImport.ImportLevel.Parent, Column = "B" },
-                new Ecr.Application.RegistryImport.ImportFieldSpec
-                {
-                    Name = ndvYear, Level = Ecr.Application.RegistryImport.ImportLevel.Child, Column = "AB", Parser = Ecr.Application.RegistryImport.ImportParser.Integer,
-                },
-            ],
-        };
-        var specJson = JsonDocument.Parse(spec.ToJson()).RootElement;
-
-        // Column B («Цех») is empty in the synthetic form: fill it on every source row (the NAE number sits in G).
-        byte[] bytes;
-        using (var input = new MemoryStream(Synthetic.Bytes))
-        using (var book = new ClosedXML.Excel.XLWorkbook(input))
-        {
-            var sheet = book.Worksheets.First();
-            foreach (var row in sheet.RowsUsed().Where(r => r.RowNumber() > 7 && !r.Cell("G").IsEmpty()))
-            {
-                row.Cell("B").Value = "WS-" + row.Cell("G").GetFormattedString();
-            }
-
-            using var output = new MemoryStream();
-            book.SaveAs(output);
-            bytes = output.ToArray();
-        }
+        var specJson = AddedColumnsSpec(pointCopy, ndvYear);
+        var bytes = WithWorkshops();
 
         var region = NewRegion();
         var permitId = await NewPermitAsync(client, app);
@@ -444,6 +408,131 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
             client, Preview(permitId), bytes, new { region, area = "OFFSHORE", spec = specJson }))).GetProperty("preview");
         Assert.Equal(373, preview.GetProperty("diff").GetProperty("unchangedParents").GetInt32());
         Assert.Equal(0, preview.GetProperty("diff").GetProperty("changedParents").GetInt32());
+    }
+
+    /// <remarks>
+    /// P1 07.11 «the user must SEE ALL imported data»: after an import with added columns the card (<c>GET …/air-limits</c>) lists
+    /// the added columns of both tables with name and data type, carries their values on every source and substance row, and each
+    /// row's <c>version</c> is what the generic batch write (<c>POST /registries/{code}/entries/batch</c>) checks: an edit of a
+    /// built-in and an added value through it is visible in the card, and the old version is refused (<c>entryChanged</c>).
+    /// Mutations (run, red): <c>AddedSourceColumns</c> returning nothing → no «sources» column and no source values; the row
+    /// version left out of <c>AirRow</c> (<c>VersionOf</c> → <c>null</c>) → «version» is null and the edit cannot be checked.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Card__shows_added_columns_with_values_and_rows_edit_through_the_generic_batch_with_their_version()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+        var stamp = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var workshop = $"FILE_B_{stamp}";
+        var year = $"FILE_AB_{stamp}";
+        await AddColumnAsync(app, client, AirLimitsSchema.SourcesTable, workshop, "String");
+        await AddColumnAsync(app, client, AirLimitsSchema.SubstancesTable, year, "Int");
+
+        var region = NewRegion();
+        var permitId = await NewPermitAsync(client, app);
+        var resolutions = await ResolveAllAsync(app, client, permitId, region);
+        await ApplyBytesAsync(app, client, permitId, WithWorkshops(), new { region, area = "OFFSHORE", resolutions, spec = AddedColumnsSpec(workshop, year) });
+
+        var card = await CardAsync(app, client, permitId);
+        Assert.Equal(AirLimitsSchema.SourcesRegistry, card.GetProperty("sourcesRegistryCode").GetString());
+        Assert.Equal(AirLimitsSchema.SubstancesRegistry, card.GetProperty("substancesRegistryCode").GetString());
+        var columns = card.GetProperty("addedColumns").EnumerateArray().ToList();
+        var workshopColumn = Assert.Single(columns, c => c.GetProperty("code").GetString() == workshop);
+        Assert.Equal("sources", workshopColumn.GetProperty("table").GetString());
+        Assert.Equal("String", workshopColumn.GetProperty("dataType").GetString());
+        Assert.Equal(workshop, workshopColumn.GetProperty("nameL10n").GetProperty("en").GetString());
+        var yearColumn = Assert.Single(columns, c => c.GetProperty("code").GetString() == year);
+        Assert.Equal("substances", yearColumn.GetProperty("table").GetString());
+        Assert.Equal("Int", yearColumn.GetProperty("dataType").GetString());
+        Assert.DoesNotContain(columns, c => c.GetProperty("code").GetString() is AirLimitsSchema.Nae or AirLimitsSchema.SourceName or AirLimitsSchema.TonsPerYear or "PERMIT");
+
+        var sources = card.GetProperty("sources").EnumerateArray().ToList();
+        Assert.Equal(373, sources.Count);
+        Assert.All(sources, s => Assert.StartsWith("WS-", s.GetProperty("added").GetProperty(workshop).GetString(), StringComparison.Ordinal));
+        var substances = sources.SelectMany(s => s.GetProperty("substances").EnumerateArray()).ToList();
+        Assert.True(
+            substances.Count(x => x.GetProperty("added").TryGetProperty(year, out var y) && Dec(y) > 2000m) > 2000,
+            "substance rows with the added year");
+
+        var source = sources.First(s => s.GetProperty("substances").GetArrayLength() > 0);
+        var sourceVersion = source.GetProperty("version").GetString();
+        Assert.False(string.IsNullOrEmpty(sourceVersion));
+        var substance = source.GetProperty("substances")[0];
+        var substanceVersion = substance.GetProperty("version").GetString();
+        Assert.False(string.IsNullOrEmpty(substanceVersion));
+
+        async Task<JsonElement> BatchAsync(string registry, long id, string? version, Dictionary<string, object?> values)
+            => await ReadAsync(app, await client.PostAsJsonAsync(
+                new Uri($"/api/v1/registries/{registry}/entries/batch?dryRun=false", UriKind.Relative),
+                new { items = new[] { new { clientRowId = "r1", op = "upsert", id, code = (string?)null, baseVersion = version, values } } },
+                Web));
+
+        var sourceId = source.GetProperty("id").GetInt64();
+        var editedSource = await BatchAsync(AirLimitsSchema.SourcesRegistry, sourceId, sourceVersion, new() { [AirLimitsSchema.SourceName] = "Edited source", [workshop] = "WS-EDITED" });
+        Assert.True(editedSource.GetProperty("applied").GetBoolean(), editedSource.GetRawText());
+        var substanceId = substance.GetProperty("id").GetInt64();
+        var editedSubstance = await BatchAsync(AirLimitsSchema.SubstancesRegistry, substanceId, substanceVersion, new() { [AirLimitsSchema.TonsPerYear] = 1.25m, [year] = 2031 });
+        Assert.True(editedSubstance.GetProperty("applied").GetBoolean(), editedSubstance.GetRawText());
+
+        var after = await CardAsync(app, client, permitId);
+        var changed = after.GetProperty("sources").EnumerateArray().Single(s => s.GetProperty("id").GetInt64() == sourceId);
+        Assert.Equal("Edited source", changed.GetProperty("sourceName").GetString());
+        Assert.Equal("WS-EDITED", changed.GetProperty("added").GetProperty(workshop).GetString());
+        Assert.NotEqual(sourceVersion, changed.GetProperty("version").GetString());
+        var changedSubstance = changed.GetProperty("substances").EnumerateArray().Single(x => x.GetProperty("id").GetInt64() == substanceId);
+        Assert.Equal(1.25m, Dec(changedSubstance.GetProperty("tonsPerYear")));
+        Assert.Equal(2031m, Dec(changedSubstance.GetProperty("added").GetProperty(year)));
+
+        // The version the card showed BEFORE the edit is stale now: the generic write refuses it (the card reloads and shows why).
+        var stale = await BatchAsync(AirLimitsSchema.SourcesRegistry, sourceId, sourceVersion, new() { [AirLimitsSchema.SourceName] = "Lost update" });
+        Assert.False(stale.GetProperty("applied").GetBoolean());
+        Assert.Contains("entryChanged", stale.GetRawText(), StringComparison.Ordinal);
+    }
+
+    /// <summary>ERA table 3.3 with two extra profile fields: column B → a source field, column AB (integer) → a substance field.</summary>
+    private static JsonElement AddedColumnsSpec(string parentField, string childField)
+    {
+        var era = Ecr.Application.RegistryImport.BuiltInImportProfiles.EraTable33;
+        var spec = new Ecr.Application.RegistryImport.RegistryImportSpec
+        {
+            Sheet = era.Sheet,
+            Header = era.Header,
+            DataStartRow = era.DataStartRow,
+            GroupRows = era.GroupRows,
+            ParentKeyField = era.ParentKeyField,
+            ChildKeyField = era.ChildKeyField,
+            NaMarkers = era.NaMarkers,
+            Fields =
+            [
+                .. era.Fields,
+                new Ecr.Application.RegistryImport.ImportFieldSpec { Name = parentField, Level = Ecr.Application.RegistryImport.ImportLevel.Parent, Column = "B" },
+                new Ecr.Application.RegistryImport.ImportFieldSpec
+                {
+                    Name = childField, Level = Ecr.Application.RegistryImport.ImportLevel.Child, Column = "AB", Parser = Ecr.Application.RegistryImport.ImportParser.Integer,
+                },
+            ],
+        };
+        return JsonDocument.Parse(spec.ToJson()).RootElement.Clone();
+    }
+
+    /// <summary>The synthetic workbook with column B («Цех», empty in the form) filled on every source row (the NAE number sits in G).</summary>
+    private static byte[] WithWorkshops()
+    {
+        using var input = new MemoryStream(Synthetic.Bytes);
+        using var book = new ClosedXML.Excel.XLWorkbook(input);
+        var sheet = book.Worksheets.First();
+        foreach (var row in sheet.RowsUsed().Where(r => r.RowNumber() > 7 && !r.Cell("G").IsEmpty()))
+        {
+            row.Cell("B").Value = "WS-" + row.Cell("G").GetFormattedString();
+        }
+
+        using var output = new MemoryStream();
+        book.SaveAs(output);
+        return output.ToArray();
     }
 
     /// <summary>Adds a column to a table of the AIR type the way the type editor does: new version → PUT → publish.</summary>

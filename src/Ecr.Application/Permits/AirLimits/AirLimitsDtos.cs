@@ -182,6 +182,11 @@ public sealed record AirLimitsImportResultDto(
 /// <param name="GramsPerSecond">g/s.</param>
 /// <param name="MgPerNm3">mg/nm3.</param>
 /// <param name="TonsPerYear">t/year (full precision, no rounding).</param>
+/// <param name="Added">
+/// P1 07.11: values of the columns ADDED to <c>AIR_SOURCE_SUBSTANCES</c> (the card's <c>addedColumns</c>), by code:
+/// number (Int / Decimal), text, ISO date <c>yyyy-MM-dd</c>, bool or lookup entry id; a column without a value is absent.
+/// </param>
+/// <param name="Version">Row version — the <c>baseVersion</c> of <c>POST /api/v1/registries/{code}/entries/batch</c>.</param>
 public sealed record AirSubstanceDto(
     long Id,
     long SubstanceEntryId,
@@ -189,7 +194,16 @@ public sealed record AirSubstanceDto(
     string? SubstanceName,
     decimal? GramsPerSecond,
     decimal? MgPerNm3,
-    decimal? TonsPerYear);
+    decimal? TonsPerYear,
+    IReadOnlyDictionary<string, object?>? Added = null,
+    string? Version = null);
+
+/// <summary>A column added to a sources table of the AIR type (P1 06.11 «Add as new column»), for the card headers.</summary>
+/// <param name="Table"><c>sources</c> (AIR_SOURCES) or <c>substances</c> (AIR_SOURCE_SUBSTANCES).</param>
+/// <param name="Code">Column (registry field) code, e.g. <c>FILE_B</c>.</param>
+/// <param name="NameL10n">Display name by language.</param>
+/// <param name="DataType"><c>String</c>, <c>Int</c>, <c>Decimal</c>, <c>Date</c>, <c>Bool</c> or <c>Lookup</c>.</param>
+public sealed record AirAddedColumnDto(string Table, string Code, IReadOnlyDictionary<string, string> NameL10n, string DataType);
 
 /// <summary>One source (NAE) of a permit with its substances.</summary>
 /// <param name="Id">Row id in <c>AIR_SOURCES</c>.</param>
@@ -218,6 +232,8 @@ public sealed record AirSubstanceDto(
 /// <param name="RegionEntryCode">Its code (<c>REG_001</c>).</param>
 /// <param name="AreaEntryId">Area registry entry; <c>null</c> — none.</param>
 /// <param name="AreaEntryCode">Its code (<c>AREA_018</c>).</param>
+/// <param name="Added">P1 07.11: values of the columns added to <c>AIR_SOURCES</c>, by code (as the substance's <c>added</c>).</param>
+/// <param name="Version">Row version — the <c>baseVersion</c> of the generic batch write.</param>
 public sealed record AirSourceDto(
     long Id,
     long NaeEntryId,
@@ -244,7 +260,9 @@ public sealed record AirSourceDto(
     long? RegionEntryId = null,
     string? RegionEntryCode = null,
     long? AreaEntryId = null,
-    string? AreaEntryCode = null);
+    string? AreaEntryCode = null,
+    IReadOnlyDictionary<string, object?>? Added = null,
+    string? Version = null);
 
 /// <summary>Total of one substance over all sources of the permit (computed, never stored).</summary>
 /// <param name="SubstanceEntryId">Entry in the substance registry.</param>
@@ -270,6 +288,9 @@ public sealed record AirTotalDto(
 /// <param name="Sources">Sources with substances, by NAE code.</param>
 /// <param name="Totals">Totals per substance, by code.</param>
 /// <param name="SubstanceRows">Substance rows in all sources.</param>
+/// <param name="AddedColumns">P1 07.11: columns added to the two tables (sources first, then substances), in table order.</param>
+/// <param name="SourcesRegistryCode">Registry of <c>AIR_SOURCES</c> — where the card writes an edited source row (generic batch).</param>
+/// <param name="SubstancesRegistryCode">Registry of <c>AIR_SOURCE_SUBSTANCES</c>.</param>
 public sealed record AirLimitsPermitDto(
     long PermitId,
     string PermitNumber,
@@ -278,4 +299,7 @@ public sealed record AirLimitsPermitDto(
     DateOnly? ValidTo,
     IReadOnlyList<AirSourceDto> Sources,
     IReadOnlyList<AirTotalDto> Totals,
-    int SubstanceRows);
+    int SubstanceRows,
+    IReadOnlyList<AirAddedColumnDto>? AddedColumns = null,
+    string? SourcesRegistryCode = null,
+    string? SubstancesRegistryCode = null);
