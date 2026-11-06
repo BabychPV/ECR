@@ -7,10 +7,8 @@
  * затирається, доки людина сама не вибере частоту.
  */
 export interface EventFrequency {
-  /** Ключ варіанта (і значення `Select`). */
+  /** Ключ варіанта (і значення `Select`); підпис — `frequencyLabel` у `SourceEventFrequency.tsx` (літерали ключів). */
   readonly value: string;
-  /** Ключ каталогу підпису. */
-  readonly labelKey: string;
   /** Вираз cron Quartz (6 полів). */
   readonly cron: string;
 }
@@ -19,14 +17,14 @@ export interface EventFrequency {
 export const DefaultEventFrequency = 'PT1H';
 
 export const EventFrequencies: readonly EventFrequency[] = [
-  { value: 'PT5M', labelKey: 'sourceEvents.frequency.m5', cron: '0 0/5 * * * ?' },
-  { value: 'PT15M', labelKey: 'sourceEvents.frequency.m15', cron: '0 0/15 * * * ?' },
-  { value: 'PT30M', labelKey: 'sourceEvents.frequency.m30', cron: '0 0/30 * * * ?' },
-  { value: 'PT1H', labelKey: 'sourceEvents.frequency.h1', cron: '0 0 * * * ?' },
-  { value: 'PT2H', labelKey: 'sourceEvents.frequency.h2', cron: '0 0 0/2 * * ?' },
-  { value: 'PT6H', labelKey: 'sourceEvents.frequency.h6', cron: '0 0 0/6 * * ?' },
-  { value: 'PT12H', labelKey: 'sourceEvents.frequency.h12', cron: '0 0 0/12 * * ?' },
-  { value: 'P1D', labelKey: 'sourceEvents.frequency.d1', cron: '0 0 0 * * ?' },
+  { value: 'PT5M', cron: '0 0/5 * * * ?' },
+  { value: 'PT15M', cron: '0 0/15 * * * ?' },
+  { value: 'PT30M', cron: '0 0/30 * * * ?' },
+  { value: 'PT1H', cron: '0 0 * * * ?' },
+  { value: 'PT2H', cron: '0 0 0/2 * * ?' },
+  { value: 'PT6H', cron: '0 0 0/6 * * ?' },
+  { value: 'PT12H', cron: '0 0 0/12 * * ?' },
+  { value: 'P1D', cron: '0 0 0 * * ?' },
 ];
 
 /** Значення варіанта для cron розкладу; `null` — cron поза набором (заданий на вкладці «Розклад»). */

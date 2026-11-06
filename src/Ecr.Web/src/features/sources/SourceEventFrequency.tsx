@@ -16,6 +16,28 @@ import { cronOfFrequency, DefaultEventFrequency, EventFrequencies, frequencyOfCr
 /** Значення `Select` для cron поза набором частот. */
 const Custom = 'custom';
 
+/** Підпис частоти — ЛІТЕРАЛАМИ ключів: сторож `EndpointCoverageTests` не знає, що доходить у `t(змінна)`. */
+function frequencyLabel(value: string): string {
+  switch (value) {
+    case 'PT5M':
+      return t('sourceEvents.frequency.m5');
+    case 'PT15M':
+      return t('sourceEvents.frequency.m15');
+    case 'PT30M':
+      return t('sourceEvents.frequency.m30');
+    case 'PT1H':
+      return t('sourceEvents.frequency.h1');
+    case 'PT2H':
+      return t('sourceEvents.frequency.h2');
+    case 'PT6H':
+      return t('sourceEvents.frequency.h6');
+    case 'PT12H':
+      return t('sourceEvents.frequency.h12');
+    default:
+      return t('sourceEvents.frequency.d1');
+  }
+}
+
 /**
  * Частота синку подій PI сутності-шаблону (Q-2, людина 06.11: «це має бути параметр налаштування в UI»).
  *
@@ -70,7 +92,7 @@ export function SourceEventFrequency({
   const cron = cronOfFrequency(value);
   const dirty = schedule === null || (value !== stored && cron !== undefined);
 
-  const options = EventFrequencies.map((item) => ({ value: item.value, label: t(item.labelKey) }));
+  const options = EventFrequencies.map((item) => ({ value: item.value, label: frequencyLabel(item.value) }));
   if (stored === Custom && schedule !== null) {
     options.push({ value: Custom, label: t('sourceEvents.frequency.custom', { cron: schedule.cron }) });
   }
