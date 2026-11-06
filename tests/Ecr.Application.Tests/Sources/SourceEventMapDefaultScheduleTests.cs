@@ -40,6 +40,39 @@ public sealed class SourceEventMapDefaultScheduleTests : SourceEventMapTestBase
             Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// F13-p192 (P3): користувач лише з <c>Integration.Manage</c> (без <c>Integration.EditSchedule</c>) неявно заводить
+    /// розклад — це лишається (Q-2), але в журналі рівно один запис розкладу з цим автором і причиною
+    /// <c>defaultForEventMap</c> (з'єднання, сутність, cron).
+    /// </summary>
+    /// <remarks>Мутація: прибрати запис журналу в <c>AddDefaultScheduleAsync</c> (або параметр <c>cause</c>) — червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Decision", "Q-2")]
+    public async Task Неявний_розклад_без_права_EditSchedule_журналюється_з_автором_і_причиною()
+    {
+        Scheduling("Flare_Auto", scheduleId: null);
+        var profile = await Access.BuildProfileAsync(Actor, CancellationToken.None);
+        Assert.False(profile.Has(ListCollectionSchedulesHandler.Permission));
+        var records = new List<StructureChangeRecord>();
+        await Audit.WriteStructureChangeAsync(
+            Arg.Do<StructureChangeRecord>(records.Add), Arg.Any<CancellationToken>());
+
+        await Create().HandleAsync(Command(), CancellationToken.None);
+
+        _schedules.Received(1).Add(Arg.Any<CollectionSchedule>());
+        var scheduleRecord = Assert.Single(records, r => r.EntityType == "ext.CollectionSchedule");
+        Assert.Equal(Actor, scheduleRecord.ChangedByUserId);
+        Assert.Equal(CreateCollectionScheduleHandler.AuditOperation, scheduleRecord.Operation);
+        Assert.Null(scheduleRecord.OldJson);
+        Assert.True(JobProgressMessageCodec.TryDecode(scheduleRecord.ChangeReason, out var reason));
+        Assert.Equal("integrationAudit.scheduleCreated", reason.Key);
+        Assert.Equal("defaultForEventMap", reason.Params!["cause"]);
+        Assert.Equal("0 0 * * * ?", reason.Params["cron"]);
+        Assert.Equal("Flare_Auto", reason.Params["entity"]);
+        Assert.Equal("PI", reason.Params["dataSource"]);
+    }
+
     [Theory]
     [InlineData("Flare_Auto", 3, RegistrySourceKind.External)] // розклад уже є — частоту людини не чіпаємо
     [InlineData("Flare_Auto_Day", null, RegistrySourceKind.External)] // Q-1: копія `_Day` не синхронізується
