@@ -31,7 +31,9 @@ public sealed class AirImportProfileHandler(
     {
         await Security.PermissionCheck.RequireAsync(access, currentUser, ViewPermission, ct).ConfigureAwait(false);
         var tables = await accessor.Data.TablesAsync(ct).ConfigureAwait(false);
+        // The paste mapping of the dialog lives in the same table of profiles but is not a wizard profile.
         return [.. (await profiles.ListAsync(tables.Sources.Id, ct).ConfigureAwait(false))
+            .Where(p => !IsPasteMapping(p.Code))
             .Select(p => new ImportProfileSummaryDto(p.Code, Names(p), IsBuiltIn(p), p.UpdatedAt))];
     }
 
@@ -42,7 +44,8 @@ public sealed class AirImportProfileHandler(
     {
         await Security.PermissionCheck.RequireAsync(access, currentUser, ViewPermission, ct).ConfigureAwait(false);
         var tables = await accessor.Data.TablesAsync(ct).ConfigureAwait(false);
-        var profile = await profiles.FindAsync(tables.Sources.Id, code?.Trim() ?? string.Empty, ct).ConfigureAwait(false)
+        var trimmed = code?.Trim() ?? string.Empty;
+        var profile = (IsPasteMapping(trimmed) ? null : await profiles.FindAsync(tables.Sources.Id, trimmed, ct).ConfigureAwait(false))
                       ?? throw NotFound(code);
         return ToDto(profile);
     }
@@ -63,6 +66,11 @@ public sealed class AirImportProfileHandler(
 
         var tables = await accessor.Data.TablesAsync(ct).ConfigureAwait(false);
         var ecrCode = EcrCode.Create(code);
+        if (IsPasteMapping(ecrCode.Value))
+        {
+            throw SpecInvalid("code", "reserved for the paste mapping");
+        }
+
         var spec = (request.Spec ?? throw SpecInvalid("spec", "missing")).Validated();
         var name = new LocalizedText(new Dictionary<string, string>(
             request.NameL10n is { Count: > 0 } ? request.NameL10n : new Dictionary<string, string> { ["en"] = ecrCode.Value },
@@ -97,6 +105,10 @@ public sealed class AirImportProfileHandler(
     }
 
     private static bool IsBuiltIn(RegistryImportProfile p) => p.Code == AirLimitsSchema.ProfileCode;
+
+    /// <summary>The code of the paste mapping (<see cref="Import.PermitImportMappingHandler"/>) — not a wizard profile.</summary>
+    internal static bool IsPasteMapping(string code)
+        => string.Equals(code, Import.PermitImportTables.ProfileCode, StringComparison.OrdinalIgnoreCase);
 
     private static Dictionary<string, string> Names(RegistryImportProfile p)
         => new Dictionary<string, string>(p.NameL10n.Values, StringComparer.OrdinalIgnoreCase);

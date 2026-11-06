@@ -13,7 +13,8 @@ import { TestProviders } from '@/test/render';
 import * as permitsApi from '../../api/permitsApi';
 import * as typesApi from '../../api/typesApi';
 import { PermitSheetBindingsFlag } from '../../permitFeatures';
-import { LimitsRegistry, page, permit, permitType, rowsFor } from './permitFixtures';
+import { fakeImportServer, importResponse } from './importFixtures';
+import { LimitsRegistry, page, permit, permitType, PlacesRegistry, rowsFor } from './permitFixtures';
 
 /**
  * Екран дозволу (PM-07): шапка-форма, вкладки, життєвий цикл за станом і правами, форма рядка, вставка з Excel.
@@ -85,10 +86,13 @@ function applied(clientRowId = 'save'): RegistryBatchResult {
   };
 }
 
+let importServer = fakeImportServer();
+
 beforeEach(() => {
   session.permissions = Editor;
-  vi.mocked(apiFetch).mockImplementation((path: string) =>
-    Promise.resolve(path === '/api/v1/units' ? [{ id: 7, code: 't/yr' }] : []) as never,
+  importServer = fakeImportServer();
+  vi.mocked(apiFetch).mockImplementation((path: string, init?: RequestInit) =>
+    Promise.resolve(path === '/api/v1/units' ? [{ id: 7, code: 't/yr' }] : (importResponse(importServer, path, init) ?? [])) as never,
   );
   vi.mocked(typesApi.getPermitType).mockResolvedValue(permitType());
   // Як сервер: реєстри темпоральні, читання без `asOf` — відмова (`422 ECR-REQ-0422`, e2e-стенд 19.10).
@@ -688,8 +692,8 @@ describe('вставка з Excel', () => {
     await openLimits();
     fireEvent.click(screen.getByRole('button', { name: 'Paste from Excel…' }));
     const dialog = await screen.findByRole('dialog', { name: 'Paste rows into Limits' });
-    // Пікери читаються асинхронно: поки йдуть, кнопка «Check rows» вимкнена.
-    await waitFor(() => expect(getRows).toHaveBeenCalledWith('Substances', expect.anything()));
+    // Пікер (лише таблиця того самого дозволу) і збережене зіставлення читаються асинхронно: поки йдуть, «Check rows» вимкнена.
+    await waitFor(() => expect(getRows).toHaveBeenCalledWith(PlacesRegistry, expect.anything()));
     return dialog;
   }
 
@@ -837,6 +841,167 @@ describe('вставка з Excel', () => {
     const dialog = await openPaste();
     expect(within(dialog).getByText('Nothing to add yet')).toBeTruthy();
     expect(within(dialog).getByRole('button', { name: 'Check rows' })).toHaveProperty('disabled', true);
+  });
+});
+
+describe('вставка: зіставлення стовпців і значення за кодом чи назвою (людина 06.11)', () => {
+  /** Сервер `entries/batch`: перевірка й запис проходять. */
+  function batchOk(): void {
+    saveBatch.mockImplementation((_code, items, dryRun) =>
+      Promise.resolve({
+        added: items.length,
+        applied: !dryRun,
+        deleted: 0,
+        dryRun,
+        rows: items.map((item) => ({ clientRowId: item.clientRowId, entryId: null, errors: [], status: 'added', version: null })),
+        unchanged: 0,
+        updated: 0,
+      }),
+    );
+  }
+
+  async function openPaste(): Promise<HTMLElement> {
+    await openLimits();
+    fireEvent.click(screen.getByRole('button', { name: 'Paste from Excel…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Paste rows into Limits' });
+    await waitFor(() => expect(getRows).toHaveBeenCalledWith(PlacesRegistry, expect.anything()));
+    return dialog;
+  }
+
+  const select = (dialog: HTMLElement, column: string): HTMLSelectElement =>
+    within(dialog).getByRole('combobox', { name: `Table column for «${column}»` }) as HTMLSelectElement;
+
+  async function addAll(dialog: HTMLElement, rows: number): Promise<void> {
+    const check = within(dialog).getByRole('button', { name: 'Check rows' });
+    await waitFor(() => expect(check).toHaveProperty('disabled', false));
+    fireEvent.click(check);
+    fireEvent.click(await within(dialog).findByRole('button', { name: `Add ${String(rows)} rows` }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Paste rows into Limits' })).toBeNull());
+  }
+
+  it('переставлені стовпці з заголовком: автозіставлення за назвою/кодом, посилання за кодом і за назвою', async () => {
+    batchOk();
+    const dialog = await openPaste();
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Rows' }), {
+      target: { value: ['Substance\tName\tannual volume\tTYPE OF USE', 'ch4\tOutfall C\t5,5\tprocess', 'Benzene\tOutfall D\t7\tCOOL'].join('\n') },
+    });
+
+    // Заголовок упізнано сам; кожен стовпець файлу зіставлено зі своїм стовпцем таблиці.
+    expect(within(dialog).getByRole('checkbox', { name: 'The first line is a header (skip it)' })).toHaveProperty('checked', true);
+    expect(select(dialog, 'Substance').value).toBe('Substance');
+    expect(select(dialog, 'Name').value).toBe('Name');
+    expect(select(dialog, 'annual volume').value).toBe('Annual');
+    expect(select(dialog, 'TYPE OF USE').value).toBe('Use');
+    expect(await within(dialog).findByText('2 rows can be added to Limits; 0 need fixing before anything is added.')).toBeTruthy();
+
+    await addAll(dialog, 2);
+    const sent = saveBatch.mock.calls.at(-1)?.[1] ?? [];
+    expect(sent.map((item) => item.values)).toEqual([
+      { PERMIT: '5', Name: 'Outfall C', Annual: '5.5', Use: '22', Substance: '41' },
+      { PERMIT: '5', Name: 'Outfall D', Annual: '7', Use: '21', Substance: '42' },
+    ]);
+    // Сервер отримав РІЗНІ значення кожного стовпця-посилання (таблиця того самого дозволу - не його справа).
+    expect(importServer.lookups.at(-1)).toEqual({
+      columns: [
+        { column: 'Use', values: ['COOL', 'process'] },
+        { column: 'Substance', values: ['Benzene', 'ch4'] },
+      ],
+      derive: true,
+    });
+  });
+
+  it('збережене зіставлення таблиці застосовується до заголовків, яких автозіставлення не знає', async () => {
+    batchOk();
+    importServer.mapping = { ...importServer.mapping, columns: { stoff: 'Substance', bezeichnung: 'Name', jahresmenge: 'Annual' }, rowVersion: 'rv-saved' };
+    const dialog = await openPaste();
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Rows' }), {
+      target: { value: ['Stoff\tBezeichnung\tJahres-menge', 'Methane\tOutfall C\t3'].join('\n') },
+    });
+    expect(select(dialog, 'Stoff').value).toBe('Substance');
+    expect(select(dialog, 'Bezeichnung').value).toBe('Name');
+    expect(select(dialog, 'Jahres-menge').value).toBe('Annual');
+    await addAll(dialog, 1);
+    expect(saveBatch.mock.calls.at(-1)?.[1].map((item) => item.values)).toEqual([{ PERMIT: '5', Name: 'Outfall C', Annual: '3', Substance: '41' }]);
+    // Зіставлення не змінилось - нічого не зберігається.
+    expect(importServer.saves).toEqual([]);
+  });
+
+  it('змінене зіставлення зберігається для таблиці з If-Match (право Permit.EditType)', async () => {
+    batchOk();
+    session.permissions = [...Editor, 'Permit.EditType'];
+    importServer.mapping = { ...importServer.mapping, columns: { stoff: 'Substance' }, rowVersion: 'rv-saved' };
+    const dialog = await openPaste();
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Rows' }), {
+      target: { value: ['Stoff\tName\tMenge', 'Methane\tOutfall C\t3'].join('\n') },
+    });
+    // «Menge» не впізнано: Annual (обов'язковий) не зіставлено - запис заблоковано.
+    expect(select(dialog, 'Menge').value).toBe('');
+    expect(within(dialog).getByText('Required columns are not matched: Annual volume')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Check rows' })).toHaveProperty('disabled', true);
+
+    fireEvent.change(select(dialog, 'Menge'), { target: { value: 'Annual' } });
+    expect(within(dialog).queryByText('Required columns are not matched: Annual volume')).toBeNull();
+    expect(within(dialog).getByRole('checkbox', { name: 'Remember this mapping for Limits (for everyone)' })).toHaveProperty('checked', true);
+    await addAll(dialog, 1);
+    expect(importServer.saves).toEqual([{ columns: { stoff: 'Substance', name: 'Name', menge: 'Annual' }, ifMatch: '"rv-saved"' }]);
+  });
+
+  it('стовпець зіставлено двічі - запис заблоковано', async () => {
+    const dialog = await openPaste();
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Rows' }), { target: { value: ['Name\tAnnual\tX', 'A\t1\tB'].join('\n') } });
+    fireEvent.change(select(dialog, 'X'), { target: { value: 'Name' } });
+    expect(within(dialog).getByText('A column is matched to several file columns: Name')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Check rows' })).toHaveProperty('disabled', true);
+  });
+
+  it("нерозв'язані значення - перелік РІЗНИХ значень із кількістю рядків і причиною; виправлення відкриває перевірку", async () => {
+    batchOk();
+    const dialog = await openPaste();
+    const rows = within(dialog).getByRole('textbox', { name: 'Rows' });
+    fireEvent.change(rows, {
+      target: { value: ['Name\tAnnual\tSubstance', 'A\t1\tXylene', 'B\t2\txylene', 'C\t3\tNope', 'D\t4\tMethane'].join('\n') },
+    });
+    const list = await within(dialog).findByRole('list', { name: 'Values that could not be matched' });
+    // «Xylene» і «xylene» - одне значення (регістр не важить), два рядки; порядок - як у файлі.
+    expect(within(list).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+      'Substance: «Xylene» — several entries have this name — use the code (rows: 2)',
+      'Substance: «Nope» — no entry has this code or name (rows: 1)',
+    ]);
+    expect(within(dialog).getByText('Nothing is added while there are problems. Fix them and check the rows again.')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Check rows' })).toHaveProperty('disabled', true);
+    expect(saveBatch).not.toHaveBeenCalled();
+
+    // Код замість неоднозначної назви, без невідомого рядка.
+    fireEvent.change(rows, { target: { value: ['Name\tAnnual\tSubstance', 'A\t1\tX1', 'B\t2\tX2', 'D\t4\tMethane'].join('\n') } });
+    expect(await within(dialog).findByText('3 rows can be added to Limits; 0 need fixing before anything is added.')).toBeTruthy();
+    await addAll(dialog, 3);
+    expect(saveBatch.mock.calls.at(-1)?.[1].map((item) => item.values?.['Substance'])).toEqual(['43', '44', '41']);
+  });
+
+  it('Import file… з .xlsx: аркуш читає сервер, людина обирає інший аркуш', async () => {
+    batchOk();
+    importServer.workbook = {
+      Notes: [['Read me']],
+      Sources: [
+        ['Annual volume', 'Name'],
+        ['8', 'Outfall X'],
+      ],
+    };
+    await openLimits();
+    fireEvent.click(screen.getByRole('button', { name: 'Import file…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Paste rows into Limits' });
+    const input = dialog.querySelector('input[type="file"]');
+    const book = new File(['PK'], 'rows.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    await userEvent.setup().upload(input as HTMLInputElement, book);
+
+    const sheet = (await within(dialog).findByRole('combobox', { name: 'Sheet' })) as HTMLSelectElement;
+    expect(sheet.value).toBe('Notes');
+    fireEvent.change(sheet, { target: { value: 'Sources' } });
+    await waitFor(() => expect(importServer.sheetsRead).toEqual([null, 'Sources']));
+    expect(await within(dialog).findByText('1 rows can be added to Limits; 0 need fixing before anything is added.')).toBeTruthy();
+    expect(select(dialog, 'Annual volume').value).toBe('Annual');
+    await addAll(dialog, 1);
+    expect(saveBatch.mock.calls.at(-1)?.[1].map((item) => item.values)).toEqual([{ PERMIT: '5', Name: 'Outfall X', Annual: '8' }]);
   });
 });
 

@@ -38,6 +38,9 @@ public static class DependencyInjection
         // NAE tree import without AF (template, safety gate, first visible sheet as text). Stateless.
         services.AddSingleton<Ecr.Application.Registries.Nae.INaeTreeWorkbook, RegistryImport.NaeTreeWorkbook>();
 
+        // «Import file…» of a permit table: one .xlsx sheet as text, same safety gate. Stateless.
+        services.AddSingleton<IPermitImportWorkbook, RegistryImport.PermitImportWorkbook>();
+
         // Книга зрізу звітності (R7). Без стану і без портів — тому Singleton:
         // усе, що їй треба, приходить аргументом.
         services.AddSingleton<ISnapshotWorkbookWriter, SnapshotWorkbookWriter>();

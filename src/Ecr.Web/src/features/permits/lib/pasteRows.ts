@@ -140,11 +140,16 @@ function convert(
 
 /** Розбирає вставлений блок у рядки за впорядкованими стовпцями. Порожні рядки пропускаються. */
 export function parsePastedRows(text: string, columns: readonly PasteColumn[]): PasteResult {
+  return parsePastedLines(parseBlock(text), columns);
+}
+
+/** Те саме для вже розбитих рядків (клітинки в порядку `columns`, напр. після зіставлення стовпців файлу). */
+export function parsePastedLines(lines: readonly (readonly string[])[], columns: readonly PasteColumn[]): PasteResult {
   const rows: PastedRow[] = [];
   const issues: PasteIssue[] = [];
   let extraCells = 0;
 
-  for (const line of parseBlock(text)) {
+  for (const line of lines) {
     if (line.every((cell) => cell.trim() === '')) continue;
 
     if (rows.length >= MaxPastedRows) {

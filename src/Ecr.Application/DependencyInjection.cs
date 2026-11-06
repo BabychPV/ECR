@@ -68,6 +68,11 @@ public static class DependencyInjection
         services.AddScoped<Permits.AirLimits.AirScopeColumns>();
         services.AddScoped<Permits.AirLimits.GetAirScopeFieldsHandler>();
         services.AddScoped<Permits.AirLimits.AirTypeSystemProvisioner>();
+
+        // Paste/import of a permit table: saved column mapping, lookups by code or name, .xlsx sheet as text.
+        services.AddScoped<Permits.Import.PermitImportMappingHandler>();
+        services.AddScoped<Permits.Import.PermitImportLookupHandler>();
+        services.AddScoped<Permits.Import.PermitImportWorkbookHandler>();
         services.AddScoped<PatchPresentationHandler>();
         services.AddScoped<ReplaceHeaderGroupsHandler>();
 

@@ -243,7 +243,7 @@ public sealed class AirLimitsImportHandler(
         }
 
         var code = string.IsNullOrWhiteSpace(options.ProfileCode) ? AirLimitsSchema.ProfileCode : options.ProfileCode.Trim();
-        var stored = await profiles.FindAsync(tables.Sources.Id, code, ct).ConfigureAwait(false);
+        var stored = AirImportProfileHandler.IsPasteMapping(code) ? null : await profiles.FindAsync(tables.Sources.Id, code, ct).ConfigureAwait(false);
         if (stored is not null)
         {
             return (RegistryImportSpec.Parse(stored.SpecJson), code);

@@ -4800,6 +4800,12 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/permits/{permitId}/air-limits` | `Registry.View` або грант `Read` на реєстр шапки | 8 |
 | `GET` | `/api/v1/air-limits/scope-codes` | `Registry.View` | 8 |
 | `GET` | `/api/v1/air-limits/scope-fields` | `Registry.View` | 8 |
+| `GET` | `/api/v1/permit-tables/{code}/import-mapping` | `Registry.View` або грант `Read` на таблицю | 8 |
+| `PUT` | `/api/v1/permit-tables/{code}/import-mapping` | `Permit.EditType` | 8 |
+| `POST` | `/api/v1/permit-tables/{code}/import/lookups` | `Registry.View` або грант `Read` на таблицю | 8 |
+| `POST` | `/api/v1/permit-tables/{code}/import/workbook` | `Registry.EditData` або грант `Write` на таблицю | 8 |
+
+Вставка/імпорт рядків таблиці дозволу (людина 06.11, зіставлення стовпців): `…/import-mapping` - збережене СПІЛЬНЕ зіставлення «нормалізований заголовок файлу → код стовпця» (профіль `PASTE_DEFAULT` у `cfg.RegistryImportProfile` реєстру таблиці; `PUT` з `If-Match` = `rowVersion`, чужа зміна - `409 ECR-REG-0409 importMappingChanged`); `…/import/lookups` - значення стовпців-посилань за КОДОМ або НАЗВОЮ будь-якою мовою (2+ записи - `ambiguous`, НАЕ - лише джерела `SRC`, інакше `notSource`) і Region/Area, виведені з предків джерела в дереві НАЕ (`AirScopeMatcher`, лише однозначний збіг); `…/import/workbook` - аркуш `.xlsx` (до 5 МБ) текстом із переліком аркушів, нічого не пишеться. Рядки пишуться, як і раніше, `entries/batch`. Порт `IPermitImportWorkbook` - аркуш `.xlsx` як текст за `XlsxSafetyGate` (адаптер Excel).
 
 Порт NAE N3: `IRegistryImportProfileStore` - збережені профілі імпорту таблиці `AIR_SOURCES` (`cfg.RegistryImportProfile`): список, пошук за кодом, додавання, перевірка `RowVersion` для `PUT …/import-profiles/{code}`.
 | `GET` | `/api/v1/permit-types?category=&status=&q=&limit=&cursor=` | `Registry.View` | 8 |
