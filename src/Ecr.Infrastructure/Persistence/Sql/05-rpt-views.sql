@@ -295,7 +295,8 @@ BEGIN
     -- @plainAgg / @plainCnt - при прапорі ON усі НЕмаршрутизовані колонки читає ОДИН apply pc замість c<n> на колонку.
     DECLARE @rvPack nvarchar(max), @rvChoose nvarchar(max), @rvExprs nvarchar(max), @rvPred bit, @rvDer nvarchar(max), @rvOwn nvarchar(max), @rvGen nvarchar(max),
             @plainAgg nvarchar(max), @plainCnt int, @numRef nvarchar(64), @strRef nvarchar(64),
-            @famAgg nvarchar(max), @pkExpr nvarchar(16), @rvRef nvarchar(8), @fromSql nvarchar(max), @tiAp nvarchar(max), @rowApply nvarchar(max);
+            @famAgg nvarchar(max), @pkExpr nvarchar(16), @rvRef nvarchar(8), @fromSql nvarchar(max), @tiAp nvarchar(max), @rowApply nvarchar(max),
+            @famMap nvarchar(max);
     -- RS (копії аркушів): службові колонки _SheetCopyOrdinal/_SheetDisplayName — у КІНЦІ списку (адитивні, як <Код>_Text).
     DECLARE @sheetNameLit nvarchar(max), @copyCols nvarchar(max);
 
@@ -317,7 +318,7 @@ BEGIN
         SET @rvPred = CASE WHEN EXISTS (SELECT 1 FROM cfg.CalculationBinding
                                          WHERE IsActive = 1 AND TableDefId = @id AND REPLACE(MatchJson, CHAR(32), N'') <> N'{}') THEN 1 ELSE 0 END;
         SET @rvRef = CASE WHEN @rvPred = 0 THEN N'r' ELSE N'rv' END;
-        SELECT @fromSql = N'', @tiAp = N'', @rowApply = N'', @famAgg = N'';
+        SELECT @fromSql = N'', @tiAp = N'', @rowApply = N'', @famAgg = N'', @famMap = N'';
         SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0);
         WHILE @colId IS NOT NULL
         BEGIN
@@ -399,15 +400,24 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                 -- Власна обчислена читається ОКРЕМИМ apply sc (OwnerNo -2) лише по обчислених комірках рядка (їх мало, а то й нема),
                 -- а не другим агрегатом на колонку в sv: p61 (прапор k<n> у sv) подвоював роботу sv (T10_03 / T11_03 у 2-4 рази).
                 INSERT INTO @pv (OwnerNo, ColNo, ColId, Agg) VALUES
-                    (-2, @n, @colId, @aggBody + N' AS cv' + CAST(@n AS nvarchar(10))),
-                    (-1, @n, @colId, @agg);
+                    (-2, @n, @colId, @aggBody + N' AS cv' + CAST(@n AS nvarchar(10)));
+                -- Q-17.perf3 (Land T9_04 ON 2,2-2,4 с проти OFF 0,5-0,8 с): власна копія - у СПІЛЬНОМУ apply pc (ті самі рядки й той
+                -- самий агрегат), а не окремим apply sv (зайвий seek і прохід на рядок, +~200 агрегатів у тексті й компіляції).
+                SET @plainAgg = @plainAgg + N', ' + @agg;
+                SET @plainCnt = @plainCnt + 1;
+                -- Q-17.perf3: fam агрегував УСІ комірки 12 екземплярів року (45 520 рядків на T9_04 Land, 1,96 с CPU з 3,0) через
+                -- ~200 CASE (ColumnDefId + місяць/якір) на кожну. Тепер у агрегацію йдуть лише комірки, що НАЛЕЖАТЬ власнику (мапа fm
+                -- (ColumnDefId, Mo, n): Mo - місяць колонки або 0 = якір року; хеш-зʼєднання), а колонку вибирає номер слота fm.n.
+                -- Значення ті самі: решта комірок у старому тексті давала NULL у кожен агрегат; MAX нечутливий до дублікатів.
                 SET @famAgg = @famAgg + N', ' + CASE WHEN @colType = 3
-                    THEN N'MAX(CAST(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' AND ' + CASE WHEN @isMonth = 1 THEN N'oi.PeriodKey % 100 = ' + CAST(@monthNo AS nvarchar(3)) ELSE N'oi.PeriodKey = pa.AnchorKey' END + N' THEN x.' + @raw1 + N' END AS tinyint))'
-                    ELSE N'MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' AND ' + CASE WHEN @isMonth = 1 THEN N'oi.PeriodKey % 100 = ' + CAST(@monthNo AS nvarchar(3)) ELSE N'oi.PeriodKey = pa.AnchorKey' END + N' THEN x.' + @raw1 + N' END)' END
+                    THEN N'MAX(CAST(CASE WHEN fm.n = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END AS tinyint))'
+                    ELSE N'MAX(CASE WHEN fm.n = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END)' END
                     + N' AS v' + CAST(@n AS nvarchar(10));
+                SET @famMap = @famMap + N', (' + CAST(@colId AS nvarchar(10)) + N', '
+                            + CASE WHEN @isMonth = 1 THEN CAST(@monthNo AS nvarchar(3)) ELSE N'0' END + N', ' + CAST(@n AS nvarchar(10)) + N')';
 
                 SET @valueCol = N'COALESCE(sc.cv' + CAST(@n AS nvarchar(10)) + N', '
-                              + N'fam.v' + CAST(@n AS nvarchar(10)) + N', sv.v' + CAST(@n AS nvarchar(10)) + N')';
+                              + N'fam.v' + CAST(@n AS nvarchar(10)) + N', pc.v' + CAST(@n AS nvarchar(10)) + N')';
                 IF @colType = 3
                     SET @valueCol = N'CAST(' + @valueCol + N' AS bit)';
             END
@@ -483,21 +493,27 @@ OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x
             -- приєднуються до рядків хеш-зʼєднанням (ліворуч лише ti, r, d, p, a - вузький потік). Семантика та сама: немає екземпляра/
             -- рядка власника/комірки - NULL; PeriodKind <> 0 - так само NULL (умова в ON).
             SET @extra = @extra + 6;   -- oi, od, pa (doc.Period), ow, x у похідній + її доступ
+            -- Q-17.perf3: у агрегацію йдуть лише комірки власників (мапа fm, хеш-зʼєднання; умова Mo > 0 - місяць екземпляра,
+            -- Mo = 0 - якір року), колонку вибирає слот fm.n.
             SET @ownerRows = N'
-LEFT HASH JOIN (SELECT oi.DocumentId, oi.PeriodKey / 100 AS Yr, ow.RowKey' + @famAgg + N'
-                  FROM doc.TableInstance AS oi
-                  JOIN doc.Document AS od ON od.Id = oi.DocumentId
-                  LEFT JOIN (SELECT ProjectId, PeriodKey / 100 AS Yr, MIN(PeriodKey) AS AnchorKey
-                               FROM doc.Period GROUP BY ProjectId, PeriodKey / 100) AS pa
-                         ON pa.ProjectId = od.ProjectId AND pa.Yr = oi.PeriodKey / 100
-                  JOIN doc.TableRow AS ow ON ow.PeriodKey = oi.PeriodKey AND ow.TableInstanceId = oi.Id AND ow.IsDeleted = 0
-                  JOIN doc.CellValue AS x ON x.PeriodKey = ow.PeriodKey AND x.TableRowId = ow.Id
-                 WHERE oi.TableDefId = ' + CAST(@id AS nvarchar(10)) + N'
-                 GROUP BY oi.DocumentId, oi.PeriodKey / 100, ow.RowKey) AS fam
+LEFT HASH JOIN (SELECT c.DocumentId, c.Yr, c.RowKey' + @famAgg + N'
+                  FROM (VALUES ' + STUFF(@famMap, 1, 2, N'') + N') AS fm (ColumnDefId, Mo, n)
+                  INNER HASH JOIN (SELECT oi.DocumentId, oi.PeriodKey / 100 AS Yr, oi.PeriodKey, pa.AnchorKey, ow.RowKey, x.ColumnDefId,
+                                          x.ValueString, x.ValueNumeric, x.ValueDate, x.ValueBool, x.ValueRegistryEntryId, x.ValueUnitId
+                                     FROM doc.TableInstance AS oi
+                                     JOIN doc.Document AS od ON od.Id = oi.DocumentId
+                                     LEFT JOIN (SELECT ProjectId, PeriodKey / 100 AS Yr, MIN(PeriodKey) AS AnchorKey
+                                                  FROM doc.Period GROUP BY ProjectId, PeriodKey / 100) AS pa
+                                            ON pa.ProjectId = od.ProjectId AND pa.Yr = oi.PeriodKey / 100
+                                     JOIN doc.TableRow AS ow ON ow.PeriodKey = oi.PeriodKey AND ow.TableInstanceId = oi.Id AND ow.IsDeleted = 0
+                                     JOIN doc.CellValue AS x ON x.PeriodKey = ow.PeriodKey AND x.TableRowId = ow.Id
+                                    WHERE oi.TableDefId = ' + CAST(@id AS nvarchar(10)) + N') AS c
+                          ON c.ColumnDefId = fm.ColumnDefId
+                         AND ((fm.Mo > 0 AND c.PeriodKey % 100 = fm.Mo) OR (fm.Mo = 0 AND c.PeriodKey = c.AnchorKey))
+                 GROUP BY c.DocumentId, c.Yr, c.RowKey) AS fam
        ON p.PeriodKind = 0 AND fam.DocumentId = ti.DocumentId AND fam.Yr = ti.PeriodKey / 100 AND fam.RowKey = r.RowKey';
-            -- Власна копія (sv) і кожен власник (om<m>, omA) - по одному OUTER APPLY з умовною агрегацією (B1).
-            -- Власна копія: рядок перегляду; без жодної введеної колонки з маршрутизацією цього блоку немає.
-            SET @extra = @extra + 2 - (SELECT COUNT(*) FROM @pv WHERE OwnerNo = -1);   -- sv і sc замість c<n> на кожну колонку
+            -- Власна обчислена (sc) - OUTER APPLY з умовною агрегацією (B1); власна копія - у pc (Q-17.perf3).
+            SET @extra = @extra + 1;   -- sc
             SET @ownerCells = N'';
             SET @ownerNo = -2;
             WHILE @ownerNo IS NOT NULL
@@ -888,7 +904,7 @@ BEGIN
     DECLARE @routedGroup bit, @routed bit, @layoutOk bit, @monthMask int, @needAnchor bit, @ownerRows nvarchar(max), @ownerCells nvarchar(max);
     DECLARE @agg nvarchar(max), @aggBody nvarchar(max), @aggList nvarchar(max), @ownerNo int, @famAgg nvarchar(max), @pkExpr nvarchar(16), @fromSql nvarchar(max), @rowApply nvarchar(max);
     DECLARE @selectRv nvarchar(max), @selectTextRv nvarchar(max), @rvIds nvarchar(max), @rvApply nvarchar(max), @rvAgg nvarchar(max), @rvPack nvarchar(max), @rvExprs nvarchar(max);
-    DECLARE @rvPred bit, @rvRef nvarchar(8), @conflictCodes nvarchar(1500), @hasText bit, @hasId bit, @extra int;
+    DECLARE @rvPred bit, @rvRef nvarchar(8), @conflictCodes nvarchar(1500), @hasText bit, @hasId bit, @extra int, @famMap nvarchar(max);
     -- RS (копії аркушів): службові колонки _SheetCopyOrdinal/_SheetDisplayName — у КІНЦІ списку (адитивні).
     DECLARE @sheetNameCase nvarchar(max), @copyCols nvarchar(max);
     DECLARE @pv TABLE (OwnerNo int NOT NULL, ColNo int NOT NULL, Agg nvarchar(max) NOT NULL);
@@ -909,7 +925,7 @@ BEGIN
     BEGIN
         SELECT @select = N'', @selectText = N'', @joins = N'', @n = 0, @plainCnt = 0, @plainAgg = N'', @ownerRows = N'', @ownerCells = N'',
                @monthMask = 0, @needAnchor = 0, @famAgg = N'', @selectRv = N'', @selectTextRv = N'', @rvIds = N'', @rvApply = N'',
-               @rvAgg = N'', @rvPack = N'', @rvExprs = N'', @rowApply = N'', @conflictCodes = N'', @extra = 0;
+               @rvAgg = N'', @rvPack = N'', @rvExprs = N'', @rowApply = N'', @conflictCodes = N'', @extra = 0, @famMap = N'';
         DELETE FROM @pv;
         DELETE FROM @ci;
         DELETE FROM @cols;
@@ -1016,13 +1032,19 @@ BEGIN
                 ELSE
                     SET @needAnchor = 1;
                 INSERT INTO @pv (OwnerNo, ColNo, Agg) VALUES
-                    (-2, @n, @aggBody + N' AS cv' + CAST(@n AS nvarchar(10))),
-                    (-1, @n, @agg);
+                    (-2, @n, @aggBody + N' AS cv' + CAST(@n AS nvarchar(10)));
+                -- Q-17.perf3: own copy - the shared apply pc (same rows, same aggregate), not a second apply sv.
+                SET @plainAgg = @plainAgg + N', ' + @agg;
+                SET @plainCnt = @plainCnt + 1;
+                -- Q-17.perf3: fam aggregates by slot (fm.n) over the OWNED cells only (map below), see the _vN proc.
                 SET @famAgg = @famAgg + N', ' + CASE WHEN @colType = 3
-                    THEN N'MAX(CAST(CASE WHEN ' + @pred + N' AND ' + CASE WHEN @isMonth = 1 THEN N'oi.PeriodKey % 100 = ' + CAST(@monthNo AS nvarchar(3)) ELSE N'oi.PeriodKey = pa.AnchorKey' END + N' THEN x.' + @raw1 + N' END AS tinyint))'
-                    ELSE N'MAX(CASE WHEN ' + @pred + N' AND ' + CASE WHEN @isMonth = 1 THEN N'oi.PeriodKey % 100 = ' + CAST(@monthNo AS nvarchar(3)) ELSE N'oi.PeriodKey = pa.AnchorKey' END + N' THEN x.' + @raw1 + N' END)' END
+                    THEN N'MAX(CAST(CASE WHEN fm.n = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END AS tinyint))'
+                    ELSE N'MAX(CASE WHEN fm.n = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END)' END
                     + N' AS v' + CAST(@n AS nvarchar(10));
-                SET @valueCol = N'COALESCE(sc.cv' + CAST(@n AS nvarchar(10)) + N', fam.v' + CAST(@n AS nvarchar(10)) + N', sv.v' + CAST(@n AS nvarchar(10)) + N')';
+                SET @famMap = @famMap + N', (' + REPLACE(@ids, N',', N', ' + CASE WHEN @isMonth = 1 THEN CAST(@monthNo AS nvarchar(3)) ELSE N'0' END
+                                                         + N', ' + CAST(@n AS nvarchar(10)) + N'), (')
+                            + N', ' + CASE WHEN @isMonth = 1 THEN CAST(@monthNo AS nvarchar(3)) ELSE N'0' END + N', ' + CAST(@n AS nvarchar(10)) + N')';
+                SET @valueCol = N'COALESCE(sc.cv' + CAST(@n AS nvarchar(10)) + N', fam.v' + CAST(@n AS nvarchar(10)) + N', pc.v' + CAST(@n AS nvarchar(10)) + N')';
                 IF @colType = 3
                     SET @valueCol = N'CAST(' + @valueCol + N' AS bit)';
             END
@@ -1085,18 +1107,23 @@ OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x
         IF @monthMask <> 0 OR @needAnchor = 1
         BEGIN
             -- Owner values (monthly: instance of the column month; entered non-monthly: year anchor) are collected ONCE per
-            -- (document, year, RowKey) by one set-based pass, as in the _vN views (Q-17.perf2).
+            -- (document, year, RowKey) by one set-based pass, as in the _vN views (Q-17.perf2), over the OWNED cells only (Q-17.perf3).
             SET @ownerRows = N'
-LEFT HASH JOIN (SELECT oi.DocumentId, oi.PeriodKey / 100 AS Yr, ow.RowKey' + @famAgg + N'
-                  FROM doc.TableInstance AS oi
-                  JOIN doc.Document AS od ON od.Id = oi.DocumentId
-                  LEFT JOIN (SELECT ProjectId, PeriodKey / 100 AS Yr, MIN(PeriodKey) AS AnchorKey
-                               FROM doc.Period GROUP BY ProjectId, PeriodKey / 100) AS pa
-                         ON pa.ProjectId = od.ProjectId AND pa.Yr = oi.PeriodKey / 100
-                  JOIN doc.TableRow AS ow ON ow.PeriodKey = oi.PeriodKey AND ow.TableInstanceId = oi.Id AND ow.IsDeleted = 0
-                  JOIN doc.CellValue AS x ON x.PeriodKey = ow.PeriodKey AND x.TableRowId = ow.Id
-                 WHERE oi.TableDefId IN (' + @tids + N')
-                 GROUP BY oi.DocumentId, oi.PeriodKey / 100, ow.RowKey) AS fam
+LEFT HASH JOIN (SELECT c.DocumentId, c.Yr, c.RowKey' + @famAgg + N'
+                  FROM (VALUES ' + STUFF(@famMap, 1, 2, N'') + N') AS fm (ColumnDefId, Mo, n)
+                  INNER HASH JOIN (SELECT oi.DocumentId, oi.PeriodKey / 100 AS Yr, oi.PeriodKey, pa.AnchorKey, ow.RowKey, x.ColumnDefId,
+                                          x.ValueString, x.ValueNumeric, x.ValueDate, x.ValueBool, x.ValueRegistryEntryId, x.ValueUnitId
+                                     FROM doc.TableInstance AS oi
+                                     JOIN doc.Document AS od ON od.Id = oi.DocumentId
+                                     LEFT JOIN (SELECT ProjectId, PeriodKey / 100 AS Yr, MIN(PeriodKey) AS AnchorKey
+                                                  FROM doc.Period GROUP BY ProjectId, PeriodKey / 100) AS pa
+                                            ON pa.ProjectId = od.ProjectId AND pa.Yr = oi.PeriodKey / 100
+                                     JOIN doc.TableRow AS ow ON ow.PeriodKey = oi.PeriodKey AND ow.TableInstanceId = oi.Id AND ow.IsDeleted = 0
+                                     JOIN doc.CellValue AS x ON x.PeriodKey = ow.PeriodKey AND x.TableRowId = ow.Id
+                                    WHERE oi.TableDefId IN (' + @tids + N')) AS c
+                          ON c.ColumnDefId = fm.ColumnDefId
+                         AND ((fm.Mo > 0 AND c.PeriodKey % 100 = fm.Mo) OR (fm.Mo = 0 AND c.PeriodKey = c.AnchorKey))
+                 GROUP BY c.DocumentId, c.Yr, c.RowKey) AS fam
        ON p.PeriodKind = 0 AND fam.DocumentId = ti.DocumentId AND fam.Yr = ti.PeriodKey / 100 AND fam.RowKey = r.RowKey';
             SET @ownerCells = N'';
             SET @ownerNo = -2;
