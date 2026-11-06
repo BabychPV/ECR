@@ -138,6 +138,12 @@ public sealed class SqlServerFixture : IAsyncLifetime
             await _container.StartAsync().ConfigureAwait(false);
             serverConnection = _container.GetConnectionString();
         }
+        else if (_nameSuffix.Length == 0 && TestDatabaseFiles.MaxAge() is { } maxAge)
+        {
+            // 06.11: EcrTest_* that nobody ran for a day — the main reason the data disk filled up. Idle ones only (see
+            // TestDatabaseFiles.DropStaleAsync); a container is fresh, nothing to sweep there.
+            await TestDatabaseFiles.DropStaleAsync(serverConnection, maxAge, DatabaseName).ConfigureAwait(false);
+        }
 
         ConnectionString = await CreateEmptyDatabaseAsync(serverConnection).ConfigureAwait(false);
         await BuildSchemaAsync().ConfigureAwait(false);
@@ -419,30 +425,16 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// проти 240 мс на вільному — тобто «порушення бюджету» було артефактом
     /// середовища, і на його пошук пішла половина дня.
     ///
-    /// ⚠ Порожнє значення (немає диска <c>H:</c>) лишає типовий каталог —
+    /// ⚠ Порожнє значення лишає типовий каталог —
     /// збірка на CI від цього не змінюється.
+    ///
+    /// ⛔ 06.11: дефолт <c>H:\EcrData</c> прибрано — там живий стенд <c>EcrLandUi</c>, і <c>EcrTest_*</c> двічі за день
+    /// довели <c>H:</c> до 0,1 ГБ. Правило шляху — <see cref="TestDatabaseFiles.Resolve()"/>.
     /// </remarks>
-    private static string DataPath()
-        => Environment.GetEnvironmentVariable("ECR_TEST_DATA_PATH")
-           ?? (Directory.Exists("H:\\") ? "H:\\EcrData" : string.Empty);
+    private static string DataPath() => TestDatabaseFiles.Resolve();
 
     /// <summary>Фрагмент <c>CREATE DATABASE</c> із явними файлами.</summary>
-    private string FilesClause()
-    {
-        var path = DataPath();
-        if (string.IsNullOrEmpty(path))
-        {
-            return string.Empty;
-        }
-
-        Directory.CreateDirectory(path);
-
-        return $"""
-
-            ON PRIMARY (NAME = N'{DatabaseName}', FILENAME = N'{path}\{DatabaseName}.mdf')
-            LOG ON     (NAME = N'{DatabaseName}_log', FILENAME = N'{path}\{DatabaseName}_log.ldf')
-            """;
-    }
+    private string FilesClause() => TestDatabaseFiles.Clause(DatabaseName);
 
     /// <summary>Каже <c>01-filegroups.sql</c>, куди класти файли груп.</summary>
     private async Task MarkDataPathAsync(string serverConnection)

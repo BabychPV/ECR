@@ -146,7 +146,7 @@ public sealed class RK03PeriodStartMarginTests(SqlServerFixture sql)
                     ALTER DATABASE [{name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
                     DROP DATABASE [{name}];
                 END
-                CREATE DATABASE [{name}] COLLATE Latin1_General_100_CI_AS_SC;
+                CREATE DATABASE [{name}]{TestDatabaseFiles.Clause(name)} COLLATE Latin1_General_100_CI_AS_SC;
                 """;
             await command.ExecuteNonQueryAsync();
         }

@@ -41,7 +41,7 @@ public sealed class TvpGrantsSurviveRecreateTests(SqlServerFixture sql)
         await using (var admin = new SqlConnection(master.ConnectionString))
         {
             await admin.OpenAsync();
-            await ExecuteAsync(admin, $"CREATE DATABASE [{database}];");
+            await ExecuteAsync(admin, $"CREATE DATABASE [{database}]{TestDatabaseFiles.Clause(database)};");
         }
 
         try

@@ -36,7 +36,7 @@ public sealed class DbJobQueueRcsiTests(SqlServerFixture sql)
         var master = new SqlConnectionStringBuilder(sql.ConnectionString) { InitialCatalog = "master" }.ConnectionString;
         var target = new SqlConnectionStringBuilder(sql.ConnectionString) { InitialCatalog = name }.ConnectionString;
 
-        await ExecAsync(master, $"CREATE DATABASE [{name}]; ALTER DATABASE [{name}] SET READ_COMMITTED_SNAPSHOT OFF;");
+        await ExecAsync(master, $"CREATE DATABASE [{name}]{TestDatabaseFiles.Clause(name)}; ALTER DATABASE [{name}] SET READ_COMMITTED_SNAPSHOT OFF;");
         try
         {
             await ExecAsync(target, "EXEC (N'CREATE SCHEMA itg');");

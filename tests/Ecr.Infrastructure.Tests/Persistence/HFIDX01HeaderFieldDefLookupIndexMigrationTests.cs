@@ -35,7 +35,7 @@ public sealed class HFIDX01HeaderFieldDefLookupIndexMigrationTests(SqlServerFixt
         var name = builder.InitialCatalog + "_HFI" + Guid.NewGuid().ToString("N")[..6];
         await ExecuteAsync(
             new SqlConnectionStringBuilder(sql.ConnectionString) { InitialCatalog = "master" }.ConnectionString,
-            $"CREATE DATABASE [{name}] COLLATE Latin1_General_100_CI_AS_SC;");
+            $"CREATE DATABASE [{name}]{TestDatabaseFiles.Clause(name)} COLLATE Latin1_General_100_CI_AS_SC;");
         builder.InitialCatalog = name;
         var cs = builder.ConnectionString;
         try
