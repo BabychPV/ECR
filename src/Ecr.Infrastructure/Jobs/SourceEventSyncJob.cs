@@ -871,12 +871,22 @@ public sealed partial class SourceEventSyncJob(
     /// <param name="candidates">Скільки рядків було б видалено після гардів.</param>
     /// <param name="linkedWithRows">Зв'язків з рядком, чий початок у вікні прогону.</param>
     /// <param name="limit">Дозволена кількість (для повідомлення).</param>
+    /// <remarks>
+    /// ✎ Q-3 (людина 06.11: EF факела — «тисячі» на місяць): абсолютна стеля росте з обсягом —
+    /// <c>max(200, 10 % зв'язків-з-рядками)</c>. Плоскі 200 при 5 000 подій вікна блокували б уже 4 % звичайної чистки
+    /// (перестворені в AF події, виправлений шаблон), і кожен такий прогін чекав би людину. Масове зникнення (≥ 20 %
+    /// вікна, усе вікно, порожня відповідь) блокується, як і доти.
+    /// </remarks>
     public static bool ExceedsRemovalLimit(int candidates, int linkedWithRows, out int limit)
     {
         var percent = Math.Max(MinRemovalsAllowed, linkedWithRows * MaxRemovalFraction);
-        limit = (int)Math.Min(MaxRemovalsPerRun, Math.Floor(percent));
-        return candidates > percent || candidates > MaxRemovalsPerRun || (candidates > 0 && candidates >= linkedWithRows);
+        var absolute = Math.Max(MaxRemovalsPerRun, Math.Floor(linkedWithRows * MaxRemovalAbsoluteFraction));
+        limit = (int)Math.Min(absolute, Math.Floor(percent));
+        return candidates > percent || candidates > absolute || (candidates > 0 && candidates >= linkedWithRows);
     }
+
+    /// <summary>Частка зв'язків-з-рядками вікна, до якої росте абсолютна стеля понад <see cref="MaxRemovalsPerRun"/> (Q-3).</summary>
+    public const double MaxRemovalAbsoluteFraction = 0.1;
 
     /// <summary>Видалення, яке РІШЕНО виконати: подія зникла, гарди пройдено.</summary>
     private sealed record PendingRemoval(SourceEventLinkState State, SourceEventLink Link, bool SharedRow);
@@ -1344,15 +1354,19 @@ public sealed partial class SourceEventSyncJob(
 
             -- ⛔ R5-Q1-01: c.DocumentId = @document — провідна колонка IX_CellChange_Cell; без неї скан УСЬОГО
             -- журналу аудиту під HOLDLOCK на doc.Period/doc.TableRow вище (екземпляри мапи — лише її документа).
+            -- ✎ Q-3 (тисячі EF на місяць): рядок — ЗМІННОЮ, а не з'єднанням: з'єднання виконувалось сканом усіх змін
+            -- документа на КОЖНЕ видалення (≈ 10 тис. читань на рядок при 5 000 подій; звірка −300 росла з 5 до 100 с
+            -- разом із журналом); тепер — пошук за (DocumentId, TableRowId) того самого IX_CellChange_Cell.
+            DECLARE @rowId bigint = (SELECT MAX(Id) FROM doc.TableRow
+                                      WHERE PeriodKey = @period AND TableInstanceId = @instance AND RowKey = @rowKey);
             WITH last_change AS (
                 SELECT c.Origin,
                        ROW_NUMBER() OVER (PARTITION BY c.ColumnDefId ORDER BY c.ChangedAt DESC, c.Id DESC) AS rn
-                  FROM doc.TableRow AS r
-                  JOIN aud.CellChange AS c
-                    ON c.DocumentId = @document
-                   AND c.TableRowId = r.Id
-                   AND c.PeriodKey = r.PeriodKey
-                 WHERE r.PeriodKey = @period AND r.TableInstanceId = @instance AND c.RowKey = @rowKey
+                  FROM aud.CellChange AS c
+                 WHERE c.DocumentId = @document
+                   AND c.TableRowId = @rowId
+                   AND c.PeriodKey = @period
+                   AND c.RowKey = @rowKey
             )
             SELECT COUNT(*) FROM last_change WHERE rn = 1 AND Origin IN ({CellChangeOrigins.HumanOriginsSql});
             """;
