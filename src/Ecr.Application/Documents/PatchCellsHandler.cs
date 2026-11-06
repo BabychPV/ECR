@@ -1677,17 +1677,11 @@ public sealed partial class PatchCellsHandler(
             return messages;
         }
 
-        var applicable = new List<ApplicableMethodology>();
-        foreach (var methodologyId in methodologyIds)
-        {
-            var applied = await ResolveApplicableAsync(
-                methodologyId, bounds.PeriodEnd, context.Instance.TemplateVersionId, context.Instance.TableDefId, ct)
-                .ConfigureAwait(false);
-            if (applied is not null)
-            {
-                applicable.Add(applied);
-            }
-        }
+        // ⚡ Усі прив'язані методології — пакетом (≤ 4 звернення на запис), а не 3-5 звернень на КОЖНУ методологію
+        // (Land, T3_00: 15 із ~36 звернень одного PATCH). Вибір версії й порядок — ті самі.
+        var applicable = await ResolveApplicableAsync(
+                methodologyIds, bounds.PeriodEnd, context.Instance.TemplateVersionId, context.Instance.TableDefId, ct)
+            .ConfigureAwait(false);
 
         if (applicable.Count == 0)
         {
@@ -1864,56 +1858,130 @@ public sealed partial class PatchCellsHandler(
     /// </summary>
     private async Task<ApplicableMethodology?> ResolveApplicableAsync(
         int methodologyId, DateOnly onDate, int templateVersionId, int tableDefId, CancellationToken ct)
+        => (await ResolveApplicableAsync([methodologyId], onDate, templateVersionId, tableDefId, ct)
+            .ConfigureAwait(false)).FirstOrDefault();
+
+    /// <summary>
+    /// Те саме для кількох методологій — пакетом: версії, правила, вимоги й коди читаються ОДНИМ зверненням на
+    /// вид даних (≤ 4 на будь-яке число методологій), а не 3-5 на кожну.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Семантика поштучного шляху не змінюється: вибір версії той самий, методологія без чинної версії, без
+    /// активних правил або без вимог пропускається; порядок результату — порядок <paramref name="methodologyIds"/>.
+    /// Кешу тут немає навмисно: gate запису читає методологію на кожен запис
+    /// (<c>MethodologyRequiredColumnsCache</c>, зауваження «стеля несвіжості»).
+    /// </remarks>
+    private async Task<List<ApplicableMethodology>> ResolveApplicableAsync(
+        IReadOnlyList<int> methodologyIds, DateOnly onDate, int templateVersionId, int tableDefId, CancellationToken ct)
     {
-        var versions = await methodologies.GetPublishedVersionsAsync(methodologyId, ct).ConfigureAwait(false);
-
-        // ⚠ Те саме правило вибору, що й `MethodologyResolver.ResolveVersionAsync`
-        // (пізніша `EffectiveFrom` → старша версія → більший Id) — той самий
-        // компаратор домену, не друга копія.
-        var version = versions
-            .Where(v => v.EffectiveFrom is not null && v.EffectiveFrom <= onDate)
-            .OrderByDescending(
-                v => new MethodologyVersionKey(v.EffectiveFrom, v.Version, v.Id),
-                MethodologyVersionKey.Currency)
-            .FirstOrDefault();
-
-        if (version is null)
+        var result = new List<ApplicableMethodology>();
+        if (methodologyIds.Count == 0)
         {
-            return null;
+            return result;
         }
 
-        var rules = await methodologies.GetRulesAsync(version.Id, ct).ConfigureAwait(false);
-        if (rules.Count == 0)
+        var published = (await methodologies.GetPublishedVersionsOfAsync(methodologyIds, ct).ConfigureAwait(false))
+            .ToLookup(v => v.MethodologyId);
+
+        var chosen = new List<(int MethodologyId, MethodologyVersion Version)>();
+        foreach (var methodologyId in methodologyIds)
         {
-            return null;
+            // ⚠ Те саме правило вибору, що й `MethodologyResolver.ResolveVersionAsync`
+            // (пізніша `EffectiveFrom` → старша версія → більший Id) — той самий
+            // компаратор домену, не друга копія.
+            var version = published[methodologyId]
+                .Where(v => v.EffectiveFrom is not null && v.EffectiveFrom <= onDate)
+                .OrderByDescending(
+                    v => new MethodologyVersionKey(v.EffectiveFrom, v.Version, v.Id),
+                    MethodologyVersionKey.Currency)
+                .FirstOrDefault();
+
+            if (version is not null)
+            {
+                chosen.Add((methodologyId, version));
+            }
         }
 
-        var requiredInputs = await methodologies.GetRequiredInputsAsync(version.Id, ct).ConfigureAwait(false);
-        if (requiredInputs.Count == 0)
+        if (chosen.Count == 0)
         {
-            return null;
+            return result;
         }
 
-        var methodology = await methodologies.FindByVersionAsync(version.Id, ct).ConfigureAwait(false);
+        var versionIds = chosen.Select(c => c.Version.Id).Distinct().ToList();
+        var rulesByVersion = (await methodologies.GetRulesOfVersionsAsync(versionIds, ct).ConfigureAwait(false))
+            .ToLookup(r => r.MethodologyVersionId);
 
-        // ⛔ C1: Id у правилах і вимогах — колонки тієї версії шаблону, де їх писали; переклад на колонки версії
-        // ДОКУМЕНТА (за шляхом аркуш/таблиця/колонка) — до будь-якого зіставлення з комірками.
-        var localized = await MethodologyKeyLocalizer
-            .LocalizeAsync(columnMapper, templateVersionId, rules, requiredInputs, ct)
+        // Версія без активних правил не перевіряє нічого — вимоги для неї не питаються (як і поштучно).
+        var withRules = versionIds.Where(id => rulesByVersion[id].Any()).ToList();
+        if (withRules.Count == 0)
+        {
+            return result;
+        }
+
+        var inputsByVersion = (await methodologies.GetRequiredInputsOfVersionsAsync(withRules, ct).ConfigureAwait(false))
+            .ToLookup(r => r.MethodologyVersionId);
+
+        var gated = withRules.Where(id => inputsByVersion[id].Any()).ToHashSet();
+        if (gated.Count == 0)
+        {
+            return result;
+        }
+
+        // Код методології — для тексту вимоги; раніше `FindByVersionAsync` (агрегат з усіма версіями, 2 звернення
+        // на методологію, ще й у відстеженні контексту запису), тепер підпис версії одним зверненням.
+        var labels = await methodologies.GetVersionLabelsAsync([.. gated], ct).ConfigureAwait(false);
+
+        // ⛔ C1: переклад Id колонок на версію шаблону документа — ОДНИМ зверненням на всі версії: переклад кожного Id
+        // не залежить від сусідів у наборі (шлях аркуш/таблиця/колонка), тож підмножина спільної відповіді — рівно те,
+        // що дав би окремий виклик.
+        var mapper = await PrefetchedColumnMapper
+            .CreateAsync(
+                columnMapper,
+                templateVersionId,
+                gated.SelectMany(id => rulesByVersion[id].SelectMany(r => MethodologyRuleMatcher.ColumnIds(r.MatchJson))
+                    .Concat(inputsByVersion[id].Select(i => i.ColumnDefId))),
+                ct)
             .ConfigureAwait(false);
 
-        // D-425: колонки статусу таблиці (за довідником із прапорця методології); порожньо — фільтр не діє.
-        var activity = rowActivity is null
+        // D-425: фільтри активності — одним читанням прапорців на всі методології, що дійшли до перевірки.
+        var activities = rowActivity is null
             ? null
-            : await rowActivity.ResolveForMethodologyAsync(methodologyId, [tableDefId], ct).ConfigureAwait(false);
-        var statusColumns = activity?.ColumnsOf(tableDefId) ?? [];
+            : await rowActivity
+                .ResolveForMethodologiesAsync(
+                    [.. chosen.Where(c => gated.Contains(c.Version.Id)).Select(c => c.MethodologyId).Distinct()],
+                    [tableDefId],
+                    ct)
+                .ConfigureAwait(false);
 
-        return new ApplicableMethodology(
-            methodology?.Code ?? methodologyId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            localized.Rules,
-            localized.RequiredInputs,
-            statusColumns,
-            activity?.ActiveEntryIdText);
+        foreach (var (methodologyId, version) in chosen)
+        {
+            if (!gated.Contains(version.Id))
+            {
+                continue;
+            }
+
+            // ⛔ C1: Id у правилах і вимогах — колонки тієї версії шаблону, де їх писали; переклад на колонки версії
+            // ДОКУМЕНТА (за шляхом аркуш/таблиця/колонка) — до будь-якого зіставлення з комірками.
+            var localized = await MethodologyKeyLocalizer
+                .LocalizeAsync(
+                    mapper, templateVersionId, [.. rulesByVersion[version.Id]], [.. inputsByVersion[version.Id]], ct)
+                .ConfigureAwait(false);
+
+            // D-425: колонки статусу таблиці (за довідником із прапорця методології); порожньо — фільтр не діє.
+            var activity = activities?.GetValueOrDefault(methodologyId);
+            var statusColumns = activity?.ColumnsOf(tableDefId) ?? [];
+
+            result.Add(new ApplicableMethodology(
+                labels.TryGetValue(version.Id, out var label)
+                    ? label.MethodologyCode
+                    : methodologyId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                localized.Rules,
+                localized.RequiredInputs,
+                statusColumns,
+                activity?.ActiveEntryIdText));
+        }
+
+        return result;
     }
 
     /// <summary>Методологія, чия версія на дату дійсно має що перевіряти в рядку.</summary>

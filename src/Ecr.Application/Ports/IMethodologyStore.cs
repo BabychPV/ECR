@@ -151,6 +151,41 @@ public interface IMethodologyStore
         int methodologyVersionId, CancellationToken ct);
 
     /// <summary>
+    /// <see cref="GetPublishedVersionsAsync(int, CancellationToken)"/> для кількох методологій — одним зверненням.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Потрібно gate-у обов'язкових входів <c>PatchCellsHandler</c>: там версії питались поштучно по кожній
+    /// прив'язаній методології на КОЖЕН запис комірки (Land, T3_00: 5 методологій × 3 запити). Вибір чинної на
+    /// дату робить викликач, як і для поштучного методу.
+    /// </remarks>
+    /// <param name="methodologyIds">Методології.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Опубліковані версії всіх названих методологій (групує викликач за <c>MethodologyId</c>).</returns>
+    public Task<IReadOnlyList<MethodologyVersion>> GetPublishedVersionsOfAsync(
+        IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
+
+    /// <summary>
+    /// <see cref="GetRulesAsync(int, CancellationToken)"/> для кількох версій — одним зверненням.
+    /// </summary>
+    /// <param name="methodologyVersionIds">Версії методологій.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Активні правила, впорядковані за версією, далі за <c>Priority</c> і <c>Id</c> — у межах версії той самий
+    /// порядок «перший збіг виграє», що й у поштучного методу.
+    /// </returns>
+    public Task<IReadOnlyList<MethodologyRule>> GetRulesOfVersionsAsync(
+        IReadOnlyCollection<int> methodologyVersionIds, CancellationToken ct);
+
+    /// <summary>
+    /// <see cref="GetRequiredInputsAsync(int, CancellationToken)"/> для кількох версій — одним зверненням.
+    /// </summary>
+    /// <param name="methodologyVersionIds">Версії методологій.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Обов'язкові входи, впорядковані за версією, далі за <c>Id</c>.</returns>
+    public Task<IReadOnlyList<MethodologyRequiredInput>> GetRequiredInputsOfVersionsAsync(
+        IReadOnlyCollection<int> methodologyVersionIds, CancellationToken ct);
+
+    /// <summary>
     /// Методології, активно прив'язані бодай однією колонкою до цієї таблиці
     /// (<c>cfg.CalculationBinding</c>).
     /// </summary>

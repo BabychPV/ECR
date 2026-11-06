@@ -433,6 +433,151 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
         Assert.Equal(0, groups.EnsureFreshCalls);
     }
 
+    /// <summary>
+    /// Стеля звернень на теплий <c>PATCH</c> ОДНІЄЇ комірки таблиці з трьома прив'язаними методологіями (правило «усі
+    /// рядки» й обов'язковий вхід — записувана колонка, тож gate виконується повністю і пропускає запис).
+    /// </summary>
+    /// <remarks>
+    /// Замір 06.11 (perf PATCH, Land T3_00: 5 методологій, ~36 звернень на одну комірку): ДО — gate читав версії,
+    /// правила, вимоги, агрегат методології (2 запити), переклад колонок і фільтр активності (D-425) ПОШТУЧНО на кожну
+    /// методологію (1 → 3 методології: +14 звернень); ПІСЛЯ — пакетом, 32 при будь-якій кількості методологій (з них
+    /// gate: прив'язки, межі періоду, версії, правила, вимоги, підписи, переклад колонок, фільтри, базові комірки).
+    /// Лише знижується.
+    /// </remarks>
+    private const int MaxSingleCellGatedCommands = 32;
+
+    /// <summary>
+    /// Perf PATCH: число звернень одного запису комірки НЕ залежить від кількості прив'язаних до таблиці методологій —
+    /// gate обов'язкових входів читає їх пакетом (версії, правила, вимоги, підписи, переклад колонок — по одному
+    /// зверненню на вид даних).
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ (запущений): старий поштучний <c>ResolveApplicableAsync</c> (цикл по методологіях з
+    /// <c>GetPublishedVersionsAsync</c>/<c>GetRulesAsync</c>/<c>GetRequiredInputsAsync</c>/<c>FindByVersionAsync</c>) —
+    /// 1 і 3 методології дають різне число звернень, тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "WR-04")]
+    public async Task PATCH_однієї_комірки_не_залежить_від_кількості_прив_язаних_методологій()
+    {
+        var one = await MeasureGatedSingleCellAsync(methodologyCount: 1).ConfigureAwait(true);
+        var three = await MeasureGatedSingleCellAsync(methodologyCount: 3).ConfigureAwait(true);
+
+        // ⛔ Підлога: gate справді читав методології (інакше «рівно» означало б «gate не виконувався»).
+        Assert.True(one.Rules == 1 && three.Rules == 1, $"Правила методологій: {one.Rules} / {three.Rules}, очікувалось по 1.\n{three.Detail}");
+
+        Assert.True(
+            one.Total == three.Total,
+            $"1 методологія: {one.Total} звернень, 3: {three.Total}; мають збігатися.\n--- 1 ---\n{one.Detail}\n--- 3 ---\n{three.Detail}");
+        Assert.True(
+            three.Total <= MaxSingleCellGatedCommands,
+            $"PATCH 1 комірки, 3 методології: {three.Total} звернень, стеля {MaxSingleCellGatedCommands}.\n{three.Detail}");
+    }
+
+    private async Task<(int Total, int Rules, string Detail)> MeasureGatedSingleCellAsync(int methodologyCount)
+    {
+        var scenario = await ArrangeAsync().ConfigureAwait(true);
+        await SeedGatedMethodologiesAsync(scenario, methodologyCount).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5));
+        app.Server.PreserveExecutionContext = true;
+        using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
+
+        var sliceUri = new Uri($"/api/v1/documents/{scenario.DocumentId}/tables/{scenario.TableInstanceId}", UriKind.Relative);
+        var patchUri = new Uri($"/api/v1/documents/{scenario.DocumentId}/cells", UriKind.Relative);
+        var (columnCodes, versions) = await OpenSliceAsync(client, sliceUri, app).ConfigureAwait(true);
+        var rowKey = versions.Keys.Order(StringComparer.Ordinal).First();
+        var gatedColumn = columnCodes[1];
+
+        // Розігрів (кеші метаданих, доступу, штампа).
+        versions[rowKey] = await PatchRowAsync(client, patchUri, scenario, rowKey, versions[rowKey], gatedColumn, "1.5", app)
+            .ConfigureAwait(true);
+
+        var texts = new ConcurrentQueue<string>();
+        using var counter = new SqlClientCommandCounter(new CommandTally(), command =>
+        {
+            if (Measuring.Value is not { Value: true })
+            {
+                return false;
+            }
+
+            texts.Enqueue(command.CommandText ?? string.Empty);
+            return true;
+        });
+
+        var rounds = new List<(int Total, int Rules, string Detail)>();
+        for (var round = 1; round <= MeasuredRounds; round++)
+        {
+            counter.Tally.Reset();
+            texts.Clear();
+            var flag = new StrongBox<bool>(true);
+            Measuring.Value = flag;
+            try
+            {
+                var value = (2m + round).ToString(CultureInfo.InvariantCulture);
+                versions[rowKey] = await PatchRowAsync(client, patchUri, scenario, rowKey, versions[rowKey], gatedColumn, value, app)
+                    .ConfigureAwait(true);
+            }
+            finally
+            {
+                flag.Value = false;
+                Measuring.Value = null;
+            }
+
+            counter.AssertObserved();
+            var seen = counter.Tally.Snapshot();
+            rounds.Add((seen.Total, seen["SELECT calc.MethodologyRule"], Describe(seen, texts)));
+        }
+
+        var worst = rounds.MaxBy(r => r.Total);
+        Assert.True(
+            rounds.All(r => r.Total == worst.Total),
+            $"Теплі заміри розходяться: {string.Join(", ", rounds.Select(r => r.Total))}.\n{worst.Detail}");
+
+        return worst;
+    }
+
+    /// <summary>
+    /// <paramref name="count"/> опублікованих методологій, прив'язаних до таблиці сценарію: правило «усі рядки» і
+    /// обов'язковий вхід <c>Block</c> на другій колонці (її й пише замір — gate пропускає).
+    /// </summary>
+    private async Task SeedGatedMethodologiesAsync(Scenario scenario, int count)
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var published = DateTime.UtcNow;
+
+        for (var i = 0; i < count; i++)
+        {
+            await using var db = builder.CreateContext();
+
+            var methodology = new Ecr.Domain.Entities.Calculations.Methodology(
+                EcrCode.Create($"PPG_{tag}_{i}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = $"Patch gate {tag} {i}" }));
+            db.Methodologies.Add(methodology);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+
+            // Версія зберігається ДО правила й вимоги: обидва несуть MethodologyVersionId.
+            var version = new Ecr.Domain.Entities.Calculations.MethodologyVersion(
+                methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, published);
+            db.MethodologyVersions.Add(version);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+
+            var rule = version.AddRule(EcrCode.Create("all"), "{}", 100);
+            var requiredInput = version.AddRequiredInput(scenario.ColumnDefIds[1], RequiredInputSeverity.Block, hint: null);
+            version.Publish(publishedByUserId: 2, "perf PATCH", new DateOnly(2026, 1, 1), testsPassed: true, published);
+
+            db.MethodologyRules.Add(rule);
+            db.MethodologyRequiredInputs.Add(requiredInput);
+            db.CalculationBindings.Add(new Ecr.Domain.Entities.Configuration.CalculationBinding(
+                scenario.TableDefId, scenario.ColumnDefIds[0], methodology.Id, "OUT", "{}"));
+
+            await db.SaveChangesAsync().ConfigureAwait(false);
+        }
+    }
+
     /// <summary>Один <c>PATCH</c> однієї комірки одного рядка; повертає нову версію рядка.</summary>
     private static async Task<string> PatchRowAsync(
         HttpClient client, Uri patchUri, Scenario scenario, string rowKey, string baseVersion, string columnCode, string value, EcrApiFactory app)
@@ -613,9 +758,17 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
 
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        return new Scenario(document.DocumentId, document.TableInstanceId, userName, periodKey, document.RowIds, document.ColumnDefIds);
+        return new Scenario(
+            document.DocumentId, document.TableInstanceId, userName, periodKey, document.RowIds, document.ColumnDefIds,
+            document.TableDefId);
     }
 
     private sealed record Scenario(
-        long DocumentId, long TableInstanceId, string UserName, int PeriodKey, IReadOnlyList<long> RowIds, IReadOnlyList<int> ColumnDefIds);
+        long DocumentId,
+        long TableInstanceId,
+        string UserName,
+        int PeriodKey,
+        IReadOnlyList<long> RowIds,
+        IReadOnlyList<int> ColumnDefIds,
+        int TableDefId);
 }
