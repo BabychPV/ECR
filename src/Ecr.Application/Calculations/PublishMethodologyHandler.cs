@@ -34,8 +34,12 @@ public sealed class PublishMethodologyHandler(
     IRegistryStore? registryStore = null,
     IRegistryKeyStore? registryKeys = null,
     IRegistryUseStore? registryUses = null,
-    IUiStringCatalog? uiCatalog = null)
+    IUiStringCatalog? uiCatalog = null,
+    RuleCoverageHandler? ruleCoverage = null)
 {
+    /// <summary>Ключ попередження: комбінації значень реальних рядків, яких не зачіпає жодне правило (ФВ-13.9).</summary>
+    public const string CoverageGapsWarningKey = "publish.warning.ruleCoverageGaps";
+
     /// <summary>Право на публікацію методології (`02-contracts.md` §9).</summary>
     /// <remarks>
     /// ⚠ Право **небезпечне** (`sec.Permission.IsDangerous = 1`): вбудованим
@@ -123,6 +127,13 @@ public sealed class PublishMethodologyHandler(
         var warnings = await ApplyEvaluationOrderAsync(methodology, version, from, ct)
             .ConfigureAwait(false);
 
+        // ✎ ФВ-13.9 (AN-13): ПОКРИТТЯ (рядки без правила) на РЕАЛЬНИХ даних - тією самою матрицею, що й екран
+        // покриття. Попередження, не відмова: розрив на даних - не дефект версії (рядок може свідомо не рахуватися),
+        // а блок публікації через чужі дані зупинив би виправлення самої методології. ПЕРЕТИН блокує вже
+        // CheckRulesAsync вище (V-18: однаковий пріоритет, «уся таблиця» попереду) - нічиї на даних після нього немає.
+        var coverageWarnings = await RuleCoverageWarningsAsync(methodology, methodologyVersionId, ct)
+            .ConfigureAwait(false);
+
         var diff = await BuildDiffAsync(methodology, version, previous, testCases, ct).ConfigureAwait(false);
 
         // Зелений тест — не прапорець, а факт: усі випадки золотого набору
@@ -173,7 +184,71 @@ public sealed class PublishMethodologyHandler(
         // канал (журнал, лист) означав би, що той, хто публікує, їх не
         // побачить — а 186 попереджень у логах не прочитає ніхто.
         // ✎ L2-5: попередження diff (попередня версія не обчислилась) — до попереджень публікації.
-        return diff with { Warnings = [.. diff.Warnings ?? [], .. warnings] };
+        return diff with { Warnings = [.. diff.Warnings ?? [], .. warnings, .. coverageWarnings] };
+    }
+
+    /// <summary>
+    /// ФВ-13.9: розриви (комбінації значень без жодного правила) правил версії на рядках таблиць прив'язок - одне
+    /// попередження з числом комбінацій і рядків.
+    /// </summary>
+    /// <remarks>
+    /// Вікно періодів і набір проєктів - як у матриці покриття (<see cref="RuleCoverageHandler"/>): останній рік і лише
+    /// проєкти, які той, хто публікує, може читати. Без права <c>Calculation.View</c> матриця недоступна - тоді й
+    /// попереджень немає (дані проєктів не розкриваються через публікацію). Бібліотека й версія без правил - мовчки.
+    /// </remarks>
+    private async Task<IReadOnlyList<string>> RuleCoverageWarningsAsync(
+        Methodology methodology, int methodologyVersionId, CancellationToken ct)
+    {
+        if (ruleCoverage is null || methodology.Kind == MethodologyKind.Library)
+        {
+            return [];
+        }
+
+        Dto.RuleCoverageDto matrix;
+        try
+        {
+            matrix = await ruleCoverage
+                .HandleAsync(methodology.Id, methodologyVersionId, tableDefId: null, periodFrom: null, periodTo: null, ct)
+                .ConfigureAwait(false);
+        }
+        catch (AccessDeniedException)
+        {
+            return [];
+        }
+
+        if (matrix.Rules.Count == 0)
+        {
+            return [];
+        }
+
+        var strings = uiCatalog is null
+            ? null
+            : await uiCatalog.GetAsync(currentUser.Language, ct).ConfigureAwait(false);
+
+        var combinations = matrix.Combinations.Where(c => c.State == Dto.RuleCoverageState.Gap).ToList();
+        if (combinations.Count == 0)
+        {
+            return [];
+        }
+
+        const string fallback =
+            "Rule coverage ({from}-{to}): {combinations} value combinations ({rows} rows) match no rule of this version "
+            + "and will not be calculated. Check the coverage matrix of the version.";
+
+        var values = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["from"] = matrix.PeriodFrom.ToString(CultureInfo.InvariantCulture),
+            ["to"] = matrix.PeriodTo.ToString(CultureInfo.InvariantCulture),
+            ["combinations"] = combinations.Count.ToString(CultureInfo.InvariantCulture),
+            ["rows"] = combinations.Sum(c => c.Rows).ToString(CultureInfo.InvariantCulture),
+        };
+
+        return
+        [
+            strings is null
+                ? values.Aggregate(fallback, (text, pair) => text.Replace("{" + pair.Key + "}", pair.Value, StringComparison.Ordinal))
+                : Localization.UiStringResolver.Format(Localization.UiStringResolver.Resolve(strings, CoverageGapsWarningKey), values),
+        ];
     }
 
     /// <summary>
