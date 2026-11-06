@@ -162,6 +162,8 @@ public sealed class AirLimitsImportTarget(
         var substanceCodes = await Data.SubstanceCodesAsync(
             tables, [.. children.Values.Select(c => c.Ref(AirLimitsSchema.Substance)).OfType<long>().Distinct()], ct).ConfigureAwait(false);
 
+        var parentColumns = AirLimitsSchema.ParentColumnsOf(tables.Sources);
+        var childColumns = AirLimitsSchema.ChildColumnsOf(tables.Substances);
         var result = new List<StoredSource>();
         foreach (var row in chosen)
         {
@@ -174,7 +176,7 @@ public sealed class AirLimitsImportTarget(
             var label = permits.TryGetValue(owner, out var permit) ? permit.Text("Permit_Number") : null;
 
             var values = new Dictionary<string, object?>(StringComparer.Ordinal) { ["naeCode"] = naeCode };
-            foreach (var (field, column) in AirLimitsSchema.ParentColumns)
+            foreach (var (field, column) in parentColumns)
             {
                 values[field] = ColumnValue(row, column);
             }
@@ -190,9 +192,10 @@ public sealed class AirLimitsImportTarget(
                 }
 
                 var cv = new Dictionary<string, object?>(StringComparer.Ordinal) { ["substanceCode"] = code };
-                foreach (var (field, column) in AirLimitsSchema.ChildColumns)
+                foreach (var (field, column) in childColumns)
                 {
-                    cv[field] = child.Number(column);
+                    // Built-in substance columns are numbers; an added column keeps its own type (number or text).
+                    cv[field] = AirLimitsSchema.ChildColumns.ContainsKey(field) ? child.Number(column) : ColumnValue(child, column);
                 }
 
                 kids.Add(new ExistingChild(code, cv));
@@ -343,6 +346,8 @@ public sealed class AirLimitsImportTarget(
         var substanceIds = await Data.SubstancesByCodeAsync(
             tables, [.. plan.Insert.SelectMany(p => p.Children).Select(c => c.Key).Distinct()], ct).ConfigureAwait(false);
 
+        var parentColumns = AirLimitsSchema.ParentColumnsOf(tables.Sources);
+        var childColumns = AirLimitsSchema.ChildColumnsOf(tables.Substances);
         var sourceWrites = new List<RegistryEntryWrite>();
         foreach (var parent in plan.Insert)
         {
@@ -359,9 +364,13 @@ public sealed class AirLimitsImportTarget(
                 [AirLimitsSchema.Area] = air.Area?.Stored,
                 [AirLimitsSchema.SiteLabel] = parent.GroupLabel,
             };
-            foreach (var (field, column) in AirLimitsSchema.ParentColumns)
+            foreach (var (field, column) in parentColumns)
             {
-                values[column] = parent.Values.GetValueOrDefault(field);
+                // A column the profile does not map stays empty (the row is replaced as a whole, like before).
+                if (parent.Values.TryGetValue(field, out var value) || AirLimitsSchema.ParentColumns.ContainsKey(field))
+                {
+                    values[column] = value;
+                }
             }
 
             sourceWrites.Add(new RegistryEntryWrite(string.Empty, values) { DisplayName = $"{parent.Key} {parent.Values.GetValueOrDefault("sourceName")}" });
@@ -398,9 +407,12 @@ public sealed class AirLimitsImportTarget(
                     [AirLimitsSchema.Source] = sourceIds[i],
                     [AirLimitsSchema.Substance] = substanceId,
                 };
-                foreach (var (field, column) in AirLimitsSchema.ChildColumns)
+                foreach (var (field, column) in childColumns)
                 {
-                    values[column] = child.Values.GetValueOrDefault(field);
+                    if (child.Values.TryGetValue(field, out var value) || AirLimitsSchema.ChildColumns.ContainsKey(field))
+                    {
+                        values[column] = value;
+                    }
                 }
 
                 childWrites.Add(($"{plan.Insert[i].Key}/{child.Key}", new RegistryEntryWrite(string.Empty, values) { DisplayName = child.Key }));

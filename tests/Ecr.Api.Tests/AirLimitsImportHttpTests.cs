@@ -8,6 +8,7 @@ using Ecr.Adapters.Tests.Excel.RegistryImport;
 using Ecr.Application.Ports;
 using Ecr.Application.Permits.AirLimits;
 using Ecr.Application.Registries.Nae;
+using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -360,6 +361,129 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         var card = await ReadAsync(app, await client.GetAsync(new Uri($"/api/v1/permits/{permitId}/air-limits", UriKind.Relative)));
         Assert.Equal(373, card.GetProperty("sources").GetArrayLength());
         Assert.Equal(2624, card.GetProperty("substanceRows").GetInt32());
+    }
+
+    /// <remarks>
+    /// P1 06.11 «Add as new column»: a column added to AIR_SOURCES / AIR_SOURCE_SUBSTANCES through the permit-type API is filled
+    /// by a profile field with the SAME code, and a re-import of the same file is «unchanged» (the stored row carries the added
+    /// column too). Mutations (run, red): <c>InsertAsync</c> back on the fixed <c>ParentColumns</c>/<c>ChildColumns</c> — nothing
+    /// stored; <c>StoredAsync</c> back on them — the re-import shows 373 «changed».
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task AddedColumns__a_profile_field_with_the_column_code_is_stored_and_a_reimport_is_unchanged()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+        var stamp = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var pointCopy = $"POINT_COPY_{stamp}";
+        var ndvYear = $"NDV_YEAR_{stamp}";
+        await AddColumnAsync(app, client, AirLimitsSchema.SourcesTable, pointCopy, "String");
+        await AddColumnAsync(app, client, AirLimitsSchema.SubstancesTable, ndvYear, "Int");
+
+        var era = Ecr.Application.RegistryImport.BuiltInImportProfiles.EraTable33;
+        var spec = new Ecr.Application.RegistryImport.RegistryImportSpec
+        {
+            Sheet = era.Sheet,
+            Header = era.Header,
+            DataStartRow = era.DataStartRow,
+            GroupRows = era.GroupRows,
+            ParentKeyField = era.ParentKeyField,
+            ChildKeyField = era.ChildKeyField,
+            NaMarkers = era.NaMarkers,
+            Fields =
+            [
+                .. era.Fields,
+                new Ecr.Application.RegistryImport.ImportFieldSpec { Name = pointCopy, Level = Ecr.Application.RegistryImport.ImportLevel.Parent, Column = "B" },
+                new Ecr.Application.RegistryImport.ImportFieldSpec
+                {
+                    Name = ndvYear, Level = Ecr.Application.RegistryImport.ImportLevel.Child, Column = "AB", Parser = Ecr.Application.RegistryImport.ImportParser.Integer,
+                },
+            ],
+        };
+        var specJson = JsonDocument.Parse(spec.ToJson()).RootElement;
+
+        // Column B («Цех») is empty in the synthetic form: fill it on every source row (the NAE number sits in G).
+        byte[] bytes;
+        using (var input = new MemoryStream(Synthetic.Bytes))
+        using (var book = new ClosedXML.Excel.XLWorkbook(input))
+        {
+            var sheet = book.Worksheets.First();
+            foreach (var row in sheet.RowsUsed().Where(r => r.RowNumber() > 7 && !r.Cell("G").IsEmpty()))
+            {
+                row.Cell("B").Value = "WS-" + row.Cell("G").GetFormattedString();
+            }
+
+            using var output = new MemoryStream();
+            book.SaveAs(output);
+            bytes = output.ToArray();
+        }
+
+        var region = NewRegion();
+        var permitId = await NewPermitAsync(client, app);
+        var resolutions = await ResolveAllAsync(app, client, permitId, region);
+        await ApplyBytesAsync(app, client, permitId, bytes, new { region, area = "OFFSHORE", resolutions, spec = specJson });
+
+        await using (var db = new EcrDbContext(Options()))
+        {
+            async Task<List<RegistryValue>> ValuesOf(string code)
+            {
+                var fieldId = await db.RegistryFieldDefs.Where(f => f.Code == code).Select(f => f.Id).SingleAsync();
+                return await db.RegistryValues.Where(v => v.RegistryFieldDefId == fieldId).ToListAsync();
+            }
+
+            var points = await ValuesOf(pointCopy);
+            Assert.Equal(373, points.Count(v => v.ValueString?.StartsWith("WS-", StringComparison.Ordinal) == true));
+            var years = await ValuesOf(ndvYear);
+            Assert.True(years.Count(v => v.ValueNumeric is > 2000m) > 2000, $"stored years: {years.Count}");
+        }
+
+        var preview = (await ReadAsync(app, await PostFileAsync(
+            client, Preview(permitId), bytes, new { region, area = "OFFSHORE", spec = specJson }))).GetProperty("preview");
+        Assert.Equal(373, preview.GetProperty("diff").GetProperty("unchangedParents").GetInt32());
+        Assert.Equal(0, preview.GetProperty("diff").GetProperty("changedParents").GetInt32());
+    }
+
+    /// <summary>Adds a column to a table of the AIR type the way the type editor does: new version → PUT → publish.</summary>
+    private static async Task AddColumnAsync(EcrApiFactory app, HttpClient client, string table, string code, string dataType)
+    {
+        var type = await ReadAsync(app, await client.GetAsync(new Uri($"/api/v1/permit-types/{AirLimitsSchema.TypeCode}", UriKind.Relative)));
+        if (!type.GetProperty("hasUnpublishedChanges").GetBoolean())
+        {
+            type = await ReadAsync(app, await client.PostAsync(new Uri($"/api/v1/permit-types/{AirLimitsSchema.TypeCode}/new-version", UriKind.Relative), null));
+        }
+
+        var tables = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(type.GetProperty("tables").GetRawText(), Web)!;
+        var target = tables.Single(t => t["code"].GetString() == table);
+        var columns = JsonSerializer.Deserialize<List<JsonElement>>(target["columns"].GetRawText(), Web)!;
+        var order = columns.Max(c => c.GetProperty("order").GetInt32()) + 1;
+        columns.Add(JsonSerializer.SerializeToElement(
+            new
+            {
+                code, nameL10n = new Dictionary<string, string> { ["en"] = code }, dataType, order, required = false, key = false,
+                choices = (string[]?)null, group = (string?)null, listRegistryCode = (string?)null, listScope = (string?)null,
+                precision = (int?)null, scale = (int?)null, siblingTableCode = (string?)null, unitId = (int?)null,
+            },
+            Web));
+        target["columns"] = JsonSerializer.SerializeToElement(columns, Web);
+
+        var replaced = await ReadAsync(app, await client.PutAsJsonAsync(
+            new Uri($"/api/v1/permit-types/{AirLimitsSchema.TypeCode}", UriKind.Relative),
+            new
+            {
+                rowVersion = type.GetProperty("rowVersion").GetString(),
+                nameL10n = type.GetProperty("nameL10n"),
+                category = type.GetProperty("category").GetString(),
+                rules = type.GetProperty("rules"),
+                tables,
+            },
+            Web));
+        await ReadAsync(app, await client.PostAsJsonAsync(
+            new Uri($"/api/v1/permit-types/{AirLimitsSchema.TypeCode}/publish", UriKind.Relative),
+            new { reason = "P1 06.11: added column test", rowVersion = replaced.GetProperty("rowVersion").GetString() },
+            Web));
     }
 
     [Fact]
