@@ -137,7 +137,7 @@ public sealed class DatabaseHealthRcsiOffTests(SqlServerFixture sql)
 
             await ExecAsync(
                 master,
-                $"CREATE DATABASE [{name}]; ALTER DATABASE [{name}] SET READ_COMMITTED_SNAPSHOT OFF;");
+                $"CREATE DATABASE [{name}]{TestDatabaseFiles.Clause(name)}; ALTER DATABASE [{name}] SET READ_COMMITTED_SNAPSHOT OFF;");
 
             var temp = new RcsiOffDatabase(name, master, target);
 

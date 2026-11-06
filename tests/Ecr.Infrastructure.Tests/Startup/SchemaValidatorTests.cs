@@ -364,7 +364,7 @@ public sealed class SchemaValidatorTests(SqlServerFixture sql)
                 ALTER DATABASE [{bare}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
                 DROP DATABASE [{bare}];
             END
-            CREATE DATABASE [{bare}];
+            CREATE DATABASE [{bare}]{TestDatabaseFiles.Clause(bare)};
             """;
         if (compatibilityLevel is { } level)
         {
