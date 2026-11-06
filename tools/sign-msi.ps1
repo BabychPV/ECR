@@ -6,7 +6,10 @@
     Два шляхи (MSI-SIGNING-OPTIONS (A+B), QUESTIONS-BUSINESS §3.3):
       -Thumbprint   — варіант A: власний (самопідписаний) code-signing
                       сертифікат зі сховища Cert:\CurrentUser\My або
-                      Cert:\LocalMachine\My; Set-AuthenticodeSignature, без signtool.
+                      Cert:\LocalMachine\My (створює tools/new-codesign-cert.ps1).
+                      ✎ 06.11 (Q-6 «A+B зараз»): signtool sign /sha1 <відбиток> /fd SHA256,
+                      якщо signtool є в PATH; інакше Set-AuthenticodeSignature
+                      -HashAlgorithm SHA256 (той самий Authenticode SHA-256).
       -SubjectName  — варіант C: сертифікат корпоративного ЦС через signtool
                       (ключ може бути на токені/HSM).
     Після підпису файл змінюється, тож скрипт ПЕРЕПИСУЄ `<MsiPath>.sha256`
@@ -37,14 +40,32 @@ if ($PSCmdlet.ParameterSetName -eq 'Thumbprint') {
         Where-Object { $_.Thumbprint -eq $Thumbprint } | Select-Object -First 1
     if (-not $cert) { throw "сертифіката з відбитком $Thumbprint немає в CurrentUser\My і LocalMachine\My" }
     if (-not $cert.HasPrivateKey) { throw "сертифікат $Thumbprint без закритого ключа — підписати ним не можна" }
-    $signArgs = @{ LiteralPath = $MsiPath; Certificate = $cert; HashAlgorithm = 'SHA256' }
-    if ($TimestampServer) { $signArgs.TimestampServer = $TimestampServer }
-    $sig = Set-AuthenticodeSignature @signArgs
-    # Status тут — стан ПІСЛЯ підпису: для самопідписаного без довіри на цій
-    # машині це UnknownError/NotTrusted, і підпис усе одно записано. Провал —
-    # лише коли підпису у файлі немає.
-    if (-not $sig.SignerCertificate -or $sig.Status -in 'NotSigned', 'HashMismatch') {
-        throw "Set-AuthenticodeSignature: $($sig.Status) — $($sig.StatusMessage)"
+    if (Get-Command signtool -ErrorAction SilentlyContinue) {
+        # /sha1 — відбиток у сховищах користувача й машини; /fd SHA256 — дайджест файла (не SHA-1 типово).
+        $toolArgs = @('sign', '/sha1', $Thumbprint, '/fd', 'SHA256')
+        if ($TimestampServer) { $toolArgs += @('/tr', $TimestampServer, '/td', 'SHA256') }
+        $toolArgs += $MsiPath
+        # ⛔ Q-217: той самий захист від нешкідливого stderr, що й у гілці -SubjectName нижче.
+        $previousEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & signtool @toolArgs
+        }
+        finally {
+            $ErrorActionPreference = $previousEap
+        }
+        if ($LASTEXITCODE) { throw "signtool завершився з кодом $LASTEXITCODE" }
+    }
+    else {
+        $signArgs = @{ LiteralPath = $MsiPath; Certificate = $cert; HashAlgorithm = 'SHA256' }
+        if ($TimestampServer) { $signArgs.TimestampServer = $TimestampServer }
+        $sig = Set-AuthenticodeSignature @signArgs
+        # Status тут — стан ПІСЛЯ підпису: для самопідписаного без довіри на цій
+        # машині це UnknownError/NotTrusted, і підпис усе одно записано. Провал —
+        # лише коли підпису у файлі немає.
+        if (-not $sig.SignerCertificate -or $sig.Status -in 'NotSigned', 'HashMismatch') {
+            throw "Set-AuthenticodeSignature: $($sig.Status) — $($sig.StatusMessage)"
+        }
     }
 }
 else {
