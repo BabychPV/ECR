@@ -18,6 +18,9 @@ public sealed class MethodologyKeyLocalizerGuardTests
     private static readonly string[] Tokens =
     [
         ".GetRulesAsync(", ".GetRequiredInputsAsync(", ".MethodologyRules", ".MethodologyRequiredInputs",
+
+        // Пакетні варіанти тих самих читань (PATCH gate, ✎ 2026-11-06) — те саме правило перекладу ключів.
+        ".GetRulesOfVersionsAsync(", ".GetRequiredInputsOfVersionsAsync(",
     ];
 
     /// <summary>Файли, яким переклад не потрібен, з причиною.</summary>

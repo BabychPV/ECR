@@ -426,6 +426,74 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<MethodologyVersion>> GetPublishedVersionsOfAsync(
+        IReadOnlyCollection<int> methodologyIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodologyIds);
+        if (methodologyIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = methodologyIds.Distinct().ToList();
+
+        return await db.MethodologyVersions
+            .AsNoTracking()
+            .Where(v => ids.Contains(v.MethodologyId) && v.Status == TemplateVersionStatus.Published)
+            .OrderBy(v => v.MethodologyId)
+            .ThenByDescending(v => v.EffectiveFrom)
+            .Take(MaxChildren * ids.Count)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<MethodologyRule>> GetRulesOfVersionsAsync(
+        IReadOnlyCollection<int> methodologyVersionIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodologyVersionIds);
+        if (methodologyVersionIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = methodologyVersionIds.Distinct().ToList();
+
+        // Порядок у межах версії — той самий, що в GetRulesAsync: Priority, потім Id («перший збіг виграє», ФВ-13.4).
+        return await db.MethodologyRules
+            .AsNoTracking()
+            .Where(r => ids.Contains(r.MethodologyVersionId) && r.IsActive)
+            .OrderBy(r => r.MethodologyVersionId)
+            .ThenBy(r => r.Priority)
+            .ThenBy(r => r.Id)
+            .Take(MaxChildren * ids.Count)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<MethodologyRequiredInput>> GetRequiredInputsOfVersionsAsync(
+        IReadOnlyCollection<int> methodologyVersionIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodologyVersionIds);
+        if (methodologyVersionIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = methodologyVersionIds.Distinct().ToList();
+
+        return await db.MethodologyRequiredInputs
+            .AsNoTracking()
+            .Where(r => ids.Contains(r.MethodologyVersionId))
+            .OrderBy(r => r.MethodologyVersionId)
+            .ThenBy(r => r.Id)
+            .Take(MaxChildren * ids.Count)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<int>> GetMethodologyIdsBoundToTableAsync(
         int tableDefId, CancellationToken ct)
         => await db.CalculationBindings
