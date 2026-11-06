@@ -442,8 +442,9 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
 
         // На рядок doc.CellValue читають лише sc (власна обчислена) і pc (власна копія РАЗОМ з нероутованими колонками, Q-17.perf3:
         // окремого apply sv немає); власників у apply на рядок немає.
-        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(definition, "FROM doc\\.CellValue AS x WHERE x\\.PeriodKey = r\\.PeriodKey AND x\\.TableRowId = r\\.Id AND x\\.IsCalculated = 1\\) AS sc\\b"));
-        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(definition, "FROM doc\\.CellValue AS x WHERE x\\.PeriodKey = r\\.PeriodKey AND x\\.TableRowId = r\\.Id\\) AS pc\\b"));
+        // Q-17.slotmap: обидва - через мапу слотів rpt.ViewSlot (seek по (вʼюха, ColumnDefId)); sc - лише маршрутизовані (Mo IS NOT NULL).
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(definition, "FROM doc\\.CellValue AS x INNER LOOP JOIN rpt\\.ViewSlot AS m ON m\\.ViewName = N'[A-Za-z0-9_]+' AND m\\.ColumnDefId = x\\.ColumnDefId AND m\\.Mo IS NOT NULL WHERE x\\.PeriodKey = r\\.PeriodKey AND x\\.TableRowId = r\\.Id AND x\\.IsCalculated = 1\\) AS sc\\b"));
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(definition, "FROM doc\\.CellValue AS x INNER LOOP JOIN rpt\\.ViewSlot AS m ON m\\.ViewName = N'[A-Za-z0-9_]+' AND m\\.ColumnDefId = x\\.ColumnDefId WHERE x\\.PeriodKey = r\\.PeriodKey AND x\\.TableRowId = r\\.Id\\) AS pc\\b"));
         Assert.DoesNotContain(") AS sv", definition, StringComparison.Ordinal);
         for (var m = 1; m <= 12; m++)
         {
@@ -460,15 +461,28 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         Assert.Contains("LEFT HASH JOIN (SELECT c.DocumentId, c.Yr, c.RowKey", definition, StringComparison.Ordinal);
         Assert.Contains("p.PeriodKind = 0 AND fam.DocumentId = ti.DocumentId AND fam.Yr = ti.PeriodKey / 100 AND fam.RowKey = r.RowKey", definition, StringComparison.Ordinal);
         // Q-17.perf3: в агрегацію fam ідуть лише комірки власників - мапа fm (колонка, місяць або 0 = якір, слот), хеш-зʼєднання.
-        Assert.Contains(") AS fm (ColumnDefId, Mo, n)", definition, StringComparison.Ordinal);
+        // Q-17.slotmap: мапа - рядки rpt.ViewSlot цієї вʼюхи з Mo (inline VALUES більше немає).
+        Assert.Contains("FROM rpt.ViewSlot AS fm", definition, StringComparison.Ordinal);
+        Assert.Contains($"WHERE fm.ViewName = N'{f.View}' AND fm.Mo IS NOT NULL", definition, StringComparison.Ordinal);
+        Assert.DoesNotContain("(VALUES ", definition, StringComparison.Ordinal);
         Assert.Contains("((fm.Mo > 0 AND c.PeriodKey % 100 = fm.Mo) OR (fm.Mo = 0 AND c.PeriodKey = c.AnchorKey))", definition, StringComparison.Ordinal);
         Assert.DoesNotContain("oi.PeriodKey % 100 =", definition, StringComparison.Ordinal);
-        for (var m = 1; m <= 12; m++)
+        await using (var map = new SqlConnection(sql.ConnectionString))
         {
-            Assert.Matches($"\\(\\d+, {m}, \\d+\\)", definition);
+            await map.OpenAsync();
+            await using var mos = map.CreateCommand();
+            mos.CommandText = "SELECT DISTINCT Mo FROM rpt.ViewSlot WHERE ViewName = @v AND Mo IS NOT NULL ORDER BY Mo";
+            mos.Parameters.AddWithValue("@v", f.View);
+            var seen = new List<int>();
+            await using var reader = await mos.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                seen.Add(reader.GetInt32(0));
+            }
+
+            Assert.Equal(Enumerable.Range(0, 13), seen);
         }
 
-        Assert.Matches("\\(\\d+, 0, \\d+\\)", definition);
         // Власник читається діапазоном ключа рядка, а не seek-ом на колонку: IN-списку колонок у apply немає.
         Assert.DoesNotContain("x.ColumnDefId IN (", definition, StringComparison.Ordinal);
 
@@ -477,8 +491,16 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
             definition, "(?:FROM|JOIN)\\s+(?:doc|wf)\\.\\w+");
         Assert.True(tables < 250, $"таблиць у запиті {tables}");
     }
-    /// <summary>Результат вимірювання запиту: логічні читання (STATISTICS IO) і процесорний час (STATISTICS TIME).</summary>
-    private sealed record Measure(long Reads, long CpuMs);
+    /// <summary>
+    /// Результат вимірювання запиту: логічні читання даних (STATISTICS IO, без мапи слотів), читання мапи <c>rpt.ViewSlot</c>
+    /// окремо і процесорний час (STATISTICS TIME).
+    /// </summary>
+    /// <remarks>
+    /// Q-17.slotmap: apply pc шукає слот КОЖНОЇ комірки рядка в мапі (LOOP seek, 2 логічні читання гарячої 2-3-сторінкової
+    /// таблиці на комірку) - це ціна заміни IN-списків, а не кратність читання даних, яку стереже межа нижче; тому мапа
+    /// рахується окремо (у звіті), а межа - по doc.*.
+    /// </remarks>
+    private sealed record Measure(long Reads, long CpuMs, long MapReads = 0);
 
     /// <summary>
     /// Вимірює запит: один прогрів (план у кеші), далі 3 заміри - читання останнього, CPU - мінімум (стійко до шуму).
@@ -486,14 +508,23 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
     private async Task<Measure> MeasureAsync(string query)
     {
         long reads = 0;
+        long mapReads = 0;
         long cpu = 0;
         await using var connection = new SqlConnection(sql.ConnectionString);
         connection.InfoMessage += (_, e) =>
         {
             foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
-                         e.Message, "logical reads (\\d+)"))
+                         e.Message, "Table '([^']+)'\\. Scan count \\d+, logical reads (\\d+)"))
             {
-                reads += long.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                var value = long.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+                if (m.Groups[1].Value == "ViewSlot")
+                {
+                    mapReads += value;
+                }
+                else
+                {
+                    reads += value;
+                }
             }
 
             foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
@@ -511,9 +542,11 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
 
         var best = long.MaxValue;
         var lastReads = 0L;
+        var lastMapReads = 0L;
         for (var run = 0; run < 4; run++)
         {
             reads = 0;
+            mapReads = 0;
             cpu = 0;
             await using var command = connection.CreateCommand();
             command.CommandText = query;
@@ -533,10 +566,11 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
             {
                 best = Math.Min(best, cpu);
                 lastReads = reads;
+                lastMapReads = mapReads;
             }
         }
 
-        return new Measure(lastReads, best);
+        return new Measure(lastReads, best, lastMapReads);
     }
 
     /// <summary>

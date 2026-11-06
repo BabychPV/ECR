@@ -91,6 +91,23 @@ LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId
 WHERE cv.IsEmpty = 0;
 GO
 
+-- Q-17.slotmap (P3, ON <= 1,2x OFF): READ MODEL слотів вʼюх із маршрутизацією місяців (@MonthRouting = 1). Рядок = (вʼюха,
+-- ColumnDefId, слот n колонки вʼюхи, Mo): Mo NULL - колонка НЕ маршрутизується (власна комірка), 0 - введена не-місячна
+-- (власник - якір року), 1..12 - місячна (власник - екземпляр цього місяця). Id у кількох кодах (аліаси cfg.ColumnRename)
+-- = кілька рядків, кожен у своєму слоті. Таблицю веде ЛИШЕ генератор (обидві процедури нижче, EXECUTE AS OWNER), у тій самій
+-- транзакції, що й ALTER VIEW; вʼюхи ON читають її замість inline-мапи VALUES і замість IN-списків/CASE за ColumnDefId
+-- (умовна агрегація за слотом m.Slot, apply sc і похідна fam - лише по рядках мапи з Mo IS NOT NULL). Вʼюхи OFF її НЕ читають
+-- (текст OFF байт-у-байт як раніше), а їхні рядки генератор прибирає. Індекс - кластерний ключ (ViewName, ColumnDefId, Slot):
+-- seek по (вʼюха, колонка комірки) з apply на рядок і діапазон вʼюхи для хеш-зʼєднання fam.
+IF OBJECT_ID(N'rpt.ViewSlot', N'U') IS NULL
+    CREATE TABLE rpt.ViewSlot (
+        ViewName    sysname NOT NULL,
+        ColumnDefId int     NOT NULL,
+        Slot        int     NOT NULL,
+        Mo          int     NULL,
+        CONSTRAINT PK_ViewSlot PRIMARY KEY CLUSTERED (ViewName, ColumnDefId, Slot));
+GO
+
 -- AN-155d: відбиток УСІХ входів, від яких залежить текст вʼюх rpt.v_*_vN та стабільних (обидві процедури нижче):
 --   * @MonthRouting;
 --   * визначення самих процедур і цієї функції (правка 05-rpt-views.sql => інший відбиток => перегенерація);
@@ -268,6 +285,11 @@ BEGIN
        AND @fp = (SELECT CONVERT(varchar(64), ep.value) FROM sys.extended_properties AS ep
                    WHERE ep.class = 3 AND ep.major_id = SCHEMA_ID(N'rpt') AND ep.minor_id = 0 AND ep.name = @fpName)
        AND NOT EXISTS (SELECT 1 FROM @tables AS tt WHERE OBJECT_ID(N'rpt.' + QUOTENAME(tt.ViewName), N'V') IS NULL)
+       -- Q-17.slotmap: вʼюха, що читає мапу слотів, має свої рядки в rpt.ViewSlot (інакше - перегенерувати, а не пропустити).
+       AND NOT EXISTS (SELECT 1 FROM @tables AS tt
+                         JOIN sys.sql_expression_dependencies AS dep
+                           ON dep.referencing_id = OBJECT_ID(N'rpt.' + QUOTENAME(tt.ViewName), N'V') AND dep.referenced_id = OBJECT_ID(N'rpt.ViewSlot', N'U')
+                        WHERE NOT EXISTS (SELECT 1 FROM rpt.ViewSlot AS vs WHERE vs.ViewName = tt.ViewName))
     BEGIN
         SELECT CAST(0 AS int) AS TableDefId, CAST(N'' AS nvarchar(400)) AS ViewName, CAST(N'Skipped' AS nvarchar(16)) AS Action;
         RETURN;
@@ -282,8 +304,7 @@ BEGIN
             @ownerRows nvarchar(max), @ownerCells nvarchar(max), @valueCol nvarchar(128), @extra int, @mi int;
     -- Q-17.fix (B1): умовні агрегації значень власників - по одному OUTER APPLY на власника (OwnerNo: -1 власна копія,
     -- 0 якір року, 1..12 місяць), а не по приєднанню doc.CellValue на колонку.
-    DECLARE @ownerRows2 nvarchar(max), @routed bit, @raw1 nvarchar(64), @agg nvarchar(max), @aggBody nvarchar(max), @ownerNo int, @aggList nvarchar(max), @idList nvarchar(max);
-    DECLARE @pv TABLE (OwnerNo int NOT NULL, ColNo int NOT NULL, ColId int NOT NULL, Agg nvarchar(max) NOT NULL);
+    DECLARE @routed bit, @raw1 nvarchar(64), @agg nvarchar(max), @aggBody nvarchar(max);
     DECLARE @marker nvarchar(64) = N'-- Згенеровано rpt.usp_GenerateTemplateViews';
     DECLARE @failure nvarchar(2048);
     -- Q-17.recalc: результати методологій для колонок Calculated (див. нижче). @selectRv - той самий список колонок, але
@@ -295,10 +316,12 @@ BEGIN
     -- @plainAgg / @plainCnt - при прапорі ON усі НЕмаршрутизовані колонки читає ОДИН apply pc замість c<n> на колонку.
     DECLARE @rvPack nvarchar(max), @rvChoose nvarchar(max), @rvExprs nvarchar(max), @rvPred bit, @rvDer nvarchar(max), @rvOwn nvarchar(max), @rvGen nvarchar(max),
             @plainAgg nvarchar(max), @plainCnt int, @numRef nvarchar(64), @strRef nvarchar(64),
-            @famAgg nvarchar(max), @pkExpr nvarchar(16), @rvRef nvarchar(8), @fromSql nvarchar(max), @tiAp nvarchar(max), @rowApply nvarchar(max),
-            @famMap nvarchar(max);
+            @famAgg nvarchar(max), @pkExpr nvarchar(16), @rvRef nvarchar(8), @fromSql nvarchar(max), @tiAp nvarchar(max), @rowApply nvarchar(max);
     -- RS (копії аркушів): службові колонки _SheetCopyOrdinal/_SheetDisplayName — у КІНЦІ списку (адитивні, як <Код>_Text).
     DECLARE @sheetNameLit nvarchar(max), @copyCols nvarchar(max);
+    -- Q-17.slotmap: агрегати за слотом (pc / sc), літерал імені вʼюхи, бажані рядки rpt.ViewSlot і чи їх треба переписати.
+    DECLARE @plainAggS nvarchar(max), @scAggS nvarchar(max), @vnLit nvarchar(300), @useSlots bit, @mapDiff bit, @ddl bit;
+    DECLARE @slot TABLE (ColumnDefId int NOT NULL, Slot int NOT NULL, Mo int NULL, PRIMARY KEY (ColumnDefId, Slot));
 
     DECLARE cur_views CURSOR LOCAL FAST_FORWARD FOR
         SELECT TableDefId, SheetDefId, Header, ViewName FROM @tables ORDER BY TableDefId;
@@ -310,15 +333,16 @@ BEGIN
         SELECT @select = N'', @selectText = N'', @joins = N'', @n = 0,
                @ownerRows = N'', @ownerCells = N'', @monthMask = 0, @needAnchor = 0, @extra = 0,
                @selectRv = N'', @rvIds = N'', @rvAgg = N'', @rvApply = N'', @selectTextRv = N'',
-               @rvPack = N'', @rvChoose = N'', @rvExprs = N'', @plainAgg = N'', @plainCnt = 0;
-        DELETE FROM @pv;
+               @rvPack = N'', @rvChoose = N'', @rvExprs = N'', @plainAgg = N'', @plainCnt = 0,
+               @plainAggS = N'', @scAggS = N'', @vnLit = N'N''' + REPLACE(@view, N'''', N'''''') + N'''';
+        DELETE FROM @slot;
         SET @layout = (SELECT LayoutKind FROM cfg.TableDef WHERE Id = @id);
         -- Q-17.perf: чи є в таблиці активна прив'язка з предикатом MatchJson (тоді rv - посередній apply на рядок, нижче).
         -- rv наборового варіанта стає колонками apply-джерела рядків r (alias r), посередній - окремим apply rv.
         SET @rvPred = CASE WHEN EXISTS (SELECT 1 FROM cfg.CalculationBinding
                                          WHERE IsActive = 1 AND TableDefId = @id AND REPLACE(MatchJson, CHAR(32), N'') <> N'{}') THEN 1 ELSE 0 END;
         SET @rvRef = CASE WHEN @rvPred = 0 THEN N'r' ELSE N'rv' END;
-        SELECT @fromSql = N'', @tiAp = N'', @rowApply = N'', @famAgg = N'', @famMap = N'';
+        SELECT @fromSql = N'', @tiAp = N'', @rowApply = N'', @famAgg = N'';
         SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0);
         WHILE @colId IS NOT NULL
         BEGIN
@@ -360,6 +384,16 @@ BEGIN
                 IF @colType IN (6, 8)
                     SET @plainAgg = @plainAgg + N', MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' THEN x.ValueString END) AS s'
                                   + CAST(@n AS nvarchar(10));
+                -- Q-17.slotmap: той самий агрегат за слотом (m.Slot) - для вʼюхи з маршрутизованими колонками (вибір нижче).
+                SET @plainAggS = @plainAggS + N', '
+                    + CASE WHEN @colType = 3
+                           THEN N'MAX(CAST(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
+                           ELSE N'MAX(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END)' END
+                    + N' AS v' + CAST(@n AS nvarchar(10))
+                    + CASE WHEN @colType IN (6, 8)
+                           THEN N', MAX(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.ValueString END) AS s' + CAST(@n AS nvarchar(10))
+                           ELSE N'' END;
+                INSERT INTO @slot (ColumnDefId, Slot, Mo) VALUES (@colId, @n, NULL);
                 SET @plainCnt = @plainCnt + 1;
                 SET @valueCol = CASE WHEN @colType = 3 THEN N'CAST(pc.v' + CAST(@n AS nvarchar(10)) + N' AS bit)'
                                      ELSE N'pc.v' + CAST(@n AS nvarchar(10)) END;
@@ -399,22 +433,28 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                 -- приховує. Правило - на рівні КОМІРКИ: значення = COALESCE(власна обчислена, власник, власна копія).
                 -- Власна обчислена читається ОКРЕМИМ apply sc (OwnerNo -2) лише по обчислених комірках рядка (їх мало, а то й нема),
                 -- а не другим агрегатом на колонку в sv: p61 (прапор k<n> у sv) подвоював роботу sv (T10_03 / T11_03 у 2-4 рази).
-                INSERT INTO @pv (OwnerNo, ColNo, ColId, Agg) VALUES
-                    (-2, @n, @colId, @aggBody + N' AS cv' + CAST(@n AS nvarchar(10)));
                 -- Q-17.perf3 (Land T9_04 ON 2,2-2,4 с проти OFF 0,5-0,8 с): власна копія - у СПІЛЬНОМУ apply pc (ті самі рядки й той
                 -- самий агрегат), а не окремим apply sv (зайвий seek і прохід на рядок, +~200 агрегатів у тексті й компіляції).
                 SET @plainAgg = @plainAgg + N', ' + @agg;
                 SET @plainCnt = @plainCnt + 1;
+                -- Q-17.slotmap: pc і sc - за слотом (рядок мапи з Mo: місяць колонки або 0 = якір року).
+                SET @plainAggS = @plainAggS + N', ' + CASE WHEN @colType = 3
+                    THEN N'MAX(CAST(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
+                    ELSE N'MAX(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END)' END
+                    + N' AS v' + CAST(@n AS nvarchar(10));
+                SET @scAggS = @scAggS + N', ' + CASE WHEN @colType = 3
+                    THEN N'MAX(CAST(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
+                    ELSE N'MAX(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END)' END
+                    + N' AS cv' + CAST(@n AS nvarchar(10));
+                INSERT INTO @slot (ColumnDefId, Slot, Mo) VALUES (@colId, @n, CASE WHEN @isMonth = 1 THEN @monthNo ELSE 0 END);
                 -- Q-17.perf3: fam агрегував УСІ комірки 12 екземплярів року (45 520 рядків на T9_04 Land, 1,96 с CPU з 3,0) через
                 -- ~200 CASE (ColumnDefId + місяць/якір) на кожну. Тепер у агрегацію йдуть лише комірки, що НАЛЕЖАТЬ власнику (мапа fm
                 -- (ColumnDefId, Mo, n): Mo - місяць колонки або 0 = якір року; хеш-зʼєднання), а колонку вибирає номер слота fm.n.
                 -- Значення ті самі: решта комірок у старому тексті давала NULL у кожен агрегат; MAX нечутливий до дублікатів.
                 SET @famAgg = @famAgg + N', ' + CASE WHEN @colType = 3
-                    THEN N'MAX(CAST(CASE WHEN fm.n = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END AS tinyint))'
-                    ELSE N'MAX(CASE WHEN fm.n = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END)' END
+                    THEN N'MAX(CAST(CASE WHEN fm.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END AS tinyint))'
+                    ELSE N'MAX(CASE WHEN fm.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END)' END
                     + N' AS v' + CAST(@n AS nvarchar(10));
-                SET @famMap = @famMap + N', (' + CAST(@colId AS nvarchar(10)) + N', '
-                            + CASE WHEN @isMonth = 1 THEN CAST(@monthNo AS nvarchar(3)) ELSE N'0' END + N', ' + CAST(@n AS nvarchar(10)) + N')';
 
                 SET @valueCol = N'COALESCE(sc.cv' + CAST(@n AS nvarchar(10)) + N', '
                               + N'fam.v' + CAST(@n AS nvarchar(10)) + N', pc.v' + CAST(@n AS nvarchar(10)) + N')';
@@ -476,11 +516,15 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
         -- (PeriodKey, TableInstanceId, RowKey), обидва вирівняні по ps_ByPeriodKey; без підзапитів на рядок
         -- (якір — похідна таблиця по doc.Period, обчислюється один раз на запит). Лише Monthly-проєкти:
         -- у квартальних/річних ключ Year*100+Sequence означає не місяць.
+        -- Q-17.slotmap: вʼюха з маршрутизованими колонками читає мапу слотів rpt.ViewSlot (pc, sc, fam); решта - як була.
+        SET @useSlots = CASE WHEN @monthMask <> 0 OR @needAnchor = 1 THEN 1 ELSE 0 END;
         IF @plainCnt > 0
         BEGIN
-            SET @joins = @joins + N'
-OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc';
-            SET @extra = @extra + 1 - @plainCnt;   -- pc замість c<n> на кожну нероутовану колонку
+            SET @joins = @joins + CASE WHEN @useSlots = 1 THEN N'
+OUTER APPLY (SELECT ' + STUFF(@plainAggS, 1, 2, N'') + N' FROM doc.CellValue AS x INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
+                + N' AND m.ColumnDefId = x.ColumnDefId WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc' ELSE N'
+OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc' END;
+            SET @extra = @extra + 1 - @plainCnt + @useSlots;   -- pc замість c<n> на кожну нероутовану колонку (+ мапа слотів)
         END
 
         IF @monthMask <> 0 OR @needAnchor = 1
@@ -495,9 +539,11 @@ OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x
             SET @extra = @extra + 6;   -- oi, od, pa (doc.Period), ow, x у похідній + її доступ
             -- Q-17.perf3: у агрегацію йдуть лише комірки власників (мапа fm, хеш-зʼєднання; умова Mo > 0 - місяць екземпляра,
             -- Mo = 0 - якір року), колонку вибирає слот fm.n.
+            -- Q-17.slotmap: мапа fm - рядки rpt.ViewSlot цієї вʼюхи з Mo IS NOT NULL (замість inline VALUES; та сама умова власника).
+            SET @extra = @extra + 1;   -- fm (rpt.ViewSlot)
             SET @ownerRows = N'
 LEFT HASH JOIN (SELECT c.DocumentId, c.Yr, c.RowKey' + @famAgg + N'
-                  FROM (VALUES ' + STUFF(@famMap, 1, 2, N'') + N') AS fm (ColumnDefId, Mo, n)
+                  FROM rpt.ViewSlot AS fm
                   INNER HASH JOIN (SELECT oi.DocumentId, oi.PeriodKey / 100 AS Yr, oi.PeriodKey, pa.AnchorKey, ow.RowKey, x.ColumnDefId,
                                           x.ValueString, x.ValueNumeric, x.ValueDate, x.ValueBool, x.ValueRegistryEntryId, x.ValueUnitId
                                      FROM doc.TableInstance AS oi
@@ -510,35 +556,16 @@ LEFT HASH JOIN (SELECT c.DocumentId, c.Yr, c.RowKey' + @famAgg + N'
                                     WHERE oi.TableDefId = ' + CAST(@id AS nvarchar(10)) + N') AS c
                           ON c.ColumnDefId = fm.ColumnDefId
                          AND ((fm.Mo > 0 AND c.PeriodKey % 100 = fm.Mo) OR (fm.Mo = 0 AND c.PeriodKey = c.AnchorKey))
+                 WHERE fm.ViewName = ' + @vnLit + N' AND fm.Mo IS NOT NULL
                  GROUP BY c.DocumentId, c.Yr, c.RowKey) AS fam
        ON p.PeriodKind = 0 AND fam.DocumentId = ti.DocumentId AND fam.Yr = ti.PeriodKey / 100 AND fam.RowKey = r.RowKey';
-            -- Власна обчислена (sc) - OUTER APPLY з умовною агрегацією (B1); власна копія - у pc (Q-17.perf3).
-            SET @extra = @extra + 1;   -- sc
-            SET @ownerCells = N'';
-            SET @ownerNo = -2;
-            WHILE @ownerNo IS NOT NULL
-            BEGIN
-                -- ⚠ FOR XML PATH, а не «@var = @var + …» з ORDER BY: останнє не гарантує конкатенації всіх рядків.
-                SET @aggList = STUFF((SELECT N', ' + Agg FROM @pv WHERE OwnerNo = @ownerNo ORDER BY ColNo
-                                      FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
-                -- P2 (T3_00 Land, 96 місячних колонок: 231 seek PK_CellValue на КОЖЕН рядок результату, ~5,4 млн виконань):
-                -- власник читається ОДНИМ діапазоном ключа (PeriodKey, TableRowId) - усі комірки його рядка за один seek, -
-                -- а потрібну колонку вибирає умовна агрегація MAX(CASE ColumnDefId ...) (вона й так фільтрує). Раніше тут стояв
-                -- `x.ColumnDefId IN (<колонки власника>)`: оптимізатор розкривав його в seek НА КОЛОНКУ. Комірок у рядку власника
-                -- небагато (розріджено), тож читання діапазону дешевше за N seek-ів; результат той самий.
-                SET @idList = N'';
-                SET @ownerCells = @ownerCells + N'
-OUTER APPLY (SELECT ' + @aggList + N' FROM '
-                    + CASE WHEN @ownerNo > 100
-                           THEN N'doc.CellValue AS x WHERE x.PeriodKey = ow' + CAST(@ownerNo - 100 AS nvarchar(3)) + N'.PeriodKey AND x.TableRowId = ow' + CAST(@ownerNo - 100 AS nvarchar(3)) + N'.Id'
-                           WHEN @ownerNo = -2
-                           THEN N'doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id AND x.IsCalculated = 1'
-                           WHEN @ownerNo = -1
-                           THEN N'doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id'
-                           ELSE N'doc.CellValue AS x WHERE x.PeriodKey = owA.PeriodKey AND x.TableRowId = owA.Id' + @idList END
-                    + N') AS ' + CASE WHEN @ownerNo = -1 THEN N'sv' WHEN @ownerNo = -2 THEN N'sc' WHEN @ownerNo = 0 THEN N'omA' ELSE N'om' + CAST(@ownerNo - 100 AS nvarchar(3)) END;
-                SET @ownerNo = (SELECT MIN(OwnerNo) FROM @pv WHERE OwnerNo > @ownerNo);
-            END
+            -- Власна обчислена (sc) - OUTER APPLY з умовною агрегацією (B1) лише по обчислених комірках МАРШРУТИЗОВАНИХ колонок
+            -- (seek мапи по (вʼюха, ColumnDefId) з Mo IS NOT NULL): обчислені Formula/Calculated у агрегацію більше не йдуть
+            -- (Land T9_04: 3 448 обчислених комірок екземпляра x ~150 CASE, із них маршрутизованих - 0). Власна копія - у pc.
+            SET @extra = @extra + 2;   -- sc + його мапа
+            SET @ownerCells = N'
+OUTER APPLY (SELECT ' + STUFF(@scAggS, 1, 2, N'') + N' FROM doc.CellValue AS x INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
+                + N' AND m.ColumnDefId = x.ColumnDefId AND m.Mo IS NOT NULL WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id AND x.IsCalculated = 1) AS sc';
 
             -- Порядок: приєднання власників-рядків ідуть ДО комірок власників; власні копії нероутованих колонок (c<n>) - між ними.
             SET @joins = @ownerRows + @joins + @ownerCells;
@@ -726,23 +753,37 @@ WHERE ti.TableDefId = ', CAST(@id AS nvarchar(10)), N';');
         -- Вʼюха з тим самим ім'ям, зроблена руками (позначки немає), перезаписується.
         SET @existing = OBJECT_DEFINITION(OBJECT_ID(N'rpt.' + QUOTENAME(@view), N'V'));
         SET @pos = CHARINDEX(@marker, @existing);
+        SET @ddl = CASE WHEN @existing IS NULL OR @pos = 0
+                             OR SUBSTRING(@existing, @pos, LEN(@existing)) COLLATE Latin1_General_BIN2
+                                <> SUBSTRING(@sql, CHARINDEX(@marker, @sql), LEN(@sql)) COLLATE Latin1_General_BIN2
+                        THEN 1 ELSE 0 END;
+        -- Q-17.slotmap: рядки rpt.ViewSlot цієї вʼюхи = бажана мапа (вʼюха без маршрутизації - жодного рядка). Різниця - переписати
+        -- мапу й (за потреби) вʼюху в ОДНІЙ транзакції: читач не бачить вʼюху з чужою мапою (ALTER VIEW тримає Sch-M до коміту).
+        SET @mapDiff = CASE WHEN EXISTS (SELECT ColumnDefId, Slot, Mo FROM @slot WHERE @useSlots = 1
+                                         EXCEPT SELECT ColumnDefId, Slot, Mo FROM rpt.ViewSlot WHERE ViewName = @view)
+                              OR EXISTS (SELECT ColumnDefId, Slot, Mo FROM rpt.ViewSlot WHERE ViewName = @view
+                                         EXCEPT SELECT ColumnDefId, Slot, Mo FROM @slot WHERE @useSlots = 1)
+                            THEN 1 ELSE 0 END;
+
+        IF @ddl = 1 OR @mapDiff = 1
+        BEGIN
+            BEGIN TRANSACTION;
+            IF @mapDiff = 1
+            BEGIN
+                DELETE FROM rpt.ViewSlot WHERE ViewName = @view;
+                INSERT INTO rpt.ViewSlot (ViewName, ColumnDefId, Slot, Mo) SELECT @view, ColumnDefId, Slot, Mo FROM @slot WHERE @useSlots = 1;
+            END
+            IF @ddl = 1
+                EXEC sys.sp_executesql @sql;
+            COMMIT TRANSACTION;
+        END
 
         IF @existing IS NULL
-        BEGIN
-            EXEC sys.sp_executesql @sql;
             INSERT INTO @result VALUES (@id, @view, N'Created');
-        END
-        ELSE IF @pos = 0
-             OR SUBSTRING(@existing, @pos, LEN(@existing)) COLLATE Latin1_General_BIN2
-                <> SUBSTRING(@sql, CHARINDEX(@marker, @sql), LEN(@sql)) COLLATE Latin1_General_BIN2
-        BEGIN
-            EXEC sys.sp_executesql @sql;
+        ELSE IF @ddl = 1 OR @mapDiff = 1
             INSERT INTO @result VALUES (@id, @view, N'Altered');
-        END
         ELSE
-        BEGIN
             INSERT INTO @result VALUES (@id, @view, N'Unchanged');
-        END
 
 next_table:
         FETCH NEXT FROM cur_views INTO @id, @sheet, @header, @view;
@@ -757,6 +798,11 @@ next_table:
             N' (', @clashWho, N'). Змініть код шаблону, аркуша чи таблиці так, щоб вони відрізнялися не лише розділовими знаками чи регістром.');
         THROW 50409, @message, 1;
     END
+
+    -- Q-17.slotmap: рядки мапи вʼюх, яких у базі вже немає, - прибрати (лише при повній генерації; рядки іншої процедури
+    -- належать наявним вʼюхам і лишаються).
+    IF @TemplateVersionId IS NULL
+        DELETE FROM rpt.ViewSlot WHERE OBJECT_ID(N'rpt.' + QUOTENAME(ViewName), N'V') IS NULL;
 
     IF @failure IS NOT NULL
         THROW 50422, @failure, 1;
@@ -890,6 +936,11 @@ BEGIN
        AND @fp = (SELECT CONVERT(varchar(64), ep.value) FROM sys.extended_properties AS ep
                    WHERE ep.class = 3 AND ep.major_id = SCHEMA_ID(N'rpt') AND ep.minor_id = 0 AND ep.name = @fpName)
        AND NOT EXISTS (SELECT 1 FROM @groups AS gg WHERE OBJECT_ID(N'rpt.' + QUOTENAME(gg.ViewName), N'V') IS NULL)
+       -- Q-17.slotmap: a view that reads the slot map has its rpt.ViewSlot rows (otherwise regenerate, do not skip).
+       AND NOT EXISTS (SELECT 1 FROM @groups AS gg
+                         JOIN sys.sql_expression_dependencies AS dep
+                           ON dep.referencing_id = OBJECT_ID(N'rpt.' + QUOTENAME(gg.ViewName), N'V') AND dep.referenced_id = OBJECT_ID(N'rpt.ViewSlot', N'U')
+                        WHERE NOT EXISTS (SELECT 1 FROM rpt.ViewSlot AS vs WHERE vs.ViewName = gg.ViewName))
     BEGIN
         SELECT CAST(N'' AS sysname) AS ViewName, CAST(N'Skipped' AS nvarchar(16)) AS Action, CAST(NULL AS nvarchar(2000)) AS Warning;
         RETURN;
@@ -902,12 +953,14 @@ BEGIN
     DECLARE @seq int, @colCode nvarchar(64), @colType tinyint, @isMonth bit, @monthNo tinyint, @conflict bit, @ids nvarchar(max), @pred nvarchar(max);
     DECLARE @n int, @plainCnt int, @plainAgg nvarchar(max), @valueCol nvarchar(max), @valueColRv nvarchar(max), @numRef nvarchar(64), @strRef nvarchar(64), @raw1 nvarchar(64);
     DECLARE @routedGroup bit, @routed bit, @layoutOk bit, @monthMask int, @needAnchor bit, @ownerRows nvarchar(max), @ownerCells nvarchar(max);
-    DECLARE @agg nvarchar(max), @aggBody nvarchar(max), @aggList nvarchar(max), @ownerNo int, @famAgg nvarchar(max), @pkExpr nvarchar(16), @fromSql nvarchar(max), @rowApply nvarchar(max);
+    DECLARE @agg nvarchar(max), @aggBody nvarchar(max), @famAgg nvarchar(max), @pkExpr nvarchar(16), @fromSql nvarchar(max), @rowApply nvarchar(max);
     DECLARE @selectRv nvarchar(max), @selectTextRv nvarchar(max), @rvIds nvarchar(max), @rvApply nvarchar(max), @rvAgg nvarchar(max), @rvPack nvarchar(max), @rvExprs nvarchar(max);
-    DECLARE @rvPred bit, @rvRef nvarchar(8), @conflictCodes nvarchar(1500), @hasText bit, @hasId bit, @extra int, @famMap nvarchar(max);
+    DECLARE @rvPred bit, @rvRef nvarchar(8), @conflictCodes nvarchar(1500), @hasText bit, @hasId bit, @extra int;
     -- RS (копії аркушів): службові колонки _SheetCopyOrdinal/_SheetDisplayName — у КІНЦІ списку (адитивні).
     DECLARE @sheetNameCase nvarchar(max), @copyCols nvarchar(max);
-    DECLARE @pv TABLE (OwnerNo int NOT NULL, ColNo int NOT NULL, Agg nvarchar(max) NOT NULL);
+    -- Q-17.slotmap: як у rpt.usp_GenerateTemplateViews - агрегати за слотом і бажані рядки rpt.ViewSlot (усі Id коду й аліасів).
+    DECLARE @plainAggS nvarchar(max), @scAggS nvarchar(max), @vnLit nvarchar(300), @useSlots bit, @mapDiff bit, @ddl bit, @slotAgg nvarchar(max);
+    DECLARE @slot TABLE (ColumnDefId int NOT NULL, Slot int NOT NULL, Mo int NULL, PRIMARY KEY (ColumnDefId, Slot));
 
     -- Columns of one group: one row per ColumnDef (all versions), then one row per code.
     DECLARE @ci TABLE (ColId int NOT NULL PRIMARY KEY, Code nvarchar(64) NOT NULL, DataType tinyint NOT NULL, Fam tinyint NOT NULL,
@@ -925,8 +978,9 @@ BEGIN
     BEGIN
         SELECT @select = N'', @selectText = N'', @joins = N'', @n = 0, @plainCnt = 0, @plainAgg = N'', @ownerRows = N'', @ownerCells = N'',
                @monthMask = 0, @needAnchor = 0, @famAgg = N'', @selectRv = N'', @selectTextRv = N'', @rvIds = N'', @rvApply = N'',
-               @rvAgg = N'', @rvPack = N'', @rvExprs = N'', @rowApply = N'', @conflictCodes = N'', @extra = 0, @famMap = N'';
-        DELETE FROM @pv;
+               @rvAgg = N'', @rvPack = N'', @rvExprs = N'', @rowApply = N'', @conflictCodes = N'', @extra = 0,
+               @plainAggS = N'', @scAggS = N'', @vnLit = N'N''' + REPLACE(@view, N'''', N'''''') + N'''';
+        DELETE FROM @slot;
         DELETE FROM @ci;
         DELETE FROM @cols;
 
@@ -983,6 +1037,13 @@ BEGIN
             SET @strRef = N'pc.s' + CAST(@n AS nvarchar(10));
             SET @routed = CASE WHEN @routedGroup = 1 AND @conflict = 0 AND @colType NOT IN (6, 8)
                                     AND (@isMonth = 0 OR @monthNo BETWEEN 1 AND 12) THEN 1 ELSE 0 END;
+            -- Q-17.slotmap: кожен Id коду (з аліасами) - рядок мапи у слоті @n; Mo - лише для маршрутизованої колонки.
+            INSERT INTO @slot (ColumnDefId, Slot, Mo)
+            SELECT ColId, @n, CASE WHEN @routed = 1 THEN CASE WHEN @isMonth = 1 THEN @monthNo ELSE 0 END END
+              FROM @ci WHERE Code = @colCode OR Code IN (SELECT Other FROM @alias WHERE Code = @colCode);
+            SET @slotAgg = CASE WHEN @colType = 3
+                                THEN N'MAX(CAST(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
+                                ELSE N'MAX(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END)' END;
 
             IF @conflict = 1
             BEGIN
@@ -1002,6 +1063,8 @@ BEGIN
                                             FROM @ci AS c1 WHERE c1.Code = @colCode GROUP BY c1.Code, c1.Fam) AS f
                                    ORDER BY f.Fam FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
                 SET @plainAgg = @plainAgg + N', COALESCE(' + @agg + N') AS v' + CAST(@n AS nvarchar(10));
+                -- Q-17.slotmap: конфлікт типів - ті самі IN-списки (комірки його Id у потоці pc є: вони в мапі слота @n).
+                SET @plainAggS = @plainAggS + N', COALESCE(' + @agg + N') AS v' + CAST(@n AS nvarchar(10));
                 SET @plainCnt = @plainCnt + 1;
                 SET @valueCol = @numRef;
                 SET @colType = 0;   -- no companion, no methodology overlay
@@ -1017,6 +1080,10 @@ BEGIN
                     + N' AS v' + CAST(@n AS nvarchar(10));
                 IF @colType IN (6, 8)
                     SET @plainAgg = @plainAgg + N', MAX(CASE WHEN ' + @pred + N' THEN x.ValueString END) AS s' + CAST(@n AS nvarchar(10));
+                SET @plainAggS = @plainAggS + N', ' + @slotAgg + N' AS v' + CAST(@n AS nvarchar(10))
+                    + CASE WHEN @colType IN (6, 8)
+                           THEN N', MAX(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.ValueString END) AS s' + CAST(@n AS nvarchar(10))
+                           ELSE N'' END;
                 SET @plainCnt = @plainCnt + 1;
                 SET @valueCol = CASE WHEN @colType = 3 THEN N'CAST(' + @numRef + N' AS bit)' ELSE @numRef END;
             END
@@ -1031,19 +1098,17 @@ BEGIN
                     SET @monthMask = 1;
                 ELSE
                     SET @needAnchor = 1;
-                INSERT INTO @pv (OwnerNo, ColNo, Agg) VALUES
-                    (-2, @n, @aggBody + N' AS cv' + CAST(@n AS nvarchar(10)));
                 -- Q-17.perf3: own copy - the shared apply pc (same rows, same aggregate), not a second apply sv.
                 SET @plainAgg = @plainAgg + N', ' + @agg;
+                -- Q-17.slotmap: pc and sc aggregate by slot (m.Slot) over the cells joined to the view's slot map.
+                SET @plainAggS = @plainAggS + N', ' + @slotAgg + N' AS v' + CAST(@n AS nvarchar(10));
+                SET @scAggS = @scAggS + N', ' + @slotAgg + N' AS cv' + CAST(@n AS nvarchar(10));
                 SET @plainCnt = @plainCnt + 1;
-                -- Q-17.perf3: fam aggregates by slot (fm.n) over the OWNED cells only (map below), see the _vN proc.
+                -- Q-17.perf3: fam aggregates by slot (fm.Slot) over the OWNED cells only (map rows with Mo, rpt.ViewSlot), see the _vN proc.
                 SET @famAgg = @famAgg + N', ' + CASE WHEN @colType = 3
-                    THEN N'MAX(CAST(CASE WHEN fm.n = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END AS tinyint))'
-                    ELSE N'MAX(CASE WHEN fm.n = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END)' END
+                    THEN N'MAX(CAST(CASE WHEN fm.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END AS tinyint))'
+                    ELSE N'MAX(CASE WHEN fm.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END)' END
                     + N' AS v' + CAST(@n AS nvarchar(10));
-                SET @famMap = @famMap + N', (' + REPLACE(@ids, N',', N', ' + CASE WHEN @isMonth = 1 THEN CAST(@monthNo AS nvarchar(3)) ELSE N'0' END
-                                                         + N', ' + CAST(@n AS nvarchar(10)) + N'), (')
-                            + N', ' + CASE WHEN @isMonth = 1 THEN CAST(@monthNo AS nvarchar(3)) ELSE N'0' END + N', ' + CAST(@n AS nvarchar(10)) + N')';
                 SET @valueCol = N'COALESCE(sc.cv' + CAST(@n AS nvarchar(10)) + N', fam.v' + CAST(@n AS nvarchar(10)) + N', pc.v' + CAST(@n AS nvarchar(10)) + N')';
                 IF @colType = 3
                     SET @valueCol = N'CAST(' + @valueCol + N' AS bit)';
@@ -1100,17 +1165,22 @@ BEGIN
             GOTO next_group;
         END
 
+        -- Q-17.slotmap: a group with month-routed columns reads the slot map rpt.ViewSlot (pc, sc, fam); the others are unchanged.
+        SET @useSlots = CASE WHEN @monthMask <> 0 OR @needAnchor = 1 THEN 1 ELSE 0 END;
         IF @plainCnt > 0
-            SET @joins = @joins + N'
-OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc';
+            SET @joins = @joins + CASE WHEN @useSlots = 1 THEN N'
+OUTER APPLY (SELECT ' + STUFF(@plainAggS, 1, 2, N'') + N' FROM doc.CellValue AS x INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
+                + N' AND m.ColumnDefId = x.ColumnDefId WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc' ELSE N'
+OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc' END;
 
         IF @monthMask <> 0 OR @needAnchor = 1
         BEGIN
             -- Owner values (monthly: instance of the column month; entered non-monthly: year anchor) are collected ONCE per
-            -- (document, year, RowKey) by one set-based pass, as in the _vN views (Q-17.perf2), over the OWNED cells only (Q-17.perf3).
+            -- (document, year, RowKey) by one set-based pass, as in the _vN views (Q-17.perf2), over the OWNED cells only (Q-17.perf3):
+            -- the owner map is the view's rpt.ViewSlot rows with Mo (Q-17.slotmap; was an inline VALUES list of every id x slot).
             SET @ownerRows = N'
 LEFT HASH JOIN (SELECT c.DocumentId, c.Yr, c.RowKey' + @famAgg + N'
-                  FROM (VALUES ' + STUFF(@famMap, 1, 2, N'') + N') AS fm (ColumnDefId, Mo, n)
+                  FROM rpt.ViewSlot AS fm
                   INNER HASH JOIN (SELECT oi.DocumentId, oi.PeriodKey / 100 AS Yr, oi.PeriodKey, pa.AnchorKey, ow.RowKey, x.ColumnDefId,
                                           x.ValueString, x.ValueNumeric, x.ValueDate, x.ValueBool, x.ValueRegistryEntryId, x.ValueUnitId
                                      FROM doc.TableInstance AS oi
@@ -1123,20 +1193,13 @@ LEFT HASH JOIN (SELECT c.DocumentId, c.Yr, c.RowKey' + @famAgg + N'
                                     WHERE oi.TableDefId IN (' + @tids + N')) AS c
                           ON c.ColumnDefId = fm.ColumnDefId
                          AND ((fm.Mo > 0 AND c.PeriodKey % 100 = fm.Mo) OR (fm.Mo = 0 AND c.PeriodKey = c.AnchorKey))
+                 WHERE fm.ViewName = ' + @vnLit + N' AND fm.Mo IS NOT NULL
                  GROUP BY c.DocumentId, c.Yr, c.RowKey) AS fam
        ON p.PeriodKind = 0 AND fam.DocumentId = ti.DocumentId AND fam.Yr = ti.PeriodKey / 100 AND fam.RowKey = r.RowKey';
-            SET @ownerCells = N'';
-            SET @ownerNo = -2;
-            WHILE @ownerNo IS NOT NULL
-            BEGIN
-                SET @aggList = STUFF((SELECT N', ' + Agg FROM @pv WHERE OwnerNo = @ownerNo ORDER BY ColNo
-                                      FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
-                SET @ownerCells = @ownerCells + N'
-OUTER APPLY (SELECT ' + @aggList + N' FROM doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id'
-                    + CASE WHEN @ownerNo = -2 THEN N' AND x.IsCalculated = 1' ELSE N'' END
-                    + N') AS ' + CASE WHEN @ownerNo = -1 THEN N'sv' ELSE N'sc' END;
-                SET @ownerNo = (SELECT MIN(OwnerNo) FROM @pv WHERE OwnerNo > @ownerNo);
-            END
+            -- Own computed cell (sc): only the computed cells of ROUTED columns (map rows with Mo) reach the aggregate.
+            SET @ownerCells = N'
+OUTER APPLY (SELECT ' + STUFF(@scAggS, 1, 2, N'') + N' FROM doc.CellValue AS x INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
+                + N' AND m.ColumnDefId = x.ColumnDefId AND m.Mo IS NOT NULL WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id AND x.IsCalculated = 1) AS sc';
             SET @joins = @ownerRows + @joins + @ownerCells;
         END
 
@@ -1267,19 +1330,34 @@ WHERE ti.TableDefId IN (', @tids, N');');
                             ELSE LEFT(CONCAT(N'type conflict across versions, exposed as nvarchar: ', @conflictCodes), 2000) END;
         SET @existing = OBJECT_DEFINITION(OBJECT_ID(N'rpt.' + QUOTENAME(@view), N'V'));
         SET @pos = CHARINDEX(@marker, @existing);
+        SET @ddl = CASE WHEN @existing IS NULL OR @pos = 0
+                             OR SUBSTRING(@existing, @pos, LEN(@existing)) COLLATE Latin1_General_BIN2
+                                <> SUBSTRING(@sql, CHARINDEX(@marker, @sql), LEN(@sql)) COLLATE Latin1_General_BIN2
+                        THEN 1 ELSE 0 END;
+        -- Q-17.slotmap: the view's rpt.ViewSlot rows must equal the wanted map (none for a view without routing); map and view
+        -- are rewritten in ONE transaction (ALTER VIEW holds Sch-M until commit: no reader sees a view with a foreign map).
+        SET @mapDiff = CASE WHEN EXISTS (SELECT ColumnDefId, Slot, Mo FROM @slot WHERE @useSlots = 1
+                                         EXCEPT SELECT ColumnDefId, Slot, Mo FROM rpt.ViewSlot WHERE ViewName = @view)
+                              OR EXISTS (SELECT ColumnDefId, Slot, Mo FROM rpt.ViewSlot WHERE ViewName = @view
+                                         EXCEPT SELECT ColumnDefId, Slot, Mo FROM @slot WHERE @useSlots = 1)
+                            THEN 1 ELSE 0 END;
+        IF @ddl = 1 OR @mapDiff = 1
+        BEGIN
+            BEGIN TRANSACTION;
+            IF @mapDiff = 1
+            BEGIN
+                DELETE FROM rpt.ViewSlot WHERE ViewName = @view;
+                INSERT INTO rpt.ViewSlot (ViewName, ColumnDefId, Slot, Mo) SELECT @view, ColumnDefId, Slot, Mo FROM @slot WHERE @useSlots = 1;
+            END
+            IF @ddl = 1
+                EXEC sys.sp_executesql @sql;
+            COMMIT TRANSACTION;
+        END
 
         IF @existing IS NULL
-        BEGIN
-            EXEC sys.sp_executesql @sql;
             INSERT INTO @result VALUES (@view, N'Created', @warning);
-        END
-        ELSE IF @pos = 0
-             OR SUBSTRING(@existing, @pos, LEN(@existing)) COLLATE Latin1_General_BIN2
-                <> SUBSTRING(@sql, CHARINDEX(@marker, @sql), LEN(@sql)) COLLATE Latin1_General_BIN2
-        BEGIN
-            EXEC sys.sp_executesql @sql;
+        ELSE IF @ddl = 1 OR @mapDiff = 1
             INSERT INTO @result VALUES (@view, N'Altered', @warning);
-        END
         ELSE
             INSERT INTO @result VALUES (@view, N'Unchanged', @warning);
 
@@ -1296,6 +1374,10 @@ next_group:
             N'). Change the template, sheet or table code so that they differ by more than punctuation, case or a _v<N> suffix.');
         THROW 50409, @message, 1;
     END
+
+    -- Q-17.slotmap: map rows of views that no longer exist are removed (full generation only).
+    IF @TemplateVersionId IS NULL
+        DELETE FROM rpt.ViewSlot WHERE OBJECT_ID(N'rpt.' + QUOTENAME(ViewName), N'V') IS NULL;
 
     IF @failure IS NOT NULL
         THROW 50422, @failure, 1;
