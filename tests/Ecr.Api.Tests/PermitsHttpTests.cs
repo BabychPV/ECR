@@ -16,7 +16,7 @@ namespace Ecr.Api.Tests;
 /// «Читач…» дістає 201 замість 403.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class PermitsHttpTests(SqlServerFixture sql)
+public sealed partial class PermitsHttpTests(SqlServerFixture sql)
 {
     private readonly string _tag = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
 
