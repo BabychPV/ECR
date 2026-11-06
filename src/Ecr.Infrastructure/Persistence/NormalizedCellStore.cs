@@ -1,4 +1,5 @@
 using System.Data;
+using System.Data.Common;
 using System.Globalization;
 using System.Text;
 using Ecr.Application.Errors;
@@ -8,6 +9,8 @@ using Ecr.Domain.ValueObjects;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.SqlClient.Server;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -207,9 +210,10 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
     {
         IReadOnlyCollection<long> ids = [tableInstanceId];
 
-        var rows = await SliceRowsAsync(RowStore.TableInstancesByIdQuery(db, ids), ct).ConfigureAwait(false);
+        var rows = await SliceRowsAsync(RowStore.TableInstancesByIdQuery(db, ids), byInstance: false, ct)
+            .ConfigureAwait(false);
 
-        if (rows.Count == 0
+        if (rows.Cells.Count == 0
             && !await RowStore.TableInstancesByIdQuery(db, ids).AnyAsync(ct).ConfigureAwait(false))
         {
             // Екземпляра немає серед періодів `doc.Period` — або його немає
@@ -217,7 +221,7 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
             // періоду. Колишній запит без ключа розрізняє ці випадки так само,
             // як до O3b.
             rows = await SliceRowsAsync(
-                    db.TableInstances.AsNoTracking().Where(t => t.Id == tableInstanceId), ct)
+                    db.TableInstances.AsNoTracking().Where(t => t.Id == tableInstanceId), byInstance: false, ct)
                 .ConfigureAwait(false);
         }
 
@@ -234,7 +238,7 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
     {
         var rows = await SliceRowsAsync(
-                RowStore.TableInstancesInPeriodQuery(db, [tableInstanceId], periodKey), ct)
+                RowStore.TableInstancesInPeriodQuery(db, [tableInstanceId], periodKey), byInstance: false, ct)
             .ConfigureAwait(false);
 
         return await SliceOrArchiveAsync(tableInstanceId, rows, ct).ConfigureAwait(false);
@@ -259,7 +263,7 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         }
 
         var rows = await SliceRowsAsync(
-                db.TableInstances.AsNoTracking().Where(t => tableInstanceIds.Contains(t.Id)), ct)
+                db.TableInstances.AsNoTracking().Where(t => tableInstanceIds.Contains(t.Id)), byInstance: true, ct)
             .ConfigureAwait(false);
 
         return await SlicesOrArchiveAsync(tableInstanceIds, rows, ct).ConfigureAwait(false);
@@ -276,7 +280,7 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         }
 
         var rows = await SliceRowsAsync(
-                RowStore.TableInstancesInPeriodQuery(db, tableInstanceIds, periodKey), ct)
+                RowStore.TableInstancesInPeriodQuery(db, tableInstanceIds, periodKey), byInstance: true, ct)
             .ConfigureAwait(false);
 
         return await SlicesOrArchiveAsync(tableInstanceIds, rows, ct).ConfigureAwait(false);
@@ -291,10 +295,206 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
     /// <c>doc.TableRow</c>/<c>doc.CellValue</c>. Партицію самого
     /// <c>doc.TableInstance</c> відсікає лише предикат у
     /// <paramref name="instances"/> — тому його вибирає викликач.
+    ///
+    /// ⚡ Перф зрізу (HSE401 на копії Land: 6 428 рядків, 292 тис. комірок). Матеріалізація EF
+    /// (<c>ToListAsync</c> у проміжний <see cref="SliceRow"/>, потім <c>ToRecord</c> у другий список) коштувала
+    /// ~0,25–0,3 с поверх самого читання і 169 МБ виділень на запит. Тепер:
+    /// <list type="bullet">
+    /// <item>SQL — ТОЙ САМИЙ: текст і параметри бере сам EF із того самого LINQ
+    /// (<see cref="RelationalQueryableExtensions.CreateDbCommand"/>), тож план, кеш планів і порядок рядків незмінні;</item>
+    /// <item>виконання — тим самим конвеєром EF (<see cref="IRelationalCommand"/>): перехоплювачі, журнал
+    /// <c>CommandExecuted</c>, лічильники звернень і стратегія повторів бачать команду, як і раніше;</item>
+    /// <item>рядки читаються з <see cref="DbDataReader"/> одразу в <see cref="CellRecord"/> — без проміжного об'єкта
+    /// на комірку і без упаковки значень.</item>
+    /// </list>
     /// </remarks>
-    private Task<List<SliceRow>> SliceRowsAsync(
-        IQueryable<Domain.Entities.Documents.TableInstance> instances, CancellationToken ct)
-        => (from instance in instances
+    private async Task<SliceRead> SliceRowsAsync(
+        IQueryable<Domain.Entities.Documents.TableInstance> instances, bool byInstance, CancellationToken ct)
+    {
+        var command = SliceCommand(SliceQuery(instances), out var parameterValues);
+        var connection = db.GetService<IRelationalConnection>();
+        var logger = db.GetService<IRelationalCommandDiagnosticsLogger>();
+
+        // ⚠ Стратегія повторів — та сама, що в запиту EF: виконання (не читання рядків) обгорнуте нею.
+        var reader = await db.Database.CreateExecutionStrategy().ExecuteAsync(
+                (command, parameterValues, connection, logger, db),
+                static (_, s, token) => s.command.ExecuteReaderAsync(
+                    new RelationalCommandParameterObject(
+                        s.connection, s.parameterValues, null, s.db, s.logger, CommandSource.LinqQuery),
+                    token),
+                null,
+                ct)
+            .ConfigureAwait(false);
+
+        await using (reader.ConfigureAwait(false))
+        {
+            return await ReadSliceRowsAsync(reader, byInstance, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Команда зрізу: текст і параметри — з самого запиту EF (той самий SQL, що дав би <c>ToListAsync</c>).
+    /// </summary>
+    private IRelationalCommand SliceCommand(
+        IQueryable<SliceRow> query, out IReadOnlyDictionary<string, object?> parameterValues)
+    {
+        string text;
+        DbParameter[] parameters;
+
+        // ⚠ Команда-зразок лише віддає текст і параметри; виконує її конвеєр EF нижче. Параметри від'єднуються, бо
+        // один DbParameter не може належати двом колекціям команд.
+        using (var probe = query.CreateDbCommand())
+        {
+            text = probe.CommandText;
+            parameters = [.. probe.Parameters.Cast<DbParameter>()];
+            probe.Parameters.Clear();
+        }
+
+        var builder = db.GetService<IRelationalCommandBuilderFactory>().Create().Append(text);
+        var values = new Dictionary<string, object?>(parameters.Length, StringComparer.Ordinal);
+        foreach (var parameter in parameters)
+        {
+            builder.AddRawParameter(parameter.ParameterName, parameter);
+            values[parameter.ParameterName] = parameter;
+        }
+
+        parameterValues = values;
+        return builder.Build();
+    }
+
+    /// <summary>Рядки зрізу з читача — одразу в <see cref="CellRecord"/>, порядок читача.</summary>
+    /// <remarks>
+    /// ⛔ Значення — ті самі, що давала матеріалізація EF: <c>decimal(34,16)</c> читається <c>GetDecimal</c> (масштаб
+    /// 16 зберігається), <c>datetime2(3)</c> — <c>GetDateTime</c> (<see cref="DateTimeKind.Unspecified"/>, конвертера
+    /// немає), <c>ValueRegistryEntryId</c> — <c>int</c> у сховищі, <c>long</c> у CLR (<c>HasConversion&lt;int?&gt;</c>);
+    /// <c>NULL</c> — <c>null</c>, явна порожнеча — <c>IsEmpty</c>. Тримає <c>CellSliceReadFidelityTests</c>.
+    /// </remarks>
+    private static async Task<SliceRead> ReadSliceRowsAsync(
+        RelationalDataReader relational, bool byInstance, CancellationToken ct)
+    {
+        var reader = relational.DbDataReader;
+        EnsureSliceShape(reader);
+        const int instanceOrdinal = 0;
+        const int periodOrdinal = 1;
+        const int rowOrdinal = 2;
+        const int columnOrdinal = 3;
+        const int tableOrdinal = 4;
+        const int stringOrdinal = 5;
+        const int numericOrdinal = 6;
+        const int dateOrdinal = 7;
+        const int boolOrdinal = 8;
+        const int registryOrdinal = 9;
+        const int unitOrdinal = 10;
+        const int calculatedOrdinal = 11;
+        const int emptyOrdinal = 12;
+
+        var read = new SliceRead(byInstance);
+        var lastPeriod = int.MinValue;
+        long lastInstance = long.MinValue;
+        List<CellRecord>? instanceCells = null;
+
+        while (await relational.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var period = reader.GetInt32(periodOrdinal);
+            if (period != lastPeriod)
+            {
+                // Порядок першої появи — як у колишньому `Select(...).Distinct()`.
+                lastPeriod = period;
+                if (!read.Periods.Contains(period))
+                {
+                    read.Periods.Add(period);
+                }
+            }
+
+            var cell = new CellRecord(
+                new CellAddress(new PeriodKey(period), reader.GetInt64(rowOrdinal), reader.GetInt32(columnOrdinal)),
+                reader.GetInt32(tableOrdinal),
+                new CellValueData
+                {
+                    ValueString = reader.IsDBNull(stringOrdinal) ? null : reader.GetString(stringOrdinal),
+                    ValueNumeric = reader.IsDBNull(numericOrdinal) ? null : reader.GetDecimal(numericOrdinal),
+                    ValueDate = reader.IsDBNull(dateOrdinal) ? null : reader.GetDateTime(dateOrdinal),
+                    ValueBool = reader.IsDBNull(boolOrdinal) ? null : reader.GetBoolean(boolOrdinal),
+                    ValueRegistryEntryId = reader.IsDBNull(registryOrdinal) ? null : reader.GetInt32(registryOrdinal),
+                    ValueUnitId = reader.IsDBNull(unitOrdinal) ? null : reader.GetInt32(unitOrdinal),
+                    IsCalculated = reader.GetBoolean(calculatedOrdinal),
+                    IsEmpty = reader.GetBoolean(emptyOrdinal),
+                });
+
+            if (read.ByInstance is not { } groups)
+            {
+                read.Cells.Add(cell);
+                continue;
+            }
+
+            // Пакет: групи в порядку першої появи екземпляра, комірки групи — у порядку читача (як `GroupBy`).
+            var instance = reader.GetInt64(instanceOrdinal);
+            if (instance != lastInstance || instanceCells is null)
+            {
+                lastInstance = instance;
+                if (!groups.TryGetValue(instance, out instanceCells))
+                {
+                    instanceCells = [];
+                    groups[instance] = instanceCells;
+                }
+            }
+
+            instanceCells.Add(cell);
+            read.Count++;
+        }
+
+        return read;
+    }
+
+    /// <summary>
+    /// Стовпці результату — у порядку членів <see cref="SliceRow"/>; ім'я — стовпця або члена (EF ставить псевдонім
+    /// члена, коли запит екземплярів має підзапит, напр. <see cref="RowStore.TableInstancesByIdQuery"/>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Читання позиційне; якщо EF колись змінить порядок чи склад стовпців, тут гучна відмова, а не тихо
+    /// переплутані слоти значень.
+    /// </remarks>
+    private static void EnsureSliceShape(DbDataReader reader)
+    {
+        if (reader.FieldCount != SliceColumns.Length)
+        {
+            throw new InvalidOperationException(
+                $"Зріз комірок: очікувалось {SliceColumns.Length} стовпців, отримано {reader.FieldCount}.");
+        }
+
+        for (var i = 0; i < SliceColumns.Length; i++)
+        {
+            var name = reader.GetName(i);
+            if (!string.Equals(name, SliceColumns[i].Column, StringComparison.Ordinal)
+                && !string.Equals(name, SliceColumns[i].Member, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Зріз комірок: стовпець {i} — «{name}», очікувався «{SliceColumns[i].Column}».");
+            }
+        }
+    }
+
+    /// <summary>Стовпці зрізу: ім'я в таблиці й ім'я члена <see cref="SliceRow"/> — у порядку проєкції.</summary>
+    private static readonly (string Column, string Member)[] SliceColumns =
+    [
+        ("Id", nameof(SliceRow.TableInstanceId)),
+        ("PeriodKey", nameof(SliceRow.PeriodKeyValue)),
+        ("TableRowId", nameof(SliceRow.TableRowId)),
+        ("ColumnDefId", nameof(SliceRow.ColumnDefId)),
+        ("TableDefId", nameof(SliceRow.TableDefId)),
+        ("ValueString", nameof(SliceRow.ValueString)),
+        ("ValueNumeric", nameof(SliceRow.ValueNumeric)),
+        ("ValueDate", nameof(SliceRow.ValueDate)),
+        ("ValueBool", nameof(SliceRow.ValueBool)),
+        ("ValueRegistryEntryId", nameof(SliceRow.ValueRegistryEntryId)),
+        ("ValueUnitId", nameof(SliceRow.ValueUnitId)),
+        ("IsCalculated", nameof(SliceRow.IsCalculated)),
+        ("IsEmpty", nameof(SliceRow.IsEmpty)),
+    ];
+
+    /// <summary>Запит зрізу — форма, з якої EF будує SQL (<see cref="SliceCommand"/>).</summary>
+    private IQueryable<SliceRow> SliceQuery(IQueryable<Domain.Entities.Documents.TableInstance> instances)
+        => from instance in instances
             join row in db.TableRows.AsNoTracking()
                 on new { P = instance.PeriodKeyValue, I = instance.Id }
                 equals new { P = row.PeriodKeyValue, I = row.TableInstanceId }
@@ -317,10 +517,10 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
                 ValueUnitId = cell.ValueUnitId,
                 IsCalculated = cell.IsCalculated,
                 IsEmpty = cell.IsEmpty,
-            }).ToListAsync(ct);
+            };
 
     private async Task<IReadOnlyList<CellRecord>> SliceOrArchiveAsync(
-        long tableInstanceId, List<SliceRow> rows, CancellationToken ct)
+        long tableInstanceId, SliceRead rows, CancellationToken ct)
     {
         if (rows.Count == 0 && archive is not null)
         {
@@ -339,7 +539,7 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         // ⚠ Порожній архів (екземпляра там немає) — не привід сховати гарячі дані: тоді гаряча вибірка.
         if (rows.Count > 0 && archive is not null
             && (await archive.ArchivedOfHotInstancesAsync(
-                    [tableInstanceId], [.. rows.Select(r => r.PeriodKeyValue).Distinct()], ct).ConfigureAwait(false))
+                    [tableInstanceId], rows.Periods, ct).ConfigureAwait(false))
                 .Contains(tableInstanceId))
         {
             var archived = await archive.ReadArchivedSliceAsync(tableInstanceId, ct).ConfigureAwait(false);
@@ -352,11 +552,11 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         // Порожніх комірок у базі не існує взагалі — клієнт бере
         // ColumnDef.DefaultValue (ФВ-3.8). Явна порожнеча — це рядок із
         // IsEmpty = 1, і він повертається (R-B4).
-        return [.. rows.Select(ToRecord)];
+        return rows.Cells;
     }
 
     private async Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> SlicesOrArchiveAsync(
-        IReadOnlyList<long> tableInstanceIds, List<SliceRow> rows, CancellationToken ct)
+        IReadOnlyList<long> tableInstanceIds, SliceRead rows, CancellationToken ct)
     {
         if (rows.Count == 0 && archive is not null)
         {
@@ -367,11 +567,11 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
             return await archive.ReadArchivedSlicesAsync(tableInstanceIds, ct).ConfigureAwait(false);
         }
 
-        var hot = rows
-            .GroupBy(r => r.TableInstanceId)
-            .ToDictionary(
-                g => g.Key,
-                IReadOnlyList<CellRecord> (g) => [.. g.Select(ToRecord)]);
+        var hot = new Dictionary<long, IReadOnlyList<CellRecord>>(rows.ByInstance!.Count);
+        foreach (var (id, cells) in rows.ByInstance)
+        {
+            hot[id] = cells;
+        }
 
         if (archive is null)
         {
@@ -383,7 +583,7 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         // з архіву читаються і ці екземпляри, і запитані без жодної гарячої комірки (перерваний КРОК 1
         // встиг повернути комірки лише частини таблиць). Порожня архівна відповідь гарячих даних не ховає.
         var archivedIds = await archive
-            .ArchivedOfHotInstancesAsync(hot.Keys, [.. rows.Select(r => r.PeriodKeyValue).Distinct()], ct)
+            .ArchivedOfHotInstancesAsync(hot.Keys, rows.Periods, ct)
             .ConfigureAwait(false);
         if (archivedIds.Count == 0)
         {
@@ -407,23 +607,29 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         return result;
     }
 
-    private static CellRecord ToRecord(SliceRow r)
-        => new(
-            new CellAddress(new PeriodKey(r.PeriodKeyValue), r.TableRowId, r.ColumnDefId),
-            r.TableDefId,
-            new CellValueData
-            {
-                ValueString = r.ValueString,
-                ValueNumeric = r.ValueNumeric,
-                ValueDate = r.ValueDate,
-                ValueBool = r.ValueBool,
-                ValueRegistryEntryId = r.ValueRegistryEntryId,
-                ValueUnitId = r.ValueUnitId,
-                IsCalculated = r.IsCalculated,
-                IsEmpty = r.IsEmpty,
-            });
+    /// <summary>Результат <see cref="SliceRowsAsync"/>: комірки (або групи за екземпляром) і періоди.</summary>
+    private sealed class SliceRead(bool byInstance)
+    {
+        /// <summary>Комірки одного зрізу в порядку читача; у пакетному читанні порожній.</summary>
+        public List<CellRecord> Cells { get; } = [];
 
-    /// <summary>Рядок результату <see cref="SliceRowsAsync"/>.</summary>
+        /// <summary>Пакет: екземпляр → комірки, у порядку першої появи; <c>null</c> для одного зрізу.</summary>
+        public Dictionary<long, List<CellRecord>>? ByInstance { get; } = byInstance ? [] : null;
+
+        /// <summary>Різні періоди прочитаних комірок у порядку першої появи.</summary>
+        public List<int> Periods { get; } = [];
+
+        /// <summary>Скільки комірок прочитано.</summary>
+        public int Count
+        {
+            get => ByInstance is null ? Cells.Count : _count;
+            set => _count = value;
+        }
+
+        private int _count;
+    }
+
+    /// <summary>Форма запиту зрізу — з неї EF будує SQL; рядки читаються не в неї (<see cref="ReadSliceRowsAsync"/>).</summary>
     private sealed class SliceRow
     {
         public long TableInstanceId { get; init; }
