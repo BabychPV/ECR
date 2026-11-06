@@ -2,8 +2,9 @@ import { serverMessage } from '@/features/registries/rc816/serverMessage';
 import { saveBatch, type RegistryBatchItem } from '@/features/registries/rows/api';
 import type { PermitCellValue } from '../lib/columns';
 import { canonicalKey, type KeyPart, type KeyPartType } from '@/features/registries/keys/normalizeKey';
-import { parsePastedRows } from '../lib/pasteRows';
-import { newRowItem, type PermitField, type PickerData, pickerOptions } from './model';
+import { parseBlock } from '@/features/registries/rc812/rowModel';
+import { MaxPastedRows, parsePastedLines } from '../lib/pasteRows';
+import { isLookup, newRowItem, type PermitField, type PickerData, pickerOptions } from './model';
 
 /*
  * Вставка з Excel і імпорт файлу в таблицю дозволу (PM-07).
@@ -21,7 +22,20 @@ import { newRowItem, type PermitField, type PickerData, pickerOptions } from './
 /** Рядків за один виклик `entries/batch` (межа сервера — 2000). */
 export const ImportChunk = 500;
 
-export type ImportIssueReason = 'number' | 'bool' | 'date' | 'limit' | 'integer' | 'unknownValue' | 'duplicateKey';
+export type ImportIssueReason =
+  | 'number'
+  | 'bool'
+  | 'date'
+  | 'limit'
+  | 'integer'
+  | 'unknownValue'
+  | 'ambiguous'
+  | 'notSource'
+  | 'notDerived'
+  | 'duplicateKey';
+
+/** Причини, з якими значення стовпця-посилання не стало записом (`notDerived` - Region/Area не виведено з джерела НАЕ). */
+export const LookupReasons: readonly ImportIssueReason[] = ['unknownValue', 'ambiguous', 'notSource', 'notDerived'];
 
 /** Клітинка, яку не вдалось прочитати: рядок вставки (з 1), стовпець, сирий текст. */
 export interface ImportIssue {
@@ -29,6 +43,41 @@ export interface ImportIssue {
   readonly column: string;
   readonly text: string;
   readonly reason: ImportIssueReason;
+}
+
+/** Значення стовпця-посилання: запис (id, підпис) або причина, чому ні. */
+export type LookupHit =
+  | { readonly id: string; readonly label?: string }
+  | { readonly reason: 'unknownValue' | 'ambiguous' | 'notSource' };
+
+/** Виведена з джерела НАЕ клітинка Region/Area: запис або причина (`noScope`, `noMatch`, `ambiguous`). */
+export type DerivedHit = { readonly id: string; readonly label: string } | { readonly reason: string };
+
+/**
+ * Як план читає стовпці-посилання. `resolve` → `null`: відповідь ще не прийшла (план «у перевірці», не чистий).
+ * `derive(naeId)` → клітинки Region/Area джерела за кодом стовпця.
+ */
+export interface LookupResolver {
+  readonly resolve: (field: PermitField, text: string) => LookupHit | null;
+  readonly derive?: (naeId: string) => ReadonlyMap<string, DerivedHit> | undefined;
+  /** Стовпці, що виводяться з джерела НАЕ, коли у файлі порожньо. */
+  readonly derivable?: readonly string[];
+  /** Стовпці НАЕ (джерело, з якого виводяться Region/Area). */
+  readonly naeColumns?: readonly string[];
+}
+
+/** Клітинка, заповнена з джерела НАЕ (у перегляді позначена «з НАЕ»). */
+export interface DerivedMark {
+  readonly row: number;
+  readonly column: string;
+  readonly label: string;
+}
+
+/** Необов'язкова клітинка, яку не вдалось вивести: лишається порожньою, запису не блокує. */
+export interface UnderivedMark {
+  readonly row: number;
+  readonly column: string;
+  readonly reason: string;
 }
 
 export interface ImportRow {
@@ -44,6 +93,12 @@ export interface ImportPlan {
   readonly issues: readonly ImportIssue[];
   /** Клітинок правіше за останній стовпець таблиці (відкинуто). */
   readonly extraCells: number;
+  /** Клітинки Region/Area, заповнені з джерела НАЕ. */
+  readonly derived?: readonly DerivedMark[];
+  /** Необов'язкові клітинки, які не вдалось вивести (лишились порожні). */
+  readonly underived?: readonly UnderivedMark[];
+  /** Значення посилань ще перевіряються сервером. */
+  readonly pending?: boolean;
 }
 
 function isoText(value: PermitCellValue): string {
@@ -65,11 +120,19 @@ export function planImport(
   ignoreCase = true,
 ): ImportPlan {
   const body = skipHeader ? text.replace(/\r\n?/g, '\n').split('\n').slice(1).join('\n') : text;
-  const parsed = parsePastedRows(body, fields.map((field) => field.column));
-  const issues: ImportIssue[] = parsed.issues.map((issue) => ({ ...issue }));
-  const bad = new Set<number>(parsed.issues.map((issue) => issue.row));
+  const lines = parseBlock(body);
+  const width = fields.length;
+  const plan = planRows(lines.map((line) => line.slice(0, width)), fields, pickerResolver(fields, picker), permitId, ignoreCase);
+  // За порядком (без зіставлення): клітинки правіше за останній стовпець - зайві й блокують запис.
+  const extraCells = lines
+    .filter((line) => !line.every((cell) => cell.trim() === ''))
+    .slice(0, MaxPastedRows)
+    .reduce((sum, line) => sum + Math.max(0, line.length - width), 0);
+  return { ...plan, extraCells };
+}
 
-  // Підпис → id для кожного пікера, без урахування регістру й крайніх пробілів.
+/** Пікери форми рядка як {@link LookupResolver}: підпис без урахування регістру й крайніх пробілів. */
+export function pickerResolver(fields: readonly PermitField[], picker: PickerData): LookupResolver {
   const idByLabel = new Map<string, Map<string, string>>();
   for (const field of fields) {
     if (field.column.type !== 'choice' && field.column.type !== 'link') continue;
@@ -78,6 +141,43 @@ export function planImport(
       new Map(pickerOptions(field, picker).map((option) => [option.label.trim().toLowerCase(), option.value])),
     );
   }
+  return {
+    resolve: (field, text) => {
+      const id = idByLabel.get(field.column.code)?.get(text.trim().toLowerCase());
+      return id === undefined ? { reason: 'unknownValue' } : { id };
+    },
+  };
+}
+
+/** Перший id джерела НАЕ в рядку (за порядком стовпців НАЕ). */
+function sourceOf(form: Readonly<Record<string, string>>, naeColumns: readonly string[]): string | null {
+  for (const code of naeColumns) {
+    const id = form[code];
+    if (id !== undefined && id !== '') return id;
+  }
+  return null;
+}
+
+/**
+ * Рядки (клітинки вже в порядку `fields`) → пакет нових рядків. Посилання читає `resolver` (за кодом чи назвою на сервері, або
+ * пікери); порожні Region/Area заповнюються з джерела НАЕ (`resolver.derive`) і позначаються. Рядок із нерозпізнаною клітинкою
+ * не йде на запис («все або нічого», рішення 19.10).
+ */
+export function planRows(
+  lines: readonly (readonly string[])[],
+  fields: readonly PermitField[],
+  resolver: LookupResolver,
+  permitId: number,
+  ignoreCase = true,
+): ImportPlan {
+  const parsed = parsePastedLines(lines, fields.map((field) => field.column));
+  const issues: ImportIssue[] = parsed.issues.map((issue) => ({ ...issue }));
+  const bad = new Set<number>(parsed.issues.map((issue) => issue.row));
+  const derived: DerivedMark[] = [];
+  const underived: UnderivedMark[] = [];
+  const derivable = new Set(resolver.derivable ?? []);
+  const naeColumns = resolver.naeColumns ?? [];
+  let pending = false;
 
   const rows: ImportRow[] = parsed.rows.map((row, position) => {
     const index = position + 1;
@@ -88,15 +188,18 @@ export function planImport(
       const value = row.values[column.code];
       let cell = isoText(value);
 
-      const labels = idByLabel.get(column.code);
-      if (labels !== undefined && cell !== '') {
-        const id = labels.get(cell.trim().toLowerCase());
-        if (id === undefined) {
-          issues.push({ row: index, column: column.code, text: cell, reason: 'unknownValue' });
+      if (isLookup(column) && cell !== '') {
+        const hit = resolver.resolve(field, cell);
+        if (hit === null) {
+          pending = true;
+          bad.add(index);
+          cell = '';
+        } else if ('reason' in hit) {
+          issues.push({ row: index, column: column.code, text: cell, reason: hit.reason });
           bad.add(index);
           cell = '';
         } else {
-          cell = id;
+          cell = hit.id;
         }
       }
 
@@ -105,6 +208,27 @@ export function planImport(
         bad.add(index);
       }
       form[column.code] = cell;
+    }
+
+    // Region/Area з джерела НАЕ: лише порожні клітинки, лише однозначний збіг (сервер).
+    const source = derivable.size > 0 ? sourceOf(form, naeColumns) : null;
+    if (source !== null && resolver.derive !== undefined) {
+      const cells = resolver.derive(source);
+      for (const field of fields) {
+        const code = field.column.code;
+        if (!derivable.has(code) || form[code] !== '' || (row.values[code] ?? null) !== null) continue;
+        const hit = cells?.get(code);
+        if (hit === undefined) continue;
+        if ('id' in hit) {
+          form[code] = hit.id;
+          derived.push({ row: index, column: code, label: hit.label });
+        } else if (field.column.required === true) {
+          issues.push({ row: index, column: code, text: hit.reason, reason: 'notDerived' });
+          bad.add(index);
+        } else {
+          underived.push({ row: index, column: code, reason: hit.reason });
+        }
+      }
     }
 
     return { index, item: newRowItem(`row-${String(index)}`, permitId, fields, form), clean: !bad.has(index) };
@@ -116,7 +240,30 @@ export function planImport(
     rows: rows.map((row) => (bad.has(row.index) && row.clean ? { ...row, clean: false } : row)),
     issues,
     extraCells: parsed.extraCells,
+    derived,
+    underived,
+    pending,
   };
+}
+
+/** Нерозв'язане значення стовпця-посилання разом: стовпець, текст, причина і скільки рядків. */
+export interface UnresolvedGroup {
+  readonly column: string;
+  readonly text: string;
+  readonly reason: ImportIssueReason;
+  readonly rows: number;
+}
+
+/** Різні нерозв'язані значення по стовпцях (з кількістю рядків) - перелік у перегляді ДО будь-якого запису. */
+export function unresolvedGroups(issues: readonly ImportIssue[]): UnresolvedGroup[] {
+  const groups = new Map<string, UnresolvedGroup>();
+  for (const issue of issues) {
+    if (!LookupReasons.includes(issue.reason)) continue;
+    const key = `${issue.column}\u0000${issue.text.trim().toLowerCase()}\u0000${issue.reason}`;
+    const found = groups.get(key);
+    groups.set(key, found === undefined ? { column: issue.column, text: issue.text, reason: issue.reason, rows: 1 } : { ...found, rows: found.rows + 1 });
+  }
+  return [...groups.values()];
 }
 
 /**
@@ -211,7 +358,7 @@ export const MaxImportFileBytes = MaxImportFileMb * 1024 * 1024;
 
 /** План можна перевіряти й писати лише цілком: жодного зауваження, зайвих клітинок і хоч один рядок. */
 export function isPlanClean(plan: ImportPlan): boolean {
-  return plan.rows.length > 0 && plan.issues.length === 0 && plan.extraCells === 0;
+  return plan.rows.length > 0 && plan.issues.length === 0 && plan.extraCells === 0 && plan.pending !== true;
 }
 
 /** Один прохід усіма шматками з `dryRun`: помилки рядків за номерами плану. */

@@ -8,6 +8,7 @@ import { describe as describeViolations, findViolations } from '@/test/a11y';
 import * as permitsApi from '../../api/permitsApi';
 import * as typesApi from '../../api/typesApi';
 import * as listsApi from '../../lists/listsApi';
+import { fakeImportServer, importResponse } from './importFixtures';
 import { permit, permitType, rowsFor } from './permitFixtures';
 
 /**
@@ -49,8 +50,9 @@ vi.mock('@/shared/session/useSession', async (importOriginal) => ({
 }));
 
 beforeEach(() => {
-  vi.mocked(apiFetch).mockImplementation((path: string) =>
-    Promise.resolve(path === '/api/v1/units' ? [{ id: 7, code: 't/yr' }] : []) as never,
+  const importServer = fakeImportServer();
+  vi.mocked(apiFetch).mockImplementation((path: string, init?: RequestInit) =>
+    Promise.resolve(path === '/api/v1/units' ? [{ id: 7, code: 't/yr' }] : (importResponse(importServer, path, init) ?? [])) as never,
   );
   vi.mocked(typesApi.getPermitType).mockResolvedValue(permitType());
   // «Add a value…» показується лише для списків, які сервер віддав як `editable` (PM-08e).
@@ -139,6 +141,18 @@ describe('Екран дозволу — доступність', { timeout: 180_
         await screen.findByRole('dialog', { name: 'Paste rows into Limits' });
         fireEvent.change(screen.getByRole('textbox', { name: 'Rows' }), { target: { value: 'A\t12abc\nB\t3' } });
         await screen.findByText('Row 1, Annual volume: "12abc" is not a number');
+      });
+    });
+
+    // Людина 06.11: таблиця зіставлення стовпців, банер незіставленого обов'язкового стовпця, перелік нерозв'язаних значень.
+    it(`${colorScheme}: діалог вставки - зіставлення стовпців і нерозв'язані значення`, async () => {
+      await scan(colorScheme, '/admin/permits/5?tab=Limits', permit(), async () => {
+        await screen.findByText('Outfall A');
+        fireEvent.click(screen.getByRole('button', { name: 'Paste from Excel…' }));
+        await screen.findByRole('dialog', { name: 'Paste rows into Limits' });
+        fireEvent.change(screen.getByRole('textbox', { name: 'Rows' }), { target: { value: 'Substance\tName\tNote\nNope\tA\tx' } });
+        await screen.findByText('Required columns are not matched: Annual volume');
+        await screen.findByRole('list', { name: 'Values that could not be matched' });
       });
     });
 

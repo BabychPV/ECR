@@ -13199,6 +13199,270 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/permit-tables/{code}/import-mapping": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The saved column mapping of the table (shared by all users; empty when none) with its NAE and derivable Region/Area columns.
+         *     Permission `Registry.View` or grant `Read` on the table. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Table registry code. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitImportMappingDto"];
+                        "text/json": components["schemas"]["PermitImportMappingDto"];
+                        "text/plain": components["schemas"]["PermitImportMappingDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Creates or replaces the saved column mapping. An existing mapping needs `If-Match` with its `rowVersion`
+         *     (changed meanwhile — `409`). Permission `Permit.EditType`. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Table registry code. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SavePermitImportMappingRequest"];
+                    "application/json": components["schemas"]["SavePermitImportMappingRequest"];
+                    "text/json": components["schemas"]["SavePermitImportMappingRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitImportMappingDto"];
+                        "text/json": components["schemas"]["PermitImportMappingDto"];
+                        "text/plain": components["schemas"]["PermitImportMappingDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permit-tables/{code}/import/lookups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolves the distinct values of the lookup columns by entry code or name (any language); two or more entries with the name —
+         *     `ambiguous`. A NAE column takes sources only. Derives Region/Area of each resolved NAE source from the NAE tree. Nothing
+         *     is written. Permission `Registry.View` or grant `Read` on the table. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Table registry code. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["PermitImportLookupRequest"];
+                    "application/json": components["schemas"]["PermitImportLookupRequest"];
+                    "text/json": components["schemas"]["PermitImportLookupRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitImportLookupResultDto"];
+                        "text/json": components["schemas"]["PermitImportLookupResultDto"];
+                        "text/plain": components["schemas"]["PermitImportLookupResultDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permit-tables/{code}/import/workbook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** One sheet of an `.xlsx` (at most 5 MB) as text, with the list of its visible sheets; nothing is stored. Permission
+         *     `Registry.EditData` or grant `Write` on the table. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Table registry code. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    } & {
+                        sheet?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitImportSheetDto"];
+                        "text/json": components["schemas"]["PermitImportSheetDto"];
+                        "text/plain": components["schemas"]["PermitImportSheetDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/permit-types": {
         parameters: {
             query?: never;
@@ -33361,6 +33625,116 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description A derived cell. */
+        PermitImportDerivedCellDto: {
+            /** @description Column code. */
+            column: string;
+            /**
+             * Format: int64
+             * @description Entry; `null` — not derived.
+             */
+            entryId: null | number;
+            /** @description Entry name in the user's language. */
+            label: null | string;
+            /** @description `noScope` (the source has no region/area in the tree), `noMatch` or `ambiguous`; `null` when derived. */
+            reason: null | string;
+            /** @description NAE tree region/area code the source sits in. */
+            scope: null | string;
+        };
+        /** @description Region/Area of one NAE source. */
+        PermitImportDerivedDto: {
+            /** @description One per derivable column that has a scope in the tree. */
+            cells: components["schemas"]["PermitImportDerivedCellDto"][];
+            /**
+             * Format: int64
+             * @description NAE source entry.
+             */
+            naeEntryId: number;
+        };
+        /** @description Values of one column. */
+        PermitImportLookupColumn: {
+            /** @description Column code. */
+            column: string;
+            /** @description Distinct texts as they are in the file. */
+            values: null | string[];
+        };
+        /** @description Resolution of one column. */
+        PermitImportLookupColumnResultDto: {
+            /** @description Column code. */
+            column: string;
+            /** @description Registry the column points at. */
+            registryCode: string;
+            /** @description One result per requested text. */
+            values: components["schemas"]["PermitImportLookupValueDto"][];
+        };
+        /** @description Distinct file values of the lookup columns to resolve to registry entries. */
+        PermitImportLookupRequest: {
+            /** @description Per column: the distinct texts. */
+            columns: null | components["schemas"]["PermitImportLookupColumn"][];
+            /**
+             * @description Also derive Region/Area of every resolved NAE source.
+             * @default true
+             */
+            derive: boolean;
+        };
+        /** @description Resolution of the lookup values, and Region/Area derived from the NAE sources. */
+        PermitImportLookupResultDto: {
+            /** @description Resolved columns (a column that is not a lookup to a shared registry or a type list is left out). */
+            columns: components["schemas"]["PermitImportLookupColumnResultDto"][];
+            /** @description Per resolved NAE source: Region/Area entries of the derivable columns. */
+            derived: components["schemas"]["PermitImportDerivedDto"][];
+        };
+        /** @description One text: the entry it names, or why none. */
+        PermitImportLookupValueDto: {
+            /**
+             * Format: int64
+             * @description Entry; `null` — not resolved.
+             */
+            entryId: null | number;
+            /** @description Entry name in the user's language (code when it has none). */
+            label: null | string;
+            /**
+             * Format: int32
+             * @description How many entries the text names.
+             */
+            matches: number;
+            /** @description `unknown`, `ambiguous` (2+ entries) or `notSource` (a NAE node that is not a source); `null` when resolved. */
+            reason: null | string;
+            /** @description The text as sent. */
+            text: string;
+        };
+        /** @description Saved column mapping of «Paste from Excel…» / «Import file…» for one permit table (`PRM_&lt;type&gt;_&lt;table&gt;`), shared by
+         *     every user: normalised file header → column code. */
+        PermitImportMappingDto: {
+            /** @description Normalised header (lower case, letters and digits only) → column code; empty when nothing is saved. */
+            columns: {
+                [key: string]: string;
+            };
+            /** @description Region/Area columns filled from the NAE source when the file leaves them empty. */
+            derivable: string[];
+            /** @description Columns that reference the NAE tree (their sources give Region/Area). */
+            naeColumns: string[];
+            /** @description Table registry. */
+            registryCode: string;
+            /** @description Token for `If-Match` of the next `PUT`; `null` — nothing saved yet. */
+            rowVersion: null | string;
+            /**
+             * Format: date-time
+             * @description Last change (UTC); `null` — nothing saved yet.
+             */
+            updatedAt: null | string;
+        };
+        /** @description One sheet of an `.xlsx` as text: the first row is the header (if the file has one). */
+        PermitImportSheetDto: {
+            /** @description Rows as text (numbers invariant, dates `yyyy-MM-dd`, logical `true`/`false`). */
+            rows: string[][];
+            /** @description Sheet read. */
+            sheet: string;
+            /** @description Visible sheets of the workbook. */
+            sheets: string[];
+            /** @description The sheet has more rows than were read (the paste limit). */
+            truncated: boolean;
+        };
         /** @description Список зі значеннями. */
         PermitListDetailDto: {
             /** @description Чинні значення в порядку показу. */
@@ -36923,6 +37297,13 @@ export interface components {
              * @description Таблиця аркуша цієї версії.
              */
             sheetTableDefId: number;
+        };
+        /** @description Body of `PUT …/import-mapping`; the token goes in `If-Match`. */
+        SavePermitImportMappingRequest: {
+            /** @description File header → column code (the header is normalised by the server as well). */
+            columns: null | {
+                [key: string]: string;
+            };
         };
         /** @description Запит на збереження чернетки опису (`BE-24` крок 2). */
         SaveRegistryDefinitionDraftRequest: {

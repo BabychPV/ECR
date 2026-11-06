@@ -201,6 +201,51 @@ details.pp-group > summary {
   overflow-y: auto;
 }
 
+/* Зіставлення стовпців файлу зі стовпцями таблиці (діалог вставки/імпорту, людина 06.11). */
+.pp-map {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-xs);
+  min-width: 0;
+}
+
+.pp-map-table {
+  display: block;
+  max-height: 260px;
+  overflow: auto;
+  border-collapse: collapse;
+  font-size: var(--mantine-font-size-sm);
+}
+
+.pp-map-table th,
+.pp-map-table td {
+  padding: 2px var(--mantine-spacing-xs);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  text-align: start;
+  vertical-align: middle;
+}
+
+.pp-map-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--mantine-color-body);
+  font-weight: 600;
+}
+
+.pp-map-table tbody th {
+  font-weight: 500;
+  max-width: 220px;
+  overflow-wrap: anywhere;
+}
+
+.pp-map-sample {
+  max-width: 180px;
+  color: var(--mantine-color-dimmed);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* «Not in the list? Add a value…» під полем-списком (PM-08e). */
 .pp-with-add {
   display: flex;

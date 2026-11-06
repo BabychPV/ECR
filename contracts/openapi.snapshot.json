@@ -14299,6 +14299,307 @@
         ],
         "type": "object"
       },
+      "PermitImportDerivedCellDto": {
+        "description": "A derived cell.",
+        "properties": {
+          "column": {
+            "description": "Column code.",
+            "type": "string"
+          },
+          "entryId": {
+            "description": "Entry; `null` — not derived.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "label": {
+            "description": "Entry name in the user's language.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "description": "`noScope` (the source has no region/area in the tree), `noMatch` or `ambiguous`; `null` when derived.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "scope": {
+            "description": "NAE tree region/area code the source sits in.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "column",
+          "entryId",
+          "label",
+          "reason",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "PermitImportDerivedDto": {
+        "description": "Region/Area of one NAE source.",
+        "properties": {
+          "cells": {
+            "description": "One per derivable column that has a scope in the tree.",
+            "items": {
+              "$ref": "#/components/schemas/PermitImportDerivedCellDto"
+            },
+            "type": "array"
+          },
+          "naeEntryId": {
+            "description": "NAE source entry.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "naeEntryId",
+          "cells"
+        ],
+        "type": "object"
+      },
+      "PermitImportLookupColumn": {
+        "description": "Values of one column.",
+        "properties": {
+          "column": {
+            "description": "Column code.",
+            "type": "string"
+          },
+          "values": {
+            "description": "Distinct texts as they are in the file.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "column",
+          "values"
+        ],
+        "type": "object"
+      },
+      "PermitImportLookupColumnResultDto": {
+        "description": "Resolution of one column.",
+        "properties": {
+          "column": {
+            "description": "Column code.",
+            "type": "string"
+          },
+          "registryCode": {
+            "description": "Registry the column points at.",
+            "type": "string"
+          },
+          "values": {
+            "description": "One result per requested text.",
+            "items": {
+              "$ref": "#/components/schemas/PermitImportLookupValueDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "column",
+          "registryCode",
+          "values"
+        ],
+        "type": "object"
+      },
+      "PermitImportLookupRequest": {
+        "description": "Distinct file values of the lookup columns to resolve to registry entries.",
+        "properties": {
+          "columns": {
+            "description": "Per column: the distinct texts.",
+            "items": {
+              "$ref": "#/components/schemas/PermitImportLookupColumn"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "derive": {
+            "default": true,
+            "description": "Also derive Region/Area of every resolved NAE source.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "columns"
+        ],
+        "type": "object"
+      },
+      "PermitImportLookupResultDto": {
+        "description": "Resolution of the lookup values, and Region/Area derived from the NAE sources.",
+        "properties": {
+          "columns": {
+            "description": "Resolved columns (a column that is not a lookup to a shared registry or a type list is left out).",
+            "items": {
+              "$ref": "#/components/schemas/PermitImportLookupColumnResultDto"
+            },
+            "type": "array"
+          },
+          "derived": {
+            "description": "Per resolved NAE source: Region/Area entries of the derivable columns.",
+            "items": {
+              "$ref": "#/components/schemas/PermitImportDerivedDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "columns",
+          "derived"
+        ],
+        "type": "object"
+      },
+      "PermitImportLookupValueDto": {
+        "description": "One text: the entry it names, or why none.",
+        "properties": {
+          "entryId": {
+            "description": "Entry; `null` — not resolved.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "label": {
+            "description": "Entry name in the user's language (code when it has none).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "matches": {
+            "description": "How many entries the text names.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "`unknown`, `ambiguous` (2+ entries) or `notSource` (a NAE node that is not a source); `null` when resolved.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "text": {
+            "description": "The text as sent.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "entryId",
+          "label",
+          "reason",
+          "matches"
+        ],
+        "type": "object"
+      },
+      "PermitImportMappingDto": {
+        "description": "Saved column mapping of «Paste from Excel…» / «Import file…» for one permit table (`PRM_&lt;type&gt;_&lt;table&gt;`), shared by\nevery user: normalised file header → column code.",
+        "properties": {
+          "columns": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Normalised header (lower case, letters and digits only) → column code; empty when nothing is saved.",
+            "type": "object"
+          },
+          "derivable": {
+            "description": "Region/Area columns filled from the NAE source when the file leaves them empty.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "naeColumns": {
+            "description": "Columns that reference the NAE tree (their sources give Region/Area).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "registryCode": {
+            "description": "Table registry.",
+            "type": "string"
+          },
+          "rowVersion": {
+            "description": "Token for `If-Match` of the next `PUT`; `null` — nothing saved yet.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "updatedAt": {
+            "description": "Last change (UTC); `null` — nothing saved yet.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "registryCode",
+          "columns",
+          "rowVersion",
+          "updatedAt",
+          "naeColumns",
+          "derivable"
+        ],
+        "type": "object"
+      },
+      "PermitImportSheetDto": {
+        "description": "One sheet of an `.xlsx` as text: the first row is the header (if the file has one).",
+        "properties": {
+          "rows": {
+            "description": "Rows as text (numbers invariant, dates `yyyy-MM-dd`, logical `true`/`false`).",
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "sheet": {
+            "description": "Sheet read.",
+            "type": "string"
+          },
+          "sheets": {
+            "description": "Visible sheets of the workbook.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "description": "The sheet has more rows than were read (the paste limit).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sheet",
+          "sheets",
+          "rows",
+          "truncated"
+        ],
+        "type": "object"
+      },
       "PermitListDetailDto": {
         "description": "Список зі значеннями.",
         "properties": {
@@ -22164,6 +22465,25 @@
           "selectionRule",
           "headerFieldDefId",
           "isActive",
+          "columns"
+        ],
+        "type": "object"
+      },
+      "SavePermitImportMappingRequest": {
+        "description": "Body of `PUT …/import-mapping`; the token goes in `If-Match`.",
+        "properties": {
+          "columns": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "File header → column code (the header is normalised by the server as well).",
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        },
+        "required": [
           "columns"
         ],
         "type": "object"
@@ -47413,6 +47733,399 @@
         ]
       }
     },
+    "/api/v1/permit-tables/{code}/import-mapping": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Table registry code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitImportMappingDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitImportMappingDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitImportMappingDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "The saved column mapping of the table (shared by all users; empty when none) with its NAE and derivable Region/Area columns.\nPermission `Registry.View` or grant `Read` on the table.",
+        "tags": [
+          "PermitTableImport"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Table registry code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavePermitImportMappingRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavePermitImportMappingRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavePermitImportMappingRequest"
+              }
+            }
+          },
+          "description": "Cancellation token.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitImportMappingDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitImportMappingDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitImportMappingDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Creates or replaces the saved column mapping. An existing mapping needs `If-Match` with its `rowVersion`\n(changed meanwhile — `409`). Permission `Permit.EditType`.",
+        "tags": [
+          "PermitTableImport"
+        ]
+      }
+    },
+    "/api/v1/permit-tables/{code}/import/lookups": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Table registry code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermitImportLookupRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermitImportLookupRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermitImportLookupRequest"
+              }
+            }
+          },
+          "description": "Cancellation token.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitImportLookupResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitImportLookupResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitImportLookupResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Resolves the distinct values of the lookup columns by entry code or name (any language); two or more entries with the name —\n`ambiguous`. A NAE column takes sources only. Derives Region/Area of each resolved NAE source from the NAE tree. Nothing\nis written. Permission `Registry.View` or grant `Read` on the table.",
+        "tags": [
+          "PermitTableImport"
+        ]
+      }
+    },
+    "/api/v1/permit-tables/{code}/import/workbook": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Table registry code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "properties": {
+                      "file": {
+                        "$ref": "#/components/schemas/IFormFile"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "sheet": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "description": "Cancellation token.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitImportSheetDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitImportSheetDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitImportSheetDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "One sheet of an `.xlsx` (at most 5 MB) as text, with the list of its visible sheets; nothing is stored. Permission\n`Registry.EditData` or grant `Write` on the table.",
+        "tags": [
+          "PermitTableImport"
+        ]
+      }
+    },
     "/api/v1/permit-types": {
       "get": {
         "parameters": [
@@ -66325,6 +67038,9 @@
     },
     {
       "name": "Permits"
+    },
+    {
+      "name": "PermitTableImport"
     },
     {
       "name": "PermitTypes"
