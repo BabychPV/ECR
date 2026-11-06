@@ -166,7 +166,7 @@ function Harness(): JSX.Element {
       <h1>doc</h1>
       <Menu opened withinPortal={false}>
         <Menu.Target>
-          <span>menu</span>
+          <button type="button">menu</button>
         </Menu.Target>
         <Menu.Dropdown>{action.menuItem}</Menu.Dropdown>
       </Menu>
@@ -210,6 +210,19 @@ afterEach(() => {
 });
 
 describe('useVersionMigrationAction', () => {
+  // P3 (AU-13 pass B): Esc у діалозі повертає фокус кнопці меню, з якого його відкрито (не BODY). Мутація: прибрати
+  // `trigger.current?.focus()` у VersionMigrationAction.close - червоніє.
+  it('Esc закриває діалог і повертає фокус тригеру меню', async () => {
+    show(['Template.Edit'], report({}));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '⟦documents.migrateVersion⟧' }));
+    const dryRun = await screen.findByTestId('migrate-dry-run');
+
+    fireEvent.keyDown(dryRun, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByTestId('migrate-dry-run')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'menu' })));
+  });
+
   it('без права Template.Edit пункту немає', async () => {
     show(['Document.View'], report({}));
 
