@@ -305,6 +305,8 @@ if ($KV['tableinstanceid_column'] -eq 'absent') {
     V 'TII' 'нові результати: NULL = 0 (PASS), частково (INFO), усі NULL або немає нових (FAIL)' $v "new=$tn null=$tnull not_null=$($tn - $tnull)"
 }
 V 'BRANCH_BOTH' 'BRANCH_BOTH у TraceJson/ModulesProfileJson/JobProgress після since = 0' $(Pv (Eq (N 'branch_both_hits') 0)) "hits=$($KV['branch_both_hits'])"
+# Тексти модулів у кодуванні ANSI (sqlcmd без -f i:65001): лікується перезастосуванням файлу з Sql/ через -f i:65001.
+V 'UTF8' 'тексти процедур/тригерів/функцій/вʼюх без кирилиці, прочитаної як ANSI (Ð/Ñ) = 0' $(Pv (Eq (N 'mojibake_modules') 0)) "modules=$($KV['mojibake_modules']) names=$($KV['mojibake_module_names'])"
 # RowActivityFilter
 if ($KV['rowactivityfilter_column'] -eq 'absent') {
     V 'ROWFILTER' 'calc.Methodology.RowActivityFilter' $newFail 'колонка відсутня (міграція не застосована)'

@@ -390,6 +390,23 @@ SELECT @n = COUNT(*) FROM itg.JobProgress WITH (NOLOCK)
   WHERE COALESCE(UpdatedAt, CreatedAt) >= @since AND Message LIKE '%jobs.recalcCategoryRuleRejected%';
 PRINT 'PC|jobs_category_rule_rejected|' + CAST(@n AS varchar(20));
 
+-- Тексти модулів (процедури, тригери, функції, в'юхи) з кирилицею, прочитаною як ANSI: «Привіт» -> «ÐŸÑ€Ð¸...».
+-- Sql/*.sql - UTF-8 без BOM; sqlcmd без -f i:65001 (до #743) записав такі тексти в базу, і вони лишаються,
+-- доки файл не перезастосовано з -f i:65001 (W15h: arc.usp_* з 03/04 не перезастосовувались). Кирилиця
+-- в UTF-8 - байти D0/D1 + ще один, тож в ANSI кожна літера дає Ð (U+00D0) або Ñ (U+00D1); у наших модулях
+-- цих літер немає. Блок між маркерами виконує як є тест ModuleTextEncodingCheckTests (Ecr.Infrastructure.Tests).
+-- MOJIBAKE:begin
+DECLARE @mj_n int, @mj_names nvarchar(max);
+SELECT @mj_n = COUNT(*),
+       @mj_names = STRING_AGG(CAST(SCHEMA_NAME(o.schema_id) + N'.' + o.name AS nvarchar(max)), N',')
+                   WITHIN GROUP (ORDER BY SCHEMA_NAME(o.schema_id), o.name)
+FROM sys.sql_modules m WITH (NOLOCK)
+JOIN sys.objects o WITH (NOLOCK) ON o.object_id = m.object_id
+WHERE m.definition COLLATE Latin1_General_BIN2 LIKE N'%[' + NCHAR(208) + NCHAR(209) + N']%';
+PRINT 'PC|mojibake_modules|' + CAST(ISNULL(@mj_n, 0) AS varchar(20));
+PRINT 'PC|mojibake_module_names|' + LEFT(ISNULL(@mj_names, N''), 3000);
+-- MOJIBAKE:end
+
 -- остання Published версія заданих методологій: CODE=ver;CODE=ver
 SELECT @s = STUFF((SELECT ';' + t.tok + '=' + ISNULL((SELECT TOP 1 mv.Version FROM calc.MethodologyVersion mv WITH (NOLOCK)
                        JOIN calc.Methodology m WITH (NOLOCK) ON m.Id = mv.MethodologyId
