@@ -224,27 +224,57 @@ public sealed partial class PatchCellsHandler
     }
 
     /// <summary>
-    /// ✎ D-461 (P1 06.11): текстове ручне значення — лише замість ТЕКСТОВОГО результату. Тип результату видно з
-    /// наявного значення комірки (уже прочитаного, нуль нових звернень): число в комірці — числова формула, і текст
-    /// у ній — та сама відмова «очікує число», що й без ручного значення. Порожня комірка типу не каже — текст
-    /// приймається.
+    /// ✎ D-461 (P1 06.11): текстове ручне значення — лише замість ТЕКСТОВОГО результату; текст замість числового —
+    /// та сама відмова «очікує число», що й без ручного значення.
     /// </summary>
-    private static void EnsureManualTextMatchesFormula(
-        RequestContext context, CellChangeLists changes, IReadOnlyDictionary<CellAddress, CellValueData> previous)
+    /// <remarks>
+    /// ✎ P3 06.11 (Аудит-2): тип — з ВИРАЗУ формули (<see cref="FormulaResultKinds"/>), а не з наявного значення: порожня
+    /// комірка числової формули типу не казала, і текст приймався. Наявне значення лишається запасним шляхом лише тоді,
+    /// коли тип статично невідомий (посилання на іншу формулу). Розбір — раз на формулу батчу, лише для текстових
+    /// ручних значень (число — нуль роботи).
+    /// </remarks>
+    private async Task EnsureManualTextMatchesFormulaAsync(
+        RequestContext context, CellChangeLists changes, IReadOnlyDictionary<CellAddress, CellValueData> previous,
+        CancellationToken ct)
     {
         if (context.OverridePlan is null)
         {
             return;
         }
 
+        var policy = FormulaOverridePolicy.For(context.Table);
+        var kinds = new Dictionary<int, FormulaResultKind>();
+
         foreach (var upsert in changes.Upserts)
         {
-            if (upsert.Value.ValueString is { } text
-                && IsManualOverride(context, changes, upsert.Address)
-                && previous.TryGetValue(upsert.Address, out var stored)
-                && stored.ValueNumeric is not null)
+            if (upsert.Value.ValueString is not { } text
+                || !IsManualOverride(context, changes, upsert.Address)
+                || KeyOf(changes, upsert.Address) is not { } key)
             {
-                throw CellValueReader.ExpectsNumber(context.Snapshot.ColumnsById[upsert.Address.ColumnDefId], text);
+                continue;
+            }
+
+            var column = context.Snapshot.ColumnsById[upsert.Address.ColumnDefId];
+            var kind = FormulaResultKind.Unknown;
+            if (policy.FormulaOf(key.RowKey, column) is { } formula)
+            {
+                if (!kinds.TryGetValue(formula.Id, out kind))
+                {
+                    kind = await FormulaResultKinds.OfAsync(formula, context.Table, registries, ct).ConfigureAwait(false);
+                    kinds[formula.Id] = kind;
+                }
+            }
+
+            var numeric = kind switch
+            {
+                FormulaResultKind.Number => true,
+                FormulaResultKind.Text => false,
+                _ => previous.TryGetValue(upsert.Address, out var stored) && stored.ValueNumeric is not null,
+            };
+
+            if (numeric)
+            {
+                throw CellValueReader.ExpectsNumber(column, text);
             }
         }
     }
