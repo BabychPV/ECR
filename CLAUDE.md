@@ -315,7 +315,24 @@ DataProtection), примусовий повторний вхід. Жодна з
 
 Червоне тут блокує мерж так само, як червоний гейт.
 
-⚠ Режиму «поверх наявної бази» у скриптах поки немає. `setup-dev-db.ps1`
+✎ 2026-11-07 (слово людини в сесії «Аудит-2»): режим «поверх наявної бази»
+тепер є; перекреслений абзац нижче застарів (перевірено в AU-13, прохід B на
+703fc1dbe: B0 2f4462c44 → F ×2, smoke 25/25 на оновленій базі).
+- `tools\setup-dev-db.ps1 -Upgrade` оновлює НАЯВНУ базу без `DROP`/`CREATE`:
+  ідемпотентний скрипт міграцій + `Sql/*.sql` у порядку `$scripts` (без
+  `14-agent-jobs.sql`) + один старт застосунку для `09-seed.sql`; bootstrap не
+  створює, `-Documents` ігнорує; місце без явного `-RequireFreeGb` не перевіряє.
+- `tools\smoke.ps1 -ExistingDatabase [-AdminPassword <чинний пароль bootstrap>]`
+  — сценарій на наявній базі: без розгортання й без видалення бази наприкінці;
+  кроки лише для свіжої бази пропускає з рядком «пропущено: наявна база».
+
+Порядок кроків 1–4 вище тепер такий: (1) worktree на `origin/main`:
+`setup-dev-db.ps1 -Documents 1` + `smoke.ps1 -ExistingDatabase` (дані);
+(2) worktree на T: `setup-dev-db.ps1 -Upgrade` двічі (другий раз — 0 змін);
+(3) `smoke.ps1 -ExistingDatabase` з worktree на T; (4) ідемпотентний скрипт ×2
+через `sqlcmd -I -b -f i:65001` — як і раніше.
+
+~~⚠ Режиму «поверх наявної бази» у скриптах поки немає. `setup-dev-db.ps1`
 (`-Server`, `-Database`, `-Documents`, `-BootstrapPassword`, `-DataPath`,
 `-RequireFreeGb`) завжди робить `DROP` + `CREATE DATABASE`; `smoke.ps1`
 (`-Server`, `-Database`, `-Port`, `-DataPath`, `-RequireFreeGb`) сам кличе
@@ -325,7 +342,7 @@ DataProtection), примусовий повторний вхід. Жодна з
 migrations script --idempotent` → `sqlcmd -I -b`, далі `Sql/*.sql` у
 порядку масиву `$scripts` із `setup-dev-db.ps1`, сід — старт застосунку
 (`09-seed.sql` виконує він); кроки 1 і 3 зі `smoke.ps1` стануть можливі лише
-після режиму «наявна база» в ньому — до того це [debt].
+після режиму «наявна база» в ньому — до того це [debt].~~
 
 ## ~~⛔ Перше, що робиш у новій сесії~~
 
