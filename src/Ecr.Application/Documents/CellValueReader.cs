@@ -167,6 +167,50 @@ public static class CellValueReader
         };
     }
 
+    /// <summary>
+    /// ✎ D-461 (P1 06.11, HSE401 H_COMPONENT = <c>REGFIELD(…)</c>): ручне значення замість формули. Колонка формули
+    /// зберігає результат того типу, який дала формула, тож ручне значення текстової формули — текст. Текст, що НЕ
+    /// читається як число, лягає в <c>ValueString</c>; число й решта — як <see cref="Read"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Чи результат формули саме текстовий, тут не видно: це вирішує <c>PatchCellsHandler</c> за наявним значенням
+    /// комірки (текст у комірці числової формули — відмова <see cref="TypeMismatch"/>).
+    /// </remarks>
+    /// <param name="raw">Значення з запиту.</param>
+    /// <param name="column">Колонка.</param>
+    /// <param name="culture">Культура користувача (як у <see cref="Read"/>).</param>
+    /// <returns>Значення для запису; <c>null</c> — комірку треба стерти.</returns>
+    public static CellValueData? ReadManualOverride(object? raw, ColumnDef column, CultureInfo? culture = null)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+
+        if (column.DataType == CellDataType.Formula
+            && Normalize(raw) is string text
+            && text.Trim().Length > 0
+            && !IsNumberText(text, culture))
+        {
+            return new CellValueData { ValueString = text };
+        }
+
+        return Read(raw, column, culture);
+    }
+
+    /// <summary>Відмова «колонка очікує число» (той самий код і ключ, що й у <see cref="Read"/>).</summary>
+    /// <param name="column">Колонка.</param>
+    /// <param name="value">Відхилене значення.</param>
+    public static BusinessRuleException ExpectsNumber(ColumnDef column, object value)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        ArgumentNullException.ThrowIfNull(value);
+        return Mismatch(column, value, ExpectedType.Number);
+    }
+
+    /// <summary>Чи текст читається як число (будь-яке прочитання, зокрема неоднозначне — тоді відмова лишається).</summary>
+    private static bool IsNumberText(string text, CultureInfo? culture)
+        => culture is null
+            ? decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out _)
+            : CultureNumberReader.Read(text, culture).Kind != NumberTextKind.NotNumber;
+
     /// <summary>Число з урахуванням того, що JSON міг привезти його рядком.</summary>
     /// <remarks>
     /// ⛔ Нерозпізнане число — <b>відмова</b>, а не нуль і не текст у числовій

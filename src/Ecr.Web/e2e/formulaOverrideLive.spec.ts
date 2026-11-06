@@ -67,7 +67,7 @@ const asNumber = (value: unknown): number => (value === null || value === undefi
  * Шаблон із формулами, проєкт, документ, 5 рядків з A/B — через API (як `multiSheet.ts`).
  * `readOnlyFormulas` — формульні колонки ще й «лише для читання», як їх створює `tools/hse401` (P1 06.11).
  */
-async function arrange(page: Page, readOnlyFormulas = false): Promise<Arranged> {
+async function arrange(page: Page, readOnlyFormulas = false, textFormula = false): Promise<Arranged> {
   const stamp = String(Date.now());
   const template = await ok<{ templateId: number }>(
     await page.request.post('/api/v1/templates', { data: { code: `E2EFo${stamp}`, nameL10n: { en: `E2E formula override ${stamp}` } } }),
@@ -97,6 +97,7 @@ async function arrange(page: Page, readOnlyFormulas = false): Promise<Arranged> 
     ['B', 'Decimal'],
     ['F1', 'Formula'],
     ['F2', 'Formula'],
+    ...(textFormula ? ([['T', 'Formula']] as [string, string][]) : []),
   ];
   for (const [index, [code, dataType]] of columns.entries()) {
     await ok(
@@ -125,7 +126,22 @@ async function arrange(page: Page, readOnlyFormulas = false): Promise<Arranged> 
     }),
     'формула F2',
   );
+  // P1 06.11: текстова формула (як HSE401 Компонент = REGFIELD(...)) — результат текстом.
+  const text = textFormula
+    ? await ok<{ id: number }>(
+        await page.request.put(`${base}/tables/${String(table.id)}/formulas/column/${String(idOf('T'))}`, {
+          data: { dialect: 'Template', expression: "IF([A] > 3, 'high', 'low')" },
+        }),
+        'формула T',
+      )
+    : null;
   await ok(await page.request.post(`${base}/publish`, { data: { reason: 'e2e: D-461 ручне значення замість формули' } }), 'публікація');
+  if (text !== null) {
+    await ok(
+      await page.request.put(`${base}/formulas/${String(text.id)}/manual-override`, { data: { allow: true, dryRun: false } }),
+      'дозволити ручне значення T',
+    );
+  }
 
   // ✎ D-461: прапорець — на ОПУБЛІКОВАНІЙ версії, без нової версії.
   const toggled = await ok<{ allowManualOverride: boolean; changed: boolean }>(
@@ -372,5 +388,35 @@ test.describe('D-461 formula override', () => {
     await expect
       .poll(async () => asNumber((await sliceOf(page, arranged)).rows[0]?.cells['F1']), { timeout: 30_000 })
       .toBe(77);
+  });
+
+  // P1 06.11 (живий тест людини, HSE401 Компонент = REGFIELD): у текстову формулу ручне значення вводилось лише
+  // числом, а після Delete комірка лишалась порожньою до фонового перерахунку (38 с) — перегляд рядка формулу з
+  // дозволом ручного значення не рахував.
+  test('D-461 formula override: text formula takes a text manual value and Delete shows the formula text at once', async ({ page }) => {
+    test.slow();
+    await signIn(page);
+    const arranged = await arrange(page, false, true);
+
+    await page.goto(`/documents/${String(arranged.documentId)}?periodKey=${String(arranged.periodKey)}`);
+    await expect(page.locator('revo-grid:visible').first()).toBeVisible({ timeout: 60_000 });
+    const initial = await sliceOf(page, arranged);
+    const colT = columnIndex(initial, 'T');
+    await expect(cellAt(page, colT, 0)).toHaveText('low', { timeout: 60_000 });
+
+    await enterManual(page, colT, 0, 'Diethyl manual', 'Text formula');
+    await expect(cellAt(page, colT, 0)).toHaveAttribute('data-formula-manual', 'true', { timeout: 15_000 });
+    await expect(cellAt(page, colT, 0)).toHaveText('Diethyl manual');
+    await expect.poll(async () => (await sliceOf(page, arranged)).rows[0]?.cells['T'], { timeout: 30_000 }).toBe('Diethyl manual');
+
+    // Delete — повернення формули: відповідь PATCH уже несе текст формули (перегляд рядка), сітка показує його одразу.
+    await cellAt(page, colT, 0).click();
+    await page.waitForTimeout(200);
+    const patched = page.waitForResponse((r) => r.request().method() === 'PATCH' && r.url().includes('/cells'));
+    await page.keyboard.press('Delete');
+    const body = (await (await patched).json()) as { computedCells?: { rowKey: string; columnCode: string; value: unknown }[] };
+    expect(body.computedCells?.find((c) => c.columnCode === 'T')?.value).toBe('low');
+    await expect(cellAt(page, colT, 0)).toHaveText('low', { timeout: 5_000 });
+    await expect(cellAt(page, colT, 0)).not.toHaveAttribute('data-formula-manual', 'true');
   });
 });

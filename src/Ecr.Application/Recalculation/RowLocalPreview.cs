@@ -36,7 +36,13 @@ public interface IRowLocalPreview
 /// <remarks>
 /// ⚠ Це ПЕРЕГЛЯД, а не джерело істини: фоновий перерахунок (<c>FormulaRecalculationJob</c>) лишається єдиним, що пише
 /// обчислені комірки. Тому тут свідомо консервативно - формула, яку не вдалося довести локальною й замкненою (HDR, інші рядки й
-/// таблиці, форми <c>REG*</c>, ручні значення D-461, формули рядка), просто не рахується.
+/// таблиці, форми <c>REG*</c>, формули рядка), просто не рахується.
+/// <para>
+/// ✎ D-461 (P1 06.11, HSE401 H_COMPONENT): формула з дозволом ручного значення рахується, а пропускаються лише КОМІРКИ з
+/// позначкою (їхнє значення лишається в контексті для залежних). Раніше пропускалась уся формула — після «дозволити ручне»
+/// Компонент не з'являвся одразу ні на зміну коду, ні на повернення формули, а чекав фонового перерахунку (на живому 38 с).
+/// Без сховища позначок формула з дозволом не рахується (консервативно, як було).
+/// </para>
 /// </remarks>
 public sealed class RowLocalPreview(
     IMetadataCache metadata,
@@ -44,7 +50,8 @@ public sealed class RowLocalPreview(
     IFormulaEngine formulaEngine,
     IPeriodStore periods,
     IUnitCatalog unitCatalog,
-    IRegistryStore registryStore) : IRowLocalPreview
+    IRegistryStore registryStore,
+    IFormulaOverrideStore? formulaOverrides = null) : IRowLocalPreview
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<ComputedCellDto>?> PreviewAsync(
@@ -79,6 +86,14 @@ public sealed class RowLocalPreview(
             .SelectMany(rowId => columns.Select(c => new CellAddress(period, rowId, c.Id)))
             .ToList();
         var stored = await cellStore.ReadCellsAsync(addresses, ct).ConfigureAwait(false);
+
+        // ✎ D-461: позначки ручних значень — лише коли серед формул перегляду є формула з дозволом (одне читання).
+        var manualAddresses = previewable.Where(p => p.Formula.AllowManualOverride)
+            .SelectMany(p => editedRows.Values.Select(rowId => new CellAddress(period, rowId, p.Column.Id)))
+            .ToList();
+        HashSet<CellAddress> manual = manualAddresses.Count == 0 || formulaOverrides is null
+            ? new HashSet<CellAddress>()
+            : (await formulaOverrides.ReadAsync(manualAddresses, ct).ConfigureAwait(false)).Keys.ToHashSet();
 
         var values = new Dictionary<CellKey, ExpressionValue>();
         foreach (var (address, cell) in stored)
@@ -121,6 +136,13 @@ public sealed class RowLocalPreview(
                 var evaluated = formulaEngine.Evaluate(parsed, context);
                 var key = new CellKey(0, table.Id, rowKey, column.Id);
                 var address = new CellAddress(period, rowId, column.Id);
+
+                // ✎ D-461: ручне значення формула не перезаписує й у перегляді; залежні читають його (уже в `values`).
+                if (manual.Contains(address))
+                {
+                    continue;
+                }
+
                 stored.TryGetValue(address, out var old);
 
                 if (evaluated.Value.IsError)
@@ -180,7 +202,7 @@ public sealed class RowLocalPreview(
             var column = table.Columns.FirstOrDefault(c => c.Id == formula.ColumnDefId && !c.IsDeleted);
             if (column is null
                 || formula.IsSnapshot
-                || formula.AllowManualOverride)
+                || (formula.AllowManualOverride && formulaOverrides is null))
             {
                 continue;
             }

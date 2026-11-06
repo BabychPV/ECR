@@ -354,6 +354,8 @@ public sealed class ColumnDef : Entity<int>
     /// ✎ D-461: перевіряє РУЧНЕ ЗНАЧЕННЯ ЗАМІСТЬ ФОРМУЛИ. Обчислювана колонка формули (<see cref="CellDataType.Formula"/>)
     /// приймає заповнене число (результат формули шаблону — число); колонка вводу з комірочною формулою — за власним
     /// типом, як звичайне значення. Методологічна (<see cref="CellDataType.Calculated"/>) ручного значення не приймає.
+    /// ✎ P1 06.11: текстова формула (напр. <c>REGFIELD</c>) — ручне значення текстом, у межах
+    /// <see cref="MaxStringLength"/>; що формула саме текстова, перевіряє запис (наявне значення комірки).
     /// </summary>
     /// <returns>Код помилки з каталогу або <c>null</c>.</returns>
     public string? ValidateManualOverride(CellValueData value)
@@ -363,6 +365,11 @@ public sealed class ColumnDef : Entity<int>
         if (DataType != CellDataType.Formula)
         {
             return ValidateValue(value);
+        }
+
+        if (value.IsWellFormed() && !value.IsEmpty && value.ValueString is { } text)
+        {
+            return text.Trim().Length > 0 && text.Length <= MaxStringLength ? null : "ECR-CELL-0422";
         }
 
         if (!value.IsWellFormed() || value.IsEmpty || value.ValueNumeric is not { } number)
