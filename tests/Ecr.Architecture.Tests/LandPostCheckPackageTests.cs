@@ -81,6 +81,23 @@ public sealed class LandPostCheckPackageTests
         Assert.DoesNotMatch(new Regex(@"Write-Host[^\r\n]*\$acc\b|Write-Host[^\r\n]*Password", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase), api);
     }
 
+    /// <summary>
+    /// W15h: тексти <c>arc.usp_*</c> у кодуванні ANSI жодна перевірка вікна не бачила. Ключ друкує
+    /// <c>PostCheck.sql</c>, а <c>Run-PostCheck.ps1</c> дає за ним вердикт PASS/FAIL (не INFO). SQL-предикат
+    /// перевіряє <c>ModuleTextEncodingCheckTests</c> (Ecr.Infrastructure.Tests) на справжній базі.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Вердикт_UTF8_тексти_модулів_рахується_і_червоніє()
+    {
+        var sqlText = File.ReadAllText(Path.Combine(PackageDir, "PostCheck.sql"));
+        Assert.Contains("PRINT 'PC|mojibake_modules|'", sqlText, StringComparison.Ordinal);
+        Assert.Contains("-- MOJIBAKE:begin", sqlText, StringComparison.Ordinal);
+
+        var run = File.ReadAllText(Path.Combine(PackageDir, "Run-PostCheck.ps1"));
+        Assert.Matches(new Regex(@"V 'UTF8' [^\r\n]*\$\(Pv \(Eq \(N 'mojibake_modules'\) 0\)\)", RegexOptions.CultureInvariant), run);
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Run_без_EcrLand_бази_відмовляє_до_будь_якого_підключення()
