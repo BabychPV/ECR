@@ -23,7 +23,8 @@ namespace Ecr.Application.Permits.Import;
 /// </summary>
 /// <remarks>
 /// Read: <c>Registry.View</c> or grant <c>Read</c> on the table registry (whoever can open the dialog). Save: <c>Permit.EditType</c> —
-/// the mapping is part of how the permit TYPE is filled, the same right that edits the type's tables and columns.
+/// the mapping is part of how the permit TYPE is filled, the same right that edits the type's tables and columns — AND the read
+/// access of <see cref="GetAsync"/> (a table under Deny is 404 like a missing one, S18).
 /// The specification is <c>{"kind":"permitPasteMapping","columns":{"&lt;header&gt;":"&lt;column&gt;"}}</c>.
 /// </remarks>
 public sealed class PermitImportMappingHandler(
@@ -80,8 +81,11 @@ public sealed class PermitImportMappingHandler(
                          "Anonymous requests do not change registries.",
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
-        var table = PermitImportTables.RequireTable(
-            await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false) ?? throw RegistryAccess.NotFound(code), code);
+        // ⛔ S18/D-312 (AU-13 P2-A): та сама перевірка таблиці, що й у GetAsync, ДО будь-якої валідації: таблиця під Deny
+        // (або без Read) для запису так само «невідома», як для читання - 404 ≡ неіснуючий, без оракула кодів колонок.
+        var lookup = new RegistryLookup(registries, code);
+        await RegistryAccess.RequireAsync(access, currentUser, ViewPermission, GrantLevel.Read, lookup, ct).ConfigureAwait(false);
+        var table = PermitImportTables.RequireTable(await lookup.RequireAsync(ct).ConfigureAwait(false), code);
         var columns = Validate(table, request.Columns ?? new Dictionary<string, string>());
         var spec = JsonSerializer.Serialize(new { kind = Kind, columns });
         var name = new LocalizedText(new Dictionary<string, string> { ["en"] = "Paste mapping" });

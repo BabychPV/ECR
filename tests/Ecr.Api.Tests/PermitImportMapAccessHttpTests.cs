@@ -151,6 +151,57 @@ public sealed partial class PermitImportMapHttpTests
         Assert.True(retried.StatusCode == HttpStatusCode.OK, await retried.Content.ReadAsStringAsync());
     }
 
+    /// <remarks>
+    /// AU-13 P2-A (S18/D-312): <c>PUT …/import-mapping</c> перевіряв лише <c>Permit.EditType</c> - користувач із Deny Read на таблицю
+    /// дозволу зберігав спільне зіставлення (200), а невідомий стовпець давав 422 замість 404 (оракул таблиці й кодів колонок).
+    /// Мутація: прибрати <c>RegistryAccess.RequireAsync</c> із <c>SaveAsync</c> - червоніє (200 і 422 замість 404).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Збереження_зіставлення_під_Deny_таблиці_404_як_неіснуюча_і_нічого_не_зберігає()
+    {
+        var world = await SeedAsync();
+        using var app = App(world);
+        using var admin = await SystemHealthControllerTests.SignedInAsync(sql, app, AllRights);
+        var table = await PublishAsync(admin, world);
+        var tableId = await RegistryIdAsync(table);
+        var missing = $"PRM_NOPE{_tag}_Sources";
+
+        using var denied = await SignedInWithGrantsAsync(
+            app, ["Permit.EditType", "Registry.View", "Registry.EditData"], (tableId, GrantLevel.Read, true));
+        var url = new Uri($"/api/v1/permit-tables/{table}/import-mapping", UriKind.Relative);
+        var missingUrl = new Uri($"/api/v1/permit-tables/{missing}/import-mapping", UriKind.Relative);
+
+        var unknown = await denied.PutAsJsonAsync(missingUrl, new { columns = new Dictionary<string, string> { ["Name"] = "NAME" } });
+        var unknownBody = await unknown.Content.ReadAsStringAsync();
+        Assert.True(unknown.StatusCode == HttpStatusCode.NotFound, $"{unknown.StatusCode}: {unknownBody}");
+
+        // Відомий стовпець і невідомий - та сама відповідь, що й таблиця, якої немає.
+        foreach (var column in new[] { "NAME", "NOPECOL" })
+        {
+            var hidden = await denied.PutAsJsonAsync(url, new { columns = new Dictionary<string, string> { ["Name"] = column } });
+            var body = await hidden.Content.ReadAsStringAsync();
+            Assert.True(hidden.StatusCode == HttpStatusCode.NotFound, $"{column}: {hidden.StatusCode}: {body}");
+            Assert.Equal(Uniform(unknownBody, missing), Uniform(body, table));
+        }
+
+        // Нічого не збережено: адміністратор бачить порожнє зіставлення.
+        var seen = await Json(await admin.GetAsync(url));
+        Assert.Empty(seen.GetProperty("columns").EnumerateObject());
+        Assert.Equal(JsonValueKind.Null, seen.GetProperty("rowVersion").ValueKind);
+
+        // Контроль: редактор без Deny зберігає, як і раніше.
+        using var editor = await SignedInWithGrantsAsync(app, ["Permit.EditType", "Registry.View"]);
+        var saved = await editor.PutAsJsonAsync(url, new { columns = new Dictionary<string, string> { ["Name"] = "NAME" } });
+        Assert.True(saved.StatusCode == HttpStatusCode.OK, await saved.Content.ReadAsStringAsync());
+    }
+
+    private static string Uniform(string body, string code)
+        => System.Text.RegularExpressions.Regex.Replace(
+            body.Replace(code, "<T>", StringComparison.Ordinal),
+            "\"(traceId|correlationId|requestId)\"\\s*:\\s*\"[^\"]*\",?",
+            string.Empty);
+
     private static Dictionary<string, JsonElement> RawValues(JsonElement result, string column)
         => result.GetProperty("columns").EnumerateArray()
             .Single(c => c.GetProperty("column").GetString() == column)
