@@ -115,7 +115,18 @@ export class GridAriaPlugin extends BasePlugin {
       // Блок `.group-rgRow` — один `row` (aria-rowindex 1), група — `columnheader` зі своїм `aria-rowindex` (рівень).
       // Порожні клітинки над колонкою без групи (їх перекриває сама колонка) ховаємо від дерева доступності.
       const block = header.querySelector('.group-rgRow');
-      if (block !== null) {
+      // PB2-P2-1: без груп колонок блок порожній (чи лише порожні клітинки) — `row` без жодного видимого
+      // `columnheader` знову `aria-required-children`. Тоді блок не `row`, а прихований від дерева доступності.
+      const hasGroups =
+        block !== null &&
+        [...block.querySelectorAll('.rgHeaderCell')].some((cell) => (cell.textContent ?? '').trim().length > 0);
+      if (block !== null && !hasGroups) {
+        if (block.hasAttribute('role')) block.removeAttribute('role');
+        if (block.hasAttribute('aria-rowindex')) block.removeAttribute('aria-rowindex');
+        if (block.getAttribute('aria-hidden') !== 'true') block.setAttribute('aria-hidden', 'true');
+      }
+      if (block !== null && hasGroups) {
+        if (block.hasAttribute('aria-hidden')) block.removeAttribute('aria-hidden');
         if (block.getAttribute('role') !== 'row') block.setAttribute('role', 'row');
         if (block.getAttribute('aria-rowindex') !== '1') block.setAttribute('aria-rowindex', '1');
         for (const cell of block.querySelectorAll('.rgHeaderCell')) {
