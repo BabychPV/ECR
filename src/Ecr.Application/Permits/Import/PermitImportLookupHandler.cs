@@ -63,7 +63,7 @@ public sealed class PermitImportLookupHandler(
     {
         ArgumentNullException.ThrowIfNull(request);
         var lookup = new RegistryLookup(registries, code);
-        await RegistryAccess.RequireAsync(access, currentUser, Permission, GrantLevel.Read, lookup, ct).ConfigureAwait(false);
+        var profile = await RegistryAccess.RequireAsync(access, currentUser, Permission, GrantLevel.Read, lookup, ct).ConfigureAwait(false);
         var table = await PermitImportTables.DescribeAsync(
             registries, PermitImportTables.RequireTable(await lookup.RequireAsync(ct).ConfigureAwait(false), code), naeTree, air, ct).ConfigureAwait(false);
 
@@ -87,9 +87,13 @@ public sealed class PermitImportLookupHandler(
             {
                 var def = await registries.FindDefinitionByIdAsync(refId, ct).ConfigureAwait(false);
                 // Another table of the same permit: resolved by the dialog (rows of this permit only).
+                // A target registry the caller does not read (no Registry.View / grant Read, or an explicit Deny, S18/D-312) gives no
+                // candidates: every value is `unknown`, the same answer as a code that does not exist - no oracle of existence.
                 target = def is null || PermitImportTables.IsPermitTable(def)
                     ? Target.Skip
-                    : await LoadAsync(def, refId == table.NaeDefId, ct).ConfigureAwait(false);
+                    : RegistryAccess.CanAccess(profile, Permission, GrantLevel.Read, refId)
+                        ? await LoadAsync(def, refId == table.NaeDefId, ct).ConfigureAwait(false)
+                        : Target.Hidden(def);
                 targets[refId] = target;
             }
 
@@ -112,7 +116,7 @@ public sealed class PermitImportLookupHandler(
         }
 
         var derived = request.Derive && naeSources.Count > 0
-            ? await DeriveAsync(table, naeSources, ct).ConfigureAwait(false)
+            ? await DeriveAsync(table, naeSources, def => RegistryAccess.CanAccess(profile, Permission, GrantLevel.Read, def), ct).ConfigureAwait(false)
             : [];
         return new PermitImportLookupResultDto(results, derived);
     }
@@ -195,11 +199,13 @@ public sealed class PermitImportLookupHandler(
     }
 
     /// <summary>Region/Area of each NAE source from its ancestors.</summary>
-    private async Task<IReadOnlyList<PermitImportDerivedDto>> DeriveAsync(PermitImportTable table, IReadOnlySet<long> sources, CancellationToken ct)
+    private async Task<IReadOnlyList<PermitImportDerivedDto>> DeriveAsync(
+        PermitImportTable table, IReadOnlySet<long> sources, Func<int, bool> readable, CancellationToken ct)
     {
         var regionColumns = table.RegionColumns;
         var areaColumns = table.AreaColumns;
-        if (regionColumns.Count == 0 && areaColumns.Count == 0)
+        // The NAE tree the caller does not read derives nothing (its sources cannot be resolved either: belt and braces).
+        if ((regionColumns.Count == 0 && areaColumns.Count == 0) || !readable(table.NaeDefId!.Value))
         {
             return [];
         }
@@ -303,8 +309,9 @@ public sealed class PermitImportLookupHandler(
         var matcherTree = tree
             .Select(r => new AirRegionCodeDto(r.Key, r.Value.Name, [.. r.Value.Areas.Select(a => new AirAreaCodeDto(a.Key, a.Value))]))
             .ToList();
-        var regionEntries = await EntriesAsync(table.RegionDefId, ct).ConfigureAwait(false);
-        var areaEntries = await EntriesAsync(table.AreaDefId, ct).ConfigureAwait(false);
+        // A Region/Area registry the caller does not read offers no candidates (`noMatch`): its entries are neither used nor named.
+        var regionEntries = await EntriesAsync(table.RegionDefId is { } regionDef && readable(regionDef) ? regionDef : null, ct).ConfigureAwait(false);
+        var areaEntries = await EntriesAsync(table.AreaDefId is { } areaDef && readable(areaDef) ? areaDef : null, ct).ConfigureAwait(false);
 
         var result = new List<PermitImportDerivedDto>();
         foreach (var (id, scope) in scopes.OrderBy(s => s.Key))
@@ -411,6 +418,10 @@ public sealed class PermitImportLookupHandler(
         IReadOnlySet<long>? Sources)
     {
         public static Target Skip { get; } = new(null, new Dictionary<long, RegistryEntry>(), new Dictionary<string, HashSet<long>>(), new Dictionary<string, HashSet<long>>(), null);
+
+        /// <summary>A registry the caller does not read: no candidates, every value <c>unknown</c> (never <c>notSource</c>).</summary>
+        public static Target Hidden(RegistryDef definition)
+            => new(definition, new Dictionary<long, RegistryEntry>(), new Dictionary<string, HashSet<long>>(), new Dictionary<string, HashSet<long>>(), null);
 
         /// <summary>Code first (unique code wins over names), then name; a NAE column — sources only.</summary>
         public PermitImportLookupValueDto Resolve(string text, Func<RegistryEntry, string> label)
