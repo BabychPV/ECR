@@ -64,4 +64,44 @@ public sealed class CodeSigningScriptsTests
         Assert.Contains("verify-msi.ps1 -MsiPath .\\Ecr.msi -IntegrityOnly -RequireSignature -TrustedThumbprint", doc, StringComparison.Ordinal);
         Assert.DoesNotContain("поки варіант не обрано, **MSI не підписується**", doc, StringComparison.Ordinal);
     }
+
+    /// <remarks>
+    /// F13-p189 (P3): резервна копія ключа в робочому дереві git — один <c>git add</c> до витоку закритого ключа. Скрипт відмовляє
+    /// ДО пароля й до модуля PKI (тож тест іде і на Linux CI), а <c>.gitignore</c> ігнорує <c>*.pfx</c>. Мутація (прогнано):
+    /// прибрати цикл пошуку <c>.git</c> — відмова стає «потребує -PfxPassword», тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Резервна_копія_ключа_в_репозиторії_відмовляє_і_pfx_ігнорується()
+    {
+        Assert.Contains("*.pfx", Read(".gitignore").Split('\n').Select(l => l.Trim()));
+
+        var cer = Path.Combine(Path.GetTempPath(), $"ecr-cl3-{Guid.NewGuid():N}.cer");
+        var pfx = Path.Combine(SourceTree.Root, "tools", $"ecr-cl3-{Guid.NewGuid():N}.pfx");
+        var start = new System.Diagnostics.ProcessStartInfo(DeployScriptHarness.FindPowerShell())
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            StandardOutputEncoding = System.Text.Encoding.UTF8,
+            StandardErrorEncoding = System.Text.Encoding.UTF8,
+        };
+        foreach (var a in new[]
+                 {
+                     "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+                     Path.Combine(SourceTree.Root, "tools", "new-codesign-cert.ps1"), "-CerPath", cer, "-BackupPfxPath", pfx,
+                 })
+        {
+            start.ArgumentList.Add(a);
+        }
+
+        using var process = System.Diagnostics.Process.Start(start) ?? throw new InvalidOperationException("PowerShell не запустився");
+        var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+        Assert.True(process.WaitForExit(60_000), "PowerShell не завершився за 60 с.");
+        Assert.NotEqual(0, process.ExitCode);
+        // ASCII-частина відмови (кирилицю stderr Windows PowerShell 5.1 віддає кодовою сторінкою консолі): повний шлях PFX є лише
+        // у відмові «у git-репозиторії», а не у відмові «потребує -PfxPassword».
+        Assert.Contains(pfx, output, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(pfx) || File.Exists(cer), "скрипт не мав нічого записати");
+    }
 }

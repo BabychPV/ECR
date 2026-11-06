@@ -139,6 +139,80 @@ public sealed partial class PermitImportMapHttpTests(SqlServerFixture sql)
         Assert.Empty(result.GetProperty("derived").EnumerateArray());
     }
 
+    /// <remarks>
+    /// D-456 (06.11): кандидати — те саме правило імпорту, що <c>LookupTargetEntries.ListAsync</c> із профілем. Deny на реєстр цілі
+    /// (так само учасник групи <c>PRMG_*</c> під Deny) — наявний код відповідає <c>unknown</c>, рівно як неіснуючий: без оракула
+    /// існування. HTTP-шлях Deny на весь реєстр (рівень реєстру, #757 — <c>CanAccess</c> → <c>Hidden</c>); рівень записів — учасник
+    /// групи під Deny — доводить <c>PermitImportLookupGroupDenyTests</c> (Application).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Реєстр_під_Deny_відповідає_unknown_як_неіснуючий_код()
+    {
+        var world = await SeedAsync();
+        using var app = App(world);
+        using var admin = await SystemHealthControllerTests.SignedInAsync(sql, app, AllRights);
+        var table = await PublishAsync(admin, world);
+
+        int regionDefId;
+        await using (var db = sql.CreateContext())
+        {
+            regionDefId = db.RegistryDefs.Single(d => d.Code == EcrCode.Create(world.RegionRegistry)).Id;
+        }
+
+        using var denied = await DeniedAsync(app, regionDefId);
+        var body = new
+        {
+            columns = new object[]
+            {
+                new { column = "NAE", values = new[] { $"0036{_tag}" } },
+                new { column = "REGION", values = new[] { $"RATY{_tag}", $"Mangystau{_tag}", "nothing" } },
+            },
+            derive = false,
+        };
+
+        var region = Values(await LookupsAsync(denied, table, body), "REGION");
+        Assert.Equal((null, "unknown"), region[$"RATY{_tag}"]);
+        Assert.Equal((null, "unknown"), region[$"Mangystau{_tag}"]);
+        Assert.Equal(region["nothing"], region[$"RATY{_tag}"]);
+
+        // Контроль: реєстр без Deny — як і раніше; той самий запит адміністратора знаходить регіон.
+        Assert.Equal(world.N1, Values(await LookupsAsync(denied, table, body), "NAE")[$"0036{_tag}"].EntryId);
+        Assert.Equal(world.RegionAty, Values(await LookupsAsync(admin, table, body), "REGION")[$"RATY{_tag}"].EntryId);
+    }
+
+    /// <summary>Користувач з усіма правами тесту і роллю з Deny на реєстр <paramref name="registryDefId"/>.</summary>
+    private async Task<HttpClient> DeniedAsync(EcrApiFactory app, int registryDefId)
+    {
+        const string Password = "Permit-Import-Deny-2026!";
+        var name = $"pimdn_{Guid.NewGuid():N}"[..20];
+        await using (var db = sql.CreateContext())
+        {
+            var user = new Ecr.Domain.Entities.Security.User(name, name, AuthProvider.Local);
+            user.SetPassword(new Ecr.Infrastructure.Security.PasswordHasher().Hash(Password));
+            db.Users.Add(user);
+            var role = new Ecr.Domain.Entities.Security.Role(EcrCode.Create($"R{Guid.NewGuid():N}"[..12]), new LocalizedText(new Dictionary<string, string> { ["en"] = "Import" }));
+            var denier = new Ecr.Domain.Entities.Security.Role(EcrCode.Create($"D{Guid.NewGuid():N}"[..12]), new LocalizedText(new Dictionary<string, string> { ["en"] = "Deny" }));
+            db.Roles.AddRange(role, denier);
+            await db.SaveChangesAsync();
+
+            foreach (var permission in AllRights)
+            {
+                db.RolePermissions.Add(new Ecr.Domain.Entities.Security.RolePermission(role.Id, permission));
+            }
+
+            db.RoleAssignments.Add(new Ecr.Domain.Entities.Security.RoleAssignment(role.Id, user.Id, principalSid: null));
+            db.ResourceGrants.Add(new Ecr.Domain.Entities.Security.ResourceGrant(denier.Id, ResourceKind.Registry, registryDefId, GrantLevel.Read, isDeny: true));
+            db.RoleAssignments.Add(new Ecr.Domain.Entities.Security.RoleAssignment(denier.Id, user.Id, principalSid: null));
+            await db.SaveChangesAsync();
+        }
+
+        var client = app.CreateClient();
+        var login = await client.PostAsJsonAsync(new Uri("/api/v1/login/local", UriKind.Relative), new { userName = name, password = Password });
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+        return client;
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Region_і_Area_виводяться_з_предків_джерела_в_дереві_НАЕ()
