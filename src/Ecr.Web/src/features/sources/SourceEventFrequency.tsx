@@ -9,6 +9,7 @@ import {
 } from '@/features/integration/scheduleApi';
 import { collectionSchedulesKey, useCollectionSchedules } from '@/features/integration/useCollectionSchedules';
 import { DataSourcesQueryKey } from '@/features/integration/dataSourcesKey';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { t } from '@/shared/i18n';
 import { cronOfFrequency, DefaultEventFrequency, EventFrequencies, frequencyOfCron } from './eventFrequency';
@@ -80,6 +81,9 @@ export function SourceEventFrequency({
     onError: () => void queryClient.invalidateQueries({ queryKey: collectionSchedulesKey(dataSource) }),
   });
 
+  // ФВ-14.26: відкладений спінер (без миготіння на швидкій відповіді), не миттєвий.
+  const saveLoading = usePendingLoading(save.isPending);
+
   if (schedules.isPending) return <Loader size="sm" role="status" aria-label={t('common.loading')} />;
 
   if (schedules.isError) {
@@ -112,7 +116,7 @@ export function SourceEventFrequency({
         <Button
           onClick={() => cron !== undefined && save.mutate({ base: schedule, cron })}
           disabled={!dirty || cron === undefined}
-          loading={save.isPending}
+          loading={saveLoading}
           data-source-event-frequency-save=""
         >
           {t('sourceEvents.frequency.save')}

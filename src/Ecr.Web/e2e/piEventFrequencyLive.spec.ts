@@ -66,18 +66,23 @@ async function openEventsTab(page: Page): Promise<void> {
 }
 
 async function schedules(page: Page): Promise<ScheduleRow[]> {
-  const response = await page.request.get(`/api/v1/collection-schedules?dataSource=${Connection}`);
-  expect(response.ok()).toBe(true);
+  // Перелік вимагає `Integration.EditSchedule` (роль `E2EAdmin` у `tools/e2e-stand.ps1`); відмова — зі статусом і тілом.
+  const response = await page.request.get(`/api/v1/collection-schedules?dataSource=${encodeURIComponent(Connection)}`);
+  expect(response.ok(), `GET collection-schedules?dataSource=${Connection}: ${String(response.status())} ${await response.text()}`).toBe(true);
   return (await response.json()) as ScheduleRow[];
 }
 
+/** Прибирання — терпиме: розкладу немає (чи його вже прибрали — `404`) означає «нічого прибирати». */
 async function removeSchedule(page: Page): Promise<void> {
   const row = (await schedules(page)).find((item) => item.sourceEntityId === EntityId);
   if (row === undefined) return;
-  const response = await page.request.delete(`/api/v1/collection-schedules/${row.id}`, {
+  const response = await page.request.delete(`/api/v1/collection-schedules/${String(row.id)}`, {
     headers: { 'If-Match': `"${row.rowVersion}"` },
   });
-  expect(response.ok()).toBe(true);
+  expect(
+    response.ok() || response.status() === 404,
+    `DELETE collection-schedules/${String(row.id)}: ${String(response.status())} ${await response.text()}`,
+  ).toBe(true);
 }
 
 async function signIn(page: Page): Promise<void> {
