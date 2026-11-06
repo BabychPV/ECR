@@ -1,0 +1,15 @@
+/* P1 07.11: картка «Sources & parameters» — додані колонки й правка рядка (air.css веде майстер імпорту; тут лише нове). */
+
+.pa-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: var(--mantine-spacing-sm);
+}
+
+.pa-edit-error {
+  display: block;
+}
+
+.pa-actions {
+  white-space: nowrap;
+}

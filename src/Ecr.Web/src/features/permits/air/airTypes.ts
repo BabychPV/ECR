@@ -7,6 +7,8 @@ export type AirLimitsPermit = Schemas['AirLimitsPermitDto'];
 export type AirSource = Schemas['AirSourceDto'];
 export type AirSubstance = Schemas['AirSubstanceDto'];
 export type AirTotal = Schemas['AirTotalDto'];
+/** P1 07.11: колонка, додана до таблиці AIR_SOURCES / AIR_SOURCE_SUBSTANCES («Add as new column»). */
+export type AirAddedColumn = Schemas['AirAddedColumnDto'];
 
 /** Профілі імпорту та їх специфікація (`RegistryImportSpec`). */
 export type ImportProfile = Schemas['ImportProfileDto'];

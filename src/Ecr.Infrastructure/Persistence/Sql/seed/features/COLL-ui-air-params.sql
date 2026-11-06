@@ -18,7 +18,29 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.air.import.scope.notInTreeTitle', N'ru', N'Региона или участка нет в дереве НАЕ'),
     (N'permits.air.import.scope.notInTreeTitle', N'kz', N'Аймақ немесе учаске НАЕ ағашында жоқ'),
     (N'permits.air.import.scope.notInTreeText', N'ru', N'Коды НАЕ из файла будут сопоставлены без учёта региона. Проверьте регион или добавьте его в дерево НАЕ.'),
-    (N'permits.air.import.scope.notInTreeText', N'kz', N'Файлдағы НАЕ кодтары аймақсыз сәйкестендіріледі. Аймақты тексеріңіз немесе оны НАЕ ағашына қосыңыз.')
+    (N'permits.air.import.scope.notInTreeText', N'kz', N'Файлдағы НАЕ кодтары аймақсыз сәйкестендіріледі. Аймақты тексеріңіз немесе оны НАЕ ағашына қосыңыз.'),
+    (N'permits.air.edit.button', N'ru', N'Изменить'),
+    (N'permits.air.edit.button', N'kz', N'Өзгерту'),
+    (N'permits.air.edit.column', N'ru', N'Действия'),
+    (N'permits.air.edit.column', N'kz', N'Әрекеттер'),
+    (N'permits.air.edit.source', N'ru', N'Изменить источник {nae}'),
+    (N'permits.air.edit.source', N'kz', N'{nae} көзін өзгерту'),
+    (N'permits.air.edit.substance', N'ru', N'Изменить вещество {code} источника {nae}'),
+    (N'permits.air.edit.substance', N'kz', N'{nae} көзінің {code} затын өзгерту'),
+    (N'permits.air.edit.notSaved', N'ru', N'Изменения не сохранены'),
+    (N'permits.air.edit.notSaved', N'kz', N'Өзгерістер сақталмады'),
+    (N'permits.air.edit.site', N'ru', N'Площадка / производство'),
+    (N'permits.air.edit.site', N'kz', N'Алаң / өндіріс'),
+    (N'permits.air.edit.productionCode', N'ru', N'Код производства'),
+    (N'permits.air.edit.productionCode', N'kz', N'Өндіріс коды'),
+    (N'permits.air.edit.x1', N'ru', N'X1'),
+    (N'permits.air.edit.x1', N'kz', N'X1'),
+    (N'permits.air.edit.y1', N'ru', N'Y1'),
+    (N'permits.air.edit.y1', N'kz', N'Y1'),
+    (N'permits.air.edit.x2', N'ru', N'X2'),
+    (N'permits.air.edit.x2', N'kz', N'X2'),
+    (N'permits.air.edit.y2', N'ru', N'Y2'),
+    (N'permits.air.edit.y2', N'kz', N'Y2')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -34,7 +56,18 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'permits.air.import.scope.nothingFound', N'en', N'Nothing found', 1),
     (N'permits.air.import.scope.notInTreeTitle', N'en', N'Region or area not in the NAE tree', 1),
     (N'permits.air.sources.scope', N'en', N'Region / area', 1),
-    (N'permits.air.import.scope.notInTreeText', N'en', N'NAE codes of the file will be matched without the region. Check the region or add it to the NAE tree.', 1)
+    (N'permits.air.import.scope.notInTreeText', N'en', N'NAE codes of the file will be matched without the region. Check the region or add it to the NAE tree.', 1),
+    (N'permits.air.edit.button', N'en', N'Edit', 1),
+    (N'permits.air.edit.column', N'en', N'Actions', 1),
+    (N'permits.air.edit.source', N'en', N'Edit source {nae}', 1),
+    (N'permits.air.edit.substance', N'en', N'Edit substance {code} of source {nae}', 1),
+    (N'permits.air.edit.notSaved', N'en', N'Changes not saved', 1),
+    (N'permits.air.edit.site', N'en', N'Site / production', 1),
+    (N'permits.air.edit.productionCode', N'en', N'Production code', 1),
+    (N'permits.air.edit.x1', N'en', N'X1', 1),
+    (N'permits.air.edit.y1', N'en', N'Y1', 1),
+    (N'permits.air.edit.x2', N'en', N'X2', 1),
+    (N'permits.air.edit.y2', N'en', N'Y2', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { saveBatch, type RegistryBatchResult } from '@/features/registries/rows/api';
 import {
   analyseAirImport,
   applyAirImport,
@@ -121,6 +122,32 @@ export function useSaveImportProfile() {
       client.setQueryData(airKeys.profile(saved.code), saved);
       return client.invalidateQueries({ queryKey: airKeys.profiles });
     },
+  });
+}
+
+/** Запис одного рядка картки (джерело чи речовина) загальним пакетним записом довідника. */
+export interface AirRowSave {
+  /** Довідник таблиці (`sourcesRegistryCode` / `substancesRegistryCode` картки). */
+  readonly registryCode: string;
+  readonly id: number;
+  /** `version` рядка з картки — `baseVersion` пакета; застарілий дає помилку рядка `entryChanged`. */
+  readonly version: string | null;
+  readonly values: Readonly<Record<string, string | number | null>>;
+}
+
+/**
+ * P1 07.11: правка рядка на картці — тим самим `POST /registries/{code}/entries/batch`, що й сітка таблиці дозволу (нового
+ * шляху запису немає). Звіт завжди 200: `applied: false` — нічого не записано, причина в `rows[].errors`. Після будь-якого
+ * результату картка перечитується (свіжа версія рядка; після `entryChanged` — чужі значення).
+ */
+export function useSaveAirRow(permitId: number) {
+  const client = useQueryClient();
+
+  return useMutation<RegistryBatchResult, Error, AirRowSave>({
+    mutationFn: ({ registryCode, id, version, values }) =>
+      saveBatch(registryCode, [{ clientRowId: `air-${String(id)}`, op: 'upsert', id, code: null, baseVersion: version, values: { ...values } }], false),
+    meta: { handled: true },
+    onSettled: () => client.invalidateQueries({ queryKey: airKeys.card(permitId) }),
   });
 }
 
