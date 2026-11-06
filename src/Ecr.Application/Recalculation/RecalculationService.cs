@@ -713,8 +713,19 @@ public sealed class RecalculationService(
         // заповнив, знімок лишиться порожнім, і REGFIELD віддасть `#REF`
         // навіть коли Lookup-комірка заповнена, — це і є той міст, який
         // з'єднує `DependencyExtractor` з фактичним перерахунком.
+        // ✎ P1 06.11 (HSE401, 6428 рядків): поля довідника — лише для рядків, які прогін справді рахує. Колонкова
+        // REGFIELD у рядково-локальній цілі першого проходу рахується лише в брудних рядках (`rowFilter` нижче, CAL-03),
+        // а знімок брався для КОЖНОГО рядка таблиці: задача правки одного рядка тривала 12–26 с проти 1.9 с числової.
+        // Умова звуження — та сама, що в `EvaluateTargets(narrowRows: true)`.
+        bool NarrowsRows(int formulaId)
+            => dirtyRows is not null
+               && rowLocal.Contains(formulaId)
+               && formulas.TryGetValue(formulaId, out var narrowOwner)
+               && !tablesWithNonLocalTarget.Contains(narrowOwner.Table.Id);
+
         var registryFields = await LoadRegistryFieldsAsync(
-            dependencies, targets, tables, rowIdsByTable, values, catalogue, ct).ConfigureAwait(false);
+            dependencies, targets, tables, rowIdsByTable, values, catalogue, ct, NarrowsRows, dirtyRows).ConfigureAwait(false);
+        var registryFieldsNarrowed = dirtyRows is not null && targets.Any(NarrowsRows);
 
         // ⛔ Шапка документа читається РЕАЛЬНО (раніше — EmptyHeaders,
         // статичний порожній словник, і HDR.X завжди давав Null незалежно
@@ -734,13 +745,17 @@ public sealed class RecalculationService(
                 registrySnapshots, registryStore, ct)
             .ConfigureAwait(false);
 
-        var context = new SliceEvaluationContext(
-            snapshot, values, headerValues,
-            periodContext,
-            catalogue, rowIdsByTable, registryFields,
-            formulaDependencies: dependencies,
-            logger: logger,
-            registries: templateRegistries);
+        SliceEvaluationContext NewContext(
+            IReadOnlyDictionary<long, IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>>? fields)
+            => new(
+                snapshot, values, headerValues,
+                periodContext,
+                catalogue, rowIdsByTable, fields,
+                formulaDependencies: dependencies,
+                logger: logger,
+                registries: templateRegistries);
+
+        var context = NewContext(registryFields);
 
         // Результати групуються за екземпляром: кожна таблиця пишеться
         // своїм набором змін, бо `CellChangeSet` адресує один екземпляр.
@@ -932,6 +947,17 @@ public sealed class RecalculationService(
                     foreach (var (key, value) in extraStored)
                     {
                         stored.TryAdd(key, value);
+                    }
+
+                    // ✎ P1 06.11: каскад рахує ВСІ рядки — знімок полів довідника, звужений для першого проходу,
+                    // тут перечитується повним (для цілей обох проходів), інакше REGFIELD поза брудними рядками дав би #REF.
+                    if (registryFieldsNarrowed)
+                    {
+                        var full = await LoadRegistryFieldsAsync(
+                                dependencies, [.. targets, .. cascadeTargets], tables, rowIdsByTable, values, catalogue, ct)
+                            .ConfigureAwait(false);
+                        context = NewContext(full);
+                        registryFieldsNarrowed = false;
                     }
 
                     // Рядкове звуження вимкнено: брудні рядки першого проходу не описують рядки цілі Rollup.
@@ -2074,15 +2100,18 @@ public sealed class RecalculationService(
             Dictionary<int, IReadOnlyDictionary<string, long>> rowIdsByTable,
             Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
             UnitCatalogSnapshot units,
-            CancellationToken ct)
+            CancellationToken ct,
+            Func<int, bool>? narrowsRows = null,
+            HashSet<long>? dirtyRows = null)
     {
         var targetIds = new HashSet<int>(targets);
 
         // 1. Які (таблиця, рядок?, колонка, код поля) читає REGFIELD серед
         //    формул-ЦІЛЕЙ. `RowKey == null` — колонкова формула: залежність
         //    стосується КОЖНОГО рядка таблиці (той самий випадок, що
-        //    `RecalculationPlanBuilder.AddCellEdge` уже обробляє для Cell).
-        var needed = new List<(int TableDefId, string? RowKey, int ColumnDefId, string FieldCode)>();
+        //    `RecalculationPlanBuilder.AddCellEdge` уже обробляє для Cell);
+        //    ✎ P1 06.11: крім рядково-локальної цілі, що рахується лише в брудних рядках (`narrowsRows`).
+        var needed = new List<(int TableDefId, string? RowKey, int ColumnDefId, string FieldCode, bool Narrow)>();
 
         foreach (var dependency in dependencies)
         {
@@ -2096,7 +2125,8 @@ public sealed class RecalculationService(
                 continue;
             }
 
-            needed.Add((tableDefId, dependency.RowKey, columnDefId, fieldCode));
+            needed.Add((tableDefId, dependency.RowKey, columnDefId, fieldCode,
+                dirtyRows is not null && narrowsRows is not null && narrowsRows(formulaId)));
         }
 
         if (needed.Count == 0)
@@ -2108,7 +2138,7 @@ public sealed class RecalculationService(
         //    самим шляхом, що й будь-яка інша), + який довідник (з колонки).
         var requests = new List<Registries.RegistryFieldRequest>();
 
-        foreach (var (tableDefId, rowKey, columnDefId, fieldCode) in needed)
+        foreach (var (tableDefId, rowKey, columnDefId, fieldCode, narrow) in needed)
         {
             if (!tables.TryGetValue(tableDefId, out var table))
             {
@@ -2123,7 +2153,9 @@ public sealed class RecalculationService(
 
             IEnumerable<string> rowKeys = rowKey is not null
                 ? [rowKey]
-                : rowIdsByTable.TryGetValue(tableDefId, out var rows) ? rows.Keys : [];
+                : !rowIdsByTable.TryGetValue(tableDefId, out var rows) ? []
+                : narrow ? rows.Where(pair => dirtyRows!.Contains(pair.Value)).Select(pair => pair.Key)
+                : rows.Keys;
 
             foreach (var key in rowKeys)
             {

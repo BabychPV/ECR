@@ -6,6 +6,7 @@ using System.Text.Json;
 using Ecr.Application.Documents;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
@@ -246,7 +247,131 @@ public sealed class FormulaManualOverrideHttpFlowTests(SqlServerFixture sql)
             i => i.GetProperty("kind").GetString() == "OverrideLost" && i.GetProperty("values").GetInt64() == 2);
     }
 
+    /// <remarks>
+    /// P1 06.11 (живий тест людини, HSE401 P4-V11-0001, H_COMPONENT = <c>REGFIELD([H_POLL], 'COMPONENT')</c>): після
+    /// повернення формули (видалення ручного значення) числові формули рахувались знову, а текстова лишалась порожньою.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-461")]
+    public async Task Текстова_формула_REGFIELD_рахується_знову_після_повернення_формули()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        int lookupId, textId;
+        long entryId;
+        await using (var db = s.Builder.CreateContext())
+        {
+            var registry = new RegistryDef(EcrCode.Create($"SUBST{Guid.NewGuid():N}"[..20].ToUpperInvariant()), Name("Substances"), isTemporal: false);
+            db.RegistryDefs.Add(registry);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            var field = new RegistryFieldDef(registry.Id, EcrCode.Create("COMPONENT"), Name("Component"), CellDataType.String, 1);
+            db.RegistryFieldDefs.Add(field);
+            var entry = new RegistryEntry(registry.Id, EcrCode.Create("E1023"), Name("1023 Diethyl"));
+            db.RegistryEntries.Add(entry);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            var value = new RegistryValue(entry.Id, field.Id);
+            value.Set(CellDataType.String, "Diethylamine", null);
+            db.RegistryValues.Add(value);
+
+            var lookup = new ColumnDef(s.TableA, EcrCode.Create("POLL"), Name("Pollutant"), 4, CellDataType.Lookup);
+            lookup.SetLookup(registry.Id);
+            var text = new ColumnDef(s.TableA, EcrCode.Create("COMP"), Name("Component"), 5, CellDataType.Formula);
+            db.ColumnDefs.AddRange(lookup, text);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            (lookupId, textId, entryId) = (lookup.Id, text.Id, entry.Id);
+        }
+
+        var admin = await NewUserAsync(s, GrantLevel.Manage,
+            "Template.View", "Template.Edit", "Template.Publish", "Registry.View", EditRules.OverrideFormulaPermission).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var adminClient = await SignInAsync(app, admin).ConfigureAwait(true);
+
+        await ExpectAsync(app, HttpStatusCode.OK, SaveFormulaAsync(adminClient, s.VersionId, s.TableA, s.FColumnId,
+            $"[{s.ACode}] * 2")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.OK, SaveFormulaAsync(adminClient, s.VersionId, s.TableB, s.SColumnId,
+            $"SUM([{s.SheetA}].[{s.TableACode}].[{s.Rows[0]}:{s.Rows[4]}].[{s.FCode}])")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.OK, SaveFormulaAsync(adminClient, s.VersionId, s.TableA, textId,
+            "REGFIELD([POLL], 'COMPONENT')")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, PublishAsync(adminClient, s.VersionId)).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.OK,
+            ToggleAsync(adminClient, s.VersionId, await FormulaIdAsync(s, textId).ConfigureAwait(true), true, false)).ConfigureAwait(true);
+
+        // (a) Перегляд рядка у відповіді PATCH рахує формулу з дозволом ручного значення: текст одразу, без фонової задачі
+        // (до 06.11 формула з дозволом у перегляд не потрапляла — Компонент був порожній до перерахунку, на живому 38 с).
+        var row = s.Rows[0];
+        var picked = await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(adminClient, s, row, "POLL", entryId.ToString(CultureInfo.InvariantCulture),
+            null, await VersionAsync(adminClient, s, row).ConfigureAwait(true))).ConfigureAwait(true);
+        Assert.Equal("Diethylamine", Computed(picked, row, "COMP"));
+        await WaitTextAsync(app, adminClient, s, row, "COMP", "Diethylamine").ConfigureAwait(true);
+
+        // (c) Ручне значення текстової формули — текст (до 06.11: 422 «очікує число», людина вводила 1).
+        var manual = await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(adminClient, s, row, "COMP", "Diethyl manual", "ручне",
+            await VersionAsync(adminClient, s, row).ConfigureAwait(true))).ConfigureAwait(true);
+        Assert.Null(Computed(manual, row, "COMP")); // ручне значення перегляд не перезаписує
+        await WaitTextAsync(app, adminClient, s, row, "COMP", "Diethyl manual").ConfigureAwait(true);
+        Assert.Equal((CellChangeOrigins.FormulaOverride, "ручне"), await LastChangeAsync(s, row, textId).ConfigureAwait(true));
+
+        // Видалення — повернення формули: текст довідника одразу у відповіді й після перерахунку.
+        var restored = await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(adminClient, s, row, "COMP", null, null,
+            await VersionAsync(adminClient, s, row).ConfigureAwait(true))).ConfigureAwait(true);
+        Assert.Equal("Diethylamine", Computed(restored, row, "COMP"));
+        await WaitTextAsync(app, adminClient, s, row, "COMP", "Diethylamine").ConfigureAwait(true);
+        Assert.Equal(0, await MarksAsync(s).ConfigureAwait(true));
+
+        // Числова формула лишається числовою: текст замість числа — та сама відмова «очікує число».
+        await ExpectAsync(app, HttpStatusCode.OK,
+            ToggleAsync(adminClient, s.VersionId, await FormulaIdAsync(s, s.FColumnId).ConfigureAwait(true), true, false)).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(adminClient, s, row, s.ACode, "3", null,
+            await VersionAsync(adminClient, s, row).ConfigureAwait(true))).ConfigureAwait(true);
+        await WaitTextAsync(app, adminClient, s, row, s.FCode, "6.0000000000000000").ConfigureAwait(true);
+        var numeric = await ExpectAsync(app, HttpStatusCode.UnprocessableEntity, PatchAsync(adminClient, s, row, s.FCode, "abc", "текст",
+            await VersionAsync(adminClient, s, row).ConfigureAwait(true))).ConfigureAwait(true);
+        Assert.Equal("err.ECR-CELL-0422.expectsNumber", Json(numeric).GetProperty("messageKey").GetString());
+        Assert.Equal(6m, await StoredAsync(s, row, s.FColumnId).ConfigureAwait(true));
+        _ = lookupId;
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
+
+    /// <summary>Значення комірки з <c>computedCells</c> відповіді PATCH (перегляд рядка); <c>null</c> — її там немає.</summary>
+    private static string? Computed(string patchBody, string rowKey, string code)
+        => Json(patchBody).TryGetProperty("computedCells", out var cells) && cells.ValueKind == JsonValueKind.Array
+            ? cells.EnumerateArray()
+                .Where(c => c.GetProperty("rowKey").GetString() == rowKey && c.GetProperty("columnCode").GetString() == code)
+                .Select(c => c.GetProperty("value").ToString())
+                .FirstOrDefault()
+            : null;
+
+    /// <summary>Опитує зріз, доки комірка не покаже очікуваний текст (черга перерахунку асинхронна).</summary>
+    private static async Task WaitTextAsync(EcrApiFactory app, HttpClient client, Scenario s, string rowKey, string code, string expected)
+    {
+        var deadline = DateTime.UtcNow + RecalcDeadline;
+        while (true)
+        {
+            var cells = Json(await SliceAsync(app, client, s).ConfigureAwait(false)).GetProperty("rows").EnumerateArray()
+                .Single(r => r.GetProperty("rowKey").GetString() == rowKey).GetProperty("cells");
+            var seen = cells.TryGetProperty(code, out var v)
+                ? v.ValueKind switch
+                {
+                    JsonValueKind.String => v.GetString(),
+                    JsonValueKind.Number => v.GetDecimal().ToString(CultureInfo.InvariantCulture),
+                    _ => null,
+                }
+                : null;
+            if (seen == expected)
+            {
+                return;
+            }
+
+            if (DateTime.UtcNow > deadline)
+            {
+                Assert.Fail($"Очікувано {rowKey}:{code} = «{expected}»; є «{seen}»\n{cells}\n{app.ErrorsText}");
+            }
+
+            await Task.Delay(200).ConfigureAwait(false);
+        }
+    }
 
     private sealed record Scenario(
         TestDocumentBuilder Builder, TestDocument Document, int PeriodKey, int VersionId,
@@ -425,13 +550,14 @@ public sealed class FormulaManualOverrideHttpFlowTests(SqlServerFixture sql)
         return (calculated, marked);
     }
 
-    private static async Task<(string Origin, string? Reason)> LastChangeAsync(Scenario s, string rowKey)
+    private static async Task<(string Origin, string? Reason)> LastChangeAsync(Scenario s, string rowKey, int? columnId = null)
     {
+        var column = columnId ?? s.FColumnId;
         await using var db = s.Builder.CreateContext();
         var row = await db.Database.SqlQuery<ChangeRow>(
                 $"""
                 SELECT TOP (1) Origin, Reason FROM aud.CellChange
-                WHERE DocumentId = {s.Document.DocumentId} AND ColumnDefId = {s.FColumnId} AND RowKey = {rowKey}
+                WHERE DocumentId = {s.Document.DocumentId} AND ColumnDefId = {column} AND RowKey = {rowKey}
                   AND Origin <> N'Recalculation'
                 ORDER BY Id DESC
                 """)

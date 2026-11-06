@@ -223,6 +223,32 @@ public sealed partial class PatchCellsHandler
         return reason;
     }
 
+    /// <summary>
+    /// ✎ D-461 (P1 06.11): текстове ручне значення — лише замість ТЕКСТОВОГО результату. Тип результату видно з
+    /// наявного значення комірки (уже прочитаного, нуль нових звернень): число в комірці — числова формула, і текст
+    /// у ній — та сама відмова «очікує число», що й без ручного значення. Порожня комірка типу не каже — текст
+    /// приймається.
+    /// </summary>
+    private static void EnsureManualTextMatchesFormula(
+        RequestContext context, CellChangeLists changes, IReadOnlyDictionary<CellAddress, CellValueData> previous)
+    {
+        if (context.OverridePlan is null)
+        {
+            return;
+        }
+
+        foreach (var upsert in changes.Upserts)
+        {
+            if (upsert.Value.ValueString is { } text
+                && IsManualOverride(context, changes, upsert.Address)
+                && previous.TryGetValue(upsert.Address, out var stored)
+                && stored.ValueNumeric is not null)
+            {
+                throw CellValueReader.ExpectsNumber(context.Snapshot.ColumnsById[upsert.Address.ColumnDefId], text);
+            }
+        }
+    }
+
     /// <summary>Чи комірка — нове ручне значення цього батчу (для структурної перевірки значення).</summary>
     private static bool IsManualOverride(RequestContext context, CellChangeLists changes, CellAddress address)
         => context.OverridePlan is { } plan

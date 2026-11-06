@@ -185,6 +185,7 @@ public sealed partial class PatchCellsHandler(
         // «те саме значення, що вже стоїть» пропускається без відмови, і
         // питати про це сховище вдруге, по комірці, немає потреби.
         var previous = await ReadPreviousValuesAsync(changes, ct).ConfigureAwait(false);
+        EnsureManualTextMatchesFormula(context, changes, previous);
         await EnsureRegistryReferencesExistAsync(context, changes, previous, ct).ConfigureAwait(false);
         await EnsureUnitReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
 
@@ -1501,7 +1502,7 @@ public sealed partial class PatchCellsHandler(
         // спершу нові рядки, потім наявні — тож і перша відмова батчу та сама.
         if (context.Creations.Count > 0)
         {
-            EnsureCreationValuesReadable(context.Creations, context.ColumnDefs, culture);
+            EnsureCreationValuesReadable(context.Creations, context.ColumnDefs, culture, context.OverrideCells);
 
             for (var i = 0; i < context.Creations.Count; i++)
             {
@@ -1509,7 +1510,8 @@ public sealed partial class PatchCellsHandler(
                 var id = PlaceholderRowId(i);
                 touched.Add(id);
                 rowKeyById[id] = row.RowKey;
-                Distribute(row, id, context.PeriodKey, context.ColumnDefs, context.Instance.TableDefId, upserts, deletes, culture);
+                Distribute(row, id, context.PeriodKey, context.ColumnDefs, context.Instance.TableDefId, upserts, deletes, culture,
+                    context.OverrideCells);
             }
         }
 
@@ -1525,7 +1527,8 @@ public sealed partial class PatchCellsHandler(
             // це рівно ті рядки, які `LoadContextAsync` відібрав за
             // `BaseVersion is not null` (null означає намір СТВОРИТИ, R-B2).
             expectedRowVersions[id] = row.BaseVersion!;
-            Distribute(row, id, context.PeriodKey, context.ColumnDefs, context.Instance.TableDefId, upserts, deletes, culture);
+            Distribute(row, id, context.PeriodKey, context.ColumnDefs, context.Instance.TableDefId, upserts, deletes, culture,
+                context.OverrideCells);
         }
 
         return new CellChangeLists(upserts, deletes, touched, rowKeyById, expectedRowVersions);
@@ -3662,7 +3665,8 @@ public sealed partial class PatchCellsHandler(
     /// що й у <see cref="Distribute"/>, тож відмова однакова, лише раніше.
     /// </remarks>
     private static void EnsureCreationValuesReadable(
-        IReadOnlyList<PatchRow> creations, IReadOnlyDictionary<string, ColumnDef> columnDefs, System.Globalization.CultureInfo culture)
+        IReadOnlyList<PatchRow> creations, IReadOnlyDictionary<string, ColumnDef> columnDefs, System.Globalization.CultureInfo culture,
+        HashSet<(string RowKey, int ColumnDefId)>? overrideCells = null)
     {
         foreach (var row in creations)
         {
@@ -3672,7 +3676,9 @@ public sealed partial class PatchCellsHandler(
 
                 if (!cell.IsEmpty)
                 {
-                    _ = CellValueReader.Read(cell.Value, column, culture);
+                    _ = overrideCells is { Count: > 0 } && overrideCells.Contains((row.RowKey, column.Id))
+                        ? CellValueReader.ReadManualOverride(cell.Value, column, culture)
+                        : CellValueReader.Read(cell.Value, column, culture);
                 }
             }
         }
@@ -3686,7 +3692,8 @@ public sealed partial class PatchCellsHandler(
         int tableDefId,
         List<CellRecord> upserts,
         List<CellAddress> deletes,
-        System.Globalization.CultureInfo culture)
+        System.Globalization.CultureInfo culture,
+        HashSet<(string RowKey, int ColumnDefId)>? overrideCells = null)
     {
         foreach (var cell in row.Cells)
         {
@@ -3703,7 +3710,10 @@ public sealed partial class PatchCellsHandler(
             // читач повертає null, а не порожнє значення: «стерти» і «явна
             // порожнеча» — різні наміри, і зводити їх в один означає втратити
             // відмінність, яку користувач висловив свідомо.
-            var data = CellValueReader.Read(cell.Value, column, culture);
+            // ✎ D-461: ручне значення замість формули може бути текстом (текстова формула, напр. REGFIELD).
+            var data = overrideCells is { Count: > 0 } && overrideCells.Contains((row.RowKey, column.Id))
+                ? CellValueReader.ReadManualOverride(cell.Value, column, culture)
+                : CellValueReader.Read(cell.Value, column, culture);
 
             if (data is null)
             {
