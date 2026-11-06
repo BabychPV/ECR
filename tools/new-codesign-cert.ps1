@@ -45,6 +45,17 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+# ⛔ F13-p189 (P3): резервна копія ключа НЕ лягає в робоче дерево git — один `git add` і закритий ключ у репозиторії.
+# Перевіряється ПЕРШОЮ (до пароля й до модуля PKI): шлях повний, вгору шукається `.git` (тека або файл worktree).
+if ($BackupPfxPath) {
+    $pfxFull = [System.IO.Path]::GetFullPath($BackupPfxPath)
+    for ($dir = [System.IO.Path]::GetDirectoryName($pfxFull); $dir; $dir = [System.IO.Path]::GetDirectoryName($dir)) {
+        if (Test-Path -LiteralPath (Join-Path $dir '.git')) {
+            throw "-BackupPfxPath $pfxFull лежить у git-репозиторії ($dir): закритий ключ не зберігається в репозиторії — оберіть теку поза ним (офлайн-носій)."
+        }
+    }
+}
+
 if ($BackupPfxPath -and -not $PfxPassword) {
     throw '-BackupPfxPath потребує -PfxPassword (SecureString): резервна копія ключа без пароля не створюється.'
 }

@@ -34,6 +34,13 @@ namespace Ecr.Application.Permits.Import;
 /// (normalised English name or code). Unique match only; none — <c>noMatch</c>, two or more — <c>ambiguous</c>.
 /// </para>
 /// Right: <c>Registry.View</c> or grant <c>Read</c> on the table. Nothing is written.
+/// <para>
+/// ✎ D-456 (06.11): candidates follow the ONE import rule <see cref="Groups.LookupTargetEntries.ListAsync"/> with the caller's
+/// profile. A target that is a permit-type GROUP (<c>PRMG_*</c>, no own entries) expands to its members, and a member under Deny is
+/// skipped; a target under Deny, or one the caller may not choose from (<see cref="Groups.LookupTargetMatcher.MayChoose"/>), has no
+/// candidates. A text naming a hidden entry answers <c>unknown</c> — the same shape as a code that does not exist (no existence
+/// oracle).
+/// </para>
 /// </remarks>
 public sealed class PermitImportLookupHandler(
     IRegistryStore registries,
@@ -42,7 +49,8 @@ public sealed class PermitImportLookupHandler(
     IAccessDecisionService access,
     ICurrentUser currentUser,
     NaeTreeSettings? naeTree = null,
-    AirLimitsSettings? air = null)
+    AirLimitsSettings? air = null,
+    Groups.IPermitGroupResolver? groups = null)
 {
     /// <summary>Right to resolve (or a grant <c>Read</c> on the table).</summary>
     public const string Permission = "Registry.View";
@@ -92,7 +100,8 @@ public sealed class PermitImportLookupHandler(
                 target = def is null || PermitImportTables.IsPermitTable(def)
                     ? Target.Skip
                     : RegistryAccess.CanAccess(profile, Permission, GrantLevel.Read, refId)
-                        ? await LoadAsync(def, refId == table.NaeDefId, ct).ConfigureAwait(false)
+                        // D-456: a readable registry still offers only the entries the caller may choose (PRMG members, Deny).
+                        ? await LoadAsync(def, refId == table.NaeDefId, profile, ct).ConfigureAwait(false)
                         : Target.Hidden(def);
                 targets[refId] = target;
             }
@@ -141,9 +150,9 @@ public sealed class PermitImportLookupHandler(
     }
 
     /// <summary>Candidates of one registry, indexed by normalised code and name.</summary>
-    private async Task<Target> LoadAsync(RegistryDef def, bool isNae, CancellationToken ct)
+    private async Task<Target> LoadAsync(RegistryDef def, bool isNae, AccessProfile profile, CancellationToken ct)
     {
-        var entries = (await rows.ListEntriesAsync(def.Id, asOfUtc: null, ct).ConfigureAwait(false)).Where(e => !e.IsDeleted).ToList();
+        var entries = (await CandidatesAsync(def, profile, ct).ConfigureAwait(false)).Where(e => !e.IsDeleted).ToList();
         var naeCodes = new Dictionary<long, string>();
         HashSet<long>? sources = null;
         if (isNae)
@@ -196,6 +205,27 @@ public sealed class PermitImportLookupHandler(
         }
 
         return new Target(def, entries.ToDictionary(e => e.Id), byCode, byName, sources);
+    }
+
+    /// <summary>
+    /// D-456: entries the caller may choose — a group target through <see cref="Groups.LookupTargetEntries.ListAsync"/> (members under
+    /// Deny skipped, Deny on the group — none); a direct target the caller may not choose from — none; otherwise the registry rows.
+    /// </summary>
+    private async Task<IReadOnlyList<RegistryEntry>> CandidatesAsync(RegistryDef def, AccessProfile profile, CancellationToken ct)
+    {
+        if (groups is not null)
+        {
+            await groups.EnsureFreshAsync(ct).ConfigureAwait(false);
+            if (groups.IsGroup(def.Id))
+            {
+                return [.. (await Groups.LookupTargetEntries.ListAsync(registries, groups, def.Id, ct, profile).ConfigureAwait(false))
+                    .Select(e => e.Entry)];
+            }
+        }
+
+        return Groups.LookupTargetMatcher.MayChoose(profile, def.Id, viewProjectId: null)
+            ? await rows.ListEntriesAsync(def.Id, asOfUtc: null, ct).ConfigureAwait(false)
+            : [];
     }
 
     /// <summary>Region/Area of each NAE source from its ancestors.</summary>
