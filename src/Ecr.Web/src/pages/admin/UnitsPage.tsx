@@ -407,6 +407,7 @@ export function UnitsPage(): JSX.Element {
           rows={shown}
           rowKey={(unit) => String(unit.id)}
           defaultSort={{ key: 'dimensionCode', direction: 'asc' }}
+          urlSortParam="sort"
           isPending={units.isPending}
           error={units.error}
           emptyTitle={t('units.empty')}
