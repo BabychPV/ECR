@@ -123,7 +123,11 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Workflow/SubmitSheetHandler.cs | текст | emptyCodes.Count"] =
             (1, "D-PS: число порожніх обов'язкових полів шапки, не колонка і не значення"),
         ["src/Ecr.Application/Documents/GetTableSliceHandler.cs | текст | code"] =
-            (4, "ключ «рядок:колонка» лише для колонок, що пройшли CanReadColumn; CELL-STYLE L3b — оформлення комірок лише видимих колонок відповіді; D-461 — ручні значення лише видимих колонок відповіді"),
+            (3, "ключ «рядок:колонка» лише для колонок, що пройшли CanReadColumn (причини/підтвердження — у SlicePermissionMaps); CELL-STYLE L3b — оформлення комірок лише видимих колонок відповіді; D-461 — ручні значення лише видимих колонок відповіді"),
+        ["src/Ecr.Application/Documents/SlicePermissionMaps.cs | текст | code"] =
+            (2, "перф зрізу: ключ «рядок:колонка» причин/підтверджень, винесений з GetTableSliceHandler; лише колонки, що пройшли CanReadColumn (S6)"),
+        ["src/Ecr.Application/Documents/CellStyleAccessPolicy.cs | текст | cell.ColumnCode"] =
+            (1, "CELL-STYLE P1A: ключ «рядок:колонка» лише для ВИДИМИХ колонок відповіді (visibleColumnCodeById); причина — enum, не значення"),
         ["src/Ecr.Application/Documents/GetTableSliceHandler.cs | текст | visibleCodeById[cell.ColumnDefId]"] =
             (1, "D-461: комірки формул, що дозволяють ручне значення, — лише видимих колонок відповіді (visibleCodeById)"),
         ["src/Ecr.Application/Documents/PatchCellsHandler.FormulaOverride.cs | деталь columnCode | columnCode"] =

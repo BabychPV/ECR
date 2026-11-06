@@ -399,10 +399,35 @@ public sealed class GetTableSliceHandler(
         var ownerBlocked = await OwnerBlockedColumnsAsync(documentId, table, instance.PeriodKey, anyPeriodScope, ct)
             .ConfigureAwait(false);
 
-        var cellsByRow = cells
-            .Where(c => readable.CanReadColumn(c.Address.ColumnDefId) && !ownerBlocked.Contains(c.Address.ColumnDefId))
-            .GroupBy(c => c.Address.TableRowId)
-            .ToDictionary(g => g.Key, g => g.ToList());
+        // ⚡ Перф зрізу (HSE401: ~10⁵ комірок): рішення «віддати колонку?» і її ключ у `RowDto.Cells` — один раз на
+        // колонку, а не на комірку; групування за рядком — без LINQ GroupBy. Набір і ключі — ті самі.
+        var cellKeyByColumn = new Dictionary<int, string?>();
+        var cellsByRow = new Dictionary<long, List<CellRecord>>(rowIds.Count);
+        foreach (var cell in cells)
+        {
+            var columnId = cell.Address.ColumnDefId;
+            if (!cellKeyByColumn.TryGetValue(columnId, out var cellKey))
+            {
+                cellKey = readable.CanReadColumn(columnId) && !ownerBlocked.Contains(columnId)
+                    ? columnCodeById.TryGetValue(columnId, out var code)
+                        ? code
+                        : columnId.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    : null;
+                cellKeyByColumn[columnId] = cellKey;
+            }
+
+            if (cellKey is null)
+            {
+                continue;
+            }
+
+            if (!cellsByRow.TryGetValue(cell.Address.TableRowId, out var own))
+            {
+                cellsByRow[cell.Address.TableRowId] = own = [];
+            }
+
+            own.Add(cell);
+        }
 
         // Підписи й порядок — з опису рядка шаблону (`RowDef`). Раніше тут
         // стояли `Ordinal: 0` і `Label: null` на КОЖНОМУ рядку: поля контракту
@@ -428,10 +453,7 @@ public sealed class GetTableSliceHandler(
                 RowKind: r.Def is null ? table.RowMode.ToString() : r.Def.RowKind.ToString(),
                 Label: r.Def?.LabelL10n.Get(language),
                 RowVersion: versions.GetValueOrDefault(r.RowKey) ?? string.Empty,
-                Cells: (cellsByRow.GetValueOrDefault(r.RowId) ?? [])
-                    .ToDictionary(
-                        c => columnCodeById.TryGetValue(c.Address.ColumnDefId, out var code) ? code : c.Address.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        c => Unwrap(c.Value)),
+                Cells: RowCells(cellsByRow.GetValueOrDefault(r.RowId), cellKeyByColumn),
                 IsOrphaned: orphans.TryGetValue(r.RowId, out var orph) && orph,
                 Style: StyleOf(styleById, r.Def?.StyleId)))
             .ToList();
@@ -439,8 +461,6 @@ public sealed class GetTableSliceHandler(
         // 5. Компактні мапи: grid має одразу знати, що сіре і чому (заборони),
         //    і що дозволене лише з підтвердженням (`ФВ-2.16`, `#43`), — без
         //    другого запиту в обох випадках.
-        var permissions = new Dictionary<string, string>(StringComparer.Ordinal);
-
         // HSE401: колонки формул (обчислювані) - їхню нередагованість клієнт виводить сам з типу колонки
         // (`permissions.ts`: Formula/Calculated без запису = `CalculatedCell`; ручне значення D-461 сервер знімає ключем
         // і `formulaOverride`). Тож ключ `CalculatedCell` на КОЖНУ таку комірку (6 428 x 31 = ~200k ключів) не віддається.
@@ -448,43 +468,11 @@ public sealed class GetTableSliceHandler(
             .Where(c => c.DataType is nameof(Domain.Enums.CellDataType.Formula) or nameof(Domain.Enums.CellDataType.Calculated))
             .Select(c => c.Id)
             .ToHashSet();
-        var confirmations = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (address, decision) in decisions)
-        {
-            if (!keyById.TryGetValue(address.TableRowId, out var rowKey))
-            {
-                continue;
-            }
-            // ⚠ S6: причина відмови на заборонену колонку теж розкривала б її код.
-            if (!readable.CanReadColumn(address.ColumnDefId)
-                || !columnCodeById.TryGetValue(address.ColumnDefId, out var code))
-            {
-                continue;
-            }
 
-            var key = $"{rowKey}:{code}";
-
-            if (!decision.IsAllowed)
-            {
-                if (decision.Reason == Domain.Enums.EditDenyReason.CalculatedCell
-                    && computedColumns.Contains(address.ColumnDefId))
-                {
-                    continue;
-                }
-
-                permissions[key] = decision.Reason.ToString();
-                continue;
-            }
-
-            // ⛔ До цього поля `RequiresConfirmation` ніхто не читав: рішення
-            // рахувалося (`AccessDecisionService.Decide`), а сюди, у
-            // відповідь клієнту, не потрапляло НІЧОГО — `AllowWithConfirmation`
-            // і звичайний дозвіл були на виході з обробника нерозрізненні (`#43`).
-            if (decision.RequiresConfirmation)
-            {
-                confirmations[key] = decision.Detail ?? string.Empty;
-            }
-        }
+        // ⚠ S6 (заборонена колонка не дає ключа) і `#43` (підтвердження) — у `SlicePermissionMaps`; колонка там
+        // розв'язується один раз, а не на кожне з ~200k рішень.
+        var (permissions, confirmations) = SlicePermissionMaps.Build(
+            decisions, keyById, readable.CanReadColumn, columnCodeById, computedColumns);
 
         // ФВ-2.6/2.7: умовне форматування — ОДИН запит на версію й та сама
         // чиста функція, що в Excel-експорті (`ConditionalFormatEvaluator`).
@@ -942,6 +930,23 @@ public sealed class GetTableSliceHandler(
     /// розбіжність була видима лише як «"Перевірити" каже одне, подання —
     /// інше».
     /// </remarks>
+    private static Dictionary<string, object?> RowCells(List<CellRecord>? own, Dictionary<int, string?> cellKeyByColumn)
+    {
+        var result = new Dictionary<string, object?>(own?.Count ?? 0);
+        if (own is null)
+        {
+            return result;
+        }
+
+        foreach (var cell in own)
+        {
+            // ⚠ `Add`, як і попередній `ToDictionary`: дві комірки на один ключ — дефект даних, не тиха перезапис.
+            result.Add(cellKeyByColumn[cell.Address.ColumnDefId]!, Unwrap(cell.Value));
+        }
+
+        return result;
+    }
+
     private static object? Unwrap(Domain.ValueObjects.CellValueData v)
         => Ecr.Expressions.Evaluation.CellValueMapping.ToRuleValue(v);
 }

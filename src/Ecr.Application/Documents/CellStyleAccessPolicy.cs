@@ -36,52 +36,67 @@ public static class CellStyleAccessPolicy
         ArgumentNullException.ThrowIfNull(rowKeyById);
         ArgumentNullException.ThrowIfNull(visibleColumnCodeById);
 
-        var cells = new List<(string RowKey, string ColumnCode, EditDecision Decision)>();
+        // ⚡ Перф зрізу (~200k рішень на HSE401): доти кожна видима комірка ставала кортежем у списку, а підсумки
+        // рахувались чотирма GroupBy по рядкових ключах. Тепер — лічильники за один прохід; кортежі лише для ЗАБОРОНЕНИХ
+        // комірок (вони потрібні для залишку). Результат той самий: тотожність зі старою реалізацією стереже
+        // `CellStyleAccessPolicyEquivalenceTests`.
+        var total = 0;
+        var rowTotals = new Dictionary<string, int>(StringComparer.Ordinal);
+        var columnTotals = new Dictionary<string, int>(StringComparer.Ordinal);
+        var rowDenied = new Dictionary<string, int>(StringComparer.Ordinal);
+        var columnDenied = new Dictionary<string, int>(StringComparer.Ordinal);
+        var reasonCounts = new Dictionary<EditDenyReason, int>();
+        var denied = new List<(string RowKey, string ColumnCode, EditDenyReason Reason)>();
+
         if (decisions is not null)
         {
             foreach (var (address, decision) in decisions)
             {
                 // Рішення на комірку, якої читач не бачить (рядок без ключа, схована колонка), не береться.
-                if (rowKeyById.TryGetValue(address.TableRowId, out var rowKey)
-                    && visibleColumnCodeById.TryGetValue(address.ColumnDefId, out var code))
+                if (!rowKeyById.TryGetValue(address.TableRowId, out var rowKey)
+                    || !visibleColumnCodeById.TryGetValue(address.ColumnDefId, out var code))
                 {
-                    cells.Add((rowKey, code, decision));
+                    continue;
+                }
+
+                total++;
+                Increment(rowTotals, rowKey);
+                Increment(columnTotals, code);
+
+                if (!decision.IsAllowed)
+                {
+                    Increment(rowDenied, rowKey);
+                    Increment(columnDenied, code);
+                    Increment(reasonCounts, decision.Reason);
+                    denied.Add((rowKey, code, decision.Reason));
                 }
             }
         }
 
-        if (cells.Count == 0)
+        if (total == 0)
         {
             return new CellStyleAccessDto(false, null, [], [], new Dictionary<string, string>(), false);
         }
 
-        var denied = cells.Where(c => !c.Decision.IsAllowed).ToList();
-
-        if (denied.Count == cells.Count)
+        if (denied.Count == total)
         {
             // Одна причина на всю таблицю: найчастіша, при рівності — менше значення enum (детермінізм).
-            var reason = denied
-                .GroupBy(c => c.Decision.Reason)
-                .OrderByDescending(g => g.Count())
-                .ThenBy(g => (int)g.Key)
+            var reason = reasonCounts
+                .OrderByDescending(r => r.Value)
+                .ThenBy(r => (int)r.Key)
                 .First().Key;
 
             return new CellStyleAccessDto(false, reason.ToString(), [], [], new Dictionary<string, string>(), false);
         }
 
         // Рядок/колонка заборонені ЦІЛКОМ, якщо заборонена кожна їхня видима комірка.
-        var rowTotals = cells.GroupBy(c => c.RowKey, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
-        var columnTotals = cells.GroupBy(c => c.ColumnCode, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
-
-        var deniedRows = denied.GroupBy(c => c.RowKey, StringComparer.Ordinal)
-            .Where(g => g.Count() == rowTotals[g.Key])
-            .Select(g => g.Key)
+        var deniedRows = rowDenied
+            .Where(r => r.Value == rowTotals[r.Key])
+            .Select(r => r.Key)
             .ToHashSet(StringComparer.Ordinal);
-        var deniedColumns = denied.GroupBy(c => c.ColumnCode, StringComparer.Ordinal)
-            .Where(g => g.Count() == columnTotals[g.Key])
-            .Select(g => g.Key)
+        var deniedColumns = columnDenied
+            .Where(c => c.Value == columnTotals[c.Key])
+            .Select(c => c.Key)
             .ToHashSet(StringComparer.Ordinal);
 
         var residual = denied
@@ -99,7 +114,7 @@ public static class CellStyleAccessPolicy
         var cellMap = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var cell in residual.Take(budget))
         {
-            cellMap[$"{cell.RowKey}:{cell.ColumnCode}"] = cell.Decision.Reason.ToString();
+            cellMap[$"{cell.RowKey}:{cell.ColumnCode}"] = cell.Reason.ToString();
         }
 
         var truncated = rowKeys.Count < deniedRows.Count
@@ -107,5 +122,12 @@ public static class CellStyleAccessPolicy
                         || cellMap.Count < residual.Count;
 
         return new CellStyleAccessDto(true, null, rowKeys, columnCodes, cellMap, truncated);
+    }
+
+    private static void Increment<TKey>(Dictionary<TKey, int> counts, TKey key)
+        where TKey : notnull
+    {
+        ref var count = ref System.Runtime.InteropServices.CollectionsMarshal.GetValueRefOrAddDefault(counts, key, out _);
+        count++;
     }
 }
