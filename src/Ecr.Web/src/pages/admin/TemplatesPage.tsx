@@ -396,6 +396,7 @@ export function TemplatesPage(): JSX.Element {
             columns={columns}
             rows={visible}
             rowKey={(row) => String(row.template.id)}
+            urlSortParam="sort"
             isPending={templates.isPending || (rows === undefined && versionsBatch.isPending)}
             error={templates.error ?? versionsError}
             emptyTitle={t('templates.empty')}

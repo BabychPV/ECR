@@ -1,6 +1,7 @@
 import { useMemo, useState, type JSX, type ReactNode } from 'react';
 import { Button, Group, ScrollArea, Table, Text, UnstyledButton } from '@mantine/core';
 import { AsyncBoundary, type EmptyHeadingOrder } from '../AsyncBoundary';
+import { useUrlState } from '../useUrlState';
 import {
   decimalEquals,
   formatDecimal,
@@ -155,6 +156,58 @@ export interface DataTableProps<Row> {
    * пропу пізніше не скидає вибір людини.
    */
   readonly defaultSort?: SortState | undefined;
+
+  /**
+   * `ФВ-14.4`: ім'я параметра адреси, у якому живе сортування (`?sort=code:desc`).
+   *
+   * ⚠ Opt-in: без пропу сортування — локальний стан, як і раніше (і таблиці не
+   * потрібен роутер). З пропом вибір людини переживає перезавантаження, «Назад» і
+   * надіслане посилання (`useUrlState`, `ФВ-14.29`).
+   *
+   * ⚠ Збіг із `defaultSort` прибирає параметр (чиста адреса), «порядок сервера»
+   * при наявному `defaultSort` пишеться як `none`. Невідома колонка, несортована
+   * колонка чи сміття в адресі — мовчки `defaultSort`, без помилки.
+   */
+  readonly urlSortParam?: string | undefined;
+}
+
+/** Значення параметра адреси «порядок сервера», коли `defaultSort` задано. */
+const UrlSortNone = 'none';
+
+function sameSort(a: SortState | null, b: SortState | null): boolean {
+  if (a === null || b === null) return a === b;
+
+  return a.key === b.key && a.direction === b.direction;
+}
+
+/** Розбір `?sort=<key>:<asc|desc>`; усе невідоме — `fallback`. */
+function parseSortParam<Row>(
+  raw: string | null,
+  columns: readonly DataTableColumn<Row>[],
+  fallback: SortState | null,
+): SortState | null {
+  if (raw === null) return fallback;
+  if (raw === UrlSortNone) return null;
+
+  const at = raw.lastIndexOf(':');
+  if (at <= 0) return fallback;
+
+  const key = raw.slice(0, at);
+  const direction = raw.slice(at + 1);
+  if (direction !== 'asc' && direction !== 'desc') return fallback;
+
+  const column = columns.find((candidate) => candidate.key === key);
+  if (column === undefined || !isSortable(column)) return fallback;
+
+  return { key, direction };
+}
+
+/** Зворотне до `parseSortParam`; `null` — прибрати параметр з адреси. */
+function formatSortParam(sort: SortState | null, fallback: SortState | null): string | null {
+  if (sameSort(sort, fallback)) return null;
+  if (sort === null) return UrlSortNone;
+
+  return `${sort.key}:${sort.direction}`;
 }
 
 /**
@@ -379,7 +432,48 @@ function isSortable<Row>(column: DataTableColumn<Row>): boolean {
   return column.sortable !== false;
 }
 
-export function DataTable<Row>({
+/** Стан сортування, яким тримач (локальний стан чи адреса) годує таблицю. */
+interface SortBinding {
+  readonly sort: SortState | null;
+  readonly onSortChange: (next: SortState | null) => void;
+}
+
+/**
+ * ⚠ Два тримачі — два КОМПОНЕНТИ, а не умовний хук: `useUrlState` вимагає
+ * роутера, а локальна таблиця (усі наявні викликачі, тести без роутера) його не
+ * має. Умовний виклик хука в одному тілі порушив би правила хуків.
+ */
+export function DataTable<Row>(props: DataTableProps<Row>): JSX.Element {
+  return props.urlSortParam === undefined ? (
+    <LocalSortTable<Row> {...props} />
+  ) : (
+    <UrlSortTable<Row> {...props} urlSortParam={props.urlSortParam} />
+  );
+}
+
+function LocalSortTable<Row>(props: DataTableProps<Row>): JSX.Element {
+  const [sort, setSort] = useState<SortState | null>(props.defaultSort ?? null);
+
+  return <DataTableView<Row> {...props} sort={sort} onSortChange={setSort} />;
+}
+
+function UrlSortTable<Row>(props: DataTableProps<Row> & { readonly urlSortParam: string }): JSX.Element {
+  const [raw, setRaw] = useUrlState(props.urlSortParam);
+  const fallback = props.defaultSort ?? null;
+  const sort = parseSortParam(raw, props.columns, fallback);
+
+  return (
+    <DataTableView<Row>
+      {...props}
+      sort={sort}
+      onSortChange={(next) => {
+        setRaw(formatSortParam(next, fallback));
+      }}
+    />
+  );
+}
+
+function DataTableView<Row>({
   columns,
   rows,
   rowKey,
@@ -405,8 +499,9 @@ export function DataTable<Row>({
   selectedKey,
   caption,
   height,
-  defaultSort,
-}: DataTableProps<Row>): JSX.Element {
+  sort,
+  onSortChange,
+}: DataTableProps<Row> & SortBinding): JSX.Element {
   /*
    * ⛔ `L5` кидає ВИНЯТОК у режимі розробки, а не пише в консоль (`KIT.md`
    * §6.5 каже «попередження в консолі» — директива №15 §0 це свідомо
@@ -428,8 +523,6 @@ export function DataTable<Row>({
         'Решта полів належить шухляді подробиць рядка (KIT.md §1.7, директива №15 §0).',
     );
   }
-
-  const [sort, setSort] = useState<SortState | null>(defaultSort ?? null);
 
   const collator = useMemo(() => new Intl.Collator(formatLocale()), []);
 
@@ -529,7 +622,7 @@ export function DataTable<Row>({
                         column={column}
                         sort={sort}
                         onSort={() => {
-                          setSort((current) => nextSort(current, column.key));
+                          onSortChange(nextSort(sort, column.key));
                         }}
                       />
                     ))}

@@ -366,6 +366,7 @@ export function JobsPage(): JSX.Element {
           columns={columns}
           rows={shown}
           rowKey={(job) => job.jobId}
+          urlSortParam="sort"
           isPending={jobs.isPending}
           error={jobs.error}
           onRetry={() => void jobs.refetch()}
