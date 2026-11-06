@@ -123,6 +123,26 @@ describe('EditAssignmentsDrawer — учасники документа (D-443)'
     );
   });
 
+  // PB2-P2-3: діалог знімається з дерева - без повернення фокус падав на BODY. Мутація: прибрати
+  // `participantTrigger.current?.focus()` у EditAssignmentsDrawer - червоніють усі три випадки.
+  it.each(['grant', 'escape', 'cancel'] as const)('після закриття діалогу учасника (%s) фокус — на «Додати учасника»', async (how) => {
+    show();
+    const trigger = await screen.findByTestId('add-participant');
+    fireEvent.click(trigger);
+    const modal = await screen.findByTestId('participant-modal');
+    if (how === 'grant') {
+      await pickKoval(modal);
+      fireEvent.click(within(modal).getByRole('button', { name: '⟦editAssign.participant.grant⟧' }));
+    } else if (how === 'escape') {
+      fireEvent.keyDown(within(modal).getByLabelText('⟦editAssign.participant.who⟧'), { key: 'Escape' });
+    } else {
+      fireEvent.click(within(modal).getByRole('button', { name: '⟦common.cancel⟧' }));
+    }
+
+    await waitFor(() => expect(screen.queryByTestId('participant-modal')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('add-participant')));
+  });
+
   it('у симуляції — ні «Додати учасника», ні «Передати власність»', async () => {
     show({ simulation: true });
     await screen.findAllByTestId('assignment-level');
