@@ -4,6 +4,7 @@ import { serverMessage } from '@/features/registries/rc816/serverMessage';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { showErrorText } from '@/shared/ui/notify';
 import { changedValues, type EditField } from './airCardModel';
 import { useSaveAirRow } from './useAirLimits';
 
@@ -54,7 +55,16 @@ export function AirRowEditor({
             return;
           }
 
-          const errors = result.rows.flatMap((row) => row.errors.map((error) => serverMessage(error.messageKey, error.params)));
+          const found = result.rows.flatMap((row) => row.errors);
+          const errors = found.map((error) => serverMessage(error.messageKey, error.params));
+          // Someone else changed the row: this form holds the old version, so saving again would be refused again. Close it
+          // with the server's text; the card has been re-read, and opening the row again takes the fresh version.
+          if (found.some((error) => error.messageKey.endsWith('.entryChanged'))) {
+            showErrorText(errors.join(' '));
+            onClose();
+            return;
+          }
+
           setRowErrors(errors.length > 0 ? errors : [t('permits.air.edit.notSaved')]);
         },
       },

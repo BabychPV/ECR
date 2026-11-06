@@ -179,7 +179,29 @@ describe('картка «Sources & parameters»: додані колонки й 
     expect(saveBatch).not.toHaveBeenCalled();
   });
 
-  it('застаріла версія — текст сервера в формі, картка перечитується', async () => {
+  function rowError(messageKey: string, errorCode: string): typeof applied {
+    return {
+      ...applied,
+      applied: false,
+      updated: 0,
+      rows: [{ clientRowId: 'air-1', status: 'error', entryId: 1, version: null, errors: [{ field: null, errorCode, messageKey, params: { entryId: '1', entryCode: 'SRC-1' } }] }],
+    } as typeof applied;
+  }
+
+  it('застаріла версія — форма закривається (її версія вже стара), картка перечитується', async () => {
+    saveBatch.mockResolvedValue(rowError('err.ECR-REG-4093.entryChanged', 'ECR-REG-4093'));
+    render(mount(true));
+    await screen.findByText('Source 1085');
+    fireEvent.click(screen.getByRole('button', { name: text('permits.air.edit.source', { nae: '1085' }) }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(field(dialog, 'SOURCE_NAME'), { target: { value: 'Lost update' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: text('common.save') }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(getAirLimits).toHaveBeenCalledTimes(2));
+  });
+
+  it('інша відмова рядка — текст сервера в формі, форма лишається', async () => {
     saveBatch.mockResolvedValue({
       ...applied,
       applied: false,
@@ -193,8 +215,8 @@ describe('картка «Sources & parameters»: додані колонки й 
           errors: [
             {
               field: null,
-              errorCode: 'ECR-REG-4093',
-              messageKey: 'err.ECR-REG-4093.entryChanged',
+              errorCode: 'ECR-REG-0422',
+              messageKey: 'err.ECR-REG-0422.required',
               params: { entryId: '1', entryCode: 'SRC-1' },
             },
           ],
@@ -209,7 +231,6 @@ describe('картка «Sources & parameters»: додані колонки й 
     fireEvent.click(within(dialog).getByRole('button', { name: text('common.save') }));
 
     expect(await within(dialog).findByText(text('permits.air.edit.notSaved'))).toBeTruthy();
-    expect(within(dialog).getByText(text('err.ECR-REG-4093.entryChanged', { entryId: '1', entryCode: 'SRC-1' }))).toBeTruthy();
     expect(screen.getByRole('dialog')).toBeTruthy();
     await waitFor(() => expect(getAirLimits).toHaveBeenCalledTimes(2));
   });

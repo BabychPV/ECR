@@ -182,6 +182,22 @@ test.describe('Air real shape', () => {
     const card = await ok<{ sources: unknown[]; substanceRows: number }>(await admin.get(`/api/v1/permits/${String(state.permitId)}/air-limits`), 'card');
     expect(card.sources).toHaveLength(3);
     expect(card.substanceRows).toBe(6);
+
+    // 3. «Sources & parameters» shows ALL imported data, incl. the added column, and edits a row (P1 07.11); the raw
+    // «Sources (NAE)» / «Substances of sources» tabs are hidden for AIR.
+    await page.goto(`/admin/permits/${String(state.permitId)}?tab=air`);
+    await expect(page.getByTestId('air-counts')).toHaveText('3 sources · 6 substance rows', { timeout: 30_000 });
+    await expect(page.getByRole('columnheader', { name: Workshop })).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'Цех 2', exact: true })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /Sources \(NAE\)/ })).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: /Substances of sources/ })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Edit source 0003' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.locator(`[data-field="${added?.code ?? '-'}"]`).fill('Цех 3 (edited)');
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(dialog).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.getByRole('cell', { name: 'Цех 3 (edited)', exact: true })).toBeVisible({ timeout: 30_000 });
   });
 
   test('Air real shape: re-import overwrites — new 0, changed 1, unchanged 1, removed 1; column B is reused', async ({ page }) => {
