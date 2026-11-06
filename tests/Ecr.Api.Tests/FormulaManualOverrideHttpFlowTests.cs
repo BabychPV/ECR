@@ -329,6 +329,12 @@ public sealed class FormulaManualOverrideHttpFlowTests(SqlServerFixture sql)
             await VersionAsync(adminClient, s, row).ConfigureAwait(true))).ConfigureAwait(true);
         Assert.Equal("err.ECR-CELL-0422.expectsNumber", Json(numeric).GetProperty("messageKey").GetString());
         Assert.Equal(6m, await StoredAsync(s, row, s.FColumnId).ConfigureAwait(true));
+
+        // P3 06.11 (Аудит-2): ПОРОЖНЯ комірка числової формули (A не введено) — тип з виразу, текст однаково 422.
+        var empty = s.Rows[1];
+        var emptyNumeric = await ExpectAsync(app, HttpStatusCode.UnprocessableEntity, PatchAsync(adminClient, s, empty, s.FCode, "abc", "текст",
+            await VersionAsync(adminClient, s, empty).ConfigureAwait(true))).ConfigureAwait(true);
+        Assert.Equal("err.ECR-CELL-0422.expectsNumber", Json(emptyNumeric).GetProperty("messageKey").GetString());
         _ = lookupId;
     }
 

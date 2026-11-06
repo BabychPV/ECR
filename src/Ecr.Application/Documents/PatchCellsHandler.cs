@@ -185,7 +185,7 @@ public sealed partial class PatchCellsHandler(
         // «те саме значення, що вже стоїть» пропускається без відмови, і
         // питати про це сховище вдруге, по комірці, немає потреби.
         var previous = await ReadPreviousValuesAsync(changes, ct).ConfigureAwait(false);
-        EnsureManualTextMatchesFormula(context, changes, previous);
+        await EnsureManualTextMatchesFormulaAsync(context, changes, previous, ct).ConfigureAwait(false);
         await EnsureRegistryReferencesExistAsync(context, changes, previous, ct).ConfigureAwait(false);
         await EnsureUnitReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
 
