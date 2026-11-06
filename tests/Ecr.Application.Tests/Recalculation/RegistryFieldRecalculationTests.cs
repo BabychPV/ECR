@@ -265,6 +265,88 @@ public sealed class RegistryFieldRecalculationTests
         Assert.Equal(-1m, Assert.Single(Applied()).Value.ValueNumeric);
     }
 
+    /// <remarks>
+    /// P1 06.11 (живий HSE401, 6428 рядків, H_COMPONENT = REGFIELD([H_POLL], 'COMPONENT')): задача правки одного рядка
+    /// тривала 12–26 с проти 1.9 с числової — знімок полів довідника брався для КОЖНОГО рядка таблиці, хоча рядково-
+    /// локальна ціль рахується лише в брудних рядках. Мутація: прибрати звуження в <c>LoadRegistryFieldsAsync</c>
+    /// (`narrow` → false) — довідник питають про обидва записи, тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Інкрементний_прогін_читає_поля_довідника_лише_для_брудних_рядків()
+    {
+        const long otherEntry = 5002;
+        var builder = new TemplateBuilder { TemplateVersionId = Version };
+        _table = builder.Table(builder.Sheet("Air"), "Main");
+        var permitColumn = builder.Column(_table, "Permit", CellDataType.Lookup);
+        permitColumn.SetLookup(RegistryDefId);
+        var resultColumn = builder.Column(_table, "Result");
+        builder.Row(_table, "r1", 1);
+        builder.Row(_table, "r2", 2);
+        _permitId = permitColumn.Id;
+        _resultId = resultColumn.Id;
+
+        var formula = new FormulaDef(_table.Id, FormulaScope.Column, "REGFIELD([Permit], 'Limit')", ExpressionDialect.Template);
+        typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(formula, 100);
+        typeof(FormulaDef).GetProperty(nameof(FormulaDef.ColumnDefId))!.SetValue(formula, _resultId);
+        _table.AddFormula(formula);
+        _formulaId = formula.Id;
+        _metadata.GetAsync(Version, Arg.Any<CancellationToken>()).Returns(builder.Build());
+
+        var instance = new TableInstanceRef(TableInstance, DocumentId, _table.Id, Version, Period.Value);
+        _rows.ResolveTableInstanceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns(instance);
+        _rows.GetTableInstancesAsync(DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns([instance]);
+        _rows.GetRowIdsBatchAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyDictionary<string, long>>
+            {
+                [TableInstance] = new Dictionary<string, long> { ["r1"] = 1001, ["r2"] = 1002 },
+            });
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
+            {
+                [TableInstance] =
+                [
+                    new(new CellAddress(Period, 1001, _permitId), _table.Id, new CellValueData { ValueRegistryEntryId = EntryId }),
+                    new(new CellAddress(Period, 1002, _permitId), _table.Id, new CellValueData { ValueRegistryEntryId = otherEntry }),
+                ],
+            });
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+        _versions.ListFormulaDependenciesAsync(Version, Arg.Any<CancellationToken>()).Returns(
+        [
+            FormulaDependency.ForFormula(_formulaId, DependencyExtractor.KindCell, _table.Id, null, _permitId, null, null, 0),
+            FormulaDependency.ForFormula(_formulaId, DependencyExtractor.KindRegistry, _table.Id, null, _permitId, "Limit", null, 1),
+        ]);
+
+        var registryDef = new RegistryDef(
+            EcrCode.Create("Permits"), new LocalizedText(new Dictionary<string, string> { ["en"] = "Permits" }), isTemporal: false);
+        typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(registryDef, RegistryDefId);
+        var fieldDef = new RegistryFieldDef(
+            RegistryDefId, EcrCode.Create("Limit"), new LocalizedText(new Dictionary<string, string> { ["en"] = "Limit" }),
+            CellDataType.Decimal, ordinal: 0);
+        typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(fieldDef, 1);
+        _fieldDefId = fieldDef.Id;
+        registryDef.AddField(fieldDef);
+        _registry.FindDefinitionByIdAsync(RegistryDefId, Arg.Any<CancellationToken>()).Returns(registryDef);
+
+        var limit = new RegistryValue(otherEntry, _fieldDefId);
+        limit.Set(CellDataType.Decimal, 7m, unitId: null);
+        _registry.ListValuesAsync(otherEntry, Arg.Any<CancellationToken>()).Returns((IReadOnlyList<RegistryValue>)[limit]);
+        _registry.ListValuesForEntriesAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns((IReadOnlyList<RegistryValue>)[limit]);
+
+        var dirty = new DirtySet();
+        dirty.Add(new CellAddress(Period, 1002, _permitId));
+
+        var written = await Service().RecalculateAsync(TableInstance, dirty, CancellationToken.None);
+
+        Assert.Equal(1, written);
+        var upsert = Assert.Single(Applied());
+        Assert.Equal((1002L, _resultId, 7m), (upsert.Address.TableRowId, upsert.Address.ColumnDefId, upsert.Value.ValueNumeric));
+        await _registry.DidNotReceive().ListValuesForEntriesAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>());
+        await _registry.DidNotReceive().ListValuesAsync(EntryId, Arg.Any<CancellationToken>());
+    }
+
     private void SetRegistryValue(decimal amount)
     {
         var value = new RegistryValue(EntryId, _fieldDefId);
