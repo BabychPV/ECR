@@ -88,7 +88,15 @@ public sealed partial class SourceEventSyncJob(
     /// <summary>Ключ каталогу відмови «рядок не вмістився в <c>MaxDynamicRows</c>».</summary>
     public const string RowLimitKey = "err.ECR-ROW-0409.dynamicRowLimit";
 
+    /// <summary>Ключ каталогу підсумку «шаблон — добова копія `_Day`, синк пропущено» (Q-1).</summary>
+    public const string DayCopySkippedKey = "jobs.sourceEventsDayCopySkipped";
+
     private const string SourceUnavailable = "ECR-INT-0503";
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "SourceEventSyncJob: шаблон {Template} — добова копія (_Day, рішення Q-1): синк не виконується, події беруться лише з кореневих _Auto/_Manual.")]
+    private static partial void LogDayCopySkipped(ILogger logger, string template);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -124,6 +132,16 @@ public sealed partial class SourceEventSyncJob(
                          $"Сутність джерела {request.SourceEntityId} не існує або вимкнена: синхронізувати нічого.",
                          "err.ECR-INT-0503.sourceEntityUnavailable",
                          ("sourceEntityId", request.SourceEntityId.ToString(CultureInfo.InvariantCulture)));
+
+        // ⛔ Q-1 (людина 06.11, «а»): шаблон `…_Day` — добова КОПІЯ кореневих подій із власними ID. Його події не
+        // пишуться ніколи — ні як свої (подвоєння рядків), ні як братні (передача рядка копії, яка не синхронізується).
+        // Нічого не читаємо й нічого не видаляємо: рядки, записані копією до рішення, прибирає людина.
+        if (SourceEventTemplateOrder.IsDayCopy(entity.Code))
+        {
+            LogDayCopySkipped(_logger, entity.Code);
+            await progress.ReportKeyAsync(100, DayCopySkippedKey, ct).ConfigureAwait(false);
+            return;
+        }
 
         var dataSource = await db.DataSources
                              .AsNoTracking()
@@ -190,8 +208,9 @@ public sealed partial class SourceEventSyncJob(
         // ⛔ Братні шаблони (Auto/Auto_Day/Manual/Manual_Day) тієї самої таблиці — одна множина подій: дедуплікація
         // за ID, перекриття з різними значеннями — попередження, збій читання будь-якого — пропуск видалення.
         var sibling = await ReadSiblingsAsync(adapter, dataSource.Id, entity, maps, from, to, read, ct).ConfigureAwait(false);
+        // Q-1: подія з шаблоном `…_Day` у відповіді (перевизначений запит подій може об'єднувати view) — копія, не пишеться.
         var own = new SourceEventResult(
-            [.. read.Events.Where(e => !sibling.Outranked.Contains(e.EventId))],
+            [.. read.Events.Where(e => !sibling.Outranked.Contains(e.EventId) && !SourceEventTemplateOrder.IsDayCopy(e.TemplateName))],
             read.Truncated || sibling.Incomplete,
             read.ErrorCode);
 
@@ -371,6 +390,14 @@ public sealed partial class SourceEventSyncJob(
             .Where(e => ids.Contains(e.Id) && e.IsActive && e.DataSourceId == entity.DataSourceId)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        // Q-1: копії `…_Day` не синхронізуються — і братніми не рахуються: інакше подія, що є і в корені, і в копії,
+        // передавалась би копії (`HandedOff`), а та рядка не веде.
+        entities.RemoveAll(e => SourceEventTemplateOrder.IsDayCopy(e.Code));
+        if (entities.Count == 0)
+        {
+            return SiblingContext.Empty;
+        }
 
         var ownById = read.Events
             .Where(e => string.IsNullOrWhiteSpace(e.ParentId))
