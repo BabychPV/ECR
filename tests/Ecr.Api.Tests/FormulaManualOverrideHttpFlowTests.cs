@@ -47,6 +47,57 @@ public sealed class FormulaManualOverrideHttpFlowTests(SqlServerFixture sql)
     private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Atyrau").ToTimeZoneInfo();
     private static readonly TimeSpan RecalcDeadline = TimeSpan.FromSeconds(60);
 
+    /// <remarks>
+    /// P1 06.11 (живий тест людини, HSE401 v13): формульна колонка шаблону ще й «лише для читання» (так її створює
+    /// <c>tools/hse401</c>). Після «Дозволити ручне значення» комірка заштрихована, а запис - 403 <c>ColumnReadOnly</c>.
+    /// Мутація: безумовне <c>ColumnIsReadOnly</c> у <c>EditRules.CanEdit</c> - червоний (403 замість 200).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-461")]
+    public async Task Формульна_колонка_лише_для_читання_приймає_ручне_значення_після_дозволу()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        await using (var db = s.Builder.CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE cfg.ColumnDef SET IsReadOnly = 1 WHERE Id = {s.FColumnId}").ConfigureAwait(true);
+        }
+
+        var admin = await NewUserAsync(s, GrantLevel.Manage,
+            "Template.View", "Template.Edit", "Template.Publish", EditRules.OverrideFormulaPermission).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var adminClient = await SignInAsync(app, admin).ConfigureAwait(true);
+
+        await ExpectAsync(app, HttpStatusCode.OK, SaveFormulaAsync(adminClient, s.VersionId, s.TableA, s.FColumnId,
+            $"[{s.ACode}] * 2")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.OK, SaveFormulaAsync(adminClient, s.VersionId, s.TableB, s.SColumnId,
+            $"SUM([{s.SheetA}].[{s.TableACode}].[{s.Rows[0]}:{s.Rows[4]}].[{s.FCode}])")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, PublishAsync(adminClient, s.VersionId)).ConfigureAwait(true);
+        var formulaId = await FormulaIdAsync(s, s.FColumnId).ConfigureAwait(true);
+
+        // Без прапорця - відмова «рахує формула», як і для колонки без «лише для читання».
+        var off = await ExpectAsync(app, HttpStatusCode.Forbidden,
+            PatchAsync(adminClient, s, s.Rows[3], s.FCode, "100", "r4", await VersionAsync(adminClient, s, s.Rows[3]).ConfigureAwait(true)))
+            .ConfigureAwait(true);
+        Assert.Equal(nameof(EditDenyReason.CalculatedCell), ReasonOf(off));
+
+        await ExpectAsync(app, HttpStatusCode.OK, ToggleAsync(adminClient, s.VersionId, formulaId, true, false)).ConfigureAwait(true);
+
+        // Зріз не відхиляє комірку, а запис із причиною проходить і лягає ручним значенням.
+        var slice = Json(await SliceAsync(app, adminClient, s).ConfigureAwait(true));
+        Assert.False(
+            slice.GetProperty("cellPermissions").TryGetProperty($"{s.Rows[3]}:{s.FCode}", out var denial)
+            && denial.GetString() is not ("None" or null),
+            $"зріз відхиляє комірку: {slice.GetProperty("cellPermissions")}");
+
+        await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(adminClient, s, s.Rows[3], s.FCode, "100", "ручна r4",
+            await VersionAsync(adminClient, s, s.Rows[3]).ConfigureAwait(true))).ConfigureAwait(true);
+        Assert.Equal(100m, await StoredAsync(s, s.Rows[3], s.FColumnId).ConfigureAwait(true));
+        Assert.Equal((false, true), await StoredFlagsAsync(s, s.Rows[3]).ConfigureAwait(true));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

@@ -139,9 +139,16 @@ public readonly record struct CellAccessContext(
     /// (<c>doc.CellFormulaOverride</c> — його можна повернути до формули й після вимкнення прапорця). Рахує служба.
     /// </summary>
     /// <remarks>
-    /// ⛔ Знімає ЛИШЕ <see cref="EditDenyReason.CalculatedCell"/> і лише разом із правом
-    /// <see cref="EditRules.OverrideFormulaPermission"/> у проєкті: запис у аркуш сам по собі формулу не замінює.
-    /// Симуляція, архів, період, вікно доступу, стан аркуша, «лише читання» й грант на комірку перевіряються як для всіх.
+    /// ⛔ Знімає ЛИШЕ <see cref="EditDenyReason.CalculatedCell"/> (і «лише читання» САМОЇ обчислюваної колонки - див.
+    /// нижче) і лише разом із правом <see cref="EditRules.OverrideFormulaPermission"/> у проєкті: запис у аркуш сам по
+    /// собі формулу не замінює. Симуляція, архів, період, вікно доступу, стан аркуша, «лише читання» рядка й грант на
+    /// комірку перевіряються як для всіх.
+    /// <para>
+    /// ✎ P1 06.11 (HSE401 v13): шаблон позначав формульні колонки ще й <c>IsReadOnly</c> - для обчислюваної колонки це
+    /// той самий факт «уводу немає», що й <c>IsComputed</c>. Без зняття ознаки увімкнене «Дозволити ручне значення»
+    /// давало заштриховану, але незмінну комірку (<see cref="EditDenyReason.ColumnReadOnly"/> одразу після формули),
+    /// тоді як клієнт (<c>permissions.ts</c>) уже вважав її доступною.
+    /// </para>
     /// </remarks>
     public bool FormulaOverridable { get; init; }
 }
@@ -254,7 +261,10 @@ public static class EditRules
             viaOverride = true;
         }
 
-        if (context.ColumnIsReadOnly)
+        // ✎ P1 06.11: «лише читання» обчислюваної КОЛОНКИ - той самий факт, що й формула; дозвіл ручного значення його
+        // перекриває (інакше прапорець формули на HSE401 не діяв). Комірочна формула на колонці вводу (CellIsComputed без
+        // ColumnIsComputed) і «лише читання» рядка - як раніше.
+        if (context.ColumnIsReadOnly && !(viaOverride && context.ColumnIsComputed))
         {
             return EditDecision.Deny(EditDenyReason.ColumnReadOnly);
         }

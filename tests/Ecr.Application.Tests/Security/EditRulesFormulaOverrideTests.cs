@@ -69,6 +69,48 @@ public sealed class EditRulesFormulaOverrideTests
         Assert.Equal(EditDenyReason.CalculatedCell, decision.Reason);
     }
 
+    /// <remarks>
+    /// P1 06.11 (HSE401 v13): формульні колонки шаблону ще й <c>IsReadOnly</c>. Увімкнене «Дозволити ручне значення»
+    /// давало <c>ColumnReadOnly</c> одразу після формули - комірка заштрихована, але незмінна. Мутація: повернути
+    /// безумовне <c>if (context.ColumnIsReadOnly)</c> - червоний цей тест.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-461")]
+    public void Обчислювана_колонка_лише_для_читання_з_дозволом_і_правом_приймає_ручне_значення()
+    {
+        var context = FormulaCell(true) with { ColumnIsReadOnly = true };
+
+        var decision = EditRules.CanEdit(Writer(EditRules.OverrideFormulaPermission), context);
+
+        Assert.True(decision.IsAllowed, decision.Reason.ToString());
+        Assert.True(decision.ViaFormulaOverride);
+    }
+
+    /// <remarks>
+    /// Межі зняття: без права чи без дозволу формули - <c>CalculatedCell</c>, як раніше; «лише читання» рядка й
+    /// колонки ВВОДУ з комірочною формулою (колонка не обчислювана) - не знімаються.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-461")]
+    public void Лише_для_читання_не_знімається_без_дозволу_права_на_рядку_і_на_колонці_вводу()
+    {
+        var withOverride = Writer(EditRules.OverrideFormulaPermission);
+        var readOnlyComputed = FormulaCell(true) with { ColumnIsReadOnly = true };
+
+        Assert.Equal(EditDenyReason.CalculatedCell, EditRules.CanEdit(Writer(), readOnlyComputed).Reason);
+        Assert.Equal(
+            EditDenyReason.CalculatedCell,
+            EditRules.CanEdit(withOverride, readOnlyComputed with { FormulaOverridable = false }).Reason);
+        Assert.Equal(
+            EditDenyReason.RowReadOnly,
+            EditRules.CanEdit(withOverride, readOnlyComputed with { ColumnIsReadOnly = false, RowIsReadOnly = true }).Reason);
+        Assert.Equal(
+            EditDenyReason.ColumnReadOnly,
+            EditRules.CanEdit(withOverride, FormulaCell(true, cellScope: true) with { ColumnIsReadOnly = true }).Reason);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Decision", "D-461")]
