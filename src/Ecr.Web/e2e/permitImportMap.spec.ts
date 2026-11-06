@@ -272,7 +272,8 @@ test.describe('Permit import mapping', () => {
     const importDialog = page.getByRole('dialog', { name: 'Paste rows into Sources (NAE)' });
     await expect(importDialog).toBeVisible();
     await importDialog.locator('input[type="file"]').setInputFiles(Workbook);
-    const sheet = importDialog.getByRole('combobox', { name: 'Sheet' });
+    // exact: рядок зіставлення для заголовка «…on the sheet «Sources».» з аркуша Readme теж містить «sheet».
+    const sheet = importDialog.getByRole('combobox', { name: 'Sheet', exact: true });
     await expect(sheet).toHaveValue('Readme', { timeout: 30_000 });
     await sheet.selectOption('Sources');
     await expect(importDialog.getByRole('combobox', { name: 'Table column for «NAE number»' })).toHaveValue('', { timeout: 30_000 });
