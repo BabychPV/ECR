@@ -1392,7 +1392,8 @@ Msg 50148 … Передперевірка D148: оновлення зупине
 
 3. Застосувати `01-filegroups.sql`, `02-partitions.sql` і `migration.sql`.
    Прапорці ті самі, що в `deploy-ecr.ps1`:
-   `sqlcmd -S <сервер> -E -C -b -I -d <база> -i <файл>`. Тепер `migration.sql`
+   `sqlcmd -S <сервер> -E -C -b -I -d <база> -f i:65001 -i <файл>` (`-f i:65001` обов'язковий: скрипти — UTF-8
+   без BOM, без нього кирилиця в текстах помилок тригерів псується). Тепер `migration.sql`
    проходить до кінця, стовпці стають `decimal(34,16)`.
 4. Повернути значення за ключем:
    `UPDATE t SET ValueNumeric = h.OldValue FROM … JOIN dbo.D148Hold_… AS h ON …`.

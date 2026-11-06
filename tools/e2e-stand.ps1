@@ -745,7 +745,7 @@ try {
     $ErrorActionPreference = 'Continue'
     try {
         $piSeed = Join-Path $root 'tools/e2e/pi-raw-data-seed.sql'
-        $piEntity = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d $Database -i $piSeed `
+        $piEntity = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d $Database -f i:65001 -i $piSeed `
             -v "DocumentId=$($env:ECR_E2E_DOCUMENT)" "PeriodKey=$($open.periodKey)") | Select-Object -Last 1
     }
     finally {
@@ -763,7 +763,7 @@ try {
     $ErrorActionPreference = 'Continue'
     try {
         $efSeed = Join-Path $root 'tools/e2e/pi-events-seed.sql'
-        $efEntity = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d $Database -i $efSeed `
+        $efEntity = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d $Database -f i:65001 -i $efSeed `
             -v "DocumentId=$($env:ECR_E2E_DOCUMENT)" "PeriodKey=$($open.periodKey)") | Select-Object -Last 1
     }
     finally {

@@ -971,7 +971,7 @@ runbook, п. 3.
    колонка `copiesWritten` > 0) виконайте перерахунок: `POST /api/v1/documents/{id}/recalculate` по періодах (готовий
    інструмент — `tools\land\Invoke-LandRecalc.ps1`, режим плану й `-Execute`). Порівняйте суми методологій «до/після».
 7. **Прапор маршрутизації.** ⛔ СПЕРШУ накотіть процедуру вʼюх на базу — ПЕРЕД рестартом нового API, навіть якщо прапор
-   лишається вимкненим: `sqlcmd -S <сервер> -E -C -b -I -d <база> -i <каталог розгортання>\Sql\05-rpt-views.sql`
+   лишається вимкненим: `sqlcmd -S <сервер> -E -C -b -I -d <база> -f i:65001 -i <каталог розгортання>\Sql\05-rpt-views.sql`
    (у репозиторії `src\Ecr.Infrastructure\Persistence\Sql\05-rpt-views.sql`). Новий API на старті ЗАВЖДИ кличе
    `rpt.usp_GenerateTemplateViews @MonthRouting = …` (також при `0`); стара процедура без цього параметра відповідає
    `Procedure … has too many arguments specified`, вʼюхи не перегенеруються, а `/health/ready` стає `Degraded`.
