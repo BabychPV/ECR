@@ -811,25 +811,45 @@ public sealed class AccessDecisionService(
             return false;
         }
 
-        var documents = EditAssignmentFactsReader.ParticipatedDocuments(db, profile.UserId, clock.UtcNow);
-        var candidates = await db.Documents
-            .AsNoTracking()
-            .Where(d => d.ProjectId == projectId && documents.Contains(d.Id))
-            .Select(d => d.Id)
-            .OrderBy(id => id)
-            .Take(50)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-        if (candidates.Count == 0)
-        {
-            return false;
-        }
-
         // ⛔ P3 (календар періодів): надання, чий делегатор утратив право його видавати, проєкту не відкриває - те саме
         // динамічне правило, що й для документа (ParticipationGrantsAsync -> WithDelegatorRightsAsync).
-        var grants = await ParticipationGrantsAsync(profile, [.. candidates], ct).ConfigureAwait(false);
-        return grants.Values.Any(g => g.Count > 0);
+        // ✎ PM-EDITASSIGN-P3 (c): кандидати - сторінками за Id, а не одним зрізом: перші 50 документів із «мертвими»
+        // наданнями не ховають діюче надання в 51-му (хибна 404). Звичайний випадок - одна сторінка, як і раніше.
+        var documents = EditAssignmentFactsReader.ParticipatedDocuments(db, profile.UserId, clock.UtcNow);
+        var after = 0L;
+        while (true)
+        {
+            var from = after;
+            var candidates = await db.Documents
+                .AsNoTracking()
+                .Where(d => d.ProjectId == projectId && d.Id > from && documents.Contains(d.Id))
+                .Select(d => d.Id)
+                .OrderBy(id => id)
+                .Take(ParticipationPageSize)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            if (candidates.Count == 0)
+            {
+                return false;
+            }
+
+            var grants = await ParticipationGrantsAsync(profile, [.. candidates], ct).ConfigureAwait(false);
+            if (grants.Values.Any(g => g.Count > 0))
+            {
+                return true;
+            }
+
+            if (candidates.Count < ParticipationPageSize)
+            {
+                return false;
+            }
+
+            after = candidates[^1];
+        }
     }
+
+    /// <summary>Сторінка кандидатів-документів у <see cref="ParticipatesInProjectAsync"/>.</summary>
+    private const int ParticipationPageSize = 50;
 
     /// <summary>
     /// D-443: діючі надання учасника в документах — з тих самих фактів, що й рішення про запис

@@ -332,6 +332,71 @@ public sealed class EditAssignmentDelegatorRightsTests(SqlServerFixture sql)
         Assert.True(await InProjectAsync());
     }
 
+    /// <summary>
+    /// PM-EDITASSIGN-P3 (c): понад сторінку (50) документів проєкту з «мертвими» наданнями не ховають діюче надання в
+    /// документі з більшим Id. Мутація: повернути один зріз <c>Take(50)</c> без наступних сторінок - червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "PM-EDITASSIGN-P3-c")]
+    public async Task Календар_проєкту_відкриває_діюче_надання_за_першою_сторінкою_мертвих()
+    {
+        var w = await ArrangeAsync(GrantLevel.Read);
+
+        Task<bool> InProjectAsync() => WithServiceAsync(
+            w, s => s.ParticipatesInProjectAsync(Participant(w), w.Doc.ProjectId, CancellationToken.None));
+
+        // Делегатор першого надання втратив ролі; ще 50 документів проєкту з наданнями того самого делегатора.
+        await RemoveDelegatorRolesAsync(w);
+        await using (var db = w.Builder.CreateContext())
+        {
+            for (var i = 0; i < 50; i++)
+            {
+                var document = new Document(w.Doc.ProjectId, $"DEAD{Guid.NewGuid():N}"[..20], w.DelegatorId, Now);
+                db.Documents.Add(document);
+                await db.SaveChangesAsync(CancellationToken.None);
+                AddReadAssignment(db, document.Id, w.DelegatorId, w.ExecutorId);
+            }
+
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        Assert.False(await InProjectAsync());
+
+        // Діюче надання - лише в документі з найбільшим Id (52-й кандидат), від іншого менеджера проєкту.
+        await using (var db = w.Builder.CreateContext())
+        {
+            var live = NewUser("dr_l");
+            db.Users.Add(live);
+            await db.SaveChangesAsync(CancellationToken.None);
+            db.RoleAssignments.Add(new RoleAssignment(w.ManagerRoleId, live.Id, null));
+
+            var document = new Document(w.Doc.ProjectId, $"LIVE{Guid.NewGuid():N}"[..20], live.Id, Now);
+            db.Documents.Add(document);
+            await db.SaveChangesAsync(CancellationToken.None);
+            AddReadAssignment(db, document.Id, live.Id, w.ExecutorId);
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        Assert.True(await InProjectAsync());
+    }
+
+    private static void AddReadAssignment(EcrDbContext db, long documentId, int delegatorId, int executorId)
+    {
+        var assignment = new EditAssignment(
+            documentId,
+            EditAssignmentSlice.Create(sheetCode: null, tableCode: null, monthNumber: null, periodKey: null),
+            isExclusive: false,
+            delegatedByUserId: delegatorId,
+            handoffId: Guid.NewGuid(),
+            createdByUserId: delegatorId,
+            utcNow: Now,
+            level: GrantLevel.Read);
+        assignment.AddRecipient(executorId, delegatorId, Now);
+        new EditAssignmentStore(db).Add(assignment);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
