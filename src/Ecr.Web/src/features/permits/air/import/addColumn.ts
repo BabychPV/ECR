@@ -1,3 +1,4 @@
+import { EcrApiError } from '@/api/client';
 import type { ImportFieldSpec, ImportSpec } from '../airTypes';
 import {
   getPermitType,
@@ -72,7 +73,8 @@ export function newColumn(code: string, request: NewColumnRequest, order: number
 
   return {
     code,
-    nameL10n: { en: request.name, ru: request.name },
+    // F13-p198 P3-2: all three catalogue languages — the name the user typed is the only one known (kz = en until translated).
+    nameL10n: { en: request.name, ru: request.name, kz: request.name },
     dataType: DataTypes[request.kind],
     order,
     required: false,
@@ -134,7 +136,12 @@ export async function addPermitTableColumn(request: NewColumnRequest, reason: st
   const problem = addColumnProblem(current, table);
   if (problem !== null) throw new AddColumnError(problem);
 
-  const draft = await openPermitTypeVersion(AirType);
+  // F13-p198 P3-1: the server is the guard — a draft opened by someone else after our read makes new-version 409
+  // (ECR-PRM-4093), and that is the same «someone else's draft is open» refusal, not a generic error.
+  const draft = await openPermitTypeVersion(AirType).catch((error: unknown) => {
+    if (error instanceof EcrApiError && error.problem.errorCode === 'ECR-PRM-4093') throw new AddColumnError('draftOpen');
+    throw error;
+  });
   const draftTable = draft.tables.find((candidate) => candidate.code === table);
   if (draftTable === undefined) throw new AddColumnError('noTable');
 
