@@ -43,7 +43,12 @@ let client: QueryClient;
 /**
  * @param server `true`/`false` — відповідь `canApproverEdit`; `'pending'` — відповідь не приходить.
  */
-function show(options: { grants: Record<string, string>; server: boolean | 'pending'; isSimulation?: boolean }): void {
+function show(options: {
+  grants: Record<string, string>;
+  server: boolean | 'pending';
+  isSimulation?: boolean;
+  permissions?: string[];
+}): void {
   approverEditAsked = 0;
   vi.stubGlobal(
     'fetch',
@@ -62,7 +67,7 @@ function show(options: { grants: Record<string, string>; server: boolean | 'pend
           isSimulation: options.isSimulation ?? false,
           language: 'en',
           mustChangePassword: false,
-          permissions: ['Document.View'],
+          permissions: options.permissions ?? ['Document.View'],
           simulatedForUserId: null,
           userId: 9,
           userName: 'participant',
@@ -144,5 +149,35 @@ describe('SheetActions: Approve/Reject на поданому аркуші — з
 
     expect(screen.queryByRole('button', { name: ApproveButton })).toBeNull();
     expect(screen.queryByRole('button', { name: RejectButton })).toBeNull();
+  });
+});
+
+/**
+ * AU-13: «Return for edits» на ПОДАНОМУ аркуші. Сервер (`CanReopenCoreAsync`, P2-4) вимагає ролі поточного кроку
+ * маршруту, як для Approve (D-444 п. 2), тож видимість — та сама відповідь `approver-edit` плюс право `Document.Reopen`.
+ * ⛔ Мутація (прогнано локально): повернути `mayWorkflow('approve')` замість `mayDecide` для Submitted — червоніє e).
+ */
+describe('SheetActions: Return for edits on a submitted sheet follows the approval step', () => {
+  const ReopenButton = /workflow\.reopen\W?$/i;
+  const permissions = ['Document.View', 'Document.Reopen'];
+
+  it('e) Approver поза маршрутом: грант Approve і Document.Reopen є, сервер: ні — кнопки немає', async () => {
+    show({ grants: { 'Project:7': 'Approve' }, server: false, permissions });
+    await settled(true);
+
+    expect(screen.queryByRole('button', { name: ReopenButton })).toBeNull();
+  });
+
+  it('f) погоджувач кроку з Document.Reopen, сервер: так — кнопка є', async () => {
+    show({ grants: { 'Project:7': 'Approve' }, server: true, permissions });
+
+    expect(await screen.findByRole('button', { name: ReopenButton })).toBeTruthy();
+  });
+
+  it('g) сервер: так, але без Document.Reopen — кнопки немає', async () => {
+    show({ grants: { 'Project:7': 'Approve' }, server: true });
+    await settled(true);
+
+    expect(screen.queryByRole('button', { name: ReopenButton })).toBeNull();
   });
 });
