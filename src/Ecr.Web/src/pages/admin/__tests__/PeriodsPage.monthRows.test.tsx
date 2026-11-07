@@ -107,7 +107,7 @@ describe('PeriodsPage: рядок місяця — підпис, стан і о�
       await row(202601);
 
       const headers = screen.getAllByRole('columnheader').map((th) => th.textContent ?? '');
-      expect(headers[0]).toContain('⟦periods.month⟧');
+      expect(headers[0]).toContain('⟦periods.columnMonth⟧');
       expect(headers[1]).toContain('⟦periods.state⟧');
       expect(headers[2]).toContain('⟦periods.locksOn⟧');
       // ⛔ Мутація «повернути колонки Range/Grace/Key/Sequence» дає тут зайві заголовки.

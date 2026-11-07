@@ -2,7 +2,7 @@
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'periods.month', N'ru', N'Месяц'),
+    (N'periods.columnMonth', N'ru', N'Месяц'),
     (N'periods.locksOn', N'ru', N'Блокируется'),
     (N'periods.locksOnHint', N'ru', N'В этот момент данные месяца блокируются (конец периода + {hardClose} дн., политика {code}); переоткрытый месяц блокируется по окончании переоткрытия. Начиная с {grace} дн. после конца периода правки ещё принимаются, но отмечаются как запоздалые. Время — в часовом поясе площадки.'),
     (N'periods.keyTooltip', N'ru', N'Ключ периода {key} · порядковый номер {sequence}'),
@@ -31,7 +31,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'documents.yearStripLabel', N'ru', N'{key}: месяцы {year}'),
     (N'documents.monthState', N'ru', N'{month} — {state}'),
     (N'documents.monthNoState', N'ru', N'{month} — нет данных'),
-    (N'periods.month', N'kz', N'Ай'),
+    (N'periods.columnMonth', N'kz', N'Ай'),
     (N'periods.locksOn', N'kz', N'Бұғатталады'),
     (N'periods.locksOnHint', N'kz', N'Осы сәтте айдың деректері бұғатталады (кезеңнің соңы + {hardClose} күн, {code} саясаты); қайта ашылған ай қайта ашу аяқталғанда бұғатталады. Кезең аяқталғаннан кейін {grace} күннен бастап түзетулер әлі қабылданады, бірақ кешіккен деп белгіленеді. Уақыт — алаңның уақыт белдеуінде.'),
     (N'periods.keyTooltip', N'kz', N'Кезең кілті {key} · реттік нөмір {sequence}'),
@@ -68,7 +68,7 @@ GO
 INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
-    (N'periods.month', N'en', N'Month', 1),
+    (N'periods.columnMonth', N'en', N'Month', 1),
     (N'periods.locksOn', N'en', N'Locks on', 1),
     (N'periods.locksOnHint', N'en', N'The month''s data locks at this moment (period end + {hardClose} d, policy {code}); a reopened month locks when its reopening ends. From {grace} d after the period end, edits are still accepted but flagged as late. Times are in the site time zone.', 1),
     (N'periods.keyTooltip', N'en', N'Period key {key} · sequence {sequence}', 1),

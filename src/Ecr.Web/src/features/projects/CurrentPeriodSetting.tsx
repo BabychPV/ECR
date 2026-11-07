@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { PeriodCalendarDto } from '@/api/types';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { formatPeriodKey } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -86,6 +87,10 @@ export function CurrentPeriodSetting({
     onError: showApiError,
   });
 
+  // ФВ-14.26: спінер — із затримкою, не на кожен швидкий запит.
+  const pinLoading = usePendingLoading(pin.isPending);
+  const backLoading = usePendingLoading(backToAuto.isPending);
+
   const label = (key: number | null): string =>
     key === null ? t('projectSettings.noCurrent') : formatPeriodKey(key, calendar?.periodKind) || String(key);
 
@@ -138,7 +143,12 @@ export function CurrentPeriodSetting({
             {t('projectSettings.pin')}
           </Button>
           {pinned && (
-            <Button variant="default" loading={backToAuto.isPending} onClick={() => backToAuto.mutate()}>
+            <Button
+              variant="default"
+              loading={backLoading}
+              disabled={backToAuto.isPending}
+              onClick={() => backToAuto.mutate()}
+            >
               {t('projectSettings.backToAuto')}
             </Button>
           )}
@@ -172,8 +182,8 @@ export function CurrentPeriodSetting({
               {t('common.cancel')}
             </Button>
             <Button
-              disabled={pinPeriodId === null || reason.trim().length === 0}
-              loading={pin.isPending}
+              disabled={pinPeriodId === null || reason.trim().length === 0 || pin.isPending}
+              loading={pinLoading}
               onClick={() => {
                 if (pinPeriodId !== null) pin.mutate({ periodId: Number(pinPeriodId), reason: reason.trim() });
               }}

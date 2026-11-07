@@ -442,7 +442,7 @@ export function PeriodsPage(): JSX.Element {
         <Table striped className="ecr-sticky-head" data-periods-table="months">
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>{t('periods.month')}</Table.Th>
+              <Table.Th>{t('periods.columnMonth')}</Table.Th>
               <Table.Th>{t('periods.state')}</Table.Th>
               {/* ⚠ `Hint` із `focusable` (Q-337): формула — з РЕАЛЬНИХ чисел політики проєкту, доступна з клавіатури. */}
               <Table.Th>

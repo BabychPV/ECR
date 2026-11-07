@@ -37,6 +37,8 @@ const Ledger: Readonly<Record<string, number>> = {
   'features/documents/DocumentHeaderPanel.tsx': 1,
   'features/documents/VersionMigrationDialog.tsx': 2,
   'features/expressions/TestCaseRunner.tsx': 1,
+  // ✎ Period clarity: перерахунок проєкту переїхав із PeriodsPage (той самий запис, інший файл).
+  'features/documents/ProjectRecalculateAction.tsx': 1,
   'features/integration/AddSourceEntityModal.tsx': 1,
   'features/integration/DataSourceFormModal.tsx': 1,
   'features/integration/TestDataSourceModal.tsx': 1,
@@ -74,7 +76,10 @@ const Ledger: Readonly<Record<string, number>> = {
   'features/units/UnitEditModal.tsx': 1,
   'features/workflow/WorkflowHistory.tsx': 1,
   'pages/admin/GrantsPanel.tsx': 1,
-  'pages/admin/PeriodsPage.tsx': 7,
+  // ✎ Period clarity (07.11): 7 = 1 (перевідкриття) + 5 (налаштування проєкту) + 1 (перерахунок, перелік документів) —
+  // ті самі кнопки переїхали з PeriodsPage, нових записів немає.
+  'pages/admin/PeriodsPage.tsx': 1,
+  'pages/admin/ProjectSettingsPage.tsx': 5,
   'pages/admin/SourcesPage.tsx': 1,
   'pages/admin/TableRelationsPage.tsx': 1,
   'pages/admin/TemplateCardPage.tsx': 1,
