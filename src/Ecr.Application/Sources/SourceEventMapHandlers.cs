@@ -489,6 +489,12 @@ public sealed class CreateSourceEventMapHandler(
     /// </summary>
     public const string DefaultEventSyncCron = "0 0 * * * ?";
 
+    /// <summary>
+    /// Параметр <c>cause</c> причини в журналі: розклад заведено неявно разом із мапінгом подій (Q-2), а не людиною
+    /// на вкладці «Розклад» (F13-p192).
+    /// </summary>
+    public const string DefaultScheduleCause = "defaultForEventMap";
+
     /// <summary>Заводить мапінг.</summary>
     /// <param name="command">Налаштування мапінгу.</param>
     /// <param name="ct">Скасування.</param>
@@ -612,11 +618,20 @@ public sealed class CreateSourceEventMapHandler(
         schedules.Add(schedule);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
+        // ⛔ F13-p192 (P3): розклад ставиться НЕЯВНО й без права `Integration.EditSchedule` (Q-2 так задумав) — тому
+        // журнал прямо називає причину `defaultForEventMap`, з'єднання, сутність і cron; автор — `ChangedByUserId`.
+        // Ключ той самий, що в явного створення (клієнт і каталог без змін; зайві параметри він ігнорує).
         await IntegrationConfigAudit.WriteAsync(
             audit, clock, currentUser, IntegrationConfigAudit.ScheduleType, schedule.Id,
             Integration.CreateCollectionScheduleHandler.AuditOperation,
             oldJson: null, newJson: IntegrationConfigAudit.Snapshot(schedule),
-            reason: IntegrationConfigAudit.Reason("integrationAudit.scheduleCreated", ("id", schedule.Id), ("entity", entity.Code)),
+            reason: IntegrationConfigAudit.Reason(
+                "integrationAudit.scheduleCreated",
+                ("id", schedule.Id),
+                ("entity", entity.Code),
+                ("dataSource", entity.DataSourceCode),
+                ("cron", DefaultEventSyncCron),
+                ("cause", DefaultScheduleCause)),
             ct).ConfigureAwait(false);
 
         return schedule;

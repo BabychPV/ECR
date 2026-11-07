@@ -214,10 +214,23 @@ public sealed partial class SourceEventSyncJob(
             read.Truncated || sibling.Incomplete,
             read.ErrorCode);
 
+        // ⛔ F13-p192 (P3): ID, які у відповіді є ЛИШЕ як копія `…_Day`, — поза звіркою: подія не додається (вище), а її
+        // наявний зв'язок не стає кандидатом на видалення (`Gone`/`Missing`) і не перехоплюється перепривʼязкою. Без
+        // цього перевизначений запит кореня, що повертає й `_Day`, видаляв рядки, записані копією до рішення Q-1.
+        // ID, що є і в корені, — звичайна звірка (зв'язок кореня).
+        var rootIds = read.Events
+            .Where(e => !SourceEventTemplateOrder.IsDayCopy(e.TemplateName))
+            .Select(e => e.EventId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var dayCopyOnlyIds = read.Events
+            .Where(e => SourceEventTemplateOrder.IsDayCopy(e.TemplateName) && !rootIds.Contains(e.EventId))
+            .Select(e => e.EventId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         var totals = new Totals();
         foreach (var map in maps)
         {
-            await SyncMapAsync(map, own, sibling, from, to, now, totals, truncatedAfterPaging, ct).ConfigureAwait(false);
+            await SyncMapAsync(map, own, sibling, dayCopyOnlyIds, from, to, now, totals, truncatedAfterPaging, ct).ConfigureAwait(false);
         }
 
         if (totals.Removed > 0 || totals.RemovalSkipped > 0)
@@ -609,6 +622,7 @@ public sealed partial class SourceEventSyncJob(
         SourceEventMap map,
         SourceEventResult read,
         SiblingContext sibling,
+        HashSet<string> dayCopyOnlyIds,
         DateTime from,
         DateTime to,
         DateTime now,
@@ -698,7 +712,7 @@ public sealed partial class SourceEventSyncJob(
             read.Events,
             read.Truncated,
             read.ErrorCode,
-            [.. links.Select(State)],
+            [.. links.Where(l => !dayCopyOnlyIds.Contains(l.SourceEventId)).Select(State)],
             start =>
             {
                 var period = SourceEventPeriods.Locate(start, periods);
