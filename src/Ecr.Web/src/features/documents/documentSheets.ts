@@ -62,5 +62,13 @@ export function documentState(document: Pick<DocumentSummary, 'sheetStates'>): s
   const unknown = states.find((state) => !(Worst as readonly string[]).includes(state));
   if (unknown !== undefined) return unknown;
 
-  return Worst.find((state) => states.includes(state)) ?? null;
+  const worst = Worst.find((state) => states.includes(state)) ?? null;
+
+  // ✎ UAT-recalc-ux: чернетка поруч із поданим/затвердженим — «частково подано» (`02-contracts.md`, стан
+  // погодження документа; те саме правило — фільтр `state=PartlySubmitted` і лічильник смуги).
+  if (worst === 'Draft' && states.some((state) => state === 'Submitted' || state === 'Approved')) {
+    return 'PartlySubmitted';
+  }
+
+  return worst;
 }

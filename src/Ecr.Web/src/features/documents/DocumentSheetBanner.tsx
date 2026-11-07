@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import { Alert } from '@mantine/core';
+import { Alert, Text } from '@mantine/core';
 import { isEventOfSheet, useWorkflowHistory, type WorkflowEvent } from '@/features/workflow/api';
 import { formatDate } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
@@ -18,6 +18,11 @@ interface DocumentSheetBannerProps {
   readonly lock: DocumentLock | null;
   /** Ця людина може затвердити чи відхилити поданий аркуш. */
   readonly canDecide: boolean;
+  /**
+   * ✎ UAT-recalc-ux: поданий аркуш перераховано ПІСЛЯ подання (GET /documents/{id} → sheets[].recalculatedAfterSubmission):
+   * погоджувач має знати, що числа зрушили. Зникає з повторним поданням або затвердженням.
+   */
+  readonly recalculatedAfterSubmission?: boolean;
 }
 
 /**
@@ -43,6 +48,7 @@ export function DocumentSheetBanner({
   state,
   lock,
   canDecide,
+  recalculatedAfterSubmission = false,
 }: DocumentSheetBannerProps): JSX.Element | null {
   const contextual =
     !widerLock(lock) && (lock === 'sheetSubmitted' || lock === 'sheetApproved' || state === 'Rejected');
@@ -67,6 +73,11 @@ export function DocumentSheetBanner({
             людина (і тест) знаходить те саме речення, що в розділі 5.3. */}
         {t('grid.submittedReadOnlyHint')}{' '}
         <span>{canDecide ? t('document.banner.submittedDecide') : t('document.banner.submittedWait')}</span>
+        {recalculatedAfterSubmission && (
+          <Text component="strong" display="block" fw={700} mt="xs" size="sm" data-recalculated-after-submission="">
+            {t('sheet.recalculatedAfterSubmission')}: {t('sheet.recalculatedAfterSubmissionHint')}
+          </Text>
+        )}
       </Alert>
     );
   }

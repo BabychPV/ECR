@@ -142,6 +142,8 @@ afterEach(() => {
  */
 const expected: readonly (readonly [StatusKind, string, StatusTone])[] = [
   ['sheet', 'Draft', 'neutral'],
+  // ✎ UAT-recalc-ux: стан документа «частково подано» (`documentState`).
+  ['sheet', 'PartlySubmitted', 'info'],
   ['sheet', 'Submitted', 'info'],
   ['sheet', 'Approved', 'neutral'],
   ['sheet', 'Rejected', 'danger'],
@@ -238,8 +240,8 @@ describe('StatusBadge: стан → тон', () => {
    * коли й тут забули рядок: два переліки розійшлися б, а тест лишився б
    * зеленим на тому, що від них лишилося.
    */
-  it('перелік вичерпний: 59 пар, і таблиця компонента не має жодної зайвої', () => {
-    expect(expected).toHaveLength(59);
+  it('перелік вичерпний: 60 пар, і таблиця компонента не має жодної зайвої', () => {
+    expect(expected).toHaveLength(60);
     expect(expected.every(([kind, state]) => isKnownStatus(kind, state))).toBe(true);
 
     const inComponent = Object.entries(statusTable).flatMap(([kind, states]) =>

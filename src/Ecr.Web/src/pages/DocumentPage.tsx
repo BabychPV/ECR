@@ -785,6 +785,11 @@ export function DocumentPage(): JSX.Element {
           state={state}
           lock={lock}
           readOnly={readOnly}
+          // ✎ UAT-recalc-ux: позначка «перераховано після подання» — лише для оригіналу аркуша (копія без позначки).
+          recalculatedAfterSubmission={
+            (active.sheetCopyId ?? null) === null &&
+            (summary.data?.sheets ?? []).some((s) => s.code === active.code && s.recalculatedAfterSubmission)
+          }
           language={session.data?.language ?? 'en'}
           // ⛔ Імпорт лише туди, куди можна писати (`ФВ-5.20a`). ✎ D-445: поданий аркуш імпортує погоджувач
           // поточного кроку — як править його в сітці; хто саме — вирішує сервер (перегляд покаже відмову решті).

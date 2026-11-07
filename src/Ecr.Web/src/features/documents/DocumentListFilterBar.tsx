@@ -82,6 +82,7 @@ export function DocumentListFilterBar({
    */
   const labels: Readonly<Record<DocumentStateFilter, string>> = {
     Draft: t(statusKey('sheet', 'Draft')),
+    PartlySubmitted: t('documents.statePartlySubmitted'),
     Submitted: t(statusKey('sheet', 'Submitted')),
     Approved: t(statusKey('sheet', 'Approved')),
     Rejected: t(statusKey('sheet', 'Rejected')),

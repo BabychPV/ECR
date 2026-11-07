@@ -62,6 +62,8 @@ interface DocumentActionBarProps {
   readonly resultsStaleSince?: string | null;
   /** Власник нагадування «вихід із застарілим» - сторінка (N3-08); без нього нагадує сам рядок. */
   readonly staleReminderHost?: RefObject<StaleReminderState>;
+  /** ✎ UAT-recalc-ux: поданий аркуш перераховано після подання — позначка в банері для погоджувача. */
+  readonly recalculatedAfterSubmission?: boolean;
 }
 
 /**
@@ -92,6 +94,7 @@ export function DocumentActionBar({
   approverImport = false,
   canExport,
   calculationsStale = false,
+  recalculatedAfterSubmission = false,
   validate,
   documentItems,
   status,
@@ -273,6 +276,7 @@ export function DocumentActionBar({
         state={state}
         lock={lock}
         canDecide={actions.approve !== null || actions.reject !== null}
+        recalculatedAfterSubmission={recalculatedAfterSubmission}
       />
 
       {/* ✎ resultsStale: входи змінилися після прогону - банер і кнопка «Recalculate» (автоперерахунку немає). */}

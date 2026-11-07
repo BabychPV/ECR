@@ -90,8 +90,27 @@ export function DocumentListSummaryStrip({ periodKey, filters }: DocumentListSum
         ]
       : [];
 
+  /*
+   * ✎ UAT-recalc-ux: «частково подано» — окремо від чернетки (`02-contracts.md`, стан погодження документа). Як і
+   * Rejected — лише коли такі документи Є або фільтр уже активний: смуга в спокійному стані не росте нулями.
+   */
+  const partlyCount = summary.data.partlySubmitted ?? 0;
+  const partly: readonly Counter[] =
+    partlyCount > 0 || active === 'PartlySubmitted'
+      ? [
+          {
+            id: 'partlySubmitted',
+            label: t('documents.statePartlySubmitted'),
+            count: partlyCount,
+            tone: null,
+            state: 'PartlySubmitted',
+          },
+        ]
+      : [];
+
   const counters: readonly Counter[] = [
     { id: 'draft', label: t(statusKey('sheet', 'Draft')), count: summary.data.draft, tone: null, state: 'Draft' },
+    ...partly,
     {
       id: 'submitted',
       label: t(statusKey('sheet', 'Submitted')),

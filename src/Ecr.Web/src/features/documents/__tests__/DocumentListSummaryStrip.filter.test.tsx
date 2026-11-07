@@ -99,6 +99,28 @@ const counter = async (state: 'Draft' | 'Submitted' | 'Approved' | 'Rejected'): 
 
 describe('DocumentListSummaryStrip: лічильник — фільтр стану (BE-09b)', () => {
   it(
+    '✎ UAT-recalc-ux: «частково подано» — лічильник, коли такі є, і фільтр state=PartlySubmitted у запиті',
+    async () => {
+      mockFetch();
+      Object.assign(Summary, { partlySubmitted: 2 });
+      try {
+        show('/?periodKey=202601');
+
+        const partly = within(await strip()).getByRole('button', { name: /documents\.statePartlySubmitted/ });
+        expect(partly.textContent).toContain('2');
+        fireEvent.click(partly);
+
+        await waitFor(() => expect(lastListed().get('state')).toBe('PartlySubmitted'), { timeout: Find });
+        const field = screen.getByRole('combobox', { name: '⟦documents.state⟧' }) as HTMLSelectElement;
+        expect(field.value).toBe('PartlySubmitted');
+      } finally {
+        Reflect.deleteProperty(Summary, 'partlySubmitted');
+      }
+    },
+    Slow,
+  );
+
+  it(
     'клік на лічильник ставить state в адресу і в запит, позначає його aria-pressed і лишає на ньому фокус',
     async () => {
       mockFetch();

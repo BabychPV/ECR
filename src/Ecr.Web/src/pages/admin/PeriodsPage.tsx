@@ -16,7 +16,7 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiEnqueue, apiFetch } from '@/api/client';
+import { apiFetch } from '@/api/client';
 import type {
   ChangeProjectTimeZoneRequest,
   CloneProjectRequest,
@@ -40,6 +40,7 @@ import {
 import { hasProjectGrant } from '@/features/documents/projectGrant';
 import { pollInterval, outcomeOf } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
+import { RecalcSkippedList, type RecalcRequestOutcome } from '@/features/workflow/RecalcSkippedList';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -486,13 +487,25 @@ export function PeriodsPage(): JSX.Element {
    */
   const [recalcJobId, setRecalcJobId] = useState<string | null>(null);
 
+  // ✎ UAT-recalc-ux: відповідь несе пропущені (затверджені) аркуші; `jobId: null` — рахувати нічого.
+  const [recalcRequest, setRecalcRequest] = useState<RecalcRequestOutcome | null>(null);
+
   const recalculate = useMutation({
     mutationFn: (id: number) =>
-      apiEnqueue(`/api/v1/projects/${id}/recalculate`, {
-        periodKey: null,
-        approvalId: null,
-      } satisfies ProjectRecalculationRequest),
+      apiFetch<RecalcRequestOutcome>(`/api/v1/projects/${id}/recalculate`, {
+        method: 'POST',
+        body: JSON.stringify({
+          periodKey: null,
+          approvalId: null,
+        } satisfies ProjectRecalculationRequest),
+      }),
     onSuccess: (job) => {
+      setRecalcRequest(job);
+      if (job.jobId === null || job.jobId === undefined) {
+        setRecalcJobId(null);
+        return;
+      }
+
       setRecalcJobId(job.jobId);
       // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у ТОСТІ, `jobId` у стані —
       // і в запиті опитування — не змінюється.
@@ -736,6 +749,11 @@ export function PeriodsPage(): JSX.Element {
               >
                 {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
               </Button>
+            )}
+
+            {/* ✎ UAT-recalc-ux: пропущені затверджені аркуші — після завершення задачі (або одразу, коли рахувати нічого). */}
+            {recalcRequest !== null && (recalcRequest.nothingToRecalculate === true || (recalcJobId !== null && !recalcRunning)) && (
+              <RecalcSkippedList outcome={recalcRequest} />
             )}
 
             {recalcFan !== null && (
