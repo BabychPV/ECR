@@ -319,13 +319,24 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
 
         if (IsNumber(a) && IsNumber(b))
         {
-            return Convert.ToDecimal(a, CultureInfo.InvariantCulture) == Convert.ToDecimal(b, CultureInfo.InvariantCulture);
+            // The store keeps StoredScale decimals: a file number with more (Excel double 0.19091925399999998) comes back rounded
+            // (0.1909192540000000), so the same file must not read as «changed». Compare as the store would keep them.
+            return Stored(a) == Stored(b);
         }
 
         return Canon(a) == Canon(b);
     }
 
     private static bool IsNumber(object o) => o is decimal or long or int or short or double;
+
+    /// <summary>
+    /// Decimals the registry keeps for a number (<c>dic.RegistryValue.ValueNumeric decimal(34,16)</c>; SQL Server rounds half
+    /// away from zero when it stores more).
+    /// </summary>
+    internal const int StoredScale = 16;
+
+    private static decimal Stored(object number)
+        => Math.Round(Convert.ToDecimal(number, CultureInfo.InvariantCulture), StoredScale, MidpointRounding.AwayFromZero);
 
     private static string Canon(object? value) => value switch
     {
