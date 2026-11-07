@@ -23,7 +23,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REG-0404.importProfile', N'ru', N'Профиль импорта {code} не существует.'),
     (N'err.ECR-REG-0404.importProfile', N'kz', N'{code} импорт профилі жоқ.'),
     (N'registryAudit.airLimitsImport', N'ru', N'Импортированы лимиты: источников {sources}, строк веществ {substances}.'),
-    (N'registryAudit.airLimitsImport', N'kz', N'Лимиттер импортталды: көздер {sources}, заттар жолдары {substances}.')
+    (N'registryAudit.airLimitsImport', N'kz', N'Лимиттер импортталды: көздер {sources}, заттар жолдары {substances}.'),
+    (N'err.ECR-REG-0409.profileCodeTaken', N'ru', N'Профиль импорта с кодом {code} уже существует.'),
+    (N'err.ECR-REG-0409.profileCodeTaken', N'kz', N'{code} коды бар импорт профилі бұрыннан бар.'),
+    (N'err.ECR-REG-0409.profileBuiltIn', N'ru', N'Профиль импорта {code} встроенный, его нельзя перезаписать. Сохраните сопоставление под другим кодом.'),
+    (N'err.ECR-REG-0409.profileBuiltIn', N'kz', N'{code} импорт профилі кірістірілген, оны қайта жазуға болмайды. Сәйкестікті басқа кодпен сақтаңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -42,7 +46,9 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-IMP-0422.airProfileUnknown',     N'en', N'The import profile {code} does not exist.', 1),
     (N'err.ECR-REG-0409.profileChanged',        N'en', N'The import profile {code} was changed after you opened it. Reload it and try again.', 1),
     (N'err.ECR-REG-0404.importProfile',         N'en', N'The import profile {code} does not exist.', 1),
-    (N'registryAudit.airLimitsImport',          N'en', N'Air limits imported: {sources} sources, {substances} substance rows.', 1)
+    (N'registryAudit.airLimitsImport',          N'en', N'Air limits imported: {sources} sources, {substances} substance rows.', 1),
+    (N'err.ECR-REG-0409.profileCodeTaken',      N'en', N'An import profile with code {code} already exists.', 1),
+    (N'err.ECR-REG-0409.profileBuiltIn',        N'en', N'The import profile {code} is built in and cannot be overwritten. Save the mapping under another code.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

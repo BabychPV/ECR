@@ -84,6 +84,18 @@ public sealed class AirImportProfileHandler(
         }
         else
         {
+            // Pass 2 (07.11): the wizard never overwrites the shipped profile, and «Save as profile…» (no token) under a code that
+            // is taken is a «code taken» refusal, not «changed after you opened it» (nothing was opened).
+            if (IsBuiltIn(existing))
+            {
+                throw BuiltInReadOnly(existing.Code);
+            }
+
+            if (string.IsNullOrEmpty(request.RowVersion))
+            {
+                throw CodeTaken(existing.Code);
+            }
+
             if (!string.Equals(request.RowVersion, Convert.ToBase64String(existing.RowVersion), StringComparison.Ordinal))
             {
                 throw Changed(existing.Code);
@@ -127,6 +139,18 @@ public sealed class AirImportProfileHandler(
             "ECR-REG-0409",
             $"Import profile {code} was changed after it was read.",
             new Dictionary<string, object?> { ["messageKey"] = AirLimitsKeys.ProfileChanged, ["code"] = code });
+
+    private static ConcurrencyConflictException CodeTaken(string code)
+        => new(
+            "ECR-REG-0409",
+            $"Import profile {code} already exists.",
+            new Dictionary<string, object?> { ["messageKey"] = AirLimitsKeys.ProfileCodeTaken, ["code"] = code });
+
+    private static ConcurrencyConflictException BuiltInReadOnly(string code)
+        => new(
+            "ECR-REG-0409",
+            $"Import profile {code} is built in and cannot be overwritten.",
+            new Dictionary<string, object?> { ["messageKey"] = AirLimitsKeys.ProfileBuiltIn, ["code"] = code });
 
     private static BusinessRuleException SpecInvalid(string where, string reason)
         => new(

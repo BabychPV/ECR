@@ -746,6 +746,64 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         await AssertErrorAsync(app, saved, HttpStatusCode.UnprocessableEntity, "err.ECR-IMP-0422.regSpecInvalid");
     }
 
+    /// <summary>
+    /// Air pass2 (human pass 07.11, P2): «Save as profile…» sends no token. Under a code that is taken the answer is «a profile
+    /// with this code already exists» (<c>profileCodeTaken</c>), not «changed after you opened it»; with the profile's current
+    /// token the same request overwrites it. The built-in <c>ERA_TABLE_33</c> is never overwritten from the wizard, token or not
+    /// (<c>profileBuiltIn</c>), and stays unchanged.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task SaveProfile__a_taken_code_is_code_taken_overwrite_needs_the_token_and_the_built_in_is_never_overwritten()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+
+        var builtIn = await ReadAsync(app, await client.GetAsync(new Uri("/api/v1/air-limits/import-profiles/ERA_TABLE_33", UriKind.Relative)));
+        var spec = builtIn.GetProperty("spec");
+        var code = $"PASS2_{Guid.NewGuid():N}".ToUpperInvariant();
+        var uri = new Uri($"/api/v1/air-limits/import-profiles/{code}", UriKind.Relative);
+
+        var created = await ReadAsync(app, await client.PutAsJsonAsync(
+            uri, new { nameL10n = new Dictionary<string, string> { ["en"] = "first" }, spec, rowVersion = (string?)null }));
+        Assert.Equal(code, created.GetProperty("code").GetString());
+
+        await AssertErrorAsync(
+            app,
+            await client.PutAsJsonAsync(uri, new { nameL10n = new Dictionary<string, string> { ["en"] = "second" }, spec, rowVersion = (string?)null }),
+            HttpStatusCode.Conflict,
+            "err.ECR-REG-0409.profileCodeTaken");
+
+        var current = await ReadAsync(app, await client.GetAsync(uri));
+        Assert.Equal("first", current.GetProperty("nameL10n").GetProperty("en").GetString());
+        var overwritten = await ReadAsync(app, await client.PutAsJsonAsync(
+            uri, new { nameL10n = new Dictionary<string, string> { ["en"] = "second" }, spec, rowVersion = current.GetProperty("rowVersion").GetString() }));
+        Assert.Equal("second", overwritten.GetProperty("nameL10n").GetProperty("en").GetString());
+
+        // A stale token is still «changed after you opened it».
+        await AssertErrorAsync(
+            app,
+            await client.PutAsJsonAsync(uri, new { nameL10n = new Dictionary<string, string> { ["en"] = "third" }, spec, rowVersion = current.GetProperty("rowVersion").GetString() }),
+            HttpStatusCode.Conflict,
+            "err.ECR-REG-0409.profileChanged");
+
+        var builtInUri = new Uri("/api/v1/air-limits/import-profiles/ERA_TABLE_33", UriKind.Relative);
+        await AssertErrorAsync(
+            app,
+            await client.PutAsJsonAsync(builtInUri, new { nameL10n = new Dictionary<string, string> { ["en"] = "mine" }, spec, rowVersion = (string?)null }),
+            HttpStatusCode.Conflict,
+            "err.ECR-REG-0409.profileBuiltIn");
+        await AssertErrorAsync(
+            app,
+            await client.PutAsJsonAsync(builtInUri, new { nameL10n = new Dictionary<string, string> { ["en"] = "mine" }, spec, rowVersion = builtIn.GetProperty("rowVersion").GetString() }),
+            HttpStatusCode.Conflict,
+            "err.ECR-REG-0409.profileBuiltIn");
+        var after = await ReadAsync(app, await client.GetAsync(builtInUri));
+        Assert.Equal(builtIn.GetProperty("rowVersion").GetString(), after.GetProperty("rowVersion").GetString());
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

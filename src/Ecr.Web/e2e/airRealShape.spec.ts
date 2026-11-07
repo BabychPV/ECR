@@ -278,4 +278,98 @@ test.describe('Air real shape', () => {
     await expect(failure).toHaveCount(0, { timeout: 60_000 });
     await expect(page.locator('.pi-stat').first()).toContainText('2', { timeout: 60_000 });
   });
+
+  /**
+   * Human pass 2 (07.11, P2): «Save as profile…» under a code that exists said «changed after you opened it». Now: a taken code →
+   * «A profile with this code already exists» + «Overwrite» (re-saved with the profile's current token); the built-in
+   * ERA_TABLE_33 → its own refusal, only «Choose another code», and it stays unchanged. Nothing is imported.
+   * ⚠ The profile PASS2_<stamp> stays on the stand (profiles have no delete endpoint); its code is unique per run.
+   */
+  test('Air pass2: a taken profile code offers Overwrite; the built-in profile is never overwritten', async ({ page }) => {
+    const code = `PASS2_${Stamp}`;
+    const builtInBefore = await ok<{ rowVersion: string }>(await admin.get('/api/v1/air-limits/import-profiles/ERA_TABLE_33'), 'built-in profile');
+    await signIn(page);
+    await toMapping(page, realShapeWorkbook(RealShapeSources));
+
+    const save = async (name: string, profileCode: string): Promise<void> => {
+      await page.getByRole('button', { name: 'Save as profile…' }).click();
+      await page.getByRole('textbox', { name: 'Profile name' }).fill(name);
+      await page.getByRole('textbox', { name: /^Profile code/ }).fill(profileCode);
+      await page.getByRole('button', { name: 'Save profile', exact: true }).click();
+    };
+
+    await save('Pass2 e2e', code);
+    await expect(page.getByText(`Profile ${code} saved and selected.`)).toBeVisible({ timeout: 30_000 });
+
+    await save('Pass2 e2e again', code);
+    const conflict = page.getByTestId('air-profile-conflict');
+    await expect(conflict).toContainText('A profile with this code already exists', { timeout: 30_000 });
+    await expect(page.getByText(/changed after you opened it/)).toHaveCount(0);
+    await page.getByRole('button', { name: 'Overwrite', exact: true }).click();
+    await expect(conflict).toHaveCount(0, { timeout: 30_000 });
+    const stored = await ok<{ nameL10n: Record<string, string> }>(await admin.get(`/api/v1/air-limits/import-profiles/${code}`), 'saved profile');
+    expect(stored.nameL10n['en']).toBe('Pass2 e2e again');
+
+    await save('Mine', 'ERA_TABLE_33');
+    await expect(conflict).toContainText('The built-in profile cannot be overwritten', { timeout: 30_000 });
+    await expect(page.getByRole('button', { name: 'Overwrite', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Choose another code' }).click();
+    await expect(conflict).toHaveCount(0);
+    await expect(page.getByRole('textbox', { name: /^Profile code/ })).toBeFocused();
+    const builtInAfter = await ok<{ rowVersion: string }>(await admin.get('/api/v1/air-limits/import-profiles/ERA_TABLE_33'), 'built-in profile');
+    expect(builtInAfter.rowVersion).toBe(builtInBefore.rowVersion);
+  });
+
+  /**
+   * Human pass 2 (07.11, P2): NAE codes missing in the tree gave «The file has errors — fix them and upload again». Now they are a
+   * warning group: no «fix the file» gate, «Create all undecided under this node», «Run preview again», Apply. Apply stays
+   * disabled while any code is undecided.
+   */
+  test('Air pass2: missing NAE are a warning group, created under a node from the preview, then applied', async ({ page }) => {
+    const [first, second] = RealShapeSources as readonly [RealShapeSource, RealShapeSource, RealShapeSource];
+    const fresh: RealShapeSource[] = [{ ...first, nae: '0901' }, { ...second, nae: '0902' }];
+    await signIn(page);
+    await toMapping(page, realShapeWorkbook(fresh));
+    await page.getByRole('button', { name: /Next: preview/ }).click();
+    await expect(page.getByRole('heading', { name: 'Preview', level: 2 })).toBeVisible({ timeout: 30_000 });
+
+    await expect(page.getByRole('heading', { name: /NAE codes missing in the tree: 2/ })).toBeVisible();
+    await expect(page.getByTestId('air-missing-group')).toContainText('These are not file errors');
+    await expect(page.getByText('The file has errors — fix them and upload again.')).toHaveCount(0);
+    await expect(page.getByText('Decide every missing NAE code: create or skip.')).toBeVisible();
+    const apply = page.getByRole('button', { name: /Apply import/ });
+    await expect(apply).toBeDisabled();
+
+    await page.getByRole('textbox', { name: /^Node for all undecided NAE/ }).click();
+    await page.getByRole('option', { name: new RegExp(`${Region}_S$`) }).click();
+    await page.getByRole('button', { name: 'Create all undecided (2) under this node' }).click();
+    await expect(apply).toBeDisabled();
+    await page.getByRole('button', { name: 'Run preview again' }).click();
+    await expect(page.getByText('The preview is out of date')).toHaveCount(0, { timeout: 30_000 });
+    await expect(apply).toBeEnabled({ timeout: 30_000 });
+    await apply.click();
+    await expect(page.getByRole('heading', { name: 'Result', level: 2 })).toBeVisible({ timeout: 60_000 });
+
+    // The apply refuses any unresolved NAE: two sources in the card means both nodes were created under the site.
+    await expect(page.getByText('NAE created in the tree')).toBeVisible();
+    const card = await ok<{ sources: unknown[] }>(await admin.get(`/api/v1/permits/${String(state.permitId)}/air-limits`), 'card');
+    expect(card.sources).toHaveLength(2);
+  });
+
+  /** Human pass 2 (07.11, P3): the step pills looked like buttons but did nothing. A completed step now goes back to it. */
+  test('Air pass2: a completed step pill goes back to that step; the current and later ones are not buttons', async ({ page }) => {
+    await signIn(page);
+    await toMapping(page, realShapeWorkbook(RealShapeSources));
+    const steps = page.getByRole('list', { name: 'Import steps' });
+    await expect(steps.getByRole('button')).toHaveCount(2);
+    await expect(steps.getByText('3 Mapping')).toHaveAttribute('aria-current', 'step');
+    await expect(steps.getByRole('button', { name: '4 Preview' })).toHaveCount(0);
+
+    await steps.getByRole('button', { name: '2 File' }).click();
+    await expect(page.getByRole('heading', { name: 'File', level: 2 })).toBeVisible({ timeout: 30_000 });
+    await expect(steps.getByRole('button')).toHaveCount(1);
+    // Forward only through the checks: the file is kept and analysed again by «Next».
+    await page.getByRole('button', { name: /Next: analyse file/ }).click();
+    await expect(page.getByRole('heading', { name: 'Mapping', level: 2 })).toBeVisible({ timeout: 30_000 });
+  });
 });

@@ -386,7 +386,25 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.air.import.network.text', N'ru', N'Запрос не дошёл до сервера (обрыв связи или сервер перезапускается). Повторите через минуту.'),
     (N'permits.air.import.network.text', N'kz', N'Сұрау серверге жетпеді (байланыс үзілді немесе сервер қайта іске қосылуда). Бір минуттан кейін қайталаңыз.'),
     (N'permits.air.import.chooseAgain', N'ru', N'Выбрать файл заново'),
-    (N'permits.air.import.chooseAgain', N'kz', N'Файлды қайта таңдау')
+    (N'permits.air.import.chooseAgain', N'kz', N'Файлды қайта таңдау'),
+    (N'permits.air.import.save.codeTakenTitle', N'ru', N'Профиль с таким кодом уже существует'),
+    (N'permits.air.import.save.codeTakenTitle', N'kz', N'Мұндай коды бар профиль бұрыннан бар'),
+    (N'permits.air.import.save.codeTaken', N'ru', N'Профиль {code} уже есть. Перезапишите его этим сопоставлением или выберите другой код.'),
+    (N'permits.air.import.save.codeTaken', N'kz', N'{code} профилі бұрыннан бар. Оны осы сәйкестікпен қайта жазыңыз немесе басқа код таңдаңыз.'),
+    (N'permits.air.import.save.builtInTitle', N'ru', N'Встроенный профиль нельзя перезаписать'),
+    (N'permits.air.import.save.builtInTitle', N'kz', N'Кірістірілген профильді қайта жазуға болмайды'),
+    (N'permits.air.import.save.builtIn', N'ru', N'{code} — встроенный профиль системы. Выберите другой код для своего профиля.'),
+    (N'permits.air.import.save.builtIn', N'kz', N'{code} — жүйенің кірістірілген профилі. Өз профиліңіз үшін басқа код таңдаңыз.'),
+    (N'permits.air.import.save.overwrite', N'ru', N'Перезаписать'),
+    (N'permits.air.import.save.overwrite', N'kz', N'Қайта жазу'),
+    (N'permits.air.import.save.chooseAnother', N'ru', N'Выбрать другой код'),
+    (N'permits.air.import.save.chooseAnother', N'kz', N'Басқа код таңдау'),
+    (N'permits.air.import.missing.warning', N'ru', N'Это не ошибки файла: этих кодов НАЕ пока нет в дереве НАЕ. Создайте недостающие узлы или пропустите эти строки, затем повторите просмотр. Применить можно, когда решено по всем кодам.'),
+    (N'permits.air.import.missing.warning', N'kz', N'Бұл файл қателері емес: бұл НАЕ кодтары НАЕ ағашында әзірге жоқ. Жетіспейтін түйіндерді жасаңыз немесе бұл жолдарды өткізіп жіберіңіз, содан кейін қарап шығуды қайталаңыз. Барлық кодтар бойынша шешім қабылданғанда қолдануға болады.'),
+    (N'permits.air.import.missing.createAllUnder', N'ru', N'Узел для всех нерешённых НАЕ'),
+    (N'permits.air.import.missing.createAllUnder', N'kz', N'Шешілмеген барлық НАЕ үшін түйін'),
+    (N'permits.air.import.missing.createAll', N'ru', N'Создать все нерешённые ({count}) под этим узлом'),
+    (N'permits.air.import.missing.createAll', N'kz', N'Шешілмеген барлығын ({count}) осы түйін астында жасау')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -586,7 +604,16 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'permits.air.import.fileUnreadable.text', N'en', N'The browser can no longer read the chosen file: it was changed, moved or deleted after you chose it (for example, saved in Excel). Choose the file again; the mapping and the profile are kept.', 1),
     (N'permits.air.import.network.title', N'en', N'The server did not answer', 1),
     (N'permits.air.import.network.text', N'en', N'The request did not reach the server (the connection dropped or the server is restarting). Try again in a minute.', 1),
-    (N'permits.air.import.chooseAgain', N'en', N'Choose the file again', 1)
+    (N'permits.air.import.chooseAgain', N'en', N'Choose the file again', 1),
+    (N'permits.air.import.save.codeTakenTitle', N'en', N'A profile with this code already exists', 1),
+    (N'permits.air.import.save.codeTaken', N'en', N'Profile {code} already exists. Overwrite it with this mapping, or choose another code.', 1),
+    (N'permits.air.import.save.builtInTitle', N'en', N'The built-in profile cannot be overwritten', 1),
+    (N'permits.air.import.save.builtIn', N'en', N'{code} is the built-in profile of the system. Choose another code for your profile.', 1),
+    (N'permits.air.import.save.overwrite', N'en', N'Overwrite', 1),
+    (N'permits.air.import.save.chooseAnother', N'en', N'Choose another code', 1),
+    (N'permits.air.import.missing.warning', N'en', N'These are not file errors: the NAE codes are not in the NAE tree yet. Create the missing nodes or skip those rows, then run the preview again. Apply is possible once every code is decided.', 1),
+    (N'permits.air.import.missing.createAllUnder', N'en', N'Node for all undecided NAE', 1),
+    (N'permits.air.import.missing.createAll', N'en', N'Create all undecided ({count}) under this node', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

@@ -336,6 +336,12 @@ public static class AirLimitsKeys
     /// <summary>The profile changed since it was read.</summary>
     public const string ProfileChanged = "err.ECR-REG-0409.profileChanged";
 
+    /// <summary>A new profile (no token) under a code that is taken.</summary>
+    public const string ProfileCodeTaken = "err.ECR-REG-0409.profileCodeTaken";
+
+    /// <summary>The built-in profile is not overwritten from the wizard.</summary>
+    public const string ProfileBuiltIn = "err.ECR-REG-0409.profileBuiltIn";
+
     /// <summary>The upload is missing.</summary>
     public const string RequestInvalid = "err.ECR-IMP-0422.airRequestInvalid";
 }

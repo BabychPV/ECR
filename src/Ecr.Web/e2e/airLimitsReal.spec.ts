@@ -402,14 +402,18 @@ test.describe('Air limits real', () => {
     await expect(page.getByText(/Header rows 2–3 · data from row 5/)).toBeVisible();
     await expectNoRawKeys(page);
 
-    // 3 Preview: errors for the two NAE codes that are not in the tree, a warning for the empty t/year cell.
+    // 3 Preview: the two NAE codes that are not in the tree are the missing-NAE warning group (pass 2, 07.11: not file
+    // errors — no «fix the file» gate, no Error rows among the findings), a warning for the empty t/year cell.
     await page.getByRole('button', { name: /Next: preview/ }).click();
     await expect(page.getByRole('heading', { name: 'Preview', level: 2 })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('heading', { name: /NAE codes missing in the tree: 2/ })).toBeVisible();
+    const missingRows = page.getByRole('region', { name: 'NAE codes missing in the tree' });
+    await expect(missingRows.getByRole('row', { name: /0002\s+7/ })).toBeVisible();
+    await expect(missingRows.getByRole('row', { name: /0003\s+8/ })).toBeVisible();
     const issues = page.getByRole('region', { name: 'Import findings' });
     await expect(issues.getByRole('row', { name: /Warning\s+6\s+I\s+t\/year/ })).toBeVisible();
-    await expect(issues.getByRole('row', { name: /Error\s+7\s+B\s+NAE number/ })).toBeVisible();
-    await expect(issues.getByRole('row', { name: /Error\s+8\s+B\s+NAE number/ })).toBeVisible();
+    await expect(issues.getByRole('row', { name: /Error/ })).toHaveCount(0);
+    await expect(page.getByText('The file has errors — fix them and upload again.')).toHaveCount(0);
     await expectNoRawKeys(page);
     const apply = page.getByRole('button', { name: /Apply import/ });
     await expect(apply).toBeDisabled();
