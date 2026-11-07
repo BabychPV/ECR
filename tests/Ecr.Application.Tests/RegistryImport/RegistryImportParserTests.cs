@@ -228,6 +228,35 @@ public sealed class RegistryImportParserTests
         Assert.Contains(parsed.Header!.Mapped, m => m.Field == "workshop" && m.ColumnLetter == "B");
     }
 
+    /// <summary>
+    /// P1 UAT 07.11 (AIR wizard «Mapping»): a field just added in the editor has a name and nothing else. Reading the file with
+    /// such an unsaved specification must not be refused as a whole — the field is reported as unmapped next to its name and the
+    /// rest of the file is read. A SAVED profile still needs a column for every field.
+    /// </summary>
+    [Fact]
+    public void A_field_without_column_or_patterns_is_reported_when_reading_but_refused_when_saving()
+    {
+        RegistryImportSpec Spec() => new()
+        {
+            GroupRows = Era.GroupRows,
+            ParentKeyField = Era.ParentKeyField,
+            ChildKeyField = Era.ChildKeyField,
+            Fields = [.. Era.Fields, new ImportFieldSpec { Name = "workshop", Level = ImportLevel.Child }],
+        };
+
+        var parsed = Parse(TwoSources(), Spec().ValidatedForReading());
+
+        Assert.False(parsed.HasErrors, string.Join("; ", parsed.Issues.Select(i => i.MessageKey + " " + i.Field)));
+        var issue = Assert.Single(parsed.Issues, i => i.Field == "workshop");
+        Assert.Equal((ImportSeverity.Warning, RegistryImportKeys.ColumnMissing), (issue.Severity, issue.MessageKey));
+        Assert.DoesNotContain(parsed.Header!.Mapped, m => m.Field == "workshop");
+        Assert.Equal(3, parsed.Parents.Count);
+
+        var refused = Assert.Throws<BusinessRuleException>(() => Spec().Validated());
+        Assert.Equal(RegistryImportKeys.SpecInvalid, refused.Details!["messageKey"]);
+        Assert.Equal("workshop", refused.Details["where"]);
+    }
+
     // ---------- rows ----------
 
     [Fact]

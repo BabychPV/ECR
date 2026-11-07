@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
 import { RealShapeSources, realShapeWorkbook, type RealShapeSource } from './airRealShape';
 import { ensureNaeTree, ensureSubstances, fillScope, prepareScope, removeScopeEntries, type PreparedScope } from './airScope';
@@ -219,5 +220,62 @@ test.describe('Air real shape', () => {
     const card = await ok<{ sources: unknown[]; substanceRows: number }>(await admin.get(`/api/v1/permits/${String(state.permitId)}/air-limits`), 'card');
     expect(card.sources).toHaveLength(2);
     expect(card.substanceRows).toBe(3);
+  });
+
+  /**
+   * P1 UAT 07.11: a field added in the editor (name only) and «Re-analyse file» ended in «The request failed», «Next: preview»
+   * stayed disabled. Root cause on the stand: the chosen file was changed on disk after it was chosen — Chromium then refuses
+   * every upload of it (`fetch` → `TypeError: Failed to fetch`, no HTTP answer), while requests without the file (save profile)
+   * still work. Nothing is applied here: only analyses.
+   */
+  test('Air real shape: a field without a column and a file changed after it was chosen never leave the user stuck', async ({ page }) => {
+    const field = 'Workshop e2e field';
+    const book = test.info().outputPath('params-e2e.xlsx');
+    writeFileSync(book, realShapeWorkbook(RealShapeSources));
+
+    await signIn(page);
+    const prepared = scope;
+    if (prepared === null) throw new Error('scope not prepared');
+    await page.goto(`/admin/permits/${String(state.permitId)}/import`);
+    await expect(page.getByRole('heading', { name: 'Region and area', level: 2 })).toBeVisible({ timeout: 30_000 });
+    await fillScope(page, prepared);
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'File', level: 2 })).toBeVisible({ timeout: 30_000 });
+    // From a path (not a buffer): the browser holds a real file-backed File, as when the user picks it.
+    await page.locator('input[type="file"]').setInputFiles(book);
+    await page.getByRole('button', { name: /Next: analyse file/ }).click();
+    await expect(page.getByRole('heading', { name: 'Mapping', level: 2 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('.pi-stat').first()).toContainText('3');
+
+    // 1. «Add field» gives a name and nothing else: highlighted, the save is blocked with the reason, re-analysis still works.
+    await page.getByText('Advanced: edit the mapping rules').click();
+    await page.getByRole('button', { name: 'Edit mapping' }).click();
+    await page.getByRole('textbox', { name: 'New field name' }).fill(field);
+    await page.getByRole('button', { name: 'Add field', exact: true }).click();
+    await expect(page.getByTestId('air-field-without-column')).toContainText(`Field "${field}" has no file column`);
+    await expect(page.getByRole('button', { name: 'Save as profile…' })).toBeDisabled();
+    await page.getByRole('button', { name: 'Re-analyse file' }).click();
+    await expect(page.getByText(`The column for "${field}" was not found in the file header.`)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText('The request failed')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Next: preview/ })).toBeEnabled({ timeout: 30_000 });
+
+    // 2. The column picked from the file's columns: the field reads B «Цех».
+    await page.getByRole('textbox', { name: `File column of field ${field}` }).click();
+    await page.getByRole('option', { name: 'B — Цех' }).click();
+    await expect(page.getByTestId('air-field-without-column')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Next: preview/ })).toBeDisabled();
+    await page.getByRole('button', { name: 'Re-analyse file' }).click();
+    await expect(page.getByRole('region', { name: 'Matched columns' }).getByRole('rowheader', { name: field, exact: true })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole('button', { name: /Next: preview/ })).toBeEnabled({ timeout: 30_000 });
+
+    // 3. The file is saved again on disk (as Excel does): the reason and «Choose the file again», never «The request failed».
+    writeFileSync(book, realShapeWorkbook(RealShapeSources.slice(0, 2)));
+    await page.getByRole('button', { name: 'Re-analyse file' }).click();
+    const failure = page.getByTestId('air-send-failure');
+    await expect(failure).toContainText('The file could not be sent', { timeout: 60_000 });
+    await expect(page.getByText('The request failed')).toHaveCount(0);
+    await failure.locator('input[type="file"]').setInputFiles(book);
+    await expect(failure).toHaveCount(0, { timeout: 60_000 });
+    await expect(page.locator('.pi-stat').first()).toContainText('2', { timeout: 60_000 });
   });
 });

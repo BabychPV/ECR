@@ -1,3 +1,4 @@
+import { EcrApiError } from '@/api/client';
 import type {
   AirImportOptions,
   AirPreview,
@@ -130,6 +131,37 @@ export function buildOptions(
   };
 }
 
+/**
+ * Why a request with the workbook never got an answer (P1 UAT 07.11): `fileUnreadable` — the browser can no longer read the chosen
+ * file (it was saved in Excel, moved or deleted after it was chosen: Chrome refuses the upload, `fetch` rejects with a
+ * `TypeError` and no HTTP status); `network` — the file is readable, the server was not reached. `null` — not such a failure (an
+ * answer of the server, shown by `ErrorAlert` with its own text).
+ *
+ * ⚠ Without this the wizard showed the generic «The request failed» for every retry and the user had no way forward.
+ */
+export type SendFailure = 'fileUnreadable' | 'network';
+
+export async function sendFailureOf(error: unknown, file: File | null): Promise<SendFailure | null> {
+  if (error instanceof EcrApiError || !(error instanceof TypeError)) return null;
+  if (file === null) return 'network';
+
+  return (await readable(file)) ? 'network' : 'fileUnreadable';
+}
+
+/** Reads the first byte of the file: a file changed or removed on disk after it was chosen fails (`NotReadableError`). */
+function readable(file: File): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const reader = new FileReader();
+      reader.onload = () => resolve(true);
+      reader.onerror = () => resolve(false);
+      reader.readAsArrayBuffer(file.slice(0, 1));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 /** Крок «Файл» можна завершити: є файл `.xlsx` (область перевіряє крок «Регіон і ділянка», `scopeProblem`). */
 export function fileStepProblem(draft: ImportDraft): 'file' | 'extension' | null {
   if (draft.file === null) return 'file';
@@ -230,6 +262,54 @@ export function withoutField(spec: ImportSpec, index: number): ImportSpec {
 
 export function withNewField(spec: ImportSpec, name: string): ImportSpec {
   return { ...spec, fields: [...specFields(spec), { name, patterns: [], level: 'Child', parser: 'Text' }] };
+}
+
+/**
+ * The first field that points at nothing — no column letter and no header text (a field just added in the editor); `null` —
+ * every field has one. Such a field may be READ (the server reports it as «column not found»), but a profile cannot be saved
+ * with it (`422 regSpecInvalid`): the editor highlights it and blocks «Save as profile…».
+ */
+export function fieldWithoutColumn(spec: ImportSpec): string | null {
+  const field = specFields(spec).find(lacksColumn);
+
+  return field === undefined ? null : (field.name ?? '');
+}
+
+/** A field has neither a column letter nor header text. */
+export function lacksColumn(field: ImportFieldSpec): boolean {
+  return (field.column ?? '').trim() === '' && (field.patterns ?? []).length === 0;
+}
+
+/** A file column the editor offers for a field: letter and the header text found there. */
+export interface FileColumnOption {
+  readonly value: string;
+  readonly label: string;
+}
+
+/**
+ * Columns of the analysed file (mapped and unmapped) for the field editor's column picker, in file order: `B — Цех`. A letter
+ * the specification already names but the header report does not list (a column past the header) is kept, so the picker never
+ * hides the current value.
+ */
+export function fileColumnOptions(
+  columns: readonly { readonly column: number; readonly columnLetter: string; readonly headerText: string }[],
+  current: readonly (string | null | undefined)[] = [],
+): FileColumnOption[] {
+  const byLetter = new Map<string, { order: number; label: string }>();
+  for (const column of columns) {
+    if (byLetter.has(column.columnLetter)) continue;
+    const text = column.headerText.replace(/\s+/g, ' ').trim();
+    const shown = text.length > 60 ? `${text.slice(0, 60)}…` : text;
+    byLetter.set(column.columnLetter, { order: column.column, label: shown === '' ? column.columnLetter : `${column.columnLetter} — ${shown}` });
+  }
+  for (const letter of current) {
+    const value = (letter ?? '').trim().toUpperCase();
+    if (value !== '' && !byLetter.has(value)) byLetter.set(value, { order: Number.MAX_SAFE_INTEGER, label: value });
+  }
+
+  return [...byLetter.entries()]
+    .sort((a, b) => a[1].order - b[1].order || a[0].localeCompare(b[0]))
+    .map(([value, { label }]) => ({ value, label }));
 }
 
 /** Специфікацію можна зберегти/аналізувати: у кожного поля є ім'я, імена унікальні. */
