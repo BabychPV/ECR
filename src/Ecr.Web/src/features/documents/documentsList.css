@@ -21,6 +21,67 @@
   white-space: nowrap;
 }
 
+/*
+ * ✎ Period clarity (п. e): смуга 12 місяців у рядку документа. Клітинка — посилання з `aria-label`; стан — тоном
+ * (`toneFills`) і знаком (не лише кольором). Рамка — колір межі теми, щоб клітинка без стану була видима.
+ */
+.ecr-year-strip {
+  display: flex;
+  gap: calc(var(--mantine-spacing-xs) / 4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ecr-year-strip-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  min-height: 1.75rem;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-xs);
+  color: var(--mantine-color-text);
+  font-size: var(--mantine-font-size-xs);
+  line-height: 1;
+  text-decoration: none;
+}
+
+/* Тони — ті самі пари, що `toneFills` у `StatusBadge` (`shared/ui`). */
+.ecr-year-strip-cell[data-tone='neutral'] {
+  background: var(--ecr-sunken);
+  color: var(--ecr-text);
+}
+
+.ecr-year-strip-cell[data-tone='info'] {
+  background: var(--ecr-accent-soft);
+  color: var(--ecr-accent-text);
+}
+
+.ecr-year-strip-cell[data-tone='warning'] {
+  background: var(--ecr-sunken);
+  color: var(--ecr-warning);
+}
+
+.ecr-year-strip-cell[data-tone='danger'] {
+  background: var(--ecr-sunken);
+  color: var(--ecr-danger);
+}
+
+.ecr-year-strip-cell[data-tone='muted'] {
+  background: var(--ecr-sunken);
+  color: var(--ecr-muted);
+}
+
+.ecr-year-strip-cell:hover {
+  border-color: var(--mantine-color-text);
+}
+
+.ecr-year-strip-mark {
+  min-height: 0.75em;
+}
+
 @media (max-width: 640px) {
   .ecr-docs-table-scroll [data-column='updated'],
   .ecr-docs-table-scroll [data-column='owner'] {

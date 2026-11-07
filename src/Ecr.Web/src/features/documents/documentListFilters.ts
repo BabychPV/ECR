@@ -35,7 +35,7 @@ export interface DocumentListFilters {
   /**
    * Стан, який іде в запит.
    *
-   * ⛔ `null` без періоду, хоч би що стояло в адресі: стан документа поза
+   * ⛔ `null` без періоду й без року, хоч би що стояло в адресі: стан документа поза
    * періодом не визначений (`D-93`), і сервер відповів би `422`.
    */
   readonly state: DocumentStateFilter | null;
@@ -116,7 +116,7 @@ export interface DocumentListFilters {
  * курсор належить попередньому набору, і з ним перша сторінка нового набору
  * почалася б із середини.
  */
-export function useDocumentListFilters(periodKey: number | null): DocumentListFilters {
+export function useDocumentListFilters(periodKey: number | null, year: number | null = null): DocumentListFilters {
   const [rawState] = useUrlState('state');
   const [rawMine] = useUrlState('mine');
   const [rawOwner] = useUrlState('owner');
@@ -128,7 +128,8 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
   const [rawVersionSort] = useUrlState('vsort');
   const setParams = useUrlParamsSetter();
 
-  const state = periodKey === null ? null : parseStateFilter(rawState);
+  // ✎ Period clarity (п. e): стан визначений і за РІК (`year`, сервер фільтрує за роком), не лише за місяць.
+  const state = periodKey === null && year === null ? null : parseStateFilter(rawState);
   const owner = parseOwnerFilter(rawOwner);
   const mine = owner === null && rawMine === 'true';
   const hasLateEdits = rawHasLateEdits === 'true';

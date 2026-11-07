@@ -10,8 +10,11 @@ import { DocumentStateFilters, parseStateFilter, type DocumentListFilters } from
 import { DocumentOwnerFilter } from './DocumentOwnerFilter';
 
 interface DocumentListFilterBarProps {
-  /** Обраний період; `null` — фільтр стану недоступний. */
+  /** Обраний період (місяць); `null` — «усі місяці». */
   readonly periodKey: number | null;
+
+  /** ✎ Period clarity (п. e): рік переліку за «All months» — фільтр стану діє за рік. `null` — стан недоступний. */
+  readonly year?: number | null | undefined;
 
   readonly filters: DocumentListFilters;
 
@@ -60,6 +63,7 @@ interface DocumentListFilterBarProps {
  */
 export function DocumentListFilterBar({
   periodKey,
+  year = null,
   filters,
   projects = [],
   children,
@@ -68,6 +72,8 @@ export function DocumentListFilterBar({
   versionOptions = [],
 }: DocumentListFilterBarProps): JSX.Element {
   const noPeriod = periodKey === null;
+  // ✎ Period clarity: стан — за місяць або за рік; недоступний лише без обох.
+  const noStateScope = noPeriod && year === null;
   // Той самий запит, що в смузі лічильників (`DocumentListSummaryStrip`): один ключ — один мережевий виклик.
   const summaryStale = useDocumentListSummary(periodKey, undefined, filters.projectId).data?.staleResultsCount;
   const staleCount = summaryStale === undefined ? undefined : Math.max(summaryStale, staleOnPage);
@@ -95,7 +101,7 @@ export function DocumentListFilterBar({
 
   return (
     <>
-      <FilterRow gap="lg" mb={noPeriod ? 'xs' : 'md'} data-document-filters="true">
+      <FilterRow gap="lg" mb={noStateScope ? 'xs' : 'md'} data-document-filters="true">
         {/* ✎ `UI-18` (макет: `FilterBar` — пошук · All projects · All states · Everyone's documents):
             пошук іде в `q` сервера — по ключу й назві документа, а не лише по завантаженій сторінці. */}
         <TextInput
@@ -160,8 +166,8 @@ export function DocumentListFilterBar({
           label={t('documents.state')}
           data={options}
           value={filters.state ?? ''}
-          disabled={noPeriod}
-          description={noPeriod ? t('documents.stateNeedsPeriod') : undefined}
+          disabled={noStateScope}
+          description={noStateScope ? t('documents.stateNeedsPeriod') : undefined}
           styles={readerOnlyDescription}
           onChange={(event) => {
             filters.setState(parseStateFilter(event.currentTarget.value));
@@ -223,7 +229,7 @@ export function DocumentListFilterBar({
       </FilterRow>
 
       {/* Видима копія пояснення; читалка вже отримує його через поле. */}
-      {noPeriod && (
+      {noStateScope && (
         <Text size="xs" c="dimmed" mb="md" aria-hidden="true" data-document-filters-hint="">
           {t('documents.stateNeedsPeriod')}
         </Text>

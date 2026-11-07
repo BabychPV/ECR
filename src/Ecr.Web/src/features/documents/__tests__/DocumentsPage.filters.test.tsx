@@ -202,28 +202,24 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
   );
 
   it(
-    'без періоду фільтр стану недоступний, причина видима й прив\'язана до поля, state у запит не йде',
+    'Period clarity: без місяця («All months») фільтр стану діє за РІК — доступний, без причини, state іде з year',
     async () => {
       mockFetch('rows');
-      // ⚠ `state` в адресі без періоду — посилання, зібране руками. Сервер на
-      // нього відповів би 422; екран мусить не дійти до цього.
-      show('/?state=Rejected');
+      show('/?state=Rejected&year=2025');
 
       const field = await stateField();
       await screen.findByRole('table', {}, { timeout: Find });
 
-      expect((field as HTMLSelectElement).disabled).toBe(true);
+      // ⛔ Мутація «стан лише з місяцем» (старий `noPeriod`) вимикає поле й прибирає state із запиту.
+      expect((field as HTMLSelectElement).disabled).toBe(false);
+      expect(screen.queryAllByText('⟦documents.stateNeedsPeriod⟧')).toHaveLength(0);
 
-      // ⚠ Причина двічі: прихований `description` поля, зв'язаний із ним, і
-      // видима копія під рядом фільтрів (`aria-hidden`) — видимий опис під
-      // полем опускав його нижню межу й розсував ряд (`FilterRow`).
-      const reasons = screen.getAllByText('⟦documents.stateNeedsPeriod⟧');
-      const reason = reasons.find((node) => node.id !== '');
-      expect(reason).toBeDefined();
-      expect(field.getAttribute('aria-describedby') ?? '').toContain(reason?.id ?? '⟂');
-      expect(reasons.some((node) => node.getAttribute('aria-hidden') === 'true')).toBe(true);
-
-      expect(listed.every((url) => !new URLSearchParams(url.split('?')[1] ?? '').has('state'))).toBe(true);
+      await waitFor(() => {
+        const last = new URLSearchParams(listed.at(-1)?.split('?')[1] ?? '');
+        expect(last.get('state')).toBe('Rejected');
+        expect(last.get('year')).toBe('2025');
+        expect(last.has('periodKey')).toBe(false);
+      });
     },
     Slow,
   );

@@ -1,9 +1,19 @@
-import { lazy, Suspense, useEffect, useRef, useState, type JSX } from 'react';
-import { ActionIcon, Box, Button, Code, Group, SegmentedControl, Skeleton, Table, Text, VisuallyHidden } from '@mantine/core';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { lazy, Suspense, useRef, useState, type JSX } from 'react';
+import {
+  ActionIcon,
+  Box,
+  Button,
+  Code,
+  Group,
+  NativeSelect,
+  SegmentedControl,
+  Skeleton,
+  Table,
+  Text,
+  VisuallyHidden,
+} from '@mantine/core';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { apiFetch } from '@/api/client';
-import type { PeriodCalendarDto } from '@/api/types';
 import { listDocuments, listDocumentTemplateVersions, type DocumentListPage } from '@/features/documents/api';
 import { DocumentListFilterBar } from '@/features/documents/DocumentListFilterBar';
 import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSummaryStrip';
@@ -16,8 +26,8 @@ import { parseDocumentsView } from '@/features/documents/documentsBoardModel';
 import '@/features/documents/documentsList.css';
 import { LateEditsMark } from '@/features/documents/LateEditsMark';
 import { StaleResultsMark, StaleResultsUndeterminedMark } from '@/features/documents/StaleResultsMark';
-import { newestOpenPeriodKey } from '@/features/documents/newDocumentPeriod';
-import { formatNumber } from '@/shared/format';
+import { DocumentYearStrip } from '@/features/documents/DocumentYearStrip';
+import { formatMonthName, formatNumber } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -25,7 +35,6 @@ import { useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { FilterInline } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
-import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { SegmentBar } from '@/shared/ui/SegmentBar';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -50,7 +59,9 @@ const CreateDocumentModal = lazy(async () => ({
   default: (await loadCreateDocumentModal()).CreateDocumentModal,
 }));
 
-/** A3-02: скільки проєктів максимум опитуємо заради типового періоду; більше — вибір лишається людині. */
+/** Місяці селектора: «All months» (`''` — рік) і дванадцять місяців обраного року. */
+const MonthNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+
 /**
  * Швидкий перегляд документа (`UI-29`) — за `import()`: шторку відкривають
  * рідко, а бюджет маршруту (`D-132`) не має рости заради неї.
@@ -75,21 +86,31 @@ const ProjectRecalculateAction = lazy(async () => ({
   default: (await import('@/features/documents/ProjectRecalculateAction')).ProjectRecalculateAction,
 }));
 
-const AUTO_PICK_MAX_PROJECTS = 10;
-
 /**
  * Перелік документів.
  *
- * ⚠ Період обов'язковий для показу стану: без нього «стан документа» не
- * визначений — аркуші за різні періоди бувають у різних станах одночасно
- * (D-93). Тому колонка стану порожня, доки період не обрано, а не показує
- * бадж «Draft», якому ніхто не зможе довіряти.
+ * ✎ Period clarity (людина 07.11, п. e): типово — перегляд РОКУ: «один документ на об'єкт, усі місяці
+ * всередині», у рядку — смуга станів 12 місяців (`periodStates`), клік по місяцю відкриває документ на ньому.
+ * Обраний місяць — колишній перегляд за період: стан аркушів і документа за ОДИН місяць (`D-93`).
  */
 export function DocumentsPage(): JSX.Element {
   // ⛔ Період і курсор — в АДРЕСІ (`ФВ-14.29`). Перелік документів за
   // конкретний період — це те, що надсилають колезі; у локальному стані таке
   // посилання вело б на порожній екран із проханням обрати період наново.
   const [periodKey] = useUrlNumber('periodKey');
+  /*
+   * ✎ Period clarity (людина 07.11, п. e): типово — РІК («All months»), рядок документа несе смугу 12 місяців.
+   * Обраний місяць (`?periodKey=`) — колишній перегляд за місяць. Рік — з місяця, інакше з `?year=`, інакше поточний.
+   * ⛔ Автовибору місяця при вході більше немає: «один документ на об'єкт, усі місяці всередині».
+   */
+  const [urlYear] = useUrlNumber('year');
+  const year = periodKey !== null ? Math.trunc(periodKey / 100) : (urlYear ?? new Date().getFullYear());
+  // Роки селектора: три попередні, поточний і наступний, плюс рік з адреси, якщо він поза ними.
+  const thisYear = new Date().getFullYear();
+  const yearOptions = [...new Set([thisYear - 3, thisYear - 2, thisYear - 1, thisYear, thisYear + 1, year])].sort(
+    (a, b) => b - a,
+  );
+  const yearView = periodKey === null;
   const [cursor] = useUrlState('cursor');
   // `UI-40`: подання — в адресі (`?view=board`, як у макеті), щоб посилання відкривало дошку.
   const [viewParam] = useUrlState('view');
@@ -116,7 +137,7 @@ export function DocumentsPage(): JSX.Element {
   if (panel !== null && panel !== quickLookId) setQuickLookId(panel);
 
   // `BE-09b`: стан і «мої» — теж в адресі; без періоду стан у запит не йде.
-  const filters = useDocumentListFilters(periodKey);
+  const filters = useDocumentListFilters(periodKey, year);
 
   // `UI-18`: пошук іде в запит після паузи в наборі; поле й адреса оновлюються одразу.
   const appliedQ = useDebouncedFilter(filters.q.trim());
@@ -127,6 +148,7 @@ export function DocumentsPage(): JSX.Element {
     queryKey: [
       'documents',
       periodKey,
+      periodKey === null ? year : null,
       cursor,
       filters.state,
       filters.mine,
@@ -141,6 +163,7 @@ export function DocumentsPage(): JSX.Element {
     queryFn: () =>
       listDocuments({
         periodKey,
+        year,
         cursor,
         state: filters.state,
         mine: filters.mine,
@@ -191,84 +214,6 @@ export function DocumentsPage(): JSX.Element {
   const showRecalc =
     recalcProject !== null && recalcProject.status === 'Active' && can(session.data, 'Calculation.Recalculate');
 
-  /*
-   * ⛔ `U-10`. Перелік відкривався з ПОРОЖНІМ полем «Period», тому колонка
-   * «State» показувала «—» в кожному рядку — хоча відкритий період у проєкту
-   * рівно один і система його знає (`GET /projects/{id}/periods` віддає
-   * `isCurrent`). Екран мовчки показував «станів немає» там, де стан є.
-   *
-   * ⛔ Межа автовибору (✎ A3-02: переписана — U-10 брав лише єдиний проєкт, і з п'ятьма проєктами
-   * поле лишалось порожнім): період береться не «перший у списку», а НАЙНОВІШИЙ ВІДКРИТИЙ серед
-   * календарів усіх проєктів (до `AUTO_PICK_MAX_PROJECTS`), як у формі створення документа; поточний
-   * (`isCurrent`, `D-77`) — запасний, коли відкритих немає. Проєктів понад межу — вибір людині.
-   *
-   * ⛔ Фільтром це НЕ стає, і ця межа тут найважливіша: перелік документів
-   * періодом не фільтрується (див. шапку файла — період керує лише КОЛОНКОЮ
-   * стану), і автовибір не має цього змінити. Він робить рівно те, що зробила
-   * б людина, обравши період руками.
-   *
-   * ⚠ Значення йде в АДРЕСУ (`?periodKey=`), а не в локальний стан: воно має
-   * лишитися видимим у полі й у посиланні, яке звідси надсилають далі
-   * (`documentHref` нижче бере його ж). Локальний стан дав би посилання на
-   * «поточний місяць за замовчуванням» — рівно той дефект, який уже
-   * виправляли в `documentHref` (`UI-walkthrough F3`).
-   *
-   * ⚠ Запит робиться ЛИШЕ доки періоду в адресі немає: `enabled` знімає його,
-   * щойно вибір є, тож звичайне відкриття сторінки з посилання зайвого
-   * звернення не робить.
-   *
-   * ⛔ Автовибір — лише при ВХОДІ на сторінку без періоду в адресі, а не
-   * щоразу, коли `periodKey` став `null`. Живий стенд (2026-09-24,
-   * `drop-repro.mjs`): людина очищала поле (Ctrl+A, Delete), щоб набрати
-   * інший період, — `periodKey` зникав з адреси, автовибір за ~100 мс
-   * дописував `202609` у поле, в якому вона вже друкувала (курсор лишався на
-   * початку), і набір `202608` давав у полі `202608202609` (5 з 5 спроб).
-   * Очищене руками поле — рішення людини, а не «період не обрано».
-   */
-  const [autoPick, setAutoPick] = useState(() => periodKey === null);
-  /*
-   * ⛔ A3-02: проєктів у типовій установці кілька (приймальний стенд — п'ять), тож «рівно один проєкт»
-   * лишало поле порожнім майже завжди. Тепер календарі беруться в УСІХ проєктів (до `AUTO_PICK_MAX_PROJECTS`;
-   * `periodKey` — один календар місяців для всіх, ключі ті самі) і береться НАЙНОВІШИЙ ВІДКРИТИЙ період
-   * серед них — як у формі створення документа (`newestOpenPeriodKey`, A2-05). Проєктів більше межі —
-   * вибір лишається людині: десятки запитів заради замовчування не виправдані. Поточний (`isCurrent`)
-   * лишається запасним, коли відкритих періодів немає. Решта меж (лише при вході, не очищене поле,
-   * період — не фільтр) — без змін.
-   */
-  const pickProjects =
-    projects.data !== undefined && projects.data.items.length <= AUTO_PICK_MAX_PROJECTS
-      ? projects.data.items
-      : [];
-  const calendars = useQueries({
-    queries: pickProjects.map((project) => ({
-      queryKey: ['periods', project.id],
-      queryFn: () => apiFetch<PeriodCalendarDto>(`/api/v1/projects/${String(project.id)}/periods`),
-      enabled: autoPick && periodKey === null,
-    })),
-  });
-  const calendarsReady = pickProjects.length > 0 && calendars.every((calendar) => calendar.data !== undefined);
-  // Відмова будь-якого календаря — під переліком (як і раніше), автовибір тоді не відбувається.
-  const calendarFailure = calendars.find((calendar) => calendar.error !== null);
-  const calendar = {
-    error: calendarFailure?.error ?? null,
-    refetch: () => Promise.all(calendars.map((entry) => entry.refetch())),
-  };
-
-  // `undefined` — календарі ще в дорозі; `null` — вибирати нічого.
-  let autoKey: number | null | undefined;
-  if (calendarsReady) {
-    const periods = calendars.flatMap((entry) => entry.data?.periods ?? []);
-    autoKey = newestOpenPeriodKey(periods) ?? periods.find((period) => period.isCurrent)?.periodKey ?? null;
-  }
-
-  useEffect(() => {
-    if (!autoPick || periodKey !== null || autoKey === undefined) return;
-
-    // ⚠ Рішення при вході ухвалено — з вибором чи без: далі період змінює лише людина.
-    setAutoPick(false);
-    if (autoKey !== null) setUrlParams({ periodKey: autoKey, cursor: null });
-  }, [autoPick, periodKey, autoKey, setUrlParams]);
-
   /**
    * ⛔ Директива D15 §0, правило L10. Тут стояло
    * `…?.code ?? String(projectId)`, тож відмова `GET /api/v1/projects`
@@ -318,26 +263,41 @@ export function DocumentsPage(): JSX.Element {
                 (некерований DOM встигав показати введене), але жоден запит
                 ніколи не бачив `periodKey` в адресі. `useUrlParamsSetter`
                 оновлює обидва параметри ОДНИМ переходом. */}
-            {/* ⛔ UI-06: `NumberInput` → `PeriodPicker` (`DIRECTIVE-15-FRONTEND.md:129`).
-                Формат `periodKey` і місце в адресі — БЕЗ змін, лише
-                стрілки, що крокують календарем (не `+1`), і підпис. */}
-            <PeriodPicker
+            {/* ✎ Period clarity (п. e): рік і місяць замість поля «Period». «All months» — перегляд року (типово);
+                місяць — перегляд за місяць. Фільтр стану лишається: він діє і за рік (`year`), і за місяць. */}
+            <NativeSelect
               size="xs"
-              miw={120}
-              projectIds={pickProjects.map((project) => project.id)}
-              value={periodKey}
-              onChange={(value) => {
-                // ⛔ Людина обрала сама — автовибір більше не втручається.
-                setAutoPick(false);
-                // ⚠ Період прибрано — прибирається й фільтр стану: без періоду
-                // він однаково не діє, а повернення періоду не має мовчки
-                // відновлювати звуження, якого на екрані вже не видно.
+              label={t('documents.year')}
+              data={yearOptions.map((value) => ({ value: String(value), label: String(value) }))}
+              value={String(year)}
+              onChange={(event) => {
+                const next = Number(event.currentTarget.value);
                 setUrlParams(
-                  value !== null
-                    ? { periodKey: value, cursor: null }
-                    : { periodKey: null, cursor: null, state: null },
+                  periodKey === null
+                    ? { year: next, cursor: null }
+                    : { periodKey: next * 100 + (periodKey % 100), year: null, cursor: null },
                 );
               }}
+              data-documents-year=""
+            />
+            <NativeSelect
+              size="xs"
+              miw={140}
+              label={t('documents.month')}
+              data={[
+                { value: '', label: t('documents.allMonths') },
+                ...MonthNumbers.map((month) => ({ value: String(month), label: formatMonthName(month) })),
+              ]}
+              value={periodKey === null ? '' : String(periodKey % 100)}
+              onChange={(event) => {
+                const month = event.currentTarget.value;
+                setUrlParams(
+                  month === ''
+                    ? { periodKey: null, year, cursor: null, resultsStale: null }
+                    : { periodKey: year * 100 + Number(month), year: null, cursor: null },
+                );
+              }}
+              data-documents-month=""
             />
 
             {/* ⛔ Створення документа не мало в інтерфейсі жодної кнопки
@@ -380,8 +340,13 @@ export function DocumentsPage(): JSX.Element {
           межею кожен клік знімав би її разом із фокусом на час запиту, а
           порожній результат — ховав би кнопку, якою фільтр і знімають.
           ⚠ І в ТОМУ САМОМУ ряду, що й фільтри (рішення людини 2026-10-06). */}
+      <Text size="sm" mb="xs" data-documents-year-note="">
+        {t('documents.oneDocumentNote')}
+      </Text>
+
       <DocumentListFilterBar
         periodKey={periodKey}
+        year={periodKey === null ? year : null}
         filters={filters}
         projects={projects.data?.items ?? []}
         // Варіанти — УСІ версії видимих документів (`GET /documents/template-versions`); обрані, яких сервер уже не
@@ -408,7 +373,9 @@ export function DocumentsPage(): JSX.Element {
             </Button>
           </FilterInline>
         )}
-        <DocumentListSummaryStrip periodKey={periodKey} filters={filters} />
+        {/* ✎ Period clarity (п. e): за «All months» — лічильники ЗА РІК (`GET /documents/summary?year=`), тим самим
+            правилом, що й фільтр стану за рік; за місяць — як і раніше. */}
+        <DocumentListSummaryStrip periodKey={periodKey} year={periodKey === null ? year : null} filters={filters} />
         {/* ✎ `UI-40` (макет: `E.Segmented` «Table · Board» праворуч у рядку фільтрів):
             фільтри, період і курсор — СПІЛЬНІ для обох подань, бо лежать в адресі. */}
         <FilterInline ml="auto">
@@ -425,13 +392,6 @@ export function DocumentsPage(): JSX.Element {
           />
         </FilterInline>
       </DocumentListFilterBar>
-
-      {/* ⛔ `ФВ-14.22`: відмова календаря не показувалась ніде — автовибір
-          періоду мовчки не ставався, і колонка «State» лишалась «—» без
-          жодної причини на екрані. */}
-      {calendar.error !== null && (
-        <ErrorAlert error={calendar.error} onRetry={() => void calendar.refetch()} />
-      )}
 
       {/*
        * ⛔ Три порожні стани не виглядають однаково (L10): «фільтр нічого не
@@ -513,19 +473,29 @@ export function DocumentsPage(): JSX.Element {
             ) : (
               // `UI-42`: на вузькому екрані прокручується таблиця, а не сторінка (`documentsList.css`).
               <div className="ecr-docs-table-scroll">
-                <Table highlightOnHover className="ecr-sticky-head" data-documents-table="">
+                <Table
+                  highlightOnHover
+                  className="ecr-sticky-head"
+                  data-documents-table=""
+                  data-documents-scope={yearView ? 'year' : 'month'}
+                >
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th>{t('documents.document')}</Table.Th>
                       <Table.Th data-column="owner">{t('documents.owner')}</Table.Th>
-                      <Table.Th>{t('documents.sheets')}</Table.Th>
+                      {/* ✎ Period clarity: за рік — смуга 12 місяців замість аркушів і стану одного місяця. */}
+                      {yearView ? (
+                        <Table.Th data-column="months">{t('documents.months', { year })}</Table.Th>
+                      ) : (
+                        <Table.Th>{t('documents.sheets')}</Table.Th>
+                      )}
                       <Table.Th>{t('documents.issues')}</Table.Th>
                       <Table.Th data-column="updated">{t('documents.updated')}</Table.Th>
                       <DocumentVersionTh
                         sort={filters.versionSort}
                         onSort={() => filters.setVersionSort(nextVersionSort(filters.versionSort))}
                       />
-                      <Table.Th>{t('documents.state')}</Table.Th>
+                      {!yearView && <Table.Th>{t('documents.state')}</Table.Th>}
                       <Table.Th>
                         <VisuallyHidden>{t('documents.quickLookColumn')}</VisuallyHidden>
                       </Table.Th>
@@ -582,16 +552,27 @@ export function DocumentsPage(): JSX.Element {
                               </Text>
                             )}
                           </Table.Td>
-                          <Table.Td data-column="sheets">
-                            {/* ⛔ UI-walkthrough F6: станів за період немає — видиме
-                                «—», а не порожнеча, яка читається і як «не
-                                завантажилось». */}
-                            {hasSheetStates(document) ? (
-                              <SegmentBar segments={sheetLabels(document)} />
-                            ) : (
-                              <Text c="dimmed">—</Text>
-                            )}
-                          </Table.Td>
+                          {yearView ? (
+                            <Table.Td data-column="months">
+                              <DocumentYearStrip
+                                documentId={document.id}
+                                businessKey={document.businessKey}
+                                year={year}
+                                periodStates={document.periodStates}
+                              />
+                            </Table.Td>
+                          ) : (
+                            <Table.Td data-column="sheets">
+                              {/* ⛔ UI-walkthrough F6: станів за період немає — видиме
+                                  «—», а не порожнеча, яка читається і як «не
+                                  завантажилось». */}
+                              {hasSheetStates(document) ? (
+                                <SegmentBar segments={sheetLabels(document)} />
+                              ) : (
+                                <Text c="dimmed">—</Text>
+                              )}
+                            </Table.Td>
+                          )}
                           <Table.Td data-column="issues" data-document-errors={errors ?? 'none'}>
                             {/* ⛔ BE-09: `null` — документ НЕ ПЕРЕВІРЯЛИ (або роль не
                                 бачить усіх аркушів) — «—», а не «0»: нуль під
@@ -627,9 +608,11 @@ export function DocumentsPage(): JSX.Element {
                           <Table.Td data-column="version">
                             <DocumentVersionCell source={document} periodKey={periodKey} />
                           </Table.Td>
-                          <Table.Td data-column="state">
-                            {state === null ? <Text c="dimmed">—</Text> : <StatusBadge kind="sheet" state={state} quiet />}
-                          </Table.Td>
+                          {!yearView && (
+                            <Table.Td data-column="state">
+                              {state === null ? <Text c="dimmed">—</Text> : <StatusBadge kind="sheet" state={state} quiet />}
+                            </Table.Td>
+                          )}
                           <Table.Td data-column="quick-look">
                             {/* `UI-29`: швидкий перегляд у шторці під `?panel=<id>`. */}
                             <ActionIcon

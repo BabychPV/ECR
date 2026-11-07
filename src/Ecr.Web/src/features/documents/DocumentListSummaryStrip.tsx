@@ -11,6 +11,9 @@ interface DocumentListSummaryStripProps {
   /** За який період зводити; `null` — період не обрано. */
   readonly periodKey: number | null;
 
+  /** ✎ Period clarity: рік за «All months» — лічильники за рік (`GET /documents/summary?year=`). */
+  readonly year?: number | null | undefined;
+
   /**
    * Фільтр стану — той самий, що в `<DocumentListFilterBar>`.
    *
@@ -57,11 +60,16 @@ interface Counter {
  * фільтрувати — стан поза періодом не визначений (`D-93`), — тож перевірка
  * `periodKey` стоїть тут явно, а не лише в `enabled` запиту.
  */
-export function DocumentListSummaryStrip({ periodKey, filters }: DocumentListSummaryStripProps): JSX.Element | null {
+export function DocumentListSummaryStrip({
+  periodKey,
+  year = null,
+  filters,
+}: DocumentListSummaryStripProps): JSX.Element | null {
   // ⛔ Y7-02: лічильники за тим самим проєктом, що й перелік під смугою.
-  const summary = useDocumentListSummary(periodKey, undefined, filters.projectId ?? null);
+  // ✎ Period clarity: за «All months» — за рік, тим самим правилом, що фільтр стану за рік.
+  const summary = useDocumentListSummary(periodKey, undefined, filters.projectId ?? null, year);
 
-  if (periodKey === null || summary.data === undefined) {
+  if ((periodKey === null && year === null) || summary.data === undefined) {
     return null;
   }
 
