@@ -472,14 +472,14 @@ public sealed class MethodologyPublishTests
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "ФВ-9.4")]
-    public async Task Перерахунок_закритого_періоду_потребує_окремого_погодження()
+    public async Task Перерахунок_закритого_періоду_лише_після_Reopen()
     {
         _periods.GetPeriodStatesAsync(1, 202601, Arg.Any<CancellationToken>())
                 .Returns(new List<PeriodStateRef> { new(202601, PeriodState.Closed) });
         _workflow.HasSubmittedSheetsAsync(1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                  .Returns(false);
 
-        // ⚠ Тест перевіряє правило ФВ-9.4 (закритий період без погодження), а
+        // ⚠ Тест перевіряє правило ФВ-9.4 (закритий період — лише після Reopen), а
         // не право на запуск: профіль тут — окремий, із правом
         // `Calculation.Recalculate`, яке спільний `Profile()` класу не несе
         // (той служить `PublishMethodologyHandler`, де це право не потрібне).
@@ -497,37 +497,23 @@ public sealed class MethodologyPublishTests
             RoleIds = new HashSet<int>(),
         });
 
-        // ⚠ Аудит S1: погодження — окремий запис, і сховище віддає його лише
-        // підтвердженим іншою людиною (`Author`), для цього періоду й один раз.
-        var approvals = Substitute.For<IRecalculationApprovalStore>();
-        approvals.TryConsumeAsync(3, 1, 202601, Arg.Any<int>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
-                 .Returns(new RecalculationApprovalDto(
-                     3, 202601, "Помилка коефіцієнта, лист №17", Reviewer, null, DateTime.UtcNow,
-                     DateTime.UtcNow.AddHours(24), Author, null, DateTime.UtcNow));
-
         var handler = new RunCalculationHandler(
-            _periods, _workflow, _results, _jobs, _uow, _access, _user, _clock,
-            approvals, Substitute.For<IAuditWriter>());
+            _periods, _workflow, _results, _jobs, _uow, _access, _user, _clock, Substitute.For<IAuditWriter>());
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => handler.HandleAsync(1, 202601, approvalId: null, CancellationToken.None));
+            () => handler.HandleAsync(1, 202601, CancellationToken.None));
 
         Assert.Equal("ECR-CALC-4221", error.ErrorCode);
         await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
             Arg.Any<object?>(), Arg.Any<CancellationToken>());
 
-        // ⚠ Погодження ≠ прапорець у запиті: чуже, використане чи непідтверджене
-        // (сховище його не віддає) закритого періоду не відкриває.
-        var unusable = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => handler.HandleAsync(1, 202601, approvalId: 4, CancellationToken.None));
-        Assert.Equal("ECR-CALC-4221", unusable.ErrorCode);
-        Assert.Equal("err.ECR-CALC-4221.approvalNotUsable", unusable.Details?["messageKey"]);
-
-        // З підтвердженим погодженням — проходить.
+        // ✎ 07.11 (D-468): погодження прибрано — шлях один, Reopen (період у `Grace`), далі звичайний перерахунок.
+        _periods.GetPeriodStatesAsync(1, 202601, Arg.Any<CancellationToken>())
+                .Returns(new List<PeriodStateRef> { new(202601, PeriodState.Grace) });
         _jobs.EnqueueAsync<IRecalculationJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>())
              .Returns("job-1");
 
-        var jobId = await handler.HandleAsync(1, 202601, approvalId: 3, CancellationToken.None);
+        var jobId = await handler.HandleAsync(1, 202601, CancellationToken.None);
 
         Assert.Equal("job-1", jobId);
     }

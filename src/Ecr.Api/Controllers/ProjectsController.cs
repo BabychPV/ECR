@@ -345,11 +345,10 @@ public sealed class ProjectsController(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        // ⛔ Аудит безпеки S1: погоджувача з тіла запиту тут більше немає —
-        // лише ідентифікатор погодження, яке друга людина підтвердила власною
-        // сесією (`POST …/recalculation-approvals/{id}/confirm`).
+        // ✎ 07.11 (D-468): погоджень перерахунку закритого періоду більше немає — закритий місяць спершу
+        // відкривають повторно (Reopen), далі звичайний перерахунок; закритий у запиті — 422 periodClosed.
         var outcome = await recalculate
-            .RequestAsync(id, request.PeriodKey, request.ApprovalId, ct)
+            .RequestAsync(id, request.PeriodKey, ct)
             .ConfigureAwait(false);
 
         // ⚠ Конвенція 202 (ApiConventionTests): 202 несе jobId; 200 — лише «рахувати нічого», задачі немає.
@@ -439,12 +438,11 @@ public sealed record SetCurrentPeriodRequest(int? PinnedPeriodId, string? Reason
 
 /// <summary>Запит на перерахунок усього проєкту (Q-151).</summary>
 /// <param name="PeriodKey">Період; <c>null</c> — повний рік, усі документи проєкту.</param>
-/// <param name="ApprovalId">
-/// Підтверджене погодження перерахунку закритого періоду (ФВ-9.7,
-/// <c>…/recalculation-approvals</c>); <c>null</c> — без погодження. Одноразове,
-/// лише для свого ініціатора, цього проєкту й періоду.
-/// </param>
-public sealed record ProjectRecalculationRequest(int? PeriodKey, long? ApprovalId);
+/// <remarks>
+/// ✎ 07.11 (D-468): поля <c>approvalId</c> більше немає — погодження перерахунку закритого періоду прибрано
+/// (шлях один — Reopen). Старий клієнт, що його ще надсилає, отримує ту саму відповідь: зайве поле ігнорується.
+/// </remarks>
+public sealed record ProjectRecalculationRequest(int? PeriodKey);
 
 /// <summary>Запит на створення політики періодів (T6/#37).</summary>
 /// <param name="Code">Код політики; має бути унікальним.</param>

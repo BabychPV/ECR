@@ -61,7 +61,7 @@ public sealed class CalculationTrigger(
         var sheets = await workflow.GetSheetsAsync(documentId, periodKey, ct).ConfigureAwait(false);
         var submitted = sheets.Any(s => s.Status is DocumentStatus.Submitted or DocumentStatus.Approved);
 
-        if (RecalculationWritePolicy.Check(periodState, submitted, hasClosedPeriodApproval: false)
+        if (RecalculationWritePolicy.Check(periodState, submitted)
             != RecalculationWriteDenial.None)
         {
             return null;

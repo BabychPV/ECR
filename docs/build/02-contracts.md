@@ -3888,25 +3888,12 @@ public interface IUserPreferenceStore
 }
 ```
 
-#### `IRecalculationApprovalStore`
+#### ~~`IRecalculationApprovalStore`~~
 
-Погодження перерахунку закритого періоду `calc.RecalculationApproval` (ФВ-9.7,
-аудит безпеки S1). Підтвердження й використання — умовні `UPDATE` з одним
-рядком результату: «ще чекає / ще не використано» перевіряє база в момент запису.
-Використання вимагає ще й того самого стану періоду й тієї самої
-`doc.Period.StateChangedAt`, що були при запиті.
-
-```csharp
-public interface IRecalculationApprovalStore
-{
-    public void Add(RecalculationApproval approval);
-    public Task<PeriodStamp?> FindPeriodStampAsync(int projectId, int periodKey, CancellationToken ct);
-    public Task<IReadOnlyList<RecalculationApprovalDto>> ListActiveAsync(int projectId, DateTime utcNow, CancellationToken ct);
-    public Task<RecalculationApprovalDto?> FindAsync(long id, int projectId, CancellationToken ct);
-    public Task<bool> TryConfirmAsync(long id, int projectId, int confirmedByUserId, DateTime utcNow, CancellationToken ct);
-    public Task<RecalculationApprovalDto?> TryConsumeAsync(long id, int projectId, int periodKey, int requestedByUserId, DateTime utcNow, CancellationToken ct);
-}
-```
+✎ 2026-11-07 (`D-468`, квіз людини): порт, сховище, обробники й ендпоінти погоджень перерахунку закритого
+періоду прибрано — закритий місяць має один шлях: Reopen (з причиною) → звичайний перерахунок. **[debt]** Таблиця
+`calc.RecalculationApproval` (і сутність `RecalculationApproval` у моделі EF) лишається БЕЗ міграції: у неї ніхто не
+пише й ніхто не читає; прибрати — окремою міграцією за токеном.
 
 #### `IEffectiveAccessStore`
 
@@ -4204,7 +4191,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-UOM-4041` | 404 | розмірності з таким ідентифікатором немає (`CreateUnitHandler`) |
 | `ECR-UOM-0409` | 409 | на одиницю посилаються — не видаляється; перелік у `details.references` (`DeleteUnitHandler`, директива №15 BE-15), **або** не змінюються її множник і зсув (`unitFactorInUse`), **або** одиницю змінили між читанням і записом — `If-Match` не збігся з `rowVersion` (`unitChanged`, `UpdateUnitHandler`) |
 | `ECR-CALC-0404` | 404 | версії методології не існує |
-| `ECR-CALC-0409` | 409 | стан методології чи версії не дозволяє дію. Заголовок нейтральний, випадок каже `messageKey`-подробиця (як у `ECR-JOB-0409`): ~~публікація автором версії (D-40, `authorCannotPublish`), погодження власного перерахунку закритого періоду (D-40, `ownRecalculationApproval`)~~ — ✎ 2026-10-23: обидві подробиці ВИВЕДЕНО (D-440, AN-127: чотири очі скасовано; ключі — у «Прибрані ключі» `09-seed.sql`, CHECK `CK_MV_FourEyes`/`CK_RecalcApproval_FourEyes` знято міграцією `D440DropFourEyes`; сам код `ECR-CALC-0409` чинний для решти випадків); видалення не-чернетки (`versionNotDraft`) або версії, якою вже рахували (`versionUsedInCalculations`, BE-25); також зміна не-чернетки, чужий дочірній запис, зайнятий номер версії чи дата чинності; погодження перерахунку закритого періоду не чекає підтвердження — немає, уже підтверджене чи використане, прострочене (аудит S1, `approvalNotPending`) |
+| `ECR-CALC-0409` | 409 | стан методології чи версії не дозволяє дію. Заголовок нейтральний, випадок каже `messageKey`-подробиця (як у `ECR-JOB-0409`): ~~публікація автором версії (D-40, `authorCannotPublish`), погодження власного перерахунку закритого періоду (D-40, `ownRecalculationApproval`)~~ — ✎ 2026-10-23: обидві подробиці ВИВЕДЕНО (D-440, AN-127: чотири очі скасовано; ключі — у «Прибрані ключі» `09-seed.sql`, CHECK `CK_MV_FourEyes`/`CK_RecalcApproval_FourEyes` знято міграцією `D440DropFourEyes`; сам код `ECR-CALC-0409` чинний для решти випадків); видалення не-чернетки (`versionNotDraft`) або версії, якою вже рахували (`versionUsedInCalculations`, BE-25); також зміна не-чернетки, чужий дочірній запис, зайнятий номер версії чи дата чинності; ~~погодження перерахунку закритого періоду не чекає підтвердження (аудит S1, `approvalNotPending`)~~ — ✎ 2026-11-07: виведено разом із погодженнями (`D-468`) |
 | `ECR-CALC-0422` | 422 | запит до методології невалідний. Заголовок нейтральний («Invalid methodology request»), випадок каже `messageKey`-подробиця: публікація без зеленого тесту (ФВ-9.12, `publishNoGreenTest`), без причини (`publishNoReason`), без дати чинності (`publishNoEffectiveDate`), з проблемами перевірок (`publishChecksFailed`) чи золотого набору (`goldenSetEmpty`, `goldenSetDiverged`); невалідні константа, формула, правило, імпорт чи залежність; порожнє вікно періодів матриці покриття (`coverageWindow`, ФВ-13.9) |
 | `ECR-CALC-0431` | 422 | `^` у діалекті методологій — це XOR, а не степінь |
 | `ECR-CALC-0432` | 422 | токен `@Arg` у виразі, якого немає в оголошеному списку аргументів формули: збірка його не підставить (директива ПК-1 №05 §7, пастка 2) |
@@ -4501,9 +4488,6 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/projects/{id}/periods` | `Document.View` | 3 |
 | `GET` | `/api/v1/projects/{id}/template-versions` | `Document.View` | 3 |
 | `POST` | `/api/v1/projects/{id}/recalculate` | `Calculation.Recalculate` | 3 |
-| `GET` | `/api/v1/projects/{id}/recalculation-approvals` | `Calculation.Recalculate` | 4 |
-| `POST` | `/api/v1/projects/{id}/recalculation-approvals` | `Calculation.Recalculate` | 4 |
-| `POST` | `/api/v1/projects/{id}/recalculation-approvals/{approvalId}/confirm` | `Calculation.Recalculate` | 4 |
 | `POST` | `/api/v1/periods/{id}/reopen` | `Period.Reopen` | 3 |
 | `GET` | `/api/v1/documents` | `Document.View` | 1 |
 | `GET` | `/api/v1/documents/summary` | `Document.View` | 6 |

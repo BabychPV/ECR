@@ -230,7 +230,6 @@ public sealed class RecalculationJobYearRunResultsVisibilityTests(SqlServerFixtu
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
             clock,
-            Substitute.For<IRecalculationApprovalStore>(),
             Substitute.For<IAuditWriter>());
 
     /// <summary>Фаза формул шаблону нічого не пише — тести про методології.</summary>

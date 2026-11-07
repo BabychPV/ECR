@@ -21,7 +21,7 @@ import { describe, expect, it } from 'vitest';
  *
  * ⚠ `PeriodsPage.tsx` — у переліку СВІДОМО, хоча це щоденні шляхи: вони в графі сторінок із бюджетом `D-132`
  * (≈235/234 КБ із 250), і переведення додавало ~0.2 КБ gzip кожній; те саме
- * для `PeriodPolicyManager`, `RecalculationApprovals` (статичні в `PeriodsPage`)
+ * для `PeriodPolicyManager` (статичний у `PeriodsPage`)
  * і `VersionMigrationDialog` (статичний у `DocumentPage`). Правило
  * лейна — бюджет не збільшувати. Переводити разом із розвантаженням графа.
  *
@@ -49,7 +49,6 @@ const Ledger: Readonly<Record<string, number>> = {
   'features/projects/ApprovalRouteEditor.tsx': 1,
   'features/projects/CreateProjectModal.tsx': 1,
   'features/projects/PeriodPolicyManager.tsx': 2,
-  'features/projects/RecalculationApprovals.tsx': 2,
   'features/registries/CreateRegistryModal.tsx': 1,
   'features/registries/RegistryExternalKeysPanel.tsx': 1,
   // ✎ client debt (D-132): діалог перемикання master винесено в лінивий чанк — те саме місце, інший файл.

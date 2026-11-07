@@ -336,7 +336,6 @@ public sealed class SupersededResultsPurgeTests(SqlServerFixture sql)
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
             clock,
-            Substitute.For<IRecalculationApprovalStore>(),
             Substitute.For<IAuditWriter>());
 
         await handler.CompleteAsync(runId, new ModuleProfile(), CancellationToken.None);

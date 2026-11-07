@@ -686,7 +686,6 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
             clock,
-            Substitute.For<IRecalculationApprovalStore>(),
             Substitute.For<IAuditWriter>());
 
     private static RecalculationService FormulaService()

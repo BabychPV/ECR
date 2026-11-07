@@ -189,7 +189,6 @@ public sealed class RecalculationJobNoMatchingRuleTests(SqlServerFixture sql)
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
             new TestClock(DateTime.UtcNow),
-            Substitute.For<IRecalculationApprovalStore>(),
             Substitute.For<IAuditWriter>());
 
     /// <summary>Оркестратор, що повертає профіль із заданими рядками без правила.</summary>

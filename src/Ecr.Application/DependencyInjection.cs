@@ -452,7 +452,6 @@ public static class DependencyInjection
         services.AddScoped<Documents.GetCalculationRunStatusHandler>();
         services.AddScoped<Documents.GetCalculationIssuesHandler>();
         services.AddScoped<Calculations.RunCalculationHandler>();
-        services.AddScoped<Calculations.RecalculationApprovalHandlers>();
         services.AddScoped<Localization.SetUiStringHandler>();
         services.AddScoped<Localization.GetUiStringCoverageHandler>();
         services.AddScoped<Localization.ListUiStringsHandler>();

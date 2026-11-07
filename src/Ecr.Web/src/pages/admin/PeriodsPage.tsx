@@ -33,10 +33,6 @@ import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
 import { timeZones } from '@/features/projects/timeZones';
 import { useOpenerFocusReturn } from '@/features/projects/useOpenerFocusReturn';
 import { MountedLazyConfirmModal, MountedLazyReasonModal } from '@/features/projects/lazyPeriodsDialogs';
-import {
-  RecalculationApprovalsPanel,
-  RequestRecalculationButton,
-} from '@/features/projects/RecalculationApprovals';
 import { hasProjectGrant } from '@/features/documents/projectGrant';
 import { pollInterval, outcomeOf } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
@@ -496,7 +492,6 @@ export function PeriodsPage(): JSX.Element {
         method: 'POST',
         body: JSON.stringify({
           periodKey: null,
-          approvalId: null,
         } satisfies ProjectRecalculationRequest),
       }),
     onSuccess: (job) => {
@@ -1002,10 +997,6 @@ export function PeriodsPage(): JSX.Element {
                 </Table.Td>
                 <Table.Td>
                   <Group gap="xs" justify="flex-end">
-                    {period.state === 'Closed' && recalculates && projectId !== null && (
-                      <RequestRecalculationButton projectId={projectId} periodKey={period.periodKey} />
-                    )}
-
                     {period.state === 'Closed' && reopens && (
                       <Button
                         size="xs"
@@ -1036,9 +1027,6 @@ export function PeriodsPage(): JSX.Element {
         )}
       </AsyncBoundary>
       )}
-
-      {/* ФВ-9.7, аудит S1: погодження перерахунку закритих періодів. */}
-      {recalculates && projectId !== null && <RecalculationApprovalsPanel projectId={projectId} />}
 
       {/* UI-33: «All projects · current period» — без вибору проєкту це головний
           вміст сторінки, а не порожній «Pick a project»; рядок обирає проєкт. */}

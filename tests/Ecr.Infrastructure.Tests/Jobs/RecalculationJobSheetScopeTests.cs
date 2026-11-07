@@ -214,7 +214,6 @@ public sealed class RecalculationJobSheetScopeTests(SqlServerFixture sql)
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
             new TestClock(DateTime.UtcNow),
-            Substitute.For<Ecr.Application.Ports.IRecalculationApprovalStore>(),
             Substitute.For<Ecr.Application.Ports.IAuditWriter>());
 
     /// <summary>Оркестратор, що запам'ятовує прив'язки, з якими його викликали.</summary>

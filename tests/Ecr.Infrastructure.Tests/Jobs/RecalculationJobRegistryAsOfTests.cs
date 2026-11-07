@@ -378,7 +378,6 @@ public sealed class RecalculationJobRegistryAsOfTests(SqlServerFixture sql)
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
             new TestClock(DateTime.UtcNow),
-            Substitute.For<IRecalculationApprovalStore>(),
             Substitute.For<IAuditWriter>());
 
     /// <summary>Оркестратор, що запам'ятовує момент знімка кожного виклику.</summary>

@@ -170,7 +170,6 @@ public static class DependencyInjection
         services.AddScoped<IUnitStore, UnitStore>();
         services.AddScoped<IWhereUsedStore, WhereUsedStore>();
         services.AddScoped<IUserPreferenceStore, UserPreferenceStore>();
-        services.AddScoped<IRecalculationApprovalStore, RecalculationApprovalStore>();
         services.AddScoped<IMethodologyStore, MethodologyStore>();
         services.AddScoped<IRowActivityFilterSource, RowActivityFilterSource>();
         services.AddScoped<IRuleCoverageReader, RuleCoverageReader>();

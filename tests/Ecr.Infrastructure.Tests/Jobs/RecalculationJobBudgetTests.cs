@@ -182,7 +182,6 @@ public sealed class RecalculationJobBudgetTests(SqlServerFixture sql)
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
             new TestClock(DateTime.UtcNow),
-            Substitute.For<IRecalculationApprovalStore>(),
             Substitute.For<IAuditWriter>());
 
     /// <summary>Оркестратор, що «рахує» стільки, на скільки просуває годинник задачі.</summary>

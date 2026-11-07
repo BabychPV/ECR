@@ -522,7 +522,7 @@ public sealed partial class RecalculationJob(
                             .CompleteAsync(
                                 run.Id, profile, ct, carryOvers.GetValueOrDefault(period),
                                 token => GuardCompletionAsync(
-                                    projectId, period, guards, request.ApprovedBy is not null, WritesSubmitted(request), token))
+                                    projectId, period, guards, WritesSubmitted(request), token))
                             .ConfigureAwait(false);
                         break;
                     }
@@ -718,11 +718,8 @@ public sealed partial class RecalculationJob(
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⛔ Дочірня задача несе ВСЕ завдання батька, крім <c>DocumentId</c>: період,
-    /// автора й погодження (<c>ApprovedBy</c>, <c>ApprovalId</c>,
-    /// <c>ApprovalReason</c>, аудит S1). Погодження використане ОДИН раз —
-    /// обробником, до постановки батька; дочірні лише несуть його факт, інакше
-    /// гейт стану періоду (<see cref="RefusedPeriodsAsync"/>) відмовив би кожному
-    /// документу законно погодженого перерахунку закритого періоду.
+    /// автора; погоджень перерахунку закритого періоду більше немає (D-468, 07.11): закритий
+    /// період відмовляє гейт стану (<see cref="RefusedPeriodsAsync"/>) — шлях один, Reopen.
     /// <para>
     /// ⚠ Злиття, а не витіснення: повторний нічний запуск, поки документна задача
     /// ще в черзі, не ставить другу (<c>EnqueueCoalescedAsync</c>), і не перериває
@@ -1228,7 +1225,6 @@ public sealed partial class RecalculationJob(
     /// <param name="projectId">Проєкт.</param>
     /// <param name="period">Період прогону.</param>
     /// <param name="guards">Перераховані аркуші за документами.</param>
-    /// <param name="approved">Завдання несе погодження S1 (ФВ-9.7).</param>
     /// <param name="writeSubmitted">✎ UAT-recalc-ux: ручний прогін — поданий аркуш перемикати можна.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="ConcurrencyConflictException">
@@ -1249,7 +1245,7 @@ public sealed partial class RecalculationJob(
     /// </para>
     /// </remarks>
     private async Task GuardCompletionAsync(
-        int projectId, int period, IReadOnlyList<SheetGuard> guards, bool approved, bool writeSubmitted, CancellationToken ct)
+        int projectId, int period, IReadOnlyList<SheetGuard> guards, bool writeSubmitted, CancellationToken ct)
     {
         // ⛔ X6-01: стан — ЕФЕКТИВНИЙ (F-08), а не збережений: прогін, що завершується між
         // `ComputedCloseAt` і найближчою годинною задачею станів, інакше перемикав актуальність
@@ -1261,7 +1257,7 @@ public sealed partial class RecalculationJob(
             .FirstOrDefault();
 
         if (state is { } current
-            && RecalculationWritePolicy.Check(current, false, approved) != RecalculationWriteDenial.None)
+            && RecalculationWritePolicy.Check(current, false) != RecalculationWriteDenial.None)
         {
             throw StateChanged(guards.Count > 0 ? guards[0].DocumentId : 0, period, sheetDefId: null);
         }
@@ -1397,13 +1393,12 @@ public sealed partial class RecalculationJob(
                 return sheets.Count > 0 && sheets.All(submittedBySheet[period].Contains);
             })];
         }
-        var approved = request.ApprovedBy is not null;
         var refused = new HashSet<int>();
 
         foreach (var period in states)
         {
             var denial = RecalculationWritePolicy.Check(
-                period.State, submittedKeys.Contains(period.PeriodKeyValue), approved);
+                period.State, submittedKeys.Contains(period.PeriodKeyValue));
 
             if (denial == RecalculationWriteDenial.None)
             {
@@ -1876,17 +1871,6 @@ public sealed partial class RecalculationJob(
 /// <param name="DocumentId">Документ; нуль — усі документи проєкту.</param>
 /// <param name="PeriodKey">Період; <c>null</c> — повний рік.</param>
 /// <param name="TriggeredByUserId">Хто запустив; <c>null</c> — за розкладом.</param>
-/// <param name="ApprovedBy">
-/// Хто погодив перерахунок ЗАКРИТОГО періоду; <c>null</c> — погодження немає.
-/// ⛔ Поле заведене разом із гейтом стану періоду і не є декорацією:
-/// <c>RunCalculationHandler</c> уже клав у payload <c>approvedBy</c>, і воно
-/// тихо зникало при розборі, бо в цьому записі його не існувало. Без нього
-/// гейт нижче відмовляв би й законно погодженому перерахунку — тобто ламав би
-/// єдиний штатний шлях виправити закритий період (ФВ-9.7).
-/// ⚠ Саме <c>ApprovedBy</c>, а не <c>ApprovedByUserId</c>: ім'я мусить збігтися
-/// з тим, що кладе в чергу обробник, інакше JSON не зв'яжеться і поле знову
-/// буде мовчазним нулем.
-/// </param>
 /// <param name="SheetDefId">
 /// Аркуш; <c>null</c> — увесь документ (поведінка до Q-331). Звужує лише те, ЩО
 /// ЗАПИСУЄТЬСЯ (формули й методології, чиї цілі належать таблицям цього
@@ -1896,13 +1880,6 @@ public sealed partial class RecalculationJob(
 /// звузити читання означало б порахувати з частково застарілих входів —
 /// тихо неправильне число замість «кнопка ширша за назву» (Q-327).
 /// </param>
-/// <param name="ApprovalId">
-/// Використане погодження (<c>calc.RecalculationApproval</c>); кладе
-/// <c>RunCalculationHandler</c>. ⚠ P4 ФВ-9.8: поле існує, щоб дочірні документні
-/// задачі несли слід погодження разом з <paramref name="ApprovedBy"/>, а не
-/// губили його при розборі.
-/// </param>
-/// <param name="ApprovalReason">Причина погодження — той самий слід, що й <paramref name="ApprovalId"/>.</param>
 /// <param name="FanOutParentJobId">
 /// Батьківська задача-розклад (P4): кладе <c>FanOutAsync</c> у дочірні, щоб статус
 /// батька рахував їх (<c>IJobProgressStore.GetFanOutAsync</c>, JSON <c>fanOutParentJobId</c>).
@@ -1913,7 +1890,4 @@ public sealed record RecalculationRequest(
     int? PeriodKey,
     int? TriggeredByUserId,
     int? SheetDefId = null,
-    int? ApprovedBy = null,
-    long? ApprovalId = null,
-    string? ApprovalReason = null,
     string? FanOutParentJobId = null);

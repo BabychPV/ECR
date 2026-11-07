@@ -66,7 +66,7 @@ public sealed class RunCalculationIssuesWriteTests
         var handler = new RunCalculationHandler(
             Substitute.For<IPeriodStore>(), Substitute.For<IWorkflowStore>(), results,
             Substitute.For<IBackgroundJobScheduler>(), uow, Substitute.For<IAccessDecisionService>(),
-            Substitute.For<ICurrentUser>(), Substitute.For<IClock>(), Substitute.For<IRecalculationApprovalStore>(),
+            Substitute.For<ICurrentUser>(), Substitute.For<IClock>(),
             Substitute.For<IAuditWriter>(), issues: issues);
 
         return (handler, issues);

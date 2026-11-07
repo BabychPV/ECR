@@ -71,7 +71,6 @@ public sealed class RunCalculationCompleteFencingTests
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
             Substitute.For<IClock>(),
-            Substitute.For<IRecalculationApprovalStore>(),
             Substitute.For<IAuditWriter>(),
             queue,
             lease);
