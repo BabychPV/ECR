@@ -128,23 +128,59 @@ public sealed class ListDocumentsHandler(
     /// </param>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+    public Task<PagedResult<DocumentSummary>> HandleAsync(
         int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
         string? query, bool? resultsStale, string? staleBy, int? ownerUserId,
         string? sort, string? templateVersions, CursorRequest page, CancellationToken ct)
+        => HandleAsync(
+            projectId, periodKey, state, mine, hasLateEdits, query, resultsStale, staleBy, ownerUserId, sort, templateVersions,
+            year: null, page, ct);
+
+    /// <summary>Найменший рік смуги станів (`year`).</summary>
+    public const int MinYear = 2000;
+
+    /// <summary>Найбільший рік смуги станів (`year`).</summary>
+    public const int MaxYear = 2999;
+
+    /// <summary>
+    /// ✎ 2026-11-07 Period clarity (п. e2): те саме з роком — кожен документ несе `periodStates` за періоди року, а фільтр
+    /// стану без `periodKey` рахується за рік (правило — `02-contracts.md`, «Period clarity»). `year` — рік смуги;
+    /// `null` — без смуги; поза `2000..2999` — 422.
+    /// </summary>
+    /// <inheritdoc cref="HandleAsync(int?, int?, string?, bool, bool?, string?, bool?, string?, int?, string?, string?, CursorRequest, CancellationToken)"/>
+    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+        int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
+        string? query, bool? resultsStale, string? staleBy, int? ownerUserId,
+        string? sort, string? templateVersions, int? year, CursorRequest page, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
+
+        if (year is < MinYear or > MaxYear)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Рік {year} поза межами {MinYear}..{MaxYear}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.documentYearOutOfRange",
+                    ["min"] = MinYear.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["max"] = MaxYear.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        // Стан без періоду — за рік, якщо рік задано (`WhereYearState`); без обох — 422, як і раніше.
+        var stateScope = periodKey ?? year;
 
         var profile = await ProfileAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         var staleByMe = ParseStaleBy(staleBy, resultsStale, periodKey);
         ValidateOwner(ownerUserId, mine);
         var versionSort = ParseVersionSort(sort);
         var versions = ParseTemplateVersions(templateVersions);
-        var partly = IsPartlySubmitted(state, periodKey);
+        var partly = IsPartlySubmitted(state, stateScope);
         var filter = new DocumentListFilter(
-            partly ? null : ParseState(state, periodKey), mine ? profile.UserId : null, hasLateEdits, Query: NormalizeQuery(query),
+            partly ? null : ParseState(state, stateScope), mine ? profile.UserId : null, hasLateEdits, Query: NormalizeQuery(query),
             ResultsStale: resultsStale, StaleByUserId: staleByMe ? profile.UserId : null, OwnerUserId: ownerUserId,
-            TemplateVersions: versions, VersionSort: versionSort, PartlySubmitted: partly);
+            TemplateVersions: versions, VersionSort: versionSort, PartlySubmitted: partly, Year: year);
 
         // ⛔ Родина REQ, а не CELL (`P-25`, рядок 1): хибний `limit` — це
         // помилка параметра запиту, і показувати її в обробнику помилок

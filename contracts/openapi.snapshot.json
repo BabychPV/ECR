@@ -5891,6 +5891,25 @@
         ],
         "type": "object"
       },
+      "DocumentPeriodState": {
+        "description": "Стан погодження документа за один період (смуга року, ✎ 2026-11-07 Period clarity).",
+        "properties": {
+          "periodKey": {
+            "description": "Період; `Рік*100 + Номер`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "state": {
+            "description": "`Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "periodKey",
+          "state"
+        ],
+        "type": "object"
+      },
       "DocumentSheetState": {
         "description": "Аркуш складу документа в переліку: код, назва, стан за період.",
         "properties": {
@@ -6018,6 +6037,16 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "periodStates": {
+            "description": "✎ 2026-11-07 Period clarity (п. e2): стан погодження документа за КОЖЕН період проєкту в запитаному році\n(`GET /documents?year=`), за зростанням ключа; `null` — рік не запитано. Визначення — те саме, що у фільтра`state`:\n`Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved` за аркушами складу, ВИДИМИМИ читачеві (S18).\nРахується ОДНИМ запитом на сторінку (`DocumentStore.PeriodStatesBatchAsync`).",
+            "items": {
+              "$ref": "#/components/schemas/DocumentPeriodState"
+            },
+            "type": [
+              "null",
+              "array"
             ]
           },
           "projectId": {
@@ -33352,6 +33381,14 @@
             "name": "templateVersions",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "year",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
             }
           }
         ],

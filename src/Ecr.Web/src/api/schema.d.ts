@@ -2883,6 +2883,7 @@ export interface paths {
                     ownerUserId?: number;
                     sort?: string;
                     templateVersions?: string;
+                    year?: number;
                 };
                 header?: never;
                 path?: never;
@@ -29487,6 +29488,16 @@ export interface components {
              */
             periodKey: number;
         };
+        /** @description Стан погодження документа за один період (смуга року, ✎ 2026-11-07 Period clarity). */
+        DocumentPeriodState: {
+            /**
+             * Format: int32
+             * @description Період; `Рік*100 + Номер`.
+             */
+            periodKey: number;
+            /** @description `Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved`. */
+            state: string;
+        };
         /** @description Аркуш складу документа в переліку: код, назва, стан за період. */
         DocumentSheetState: {
             /** @description Код аркуша (`SheetDef.Code`); він же ключ у `DocumentSummary.SheetStates`. */
@@ -29570,6 +29581,11 @@ export interface components {
              *     метадані проєкту не секрет, звуження читача його не знімає. Документ власної періодичності не має; `periodKey` не віддається
              *     (це вісь запиту). Заповнюють і картка, і перелік; `null` лише коли проєкт не знайдено. */
             periodKind?: null | string;
+            /** @description ✎ 2026-11-07 Period clarity (п. e2): стан погодження документа за КОЖЕН період проєкту в запитаному році
+             *     (`GET /documents?year=`), за зростанням ключа; `null` — рік не запитано. Визначення — те саме, що у фільтра`state`:
+             *     `Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved` за аркушами складу, ВИДИМИМИ читачеві (S18).
+             *     Рахується ОДНИМ запитом на сторінку (`DocumentStore.PeriodStatesBatchAsync`). */
+            periodStates?: null | components["schemas"]["DocumentPeriodState"][];
             /**
              * Format: int32
              * @description Проєкт.

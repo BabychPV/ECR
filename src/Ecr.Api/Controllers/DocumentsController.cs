@@ -79,6 +79,7 @@ public sealed class DocumentsController(
         [FromQuery] int? ownerUserId,
         [FromQuery] string? sort,
         [FromQuery] string? templateVersions,
+        [FromQuery] int? year,
         CancellationToken ct)
     {
         var page = new CursorRequest(limit == 0 ? 50 : limit, cursor);
@@ -100,10 +101,12 @@ public sealed class DocumentsController(
         // ⛔ Зведений стан рахується запитом по wf.ApprovalState і лише коли
         // вказано період: без періоду «стан документа» не визначений — аркуші
         // за різні періоди бувають у різних станах одночасно (D-93).
+        // ✎ 2026-11-07 Period clarity: `year` — смуга `periodStates` за періоди року і стан за рік без періоду
+        // (п'ятистанове правило над клітинками «аркуш × розпочатий період», `02-contracts.md`).
         return Ok(await listDocuments
             .HandleAsync(
                 projectId, periodKey, state, mine, hasLateEdits, q, resultsStale, staleBy, ownerUserId, sort, templateVersions,
-                page, ct)
+                year, page, ct)
             .ConfigureAwait(false));
     }
 

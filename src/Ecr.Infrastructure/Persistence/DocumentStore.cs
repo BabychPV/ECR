@@ -346,6 +346,13 @@ public sealed class DocumentStore(
                 documents = WhereState(
                     documents, state: null, partlyPeriod, filter.HiddenSheetDefIds, filter.Participation?.HiddenSheets);
             }
+            else if ((filter.State is not null || filter.PartlySubmitted) && period.Value is null && filter.Year is { } year)
+            {
+                // ✎ 2026-11-07 Period clarity: стан за РІК — те саме правило над клітинками «аркуш × розпочатий період».
+                documents = WhereYearState(
+                    documents, filter.PartlySubmitted ? null : filter.State, year,
+                    filter.HiddenSheetDefIds, filter.Participation?.HiddenSheets);
+            }
 
             // BE-09b: та сама умова, що дає позначку в рядку (`LateEditDocumentIds`),
             // застосована ЗАПИТОМ до стелі сторінки — не друге визначення «пізньої
@@ -490,6 +497,11 @@ public sealed class DocumentStore(
         var staleByDocument = await StaleResultsBatchAsync(
             [.. page1.Select(d => d.Id)], period, starFetched, starMap, ct).ConfigureAwait(false);
 
+        // ✎ 2026-11-07 Period clarity: смуга станів року — теж ОДИН запит на сторінку.
+        var periodStates = filter.Year is { } stripYear
+            ? await PeriodStatesBatchAsync([.. page1.Select(d => d.Id)], stripYear, filter, ct).ConfigureAwait(false)
+            : null;
+
         var multiProjects = page1.Where(d => d.MultiVersion).Select(d => d.ProjectId).ToList();
         var versionByPeriod = multiProjects.Count == 0
             ? []
@@ -515,7 +527,8 @@ public sealed class DocumentStore(
                 PeriodKind: d.ProjectPeriodKind?.ToString(),
                 OwnerUserId: d.OwnerUserId,
                 TemplateVersion: d.TemplateVersion,
-                TemplateVersionByPeriod: versionByPeriod.GetValueOrDefault(d.ProjectId)));
+                TemplateVersionByPeriod: versionByPeriod.GetValueOrDefault(d.ProjectId),
+                PeriodStates: periodStates is null ? null : periodStates.GetValueOrDefault(d.Id) ?? []));
         }
 
         var next = !hasMore
@@ -1569,6 +1582,161 @@ public sealed class DocumentStore(
                     && !states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null)) && a.Status == DocumentStatus.Approved))),
             _ => throw new ArgumentOutOfRangeException(nameof(state), state, "Невідомий стан документа."),
         };
+    }
+
+    /// <summary>Рядки складу, видимі читачеві: та сама межа, що в <see cref="WhereState"/> і смузі (S18, N1-01, D-444).</summary>
+    private IQueryable<Domain.Entities.Documents.DocumentSheet> VisibleSheets(
+        IReadOnlyCollection<(int ProjectId, int Id)>? hiddenSheetDefIds,
+        IReadOnlyCollection<(long DocumentId, int SheetDefId)>? hiddenParticipantSheets)
+    {
+        var sheets = db.DocumentSheets.Where(s => s.IsIncluded);
+        if (hiddenSheetDefIds is { Count: > 0 })
+        {
+            var hiddenRows = HiddenSheetRows(hiddenSheetDefIds);
+            sheets = sheets.Where(s => !hiddenRows.Contains(s.Id));
+        }
+
+        if (hiddenParticipantSheets is { Count: > 0 })
+        {
+            var participantRows = HiddenParticipantSheetRows(hiddenParticipantSheets);
+            sheets = sheets.Where(s => !participantRows.Contains(s.Id));
+        }
+
+        return sheets;
+    }
+
+    /// <summary>
+    /// ✎ 2026-11-07 Period clarity (п. e2): фільтр стану документа за РІК без періоду.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Правило року — ТЕ САМЕ п'ятистанове правило, що й за місяць (<see cref="WhereState"/>), лише над
+    /// клітинками «видимий аркуш складу × РОЗПОЧАТИЙ період проєкту в році» (стан періоду не <c>Scheduled</c>):
+    /// <c>Rejected</c> — хоч одна клітинка повернута; <c>Draft</c> — жодна не подана/затверджена; <c>PartlySubmitted</c> —
+    /// є подана/затверджена і є неподана; <c>Submitted</c> — неподаних немає, хоч одна лише подана; <c>Approved</c> — усі
+    /// затверджені. Майбутні (<c>Scheduled</c>) місяці не тягнуть рік у «частково» — у них ще нема чого подавати.
+    /// </remarks>
+    private IQueryable<Document> WhereYearState(
+        IQueryable<Document> documents, DocumentStatus? state, int year,
+        IReadOnlyCollection<(int ProjectId, int Id)>? hiddenSheetDefIds,
+        IReadOnlyCollection<(long DocumentId, int SheetDefId)>? hiddenParticipantSheets)
+    {
+        var sheets = VisibleSheets(hiddenSheetDefIds, hiddenParticipantSheets);
+        var from = year * 100;
+        var to = (year + 1) * 100;
+        var periods = db.Periods.Where(p => p.PeriodKeyValue > from && p.PeriodKeyValue < to && p.State != PeriodState.Scheduled);
+        var states = db.ApprovalStates.Where(a => a.PeriodKey > from && a.PeriodKey < to);
+
+        // Клітинка стану — рядок `wf.ApprovalState` аркуша складу в розпочатому періоді проєкту документа.
+        Expression<Func<Document, bool>> anyCell = d => sheets.Any(s => s.DocumentId == d.Id)
+            && periods.Any(p => p.ProjectId == d.ProjectId);
+        Expression<Func<Document, bool>> rejected = d => sheets.Any(s => s.DocumentId == d.Id
+            && states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null))
+                && a.Status == DocumentStatus.Rejected && periods.Any(p => p.ProjectId == d.ProjectId && p.PeriodKeyValue == a.PeriodKey)));
+        Expression<Func<Document, bool>> sentCell = d => sheets.Any(s => s.DocumentId == d.Id
+            && states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null))
+                && (a.Status == DocumentStatus.Submitted || a.Status == DocumentStatus.Approved)
+                && periods.Any(p => p.ProjectId == d.ProjectId && p.PeriodKeyValue == a.PeriodKey)));
+        Expression<Func<Document, bool>> submittedCell = d => sheets.Any(s => s.DocumentId == d.Id
+            && states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null))
+                && a.Status == DocumentStatus.Submitted && periods.Any(p => p.ProjectId == d.ProjectId && p.PeriodKeyValue == a.PeriodKey)));
+        Expression<Func<Document, bool>> draftCell = d => sheets.Any(s => s.DocumentId == d.Id
+            && periods.Any(p => p.ProjectId == d.ProjectId
+                && !states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && a.PeriodKey == p.PeriodKeyValue
+                    && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null)) && a.Status != DocumentStatus.Draft)));
+        Expression<Func<Document, bool>> notApprovedCell = d => sheets.Any(s => s.DocumentId == d.Id
+            && periods.Any(p => p.ProjectId == d.ProjectId
+                && !states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && a.PeriodKey == p.PeriodKeyValue
+                    && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null)) && a.Status == DocumentStatus.Approved)));
+
+        return state switch
+        {
+            DocumentStatus.Rejected => documents.Where(rejected),
+            DocumentStatus.Draft => documents.Where(Not(rejected)).Where(Not(sentCell)),
+            null => documents.Where(Not(rejected)).Where(draftCell).Where(sentCell),
+            DocumentStatus.Submitted => documents.Where(Not(rejected)).Where(Not(draftCell)).Where(submittedCell),
+            DocumentStatus.Approved => documents.Where(anyCell).Where(Not(notApprovedCell)),
+            _ => throw new ArgumentOutOfRangeException(nameof(state), state, "Невідомий стан документа."),
+        };
+    }
+
+    /// <summary>
+    /// ✎ 2026-11-07 Period clarity (п. e2): стан погодження кожного документа сторінки за КОЖЕН період проєкту в році —
+    /// ОДНИМ запитом (без N+1).
+    /// </summary>
+    /// <remarks>
+    /// Визначення стану клітинки «документ × період» — те саме, що у фільтра <c>state</c> і смуги (лише видимі аркуші
+    /// складу, S18): повернутий → <c>Rejected</c>; жодного поданого/затвердженого → <c>Draft</c>; є і поданий, і неподаний →
+    /// <c>PartlySubmitted</c>; усі затверджені → <c>Approved</c>; інакше <c>Submitted</c>. Смуга показує всі періоди року
+    /// (і <c>Scheduled</c> — як <c>Draft</c>), фільтр року бере лише розпочаті.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<long, IReadOnlyList<DocumentPeriodState>>> PeriodStatesBatchAsync(
+        long[] documentIds, int year, DocumentListFilter filter, CancellationToken ct)
+    {
+        if (documentIds.Length == 0)
+        {
+            return new Dictionary<long, IReadOnlyList<DocumentPeriodState>>();
+        }
+
+        var sheets = VisibleSheets(filter.HiddenSheetDefIds, filter.Participation?.HiddenSheets);
+        var from = year * 100;
+        var to = (year + 1) * 100;
+        var states = db.ApprovalStates.Where(a => a.PeriodKey > from && a.PeriodKey < to);
+
+        var rows = await db.Documents
+            .AsNoTracking()
+            .Where(d => documentIds.Contains(d.Id))
+            .Join(
+                db.Periods.Where(p => p.PeriodKeyValue > from && p.PeriodKeyValue < to),
+                d => d.ProjectId,
+                p => p.ProjectId,
+                (d, p) => new { DocumentId = d.Id, PeriodKey = p.PeriodKeyValue })
+            .Select(c => new
+            {
+                c.DocumentId,
+                c.PeriodKey,
+                Total = sheets.Count(s => s.DocumentId == c.DocumentId),
+                Rejected = sheets.Count(s => s.DocumentId == c.DocumentId
+                    && states.Any(a => a.DocumentId == c.DocumentId && a.SheetDefId == s.SheetDefId && a.PeriodKey == c.PeriodKey
+                        && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null)) && a.Status == DocumentStatus.Rejected)),
+                Submitted = sheets.Count(s => s.DocumentId == c.DocumentId
+                    && states.Any(a => a.DocumentId == c.DocumentId && a.SheetDefId == s.SheetDefId && a.PeriodKey == c.PeriodKey
+                        && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null)) && a.Status == DocumentStatus.Submitted)),
+                Approved = sheets.Count(s => s.DocumentId == c.DocumentId
+                    && states.Any(a => a.DocumentId == c.DocumentId && a.SheetDefId == s.SheetDefId && a.PeriodKey == c.PeriodKey
+                        && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null)) && a.Status == DocumentStatus.Approved)),
+            })
+            .OrderBy(r => r.DocumentId)
+            .ThenBy(r => r.PeriodKey)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .GroupBy(r => r.DocumentId)
+            .ToDictionary(
+                g => g.Key,
+                IReadOnlyList<DocumentPeriodState> (g) => [.. g.Select(r => new DocumentPeriodState(
+                    r.PeriodKey, CellState(r.Total, r.Rejected, r.Submitted, r.Approved)))]);
+    }
+
+    /// <summary>П'ять станів документа за лічильниками аркушів (те саме правило, що й <see cref="WhereState"/>).</summary>
+    internal static string CellState(int total, int rejected, int submitted, int approved)
+    {
+        if (rejected > 0)
+        {
+            return nameof(DocumentStatus.Rejected);
+        }
+
+        if (submitted + approved == 0)
+        {
+            return nameof(DocumentStatus.Draft);
+        }
+
+        if (total - submitted - approved > 0)
+        {
+            return Application.Documents.ListDocumentsHandler.StatePartlySubmitted;
+        }
+
+        return approved == total ? nameof(DocumentStatus.Approved) : nameof(DocumentStatus.Submitted);
     }
 
     /// <summary>

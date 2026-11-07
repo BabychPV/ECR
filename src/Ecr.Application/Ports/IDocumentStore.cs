@@ -118,6 +118,12 @@ namespace Ecr.Application.Ports;
 /// <param name="StepApproverNamesTruncated">
 /// <c>true</c> — список обрізано (понад 20 імен або понад 100 кандидатів): справжніх погоджувачів може бути більше.
 /// </param>
+/// <param name="PeriodStates">
+/// ✎ 2026-11-07 Period clarity (п. e2): стан погодження документа за КОЖЕН період проєкту в запитаному році
+/// (`GET /documents?year=`), за зростанням ключа; `null` — рік не запитано. Визначення — те саме, що у фільтра`state`:
+/// `Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved` за аркушами складу, ВИДИМИМИ читачеві (S18).
+/// Рахується ОДНИМ запитом на сторінку (`DocumentStore.PeriodStatesBatchAsync`).
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -145,7 +151,13 @@ public sealed record DocumentSummary(
     ResultsStaleUndeterminedReason? ResultsStaleUndetermined = null,
     IReadOnlyDictionary<string, string>? TemplateVersionByPeriod = null,
     IReadOnlyList<string>? StepApproverNames = null,
-    bool StepApproverNamesTruncated = false);
+    bool StepApproverNamesTruncated = false,
+    IReadOnlyList<DocumentPeriodState>? PeriodStates = null);
+
+/// <summary>Стан погодження документа за один період (смуга року, ✎ 2026-11-07 Period clarity).</summary>
+/// <param name="PeriodKey">Період; `Рік*100 + Номер`.</param>
+/// <param name="State">`Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved`.</param>
+public sealed record DocumentPeriodState(int PeriodKey, string State);
 
 /// <summary>
 /// ✎ D-446: чому застарілість результатів документа читачеві не визначається
@@ -183,6 +195,11 @@ public sealed record DocumentSheetState(
 /// <param name="PartlySubmitted">
 /// ✎ UAT-recalc-ux: лише частково подані документи (є поданий/затверджений і є неподаний видимий аркуш, жодного
 /// відхиленого); разом із <paramref name="State"/> не задається.
+/// </param>
+/// <param name="Year">
+/// ✎ 2026-11-07 Period clarity: рік смуги станів (<see cref="DocumentSummary.PeriodStates"/>). Без періоду фільтр стану
+/// (<paramref name="State"/>/<paramref name="PartlySubmitted"/>) рахується за РІК: те саме п'ятистанове правило над усіма
+/// клітинками «видимий аркуш × розпочатий період року» (стан періоду не <c>Scheduled</c>).
 /// </param>
 /// <param name="MineUserId">
 /// Лише документи, де цей користувач — автор (<c>CreatedByUserId</c>) або подавав
@@ -253,7 +270,8 @@ public readonly record struct DocumentListFilter(
     int? OwnerUserId = null,
     IReadOnlyCollection<string>? TemplateVersions = null,
     DocumentVersionSort? VersionSort = null,
-    bool PartlySubmitted = false);
+    bool PartlySubmitted = false,
+    int? Year = null);
 
 /// <summary>Напрямок сортування переліку документів за версією шаблону.</summary>
 public enum DocumentVersionSort
