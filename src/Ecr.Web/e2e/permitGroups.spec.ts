@@ -200,6 +200,48 @@ test.describe('Permit groups', () => {
     }
   });
 
+  test('видалення групи: фокус на сусідньому рядку, після останньої - на заголовку, не BODY - N/5', async ({ page }) => {
+    test.setTimeout(240_000);
+    await signIn(page);
+    const Spare = group({ code: 'SPARE', nameL10n: { en: 'Spare permits' }, rowVersion: 's1' });
+
+    const deleteVia = async (rowName: RegExp, label: string, run: number): Promise<void> => {
+      const row = page.getByRole('row', { name: rowName });
+      await expect(row, `прогін ${run}: рядок ${label}`).toBeVisible({ timeout: 30_000 });
+      await row.focus();
+      await row.press('Enter');
+      const drawer = page.getByRole('dialog').first();
+      await expect(drawer).toBeVisible();
+      await drawer.getByRole('button', { name: 'Delete group' }).click();
+      const confirm = page.getByRole('dialog', { name: `Delete group "${label}"?` });
+      await expect(confirm).toBeVisible();
+      await confirm.getByRole('button', { name: 'Delete group' }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 15_000 });
+      await expect(row, `прогін ${run}: рядок ${label} зник`).toHaveCount(0);
+    };
+    const active = async (): Promise<string> =>
+      page.evaluate(() => {
+        const element = document.activeElement;
+        if (element === null || element === document.body) return 'BODY';
+
+        return `${element.tagName}:${element.getAttribute('data-row-key') ?? element.textContent?.trim() ?? ''}`;
+      });
+
+    for (let run = 1; run <= 5; run += 1) {
+      const backend = await installBackend(page, [{ ...Water }, { ...Spare }]);
+      await page.goto('/admin/permits/groups');
+
+      // Видалено один із двох: фокус на рядку, що лишився.
+      await deleteVia(/Water permits/, 'Water permits', run);
+      await expect.poll(active, { message: `прогін ${run}: фокус після видалення першої групи`, timeout: 10_000 }).toBe('TR:SPARE');
+
+      // Видалено останню: фокус на заголовку сторінки.
+      await deleteVia(/Spare permits/, 'Spare permits', run);
+      await expect.poll(active, { message: `прогін ${run}: фокус після видалення останньої групи`, timeout: 10_000 }).toBe('H1:Groups');
+      expect(backend.sent.map((sent) => sent.method), `прогін ${run}`).toEqual(['DELETE', 'DELETE']);
+    }
+  });
+
   test('незбережене у шторці: Esc, хрестик і Cancel питають «Discard»; Keep editing лишає, Discard закриває без запису, фокус на рядку - N/5', async ({ page }) => {
     test.setTimeout(240_000);
     await signIn(page);
