@@ -2,7 +2,8 @@ import { useState, type JSX } from 'react';
 import { Button, Group, Modal, Stack, Text, TextInput } from '@mantine/core';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { language, t } from '@/shared/i18n';
-import { showApiError, showDone } from '@/shared/ui/notify';
+import { showDone } from '@/shared/ui/notify';
+import { showListChangeError } from '../lists/listErrors';
 import type { PermitListValue } from '../lists/listsApi';
 import { valueLabels } from '../lists/listsModel';
 import { useChangeListItems } from '../lists/useLists';
@@ -47,7 +48,7 @@ export function AddValueDialog({ listKey, scope, listName, onAdded, onClose }: A
         if (item !== undefined) onAdded(item);
         onClose();
       },
-      onError: showApiError,
+      onError: (error) => showListChangeError(error, listName, text),
     });
   }
 

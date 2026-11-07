@@ -175,6 +175,16 @@
   font-style: var(--ecr-header-style, inherit);
 }
 
+/*
+ * AU-13 N1: у Light рядок одиниці на заливці шапки бере колір тексту шапки (`--ecr-cell-fill-fg`, ≥ 4,5:1
+ * до заливки), а не `--ecr-muted`: #5b6175 на #C6D9F1 давав 4,27:1. У Dark так само для заливок, що лишаються
+ * авторськими (#FFC000, #1F3864); світла заливка в Dark — це `--ecr-sunken`, там `--ecr-muted` проходить і лишається.
+ */
+:root:not([data-mantine-color-scheme='dark']) revo-grid[theme] revogr-header .rgHeaderCell.ecr-header-styled .ecr-header-unit,
+:root[data-mantine-color-scheme='dark'] revo-grid[theme] revogr-header .rgHeaderCell.ecr-header-styled:not(.ecr-header-fill-light) .ecr-header-unit {
+  color: inherit;
+}
+
 /* Dark: світла заливка шапки → токен `--ecr-sunken` (макет D15-01); темна лишається. Колір тексту автора не затираємо. */
 :root[data-mantine-color-scheme='dark'] revo-grid[theme] revogr-header .rgHeaderCell.ecr-header-styled.ecr-header-fill-light {
   background-color: var(--ecr-sunken);

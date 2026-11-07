@@ -306,3 +306,47 @@ test.describe('Списки пермітів: екран «Lists»', () => {
     await expect(page.getByRole('row', { name: /Row with Toluene/ })).toContainText('Toluene');
   });
 });
+
+/**
+ * AU-13 N3: повтор значення в шторці списку (422 `choicesInvalid`) — рівно ОДИН тост, із назвою списку й повтореним
+ * значенням, без внутрішнього ключа списку (`type:…` / `shared:…`). Раніше тост ішов двічі (виклик + `MutationCache`).
+ */
+test.describe('Permit list duplicate value toast', () => {
+  test.skip(PeriodKey === '', 'ECR_E2E_OPTIONAL: стенда немає. Стенд: tools/e2e-stand.ps1.');
+
+  const created = new CreatedPermitTypes();
+  test.afterEach(async ({ page }) => {
+    await created.cleanup(page);
+  });
+
+  test('duplicate value shows one toast with list name and value', async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+
+    const stamp = String(Date.now());
+    const code = created.track(`E2EListsDup${stamp}`);
+    const method = `E2E_Dup${stamp}`;
+    await publishType(page, code, method);
+
+    await page.goto('/admin/permits/lists');
+    const row = page.locator('[data-list-table] table tbody tr', { hasText: method });
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await row.click();
+    const drawer = page.getByRole('dialog');
+    await expect(drawer).toContainText('Alpha', { timeout: 10_000 });
+
+    const put = page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().includes('/items'));
+    await drawer.getByRole('textbox', { name: 'New value' }).fill('alpha');
+    await drawer.getByRole('button', { name: 'Add value' }).click();
+    expect((await put).status()).toBe(422);
+
+    const toasts = page.locator('.mantine-Notification-root').filter({ hasText: 'already has the value' });
+    await expect(toasts).toHaveCount(1, { timeout: 10_000 });
+    await expect(toasts.first()).toContainText('«alpha»');
+    await expect(toasts.first()).not.toContainText('type:');
+    await page.waitForTimeout(500);
+    await expect(page.locator('.mantine-Notification-root')).toHaveCount(1);
+    await expect(drawer.getByText('alpha', { exact: true })).toHaveCount(0);
+  });
+});

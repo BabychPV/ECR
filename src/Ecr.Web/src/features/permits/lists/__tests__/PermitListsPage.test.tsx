@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { testTheme } from '@/test/render';
 import { PermitListsPage } from '@/pages/admin/PermitListsPage';
+import { createQueryClient } from '@/app/queryClient';
 import type { PermitListDetail, PermitListDto, PermitListValue } from '../listsApi';
 
 /**
@@ -26,11 +27,14 @@ vi.mock('@/shared/session/useSession', async (importOriginal) => ({
   useSession: () => ({ data: { permissions: ['Registry.View', 'Permit.EditType'], isSimulation: false } }),
 }));
 
-const warned = vi.hoisted(() => ({ showWarning: vi.fn() }));
-vi.mock('@/shared/ui/notify', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/shared/ui/notify')>()),
-  showWarning: warned.showWarning,
-}));
+const warned = vi.hoisted(() => ({ showWarning: vi.fn(), showApiError: vi.fn(), showErrorText: vi.fn() }));
+vi.mock('@/shared/ui/notify', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/shared/ui/notify')>();
+  warned.showApiError.mockImplementation(original.showApiError);
+  warned.showErrorText.mockImplementation(original.showErrorText);
+
+  return { ...original, showWarning: warned.showWarning, showApiError: warned.showApiError, showErrorText: warned.showErrorText };
+});
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -166,11 +170,11 @@ function Where(): null {
   return null;
 }
 
-function show(entry = '/admin/permits/lists'): void {
+function show(entry = '/admin/permits/lists', client = new QueryClient({ defaultOptions: { queries: { retry: false } } })): void {
   render(
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={[entry]}>
-        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <QueryClientProvider client={client}>
           <Where />
           <Routes>
             <Route path="/admin/permits/lists" element={<PermitListsPage />} />
@@ -555,5 +559,48 @@ describe('Lists: Remove значення, яке вже видалили деі�
     await waitFor(() => expect(warned.showWarning).toHaveBeenCalledWith('permits.lists.drawer.gone'));
     await waitFor(() => expect(within(drawer).queryByText('Direct')).toBeNull());
     expect(within(drawer).getByText('Calc')).toBeTruthy();
+  });
+});
+describe('Lists: shared list duplicate value', () => {
+  it('AU-13 N3: 422 choicesInvalid — один тост із назвою списку і повтореним значенням, без внутрішнього ключа', async () => {
+    stub();
+    const real = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method !== 'PUT') return real(input, init);
+
+        return json(
+          {
+            title: 'Unprocessable',
+            status: 422,
+            errorCode: 'ECR-PRM-0422',
+            correlationId: 'c',
+            messageKey: 'err.ECR-PRM-0422.choicesInvalid',
+            columnCode: SharedKey,
+            detail: 'Значення «nitrogen OXIDES» у списку вже є.',
+          },
+          422,
+        );
+      }),
+    );
+    warned.showApiError.mockClear();
+    warned.showErrorText.mockClear();
+    // Справжній клієнт застосунку: його `MutationCache.onError` і давав другий тост.
+    show('/admin/permits/lists', createQueryClient());
+    fireEvent.click(await screen.findByText('Substances'));
+    const drawer = await screen.findByRole('dialog');
+    await within(drawer).findByText('Nitrogen oxides');
+
+    fireEvent.change(within(drawer).getByRole('textbox', { name: 'permits.lists.drawer.add.label' }), { target: { value: ' nitrogen OXIDES ' } });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'permits.lists.drawer.add.submit' }));
+
+    await waitFor(() =>
+      expect(warned.showErrorText).toHaveBeenCalledWith('permits.lists.duplicateValue {"list":"Substances","value":"nitrogen OXIDES"}'),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(warned.showErrorText).toHaveBeenCalledTimes(1);
+    expect(warned.showApiError).not.toHaveBeenCalled();
+    expect(within(drawer).queryByText('nitrogen OXIDES')).toBeNull();
   });
 });

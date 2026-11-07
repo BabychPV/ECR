@@ -960,7 +960,17 @@ export function useSheetActions({
    * `403 reopenDenied`. Тепер, як для Approve/Reject, кнопки немає, коли гранта
    * замало (`mayWorkflow('approve')`: не симуляція + поріг Approve).
    */
-  const canReopen = isAllowed('reopen', state) && can(me, 'Document.Reopen') && mayWorkflow('approve');
+  /*
+   * ✎ AU-13: на ПОДАНОМУ аркуші сервер вимагає ще й ролі поточного кроку маршруту (`CanReopenCoreAsync`, P2-4:
+   * `EditRules.CanReopen(profile, context, requiredRoleId)` — те саме правило кроку, що й `CanApprove`, D-444 п. 2).
+   * Грант із `/me` маршруту не бачить: погоджувач поза маршрутом бачив «Return for edits» і діставав 403 `reopenDenied`.
+   * Тому для Submitted — відповідь сервера `approver-edit` (`mayDecide`, роль кроку + грант Approve) разом із правом
+   * `Document.Reopen`. Для Approved (крок — останній маршруту) `approver-edit` не відповідає — лишається грант.
+   */
+  const canReopen =
+    isAllowed('reopen', state) &&
+    can(me, 'Document.Reopen') &&
+    (editsDeferToServer(state) ? mayDecide : mayWorkflow('approve'));
 
   // ✎ LIVE-STATUS: діалог проти застарілого стану не відкривається.
   const askFresh = (action: 'approve' | 'reject' | 'reopen' | 'recall'): void => {

@@ -111,19 +111,30 @@ describe('GridAriaPlugin', () => {
     element.remove();
   });
 
-  it('CL-17: прокручувана область даних (rgCol) стає фокусованою, закріплені — ні', () => {
+  // AU-13 N2: прокручуються рядки `.vertical-inner` кожного в'юпорта з колонками (і закріпленого теж).
+  const viewport = (cls: string, columns: boolean): string =>
+    `<revogr-viewport-scroll class="${cls}"><div class="inner-content-table">` +
+    `<div class="header-wrapper">${columns ? '<div class="rgHeaderCell">A</div>' : ''}</div>` +
+    '<div class="vertical-inner"><div class="content-wrapper"></div></div></div></revogr-viewport-scroll>';
+  const rowsOf = (element: Element, cls: string): Element | null =>
+    element.querySelector(`revogr-viewport-scroll.${cls} .vertical-inner`);
+
+  it('CL-17 / AU-13 N2: фокусовані рядки (.vertical-inner) в\'юпортів із колонками, порожній закріплений — ні', () => {
     const element = grid();
     element.insertAdjacentHTML(
       'beforeend',
-      '<revogr-viewport-scroll class="colPinStart"></revogr-viewport-scroll>' +
-        '<revogr-viewport-scroll class="rgCol"></revogr-viewport-scroll>' +
-        '<revogr-viewport-scroll class="colPinEnd"></revogr-viewport-scroll>',
+      viewport('colPinStart', true) + viewport('rgCol', true) + viewport('colPinEnd', false),
     );
     const plugin = new GridAriaPlugin(element, {} as PluginProviders);
 
-    expect(element.querySelector('revogr-viewport-scroll.rgCol')?.getAttribute('tabindex')).toBe('0');
-    expect(element.querySelector('revogr-viewport-scroll.colPinStart')?.hasAttribute('tabindex')).toBe(false);
-    expect(element.querySelector('revogr-viewport-scroll.colPinEnd')?.hasAttribute('tabindex')).toBe(false);
+    for (const cls of ['colPinStart', 'rgCol']) {
+      expect(rowsOf(element, cls)?.getAttribute('tabindex')).toBe('0');
+      expect(rowsOf(element, cls)?.getAttribute('role')).toBe('rowgroup');
+    }
+    expect(rowsOf(element, 'colPinEnd')?.hasAttribute('tabindex')).toBe(false);
+    for (const cls of ['colPinStart', 'rgCol', 'colPinEnd']) {
+      expect(element.querySelector(`revogr-viewport-scroll.${cls}`)?.hasAttribute('tabindex')).toBe(false);
+    }
 
     plugin.destroy();
     element.remove();
@@ -132,10 +143,10 @@ describe('GridAriaPlugin', () => {
   it('CL-17: область, що з’явилась пізніше (Stencil домальовує), теж отримує tabindex', async () => {
     const element = grid();
     const plugin = new GridAriaPlugin(element, {} as PluginProviders);
-    element.insertAdjacentHTML('beforeend', '<revogr-viewport-scroll class="rgCol"></revogr-viewport-scroll>');
+    element.insertAdjacentHTML('beforeend', viewport('rgCol', true));
 
     await vi.waitFor(() => {
-      expect(element.querySelector('revogr-viewport-scroll.rgCol')?.getAttribute('tabindex')).toBe('0');
+      expect(rowsOf(element, 'rgCol')?.getAttribute('tabindex')).toBe('0');
     });
 
     plugin.destroy();

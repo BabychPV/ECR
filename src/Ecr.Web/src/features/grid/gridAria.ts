@@ -141,12 +141,26 @@ export class GridAriaPlugin extends BasePlugin {
     // мусить приймати фокус, інакше клавіатурний користувач не прокрутить її стрілками (WCAG 2.1.1, axe
     // `scrollable-region-focusable`). Одна зупинка Tab; стрілки на самій області гортають нативно, а на комірці їх,
     // як і раніше, обробляє сітка.
-    const scroller = this.revogrid.querySelector('revogr-viewport-scroll.rgCol');
-    if (scroller !== null && scroller.getAttribute('tabindex') !== '0') scroller.setAttribute('tabindex', '0');
+    //
+    // AU-13 N2: вертикально прокручується не сам в'юпорт, а його `.vertical-inner` (рядки даних) — і в `rgCol`, і в
+    // закріплених `colPinStart`/`colPinEnd`. Тож зупинка Tab — саме `.vertical-inner` кожного в'юпорта з колонками;
+    // зовнішній `rgCol` (горизонтальна прокрутка) проходить axe через фокусований вміст і зупинкою більше не є.
     // P2-1: фокусований елемент без ролі axe рахує недозволеною дитиною `role=grid` (`aria-required-children`,
-    // critical). `rowgroup` дозволена дитина `grid`, а всередині — ті самі `row` (шапка й рядки даних), тож
-    // структура дерева доступності лишається коректною, розкладка й клавіатурна навігація сітки не змінюються.
-    if (scroller !== null && scroller.getAttribute('role') !== 'rowgroup') scroller.setAttribute('role', 'rowgroup');
+    // critical), тож `.vertical-inner` — `rowgroup` (усередині ті самі `row` рядків даних); шапка — `row` у `grid`.
+    for (const viewport of this.revogrid.querySelectorAll('revogr-viewport-scroll')) {
+      if (viewport.getAttribute('tabindex') !== null) viewport.removeAttribute('tabindex');
+      if (viewport.getAttribute('role') !== null) viewport.removeAttribute('role');
+      const rows = viewport.querySelector('.vertical-inner');
+      if (rows === null) continue;
+      const hasColumns = viewport.querySelector('[role="columnheader"], .rgHeaderCell') !== null;
+      if (!hasColumns) {
+        if (rows.hasAttribute('tabindex')) rows.removeAttribute('tabindex');
+        if (rows.hasAttribute('role')) rows.removeAttribute('role');
+        continue;
+      }
+      if (rows.getAttribute('tabindex') !== '0') rows.setAttribute('tabindex', '0');
+      if (rows.getAttribute('role') !== 'rowgroup') rows.setAttribute('role', 'rowgroup');
+    }
     const attribution = this.revogrid.querySelector('revogr-attribution');
     if (attribution === null) return;
     if (attribution.getAttribute('aria-hidden') !== 'true') attribution.setAttribute('aria-hidden', 'true');
