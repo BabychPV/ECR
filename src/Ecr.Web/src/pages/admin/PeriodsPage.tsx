@@ -1,70 +1,27 @@
-import { Suspense, lazy, useEffect, useRef, useState, type JSX } from 'react';
-import {
-  Alert,
-  Badge,
-  Button,
-  Group,
-  Modal,
-  ScrollArea,
-  Select,
-  Stack,
-  Table,
-  Text,
-  TextInput,
-  Textarea,
-  VisuallyHidden,
-} from '@mantine/core';
-import { notifications } from '@mantine/notifications';
+import { Suspense, lazy, useEffect, useState, type JSX } from 'react';
+import { Badge, Button, Group, Modal, ScrollArea, Select, Stack, Table, Text, Textarea, VisuallyHidden } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
-import type {
-  ChangeProjectTimeZoneRequest,
-  CloneProjectRequest,
-  JobStatus,
-  PagedProjects,
-  PeriodCalendarDto,
-  ProjectIdResponse,
-  ProjectRecalculationRequest,
-  ReopenPeriodRequest,
-  SetCurrentPeriodRequest,
-} from '@/api/types';
-import { markSlicesStale } from '@/features/grid/sliceCache';
-import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
-import { timeZones } from '@/features/projects/timeZones';
-import { useOpenerFocusReturn } from '@/features/projects/useOpenerFocusReturn';
-import { MountedLazyConfirmModal, MountedLazyReasonModal } from '@/features/projects/lazyPeriodsDialogs';
+import type { PagedProjects, PeriodCalendarDto, ReopenPeriodRequest, SetCurrentPeriodRequest } from '@/api/types';
+import { MountedLazyReasonModal } from '@/features/projects/lazyPeriodsDialogs';
 import { hasProjectGrant } from '@/features/documents/projectGrant';
-import { pollInterval, outcomeOf } from '@/features/workflow/jobFollow';
-import { humanizeJobId } from '@/features/workflow/jobLabel';
-import { RecalcSkippedList, type RecalcRequestOutcome } from '@/features/workflow/RecalcSkippedList';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
-import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { Hint } from '@/shared/ui/Hint';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
 import { formatMonthYear } from '@/shared/format';
 import { siteMomentText, zoneClock } from '@/shared/siteMoment';
-import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
-import { errorCodeText } from '@/shared/ui/problemText';
+import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { projectsQuery } from '@/features/projects/allProjects';
-import { FilterInline, FilterRow } from '@/shared/ui/FilterBar';
+import { FilterRow } from '@/shared/ui/FilterBar';
 
 // Правило поясу майданчика живе в `shared/siteMoment`; ім'я лишається доступним звідси.
 export { siteMomentText } from '@/shared/siteMoment';
 
-/**
- * Діалог створення проєкту і менеджер політик — за `import()` (`D-132`).
- *
- * ⚠ Обидва тягнуть `NumberInput` (~8 КБ gzip), а маршрут стояв на 247 із 250.
- * Діалог потрібен лише після «Створити», менеджер — лише адміністраторові
- * (`manages`); переглядач календаря періодів не завантажує жодного.
- */
-const CreateProjectModal = lazy(async () => ({
-  default: (await import('@/features/projects/CreateProjectModal')).CreateProjectModal,
-}));
 // UI-33: плитки року й «All projects» — окремим чанком (бюджет `D-132`).
 const PeriodYearTiles = lazy(async () => ({
   default: (await import('@/features/projects/PeriodsOverview')).PeriodYearTiles,
@@ -75,10 +32,6 @@ const PeriodsStatStrip = lazy(async () => ({
 const AllProjectsPeriods = lazy(async () => ({
   default: (await import('@/features/projects/PeriodsOverview')).AllProjectsPeriods,
 }));
-const PeriodPolicyManager = lazy(async () => ({
-  default: (await import('@/features/projects/PeriodPolicyManager')).PeriodPolicyManager,
-}));
-
 /**
  * Поле дати — за `import()`, і не заради стилю.
  *
@@ -207,11 +160,9 @@ export function endOfSiteDayUtc(day: Date, timeZoneId: string): string {
  * ⚠ `PeriodKey = Year*100 + Sequence` (R-A6), і `Sequence` — це **порядковий
  * номер періоду**, а не місяць: у квартальному проєкті їх чотири.
  *
- * ⛔ Життєвий цикл проєкту тут увесь: створити, клонувати з минулого року,
- * активувати, зафіксувати поточний період, заархівувати. До аудиту (`A7-39`,
- * `A7-42`) з нього була одна дія — активація. Створити проєкт, клонувати його
- * чи відкрити закритий період через інтерфейс було неможливо, тобто перший
- * крок роботи із системою доводилося робити повз неї.
+ * ✎ Period clarity (людина 07.11): сторінка — ЛИШЕ блокування місяців (стан, дата блокування, перевідкриття).
+ * Життєвий цикл проєкту (створити, клонувати, активувати, заархівувати), маршрут, політики й пояс — у
+ * налаштуваннях проєкту (`ProjectSettingsPage`), перерахунок — на переліку документів.
  */
 export function PeriodsPage(): JSX.Element {
   const [projectId, setProjectId] = useUrlNumber('projectId');
@@ -219,24 +170,6 @@ export function PeriodsPage(): JSX.Element {
   const [tileKey, setTileKey] = useState<number | null>(null);
   const queryClient = useQueryClient();
   const session = useSession();
-
-  const [creating, setCreating] = useState(false);
-  // Діалог створення монтується з першого відкриття (лінивий чанк, D-132).
-  const [createMounted, setCreateMounted] = useState(false);
-  const createFocus = useOpenerFocusReturn();
-  useEffect(() => {
-    if (creating) setCreateMounted(true);
-  }, [creating]);
-
-  const [cloning, setCloning] = useState(false);
-  const [cloneCode, setCloneCode] = useState('');
-
-  // T6/#52: діалог зміни поясу майданчика; `null` — закрито. Значення поля
-  // ПОРОЖНЄ на відкритті — з тієї ж причини, що й пояс у формі створення
-  // (директива ПК-1 №06 §3): наявний пояс не має підказувати новий, бо це
-  // одна незворотна дія.
-  const [changingTimeZone, setChangingTimeZone] = useState(false);
-  const [newTimeZoneId, setNewTimeZoneId] = useState<string | null>(null);
 
   // Який період відкриваємо; `null` — діалог закритий.
   const [reopening, setReopening] = useState<number | null>(null);
@@ -250,21 +183,6 @@ export function PeriodsPage(): JSX.Element {
 
   // Який період фіксуємо як поточний; `null` — діалог закритий.
   const [pinning, setPinning] = useState<number | null>(null);
-
-  // ⚠ Q-287: архівація раніше виконувалась одразу по кліку — без
-  // підтвердження, на відміну від Reopen/Pin на цій самій сторінці, які
-  // вимагають діалог. Дія незворотна (`Archived` — кінцевий стан), тому
-  // випадковий клік має ту саму ціну помилки, що й випадкове відкриття чи
-  // фіксація періоду. `boolean`, а не reason: `POST /archive` не приймає
-  // причину (на відміну від `reopen`/`current-period`), тому тут — простий
-  // діалог підтвердження, той самий патерн, що вже несуть `cloning`/
-  // `changingTimeZone` на цій сторінці, а не `ReasonModal`.
-  const [archiving, setArchiving] = useState(false);
-
-  // ⛔ `X-25`: активація проєкту й перерахунок УСЬОГО проєкту йшли одним
-  // кліком. Обидві дії важкі (перша незворотна, друга ставить у чергу всі
-  // документи всіх періодів) — тепер через підтвердження; `null` — закрито.
-  const [confirming, setConfirming] = useState<'activate' | 'recalculate' | null>(null);
 
   // ⛔ Проєкти ВИБИРАЮТЬСЯ зі списку, а не вводяться номером. Це не про
   // зручність: без переліку не видно СТАНУ проєкту, а саме він визначає, чи
@@ -309,113 +227,11 @@ export function PeriodsPage(): JSX.Element {
     if (projectId === null && onlyProject !== undefined) setProjectId(onlyProject.id);
   }, [projectId, onlyProject, setProjectId]);
 
-  // ⚠ Аудит-пас 8, п.2: `POST /archive` відмовляє `409 ECR-PRD-0409`, коли є
-  // хоч один незакритий період, — але діалог підтвердження про це мовчав, і
-  // відмова виринала лише ПІСЛЯ кліку «Архівувати» в діалозі. Дані про стан
-  // періодів уже завантажені на цій сторінці (`periods` вище), новий запит
-  // не потрібен.
-  const openPeriods = (periods.data?.periods ?? []).filter((p) => p.state !== 'Closed');
-
-  /*
-   * ⛔ Чи ВІДОМО, які періоди відкриті. Без цього запобіжник вище деградував у
-   * бік ДОЗВОЛУ: при відмові `GET /projects/{id}/periods` (чи поки він у
-   * дорозі) `periods.data` — `undefined`, `openPeriods` стає порожнім, і з
-   * діалогу архівації зникає попередження, а кнопка «Архівувати»
-   * РОЗБЛОКОВУЄТЬСЯ. Тобто рівно тоді, коли клієнт не знає стану періодів, він
-   * повідомляв, що архівувати безпечно.
-   *
-   * ⚠ Сервер усе одно відмовить (`ECR-PRD-0409`), тож дані цілі — але
-   * інтерфейс активно казав протилежне тому, що знав. Це гірше за мовчання:
-   * попередження, яке зникає саме в невизначеності, вчить йому не вірити.
-   *
-   * ⚠ Запобіжник має деградувати в бік ЗАБОРОНИ: не знаємо — не пускаємо, і
-   * кажемо чому.
-   */
-  const openPeriodsUnknown = periods.error !== null || periods.data === undefined;
-
   /** Перечитує проєкти і календар після будь-якої зміни. */
   const refresh = async (): Promise<void> => {
     await queryClient.invalidateQueries({ queryKey: projectsQuery.queryKey });
     await queryClient.invalidateQueries({ queryKey: ['periods', projectId] });
   };
-
-  const activate = useMutation({
-    mutationFn: (id: number) => apiFetch(`/api/v1/projects/${id}/activate`, { method: 'POST' }),
-    onSuccess: async () => {
-      await refresh();
-      showDone(t('periods.activated'));
-    },
-    onError: showApiError,
-  });
-
-  /**
-   * Клонування проєкту з попереднього року (`ФВ-1.3`).
-   *
-   * ⚠ Копіюються довідники, налаштування і склад аркушів; **дані — ні**. Саме
-   * тому це окрема дія, а не «створити схожий»: минулорічні числа в новому
-   * році — не зручність, а неправдива звітність.
-   */
-  const clone = useMutation({
-    mutationFn: (id: number) =>
-      apiFetch<ProjectIdResponse>(`/api/v1/projects/${id}/clone`, {
-        method: 'POST',
-        body: JSON.stringify({ code: cloneCode.trim() } satisfies CloneProjectRequest),
-      }),
-    onSuccess: async (result) => {
-      await refresh();
-      setCloning(false);
-      setCloneCode('');
-      setProjectId(result.projectId);
-      showDone(t('periods.cloned'));
-    },
-    onError: showApiError,
-  });
-
-  /**
-   * Архівація проєкту.
-   *
-   * ⛔ Це ПОЗНАЧКА, а не перенесення даних: фізично в `arc.*` їх переносить
-   * окрема задача. Дозволено лише коли всі періоди закриті (`D-123`), і
-   * відмова `409` каже саме це.
-   *
-   * ⚠ `Archived` — кінцевий стан; проєкт не видаляється ніколи (`ФВ-1.15`),
-   * бо на нього посилаються подані форми, аудит і зрізи.
-   */
-  const archive = useMutation({
-    mutationFn: (id: number) => apiFetch(`/api/v1/projects/${id}/archive`, { method: 'POST' }),
-    onSuccess: async () => {
-      await refresh();
-      setArchiving(false);
-      showDone(t('periods.archived'));
-    },
-    onError: showApiError,
-  });
-
-  /**
-   * Зміна поясу майданчика (T6/#52).
-   *
-   * ⛔ Домен уже мав повний, протестований `Project.ChangeTimeZone` —
-   * прогалина була рівно тут, у відсутньому ендпоінті над ним, не в
-   * правилі. Дозволено лише поки жоден період не вийшов зі стану
-   * `Scheduled` (ФВ-1.1a); кнопка нижче показується лише чернетці як
-   * найближчий видимий проксі цього правила — сервер перевіряє його
-   * насправді і відмовляє `ECR-PRD-0409`, якщо проксі колись розійдеться
-   * з фактом.
-   */
-  const changeTimeZone = useMutation({
-    mutationFn: (target: { id: number; timeZoneId: string }) =>
-      apiFetch(`/api/v1/projects/${target.id}/timezone`, {
-        method: 'PUT',
-        body: JSON.stringify({ timeZoneId: target.timeZoneId } satisfies ChangeProjectTimeZoneRequest),
-      }),
-    onSuccess: async () => {
-      await refresh();
-      setChangingTimeZone(false);
-      setNewTimeZoneId(null);
-      showDone(t('periods.timezoneChanged'));
-    },
-    onError: showApiError,
-  });
 
   /**
    * Фіксація поточного періоду (`ФВ-1.13`).
@@ -486,123 +302,6 @@ export function PeriodsPage(): JSX.Element {
     onError: showApiError,
   });
 
-  /**
-   * Перерахунок УСЬОГО проєкту (Q-151/Q-162): постановка в чергу і стеження
-   * за нею — той самий прийом, що й у `SheetActions.tsx` для одного
-   * документа (директива №09 `W8` п.7): GUID у тості й забуття про задачу —
-   * дефект, який тут не повторюємо.
-   *
-   * ⚠ `periodKey: null` — повний рік, тобто саме та семантика, заради якої
-   * `RunCalculationHandler` існував (`RecalculationJob`, Q-162): без цього
-   * маршруту оператор не мав звідки поставити перерахунок УСІХ документів
-   * проєкту одразу, лише по одному документу за раз.
-   */
-  const [recalcJobId, setRecalcJobId] = useState<string | null>(null);
-
-  // ✎ UAT-recalc-ux: відповідь несе пропущені (затверджені) аркуші; `jobId: null` — рахувати нічого.
-  const [recalcRequest, setRecalcRequest] = useState<RecalcRequestOutcome | null>(null);
-
-  const recalculate = useMutation({
-    mutationFn: (id: number) =>
-      apiFetch<RecalcRequestOutcome>(`/api/v1/projects/${id}/recalculate`, {
-        method: 'POST',
-        body: JSON.stringify({
-          periodKey: null,
-        } satisfies ProjectRecalculationRequest),
-      }),
-    onSuccess: (job) => {
-      setRecalcRequest(job);
-      if (job.jobId === null || job.jobId === undefined) {
-        setRecalcJobId(null);
-        return;
-      }
-
-      setRecalcJobId(job.jobId);
-      // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у ТОСТІ, `jobId` у стані —
-      // і в запиті опитування — не змінюється.
-      showDone(t('workflow.recalcQueued', { job: humanizeJobId(job.jobId) }));
-    },
-    onError: showApiError,
-  });
-
-  const recalcJob = useQuery({
-    queryKey: ['job', recalcJobId],
-    queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(recalcJobId ?? '')}`),
-    enabled: recalcJobId !== null,
-    // ⛔ P4 ФВ-9.8: батько-розклад уже `Succeeded`, коли документи ще рахуються
-    // (`effectiveState = FannedOut`) — опитування триває до кінця ДОЧІРНІХ.
-    refetchInterval: (query) => pollInterval(query.state.data?.state, query.state.data?.effectiveState),
-
-    // ⚠ `GET /jobs/{id}` вимагає `System.ViewHealth` (Q-156) — без нього
-    // оператор лишається з поставленою задачею, а не з червоним сповіщенням
-    // про право, якого він не просив.
-    retry: false,
-  });
-
-  const recalcOutcome = recalcJobId === null
-    ? null
-    : outcomeOf(recalcJob.data?.state, recalcJob.isError, recalcJob.data?.effectiveState);
-
-  const recalcRunning = recalcOutcome === 'running';
-
-  // «Розкладено N, виконано M з N, помилок K» — правдивий стан проєктної задачі.
-  const recalcFan = recalcJobId === null ? null : (recalcJob.data?.fanOut ?? null);
-
-  const recalcReported = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (recalcJobId === null || recalcOutcome === null || recalcOutcome === 'running') return;
-    if (recalcOutcome === 'unknown') return;
-    if (recalcReported.current === recalcJobId) return;
-
-    recalcReported.current = recalcJobId;
-
-    if (recalcOutcome === 'succeeded' || recalcOutcome === 'partial') {
-      // ⛔ «Завершено» — лише коли виконано M = N і помилок K = 0. Батько-розклад
-      // `Succeeded` одразу після розкладу; раніше тут і з'являвся тост
-      // «перерахунок завершено» над жодним ще не порахованим документом.
-      if (recalcOutcome === 'succeeded') {
-        showDone(t('workflow.recalcDone'));
-      } else {
-        const fan = recalcJob.data?.fanOut;
-
-        notifications.show({
-          color: 'statusWarning',
-          message: t('workflow.recalcDoneWithErrors', {
-            total: fan?.total ?? 0,
-            done: fan?.succeeded ?? 0,
-            failed: fan?.failed ?? 0,
-          }),
-          closeButtonProps: notificationCloseButtonProps,
-        });
-      }
-
-      // ⚠ Кеш сіток скидається САМЕ тут, а не на постановці в чергу: раніше
-      // означало б показати старі числа під написом «перераховано».
-      //
-      // ⛔ `CL-02`: але БЕЗ перезапиту. Перерахунок проєкту йде по всіх
-      // періодах (`periodKey: null` у запиті), тож звузити намір нема по
-      // чому — а от запитувати нема чого: це адміністративний екран, жодної
-      // сітки на ньому не змонтовано. Позначені застарілими зрізи прочитають
-      // свіже самі, коли документ відкриють.
-      void markSlicesStale(queryClient);
-      void queryClient.invalidateQueries({ queryKey: ['document'] });
-
-      return;
-    }
-
-    // ⛔ Q-234: не `message` — це останній прогрес, на відмові застарілий.
-    // ⛔ `X-04`: і не `error` — той несе `ex.Message` сервера
-    // (`FinishAsync(..., errorMessage: ex.Message, ...)`): українське речення
-    // розробника чи «Violation of PRIMARY KEY…» на англійському екрані.
-    // Причина — за КОДОМ із каталогу, невідомий код — загальний текст.
-    notifications.show({
-      color: 'statusError',
-      message: errorCodeText(recalcJob.data?.errorCode, t('workflow.recalcFailed')),
-      closeButtonProps: notificationCloseButtonProps,
-    });
-  }, [recalcJobId, recalcOutcome, recalcJob.data?.errorCode, recalcJob.data?.fanOut, queryClient]);
-
   /*
    * ⚠ Пояс МАЙДАНЧИКА, а не той, у якому сидить адміністратор: строк
    * перевідкриття — момент, і сервер міряє його саме цим поясом (`D-68`).
@@ -641,16 +340,12 @@ export function PeriodsPage(): JSX.Element {
     setReopening(periodId);
   };
 
-  const manages = can(session.data, 'Project.Manage');
-
   // ⛔ `F-19`: право каже, ЩО можна, а грант — НАД ЧИМ. Сервер для кожної дії
-  // над КОНКРЕТНИМ проєктом (активація, пояс, клон, архів, маршрут погодження,
-  // поточний період) вимагає ще й гранта Manage на нього
-  // (`ActivateProjectHandler`, `SetCurrentPeriodHandler`, …). З грантом Read
+  // над КОНКРЕТНИМ проєктом (поточний період, перевідкриття) вимагає ще й гранта
+  // Manage на нього (`SetCurrentPeriodHandler`, …). З грантом Read
   // «Make current» стояв на кожному рядку й давав 403.
   const managesSelected =
     projectId !== null && hasProjectGrant(session.data ?? undefined, projectId, 'Manage');
-  const managesProject = manages && managesSelected;
   const configures = can(session.data, 'Period.Configure') && managesSelected;
   // ⛔ Право `Period.Reopen` не каже, ЧИЇ періоди: сервер вимагає ще й гранта
   // Manage на проєкт (`ReopenPeriodHandler`). Без цієї умови кнопка обіцяла б
@@ -659,7 +354,6 @@ export function PeriodsPage(): JSX.Element {
     can(session.data, 'Period.Reopen') &&
     projectId !== null &&
     hasProjectGrant(session.data, projectId, 'Manage');
-  const recalculates = can(session.data, 'Calculation.Recalculate');
 
   return (
     <>
@@ -691,110 +385,16 @@ export function PeriodsPage(): JSX.Element {
               }}
             />
 
-            {/* ⛔ Маршрут погодження (`ФВ-5.17`). Дві таблиці існували від
-                Етапу 3 і не мали жодного способу наповнення — багатоетапне
-                затвердження було конфігурацією, якої неможливо створити. */}
-            {selected !== undefined && managesProject && (
-              <ApprovalRouteEditor projectId={selected.id} />
-            )}
-
-            {manages && (
-              <Button
-                onClick={() => {
-                  createFocus.remember();
-                  setCreating(true);
-                }}
-              >
-                {t('periods.create')}
-              </Button>
-            )}
-
-            {/* T6/#37: CRUD політик — без нього завести чи змінити політику
-                можна було лише сідингом або рукою DBA. */}
-            {manages && (
-              <Suspense fallback={null}>
-                <PeriodPolicyManager />
-              </Suspense>
-            )}
-
-            {/* ⛔ Кнопка є лише для чернетки. Доки проєкт не активований,
-                задача станів до нього не доходить, періоди лишаються
-                `Scheduled`, і система відмовляє в кожній комірці з причиною
-                «період ще не відкрито» — неправдивою (`A7-25`). */}
-            {/* ⛔ `X-25`: активація — незворотна (`Draft → Active`, назад
-                шляху немає: календар починає відкривати й закривати періоди),
-                і йшла одним кліком. Тепер — через підтвердження нижче. */}
-            {selected?.status === 'Draft' && managesProject && (
-              <Button
-                loading={activate.isPending}
-                onClick={() => setConfirming('activate')}
-              >
-                {t('periods.activate')}
-              </Button>
-            )}
-
-            {/* T6/#52: показана лише чернетці — поки жоден період не вийшов
-                зі `Scheduled`, зміна безпечна (ФВ-1.1a); сервер перевіряє це
-                насправді через `Project.ChangeTimeZone`, кнопка — лише
-                видимий проксі. */}
-            {selected?.status === 'Draft' && managesProject && (
-              <Button variant="default" onClick={() => setChangingTimeZone(true)}>
-                {t('periods.timezoneChange')}
-              </Button>
-            )}
-
-            {selected !== undefined && managesProject && (
-              <Button variant="default" onClick={() => setCloning(true)}>
-                {t('periods.clone')}
-              </Button>
-            )}
-
-            {/* ⛔ Q-151/Q-162: перерахунок усього проєкту, а не по документу за
-                раз. Кнопка доступна лише активному проєкту — чернетка не має
-                жодного документа, який можна було б перерахувати. */}
-            {selected?.status === 'Active' && recalculates && (
-              <Button
-                variant="default"
-                loading={recalculate.isPending || recalcRunning}
-                onClick={() => setConfirming('recalculate')}
-              >
-                {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
-              </Button>
-            )}
-
-            {/* ✎ UAT-recalc-ux: пропущені затверджені аркуші — після завершення задачі (або одразу, коли рахувати нічого). */}
-            {recalcRequest !== null && (recalcRequest.nothingToRecalculate === true || (recalcJobId !== null && !recalcRunning)) && (
-              <RecalcSkippedList outcome={recalcRequest} />
-            )}
-
-            {recalcFan !== null && (
-              <FilterInline>
-                <Text size="xs" c="dimmed" role="status" data-recalc-fanout={recalcJob.data?.effectiveState ?? ''}>
-                  {t('jobs.fanOutProgress', {
-                    total: recalcFan.total,
-                    done: recalcFan.succeeded,
-                    failed: recalcFan.failed,
-                  })}
-                </Text>
-              </FilterInline>
-            )}
-
-            {/* ⚠ Архівація пропонується лише активному проєкту: чернетку
-                архівувати нема від чого, а вже заархівований — кінцевий стан. */}
-            {/* ⛔ `X-29`: `variant="default"` разом із `color="statusError"` —
-                Mantine малює `default` сірим, і колір просто губився: кінцева,
-                незворотна дія виглядала як «Clone» поруч. `outline` лишає
-                кнопку вторинною, але червоною. */}
-            {selected?.status === 'Active' && managesProject && (
-              <Button
-                variant="outline"
-                color="statusError"
-                loading={archive.isPending}
-                onClick={() => setArchiving(true)}
-              >
-                {t('periods.archive')}
-              </Button>
-            )}
+            {/* ✎ Period clarity (людина 07.11, п. b): маршрут погодження, політики, клон, пояс, життєвий цикл
+                проєкту — у налаштуваннях проєкту; перерахунок — на переліку документів. Тут — лише місяці. */}
+            <Button
+              variant="default"
+              component={Link}
+              to={projectId === null ? '/admin/projects' : `/admin/projects?projectId=${String(projectId)}`}
+              data-project-settings-link=""
+            >
+              {t('projectSettings.title')}
+            </Button>
           </FilterRow>
         }
       />
@@ -862,7 +462,7 @@ export function PeriodsPage(): JSX.Element {
           />
         </Suspense>
 
-        <Text size="sm" mb={4} data-periods-lock-note="">
+        <Text size="sm" mb="xs" data-periods-lock-note="">
           {t('periods.lockOnlyNote')}
         </Text>
         <Text size="xs" c="dimmed" mb="xs">
@@ -1032,141 +632,6 @@ export function PeriodsPage(): JSX.Element {
         </Suspense>
       )}
 
-      {/* ⛔ Форма створення живе ОКРЕМИМ компонентом (`A7-56`). Вона
-          надсилала запит без версії шаблону і без політики періодів, а сервер
-          відхиляє створення без них — тобто перший крок роботи із системою не
-          працював жодного разу. Окремий компонент дає їй власний тест, який
-          дивиться на тіло запиту, а не на те, що діалог відкрився. */}
-      {/* ⚠ Монтується з першого «Створити» і лишається змонтованим — як і до
-          лінивого імпорту: анімація закриття й набране у формі не губляться. */}
-      {createMounted && (
-        <Suspense fallback={null}>
-          <CreateProjectModal
-            opened={creating}
-            onClose={() => {
-              setCreating(false);
-              createFocus.restore();
-            }}
-            onCreated={async (projectId) => {
-              await refresh();
-              setProjectId(projectId);
-              showDone(t('periods.created'));
-            }}
-          />
-        </Suspense>
-      )}
-
-      <Modal opened={cloning} onClose={() => setCloning(false)} title={t('periods.clone')}>
-        <Text size="sm" mb="sm">
-          {t('periods.cloneHint')}
-        </Text>
-
-        <TextInput
-          label={t('periods.code')}
-          value={cloneCode}
-          onChange={(event) => setCloneCode(event.currentTarget.value)}
-          data-autofocus
-        />
-
-        <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={() => setCloning(false)}>
-            {t('common.cancel')}
-          </Button>
-          <Button
-            disabled={cloneCode.trim().length === 0 || selected === undefined}
-            loading={clone.isPending}
-            onClick={() => {
-              if (selected !== undefined) clone.mutate(selected.id);
-            }}
-          >
-            {t('periods.clone')}
-          </Button>
-        </Group>
-      </Modal>
-
-      {/* T6/#52: значення поля ПОРОЖНЄ на відкритті — той самий вибір, що й
-          у формі створення (директива ПК-1 №06 §3): наявний пояс не має
-          підказувати новий для незворотної дії. */}
-      <Modal
-        opened={changingTimeZone}
-        onClose={() => setChangingTimeZone(false)}
-        title={t('periods.timezoneChange')}
-      >
-        <Text size="sm" mb="sm">
-          {t('periods.timezoneChangeHint')}
-        </Text>
-
-        <Select
-          required
-          searchable
-          limit={50}
-          label={t('periods.timeZone')}
-          data={timeZones()}
-          value={newTimeZoneId}
-          onChange={setNewTimeZoneId}
-          data-autofocus
-        />
-
-        <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={() => setChangingTimeZone(false)}>
-            {t('common.cancel')}
-          </Button>
-          <Button
-            disabled={newTimeZoneId === null || selected === undefined}
-            loading={changeTimeZone.isPending}
-            onClick={() => {
-              if (selected !== undefined && newTimeZoneId !== null) {
-                changeTimeZone.mutate({ id: selected.id, timeZoneId: newTimeZoneId });
-              }
-            }}
-          >
-            {t('periods.timezoneChange')}
-          </Button>
-        </Group>
-      </Modal>
-
-      {/* ⚠ Q-287: підтвердження перед незворотною архівацією — той самий
-          рівень захисту, що вже мають Reopen/Pin нижче (`ReasonModal`), лише
-          без поля причини: `POST /archive` його не приймає. */}
-      <Modal opened={archiving} onClose={() => setArchiving(false)} title={t('periods.archive')}>
-        <Text size="sm" mb="sm">
-          {t('periods.archiveConfirm')}
-        </Text>
-
-        {/* ⚠ Аудит-пас 8, п.2: попередження про передумову ДО кліку, а не
-            `409 ECR-PRD-0409` ПІСЛЯ нього. Кнопка нижче заблокована з тієї ж
-            причини — підтвердження, яке заздалегідь приречене на відмову
-            сервера, гірше за підтвердження, недоступне для кліку. */}
-        {openPeriods.length > 0 && (
-          <Alert color="statusWarning" variant="light" mb="sm">
-            {t('periods.archiveOpenPeriods')}
-          </Alert>
-        )}
-
-        {/* ⛔ Стан періодів НЕВІДОМИЙ — кнопка лишається заблокованою, і
-            причину видно. Раніше саме тут запобіжник мовчки перевертався:
-            відмова запиту прибирала попередження й розблоковувала дію. */}
-        {openPeriodsUnknown && periods.error !== null && (
-          <ErrorAlert error={periods.error} onRetry={() => void periods.refetch()} />
-        )}
-
-        <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={() => setArchiving(false)}>
-            {t('common.cancel')}
-          </Button>
-          <Button
-            color="statusError"
-            loading={archive.isPending}
-            disabled={openPeriods.length > 0 || openPeriodsUnknown}
-            onClick={() => {
-              if (selected !== undefined) archive.mutate(selected.id);
-            }}
-          >
-            {t('periods.archive')}
-          </Button>
-        </Group>
-      </Modal>
-
       {/*
         ⛔ Не `ReasonModal`, і це не дублювання заради дублювання: перевідкриття
         збирає ДВА значення — причину і строк, — а `ReasonModal` приймає рівно
@@ -1245,37 +710,6 @@ export function PeriodsPage(): JSX.Element {
           </Group>
         </Stack>
       </Modal>
-
-      {/* ⛔ `X-25`: підтвердження ПЕРЕД дією, фокус на «Cancel» (`L6`,
-          `ConfirmModal`). Не `danger`: жодна з двох дій не знищує даних, але
-          обидві — важкі, і клік повз них не має їх запускати. */}
-      <MountedLazyConfirmModal
-        opened={confirming === 'activate' && selected !== undefined}
-        title={t('periods.activateTitle', { code: selected?.code ?? '' })}
-        text={t('periods.activateConfirm')}
-        verb={t('periods.activate')}
-        danger={false}
-        isPending={activate.isPending}
-        onConfirm={() => {
-          if (selected !== undefined) activate.mutate(selected.id);
-          setConfirming(null);
-        }}
-        onClose={() => setConfirming(null)}
-      />
-
-      <MountedLazyConfirmModal
-        opened={confirming === 'recalculate' && selected !== undefined}
-        title={t('periods.recalcTitle', { code: selected?.code ?? '' })}
-        text={t('periods.recalcConfirm')}
-        verb={t('workflow.recalculate')}
-        danger={false}
-        isPending={recalculate.isPending}
-        onConfirm={() => {
-          if (selected !== undefined) recalculate.mutate(selected.id);
-          setConfirming(null);
-        }}
-        onClose={() => setConfirming(null)}
-      />
 
       <MountedLazyReasonModal
         opened={pinning !== null}

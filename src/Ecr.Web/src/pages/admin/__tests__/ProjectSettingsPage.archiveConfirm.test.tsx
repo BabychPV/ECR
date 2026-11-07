@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { PeriodsPage } from '@/pages/admin/PeriodsPage';
+import { ProjectSettingsPage } from '@/pages/admin/ProjectSettingsPage';
 import { testTheme } from '@/test/render';
 
 /**
@@ -101,9 +101,9 @@ function show(): void {
 
   render(
     <MantineProvider theme={testTheme}>
-      <MemoryRouter initialEntries={['/admin/periods?projectId=7']}>
+      <MemoryRouter initialEntries={['/admin/projects?projectId=7']}>
         <QueryClientProvider client={client}>
-          <PeriodsPage />
+          <ProjectSettingsPage />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,
@@ -119,7 +119,7 @@ afterEach(() => {
 // ПОВНІЙ ізоляції, без жодних сусідніх процесів). 30с виявилось замало.
 const SlowEnvTimeout = 400_000;
 
-describe('PeriodsPage: підтвердження архівації (Q-287)', () => {
+describe('ProjectSettingsPage: підтвердження архівації (Q-287)', () => {
   it(
     'клік «Архівувати» БЕЗ підтвердження не надсилає запит',
     async () => {

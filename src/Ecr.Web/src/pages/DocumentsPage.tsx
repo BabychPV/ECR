@@ -67,6 +67,14 @@ const DocumentsBoard = lazy(async () => ({
   default: (await import('@/features/documents/DocumentsBoard')).DocumentsBoard,
 }));
 
+/**
+ * ✎ Period clarity (людина 07.11, п. b): перерахунок УСЬОГО проєкту переїхав зі сторінки Periods сюди — за
+ * `import()` (`D-132`): дію бачить лише `Calculation.Recalculate`, а бюджет маршруту тісний.
+ */
+const ProjectRecalculateAction = lazy(async () => ({
+  default: (await import('@/features/documents/ProjectRecalculateAction')).ProjectRecalculateAction,
+}));
+
 const AUTO_PICK_MAX_PROJECTS = 10;
 
 /**
@@ -169,6 +177,19 @@ export function DocumentsPage(): JSX.Element {
    * твердження про доступ було б неправдою про дані.
    */
   const noProjects = projects.isSuccess && projects.data.items.length === 0;
+
+  /*
+   * ✎ Period clarity (п. b): перерахунок — дія ПРОЄКТУ: той, що обрано фільтром, або єдиний. Лише активному
+   * (у чернетці документів немає) і з правом `Calculation.Recalculate` — так само, як було на сторінці Periods.
+   */
+  const recalcProject =
+    (filters.projectId !== null
+      ? projects.data?.items.find((project) => project.id === filters.projectId)
+      : projects.data?.items.length === 1
+        ? projects.data.items[0]
+        : undefined) ?? null;
+  const showRecalc =
+    recalcProject !== null && recalcProject.status === 'Active' && can(session.data, 'Calculation.Recalculate');
 
   /*
    * ⛔ `U-10`. Перелік відкривався з ПОРОЖНІМ полем «Period», тому колонка
@@ -336,6 +357,12 @@ export function DocumentsPage(): JSX.Element {
                   {t('documents.create')}
                 </Button>
               </DisabledReason>
+            )}
+
+            {showRecalc && recalcProject !== null && (
+              <Suspense fallback={null}>
+                <ProjectRecalculateAction key={recalcProject.id} project={recalcProject} />
+              </Suspense>
             )}
           </Group>
         }

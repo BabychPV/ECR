@@ -95,6 +95,10 @@ export const SecurityPage = lazy(SecurityPageLoader);
 
 const PeriodsPageLoader = async () => ({ default: (await import('@/pages/admin/PeriodsPage')).PeriodsPage });
 export const PeriodsPage = lazy(PeriodsPageLoader);
+const ProjectSettingsPageLoader = async () => ({
+  default: (await import('@/pages/admin/ProjectSettingsPage')).ProjectSettingsPage,
+});
+export const ProjectSettingsPage = lazy(ProjectSettingsPageLoader);
 
 const SourcesPageLoader = async () => ({ default: (await import('@/pages/admin/SourcesPage')).SourcesPage });
 export const SourcesPage = lazy(SourcesPageLoader);
@@ -177,6 +181,7 @@ const routeChunkLoaders: Partial<Record<string, () => Promise<unknown>>> = {
   [routes.adminExpressions.id]: ExpressionsPageLoader,
   [routes.adminSecurity.id]: SecurityPageLoader,
   [routes.adminPeriods.id]: PeriodsPageLoader,
+  [routes.adminProjectSettings.id]: ProjectSettingsPageLoader,
   [routes.adminSources.id]: SourcesPageLoader,
   [routes.adminMapping.id]: MappingPreviewPageLoader,
   [routes.adminPiData.id]: PiDataPageLoader,

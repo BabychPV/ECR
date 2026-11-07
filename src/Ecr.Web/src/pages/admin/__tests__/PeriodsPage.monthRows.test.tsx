@@ -123,6 +123,32 @@ describe('PeriodsPage: рядок місяця — підпис, стан і о�
   );
 
   it(
+    'п. b: маршрут, політики, клон, пояс, архів і перерахунок — не тут; є посилання на налаштування проєкту',
+    async () => {
+      mockFetch();
+      show();
+      await row(202601);
+
+      // ⛔ Мутація «повернути дії проєкту на сторінку» (права й грант Manage у фікстурі є) дає тут кнопки.
+      for (const name of [
+        '⟦workflow.route⟧',
+        '⟦periods.policies⟧',
+        '⟦periods.clone⟧',
+        '⟦periods.timezoneChange⟧',
+        '⟦periods.archive⟧',
+        '⟦periods.create⟧',
+        '⟦workflow.recalculate⟧',
+      ]) {
+        expect(screen.queryByRole('button', { name })).toBeNull();
+      }
+
+      const link = screen.getByRole('link', { name: '⟦projectSettings.title⟧' });
+      expect(link.getAttribute('href')).toBe('/admin/projects?projectId=7');
+    },
+    Slow,
+  );
+
+  it(
     'підпис місяця — назва; ключ і номер — у підказці, доступній з клавіатури',
     async () => {
       mockFetch();

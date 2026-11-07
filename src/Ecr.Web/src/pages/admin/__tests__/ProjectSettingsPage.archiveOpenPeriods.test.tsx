@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { PeriodsPage } from '@/pages/admin/PeriodsPage';
+import { ProjectSettingsPage } from '@/pages/admin/ProjectSettingsPage';
 import { testTheme } from '@/test/render';
 
 /**
@@ -123,9 +123,9 @@ function show(): void {
 
   render(
     <MantineProvider theme={testTheme}>
-      <MemoryRouter initialEntries={['/admin/periods?projectId=7']}>
+      <MemoryRouter initialEntries={['/admin/projects?projectId=7']}>
         <QueryClientProvider client={client}>
-          <PeriodsPage />
+          <ProjectSettingsPage />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,
@@ -138,7 +138,7 @@ afterEach(() => {
 
 const SlowEnvTimeout = 400_000;
 
-describe('PeriodsPage: попередження про незакриті періоди перед архівацією', () => {
+describe('ProjectSettingsPage: попередження про незакриті періоди перед архівацією', () => {
   it(
     'відкритий період — попередження видно, кнопка підтвердження заблокована',
     async () => {

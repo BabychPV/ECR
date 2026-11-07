@@ -98,7 +98,8 @@ describe('app/routes — реєстр маршрутів', () => {
           '/admin/pi-data',
         ],
       ],
-      ['access', ['/admin/security', '/admin/periods']],
+      // ✎ Period clarity: налаштування проєкту — поруч із періодами, звідки переїхали.
+      ['access', ['/admin/security', '/admin/periods', '/admin/projects']],
       [
         'operate',
         [
@@ -138,6 +139,7 @@ describe('app/routes — реєстр маршрутів', () => {
         '/admin/mapping',
         '/admin/pi-data',
         '/admin/periods',
+        '/admin/projects',
         '/admin/jobs',
         '/admin/snapshots',
         '/admin/audit',

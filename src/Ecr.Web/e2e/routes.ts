@@ -34,6 +34,7 @@ export const Routes = [
   { path: '/admin/units', name: 'units' },
   { path: '/admin/security', name: 'security' },
   { path: '/admin/periods', name: 'periods' },
+  { path: '/admin/projects', name: 'project-settings' },
   { path: '/admin/sources', name: 'sources' },
   { path: '/admin/mapping', name: 'mapping' },
   { path: '/admin/pipeline', name: 'pipeline' },

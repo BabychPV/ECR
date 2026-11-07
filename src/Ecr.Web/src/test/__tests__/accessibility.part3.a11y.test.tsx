@@ -13,6 +13,7 @@ import {
 } from '@/test/__tests__/a11yFixtures';
 import { SecurityPage } from '@/pages/admin/SecurityPage';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
+import { ProjectSettingsPage } from '@/pages/admin/ProjectSettingsPage';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
 import { MappingPreviewPage } from '@/pages/admin/MappingPreviewPage';
 import { PiDataPage } from '@/pages/admin/PiDataPage';
@@ -34,6 +35,7 @@ import { CampaignOverviewPage } from '@/pages/admin/CampaignOverviewPage';
 const Pages: [string, () => JSX.Element][] = [
   ['/admin/security', SecurityPage],
   ['/admin/periods', PeriodsPage],
+  ['/admin/projects', ProjectSettingsPage],
   ['/admin/sources', SourcesPage],
   ['/admin/mapping', MappingPreviewPage],
 
