@@ -83,6 +83,45 @@ test.describe('Учасники документа (D-443) на реальном
     }
   });
 
+  // PB2-P2-3: (а) фокус входить у шторку, (б) після вибору людини лишається в діалозі на рівні, (в) Esc закриває шторку
+  // і повертає фокус на «More». Без фіксу всі три - BODY: пункт меню, що відкрив шторку, зникає разом із меню.
+  test('фокус у шторці учасників: входить при відкритті, після вибору людини на рівні, Esc повертає на More', async ({ browser }) => {
+    const admin = await signedIn(browser, Admin);
+    try {
+      const page = await admin.newPage();
+      await openDrawer(page);
+      const where = async (): Promise<string> =>
+        page.evaluate(() => {
+          const active = document.activeElement;
+          if (active === null || active === document.body) return 'BODY';
+          if (active instanceof HTMLInputElement && active.type === 'radio' && active.checked && active.closest('[data-testid="participant-modal"]') !== null) {
+            return 'level';
+          }
+
+          return active.closest('[data-panel]')?.getAttribute('data-panel') ?? `${active.tagName}:${active.getAttribute('data-testid') ?? ''}`;
+        });
+
+      await expect.poll(where, { message: '(а) фокус не увійшов у шторку', timeout: 10_000 }).toBe('edit-assignments');
+
+      await page.getByTestId('add-participant').click();
+      const modal = page.getByTestId('participant-modal');
+      await expect(modal).toBeVisible();
+      await modal.getByLabel(/^Who|^Кто/).fill(Operator.displayName);
+      await modal.getByRole('button', { name: Operator.displayName }).click({ timeout: 20_000 });
+      await expect(modal.getByTestId('participant-picked')).toBeVisible();
+      await expect.poll(where, { message: '(б) фокус після вибору людини', timeout: 10_000 }).toBe('level');
+      await modal.getByRole('button', { name: /^(Cancel|Отмена)$/ }).click();
+      await expect(modal).toBeHidden();
+      await expect(page.getByTestId('add-participant')).toBeFocused();
+
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('add-participant')).toBeHidden({ timeout: 10_000 });
+      await expect.poll(where, { message: '(в) фокус після Esc', timeout: 10_000 }).toBe('BUTTON:document-more');
+    } finally {
+      await admin.close();
+    }
+  });
+
   test('учасник без ролі отримує одну таблицю через шторку: бачить документ і лише цю таблицю', async ({ browser }) => {
     const admin = await signedIn(browser, Admin);
     try {
