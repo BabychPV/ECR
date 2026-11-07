@@ -52,6 +52,9 @@ function show(canRecall: boolean, grant: 'Approve' | 'Write' = 'Approve'): void 
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      // ✎ PB2-P2-2: Approve/Reject на поданому аркуші вирішує відповідь сервера, не грант `/me`; тут сервер
+      // відповідає так, як відповів би за цим грантом (Approve → погоджувач, Write → ні).
+      if (url.includes('/approver-edit')) return json({ canApproverEdit: grant === 'Approve' });
       if (url.includes('/api/v1/me')) return json({ ...Me, grants: { 'Project:7': grant } });
       if (url.includes('/recall?')) {
         availabilityAsked += 1;

@@ -92,6 +92,42 @@ public sealed class PermitListsWriteHttpTests(SqlServerFixture sql)
         Assert.False((await db.RegistryEntries.AsNoTracking().SingleAsync(e => e.Id == foreign)).IsDeleted);
     }
 
+    /// <remarks>
+    /// PB2 P3: спільний довідник приймав повторене значення (дубль відхиляв лише список «лише для типу»). Тепер дубль тієї
+    /// самої мови без урахування регістру — 422 ECR-PRM-0422 і нічого не збережено (усе або нічого): і з наявним значенням, і
+    /// всередині одного запиту, і при перейменуванні на чужу назву; перейменування на себе — можна. Мутація: прибрати
+    /// <c>RequireUniqueShared</c> з <c>ChangeSharedAsync</c> — червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Спільний_довідник_не_приймає_дубль_значення_тієї_самої_мови()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, AllRights);
+        var shared = await EnsureSharedRegistryAsync(sql, $"PLX_{_tag}");
+        await PublishTypeAsync(client, $"PLX{_tag}", shared, ["A"]);
+        var key = $"shared:{shared}";
+
+        var added = await Json(await PutAsync(client, key, Changes(
+            new { action = "Add", displayL10n = new { en = "Alpha", ru = "Альфа" } },
+            new { action = "Add", displayL10n = new { en = "Beta" } })));
+        var before = added.GetProperty("list").GetProperty("itemCount").GetInt32();
+        var betaId = added.GetProperty("items").EnumerateArray().Single(i => i.GetProperty("displayL10n").GetProperty("en").GetString() == "Beta").GetProperty("id").GetInt64();
+
+        // З наявним (інший регістр), з наявним іншою мовою, усередині одного запиту, перейменування на чужу назву.
+        await AssertErrorAsync(await PutAsync(client, key, Changes(new { action = "Add", displayL10n = new { en = "alpha" } })), HttpStatusCode.UnprocessableEntity, "ECR-PRM-0422");
+        await AssertErrorAsync(await PutAsync(client, key, Changes(new { action = "Add", displayL10n = new { ru = "АЛЬФА" } })), HttpStatusCode.UnprocessableEntity, "ECR-PRM-0422");
+        await AssertErrorAsync(
+            await PutAsync(client, key, Changes(new { action = "Add", displayL10n = new { en = "Gamma" } }, new { action = "Add", displayL10n = new { en = "GAMMA" } })),
+            HttpStatusCode.UnprocessableEntity, "ECR-PRM-0422");
+        await AssertErrorAsync(await PutAsync(client, key, Changes(new { action = "Update", id = betaId, displayL10n = new { en = "Alpha" } })), HttpStatusCode.UnprocessableEntity, "ECR-PRM-0422");
+        Assert.Equal(before, (await Json(await GetAsync(client, key))).GetProperty("list").GetProperty("itemCount").GetInt32());
+
+        // Своя назва (інший регістр) і та сама назва в іншій мові без збігу — можна.
+        var self = await PutAsync(client, key, Changes(new { action = "Update", id = betaId, displayL10n = new { en = "BETA" } }));
+        Assert.True(self.StatusCode == HttpStatusCode.OK, $"{self.StatusCode}: {await self.Content.ReadAsStringAsync()}");
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Значення_лише_для_типу_додаються_змінюються_вимикаються_а_останнє_й_дубль_відхиляються()

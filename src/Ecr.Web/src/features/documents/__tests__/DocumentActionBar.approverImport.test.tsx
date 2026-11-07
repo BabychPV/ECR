@@ -38,6 +38,8 @@ function mockFetch(grant: 'Approve' | 'Write'): void {
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
 
+      // ✎ PB2-P2-2: хто погоджує поданий аркуш, вирішує відповідь сервера; тут — як за грантом (Approve → так).
+      if (url.includes('/approver-edit')) return json({ canApproverEdit: grant === 'Approve' });
       if (url.includes('/api/v1/me')) return json(user(grant));
       if (url.includes('/submission-target')) {
         return json({
@@ -96,6 +98,7 @@ function show(approverImport: boolean): void {
 async function openMore(): Promise<void> {
   const more = await screen.findByTestId('document-more');
   await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/v1/me'))).toBe(true));
+  await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/approver-edit'))).toBe(true));
   await userEvent.setup().click(more);
   await screen.findByRole('menuitem', { name: 'probe' });
 }

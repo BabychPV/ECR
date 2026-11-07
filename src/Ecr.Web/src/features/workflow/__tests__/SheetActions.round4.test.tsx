@@ -42,6 +42,9 @@ function mockFetch(options: { grants: Record<string, string>; jobState?: string;
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
+      // ✎ PB2-P2-2: Approve/Reject на поданому аркуші — за відповіддю сервера; тут погоджувач має грант Approve.
+      if (url.includes('/approver-edit')) return json({ canApproverEdit: options.grants['Project:7'] === 'Approve' });
+
       if (url.includes('/api/v1/me')) {
         return json({
           denies: [],

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { EcrApiError } from '@/api/client';
 import { Catalog } from '@/test/__tests__/a11yFixtures';
 import { TestProviders } from '@/test/render';
 import * as typesApi from '@/features/permits/api/typesApi';
@@ -116,7 +117,8 @@ describe('addColumn — the permit table column and the profile field', () => {
     expect(body.rowVersion).toBe('rv-draft');
     const sources = body.tables.find((table) => table.code === 'AIR_SOURCES')!;
     expect(sources.columns.map((c) => c.code)).toEqual(['SOURCE_NAME', 'FILE_B']);
-    expect(sources.columns[1]).toMatchObject({ order: 2, dataType: 'String', nameL10n: { en: 'Workshop', ru: 'Workshop' } });
+    // F13-p198 P3-2: all three catalogue languages.
+    expect(sources.columns[1]).toMatchObject({ order: 2, dataType: 'String', nameL10n: { en: 'Workshop', ru: 'Workshop', kz: 'Workshop' } });
     // The other table is sent back unchanged.
     expect(body.tables.find((table) => table.code === 'AIR_SOURCE_SUBSTANCES')!.columns).toHaveLength(1);
     expect(api.publishPermitType).toHaveBeenCalledWith('AIR', { reason: 'Column «Workshop» added from import file column B', rowVersion: 'rv-replaced' });
@@ -127,6 +129,16 @@ describe('addColumn — the permit table column and the profile field', () => {
 
     await expect(addPermitTableColumn(Workshop, 'reason long enough')).rejects.toEqual(new AddColumnError('draftOpen'));
     expect(api.openPermitTypeVersion).not.toHaveBeenCalled();
+    expect(api.publishPermitType).not.toHaveBeenCalled();
+  });
+
+  it('F13-p198 P3-1: a draft opened by someone else after our read — the server refuses new-version (409), shown as draftOpen', async () => {
+    api.openPermitTypeVersion.mockRejectedValue(
+      new EcrApiError({ type: 'about:blank', title: 'Conflict', status: 409, errorCode: 'ECR-PRM-4093', correlationId: 'c1' } as never),
+    );
+
+    await expect(addPermitTableColumn(Workshop, 'reason long enough')).rejects.toEqual(new AddColumnError('draftOpen'));
+    expect(api.replacePermitType).not.toHaveBeenCalled();
     expect(api.publishPermitType).not.toHaveBeenCalled();
   });
 

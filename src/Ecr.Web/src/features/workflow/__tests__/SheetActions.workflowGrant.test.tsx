@@ -66,10 +66,21 @@ function currentUser(options: {
 }
 
 function mockFetch(me: ReturnType<typeof currentUser>): void {
+  // ✎ PB2-P2-2: «Approve»/«Reject» на поданому аркуші вирішує сервер (`GET …/approver-edit`), не грант `/me`;
+  // заглушка відповідає так, як відповів би сервер за цим грантом (поріг Approve, заборона, симуляція).
+  const canApproverEdit = !me.isSimulation && meetsGrant(effectiveGrant(me, ProjectId, SheetDefId), 'Approve');
+
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
+      if (url.includes('/approver-edit')) {
+        return new Response(JSON.stringify({ canApproverEdit }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
 
       if (url.includes('/api/v1/me')) {
         return new Response(JSON.stringify(me), {
@@ -336,9 +347,8 @@ describe('SheetActions: «Approve»/«Reject» — поріг Approve, а не S
       show({ grants: { 'Project:7': 'Submit' }, state: 'Submitted' });
       await anchor();
 
-      // ⛔ Мутаційний доказ на ПОРІГ, а не на наявність перевірки: постав у
-      // `RequiredGrant` для `approve`/`reject` рівень `Submit` — обидва рядки
-      // почервоніють, бо кнопки з'являться.
+      // ✎ PB2-P2-2: поріг тепер тримає сервер — заглушка `/approver-edit` відповідає false для Submit;
+      // доказ «кнопки — за відповіддю сервера» — `SheetActions.serverApprove.test.tsx`.
       expect(screen.queryByRole('button', { name: /approve/i })).toBeNull();
       expect(screen.queryByRole('button', { name: /reject/i })).toBeNull();
     },

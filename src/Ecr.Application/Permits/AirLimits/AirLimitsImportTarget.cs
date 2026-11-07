@@ -86,8 +86,18 @@ public sealed class AirLimitsImportTarget(
                 uow.ReleaseSavedRegistryRows();
                 Data.Invalidate();
 
-                // 3. The new rows.
-                var inserted = await InsertAsync(tables, plan, permitId, air, token).ConfigureAwait(false);
+                // 3. The new rows. ✎ F13-p198 P3-3: values of ADDED columns the profile does not map are carried over from this
+                // permit's replaced row with the same NAE (and substance): a re-import must not wipe what the file does not carry.
+                var own = permitId.ToString(CultureInfo.InvariantCulture);
+                var carry = new Carry(
+                    doomed.Where(d => d.Parent.OwnerKey == own)
+                        .GroupBy(d => d.Parent.Key, StringComparer.Ordinal)
+                        .ToDictionary(g => g.Key, g => g.First().Parent.Values, StringComparer.Ordinal),
+                    doomed.Where(d => d.Parent.OwnerKey == own)
+                        .SelectMany(d => d.Parent.Children.Select(c => (Key: $"{d.Parent.Key}/{c.Key}", c.Values)))
+                        .GroupBy(c => c.Key, StringComparer.Ordinal)
+                        .ToDictionary(g => g.Key, g => g.First().Values, StringComparer.Ordinal));
+                var inserted = await InsertAsync(tables, plan, permitId, air, carry, token).ConfigureAwait(false);
 
                 await audit.WriteStructureChangeAsync(
                     new StructureChangeRecord(
@@ -178,7 +188,7 @@ public sealed class AirLimitsImportTarget(
             var values = new Dictionary<string, object?>(StringComparer.Ordinal) { ["naeCode"] = naeCode };
             foreach (var (field, column) in parentColumns)
             {
-                values[field] = ColumnValue(row, column);
+                values[field] = AirLimitsSchema.ParentColumns.ContainsKey(field) ? ColumnValue(row, column) : AddedValue(row, tables.Sources, column);
             }
 
             var kids = new List<ExistingChild>();
@@ -195,7 +205,7 @@ public sealed class AirLimitsImportTarget(
                 foreach (var (field, column) in childColumns)
                 {
                     // Built-in substance columns are numbers; an added column keeps its own type (number or text).
-                    cv[field] = AirLimitsSchema.ChildColumns.ContainsKey(field) ? child.Number(column) : ColumnValue(child, column);
+                    cv[field] = AirLimitsSchema.ChildColumns.ContainsKey(field) ? child.Number(column) : AddedValue(child, tables.Substances, column);
                 }
 
                 kids.Add(new ExistingChild(code, cv));
@@ -210,6 +220,12 @@ public sealed class AirLimitsImportTarget(
 
     private static object? ColumnValue(AirRow row, string column)
         => row.Values.TryGetValue(column, out var v) ? (object?)v.Numeric ?? v.Text : null;
+
+    /// <summary>An added column's value by its own type (date and bool too, not only number/text) — compared and carried over.</summary>
+    private static object? AddedValue(AirRow row, Domain.Entities.Configuration.RegistryDef table, string column)
+        => table.Fields.FirstOrDefault(f => string.Equals(f.Code, column, StringComparison.OrdinalIgnoreCase)) is { } field
+            ? row.Value(field)
+            : ColumnValue(row, column);
 
     // ---------- NAE creation ----------
 
@@ -333,8 +349,13 @@ public sealed class AirLimitsImportTarget(
 
     // ---------- insert ----------
 
+    /// <summary>Stored values of the replaced own rows: NAE → source values, «NAE/substance» → substance values (by field name).</summary>
+    private sealed record Carry(
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, object?>> Sources,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, object?>> Substances);
+
     private async Task<(int Sources, int Substances)> InsertAsync(
-        AirTables tables, ImportApplyPlan plan, long permitId, AirImportScope air, CancellationToken ct)
+        AirTables tables, ImportApplyPlan plan, long permitId, AirImportScope air, Carry carry, CancellationToken ct)
     {
         if (plan.Insert.Count == 0)
         {
@@ -364,12 +385,17 @@ public sealed class AirLimitsImportTarget(
                 [AirLimitsSchema.Area] = air.Area?.Stored,
                 [AirLimitsSchema.SiteLabel] = parent.GroupLabel,
             };
+            var keptSource = carry.Sources.GetValueOrDefault(parent.Key);
             foreach (var (field, column) in parentColumns)
             {
-                // A column the profile does not map stays empty (the row is replaced as a whole, like before).
                 if (parent.Values.TryGetValue(field, out var value) || AirLimitsSchema.ParentColumns.ContainsKey(field))
                 {
                     values[column] = value;
+                }
+                else if (keptSource?.GetValueOrDefault(field) is { } kept)
+                {
+                    // An added column the profile does not map: the replaced row's value stays (P3-3).
+                    values[column] = kept;
                 }
             }
 
@@ -407,11 +433,16 @@ public sealed class AirLimitsImportTarget(
                     [AirLimitsSchema.Source] = sourceIds[i],
                     [AirLimitsSchema.Substance] = substanceId,
                 };
+                var keptSubstance = carry.Substances.GetValueOrDefault($"{plan.Insert[i].Key}/{child.Key}");
                 foreach (var (field, column) in childColumns)
                 {
                     if (child.Values.TryGetValue(field, out var value) || AirLimitsSchema.ChildColumns.ContainsKey(field))
                     {
                         values[column] = value;
+                    }
+                    else if (keptSubstance?.GetValueOrDefault(field) is { } kept)
+                    {
+                        values[column] = kept;
                     }
                 }
 

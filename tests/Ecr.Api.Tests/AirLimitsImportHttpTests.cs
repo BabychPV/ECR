@@ -411,6 +411,94 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
     }
 
     /// <remarks>
+    /// F13-p198 P3-3: a re-import with a profile that does NOT map the added columns keeps their values — the replaced row's
+    /// value is carried over by NAE (and NAE/substance) instead of being wiped by the whole-row replace. Mutation (run, red):
+    /// drop the carry branch in <c>InsertAsync</c> — the values are gone after the second import.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task AddedColumns__a_reimport_whose_profile_does_not_map_them_keeps_their_values()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+        var stamp = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var pointCopy = $"POINT_KEEP_{stamp}";
+        var ndvYear = $"NDV_KEEP_{stamp}";
+        await AddColumnAsync(app, client, AirLimitsSchema.SourcesTable, pointCopy, "String");
+        await AddColumnAsync(app, client, AirLimitsSchema.SubstancesTable, ndvYear, "Int");
+        var bytes = WithWorkshops();
+
+        var region = NewRegion();
+        var permitId = await NewPermitAsync(client, app);
+        var resolutions = await ResolveAllAsync(app, client, permitId, region);
+        await ApplyBytesAsync(app, client, permitId, bytes, new { region, area = "OFFSHORE", resolutions, spec = AddedColumnsSpec(pointCopy, ndvYear) });
+
+        // The built-in profile (no added fields): the file still has B and AB, the profile just does not read them.
+        await ApplyBytesAsync(app, client, permitId, bytes, new { region, area = "OFFSHORE" });
+
+        await using var db = new EcrDbContext(Options());
+        async Task<List<RegistryValue>> ValuesOf(string code)
+        {
+            var fieldId = await db.RegistryFieldDefs.Where(f => f.Code == code).Select(f => f.Id).SingleAsync();
+            var live = db.RegistryEntries.Where(e => !e.IsDeleted).Select(e => e.Id);
+            return await db.RegistryValues.Where(v => v.RegistryFieldDefId == fieldId && live.Contains(v.RegistryEntryId)).ToListAsync();
+        }
+
+        Assert.Equal(373, (await ValuesOf(pointCopy)).Count(v => v.ValueString?.StartsWith("WS-", StringComparison.Ordinal) == true));
+        Assert.True((await ValuesOf(ndvYear)).Count(v => v.ValueNumeric is > 2000m) > 2000, "substance values of the added column kept");
+    }
+
+    /// <remarks>
+    /// F13-p198 P3-1: «Add as new column» never publishes someone else's draft — the SERVER refuses, not only the client check:
+    /// while another editor's draft of the AIR type is open, opening a new version is 409 ECR-PRM-4093, so the add-column flow
+    /// (new-version → PUT → publish) stops before touching the draft; a PUT with a stale token is 409 too.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task TypeDraft__another_editors_open_draft_cannot_be_taken_over_by_add_column()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var editor = await SignedInAsync(app, Admin);
+        using var importer = await SignedInAsync(app, Admin);
+        var typeUrl = new Uri($"/api/v1/permit-types/{AirLimitsSchema.TypeCode}", UriKind.Relative);
+        var newVersion = new Uri($"/api/v1/permit-types/{AirLimitsSchema.TypeCode}/new-version", UriKind.Relative);
+
+        var published = await ReadAsync(app, await importer.GetAsync(typeUrl));
+        if (published.GetProperty("hasUnpublishedChanges").GetBoolean())
+        {
+            // A draft left by another test: publish it so this test starts from a published type.
+            await ReadAsync(app, await editor.PostAsJsonAsync(
+                new Uri($"/api/v1/permit-types/{AirLimitsSchema.TypeCode}/publish", UriKind.Relative),
+                new { reason = "F13-p198: close a leftover draft", rowVersion = published.GetProperty("rowVersion").GetString() }, Web));
+            published = await ReadAsync(app, await importer.GetAsync(typeUrl));
+        }
+
+        var stale = published.GetProperty("rowVersion").GetString();
+        var draft = await ReadAsync(app, await editor.PostAsync(newVersion, null)); // the other editor opens a draft
+
+        // The importer read the type BEFORE the draft (the race): the server still refuses both steps.
+        await AssertErrorAsync(app, await importer.PostAsync(newVersion, null), HttpStatusCode.Conflict, "ECR-PRM-4093");
+        var takeOver = await importer.PutAsJsonAsync(typeUrl, new
+        {
+            rowVersion = stale,
+            nameL10n = published.GetProperty("nameL10n"),
+            category = published.GetProperty("category").GetString(),
+            rules = published.GetProperty("rules"),
+            tables = published.GetProperty("tables"),
+        }, Web);
+        Assert.Equal(HttpStatusCode.Conflict, takeOver.StatusCode);
+
+        // The other editor's draft is untouched and theirs to publish.
+        await ReadAsync(app, await editor.PostAsJsonAsync(
+            new Uri($"/api/v1/permit-types/{AirLimitsSchema.TypeCode}/publish", UriKind.Relative),
+            new { reason = "F13-p198: the editor publishes own draft", rowVersion = draft.GetProperty("rowVersion").GetString() }, Web));
+    }
+
+    /// <remarks>
     /// P1 07.11 «the user must SEE ALL imported data»: after an import with added columns the card (<c>GET …/air-limits</c>) lists
     /// the added columns of both tables with name and data type, carries their values on every source and substance row, and each
     /// row's <c>version</c> is what the generic batch write (<c>POST /registries/{code}/entries/batch</c>) checks: an edit of a

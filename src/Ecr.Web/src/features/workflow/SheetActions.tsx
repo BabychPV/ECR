@@ -20,7 +20,7 @@ import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { LazyConfirmModal, LazyReasonModal } from './lazyDialogs';
 import { Hint } from '@/shared/ui/Hint';
 import { showApiError, showDone, showWarning } from '@/shared/ui/notify';
-import { useRecallAvailability, useSubmissionTarget, type RecallSheetRequest } from './api';
+import { useApproverEditAvailability, useRecallAvailability, useSubmissionTarget, type RecallSheetRequest } from './api';
 import { outcomeOf, pollInterval } from './jobFollow';
 import { useSettledAction } from '@/features/grid/settleEdits';
 import { isRecalculateKey, isTypingOrDialogTarget } from '@/features/grid/shortcutKey';
@@ -864,8 +864,17 @@ export function useSheetActions({
    * погоджує власний аркуш, тож Approve/Reject НЕ ховаються на власному поданні
    * (доти ознакою «автора» був `canRecall`). Видимість — лише стан і права.
    */
-  const canApprove = isAllowed('approve', state) && mayWorkflow('approve');
-  const canReject = isAllowed('reject', state) && mayWorkflow('reject');
+  /*
+   * ✎ PB2-P2-2 (D-444 пп. 2–3): хто погоджує ПОДАНИЙ аркуш, знає лише сервер — роль поточного кроку маршруту, учасник
+   * документа без маршруту з правом Approve, грант. Грант із `/me` цього не бачить: учасник без маршруту не мав кнопок
+   * (сервер його пропускає), а погоджувач ІНШОГО кроку бачив Approve/Reject і отримував 403. Тепер видимість — відповідь
+   * сервера `GET …/approver-edit` (`CanApproveOfAsync`, те саме правило, що й `POST …/approve`); поки її немає чи
+   * вона збійна — кнопок немає (відмова закрита). Запит той самий, що в `DocumentPage` (той самий ключ, один запит).
+   */
+  const approverCheck = useApproverEditAvailability(documentId, sheetDefId, periodKey, editsDeferToServer(state), sheetCopyId);
+  const mayDecide = me !== undefined && !me.isSimulation && approverCheck.data?.canApproverEdit === true;
+  const canApprove = isAllowed('approve', state) && mayDecide;
+  const canReject = isAllowed('reject', state) && mayDecide;
 
   // ⛔ Аудит Етапу 3, лана "Documents core" (`lane3-workflow-buttons-not-grouped`,
   // знахідка людини зі скріншотом): `DocumentPage.tsx` рендерить ОДИН

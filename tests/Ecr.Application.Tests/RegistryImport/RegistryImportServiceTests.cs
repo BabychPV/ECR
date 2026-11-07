@@ -142,6 +142,48 @@ public sealed class RegistryImportServiceTests
         Assert.Equal(3, (await service.PreviewAsync(File(), Era, Request(), default)).Diff.UnchangedParents);
     }
 
+    /// <remarks>
+    /// P1 07.11 (the human's real file, «7) Параметры_2024_final.xlsx»): source 0002 / substance 1720 has g/s =
+    /// 0.19091925399999998 — an Excel double with 17 decimals. The registry keeps 16 (<c>decimal(34,16)</c>), so the stored value
+    /// is 0.1909192540000000 and a re-import of the SAME file showed «changed 1». Equality now compares as the store keeps the
+    /// numbers — but not looser: a difference in the 16th decimal is still a change. Mutation (run, red): <c>SameValue</c> back
+    /// on raw decimals — «unchanged» fails.
+    /// </remarks>
+    [Fact]
+    public async Task A_number_with_more_decimals_than_the_store_keeps_is_unchanged_after_a_reimport_of_the_same_file()
+    {
+        static InMemoryImportGrid RealDouble() => new EraGrid()
+            .Group("Site one")
+            .Source(3d, "Source A", "Т", [Sub("0333", "H2S", 0.19091925399999998d, null, 0.07d), Sub(2735d, "Oil", 0.0002d, 1.263d, 0.0063d)], diameter: 0.25d)
+            .Source(4d, "Source B", "П1", [Sub(333d, "H2S", 1.6e-07d)])
+            .Group("Site two")
+            .Source(6001d, "Source C", "T", [Sub("2902", "Dust", 0.0007d)])
+            .Grid;
+
+        var target = new FakeRegistryImportTarget();
+        var service = Service(target, AllNae(), AllSubstances());
+        await service.CommitAsync(RealDouble(), Era, Request(), default);
+
+        // What SQL Server keeps in decimal(34,16).
+        var stored = target.Stored.Single(p => p.Key == "0003");
+        var child = stored.Children[0];
+        var kept = Math.Round((decimal)child.Values["gramsPerSecond"]!, RegistryImportService.StoredScale, MidpointRounding.AwayFromZero);
+        Assert.NotEqual((decimal)child.Values["gramsPerSecond"]!, kept); // the file value really has more decimals than the store
+        target.Stored[target.Stored.IndexOf(stored)] = stored with
+        {
+            Children = [child with { Values = new Dictionary<string, object?>(child.Values) { ["gramsPerSecond"] = kept } }, stored.Children[1]],
+        };
+
+        Assert.Equal(new ImportDiffCounts(0, 0, 3, 0, 0, 4), (await service.PreviewAsync(RealDouble(), Era, Request(), default)).Diff);
+
+        // Not looser than the store: one unit in the 16th decimal is a real change.
+        target.Stored[target.Stored.IndexOf(target.Stored.Single(p => p.Key == "0003"))] = stored with
+        {
+            Children = [child with { Values = new Dictionary<string, object?>(child.Values) { ["gramsPerSecond"] = kept + 0.0000000000000001m } }, stored.Children[1]],
+        };
+        Assert.Equal(1, (await service.PreviewAsync(RealDouble(), Era, Request(), default)).Diff.ChangedParents);
+    }
+
     // ---------- replace scope ----------
 
     [Fact]

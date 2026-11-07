@@ -55,6 +55,8 @@ beforeAll(async () => {
           headers: { 'Content-Type': 'application/json', ETag: '"public-en-1"' },
         });
       }
+      // ✎ PB2-P2-2: кнопки показує відповідь сервера; 403 нижче — відмова, що настала вже після неї (гонитва).
+      if (url.includes('/approver-edit')) return json({ canApproverEdit: true });
       if (url.includes('/api/v1/me')) return json(Me);
       if (url.includes('/recall?')) return json({ canRecall: false });
       if (url.includes('/approve') && init?.method === 'POST') {

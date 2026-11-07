@@ -149,30 +149,43 @@ public sealed class ChangePermitListItemsHandler(
         var registryId = entry.RegistryDefId!.Value;
         var definition = await registries.FindDefinitionByIdAsync(registryId, ct).ConfigureAwait(false)
             ?? throw PermitListCatalog.NotFound(entry.Dto.Key);
-        var nextNumber = NextNumber(await registries.ListEntriesAsync(registryId, ct).ConfigureAwait(false));
+        var all = await registries.ListEntriesAsync(registryId, ct).ConfigureAwait(false);
+        var nextNumber = NextNumber(all);
+
+        // ✎ PB2 P3: a shared list did not refuse a repeated value (only «type only» did). The same name in the same language,
+        // case ignored, is a duplicate — checked against the live values AND the earlier changes of this request.
+        var live = all.Where(e => !e.IsDeleted && e.IsActive).Select(e => (Id: (long?)e.Id, Display: e.DisplayL10n)).ToList();
 
         foreach (var change in changes)
         {
             switch (change.Action)
             {
                 case Add:
+                    var added = Display(change, requireEnglish: false, entry.Dto.Key);
+                    RequireUniqueShared(live, added, ignore: null, entry.Dto.Key);
+                    live.Add((null, added));
                     var code = definition.CodeMode == RegistryCodeMode.Auto
                         ? string.Empty
                         : "V" + (nextNumber++).ToString("D3", CultureInfo.InvariantCulture);
                     await upsert.HandleWithWarningsAsync(
-                        new RegistryEntryUpsertDto(null, registryId, code, Display(change, requireEnglish: false, entry.Dto.Key), null, new Dictionary<string, object?>()),
+                        new RegistryEntryUpsertDto(null, registryId, code, added, null, new Dictionary<string, object?>()),
                         definition.Code, ct).ConfigureAwait(false);
                     break;
 
                 case Update:
                     var existing = await RequireEntryAsync(registryId, definition.Code, change.Id!.Value, ct).ConfigureAwait(false);
+                    var renamed = Display(change, requireEnglish: false, entry.Dto.Key);
+                    RequireUniqueShared(live, renamed, ignore: existing.Id, entry.Dto.Key);
+                    live.RemoveAll(v => v.Id == existing.Id);
+                    live.Add((existing.Id, renamed));
                     await upsert.HandleWithWarningsAsync(
-                        new RegistryEntryUpsertDto(existing.Id, registryId, existing.Code, Display(change, requireEnglish: false, entry.Dto.Key), existing.ParentEntryId, new Dictionary<string, object?>()),
+                        new RegistryEntryUpsertDto(existing.Id, registryId, existing.Code, renamed, existing.ParentEntryId, new Dictionary<string, object?>()),
                         definition.Code, ct).ConfigureAwait(false);
                     break;
 
                 default:
                     await delete.HandleAsync(definition.Code, change.Id!.Value, ct).ConfigureAwait(false);
+                    live.RemoveAll(v => v.Id == change.Id);
                     break;
             }
         }
@@ -409,6 +422,22 @@ public sealed class ChangePermitListItemsHandler(
                 ErrorCodes.PermitTypeInvalid,
                 $"Значення «{text}» у списку вже є.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRM-0422.choicesInvalid", ["columnCode"] = fieldCode });
+        }
+    }
+
+    private static void RequireUniqueShared(
+        IEnumerable<(long? Id, LocalizedText Display)> live, LocalizedText display, long? ignore, string listKey)
+    {
+        foreach (var (language, text) in display.Values)
+        {
+            if (live.Any(v => (ignore is null || v.Id != ignore)
+                              && string.Equals(v.Display.Get(language), text, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.PermitTypeInvalid,
+                    $"Значення «{text}» у списку вже є.",
+                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRM-0422.choicesInvalid", ["columnCode"] = listKey });
+            }
         }
     }
 

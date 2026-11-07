@@ -40,6 +40,8 @@ function mockFetch(): void {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
+      // ✎ PB2-P2-2: Approve на поданому аркуші — за відповіддю сервера; тут користувач погоджує.
+      if (url.includes('/approver-edit')) return json({ canApproverEdit: true });
       if (url.includes('/api/v1/me')) return json(CurrentUser);
 
       // ✎ D-441: ціль подання — період із запиту, аркуш неподаний (так рахує сервер для чернетки).
