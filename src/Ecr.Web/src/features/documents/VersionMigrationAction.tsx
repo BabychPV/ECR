@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState, type JSX } from 'react';
+import { Suspense, lazy, useRef, useState, type JSX } from 'react';
 import { Menu } from '@mantine/core';
 import type { DocumentSummary } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
@@ -56,8 +56,12 @@ export function useVersionMigrationAction({ documentId, document }: VersionMigra
   });
   const jobActive = jobId !== null && (job.data === undefined ? job.error === null : isActiveJob(job.data.state));
 
+  // P3 (AU-13 pass B): діалог розмонтовується одразу, а пункт меню зникає разом із меню - Esc лишав фокус на BODY.
+  // Тригер - кнопка меню, з якого відкрито діалог (`aria-labelledby` випадного списку Mantine); йому й повертаємо фокус.
+  const trigger = useRef<HTMLElement | null>(null);
   const close = () => {
     setOpened(false);
+    window.setTimeout(() => trigger.current?.focus(), 0);
     // Завершена (відмовлена) задача не тягнеться в наступне відкриття; та, що йде, - лишається.
     if (!jobActive) setJobId(null);
   };
@@ -69,7 +73,14 @@ export function useVersionMigrationAction({ documentId, document }: VersionMigra
     && hasProjectGrant(session.data, document.projectId, 'Manage');
 
   const menuItem = allowed ? (
-    <Menu.Item onClick={() => setOpened(true)} data-migrate-version="">
+    <Menu.Item
+      onClick={(event) => {
+        const menu = event.currentTarget.closest('[role="menu"]')?.getAttribute('aria-labelledby');
+        trigger.current = menu == null ? null : window.document.getElementById(menu);
+        setOpened(true);
+      }}
+      data-migrate-version=""
+    >
       {t('documents.migrateVersion')}
     </Menu.Item>
   ) : null;

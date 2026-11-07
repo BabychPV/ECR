@@ -36,6 +36,27 @@ describe('GridAriaPlugin', () => {
     element.remove();
   });
 
+  // PB2-P2-1: без груп колонок `.group-rgRow` порожній — `row` без columnheader дає axe aria-required-children.
+  it.each([
+    ['без груп: блок не row і прихований', '<div class="rgHeaderCell"></div>', null, 'true'],
+    ['з групами: блок — row, група — columnheader', '<div class="rgHeaderCell">Квартал</div>', 'row', null],
+  ])('%s', (_name, cells, role, hidden) => {
+    const element = grid();
+    element.querySelector('revogr-header')?.insertAdjacentHTML('beforeend', `<div class="group-rgRow">${cells}</div>`);
+    const plugin = new GridAriaPlugin(element, {} as PluginProviders);
+
+    const block = element.querySelector('.group-rgRow');
+    expect(block?.getAttribute('role')).toBe(role);
+    expect(block?.getAttribute('aria-hidden')).toBe(hidden);
+    if (role === 'row') {
+      expect(block?.getAttribute('aria-rowindex')).toBe('1');
+      expect(block?.querySelector('.rgHeaderCell')?.getAttribute('role')).toBe('columnheader');
+    }
+
+    plugin.destroy();
+    element.remove();
+  });
+
   it('нумерує колонки й рядки від одиниці, підсумок — після даних', () => {
     const element = grid();
     const plugin = new GridAriaPlugin(element, {} as PluginProviders);

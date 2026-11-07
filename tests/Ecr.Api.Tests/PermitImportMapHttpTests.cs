@@ -276,7 +276,20 @@ public sealed partial class PermitImportMapHttpTests(SqlServerFixture sql)
             fixture.GetProperty("rows").EnumerateArray().Select(r => r.EnumerateArray().Select(c => c.GetString()).ToArray()).ToArray());
         Assert.Equal(["Readme", "Sources"], fixture.GetProperty("sheets").EnumerateArray().Select(s => s.GetString()));
 
-        await AssertErrorAsync(await Upload(client, table, book, "Missing"), HttpStatusCode.UnprocessableEntity, "ECR-IMP-0422");
+        // AU-13 P3-3: свій текст «аркуша немає в книзі» з назвою аркуша, а не текст імпорту документа після експорту.
+        var missingSheet = await Upload(client, table, book, "Missing");
+        var missingBody = await missingSheet.Content.ReadAsStringAsync();
+        Assert.True(missingSheet.StatusCode == HttpStatusCode.UnprocessableEntity, missingBody);
+        Assert.Equal("err.ECR-IMP-0422.permitImportSheetMissing", JsonDocument.Parse(missingBody).RootElement.GetProperty("messageKey").GetString());
+        Assert.Contains("\"Missing\"", missingBody, StringComparison.Ordinal);
+
+        // AU-13 P3-2: задовге значення в lookups - своя причина з межею, а не batchTooLarge «у запиті 1 значення».
+        var tooLong = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/permit-tables/{table}/import/lookups", UriKind.Relative),
+            new { columns = new[] { new { column = "NAE", values = new[] { new string('x', 1001) } } }, derive = false });
+        var tooLongBody = await tooLong.Content.ReadAsStringAsync();
+        Assert.True(tooLong.StatusCode == HttpStatusCode.UnprocessableEntity, tooLongBody);
+        Assert.Equal("err.ECR-REQ-0422.lookupValueTooLong", JsonDocument.Parse(tooLongBody).RootElement.GetProperty("messageKey").GetString());
         await AssertErrorAsync(await Upload(client, table, [1, 2, 3], null), HttpStatusCode.UnprocessableEntity, "ECR-IMP-0422");
 
         // Лише читання - 403: книга читається лише тим, хто може додати рядки.

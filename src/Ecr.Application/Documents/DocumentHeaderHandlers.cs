@@ -37,8 +37,9 @@ public sealed class GetDocumentHeaderHandler(
         var templateVersionId = await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
         var values = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);
+        var projectId = (await documents.FindAsync(documentId, new PeriodKeyFilter(null), ct).ConfigureAwait(false))?.ProjectId;
 
-        return HeaderVersion.ToDto(snapshot, values);
+        return HeaderVersion.ToDto(snapshot, values, registryDefId => Registries.RegistryAccess.IsDeniedIn(profile, registryDefId, projectId));
     }
 }
 
@@ -46,14 +47,26 @@ public sealed class GetDocumentHeaderHandler(
 internal static class HeaderVersion
 {
     /// <summary>Відповідь: усі поля версії шаблону, значення і версія.</summary>
+    /// <param name="snapshot">Версія шаблону.</param>
+    /// <param name="values">Збережені значення.</param>
+    /// <param name="registryDenied">
+    /// ⛔ S18 (AU-13 P3-7): чи під забороною в глядача довідник поля Lookup. Значення такого поля віддається <c>null</c>, а не
+    /// сирим ідентифікатором запису, - запис схованого довідника глядачеві невідомий (запис у поле однаково відмовляє
+    /// <c>lookupEntryMissing</c>). Версія (<c>Of</c>) рахується з повних значень: вона не розкриває ідентифікатора.
+    /// </param>
     public static DocumentHeaderDto ToDto(
-        TemplateVersionSnapshot snapshot, IReadOnlyDictionary<int, Domain.ValueObjects.DocumentHeaderValueData> values)
+        TemplateVersionSnapshot snapshot,
+        IReadOnlyDictionary<int, Domain.ValueObjects.DocumentHeaderValueData> values,
+        Func<int, bool> registryDenied)
     {
+        ArgumentNullException.ThrowIfNull(registryDenied);
         var fields = snapshot.HeaderFields
             .OrderBy(f => f.Ordinal)
             .Select(f => new DocumentHeaderFieldDto(
                 f.Id, f.Code, f.LabelL10n, f.DataType, f.IsRequired,
-                values.TryGetValue(f.Id, out var value) ? HeaderValueMapping.ToRuleValue(value) : null,
+                f.LookupRegistryDefId is { } lookup && registryDenied(lookup)
+                    ? null
+                    : values.TryGetValue(f.Id, out var value) ? HeaderValueMapping.ToRuleValue(value) : null,
                 f.LookupRegistryDefId))
             .ToList();
 
@@ -381,7 +394,8 @@ public sealed class PatchDocumentHeaderHandler(
         }
 
         var values = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);
-        return HeaderVersion.ToDto(snapshot, values);
+        return HeaderVersion.ToDto(
+            snapshot, values, registryDefId => Registries.RegistryAccess.IsDeniedIn(profile, registryDefId, document.ProjectId));
     }
 
     /// <summary>

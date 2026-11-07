@@ -135,11 +135,25 @@ public sealed class PermitImportLookupHandler(
     private static void Validate(IReadOnlyList<PermitImportLookupColumn?> columns)
     {
         var count = columns.Sum(c => c?.Values?.Count ?? 0);
-        if (count > MaxValues || columns.Any(c => c?.Values?.Any(v => v?.Length > MaxTextLength) == true))
+
+        // AU-13 P3-2: задовге значення - своя причина, а не «забагато рядків» (batchTooLarge з count = 1 вводив в оману).
+        if (count <= MaxValues && columns.Any(c => c?.Values?.Any(v => v?.Length > MaxTextLength) == true))
         {
             throw new BusinessRuleException(
                 ErrorCodes.RequestInvalid,
-                $"The request has {count} values; the most is {MaxValues} of up to {MaxTextLength} characters.",
+                $"A value is longer than {MaxTextLength} characters.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.lookupValueTooLong",
+                    ["max"] = MaxTextLength.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+
+        if (count > MaxValues)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"The request has {count} values; the most is {MaxValues}.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-REQ-0422.batchTooLarge",

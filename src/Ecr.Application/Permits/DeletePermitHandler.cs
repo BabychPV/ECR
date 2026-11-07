@@ -11,7 +11,7 @@ namespace Ecr.Application.Permits;
 
 /// <summary>
 /// Видаляє ЧЕРНЕТКУ дозволу разом із рядками всіх його таблиць (логічно, однією транзакцією). Право
-/// <c>Registry.EditData</c> (або грант <c>Write</c>) на реєстр шапки (Permits, PM-04).
+/// <c>Registry.EditData</c> (або грант <c>Write</c>) на реєстр шапки (Permits, PM-04) і на реєстри всіх таблиць типу (S18).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -57,6 +57,8 @@ public sealed class DeletePermitHandler(
         {
             ExternalRegistryGuard.EnsureManualEditAllowed(table.Def);
         }
+
+        await RequireTablesAsync(permitId, view, ct).ConfigureAwait(false);
 
         if (entry.IsActive)
         {
@@ -124,5 +126,27 @@ public sealed class DeletePermitHandler(
                     CorrelationId: currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ⛔ S18 (AU-13 P2-B): видалення каскадно м'яко видаляє рядки ВСІХ таблиць дозволу, тож право запису потрібне на кожен
+    /// реєстр таблиці типу, а не лише на шапку. Заборона на будь-яку таблицю - <c>404 ECR-PRM-0404</c>, як неіснуючий дозвіл
+    /// (та сама форма, що в <see cref="PermitLocator"/> для забороненої шапки і в <c>PermitRegistryReadGuard</c>); немає права
+    /// чи гранта <c>Write</c> - <c>403</c>. Перевіряються всі таблиці типу незалежно від того, чи є в них рядки цього дозволу:
+    /// інакше 204/404 розкривав би, чи є рядки у схованій таблиці. Частково дозвіл ніколи не видаляється.
+    /// </summary>
+    private async Task RequireTablesAsync(long permitId, PermitTypeView view, CancellationToken ct)
+    {
+        var userId = SaveRegistryDefinitionHandler.RequireUser(currentUser);
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        if (view.Tables.Any(t => RegistryAccess.IsDenied(profile, t.Def.Id)))
+        {
+            throw PermitErrors.NotFound(permitId);
+        }
+
+        if (!view.Tables.All(t => RegistryAccess.CanAccess(profile, Permission, GrantLevel.Write, t.Def.Id)))
+        {
+            throw RegistryAccess.Denied(Permission);
+        }
     }
 }

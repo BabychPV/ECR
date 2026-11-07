@@ -31,7 +31,7 @@ namespace Ecr.Api.Tests;
 /// Мутація: прибрати гілку scoped View в <c>LookupTargetMatcher.CanViewRegistry</c> - червоніють випадки «scoped».
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
+public sealed partial class ScopedRegistryViewApiTests(SqlServerFixture sql)
 {
     private const string Password = "Api-Scoped-View-2026!";
     private const int PeriodKeyValue = 202609;

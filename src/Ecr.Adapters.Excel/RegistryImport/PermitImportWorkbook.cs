@@ -16,6 +16,9 @@ public sealed class PermitImportWorkbook : IPermitImportWorkbook
     /// <summary>Most columns read.</summary>
     public const int MaxColumns = 128;
 
+    /// <summary>Обраного аркуша немає серед видимих аркушів книги.</summary>
+    public const string SheetNotInBook = "err.ECR-IMP-0422.permitImportSheetMissing";
+
     /// <inheritdoc />
     public async Task<PermitImportSheetDto> ReadAsync(Stream file, string? sheet, int maxRows, CancellationToken ct)
     {
@@ -35,7 +38,9 @@ public sealed class PermitImportWorkbook : IPermitImportWorkbook
                   ?? throw new BusinessRuleException(
                       "ECR-IMP-0422",
                       "The chosen sheet is missing in the file.",
-                      new Dictionary<string, object?> { ["messageKey"] = ImportMessageKeys.SheetMissing });
+
+                      // AU-13 P3-3: не текст імпорту документа («перейменували після експорту») - книга дозволу довільна.
+                      new Dictionary<string, object?> { ["messageKey"] = SheetNotInBook, ["sheet"] = sheet });
 
             var grid = new ClosedXmlImportGrid(chosen);
             var width = Math.Min(grid.ColumnCount, MaxColumns);
