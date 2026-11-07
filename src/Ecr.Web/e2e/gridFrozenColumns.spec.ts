@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { axeViolations } from './axeRule';
 
 /**
  * Закріплені ключові колонки сітки документа у СПРАВЖНЬОМУ `DocumentGrid` і справжньому RevoGrid:
@@ -143,13 +144,13 @@ function installWideStand(config: { documentId: number; tableInstanceId: number;
 }
 
 /** `numeric` - скільки десяткових колонок після CODE і NAME: 10 -> 12 колонок даних (широка), 3 -> 5 (вузька). */
-async function open(page: Page, scheme: 'light' | 'dark' = 'light', numeric = 10): Promise<void> {
+async function open(page: Page, scheme: 'light' | 'dark' = 'light', numeric = 10, rows = Rows): Promise<void> {
   await page.emulateMedia({ colorScheme: scheme });
   await page.addInitScript(installWideStand, {
     documentId: 9_001,
     tableInstanceId: 9_001,
     tableDefId: TableDefId,
-    rows: Rows,
+    rows,
     numeric,
   });
   await page.goto(DocStand);
@@ -347,4 +348,28 @@ test('вузька таблиця (менше 12 колонок даних): т�
   await freezeSelect(page).selectOption('3');
   await expect(pinnedCell(page, 0, 2)).toHaveText('101');
   await expect(freezeSelect(page)).toHaveValue('3');
+});
+
+/**
+ * AU-13 N2: при багатьох рядках прокручуються `.vertical-inner` і закріпленого (`colPinStart`), і основного (`rgCol`)
+ * в'юпорта — axe `scrollable-region-focusable`. Обидві області в порядку Tab, з роллю `rowgroup`, і стрілка вниз на
+ * сфокусованій закріпленій області гортає рядки (основна прокручується синхронно).
+ */
+test.describe('Grid scrollable rows are keyboard reachable', () => {
+  test('pinned and scrolled rows regions pass axe scrollable region focusable', async ({ page }) => {
+    await open(page, 'light', 10, 80);
+    const inner = (cls: string) => page.locator(`revo-grid revogr-viewport-scroll.${cls} .vertical-inner`);
+
+    for (const cls of ['colPinStart', 'rgCol']) {
+      expect(await inner(cls).evaluate((el) => el.scrollHeight > el.clientHeight), `${cls}: рядків досить для прокрутки`).toBe(true);
+      await expect(inner(cls)).toHaveAttribute('tabindex', '0');
+      await expect(inner(cls)).toHaveAttribute('role', 'rowgroup');
+    }
+    expect(await axeViolations(page, 'scrollable-region-focusable', 'revo-grid')).toEqual([]);
+    expect(await axeViolations(page, 'aria-required-children', 'revo-grid')).toEqual([]);
+
+    await inner('colPinStart').focus();
+    await page.keyboard.press('PageDown');
+    await expect.poll(() => inner('rgCol').evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  });
 });

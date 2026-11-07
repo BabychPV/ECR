@@ -15,12 +15,16 @@ function realisticGrid(): HTMLRevoGridElement {
     '<div class="main-viewport"><div class="viewports">' +
     '<revogr-viewport-scroll class="colPinStart"><div class="inner-content-table">' +
     '<revogr-header><div class="header-rgRow"><div role="columnheader" aria-label="A">A</div></div></revogr-header>' +
+    '<div class="vertical-inner"><div class="content-wrapper">' +
     '<revogr-data><div role="row" class="rgRow"><div role="gridcell">1</div></div></revogr-data>' +
+    '</div></div>' +
     '</div></revogr-viewport-scroll>' +
     '<revogr-viewport-scroll class="rgCol"><div class="inner-content-table">' +
     '<revogr-header><div class="header-rgRow"><div role="columnheader" aria-label="B">B</div></div></revogr-header>' +
+    '<div class="vertical-inner"><div class="content-wrapper">' +
     '<revogr-data><div role="row" class="rgRow"><div role="gridcell">2</div></div></revogr-data>' +
     '<revogr-overlay-selection><revogr-edit></revogr-edit></revogr-overlay-selection>' +
+    '</div></div>' +
     '</div></revogr-viewport-scroll>' +
     '</div></div>';
   document.body.append(element);
@@ -39,13 +43,16 @@ describe('GridAriaPlugin + axe', () => {
   it('фокусована прокручувана область не порушує aria-required-children / aria-required-parent', async () => {
     const element = realisticGrid();
     const plugin = new GridAriaPlugin(element, {} as PluginProviders);
-    const scroller = element.querySelector('revogr-viewport-scroll.rgCol');
-
-    // Обидві вимоги разом: область лишається фокусованою (axe `scrollable-region-focusable`, CL-17)…
-    expect(scroller?.getAttribute('tabindex')).toBe('0');
-    // …а в дереві `grid` вона має дозволену роль.
+    // AU-13 N2: прокручувані рядки — `.vertical-inner` кожного в'юпорта (і закріпленого).
+    const scrollers = [...element.querySelectorAll('revogr-viewport-scroll .vertical-inner')];
+    expect(scrollers).toHaveLength(2);
+    for (const scroller of scrollers) {
+      // Обидві вимоги разом: область фокусована (axe `scrollable-region-focusable`, CL-17)…
+      expect(scroller.getAttribute('tabindex')).toBe('0');
+      // …а в дереві `grid` вона має дозволену роль.
+      expect(scroller.getAttribute('role')).toBe('rowgroup');
+    }
     expect(await violationsOf(element)).toEqual([]);
-    expect(scroller?.getAttribute('role')).toBe('rowgroup');
 
     plugin.destroy();
     element.remove();

@@ -23,3 +23,9 @@
   background-color: var(--ecr-border-strong);
   box-shadow: 3px 0 6px -2px color-mix(in srgb, var(--ecr-border-strong) 70%, transparent);
 }
+
+/* AU-13 N2: рядки в'юпорта — зупинка Tab (`gridAria.ts`); RevoGrid гасить їм `outline`, тож кільце фокуса — тут. */
+:root revo-grid[theme] revogr-viewport-scroll .vertical-inner:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
