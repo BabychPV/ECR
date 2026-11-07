@@ -3541,8 +3541,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     -- `PeriodState` (Enums.cs).
     (N'status.period.Scheduled',           N'en', N'Not open yet', 1),
     (N'status.period.Open',                N'en', N'Open', 1),
-    (N'status.period.Grace',               N'en', N'Grace period', 1),
-    (N'status.period.Closed',              N'en', N'Closed', 1),
+    (N'status.period.Grace',               N'en', N'Late (flagged)', 1),
+    (N'status.period.Closed',              N'en', N'Locked', 1),
 
     -- `IntegrationHandlers.KnownStates` плюс `Unknown`/`Unavailable`, які
     -- віддає лише `GET /jobs/{jobId}` (`QuartzJobScheduler`).
