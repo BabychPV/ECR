@@ -10,7 +10,7 @@ import { testTheme } from '@/test/render';
 
 /**
  * UI-31: майстер створення документа (`KIT.md` §6.9, макет `screens-work.js` `openCreate`):
- * Project → Period → Sheets → Review, підсумок перед створенням, відмова сервера — банером у
+ * Project → Sheets → Review (✎ Period clarity: без кроку Period), підсумок перед створенням, відмова сервера — банером у
  * кроці, без втрати введеного.
  *
  * ⛔ P1 «прихований аркуш»: майстер показує рівно ті аркуші, що віддав
@@ -115,10 +115,10 @@ async function toSheetsStep(): Promise<void> {
   fireEvent.click(await screen.findByLabelText(/documents\.project/, { selector: 'input' }));
   fireEvent.click(await screen.findByRole('option', { name: 'P07131100' }));
   await waitFor(() => expect(next().disabled).toBe(false));
-  fireEvent.click(next());
-  await screen.findByLabelText('⟦documents.period⟧', { selector: 'input' });
+  // ✎ Period clarity (п. e): кроку Period немає — одразу Sheets.
   fireEvent.click(next());
   await screen.findByText('⟦documents.createSheetsHint⟧');
+  expect(screen.queryByLabelText('⟦documents.period⟧')).toBeNull();
 }
 
 afterEach(() => {
@@ -146,7 +146,12 @@ describe('UI-31: майстер створення документа', () => {
     fireEvent.click(screen.getByRole('button', { name: '⟦documents.createApply⟧' }));
     await waitFor(() => expect(posted).not.toBeNull());
     expect(posted?.['sheetDefIds']).toEqual([9]);
-    await waitFor(() => expect((globalThis as { __where?: string }).__where).toBe('/documents/77?periodKey=202610'));
+    // ✎ Period clarity: документ річний — запит без періоду; без місяця в переліку відкривається на поточному.
+    expect(posted).not.toHaveProperty('periodKey');
+    expect(summary.textContent).not.toContain('⟦documents.period⟧');
+    await waitFor(() => expect((globalThis as { __where?: string }).__where).toBe('/documents/77'));
+    // ⛔ Календар періодів майстру більше не потрібен.
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/periods'))).toBe(false);
   });
 
   it('Next вимкнений, доки не обрано проєкт; версію шаблону видно на першому кроці', async () => {

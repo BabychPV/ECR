@@ -10,7 +10,7 @@ public enum RecalculationWriteDenial
     /// <summary>Заперечень немає.</summary>
     None = 0,
 
-    /// <summary>Період закритий, і погодження на перерахунок немає (ФВ-9.7).</summary>
+    /// <summary>Період закритий (ФВ-9.7); шлях — Reopen, D-468.</summary>
     PeriodClosed = 1,
 
     /// <summary>У періоді є поданий або затверджений аркуш (ФВ-9.17).</summary>
@@ -46,13 +46,6 @@ public static class RecalculationWritePolicy
     /// <summary>Чи можна писати перерахунок у період із такими фактами.</summary>
     /// <param name="state">Стан періоду.</param>
     /// <param name="hasSubmittedSheets">Чи є в періоді поданий або затверджений аркуш.</param>
-    /// <param name="hasClosedPeriodApproval">
-    /// Чи є ЧИННЕ погодження на перерахунок закритого періоду
-    /// (<c>ClosedPeriodApproval</c>: причина + друга людина). Саме воно —
-    /// названий виняток, за яким системний перерахунок таки заходить у
-    /// закритий період; перевірку якості погодження робить той, хто його
-    /// приймає (<see cref="RunCalculationHandler"/>), а не ця функція.
-    /// </param>
     /// <returns><see cref="RecalculationWriteDenial.None"/> — писати можна.</returns>
     /// <remarks>
     /// ⚠ Писати можна в <c>Open</c> і <c>Grace</c> — той самий перелік, що й
@@ -69,15 +62,13 @@ public static class RecalculationWritePolicy
     /// нічого не псує, а розширити гейт на <c>Scheduled</c> означало б у тому
     /// самому пакеті змінити поведінку, якої ніхто не міряв.
     ///
-    /// ⛔ Поданий аркуш блокує НЕЗАЛЕЖНО від погодження (ФВ-9.17):
-    /// <c>ClosedPeriodApproval</c> погоджує перерахунок ЗАКРИТОГО періоду, а
-    /// не зміну поданої цифри. Для поданої цифри шлях один — Reopen, який
-    /// лишає слід у робочому процесі.
+    /// ⛔ ✎ 07.11 (квіз людини, D-468): закритий місяць має ОДИН шлях — Reopen (з причиною) →
+    /// звичайний перерахунок. Погодження перерахунку закритого періоду (<c>calc.RecalculationApproval</c>,
+    /// аудит S1) прибрано: винятку, за яким системний перерахунок заходить у <c>Closed</c>, більше немає.
     /// </remarks>
-    public static RecalculationWriteDenial Check(
-        PeriodState state, bool hasSubmittedSheets, bool hasClosedPeriodApproval)
+    public static RecalculationWriteDenial Check(PeriodState state, bool hasSubmittedSheets)
     {
-        if (state == PeriodState.Closed && !hasClosedPeriodApproval)
+        if (state == PeriodState.Closed)
         {
             return RecalculationWriteDenial.PeriodClosed;
         }
@@ -102,8 +93,8 @@ public static class RecalculationWritePolicy
         return denial switch
         {
             RecalculationWriteDenial.PeriodClosed =>
-                $"Період {key} закритий: закриті періоди не перераховуються автоматично — "
-                + "потрібне окреме погодження (ФВ-9.7).",
+                $"Період {key} закритий: закритий період не перераховується — "
+                + "спершу відкрийте його повторно (Reopen, з причиною), далі звичайний перерахунок (ФВ-9.7, D-468).",
 
             RecalculationWriteDenial.SheetsSubmitted =>
                 $"Період {key} має подані аркуші: перерахунок змінив би числа, "

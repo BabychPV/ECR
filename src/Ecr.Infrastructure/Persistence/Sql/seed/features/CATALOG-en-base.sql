@@ -829,10 +829,9 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-CALC-0409.draftRequired',        N'en', N'Version "{version}" is {status}: {what} cannot be changed. A published version is immutable — changing it means a clone with a new effective window.', 1),
     (N'err.ECR-CALC-0409.formulaWrongVersion',  N'en', N'Formula "{formulaCode}" belongs to version {ownerVersionId}, not {versionId}: it cannot be edited through this version.', 1),
     (N'err.ECR-CALC-0409.childWrongVersion',    N'en', N'{what} "{code}" belongs to version {ownerVersionId}, not {versionId}: it cannot be edited through this version.', 1),
-    -- ECR-CALC-4221 has a neutral title: closed period, submitted sheets, approval without a reason.
-    (N'err.ECR-CALC-4221.periodClosed',         N'en', N'Period {period} is closed: closed periods are not recalculated automatically, a separate approval is required.', 1),
+    -- ECR-CALC-4221 has a neutral title: closed period (Reopen is the only way, D-468), submitted sheets.
+    (N'err.ECR-CALC-4221.periodClosed',         N'en', N'Period {period} is closed and is not recalculated. Reopen it first (with a reason), then run the recalculation.', 1),
     (N'err.ECR-CALC-4221.sheetsSubmitted',      N'en', N'Period {period} has submitted sheets: recalculation would change numbers already sent for approval. Return the submitted sheets for edits first (the sheet''s «Return for edits» action).', 1),
-    (N'err.ECR-CALC-4221.approvalReasonRequired', N'en', N'An approval to recalculate a closed period is not accepted without a reason.', 1),
     (N'err.ECR-SYS-0500.contactAdmin',         N'en', N'Internal error. Contact your administrator and quote the correlation ID.', 0),
     -- FR-13.9: rule coverage matrix over real rows.
     (N'err.ECR-CALC-0422.coverageWindow',       N'en', N'The period window is empty: periodFrom {periodFrom} is after periodTo {periodTo}.', 1),
@@ -3542,8 +3541,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     -- `PeriodState` (Enums.cs).
     (N'status.period.Scheduled',           N'en', N'Not open yet', 1),
     (N'status.period.Open',                N'en', N'Open', 1),
-    (N'status.period.Grace',               N'en', N'Grace period', 1),
-    (N'status.period.Closed',              N'en', N'Closed', 1),
+    (N'status.period.Grace',               N'en', N'Late (flagged)', 1),
+    (N'status.period.Closed',              N'en', N'Locked', 1),
 
     -- `IntegrationHandlers.KnownStates` плюс `Unknown`/`Unavailable`, які
     -- віддає лише `GET /jobs/{jobId}` (`QuartzJobScheduler`).
@@ -4119,25 +4118,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-ACCS-0403.headerLocked', N'en', N'The document header cannot be changed now. Reason: {reason}.', 1),
     (N'err.ECR-DOC-0409.headerStale', N'en', N'Someone else changed the document header after you opened it. Reload the header and repeat your change.', 1),
     (N'err.ECR-REQ-0422.headerBaseVersion', N'en', N'The header change must say which version of the header it started from (baseVersion).', 1),
-    -- D16: S1 — погодження перерахунку закритого періоду окремою сутністю (ФВ-9.7).
-    (N'err.ECR-CALC-0409.approvalNotPending', N'en', N'This recalculation approval is not waiting for confirmation: it does not exist, is already confirmed or used, or has expired.', 1),
-    (N'err.ECR-CALC-4221.approvalNotUsable', N'en', N'This approval cannot be used for this recalculation. It must be confirmed by another person, unused and unexpired, and issued to you for this project and period.', 1),
-    -- D16: S1 — екран погоджень перерахунку закритого періоду (PeriodsPage).
-    (N'recalcApprovals.title', N'en', N'Recalculation approvals for closed periods', 1),
-    (N'recalcApprovals.empty', N'en', N'No open recalculation approvals.', 1),
-    (N'recalcApprovals.request', N'en', N'Request recalculation', 1),
-    (N'recalcApprovals.requestTitle', N'en', N'Request recalculation of closed period {period}', 1),
-    (N'recalcApprovals.requestHint', N'en', N'A user with Manage access to the project must confirm the request; if you have that access, you can confirm it yourself. The approval is valid for 24 hours, can be used once, and only by you.', 1),
-    (N'recalcApprovals.requested', N'en', N'Recalculation request sent for confirmation.', 1),
-    (N'recalcApprovals.reason', N'en', N'Reason', 1),
-    (N'recalcApprovals.period', N'en', N'Period', 1),
-    (N'recalcApprovals.requestedBy', N'en', N'Requested by', 1),
-    (N'recalcApprovals.state', N'en', N'State', 1),
-    (N'recalcApprovals.statePending', N'en', N'Waiting for confirmation', 1),
-    (N'recalcApprovals.stateConfirmed', N'en', N'Confirmed by {name}', 1),
-    (N'recalcApprovals.expires', N'en', N'Valid until', 1),
-    (N'recalcApprovals.confirm', N'en', N'Confirm', 1),
-    (N'recalcApprovals.confirmedDone', N'en', N'Recalculation approval confirmed.', 1),
     -- COLL:reqclose ── вкладка «Security events» екрана аудиту (ФВ-5.24: читач журналу відмов у доступі) ──
     (N'audit.viewSecurity', N'en', N'Security events', 1),
     (N'audit.eventType', N'en', N'Event type', 1),

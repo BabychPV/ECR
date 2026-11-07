@@ -524,6 +524,23 @@ export const routes = {
     handle: { labelKey: 'nav.periods', permission: 'Period.Configure', icon: 'periods', descriptionKey: 'nav.periods.description' },
     showInNav: true,
   },
+  /**
+   * ✎ Period clarity (людина 07.11, п. b/c): налаштування проєкту — маршрут погодження, політики, клон, пояс,
+   * життєвий цикл і режим поточного періоду. ⚠ Право те саме, що й у сторінки Periods, звідки вони переїхали
+   * (`Period.Configure`): хто бачив ці кнопки там, бачить і тут; кожна дія далі перевіряє своє право й грант.
+   * ⚠ Іконка — та сама, що в Periods: нова означала б правку `shared/ui/navIcons.tsx`.
+   */
+  adminProjectSettings: {
+    id: 'admin-project-settings',
+    path: '/admin/projects',
+    handle: {
+      labelKey: 'nav.projectSettings',
+      permission: 'Period.Configure',
+      icon: 'periods',
+      descriptionKey: 'nav.projectSettings.description',
+    },
+    showInNav: true,
+  },
   adminSources: {
     id: 'admin-sources',
     path: '/admin/sources',
@@ -740,7 +757,7 @@ export const navGroups: readonly NavGroup[] = [
       routes.adminPiData,
     ],
   },
-  { id: 'access', labelKey: 'nav.group.access', routes: [routes.adminSecurity, routes.adminPeriods] },
+  { id: 'access', labelKey: 'nav.group.access', routes: [routes.adminSecurity, routes.adminPeriods, routes.adminProjectSettings] },
   {
     id: 'operate',
     labelKey: 'nav.group.operate',

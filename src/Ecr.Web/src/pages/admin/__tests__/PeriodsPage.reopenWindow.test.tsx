@@ -326,7 +326,7 @@ describe('PeriodsPage: строк перевідкриття періоду', ()
 
       // Рядок закритого періоду вже намальовано — інакше «кнопки немає»
       // означало б лише «сторінка ще не завантажилася».
-      await screen.findByText('202601', {}, { timeout: Ceiling });
+      await screen.findByText((_, el) => el?.getAttribute('data-period-key') === '202601', {}, { timeout: Ceiling });
 
       expect(screen.queryByRole('button', { name: /⟦periods\.reopen⟧/ })).toBeNull();
     },

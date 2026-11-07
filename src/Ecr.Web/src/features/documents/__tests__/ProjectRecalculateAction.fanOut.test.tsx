@@ -5,7 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { PeriodsPage } from '@/pages/admin/PeriodsPage';
+import { ProjectRecalculateAction } from '@/features/documents/ProjectRecalculateAction';
 import { testTheme } from '@/test/render';
 
 /**
@@ -108,9 +108,9 @@ function respond(): { job: { effectiveState: string; fanOut: Fan }; jobReads: nu
 function show(): void {
   render(
     <MantineProvider theme={testTheme}>
-      <MemoryRouter initialEntries={['/admin/periods?projectId=7']}>
+      <MemoryRouter initialEntries={['/?projectId=7']}>
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-          <PeriodsPage />
+          <ProjectRecalculateAction project={{ id: 7, code: 'PRJ-7' }} />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,
@@ -138,7 +138,7 @@ afterEach(() => {
 const Slow = 120_000;
 const Done = '⟦workflow.recalcDone⟧';
 
-describe('PeriodsPage: правдивий стан перерахунку проєкту (P4 ФВ-9.8)', () => {
+describe('ProjectRecalculateAction (перелік документів, Period clarity п. b): правдивий стан перерахунку проєкту (P4 ФВ-9.8)', () => {
   it(
     'розкладено, документи ще рахуються — не «завершено», прогрес на екрані, опитування триває; M = N, K = 0 — «завершено»',
     async () => {

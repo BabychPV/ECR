@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuditPage } from '@/pages/admin/AuditPage';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
 import { StructureChangesPanel } from '@/features/audit/StructureChangesPanel';
-import { formatDate, formatDateTime } from '@/shared/format';
+import { formatDateTime } from '@/shared/format';
 import { testTheme } from '@/test/render';
 
 /**
@@ -229,30 +229,31 @@ describe('PeriodsPage: межі періоду і крайні строки', ()
     ],
   };
 
+  /*
+   * ✎ Period clarity (людина 07.11, п. a): у рядку місяця ОДНА дата — «Locks on» (мить блокування). Місяць названо
+   * підписом (без дати), а колонок Range і Grace until більше немає. Намір тесту лишається: КРАЙНІЙ СТРОК — із
+   * годиною і в поясі майданчика; дат без години (межі періоду) на рядку більше немає взагалі.
+   */
   it(
-    'межа періоду — без години, пільговий строк — із нею',
+    'Locks on — крайній строк із годиною в поясі майданчика; меж періоду й пільгового строку в рядку немає',
     async () => {
+      const LocksAt = '2026-03-16T22:00:00Z';
       respond([
-        ['/periods', calendar],
+        ['/periods', { ...calendar, periods: [{ ...calendar.periods[0], endsAt: LocksAt }] }],
         ['/api/v1/projects', { items: [project], nextCursor: null, totalCount: 1 }],
       ]);
       show(<PeriodsPage />, '/admin/periods?projectId=7');
 
       await screen.findByRole('table', {}, { timeout: SlowEnvTimeout });
+      await waitFor(() => expect(timeNode(LocksAt), '«Locks on» не намальовано елементом <time>').not.toBeNull(), {
+        timeout: SlowEnvTimeout,
+      });
 
-      /*
-       * ⛔ Обидві половини в одному тесті навмисно: предмет — саме РІЗНИЦЯ.
-       * Межа періоду відповідає на питання «який це місяць», тож година в ній
-       * зайва; пільговий строк — це КРАЙНІЙ СТРОК, і без години він не
-       * відповідає на питання «чи встигну ще сьогодні».
-       */
-      const start = timeNode(StartsAt);
-      expect(start, 'межу періоду не намальовано елементом <time>').not.toBeNull();
-      expect(start?.textContent).toBe(formatDate(StartsAt));
-      expect(start?.textContent).not.toMatch(/\d{1,2}:\d{2}/);
+      // ⛔ Мутація «повернути колонки Range/Grace until» дає тут <time> початку й пільгового строку.
+      expect(timeNode(StartsAt)).toBeNull();
+      expect(timeNode(GraceEndsAt)).toBeNull();
 
-      const grace = timeNode(GraceEndsAt);
-      expect(grace, 'пільговий строк не намальовано елементом <time>').not.toBeNull();
+      const grace = timeNode(LocksAt);
       /*
        * ⚠ `timeZone` тут ОБОВ'ЯЗКОВИЙ і має збігатися з тим, що передає
        * `SiteTime`/`siteMomentText` у `PeriodsPage.tsx` (`calendar.timeZoneId`,
@@ -262,7 +263,7 @@ describe('PeriodsPage: межі періоду і крайні строки', ()
        * пояс збігається з поясом майданчика (тобто НЕ на CI-раннері з UTC).
        */
       expect(grace?.textContent).toBe(
-        formatDateTime(GraceEndsAt, { dateStyle: 'medium', timeStyle: 'short', timeZone: calendar.timeZoneId }),
+        formatDateTime(LocksAt, { dateStyle: 'medium', timeStyle: 'short', timeZone: calendar.timeZoneId }),
       );
       expect(grace?.textContent).toMatch(/\d{1,2}:\d{2}/);
     },

@@ -94,7 +94,6 @@ public sealed class RunCalculationFencingTests(SqlServerFixture sql) : DbJobQueu
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
             clock,
-            Substitute.For<IRecalculationApprovalStore>(),
             Substitute.For<IAuditWriter>(),
             host.Queue,
             lease);

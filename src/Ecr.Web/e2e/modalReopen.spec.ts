@@ -38,7 +38,8 @@ test.describe('Діалоги: повторне відкриття', () => {
 
   test('модальний діалог: закрити й одразу відкрити — форма не перемонтовується', async ({ page }) => {
     await signIn(page, Operator.user, Operator.password);
-    await page.goto('/admin/periods');
+    // ✎ Period clarity: «New project» — у налаштуваннях проєкту, не на сторінці Periods.
+    await page.goto('/admin/projects');
 
     const opener = page.getByRole('button', { name: /New project|Новий проєкт/i }).first();
     await expect(opener, 'немає кнопки створення проєкту').toBeVisible({ timeout: 30_000 });

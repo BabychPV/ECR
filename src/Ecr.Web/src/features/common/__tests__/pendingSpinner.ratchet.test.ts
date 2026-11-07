@@ -21,7 +21,7 @@ import { describe, expect, it } from 'vitest';
  *
  * ⚠ `PeriodsPage.tsx` — у переліку СВІДОМО, хоча це щоденні шляхи: вони в графі сторінок із бюджетом `D-132`
  * (≈235/234 КБ із 250), і переведення додавало ~0.2 КБ gzip кожній; те саме
- * для `PeriodPolicyManager`, `RecalculationApprovals` (статичні в `PeriodsPage`)
+ * для `PeriodPolicyManager` (статичний у `PeriodsPage`)
  * і `VersionMigrationDialog` (статичний у `DocumentPage`). Правило
  * лейна — бюджет не збільшувати. Переводити разом із розвантаженням графа.
  *
@@ -37,6 +37,8 @@ const Ledger: Readonly<Record<string, number>> = {
   'features/documents/DocumentHeaderPanel.tsx': 1,
   'features/documents/VersionMigrationDialog.tsx': 2,
   'features/expressions/TestCaseRunner.tsx': 1,
+  // ✎ Period clarity: перерахунок проєкту переїхав із PeriodsPage (той самий запис, інший файл).
+  'features/documents/ProjectRecalculateAction.tsx': 1,
   'features/integration/AddSourceEntityModal.tsx': 1,
   'features/integration/DataSourceFormModal.tsx': 1,
   'features/integration/TestDataSourceModal.tsx': 1,
@@ -49,7 +51,6 @@ const Ledger: Readonly<Record<string, number>> = {
   'features/projects/ApprovalRouteEditor.tsx': 1,
   'features/projects/CreateProjectModal.tsx': 1,
   'features/projects/PeriodPolicyManager.tsx': 2,
-  'features/projects/RecalculationApprovals.tsx': 2,
   'features/registries/CreateRegistryModal.tsx': 1,
   'features/registries/RegistryExternalKeysPanel.tsx': 1,
   // ✎ client debt (D-132): діалог перемикання master винесено в лінивий чанк — те саме місце, інший файл.
@@ -75,7 +76,10 @@ const Ledger: Readonly<Record<string, number>> = {
   'features/units/UnitEditModal.tsx': 1,
   'features/workflow/WorkflowHistory.tsx': 1,
   'pages/admin/GrantsPanel.tsx': 1,
-  'pages/admin/PeriodsPage.tsx': 7,
+  // ✎ Period clarity (07.11): 7 = 1 (перевідкриття) + 5 (налаштування проєкту) + 1 (перерахунок, перелік документів) —
+  // ті самі кнопки переїхали з PeriodsPage, нових записів немає.
+  'pages/admin/PeriodsPage.tsx': 1,
+  'pages/admin/ProjectSettingsPage.tsx': 5,
   'pages/admin/SourcesPage.tsx': 1,
   'pages/admin/TableRelationsPage.tsx': 1,
   'pages/admin/TemplateCardPage.tsx': 1,

@@ -71,6 +71,11 @@ function mockFetch(projectsFail: boolean): void {
         });
       }
 
+      // ✎ Period clarity: перегляд року запитує й зведення за рік.
+      if (path.endsWith('/api/v1/documents/summary')) {
+        return json({ draft: 1, submitted: 0, approved: 0, rejected: 0, withIssues: 0 });
+      }
+
       if (path.endsWith('/api/v1/documents')) {
         return json({ items: [document_], nextCursor: null, totalCount: 1 });
       }

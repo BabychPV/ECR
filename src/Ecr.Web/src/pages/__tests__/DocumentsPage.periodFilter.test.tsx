@@ -81,7 +81,7 @@ function show(): void {
 
   render(
     <MantineProvider>
-      <MemoryRouter initialEntries={['/']}>
+      <MemoryRouter initialEntries={['/?year=2026']}>
         <LocationSpy />
         <QueryClientProvider client={client}>
           <DocumentsPage />
@@ -98,20 +98,26 @@ afterEach(() => {
 
 const SlowEnvTimeout = 400_000;
 
-describe('DocumentsPage: поле «Period» справді фільтрує (lane3)', () => {
+describe('DocumentsPage: вибір місяця справді фільтрує (lane3; ✎ Period clarity — рік і місяць)', () => {
   it(
-    'зміна поля Period потрапляє в адресу і в наступний запит до API',
+    'місяць → адреса й запит з periodKey; «All months» → назад до року',
     async () => {
       mockFetch();
       show();
 
-      const input = await screen.findByLabelText('⟦documents.period⟧', {}, { timeout: SlowEnvTimeout });
+      const month = await screen.findByLabelText('⟦documents.month⟧', {}, { timeout: SlowEnvTimeout });
+      // Типово — рік («All months»).
+      expect((month as HTMLSelectElement).value).toBe('');
 
-      fireEvent.change(input, { target: { value: '202601' } });
+      fireEvent.change(month, { target: { value: '1' } });
 
-      // ⛔ Мутаційний доказ: без фіксу `seenSearch` лишається порожнім
-      // назавжди — обидва сеттери гублять свою зміну.
+      // ⛔ Мутаційний доказ: два окремі сеттери адреси гублять зміну — `seenSearch` лишається з роком.
       await waitFor(() => expect(seenSearch).toBe('?periodKey=202601'), { timeout: SlowEnvTimeout });
+
+      fireEvent.change(await screen.findByLabelText('⟦documents.month⟧'), { target: { value: '' } });
+      await waitFor(() => expect(new URLSearchParams(seenSearch).get('year')).toBe('2026'), { timeout: SlowEnvTimeout });
+      expect(new URLSearchParams(seenSearch).has('periodKey')).toBe(false);
+      fireEvent.change(await screen.findByLabelText('⟦documents.month⟧'), { target: { value: '1' } });
 
       const fetchMock = vi.mocked(fetch);
       await waitFor(

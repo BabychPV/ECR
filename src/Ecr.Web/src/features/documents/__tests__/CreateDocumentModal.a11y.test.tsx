@@ -54,8 +54,7 @@ async function toSheetsStep(): Promise<void> {
   fireEvent.click(await screen.findByLabelText(/documents\.project/, { selector: 'input' }));
   fireEvent.click(await screen.findByRole('option', { name: 'P07131100' }));
   await waitFor(() => expect((next() as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(next());
-  await screen.findByLabelText('⟦documents.period⟧', { selector: 'input' });
+  // ✎ Period clarity: кроку Period немає — одразу Sheets.
   fireEvent.click(next());
   await screen.findByLabelText('Air emissions (AIR)');
 }

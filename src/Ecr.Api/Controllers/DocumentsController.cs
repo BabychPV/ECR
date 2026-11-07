@@ -79,6 +79,7 @@ public sealed class DocumentsController(
         [FromQuery] int? ownerUserId,
         [FromQuery] string? sort,
         [FromQuery] string? templateVersions,
+        [FromQuery] int? year,
         CancellationToken ct)
     {
         var page = new CursorRequest(limit == 0 ? 50 : limit, cursor);
@@ -100,10 +101,12 @@ public sealed class DocumentsController(
         // ⛔ Зведений стан рахується запитом по wf.ApprovalState і лише коли
         // вказано період: без періоду «стан документа» не визначений — аркуші
         // за різні періоди бувають у різних станах одночасно (D-93).
+        // ✎ 2026-11-07 Period clarity: `year` — смуга `periodStates` за періоди року і стан за рік без періоду
+        // (п'ятистанове правило над клітинками «аркуш × розпочатий період», `02-contracts.md`).
         return Ok(await listDocuments
             .HandleAsync(
                 projectId, periodKey, state, mine, hasLateEdits, q, resultsStale, staleBy, ownerUserId, sort, templateVersions,
-                page, ct)
+                year, page, ct)
             .ConfigureAwait(false));
     }
 
@@ -140,13 +143,15 @@ public sealed class DocumentsController(
     /// <remarks>
     /// ⚠ Лічить лише документи, які користувач БАЧИТЬ, — тією самою межею
     /// грантів, що й перелік вище; інакше смуга й таблиця під нею розійдуться.
-    /// Період обов'язковий: без нього стан документа не визначений (<c>D-93</c>).
+    /// Потрібен місяць (<c>periodKey</c>) або ✎ 2026-11-07 (Period clarity) рік (<c>year</c> без <c>periodKey</c>) — за
+    /// тим самим правилом року, що й фільтр стану переліку; без обох стан документа не визначений (<c>D-93</c>), 422.
+    /// За рік <c>staleResultsCount</c>/<c>staleResultsMineCount</c> — 0 (застарілість належить місяцю).
     /// </remarks>
     [HttpGet("summary")]
     [ProducesResponseType<Ecr.Application.Documents.Dto.DocumentListSummaryResponse>(StatusCodes.Status200OK)]
     public async Task<IActionResult> Summary(
-        [FromQuery] int periodKey, [FromQuery] int? projectId, CancellationToken ct)
-        => Ok(await listSummary.HandleAsync(projectId, periodKey, ct).ConfigureAwait(false));
+        [FromQuery] int? periodKey, [FromQuery] int? projectId, [FromQuery] int? year, CancellationToken ct)
+        => Ok(await listSummary.HandleAsync(projectId, periodKey, year, ct).ConfigureAwait(false));
 
     /// <summary>Створює документ. Право <c>Document.Create</c>.</summary>
     [HttpPost]

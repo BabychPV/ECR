@@ -239,17 +239,25 @@ describe('DocumentListSummaryStrip: лічильник — фільтр стан
   );
 
   it(
-    'без періоду лічильників-кнопок немає: зведення не запитується, state у запит не йде',
+    'Period clarity: без місяця («All months») — лічильники ЗА РІК, і state іде в запит разом із year',
     async () => {
       mockFetch();
-      show('/?state=Draft');
+      show('/?state=Draft&year=2026');
 
       await screen.findByRole('table', {}, { timeout: Find });
+      await strip();
 
-      expect(screen.queryByRole('group', { name: '⟦documents.summaryLabel⟧' })).toBeNull();
-      expect(document.querySelector('[data-summary-counter]')).toBeNull();
-      expect(summaries).toHaveLength(0);
-      expect(listed.every((url) => !new URLSearchParams(url.split('?')[1] ?? '').has('state'))).toBe(true);
+      // ⛔ Мутація «зведення лише за місяць» (старий `enabled: periodKey !== null`) лишає тут смугу порожньою.
+      const yearSummary = summaries.map((url) => new URLSearchParams(url.split('?')[1] ?? ''));
+      expect(yearSummary.some((q) => q.get('year') === '2026' && !q.has('periodKey'))).toBe(true);
+
+      const lists = listed.map((url) => new URLSearchParams(url.split('?')[1] ?? ''));
+      expect(lists.some((q) => q.get('state') === 'Draft' && q.get('year') === '2026' && !q.has('periodKey'))).toBe(true);
+
+      // Клік по лічильнику за рік — той самий фільтр стану, у запиті — рік.
+      fireEvent.click(await counter('Approved'));
+      await waitFor(() => expect(lastListed().get('state')).toBe('Approved'));
+      expect(lastListed().get('year')).toBe('2026');
     },
     Slow,
   );

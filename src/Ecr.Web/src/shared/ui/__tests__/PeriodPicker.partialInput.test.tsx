@@ -6,7 +6,6 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { JSX } from 'react';
 import { PeriodPicker, isCompletePeriodKey } from '@/shared/ui/PeriodPicker';
-import { DocumentsPage } from '@/pages/DocumentsPage';
 import { CampaignOverviewPage } from '@/pages/admin/CampaignOverviewPage';
 import { renderWithMantine, testTheme } from '@/test/render';
 
@@ -156,24 +155,6 @@ function show(page: JSX.Element, path: string): void {
 }
 
 describe('лічильник запитів при наборі періоду', () => {
-  it(
-    '`/` (перелік документів): набір 202608 — 0 запитів на неповні, 1 на повний',
-    async () => {
-      const seen = countSummary('/api/v1/documents/summary');
-      const user = userEvent.setup();
-      show(<DocumentsPage />, '/');
-
-      const input = await screen.findByRole('textbox', { name: '⟦documents.period⟧' }, { timeout: SlowEnvTimeout });
-      await user.type(input, '20260');
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(seen).toEqual([]);
-
-      await user.type(input, '8');
-      await waitFor(() => expect(seen).toEqual(['202608']));
-    },
-    SlowEnvTimeout,
-  );
-
   it(
     '`/admin/campaign`: набір 202608 поверх 202512 — жодного запиту з неповним ключем',
     async () => {

@@ -24,7 +24,8 @@ public sealed class SetCurrentPeriodHandler(
     IAuditWriter audit,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    Domain.Services.PeriodStateCalculator? calculator = null)
 {
     /// <summary>Право на налаштування періодів (`02-contracts.md` §9).</summary>
     public const string Permission = "Period.Configure";
@@ -86,6 +87,13 @@ public sealed class SetCurrentPeriodHandler(
         else
         {
             project.UnpinCurrentPeriod(userId, now);
+
+            // ✎ 2026-11-07 Period clarity (п. c): «Повернути автоматичний» — поточний період одразу за правилом
+            // `PeriodStateJob` (найраніший `Open`, інакше найпізніший `Grace`), а не через годину (D-77 без змін).
+            if (calculator is not null)
+            {
+                project.SetCurrentPeriodAutomatically(calculator.SelectCurrentPeriod(project.Periods)?.Id, now);
+            }
         }
 
         // ⛔ Жодних перевірок доступу на основі цього значення — ані тут, ані

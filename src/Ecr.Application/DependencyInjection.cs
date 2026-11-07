@@ -226,6 +226,7 @@ public static class DependencyInjection
         services.AddScoped<Periods.PeriodCalendarMaterializer>();
         services.AddScoped<Periods.BuildPeriodCalendarHandler>();
         services.AddScoped<Periods.SetCurrentPeriodHandler>();
+        services.AddScoped<Periods.CurrentPeriodSettingHandlers>();
         services.AddScoped<Periods.ReopenPeriodHandler>();
         services.AddScoped<Periods.GetPeriodCalendarHandler>();
 
@@ -452,7 +453,6 @@ public static class DependencyInjection
         services.AddScoped<Documents.GetCalculationRunStatusHandler>();
         services.AddScoped<Documents.GetCalculationIssuesHandler>();
         services.AddScoped<Calculations.RunCalculationHandler>();
-        services.AddScoped<Calculations.RecalculationApprovalHandlers>();
         services.AddScoped<Localization.SetUiStringHandler>();
         services.AddScoped<Localization.GetUiStringCoverageHandler>();
         services.AddScoped<Localization.ListUiStringsHandler>();

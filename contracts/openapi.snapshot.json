@@ -5317,6 +5317,106 @@
           "Pinned"
         ]
       },
+      "CurrentPeriodSettingDto": {
+        "description": "Налаштування «поточний період» проєкту (✎ 2026-11-07 Period clarity, п. c): режим і що з нього виходить.",
+        "properties": {
+          "automaticPeriodId": {
+            "description": "Який період був би поточним у режимі `Auto` зараз; `null` — жодного.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "automaticPeriodKey": {
+            "description": "Його ключ.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "changedAt": {
+            "description": "Коли поточний період або режим змінено востаннє, UTC.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "currentPeriodId": {
+            "description": "Чинний поточний період (підказка UI, не правило доступу, D-77); `null` — немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "currentPeriodKey": {
+            "description": "Його ключ.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "mode": {
+            "$ref": "#/components/schemas/CurrentPeriodMode",
+            "description": "`Auto` — за датою (веде `PeriodStateJob`); `Pinned` — закріплено вручну з причиною."
+          },
+          "pinnedReason": {
+            "description": "Причина закріплення; лише в `Pinned`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "projectId": {
+            "description": "Проєкт.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "projectId",
+          "mode",
+          "currentPeriodId",
+          "currentPeriodKey",
+          "automaticPeriodId",
+          "automaticPeriodKey",
+          "pinnedReason",
+          "changedAt"
+        ],
+        "type": "object"
+      },
+      "CurrentPeriodSettingRequest": {
+        "description": "Запит на зміну налаштування «поточний період» (✎ 2026-11-07 Period clarity).",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/CurrentPeriodMode",
+            "description": "`Auto` — за датою; `Pinned` — закріпити."
+          },
+          "pinnedPeriodId": {
+            "description": "Період для `Pinned`; для `Auto` ігнорується.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "reason": {
+            "description": "Причина для `Pinned` (обов'язкова, в аудит).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
       "CurrentUserDto": {
         "description": "Профіль поточного користувача для клієнта.",
         "properties": {
@@ -5891,6 +5991,25 @@
         ],
         "type": "object"
       },
+      "DocumentPeriodState": {
+        "description": "Стан погодження документа за один період (смуга року, ✎ 2026-11-07 Period clarity).",
+        "properties": {
+          "periodKey": {
+            "description": "Період; `Рік*100 + Номер`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "state": {
+            "description": "`Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "periodKey",
+          "state"
+        ],
+        "type": "object"
+      },
       "DocumentSheetState": {
         "description": "Аркуш складу документа в переліку: код, назва, стан за період.",
         "properties": {
@@ -6018,6 +6137,16 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "periodStates": {
+            "description": "✎ 2026-11-07 Period clarity (п. e2): стан погодження документа за КОЖЕН період проєкту в запитаному році\n(`GET /documents?year=`), за зростанням ключа; `null` — рік не запитано. Визначення — те саме, що у фільтра`state`:\n`Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved` за аркушами складу, ВИДИМИМИ читачеві (S18).\nРахується ОДНИМ запитом на сторінку (`DocumentStore.PeriodStatesBatchAsync`).",
+            "items": {
+              "$ref": "#/components/schemas/DocumentPeriodState"
+            },
+            "type": [
+              "null",
+              "array"
             ]
           },
           "projectId": {
@@ -16592,14 +16721,6 @@
       "ProjectRecalculationRequest": {
         "description": "Запит на перерахунок усього проєкту (Q-151).",
         "properties": {
-          "approvalId": {
-            "description": "Підтверджене погодження перерахунку закритого періоду (ФВ-9.7,\n`…/recalculation-approvals`); `null` — без погодження. Одноразове,\nлише для свого ініціатора, цього проєкту й періоду.",
-            "format": "int64",
-            "type": [
-              "null",
-              "integer"
-            ]
-          },
           "periodKey": {
             "description": "Період; `null` — повний рік, усі документи проєкту.",
             "format": "int32",
@@ -16610,8 +16731,7 @@
           }
         },
         "required": [
-          "periodKey",
-          "approvalId"
+          "periodKey"
         ],
         "type": "object"
       },
@@ -17316,105 +17436,6 @@
           "skipped",
           "skippedTruncated",
           "nothingToRecalculate"
-        ],
-        "type": "object"
-      },
-      "RecalculationApprovalDto": {
-        "description": "Погодження перерахунку закритого періоду — як його бачить клієнт.",
-        "properties": {
-          "confirmedAt": {
-            "description": "Коли підтверджено, UTC.",
-            "format": "date-time",
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "confirmedByName": {
-            "description": "Ім'я того, хто підтвердив.",
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "confirmedByUserId": {
-            "description": "Хто підтвердив; `null` — ще чекає.",
-            "format": "int32",
-            "type": [
-              "null",
-              "integer"
-            ]
-          },
-          "expiresAt": {
-            "description": "Після цього моменту погодження мертве, UTC.",
-            "format": "date-time",
-            "type": "string"
-          },
-          "id": {
-            "description": "Ідентифікатор; його передає `POST …/recalculate` як `approvalId`.",
-            "format": "int64",
-            "type": "integer"
-          },
-          "periodKey": {
-            "description": "Єдиний період, який погодження відкриває.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "reason": {
-            "description": "Причина.",
-            "type": "string"
-          },
-          "requestedAt": {
-            "description": "Коли створено, UTC.",
-            "format": "date-time",
-            "type": "string"
-          },
-          "requestedByName": {
-            "description": "Ім'я ініціатора.",
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "requestedByUserId": {
-            "description": "Ініціатор — єдиний, хто може ним скористатися.",
-            "format": "int32",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "periodKey",
-          "reason",
-          "requestedByUserId",
-          "requestedByName",
-          "requestedAt",
-          "expiresAt",
-          "confirmedByUserId",
-          "confirmedByName",
-          "confirmedAt"
-        ],
-        "type": "object"
-      },
-      "RecalculationApprovalRequest": {
-        "description": "Запит на погодження перерахунку закритого періоду.",
-        "properties": {
-          "periodKey": {
-            "description": "Закритий період, який треба перерахувати.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "reason": {
-            "description": "Причина; обов'язкова, потрапляє в журнал.",
-            "type": [
-              "null",
-              "string"
-            ]
-          }
-        },
-        "required": [
-          "periodKey",
-          "reason"
         ],
         "type": "object"
       },
@@ -33461,6 +33482,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "year",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -33597,7 +33626,7 @@
     },
     "/api/v1/documents/summary": {
       "get": {
-        "description": "⚠ Лічить лише документи, які користувач БАЧИТЬ, — тією самою межею\nгрантів, що й перелік вище; інакше смуга й таблиця під нею розійдуться.\nПеріод обов'язковий: без нього стан документа не визначений (`D-93`).",
+        "description": "⚠ Лічить лише документи, які користувач БАЧИТЬ, — тією самою межею\nгрантів, що й перелік вище; інакше смуга й таблиця під нею розійдуться.\nПотрібен місяць (`periodKey`) або ✎ 2026-11-07 (Period clarity) рік (`year` без `periodKey`) — за\nтим самим правилом року, що й фільтр стану переліку; без обох стан документа не визначений (`D-93`), 422.\nЗа рік `staleResultsCount`/`staleResultsMineCount` — 0 (застарілість належить місяцю).",
         "parameters": [
           {
             "in": "query",
@@ -33610,6 +33639,14 @@
           {
             "in": "query",
             "name": "projectId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "year",
             "schema": {
               "format": "int32",
               "type": "integer"
@@ -51057,7 +51094,7 @@
     },
     "/api/v1/projects/{id}/current-period": {
       "put": {
-        "description": "⚠ `CurrentPeriod` — підказка UI, а **не** правило доступу\n(`D-77`): на рішення про право запису він не впливає взагалі.\n`null` у `PinnedPeriodId` повертає режим `Auto`.",
+        "description": "⚠ `CurrentPeriod` — підказка UI, а **не** правило доступу\n(`D-77`): на рішення про право запису він не впливає взагалі.\n`null` у `PinnedPeriodId` повертає режим `Auto`.\n✎ 2026-11-07 (Period clarity, п. c): ЗАСТАРІЛО — налаштування переїхало в налаштування проєкту\n(…/settings/current-period); маршрут лишається для старого клієнта.",
         "parameters": [
           {
             "in": "path",
@@ -51378,6 +51415,231 @@
         ]
       }
     },
+    "/api/v1/projects/{id}/settings/current-period": {
+      "get": {
+        "description": "✎ 2026-11-07 (Period clarity, п. c). Поточний період — підказка UI, не правило доступу (`D-77`).",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Налаштування «поточний період» проєкту: режим `Auto` (за датою) або `Pinned`. Право `Document.View`.",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurrentPeriodSettingRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurrentPeriodSettingRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurrentPeriodSettingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює режим поточного періоду: `Pinned` (період + причина) або `Auto`. Право `Period.Configure`\nі Manage на проєкт.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/settings/current-period/pin": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "«Повернути автоматичний»: знімає закріплення, поточний період одразу — за датою. Право `Period.Configure`\nі Manage на проєкт.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
     "/api/v1/projects/{id}/template-versions": {
       "get": {
         "description": "Порожній `items` — проєкт на одній (чинній) версії всі періоди. `currentVersionId` — версія для НОВИХ\nперіодів. Невидимий проєкт — той самий `404`, що й неіснуючий.",
@@ -51525,229 +51787,6 @@
         "summary": "Змінює пояс майданчика проєкту. Право `Project.Manage` (T6/#52).",
         "tags": [
           "Projects"
-        ]
-      }
-    },
-    "/api/v1/projects/{projectId}/recalculation-approvals": {
-      "get": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "projectId",
-            "required": true,
-            "schema": {
-              "format": "int32",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/RecalculationApprovalDto"
-                  },
-                  "type": "array"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/RecalculationApprovalDto"
-                  },
-                  "type": "array"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/RecalculationApprovalDto"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": "OK"
-          }
-        },
-        "summary": "Живі погодження проєкту: не використані й не прострочені.",
-        "tags": [
-          "RecalculationApprovals"
-        ]
-      },
-      "post": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "projectId",
-            "required": true,
-            "schema": {
-              "format": "int32",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/RecalculationApprovalRequest"
-              }
-            },
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RecalculationApprovalRequest"
-              }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RecalculationApprovalRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecalculationApprovalDto"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecalculationApprovalDto"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecalculationApprovalDto"
-                }
-              }
-            },
-            "description": "Created"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "summary": "Створює запит на погодження від імені поточного користувача.",
-        "tags": [
-          "RecalculationApprovals"
-        ]
-      }
-    },
-    "/api/v1/projects/{projectId}/recalculation-approvals/{id}/confirm": {
-      "post": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "projectId",
-            "required": true,
-            "schema": {
-              "format": "int32",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "int64",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecalculationApprovalDto"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecalculationApprovalDto"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecalculationApprovalDto"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Conflict"
-          }
-        },
-        "summary": "Підтверджує чужий запит під сесією поточного користувача.",
-        "tags": [
-          "RecalculationApprovals"
         ]
       }
     },
@@ -67295,9 +67334,6 @@
     },
     {
       "name": "Public"
-    },
-    {
-      "name": "RecalculationApprovals"
     },
     {
       "name": "Registries"

@@ -26,17 +26,15 @@ public sealed class RunCalculationHandler(
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock,
-    IRecalculationApprovalStore approvals,
     IAuditWriter audit,
     IJobQueue? queue = null,
     IJobLeaseContext? lease = null,
     ICalculationIssueStore? issues = null)
 {
-    // ⛔ Константи `RecalculateClosedPermission` тут більше немає (`A7-20`).
-    // Вона оголошувала право `Calculation.RecalculateClosed`, якого немає в
-    // каталозі `sec.Permission` і не було в контракті: видати його не міг
-    // ніхто, а перевіряти його ніде й не пробували. Правило ФВ-9.7 тримається
-    // не правом, а ПОГОДЖЕННЯМ (`approval` нижче) — і саме тому працює.
+    // ⛔ Константи `RecalculateClosedPermission` тут більше немає (`A7-20`): права
+    // `Calculation.RecalculateClosed` немає в каталозі `sec.Permission`. ✎ 07.11 (D-468): і погодження
+    // перерахунку закритого періоду (аудит S1) прибрано — закритий місяць має ОДИН шлях: Reopen (з причиною)
+    // → звичайний перерахунок. ФВ-9.7 тримає `RecalculationWritePolicy` без винятків.
 
     /// <summary>Право на запуск перерахунку проєкту (`02-contracts.md` §9).</summary>
     /// <remarks>
@@ -53,18 +51,13 @@ public sealed class RunCalculationHandler(
     /// <summary>Ставить прогін у чергу і повертає ідентифікатор задачі.</summary>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="periodKey">Період; <c>null</c> — повний рік.</param>
-    /// <param name="approvalId">
-    /// Погодження на перерахунок закритого періоду (<c>calc.RecalculationApproval</c>);
-    /// <c>null</c> — немає.
-    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="BusinessRuleException">
-    /// <c>ECR-CALC-4221</c> — закритий період без придатного погодження.
+    /// <c>ECR-CALC-4221</c> <c>periodClosed</c> — закритий період (шлях — Reopen, D-468).
     /// </exception>
-    public async Task<string> HandleAsync(
-        int projectId, int? periodKey, long? approvalId, CancellationToken ct)
+    public async Task<string> HandleAsync(int projectId, int? periodKey, CancellationToken ct)
     {
-        var outcome = await RequestAsync(projectId, periodKey, approvalId, ct).ConfigureAwait(false);
+        var outcome = await RequestAsync(projectId, periodKey, ct).ConfigureAwait(false);
 
         // ⚠ Старий виклик (без переліку): «рахувати нічого» лишається відмовою 4221, як і до UAT-recalc-ux.
         return outcome.JobId
@@ -72,18 +65,17 @@ public sealed class RunCalculationHandler(
     }
 
     /// <summary>
-    /// UAT-recalc-ux: ставить прогін у чергу, ПРОПУСКАЮЧИ подані/затверджені аркуші, і повертає їх перелік.
+    /// UAT-recalc-ux: ставить прогін у чергу, ПРОПУСКАЮЧИ затверджені аркуші, і повертає їх перелік.
     /// </summary>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="periodKey">Період; <c>null</c> — повний рік.</param>
-    /// <param name="approvalId">Погодження на перерахунок закритого періоду; <c>null</c> — немає.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>
     /// Задача і пропущені (затверджені) аркуші; <c>JobId = null</c> — у названому періоді всі аркуші всіх документів
     /// затверджені, рахувати нічого (не помилка: людина бачить перелік і куди перейти).
     /// </returns>
     /// <exception cref="BusinessRuleException">
-    /// <c>ECR-CALC-4221</c> <c>periodClosed</c> — закритий період без придатного погодження.
+    /// <c>ECR-CALC-4221</c> <c>periodClosed</c> — у запиті є закритий період (шлях — Reopen, D-468).
     /// </exception>
     /// <remarks>
     /// ⛔ Слово людини 07.11: «тільки погоджені не мають перераховуватися». Затверджений аркуш не перераховується,
@@ -92,23 +84,16 @@ public sealed class RunCalculationHandler(
     /// документ, у якому затверджено все), а не відмовою всьому проєкту. Відмова цілим запитом була глухим кутом:
     /// людина не бачила, які саме аркуші заважають (UAT 07.11).
     /// </remarks>
-    public async Task<RecalculationRequestOutcome> RequestAsync(
-        int projectId, int? periodKey, long? approvalId, CancellationToken ct)
+    public async Task<RecalculationRequestOutcome> RequestAsync(int projectId, int? periodKey, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
             .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        // ⛔ Q-238: те саме, чого бракувало документному перерахунку до Q-174
-        // (`RecalculateDocumentHandler`) — глобального `Calculation.Recalculate`
-        // самого по собі недостатньо, коли ціль запиту (тут — projectId) не
-        // прив'язана до викликача жодним грантом. До цього фіксу власник
-        // проєкту A з правом Calculation.Recalculate міг перерахувати ЦІЛИЙ
-        // чужий проєкт B (усі документи, увесь рік) без жодного гранта на B.
-        // Поріг — `RecalculationApprovalPolicy.InitiatorGrant` (нині Read, як і
-        // `CanReadDocumentAsync`): той самий, що й для запиту погодження, і
-        // заданий в ОДНОМУ місці (аудит S1, питання S13).
-        RecalculationApprovalPolicy.RequireProjectGrant(profile, projectId, RecalculationApprovalPolicy.InitiatorGrant);
+        // ⛔ Q-238: глобального `Calculation.Recalculate` самого по собі недостатньо, коли ціль запиту
+        // (projectId) не прив'язана до викликача жодним грантом: власник проєкту A міг перерахувати ЦІЛИЙ
+        // чужий проєкт B. Поріг — `RecalculationGrantPolicy.InitiatorGrant` (нині Read), в ОДНОМУ місці.
+        RecalculationGrantPolicy.RequireProjectGrant(profile, projectId, RecalculationGrantPolicy.InitiatorGrant);
 
         // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
         Security.PermissionCheck.RequireIn(profile, Permission, projectId);
@@ -134,49 +119,22 @@ public sealed class RunCalculationHandler(
                 });
         }
 
-        // ⛔ ЗАКРИТІ ПЕРІОДИ автоматично не перераховуються НІКОЛИ (ФВ-9.7).
-        // Це не обережність: перерахунок закритого періоду змінює числа, які
-        // вже подані регулятору, і робить це без жодного сліду в самих даних.
+        // ⛔ ЗАКРИТІ ПЕРІОДИ не перераховуються НІКОЛИ (ФВ-9.7): перерахунок закритого періоду змінює числа,
+        // які вже подані регулятору. ✎ 07.11 (D-468): винятку «за погодженням» більше немає — закритий місяць
+        // спершу відкривають повторно (Reopen з причиною лишає слід у робочому процесі), далі звичайний перерахунок.
+        // Рішення — у `RecalculationWritePolicy` (той самий гейт тримають маршрут документа і задача).
         //
-        // ⚠ Тут лишається лише перевірка ЯКОСТІ погодження (`ConsumeApprovalAsync`)
-        // — рішення «чи можна писати в цей період» більше НЕ живе в
-        // тілі цього обробника, а взяте з `RecalculationWritePolicy`. Доти
-        // воно жило саме тут і тільки тут, тож два інші маршрути до задачі
-        // перерахунку (документ і нічний розклад) писали в закриті періоди
-        // мовчки: вони цього обробника не кличуть узагалі.
-        //
-        // ⛔ Аудит безпеки S1: «друга людина» більше не число з тіла запиту.
-        // Погодження — окремий запис, підтверджений ІНШОЮ людиною під її
-        // власною сесією (`RecalculationApprovalHandlers.ConfirmAsync`), і тут
-        // воно лише ВИКОРИСТОВУЄТЬСЯ — один раз, нижче, після всіх перевірок.
-        var closed = targets.Where(p => p.State == PeriodState.Closed).ToList();
-        var hasApproval = closed.Count > 0 && approvalId is not null;
-
-        // ⛔ Поданий зріз не перераховується взагалі (ФВ-9.17) — навіть із
-        // погодженням. Потреба змінити подану цифру закривається Reopen, який
-        // лишає слід у робочому процесі, а не тихим перерахунком.
-        //
-        // ⛔ Правило НЕ знімається наявністю `approval` — і це не недогляд, а
-        // суть (аудит 2026-09-16, §1.1). До цього стояло `submitted && approval
-        // is null`, тож ОДНЕ погодження, видане на ОДИН закритий період,
-        // знімало захист поданих зрізів у ВСІХ періодах запиту: `periodKey:
-        // null` — це весь рік, і `targets` охоплює багато періодів одночасно.
-        // Сценарій: 202601 закритий (погодження законне), 202603 відкритий із
-        // поданими аркушами — і 202603 тихо перераховувався. Тепер цю різницю
-        // тримає сама політика: `hasClosedPeriodApproval` знімає лише
-        // `PeriodClosed`, а `SheetsSubmitted` — ніколи.
-        //
-        // ✎ UAT-recalc-ux (07.11): поданий аркуш більше НЕ відмовляє всьому проєкту — його пропускає задача (по
+        // ✎ UAT-recalc-ux (07.11): поданий аркуш НЕ відмовляє всьому проєкту — його пропускає задача (по
         // аркушу), а запит повертає перелік пропущених. Тут лишається лише відмова закритого періоду.
         //
         // ✎ UAT-recalc-ux (e2e 07.11): перерахунок за ВЕСЬ рік (`periodKey: null`, кнопка Periods) закритий період
         // НЕ відмовляє — він вилучається зі скоупу, рівно як це вже робить задача (`RecalculationJob.RefusedPeriodsAsync`:
         // «запит не називав закритого періоду»). Відмова тут робила кнопку проєкту глухим кутом у будь-якому році після
-        // першого закритого місяця. Названий закритий період без погодження — відмова, як і раніше.
+        // першого закритого місяця. Названий закритий період — відмова (шлях — Reopen, D-468).
         var excluded = new HashSet<int>();
         foreach (var period in targets)
         {
-            var denial = RecalculationWritePolicy.Check(period.State, hasSubmittedSheets: false, hasApproval);
+            var denial = RecalculationWritePolicy.Check(period.State, hasSubmittedSheets: false);
             if (denial == RecalculationWriteDenial.None)
             {
                 continue;
@@ -193,16 +151,12 @@ public sealed class RunCalculationHandler(
 
         var (skipped, truncated) = await SkippedAsync(profile, projectId, periodKey, excluded, ct).ConfigureAwait(false);
 
-        // Названий період, де подано/затверджено ВСЕ: задачу не ставимо і погодження не спалюємо.
+        // Названий період, де затверджено ВСЕ: задачу не ставимо.
         if (periodKey is { } named
             && await workflow.AllSheetsApprovedAsync(projectId, named, ct).ConfigureAwait(false))
         {
             return new RecalculationRequestOutcome(null, skipped, truncated);
         }
-
-        var approval = hasApproval
-            ? await ConsumeApprovalAsync(approvalId!.Value, projectId, periodKey, userId, ct).ConfigureAwait(false)
-            : null;
 
         var jobId = await jobs
             .EnqueueAsync<IRecalculationJob>(
@@ -211,22 +165,10 @@ public sealed class RunCalculationHandler(
                     projectId,
                     periodKey,
                     triggeredByUserId = userId,
-                    approvedBy = approval?.ConfirmedByUserId,
-                    approvalReason = approval?.Reason,
-                    approvalId = approval?.Id,
                     requestedAt = clock.UtcNow,
                 },
                 ct)
             .ConfigureAwait(false);
-
-        if (approval is not null)
-        {
-            await RecalculationApprovalHandlers.WriteAuditAsync(
-                audit, currentUser, clock.UtcNow, RecalculationApprovalHandlers.UsedEventType,
-                approval.Id, projectId, approval.PeriodKey, userId,
-                new { jobId, reason = approval.Reason, confirmedByUserId = approval.ConfirmedByUserId },
-                ct).ConfigureAwait(false);
-        }
 
         return new RecalculationRequestOutcome(jobId, skipped, truncated);
     }
@@ -476,35 +418,4 @@ public sealed class RunCalculationHandler(
             ChangeReason: "calculation-run-current",
             ChangedByUserId: SystemUserId,
             CorrelationId: string.Create(CultureInfo.InvariantCulture, $"calc-run:{calculationRunId}"));
-
-    /// <summary>
-    /// Використовує погодження: атомарно, один раз, лише своє, лише на цей
-    /// проєкт і період, лише підтверджене й не прострочене.
-    /// </summary>
-    /// <remarks>
-    /// ⚠ «Погодження є / погодження немає» вирішує
-    /// <see cref="RecalculationWritePolicy"/> разом зі станом періоду; тут —
-    /// чи є погодження справжнім. Використання стоїть ПІСЛЯ політики: відмова
-    /// через поданий зріз не має спалювати законне погодження.
-    /// <para>
-    /// ⛔ <paramref name="periodKey"/> <c>null</c> (увесь рік) не збігається з
-    /// жодним погодженням: воно відкриває один період, а не рік.
-    /// </para>
-    /// </remarks>
-    private async Task<RecalculationApprovalDto> ConsumeApprovalAsync(
-        long approvalId, int projectId, int? periodKey, int userId, CancellationToken ct)
-    {
-        var used = periodKey is { } key
-            ? await approvals.TryConsumeAsync(approvalId, projectId, key, userId, clock.UtcNow, ct).ConfigureAwait(false)
-            : null;
-
-        return used ?? throw new BusinessRuleException(
-            "ECR-CALC-4221",
-            $"Погодження {approvalId} не придатне для цього перерахунку.",
-            new Dictionary<string, object?>
-            {
-                ["messageKey"] = "err.ECR-CALC-4221.approvalNotUsable",
-                ["approvalId"] = approvalId.ToString(CultureInfo.InvariantCulture),
-            });
-    }
 }

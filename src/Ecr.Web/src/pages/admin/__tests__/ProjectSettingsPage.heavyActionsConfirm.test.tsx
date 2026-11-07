@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { PeriodsPage } from '@/pages/admin/PeriodsPage';
+import { ProjectSettingsPage } from '@/pages/admin/ProjectSettingsPage';
 import { testTheme } from '@/test/render';
 
 /**
@@ -84,9 +84,9 @@ function respond(status: Status, grant: 'Read' | 'Manage' = 'Manage'): { posts: 
 function show(): void {
   render(
     <MantineProvider theme={testTheme}>
-      <MemoryRouter initialEntries={['/admin/periods?projectId=7']}>
+      <MemoryRouter initialEntries={['/admin/projects?projectId=7']}>
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-          <PeriodsPage />
+          <ProjectSettingsPage />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,
@@ -99,7 +99,7 @@ afterEach(() => {
 
 const Slow = 120_000;
 
-describe('PeriodsPage: важкі дії проєкту — через підтвердження', () => {
+describe('ProjectSettingsPage: важкі дії проєкту — через підтвердження', () => {
   it(
     'Activate: клік відкриває підтвердження, Cancel нічого не шле, підтвердження — шле',
     async () => {
@@ -130,20 +130,13 @@ describe('PeriodsPage: важкі дії проєкту — через підт�
   );
 
   it(
-    'перерахунок усього проєкту: клік відкриває підтвердження, запит — лише після нього',
+    'Period clarity: перерахунку проєкту в налаштуваннях немає — він на переліку документів',
     async () => {
-      const state = respond('Active');
-      const user = userEvent.setup();
+      respond('Active');
       show();
 
-      await user.click(await screen.findByRole('button', { name: '⟦workflow.recalculate⟧' }));
-
-      const dialog = await screen.findByRole('dialog', { name: '⟦periods.recalcTitle (code=PRJ-7)⟧' });
-      expect(state.posts).toEqual([]);
-
-      await user.click(within(dialog).getByRole('button', { name: '⟦workflow.recalculate⟧' }));
-
-      await waitFor(() => expect(state.posts).toEqual(['/api/v1/projects/7/recalculate']));
+      await screen.findByRole('button', { name: '⟦periods.archive⟧' });
+      expect(screen.queryByRole('button', { name: '⟦workflow.recalculate⟧' })).toBeNull();
     },
     Slow,
   );
@@ -162,33 +155,22 @@ describe('PeriodsPage: важкі дії проєкту — через підт�
     Slow,
   );
 
-  it(
-    'X-29: колонка дій календаря має назву для читалки',
-    async () => {
-      respond('Active');
-      show();
-
-      expect(await screen.findByRole('columnheader', { name: '⟦common.actions⟧' })).toBeTruthy();
-    },
-    Slow,
-  );
 });
 
-describe('PeriodsPage: дії над проєктом — лише з грантом Manage на нього (F-19)', () => {
+describe('ProjectSettingsPage: дії над проєктом — лише з грантом Manage на нього (F-19)', () => {
   it(
-    'грант Read: «Make current», «Archive», «Clone» не пропонуються — сервер дав би 403',
+    'грант Read: «Archive», «Clone», маршрут погодження не пропонуються — сервер дав би 403',
     async () => {
       respond('Active', 'Read');
       show();
 
-      // Календар доїхав — рядок періоду на екрані.
-      await screen.findByText('202601');
+      // Проєкт обрано й показано — розділ проєкту на екрані.
+      await screen.findByText((_, el) => el?.getAttribute('data-project-section') === 'project');
 
-      // ⛔ Мутація «лише право, без гранта» (стара умова) показує тут
-      // «Make current» на рядку й «Archive»/«Clone» у шапці.
-      expect(screen.queryByRole('button', { name: '⟦periods.pin⟧' })).toBeNull();
+      // ⛔ Мутація «лише право, без гранта» (стара умова) показує тут «Archive»/«Clone».
       expect(screen.queryByRole('button', { name: '⟦periods.archive⟧' })).toBeNull();
       expect(screen.queryByRole('button', { name: '⟦periods.clone⟧' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '⟦workflow.route⟧' })).toBeNull();
     },
     Slow,
   );
@@ -199,8 +181,8 @@ describe('PeriodsPage: дії над проєктом — лише з грант
       respond('Active', 'Manage');
       show();
 
-      expect(await screen.findByRole('button', { name: '⟦periods.pin⟧' })).toBeTruthy();
-      expect(screen.getByRole('button', { name: '⟦periods.archive⟧' })).toBeTruthy();
+      expect(await screen.findByRole('button', { name: '⟦periods.archive⟧' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: '⟦periods.clone⟧' })).toBeTruthy();
     },
     Slow,
   );

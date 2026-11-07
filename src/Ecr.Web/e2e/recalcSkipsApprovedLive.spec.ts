@@ -5,7 +5,7 @@ import { createMultiSheetDocument, signIn } from './multiSheet';
  * ✎ UAT-recalc-ux (UAT 07.11; слово людини: «тільки погоджені не мають перераховуватися … це також має логуватися»)
  * проти РЕАЛЬНОГО стенда (`tools/e2e-stand.ps1`, workflow `e2e-stand`, `-Grep recalcSkipsApproved`):
  *  1. документ на трьох аркушах власного проєкту: аркуш A поданий, B затверджений, C чернетка;
- *  2. Periods → «Recalculate» проєкту: замість відмови «Period … has submitted sheets» — перелік «1 затверджений аркуш
+ *  2. Documents (✎ Period clarity: раніше Periods) → «Recalculate» проєкту: замість відмови «Period … has submitted sheets» — перелік «1 затверджений аркуш
  *     пропущено» з посиланням, яке відкриває документ на аркуші B у його періоді;
  *  3. поданий A перераховано — на картці документа позначка «Recalculated after submission» для погоджувача;
  *  4. Documents → фільтр «Partly submitted» знаходить документ.
@@ -76,8 +76,9 @@ test.describe('Recalculation skips approved sheets and marks recalculated submit
       'GET document',
     );
 
-    // ── Periods → Recalculate: перелік пропущених замість відмови ───────────────────────────────
-    await page.goto(`/admin/periods?projectId=${String(card.projectId)}`);
+    // ── Documents → Recalculate (✎ Period clarity: дія проєкту переїхала зі сторінки Periods на перелік документів):
+    // перелік пропущених замість відмови ──────────────────────────────────────────────────────────
+    await page.goto(`/?projectId=${String(card.projectId)}`);
     await page.getByRole('button', { name: /^(Recalculate|Пересчитать|Қайта есептеу)$/ }).first().click();
     await page
       .getByRole('dialog')

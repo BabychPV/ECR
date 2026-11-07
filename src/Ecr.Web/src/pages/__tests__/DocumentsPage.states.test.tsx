@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { configure, render, screen, waitFor } from '@testing-library/react';
+import { configure, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -7,18 +7,14 @@ import { DocumentsPage } from '@/pages/DocumentsPage';
 import { testTheme } from '@/test/render';
 
 /**
- * Перелік документів: стани «помилка», «завантаження» (`ФВ-14.22`) і відмова
- * календаря періодів.
+ * Перелік документів: стани «помилка», «завантаження» (`ФВ-14.22`).
  *
  * ⚠ «Порожньо», «фільтр нічого не знайшов» і 403 переліку вже покриті в
  * `features/documents/__tests__/DocumentsPage.filters.test.tsx` — тут не
  * дублюються.
  *
- * ⛔ Дефект, який закрив останній випадок: відмова `GET /projects/{id}/periods`
- * не показувалася НІДЕ — автовибір періоду (`U-10`) мовчки не відбувався,
- * поле «Period» лишалося порожнім, колонка «State» — «—» у кожному рядку.
- * Тобто рівно той стан, який `U-10` прибирав, але тепер без жодної причини
- * на екрані.
+ * ✎ Period clarity (п. e): автовибору періоду (і запиту календарів) більше немає — типовий перегляд РОКУ, тож
+ * випадки «відмова календаря» прибрано разом із ним.
  */
 configure({ asyncUtilTimeout: 10_000 });
 
@@ -26,17 +22,6 @@ const Find = { timeout: 10_000 };
 
 const project = { id: 1, code: 'AUDIT_SMOKE_PRJ', status: 'Active' as const };
 
-const document1 = {
-  id: 1,
-  businessKey: 'DOC-000001',
-  createdAt: '2026-01-01T00:00:00Z',
-  projectId: 1,
-  sheetCount: 1,
-  sheetStates: {},
-  errorCount: null,
-  modifiedAt: '2026-09-20T10:00:00Z',
-  hasLateEdits: false,
-};
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -129,30 +114,4 @@ describe('DocumentsPage — стани', () => {
     expect(screen.queryByRole('table')).toBeNull();
   });
 
-  it('відмова календаря періодів видна з кодом, а перелік при цьому лишається', async () => {
-    serve({
-      documents: () => Promise.resolve(json({ items: [document1], nextCursor: null, totalCount: 1 })),
-      periods: () => Promise.resolve(problem(500, 'ECR-SYS-0500')),
-    });
-    show();
-
-    // Перелік приїхав — таблиця є.
-    expect(await screen.findByText('DOC-000001', {}, Find)).toBeTruthy();
-    // ⚠ Календар справді запитано: інакше відсутність банера нічого не доводить.
-    await waitFor(() => expect(requested.some((url) => url.includes('/projects/1/periods'))).toBe(true));
-
-    // Причина, чому період не підставився, — на екрані з кодом.
-    expect(await screen.findByText('ECR-SYS-0500', { exact: false }, Find)).toBeTruthy();
-  });
-
-  it('календар прочитано — банера відмови немає', async () => {
-    serve({
-      documents: () => Promise.resolve(json({ items: [document1], nextCursor: null, totalCount: 1 })),
-    });
-    show();
-
-    expect(await screen.findByText('DOC-000001', {}, Find)).toBeTruthy();
-    await waitFor(() => expect(requested.some((url) => url.includes('/projects/1/periods'))).toBe(true));
-    expect(screen.queryByText('ECR-SYS-0500', { exact: false })).toBeNull();
-  });
 });

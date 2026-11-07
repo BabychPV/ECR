@@ -24,6 +24,7 @@ import {
   MyGroupsPage,
   NotificationsPage,
   PeriodsPage,
+  ProjectSettingsPage,
   PermitsPage,
   RegistriesPage,
   RegistryConstructorPage,
@@ -489,6 +490,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminPeriods, 'admin'),
             element: guarded(routes.adminPeriods.handle, <PeriodsPage />),
             handle: routes.adminPeriods.handle,
+          },
+          {
+            path: relativePath(routes.adminProjectSettings, 'admin'),
+            element: guarded(routes.adminProjectSettings.handle, <ProjectSettingsPage />),
+            handle: routes.adminProjectSettings.handle,
           },
           {
             path: relativePath(routes.adminSources, 'admin'),

@@ -111,8 +111,13 @@ export type DocumentStateFilter = 'Draft' | 'PartlySubmitted' | 'Submitted' | 'A
 /** Параметри переліку документів (`BE-09b`). */
 interface DocumentListParams {
   periodKey: number | null;
+  /**
+   * ✎ Period clarity (п. e): рік переліку, коли місяць не обрано («All months»): сервер віддає `periodStates` за
+   * 12 місяців і фільтрує `state` за роком. ⚠ Разом із `periodKey` не йде — місяць важить більше.
+   */
+  year?: number | null;
   cursor?: string | null;
-  /** ⚠ Лише разом із `periodKey`: без періоду стан не визначений (`D-93`), сервер відповість `422`. */
+  /** ⚠ Лише разом із `periodKey` або `year` (✎ Period clarity: стан за рік); без них сервер відповість `422`. */
   state?: DocumentStateFilter | null;
   /** Лише документи, де я автор або подавав аркуш. ⛔ Не разом з `ownerUserId` — сервер відповість `422`. */
   mine?: boolean;
@@ -154,6 +159,7 @@ interface DocumentListParams {
 export function listDocuments(params: DocumentListParams): Promise<DocumentListPage> {
   const query = new URLSearchParams({ limit: '50' });
   if (params.periodKey !== null) query.set('periodKey', String(params.periodKey));
+  else if (params.year) query.set('year', String(params.year));
   if (params.cursor) query.set('cursor', params.cursor);
   if (params.state) query.set('state', params.state);
   // ✎ D-450: «мої» і конкретна людина — взаємовиключні (сервер: `422 ownerWithMine`); людина важить більше.
@@ -238,8 +244,15 @@ type DocumentListSummary = components['schemas']['DocumentListSummaryResponse'];
  * ⚠ Адреса — через `URLSearchParams` у шаблоні з одним літералом `/api/v1/documents/summary?…`, як і в
  * `listDocuments`: сторож споживачів бере весь вміст між лапками.
  */
-function documentListSummary(periodKey: number, projectId: number | null): Promise<DocumentListSummary> {
-  const query = new URLSearchParams({ periodKey: String(periodKey) });
+function documentListSummary(
+  periodKey: number | null,
+  projectId: number | null,
+  year: number | null,
+): Promise<DocumentListSummary> {
+  // ✎ Period clarity: місяць важить більше; без нього — зведення за рік (`year`, те саме правило, що фільтр стану).
+  const query = new URLSearchParams(
+    periodKey !== null ? { periodKey: String(periodKey) } : { year: String(year ?? 0) },
+  );
   if (projectId !== null) query.set('projectId', String(projectId));
 
   return apiFetch<DocumentListSummary>(`/api/v1/documents/summary?${query.toString()}`);
@@ -248,8 +261,8 @@ function documentListSummary(periodKey: number, projectId: number | null): Promi
 /**
  * Зведення переліку документів.
  *
- * ⚠ Без періоду запит НЕ йде: стан документа поза періодом не визначений
- * (`D-93`), і сервер на це відповів би `422`.
+ * ⚠ Без періоду й без року запит НЕ йде: стан документа поза періодом не визначений
+ * (`D-93`), і сервер на це відповів би `422`. ✎ Period clarity: з роком — зведення за рік.
  *
  * ⚠ Ключ починається з `'documents'` навмисно: усе, що інвалідовує перелік
  * (створення документа), тим самим префіксом оновлює і смугу над ним.
@@ -263,11 +276,16 @@ export function useDocumentListSummary(
   periodKey: number | null,
   policy?: DocumentListSummaryPolicy,
   projectId: number | null = null,
+  year: number | null = null,
 ): UseQueryResult<DocumentListSummary> {
+  // ✎ Period clarity: без місяця, але з роком — зведення за рік (окремий ключ, той самий префікс `'documents'`).
+  const yearScope = periodKey === null && year !== null;
+  const monthKey = projectId === null ? ['documents', 'summary', periodKey] : ['documents', 'summary', periodKey, projectId];
+
   return useQuery({
-    queryKey: projectId === null ? ['documents', 'summary', periodKey] : ['documents', 'summary', periodKey, projectId],
-    queryFn: () => documentListSummary(periodKey ?? 0, projectId),
-    enabled: periodKey !== null,
+    queryKey: yearScope ? ['documents', 'summary', 'year', year, projectId] : monthKey,
+    queryFn: () => documentListSummary(periodKey, projectId, year),
+    enabled: periodKey !== null || year !== null,
     ...policy,
   });
 }

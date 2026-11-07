@@ -3888,25 +3888,12 @@ public interface IUserPreferenceStore
 }
 ```
 
-#### `IRecalculationApprovalStore`
+#### ~~`IRecalculationApprovalStore`~~
 
-Погодження перерахунку закритого періоду `calc.RecalculationApproval` (ФВ-9.7,
-аудит безпеки S1). Підтвердження й використання — умовні `UPDATE` з одним
-рядком результату: «ще чекає / ще не використано» перевіряє база в момент запису.
-Використання вимагає ще й того самого стану періоду й тієї самої
-`doc.Period.StateChangedAt`, що були при запиті.
-
-```csharp
-public interface IRecalculationApprovalStore
-{
-    public void Add(RecalculationApproval approval);
-    public Task<PeriodStamp?> FindPeriodStampAsync(int projectId, int periodKey, CancellationToken ct);
-    public Task<IReadOnlyList<RecalculationApprovalDto>> ListActiveAsync(int projectId, DateTime utcNow, CancellationToken ct);
-    public Task<RecalculationApprovalDto?> FindAsync(long id, int projectId, CancellationToken ct);
-    public Task<bool> TryConfirmAsync(long id, int projectId, int confirmedByUserId, DateTime utcNow, CancellationToken ct);
-    public Task<RecalculationApprovalDto?> TryConsumeAsync(long id, int projectId, int periodKey, int requestedByUserId, DateTime utcNow, CancellationToken ct);
-}
-```
+✎ 2026-11-07 (`D-468`, квіз людини): порт, сховище, обробники й ендпоінти погоджень перерахунку закритого
+періоду прибрано — закритий місяць має один шлях: Reopen (з причиною) → звичайний перерахунок. **[debt]** Таблиця
+`calc.RecalculationApproval` (і сутність `RecalculationApproval` у моделі EF) лишається БЕЗ міграції: у неї ніхто не
+пише й ніхто не читає; прибрати — окремою міграцією за токеном.
 
 #### `IEffectiveAccessStore`
 
@@ -4204,7 +4191,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-UOM-4041` | 404 | розмірності з таким ідентифікатором немає (`CreateUnitHandler`) |
 | `ECR-UOM-0409` | 409 | на одиницю посилаються — не видаляється; перелік у `details.references` (`DeleteUnitHandler`, директива №15 BE-15), **або** не змінюються її множник і зсув (`unitFactorInUse`), **або** одиницю змінили між читанням і записом — `If-Match` не збігся з `rowVersion` (`unitChanged`, `UpdateUnitHandler`) |
 | `ECR-CALC-0404` | 404 | версії методології не існує |
-| `ECR-CALC-0409` | 409 | стан методології чи версії не дозволяє дію. Заголовок нейтральний, випадок каже `messageKey`-подробиця (як у `ECR-JOB-0409`): ~~публікація автором версії (D-40, `authorCannotPublish`), погодження власного перерахунку закритого періоду (D-40, `ownRecalculationApproval`)~~ — ✎ 2026-10-23: обидві подробиці ВИВЕДЕНО (D-440, AN-127: чотири очі скасовано; ключі — у «Прибрані ключі» `09-seed.sql`, CHECK `CK_MV_FourEyes`/`CK_RecalcApproval_FourEyes` знято міграцією `D440DropFourEyes`; сам код `ECR-CALC-0409` чинний для решти випадків); видалення не-чернетки (`versionNotDraft`) або версії, якою вже рахували (`versionUsedInCalculations`, BE-25); також зміна не-чернетки, чужий дочірній запис, зайнятий номер версії чи дата чинності; погодження перерахунку закритого періоду не чекає підтвердження — немає, уже підтверджене чи використане, прострочене (аудит S1, `approvalNotPending`) |
+| `ECR-CALC-0409` | 409 | стан методології чи версії не дозволяє дію. Заголовок нейтральний, випадок каже `messageKey`-подробиця (як у `ECR-JOB-0409`): ~~публікація автором версії (D-40, `authorCannotPublish`), погодження власного перерахунку закритого періоду (D-40, `ownRecalculationApproval`)~~ — ✎ 2026-10-23: обидві подробиці ВИВЕДЕНО (D-440, AN-127: чотири очі скасовано; ключі — у «Прибрані ключі» `09-seed.sql`, CHECK `CK_MV_FourEyes`/`CK_RecalcApproval_FourEyes` знято міграцією `D440DropFourEyes`; сам код `ECR-CALC-0409` чинний для решти випадків); видалення не-чернетки (`versionNotDraft`) або версії, якою вже рахували (`versionUsedInCalculations`, BE-25); також зміна не-чернетки, чужий дочірній запис, зайнятий номер версії чи дата чинності; ~~погодження перерахунку закритого періоду не чекає підтвердження (аудит S1, `approvalNotPending`)~~ — ✎ 2026-11-07: виведено разом із погодженнями (`D-468`) |
 | `ECR-CALC-0422` | 422 | запит до методології невалідний. Заголовок нейтральний («Invalid methodology request»), випадок каже `messageKey`-подробиця: публікація без зеленого тесту (ФВ-9.12, `publishNoGreenTest`), без причини (`publishNoReason`), без дати чинності (`publishNoEffectiveDate`), з проблемами перевірок (`publishChecksFailed`) чи золотого набору (`goldenSetEmpty`, `goldenSetDiverged`); невалідні константа, формула, правило, імпорт чи залежність; порожнє вікно періодів матриці покриття (`coverageWindow`, ФВ-13.9) |
 | `ECR-CALC-0431` | 422 | `^` у діалекті методологій — це XOR, а не степінь |
 | `ECR-CALC-0432` | 422 | токен `@Arg` у виразі, якого немає в оголошеному списку аргументів формули: збірка його не підставить (директива ПК-1 №05 §7, пастка 2) |
@@ -4496,14 +4483,14 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/projects/{id}/activate` | `Project.Manage` | 1 |
 | `POST` | `/api/v1/projects/{id}/archive` | `Project.Manage` | 1 |
 | `POST` | `/api/v1/projects/{id}/clone` | `Project.Manage` | 3 |
-| `PUT` | `/api/v1/projects/{id}/current-period` | `Period.Configure` | 3 |
+| `PUT` | `/api/v1/projects/{id}/current-period` | `Period.Configure` (✎ 2026-11-07: **застаріло** — `…/settings/current-period`) | 3 |
+| `GET` | `/api/v1/projects/{id}/settings/current-period` | `Document.View` | 3 |
+| `PUT` | `/api/v1/projects/{id}/settings/current-period` | `Period.Configure` | 3 |
+| `DELETE` | `/api/v1/projects/{id}/settings/current-period/pin` | `Period.Configure` | 3 |
 | `PUT` | `/api/v1/projects/{id}/timezone` | `Project.Manage` | 8 |
 | `GET` | `/api/v1/projects/{id}/periods` | `Document.View` | 3 |
 | `GET` | `/api/v1/projects/{id}/template-versions` | `Document.View` | 3 |
 | `POST` | `/api/v1/projects/{id}/recalculate` | `Calculation.Recalculate` | 3 |
-| `GET` | `/api/v1/projects/{id}/recalculation-approvals` | `Calculation.Recalculate` | 4 |
-| `POST` | `/api/v1/projects/{id}/recalculation-approvals` | `Calculation.Recalculate` | 4 |
-| `POST` | `/api/v1/projects/{id}/recalculation-approvals/{approvalId}/confirm` | `Calculation.Recalculate` | 4 |
 | `POST` | `/api/v1/periods/{id}/reopen` | `Period.Reopen` | 3 |
 | `GET` | `/api/v1/documents` | `Document.View` | 1 |
 | `GET` | `/api/v1/documents/summary` | `Document.View` | 6 |
@@ -5880,3 +5867,51 @@ public sealed record RowDto(
 
 П'ять станів не перетинаються; смуга віддає `partlySubmitted` поруч із рештою лічильників (`draft` більше не включає
 частково подані). «Повернуто» тут — лише `Rejected`; `Reopen` (D-449) у фільтр не входить — для цього є «Мої задачі».
+
+## ✎ 2026-11-07 Period clarity (квіз людини 07.11)
+
+### Створення документа без періоду (п. e)
+
+`POST /api/v1/documents` періоду не приймає і не вимагає: документ річний, стан — за аркушем × періодом (`D-93`), рядок `wf.ApprovalState` з'являється з першим поданням (`S-17`). Майстер клієнта кроку періоду не має; зайве поле `periodKey` старого клієнта ігнорується (контракт `CreateDocumentRequest` не змінено). `D-67`/`D-70` не зачеплено: правка поданого — лише Reopen, пізні правки позначаються як і раніше.
+
+### Рік у переліку документів: смуга станів і фільтр за рік (п. e2)
+
+`GET /api/v1/documents?year=YYYY` (необов'язковий, `2000..2999`, інакше `422 ECR-REQ-0422 documentYearOutOfRange`):
+
+- кожен документ сторінки несе `periodStates: [{ periodKey, state }]` — по одному на КОЖЕН період проєкту в році (усі,
+  і `Scheduled`), за зростанням ключа; без `year` — `null`. Рахується ОДНИМ запитом на сторінку (без N+1).
+- `state` клітинки «документ × період» — те саме визначення, що в таблиці «Стан погодження документа» вище (UAT-recalc-ux),
+  лише за аркушами складу, видимими читачеві (S18/N1-01, D-444): `Rejected` / `Draft` / `PartlySubmitted` / `Submitted` /
+  `Approved`. Документ без складу — `Draft`.
+- **Фільтр `state` за рік** (задано `year`, не задано `periodKey`): **те саме п'ятистанове правило над усіма клітинками
+  «видимий аркуш × РОЗПОЧАТИЙ період року»** (стан періоду не `Scheduled`): `Rejected` — хоч одна клітинка повернута;
+  `Draft` — жодна не подана/затверджена; `PartlySubmitted` — є подана/затверджена і є неподана; `Submitted` — неподаних
+  немає, хоч одна лише подана; `Approved` — усі затверджені (і є хоч одна клітинка). Майбутні місяці рік не «псують».
+  З `periodKey` фільтр, як і раніше, — за цей місяць. Без обох — `422 documentStateNeedsPeriod`.
+- ~~`GET /documents/summary` лишається помісячним (`periodKey` обов'язковий); лічильники за рік — **[debt]**~~ ✎ 07.11
+  (координатор, «без боргів», lane `integ-period-clarity-b`): **`GET /documents/summary?year=YYYY`** (без `periodKey`) —
+  лічильники ЗА РІК тим самим правилом, що й фільтр `state` за рік вище (клітинки «видимий аркуш × розпочатий період
+  року»), ОДНИМ агрегованим запитом, тією самою межею видимості (гранти, сховані аркуші, документи-надання), що й за
+  місяць: `draft + partlySubmitted + submitted + approved + rejected` = кількість видимих документів, і кожне число
+  дорівнює кількості рядків переліку з відповідним фільтром `state` за рік. `withIssues` — документи, у яких хоч в одному
+  розпочатому періоді року ОСТАННІЙ підсумок перевірки має помилки (звуження — як за місяць); `sheetsApproved`/`sheetsTotal`
+  — клітинки; `staleResultsCount`/`staleResultsMineCount` = 0 (застарілість належить місяцю, фільтр `resultsStale` без
+  `periodKey` — `422`). `periodKey` важить більше за `year`; без обох — `422 documentStateNeedsPeriod`; рік поза
+  `2000..2999` — `422 documentYearOutOfRange`.
+
+### Поточний період — у налаштуваннях проєкту (п. c)
+
+Поточний період визначається **автоматично за датою** (режим `Auto`, веде `PeriodStateJob`: найраніший `Open`, інакше
+найпізніший `Grace`); ручне закріплення і «Повернути автоматичний» — у налаштуваннях проєкту. `D-77` без змін: значення —
+лише за замовчуванням (документи, розклади, параметри звітів), **ніколи** не рішення про доступ.
+
+- `GET /projects/{id}/settings/current-period` (`Document.View`, невидимий проєкт — 404) →
+  `CurrentPeriodSettingDto { projectId, mode: "Auto"|"Pinned", currentPeriodId, currentPeriodKey, automaticPeriodId,
+  automaticPeriodKey, pinnedReason, changedAt }`; `automatic*` — який період був би поточним у `Auto` зараз.
+- `PUT /projects/{id}/settings/current-period` (`Period.Configure` + Manage на проєкт) — тіло
+  `{ mode, pinnedPeriodId?, reason? }`; `Pinned` вимагає період проєкту (`422 ECR-PRD-0422 periodNotInProject`) і причину
+  (`pinReasonRequired`, ≤ 400 — `pinReasonTooLong`); аудит `Project.CurrentPeriod` Pin/Unpin як і раніше. Відповідь — DTO.
+- `DELETE /projects/{id}/settings/current-period/pin` — «Повернути автоматичний»: режим `Auto`, і поточний період
+  перераховується ОДРАЗУ за тим самим правилом (раніше — до наступного прогону `PeriodStateJob`). Відповідь — DTO.
+- `PUT /projects/{id}/current-period` — **застаріло** (`deprecated` в OpenAPI), лишається для старого клієнта; той самий
+  обробник (і та сама негайна зміна при знятті закріплення).

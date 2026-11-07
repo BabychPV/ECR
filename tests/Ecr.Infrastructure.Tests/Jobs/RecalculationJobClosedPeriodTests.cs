@@ -252,68 +252,21 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.7")]
-    public async Task Погоджений_перерахунок_закритого_періоду_заходить_бо_це_названий_виняток()
+    public async Task Після_Reopen_задача_пише_в_колись_закритий_період()
     {
-        // ⛔ ЄДИНИЙ випадок, коли системний перерахунок таки пише в ЗАКРИТИЙ
-        // період, і він названий, а не мовчазний: `ClosedPeriodApproval`
-        // (причина + погодження людиною з правом; «друга людина» — лише до D-440) на маршруті
-        // перерахунку ПРОЄКТУ. `RunCalculationHandler` кладе в payload
-        // `approvedBy`, і гейт мусить це прочитати.
-        //
-        // ⚠ Тест сторожить саме прохідність: без нього фікс міг би «закрити»
-        // закриті періоди намертво — і зламати єдиний штатний шлях виправити
-        // помилку в уже поданій звітності.
+        // ✎ 07.11 (D-468, квіз людини): закритий місяць має ОДИН шлях — Reopen (з причиною) → звичайний
+        // перерахунок. Погодження перерахунку закритого періоду прибрано; тест сторожить, що шлях Reopen
+        // справді відкриває запис (Reopen переводить період у `Grace`), інакше закритий місяць став би глухим кутом.
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var document = await builder.BuildAsync();
 
         await CloseAsync(builder, document.ProjectId, document.PeriodKey.Value);
-        Arrange(document);
-
-        await using var db = builder.CreateContext();
-        var job = Job(db);
-
-        var request = new RecalculationRequest(
-            ProjectId: document.ProjectId,
-            DocumentId: document.DocumentId,
-            PeriodKey: document.PeriodKey.Value,
-            TriggeredByUserId: 7,
-            SheetDefId: null,
-            ApprovedBy: 9);
-
-        await job.ExecuteAsync(request, NoOpProgress.Instance, CancellationToken.None);
-
-        var upsert = Assert.Single(Applied());
-        Assert.Equal(document.PeriodKey.Value, upsert.Address.PeriodKey.Value);
-        Assert.Equal(15m, upsert.Value.ValueNumeric);
-    }
-
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-9.17")]
-    public async Task Погодження_НЕ_відкриває_поданий_аркуш_у_закритому_періоді()
-    {
-        // ⛔ Межа винятку вище. `ClosedPeriodApproval` погоджує перерахунок
-        // ЗАКРИТОГО періоду — і НЕ погоджує зміну ПОДАНОЇ цифри (ФВ-9.17).
-        // Без цього тесту `ApprovedBy` перетворився б на універсальний обхід
-        // усього гейту, а не на названий виняток з однієї його половини.
-        var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var document = await builder.BuildAsync();
-
-        await using (var setup = builder.CreateContext())
+        await using (var reopen = builder.CreateContext())
         {
-            var period = await setup.Periods.SingleAsync(
+            var period = await reopen.Periods.SingleAsync(
                 p => p.ProjectId == document.ProjectId && p.PeriodKeyValue == document.PeriodKey.Value);
-            period.AdvanceTo(PeriodState.Closed, DateTime.UtcNow);
-
-            var state = new ApprovalState(
-                document.DocumentId, document.SheetDefId, document.PeriodKey.Value);
-            state.Submit(userId: 5, DateTime.UtcNow);
-            // ✎ UAT-recalc-ux: ручний перерахунок пропускає лише ЗАТВЕРДЖЕНИЙ аркуш (поданий перераховується).
-            state.Approve(userId: 6, DateTime.UtcNow);
-            setup.ApprovalStates.Add(state);
-
-            await setup.SaveChangesAsync();
+            period.Reopen(DateTime.UtcNow.AddDays(7), "Виправлення коефіцієнта", DateTime.UtcNow);
+            await reopen.SaveChangesAsync();
         }
 
         Arrange(document);
@@ -326,16 +279,13 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
             DocumentId: document.DocumentId,
             PeriodKey: document.PeriodKey.Value,
             TriggeredByUserId: 7,
-            SheetDefId: null,
-            ApprovedBy: 9);
+            SheetDefId: null);
 
-        var thrown = await Record.ExceptionAsync(
-            () => job.ExecuteAsync(request, NoOpProgress.Instance, CancellationToken.None));
+        await job.ExecuteAsync(request, NoOpProgress.Instance, CancellationToken.None);
 
-        Assert.Empty(AppliedOrEmpty());
-
-        var error = Assert.IsType<BusinessRuleException>(thrown);
-        Assert.Equal("ECR-CALC-4221", error.ErrorCode);
+        var upsert = Assert.Single(Applied());
+        Assert.Equal(document.PeriodKey.Value, upsert.Address.PeriodKey.Value);
+        Assert.Equal(15m, upsert.Value.ValueNumeric);
     }
 
     /// <summary>Переводить період проєкту в <c>Closed</c>.</summary>
@@ -494,7 +444,6 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
             new TestClock(DateTime.UtcNow),
-            Substitute.For<Ecr.Application.Ports.IRecalculationApprovalStore>(),
             Substitute.For<Ecr.Application.Ports.IAuditWriter>());
 
     /// <summary>Оркестратор методологій: прогін завжди «успішний і порожній».</summary>

@@ -126,15 +126,18 @@ describe('DocumentsPage: зведення переліку (BE-09)', () => {
   );
 
   it(
-    'без періоду зведення не запитується і смуги немає',
+    'Period clarity: без місяця — зведення ЗА РІК (year, без periodKey), смуга з числами сервера',
     async () => {
       mockFetch();
-      show('/');
+      show('/?year=2025');
 
       await screen.findByRole('table', {}, { timeout: SlowEnvTimeout });
+      const strip = await screen.findByRole('group', { name: /documents\.summaryLabel/ }, { timeout: SlowEnvTimeout });
 
-      expect(requested.some((url) => url.includes('/documents/summary'))).toBe(false);
-      expect(document.querySelector('[data-summary-counter]')).toBeNull();
+      // ⛔ Мутація «зведення лише за місяць» — запиту немає, смуги немає.
+      const summaries = requested.filter((url) => url.includes('/documents/summary')).map((url) => new URL(url, 'http://x'));
+      expect(summaries.some((u) => u.searchParams.get('year') === '2025' && !u.searchParams.has('periodKey'))).toBe(true);
+      expect(strip.querySelector('[data-summary-counter="approved"]')?.textContent).toContain('12');
     },
     SlowEnvTimeout,
   );

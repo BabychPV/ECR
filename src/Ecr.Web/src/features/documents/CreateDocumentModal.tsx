@@ -4,13 +4,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
-import type { CreateDocumentRequest, DocumentIdResponse, PeriodCalendarDto } from '@/api/types';
+import type { CreateDocumentRequest, DocumentIdResponse } from '@/api/types';
 import { projectsQuery } from '@/features/projects/allProjects';
 import { groupRuleViolations } from './groupRuleViolations';
-import { newestOpenPeriodKey } from './newDocumentPeriod';
-import { formatPeriodKey } from '@/shared/format';
 import { localized } from '@/shared/i18n/localized';
-import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { KeyValue } from '@/shared/ui/KeyValue';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
@@ -24,7 +21,8 @@ import { t } from '@/shared/i18n';
  * «≥ 2 кроків або є що перевірити перед застосуванням (створити документ…)» →
  * `Wizard`; макет — `docs/design/hybrid/screens-work.js`, `openCreate`).
  *
- * Кроки: Project → Period → Sheets → Review (додає `Wizard`). Кроку «Template»
+ * Кроки: Project → Sheets → Review (додає `Wizard`; ✎ Period clarity: кроку Period немає — «один документ
+ * на об'єкт, усі місяці всередині»). Кроку «Template»
  * з макета немає навмисно: версію шаблону визначає ПРОЄКТ (V-12, V-11), обирати
  * її нема з чого — тож вона показується в кроці Project і в підсумку.
  *
@@ -60,9 +58,8 @@ export function CreateDocumentModal({
   opened: boolean;
   onClose: () => void;
   /**
-   * FP-7 (прохід «від першого обличчя» 2026-10-11): період, обраний у переліку документів, — типовий у
-   * майстрі, якщо його можна обрати для проєкту (відкритий, пільговий чи закритий). Майстер ігнорував
-   * період зі списку й завжди пропонував найновіший відкритий. Вибір людини в самому майстрі сильніший.
+   * ✎ Period clarity (людина 07.11, п. e): кроку «Period» більше немає — документ охоплює весь рік (сервер період
+   * не приймає). Місяць, обраний у переліку, лише визначає, на якому місяці документ відкриється після створення.
    */
   preferredPeriodKey?: number | null;
 }): JSX.Element {
@@ -86,9 +83,6 @@ export function CreateDocumentModal({
   // ⛔ Опційне: `BusinessKey` лишається унікальним технічним ключем незалежно від імені.
   const [name, setName] = useState<LocalizedValue>({});
 
-  // A2-05: період, у якому відкриється документ; типово — найновіший ВІДКРИТИЙ.
-  const [pickedPeriod, setPickedPeriod] = useState<string | null>(null);
-
   // ⚠ Скидання при кожному відкритті — як і дані самого `Wizard`: вибір попереднього
   // разу, що лишився в полях, — найтихіший спосіб створити документ не того проєкту.
   useEffect(() => {
@@ -97,7 +91,6 @@ export function CreateDocumentModal({
     setProjectId(null);
     setPickedSheets(null);
     setName({});
-    setPickedPeriod(null);
   }, [opened]);
 
   const projects = useQuery({
@@ -112,33 +105,9 @@ export function CreateDocumentModal({
     enabled: opened && projectId !== null,
   });
 
-  const calendar = useQuery({
-    queryKey: ['periods', Number(projectId)],
-    queryFn: () => apiFetch<PeriodCalendarDto>(`/api/v1/projects/${projectId ?? ''}/periods`),
-    enabled: opened && projectId !== null,
-  });
-
   const versionId = template.data?.templateVersionId ?? null;
   const available = template.data?.sheets ?? [];
   const sheets = pickedSheets ?? available.map((sheet) => sheet.id);
-
-  // ✎ 2026-10-06, рішення людини: сервер не забороняє документ у закритому періоді, і майстер
-  // теж — закритий період у переліку є, з попередженням. Не пропонуються лише ще не відкриті.
-  const choosablePeriods = (calendar.data?.periods ?? [])
-    .filter((period) => period.state === 'Open' || period.state === 'Grace' || period.state === 'Closed')
-    .sort((a, b) => b.periodKey - a.periodKey);
-  const newestOpen = newestOpenPeriodKey(calendar.data?.periods);
-  const preferred =
-    preferredPeriodKey !== null && choosablePeriods.some((period) => period.periodKey === preferredPeriodKey)
-      ? String(preferredPeriodKey)
-      : null;
-  const periodKey =
-    pickedPeriod ??
-    preferred ??
-    (newestOpen === null ? (choosablePeriods[0] === undefined ? null : String(choosablePeriods[0].periodKey)) : String(newestOpen));
-  const pickedState = choosablePeriods.find((period) => String(period.periodKey) === periodKey)?.state ?? null;
-  const periodLabel = (key: number): string =>
-    formatPeriodKey(key, calendar.data?.periodKind) || String(key);
 
   const projectCode =
     projects.data?.items.find((project) => String(project.id) === projectId)?.code ?? null;
@@ -203,7 +172,6 @@ export function CreateDocumentModal({
               // Аркуші належать версії проєкту: залишений вибір від попереднього послав би
               // на сервер ідентифікатори з чужої структури.
               setPickedSheets(null);
-              setPickedPeriod(null);
             }}
           />
 
@@ -233,42 +201,6 @@ export function CreateDocumentModal({
           />
         </Stack>
       ),
-    },
-    {
-      id: 'period',
-      label: t('documents.period'),
-      hint: t('documents.createPeriodHint'),
-      render: () =>
-        calendar.data !== undefined && choosablePeriods.length === 0 ? (
-          <Banner tone="warning" text={t('documents.createNoOpenPeriod')} testId="create-no-open-period" />
-        ) : (
-          <Stack gap="xs">
-            {calendar.error !== null && (
-              <ErrorAlert error={calendar.error} onRetry={() => void calendar.refetch()} />
-            )}
-            <Select
-              label={t('documents.period')}
-              data={choosablePeriods.map((period) => ({
-                value: String(period.periodKey),
-                // ⚠ Ключі літералами (сторож EndpointCoverageTests): не-Open тут лише Grace і Closed.
-                label:
-                  period.state === 'Open'
-                    ? periodLabel(period.periodKey)
-                    : `${periodLabel(period.periodKey)} · ${
-                        period.state === 'Closed' ? t('status.period.Closed') : t('status.period.Grace')
-                      }`,
-              }))}
-              value={periodKey}
-              onChange={(value) => setPickedPeriod(value)}
-              allowDeselect={false}
-            />
-
-            {/* ⚠ Лише попередження, не відмова: створення в закритому періоді дозволене. */}
-            {pickedState === 'Closed' && (
-              <Banner tone="warning" text={t('documents.createClosedPeriod')} testId="create-closed-period" />
-            )}
-          </Stack>
-        ),
     },
     {
       id: 'sheets',
@@ -338,10 +270,6 @@ export function CreateDocumentModal({
               ...(template.data === undefined ? {} : { hint: `v${template.data.version}` }),
             },
             {
-              label: t('documents.period'),
-              value: periodKey === null ? null : periodLabel(Number(periodKey)),
-            },
-            {
               label: t('documents.sheets'),
               value: t('documents.createSheetsCount', {
                 included: included.length,
@@ -363,8 +291,11 @@ export function CreateDocumentModal({
 
             // Одразу відкриваємо документ: інакше людина шукає його в переліку за
             // бізнес-ключем, якого ще не бачила.
+            // ✎ Period clarity: документ — на весь рік; відкривається на місяці, обраному в переліку, а без
+            // нього — на поточному (`DocumentPage`).
             await navigate(
-              `/documents/${result.documentId}` + (periodKey === null ? '' : `?periodKey=${periodKey}`),
+              `/documents/${result.documentId}` +
+                (preferredPeriodKey === null ? '' : `?periodKey=${String(preferredPeriodKey)}`),
             );
           },
 

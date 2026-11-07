@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { PeriodsPage, periodCaption, siteMomentText } from '@/pages/admin/PeriodsPage';
+import { PeriodsPage, lockMomentOf, periodCaption, siteMomentText } from '@/pages/admin/PeriodsPage';
 import { testTheme } from '@/test/render';
 
 /**
@@ -87,27 +87,31 @@ afterEach(() => {
 });
 
 describe('PeriodsPage: межі періодів — у поясі майданчика і підписані чесно', () => {
-  it('початок, останній день прийому даних і пільговий строк — у поясі проєкту', { timeout: 60_000 }, async () => {
+  it('Period clarity: одна дата «Locks on» — мить блокування в поясі проєкту', { timeout: 60_000 }, async () => {
     mockFetch('Monthly');
     show();
 
     const times = await screen.findAllByText((_, el) => el?.tagName === 'TIME', {}, { timeout: 20_000 });
     const shown = times.map((el) => norm(el.textContent));
 
-    // ⛔ Мутація «форматувати в поясі браузера» (старий `<Timestamp>`) дає
-    // «Dec 31, 2025» — день раніше в будь-якому поясі машини.
-    expect(shown[0]).toBe('Jan 1, 2026');
+    // ✎ Period clarity: у рядку ОДНА дата — ні початку, ні «Grace until».
+    expect(shown).toHaveLength(1);
 
-    // ⛔ `endsAt` — ВИКЛЮЧНЕ закриття (північ 17.03): останній день, коли дані
-    // ще приймаються, — 16.03. Мутація «без `inclusiveEnd`» дає «Mar 17, 2026».
-    expect(shown[1]).toBe('Mar 16, 2026');
-
-    // Пільговий строк — із годиною, у поясі майданчика: 15.02 00:00, а не
-    // «Feb 14, 9:00 PM» пояса браузера.
-    expect(shown[2]).toBe('Feb 15, 2026, 12:00 AM');
+    // ⛔ Мутація «форматувати в поясі браузера» (старий `<Timestamp>`) дає інший день у будь-якому поясі машини;
+    // блокування — північ 17.03 майданчика.
+    expect(shown[0]).toBe('Mar 17, 2026, 12:00 AM');
 
     // Точний момент сервера — у розмітці, без змін.
-    expect(times[0]?.getAttribute('dateTime')).toBe('2026-01-01T00:00:00+14:00');
+    expect(times[0]?.getAttribute('dateTime')).toBe('2026-03-17T00:00:00+14:00');
+  });
+
+  it('lockMomentOf: перевідкритий місяць блокується за строком перевідкриття, закритий — за календарем', () => {
+    const base = { endsAt: '2026-03-17T00:00:00+14:00' };
+    expect(lockMomentOf({ ...base, state: 'Open', reopenedUntil: null })).toBe(base.endsAt);
+    expect(lockMomentOf({ ...base, state: 'Open', reopenedUntil: '2026-05-01T00:00:00+14:00' })).toBe(
+      '2026-05-01T00:00:00+14:00',
+    );
+    expect(lockMomentOf({ ...base, state: 'Closed', reopenedUntil: '2026-05-01T00:00:00+14:00' })).toBe(base.endsAt);
   });
 
   it('квартальний проєкт: 202504 — четвертий квартал 2025, а не «April 2025»', { timeout: 60_000 }, async () => {

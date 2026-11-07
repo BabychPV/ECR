@@ -691,7 +691,7 @@ public sealed class PatchDocumentHeaderHandler(
         {
             if (period.State == PeriodState.Scheduled
                 || Calculations.RecalculationWritePolicy.Check(
-                    period.State, hasSubmittedSheets: false, hasClosedPeriodApproval: false)
+                    period.State, hasSubmittedSheets: false)
                 != Calculations.RecalculationWriteDenial.None)
             {
                 continue;

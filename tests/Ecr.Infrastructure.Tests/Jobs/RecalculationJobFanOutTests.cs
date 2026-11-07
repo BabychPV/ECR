@@ -32,9 +32,9 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// <remarks>
 /// Мутації, на яких ці тести червоніють:
 /// <list type="bullet">
-/// <item>дочірній payload без погодження (<c>new RecalculationRequest(ProjectId,
-/// documentId, PeriodKey, TriggeredByUserId)</c> замість <c>request with { DocumentId }</c>)
-/// — <see cref="Перерахунок_закритого_періоду_переносить_погодження_в_КОЖНУ_документну_задачу"/>;</item>
+/// <item>дочірній payload без автора (<c>new RecalculationRequest(ProjectId,
+/// documentId, PeriodKey, null)</c> замість <c>request with { DocumentId }</c>)
+/// — <see cref="Перерахунок_проєкту_переносить_автора_в_КОЖНУ_документну_задачу"/>;</item>
 /// <item><c>NewRun</c> без <c>documentId</c> (прогін «проєкт × період») —
 /// <see cref="Два_документи_паралельно_не_витісняють_актуальність_один_одного"/>;</item>
 /// <item><c>EnqueueAsync</c> замість <c>EnqueueCoalescedAsync</c> — обидва тести коалесценції.</item>
@@ -123,13 +123,14 @@ public sealed class RecalculationJobFanOutTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.7")]
-    public async Task Перерахунок_закритого_періоду_переносить_погодження_в_КОЖНУ_документну_задачу()
+    public async Task Перерахунок_проєкту_переносить_автора_в_КОЖНУ_документну_задачу()
     {
         var (builder, document) = await ArrangeAsync(extraDocuments: 2);
         var documents = await DocumentIdsAsync(builder, document.ProjectId);
         var scheduler = new RecordingScheduler();
 
-        // Payload рівно тієї форми, яку кладе в чергу `RunCalculationHandler`, — JSON із черги.
+        // Payload із черги. ✎ 07.11 (D-468): поля погодження (`approvedBy`…) — від задач, поставлених до прибирання
+        // погоджень; запис їх більше не має, і розбір їх мовчки ігнорує (обходу гейту стану вони не дають).
         var payload = JsonSerializer.Serialize(
             new
             {
@@ -153,13 +154,8 @@ public sealed class RecalculationJobFanOutTests(SqlServerFixture sql)
             documents.Select(id => RecalculateDocumentHandler.TargetOf(id, document.PeriodKey)),
             scheduler.Calls.Select(c => c.Target));
 
-        // ⛔ Чотири ока (аудит S1): без погодження в дочірній задачі гейт стану
-        // періоду відмовив би кожному документу законно погодженого перерахунку.
         Assert.All(scheduler.Calls, c =>
         {
-            Assert.Equal(11, c.Request.ApprovedBy);
-            Assert.Equal(42L, c.Request.ApprovalId);
-            Assert.Equal("виправлення подання", c.Request.ApprovalReason);
             Assert.Equal(7, c.Request.TriggeredByUserId);
             Assert.Equal(document.PeriodKey.Value, c.Request.PeriodKey);
 
@@ -462,7 +458,6 @@ public sealed class RecalculationJobFanOutTests(SqlServerFixture sql)
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
             clock,
-            Substitute.For<IRecalculationApprovalStore>(),
             Substitute.For<IAuditWriter>());
 
     /// <summary>Фаза формул шаблону нічого не пише — тести про розклад і прогони.</summary>

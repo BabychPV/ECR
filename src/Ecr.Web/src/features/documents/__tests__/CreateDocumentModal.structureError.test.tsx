@@ -158,9 +158,8 @@ describe('CreateDocumentModal: збій запиту структури не в�
     await waitFor(() => expect(screen.getByText(/AIR · v1\.0/)).toBeTruthy());
     expect(screen.queryByRole('alert')).toBeNull();
 
-    // ✎ UI-31: аркуші — у кроці Sheets майстра (Project → Period → Sheets).
+    // ✎ UI-31: аркуші — у кроці Sheets майстра (✎ Period clarity: Project → Sheets, без кроку Period).
     fireEvent.click(screen.getByRole('button', { name: '⟦wizard.next⟧' }));
-    fireEvent.click(await screen.findByRole('button', { name: '⟦wizard.next⟧' }));
     await waitFor(() => expect(screen.getByText('General (GEN)')).toBeTruthy());
   });
 

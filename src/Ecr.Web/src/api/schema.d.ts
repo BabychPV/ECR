@@ -2883,6 +2883,7 @@ export interface paths {
                     ownerUserId?: number;
                     sort?: string;
                     templateVersions?: string;
+                    year?: number;
                 };
                 header?: never;
                 path?: never;
@@ -2998,13 +2999,16 @@ export interface paths {
          * Зведення переліку за період (`BE-09`). Право `Document.View`.
          * @description ⚠ Лічить лише документи, які користувач БАЧИТЬ, — тією самою межею
          *     грантів, що й перелік вище; інакше смуга й таблиця під нею розійдуться.
-         *     Період обов'язковий: без нього стан документа не визначений (`D-93`).
+         *     Потрібен місяць (`periodKey`) або ✎ 2026-11-07 (Period clarity) рік (`year` без `periodKey`) — за
+         *     тим самим правилом року, що й фільтр стану переліку; без обох стан документа не визначений (`D-93`), 422.
+         *     За рік `staleResultsCount`/`staleResultsMineCount` — 0 (застарілість належить місяцю).
          */
         get: {
             parameters: {
                 query?: {
                     periodKey?: number;
                     projectId?: number;
+                    year?: number;
                 };
                 header?: never;
                 path?: never;
@@ -15340,6 +15344,8 @@ export interface paths {
          * @description ⚠ `CurrentPeriod` — підказка UI, а **не** правило доступу
          *     (`D-77`): на рішення про право запису він не впливає взагалі.
          *     `null` у `PinnedPeriodId` повертає режим `Auto`.
+         *     ✎ 2026-11-07 (Period clarity, п. c): ЗАСТАРІЛО — налаштування переїхало в налаштування проєкту
+         *     (…/settings/current-period); маршрут лишається для старого клієнта.
          */
         put: {
             parameters: {
@@ -15587,6 +15593,165 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/settings/current-period": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Налаштування «поточний період» проєкту: режим `Auto` (за датою) або `Pinned`. Право `Document.View`.
+         * @description ✎ 2026-11-07 (Period clarity, п. c). Поточний період — підказка UI, не правило доступу (`D-77`).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CurrentPeriodSettingDto"];
+                        "text/json": components["schemas"]["CurrentPeriodSettingDto"];
+                        "text/plain": components["schemas"]["CurrentPeriodSettingDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Змінює режим поточного періоду: `Pinned` (період + причина) або `Auto`. Право `Period.Configure`
+         *     і Manage на проєкт. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CurrentPeriodSettingRequest"];
+                    "application/json": components["schemas"]["CurrentPeriodSettingRequest"];
+                    "text/json": components["schemas"]["CurrentPeriodSettingRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CurrentPeriodSettingDto"];
+                        "text/json": components["schemas"]["CurrentPeriodSettingDto"];
+                        "text/plain": components["schemas"]["CurrentPeriodSettingDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/settings/current-period/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** «Повернути автоматичний»: знімає закріплення, поточний період одразу — за датою. Право `Period.Configure`
+         *     і Manage на проєкт. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CurrentPeriodSettingDto"];
+                        "text/json": components["schemas"]["CurrentPeriodSettingDto"];
+                        "text/plain": components["schemas"]["CurrentPeriodSettingDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{id}/template-versions": {
         parameters: {
             query?: never;
@@ -15709,150 +15874,6 @@ export interface paths {
             };
         };
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{projectId}/recalculation-approvals": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Живі погодження проєкту: не використані й не прострочені. */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    projectId: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["RecalculationApprovalDto"][];
-                        "text/json": components["schemas"]["RecalculationApprovalDto"][];
-                        "text/plain": components["schemas"]["RecalculationApprovalDto"][];
-                    };
-                };
-            };
-        };
-        put?: never;
-        /** Створює запит на погодження від імені поточного користувача. */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    projectId: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/*+json": components["schemas"]["RecalculationApprovalRequest"];
-                    "application/json": components["schemas"]["RecalculationApprovalRequest"];
-                    "text/json": components["schemas"]["RecalculationApprovalRequest"];
-                };
-            };
-            responses: {
-                /** @description Created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["RecalculationApprovalDto"];
-                        "text/json": components["schemas"]["RecalculationApprovalDto"];
-                        "text/plain": components["schemas"]["RecalculationApprovalDto"];
-                    };
-                };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ProblemDetails"];
-                        "text/json": components["schemas"]["ProblemDetails"];
-                        "text/plain": components["schemas"]["ProblemDetails"];
-                    };
-                };
-                /** @description Unprocessable Entity */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ProblemDetails"];
-                        "text/json": components["schemas"]["ProblemDetails"];
-                        "text/plain": components["schemas"]["ProblemDetails"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{projectId}/recalculation-approvals/{id}/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Підтверджує чужий запит під сесією поточного користувача. */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    projectId: number;
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["RecalculationApprovalDto"];
-                        "text/json": components["schemas"]["RecalculationApprovalDto"];
-                        "text/plain": components["schemas"]["RecalculationApprovalDto"];
-                    };
-                };
-                /** @description Conflict */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ProblemDetails"];
-                        "text/json": components["schemas"]["ProblemDetails"];
-                        "text/plain": components["schemas"]["ProblemDetails"];
-                    };
-                };
-            };
-        };
         delete?: never;
         options?: never;
         head?: never;
@@ -29332,6 +29353,55 @@ export interface components {
          * @enum {unknown}
          */
         CurrentPeriodMode: "Auto" | "Pinned";
+        /** @description Налаштування «поточний період» проєкту (✎ 2026-11-07 Period clarity, п. c): режим і що з нього виходить. */
+        CurrentPeriodSettingDto: {
+            /**
+             * Format: int32
+             * @description Який період був би поточним у режимі `Auto` зараз; `null` — жодного.
+             */
+            automaticPeriodId: null | number;
+            /**
+             * Format: int32
+             * @description Його ключ.
+             */
+            automaticPeriodKey: null | number;
+            /**
+             * Format: date-time
+             * @description Коли поточний період або режим змінено востаннє, UTC.
+             */
+            changedAt: null | string;
+            /**
+             * Format: int32
+             * @description Чинний поточний період (підказка UI, не правило доступу, D-77); `null` — немає.
+             */
+            currentPeriodId: null | number;
+            /**
+             * Format: int32
+             * @description Його ключ.
+             */
+            currentPeriodKey: null | number;
+            /** @description `Auto` — за датою (веде `PeriodStateJob`); `Pinned` — закріплено вручну з причиною. */
+            mode: components["schemas"]["CurrentPeriodMode"];
+            /** @description Причина закріплення; лише в `Pinned`. */
+            pinnedReason: null | string;
+            /**
+             * Format: int32
+             * @description Проєкт.
+             */
+            projectId: number;
+        };
+        /** @description Запит на зміну налаштування «поточний період» (✎ 2026-11-07 Period clarity). */
+        CurrentPeriodSettingRequest: {
+            /** @description `Auto` — за датою; `Pinned` — закріпити. */
+            mode: components["schemas"]["CurrentPeriodMode"];
+            /**
+             * Format: int32
+             * @description Період для `Pinned`; для `Auto` ігнорується.
+             */
+            pinnedPeriodId?: null | number;
+            /** @description Причина для `Pinned` (обов'язкова, в аудит). */
+            reason?: null | string;
+        };
         /** @description Профіль поточного користувача для клієнта. */
         CurrentUserDto: {
             /** @description Явні заборони; `IsDeny` перемагає завжди. */
@@ -29631,6 +29701,16 @@ export interface components {
              */
             periodKey: number;
         };
+        /** @description Стан погодження документа за один період (смуга року, ✎ 2026-11-07 Period clarity). */
+        DocumentPeriodState: {
+            /**
+             * Format: int32
+             * @description Період; `Рік*100 + Номер`.
+             */
+            periodKey: number;
+            /** @description `Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved`. */
+            state: string;
+        };
         /** @description Аркуш складу документа в переліку: код, назва, стан за період. */
         DocumentSheetState: {
             /** @description Код аркуша (`SheetDef.Code`); він же ключ у `DocumentSummary.SheetStates`. */
@@ -29714,6 +29794,11 @@ export interface components {
              *     метадані проєкту не секрет, звуження читача його не знімає. Документ власної періодичності не має; `periodKey` не віддається
              *     (це вісь запиту). Заповнюють і картка, і перелік; `null` лише коли проєкт не знайдено. */
             periodKind?: null | string;
+            /** @description ✎ 2026-11-07 Period clarity (п. e2): стан погодження документа за КОЖЕН період проєкту в запитаному році
+             *     (`GET /documents?year=`), за зростанням ключа; `null` — рік не запитано. Визначення — те саме, що у фільтра`state`:
+             *     `Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved` за аркушами складу, ВИДИМИМИ читачеві (S18).
+             *     Рахується ОДНИМ запитом на сторінку (`DocumentStore.PeriodStatesBatchAsync`). */
+            periodStates?: null | components["schemas"]["DocumentPeriodState"][];
             /**
              * Format: int32
              * @description Проєкт.
@@ -34630,13 +34715,6 @@ export interface components {
         /** @description Запит на перерахунок усього проєкту (Q-151). */
         ProjectRecalculationRequest: {
             /**
-             * Format: int64
-             * @description Підтверджене погодження перерахунку закритого періоду (ФВ-9.7,
-             *     `…/recalculation-approvals`); `null` — без погодження. Одноразове,
-             *     лише для свого ініціатора, цього проєкту й періоду.
-             */
-            approvalId: null | number;
-            /**
              * Format: int32
              * @description Період; `null` — повний рік, усі документи проєкту.
              */
@@ -34988,60 +35066,6 @@ export interface components {
             skipped: components["schemas"]["SkippedSheet"][];
             /** @description Пропущених більше, ніж у Skipped (стеля 200). */
             skippedTruncated: boolean;
-        };
-        /** @description Погодження перерахунку закритого періоду — як його бачить клієнт. */
-        RecalculationApprovalDto: {
-            /**
-             * Format: date-time
-             * @description Коли підтверджено, UTC.
-             */
-            confirmedAt: null | string;
-            /** @description Ім'я того, хто підтвердив. */
-            confirmedByName: null | string;
-            /**
-             * Format: int32
-             * @description Хто підтвердив; `null` — ще чекає.
-             */
-            confirmedByUserId: null | number;
-            /**
-             * Format: date-time
-             * @description Після цього моменту погодження мертве, UTC.
-             */
-            expiresAt: string;
-            /**
-             * Format: int64
-             * @description Ідентифікатор; його передає `POST …/recalculate` як `approvalId`.
-             */
-            id: number;
-            /**
-             * Format: int32
-             * @description Єдиний період, який погодження відкриває.
-             */
-            periodKey: number;
-            /** @description Причина. */
-            reason: string;
-            /**
-             * Format: date-time
-             * @description Коли створено, UTC.
-             */
-            requestedAt: string;
-            /** @description Ім'я ініціатора. */
-            requestedByName: null | string;
-            /**
-             * Format: int32
-             * @description Ініціатор — єдиний, хто може ним скористатися.
-             */
-            requestedByUserId: number;
-        };
-        /** @description Запит на погодження перерахунку закритого періоду. */
-        RecalculationApprovalRequest: {
-            /**
-             * Format: int32
-             * @description Закритий період, який треба перерахувати.
-             */
-            periodKey: number;
-            /** @description Причина; обов'язкова, потрапляє в журнал. */
-            reason: null | string;
         };
         /** @description Чи може поточний користувач відкликати аркуш (`BE-31`). */
         RecallAvailabilityDto: {

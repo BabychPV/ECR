@@ -314,7 +314,6 @@ public sealed class ReportSnapshotStalenessTests(SqlServerFixture sql)
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
             clock,
-            Substitute.For<IRecalculationApprovalStore>(),
             audit);
 
         await handler.CompleteAsync(runId, new ModuleProfile(), CancellationToken.None);

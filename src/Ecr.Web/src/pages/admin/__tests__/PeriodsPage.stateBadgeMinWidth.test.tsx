@@ -143,7 +143,7 @@ describe('PeriodsPage: бейдж стану не стискається ниж�
 
       // ⚠ Рядок періоду в таблиці, а не сам бейдж: чекаємо на розмальований
       // перелік, і лише тоді беремо корінь бейджа за станом.
-      await screen.findByText('202601', {}, { timeout: SlowEnvTimeout });
+      await screen.findByText((_, el) => el?.getAttribute('data-period-key') === '202601', {}, { timeout: SlowEnvTimeout });
 
       const badgeRoot = document.querySelector<HTMLElement>('[data-status-state="Scheduled"]');
 

@@ -133,8 +133,10 @@ describe('PeriodsPage: попередження, коли поточний пе�
       mockFetch();
       show();
 
-      const currentRow = (await screen.findByText('202601', {}, { timeout: SlowEnvTimeout })).closest('tr');
-      const otherRow = (await screen.findByText('202602', {}, { timeout: SlowEnvTimeout })).closest('tr');
+      // ✎ Period clarity: ключ — у підказці; рядок — за розміткою підпису.
+      const byKey = (key: string) => (_: string, el: Element | null) => el?.getAttribute('data-period-key') === key;
+      const currentRow = (await screen.findByText(byKey('202601'), {}, { timeout: SlowEnvTimeout })).closest('tr');
+      const otherRow = (await screen.findByText(byKey('202602'), {}, { timeout: SlowEnvTimeout })).closest('tr');
       expect(currentRow).not.toBeNull();
       expect(otherRow).not.toBeNull();
 

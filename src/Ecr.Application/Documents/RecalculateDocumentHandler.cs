@@ -190,11 +190,7 @@ public sealed class RecalculateDocumentHandler(
         }
 
         // ⛔ Стан періоду і робочого процесу — ДО черги (ФВ-9.7, ФВ-9.17).
-        // Погодження на перерахунок закритого періоду цей маршрут не приймає
-        // взагалі: його оформлює перерахунок ПРОЄКТУ
-        // (`RunCalculationHandler` + `ClosedPeriodApproval`, причина й друга
-        // людина), і вигадувати тут другий, безпогоджувальний вхід у закритий
-        // період означало б обійти правило чотирьох очей кнопкою на документі.
+        // ✎ 07.11 (D-468): закритий період не перераховується жодним маршрутом — шлях один, Reopen.
         var state = await periods
             .FindPeriodStateAsync(documentId, periodKey.Value, ct)
             .ConfigureAwait(false);
@@ -250,7 +246,7 @@ public sealed class RecalculateDocumentHandler(
             // ✎ UAT-recalc-ux: закритий період — відмова, як і раніше; «подано все» — не відмова, а відповідь без
             // задачі з переліком (людина бачить, ЩО подано і куди перейти).
             var denial = Calculations.RecalculationWritePolicy.Check(
-                periodState, hasSubmittedSheets: false, hasClosedPeriodApproval: false);
+                periodState, hasSubmittedSheets: false);
 
             if (denial != Calculations.RecalculationWriteDenial.None)
             {
