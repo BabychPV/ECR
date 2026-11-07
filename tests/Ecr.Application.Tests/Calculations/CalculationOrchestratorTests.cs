@@ -217,6 +217,36 @@ public sealed class CalculationOrchestratorTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.7")]
+    public async Task Рік_із_закритим_періодом_не_відмовляє_а_вилучає_закритий_зі_скоупу()
+    {
+        // ✎ UAT-recalc-ux (e2e 07.11): кнопка Periods — це весь рік; закритий січень раніше давав 422 periodClosed
+        // усьому проєкту. Тепер закритий період вилучається (так само, як у задачі), а затверджені аркуші закритого
+        // періоду не називаються «пропущеними».
+        _periods.GetPeriodStatesAsync(Project, null, Arg.Any<CancellationToken>())
+                .Returns(new List<PeriodStateRef> { new(202601, PeriodState.Closed), new(202603, PeriodState.Open) });
+        var name = new LocalizedText(new Dictionary<string, string> { ["en"] = "S" });
+        IReadOnlyList<SkippedSheet> approved =
+        [
+            new(11, "DOC-11", null, 3, "S3", name, 202601, "Approved"),
+            new(11, "DOC-11", null, 3, "S3", name, 202603, "Approved"),
+        ];
+        _workflow.ListApprovedSheetsAsync(Project, null, null, RecalculationSkips.MaxListed + 1, Arg.Any<CancellationToken>())
+                 .Returns(approved);
+
+        var outcome = await Handler().RequestAsync(Project, periodKey: null, approvalId: null, CancellationToken.None);
+
+        Assert.Equal("job-1", outcome.JobId);
+        Assert.Equal([202603], outcome.Skipped.Select(s => s.PeriodKey));
+
+        // Названий закритий період без погодження — відмова, як і раніше.
+        States(PeriodState.Closed);
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().RequestAsync(Project, Period, approvalId: null, CancellationToken.None));
+        Assert.Equal("err.ECR-CALC-4221.periodClosed", error.Details?["messageKey"]);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "ФВ-9.17")]
     public async Task Затверджено_все_задачі_немає_перелік_є_і_погодження_не_спалено()
     {

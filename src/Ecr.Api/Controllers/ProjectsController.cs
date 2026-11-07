@@ -352,8 +352,10 @@ public sealed class ProjectsController(
             .RequestAsync(id, request.PeriodKey, request.ApprovalId, ct)
             .ConfigureAwait(false);
 
+        // ⚠ Конвенція 202 (ApiConventionTests): 202 несе jobId; 200 — лише «рахувати нічого», задачі немає.
+        var jobId = outcome.JobId;
         var body = new Contracts.ProjectRecalculationAcceptedResponse(
-            outcome.JobId, id, request.PeriodKey, outcome.Skipped, outcome.SkippedTruncated, outcome.NothingToRecalculate);
+            jobId, id, request.PeriodKey, outcome.Skipped, outcome.SkippedTruncated, outcome.NothingToRecalculate);
 
         // ✎ UAT-recalc-ux: «рахувати нічого» — 200 без задачі, з переліком пропущених.
         return outcome.NothingToRecalculate ? Ok(body) : Accepted(body);

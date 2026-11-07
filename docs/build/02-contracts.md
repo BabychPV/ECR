@@ -5857,7 +5857,7 @@ public sealed record RowDto(
   (аркуш або склад документа).
 - «Рахувати нічого» (`nothingToRecalculate`): документ — затверджено аркуш області / всі аркуші складу; проєкт із
   названим періодом — у кожного документа всі аркуші складу затверджені. Це не помилка.
-- Закритий період без погодження — як і раніше `422 ECR-CALC-4221 periodClosed`.
+- Закритий НАЗВАНИЙ період без погодження — як і раніше `422 ECR-CALC-4221 periodClosed`. Проєкт за весь рік (`periodKey: null`) закриті періоди без погодження вилучає зі скоупу (як задача), а не відмовляє; їхні аркуші в `skipped` не потрапляють.
 - Журнал: на кожен пропущений і кожен перерахований поданий аркуш × період — запис `aud.StructureChange`
   (`EntityType = SheetRecalc`, `Operation = SkippedApproved | RecalculatedAfterSubmission`, `EntityId = SheetDefId`,
   `CorrelationId = sheet-recalc:{documentId}:{sheetDefId}:{periodKey}`, `NewJson` — документ, аркуш, період, причина).

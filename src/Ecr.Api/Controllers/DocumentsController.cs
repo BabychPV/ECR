@@ -375,8 +375,10 @@ public sealed class DocumentsController(
             .RequestAsync(id, PeriodKey.Parse(periodKey), request.SheetDefId, ct)
             .ConfigureAwait(false);
 
+        // ⚠ Конвенція 202 (ApiConventionTests): 202 несе jobId; 200 — лише «рахувати нічого», задачі немає.
+        var jobId = outcome.JobId;
         var body = new Contracts.RecalculationAcceptedResponse(
-            outcome.JobId, id, periodKey, outcome.Skipped, outcome.SkippedTruncated, outcome.NothingToRecalculate);
+            jobId, id, periodKey, outcome.Skipped, outcome.SkippedTruncated, outcome.NothingToRecalculate);
 
         // ✎ UAT-recalc-ux: «рахувати нічого» (подано все) — 200 без задачі, з переліком пропущених.
         return outcome.NothingToRecalculate ? Ok(body) : Accepted(body);

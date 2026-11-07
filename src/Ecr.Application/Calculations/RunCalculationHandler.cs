@@ -168,16 +168,30 @@ public sealed class RunCalculationHandler(
         //
         // ✎ UAT-recalc-ux (07.11): поданий аркуш більше НЕ відмовляє всьому проєкту — його пропускає задача (по
         // аркушу), а запит повертає перелік пропущених. Тут лишається лише відмова закритого періоду.
+        //
+        // ✎ UAT-recalc-ux (e2e 07.11): перерахунок за ВЕСЬ рік (`periodKey: null`, кнопка Periods) закритий період
+        // НЕ відмовляє — він вилучається зі скоупу, рівно як це вже робить задача (`RecalculationJob.RefusedPeriodsAsync`:
+        // «запит не називав закритого періоду»). Відмова тут робила кнопку проєкту глухим кутом у будь-якому році після
+        // першого закритого місяця. Названий закритий період без погодження — відмова, як і раніше.
+        var excluded = new HashSet<int>();
         foreach (var period in targets)
         {
             var denial = RecalculationWritePolicy.Check(period.State, hasSubmittedSheets: false, hasApproval);
-            if (denial != RecalculationWriteDenial.None)
+            if (denial == RecalculationWriteDenial.None)
             {
-                throw RecalculationWritePolicy.Reject(denial, period.PeriodKey);
+                continue;
             }
+
+            if (periodKey is null && denial == RecalculationWriteDenial.PeriodClosed)
+            {
+                excluded.Add(period.PeriodKey);
+                continue;
+            }
+
+            throw RecalculationWritePolicy.Reject(denial, period.PeriodKey);
         }
 
-        var (skipped, truncated) = await SkippedAsync(profile, projectId, periodKey, ct).ConfigureAwait(false);
+        var (skipped, truncated) = await SkippedAsync(profile, projectId, periodKey, excluded, ct).ConfigureAwait(false);
 
         // Названий період, де подано/затверджено ВСЕ: задачу не ставимо і погодження не спалюємо.
         if (periodKey is { } named
@@ -222,11 +236,18 @@ public sealed class RunCalculationHandler(
     /// називається ні кодом, ні станом (S18).
     /// </summary>
     private async Task<(IReadOnlyList<SkippedSheet> Items, bool Truncated)> SkippedAsync(
-        Security.AccessProfile profile, int projectId, int? periodKey, CancellationToken ct)
+        Security.AccessProfile profile, int projectId, int? periodKey, HashSet<int> excludedPeriods,
+        CancellationToken ct)
     {
         var rows = await workflow
             .ListApprovedSheetsAsync(projectId, documentId: null, periodKey, RecalculationSkips.MaxListed + 1, ct)
             .ConfigureAwait(false);
+
+        // Закриті періоди річного запиту поза скоупом узагалі — їхні аркуші не «пропущені як затверджені».
+        if (excludedPeriods.Count > 0)
+        {
+            rows = [.. rows.Where(r => !excludedPeriods.Contains(r.PeriodKey))];
+        }
 
         if (Documents.DocumentSheetVisibility.HasRestrictions(profile))
         {
