@@ -41,6 +41,8 @@ function mockFetch(janStatus: string): void {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
+      // ✎ PB2-P2-2: «Затвердити» на поданому аркуші — за відповіддю сервера; тут користувач погоджує.
+      if (url.includes('/approver-edit')) return json({ canApproverEdit: true });
       if (url.includes('/api/v1/me')) return json(CurrentUser);
 
       // ⚠ Раніше за `/submit`: `/submission-target` містить і його.

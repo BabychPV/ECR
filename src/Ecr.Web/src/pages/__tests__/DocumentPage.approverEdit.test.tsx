@@ -180,17 +180,20 @@ describe('DocumentPage: правка поданого аркуша — лише 
   );
 
   it(
-    'погоджувач іншого кроку: право погоджувати є, але «Імпорт…» сховано, сітка лише для читання',
+    'погоджувач іншого кроку (грант Manage, сервер: не його черга): ні Approve/Reject, ні «Імпорт…», сітка лише для читання',
     async () => {
       show(false);
 
       const row = await screen.findByTestId('document-actions', {}, { timeout: SlowEnvTimeout });
-      // ⚠ Кнопка Approve на місці — клієнт бачить право погоджувати; рішення про чергу — лише від сервера.
-      await within(row).findByRole('button', { name: '⟦workflow.approve⟧' }, { timeout: SlowEnvTimeout });
 
-      // ⛔ Спершу — що сервер справді спитано: інакше «Імпорту немає» було б правдою лише через недочитану відповідь.
+      // ⛔ Спершу — що сервер справді спитано: інакше «кнопок немає» було б правдою лише через недочитану відповідь.
       await waitFor(() => expect(approverEditAsked.count).toBeGreaterThan(0), { timeout: SlowEnvTimeout });
       await gridHint('read-only');
+
+      // ✎ PB2-P2-2 (D-444 пп. 2–3): доти Approve/Reject показував грант `/me`, і погоджувач іншого кроку отримував
+      // 403; тепер кнопки — за відповіддю сервера (`canApproverEdit = false` → їх немає), як і «Імпорт…».
+      expect(within(row).queryByRole('button', { name: '⟦workflow.approve⟧' })).toBeNull();
+      expect(within(row).queryByRole('button', { name: '⟦workflow.reject⟧' })).toBeNull();
 
       // Мутація «approverEditable без canApproverEdit» повертає і пункт імпорту, і редаговну сітку.
       expect(screen.queryByRole('button', { name: 'import-stub' })).toBeNull();
