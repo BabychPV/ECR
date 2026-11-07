@@ -3,8 +3,7 @@ import { Badge, Button, Group, Modal, ScrollArea, Select, Stack, Table, Text, Te
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
-import type { PagedProjects, PeriodCalendarDto, ReopenPeriodRequest, SetCurrentPeriodRequest } from '@/api/types';
-import { MountedLazyReasonModal } from '@/features/projects/lazyPeriodsDialogs';
+import type { PagedProjects, PeriodCalendarDto, ReopenPeriodRequest } from '@/api/types';
 import { hasProjectGrant } from '@/features/documents/projectGrant';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -181,9 +180,6 @@ export function PeriodsPage(): JSX.Element {
   const [reopenReason, setReopenReason] = useState('');
   const [reopenUntil, setReopenUntil] = useState<Date | null>(null);
 
-  // Який період фіксуємо як поточний; `null` — діалог закритий.
-  const [pinning, setPinning] = useState<number | null>(null);
-
   // ⛔ Проєкти ВИБИРАЮТЬСЯ зі списку, а не вводяться номером. Це не про
   // зручність: без переліку не видно СТАНУ проєкту, а саме він визначає, чи
   // відкриються періоди взагалі (`A7-25`).
@@ -232,35 +228,6 @@ export function PeriodsPage(): JSX.Element {
     await queryClient.invalidateQueries({ queryKey: projectsQuery.queryKey });
     await queryClient.invalidateQueries({ queryKey: ['periods', projectId] });
   };
-
-  /**
-   * Фіксація поточного періоду (`ФВ-1.13`).
-   *
-   * ⛔ `CurrentPeriod` — підказка інтерфейсу, а **не** правило доступу
-   * (`D-77`): на рішення про право запису вона не впливає взагалі. Тому
-   * кнопка не обіцяє «відкрити період», а каже, який період система пропонує
-   * за замовчуванням.
-   *
-   * ⚠ Причина обов'язкова: режим `Pinned` означає, що календар більше не веде
-   * поточний період сам, і через місяць «чому в нас досі січень» має мати
-   * відповідь.
-   */
-  const pinPeriod = useMutation({
-    mutationFn: (target: { id: number | null; reason: string }) =>
-      apiFetch(`/api/v1/projects/${projectId ?? 0}/current-period`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          pinnedPeriodId: target.id,
-          reason: target.reason,
-        } satisfies SetCurrentPeriodRequest),
-      }),
-    onSuccess: async () => {
-      await refresh();
-      setPinning(null);
-      showDone(t('periods.pinned'));
-    },
-    onError: showApiError,
-  });
 
   /**
    * Відкриття закритого періоду (`ФВ-1.10`).
@@ -340,13 +307,6 @@ export function PeriodsPage(): JSX.Element {
     setReopening(periodId);
   };
 
-  // ⛔ `F-19`: право каже, ЩО можна, а грант — НАД ЧИМ. Сервер для кожної дії
-  // над КОНКРЕТНИМ проєктом (поточний період, перевідкриття) вимагає ще й гранта
-  // Manage на нього (`SetCurrentPeriodHandler`, …). З грантом Read
-  // «Make current» стояв на кожному рядку й давав 403.
-  const managesSelected =
-    projectId !== null && hasProjectGrant(session.data ?? undefined, projectId, 'Manage');
-  const configures = can(session.data, 'Period.Configure') && managesSelected;
   // ⛔ Право `Period.Reopen` не каже, ЧИЇ періоди: сервер вимагає ще й гранта
   // Manage на проєкт (`ReopenPeriodHandler`). Без цієї умови кнопка обіцяла б
   // дію, яка завершиться 403.
@@ -594,16 +554,6 @@ export function PeriodsPage(): JSX.Element {
                         {t('periods.reopen')}
                       </Button>
                     )}
-
-                    {!period.isCurrent && configures && (
-                      <Button
-                        size="xs"
-                        variant="subtle"
-                        onClick={() => setPinning(period.id)}
-                      >
-                        {t('periods.pin')}
-                      </Button>
-                    )}
                   </Group>
                 </Table.Td>
               </Table.Tr>
@@ -710,19 +660,6 @@ export function PeriodsPage(): JSX.Element {
           </Group>
         </Stack>
       </Modal>
-
-      <MountedLazyReasonModal
-        opened={pinning !== null}
-        title={t('periods.pin')}
-        label={t('workflow.reason')}
-        description={t('periods.pinHint')}
-        confirmLabel={t('periods.pin')}
-        isPending={pinPeriod.isPending}
-        onConfirm={(reason) => {
-          if (pinning !== null) pinPeriod.mutate({ id: pinning, reason });
-        }}
-        onClose={() => setPinning(null)}
-      />
     </>
   );
 }

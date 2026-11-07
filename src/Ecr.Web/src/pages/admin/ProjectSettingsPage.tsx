@@ -12,6 +12,7 @@ import type {
 import { hasProjectGrant } from '@/features/documents/projectGrant';
 import { projectsQuery } from '@/features/projects/allProjects';
 import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
+import { CurrentPeriodSetting } from '@/features/projects/CurrentPeriodSetting';
 import { MountedLazyConfirmModal } from '@/features/projects/lazyPeriodsDialogs';
 import { timeZones } from '@/features/projects/timeZones';
 import { useOpenerFocusReturn } from '@/features/projects/useOpenerFocusReturn';
@@ -166,6 +167,8 @@ export function ProjectSettingsPage(): JSX.Element {
   const manages = can(session.data, 'Project.Manage');
   const managesSelected = projectId !== null && hasProjectGrant(session.data ?? undefined, projectId, 'Manage');
   const managesProject = manages && managesSelected;
+  // Закріплення поточного періоду — `Period.Configure` + грант Manage (`SetCurrentPeriodHandler`), як і на Periods.
+  const configures = can(session.data, 'Period.Configure') && managesSelected;
 
   return (
     <>
@@ -257,6 +260,11 @@ export function ProjectSettingsPage(): JSX.Element {
                 </Button>
               )}
             </Group>
+          </Section>
+
+          {/* ✎ Period clarity (п. c): режим поточного періоду — Automatic by date / Pinned to <місяць> (`D-77`). */}
+          <Section id="current-period" title={t('projectSettings.currentPeriod')}>
+            <CurrentPeriodSetting projectId={selected.id} calendar={periods.data} canConfigure={configures} />
           </Section>
 
           {/* ⛔ Маршрут погодження (`ФВ-5.17`) і політики періодів (T6/#37) — налаштування проєкту, не місяця. */}
