@@ -140,6 +140,82 @@ public sealed class DocumentYearStatesStoreTests(SqlServerFixture sql)
             await Ids(new DocumentListFilter(DocumentStatus.Submitted, null, HiddenSheetDefIds: hidden)));
     }
 
+    /// <summary>
+    /// ✎ Period clarity (координатор 07.11, «без боргів»): зведення за РІК (<c>GET /documents/summary?year=</c>) —
+    /// ОДНИМ запитом і за тим самим правилом, що й фільтр стану переліку за рік: числа смуги дорівнюють кількості
+    /// рядків, які дає фільтр.
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ (локально): без <c>p.State &lt;&gt; 0</c> у <c>SummarizeYearAsync</c> майбутні місяці тягнуть
+    /// «затверджений» і «поданий» документи в «частково» — червоний; без межі схованого аркуша — «частково» лишається.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-93")]
+    public async Task Зведення_за_рік_одним_запитом_збігається_з_фільтром_стану_за_рік()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        var year = chain.PeriodKey.Year;
+
+        int sheet2;
+        await using (var db = builder.CreateContext())
+        {
+            sheet2 = await YearAsync(db, chain, started: 2);
+            await DocumentAsync(db, chain, "SP", [chain.SheetDefId, sheet2],
+                (chain.SheetDefId, 1, DocumentStatus.Submitted),
+                (chain.SheetDefId, 2, DocumentStatus.Approved), (sheet2, 2, DocumentStatus.Approved));
+            await DocumentAsync(db, chain, "SS", [chain.SheetDefId],
+                (chain.SheetDefId, 1, DocumentStatus.Submitted), (chain.SheetDefId, 2, DocumentStatus.Approved));
+            await DocumentAsync(db, chain, "SA", [chain.SheetDefId],
+                (chain.SheetDefId, 1, DocumentStatus.Approved), (chain.SheetDefId, 2, DocumentStatus.Approved));
+            await DocumentAsync(db, chain, "SR", [chain.SheetDefId],
+                (chain.SheetDefId, 1, DocumentStatus.Approved), (chain.SheetDefId, 2, DocumentStatus.Rejected));
+        }
+
+        var counter = new DbCommandCounter();
+        await using var counted = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString)
+            .AddInterceptors(counter)
+            .Options);
+
+        var summary = await new DocumentListSummaryStore(counted)
+            .SummarizeYearAsync(chain.ProjectId, year, visibleProjectIds: null, restrictions: null, CancellationToken.None);
+
+        // Документ ланцюга без складу — чернетка; решта — по одному в кожному стані.
+        Assert.Equal(
+            (1, 1, 1, 1, 1),
+            (summary.Draft, summary.PartlySubmitted, summary.Submitted, summary.Approved, summary.Rejected));
+        Assert.Equal(0, summary.StaleResultsCount);
+        Assert.True(counter.Tally.Snapshot().Total == 1, counter.Tally.Snapshot().Format());
+
+        // Та сама відповідь, що дає фільтр стану переліку за рік (одне правило — одне число).
+        await using var read = builder.CreateContext();
+        async Task<int> Rows(DocumentListFilter filter)
+            => (await new DocumentStore(read).ListAsync(
+                    chain.ProjectId, new PeriodKeyFilter(null), filter with { Year = year },
+                    new CursorRequest(Limit: 50), visibleProjectIds: null, CancellationToken.None)).Items.Count;
+
+        Assert.Equal(await Rows(new DocumentListFilter(DocumentStatus.Draft, null)), summary.Draft);
+        Assert.Equal(await Rows(new DocumentListFilter(null, null, PartlySubmitted: true)), summary.PartlySubmitted);
+        Assert.Equal(await Rows(new DocumentListFilter(DocumentStatus.Submitted, null)), summary.Submitted);
+        Assert.Equal(await Rows(new DocumentListFilter(DocumentStatus.Approved, null)), summary.Approved);
+        Assert.Equal(await Rows(new DocumentListFilter(DocumentStatus.Rejected, null)), summary.Rejected);
+
+        // Схований аркуш 2 (S18) не вносить стан: «частково» стає «подано».
+        var code = (await read.SheetDefs.SingleAsync(s => s.Id == sheet2)).Code;
+        var hidden = await new DocumentListSummaryStore(read).SummarizeYearAsync(
+            chain.ProjectId, year, visibleProjectIds: null,
+            new SummaryRestrictions([(chain.ProjectId, code)], []), CancellationToken.None);
+        Assert.Equal((0, 2), (hidden.PartlySubmitted, hidden.Submitted));
+
+        // Межа грантів: проєкт поза видимими — нулі.
+        var foreign = await new DocumentListSummaryStore(read).SummarizeYearAsync(
+            chain.ProjectId, year, visibleProjectIds: [chain.ProjectId + 100_000], restrictions: null, CancellationToken.None);
+        Assert.Equal(0, foreign.Draft + foreign.PartlySubmitted + foreign.Submitted + foreign.Approved + foreign.Rejected);
+    }
+
     /// <summary>Добудовує 12 періодів року ланцюга; перші <paramref name="started"/> — <c>Open</c>. Повертає другий аркуш.</summary>
     private static async Task<int> YearAsync(EcrDbContext db, TestDocument chain, int started)
     {

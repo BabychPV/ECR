@@ -143,13 +143,15 @@ public sealed class DocumentsController(
     /// <remarks>
     /// ⚠ Лічить лише документи, які користувач БАЧИТЬ, — тією самою межею
     /// грантів, що й перелік вище; інакше смуга й таблиця під нею розійдуться.
-    /// Період обов'язковий: без нього стан документа не визначений (<c>D-93</c>).
+    /// Потрібен місяць (<c>periodKey</c>) або ✎ 2026-11-07 (Period clarity) рік (<c>year</c> без <c>periodKey</c>) — за
+    /// тим самим правилом року, що й фільтр стану переліку; без обох стан документа не визначений (<c>D-93</c>), 422.
+    /// За рік <c>staleResultsCount</c>/<c>staleResultsMineCount</c> — 0 (застарілість належить місяцю).
     /// </remarks>
     [HttpGet("summary")]
     [ProducesResponseType<Ecr.Application.Documents.Dto.DocumentListSummaryResponse>(StatusCodes.Status200OK)]
     public async Task<IActionResult> Summary(
-        [FromQuery] int periodKey, [FromQuery] int? projectId, CancellationToken ct)
-        => Ok(await listSummary.HandleAsync(projectId, periodKey, ct).ConfigureAwait(false));
+        [FromQuery] int? periodKey, [FromQuery] int? projectId, [FromQuery] int? year, CancellationToken ct)
+        => Ok(await listSummary.HandleAsync(projectId, periodKey, year, ct).ConfigureAwait(false));
 
     /// <summary>Створює документ. Право <c>Document.Create</c>.</summary>
     [HttpPost]

@@ -29,6 +29,20 @@ public interface IDocumentListSummaryStore
         int? projectId, int periodKey, IReadOnlyCollection<int>? visibleProjectIds,
         SummaryRestrictions? restrictions, int? currentUserId, CancellationToken ct);
 
+    /// <summary>
+    /// ✎ 2026-11-07 Period clarity: лічильники за РІК — ОДНИМ агрегованим запитом, за тим самим правилом, що й фільтр
+    /// стану переліку за рік (<c>02-contracts.md</c>, «Period clarity»): клітинка — «видимий аркуш складу × розпочатий
+    /// (не <c>Scheduled</c>) період проєкту в році».
+    /// </summary>
+    /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі видимі.</param>
+    /// <param name="year">Рік.</param>
+    /// <param name="visibleProjectIds">Межа грантів, як у <see cref="SummarizeAsync"/>.</param>
+    /// <param name="restrictions">Обмеження читача, як у <see cref="SummarizeAsync"/>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<DocumentListSummaryResponse> SummarizeYearAsync(
+        int? projectId, int year, IReadOnlyCollection<int>? visibleProjectIds,
+        SummaryRestrictions? restrictions, CancellationToken ct);
+
     /// <summary>По одному документу кожного з проєктів — щоб побудувати межі читання проєкту.</summary>
     /// <param name="projectIds">Проєкти.</param>
     /// <param name="ct">Токен скасування.</param>

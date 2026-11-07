@@ -212,6 +212,126 @@ public sealed class DocumentListSummaryStore(
         return (all, mine);
     }
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Правило року — те саме, що <c>DocumentStore.WhereYearState</c> (фільтр стану переліку за рік): клітинка —
+    /// «видимий аркуш складу × РОЗПОЧАТИЙ період проєкту в році» (<c>doc.Period.State &lt;&gt; 0</c>, не <c>Scheduled</c>),
+    /// її стан — рядок <c>wf.ApprovalState</c> за цей період (немає рядка — чернетка). Документ: хоч одна клітинка
+    /// повернута — <c>Rejected</c>; жодна не подана/затверджена — <c>Draft</c>; є і подана/затверджена, і неподана —
+    /// <c>PartlySubmitted</c>; неподаних немає, хоч одна лише подана — <c>Submitted</c>; усі затверджені —
+    /// <c>Approved</c>. Отже ті самі CASE, що й за місяць, лише над клітинками замість аркушів. Видимість (гранти,
+    /// сховані аркуші, документи-надання) — ті самі предикати, що й у <see cref="SummarizeAsync"/>.
+    ///
+    /// «З зауваженнями» — документ, у якого хоч в одному розпочатому періоді року ОСТАННІЙ підсумок перевірки має
+    /// помилки (та сама межа звуження, що за місяць). <c>SheetsApproved</c>/<c>SheetsTotal</c> — клітинки.
+    /// <c>StaleResultsCount</c>/<c>StaleResultsMineCount</c> — 0: застарілість належить місяцю, і фільтр
+    /// <c>resultsStale</c> без <c>periodKey</c> сервер відхиляє (<c>resultsStaleNeedsPeriod</c>).
+    ///
+    /// ⚠ Межі року стоять у предикаті <c>wf.ApprovalState</c> і <c>wf.ValidationResult</c> (партиції, урок <c>WR-05</c>).
+    /// </remarks>
+    public async Task<DocumentListSummaryResponse> SummarizeYearAsync(
+        int? projectId, int year, IReadOnlyCollection<int>? visibleProjectIds,
+        SummaryRestrictions? restrictions, CancellationToken ct)
+    {
+        var from = year * 100;
+        var to = (year + 1) * 100;
+
+        var hiddenJson = JsonSerializer.Serialize(
+            (restrictions?.HiddenSheets ?? []).Select(h => new { p = h.ProjectId, c = h.SheetCode }));
+        var narrowedJson = JsonSerializer.Serialize(restrictions?.NarrowedProjects ?? []);
+
+        IEnumerable<int>? allowed = visibleProjectIds;
+        if (projectId is { } single)
+        {
+            allowed = allowed is null ? [single] : allowed.Where(id => id == single);
+        }
+
+        var restrict = allowed is null ? 0 : 1;
+        var projectsJson = JsonSerializer.Serialize(allowed ?? []);
+
+        var participants = restrictions?.Participants;
+        var participantDocsJson = JsonSerializer.Serialize(participants?.DocumentIds ?? []);
+        var participantDeniedJson = JsonSerializer.Serialize(participants?.DeniedProjectIds ?? []);
+        var participantHiddenJson = JsonSerializer.Serialize(
+            (participants?.HiddenSheets ?? []).Select(h => new { d = h.DocumentId, c = h.SheetCode }));
+        var participantProject = projectId ?? 0;
+        var participantIssueJson = JsonSerializer.Serialize(participants?.IssueDocumentIds ?? []);
+
+        var row = await db.Database
+            .SqlQuery<SummaryRow>($"""
+                SELECT
+                    COALESCE(SUM(CASE WHEN x.Rejected = 0 AND x.Submitted = 0 AND x.Approved = 0 THEN 1 ELSE 0 END), 0) AS Draft,
+                    COALESCE(SUM(CASE WHEN x.Rejected = 0 AND x.Draft > 0 AND x.Submitted + x.Approved > 0 THEN 1 ELSE 0 END), 0) AS PartlySubmitted,
+                    COALESCE(SUM(CASE WHEN x.Rejected = 0 AND x.Draft = 0 AND x.Submitted > 0 THEN 1 ELSE 0 END), 0) AS Submitted,
+                    COALESCE(SUM(CASE WHEN x.Cells > 0 AND x.Approved = x.Cells THEN 1 ELSE 0 END), 0) AS Approved,
+                    COALESCE(SUM(CASE WHEN x.Rejected > 0 THEN 1 ELSE 0 END), 0) AS Rejected,
+                    COALESCE(SUM(x.HasIssues), 0) AS WithIssues,
+                    COALESCE(SUM(x.Approved), 0) AS SheetsApproved,
+                    COALESCE(SUM(x.Cells), 0) AS SheetsTotal
+                FROM (
+                    SELECT d.Id,
+                           COUNT(p.PeriodKey) AS Cells,
+                           COALESCE(SUM(CASE WHEN p.PeriodKey IS NOT NULL AND COALESCE(a.Status, 0) = 0 THEN 1 ELSE 0 END), 0) AS Draft,
+                           COALESCE(SUM(CASE WHEN a.Status = 1 THEN 1 ELSE 0 END), 0) AS Submitted,
+                           COALESCE(SUM(CASE WHEN a.Status = 2 THEN 1 ELSE 0 END), 0) AS Approved,
+                           COALESCE(SUM(CASE WHEN a.Status = 3 THEN 1 ELSE 0 END), 0) AS Rejected,
+                           CASE WHEN EXISTS (
+                               SELECT 1
+                               FROM doc.Period pv
+                               WHERE pv.ProjectId = d.ProjectId AND pv.PeriodKey > {from} AND pv.PeriodKey < {to} AND pv.State <> 0
+                                 AND (SELECT TOP (1) v.ErrorCount
+                                      FROM wf.ValidationResult v
+                                      WHERE v.DocumentId = d.Id AND v.PeriodKey = pv.PeriodKey
+                                        AND v.PeriodKey > {from} AND v.PeriodKey < {to}
+                                      ORDER BY v.RunAt DESC, v.Id DESC) > 0)
+                                 AND ((d.Id NOT IN (SELECT CAST(pd2.value AS bigint) FROM OPENJSON({participantDocsJson}) pd2)
+                                       AND d.ProjectId NOT IN (SELECT CAST(n.value AS int) FROM OPENJSON({narrowedJson}) n)
+                                       AND ({restrict} = 0
+                                            OR d.ProjectId IN (SELECT CAST(j2.value AS int) FROM OPENJSON({projectsJson}) j2)))
+                                      OR (d.Id IN (SELECT CAST(pix.value AS bigint) FROM OPENJSON({participantIssueJson}) pix)
+                                          AND NOT EXISTS (SELECT 1
+                                                          FROM doc.DocumentSheet si
+                                                          JOIN cfg.SheetDef sdi ON sdi.Id = si.SheetDefId
+                                                          JOIN OPENJSON({participantHiddenJson}) WITH (d bigint '$.d', c nvarchar(200) '$.c') hi
+                                                            ON hi.d = d.Id AND hi.c = sdi.Code COLLATE DATABASE_DEFAULT
+                                                          WHERE si.DocumentId = d.Id AND si.IsIncluded = 1)))
+                                THEN 1 ELSE 0 END AS HasIssues
+                    FROM doc.Document d
+                    LEFT JOIN doc.DocumentSheet s
+                      ON s.DocumentId = d.Id AND s.IsIncluded = 1
+                     AND NOT EXISTS (SELECT 1
+                                     FROM cfg.SheetDef sd
+                                     JOIN OPENJSON({hiddenJson}) WITH (p int '$.p', c nvarchar(200) '$.c') h
+                                       ON h.p = d.ProjectId AND h.c = sd.Code COLLATE DATABASE_DEFAULT
+                                     WHERE sd.Id = s.SheetDefId)
+                     AND NOT EXISTS (SELECT 1
+                                     FROM cfg.SheetDef sdp
+                                     JOIN OPENJSON({participantHiddenJson}) WITH (d bigint '$.d', c nvarchar(200) '$.c') hp
+                                       ON hp.d = d.Id AND hp.c = sdp.Code COLLATE DATABASE_DEFAULT
+                                     WHERE sdp.Id = s.SheetDefId)
+                    LEFT JOIN doc.Period p
+                      ON s.SheetDefId IS NOT NULL AND p.ProjectId = d.ProjectId
+                     AND p.PeriodKey > {from} AND p.PeriodKey < {to} AND p.State <> 0
+                    LEFT JOIN wf.ApprovalState a
+                      ON a.DocumentId = s.DocumentId AND a.SheetDefId = s.SheetDefId AND a.PeriodKey = p.PeriodKey
+                     AND a.PeriodKey > {from} AND a.PeriodKey < {to}
+                     AND (a.SheetCopyId = s.Id OR (a.SheetCopyId IS NULL AND s.CopyOfId IS NULL))
+                    WHERE {restrict} = 0
+                       OR d.ProjectId IN (SELECT CAST(j.value AS int) FROM OPENJSON({projectsJson}) j)
+                       OR (d.Id IN (SELECT CAST(pd.value AS bigint) FROM OPENJSON({participantDocsJson}) pd)
+                           AND ({participantProject} = 0 OR d.ProjectId = {participantProject})
+                           AND d.ProjectId NOT IN (SELECT CAST(dn.value AS int) FROM OPENJSON({participantDeniedJson}) dn))
+                    GROUP BY d.Id, d.ProjectId
+                ) x
+                """)
+            .SingleAsync(ct)
+            .ConfigureAwait(false);
+
+        return new DocumentListSummaryResponse(
+            row.Draft, row.Submitted, row.Approved, row.Rejected, row.WithIssues,
+            row.SheetsApproved, row.SheetsTotal, StaleResultsCount: 0, StaleResultsMineCount: 0, row.PartlySubmitted);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<int, long>> SampleDocumentPerProjectAsync(
         IReadOnlyCollection<int> projectIds, CancellationToken ct)
     {

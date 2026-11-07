@@ -64,6 +64,52 @@ public sealed class DocumentListSummaryHandlerTests
         await _store.DidNotReceiveWithAnyArgs().SummarizeAsync(default, default, default, default, default, default);
     }
 
+    /// <summary>
+    /// ✎ Period clarity (координатор 07.11): рік без місяця — зведення за роком, тією самою межею грантів; місяць
+    /// важить більше за рік; без обох — 422 <c>documentStateNeedsPeriod</c>, рік поза межами — 422.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    public async Task Рік_без_місяця_рахується_за_роком_тією_самою_межею()
+    {
+        Profile(new AccessBuilder { UserId = 7 }
+            .Permission(ListDocumentsHandler.Permission)
+            .Grant(ResourceKind.Project, Mine, GrantLevel.Read));
+        _store.SummarizeYearAsync(
+                Arg.Any<int?>(), Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<SummaryRestrictions?>(), Arg.Any<CancellationToken>())
+            .Returns(new DocumentListSummaryResponse(2, 0, 0, 0, 0));
+
+        var year = await Handler().HandleAsync(projectId: Mine, periodKey: null, year: 2026, default);
+
+        Assert.Equal(2, year.Draft);
+        await _store.Received(1).SummarizeYearAsync(
+            Mine, 2026, Arg.Is<IReadOnlyCollection<int>?>(ids => ids != null && ids.Count == 1 && ids.Contains(Mine)),
+            null, Arg.Any<CancellationToken>());
+        await _store.DidNotReceiveWithAnyArgs().SummarizeAsync(default, default, default, default, default, default);
+
+        // Місяць важить більше за рік.
+        await Handler().HandleAsync(projectId: Mine, periodKey: 202603, year: 2026, default);
+        await _store.Received(1).SummarizeAsync(
+            Mine, 202603, Arg.Any<IReadOnlyCollection<int>?>(), null, 7, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    public async Task Без_місяця_й_року_або_з_роком_поза_межами_422()
+    {
+        Profile(new AccessBuilder { UserId = 7 }
+            .Permission(ListDocumentsHandler.Permission)
+            .Grant(ResourceKind.Project, Mine, GrantLevel.Read));
+
+        var none = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(projectId: null, periodKey: null, year: null, default));
+        Assert.Equal("err.ECR-REQ-0422.documentStateNeedsPeriod", none.Details!["messageKey"]);
+
+        var range = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(projectId: null, periodKey: null, year: 1999, default));
+        Assert.Equal("err.ECR-REQ-0422.documentYearOutOfRange", range.Details!["messageKey"]);
+    }
+
     private GetDocumentListSummaryHandler Handler() => new(_store, _access, _user);
 
     private void Profile(AccessBuilder builder)

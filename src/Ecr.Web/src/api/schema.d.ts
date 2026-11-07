@@ -2999,13 +2999,16 @@ export interface paths {
          * Зведення переліку за період (`BE-09`). Право `Document.View`.
          * @description ⚠ Лічить лише документи, які користувач БАЧИТЬ, — тією самою межею
          *     грантів, що й перелік вище; інакше смуга й таблиця під нею розійдуться.
-         *     Період обов'язковий: без нього стан документа не визначений (`D-93`).
+         *     Потрібен місяць (`periodKey`) або ✎ 2026-11-07 (Period clarity) рік (`year` без `periodKey`) — за
+         *     тим самим правилом року, що й фільтр стану переліку; без обох стан документа не визначений (`D-93`), 422.
+         *     За рік `staleResultsCount`/`staleResultsMineCount` — 0 (застарілість належить місяцю).
          */
         get: {
             parameters: {
                 query?: {
                     periodKey?: number;
                     projectId?: number;
+                    year?: number;
                 };
                 header?: never;
                 path?: never;

@@ -1,4 +1,6 @@
 using Ecr.Application.Common;
+using Ecr.Application.Errors;
+using Ecr.Domain.Errors;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -14,13 +16,66 @@ public sealed class GetDocumentListSummaryHandler(
     /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі видимі.</param>
     /// <param name="periodKey">Період; без нього стан документа не визначений (<c>D-93</c>).</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<DocumentListSummaryResponse> HandleAsync(
+    public Task<DocumentListSummaryResponse> HandleAsync(
         int? projectId, int periodKey, CancellationToken ct)
+        => HandleAsync(projectId, periodKey, year: null, ct);
+
+    /// <summary>
+    /// ✎ 2026-11-07 Period clarity: те саме за місяць (<paramref name="periodKey"/>) АБО за рік (<paramref name="year"/>
+    /// без місяця) — правило року те саме, що й у фільтра стану переліку (<c>02-contracts.md</c>, «Period clarity»).
+    /// Без обох — 422 <c>documentStateNeedsPeriod</c>; рік поза <c>2000..2999</c> — 422 <c>documentYearOutOfRange</c>.
+    /// Місяць важить більше за рік.
+    /// </summary>
+    /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі видимі.</param>
+    /// <param name="periodKey">Місяць; <c>null</c> — рахувати за роком.</param>
+    /// <param name="year">Рік (лише без <paramref name="periodKey"/>).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<DocumentListSummaryResponse> HandleAsync(
+        int? projectId, int? periodKey, int? year, CancellationToken ct)
     {
+        if (periodKey is null && year is null)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                "Зведення стану потребує періоду або року.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.documentStateNeedsPeriod" });
+        }
+
+        if (periodKey is null && year is < ListDocumentsHandler.MinYear or > ListDocumentsHandler.MaxYear)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Рік {year} поза межами {ListDocumentsHandler.MinYear}..{ListDocumentsHandler.MaxYear}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.documentYearOutOfRange",
+                    ["min"] = ListDocumentsHandler.MinYear.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["max"] = ListDocumentsHandler.MaxYear.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
         var profile = await PermissionCheck
             .RequireInAnyProjectAsync(access, currentUser, ListDocumentsHandler.Permission, ct)
             .ConfigureAwait(false);
 
+        if (periodKey is null)
+        {
+            var readable = ListDocumentsHandler.ReadableProjects(profile, ListDocumentsHandler.Permission);
+
+            // ⚠ Межі читача без періоду (ключ 0) — рівно як перелік за рік (`ListDocumentsHandler.ReaderBoundsAsync`).
+            var yearRestrictions = await RestrictionsAsync(profile, projectId, readable, null, ct).ConfigureAwait(false);
+
+            return await summary
+                .SummarizeYearAsync(projectId, year!.Value, readable, yearRestrictions, ct)
+                .ConfigureAwait(false);
+        }
+
+        return await MonthAsync(profile, projectId, periodKey.Value, ct).ConfigureAwait(false);
+    }
+
+    private async Task<DocumentListSummaryResponse> MonthAsync(
+        AccessProfile profile, int? projectId, int periodKey, CancellationToken ct)
+    {
         // ⛔ Межа видимості — ТА САМА функція, що й у переліку, і йде вона в
         // ЗАПИТ: смуга, порахована по всіх проєктах, розійшлася б із таблицею
         // під нею і розкрила б, скільки документів у чужих проєктах (§3.3).
@@ -41,7 +96,7 @@ public sealed class GetDocumentListSummaryHandler(
 
     /// <summary><c>null</c> — читач без обмежень (нуль запитів); інакше межі по кожному його проєкту.</summary>
     private async Task<SummaryRestrictions?> RestrictionsAsync(
-        AccessProfile profile, int? projectId, IReadOnlyCollection<int> visibleProjects, int periodKey,
+        AccessProfile profile, int? projectId, IReadOnlyCollection<int> visibleProjects, int? periodKey,
         CancellationToken ct)
     {
         if (!DocumentSheetVisibility.HasRestrictions(profile))
@@ -70,7 +125,7 @@ public sealed class GetDocumentListSummaryHandler(
         }
 
         return new SummaryRestrictions(
-            hidden, narrowed, await ParticipantsAsync(access, profile, periodKey, ct).ConfigureAwait(false));
+            hidden, narrowed, await ParticipantsAsync(access, profile, periodKey ?? 0, ct).ConfigureAwait(false));
     }
 
     /// <summary>
