@@ -53,12 +53,32 @@ public sealed class GetAirLimitsPermitHandler(
             .Where(c => c.Ref(AirLimitsSchema.Source) is not null && c.Ref(AirLimitsSchema.Substance) is { } s && substanceCodes.ContainsKey(s))
             .ToLookup(c => c.Ref(AirLimitsSchema.Source)!.Value);
 
+        // P1 07.11: the columns added to the tables («Add as new column») are shown with their values, and every row carries the
+        // version the generic batch write checks (row editing on the card).
+        var addedSources = AirLimitsSchema.AddedSourceColumns(tables.Sources);
+        var addedSubstances = AirLimitsSchema.AddedSubstanceColumns(tables.Substances);
+
+        static Dictionary<string, object?> Added(AirRow row, IReadOnlyList<Domain.Entities.Configuration.RegistryFieldDef> columns)
+        {
+            var values = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var column in columns)
+            {
+                if (row.Value(column) is { } value)
+                {
+                    values[column.Code] = value;
+                }
+            }
+
+            return values;
+        }
+
         AirSubstanceDto Substance(AirRow c)
         {
             var sid = c.Ref(AirLimitsSchema.Substance)!.Value;
             return new AirSubstanceDto(
                 c.Entry.Id, sid, substanceCodes[sid], substanceNames.GetValueOrDefault(sid),
-                c.Number(AirLimitsSchema.GramsPerSecond), c.Number(AirLimitsSchema.MgPerNm3), c.Number(AirLimitsSchema.TonsPerYear));
+                c.Number(AirLimitsSchema.GramsPerSecond), c.Number(AirLimitsSchema.MgPerNm3), c.Number(AirLimitsSchema.TonsPerYear),
+                Added(c, addedSubstances), c.VersionToken);
         }
 
         // ✎ AIR-ON-AIR: REGION / AREA hold an entry (Registry / List kind) or a text (Text kind); the answer carries both forms.
@@ -96,7 +116,9 @@ public sealed class GetAirLimitsPermitHandler(
                 regionId,
                 regionId is { } r ? scopeCodes.GetValueOrDefault(r) : null,
                 areaId,
-                areaId is { } a ? scopeCodes.GetValueOrDefault(a) : null));
+                areaId is { } a ? scopeCodes.GetValueOrDefault(a) : null,
+                Added(s, addedSources),
+                s.VersionToken));
         }
 
         list = [.. list.OrderBy(s => s.Region ?? string.Empty, StringComparer.Ordinal).ThenBy(s => s.Area ?? string.Empty, StringComparer.Ordinal)
@@ -110,7 +132,13 @@ public sealed class GetAirLimitsPermitHandler(
             .OrderBy(t => t.SubstanceCode, StringComparer.Ordinal)
             .ToList();
 
+        AirAddedColumnDto Column(string table, Domain.Entities.Configuration.RegistryFieldDef f)
+            => new(table, f.Code, new Dictionary<string, string>(f.NameL10n.Values, StringComparer.Ordinal), f.DataType.ToString());
+
         return new AirLimitsPermitDto(
-            permitId, number, type.Code, entry.ValidFrom, entry.ValidTo, list, totals, list.Sum(s => s.Substances.Count));
+            permitId, number, type.Code, entry.ValidFrom, entry.ValidTo, list, totals, list.Sum(s => s.Substances.Count),
+            [.. addedSources.Select(f => Column("sources", f)), .. addedSubstances.Select(f => Column("substances", f))],
+            tables.Sources.Code,
+            tables.Substances.Code);
     }
 }

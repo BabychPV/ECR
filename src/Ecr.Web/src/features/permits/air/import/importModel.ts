@@ -250,3 +250,18 @@ export function specProblem(spec: ImportSpec): 'nameRequired' | 'nameDuplicate' 
 export function profileCodeProblem(code: string): boolean {
   return !/^[A-Z][A-Z0-9_]{1,63}$/.test(code);
 }
+
+/**
+ * Code suggested from the profile name (the user may still change it): Latin letters and digits upper case, the rest `_`;
+ * a name without Latin letters (Cyrillic) gives `''` — the user enters the code.
+ */
+export function profileCodeFrom(name: string): string {
+  const code = name
+    .toLocaleUpperCase('en-US')
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 62);
+  if (code === '') return '';
+
+  return /^[A-Z]/.test(code) ? code : `P_${code}`;
+}

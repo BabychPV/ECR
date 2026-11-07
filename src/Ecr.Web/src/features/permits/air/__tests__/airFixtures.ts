@@ -1,3 +1,5 @@
+import type { PermitType } from '@/features/permits/api/types';
+import { newColumn } from '../import/addColumn';
 import type {
   AirAnalysis,
   AirImportResult,
@@ -196,6 +198,36 @@ export function tree(): NaeTree {
     levels: [],
     registryCode: 'NAE_TREE',
     nodes: [node(1, null, 'Atyrau', 'REGION'), node(2, 1, 'Offshore', 'AREA'), node(3, 2, 'DC05_Island', 'SITE'), node(4, 3, '1085', 'SRC')],
+  };
+}
+
+/** The published AIR permit type with its two import tables; `sources` — extra columns of AIR_SOURCES as [code, en name]. */
+export function airPermitType(sources: readonly (readonly [string, string])[] = []): PermitType {
+  return {
+    code: 'AIR',
+    category: 'Air',
+    nameL10n: { en: 'Air emission permit' },
+    status: 'Published',
+    version: 3,
+    draftVersion: null,
+    hasUnpublishedChanges: false,
+    publishedAt: '2026-11-01T00:00:00Z',
+    updatedAt: '2026-11-01T00:00:00Z',
+    rowVersion: 'rv-published',
+    headerFields: [],
+    rules: [],
+    tables: [
+      {
+        code: 'AIR_SOURCES',
+        nameL10n: { en: 'Sources' },
+        order: 1,
+        rules: [],
+        columns: [['SOURCE_NAME', 'Source name'] as const, ...sources].map(([code, name], at) =>
+          newColumn(code, { letter: 'B', name, kind: 'text', level: 'Parent' }, at + 1),
+        ),
+      },
+      { code: 'AIR_SOURCE_SUBSTANCES', nameL10n: { en: 'Substances' }, order: 2, rules: [], columns: [] },
+    ],
   };
 }
 

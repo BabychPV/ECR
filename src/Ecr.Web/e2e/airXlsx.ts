@@ -78,8 +78,8 @@ function columnLetter(index: number): string {
 
 const escapeXml = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-/** One worksheet from rows of cells (`null` - empty cell). */
-export function buildXlsx(rows: readonly (readonly Cell[])[], sheetName = 'Sheet1'): Buffer {
+/** One worksheet from rows of cells (`null` - empty cell); `merges` — merged ranges like `A4:A6` (P1 06.11: real-shaped forms). */
+export function buildXlsx(rows: readonly (readonly Cell[])[], sheetName = 'Sheet1', merges: readonly string[] = []): Buffer {
   const sheetRows = rows
     .map((row, r) => {
       const cells = row
@@ -120,6 +120,13 @@ export function buildXlsx(rows: readonly (readonly Cell[])[], sheetName = 'Sheet
       name: 'xl/styles.xml',
       text: `${head}<styleSheet xmlns="${ns}"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>`,
     },
-    { name: 'xl/worksheets/sheet1.xml', text: `${head}<worksheet xmlns="${ns}"><sheetData>${sheetRows}</sheetData></worksheet>` },
+    {
+      name: 'xl/worksheets/sheet1.xml',
+      text: `${head}<worksheet xmlns="${ns}"><sheetData>${sheetRows}</sheetData>${
+        merges.length === 0
+          ? ''
+          : `<mergeCells count="${String(merges.length)}">${merges.map((ref) => `<mergeCell ref="${ref}"/>`).join('')}</mergeCells>`
+      }</worksheet>`,
+    },
   ]);
 }

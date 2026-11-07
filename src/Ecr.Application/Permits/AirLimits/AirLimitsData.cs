@@ -10,8 +10,34 @@ namespace Ecr.Application.Permits.AirLimits;
 /// <summary>A registry row read with its values by field code.</summary>
 /// <param name="Entry">The entry.</param>
 /// <param name="Values">Values by field code.</param>
-internal sealed record AirRow(RegistryEntry Entry, IReadOnlyDictionary<string, RegistryRowValue> Values)
+/// <param name="Version">System version of the row (what <c>GET …/rows</c> gives as <c>version</c>); <c>null</c> — unknown.</param>
+internal sealed record AirRow(RegistryEntry Entry, IReadOnlyDictionary<string, RegistryRowValue> Values, DateTime? Version = null)
 {
+    /// <summary>The version as the generic batch write takes it (<c>baseVersion</c>); <c>null</c> — unknown.</summary>
+    public string? VersionToken => Version is { } v ? Registries.Rows.RegistryRowVersion.Encode(v) : null;
+
+    /// <summary>
+    /// Value of a field in its JSON form for the card: number (Int / Decimal), text, ISO date, bool, or the lookup target id.
+    /// </summary>
+    /// <param name="field">The field.</param>
+    public object? Value(RegistryFieldDef field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        if (!Values.TryGetValue(field.Code, out var v))
+        {
+            return null;
+        }
+
+        return field.DataType switch
+        {
+            Domain.Enums.CellDataType.Int or Domain.Enums.CellDataType.Decimal => v.Numeric,
+            Domain.Enums.CellDataType.Date => v.Date is { } d ? d.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : null,
+            Domain.Enums.CellDataType.Bool => v.Bool,
+            Domain.Enums.CellDataType.Lookup => v.RefEntryId,
+            _ => v.Text ?? v.Numeric?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
+    }
+
     /// <summary>Text value of a field.</summary>
     public string? Text(string code) => Values.TryGetValue(code, out var v) ? v.Text : null;
 
@@ -158,17 +184,20 @@ internal sealed class AirLimitsData(IRegistryStore registries, IRegistryRowsQuer
             {
                 var values = group.Where(v => codeById.ContainsKey(v.RegistryFieldDefId))
                     .ToDictionary(v => codeById[v.RegistryFieldDefId], v => v, StringComparer.OrdinalIgnoreCase);
-                result[group.Key] = new AirRow(entries[group.Key], values);
+                result[group.Key] = new AirRow(entries[group.Key], values, VersionOf(slice, group.Key));
             }
 
             foreach (var id in chunk.Where(c => !result.ContainsKey(c) && entries.ContainsKey(c)))
             {
-                result[id] = new AirRow(entries[id], new Dictionary<string, RegistryRowValue>());
+                result[id] = new AirRow(entries[id], new Dictionary<string, RegistryRowValue>(), VersionOf(slice, id));
             }
         }
 
         return result;
     }
+
+    private static DateTime? VersionOf(RegistryRowsSlice slice, long id)
+        => slice.Versions.TryGetValue(id, out var v) ? v : null;
 
     /// <summary>
     /// NAE tree nodes of the given codes inside a region and area: normalised code → entry id (the first live one). ✎ AIR-ON-AIR:

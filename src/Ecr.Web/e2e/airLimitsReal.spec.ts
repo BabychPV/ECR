@@ -395,8 +395,10 @@ test.describe('Air limits real', () => {
     await page.getByRole('button', { name: /Next: analyse file/ }).click();
     await expect(page.getByRole('heading', { name: 'Mapping', level: 2 })).toBeVisible({ timeout: 30_000 });
     const matched = page.getByRole('table').first();
-    await expect(matched).toContainText('naeCode');
-    await expect(matched).toContainText('tonsPerYear');
+    // Readable target names (07.11), not the field codes naeCode / tonsPerYear.
+    await expect(matched).toContainText('NAE number');
+    await expect(matched).toContainText('t/year');
+    await expect(matched).not.toContainText('naeCode');
     await expect(page.getByText(/Header rows 2–3 · data from row 5/)).toBeVisible();
     await expectNoRawKeys(page);
 
@@ -405,9 +407,9 @@ test.describe('Air limits real', () => {
     await expect(page.getByRole('heading', { name: 'Preview', level: 2 })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('heading', { name: /NAE codes missing in the tree: 2/ })).toBeVisible();
     const issues = page.getByRole('region', { name: 'Import findings' });
-    await expect(issues.getByRole('row', { name: /Warning\s+6\s+I\s+tonsPerYear/ })).toBeVisible();
-    await expect(issues.getByRole('row', { name: /Error\s+7\s+B\s+naeCode/ })).toBeVisible();
-    await expect(issues.getByRole('row', { name: /Error\s+8\s+B\s+naeCode/ })).toBeVisible();
+    await expect(issues.getByRole('row', { name: /Warning\s+6\s+I\s+t\/year/ })).toBeVisible();
+    await expect(issues.getByRole('row', { name: /Error\s+7\s+B\s+NAE number/ })).toBeVisible();
+    await expect(issues.getByRole('row', { name: /Error\s+8\s+B\s+NAE number/ })).toBeVisible();
     await expectNoRawKeys(page);
     const apply = page.getByRole('button', { name: /Apply import/ });
     await expect(apply).toBeDisabled();
@@ -422,7 +424,8 @@ test.describe('Air limits real', () => {
     await expect(page.getByText('The preview is out of date')).toHaveCount(0, { timeout: 30_000 });
     await expect(page.getByRole('heading', { name: /NAE codes missing in the tree/ })).toBeVisible();
     await expect(issues.getByRole('row', { name: /Error/ })).toHaveCount(0);
-    await expect(issues.getByRole('row', { name: /Warning\s+6\s+I\s+tonsPerYear/ })).toBeVisible();
+    // Field shown by its readable name (07.11): «t/year», not tonsPerYear.
+    await expect(issues.getByRole('row', { name: /Warning\s+6\s+I\s+t\/year/ })).toBeVisible();
     await expect(apply).toBeEnabled();
 
     // 4 Apply -> result
@@ -445,7 +448,7 @@ test.describe('Air limits real', () => {
     const sub = page.getByRole('table', { name: 'Substances of source 0001' });
     await expect(sub).toContainText('0301');
     // Числа з повною шкалою сервера (0.5000000000000000) показані без нулів хвоста й без округлення; назва речовини - з довідника.
-    const values = async (row: RegExp): Promise<string[]> => (await sub.getByRole('row', { name: row }).getByRole('cell').allInnerTexts()).slice(2);
+    const values = async (row: RegExp): Promise<string[]> => (await sub.getByRole('row', { name: row }).getByRole('cell').allInnerTexts()).slice(2, 5); // g/s, mg/nm³, t/year (added columns and «Edit» follow)
     expect(await values(/0301/)).toEqual(['0.5', '25', '1.2']);
     expect(await values(/0337/)).toEqual(['0.25', '—', '—']); // порожнє t/year - прочерк, не 0
     expect(await sub.innerText(), 'нулі хвоста десяткових').not.toMatch(/\d\.\d*0{4,}/);
@@ -623,6 +626,8 @@ test.describe('Air limits real', () => {
           await page.getByRole('button', { name: /Next: analyse file/ }).click();
           await expect(page.getByRole('heading', { name: 'Mapping', level: 2 })).toBeVisible({ timeout: 30_000 });
           await clean('wizard-mapping');
+          // The rules editor lives under «Advanced» (07.11): open it first.
+          await page.getByText('Advanced: edit the mapping rules', { exact: true }).click();
           await page.getByRole('button', { name: 'Edit mapping' }).click();
           await expect(page.getByRole('region', { name: 'Mapping editor' })).toBeVisible();
           await clean('wizard-mapping-editor');

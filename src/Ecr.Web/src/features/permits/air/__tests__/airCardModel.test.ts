@@ -1,6 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Catalog } from '@/test/__tests__/a11yFixtures';
-import { cell, Dash, filterSources, num, scopeLabel, sourceTypeLabel, sourceTypeShort } from '../airCardModel';
+import {
+  addedText,
+  cell,
+  changedValues,
+  columnTitle,
+  Dash,
+  filterSources,
+  num,
+  scopeLabel,
+  sourceTypeLabel,
+  sourceTypeShort,
+  type EditField,
+} from '../airCardModel';
 import { nodeOptions } from '../import/naeNodes';
 import { card, tree } from './airFixtures';
 
@@ -8,6 +20,30 @@ vi.mock('@/shared/i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/i18n')>()),
   t: (key: string) => Catalog[key] ?? `⟦${key}⟧`,
 }));
+
+describe('airCardModel: додані колонки й правка (P1 07.11)', () => {
+  const column = { table: 'sources', code: 'FILE_B', nameL10n: { en: 'Workshop', ru: 'Цех' }, dataType: 'Decimal' };
+
+  it('заголовок — назва мовою, інакше англійська, інакше код; число без хвостових нулів, порожнє — прочерк', () => {
+    expect(columnTitle(column, 'ru')).toBe('Цех');
+    expect(columnTitle(column, 'kz')).toBe('Workshop');
+    expect(columnTitle({ ...column, nameL10n: {} }, 'en')).toBe('FILE_B');
+    expect(addedText({ FILE_B: '0.5000000000000000' }, column)).toBe('0.5');
+    expect(addedText({}, column)).toBe(Dash);
+    expect(addedText(null, column)).toBe(Dash);
+  });
+
+  it('у запис іде лише змінене: порожнє — null, число — числом, число з комою — текстом (сервер читає за мовою)', () => {
+    const fields: EditField[] = [
+      { code: 'A', label: 'A', kind: 'number', added: false },
+      { code: 'B', label: 'B', kind: 'number', added: true },
+      { code: 'C', label: 'C', kind: 'text', added: false },
+      { code: 'D', label: 'D', kind: 'text', added: true },
+    ];
+    expect(changedValues(fields, { A: '1', B: '2', C: 'x', D: 'y' }, { A: '1', B: '2,5', C: '', D: ' y ' })).toEqual({ B: '2,5', C: null });
+    expect(changedValues(fields, { A: '1', B: '', C: '', D: '' }, { A: '1.25', B: '', C: '', D: '' })).toEqual({ A: 1.25 });
+  });
+});
 
 describe('airCardModel', () => {
   it('область рядка: коди записів Region/Area, інакше текст; «-» (без ділянки) не показується', () => {

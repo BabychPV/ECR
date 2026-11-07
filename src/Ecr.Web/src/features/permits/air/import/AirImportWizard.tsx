@@ -1,12 +1,22 @@
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
-import { Button, Text, Title } from '@mantine/core';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { Button, Skeleton, Text, Title } from '@mantine/core';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { language, t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { PermitsPaths } from '../../shell/permitPaths';
-import type { AirAnalysis, AirImportResult, AirPreview } from '../airTypes';
+import type { AirAnalysis, AirImportResult, AirPreview, ImportSpec } from '../airTypes';
+import {
+  AddColumnError,
+  addPermitTableColumn,
+  AirType,
+  fieldFor,
+  withColumnField,
+  type AddColumnProblem,
+  type NewColumnRequest,
+} from './addColumn';
 import {
   useAirScopeCodes,
   useAirScopeFields,
@@ -30,7 +40,10 @@ import {
   type ImportDraft,
   type ImportStep,
 } from './importModel';
-import { MappingStep } from './MappingStep';
+import { useAirColumnNames } from './fieldLabels';
+// «Mapping» (header rows, added columns, rules editor, profile form) is its own chunk: the page stays within the client
+// budget, and the step is only needed after the file is analysed.
+const MappingStep = lazy(() => import('./MappingStep').then((module) => ({ default: module.MappingStep })));
 import { PreviewStep } from './PreviewStep';
 import '../air.css';
 
@@ -42,6 +55,8 @@ export interface AirImportWizardProps {
   readonly mayImport: boolean;
   /** Право `Registry.EditDefinition`: збереження профілю імпорту. */
   readonly mayEditProfile: boolean;
+  /** Права `Permit.EditType` + `Permit.PublishType`: «Add as new column» (нова колонка таблиці дозволу). */
+  readonly mayAddColumn?: boolean;
 }
 
 function stepLabel(step: ImportStep): string {
@@ -79,7 +94,7 @@ function stepHint(step: ImportStep): string {
  * 3 Відповідність → 4 Перегляд (+ «Apply») → 5 Результат. Все, що змінюється на сервері, — лише кроком 4; кроки 1-3
  * нічого не пишуть.
  */
-export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProfile }: AirImportWizardProps): JSX.Element {
+export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProfile, mayAddColumn = false }: AirImportWizardProps): JSX.Element {
   const [step, setStep] = useState<ImportStep>('scope');
   const [scopeIssue, setScopeIssue] = useState<'region' | 'area' | null>(null);
   const [draft, setDraft] = useState<ImportDraft>(EmptyDraft);
@@ -107,10 +122,20 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
       ? {}
       : scopeFormFields(scopeFields.data, scopeCodes.data, snapshot.region, snapshot.area);
   const profile = useImportProfile(step === 'mapping' ? draft.profileCode : undefined);
+  const columnNames = useAirColumnNames(step === 'mapping' || step === 'preview');
   const analysing = usePendingLoading(analyse.isPending);
   const previewing = usePendingLoading(previewCall.isPending);
   const applying = usePendingLoading(apply.isPending);
   const saving = usePendingLoading(saveProfile.isPending);
+  const queryClient = useQueryClient();
+  const addColumn = useMutation<string, Error, NewColumnRequest>({
+    mutationKey: ['permits', 'types', AirType, 'add-column'],
+    mutationFn: (request) =>
+      addPermitTableColumn(request, t('permits.air.import.add.reason', { name: request.name, column: request.letter })),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['permits', 'types'] }),
+  });
+  const addingColumn = usePendingLoading(addColumn.isPending);
+  const [addProblem, setAddProblem] = useState<AddColumnProblem>(null);
 
   const patchDraft = useCallback((patch: Partial<ImportDraft>) => setDraft((current) => ({ ...current, ...patch })), []);
 
@@ -125,12 +150,15 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
     setStep(next);
   };
 
-  const runAnalyse = (then: ImportStep | null): void => {
+  /** Re-reads the file; `override` — with this specification (set into the draft at the same time). */
+  const runAnalyse = (then: ImportStep | null, override?: ImportSpec): void => {
     if (analyse.isPending || draft.file === null) return;
     setFailure(null);
-    const snapshot = draft.spec;
+    const current = override === undefined ? draft : { ...draft, spec: override };
+    if (override !== undefined) patchDraft({ spec: override });
+    const snapshot = current.spec;
     analyse.mutate(
-      { file: draft.file, options: buildOptions(draft) },
+      { file: draft.file, options: buildOptions(current) },
       {
         onSuccess: (data) => {
           setAnalysis(data);
@@ -189,14 +217,37 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
     );
   };
 
+  const onAddColumn = (request: NewColumnRequest): void => {
+    const base = draft.spec ?? profile.data?.spec;
+    if (addColumn.isPending || base === undefined) return;
+    setFailure(null);
+    setAddProblem(null);
+    addColumn.mutate(request, {
+      onSuccess: (code) => {
+        showDone(t('permits.air.import.add.done', { name: request.name }));
+        runAnalyse(null, withColumnField(base, fieldFor(code, request)));
+      },
+      onError: (error) => (error instanceof AddColumnError ? setAddProblem(error.problem) : setFailure(error)),
+    });
+  };
+
+  /**
+   * The one «Save as profile…»: the current specification — edited (header rows, sheet, added columns, rules) or, untouched,
+   * the profile's own — goes into a new profile, which the wizard then uses (and the File step lists).
+   */
   const onSaveProfile = (code: string, name: string): void => {
-    if (saveProfile.isPending || draft.spec === null) return;
+    const spec = draft.spec ?? profile.data?.spec;
+    if (saveProfile.isPending || spec === undefined) return;
+    setFailure(null);
+    const analysed = draft.spec === analysedSpec;
     saveProfile.mutate(
-      { code, body: { nameL10n: { [language()]: name, en: name }, spec: draft.spec, rowVersion: null } },
+      { code, body: { nameL10n: { [language()]: name, en: name }, spec, rowVersion: null } },
       {
         onSuccess: (saved) => {
           setSavedCode(saved.code);
-          setAnalysedSpec(null); // збережена специфікація = та, з якою файл щойно розкладено
+          // The file was read with this very specification: it stays read (profile instead of spec). Edits that were not
+          // re-read yet still ask for a re-read before the preview.
+          setAnalysedSpec(analysed ? null : spec);
           patchDraft({ profileCode: saved.code, spec: null });
         },
         onError: setFailure,
@@ -264,7 +315,8 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
       )}
       {step === 'file' && <FileStep draft={draft} onChange={patchDraft} problem={problem} />}
       {step === 'mapping' && analysis !== null && (
-        <MappingStep
+        <Suspense fallback={<Skeleton height={240} role="status" aria-label={t('common.loading')} />}>
+          <MappingStep
           analysis={analysis}
           profile={profile.data}
           spec={draft.spec}
@@ -275,7 +327,14 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           onSaveProfile={onSaveProfile}
           saving={saving}
           savedCode={savedCode}
-        />
+          onApplySpec={(spec) => runAnalyse(null, spec)}
+          mayAddColumn={mayAddColumn}
+          onAddColumn={onAddColumn}
+          addingColumn={addingColumn}
+          addProblem={addProblem}
+          columnNames={columnNames}
+          />
+        </Suspense>
       )}
       {step === 'preview' && preview !== null && (
         <PreviewStep
@@ -288,12 +347,18 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           onApply={runApply}
           applying={applying}
           mayApply={mayImport}
+          columnNames={columnNames}
         />
       )}
       {step === 'apply' && result !== null && <ApplyStep result={result} permitId={permitId} />}
 
+      {step === 'mapping' && draft.spec !== analysedSpec && (
+        <Text size="sm" c="dimmed" role="status" className="pi-end">
+          {t('permits.air.import.map.reanalyseFirst')}
+        </Text>
+      )}
       {step !== 'apply' && (
-        <div className="pi-actions">
+        <div className="pi-actions pi-footer">
           {step === 'scope' ? (
             <Button component={Link} variant="default" to={`${PermitsPaths.permits}/${String(permitId)}?tab=air`}>
               {t('common.cancel')}
@@ -323,11 +388,6 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
             </Button>
           )}
         </div>
-      )}
-      {step === 'mapping' && draft.spec !== analysedSpec && (
-        <Text size="sm" c="dimmed" role="status">
-          {t('permits.air.import.map.reanalyseFirst')}
-        </Text>
       )}
     </div>
   );

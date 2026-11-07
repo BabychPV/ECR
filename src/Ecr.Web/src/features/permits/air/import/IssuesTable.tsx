@@ -4,6 +4,7 @@ import { serverMessage } from '@/features/registries/rc816/serverMessage';
 import { formatNumber } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
 import type { ImportIssue } from '../airTypes';
+import { fieldLabel, type ColumnNames } from './fieldLabels';
 import { sortIssues } from './importModel';
 
 /** Скільки знахідок показано одразу: файл на 2 600 рядків може дати їх тисячі, а DOM — не безкінечний. */
@@ -17,13 +18,15 @@ export interface IssuesTableProps {
   readonly issues: readonly ImportIssue[];
   /** Знахідки, що не вмістились у ліміт сервера (`droppedIssues`). */
   readonly dropped?: number | undefined;
+  /** Names of the AIR type columns: the «Field» column shows readable names (`fieldLabel`). */
+  readonly columnNames?: ColumnNames | undefined;
 }
 
 /**
  * Знахідки розбору й планування: серйозність, рядок, колонка, поле, текст з каталогу (`messageKey` + підстановки з
  * сервера). Помилки першими; показується порція, решта — за «Show more».
  */
-export function IssuesTable({ issues, dropped = 0 }: IssuesTableProps): JSX.Element {
+export function IssuesTable({ issues, dropped = 0, columnNames }: IssuesTableProps): JSX.Element {
   const [shown, setShown] = useState(IssuesPageSize);
   const sorted = sortIssues(issues);
 
@@ -60,7 +63,7 @@ export function IssuesTable({ issues, dropped = 0 }: IssuesTableProps): JSX.Elem
                 </td>
                 <td className="pa-num">{issue.row ?? '—'}</td>
                 <td>{issue.column ?? '—'}</td>
-                <td>{issue.field ?? '—'}</td>
+                <td>{issue.field == null ? '—' : fieldLabel(issue.field, columnNames)}</td>
                 <td>{serverMessage(issue.messageKey, issue.args ?? {})}</td>
               </tr>
             ))}

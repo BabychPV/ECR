@@ -130,6 +130,67 @@ public static class AirLimitsSchema
         ["tonsPerYear"] = TonsPerYear,
     };
 
+    /// <summary>Columns of AIR_SOURCES the import fills itself (never from a profile field of the same code).</summary>
+    private static readonly HashSet<string> SourceSystemColumns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        PermitHeaderFields.PermitFieldCode, PermitHeaderFields.PrimaryKeyCode, Nae, Region, Area, SiteLabel,
+    };
+
+    /// <summary>Columns of AIR_SOURCE_SUBSTANCES the import fills itself.</summary>
+    private static readonly HashSet<string> SubstanceSystemColumns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        PermitHeaderFields.PermitFieldCode, PermitHeaderFields.PrimaryKeyCode, Source, Substance,
+    };
+
+    /// <summary>
+    /// Import field name → source column: the built-in <see cref="ParentColumns"/> plus every column added to the table later
+    /// (P1 06.11, «Add as new column»: the user adds a column through the permit-type column API and maps a file column to a
+    /// profile field with the SAME code). System columns and the built-in targets are never taken this way.
+    /// </summary>
+    /// <param name="sources">The AIR_SOURCES definition.</param>
+    public static IReadOnlyDictionary<string, string> ParentColumnsOf(Domain.Entities.Configuration.RegistryDef sources)
+        => WithAddedColumns(ParentColumns, sources, SourceSystemColumns);
+
+    /// <summary>Import field name → substance column, like <see cref="ParentColumnsOf"/>.</summary>
+    /// <param name="substances">The AIR_SOURCE_SUBSTANCES definition.</param>
+    public static IReadOnlyDictionary<string, string> ChildColumnsOf(Domain.Entities.Configuration.RegistryDef substances)
+        => WithAddedColumns(ChildColumns, substances, SubstanceSystemColumns);
+
+    /// <summary>
+    /// Columns ADDED to AIR_SOURCES later (neither system nor built-in), in table order — the same rule as <see cref="ParentColumnsOf"/>;
+    /// the permit card shows them (P1 07.11: «the user must SEE ALL imported data»).
+    /// </summary>
+    /// <param name="sources">The AIR_SOURCES definition.</param>
+    public static IReadOnlyList<Domain.Entities.Configuration.RegistryFieldDef> AddedSourceColumns(Domain.Entities.Configuration.RegistryDef sources)
+        => AddedColumns(ParentColumns, sources, SourceSystemColumns);
+
+    /// <summary>Columns added to AIR_SOURCE_SUBSTANCES later, like <see cref="AddedSourceColumns"/>.</summary>
+    /// <param name="substances">The AIR_SOURCE_SUBSTANCES definition.</param>
+    public static IReadOnlyList<Domain.Entities.Configuration.RegistryFieldDef> AddedSubstanceColumns(Domain.Entities.Configuration.RegistryDef substances)
+        => AddedColumns(ChildColumns, substances, SubstanceSystemColumns);
+
+    private static List<Domain.Entities.Configuration.RegistryFieldDef> AddedColumns(
+        IReadOnlyDictionary<string, string> builtIn, Domain.Entities.Configuration.RegistryDef table, HashSet<string> system)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        return [.. table.Fields
+            .Where(f => !system.Contains(f.Code) && !builtIn.Values.Contains(f.Code, StringComparer.OrdinalIgnoreCase))
+            .OrderBy(f => f.Ordinal)
+            .ThenBy(f => f.Id)];
+    }
+
+    private static Dictionary<string, string> WithAddedColumns(
+        IReadOnlyDictionary<string, string> builtIn, Domain.Entities.Configuration.RegistryDef table, HashSet<string> system)
+    {
+        var result = new Dictionary<string, string>(builtIn, StringComparer.Ordinal);
+        foreach (var field in AddedColumns(builtIn, table, system))
+        {
+            result.TryAdd(field.Code, field.Code);
+        }
+
+        return result;
+    }
+
     /// <summary>Normalises a region or area code like the NAE tree does (upper case, letters and digits, others to <c>_</c>).</summary>
     /// <param name="text">Raw code.</param>
     /// <param name="emptyAs">Result for an empty value.</param>

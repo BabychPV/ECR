@@ -15,6 +15,8 @@ import { PermitsPaths } from '@/features/permits/shell/permitPaths';
 // AIR-ON-AIR (людина 02.11: «а не як окремий тип»): таблиці параметрів належать типу AIR.
 const AirTypeCode = 'AIR';
 const EditDefinition = 'Registry.EditDefinition';
+const EditType = 'Permit.EditType';
+const PublishType = 'Permit.PublishType';
 
 function ImportScreen({ permit }: { readonly permit: Permit }): JSX.Element {
   const mayEdit = useMayEditPermits();
@@ -23,6 +25,9 @@ function ImportScreen({ permit }: { readonly permit: Permit }): JSX.Element {
   const expired = permit.status === 'Expired';
   const supported = permit.typeCode === AirTypeCode;
   const mayImport = mayEdit && !expired && supported;
+  // «Add as new column» changes the permit TYPE (new version + publish): both rights, never in a simulation.
+  const mayAddColumn =
+    mayImport && can(session.data, EditType) && can(session.data, PublishType) && session.data?.isSimulation !== true;
 
   return (
     <>
@@ -34,7 +39,7 @@ function ImportScreen({ permit }: { readonly permit: Permit }): JSX.Element {
       {!supported && <Banner tone="warning" title={t('permits.air.import.unsupported.title')} text={t('permits.air.import.unsupported.text')} />}
       {supported && expired && <Banner tone="info" title={t('permits.air.import.expired.title')} text={t('permits.air.import.expired.text')} />}
       {supported && !mayEdit && <Banner tone="info" title={t('permits.air.import.readOnly.title')} text={t('permits.air.import.readOnly.text')} />}
-      {supported && <AirImportWizard permitId={permit.id} permitNumber={permit.number} mayImport={mayImport} mayEditProfile={mayEditProfile} />}
+      {supported && <AirImportWizard permitId={permit.id} permitNumber={permit.number} mayImport={mayImport} mayEditProfile={mayEditProfile} mayAddColumn={mayAddColumn} />}
     </>
   );
 }

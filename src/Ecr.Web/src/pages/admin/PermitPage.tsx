@@ -37,6 +37,10 @@ const TableTab = lazy(() => loadTableTab().then((module) => ({ default: module.T
 const AirLimitsTab = lazy(() => import('@/features/permits/air/AirLimitsTab').then((module) => ({ default: module.AirLimitsTab })));
 const AirTypeCode = 'AIR';
 const AirTabId = 'air';
+// P1 07.11 (людина): у дозволу AIR таблиці джерел і речовин показує «Sources & parameters» (усі поля, правка рядків), тож
+// їхні загальні вкладки з Add row / Paste / Import file — зайві й ховаються. Дані й API ті самі; інші типи без змін.
+// = AirLimitsSchema.SourcesTable / SubstancesTable.
+const AirOwnTables: ReadonlySet<string> = new Set(['AIR_SOURCES', 'AIR_SOURCE_SUBSTANCES']);
 
 // «Used in» (PERMIT-USAGE): де дозвіл обрано значенням шапки чи колонки документа — окремим чанком, як і інші вкладки.
 const PermitUsageTab = lazy(() =>
@@ -114,8 +118,9 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
   const requested = params.get(TabParam) ?? OverviewTabId;
   const hasAir = permit.typeCode === AirTypeCode;
   const mayImport = mayEdit && permit.status !== PermitStatus.Expired;
+  const tables = hasAir ? permit.tables.filter((table) => !AirOwnTables.has(table.code)) : permit.tables;
   const tab =
-    permit.tables.some((table) => table.code === requested) || (hasAir && requested === AirTabId) || requested === UsageTabId
+    tables.some((table) => table.code === requested) || (hasAir && requested === AirTabId) || requested === UsageTabId
       ? requested
       : OverviewTabId;
   const dialog = readLifecycleDialog(params.get(DialogParam));
@@ -139,7 +144,7 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
   const open = (id: string): void => update((next) => next.set(DialogParam, id));
   const closeDialog = (): void => update((next) => next.delete(DialogParam));
 
-  const hasTables = permit.tables.length > 0;
+  const hasTables = tables.length > 0;
   useEffect(() => {
     if (hasTables) void loadTableTab();
   }, [hasTables]);
@@ -166,7 +171,7 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
           <Tabs.List aria-label={t('permits.page.tabs.aria')} mb="md">
             <Tabs.Tab value={OverviewTabId}>{t('permits.page.tabs.overview')}</Tabs.Tab>
             {hasAir && <Tabs.Tab value={AirTabId}>{t('permits.page.tabs.air')}</Tabs.Tab>}
-            {permit.tables.map((table) => (
+            {tables.map((table) => (
               <Tabs.Tab
                 key={table.code}
                 value={table.code}
@@ -191,7 +196,7 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
               </Suspense>
             </Tabs.Panel>
           )}
-          {permit.tables.map((table) => (
+          {tables.map((table) => (
             <Tabs.Panel key={table.code} value={table.code}>
               {typeQuery.isError ? (
                 <ErrorAlert error={typeQuery.error} onRetry={() => void typeQuery.refetch()} />

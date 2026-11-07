@@ -5,6 +5,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import type { ImportProfileSummary } from '../airTypes';
 import { useImportProfiles } from '../useAirLimits';
 import type { ImportDraft } from './importModel';
+import { InputOrder } from './inputOrder';
 
 export interface FileStepProps {
   readonly draft: ImportDraft;
@@ -40,6 +41,7 @@ export function FileStep({ draft, onChange, problem }: FileStepProps): JSX.Eleme
       <FileInput
         label={t('permits.air.import.file.label')}
         description={t('permits.air.import.file.hint')}
+        inputWrapperOrder={InputOrder}
         placeholder={t('permits.air.import.file.placeholder')}
         accept=".xlsx"
         clearable
@@ -58,6 +60,7 @@ export function FileStep({ draft, onChange, problem }: FileStepProps): JSX.Eleme
       <Select
         label={t('permits.air.import.profile.label')}
         description={t('permits.air.import.profile.hint')}
+        inputWrapperOrder={InputOrder}
         data={options}
         value={profileCode}
         allowDeselect={false}

@@ -26967,6 +26967,19 @@ export interface components {
         };
         /** @enum {unknown} */
         AggregationKind: "Sum" | "Avg" | "Min" | "Max" | "Last" | "First" | "TimeWeightedAvg" | "TimeIntegral" | null;
+        /** @description A column added to a sources table of the AIR type (P1 06.11 «Add as new column»), for the card headers. */
+        AirAddedColumnDto: {
+            /** @description Column (registry field) code, e.g. `FILE_B`. */
+            code: string;
+            /** @description `String`, `Int`, `Decimal`, `Date`, `Bool` or `Lookup`. */
+            dataType: string;
+            /** @description Display name by language. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /** @description `sources` (AIR_SOURCES) or `substances` (AIR_SOURCE_SUBSTANCES). */
+            table: string;
+        };
         /** @description One area of a region. */
         AirAreaCodeDto: {
             /** @description Normalised area code (what `area` of the import options takes). */
@@ -27035,6 +27048,8 @@ export interface components {
         };
         /** @description Result of `GET /api/v1/permits/{permitId}/air-limits`: the permit card content. */
         AirLimitsPermitDto: {
+            /** @description P1 07.11: columns added to the two tables (sources first, then substances), in table order. */
+            addedColumns?: null | components["schemas"]["AirAddedColumnDto"][];
             /**
              * Format: int64
              * @description Permit.
@@ -27044,11 +27059,15 @@ export interface components {
             permitNumber: string;
             /** @description Sources with substances, by NAE code. */
             sources: components["schemas"]["AirSourceDto"][];
+            /** @description Registry of `AIR_SOURCES` — where the card writes an edited source row (generic batch). */
+            sourcesRegistryCode?: null | string;
             /**
              * Format: int32
              * @description Substance rows in all sources.
              */
             substanceRows: number;
+            /** @description Registry of `AIR_SOURCE_SUBSTANCES`. */
+            substancesRegistryCode?: null | string;
             /** @description Totals per substance, by code. */
             totals: components["schemas"]["AirTotalDto"][];
             /** @description Permit type code. */
@@ -27178,6 +27197,10 @@ export interface components {
         };
         /** @description One source (NAE) of a permit with its substances. */
         AirSourceDto: {
+            /** @description P1 07.11: values of the columns added to `AIR_SOURCES`, by code (as the substance's `added`). */
+            added?: null | {
+                [key: string]: unknown;
+            };
             /** @description Area code (`-` — none). */
             area: null | string;
             /** @description Its code (`AREA_018`). */
@@ -27250,6 +27273,8 @@ export interface components {
              * @description Gas velocity.
              */
             velocity: null | string;
+            /** @description Row version — the `baseVersion` of the generic batch write. */
+            version?: null | string;
             /**
              * Format: decimal
              * @description Gas volume.
@@ -27278,6 +27303,11 @@ export interface components {
         };
         /** @description One substance limit of a source. */
         AirSubstanceDto: {
+            /** @description P1 07.11: values of the columns ADDED to `AIR_SOURCE_SUBSTANCES` (the card's `addedColumns`), by code:
+             *     number (Int / Decimal), text, ISO date `yyyy-MM-dd`, bool or lookup entry id; a column without a value is absent. */
+            added?: null | {
+                [key: string]: unknown;
+            };
             /**
              * Format: decimal
              * @description g/s.
@@ -27307,6 +27337,8 @@ export interface components {
              * @description t/year (full precision, no rounding).
              */
             tonsPerYear: null | string;
+            /** @description Row version — the `baseVersion` of `POST /api/v1/registries/{code}/entries/batch`. */
+            version?: null | string;
         };
         /** @description Total of one substance over all sources of the permit (computed, never stored). */
         AirTotalDto: {
