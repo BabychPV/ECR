@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
-import { Button, Text, Title } from '@mantine/core';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { Button, Skeleton, Text, Title } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
@@ -41,7 +41,9 @@ import {
   type ImportStep,
 } from './importModel';
 import { useAirColumnNames } from './fieldLabels';
-import { MappingStep } from './MappingStep';
+// «Mapping» (header rows, added columns, rules editor, profile form) is its own chunk: the page stays within the client
+// budget, and the step is only needed after the file is analysed.
+const MappingStep = lazy(() => import('./MappingStep').then((module) => ({ default: module.MappingStep })));
 import { PreviewStep } from './PreviewStep';
 import '../air.css';
 
@@ -313,7 +315,8 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
       )}
       {step === 'file' && <FileStep draft={draft} onChange={patchDraft} problem={problem} />}
       {step === 'mapping' && analysis !== null && (
-        <MappingStep
+        <Suspense fallback={<Skeleton height={240} role="status" aria-label={t('common.loading')} />}>
+          <MappingStep
           analysis={analysis}
           profile={profile.data}
           spec={draft.spec}
@@ -330,7 +333,8 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           addingColumn={addingColumn}
           addProblem={addProblem}
           columnNames={columnNames}
-        />
+          />
+        </Suspense>
       )}
       {step === 'preview' && preview !== null && (
         <PreviewStep

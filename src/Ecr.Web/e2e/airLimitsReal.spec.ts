@@ -448,7 +448,7 @@ test.describe('Air limits real', () => {
     const sub = page.getByRole('table', { name: 'Substances of source 0001' });
     await expect(sub).toContainText('0301');
     // Числа з повною шкалою сервера (0.5000000000000000) показані без нулів хвоста й без округлення; назва речовини - з довідника.
-    const values = async (row: RegExp): Promise<string[]> => (await sub.getByRole('row', { name: row }).getByRole('cell').allInnerTexts()).slice(2);
+    const values = async (row: RegExp): Promise<string[]> => (await sub.getByRole('row', { name: row }).getByRole('cell').allInnerTexts()).slice(2, 5); // g/s, mg/nm³, t/year (added columns and «Edit» follow)
     expect(await values(/0301/)).toEqual(['0.5', '25', '1.2']);
     expect(await values(/0337/)).toEqual(['0.25', '—', '—']); // порожнє t/year - прочерк, не 0
     expect(await sub.innerText(), 'нулі хвоста десяткових').not.toMatch(/\d\.\d*0{4,}/);
