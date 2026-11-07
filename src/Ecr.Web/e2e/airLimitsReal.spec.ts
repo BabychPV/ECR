@@ -626,6 +626,8 @@ test.describe('Air limits real', () => {
           await page.getByRole('button', { name: /Next: analyse file/ }).click();
           await expect(page.getByRole('heading', { name: 'Mapping', level: 2 })).toBeVisible({ timeout: 30_000 });
           await clean('wizard-mapping');
+          // The rules editor lives under «Advanced» (07.11): open it first.
+          await page.getByText('Advanced: edit the mapping rules', { exact: true }).click();
           await page.getByRole('button', { name: 'Edit mapping' }).click();
           await expect(page.getByRole('region', { name: 'Mapping editor' })).toBeVisible();
           await clean('wizard-mapping-editor');
