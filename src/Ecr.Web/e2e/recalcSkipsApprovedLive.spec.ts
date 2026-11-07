@@ -118,7 +118,8 @@ test.describe('Recalculation skips approved sheets and marks recalculated submit
     await expect(page.locator('[data-recalculated-after-submission]')).toBeVisible({ timeout: 60_000 });
 
     // ── Documents: фільтр «Partly submitted» ───────────────────────────────────────────────────
-    await page.goto(`/documents?periodKey=${period}&projectId=${String(card.projectId)}`);
+    // Перелік документів живе на `/` (routes.ts: home), не на `/documents`.
+    await page.goto(`/?periodKey=${period}&projectId=${String(card.projectId)}`);
     await page.getByRole('combobox', { name: /^(State|Состояние|Күйі)$/ }).selectOption('PartlySubmitted');
     await expect(page).toHaveURL(/state=PartlySubmitted/);
     await expect(page.locator(`[data-document-row="${card.businessKey}"]`)).toBeVisible({ timeout: 60_000 });
