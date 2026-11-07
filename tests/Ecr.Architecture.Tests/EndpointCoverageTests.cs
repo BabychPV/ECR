@@ -1352,6 +1352,13 @@ public sealed partial class EndpointCoverageTests
         // Викликається клієнтом опосередковано, всередині форми входу.
         "POST /api/v1/login/windows",
 
+        // ✎ 2026-11-07 Period clarity (п. c): налаштування «поточний період» переїхало в налаштування проєкту; серверна
+        // частина — lane integ-period-clarity-a, екран — клієнтська частина 2B (налаштування проєкту).
+        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті 2B, що додає виклики в `features/projects`.
+        "GET /api/v1/projects/{p}/settings/current-period",
+        "PUT /api/v1/projects/{p}/settings/current-period",
+        "DELETE /api/v1/projects/{p}/settings/current-period/pin",
+
         // S14: споживач — сам БРАУЗЕР. Адресу він бере із заголовка
         // `Content-Security-Policy-Report-Only` (`report-uri`/`report-to`) і шле
         // звіт про порушення без жодної участі клієнта застосунку.

@@ -226,6 +226,7 @@ public static class DependencyInjection
         services.AddScoped<Periods.PeriodCalendarMaterializer>();
         services.AddScoped<Periods.BuildPeriodCalendarHandler>();
         services.AddScoped<Periods.SetCurrentPeriodHandler>();
+        services.AddScoped<Periods.CurrentPeriodSettingHandlers>();
         services.AddScoped<Periods.ReopenPeriodHandler>();
         services.AddScoped<Periods.GetPeriodCalendarHandler>();
 

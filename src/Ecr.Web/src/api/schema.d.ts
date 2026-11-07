@@ -15341,6 +15341,8 @@ export interface paths {
          * @description ⚠ `CurrentPeriod` — підказка UI, а **не** правило доступу
          *     (`D-77`): на рішення про право запису він не впливає взагалі.
          *     `null` у `PinnedPeriodId` повертає режим `Auto`.
+         *     ✎ 2026-11-07 (Period clarity, п. c): ЗАСТАРІЛО — налаштування переїхало в налаштування проєкту
+         *     (…/settings/current-period); маршрут лишається для старого клієнта.
          */
         put: {
             parameters: {
@@ -15583,6 +15585,165 @@ export interface paths {
             };
         };
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/settings/current-period": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Налаштування «поточний період» проєкту: режим `Auto` (за датою) або `Pinned`. Право `Document.View`.
+         * @description ✎ 2026-11-07 (Period clarity, п. c). Поточний період — підказка UI, не правило доступу (`D-77`).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CurrentPeriodSettingDto"];
+                        "text/json": components["schemas"]["CurrentPeriodSettingDto"];
+                        "text/plain": components["schemas"]["CurrentPeriodSettingDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Змінює режим поточного періоду: `Pinned` (період + причина) або `Auto`. Право `Period.Configure`
+         *     і Manage на проєкт. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CurrentPeriodSettingRequest"];
+                    "application/json": components["schemas"]["CurrentPeriodSettingRequest"];
+                    "text/json": components["schemas"]["CurrentPeriodSettingRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CurrentPeriodSettingDto"];
+                        "text/json": components["schemas"]["CurrentPeriodSettingDto"];
+                        "text/plain": components["schemas"]["CurrentPeriodSettingDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/settings/current-period/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** «Повернути автоматичний»: знімає закріплення, поточний період одразу — за датою. Право `Period.Configure`
+         *     і Manage на проєкт. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CurrentPeriodSettingDto"];
+                        "text/json": components["schemas"]["CurrentPeriodSettingDto"];
+                        "text/plain": components["schemas"]["CurrentPeriodSettingDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -29189,6 +29350,55 @@ export interface components {
          * @enum {unknown}
          */
         CurrentPeriodMode: "Auto" | "Pinned";
+        /** @description Налаштування «поточний період» проєкту (✎ 2026-11-07 Period clarity, п. c): режим і що з нього виходить. */
+        CurrentPeriodSettingDto: {
+            /**
+             * Format: int32
+             * @description Який період був би поточним у режимі `Auto` зараз; `null` — жодного.
+             */
+            automaticPeriodId: null | number;
+            /**
+             * Format: int32
+             * @description Його ключ.
+             */
+            automaticPeriodKey: null | number;
+            /**
+             * Format: date-time
+             * @description Коли поточний період або режим змінено востаннє, UTC.
+             */
+            changedAt: null | string;
+            /**
+             * Format: int32
+             * @description Чинний поточний період (підказка UI, не правило доступу, D-77); `null` — немає.
+             */
+            currentPeriodId: null | number;
+            /**
+             * Format: int32
+             * @description Його ключ.
+             */
+            currentPeriodKey: null | number;
+            /** @description `Auto` — за датою (веде `PeriodStateJob`); `Pinned` — закріплено вручну з причиною. */
+            mode: components["schemas"]["CurrentPeriodMode"];
+            /** @description Причина закріплення; лише в `Pinned`. */
+            pinnedReason: null | string;
+            /**
+             * Format: int32
+             * @description Проєкт.
+             */
+            projectId: number;
+        };
+        /** @description Запит на зміну налаштування «поточний період» (✎ 2026-11-07 Period clarity). */
+        CurrentPeriodSettingRequest: {
+            /** @description `Auto` — за датою; `Pinned` — закріпити. */
+            mode: components["schemas"]["CurrentPeriodMode"];
+            /**
+             * Format: int32
+             * @description Період для `Pinned`; для `Auto` ігнорується.
+             */
+            pinnedPeriodId?: null | number;
+            /** @description Причина для `Pinned` (обов'язкова, в аудит). */
+            reason?: null | string;
+        };
         /** @description Профіль поточного користувача для клієнта. */
         CurrentUserDto: {
             /** @description Явні заборони; `IsDeny` перемагає завжди. */

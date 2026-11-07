@@ -5317,6 +5317,106 @@
           "Pinned"
         ]
       },
+      "CurrentPeriodSettingDto": {
+        "description": "Налаштування «поточний період» проєкту (✎ 2026-11-07 Period clarity, п. c): режим і що з нього виходить.",
+        "properties": {
+          "automaticPeriodId": {
+            "description": "Який період був би поточним у режимі `Auto` зараз; `null` — жодного.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "automaticPeriodKey": {
+            "description": "Його ключ.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "changedAt": {
+            "description": "Коли поточний період або режим змінено востаннє, UTC.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "currentPeriodId": {
+            "description": "Чинний поточний період (підказка UI, не правило доступу, D-77); `null` — немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "currentPeriodKey": {
+            "description": "Його ключ.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "mode": {
+            "$ref": "#/components/schemas/CurrentPeriodMode",
+            "description": "`Auto` — за датою (веде `PeriodStateJob`); `Pinned` — закріплено вручну з причиною."
+          },
+          "pinnedReason": {
+            "description": "Причина закріплення; лише в `Pinned`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "projectId": {
+            "description": "Проєкт.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "projectId",
+          "mode",
+          "currentPeriodId",
+          "currentPeriodKey",
+          "automaticPeriodId",
+          "automaticPeriodKey",
+          "pinnedReason",
+          "changedAt"
+        ],
+        "type": "object"
+      },
+      "CurrentPeriodSettingRequest": {
+        "description": "Запит на зміну налаштування «поточний період» (✎ 2026-11-07 Period clarity).",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/CurrentPeriodMode",
+            "description": "`Auto` — за датою; `Pinned` — закріпити."
+          },
+          "pinnedPeriodId": {
+            "description": "Період для `Pinned`; для `Auto` ігнорується.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "reason": {
+            "description": "Причина для `Pinned` (обов'язкова, в аудит).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
       "CurrentUserDto": {
         "description": "Профіль поточного користувача для клієнта.",
         "properties": {
@@ -50986,7 +51086,7 @@
     },
     "/api/v1/projects/{id}/current-period": {
       "put": {
-        "description": "⚠ `CurrentPeriod` — підказка UI, а **не** правило доступу\n(`D-77`): на рішення про право запису він не впливає взагалі.\n`null` у `PinnedPeriodId` повертає режим `Auto`.",
+        "description": "⚠ `CurrentPeriod` — підказка UI, а **не** правило доступу\n(`D-77`): на рішення про право запису він не впливає взагалі.\n`null` у `PinnedPeriodId` повертає режим `Auto`.\n✎ 2026-11-07 (Period clarity, п. c): ЗАСТАРІЛО — налаштування переїхало в налаштування проєкту\n(…/settings/current-period); маршрут лишається для старого клієнта.",
         "parameters": [
           {
             "in": "path",
@@ -51302,6 +51402,231 @@
           }
         },
         "summary": "Перерахунок УСЬОГО проєкту. Право `Calculation.Recalculate`.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/settings/current-period": {
+      "get": {
+        "description": "✎ 2026-11-07 (Period clarity, п. c). Поточний період — підказка UI, не правило доступу (`D-77`).",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Налаштування «поточний період» проєкту: режим `Auto` (за датою) або `Pinned`. Право `Document.View`.",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurrentPeriodSettingRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurrentPeriodSettingRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurrentPeriodSettingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює режим поточного періоду: `Pinned` (період + причина) або `Auto`. Право `Period.Configure`\nі Manage на проєкт.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/settings/current-period/pin": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriodSettingDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "«Повернути автоматичний»: знімає закріплення, поточний період одразу — за датою. Право `Period.Configure`\nі Manage на проєкт.",
         "tags": [
           "Projects"
         ]

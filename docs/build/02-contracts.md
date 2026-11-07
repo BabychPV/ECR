@@ -4483,7 +4483,10 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/projects/{id}/activate` | `Project.Manage` | 1 |
 | `POST` | `/api/v1/projects/{id}/archive` | `Project.Manage` | 1 |
 | `POST` | `/api/v1/projects/{id}/clone` | `Project.Manage` | 3 |
-| `PUT` | `/api/v1/projects/{id}/current-period` | `Period.Configure` | 3 |
+| `PUT` | `/api/v1/projects/{id}/current-period` | `Period.Configure` (✎ 2026-11-07: **застаріло** — `…/settings/current-period`) | 3 |
+| `GET` | `/api/v1/projects/{id}/settings/current-period` | `Document.View` | 3 |
+| `PUT` | `/api/v1/projects/{id}/settings/current-period` | `Period.Configure` | 3 |
+| `DELETE` | `/api/v1/projects/{id}/settings/current-period/pin` | `Period.Configure` | 3 |
 | `PUT` | `/api/v1/projects/{id}/timezone` | `Project.Manage` | 8 |
 | `GET` | `/api/v1/projects/{id}/periods` | `Document.View` | 3 |
 | `GET` | `/api/v1/projects/{id}/template-versions` | `Document.View` | 3 |
@@ -5887,3 +5890,20 @@ public sealed record RowDto(
   З `periodKey` фільтр, як і раніше, — за цей місяць. Без обох — `422 documentStateNeedsPeriod`.
 - `GET /documents/summary` лишається помісячним (`periodKey` обов'язковий); лічильники за рік — **[debt]**, клієнт року
   рахує їх зі смуги сторінки або фільтром за рік.
+
+### Поточний період — у налаштуваннях проєкту (п. c)
+
+Поточний період визначається **автоматично за датою** (режим `Auto`, веде `PeriodStateJob`: найраніший `Open`, інакше
+найпізніший `Grace`); ручне закріплення і «Повернути автоматичний» — у налаштуваннях проєкту. `D-77` без змін: значення —
+лише за замовчуванням (документи, розклади, параметри звітів), **ніколи** не рішення про доступ.
+
+- `GET /projects/{id}/settings/current-period` (`Document.View`, невидимий проєкт — 404) →
+  `CurrentPeriodSettingDto { projectId, mode: "Auto"|"Pinned", currentPeriodId, currentPeriodKey, automaticPeriodId,
+  automaticPeriodKey, pinnedReason, changedAt }`; `automatic*` — який період був би поточним у `Auto` зараз.
+- `PUT /projects/{id}/settings/current-period` (`Period.Configure` + Manage на проєкт) — тіло
+  `{ mode, pinnedPeriodId?, reason? }`; `Pinned` вимагає період проєкту (`422 ECR-PRD-0422 periodNotInProject`) і причину
+  (`pinReasonRequired`, ≤ 400 — `pinReasonTooLong`); аудит `Project.CurrentPeriod` Pin/Unpin як і раніше. Відповідь — DTO.
+- `DELETE /projects/{id}/settings/current-period/pin` — «Повернути автоматичний»: режим `Auto`, і поточний період
+  перераховується ОДРАЗУ за тим самим правилом (раніше — до наступного прогону `PeriodStateJob`). Відповідь — DTO.
+- `PUT /projects/{id}/current-period` — **застаріло** (`deprecated` в OpenAPI), лишається для старого клієнта; той самий
+  обробник (і та сама негайна зміна при знятті закріплення).

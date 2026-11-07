@@ -17,6 +17,7 @@ public sealed class ProjectsController(
     BuildPeriodCalendarHandler buildCalendar,
     GetPeriodCalendarHandler getCalendar,
     SetCurrentPeriodHandler setCurrentPeriod,
+    CurrentPeriodSettingHandlers currentPeriodSetting,
     CloneProjectHandler cloneProject,
     ActivateProjectHandler activate,
     ArchiveProjectHandler archive,
@@ -280,7 +281,10 @@ public sealed class ProjectsController(
     /// ⚠ <c>CurrentPeriod</c> — підказка UI, а **не** правило доступу
     /// (<c>D-77</c>): на рішення про право запису він не впливає взагалі.
     /// <c>null</c> у <c>PinnedPeriodId</c> повертає режим <c>Auto</c>.
+    /// <para>✎ 2026-11-07 (Period clarity, п. c): ЗАСТАРІЛО — налаштування переїхало в налаштування проєкту
+    /// (<c>…/settings/current-period</c>); маршрут лишається для старого клієнта.</para>
     /// </remarks>
+    [Obsolete("Use PUT /api/v1/projects/{id}/settings/current-period (Period clarity, 2026-11-07).")]
     [HttpPut("{id:int}/current-period")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -295,6 +299,46 @@ public sealed class ProjectsController(
 
         return NoContent();
     }
+
+    /// <summary>
+    /// Налаштування «поточний період» проєкту: режим <c>Auto</c> (за датою) або <c>Pinned</c>. Право <c>Document.View</c>.
+    /// </summary>
+    /// <remarks>✎ 2026-11-07 (Period clarity, п. c). Поточний період — підказка UI, не правило доступу (<c>D-77</c>).</remarks>
+    [HttpGet("{id:int}/settings/current-period")]
+    [ProducesResponseType<CurrentPeriodSettingDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetCurrentPeriodSetting(int id, CancellationToken ct)
+        => Ok(await currentPeriodSetting.GetAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Змінює режим поточного періоду: <c>Pinned</c> (період + причина) або <c>Auto</c>. Право <c>Period.Configure</c>
+    /// і Manage на проєкт.
+    /// </summary>
+    [HttpPut("{id:int}/settings/current-period")]
+    [ProducesResponseType<CurrentPeriodSettingDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> SetCurrentPeriodSetting(
+        int id, [FromBody] CurrentPeriodSettingRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await currentPeriodSetting
+            .SetAsync(id, request.Mode, request.PinnedPeriodId, request.Reason, ct)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// «Повернути автоматичний»: знімає закріплення, поточний період одразу — за датою. Право <c>Period.Configure</c>
+    /// і Manage на проєкт.
+    /// </summary>
+    [HttpDelete("{id:int}/settings/current-period/pin")]
+    [ProducesResponseType<CurrentPeriodSettingDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ResetCurrentPeriodToAutomatic(int id, CancellationToken ct)
+        => Ok(await currentPeriodSetting
+            .SetAsync(id, Domain.Enums.CurrentPeriodMode.Auto, null, null, ct)
+            .ConfigureAwait(false));
 
     /// <summary>
     /// Змінює пояс майданчика проєкту. Право <c>Project.Manage</c> (T6/#52).
@@ -435,6 +479,13 @@ public sealed record CloneProjectRequest(string Code);
 /// <param name="PinnedPeriodId">Закріплений період; <c>null</c> — режим <c>Auto</c>.</param>
 /// <param name="Reason">Причина закріплення; потрапляє в аудит.</param>
 public sealed record SetCurrentPeriodRequest(int? PinnedPeriodId, string? Reason);
+
+/// <summary>Запит на зміну налаштування «поточний період» (✎ 2026-11-07 Period clarity).</summary>
+/// <param name="Mode">`Auto` — за датою; `Pinned` — закріпити.</param>
+/// <param name="PinnedPeriodId">Період для `Pinned`; для `Auto` ігнорується.</param>
+/// <param name="Reason">Причина для `Pinned` (обов'язкова, в аудит).</param>
+public sealed record CurrentPeriodSettingRequest(
+    Ecr.Domain.Enums.CurrentPeriodMode Mode, int? PinnedPeriodId = null, string? Reason = null);
 
 /// <summary>Запит на перерахунок усього проєкту (Q-151).</summary>
 /// <param name="PeriodKey">Період; <c>null</c> — повний рік, усі документи проєкту.</param>
