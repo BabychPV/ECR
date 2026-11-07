@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { useRef, useState, type JSX } from 'react';
 import { Button, Group, Modal, SegmentedControl, Select, Stack, Text, TextInput } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
@@ -34,12 +34,26 @@ function UserPicker({
   documentId,
   picked,
   onPick,
+  nextFocus,
 }: {
   readonly documentId: number;
   readonly picked: Candidate | null;
   readonly onPick: (user: Candidate | null) => void;
+  /** Куди перейти після вибору людини (кнопка знайденого зникає разом із переліком). */
+  readonly nextFocus: () => HTMLElement | null;
 }): JSX.Element {
   const [query, setQuery] = useState('');
+  const input = useRef<HTMLInputElement>(null);
+  const change = useRef<HTMLButtonElement>(null);
+  // PB2-P2-3: кнопка вибраної людини знімається з дерева - без цього фокус падав на BODY. Після вибору - наступний
+  // крок форми (рівень / підтвердження), після «Змінити» - знову поле пошуку.
+  const pick = (user: Candidate | null): void => {
+    onPick(user);
+    window.setTimeout(() => {
+      if (user === null) input.current?.focus();
+      else (nextFocus() ?? change.current)?.focus();
+    }, 0);
+  };
   const [debounced] = useDebouncedValue(query.trim(), 250);
   const search = useQuery({
     queryKey: queryKeys.editAssignments.candidates(documentId, debounced),
@@ -53,7 +67,7 @@ function UserPicker({
         <Text size="sm" fw={500}>
           {picked.displayName}
         </Text>
-        <Button size="xs" variant="subtle" onClick={() => onPick(null)}>
+        <Button size="xs" variant="subtle" ref={change} onClick={() => pick(null)}>
           {t('editAssign.participant.change')}
         </Button>
       </Group>
@@ -67,12 +81,13 @@ function UserPicker({
         description={t('editAssign.wizard.searchHint')}
         value={query}
         onChange={(event) => setQuery(event.currentTarget.value)}
+        ref={input}
         data-autofocus
       />
       {debounced.length >= MinCandidateQuery && (search.data ?? []).length > 0 ? (
         <Group gap="xs" role="group" aria-label={t('editAssign.wizard.found')}>
           {(search.data ?? []).map((c) => (
-            <Button key={c.userId} size="xs" variant="default" onClick={() => onPick(c)}>
+            <Button key={c.userId} size="xs" variant="default" onClick={() => pick(c)}>
               {c.displayName}
             </Button>
           ))}
@@ -111,6 +126,7 @@ export function ParticipantModal({
   const loading = usePendingLoading(isPending);
 
   const tables = sheets.find((s) => s.code === sheetCode)?.tables ?? [];
+  const levelBox = useRef<HTMLDivElement>(null);
 
   return (
     <Modal opened={opened} onClose={onClose} title={t('editAssign.participant.title')}>
@@ -118,8 +134,13 @@ export function ParticipantModal({
         <Text size="sm" c="dimmed">
           {t('editAssign.participant.hint')}
         </Text>
-        <UserPicker documentId={documentId} picked={user} onPick={setUser} />
-        <Stack gap="xs">
+        <UserPicker
+          documentId={documentId}
+          picked={user}
+          onPick={setUser}
+          nextFocus={() => levelBox.current?.querySelector<HTMLElement>('input:checked') ?? null}
+        />
+        <Stack gap="xs" ref={levelBox}>
           <Text size="sm" id="participant-level-label">
             {t('editAssign.participant.level')}
           </Text>
@@ -192,6 +213,7 @@ export function OwnerTransferModal({
 }): JSX.Element {
   const [user, setUser] = useState<Candidate | null>(null);
   const loading = usePendingLoading(isPending);
+  const confirm = useRef<HTMLButtonElement>(null);
 
   return (
     <Modal opened={opened} onClose={onClose} title={t('editAssign.owner.title')}>
@@ -199,13 +221,14 @@ export function OwnerTransferModal({
         <Text size="sm" c="dimmed">
           {t('editAssign.owner.text')}
         </Text>
-        <UserPicker documentId={documentId} picked={user} onPick={setUser} />
+        <UserPicker documentId={documentId} picked={user} onPick={setUser} nextFocus={() => confirm.current} />
         {error === null || error === undefined ? null : <ErrorAlert error={error} />}
         <Group justify="flex-end" gap="sm">
           <Button variant="default" onClick={onClose}>
             {t('common.cancel')}
           </Button>
           <Button
+            ref={confirm}
             disabled={user === null}
             loading={loading}
             onClick={() => {

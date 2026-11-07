@@ -26,6 +26,7 @@ import {
 import { OwnerTransferModal, ParticipantModal, type ParticipantChoice, type ParticipantSheet } from './ParticipantDialogs';
 import { AssignWizard, emptyAssignData, resolveUsers, type AssignWizardData } from './AssignWizard';
 import { AssignmentsMatrix, type MatrixActions, type MatrixView } from './AssignmentsMatrix';
+import { useDrawerFocus } from './useDrawerFocus';
 import { awaitingValidationCount, isHandoff, levelOf, makeSlice, nextMonthSlice, sameSlice, sliceLabel } from './model';
 import { ReturnReasonMaxLength, type EditAssignment, type EditAssignmentsList } from './types';
 
@@ -88,6 +89,8 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
     queryFn: () => getEditAssignments(documentId),
     enabled: opened,
   });
+  // PB2-P2-3: фокус у шторку при відкритті, на «More» після Esc/закриття.
+  useDrawerFocus(EditAssignmentsPanelId, opened, !query.isPending);
   const sets = useQuery({ queryKey: queryKeys.editAssignments.editorSets(), queryFn: getEditorSets, enabled: opened && dialog === WizardDialogId });
 
   const refresh = (): Promise<void> => queryClient.invalidateQueries({ queryKey: queryKeys.editAssignments.all() });

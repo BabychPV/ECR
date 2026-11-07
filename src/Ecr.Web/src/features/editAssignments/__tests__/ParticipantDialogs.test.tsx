@@ -143,6 +143,25 @@ describe('EditAssignmentsDrawer — учасники документа (D-443)'
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('add-participant')));
   });
 
+  // PB2-P2-3 (б): кнопка знайденої людини зникає після вибору - фокус мусить перейти на наступний крок, не на BODY.
+  // Мутація: прибрати `window.setTimeout(...)` у `pick` (UserPicker) - червоніють обидва випадки.
+  it('після вибору людини фокус - на рівні (учасник) і на «Передати» (власник), після «Змінити» - у полі пошуку', async () => {
+    show();
+    fireEvent.click(await screen.findByTestId('add-participant'));
+    const modal = await screen.findByTestId('participant-modal');
+    await pickKoval(modal);
+    await waitFor(() => expect(document.activeElement).toBe(within(modal).getByRole('radio', { name: '⟦editAssign.level.Read⟧' })));
+    fireEvent.click(within(modal).getByRole('button', { name: '⟦editAssign.participant.change⟧' }));
+    await waitFor(() => expect(document.activeElement).toBe(within(modal).getByLabelText('⟦editAssign.participant.who⟧')));
+    fireEvent.click(within(modal).getByRole('button', { name: '⟦common.cancel⟧' }));
+    await waitFor(() => expect(screen.queryByTestId('participant-modal')).toBeNull());
+
+    fireEvent.click(await screen.findByTestId('transfer-owner'));
+    const owner = await screen.findByTestId('owner-transfer-modal');
+    await pickKoval(owner);
+    await waitFor(() => expect(document.activeElement).toBe(within(owner).getByRole('button', { name: '⟦editAssign.owner.confirm⟧' })));
+  });
+
   it('у симуляції — ні «Додати учасника», ні «Передати власність»', async () => {
     show({ simulation: true });
     await screen.findAllByTestId('assignment-level');
