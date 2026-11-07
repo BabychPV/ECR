@@ -225,6 +225,37 @@ public sealed class ExcelImportStaleWorkbookTests
         Assert.Equal("ECR-CELL-4221", rejection.ReasonCode);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Перезапис_рядка_із_застарілим_результатом_формули_не_дозволено_причина_вивантажити_наново()
+    {
+        // AU13 P3-6, рішення координатора: перезапис імпортом рядка, чий результат формули застарів після експорту,
+        // лишається НЕ дозволеним - людина вивантажує книгу наново. Тут закріплено, що відмова явна: правка людини
+        // у вхідній комірці йде в `Overwritable` (конфлікт рядка), а застаріла обчислювана комірка того ж рядка - НЕ
+        // туди, а у відмову з ключем «вивантажте наново» (`importCalculatedStale`), тож прапорець перезапису її не
+        // обходить і `Apply` («усе або нічого») не пройде.
+        using var workbook = await ExportAsync();
+        workbook.Worksheet("Sheet").Cell(3, 1).Value = 9;
+        Recalculated(r1: 25m, r2: 12.5m);
+        _rows.GetRowVersionsBatchAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyDictionary<string, string>>
+            {
+                [InstanceId] = new Dictionary<string, string> { ["R1"] = "0xCC", ["R2"] = "0xBB" },
+            });
+
+        var preview = await ImportAsync(workbook);
+
+        Assert.Empty(preview.Changes);
+        var overwrite = Assert.Single(preview.Overwritable);
+        Assert.Equal(("R1", "A"), (overwrite.RowKey, overwrite.ColumnCode));
+        var stale = Assert.Single(preview.Rejected, r => r.ColumnCode == "EMISSION");
+        Assert.Equal("R1", stale.RowKey);
+        Assert.Equal("ECR-CELL-4221", stale.ReasonCode);
+        Assert.Equal(ImportMessageKeys.CalculatedStale, stale.MessageKey);
+        Assert.Equal("err.ECR-CELL-4221.importCalculatedStale", stale.MessageKey);
+        Assert.DoesNotContain(preview.Overwritable, c => c.ColumnCode == "EMISSION");
+    }
+
     private static void StripFingerprints(XLWorkbook workbook)
     {
         var map = workbook.Worksheet(ExcelWorkbookMap.SheetName);
