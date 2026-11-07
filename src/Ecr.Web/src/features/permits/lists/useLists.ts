@@ -58,6 +58,9 @@ export function useChangeListItems(key: string): UseMutationResult<PermitListDet
   return useMutation<PermitListDetail, Error, readonly PermitListChange[]>({
     mutationKey: ['permits', 'lists', 'change', key],
     mutationFn: (changes) => changePermitListItems(key, changes),
+    // AU-13 N3: відмову показують самі виклики (`showListChangeError`); без прапорця сітка `MutationCache.onError`
+    // показувала б той самий тост удруге.
+    meta: { handled: true },
     onSuccess: async (detail) => {
       client.setQueryData(listsKeys.detail(key), detail);
       await Promise.all([

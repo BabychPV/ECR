@@ -7,10 +7,11 @@ import { language, t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { DetailDrawer } from '@/shared/ui/DetailDrawer';
 import { KeyValue } from '@/shared/ui/KeyValue';
-import { showApiError, showDone, showWarning } from '@/shared/ui/notify';
+import { showDone, showWarning } from '@/shared/ui/notify';
 import { EcrApiError } from '@/api/client';
 import { textOf } from '../typeEditor/labels';
 import { typeEditorPath } from '../shell/permitPaths';
+import { showListChangeError } from './listErrors';
 import { listsKeys } from './listsKeys';
 import type { PermitListChange, PermitListDetail, PermitListValue } from './listsApi';
 import { keptIn, kindLabel, usedCountText, valueLabels, type ListRow, type ListUse } from './listsModel';
@@ -61,7 +62,7 @@ function ValueList({ row, detail }: ValuesProps): JSX.Element {
     target.focus({ preventScroll: true });
   });
 
-  function apply(changes: readonly PermitListChange[], done: string, after: () => void): void {
+  function apply(changes: readonly PermitListChange[], done: string, after: () => void, value = ''): void {
     if (change.isPending) return;
     change.mutate(changes, {
       onSuccess: () => {
@@ -72,7 +73,7 @@ function ValueList({ row, detail }: ValuesProps): JSX.Element {
       // not found.», і перечитування списку, щоб рядка-привида не лишилось.
       onError: (error) => {
         if (!(error instanceof EcrApiError) || error.problem.errorCode !== EntryGoneCode) {
-          showApiError(error);
+          showListChangeError(error, row.name, value);
 
           return;
         }
@@ -94,6 +95,7 @@ function ValueList({ row, detail }: ValuesProps): JSX.Element {
         pendingFocus.current = 'add';
         setFresh('');
       },
+      fresh,
     );
   }
 
@@ -106,6 +108,7 @@ function ValueList({ row, detail }: ValuesProps): JSX.Element {
         pendingFocus.current = `rename:${String(item.id)}`;
         setEditing(null);
       },
+      text,
     );
   }
 
