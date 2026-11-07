@@ -41,8 +41,7 @@ test.describe('Майстер створення документа', () => {
     await page.getByRole('listbox', { name: /Project|Проект/i }).getByRole('option').filter({ hasNotText: /E2E[ -]?(groups|bottom)|E2E(Groups|Bottom)Prj/i }).first().click();
     await expect(next, 'склад нового документа не приїхав').toBeEnabled({ timeout: 15_000 });
 
-    await next.click(); // → Period
-    await next.click(); // → Sheets
+    await next.click(); // → Sheets (✎ Period clarity: кроку Period немає)
     const boxes = dialog.getByTestId('wizard-step-body').getByRole('checkbox');
     await expect(boxes.first(), 'у кроці Sheets немає жодного аркуша').toBeVisible();
     for (const box of await boxes.all()) await expect(box).toBeChecked();

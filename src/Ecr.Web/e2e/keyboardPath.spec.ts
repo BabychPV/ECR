@@ -118,13 +118,14 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     // `YYYYMM`, поза фокусом — назву місяця) рендерить
     // `<input type="text">` (роль `textbox`), `ActionIcon` — `<button>`
     // (роль `button`), тож роль однозначно відкидає обидві стрілки.
-    await expectFocusRing(
-      page,
-      page.getByRole('textbox', { name: /Period|Період/i }).first(),
-      'поле періоду',
-    );
-    await page.keyboard.press('Control+a');
-    await page.keyboard.type(PeriodKey);
+    // ✎ Period clarity (07.11): поля «Period» на переліку більше немає — рік і місяць, рідні `<select>`
+    // (роль `combobox`), з клавіатури — так само, як і решта фільтрів. Типово — рік («All months»).
+    const yearField = page.getByRole('combobox', { name: /^(Year|Год|Жыл)$/ });
+    await expectFocusRing(page, yearField, 'поле року');
+    await yearField.selectOption(PeriodKey.slice(0, 4));
+    const monthField = page.getByRole('combobox', { name: /^(Month|Месяц|Ай)$/ });
+    await expectFocusRing(page, monthField, 'поле місяця');
+    await monthField.selectOption(String(Number(PeriodKey.slice(4))));
 
     // ── 4. Документ ──────────────────────────────────────────────────────
     // Посилання на документ — звичайний `<a>`, і Enter на ньому має
@@ -351,7 +352,8 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     await page.keyboard.press('Enter');
     await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
 
-    await page.goto('/admin/periods');
+    // ✎ Period clarity: створення проєкту переїхало в налаштування проєкту.
+    await page.goto('/admin/projects');
 
     const create = page.getByRole('button', { name: /New project|Новий проєкт/i }).first();
     await expect(create, 'немає кнопки створення проєкту').toBeVisible({ timeout: 30_000 });
