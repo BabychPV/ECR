@@ -157,6 +157,22 @@ export function periodCaption(year: number, sequence: number, kind: string): str
 }
 
 /**
+ * ✎ Period clarity (людина 07.11, п. a): мить, з якої місяць блокується, — одна дата в рядку.
+ *
+ * ⚠ Перевідкритий і ще не закритий місяць блокується за строком перевідкриття (`D-68`), а не за
+ * календарем: інакше рядок показував би минулу дату над відкритим місяцем.
+ */
+export function lockMomentOf(period: {
+  readonly state: string;
+  readonly endsAt: string;
+  readonly reopenedUntil?: string | null;
+}): string {
+  const reopened = period.reopenedUntil ?? null;
+
+  return reopened !== null && period.state !== 'Closed' ? reopened : period.endsAt;
+}
+
+/**
  * Обрана КАЛЕНДАРНА дата → момент, до якого період лишається відкритим.
  *
  * ⛔ Межа — північ НАСТУПНОЇ доби в поясі МАЙДАНЧИКА, тобто дослівно те саме,
@@ -846,6 +862,9 @@ export function PeriodsPage(): JSX.Element {
           />
         </Suspense>
 
+        <Text size="sm" mb={4} data-periods-lock-note="">
+          {t('periods.lockOnlyNote')}
+        </Text>
         <Text size="xs" c="dimmed" mb="xs">
           {t('periods.timeZone')}: {calendar.timeZoneId}
         </Text>
@@ -855,47 +874,28 @@ export function PeriodsPage(): JSX.Element {
             сторінка звужувалась (Mantine `Badge .label` — `overflow:hidden;
             text-overflow:ellipsis`) — той самий дефект, що вже виправлено
             для матриці ролей у `SecurityPage.tsx`, тим самим прийомом. */}
+        {/* ✎ Period clarity (людина 07.11, п. a): сторінка — ЛИШЕ блокування місяців. Рядок = місяць: підпис,
+            стан (Open / Late (flagged) / Locked) і ОДНА дата «Locks on»; ключ і порядковий номер — у підказці.
+            Колонки «Range» (початок — жорстке закриття, що читалось як «місяць триває до 15-го наступного») і
+            «Grace until» прибрано: пізні правки позначаються як і раніше (`D-70`), їх видно станом рядка. */}
         <ScrollArea type="auto" offsetScrollbars>
-        <Table striped className="ecr-sticky-head">
+        <Table striped className="ecr-sticky-head" data-periods-table="months">
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>{t('periods.key')}</Table.Th>
-              <Table.Th>{t('periods.sequence')}</Table.Th>
-              {/* ⛔ UI-аудит, lane 2 (Q-337): «Range» і «Grace until» не мали
-                  на сторінці ЖОДНОГО пояснення, хоч похідні від чотирьох
-                  чисел політики (мітка `+15/45` у формі створення проєкту
-                  показує лише два з чотирьох, і НЕ тут). Тултипи нижче
-                  підставляють РЕАЛЬНІ числа активної політики проєкту
-                  (`calendar.policy`), а не переказують ярлик.
-                  ⚠ `Hint` із `focusable`, а не `Tooltip`: заголовок — текст,
-                  він не в порядку табуляції, і `Tooltip` показував формулу
-                  лише під мишею. Тепер — фокус, наведення і `aria-describedby`. */}
-              <Table.Th>
-                <Hint
-                  focusable
-                  label={t('periods.rangeHint', {
-                    open: calendar.policy.openOffsetDays,
-                    hardClose: calendar.policy.hardCloseOffsetDays,
-                    code: calendar.policy.code,
-                  })}
-                >
-                  <Text span td="underline dotted" fw={600} size="sm">
-                    {t('periods.range')}
-                  </Text>
-                </Hint>
-              </Table.Th>
+              <Table.Th>{t('periods.month')}</Table.Th>
               <Table.Th>{t('periods.state')}</Table.Th>
+              {/* ⚠ `Hint` із `focusable` (Q-337): формула — з РЕАЛЬНИХ чисел політики проєкту, доступна з клавіатури. */}
               <Table.Th>
                 <Hint
                   focusable
-                  label={t('periods.graceHint', {
+                  label={t('periods.locksOnHint', {
                     grace: calendar.policy.graceOffsetDays,
                     hardClose: calendar.policy.hardCloseOffsetDays,
                     code: calendar.policy.code,
                   })}
                 >
                   <Text span td="underline dotted" fw={600} size="sm">
-                    {t('periods.grace')}
+                    {t('periods.locksOn')}
                   </Text>
                 </Hint>
               </Table.Th>
@@ -914,12 +914,17 @@ export function PeriodsPage(): JSX.Element {
                 {...(tileKey === period.periodKey ? { bg: 'var(--mantine-primary-color-light)' } : {})}
               >
                 <Table.Td>
-                  {period.periodKey}
                   {/* ⚠ `X-34`: що саме покриває період — за періодичністю
-                      проєкту, а не з `periodKey` арифметикою (`R-A6`). */}
-                  <Text span size="xs" c="dimmed" ml="xs" data-period-caption="">
-                    {periodCaption(period.year, period.sequence, calendar.periodKind)}
-                  </Text>
+                      проєкту, а не з `periodKey` арифметикою (`R-A6`).
+                      ✎ Period clarity: підпис — головне, ключ і номер — у підказці (фокус/наведення). */}
+                  <Hint
+                    focusable
+                    label={t('periods.keyTooltip', { key: period.periodKey, sequence: period.sequence })}
+                  >
+                    <Text span fw={600} size="sm" data-period-caption="" data-period-key={period.periodKey}>
+                      {periodCaption(period.year, period.sequence, calendar.periodKind)}
+                    </Text>
+                  </Hint>
                   {period.isCurrent && (
                     <Badge ml="xs" size="xs" variant="light">
                       {t('periods.current')}
@@ -937,22 +942,6 @@ export function PeriodsPage(): JSX.Element {
                       {t('periods.currentNotOpen')}
                     </Badge>
                   )}
-                </Table.Td>
-                <Table.Td>{period.sequence}</Table.Td>
-                <Table.Td>
-                  {/* ⚠ Межі періоду — БЕЗ години (`dateOnly`), хоча контракт
-                      віддає їх моментом (`Format: date-time`, «початок періоду
-                      в поясі майданчика»). Ця колонка відповідає на питання
-                      «який це місяць», і «Sep 1, 2026, 12:00 AM — Sep 30,
-                      2026, 11:59 PM» відповідає на нього гірше за
-                      «Sep 1 — Sep 30». Точний момент нікуди не дівається: він
-                      у `dateTime` кожного з двох `<time>`. */}
-                  {/* ✎ `X-34`/`F-20`: пояс МАЙДАНЧИКА (`SiteTime`), а права
-                      межа — останній день, коли дані ще приймаються:
-                      `endsAt` — виключне жорстке закриття, а не кінець
-                      місяця, і підпис колонки тепер каже саме це. */}
-                  <SiteTime value={period.startsAt} zone={calendar.timeZoneId} dateOnly /> —{' '}
-                  <SiteTime value={period.endsAt} zone={calendar.timeZoneId} dateOnly inclusiveEnd />
                 </Table.Td>
                 <Table.Td>
                   {/* ⛔ UI-аудит, lane 8 (рішення НЕ скасоване, лише переїхало):
@@ -988,12 +977,11 @@ export function PeriodsPage(): JSX.Element {
                     </Badge>
                   )}
                 </Table.Td>
-                {/* ⚠ Пільговий строк — із годиною: це теж КРАЙНІЙ СТРОК, і
-                    саме година визначає, чи правка ще буде «вчасною», чи вже
-                    позначиться в аудиті як пізня (`D-70`). Тире для «немає»
-                    тепер дає сам `Timestamp`, а не `?? '—'` на місці. */}
-                <Table.Td>
-                  <SiteTime value={period.graceEndsAt} zone={calendar.timeZoneId} />
+                {/* ✎ Period clarity: ОДНА дата — коли місяць блокується. Перевідкритий місяць блокується за строком
+                    перевідкриття (`D-68`), решта — за жорстким закриттям (`endsAt`, виключна межа: «Locks on» — мить,
+                    з якої запис уже не приймається). Із годиною: це крайній строк, у поясі МАЙДАНЧИКА. */}
+                <Table.Td data-period-locks-on={period.periodKey}>
+                  <SiteTime value={lockMomentOf(period)} zone={calendar.timeZoneId} />
                 </Table.Td>
                 <Table.Td>
                   <Group gap="xs" justify="flex-end">

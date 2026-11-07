@@ -139,7 +139,7 @@ function toneOf(state: string): string | null {
 const SlowEnvTimeout = 400_000;
 
 async function ready(): Promise<void> {
-  await screen.findByText('202605', {}, { timeout: SlowEnvTimeout });
+  await screen.findByText((_, el) => el?.getAttribute('data-period-key') === '202605', {}, { timeout: SlowEnvTimeout });
 }
 
 afterEach(() => {

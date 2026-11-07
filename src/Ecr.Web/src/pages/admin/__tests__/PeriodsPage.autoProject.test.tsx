@@ -172,7 +172,8 @@ describe('PeriodsPage: автовибір єдиного проєкту (U-10)',
     });
 
     // Календар на місці — сторінка більше не відкривається порожньою.
-    await screen.findByText('202609');
+    // ✎ Period clarity: ключ періоду — у підказці; рядок знаходимо за розміткою підпису.
+    await screen.findByText((_, el) => el?.getAttribute('data-period-key') === '202609');
 
     /*
      * ⛔ Порожнього стану «Pick a project» на екрані немає взагалі: перешкоду
@@ -230,6 +231,6 @@ describe('PeriodsPage: автовибір єдиного проєкту (U-10)',
     expect(new URLSearchParams(search).get('projectId')).toBeNull();
     await screen.findByTestId('periods-overview');
     expect(screen.queryByTestId('periods-year')).toBeNull();
-    expect(screen.queryByText('202609')).toBeNull();
+    expect(document.querySelector('[data-period-row="202609"]')).toBeNull();
   });
 });

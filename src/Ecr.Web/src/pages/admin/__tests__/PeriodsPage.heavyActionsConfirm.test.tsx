@@ -182,7 +182,7 @@ describe('PeriodsPage: дії над проєктом — лише з грант
       show();
 
       // Календар доїхав — рядок періоду на екрані.
-      await screen.findByText('202601');
+      await screen.findByText((_, el) => el?.getAttribute('data-period-key') === '202601');
 
       // ⛔ Мутація «лише право, без гранта» (стара умова) показує тут
       // «Make current» на рядку й «Archive»/«Clone» у шапці.
