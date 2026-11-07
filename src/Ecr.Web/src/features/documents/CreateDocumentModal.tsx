@@ -6,8 +6,11 @@ import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { CreateDocumentRequest, DocumentIdResponse } from '@/api/types';
 import { projectsQuery } from '@/features/projects/allProjects';
+import { listDocuments } from './api';
 import { groupRuleViolations } from './groupRuleViolations';
 import { localized } from '@/shared/i18n/localized';
+import { Banner } from '@/shared/ui/Banner';
+import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { KeyValue } from '@/shared/ui/KeyValue';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
@@ -98,6 +101,22 @@ export function CreateDocumentModal({
     enabled: opened,
   });
 
+  /*
+   * ✎ Pass2 п. 4 (людський прохід 07.11, P3): той самий проєкт двічі давав два документи без жодного слова, хоча
+   * перелік каже «один документ на об'єкт». Дублі ДОЗВОЛЕНІ задумом (документ унікальний за `(ProjectId,
+   * BusinessKey)`, ключ видає сервер — `docs/tz/01-context.md` «Документ», `02a-db-schema.md` `UQ_Document`), тож
+   * сервер не відмовляє, а майстер ПОПЕРЕДЖАЄ: документи проєкту — наявним переліком (`listDocuments`).
+   * ⚠ Ключ під `['documents', …]`: створення інвалідує його разом із переліком.
+   */
+  const existing = useQuery({
+    queryKey: ['documents', 'create-existing', projectId],
+    queryFn: () => listDocuments({ periodKey: null, projectId: Number(projectId) }),
+    enabled: opened && projectId !== null,
+  });
+
+  const existingDocs = existing.data?.items ?? [];
+  const firstExisting = existingDocs[0] ?? null;
+
   const template = useQuery({
     queryKey: ['projects', Number(projectId), 'document-template'],
     queryFn: () =>
@@ -144,6 +163,61 @@ export function CreateDocumentModal({
    * його порожнім і мовчала: людина читала його як «активних проєктів немає».
    */
   const sourceError = projects.error ?? null;
+
+  /*
+   * ✎ Pass2 п. 5 (P3): Esc / ✕ / Cancel посеред майстра мовчки губили введене. Вибір живе тут, а не в `data`
+   * майстра (див. шапку), тож `Wizard` не бачить «незбереженого» — питання ставить сам майстер документа, коли є
+   * що втрачати (обраний проєкт, змінений склад аркушів або назва). Порожній майстер закривається одразу.
+   */
+  const hasInput = projectId !== null || pickedSheets !== null || hasAnyText(name);
+  const [discarding, setDiscarding] = useState(false);
+
+  useEffect(() => {
+    if (opened) setDiscarding(false);
+  }, [opened]);
+
+  const requestClose = (): void => {
+    if (hasInput) setDiscarding(true);
+    else onClose();
+  };
+
+  /** Відкрити наявний документ замість створення ще одного (п. 4). */
+  const openExisting = async (documentId: number): Promise<void> => {
+    onClose();
+    await navigate(
+      `/documents/${String(documentId)}` +
+        (preferredPeriodKey === null ? '' : `?periodKey=${String(preferredPeriodKey)}`),
+    );
+  };
+
+  const existingBanner =
+    firstExisting === null ? null : (
+      <Banner
+        tone="warning"
+        testId="create-existing-documents"
+        title={t('documents.createExistsTitle')}
+        text={t('documents.createExistsText', { key: firstExisting.businessKey })}
+        actions={[
+          {
+            label: t('documents.createExistsOpen', { key: firstExisting.businessKey }),
+            onClick: () => void openExisting(firstExisting.id),
+          },
+          ...(existingDocs.length > 1 || (existing.data?.nextCursor ?? null) !== null
+            ? [
+                {
+                  label: t('documents.createExistsShowAll'),
+                  onClick: () => {
+                    onClose();
+                    // Перелік документів — маршрут `/`; фільтр проєкту — `?projectId=` (`documentListFilters`).
+                    void navigate(`/?projectId=${String(projectId)}`);
+                  },
+                  variant: 'subtle' as const,
+                },
+              ]
+            : []),
+        ]}
+      />
+    );
 
   const steps: WizardStep<NoData>[] = [
     {
@@ -192,6 +266,8 @@ export function CreateDocumentModal({
               ]}
             />
           )}
+
+          {existingBanner}
 
           <LocalizedInput
             label={t('documents.name')}
@@ -250,13 +326,13 @@ export function CreateDocumentModal({
   const included = available.filter((sheet) => sheets.includes(sheet.id));
 
   return (
+    <>
     <Wizard<NoData>
       opened={opened && armed}
       title={t('documents.create')}
       initialData={NoInitialData}
       steps={steps}
       labels={{ back: t('wizard.back'), next: t('wizard.next'), review: t('wizard.review') }}
-      reviewText={t('documents.createReviewText')}
       applyLabel={t('documents.createApply')}
       isApplying={create.isPending}
       summary={() => (
@@ -281,12 +357,20 @@ export function CreateDocumentModal({
           ]}
         />
       )}
+      // ✎ Pass2 п. 4: підсумок перед створенням теж каже, що документ проєкту вже є (це буде ще один).
+      reviewText={
+        firstExisting === null
+          ? t('documents.createReviewText')
+          : `${t('documents.createReviewText')} ${t('documents.createExistsReview', { key: firstExisting.businessKey })}`
+      }
       onApply={(_data, api) => {
         create.mutate(undefined, {
           onSuccess: async (result) => {
             await queryClient.invalidateQueries({ queryKey: ['documents'] });
 
-            api.close();
+            // ⚠ Не `api.close()`: це той самий `onClose` майстра, тобто `requestClose` з питанням «Discard?» —
+            // після створення втрачати нічого.
+            onClose();
             showDone(t('documents.created'));
 
             // Одразу відкриваємо документ: інакше людина шукає його в переліку за
@@ -307,11 +391,26 @@ export function CreateDocumentModal({
           },
         });
       }}
-      onClose={onClose}
-      // ⚠ Нічого не створено до «Create document», а вибір (проєкт, період, аркуші)
-      // відновлюється за кілька кліків — питання «втратити зміни?» тут лише
-      // привчало б відповідати «так», не читаючи.
+      onClose={requestClose}
+      // ⚠ `dirty` майстра тут ніколи не стає `true` (вибір живе в цьому компоненті, `update` не викликається),
+      // тож питання «Discard?» ставить `requestClose` вище (✎ Pass2 п. 5), а не цей колбек.
       onExitUnsaved={() => true}
     />
+
+    {/* ✎ Pass2 п. 5: підтвердження всередині сторінки (не `window.confirm`) — той самий `ConfirmModal`, що в
+        `BindingWizard`/`AddTableWizard`. «Keep editing» лишає майстер із введеним. */}
+    <ConfirmModal
+      opened={opened && discarding}
+      title={t('documents.createDiscardTitle')}
+      text={t('documents.createDiscardText')}
+      verb={t('documents.createDiscardVerb')}
+      cancelLabel={t('documents.createKeepEditing')}
+      onConfirm={() => {
+        setDiscarding(false);
+        onClose();
+      }}
+      onClose={() => setDiscarding(false)}
+    />
+    </>
   );
 }

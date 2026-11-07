@@ -1,4 +1,4 @@
-import { useId, useState, type JSX } from 'react';
+import { useId, useRef, useState, type JSX } from 'react';
 import { Button, Checkbox, Select, Text, TextInput } from '@mantine/core';
 import { formatNumber } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
@@ -17,6 +17,7 @@ import {
   withField,
   withNewField,
   withoutField,
+  type ProfileSaveConflict,
 } from './importModel';
 import { IssuesTable } from './IssuesTable';
 import type { AddColumnProblem, NewColumnRequest } from './addColumn';
@@ -50,6 +51,10 @@ export interface MappingStepProps {
   readonly onSaveProfile: (code: string, name: string) => void;
   readonly saving: boolean;
   readonly savedCode: string | null;
+  /** The last save was refused for its code: taken (offer «Overwrite») or the built-in profile (only another code). */
+  readonly saveConflict?: ProfileSaveConflict | null;
+  readonly onOverwriteProfile?: () => void;
+  readonly onChooseAnotherCode?: () => void;
   /** Sets the specification and re-reads the file with it in one step (header rows, a new column). */
   readonly onApplySpec: (spec: ImportSpec) => void;
   /** Rights `Permit.EditType` + `Permit.PublishType`: «Add as new column». */
@@ -90,18 +95,32 @@ function SaveProfileForm({
   onSave,
   onCancel,
   saving,
+  conflict,
+  onOverwrite,
+  onChooseAnother,
 }: {
   readonly onSave: (code: string, name: string) => void;
   readonly onCancel: () => void;
   readonly saving: boolean;
+  readonly conflict: ProfileSaveConflict | null;
+  readonly onOverwrite: () => void;
+  readonly onChooseAnother: () => void;
 }): JSX.Element {
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [codeEdited, setCodeEdited] = useState(false);
   const [touched, setTouched] = useState(false);
+  const codeInput = useRef<HTMLInputElement>(null);
   const shownCode = codeEdited ? code : profileCodeFrom(name);
   const invalid = profileCodeProblem(shownCode);
   const missingName = name.trim() === '';
+  // The refusal is about the code it was given: once the code is edited it no longer applies.
+  const shownConflict = conflict !== null && conflict.code === shownCode ? conflict : null;
+  const chooseAnother = (): void => {
+    onChooseAnother();
+    codeInput.current?.focus();
+    codeInput.current?.select();
+  };
 
   return (
     <form
@@ -126,6 +145,7 @@ function SaveProfileForm({
           data-autofocus
         />
         <TextInput
+          ref={codeInput}
           label={t('permits.air.import.save.code')}
           description={t('permits.air.import.save.codeHint')}
           inputWrapperOrder={InputOrder}
@@ -137,6 +157,32 @@ function SaveProfileForm({
           }}
         />
       </div>
+      {shownConflict !== null && (
+        <Banner
+          tone="warning"
+          testId="air-profile-conflict"
+          title={
+            shownConflict.kind === 'taken' ? t('permits.air.import.save.codeTakenTitle') : t('permits.air.import.save.builtInTitle')
+          }
+          text={
+            shownConflict.kind === 'taken'
+              ? t('permits.air.import.save.codeTaken', { code: shownConflict.code })
+              : t('permits.air.import.save.builtIn', { code: shownConflict.code })
+          }
+        />
+      )}
+      {shownConflict !== null && (
+        <div className="pi-actions">
+          {shownConflict.kind === 'taken' && (
+            <Button variant="default" loading={saving} onClick={onOverwrite}>
+              {t('permits.air.import.save.overwrite')}
+            </Button>
+          )}
+          <Button variant="default" onClick={chooseAnother}>
+            {t('permits.air.import.save.chooseAnother')}
+          </Button>
+        </div>
+      )}
       <div className="pi-actions">
         <Button variant="default" onClick={onCancel}>
           {t('common.cancel')}
@@ -455,7 +501,14 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
         </div>
       )}
       {saveOpen && mayEditProfile && base !== null && unpointed === null && (
-        <SaveProfileForm onSave={onSaveProfile} onCancel={() => setSaveOpen(false)} saving={saving} />
+        <SaveProfileForm
+          onSave={onSaveProfile}
+          onCancel={() => setSaveOpen(false)}
+          saving={saving}
+          conflict={props.saveConflict ?? null}
+          onOverwrite={props.onOverwriteProfile ?? (() => undefined)}
+          onChooseAnother={props.onChooseAnotherCode ?? (() => undefined)}
+        />
       )}
       {savedCode !== null && (
         <Text size="sm" role="status">

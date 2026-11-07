@@ -1,4 +1,4 @@
-import { useMemo, type JSX } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import { Button, Checkbox, Select, Text, Title } from '@mantine/core';
 import { formatNumber } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
@@ -8,7 +8,9 @@ import type { AirPreview, MissingReference, OwnerReplace } from '../airTypes';
 import { useNaeTree } from '../useAirLimits';
 import {
   applyGate,
-  errorIssues,
+  fileErrorIssues,
+  isMissingNaeFinding,
+  NaeReferenceKind,
   resolutionKey,
   UnsetResolution,
   unresolved,
@@ -56,13 +58,15 @@ function MissingTable({
   const tree = useNaeTree(missing.length > 0);
   const options = useMemo(() => nodeOptions(tree.data?.nodes ?? []), [tree.data]);
   const open = unresolved(missing, draft.resolutions);
+  const openNae = open.filter((item) => item.kind === NaeReferenceKind);
+  const [bulkUnder, setBulkUnder] = useState<string | null>(null);
 
   const set = (item: MissingReference, resolution: Resolution): void =>
     onDraft({ resolutions: { ...draft.resolutions, [resolutionKey(item)]: resolution } });
 
-  const setAll = (resolution: Resolution): void => {
+  const setAll = (resolution: Resolution, items: readonly MissingReference[] = open): void => {
     const next = { ...draft.resolutions };
-    for (const item of open) next[resolutionKey(item)] = resolution;
+    for (const item of items) next[resolutionKey(item)] = resolution;
     onDraft({ resolutions: next });
   };
 
@@ -73,16 +77,39 @@ function MissingTable({
   ];
 
   return (
-    <section className="pi-panel" aria-labelledby="pi-missing-title">
+    // Pass 2 (07.11): a WARNING group, not file errors — the codes are resolved right here (create under a node / skip) and the
+    // preview is run again; Apply stays blocked until every code is decided (`applyGate` «unresolved»).
+    <section className="pi-panel" aria-labelledby="pi-missing-title" data-testid="air-missing-group">
       <Title order={2} size="h4" id="pi-missing-title">
         {t('permits.air.import.missing.title', { count: formatNumber(missing.length) })}
       </Title>
+      <Banner tone="warning" text={t('permits.air.import.missing.warning')} />
       <Text size="sm" c="dimmed">
         {t('permits.air.import.missing.hint')}
       </Text>
       {tree.isError && <ErrorAlert error={tree.error} onRetry={() => void tree.refetch()} />}
       {open.length > 0 && (
         <div className="pi-toolbar">
+          {openNae.length > 0 && (
+            <div className="pi-inline">
+              <Select
+                label={t('permits.air.import.missing.createAllUnder')}
+                placeholder={t('permits.air.import.missing.under')}
+                data={options as { value: string; label: string }[]}
+                searchable
+                nothingFoundMessage={t('permits.air.import.missing.noNodes')}
+                value={bulkUnder}
+                onChange={setBulkUnder}
+              />
+              <Button
+                variant="default"
+                disabled={bulkUnder === null}
+                onClick={() => bulkUnder !== null && setAll({ choice: 'create', createUnder: bulkUnder }, openNae)}
+              >
+                {t('permits.air.import.missing.createAll', { count: formatNumber(openNae.length) })}
+              </Button>
+            </div>
+          )}
           <Button variant="default" onClick={() => setAll({ choice: 'skip', createUnder: '' })}>
             {t('permits.air.import.missing.skipAll', { count: formatNumber(open.length) })}
           </Button>
@@ -248,8 +275,10 @@ export function PreviewStep(props: PreviewStepProps): JSX.Element {
   const { preview, draft, onDraft, stale, onRerun, rerunning, onApply, applying, mayApply } = props;
   const body = preview.preview;
   const gate = applyGate(preview, draft, stale);
-  const errors = errorIssues(body.issues);
+  // Missing NAE are counted and listed in their own warning group, not as file errors (pass 2, 07.11).
+  const errors = fileErrorIssues(body.issues);
   const warnings = warningIssues(body.issues);
+  const findings = body.issues.filter((issue) => !isMissingNaeFinding(issue));
 
   return (
     <div className="pi-page">
@@ -292,7 +321,7 @@ export function PreviewStep(props: PreviewStepProps): JSX.Element {
             <Title order={2} size="h4" id="pi-issues-title">
               {t('permits.air.import.issues.title')}
             </Title>
-            <IssuesTable issues={body.issues} dropped={body.droppedIssues} columnNames={props.columnNames} />
+            <IssuesTable issues={findings} dropped={body.droppedIssues} columnNames={props.columnNames} />
           </section>
         </div>
         <div className="pi-page">

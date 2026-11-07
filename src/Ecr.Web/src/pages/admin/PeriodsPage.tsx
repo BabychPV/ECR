@@ -413,6 +413,7 @@ export function PeriodsPage(): JSX.Element {
           <PeriodYearTiles
             calendar={calendar}
             projectCode={selected?.code ?? ''}
+            projectStatus={selected?.status}
             siteDate={siteDate}
             selectedKey={tileKey}
             onPick={(key) => {

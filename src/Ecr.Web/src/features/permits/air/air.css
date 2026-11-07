@@ -161,6 +161,34 @@
   color: var(--mantine-color-text);
 }
 
+/* Pass 2 (07.11): a completed step goes back to it — the whole pill is the button (current and later steps are plain text). */
+.pi-steps li[data-link='true'] {
+  padding: 0;
+}
+
+.pi-step-link {
+  width: 100%;
+  height: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.pi-step-link:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.pi-step-link:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 2px;
+}
+
 /*
  * Поля майстра (07.11 «багато нерівностей в кнопках і полях»): однакова ширина колонок на всіх кроках (`auto-fill` тримає
  * порожні треки — два поля не розтягуються на всю ширину), підказки під полем (`InputOrder`), тож рамки стоять в один ряд.

@@ -7,7 +7,10 @@ import {
   EmptyDraft,
   fieldWithoutColumn,
   fileColumnOptions,
+  fileErrorIssues,
   fileStepProblem,
+  isMissingNaeFinding,
+  profileSaveConflict,
   sendFailureOf,
   normalizeArea,
   patternsToText,
@@ -24,6 +27,7 @@ import {
   withoutField,
   type ImportDraft,
 } from '../import/importModel';
+import type { ImportIssue } from '../airTypes';
 import { preview, xlsx } from './airFixtures';
 
 const base: ImportDraft = { ...EmptyDraft, file: xlsx(), region: ' atyrau ', area: '', profileCode: 'ERA_TABLE_33' };
@@ -99,6 +103,46 @@ describe('applyGate: коли можна застосувати', () => {
       replace: { confirmationRequired: false, otherOwners: [], thisOwner: preview().preview.replace.thisOwner },
     });
     expect(applyGate(own, base, false).allowed).toBe(true);
+  });
+
+  // Air pass2 (07.11): missing NAE are «unresolved», not «the file has errors»; the server's veto still holds.
+  const nae = (key: string): ImportIssue => ({
+    severity: 'Error',
+    messageKey: 'err.ECR-IMP-0422.regReferenceMissing',
+    row: 40,
+    column: 'G',
+    field: 'NaeCode',
+    args: { kind: 'nae', key },
+  });
+
+  it('Air pass2: only missing-NAE errors → «unresolved», never «errors»; decided → «stale»', () => {
+    const p = preview({ canApply: false, issues: [nae('3544'), nae('3545')] });
+    expect(applyGate(p, { ...base, confirmedReplace: true }, false).reasons).toEqual(['unresolved']);
+    expect(applyGate(p, { ...base, resolutions: resolved, confirmedReplace: true }, true).reasons).toEqual(['stale']);
+  });
+
+  it('Air pass2: the server still refuses with nothing to explain it → «errors»; an unknown substance is a file error', () => {
+    const p = preview({ canApply: false, issues: [nae('3544')] });
+    expect(applyGate(p, { ...base, resolutions: resolved, confirmedReplace: true }, false)).toEqual({ allowed: false, reasons: ['errors'] });
+    const substance = preview({
+      canApply: false,
+      issues: [nae('3544'), { ...nae('9999'), field: 'SubstanceCode', args: { kind: 'substance', key: '9999' } }],
+    });
+    expect(applyGate(substance, { ...base, confirmedReplace: true }, false).reasons).toEqual(['errors', 'unresolved']);
+    expect(isMissingNaeFinding(nae('1'))).toBe(true);
+    expect(fileErrorIssues(substance.preview.issues).map((i) => i.args?.['key'])).toEqual(['9999']);
+  });
+});
+
+describe('Air pass2: profileSaveConflict', () => {
+  const refusal = (errorCode: string, messageKey: string) =>
+    new EcrApiError({ title: 't', status: 409, errorCode, correlationId: 'c', extensions2: { messageKey } });
+
+  it('a taken code and the built-in profile; anything else is not a conflict of the form', () => {
+    expect(profileSaveConflict(refusal('ECR-REG-0409', 'err.ECR-REG-0409.profileCodeTaken'))).toBe('taken');
+    expect(profileSaveConflict(refusal('ECR-REG-0409', 'err.ECR-REG-0409.profileBuiltIn'))).toBe('builtIn');
+    expect(profileSaveConflict(refusal('ECR-REG-0409', 'err.ECR-REG-0409.profileChanged'))).toBeNull();
+    expect(profileSaveConflict(new Error('x'))).toBeNull();
   });
 });
 

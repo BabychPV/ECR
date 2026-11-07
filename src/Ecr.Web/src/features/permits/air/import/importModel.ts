@@ -183,16 +183,41 @@ export interface ApplyGate {
   readonly reasons: readonly ('errors' | 'unresolved' | 'confirm' | 'stale')[];
 }
 
+/** Catalog key of «the referenced code is not in the target registry» (`RegistryImportKeys.ReferenceMissing`). */
+export const ReferenceMissingKey = 'err.ECR-IMP-0422.regReferenceMissing';
+
+/** Reference kind of the NAE tree (`INaeResolver.NaeKind`). */
+export const NaeReferenceKind = 'nae';
+
+/**
+ * A finding «this NAE code is not in the NAE tree» (pass 2, 07.11): the server reports it as an error (the apply refuses while
+ * it is undecided), but it is NOT a defect of the file — the preview resolves it with «create under a node» / «skip», so it is
+ * shown in the missing-NAE warning group, not among the file errors. An unknown substance stays a file error.
+ */
+export function isMissingNaeFinding(issue: ImportIssue): boolean {
+  return issue.severity === 'Error' && issue.messageKey === ReferenceMissingKey && issue.args?.['kind'] === NaeReferenceKind;
+}
+
+/** Errors the file itself has (the user must fix the file): every error except the missing-NAE findings. */
+export function fileErrorIssues(issues: readonly ImportIssue[]): readonly ImportIssue[] {
+  return issues.filter((issue) => issue.severity === 'Error' && !isMissingNaeFinding(issue));
+}
+
 /**
  * Чи можна застосувати: сервер дозволяє (`canApply`: немає помилок), усі відсутні НАЕ розв'язані, заміна чужих
  * дозволів підтверджена, а перегляд свіжий (параметри не змінились після нього).
+ *
+ * ⚠ Pass 2 (07.11): «the file has errors» only for errors of the FILE. Undecided missing NAE are «unresolved»; decided ones
+ * make the preview stale until it is run again. If the server still refuses (`canApply` false) with nothing else to explain it,
+ * the reason is «errors» again — Apply is never enabled against the server's verdict.
  */
 export function applyGate(preview: AirPreview, draft: ImportDraft, stale: boolean): ApplyGate {
   const reasons: ('errors' | 'unresolved' | 'confirm' | 'stale')[] = [];
   const body = preview.preview;
+  const open = unresolved(body.missing, draft.resolutions).length;
 
-  if (!body.canApply) reasons.push('errors');
-  if (unresolved(body.missing, draft.resolutions).length > 0) reasons.push('unresolved');
+  if (fileErrorIssues(body.issues).length > 0 || (!body.canApply && open === 0 && !stale)) reasons.push('errors');
+  if (open > 0) reasons.push('unresolved');
   if (body.replace.confirmationRequired && !draft.confirmedReplace) reasons.push('confirm');
   if (stale) reasons.push('stale');
 
@@ -324,6 +349,31 @@ export function specProblem(spec: ImportSpec): 'nameRequired' | 'nameDuplicate' 
   }
 
   return null;
+}
+
+/** `409 ECR-REG-0409` keys of «Save as profile…» (`AirLimitsKeys` on the server). */
+export const ProfileCodeTakenKey = 'err.ECR-REG-0409.profileCodeTaken';
+export const ProfileBuiltInKey = 'err.ECR-REG-0409.profileBuiltIn';
+
+/**
+ * Why «Save as profile…» was refused for the code (pass 2, 07.11): `taken` — a profile with the code exists (the form offers
+ * «Overwrite» or «Choose another code»); `builtIn` — the shipped profile, never overwritten (only «Choose another code»).
+ * `null` — another refusal, shown as is.
+ */
+export function profileSaveConflict(error: unknown): 'taken' | 'builtIn' | null {
+  if (!(error instanceof EcrApiError) || error.problem.errorCode !== 'ECR-REG-0409') return null;
+  const key = error.problem.extensions2?.['messageKey'];
+  if (key === ProfileCodeTakenKey) return 'taken';
+  if (key === ProfileBuiltInKey) return 'builtIn';
+
+  return null;
+}
+
+/** A refused «Save as profile…» the form answers with «Overwrite» / «Choose another code». */
+export interface ProfileSaveConflict {
+  readonly code: string;
+  readonly name: string;
+  readonly kind: 'taken' | 'builtIn';
 }
 
 /** Код профілю для «Save as new»: латиниця, цифри, `_`; велика літера. */

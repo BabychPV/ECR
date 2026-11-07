@@ -47,7 +47,14 @@ SELECT v.[Key], v.Lang, v.Val
     (N'periods.overview.stat.open', N'kz', N'ашық'),
     (N'periods.overview.stat.grace', N'kz', N'жеңілдік кезеңінде'),
     (N'periods.overview.stat.soon', N'kz', N'≤ 3 күнде жабылады'),
-    (N'periods.overview.noMatch', N'kz', N'Бұл сүзгіге сай жоба жоқ')
+    (N'periods.overview.noMatch', N'kz', N'Бұл сүзгіге сай жоба жоқ'),
+    -- Pass2 п. 6 (людський прохід 07.11): плитки неактивного проєкту не обіцяють дат; смуга названа «всі проєкти».
+    (N'periods.tile.notOpenDraft', N'ru', N'не открыт — проект черновик'),
+    (N'periods.tile.notOpenDraft', N'kz', N'ашылмаған — жоба нобай күйінде'),
+    (N'periods.tile.notOpenInactive', N'ru', N'не открыт — проект неактивен'),
+    (N'periods.tile.notOpenInactive', N'kz', N'ашылмаған — жоба белсенді емес'),
+    (N'periods.overview.statsScope', N'ru', N'Все проекты:'),
+    (N'periods.overview.statsScope', N'kz', N'Барлық жобалар:')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -78,7 +85,11 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'periods.overview.stat.open', N'en', N'open', 1),
     (N'periods.overview.stat.grace', N'en', N'in grace period', 1),
     (N'periods.overview.stat.soon', N'en', N'closing in ≤ 3 days', 1),
-    (N'periods.overview.noMatch', N'en', N'No project matches this filter', 1)
+    (N'periods.overview.noMatch', N'en', N'No project matches this filter', 1),
+    -- Pass2 п. 6 (людський прохід 07.11): плитки неактивного проєкту не обіцяють дат; смуга названа «всі проєкти».
+    (N'periods.tile.notOpenDraft', N'en', N'not open — the project is a draft', 1),
+    (N'periods.tile.notOpenInactive', N'en', N'not open — the project is not active', 1),
+    (N'periods.overview.statsScope', N'en', N'All projects:', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

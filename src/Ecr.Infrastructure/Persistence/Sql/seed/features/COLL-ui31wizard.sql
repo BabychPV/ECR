@@ -27,7 +27,26 @@ SELECT v.[Key], v.Lang, v.Val
     (N'documents.createNoSheets', N'ru', N'Включите хотя бы один лист: документ без листов нельзя заполнить.'),
     (N'documents.createNoSheets', N'kz', N'Кемінде бір парақты қосыңыз: парақсыз құжатты толтыру мүмкін емес.'),
     (N'documents.createSheetsCount', N'ru', N'{included} из {total}'),
-    (N'documents.createSheetsCount', N'kz', N'{total} ішінен {included}')
+    (N'documents.createSheetsCount', N'kz', N'{total} ішінен {included}'),
+    -- Pass2 п. 4/5 (людський прохід 07.11): документ проєкту вже є; «відкинути введене?»
+    (N'documents.createExistsTitle', N'ru', N'У этого проекта уже есть документ'),
+    (N'documents.createExistsTitle', N'kz', N'Бұл жобаның құжаты бұрыннан бар'),
+    (N'documents.createExistsText', N'ru', N'{key} уже ведётся по этому проекту. Один документ — на объект, все месяцы внутри него: откройте его или нажмите «Далее», чтобы создать ещё один.'),
+    (N'documents.createExistsText', N'kz', N'{key} осы жоба бойынша жүргізіліп жатыр. Бір нысанға бір құжат, барлық айлар оның ішінде: оны ашыңыз немесе тағы біреуін құру үшін «Келесі» басыңыз.'),
+    (N'documents.createExistsOpen', N'ru', N'Открыть {key}'),
+    (N'documents.createExistsOpen', N'kz', N'{key} ашу'),
+    (N'documents.createExistsShowAll', N'ru', N'Все документы проекта'),
+    (N'documents.createExistsShowAll', N'kz', N'Жобаның барлық құжаттары'),
+    (N'documents.createExistsReview', N'ru', N'У проекта уже есть {key}: будет создан ещё один документ.'),
+    (N'documents.createExistsReview', N'kz', N'Жобада {key} бұрыннан бар: тағы бір құжат құрылады.'),
+    (N'documents.createDiscardTitle', N'ru', N'Отменить введённое?'),
+    (N'documents.createDiscardTitle', N'kz', N'Енгізілгенді тастау керек пе?'),
+    (N'documents.createDiscardText', N'ru', N'Документ ещё не создан. Выбранные проект, листы и название будут потеряны.'),
+    (N'documents.createDiscardText', N'kz', N'Құжат әлі құрылған жоқ. Таңдалған жоба, парақтар мен атау жоғалады.'),
+    (N'documents.createDiscardVerb', N'ru', N'Отменить'),
+    (N'documents.createDiscardVerb', N'kz', N'Тастау'),
+    (N'documents.createKeepEditing', N'ru', N'Продолжить ввод'),
+    (N'documents.createKeepEditing', N'kz', N'Енгізуді жалғастыру')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -48,7 +67,17 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'documents.createClosedPeriod', N'en', N'This period is closed. The document will be created, but its data can be changed only after the period is reopened.', 1),
     (N'documents.createSheetsHint', N'en', N'Leave out sheets that do not apply to this site. All are included by default.', 1),
     (N'documents.createNoSheets', N'en', N'Include at least one sheet: a document without sheets cannot be filled in.', 1),
-    (N'documents.createSheetsCount', N'en', N'{included} of {total}', 1)
+    (N'documents.createSheetsCount', N'en', N'{included} of {total}', 1),
+    -- Pass2 п. 4/5 (людський прохід 07.11): документ проєкту вже є; «відкинути введене?»
+    (N'documents.createExistsTitle', N'en', N'This project already has a document', 1),
+    (N'documents.createExistsText', N'en', N'{key} is already kept for this project. One document per object, all months inside it: open it, or press Next to create another one.', 1),
+    (N'documents.createExistsOpen', N'en', N'Open {key}', 1),
+    (N'documents.createExistsShowAll', N'en', N'All documents of the project', 1),
+    (N'documents.createExistsReview', N'en', N'The project already has {key}: another document will be created.', 1),
+    (N'documents.createDiscardTitle', N'en', N'Discard what you entered?', 1),
+    (N'documents.createDiscardText', N'en', N'The document has not been created. The project, sheets and name you chose will be lost.', 1),
+    (N'documents.createDiscardVerb', N'en', N'Discard', 1),
+    (N'documents.createKeepEditing', N'en', N'Keep editing', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

@@ -38,11 +38,14 @@ import {
   fileStepProblem,
   ImportSteps,
   previewSignature,
+  profileSaveConflict,
   sendFailureOf,
   type ImportDraft,
   type ImportStep,
+  type ProfileSaveConflict,
   type SendFailure,
 } from './importModel';
+import { getImportProfile } from '../airApi';
 import { useAirColumnNames } from './fieldLabels';
 // «Mapping» (header rows, added columns, rules editor, profile form) is its own chunk: the page stays within the client
 // budget, and the step is only needed after the file is analysed.
@@ -118,6 +121,8 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
     then: null,
   });
   const [savedCode, setSavedCode] = useState<string | null>(null);
+  const [saveConflict, setSaveConflict] = useState<ProfileSaveConflict | null>(null);
+  const [readingCurrent, setReadingCurrent] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const arrived = useRef(false);
 
@@ -136,7 +141,7 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
   const analysing = usePendingLoading(analyse.isPending);
   const previewing = usePendingLoading(previewCall.isPending);
   const applying = usePendingLoading(apply.isPending);
-  const saving = usePendingLoading(saveProfile.isPending);
+  const saving = usePendingLoading(saveProfile.isPending || readingCurrent);
   const queryClient = useQueryClient();
   const addColumn = useMutation<string, Error, NewColumnRequest>({
     mutationKey: ['permits', 'types', AirType, 'add-column'],
@@ -274,14 +279,20 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
   /**
    * The one «Save as profile…»: the current specification — edited (header rows, sheet, added columns, rules) or, untouched,
    * the profile's own — goes into a new profile, which the wizard then uses (and the File step lists).
+   *
+   * `rowVersion` — «Overwrite» after «a profile with this code already exists» (pass 2, 07.11): the token of the profile as it is
+   * now; `null` — a new profile. A taken code or the built-in profile comes back as `saveConflict` for the form, not as a failure.
    */
-  const onSaveProfile = (code: string, name: string): void => {
+  const onSaveProfile = (code: string, name: string, rowVersion: string | null = null): void => {
     const spec = draft.spec ?? profile.data?.spec;
     if (saveProfile.isPending || spec === undefined) return;
     clearFailure();
+    setSaveConflict(null);
+    // A new save starts without the old status: its success (even for the same code — «Overwrite») closes the form again.
+    setSavedCode(null);
     const analysed = draft.spec === analysedSpec;
     saveProfile.mutate(
-      { code, body: { nameL10n: { [language()]: name, en: name }, spec, rowVersion: null } },
+      { code, body: { nameL10n: { [language()]: name, en: name }, spec, rowVersion } },
       {
         onSuccess: (saved) => {
           setSavedCode(saved.code);
@@ -290,9 +301,28 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           setAnalysedSpec(analysed ? null : spec);
           patchDraft({ profileCode: saved.code, spec: null });
         },
-        onError: setFailure,
+        onError: (error) => {
+          const kind = profileSaveConflict(error);
+          if (kind === null) setFailure(error);
+          else setSaveConflict({ code, name, kind });
+        },
       },
     );
+  };
+
+  /** «Overwrite»: reads the profile as it is now (its token) and saves over it; the built-in one is refused here too. */
+  const onOverwriteProfile = (): void => {
+    if (saveConflict === null || saveConflict.kind !== 'taken' || readingCurrent || saveProfile.isPending) return;
+    const { code, name } = saveConflict;
+    clearFailure();
+    setReadingCurrent(true);
+    getImportProfile(code)
+      .then((current) => {
+        if (current.builtIn) setSaveConflict({ code, name, kind: 'builtIn' });
+        else onSaveProfile(code, name, current.rowVersion);
+      })
+      .catch(setFailure)
+      .finally(() => setReadingCurrent(false));
   };
 
   const next = (): void => {
@@ -321,12 +351,28 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
 
   return (
     <div className="pi-page">
+      {/*
+       * Pass 2 (07.11, P3): a completed step is a real button that goes BACK to it (as «Back» does — the draft is kept); the current
+       * and the later steps are plain text, so a step is never skipped forward past its check. After «Apply» (Result) nothing goes
+       * back: the preview there is used up.
+       */}
       <ol className="pi-steps" aria-label={t('permits.air.import.steps.aria')}>
-        {ImportSteps.map((id, at) => (
-          <li key={id} aria-current={id === step ? 'step' : undefined} data-done={at < index}>
-            {`${String(at + 1)} ${stepLabel(id)}`}
-          </li>
-        ))}
+        {ImportSteps.map((id, at) => {
+          const text = `${String(at + 1)} ${stepLabel(id)}`;
+          const reachable = at < index && step !== 'apply';
+
+          return (
+            <li key={id} aria-current={id === step ? 'step' : undefined} data-done={at < index} data-link={reachable}>
+              {reachable ? (
+                <button type="button" className="pi-step-link" onClick={() => goTo(id)}>
+                  {text}
+                </button>
+              ) : (
+                text
+              )}
+            </li>
+          );
+        })}
       </ol>
       <div>
         <Title order={2} size="h4" tabIndex={-1} ref={heading}>
@@ -390,6 +436,9 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           onSaveProfile={onSaveProfile}
           saving={saving}
           savedCode={savedCode}
+          saveConflict={saveConflict}
+          onOverwriteProfile={onOverwriteProfile}
+          onChooseAnotherCode={() => setSaveConflict(null)}
           onApplySpec={(spec) => runAnalyse(null, spec)}
           mayAddColumn={mayAddColumn}
           onAddColumn={onAddColumn}
