@@ -65,14 +65,25 @@ function closesText(days: number): string {
   return days === 0 ? t('periods.tile.closesToday') : formatCount(days, 'periods.tile.closesIn');
 }
 
-/** Рядок-пояснення плитки: що з періодом зараз і до коли (макет `perNote`). */
+/**
+ * Рядок-пояснення плитки: що з періодом зараз і до коли (макет `perNote`).
+ *
+ * ✎ Pass2 п. 6 (людський прохід 07.11, P3): у проєкті не в стані `Active` (чернетка, архів) періоди не відкриває
+ * ніхто — `PeriodStateJob` веде лише активні, — тож «opens Jan 1, 2026» на плитці обіцяв дату, яка вже минула і не
+ * настане. `projectStatus` не задано — поведінка як раніше (активний проєкт).
+ */
 export function periodNote(
   period: Period,
   calendar: PeriodCalendarDto,
   siteDate: SiteDate,
   now: number,
+  projectStatus?: string,
 ): string {
   const zone = calendar.timeZoneId;
+
+  if (period.state === 'Scheduled' && projectStatus !== undefined && projectStatus !== 'Active') {
+    return projectStatus === 'Draft' ? t('periods.tile.notOpenDraft') : t('periods.tile.notOpenInactive');
+  }
   const end = siteDate(period.endsAt, zone, true) ?? '';
 
   if (period.reopenedUntil !== null && (period.state === 'Open' || period.state === 'Grace')) {
@@ -99,6 +110,8 @@ export function periodNote(
 interface PeriodYearTilesProps {
   readonly calendar: PeriodCalendarDto;
   readonly projectCode: string;
+  /** Стан проєкту (`Draft`/`Active`/`Archived`); не `Active` — плитки не обіцяють дат відкриття (Pass2 п. 6). */
+  readonly projectStatus?: string | undefined;
   readonly siteDate: SiteDate;
   /** Ключ виділеної плитки (`aria-pressed`). */
   readonly selectedKey: number | null;
@@ -113,6 +126,7 @@ interface PeriodYearTilesProps {
 export function PeriodYearTiles({
   calendar,
   projectCode,
+  projectStatus,
   siteDate,
   selectedKey,
   onPick,
@@ -133,7 +147,7 @@ export function PeriodYearTiles({
         {periods.map((period) => {
           const caption = formatPeriodKey(period.periodKey, calendar.periodKind);
           const state = t(statusKey('period', period.state));
-          const note = periodNote(period, calendar, siteDate, now);
+          const note = periodNote(period, calendar, siteDate, now, projectStatus);
           const pressed = selectedKey === period.periodKey;
 
           return (
@@ -237,8 +251,16 @@ export function PeriodsStatStrip({ projects }: { readonly projects: readonly Pro
   const stat = isStat(statRaw) ? statRaw : null;
   const { rows } = useOverviewRows(projects);
 
+  /*
+   * ✎ Pass2 п. 6 (P3): смуга рахує ВСІ проєкти (її фільтр `?stat=` звужує таблицю «All projects» унизу), а під нею —
+   * календар ОДНОГО обраного проєкту; «2 open · 1 in grace» читалось як числа обраного. Тепер обсяг названо видимо.
+   */
   return (
-    <StatStrip
+    <Group gap="xs" align="baseline" wrap="wrap" mb="xs" data-periods-stats-scope="all">
+      <Text size="sm" fw={600}>
+        {t('periods.overview.statsScope')}
+      </Text>
+      <StatStrip
       label={t('periods.overview.stats')}
       items={[
         { id: 'open', label: t('periods.overview.stat.open'), value: rows.filter(statMatch.open).length },
@@ -258,6 +280,7 @@ export function PeriodsStatStrip({ projects }: { readonly projects: readonly Pro
       active={stat}
       onSelect={(id) => setStat(id)}
     />
+    </Group>
   );
 }
 

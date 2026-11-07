@@ -10,8 +10,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'nav.group.access', N'kz', N'Қолжетімділік'),
     (N'nav.group.operate', N'ru', N'Эксплуатация'),
     (N'nav.group.operate', N'kz', N'Пайдалану'),
-    (N'nav.documents.description', N'ru', N'Отчёты ваших проектов за один период. Откройте документ, чтобы работать с ним.'),
-    (N'nav.documents.description', N'kz', N'Бір кезеңдегі жобаларыңыздың есептері. Онымен жұмыс істеу үшін құжатты ашыңыз.'),
+    (N'nav.documents.description', N'ru', N'Отчёты ваших проектов за выбранный год. Откройте документ, чтобы работать с ним.'),
+    (N'nav.documents.description', N'kz', N'Таңдалған жылдағы жобаларыңыздың есептері. Онымен жұмыс істеу үшін құжатты ашыңыз.'),
     (N'nav.myGroups.description', N'ru', N'Откуда берётся ваш доступ: группы каталога дают роли, роли дают права и проекты. Здесь ничего нельзя изменить; это делает администратор.'),
     (N'nav.myGroups.description', N'kz', N'Қолжетімділігіңіз қайдан келеді: каталог топтары рөлдер береді, рөлдер құқықтар мен жобалар береді. Мұнда ештеңені өзгертуге болмайды; оны әкімші өзгертеді.'),
     (N'nav.templates.description', N'ru', N'Шаблон — это структура отчёта: листы, таблицы, колонки, формулы и правила. Документы создаются из опубликованной версии и остаются на ней.'),
@@ -52,7 +52,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'nav.group.configure', N'en', N'Configure', 1),
     (N'nav.group.access', N'en', N'Access', 1),
     (N'nav.group.operate', N'en', N'Operate', 1),
-    (N'nav.documents.description', N'en', N'Reports of your projects for one period. Open a document to work in it.', 1),
+    (N'nav.documents.description', N'en', N'Reports of your projects for the selected year. Open a document to work in it.', 1),
     (N'nav.myGroups.description', N'en', N'Where your access comes from: directory groups give you roles, roles give you permissions and projects. Nothing here can be edited; an administrator changes it for you.', 1),
     (N'nav.templates.description', N'en', N'A template is the structure of a report: sheets, tables, columns, formulas and rules. Documents are created from a published version and stay on it.', 1),
     (N'nav.registries.description', N'en', N'Reference lists that cells, formulas and mappings pick values from: sources, substances, fuels, limits.', 1),
@@ -68,6 +68,19 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'nav.uiStrings.description', N'en', N'Every label, message and button text of ECR. English is the source; missing translations fall back to English.', 1),
     (N'nav.health.description', N'en', N'Is ECR working right now? Warnings appear only when there is something to do.', 1)
        ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:uishell ── кінець секції ──
+-- COLL:uishell ── змінені тексти наявних ключів (Pass2 п. 7, людський прохід 07.11): перелік документів — перегляд РОКУ
+-- (Period clarity), «за один період» під «One document per object; all months are inside it» суперечило екрану.
+-- Епілог оновлює, лише поки в базі стоїть САМЕ старе значення.
+INSERT INTO #UiChanged ([Key], Lang, OldVal, NewVal)
+SELECT v.[Key], v.Lang, v.OldVal, v.NewVal
+  FROM (VALUES
+    (N'nav.documents.description', N'en', N'Reports of your projects for one period. Open a document to work in it.', N'Reports of your projects for the selected year. Open a document to work in it.'),
+    (N'nav.documents.description', N'ru', N'Отчёты ваших проектов за один период. Откройте документ, чтобы работать с ним.', N'Отчёты ваших проектов за выбранный год. Откройте документ, чтобы работать с ним.'),
+    (N'nav.documents.description', N'kz', N'Бір кезеңдегі жобаларыңыздың есептері. Онымен жұмыс істеу үшін құжатты ашыңыз.', N'Таңдалған жылдағы жобаларыңыздың есептері. Онымен жұмыс істеу үшін құжатты ашыңыз.')
+       ) AS v ([Key], Lang, OldVal, NewVal)
 OPTION (RECOMPILE);
 GO
 -- COLL:uishell ── кінець секції ──

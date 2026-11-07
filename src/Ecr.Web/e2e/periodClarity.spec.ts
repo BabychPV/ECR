@@ -177,3 +177,157 @@ test.describe('Period clarity', () => {
     await expect(page).toHaveURL(/\/documents\/\d+/, { timeout: 60_000 });
   });
 });
+
+/**
+ * Pass2 (людський прохід 07.11, P3, пп. 4–7) — `-Grep "Pass2:"`. Проєкти й документи власні, як і вище.
+ */
+test.describe('Pass2 (людський прохід 07.11)', () => {
+  test.describe.configure({ mode: 'serial', timeout: 300_000 });
+
+  /** Майстер «New document» на обраному проєкті, до кроку Project з обраним проєктом. */
+  async function wizardOnProject(page: Page, project: Project) {
+    await page.goto(`/?projectId=${String(project.id)}`);
+    await page.getByRole('button', { name: /^New document$/ }).click();
+    const dialog = page.getByRole('dialog', { name: /New document/ });
+    await dialog.getByRole('textbox', { name: /^Project/ }).click();
+    await page.getByRole('listbox', { name: /Project/ }).getByRole('option', { name: project.code, exact: true }).click();
+
+    return dialog;
+  }
+
+  test('Pass2: new document wizard warns that the project already has a document and opens it instead', async ({ page }) => {
+    await signIn(page);
+    const { id, project, card } = await partlySubmittedDocument(page);
+    let posts = 0;
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && /\/api\/v1\/documents$/.test(request.url())) posts += 1;
+    });
+
+    const dialog = await wizardOnProject(page, project);
+    const banner = dialog.getByTestId('create-existing-documents');
+    await expect(banner).toBeVisible({ timeout: 60_000 });
+    await expect(banner).toContainText('This project already has a document');
+    await expect(banner).toContainText(card.businessKey);
+
+    // «Створити ще один» лишається: Next доступний.
+    await expect(dialog.getByRole('button', { name: /^Next$/ })).toBeEnabled();
+
+    await banner.getByRole('button', { name: `Open ${card.businessKey}` }).click();
+    await expect(page).toHaveURL(new RegExp(`/documents/${String(id)}(\\?|$)`), { timeout: 60_000 });
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(posts, 'документ не мав створюватися').toBe(0);
+  });
+
+  test('Pass2: Esc in the new document wizard asks to discard what was entered', async ({ page }) => {
+    await signIn(page);
+    const { project } = await partlySubmittedDocument(page);
+
+    const dialog = await wizardOnProject(page, project);
+    await expect(dialog.getByRole('button', { name: /^Next$/ })).toBeEnabled({ timeout: 60_000 });
+
+    await page.keyboard.press('Escape');
+    const confirm = page.getByRole('dialog', { name: 'Discard what you entered?' });
+    await expect(confirm).toBeVisible({ timeout: 10_000 });
+
+    // «Keep editing» — майстер лишається з обраним проєктом.
+    await confirm.getByRole('button', { name: 'Keep editing' }).click();
+    await expect(confirm).toBeHidden();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('textbox', { name: /^Project/ })).toHaveValue(project.code);
+
+    // ✕ у шапці — те саме питання; «Discard» закриває майстер.
+    await dialog.locator('.mantine-Modal-close').click();
+    await expect(confirm).toBeVisible({ timeout: 10_000 });
+    await confirm.getByRole('button', { name: 'Discard' }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 10_000 });
+
+    // Відкрито знову — порожній майстер, і Esc закриває його одразу, без питання.
+    await page.getByRole('button', { name: /^New document$/ }).click();
+    await expect(dialog.getByRole('textbox', { name: /^Project/ })).toHaveValue('');
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 10_000 });
+  });
+
+  test('Pass2: periods of a draft project do not promise past opening dates and the counters say all projects', async ({ page }) => {
+    await signIn(page);
+    // Власний проєкт-ЧЕРНЕТКА: шаблон з одним аркушем, проєкт без активації.
+    const stamp = String(Date.now());
+    const template = await ok<{ templateId: number }>(
+      await page.request.post('/api/v1/templates', { data: { code: `E2EPass2Tpl${stamp}`, nameL10n: { en: `E2E pass2 ${stamp}` } } }),
+      'шаблон',
+    );
+    const version = await ok<{ versionId: number }>(
+      await page.request.post(`/api/v1/templates/${String(template.templateId)}/versions`, {
+        data: { versionNumber: '1.0.0.0', cloneFromVersionId: null },
+      }),
+      'версія шаблону',
+    );
+    const base = `/api/v1/template-versions/${String(version.versionId)}`;
+    await ok(
+      await page.request.put(`${base}/sheets/S1`, {
+        data: { nameL10n: { en: 'Sheet 1' }, ordinal: 1, isMandatory: true, isVisible: true, sheetGroup: null },
+      }),
+      'аркуш',
+    );
+    const table = await ok<{ id: number }>(
+      await page.request.put(`${base}/sheets/S1/tables/T1`, {
+        data: { nameL10n: { en: 'Table 1' }, ordinal: 0, layoutKind: 'Static', rowMode: 'Dynamic', maxDynamicRows: 50 },
+      }),
+      'таблиця',
+    );
+    await ok(
+      await page.request.put(`${base}/tables/${String(table.id)}/columns/C1`, {
+        data: {
+          headerL10n: { en: 'C1' }, ordinal: 0, dataType: 'String', isRequired: false, isReadOnly: false, isHidden: false,
+          precision: null, scale: null, defaultValue: null, displayFormat: null, lookupFilter: null,
+          lookupRegistryDefId: null, styleId: null, unitId: null,
+        },
+      }),
+      'стовпець',
+    );
+    await ok(await page.request.post(`${base}/publish`, { data: { reason: 'e2e: Pass2 draft project periods' } }), 'публікація');
+    const policies = await ok<{ id: number; code: string }[]>(await page.request.get('/api/v1/projects/period-policies'), 'політики');
+    const policy = policies.find((item) => item.code === 'ECR-Standard') ?? policies[0];
+    const created = await ok<{ projectId: number }>(
+      await page.request.post('/api/v1/projects', {
+        data: {
+          code: `E2EPass2Draft${stamp}`,
+          nameL10n: { en: `E2E pass2 draft ${stamp}` },
+          periodKind: 'Monthly',
+          timeZoneId: 'UTC',
+          templateVersionId: version.versionId,
+          periodPolicyId: policy?.id,
+          year: new Date().getUTCFullYear(),
+        },
+      }),
+      'проєкт-чернетка',
+    );
+
+    await page.goto(`/admin/periods?projectId=${String(created.projectId)}`);
+    const tiles = page.locator('[data-testid="periods-year"] [data-period-tile]');
+    await expect(tiles.first()).toBeVisible({ timeout: 60_000 });
+    const count = await tiles.count();
+    expect(count, 'у чернетки немає плиток місяців').toBeGreaterThan(0);
+    let scheduled = 0;
+    for (let i = 0; i < count; i += 1) {
+      const tile = tiles.nth(i);
+      if ((await tile.getAttribute('data-state')) !== 'Scheduled') continue;
+      scheduled += 1;
+      await expect(tile).toContainText('not open — the project is a draft');
+      await expect(tile).not.toContainText(/opens /);
+    }
+    expect(scheduled, 'у чернетки немає жодного ще не відкритого місяця — перевіряти нічого').toBeGreaterThan(0);
+
+    // Смуга показників видимо каже, що рахує всі проєкти.
+    await expect(page.locator('[data-periods-stats-scope="all"]')).toContainText('All projects:');
+  });
+
+  test('Pass2: documents year view subtitle speaks about the selected year, not one period', async ({ page }) => {
+    await signIn(page);
+    await page.goto('/');
+    const subtitle = page.getByTestId('page-description');
+    await expect(subtitle).toBeVisible({ timeout: 60_000 });
+    await expect(subtitle).toHaveText('Reports of your projects for the selected year. Open a document to work in it.');
+    await expect(page.locator('[data-documents-year-note]')).toBeVisible();
+  });
+});
