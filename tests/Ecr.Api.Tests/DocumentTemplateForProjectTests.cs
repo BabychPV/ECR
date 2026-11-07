@@ -64,6 +64,42 @@ public sealed class DocumentTemplateForProjectTests(SqlServerFixture sql)
             $"{create.StatusCode}: {await create.Content.ReadAsStringAsync().ConfigureAwait(true)}\n{app.ErrorsText}");
     }
 
+    /// <summary>
+    /// ✎ 07.11 (квіз людини, п. e): майстер нового документа — без кроку періоду. Документ річний (`D-93`: стан —
+    /// за аркушем × періодом), тож створення не приймає періоду; зайвий <c>periodKey</c> старого клієнта ігнорується.
+    /// ⛔ Мутація: <c>[JsonUnmappedMemberHandling(Disallow)]</c> на <c>CreateDocumentRequest</c> або обов'язковий
+    /// <c>int PeriodKey</c> у ньому — 400 замість 201.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-93")]
+    public async Task Документ_створюється_без_періоду_а_зайвий_periodKey_ігнорується()
+    {
+        var s = await ArrangeAsync(OperatorPermissions, deny: false).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var client = await SignInAsync(app, s.UserName).ConfigureAwait(true);
+
+        foreach (object body in new object[]
+                 {
+                     new { projectId = s.Document.ProjectId, sheetDefIds = new[] { s.Document.SheetDefId } },
+                     new { projectId = s.Document.ProjectId, sheetDefIds = new[] { s.Document.SheetDefId }, periodKey = s.Document.PeriodKey.Value },
+                 })
+        {
+            var create = await client.PostAsJsonAsync(new Uri("/api/v1/documents", UriKind.Relative), body).ConfigureAwait(true);
+            var text = await create.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(create.StatusCode == HttpStatusCode.Created, $"{create.StatusCode}: {text}\n{app.ErrorsText}");
+
+            // Документ одразу видно в періоді проєкту — з аркушем у стані Draft (рядка стану ще немає, S-17).
+            var id = JsonDocument.Parse(text).RootElement.GetProperty("documentId").GetInt64();
+            var get = await client.GetAsync(
+                new Uri($"/api/v1/documents/{id}?periodKey={s.Document.PeriodKey.Value}", UriKind.Relative)).ConfigureAwait(true);
+            var doc = JsonDocument.Parse(await get.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+            Assert.True(get.IsSuccessStatusCode, $"{get.StatusCode}");
+            Assert.All(doc.GetProperty("sheets").EnumerateArray(), x => Assert.Equal("Draft", x.GetProperty("state").GetString()));
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
