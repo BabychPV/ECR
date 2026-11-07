@@ -73,7 +73,20 @@ public sealed class RegistryImportSpec
     /// <summary>Checks the spec is self-consistent.</summary>
     /// <returns>The same spec.</returns>
     /// <exception cref="BusinessRuleException"><c>ECR-IMP-0422</c> <c>regSpecInvalid</c>.</exception>
-    public RegistryImportSpec Validated()
+    public RegistryImportSpec Validated() => Check(requireColumns: true);
+
+    /// <summary>
+    /// The same checks for READING a file with an unsaved specification (analyse, preview, apply), except one: a field with
+    /// neither header patterns nor a column is allowed — it is a field the user has just added and not pointed at a column yet.
+    /// The parser reports it as <c>regColumnMissing</c> (a warning, an error when the field is required or a key), so the
+    /// wizard shows the finding next to the field instead of refusing the whole request. A saved profile still needs a column
+    /// (<see cref="Validated"/>).
+    /// </summary>
+    /// <returns>The same spec.</returns>
+    /// <exception cref="BusinessRuleException"><c>ECR-IMP-0422</c> <c>regSpecInvalid</c>.</exception>
+    public RegistryImportSpec ValidatedForReading() => Check(requireColumns: false);
+
+    private RegistryImportSpec Check(bool requireColumns)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
 
@@ -84,7 +97,7 @@ public sealed class RegistryImportSpec
                 throw Invalid("fields", $"duplicate or empty field name '{field.Name}'");
             }
 
-            if (field.Column is null && field.Patterns.Count == 0)
+            if (requireColumns && field.Column is null && field.Patterns.Count == 0)
             {
                 throw Invalid(field.Name, "a field needs header patterns or an explicit column");
             }

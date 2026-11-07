@@ -239,7 +239,8 @@ public sealed class AirLimitsImportHandler(
     {
         if (options.Spec is { } inline)
         {
-            return (inline.Validated(), null);
+            // An unsaved specification may carry a field the user has not pointed at a column yet: reported, not refused.
+            return (inline.ValidatedForReading(), null);
         }
 
         var code = string.IsNullOrWhiteSpace(options.ProfileCode) ? AirLimitsSchema.ProfileCode : options.ProfileCode.Trim();

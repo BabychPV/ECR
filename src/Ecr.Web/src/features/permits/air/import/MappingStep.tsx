@@ -5,6 +5,9 @@ import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import type { AirAnalysis, ImportProfile, ImportSpec } from '../airTypes';
 import {
+  fieldWithoutColumn,
+  fileColumnOptions,
+  lacksColumn,
   patternsToText,
   profileCodeFrom,
   profileCodeProblem,
@@ -159,7 +162,13 @@ function FieldEditor({
 }): JSX.Element {
   const fields = specFields(spec);
   const [newName, setNewName] = useState('');
-  const mapped = new Map((analysis.analysis.header?.mapped ?? []).map((column) => [column.field, column.columnLetter] as const));
+  const header = analysis.analysis.header;
+  const mapped = new Map((header?.mapped ?? []).map((column) => [column.field, column.columnLetter] as const));
+  // P1 UAT 07.11: a field added here had no way to point at a column (only header text); the picker lists the file's columns.
+  const columnOptions = fileColumnOptions(
+    [...(header?.mapped ?? []), ...(header?.unmapped ?? [])],
+    fields.map((field) => field.column),
+  );
   const listId = useId();
 
   return (
@@ -170,6 +179,7 @@ function FieldEditor({
             <tr>
               <th scope="col">{t('permits.air.import.map.field')}</th>
               <th scope="col">{t('permits.air.import.map.patterns')}</th>
+              <th scope="col">{t('permits.air.import.map.column')}</th>
               <th scope="col">{t('permits.air.import.map.level')}</th>
               <th scope="col">{t('permits.air.import.map.parser')}</th>
               <th scope="col">{t('permits.air.import.map.required')}</th>
@@ -202,6 +212,18 @@ function FieldEditor({
                       className="pi-pattern"
                       value={patternsToText(field.patterns)}
                       onChange={(event) => onSpec(withField(spec, index, { patterns: textToPatterns(event.currentTarget.value) }))}
+                    />
+                  </td>
+                  <td>
+                    <Select
+                      aria-label={t('permits.air.import.map.columnFor', { field: name })}
+                      data={columnOptions}
+                      clearable
+                      searchable
+                      placeholder={t('permits.air.import.map.columnAuto')}
+                      value={(field.column ?? '').trim() === '' ? null : (field.column ?? '').trim().toUpperCase()}
+                      error={lacksColumn(field) ? t('permits.air.import.map.pickColumn') : undefined}
+                      onChange={(value) => onSpec(withField(spec, index, { column: value }))}
                     />
                   </td>
                   <td>
@@ -296,6 +318,8 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
   const body = analysis.analysis;
   const header = body.header;
   const problem = spec === null ? null : specProblem(spec);
+  // A field without a column may be re-analysed (reported as «column not found»), not saved into a profile.
+  const unpointed = spec === null ? null : fieldWithoutColumn(spec);
   const [saveOpen, setSaveOpen] = useState(false);
   const [seenSaved, setSeenSaved] = useState(savedCode);
   const base = baseSpec(spec, profile);
@@ -398,6 +422,14 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
                 text={problem === 'nameRequired' ? t('permits.air.import.map.nameRequired') : t('permits.air.import.map.nameDuplicate')}
               />
             )}
+            {problem === null && unpointed !== null && (
+              <Banner
+                tone="warning"
+                title={t('permits.air.import.map.problemTitle')}
+                text={t('permits.air.import.map.columnRequired', { field: fieldLabel(unpointed, columnNames) })}
+                testId="air-field-without-column"
+              />
+            )}
             <div className="pi-actions">
               <Button variant="default" onClick={() => onSpec(null)}>
                 {t('permits.air.import.map.discard')}
@@ -412,12 +444,17 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
 
       {mayEditProfile && base !== null && (
         <div className="pi-actions">
-          <Button variant="default" disabled={problem !== null} onClick={() => setSaveOpen((open) => !open)} aria-expanded={saveOpen}>
+          <Button
+            variant="default"
+            disabled={problem !== null || unpointed !== null}
+            onClick={() => setSaveOpen((open) => !open)}
+            aria-expanded={saveOpen}
+          >
             {t('permits.air.import.map.saveProfile')}
           </Button>
         </div>
       )}
-      {saveOpen && mayEditProfile && base !== null && (
+      {saveOpen && mayEditProfile && base !== null && unpointed === null && (
         <SaveProfileForm onSave={onSaveProfile} onCancel={() => setSaveOpen(false)} saving={saving} />
       )}
       {savedCode !== null && (

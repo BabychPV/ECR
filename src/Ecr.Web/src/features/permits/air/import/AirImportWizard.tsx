@@ -1,9 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type JSX } from 'react';
-import { Button, Skeleton, Text, Title } from '@mantine/core';
+import { Button, FileButton, Skeleton, Text, Title } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { language, t } from '@/shared/i18n';
+import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { PermitsPaths } from '../../shell/permitPaths';
@@ -37,8 +38,10 @@ import {
   fileStepProblem,
   ImportSteps,
   previewSignature,
+  sendFailureOf,
   type ImportDraft,
   type ImportStep,
+  type SendFailure,
 } from './importModel';
 import { useAirColumnNames } from './fieldLabels';
 // «Mapping» (header rows, added columns, rules editor, profile form) is its own chunk: the page stays within the client
@@ -107,6 +110,13 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
   const [result, setResult] = useState<AirImportResult | null>(null);
   const [problem, setProblem] = useState<ReturnType<typeof fileStepProblem>>(null);
   const [failure, setFailure] = useState<unknown>(null);
+  // A request with the workbook that got no answer: the file became unreadable, or the server was not reached.
+  const [sendFailure, setSendFailure] = useState<SendFailure | null>(null);
+  // What «Try again» repeats (read at click time with the current draft, not a closure over an old one).
+  const [again, setAgain] = useState<{ readonly call: 'analyse'; readonly then: ImportStep | null } | { readonly call: 'preview' }>({
+    call: 'analyse',
+    then: null,
+  });
   const [savedCode, setSavedCode] = useState<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const arrived = useRef(false);
@@ -145,34 +155,62 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
     arrived.current = true;
   }, [step]);
 
-  const goTo = (next: ImportStep): void => {
+  const clearFailure = (): void => {
     setFailure(null);
+    setSendFailure(null);
+  };
+
+  /** Shows a refusal: a server answer as is (`ErrorAlert`), a request that got no answer with its reason and a way forward. */
+  const fail = (error: unknown, file: File | null, repeat: typeof again): void => {
+    setAgain(repeat);
+    void sendFailureOf(error, file).then((kind) => {
+      setSendFailure(kind);
+      setFailure(error);
+    });
+  };
+
+  const goTo = (next: ImportStep): void => {
+    clearFailure();
     setStep(next);
   };
 
-  /** Re-reads the file; `override` — with this specification (set into the draft at the same time). */
-  const runAnalyse = (then: ImportStep | null, override?: ImportSpec): void => {
-    if (analyse.isPending || draft.file === null) return;
-    setFailure(null);
-    const current = override === undefined ? draft : { ...draft, spec: override };
-    if (override !== undefined) patchDraft({ spec: override });
+  /**
+   * Re-reads the file; `override` — with this specification (set into the draft at the same time); `fileOverride` — a file
+   * chosen again after the first one became unreadable (set into the draft too; the specification is kept).
+   */
+  const runAnalyse = (then: ImportStep | null, override?: ImportSpec, fileOverride?: File): void => {
+    const file = fileOverride ?? draft.file;
+    if (analyse.isPending || file === null) return;
+    clearFailure();
+    const current = { ...draft, file, ...(override === undefined ? {} : { spec: override }) };
+    if (override !== undefined || fileOverride !== undefined) patchDraft({ file, spec: current.spec });
     const snapshot = current.spec;
     analyse.mutate(
-      { file: draft.file, options: buildOptions(current) },
+      { file, options: buildOptions(current) },
       {
         onSuccess: (data) => {
           setAnalysis(data);
           setAnalysedSpec(snapshot);
           if (then !== null) goTo(then);
         },
-        onError: setFailure,
+        onError: (error) => fail(error, file, { call: 'analyse', then }),
       },
     );
   };
 
+  /** «Choose the file again» after the chosen one became unreadable: the same mapping, the file read anew. */
+  const onFileAgain = (file: File | null): void => {
+    if (file === null) return;
+    if (fileStepProblem({ ...draft, file }) !== null) {
+      setProblem(fileStepProblem({ ...draft, file }));
+      return;
+    }
+    runAnalyse(step === 'file' ? 'mapping' : null, undefined, file);
+  };
+
   const runPreview = (): void => {
     if (previewCall.isPending || draft.file === null) return;
-    setFailure(null);
+    clearFailure();
     const missing = preview?.preview.missing ?? [];
     const snapshot = draft;
     previewCall.mutate(
@@ -184,14 +222,15 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           setForceStale(false);
           goTo('preview');
         },
-        onError: setFailure,
+        onError: (error) => fail(error, snapshot.file, { call: 'preview' }),
       },
     );
   };
 
   const runApply = (): void => {
     if (apply.isPending || draft.file === null || preview === null) return;
-    setFailure(null);
+    clearFailure();
+    const file = draft.file;
     apply.mutate(
       {
         file: draft.file,
@@ -210,7 +249,8 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
         },
         onError: (error) => {
           // Сервер відхилив план (`regPlanChanged`/`regReplaceNotConfirmed`): перегляд більше не діє, потрібен новий.
-          setFailure(error);
+          // A retry after an apply that got no answer starts from a new preview (the old one is stale now).
+          fail(error, file, { call: 'preview' });
           setForceStale(true);
         },
       },
@@ -220,7 +260,7 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
   const onAddColumn = (request: NewColumnRequest): void => {
     const base = draft.spec ?? profile.data?.spec;
     if (addColumn.isPending || base === undefined) return;
-    setFailure(null);
+    clearFailure();
     setAddProblem(null);
     addColumn.mutate(request, {
       onSuccess: (code) => {
@@ -238,7 +278,7 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
   const onSaveProfile = (code: string, name: string): void => {
     const spec = draft.spec ?? profile.data?.spec;
     if (saveProfile.isPending || spec === undefined) return;
-    setFailure(null);
+    clearFailure();
     const analysed = draft.spec === analysedSpec;
     saveProfile.mutate(
       { code, body: { nameL10n: { [language()]: name, en: name }, spec, rowVersion: null } },
@@ -296,7 +336,30 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           {stepHint(step)}
         </Text>
       </div>
-      {failure !== null && <ErrorAlert error={failure} />}
+      {failure !== null && sendFailure === null && <ErrorAlert error={failure} />}
+      {failure !== null && sendFailure !== null && (
+        <div className="pi-panel" data-testid="air-send-failure">
+          <Banner
+            tone="danger"
+            title={sendFailure === 'fileUnreadable' ? t('permits.air.import.fileUnreadable.title') : t('permits.air.import.network.title')}
+            text={sendFailure === 'fileUnreadable' ? t('permits.air.import.fileUnreadable.text') : t('permits.air.import.network.text')}
+          />
+          <div className="pi-actions">
+            <FileButton onChange={onFileAgain} accept=".xlsx">
+              {(props) => (
+                <Button {...props} variant="default" loading={analysing}>
+                  {t('permits.air.import.chooseAgain')}
+                </Button>
+              )}
+            </FileButton>
+            {sendFailure === 'network' && (
+              <Button variant="default" onClick={() => (again.call === 'analyse' ? runAnalyse(again.then) : runPreview())}>
+                {t('common.retry')}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {step === 'scope' && (
         <ScopeStep
@@ -353,9 +416,17 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
       {step === 'apply' && result !== null && <ApplyStep result={result} permitId={permitId} />}
 
       {step === 'mapping' && draft.spec !== analysedSpec && (
-        <Text size="sm" c="dimmed" role="status" className="pi-end">
-          {t('permits.air.import.map.reanalyseFirst')}
-        </Text>
+        // The way forward is right here: after a save or «Discard» the editor (and its own «Re-analyse») may be closed.
+        <div className="pi-actions pi-end">
+          <Text size="sm" c="dimmed" role="status">
+            {t('permits.air.import.map.reanalyseFirst')}
+          </Text>
+          {draft.spec === null && (
+            <Button variant="default" loading={analysing} onClick={() => runAnalyse(null)}>
+              {t('permits.air.import.map.reanalyse')}
+            </Button>
+          )}
+        </div>
       )}
       {step !== 'apply' && (
         <div className="pi-actions pi-footer">

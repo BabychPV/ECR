@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { EcrApiError } from '@/api/client';
 import {
   applyGate,
   buildOptions,
   confirmedOwnerKeys,
   EmptyDraft,
+  fieldWithoutColumn,
+  fileColumnOptions,
   fileStepProblem,
+  sendFailureOf,
   normalizeArea,
   patternsToText,
   previewSignature,
@@ -157,6 +161,41 @@ describe('редактор специфікації', () => {
     expect(profileCodeProblem('MY_PROFILE_1')).toBe(false);
     expect(profileCodeProblem('my')).toBe(true);
     expect(profileCodeProblem('1ABC')).toBe(true);
+  });
+});
+
+describe('поле без колонки і колонки файлу (P1 UAT 07.11)', () => {
+  it('fieldWithoutColumn: the first field with neither a column nor header text', () => {
+    expect(fieldWithoutColumn(withNewField({ fields: [{ name: 'NaeCode', patterns: ['N'] }] }, 'Workshop'))).toBe('Workshop');
+    expect(fieldWithoutColumn({ fields: [{ name: 'A', column: 'B' }, { name: 'C', patterns: ['x'] }] })).toBeNull();
+    expect(fieldWithoutColumn({ fields: [{ name: 'A', column: '  ', patterns: [] }] })).toBe('A');
+  });
+
+  it('fileColumnOptions: mapped and unmapped in file order, letter and header; a named letter past the header is kept', () => {
+    const options = fileColumnOptions(
+      [
+        { column: 27, columnLetter: 'AA', headerText: 't/year' },
+        { column: 2, columnLetter: 'B', headerText: 'Цех\n  (shop)' },
+        { column: 7, columnLetter: 'G', headerText: '' },
+      ],
+      ['b', 'AZ', null],
+    );
+    expect(options).toEqual([
+      { value: 'B', label: 'B — Цех (shop)' },
+      { value: 'G', label: 'G' },
+      { value: 'AA', label: 'AA — t/year' },
+      { value: 'AZ', label: 'AZ' },
+    ]);
+  });
+
+  it('sendFailureOf: a server answer is not a send failure; a TypeError is the network unless the file is unreadable', async () => {
+    expect(await sendFailureOf(new EcrApiError({ title: 't', status: 422, errorCode: 'ECR-IMP-0422', correlationId: 'c' }), xlsx())).toBeNull();
+    expect(await sendFailureOf(new SyntaxError('json'), xlsx())).toBeNull();
+    expect(await sendFailureOf(new TypeError('Failed to fetch'), xlsx())).toBe('network');
+    expect(await sendFailureOf(new TypeError('Failed to fetch'), null)).toBe('network');
+    const changed = xlsx();
+    Object.defineProperty(changed, 'slice', { value: () => ({}) });
+    expect(await sendFailureOf(new TypeError('Failed to fetch'), changed)).toBe('fileUnreadable');
   });
 });
 

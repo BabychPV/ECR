@@ -366,7 +366,27 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.air.import.done.fingerprint', N'ru', N'Отпечаток плана: {value}'),
     (N'permits.air.import.done.fingerprint', N'kz', N'Жоспар іздері: {value}'),
     (N'permits.air.import.done.open', N'ru', N'Открыть карточку разрешения'),
-    (N'permits.air.import.done.open', N'kz', N'Рұқсат карточкасын ашу')
+    (N'permits.air.import.done.open', N'kz', N'Рұқсат карточкасын ашу'),
+    (N'permits.air.import.map.column', N'ru', N'Столбец файла'),
+    (N'permits.air.import.map.column', N'kz', N'Файл бағаны'),
+    (N'permits.air.import.map.columnFor', N'ru', N'Столбец файла для поля {field}'),
+    (N'permits.air.import.map.columnFor', N'kz', N'{field} өрісіне арналған файл бағаны'),
+    (N'permits.air.import.map.columnAuto', N'ru', N'По тексту заголовка'),
+    (N'permits.air.import.map.columnAuto', N'kz', N'Тақырып мәтіні бойынша'),
+    (N'permits.air.import.map.pickColumn', N'ru', N'Выберите столбец файла или введите текст заголовка'),
+    (N'permits.air.import.map.pickColumn', N'kz', N'Файл бағанын таңдаңыз немесе тақырып мәтінін енгізіңіз'),
+    (N'permits.air.import.map.columnRequired', N'ru', N'У поля «{field}» нет столбца файла: выберите столбец или введите текст заголовка, либо удалите поле. Разобрать файл можно и так (поле будет отмечено как ненайденное), сохранить профиль — нет.'),
+    (N'permits.air.import.map.columnRequired', N'kz', N'«{field}» өрісінде файл бағаны жоқ: бағанды таңдаңыз немесе тақырып мәтінін енгізіңіз, не өрісті жойыңыз. Файлды осылай да талдауға болады (өріс табылмаған деп белгіленеді), профильді сақтауға болмайды.'),
+    (N'permits.air.import.fileUnreadable.title', N'ru', N'Файл не удалось отправить'),
+    (N'permits.air.import.fileUnreadable.title', N'kz', N'Файлды жіберу мүмкін болмады'),
+    (N'permits.air.import.fileUnreadable.text', N'ru', N'Браузер больше не может прочитать выбранный файл: после выбора его изменили, переместили или удалили (например, сохранили в Excel). Выберите файл заново — соответствие и профиль сохранятся.'),
+    (N'permits.air.import.fileUnreadable.text', N'kz', N'Браузер таңдалған файлды енді оқи алмайды: таңдалғаннан кейін ол өзгертілді, жылжытылды немесе жойылды (мысалы, Excel-де сақталды). Файлды қайта таңдаңыз — сәйкестік пен профиль сақталады.'),
+    (N'permits.air.import.network.title', N'ru', N'Сервер не ответил'),
+    (N'permits.air.import.network.title', N'kz', N'Сервер жауап бермеді'),
+    (N'permits.air.import.network.text', N'ru', N'Запрос не дошёл до сервера (обрыв связи или сервер перезапускается). Повторите через минуту.'),
+    (N'permits.air.import.network.text', N'kz', N'Сұрау серверге жетпеді (байланыс үзілді немесе сервер қайта іске қосылуда). Бір минуттан кейін қайталаңыз.'),
+    (N'permits.air.import.chooseAgain', N'ru', N'Выбрать файл заново'),
+    (N'permits.air.import.chooseAgain', N'kz', N'Файлды қайта таңдау')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -556,7 +576,17 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'permits.air.import.done.replacedOwn', N'en', N'Own rows replaced', 1),
     (N'permits.air.import.done.others', N'en', N'Rows of other permits that were replaced', 1),
     (N'permits.air.import.done.fingerprint', N'en', N'Plan fingerprint: {value}', 1),
-    (N'permits.air.import.done.open', N'en', N'Open the permit card', 1)
+    (N'permits.air.import.done.open', N'en', N'Open the permit card', 1),
+    (N'permits.air.import.map.column', N'en', N'File column', 1),
+    (N'permits.air.import.map.columnFor', N'en', N'File column of field {field}', 1),
+    (N'permits.air.import.map.columnAuto', N'en', N'By header text', 1),
+    (N'permits.air.import.map.pickColumn', N'en', N'Pick a file column or enter the header text', 1),
+    (N'permits.air.import.map.columnRequired', N'en', N'Field "{field}" has no file column: pick a column or enter the header text, or remove the field. The file can still be re-analysed (the field is reported as not found); the profile cannot be saved.', 1),
+    (N'permits.air.import.fileUnreadable.title', N'en', N'The file could not be sent', 1),
+    (N'permits.air.import.fileUnreadable.text', N'en', N'The browser can no longer read the chosen file: it was changed, moved or deleted after you chose it (for example, saved in Excel). Choose the file again; the mapping and the profile are kept.', 1),
+    (N'permits.air.import.network.title', N'en', N'The server did not answer', 1),
+    (N'permits.air.import.network.text', N'en', N'The request did not reach the server (the connection dropped or the server is restarting). Try again in a minute.', 1),
+    (N'permits.air.import.chooseAgain', N'en', N'Choose the file again', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

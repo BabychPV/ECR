@@ -707,6 +707,45 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         Assert.Equal(373, (await CardAsync(app, client, second)).GetProperty("sources").GetArrayLength());
     }
 
+    /// <summary>
+    /// P1 UAT 07.11: the wizard re-analyses with an unsaved specification that carries a field just added in the editor (a name,
+    /// no column, no header text). The analysis answers 200 with the field reported as <c>regColumnMissing</c> next to its name and
+    /// the rest of the file read (373 sources); only SAVING such a profile is refused (<c>422 regSpecInvalid</c>).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Analyse__a_field_without_a_column_is_a_finding_not_a_refused_request_and_saving_it_is_refused()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+
+        var builtIn = await ReadAsync(app, await client.GetAsync(new Uri("/api/v1/air-limits/import-profiles/ERA_TABLE_33", UriKind.Relative)));
+        var spec = System.Text.Json.Nodes.JsonNode.Parse(builtIn.GetProperty("spec").GetRawText())!.AsObject();
+        spec["fields"]!.AsArray().Add(new System.Text.Json.Nodes.JsonObject
+        {
+            ["name"] = "Цех",
+            ["patterns"] = new System.Text.Json.Nodes.JsonArray(),
+            ["level"] = "Child",
+            ["parser"] = "Text",
+        });
+
+        var analysis = (await ReadAsync(app, await PostFileAsync(client, "/api/v1/air-limits/import/analyse", Synthetic.Bytes, new { spec })))
+            .GetProperty("analysis");
+        Assert.True(analysis.GetProperty("canContinue").GetBoolean(), analysis.ToString());
+        Assert.Equal(373, analysis.GetProperty("stats").GetProperty("parents").GetInt32());
+        var finding = Assert.Single(analysis.GetProperty("issues").EnumerateArray(), i => i.GetProperty("field").GetString() == "Цех");
+        Assert.Equal("err.ECR-IMP-0422.regColumnMissing", finding.GetProperty("messageKey").GetString());
+        Assert.Equal("warning", finding.GetProperty("severity").GetString(), StringComparer.OrdinalIgnoreCase);
+
+        var code = $"NOCOL_{Guid.NewGuid():N}".ToUpperInvariant();
+        var saved = await client.PutAsJsonAsync(
+            new Uri($"/api/v1/air-limits/import-profiles/{code}", UriKind.Relative),
+            new { nameL10n = new Dictionary<string, string> { ["en"] = "no column" }, spec, rowVersion = (string?)null });
+        await AssertErrorAsync(app, saved, HttpStatusCode.UnprocessableEntity, "err.ECR-IMP-0422.regSpecInvalid");
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
