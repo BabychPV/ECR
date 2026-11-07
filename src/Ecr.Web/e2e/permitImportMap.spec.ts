@@ -210,13 +210,15 @@ test.describe('Permit import mapping', () => {
     const treeId = await ensureNaeTree(api);
     const regionCode = `IMR${stamp}`;
     const areaCode = `IMA${stamp}`;
+    // AN-158 (31d85b473): код району вузла НАЕ ОБИРАЄТЬСЯ зі списку AIR_AREA (активний запис, збіг за кодом чи англ. назвою) —
+    // тож запис району заводиться ДО вузлів, тим самим API записів списку, і з кодом = коду району дерева.
+    const areaEntry = await ensureEntry(api, AreaRegistry, areaCode, areaCode);
     const regionNode = await addNode(api, treeId, `E2EIM_R_${stamp}`, `Import region ${stamp}`, null, 'REGION', { RegionCode: regionCode });
     const areaNode = await addNode(api, treeId, `E2EIM_A_${stamp}`, `Import area ${stamp}`, regionNode, 'AREA', { RegionCode: regionCode, AreaCode: areaCode });
     const site = await addNode(api, treeId, `E2EIM_S_${stamp}`, `Import site ${stamp}`, areaNode, 'SITE', { RegionCode: regionCode, AreaCode: areaCode });
     await addNode(api, treeId, `E2EIM_N1_${stamp}`, `Boiler ${stamp}`, site, 'SRC', { NaeCode: `IM1${stamp}`, RegionCode: regionCode, AreaCode: areaCode });
     await addNode(api, treeId, `E2EIM_N2_${stamp}`, `Heater ${stamp}`, site, 'SRC', { NaeCode: `IM2${stamp}`, RegionCode: regionCode, AreaCode: areaCode });
     const regionEntry = await ensureEntry(api, RegionRegistry, `E2EIMR_${stamp}`, regionCode);
-    const areaEntry = await ensureEntry(api, AreaRegistry, `E2EIMA_${stamp}`, areaCode);
 
     // Вузол книги-фікстури (фіксований, без району).
     const xlsxRegionNode = await ensureNode(api, treeId, `${XlsxRegion}_R`, `Xlsx region`, null, 'REGION', { RegionCode: XlsxRegion });
