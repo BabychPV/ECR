@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { axeViolations } from './axeRule';
 
 /**
  * Шапка колонок: світла заливка автора в Dark мапиться на `--ecr-sunken` (макет D15-01),
@@ -36,6 +37,31 @@ for (const [name, fill] of [['P1-V1-0003', 'c6d9f1'], ['P1-V1-0010 (9a)', 'ccffc
     expect(await backgroundOf(page, 'light', fill)).toBe(`rgb(${String(r)}, ${String(g)}, ${String(b)})`);
   });
 }
+
+/**
+ * AU-13 N1: рядок одиниці `.ecr-header-unit` на заливці шапки. До фіксу в Light — `--ecr-muted` #5b6175 на #C6D9F1
+ * = 4,27:1 (axe color-contrast serious). Мірило — справжній axe у шапці і обчислений контраст пари колір/фон.
+ */
+test.describe('Header unit contrast on template fill', () => {
+  const ratio = (a: string, b: string): number => {
+    const [hi, lo] = [luminanceOf(a), luminanceOf(b)].sort((x, y) => y - x) as [number, number];
+
+    return (hi + 0.05) / (lo + 0.05);
+  };
+
+  for (const scheme of ['light', 'dark'] as const) {
+    for (const fill of ['c6d9f1', 'ccffcc', 'ffc000', '1f3864']) {
+      test(`${scheme} fill ${fill} unit line passes axe color contrast`, async ({ page }) => {
+        const cellBg = await backgroundOf(page, scheme, fill);
+        const unit = page.locator('revo-grid revogr-header .rgHeaderCell.ecr-header-styled .ecr-header-unit').first();
+        await expect(unit).toHaveText('t');
+
+        expect(ratio(await unit.evaluate((node) => getComputedStyle(node).color), cellBg)).toBeGreaterThanOrEqual(4.5);
+        expect(await axeViolations(page, 'color-contrast', 'revogr-header')).toEqual([]);
+      });
+    }
+  }
+});
 
 for (const fill of ['ffc000', '1f3864']) {
   test(`Dark: заливка шапки #${fill} не змінюється`, async ({ page }) => {

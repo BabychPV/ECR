@@ -73,7 +73,7 @@ function finishCalcJob(): void {
   }
 }
 
-function column(code: string, ordinal: number, dataType: string, isReadOnly: boolean): Record<string, unknown> {
+function column(code: string, ordinal: number, dataType: string, isReadOnly: boolean, unitSymbol: string | null = null): Record<string, unknown> {
   return {
     code,
     dataType,
@@ -87,7 +87,7 @@ function column(code: string, ordinal: number, dataType: string, isReadOnly: boo
     lookupRegistryDefId: null,
     ordinal,
     unitId: null,
-    unitSymbol: null,
+    unitSymbol,
   };
 }
 
@@ -113,7 +113,8 @@ function slice(): Record<string, unknown> {
     tableInstanceId: StandTableInstanceId,
     columns: [
       column('CODE', 0, 'String', true),
-      column('QTY', 1, 'Decimal', false),
+      // AU-13 N1: зі стилем шапки QTY має одиницю — рядок `.ecr-header-unit` на заливці перевіряє axe.
+      column('QTY', 1, 'Decimal', false, headerStyle() === undefined ? null : 't'),
       ...(calcEnabled() ? [column('TOTAL', 2, 'Decimal', true)] : []),
     ],
     rows: Array.from({ length: StandRowCount }, (_, index) => {
