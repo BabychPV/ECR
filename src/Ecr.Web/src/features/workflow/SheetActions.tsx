@@ -3,7 +3,7 @@ import { Button, Divider, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
-import { apiEnqueue, apiFetch, EcrApiError } from '@/api/client';
+import { apiFetch, EcrApiError } from '@/api/client';
 import type {
   ApproveSheetRequest,
   DocumentSummary,
@@ -26,6 +26,7 @@ import { useSettledAction } from '@/features/grid/settleEdits';
 import { isRecalculateKey, isTypingOrDialogTarget } from '@/features/grid/shortcutKey';
 import { useNarrowScreen } from '@/shared/narrowScreen';
 import { humanizeJobId } from './jobLabel';
+import type { RecalcRequestOutcome } from './RecalcSkippedList';
 import { isAllowed, type WorkflowAction } from './transitions';
 import { GrantOrder, meetsGrant, type GrantLevelName } from './grantLevels';
 import { t } from '@/shared/i18n';
@@ -614,18 +615,29 @@ export function useSheetActions({
       // цього пакета кнопка передавала лише `periodKey`, і сервер
       // перераховував увесь документ незалежно від того, з якого аркуша її
       // натиснули.
-      apiEnqueue(`/api/v1/documents/${documentId}/recalculate`, {
-        periodKey: at.periodKey,
-        sheetDefId: at.sheetDefId,
-      } satisfies RecalculateDocumentRequest),
-    onSuccess: (job, at) => {
+      apiFetch<RecalcRequestOutcome>(`/api/v1/documents/${documentId}/recalculate`, {
+        method: 'POST',
+        body: JSON.stringify({
+          periodKey: at.periodKey,
+          sheetDefId: at.sheetDefId,
+        } satisfies RecalculateDocumentRequest),
+      }),
+    onSuccess: (outcome, at) => {
+      // ✎ UAT-recalc-ux: аркуш затверджено — рахувати нічого; не помилка, а пояснення (затверджене не змінюється).
+      if (outcome.jobId === null || outcome.jobId === undefined) {
+        showDone(t('recalc.nothingToRecalculate'));
+        return;
+      }
+
+      const job = { jobId: outcome.jobId };
       // ⚠ Адреса фіксується САМЕ ТУТ — у мить, коли задача стала в чергу, — і
       // далі не змінюється, хай оператор ходить по періодах скільки хоче.
       setRecalc({ jobId: job.jobId, documentId, sheetDefId: at.sheetDefId, periodKey: at.periodKey });
       // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у ТОСТІ, `jobId` у стані
       // (`setRecalcJobId`) — і, отже, в запиті опитування нижче — не
       // змінюється.
-      showDone(`${t('workflow.recalcQueued', { job: humanizeJobId(job.jobId) })} ${t('workflow.recalcSkipsSubmitted')}`);
+      // ✎ UAT-recalc-ux: «подані пропускаються» більше не правда — пропускаються лише затверджені.
+      showDone(t('workflow.recalcQueued', { job: humanizeJobId(job.jobId) }));
     },
     onError: (error, at) => showSheetError(error, at.sheetName),
   });

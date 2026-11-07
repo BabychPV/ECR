@@ -1,10 +1,11 @@
 import { useState, type JSX } from 'react';
 import { Button, Group, Stack, Table, Title } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiEnqueue, apiFetch } from '@/api/client';
+import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import { hasProjectGrant } from '@/features/documents/projectGrant';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
+import type { RecalcRequestOutcome } from '@/features/workflow/RecalcSkippedList';
 import { formatDateTime } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { useSession } from '@/shared/session/useSession';
@@ -102,12 +103,20 @@ export function RecalculationApprovalsPanel({ projectId }: { projectId: number }
 
   const run = useMutation({
     mutationFn: (approval: Approval) =>
-      apiEnqueue(`/api/v1/projects/${String(projectId)}/recalculate`, {
-        periodKey: approval.periodKey,
-        approvalId: approval.id,
-      } satisfies RecalculationRequest),
+      apiFetch<RecalcRequestOutcome>(`/api/v1/projects/${String(projectId)}/recalculate`, {
+        method: 'POST',
+        body: JSON.stringify({
+          periodKey: approval.periodKey,
+          approvalId: approval.id,
+        } satisfies RecalculationRequest),
+      }),
     onSuccess: async (job) => {
-      showDone(t('workflow.recalcQueued', { job: humanizeJobId(job.jobId) }));
+      // ✎ UAT-recalc-ux: усе затверджено — задачі немає (200, `jobId: null`), погодження не використано.
+      showDone(
+        job.jobId === null || job.jobId === undefined
+          ? t('recalc.nothingToRecalculate')
+          : t('workflow.recalcQueued', { job: humanizeJobId(job.jobId) }),
+      );
       await refresh();
     },
     onError: showApiError,

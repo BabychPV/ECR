@@ -64,6 +64,37 @@ public sealed class RunCalculationHandler(
     public async Task<string> HandleAsync(
         int projectId, int? periodKey, long? approvalId, CancellationToken ct)
     {
+        var outcome = await RequestAsync(projectId, periodKey, approvalId, ct).ConfigureAwait(false);
+
+        // ⚠ Старий виклик (без переліку): «рахувати нічого» лишається відмовою 4221, як і до UAT-recalc-ux.
+        return outcome.JobId
+            ?? throw RecalculationWritePolicy.Reject(RecalculationWriteDenial.SheetsSubmitted, periodKey ?? 0);
+    }
+
+    /// <summary>
+    /// UAT-recalc-ux: ставить прогін у чергу, ПРОПУСКАЮЧИ подані/затверджені аркуші, і повертає їх перелік.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="periodKey">Період; <c>null</c> — повний рік.</param>
+    /// <param name="approvalId">Погодження на перерахунок закритого періоду; <c>null</c> — немає.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Задача і пропущені (затверджені) аркуші; <c>JobId = null</c> — у названому періоді всі аркуші всіх документів
+    /// затверджені, рахувати нічого (не помилка: людина бачить перелік і куди перейти).
+    /// </returns>
+    /// <exception cref="BusinessRuleException">
+    /// <c>ECR-CALC-4221</c> <c>periodClosed</c> — закритий період без придатного погодження.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Слово людини 07.11: «тільки погоджені не мають перераховуватися». Затверджений аркуш не перераховується,
+    /// поданий — перераховується й позначається для погоджувача; захист — ПО АРКУШУ (тримає задача:
+    /// <c>RecalculationJob.SubmittedSheetsAsync</c> / <c>GuardCompletionAsync</c>, а розклад проєкту не ставить
+    /// документ, у якому затверджено все), а не відмовою всьому проєкту. Відмова цілим запитом була глухим кутом:
+    /// людина не бачила, які саме аркуші заважають (UAT 07.11).
+    /// </remarks>
+    public async Task<RecalculationRequestOutcome> RequestAsync(
+        int projectId, int? periodKey, long? approvalId, CancellationToken ct)
+    {
         var profile = await Security.PermissionCheck
             .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
@@ -134,17 +165,39 @@ public sealed class RunCalculationHandler(
         // поданими аркушами — і 202603 тихо перераховувався. Тепер цю різницю
         // тримає сама політика: `hasClosedPeriodApproval` знімає лише
         // `PeriodClosed`, а `SheetsSubmitted` — ніколи.
+        //
+        // ✎ UAT-recalc-ux (07.11): поданий аркуш більше НЕ відмовляє всьому проєкту — його пропускає задача (по
+        // аркушу), а запит повертає перелік пропущених. Тут лишається лише відмова закритого періоду.
+        //
+        // ✎ UAT-recalc-ux (e2e 07.11): перерахунок за ВЕСЬ рік (`periodKey: null`, кнопка Periods) закритий період
+        // НЕ відмовляє — він вилучається зі скоупу, рівно як це вже робить задача (`RecalculationJob.RefusedPeriodsAsync`:
+        // «запит не називав закритого періоду»). Відмова тут робила кнопку проєкту глухим кутом у будь-якому році після
+        // першого закритого місяця. Названий закритий період без погодження — відмова, як і раніше.
+        var excluded = new HashSet<int>();
         foreach (var period in targets)
         {
-            var submitted = await workflow
-                .HasSubmittedSheetsAsync(projectId, new Domain.ValueObjects.PeriodKey(period.PeriodKey), ct)
-                .ConfigureAwait(false);
-
-            var denial = RecalculationWritePolicy.Check(period.State, submitted, hasApproval);
-            if (denial != RecalculationWriteDenial.None)
+            var denial = RecalculationWritePolicy.Check(period.State, hasSubmittedSheets: false, hasApproval);
+            if (denial == RecalculationWriteDenial.None)
             {
-                throw RecalculationWritePolicy.Reject(denial, period.PeriodKey);
+                continue;
             }
+
+            if (periodKey is null && denial == RecalculationWriteDenial.PeriodClosed)
+            {
+                excluded.Add(period.PeriodKey);
+                continue;
+            }
+
+            throw RecalculationWritePolicy.Reject(denial, period.PeriodKey);
+        }
+
+        var (skipped, truncated) = await SkippedAsync(profile, projectId, periodKey, excluded, ct).ConfigureAwait(false);
+
+        // Названий період, де подано/затверджено ВСЕ: задачу не ставимо і погодження не спалюємо.
+        if (periodKey is { } named
+            && await workflow.AllSheetsApprovedAsync(projectId, named, ct).ConfigureAwait(false))
+        {
+            return new RecalculationRequestOutcome(null, skipped, truncated);
         }
 
         var approval = hasApproval
@@ -175,7 +228,41 @@ public sealed class RunCalculationHandler(
                 ct).ConfigureAwait(false);
         }
 
-        return jobId;
+        return new RecalculationRequestOutcome(jobId, skipped, truncated);
+    }
+
+    /// <summary>
+    /// Пропущені аркуші проєкту — лише ті, що читач бачить: схований від нього аркуш (звуження ролі, Deny) не
+    /// називається ні кодом, ні станом (S18).
+    /// </summary>
+    private async Task<(IReadOnlyList<SkippedSheet> Items, bool Truncated)> SkippedAsync(
+        Security.AccessProfile profile, int projectId, int? periodKey, HashSet<int> excludedPeriods,
+        CancellationToken ct)
+    {
+        var rows = await workflow
+            .ListApprovedSheetsAsync(projectId, documentId: null, periodKey, RecalculationSkips.MaxListed + 1, ct)
+            .ConfigureAwait(false);
+
+        // Закриті періоди річного запиту поза скоупом узагалі — їхні аркуші не «пропущені як затверджені».
+        if (excludedPeriods.Count > 0)
+        {
+            rows = [.. rows.Where(r => !excludedPeriods.Contains(r.PeriodKey))];
+        }
+
+        if (Documents.DocumentSheetVisibility.HasRestrictions(profile))
+        {
+            var visible = new List<SkippedSheet>(rows.Count);
+            foreach (var group in rows.GroupBy(r => r.DocumentId))
+            {
+                var scope = await access.ReadScopeAsync(profile, group.Key, ct).ConfigureAwait(false);
+                visible.AddRange(group.Where(r =>
+                    scope.InPeriod(new Domain.ValueObjects.PeriodKey(r.PeriodKey)).CanReadSheet(r.SheetDefId)));
+            }
+
+            rows = visible;
+        }
+
+        return RecalculationSkips.Cap(rows);
     }
 
     /// <summary>

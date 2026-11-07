@@ -5746,7 +5746,13 @@
             "type": "integer"
           },
           "draft": {
-            "description": "Документи, де є аркуш у чернетці (або ще без стану) і жодного відхиленого.",
+            "description": "✎ UAT-recalc-ux: документи, де ЖОДЕН видимий аркуш не поданий і не затверджений, і жодного відхиленого (раніше\nсюди входили й частково подані — тепер вони в PartlySubmitted).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "partlySubmitted": {
+            "default": 0,
+            "description": "✎ UAT-recalc-ux: частина видимих аркушів подана чи затверджена, частина — ні (чернетка або без стану), і жодного\nвідхиленого.",
             "format": "int32",
             "type": "integer"
           },
@@ -5895,6 +5901,11 @@
           "nameL10n": {
             "$ref": "#/components/schemas/LocalizedText",
             "description": "Назва аркуша мовами каталогу."
+          },
+          "recalculatedAfterSubmission": {
+            "default": false,
+            "description": "✎ UAT-recalc-ux (07.11, слово людини: «тільки погоджені не мають перераховуватися»): аркуш у стані\n`Submitted`, який перерахунок змінив ПІСЛЯ останнього подання — погоджувач має знати, що числа зрушили.\nВиводиться з журналу (`aud.StructureChange`, `SheetRecalc/RecalculatedAfterSubmission` пізніше за\n`SubmittedAt`), без окремого стовпця; зникає з повторним поданням або затвердженням. Лише картка документа\n(`GET /documents/{id}`); у переліку — `false`.",
+            "type": "boolean"
           },
           "state": {
             "description": "Стан робочого процесу; аркуш без рядка стану — `Draft`.",
@@ -16534,7 +16545,14 @@
         "properties": {
           "jobId": {
             "description": "Задача.",
-            "type": "string"
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "nothingToRecalculate": {
+            "description": "У названому періоді затверджено все: задачу НЕ поставлено (JobId — `null`,\nвідповідь `200`).",
+            "type": "boolean"
           },
           "periodKey": {
             "description": "Період; `null` — повний рік, усі документи проєкту.",
@@ -16548,12 +16566,26 @@
             "description": "Проєкт.",
             "format": "int32",
             "type": "integer"
+          },
+          "skipped": {
+            "description": "✎ UAT-recalc-ux: ЗАТВЕРДЖЕНІ аркуші, які перерахунок пропускає (лише видимі читачеві); порожньо — пропусків\nнемає.",
+            "items": {
+              "$ref": "#/components/schemas/SkippedSheet"
+            },
+            "type": "array"
+          },
+          "skippedTruncated": {
+            "description": "Пропущених більше, ніж у Skipped (стеля 200).",
+            "type": "boolean"
           }
         },
         "required": [
           "jobId",
           "projectId",
-          "periodKey"
+          "periodKey",
+          "skipped",
+          "skippedTruncated",
+          "nothingToRecalculate"
         ],
         "type": "object"
       },
@@ -17251,18 +17283,39 @@
           },
           "jobId": {
             "description": "Задача.",
-            "type": "string"
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "nothingToRecalculate": {
+            "description": "Усе, що просили перерахувати, затверджено: задачу НЕ поставлено (JobId —\n`null`, відповідь `200`), перелік — у Skipped.",
+            "type": "boolean"
           },
           "periodKey": {
             "description": "Період; перерахунок завжди адресує пару документ × період.",
             "format": "int32",
             "type": "integer"
+          },
+          "skipped": {
+            "description": "✎ UAT-recalc-ux: ЗАТВЕРДЖЕНІ аркуші, які перерахунок пропускає (їхні дані й результати не змінюються,\nФВ-9.17); подані перераховуються й позначаються. Порожньо — пропусків немає.",
+            "items": {
+              "$ref": "#/components/schemas/SkippedSheet"
+            },
+            "type": "array"
+          },
+          "skippedTruncated": {
+            "description": "Пропущених більше, ніж у Skipped (стеля 200).",
+            "type": "boolean"
           }
         },
         "required": [
           "jobId",
           "documentId",
-          "periodKey"
+          "periodKey",
+          "skipped",
+          "skippedTruncated",
+          "nothingToRecalculate"
         ],
         "type": "object"
       },
@@ -23827,6 +23880,64 @@
           "sessionId",
           "simulatedForUserId",
           "readOnly"
+        ],
+        "type": "object"
+      },
+      "SkippedSheet": {
+        "description": "UAT-recalc-ux: аркуш, який перерахунок ПРОПУСТИВ, бо він ЗАТВЕРДЖЕНИЙ (слово людини 07.11: «тільки погоджені не мають перераховуватися»).",
+        "properties": {
+          "documentCode": {
+            "description": "Код документа (`BusinessKey`).",
+            "type": "string"
+          },
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "documentName": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва документа мовами каталогу; `null` — немає."
+              }
+            ]
+          },
+          "periodKey": {
+            "description": "Період (`yyyyMM`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetCode": {
+            "description": "Код аркуша.",
+            "type": "string"
+          },
+          "sheetDefId": {
+            "description": "Аркуш.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetName": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва аркуша мовами каталогу."
+          },
+          "state": {
+            "description": "`Approved`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId",
+          "documentCode",
+          "documentName",
+          "sheetDefId",
+          "sheetCode",
+          "sheetName",
+          "periodKey",
+          "state"
         ],
         "type": "object"
       },
@@ -38079,6 +38190,26 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationAcceptedResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
           "202": {
             "content": {
               "application/json": {
@@ -51180,6 +51311,26 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRecalculationAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRecalculationAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRecalculationAcceptedResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
           "202": {
             "content": {
               "application/json": {

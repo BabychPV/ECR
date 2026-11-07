@@ -140,10 +140,11 @@ public sealed class ListDocumentsHandler(
         ValidateOwner(ownerUserId, mine);
         var versionSort = ParseVersionSort(sort);
         var versions = ParseTemplateVersions(templateVersions);
+        var partly = IsPartlySubmitted(state, periodKey);
         var filter = new DocumentListFilter(
-            ParseState(state, periodKey), mine ? profile.UserId : null, hasLateEdits, Query: NormalizeQuery(query),
+            partly ? null : ParseState(state, periodKey), mine ? profile.UserId : null, hasLateEdits, Query: NormalizeQuery(query),
             ResultsStale: resultsStale, StaleByUserId: staleByMe ? profile.UserId : null, OwnerUserId: ownerUserId,
-            TemplateVersions: versions, VersionSort: versionSort);
+            TemplateVersions: versions, VersionSort: versionSort, PartlySubmitted: partly);
 
         // ⛔ Родина REQ, а не CELL (`P-25`, рядок 1): хибний `limit` — це
         // помилка параметра запиту, і показувати її в обробнику помилок
@@ -466,6 +467,25 @@ public sealed class ListDocumentsHandler(
         }
 
         return true;
+    }
+
+    /// <summary>Значення фільтра стану «частково подано» (✎ UAT-recalc-ux); не є станом аркуша.</summary>
+    public const string StatePartlySubmitted = "PartlySubmitted";
+
+    /// <summary><c>state=PartlySubmitted</c>: так — <c>true</c>; без періоду — 422, як і решта станів.</summary>
+    private static bool IsPartlySubmitted(string? state, int? periodKey)
+    {
+        if (!string.Equals(state?.Trim(), StatePartlySubmitted, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return periodKey is null
+            ? throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                "Фільтр стану потребує періоду.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.documentStateNeedsPeriod" })
+            : true;
     }
 
     /// <summary>Фільтр стану: порожньо — без фільтра; невідоме ім'я або стан без періоду — 422.</summary>

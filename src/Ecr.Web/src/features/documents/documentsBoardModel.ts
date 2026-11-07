@@ -22,7 +22,8 @@ export interface BoardColumn<T> {
  * потрапить у «Returned or rejected», а не в «без стану».
  */
 const Columns: readonly Omit<BoardColumn<never>, 'items'>[] = [
-  { id: 'Draft', states: ['Draft'], attention: false },
+  // ✎ UAT-recalc-ux: частково поданий документ — ще в роботі, тож у стовпці чернеток (дошка тримає 4 стовпці макета).
+  { id: 'Draft', states: ['Draft', 'PartlySubmitted'], attention: false },
   { id: 'Submitted', states: ['Submitted'], attention: false },
   { id: 'Rework', states: ['Returned', 'Rejected'], attention: true },
   { id: 'Approved', states: ['Approved'], attention: false },

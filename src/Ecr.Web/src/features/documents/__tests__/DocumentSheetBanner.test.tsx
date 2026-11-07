@@ -35,7 +35,13 @@ function stubHistory(events: unknown[] | 'fail'): void {
   );
 }
 
-function show(state: string, lock: DocumentLock | null, canDecide = false, sheetCopyId: number | null = null): void {
+function show(
+  state: string,
+  lock: DocumentLock | null,
+  canDecide = false,
+  sheetCopyId: number | null = null,
+  recalculatedAfterSubmission = false,
+): void {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -47,6 +53,7 @@ function show(state: string, lock: DocumentLock | null, canDecide = false, sheet
           state={state}
           lock={lock}
           canDecide={canDecide}
+          recalculatedAfterSubmission={recalculatedAfterSubmission}
         />
       </QueryClientProvider>
     </MantineProvider>,
@@ -58,6 +65,25 @@ afterEach(() => {
 });
 
 describe('DocumentSheetBanner', () => {
+  it('✎ UAT-recalc-ux: поданий аркуш, перерахований після подання, — позначка для погоджувача; без факту — немає', async () => {
+    stubHistory(History);
+    show('Submitted', 'sheetSubmitted', true, null, true);
+
+    await screen.findByText(/document\.banner\.submittedBy/);
+    const banner = screen.getByTestId('document-sheet-banner');
+    expect(banner.querySelector('[data-recalculated-after-submission]')?.textContent).toContain(
+      '⟦sheet.recalculatedAfterSubmission⟧',
+    );
+  });
+
+  it('✎ UAT-recalc-ux: без перерахунку після подання позначки немає', async () => {
+    stubHistory(History);
+    show('Submitted', 'sheetSubmitted', true);
+
+    await screen.findByText(/document\.banner\.submittedBy/);
+    expect(screen.getByTestId('document-sheet-banner').querySelector('[data-recalculated-after-submission]')).toBeNull();
+  });
+
   it('поданий аркуш для погоджувача: хто й коли з журналу ЦЬОГО аркуша, і крок «вирішіть»', async () => {
     stubHistory(History);
     show('Submitted', 'sheetSubmitted', true);

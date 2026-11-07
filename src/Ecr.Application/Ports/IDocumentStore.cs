@@ -165,10 +165,25 @@ public enum ResultsStaleUndeterminedReason
 /// <param name="Code">Код аркуша (<c>SheetDef.Code</c>); він же ключ у <c>DocumentSummary.SheetStates</c>.</param>
 /// <param name="NameL10n">Назва аркуша мовами каталогу.</param>
 /// <param name="State">Стан робочого процесу; аркуш без рядка стану — <c>Draft</c>.</param>
-public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, string State);
+/// <param name="RecalculatedAfterSubmission">
+/// ✎ UAT-recalc-ux (07.11, слово людини: «тільки погоджені не мають перераховуватися»): аркуш у стані
+/// <c>Submitted</c>, який перерахунок змінив ПІСЛЯ останнього подання — погоджувач має знати, що числа зрушили.
+/// Виводиться з журналу (<c>aud.StructureChange</c>, <c>SheetRecalc/RecalculatedAfterSubmission</c> пізніше за
+/// <c>SubmittedAt</c>), без окремого стовпця; зникає з повторним поданням або затвердженням. Лише картка документа
+/// (<c>GET /documents/{id}</c>); у переліку — <c>false</c>.
+/// </param>
+public sealed record DocumentSheetState(
+    string Code, LocalizedText NameL10n, string State, bool RecalculatedAfterSubmission = false);
 
 /// <summary>Фільтри переліку документів (<c>BE-09b</c>); <c>default</c> — без фільтрів.</summary>
-/// <param name="State">Зведений стан документа за період; <c>null</c> — будь-який.</param>
+/// <param name="State">
+/// Зведений стан документа за період; <c>null</c> — будь-який. ✎ UAT-recalc-ux: <c>Draft</c> — жоден видимий аркуш
+/// не поданий/затверджений (частково подані — <paramref name="PartlySubmitted"/>).
+/// </param>
+/// <param name="PartlySubmitted">
+/// ✎ UAT-recalc-ux: лише частково подані документи (є поданий/затверджений і є неподаний видимий аркуш, жодного
+/// відхиленого); разом із <paramref name="State"/> не задається.
+/// </param>
 /// <param name="MineUserId">
 /// Лише документи, де цей користувач — автор (<c>CreatedByUserId</c>) або подавав
 /// хоч один аркуш (<c>ApprovalState.SubmittedByUserId</c>); <c>null</c> — усі.
@@ -237,7 +252,8 @@ public readonly record struct DocumentListFilter(
     DocumentParticipationFilter? Participation = null,
     int? OwnerUserId = null,
     IReadOnlyCollection<string>? TemplateVersions = null,
-    DocumentVersionSort? VersionSort = null);
+    DocumentVersionSort? VersionSort = null,
+    bool PartlySubmitted = false);
 
 /// <summary>Напрямок сортування переліку документів за версією шаблону.</summary>
 public enum DocumentVersionSort

@@ -42,15 +42,47 @@ public sealed class DocumentRecalculateDenialTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Поданий_аркуш_дає_422_з_ключем_sheetsSubmitted()
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Поданий_аркуш_перераховується_202_а_затверджений_200_без_задачі_з_переліком()
     {
-        var problem = await DenialAsync(closePeriod: false, submitSheet: true).ConfigureAwait(true);
+        // ✎ UAT-recalc-ux (слово людини 07.11: «тільки погоджені не мають перераховуватися»).
+        var (submittedStatus, submittedBody) = await RecalculateAsync(submit: true, approve: false).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Accepted, submittedStatus);
+        Assert.False(string.IsNullOrEmpty(submittedBody.GetProperty("jobId").GetString()));
+        Assert.False(submittedBody.GetProperty("nothingToRecalculate").GetBoolean());
+        Assert.Equal(0, submittedBody.GetProperty("skipped").GetArrayLength());
 
-        Assert.Equal("err.ECR-CALC-4221.sheetsSubmitted", problem.GetProperty("messageKey").GetString());
-        Assert.Equal("SheetsSubmitted", problem.GetProperty("denial").GetString());
-        Assert.StartsWith($"Period {problem.GetProperty("periodKey").GetInt32()} has submitted sheets", problem.GetProperty("detail").GetString(), StringComparison.Ordinal);
+        var (approvedStatus, approvedBody) = await RecalculateAsync(submit: true, approve: true).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, approvedStatus);
+        Assert.Equal(JsonValueKind.Null, approvedBody.GetProperty("jobId").ValueKind);
+        Assert.True(approvedBody.GetProperty("nothingToRecalculate").GetBoolean());
+        var skipped = Assert.Single(approvedBody.GetProperty("skipped").EnumerateArray());
+        Assert.Equal("Approved", skipped.GetProperty("state").GetString());
+        Assert.True(skipped.GetProperty("sheetDefId").GetInt32() > 0);
+        Assert.False(string.IsNullOrEmpty(skipped.GetProperty("documentCode").GetString()));
     }
 
+    /// <summary>Готує документ (аркуш поданий/затверджений), шле перерахунок і повертає статус і тіло.</summary>
+    private async Task<(HttpStatusCode Status, JsonElement Body)> RecalculateAsync(bool submit, bool approve)
+    {
+        var s = await ArrangeAsync(closePeriod: false, submit, approve).ConfigureAwait(false);
+
+        using var app = new EcrApiFactory(sql);
+        var client = app.CreateClient();
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = s.UserName, password = Password }).ConfigureAwait(false);
+        Assert.True(login.IsSuccessStatusCode, $"Вхід: {login.StatusCode}: {app.ErrorsText}");
+
+        var response = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.Document.DocumentId}/recalculate", UriKind.Relative),
+            new { periodKey = s.Document.PeriodKey.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) })
+            .ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
+
+        return (response.StatusCode, JsonDocument.Parse(body).RootElement.Clone());
+    }
     /// <summary>Готує документ, шле перерахунок і повертає тіло відмови.</summary>
     private async Task<JsonElement> DenialAsync(bool closePeriod, bool submitSheet)
     {
@@ -80,7 +112,7 @@ public sealed class DocumentRecalculateDenialTests(SqlServerFixture sql)
         return problem;
     }
 
-    private async Task<Scenario> ArrangeAsync(bool closePeriod, bool submitSheet)
+    private async Task<Scenario> ArrangeAsync(bool closePeriod, bool submitSheet, bool approve = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var document = await builder.BuildAsync().ConfigureAwait(false);
@@ -96,6 +128,11 @@ public sealed class DocumentRecalculateDenialTests(SqlServerFixture sql)
         {
             var state = new ApprovalState(document.DocumentId, document.SheetDefId, document.PeriodKey.Value);
             state.Submit(1, DateTime.UtcNow);
+            if (approve)
+            {
+                state.Approve(2, DateTime.UtcNow);
+            }
+
             db.ApprovalStates.Add(state);
         }
 

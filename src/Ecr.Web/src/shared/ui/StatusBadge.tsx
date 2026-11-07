@@ -123,6 +123,8 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
    */
   sheet: {
     Draft: 'neutral',
+    // ✎ UAT-recalc-ux: стан ДОКУМЕНТА в переліку (частина аркушів подана) — `documentState`, не стан аркуша сервера.
+    PartlySubmitted: 'info',
     Submitted: 'info',
     Approved: 'neutral',
     Rejected: 'danger',
@@ -445,6 +447,7 @@ type IconName = keyof typeof iconPaths;
 
 const stateIcons: Readonly<Record<string, IconName>> = {
   Draft: 'pencil',
+  PartlySubmitted: 'send',
   Submitted: 'send',
   Approved: 'checkCircle',
   Rejected: 'xCircle',

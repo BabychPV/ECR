@@ -1,8 +1,10 @@
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Tests.Jobs;
 using Ecr.TestKit;
@@ -44,6 +46,86 @@ public sealed class DocumentListFiltersStoreTests(SqlServerFixture sql)
             long[] want = state == DocumentStatus.Draft ? [chain.DocumentId, expected] : [expected];
             Assert.Equal(want.Order(), ids.Order());
         }
+    }
+
+    /// <summary>
+    /// ✎ UAT-recalc-ux: «частково подано» — є поданий/затверджений і є неподаний ВИДИМИЙ аркуш; «чернетка» — жодного
+    /// поданого. Схований від читача аркуш у стан не входить.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ (локально): гілка <c>null</c> у <c>WhereState</c> без <c>Where(sentSheet)</c> — чернетка
+    /// D потрапляє в «частково», червоний; <c>Draft</c> без <c>Not(sentSheet)</c> (старе правило) — P1/P2 у чернетках,
+    /// червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Частково_подано_і_чернетка_за_видимими_аркушами()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        await using var db = builder.CreateContext();
+
+        var sheet2 = new SheetDef(
+            chain.TemplateVersionId, EcrCode.Create($"PS2_{Guid.NewGuid():N}"[..12].ToUpperInvariant()),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Sheet 2" }), 2);
+        db.SheetDefs.Add(sheet2);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var partlySubmitted = await TwoSheetDocumentAsync(db, chain, sheet2.Id, "P-SUB", DocumentStatus.Submitted, null);
+        var partlyApproved = await TwoSheetDocumentAsync(db, chain, sheet2.Id, "P-APP", DocumentStatus.Approved, null);
+        var draft = await TwoSheetDocumentAsync(db, chain, sheet2.Id, "P-DRAFT", null, null);
+        var hiddenSent = await TwoSheetDocumentAsync(db, chain, sheet2.Id, "P-HID", null, DocumentStatus.Submitted);
+
+        var period = chain.PeriodKey.Value;
+        var partly = new DocumentListFilter(null, null, PartlySubmitted: true);
+        Assert.Equal(
+            new[] { partlySubmitted, partlyApproved, hiddenSent }.Order(),
+            (await IdsAsync(db, chain.ProjectId, period, partly, null)).Order());
+        Assert.Equal(
+            new[] { chain.DocumentId, draft }.Order(),
+            (await IdsAsync(db, chain.ProjectId, period, new DocumentListFilter(DocumentStatus.Draft, null), null)).Order());
+
+        // Аркуш 2 схований від читача: P-HID — чернетка (його поданий аркуш не рахується), P-SUB — подано, P-APP —
+        // затверджено; частково поданих немає.
+        IReadOnlyCollection<(int, int)> hidden = [(chain.ProjectId, sheet2.Id)];
+        Assert.Empty(await IdsAsync(db, chain.ProjectId, period, partly with { HiddenSheetDefIds = hidden }, null));
+        Assert.Equal(
+            new[] { chain.DocumentId, draft, hiddenSent }.Order(),
+            (await IdsAsync(
+                db, chain.ProjectId, period,
+                new DocumentListFilter(DocumentStatus.Draft, null, HiddenSheetDefIds: hidden), null)).Order());
+    }
+
+    /// <summary>Документ на двох аркушах: стан першого і другого аркуша (<c>null</c> — чернетка без рядка стану).</summary>
+    private static async Task<long> TwoSheetDocumentAsync(
+        EcrDbContext db, TestDocument chain, int sheet2, string key, DocumentStatus? first, DocumentStatus? second)
+    {
+        var document = new Document(chain.ProjectId, $"{key}-{chain.ProjectId}", 1, Now);
+        db.Documents.Add(document);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        db.DocumentSheets.Add(new DocumentSheet(document.Id, chain.SheetDefId));
+        db.DocumentSheets.Add(new DocumentSheet(document.Id, sheet2));
+        foreach (var (sheet, status) in new[] { (chain.SheetDefId, first), (sheet2, second) })
+        {
+            if (status is not { } wanted)
+            {
+                continue;
+            }
+
+            var state = new ApprovalState(document.Id, sheet, chain.PeriodKey.Value);
+            state.Submit(1, Now);
+            if (wanted == DocumentStatus.Approved)
+            {
+                state.Approve(1, Now);
+            }
+
+            db.ApprovalStates.Add(state);
+        }
+
+        await db.SaveChangesAsync(CancellationToken.None);
+        return document.Id;
     }
 
     [Fact]

@@ -12,7 +12,10 @@ const of = (states: Record<string, string>) => ({ sheetStates: states });
 describe('documentState', () => {
   it.each([
     [{ A: 'Approved', B: 'Rejected', C: 'Draft' }, 'Rejected'],
-    [{ A: 'Approved', B: 'Submitted', C: 'Draft' }, 'Draft'],
+    // ✎ UAT-recalc-ux: чернетка поруч із поданим/затвердженим — «частково подано».
+    [{ A: 'Approved', B: 'Submitted', C: 'Draft' }, 'PartlySubmitted'],
+    [{ A: 'Approved', C: 'Draft' }, 'PartlySubmitted'],
+    [{ A: 'Draft', B: 'Draft' }, 'Draft'],
     [{ A: 'Approved', B: 'Submitted' }, 'Submitted'],
     [{ A: 'Approved', B: 'Approved' }, 'Approved'],
   ])('%o → %s', (states, expected) => {
@@ -35,8 +38,8 @@ describe('sheetLabels', () => {
       sheetLabels({
         sheetStates: { WTR: 'Rejected', GEN: 'Draft' },
         sheets: [
-          { code: 'GEN', nameL10n: { values: { en: 'General info' } }, state: 'Draft' },
-          { code: 'WTR', nameL10n: { values: {} }, state: 'Rejected' },
+          { code: 'GEN', nameL10n: { values: { en: 'General info' } }, state: 'Draft', recalculatedAfterSubmission: false },
+          { code: 'WTR', nameL10n: { values: {} }, state: 'Rejected', recalculatedAfterSubmission: false },
         ],
       }),
     ).toEqual([

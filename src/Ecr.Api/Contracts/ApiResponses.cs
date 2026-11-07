@@ -94,7 +94,20 @@ public sealed record SimulationSessionResponse(long SessionId, int SimulatedForU
 /// <param name="JobId">Задача.</param>
 /// <param name="DocumentId">Документ.</param>
 /// <param name="PeriodKey">Період; перерахунок завжди адресує пару документ × період.</param>
-public sealed record RecalculationAcceptedResponse(string JobId, long DocumentId, int PeriodKey);
+/// <param name="Skipped">
+/// ✎ UAT-recalc-ux: ЗАТВЕРДЖЕНІ аркуші, які перерахунок пропускає (їхні дані й результати не змінюються,
+/// ФВ-9.17); подані перераховуються й позначаються. Порожньо — пропусків немає.
+/// </param>
+/// <param name="SkippedTruncated">Пропущених більше, ніж у <paramref name="Skipped"/> (стеля 200).</param>
+/// <param name="NothingToRecalculate">
+/// Усе, що просили перерахувати, затверджено: задачу НЕ поставлено (<paramref name="JobId"/> —
+/// <c>null</c>, відповідь <c>200</c>), перелік — у <paramref name="Skipped"/>.
+/// </param>
+public sealed record RecalculationAcceptedResponse(
+    string? JobId, long DocumentId, int PeriodKey,
+    IReadOnlyList<Ecr.Application.Calculations.SkippedSheet> Skipped,
+    bool SkippedTruncated,
+    bool NothingToRecalculate);
 
 /// <summary>
 /// Прийнятий у чергу перенос проєкту на нову версію шаблону (D-2 RC15B).
@@ -109,4 +122,17 @@ public sealed record MigrationAcceptedResponse(string JobId, long DocumentId);
 /// <param name="JobId">Задача.</param>
 /// <param name="ProjectId">Проєкт.</param>
 /// <param name="PeriodKey">Період; <c>null</c> — повний рік, усі документи проєкту.</param>
-public sealed record ProjectRecalculationAcceptedResponse(string JobId, int ProjectId, int? PeriodKey);
+/// <param name="Skipped">
+/// ✎ UAT-recalc-ux: ЗАТВЕРДЖЕНІ аркуші, які перерахунок пропускає (лише видимі читачеві); порожньо — пропусків
+/// немає.
+/// </param>
+/// <param name="SkippedTruncated">Пропущених більше, ніж у <paramref name="Skipped"/> (стеля 200).</param>
+/// <param name="NothingToRecalculate">
+/// У названому періоді затверджено все: задачу НЕ поставлено (<paramref name="JobId"/> — <c>null</c>,
+/// відповідь <c>200</c>).
+/// </param>
+public sealed record ProjectRecalculationAcceptedResponse(
+    string? JobId, int ProjectId, int? PeriodKey,
+    IReadOnlyList<Ecr.Application.Calculations.SkippedSheet> Skipped,
+    bool SkippedTruncated,
+    bool NothingToRecalculate);

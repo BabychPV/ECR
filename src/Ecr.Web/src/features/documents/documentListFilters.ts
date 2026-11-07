@@ -8,7 +8,13 @@ import { parseVersionSort, parseVersionsParam, versionsToParam, type VersionSort
  *
  * ⚠ Той самий перелік, що приймає сервер (`BE-09b`); інше він відхиляє `422`.
  */
-export const DocumentStateFilters: readonly DocumentStateFilter[] = ['Draft', 'Submitted', 'Approved', 'Rejected'];
+export const DocumentStateFilters: readonly DocumentStateFilter[] = [
+  'Draft',
+  'PartlySubmitted',
+  'Submitted',
+  'Approved',
+  'Rejected',
+];
 
 /** Значення з адреси → фільтр; невідоме — «без фільтра», а не `422`. */
 export function parseStateFilter(raw: string | null): DocumentStateFilter | null {

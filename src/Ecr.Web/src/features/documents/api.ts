@@ -102,8 +102,11 @@ export type DocumentSummary = components['schemas']['DocumentSummary'];
 /** Сторінка переліку документів. */
 export type DocumentListPage = components['schemas']['PagedResultOfDocumentSummary'];
 
-/** Значення фільтра `state` — імена `DocumentStatus` на сервері; інше сервер відхиляє `422`. */
-export type DocumentStateFilter = 'Draft' | 'Submitted' | 'Approved' | 'Rejected';
+/**
+ * Значення фільтра `state` — імена `DocumentStatus` на сервері плюс ✎ UAT-recalc-ux `PartlySubmitted`
+ * (`02-contracts.md`, «Стан погодження документа»); інше сервер відхиляє `422`.
+ */
+export type DocumentStateFilter = 'Draft' | 'PartlySubmitted' | 'Submitted' | 'Approved' | 'Rejected';
 
 /** Параметри переліку документів (`BE-09b`). */
 interface DocumentListParams {

@@ -33,8 +33,10 @@ public sealed class SheetCopySummaryTests(SqlServerFixture sql)
         var summary = await new DocumentListSummaryStore(db).SummarizeAsync(
             chain.ProjectId, chain.PeriodKey.Value, visibleProjectIds: null, restrictions: null, currentUserId: null, CancellationToken.None);
 
-        // Оригінал затверджений, копія — без стану (Draft): документ Draft, аркушів 2, затверджено 1.
-        Assert.Equal((1, 0, 0), (summary.Draft, summary.Submitted, summary.Approved));
+        // Оригінал затверджений, копія — без стану (Draft): документ НЕ затверджений, аркушів 2, затверджено 1.
+        // ✎ UAT-recalc-ux (рішення 07.11): чернетка поруч із затвердженим — «частково подано», а не Draft; копія
+        // лічиться окремим аркушем саме тому, що документ не потрапив ні в Draft, ні в Approved.
+        Assert.Equal((0, 1, 0, 0), (summary.Draft, summary.PartlySubmitted, summary.Submitted, summary.Approved));
         Assert.Equal((1, 2), (summary.SheetsApproved, summary.SheetsTotal));
     }
 

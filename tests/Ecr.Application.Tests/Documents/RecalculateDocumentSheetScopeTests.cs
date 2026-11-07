@@ -44,9 +44,10 @@ public sealed class RecalculateDocumentSheetScopeTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-9.17")]
-    public async Task Область_самого_поданого_аркуша_відхиляється()
+    public async Task Область_самого_затвердженого_аркуша_відхиляється_старим_входом()
     {
-        var fixture = Arrange(submittedSheet: 3, hiddenSheet: null);
+        // ✎ UAT-recalc-ux: затверджений аркуш області — «рахувати нічого»; старий вхід (без переліку) лишає 4221.
+        var fixture = Arrange(submittedSheet: 3, hiddenSheet: null, approved: true);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: 3, CancellationToken.None));
@@ -67,6 +68,44 @@ public sealed class RecalculateDocumentSheetScopeTests
         var jobId = await fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: null, CancellationToken.None);
 
         Assert.Equal("job-1", jobId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Поданий_але_не_затверджений_аркуш_області_перераховується()
+    {
+        // ✎ UAT-recalc-ux (слово людини 07.11: «тільки погоджені не мають перераховуватися»).
+        var fixture = Arrange(submittedSheet: 3, hiddenSheet: null);
+
+        var outcome = await fixture.Handler.RequestAsync(Document, new PeriodKey(Period), sheetDefId: 3, CancellationToken.None);
+
+        Assert.Equal("job-1", outcome.JobId);
+        Assert.Empty(outcome.Skipped);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Затверджено_все_відповідь_без_задачі_з_переліком_аркушів_складу()
+    {
+        var fixture = Arrange(submittedSheet: 3, hiddenSheet: null, alsoSubmittedSheet: 1, approved: true);
+        var name = new LocalizedText(new Dictionary<string, string> { ["en"] = "S" });
+        IReadOnlyList<SkippedSheet> rows =
+        [
+            new(Document, "D", null, 1, "S1", name, Period, "Approved"),
+            new(Document, "D", null, 3, "S3", name, Period, "Approved"),
+            new(Document, "D", null, 7, "S7", name, Period, "Approved"),   // поза складом документа — не називається
+        ];
+        fixture.Workflow.ListApprovedSheetsAsync(null, Document, Period, RecalculationSkips.MaxListed + 1, Arg.Any<CancellationToken>())
+               .Returns(rows);
+
+        var outcome = await fixture.Handler.RequestAsync(Document, new PeriodKey(Period), sheetDefId: null, CancellationToken.None);
+
+        Assert.True(outcome.NothingToRecalculate);
+        Assert.Equal([1, 3], outcome.Skipped.Select(s => s.SheetDefId));
+        await fixture.Jobs.DidNotReceiveWithAnyArgs()
+            .EnqueueCoalescedAsync<IRecalculationJob>(default!, default, default);
     }
 
     [Fact]
@@ -114,9 +153,9 @@ public sealed class RecalculateDocumentSheetScopeTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-9.17")]
-    public async Task Перерахунок_усього_документа_де_подані_усі_аркуші_відхиляється_швидко()
+    public async Task Перерахунок_усього_документа_де_затверджені_усі_аркуші_відхиляється_швидко()
     {
-        var fixture = Arrange(submittedSheet: 3, hiddenSheet: null, alsoSubmittedSheet: 1);
+        var fixture = Arrange(submittedSheet: 3, hiddenSheet: null, alsoSubmittedSheet: 1, approved: true);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: null, CancellationToken.None));
@@ -218,7 +257,8 @@ public sealed class RecalculateDocumentSheetScopeTests
     }
 
     private static Fixture Arrange(
-        int? submittedSheet, int? hiddenSheet, PeriodState periodState = PeriodState.Open, int? alsoSubmittedSheet = null)
+        int? submittedSheet, int? hiddenSheet, PeriodState periodState = PeriodState.Open, int? alsoSubmittedSheet = null,
+        bool approved = false)
     {
         var builder = new AccessBuilder { UserId = 9 }
             .Permission(RecalculateDocumentHandler.Permission)
@@ -254,6 +294,11 @@ public sealed class RecalculateDocumentSheetScopeTests
         {
             var state = new ApprovalState(Document, submitted, Period);
             state.Submit(userId: 5, DateTime.UtcNow);
+            if (approved)
+            {
+                state.Approve(userId: 6, DateTime.UtcNow);
+            }
+
             states.Add(state);
         }
 
@@ -261,6 +306,11 @@ public sealed class RecalculateDocumentSheetScopeTests
         {
             var state = new ApprovalState(Document, also, Period);
             state.Submit(userId: 5, DateTime.UtcNow);
+            if (approved)
+            {
+                state.Approve(userId: 6, DateTime.UtcNow);
+            }
+
             states.Add(state);
         }
 
@@ -276,7 +326,7 @@ public sealed class RecalculateDocumentSheetScopeTests
                 Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
             .Returns("job-1");
 
-        return new Fixture(new RecalculateDocumentHandler(jobs, access, user, documents, periods, workflow), jobs);
+        return new Fixture(new RecalculateDocumentHandler(jobs, access, user, documents, periods, workflow), jobs, workflow);
     }
 
     private static TemplateVersionSnapshot SnapshotOfTwoSheets()
@@ -289,5 +339,5 @@ public sealed class RecalculateDocumentSheetScopeTests
         return template.Build();
     }
 
-    private sealed record Fixture(RecalculateDocumentHandler Handler, IBackgroundJobScheduler Jobs);
+    private sealed record Fixture(RecalculateDocumentHandler Handler, IBackgroundJobScheduler Jobs, IWorkflowStore Workflow);
 }

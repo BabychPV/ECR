@@ -111,6 +111,8 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
             var state = new ApprovalState(
                 document.DocumentId, document.SheetDefId, document.PeriodKey.Value);
             state.Submit(userId: 5, DateTime.UtcNow);
+            // ✎ UAT-recalc-ux: ручний перерахунок пропускає лише ЗАТВЕРДЖЕНИЙ аркуш (поданий перераховується).
+            state.Approve(userId: 6, DateTime.UtcNow);
             setup.ApprovalStates.Add(state);
 
             await setup.SaveChangesAsync();
@@ -307,6 +309,8 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
             var state = new ApprovalState(
                 document.DocumentId, document.SheetDefId, document.PeriodKey.Value);
             state.Submit(userId: 5, DateTime.UtcNow);
+            // ✎ UAT-recalc-ux: ручний перерахунок пропускає лише ЗАТВЕРДЖЕНИЙ аркуш (поданий перераховується).
+            state.Approve(userId: 6, DateTime.UtcNow);
             setup.ApprovalStates.Add(state);
 
             await setup.SaveChangesAsync();

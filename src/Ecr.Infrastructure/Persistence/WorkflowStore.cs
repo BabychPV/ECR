@@ -487,4 +487,61 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
 
         return query.AnyAsync(ct);
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<Application.Calculations.SkippedSheet>> ListApprovedSheetsAsync(
+        int? projectId, long? documentId, int? periodKey, int take, CancellationToken ct)
+    {
+        // RS: стан копії не робить затвердженим аркуш-оригінал — той самий зріз, що й `RecalculationJob.SkippedSheetsAsync`.
+        var rows = await (
+                from state in db.ApprovalStates.AsNoTracking().OriginalOnly()
+                join document in db.Documents.AsNoTracking() on state.DocumentId equals document.Id
+                join sheet in db.SheetDefs.AsNoTracking() on state.SheetDefId equals sheet.Id
+                where (projectId == null || document.ProjectId == projectId)
+                      && (documentId == null || document.Id == documentId)
+                      && (periodKey == null || state.PeriodKey == periodKey)
+                      && state.Status == Domain.Enums.DocumentStatus.Approved
+                orderby document.Id, state.PeriodKey, sheet.Ordinal, sheet.Id
+                select new
+                {
+                    document.Id,
+                    document.BusinessKey,
+                    document.NameL10n,
+                    SheetDefId = sheet.Id,
+                    sheet.Code,
+                    SheetName = sheet.NameL10n,
+                    state.PeriodKey,
+                    state.Status,
+                })
+            .Take(take)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows.Select(r => new Application.Calculations.SkippedSheet(
+            r.Id, r.BusinessKey, r.NameL10n, r.SheetDefId, r.Code, r.SheetName, r.PeriodKey, r.Status.ToString()))];
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> AllSheetsApprovedAsync(int projectId, int periodKey, CancellationToken ct)
+    {
+        var documents = db.Documents.AsNoTracking().Where(d => d.ProjectId == projectId);
+
+        if (!await documents.AnyAsync(ct).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        // Є що рахувати: документ без складу або з аркушем складу (оригіналом), що не затверджений.
+        var recalculable = await documents
+            .AnyAsync(
+                d => !db.DocumentSheets.Any(s => s.DocumentId == d.Id && s.IsIncluded && s.CopyOfId == null)
+                     || db.DocumentSheets.Any(s => s.DocumentId == d.Id && s.IsIncluded && s.CopyOfId == null
+                         && !db.ApprovalStates.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId
+                             && a.SheetCopyId == null && a.PeriodKey == periodKey
+                             && a.Status == Domain.Enums.DocumentStatus.Approved)),
+                ct)
+            .ConfigureAwait(false);
+
+        return !recalculable;
+    }
 }
