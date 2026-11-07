@@ -65,7 +65,8 @@ public sealed partial class RecalculationJob(
     ILogger<RecalculationJob>? logger = null,
     ISheetEditGate? sheetGate = null,
     CrossPeriodFanOut? fanOut = null,
-    IRecalcCommandTimeout? commandTimeout = null) : IRecalculationJob
+    IRecalcCommandTimeout? commandTimeout = null,
+    IAuditWriter? audit = null) : IRecalculationJob
 {
     [LoggerMessage(
         Level = LogLevel.Error,
@@ -197,6 +198,9 @@ public sealed partial class RecalculationJob(
 
         // RC14 (P2-4): що переносити в прогін періоду (лише для прогону області аркуша).
         var carryOvers = new Dictionary<int, List<ResultCarryOver>>();
+
+        // UAT-recalc-ux: періоди, які прогін рахував, за документами — для журналу пропущених/перерахованих поданих.
+        var scopeByDocument = new Dictionary<long, int[]>();
 
         // D2-03: що перевірити перед перемиканням актуальності кожного періоду — аркуші, які прогін
         // ПЕРЕРАХУВАВ методологіями (за документами), і чи період ще дозволяє запис.
@@ -417,6 +421,7 @@ public sealed partial class RecalculationJob(
                 var methodologyPeriods = request.PeriodKey is { } namedPeriod
                     ? (IReadOnlyList<int>)[namedPeriod]
                     : periods;
+                scopeByDocument[documentId] = [.. periods.Union(methodologyPeriods)];
 
                 // ⛔ RC14 (приймальна №10, P2-4) + RC15 (P2-C): прогін області аркуша чи документа з пропущеними
                 // аркушами стає актуальним для ВСЬОГО документа й періоду, тож результати методологій, яких він
@@ -516,7 +521,8 @@ public sealed partial class RecalculationJob(
                         await runs
                             .CompleteAsync(
                                 run.Id, profile, ct, carryOvers.GetValueOrDefault(period),
-                                token => GuardCompletionAsync(projectId, period, guards, request.ApprovedBy is not null, token))
+                                token => GuardCompletionAsync(
+                                    projectId, period, guards, request.ApprovedBy is not null, WritesSubmitted(request), token))
                             .ConfigureAwait(false);
                         break;
                     }
@@ -527,6 +533,10 @@ public sealed partial class RecalculationJob(
                     }
                 }
             }
+
+            // ✎ UAT-recalc-ux: журнал аркушів — пропущені затверджені й перераховані подані (журнал змін + повідомлення
+            // задачі). Після перемикання: записується лише те, що справді стало актуальним.
+            var sheetLog = await SheetLogAsync(request, scopeByDocument, ct).ConfigureAwait(false);
 
             // L-4: «No matching rule … row N». Не помилка й не відмова - решта рядків уже
             // пораховано; це слід у повідомленні задачі, щоб рядок без правила не зник мовчки.
@@ -551,6 +561,24 @@ public sealed partial class RecalculationJob(
             {
                 await progress
                     .ReportAsync(100, JobProgressMessageCodec.Encode(UnpublishedMethodologyEnvelope(skippedUnpublished)), ct)
+                    .ConfigureAwait(false);
+            }
+
+            // ✎ UAT-recalc-ux: підсумок журналу аркушів — ОСТАННІМ повідомленням задачі (сторінка задач показує його);
+            // поіменний перелік — у журналі змін (`SheetRecalc`).
+            if (sheetLog.Skipped + sheetLog.RecalculatedSubmitted > 0)
+            {
+                await progress
+                    .ReportAsync(
+                        100,
+                        JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
+                            "jobs.recalcSheetLog",
+                            new Dictionary<string, string>(StringComparer.Ordinal)
+                            {
+                                ["skipped"] = sheetLog.Skipped.ToString(CultureInfo.InvariantCulture),
+                                ["recalculatedSubmitted"] = sheetLog.RecalculatedSubmitted.ToString(CultureInfo.InvariantCulture),
+                            })),
+                        ct)
                     .ConfigureAwait(false);
             }
         }
@@ -715,6 +743,7 @@ public sealed partial class RecalculationJob(
         CancellationToken ct)
     {
         var documentIds = await ProjectDocumentIdsAsync(request.ProjectId, ct).ConfigureAwait(false);
+        var enqueued = 0;
 
         foreach (var documentId in documentIds)
         {
@@ -724,6 +753,16 @@ public sealed partial class RecalculationJob(
                 DocumentId = documentId,
                 FanOutParentJobId = (progress as IJobIdentity)?.JobId,
             };
+
+            // ✎ UAT-recalc-ux: документ, у якому за названий період подано/затверджено ВСЕ, не ставиться — дочірня
+            // задача відмовила б 4221 і зробила б перерахунок проєкту «з помилками», хоча пропуск поданих аркушів —
+            // штатна поведінка. Те саме рішення, що й на шляху запису (`RefusedPeriodsAsync`).
+            if (child.PeriodKey is not null && await FullySubmittedAsync(child, ct).ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            enqueued++;
 
             var target = child.PeriodKey is { } period
                 ? Ecr.Application.Documents.RecalculateDocumentHandler.TargetOf(documentId, new PeriodKey(period))
@@ -741,10 +780,106 @@ public sealed partial class RecalculationJob(
                     "jobs.recalcFannedOut",
                     new Dictionary<string, string>(StringComparer.Ordinal)
                     {
-                        ["count"] = documentIds.Count.ToString(CultureInfo.InvariantCulture),
+                        ["count"] = enqueued.ToString(CultureInfo.InvariantCulture),
                     })),
                 ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ UAT-recalc-ux (слово людини 07.11: «це також має логуватися»): пише в журнал змін кожен пропущений
+    /// затверджений аркуш і кожен перерахований поданий (по запису на аркуш × період, <c>SheetRecalc</c>).
+    /// </summary>
+    /// <param name="request">Завдання.</param>
+    /// <param name="scopeByDocument">Періоди, які прогін рахував, за документами.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки пропущено і скільки поданих перераховано.</returns>
+    /// <remarks>
+    /// ⚠ Запис на АРКУШ, а не один на задачу: позначку «перераховано після подання» читає картка документа саме за
+    /// аркушем і періодом (<c>RecalculationSkips.AuditCorrelation</c>), і саме цей запис пізніший за <c>SubmittedAt</c>.
+    /// Аркуш області (<c>SheetDefId</c>) обмежує обидва переліки цим аркушем.
+    /// </remarks>
+    private async Task<(int Skipped, int RecalculatedSubmitted)> SheetLogAsync(
+        RecalculationRequest request, Dictionary<long, int[]> scopeByDocument, CancellationToken ct)
+    {
+        var writeSubmitted = WritesSubmitted(request);
+        var entries = new List<StructureChangeRecord>();
+        var skipped = 0;
+        var recalculated = 0;
+        var now = clock.UtcNow;
+
+        foreach (var (documentId, periods) in scopeByDocument.Where(pair => pair.Value.Length > 0))
+        {
+            var rows = await db.ApprovalStates
+                .AsNoTracking()
+                .OriginalOnly()
+                .Where(a => a.DocumentId == documentId && periods.Contains(a.PeriodKey)
+                            && (request.SheetDefId == null || a.SheetDefId == request.SheetDefId)
+                            && (a.Status == Domain.Enums.DocumentStatus.Approved
+                                || (writeSubmitted && a.Status == Domain.Enums.DocumentStatus.Submitted)))
+                .Join(db.SheetDefs, a => a.SheetDefId, s => s.Id, (a, s) => new { a.SheetDefId, a.PeriodKey, a.Status, s.TemplateVersionId, s.Code })
+                .OrderBy(r => r.PeriodKey).ThenBy(r => r.SheetDefId)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            foreach (var row in rows)
+            {
+                var approvedRow = row.Status == Domain.Enums.DocumentStatus.Approved;
+                if (approvedRow)
+                {
+                    skipped++;
+                }
+                else
+                {
+                    recalculated++;
+                }
+
+                entries.Add(new StructureChangeRecord(
+                    now,
+                    TemplateVersionId: row.TemplateVersionId,
+                    EntityType: RecalculationSkips.AuditEntityType,
+                    EntityId: row.SheetDefId,
+                    ChangeClass: Domain.Enums.ChangeClass.Safe,
+                    Operation: approvedRow ? RecalculationSkips.AuditSkippedApproved : RecalculationSkips.AuditRecalculatedAfterSubmission,
+                    OldJson: null,
+                    NewJson: JsonSerializer.Serialize(new
+                    {
+                        documentId,
+                        sheetDefId = row.SheetDefId,
+                        sheetCode = row.Code,
+                        periodKey = row.PeriodKey,
+                        state = row.Status.ToString(),
+                        reason = approvedRow ? "approved" : "recalculatedAfterSubmission",
+                    }),
+                    ChangeReason: approvedRow ? "recalc-skipped-approved" : "recalc-after-submission",
+                    ChangedByUserId: request.TriggeredByUserId ?? 0,
+                    CorrelationId: RecalculationSkips.AuditCorrelation(documentId, row.SheetDefId, row.PeriodKey)));
+            }
+        }
+
+        if (audit is not null && entries.Count > 0)
+        {
+            await audit.WriteStructureChangesAsync(entries, ct).ConfigureAwait(false);
+        }
+
+        return (skipped, recalculated);
+    }
+
+    /// <summary>Чи в названому періоді документа подано/затверджено все (рахувати нічого).</summary>
+    private async Task<bool> FullySubmittedAsync(RecalculationRequest child, CancellationToken ct)
+    {
+        try
+        {
+            _ = await RefusedPeriodsAsync(child, ct).ConfigureAwait(false);
+            return false;
+        }
+        catch (Ecr.Application.Errors.BusinessRuleException refused)
+            when (refused.Details is { } details
+                  && details.TryGetValue("denial", out var denial)
+                  && denial as string == nameof(RecalculationWriteDenial.SheetsSubmitted))
+        {
+            return true;
+        }
     }
 
     /// <summary>Повний перерахунок формул шаблону для документа й періодів завдання.</summary>
@@ -778,7 +913,8 @@ public sealed partial class RecalculationJob(
 
             written += await formulas
                 .RecalculateAllAsync(
-                    request.DocumentId, new PeriodKey(period), ct, request.SheetDefId, changed)
+                    request.DocumentId, new PeriodKey(period), ct, request.SheetDefId, changed,
+                    writeSubmitted: WritesSubmitted(request))
                 .ConfigureAwait(false);
         }
 
@@ -1093,6 +1229,7 @@ public sealed partial class RecalculationJob(
     /// <param name="period">Період прогону.</param>
     /// <param name="guards">Перераховані аркуші за документами.</param>
     /// <param name="approved">Завдання несе погодження S1 (ФВ-9.7).</param>
+    /// <param name="writeSubmitted">✎ UAT-recalc-ux: ручний прогін — поданий аркуш перемикати можна.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="ConcurrencyConflictException">
     /// <c>ECR-CALC-0409</c> <c>recalcStateChanged</c>: аркуш подано/затверджено або період
@@ -1112,7 +1249,7 @@ public sealed partial class RecalculationJob(
     /// </para>
     /// </remarks>
     private async Task GuardCompletionAsync(
-        int projectId, int period, IReadOnlyList<SheetGuard> guards, bool approved, CancellationToken ct)
+        int projectId, int period, IReadOnlyList<SheetGuard> guards, bool approved, bool writeSubmitted, CancellationToken ct)
     {
         // ⛔ X6-01: стан — ЕФЕКТИВНИЙ (F-08), а не збережений: прогін, що завершується між
         // `ComputedCloseAt` і найближчою годинною задачею станів, інакше перемикав актуальність
@@ -1154,7 +1291,10 @@ public sealed partial class RecalculationJob(
                         .ConfigureAwait(false) ?? Domain.Enums.DocumentStatus.Draft;
                 holdsAny = true;
 
-                if (status is Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved)
+                // ✎ UAT-recalc-ux: ручний прогін (`writeSubmitted`) має право перемкнути й поданий аркуш; затверджений —
+                // ніколи.
+                if (status is Domain.Enums.DocumentStatus.Approved
+                    || (status is Domain.Enums.DocumentStatus.Submitted && !writeSubmitted))
                 {
                     throw StateChanged(guard.DocumentId, period, sheetDefId);
                 }
@@ -1286,7 +1426,17 @@ public sealed partial class RecalculationJob(
         return refused;
     }
 
-    /// <summary>Подані/затверджені аркуші документа за періодами (ФВ-9.17).</summary>
+    /// <summary>
+    /// ✎ UAT-recalc-ux: чи цей прогін ПЕРЕРАХОВУЄ подані аркуші — так, коли його запустила людина
+    /// (<c>TriggeredByUserId</c> заданий: кнопка проєкту чи документа, і дочірні задачі розкладу проєкту).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Нічний розклад і автотригери (<c>TriggeredByUserId = null</c>) поданих аркушів не чіпають: інакше кожна ніч
+    /// ставила б позначку «перераховано після подання» на всі подані аркуші, і позначка перестала б щось означати.
+    /// </remarks>
+    internal static bool WritesSubmitted(RecalculationRequest request) => request.TriggeredByUserId is > 0;
+
+    /// <summary>Аркуші документа за періодами, які прогін ПРОПУСКАЄ: затверджені, а без людини — і подані (ФВ-9.17).</summary>
     /// <param name="request">Завдання.</param>
     /// <param name="periodKey">Період; <c>null</c> — усі.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -1295,12 +1445,15 @@ public sealed partial class RecalculationJob(
         RecalculationRequest request, int? periodKey, CancellationToken ct)
     {
         // RS: стан копії не робить поданим аркуш-оригінал; копії мають власні ворота у фазі формул (EnterSheetsAsync).
+        // ✎ UAT-recalc-ux: ручний перерахунок (людина натиснула кнопку) пропускає лише ЗАТВЕРДЖЕНІ аркуші; поданий
+        // перераховується (`WritesSubmitted`). Автоматичні маршрути (розклад, тригери) — як і раніше, обидва стани.
+        var writeSubmitted = WritesSubmitted(request);
         var rows = await db.ApprovalStates
             .AsNoTracking()
             .OriginalOnly()
             .Where(s => s.DocumentId == request.DocumentId
                         && (periodKey == null || s.PeriodKey == periodKey)
-                        && (s.Status == Domain.Enums.DocumentStatus.Submitted
+                        && ((s.Status == Domain.Enums.DocumentStatus.Submitted && !writeSubmitted)
                             || s.Status == Domain.Enums.DocumentStatus.Approved))
             .Select(s => new { s.PeriodKey, s.SheetDefId })
             .ToListAsync(ct)

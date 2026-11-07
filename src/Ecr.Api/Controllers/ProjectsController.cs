@@ -338,6 +338,7 @@ public sealed class ProjectsController(
     /// </remarks>
     [HttpPost("{id:int}/recalculate")]
     [ProducesResponseType<Contracts.ProjectRecalculationAcceptedResponse>(StatusCodes.Status202Accepted)]
+    [ProducesResponseType<Contracts.ProjectRecalculationAcceptedResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Recalculate(
         int id, [FromBody] ProjectRecalculationRequest request, CancellationToken ct)
@@ -347,11 +348,15 @@ public sealed class ProjectsController(
         // ⛔ Аудит безпеки S1: погоджувача з тіла запиту тут більше немає —
         // лише ідентифікатор погодження, яке друга людина підтвердила власною
         // сесією (`POST …/recalculation-approvals/{id}/confirm`).
-        var jobId = await recalculate
-            .HandleAsync(id, request.PeriodKey, request.ApprovalId, ct)
+        var outcome = await recalculate
+            .RequestAsync(id, request.PeriodKey, request.ApprovalId, ct)
             .ConfigureAwait(false);
 
-        return Accepted(new Contracts.ProjectRecalculationAcceptedResponse(jobId, id, request.PeriodKey));
+        var body = new Contracts.ProjectRecalculationAcceptedResponse(
+            outcome.JobId, id, request.PeriodKey, outcome.Skipped, outcome.SkippedTruncated, outcome.NothingToRecalculate);
+
+        // ✎ UAT-recalc-ux: «рахувати нічого» — 200 без задачі, з переліком пропущених.
+        return outcome.NothingToRecalculate ? Ok(body) : Accepted(body);
     }
 
     /// <summary>Календар періодів проєкту. Право <c>Document.View</c>.</summary>

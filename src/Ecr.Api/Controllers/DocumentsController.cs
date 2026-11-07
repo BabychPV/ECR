@@ -361,6 +361,7 @@ public sealed class DocumentsController(
     [HttpPost("{id:long}/recalculate")]
     [Ecr.Api.Security.DocumentRecalculateQuota]
     [ProducesResponseType<Contracts.RecalculationAcceptedResponse>(StatusCodes.Status202Accepted)]
+    [ProducesResponseType<Contracts.RecalculationAcceptedResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Recalculate(
         long id, [FromBody] RecalculateDocumentRequest request, CancellationToken ct)
@@ -370,11 +371,15 @@ public sealed class DocumentsController(
         ArgumentNullException.ThrowIfNull(request);
 
         var periodKey = request.PeriodKey;
-        var jobId = await recalculate
-            .HandleAsync(id, PeriodKey.Parse(periodKey), request.SheetDefId, ct)
+        var outcome = await recalculate
+            .RequestAsync(id, PeriodKey.Parse(periodKey), request.SheetDefId, ct)
             .ConfigureAwait(false);
 
-        return Accepted(new Contracts.RecalculationAcceptedResponse(jobId, id, periodKey));
+        var body = new Contracts.RecalculationAcceptedResponse(
+            outcome.JobId, id, periodKey, outcome.Skipped, outcome.SkippedTruncated, outcome.NothingToRecalculate);
+
+        // ✎ UAT-recalc-ux: «рахувати нічого» (подано все) — 200 без задачі, з переліком пропущених.
+        return outcome.NothingToRecalculate ? Ok(body) : Accepted(body);
     }
 
     /// <summary>

@@ -125,6 +125,29 @@ public interface IWorkflowStore
     public Task<bool> HasSubmittedSheetsAsync(int projectId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
+    /// UAT-recalc-ux: ЗАТВЕРДЖЕНІ аркуші-оригінали проєкту чи документа — те, що ручний перерахунок пропускає (слово
+    /// людини 07.11: «тільки погоджені не мають перераховуватися»; поданий аркуш перераховується й позначається).
+    /// </summary>
+    /// <param name="projectId">Проєкт; <c>null</c> — за документом.</param>
+    /// <param name="documentId">Документ; <c>null</c> — усі документи проєкту.</param>
+    /// <param name="periodKey">Період; <c>null</c> — усі.</param>
+    /// <param name="take">Скільки рядків узяти (стеля переліку + 1).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>За документом, періодом і порядком аркуша.</returns>
+    public Task<IReadOnlyList<Calculations.SkippedSheet>> ListApprovedSheetsAsync(
+        int? projectId, long? documentId, int? periodKey, int take, CancellationToken ct);
+
+    /// <summary>
+    /// UAT-recalc-ux: чи в проєкті за період НЕМАЄ чого перераховувати — є документи, і в кожного всі аркуші складу
+    /// затверджені.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>Документ без рядків складу (<c>doc.DocumentSheet</c>) вважається таким, що є що рахувати.</remarks>
+    public Task<bool> AllSheetsApprovedAsync(int projectId, int periodKey, CancellationToken ct);
+
+    /// <summary>
     /// Маршрут погодження для проєкту і версії шаблону — найконкретніший із
     /// придатних (<c>ФВ-5.17</c>).
     /// </summary>

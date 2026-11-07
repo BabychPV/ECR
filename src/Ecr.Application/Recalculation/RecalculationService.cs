@@ -333,6 +333,7 @@ public sealed class RecalculationService(
     /// бо формула аркуша має право читати сусідній (Q-331, `RecalculationJob`).
     /// </param>
     /// <param name="changedColumns">WW-03: куди скласти змінені колонки; <c>null</c> — не збирати.</param>
+    /// <param name="writeSubmitted">✎ UAT-recalc-ux: писати й ПОДАНІ аркуші (ручний перерахунок, <c>RecalculationJob.WritesSubmitted</c>); затверджені — ніколи.</param>
     /// <returns>Скільки комірок перераховано.</returns>
     /// <remarks>
     /// ⛔ Окремий метод, а НЕ прапорець на <see cref="RecalculateAsync"/>.
@@ -357,8 +358,8 @@ public sealed class RecalculationService(
     /// </remarks>
     public Task<int> RecalculateAllAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct, int? sheetDefId = null,
-        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null)
-        => RecalculateDocumentAsync(documentId, periodKey, sheetDefId, heldSheet: null, ScopeFilter.All, ct, changedColumns);
+        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null, bool writeSubmitted = false)
+        => RecalculateDocumentAsync(documentId, periodKey, sheetDefId, heldSheet: null, ScopeFilter.All, ct, changedColumns, writeSubmitted);
 
     /// <inheritdoc />
     /// <remarks>
@@ -378,7 +379,7 @@ public sealed class RecalculationService(
     private async Task<int> RecalculateDocumentAsync(
         long documentId, PeriodKey periodKey, int? sheetDefId, (int SheetDefId, long? CopyId)? heldSheet,
         ScopeFilter scopes, CancellationToken ct,
-        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null)
+        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null, bool writeSubmitted = false)
     {
         var instances = await rowStore
             .GetTableInstancesAsync(documentId, periodKey, ct)
@@ -397,7 +398,7 @@ public sealed class RecalculationService(
         foreach (var (representative, _) in ScopeRepresentatives(instances, scopes))
         {
             written += await RunAsync(
-                    representative, dirty: null, ct, sheetDefId, heldSheet, instances, changedColumns)
+                    representative, dirty: null, ct, sheetDefId, heldSheet, instances, changedColumns, writeSubmitted: writeSubmitted)
                 .ConfigureAwait(false);
         }
 
@@ -433,6 +434,7 @@ public sealed class RecalculationService(
     /// <param name="approverEditSheets">D-442: подані аркуші правки погоджувача (лише інкрементний вхід).</param>
     /// <param name="inputColumns">Q-17: куди скласти колонки насіння (введені, не похідні); <c>null</c> — не збирати.</param>
     /// <param name="shared">L2: спільні читання проходу (екземпляри, залежності); <c>null</c> — читати напряму.</param>
+    /// <param name="writeSubmitted">✎ UAT-recalc-ux: писати й ПОДАНІ аркуші (ручний перерахунок, <c>RecalculationJob.WritesSubmitted</c>); затверджені — ніколи.</param>
     private async Task<int> RunAsync(
         TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null,
         (int SheetDefId, long? CopyId)? heldSheet = null, IReadOnlyList<TableInstanceRef>? knownInstances = null,
@@ -440,7 +442,7 @@ public sealed class RecalculationService(
         IReadOnlyCollection<CrossPeriodSource>? crossPeriodSources = null,
         IReadOnlySet<int>? approverEditSheets = null,
         HashSet<(int TableDefId, int ColumnDefId)>? inputColumns = null,
-        RecalculationSharedLoad? shared = null)
+        RecalculationSharedLoad? shared = null, bool writeSubmitted = false)
     {
         var periodKey = new PeriodKey(instance.PeriodKey);
 
@@ -1038,7 +1040,7 @@ public sealed class RecalculationService(
                 instance.DocumentId);
 
             var writable = await EnterSheetsAsync(
-                    instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheet, token, approverEditSheets)
+                    instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheet, token, approverEditSheets, writeSubmitted)
                 .ConfigureAwait(false);
 
             // ⛔ O2 (ФВ-9.8, замір I2). Доти тіло нижче виконувалося НА КОЖЕН
@@ -1269,10 +1271,11 @@ public sealed class RecalculationService(
     /// записаних входів. <c>Approved</c> не пишеться ніколи (затвердження бере ВИНЯТКОВЕ блокування й
     /// перераховує аркуш саме, <c>ApprovalSnapshotRefresh</c>); інші подані аркуші — так само пропускаються.
     /// </param>
+    /// <param name="writeSubmitted">✎ UAT-recalc-ux: писати й ПОДАНІ аркуші (ручний перерахунок, <c>RecalculationJob.WritesSubmitted</c>); затверджені — ніколи.</param>
     private async Task<IReadOnlySet<(int SheetDefId, long? CopyId)>> EnterSheetsAsync(
         long documentId, PeriodKey periodKey, IEnumerable<(int SheetDefId, long? CopyId)> sheets,
         (int SheetDefId, long? CopyId)? heldSheet, CancellationToken ct,
-        IReadOnlySet<int>? approverEditSheets = null)
+        IReadOnlySet<int>? approverEditSheets = null, bool writeSubmitted = false)
     {
         var writable = new HashSet<(int SheetDefId, long? CopyId)>();
         var holdsAny = false;
@@ -1300,8 +1303,10 @@ public sealed class RecalculationService(
             };
             holdsAny = true;
 
+            // ✎ UAT-recalc-ux (слово людини 07.11: «тільки погоджені не мають перераховуватися»): ЯВНИЙ повний
+            // перерахунок (`RecalculationJob`, `writeSubmitted`) пише й поданий аркуш; затверджений — ніколи.
             if (status is not (Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved)
-                || (status == Domain.Enums.DocumentStatus.Submitted && approverEditSheets?.Contains(sheetDefId) == true))
+                || (status == Domain.Enums.DocumentStatus.Submitted && (writeSubmitted || approverEditSheets?.Contains(sheetDefId) == true)))
             {
                 writable.Add(sheet);
             }

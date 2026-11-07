@@ -6084,6 +6084,17 @@ export interface paths {
                 };
             };
             responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecalculationAcceptedResponse"];
+                        "text/json": components["schemas"]["RecalculationAcceptedResponse"];
+                        "text/plain": components["schemas"]["RecalculationAcceptedResponse"];
+                    };
+                };
                 /** @description Accepted */
                 202: {
                     headers: {
@@ -15535,6 +15546,17 @@ export interface paths {
                 };
             };
             responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectRecalculationAcceptedResponse"];
+                        "text/json": components["schemas"]["ProjectRecalculationAcceptedResponse"];
+                        "text/plain": components["schemas"]["ProjectRecalculationAcceptedResponse"];
+                    };
+                };
                 /** @description Accepted */
                 202: {
                     headers: {
@@ -29504,9 +29526,17 @@ export interface components {
             approved: number;
             /**
              * Format: int32
-             * @description Документи, де є аркуш у чернетці (або ще без стану) і жодного відхиленого.
+             * @description ✎ UAT-recalc-ux: документи, де ЖОДЕН видимий аркуш не поданий і не затверджений, і жодного відхиленого (раніше
+             *     сюди входили й частково подані — тепер вони в PartlySubmitted).
              */
             draft: number;
+            /**
+             * Format: int32
+             * @description ✎ UAT-recalc-ux: частина видимих аркушів подана чи затверджена, частина — ні (чернетка або без стану), і жодного
+             *     відхиленого.
+             * @default 0
+             */
+            partlySubmitted: number;
             /**
              * Format: int32
              * @description Хоч один аркуш відхилено.
@@ -29607,6 +29637,15 @@ export interface components {
             code: string;
             /** @description Назва аркуша мовами каталогу. */
             nameL10n: components["schemas"]["LocalizedText"];
+            /**
+             * @description ✎ UAT-recalc-ux (07.11, слово людини: «тільки погоджені не мають перераховуватися»): аркуш у стані
+             *     `Submitted`, який перерахунок змінив ПІСЛЯ останнього подання — погоджувач має знати, що числа зрушили.
+             *     Виводиться з журналу (`aud.StructureChange`, `SheetRecalc/RecalculatedAfterSubmission` пізніше за
+             *     `SubmittedAt`), без окремого стовпця; зникає з повторним поданням або затвердженням. Лише картка документа
+             *     (`GET /documents/{id}`); у переліку — `false`.
+             * @default false
+             */
+            recalculatedAfterSubmission: boolean;
             /** @description Стан робочого процесу; аркуш без рядка стану — `Draft`. */
             state: string;
         };
@@ -34568,7 +34607,10 @@ export interface components {
         /** @description Прийнятий у чергу перерахунок УСЬОГО проєкту (Q-151). */
         ProjectRecalculationAcceptedResponse: {
             /** @description Задача. */
-            jobId: string;
+            jobId: null | string;
+            /** @description У названому періоді затверджено все: задачу НЕ поставлено (JobId — `null`,
+             *     відповідь `200`). */
+            nothingToRecalculate: boolean;
             /**
              * Format: int32
              * @description Період; `null` — повний рік, усі документи проєкту.
@@ -34579,6 +34621,11 @@ export interface components {
              * @description Проєкт.
              */
             projectId: number;
+            /** @description ✎ UAT-recalc-ux: ЗАТВЕРДЖЕНІ аркуші, які перерахунок пропускає (лише видимі читачеві); порожньо — пропусків
+             *     немає. */
+            skipped: components["schemas"]["SkippedSheet"][];
+            /** @description Пропущених більше, ніж у Skipped (стеля 200). */
+            skippedTruncated: boolean;
         };
         /** @description Запит на перерахунок усього проєкту (Q-151). */
         ProjectRecalculationRequest: {
@@ -34927,12 +34974,20 @@ export interface components {
              */
             documentId: number;
             /** @description Задача. */
-            jobId: string;
+            jobId: null | string;
+            /** @description Усе, що просили перерахувати, затверджено: задачу НЕ поставлено (JobId —
+             *     `null`, відповідь `200`), перелік — у Skipped. */
+            nothingToRecalculate: boolean;
             /**
              * Format: int32
              * @description Період; перерахунок завжди адресує пару документ × період.
              */
             periodKey: number;
+            /** @description ✎ UAT-recalc-ux: ЗАТВЕРДЖЕНІ аркуші, які перерахунок пропускає (їхні дані й результати не змінюються,
+             *     ФВ-9.17); подані перераховуються й позначаються. Порожньо — пропусків немає. */
+            skipped: components["schemas"]["SkippedSheet"][];
+            /** @description Пропущених більше, ніж у Skipped (стеля 200). */
+            skippedTruncated: boolean;
         };
         /** @description Погодження перерахунку закритого періоду — як його бачить клієнт. */
         RecalculationApprovalDto: {
@@ -37878,6 +37933,33 @@ export interface components {
              * @description Чиїми правами дивимося.
              */
             simulatedForUserId: number;
+        };
+        /** @description UAT-recalc-ux: аркуш, який перерахунок ПРОПУСТИВ, бо він ЗАТВЕРДЖЕНИЙ (слово людини 07.11: «тільки погоджені не мають перераховуватися»). */
+        SkippedSheet: {
+            /** @description Код документа (`BusinessKey`). */
+            documentCode: string;
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            documentName: null | components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Період (`yyyyMM`).
+             */
+            periodKey: number;
+            /** @description Код аркуша. */
+            sheetCode: string;
+            /**
+             * Format: int32
+             * @description Аркуш.
+             */
+            sheetDefId: number;
+            /** @description Назва аркуша мовами каталогу. */
+            sheetName: components["schemas"]["LocalizedText"];
+            /** @description `Approved`. */
+            state: string;
         };
         /**
          * @description Автентифікація на поштовому сервері.

@@ -323,6 +323,13 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
         public Task<bool> HasSubmittedSheetsAsync(int projectId, PeriodKey periodKey, CancellationToken ct)
             => inner.HasSubmittedSheetsAsync(projectId, periodKey, ct);
 
+        public Task<IReadOnlyList<Ecr.Application.Calculations.SkippedSheet>> ListApprovedSheetsAsync(
+            int? projectId, long? documentId, int? periodKey, int take, CancellationToken ct)
+            => inner.ListApprovedSheetsAsync(projectId, documentId, periodKey, take, ct);
+
+        public Task<bool> AllSheetsApprovedAsync(int projectId, int periodKey, CancellationToken ct)
+            => inner.AllSheetsApprovedAsync(projectId, periodKey, ct);
+
         public Task<Ecr.Domain.Entities.Workflow.ApprovalRoute?> FindRouteAsync(
             int projectId, int templateVersionId, CancellationToken ct)
             => inner.FindRouteAsync(projectId, templateVersionId, ct);

@@ -373,6 +373,137 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// ✎ UAT-recalc-ux (слово людини 07.11: «тільки погоджені не мають перераховуватися … це також має логуватися»):
+    /// ручний перерахунок документа перераховує ПОДАНИЙ аркуш, пише це в журнал змін, і картка документа показує
+    /// позначку «перераховано після подання», доки аркуш не подано знову.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ (локально): <c>WritesSubmitted</c> → <c>false</c> — B лишається 1001, записів журналу й
+    /// позначки немає, червоний; прибрати <c>c.ChangedAt &gt; a.SubmittedAt</c> у позначці — повторне подання її не
+    /// знімає, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Поданий_аркуш_перераховується_вручну_пишеться_в_журнал_і_позначається()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+
+        await SubmitOnlyAsync(arranged, arranged.SecondSheetId, Now.AddMinutes(-5));
+
+        await using (var auditDb = arranged.Builder.CreateContext())
+        {
+            await RunJobAsync(
+                arranged, SheetRequest(arranged, sheetDefId: null), label: 2_000m, audit: new AuditWriter(auditDb));
+        }
+
+        // Чернетковий A і поданий B перераховано.
+        Assert.Equal(["A|2001", "B|2001"], await ShapeAsync(arranged));
+        Assert.Equal(1, await SheetLogCountAsync(arranged, arranged.SecondSheetId, RecalculationSkips.AuditRecalculatedAfterSubmission));
+        Assert.Equal(0, await SheetLogCountAsync(arranged, arranged.Document.SheetDefId, RecalculationSkips.AuditRecalculatedAfterSubmission));
+
+        Assert.Equal("-,marked", await MarksAsync(arranged));
+
+        // Повторне подання (пізніше за запис журналу) знімає позначку.
+        await ResubmitAsync(arranged, arranged.SecondSheetId, Now.AddMinutes(5));
+        Assert.Equal("-,-", await MarksAsync(arranged));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Затверджений_аркуш_не_перераховується_і_пишеться_в_журнал_як_пропущений()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+        await SubmitSecondSheetAsync(arranged);
+
+        await using (var auditDb = arranged.Builder.CreateContext())
+        {
+            await RunJobAsync(
+                arranged, SheetRequest(arranged, sheetDefId: null), label: 2_000m, audit: new AuditWriter(auditDb));
+        }
+
+        // Інший аркуш ТОГО САМОГО документа перераховано, затверджений — ні (значення й результат від R1).
+        Assert.Equal(["A|2001", "B|1001"], await ShapeAsync(arranged));
+        Assert.Equal(1, await SheetLogCountAsync(arranged, arranged.SecondSheetId, RecalculationSkips.AuditSkippedApproved));
+        Assert.Equal("-,-", await MarksAsync(arranged));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Автоматичний_прогін_без_людини_поданого_аркуша_не_чіпає()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+        await SubmitOnlyAsync(arranged, arranged.SecondSheetId, Now.AddMinutes(-5));
+
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null) with { TriggeredByUserId = null }, label: 2_000m);
+
+        Assert.Equal(["A|2001", "B|1001"], await ShapeAsync(arranged));
+    }
+
+    private static async Task SubmitOnlyAsync(Arranged arranged, int sheetDefId, DateTime at)
+    {
+        await using var db = arranged.Builder.CreateContext();
+        var state = new ApprovalState(arranged.Document.DocumentId, sheetDefId, arranged.Document.PeriodKey.Value);
+        state.Submit(userId: 5, at);
+        db.ApprovalStates.Add(state);
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task ResubmitAsync(Arranged arranged, int sheetDefId, DateTime at)
+    {
+        await using var db = arranged.Builder.CreateContext();
+        await db.Database.ExecuteSqlAsync($"""
+            UPDATE wf.ApprovalState SET SubmittedAt = {at}
+             WHERE DocumentId = {arranged.Document.DocumentId} AND SheetDefId = {sheetDefId}
+               AND PeriodKey = {arranged.Document.PeriodKey.Value} AND SheetCopyId IS NULL
+            """);
+    }
+
+    private static async Task<int> SheetLogCountAsync(Arranged arranged, int sheetDefId, string operation)
+    {
+        await using var db = arranged.Builder.CreateContext();
+        var correlation = RecalculationSkips.AuditCorrelation(
+            arranged.Document.DocumentId, sheetDefId, arranged.Document.PeriodKey.Value);
+        var entityType = RecalculationSkips.AuditEntityType;
+
+        return await db.Database
+            .SqlQuery<int>($"""
+                SELECT COUNT(*) AS Value FROM aud.StructureChange
+                 WHERE EntityType = {entityType} AND Operation = {operation} AND CorrelationId = {correlation}
+                """)
+            .SingleAsync();
+    }
+
+    /// <summary>Позначка «перераховано після подання» на картці: [перший аркуш, другий аркуш].</summary>
+    private static async Task<string> MarksAsync(Arranged arranged)
+    {
+        await using var db = arranged.Builder.CreateContext();
+
+        // Склад документа (картка показує стан аркушів складу); будівник документа його не створює.
+        if (!await db.DocumentSheets.AnyAsync(s => s.DocumentId == arranged.Document.DocumentId))
+        {
+            db.DocumentSheets.Add(new DocumentSheet(arranged.Document.DocumentId, arranged.Document.SheetDefId));
+            db.DocumentSheets.Add(new DocumentSheet(arranged.Document.DocumentId, arranged.SecondSheetId));
+            await db.SaveChangesAsync();
+        }
+
+        var card = await new DocumentStore(db).FindAsync(
+            arranged.Document.DocumentId, new PeriodKeyFilter(arranged.Document.PeriodKey.Value), CancellationToken.None);
+        var sheets = Assert.IsType<DocumentSummary>(card).Sheets ?? [];
+
+        return string.Join(',', sheets.OrderBy(s => s.Code.StartsWith("SHEETRC14", StringComparison.Ordinal) ? 1 : 0)
+            .Select(s => s.RecalculatedAfterSubmission ? "marked" : "-"));
+    }
+
+    /// <summary>
     /// Фейк воріт аркуша: перший аркуш береться з очікуванням як чернетка, другий без черги
     /// відмовляє «аркуш подається» перші <paramref name="busyTimes"/> разів.
     /// </summary>
@@ -512,6 +643,8 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
         var state = new ApprovalState(
             arranged.Document.DocumentId, sheetDefId, arranged.Document.PeriodKey.Value);
         state.Submit(userId: 5, Now);
+        // ✎ UAT-recalc-ux: ручний перерахунок пропускає лише ЗАТВЕРДЖЕНИЙ аркуш (поданий перераховується).
+        state.Approve(userId: 6, Now);
         db.ApprovalStates.Add(state);
         await db.SaveChangesAsync();
     }
@@ -521,7 +654,7 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
 
     private static async Task<WritingRunner> RunJobAsync(
         Arranged arranged, RecalculationRequest request, decimal label, Func<Task>? during = null,
-        ISheetEditGate? gate = null)
+        ISheetEditGate? gate = null, IAuditWriter? audit = null)
     {
         await using var db = arranged.Builder.CreateContext();
         var clock = new TestClock(Now);
@@ -533,7 +666,8 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
             RunHandler(db, clock),
             FormulaService(),
             clock,
-            sheetGate: gate)
+            sheetGate: gate,
+            audit: audit)
         {
             CompletionBusyDelay = TimeSpan.Zero,
         };

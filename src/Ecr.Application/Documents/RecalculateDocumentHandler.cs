@@ -74,6 +74,29 @@ public sealed class RecalculateDocumentHandler(
     public async Task<string> HandleAsync(
         long documentId, PeriodKey periodKey, int? sheetDefId, CancellationToken ct)
     {
+        var outcome = await RequestAsync(documentId, periodKey, sheetDefId, ct).ConfigureAwait(false);
+
+        // ⚠ Старий виклик (без переліку): «рахувати нічого» лишається відмовою 4221, як і до UAT-recalc-ux.
+        return outcome.JobId
+            ?? throw Calculations.RecalculationWritePolicy.Reject(
+                Calculations.RecalculationWriteDenial.SheetsSubmitted, periodKey.Value, documentId);
+    }
+
+    /// <summary>
+    /// UAT-recalc-ux: ставить перерахунок у чергу, пропускаючи подані/затверджені аркуші, і повертає їх перелік.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetDefId">Аркуш; <c>null</c> — увесь документ.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Задача і пропущені аркуші; <c>JobId = null</c> — подано/затверджено все, що просили перерахувати (аркуш
+    /// області чи всі аркуші складу): не помилка, а відповідь із переліком.
+    /// </returns>
+    /// <exception cref="Errors.BusinessRuleException"><c>ECR-CALC-4221</c> <c>periodClosed</c> — період закритий.</exception>
+    public async Task<Calculations.RecalculationRequestOutcome> RequestAsync(
+        long documentId, PeriodKey periodKey, int? sheetDefId, CancellationToken ct)
+    {
         var profile = await Security.PermissionCheck
             .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
@@ -176,6 +199,17 @@ public sealed class RecalculateDocumentHandler(
             .FindPeriodStateAsync(documentId, periodKey.Value, ct)
             .ConfigureAwait(false);
 
+        // ✎ UAT-recalc-ux: перелік пропущених — подані/затверджені аркуші ОБЛАСТІ (аркуш або склад документа). Читач
+        // тут бачить усі аркуші області (перевірки видимості вище), тож перелік нічого схованого не називає.
+        var skippedRows = await workflow
+            .ListApprovedSheetsAsync(projectId: null, documentId, periodKey.Value, Calculations.RecalculationSkips.MaxListed + 1, ct)
+            .ConfigureAwait(false);
+        var (skipped, truncated) = Calculations.RecalculationSkips.Cap(
+            [.. skippedRows.Where(r => sheetDefId is { } only
+                ? r.SheetDefId == only
+                : included is not { Count: > 0 } || included.Contains(r.SheetDefId))]);
+        var nothing = false;
+
         if (state is { } periodState)
         {
             var sheets = await workflow
@@ -193,10 +227,11 @@ public sealed class RecalculateDocumentHandler(
             // не відхиляє цілий запит; відмова (той самий 4221) — коли подані/затверджені ВСІ аркуші складу
             // документа (рахувати нічого). Стан має лише аркуш, який хоч раз подавали, тож склад — з порту.
             // Задача (`RecalculationJob.RefusedPeriodsAsync`) перевіряє те саме ще раз на своєму шляху запису.
+            // ✎ UAT-recalc-ux (слово людини 07.11: «тільки погоджені не мають перераховуватися»): пропускається лише
+            // ЗАТВЕРДЖЕНИЙ аркуш; поданий перераховується (задача пише його журналом і позначкою для погоджувача).
             bool IsSubmitted(int sheetId) => sheets.Any(s =>
                 s.SheetDefId == sheetId
-                && s.Status is Domain.Enums.DocumentStatus.Submitted
-                            or Domain.Enums.DocumentStatus.Approved);
+                && s.Status is Domain.Enums.DocumentStatus.Approved);
 
             bool submitted;
             if (sheetDefId is { } scopeSheetId)
@@ -212,13 +247,22 @@ public sealed class RecalculateDocumentHandler(
                     : sheets.Any(s => IsSubmitted(s.SheetDefId));
             }
 
+            // ✎ UAT-recalc-ux: закритий період — відмова, як і раніше; «подано все» — не відмова, а відповідь без
+            // задачі з переліком (людина бачить, ЩО подано і куди перейти).
             var denial = Calculations.RecalculationWritePolicy.Check(
-                periodState, submitted, hasClosedPeriodApproval: false);
+                periodState, hasSubmittedSheets: false, hasClosedPeriodApproval: false);
 
             if (denial != Calculations.RecalculationWriteDenial.None)
             {
                 throw Calculations.RecalculationWritePolicy.Reject(denial, periodKey.Value, documentId);
             }
+
+            nothing = submitted;
+        }
+
+        if (nothing)
+        {
+            return new Calculations.RecalculationRequestOutcome(null, skipped, truncated);
         }
 
         // ⛔ Новий перерахунок ВИТІСНЯЄ попередній над тим самим документом і
@@ -261,13 +305,15 @@ public sealed class RecalculateDocumentHandler(
             ? Security.PermissionCheck.IsGrantedIn(profile, PreemptPermission, pid)
             : Security.PermissionCheck.IsGranted(profile, PreemptPermission);
 
-        return mayPreempt
+        var jobId = mayPreempt
             ? await jobs
                 .EnqueueExclusiveAsync<IRecalculationJob>(target, payload, ct, currentUser.UserId)
                 .ConfigureAwait(false)
             : await jobs
                 .EnqueueCoalescedAsync<IRecalculationJob>(target, payload, ct, currentUser.UserId)
                 .ConfigureAwait(false);
+
+        return new Calculations.RecalculationRequestOutcome(jobId, skipped, truncated);
     }
 
     /// <summary>Право, що дає витіснення виконуваного перерахунку того самого документа.</summary>

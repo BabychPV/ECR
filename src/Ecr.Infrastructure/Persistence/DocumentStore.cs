@@ -175,6 +175,7 @@ public sealed class DocumentStore(
             .ConfigureAwait(false);
 
         var sheets = await StatesAsync(documentId, period, ct).ConfigureAwait(false);
+        sheets = await MarkRecalculatedAfterSubmissionAsync(documentId, period, sheets, ct).ConfigureAwait(false);
         var late = await LateEditsBatchAsync([documentId], period, ct).ConfigureAwait(false);
         var included = await IncludedCodesBatchAsync([documentId], period, ct).ConfigureAwait(false);
         // ⛔ Картка одного документа - ВУЗЬКИЙ запит по одному id тією самою плоскою формою, а НЕ карта періоду:
@@ -200,6 +201,54 @@ public sealed class DocumentStore(
             PeriodKind: document.ProjectPeriodKind?.ToString());
     }
 
+
+    /// <summary>
+    /// ✎ UAT-recalc-ux: позначка «перераховано після подання» — поданий аркуш-оригінал, для якого в журналі змін є
+    /// запис <c>SheetRecalc/RecalculatedAfterSubmission</c> ПІЗНІШИЙ за останнє подання (<c>SubmittedAt</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремого стовпця немає навмисно: факт уже лежить у журналі (його пише <c>RecalculationJob</c>), а правило
+    /// зникнення — саме порівняння з <c>SubmittedAt</c>: повторне подання зсуває <c>SubmittedAt</c>, затвердження
+    /// знімає стан <c>Submitted</c>. Запит лише тоді, коли є поданий аркуш (один на картку).
+    /// </remarks>
+    private async Task<IReadOnlyList<DocumentSheetState>> MarkRecalculatedAfterSubmissionAsync(
+        long documentId, PeriodKeyFilter period, IReadOnlyList<DocumentSheetState> sheets, CancellationToken ct)
+    {
+        if (period.Value is not { } periodKey
+            || !sheets.Any(s => string.Equals(s.State, nameof(DocumentStatus.Submitted), StringComparison.Ordinal)))
+        {
+            return sheets;
+        }
+
+        var entityType = Application.Calculations.RecalculationSkips.AuditEntityType;
+        var operation = Application.Calculations.RecalculationSkips.AuditRecalculatedAfterSubmission;
+        var prefix = string.Create(CultureInfo.InvariantCulture, $"sheet-recalc:{documentId}:");
+        var suffix = string.Create(CultureInfo.InvariantCulture, $":{periodKey}");
+
+        var codes = await db.Database
+            .SqlQuery<string>($"""
+                SELECT sd.Code AS Value
+                  FROM wf.ApprovalState a
+                  JOIN cfg.SheetDef sd ON sd.Id = a.SheetDefId
+                 WHERE a.DocumentId = {documentId} AND a.PeriodKey = {periodKey} AND a.SheetCopyId IS NULL
+                   AND a.Status = 1 AND a.SubmittedAt IS NOT NULL
+                   AND EXISTS (SELECT 1
+                                 FROM aud.StructureChange c
+                                WHERE c.EntityType = {entityType} AND c.Operation = {operation}
+                                  AND c.ChangedAt > a.SubmittedAt
+                                  AND c.CorrelationId = CONCAT({prefix}, CAST(a.SheetDefId AS nvarchar(12)), {suffix}))
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (codes.Count == 0)
+        {
+            return sheets;
+        }
+
+        var marked = codes.ToHashSet(StringComparer.Ordinal);
+        return [.. sheets.Select(s => marked.Contains(s.Code) ? s with { RecalculatedAfterSubmission = true } : s)];
+    }
 
     /// <summary>
     /// Коди аркушів складу документів ОДНИМ запитом — для обробника, що відсікає аркуші поза
@@ -291,6 +340,11 @@ public sealed class DocumentStore(
             if (filter.State is { } state && period.Value is { } periodKey)
             {
                 documents = WhereState(documents, state, periodKey, filter.HiddenSheetDefIds, filter.Participation?.HiddenSheets);
+            }
+            else if (filter.PartlySubmitted && period.Value is { } partlyPeriod)
+            {
+                documents = WhereState(
+                    documents, state: null, partlyPeriod, filter.HiddenSheetDefIds, filter.Participation?.HiddenSheets);
             }
 
             // BE-09b: та сама умова, що дає позначку в рядку (`LateEditDocumentIds`),
@@ -1459,9 +1513,13 @@ public sealed class DocumentStore(
     /// аркуш складу без рядка стану — чернетка; хоч один відхилений — Rejected;
     /// Approved — усі аркуші. Інше правило дало б фільтр, що розходиться з цифрою
     /// над таблицею.
+    /// <para>
+    /// ✎ UAT-recalc-ux: <c>state = null</c> — «частково подано»: є поданий/затверджений і є неподаний видимий аркуш,
+    /// жодного відхиленого. <c>Draft</c> — жоден видимий аркуш не поданий і не затверджений.
+    /// </para>
     /// </remarks>
     private IQueryable<Document> WhereState(
-        IQueryable<Document> documents, DocumentStatus state, int periodKey,
+        IQueryable<Document> documents, DocumentStatus? state, int periodKey,
         IReadOnlyCollection<(int ProjectId, int Id)>? hiddenSheetDefIds,
         IReadOnlyCollection<(long DocumentId, int SheetDefId)>? hiddenParticipantSheets)
     {
@@ -1491,13 +1549,17 @@ public sealed class DocumentStore(
         Expression<Func<Document, bool>> draftSheet = d => sheets.Any(s => s.DocumentId == d.Id
             && !states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null)) && a.Status != DocumentStatus.Draft));
 
+        Expression<Func<Document, bool>> sentSheet = d => sheets.Any(s => s.DocumentId == d.Id
+            && states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null))
+                && (a.Status == DocumentStatus.Submitted || a.Status == DocumentStatus.Approved)));
+
         return state switch
         {
             DocumentStatus.Rejected => documents.Where(rejected),
-            DocumentStatus.Draft => documents.Where(Not(rejected))
-                .Where(d => !sheets.Any(s => s.DocumentId == d.Id)
-                            || sheets.Any(s => s.DocumentId == d.Id
-                                && !states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null)) && a.Status != DocumentStatus.Draft))),
+
+            // ✎ UAT-recalc-ux: Draft — ЖОДЕН видимий аркуш не поданий і не затверджений (частково подані — окремо).
+            DocumentStatus.Draft => documents.Where(Not(rejected)).Where(Not(sentSheet)),
+            null => documents.Where(Not(rejected)).Where(draftSheet).Where(sentSheet),
             DocumentStatus.Submitted => documents.Where(Not(rejected)).Where(Not(draftSheet))
                 .Where(d => sheets.Any(s => s.DocumentId == d.Id
                     && states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && (a.SheetCopyId == s.Id || (a.SheetCopyId == null && s.CopyOfId == null)) && a.Status == DocumentStatus.Submitted))),
