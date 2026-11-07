@@ -33,6 +33,7 @@ import {
   type GroupDraft,
   type GroupField,
 } from './groupsModel';
+import { focusAfterDelete, neighbourOf } from './focusAfterDelete';
 import { LocalizedTextarea } from './LocalizedTextarea';
 import { useDirtyDrawerExit } from './useDirtyDrawerExit';
 import { useCreateGroup, useDeleteGroup, useReplaceGroupTypes, useUpdateGroup } from './useGroups';
@@ -235,11 +236,15 @@ export function GroupDrawer({ group, canEdit, onDirtyChange, switchRequested = f
 
   function confirmDelete(): void {
     if (group === null) return;
+    // Сусіда беремо ДО запиту: після видалення рядка в переліку вже немає.
+    const neighbour = neighbourOf(group.code);
     remove.mutate(group.code, {
       onSuccess: () => {
         setConfirmingDelete(false);
         showDone(t('permits.groups.drawer.deleted', { name: groupName(group, lang) }));
         close();
+        // Рядок-відкривач зник: без цього фокус падав на BODY (AU13 P3).
+        focusAfterDelete(group.code, neighbour);
       },
       onError: (error) => {
         setConfirmingDelete(false);
