@@ -454,7 +454,17 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
         />
       )}
       {step === 'file' && (
-        <FileStep draft={draft} onChange={patchDraft} problem={problem} mayEditProfile={mayEditProfile} onEditProfile={editProfile} />
+        <FileStep
+          draft={draft}
+          onChange={(patch) => {
+            patchDraft(patch);
+            // A shown «Choose a workbook» is re-checked against the new choice: a chosen .xlsx clears it.
+            if (problem !== null && 'file' in patch) setProblem(fileStepProblem({ ...draft, ...patch }));
+          }}
+          problem={problem}
+          mayEditProfile={mayEditProfile}
+          onEditProfile={editProfile}
+        />
       )}
       {step === 'mapping' && analysis !== null && (
         <Suspense fallback={<Skeleton height={240} role="status" aria-label={t('common.loading')} />}>

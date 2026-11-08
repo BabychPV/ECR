@@ -171,3 +171,22 @@ describe('Air pass3: a field that matches no table column', () => {
     expect(within(banner).getByText(fill('permits.air.import.unsaved.text', { fields: 'цех' }))).toBeTruthy();
   });
 });
+
+describe('Air pass3 hand pass: the File step', () => {
+  it('«Choose a workbook» shown after Next without a file goes away once a workbook is chosen', async () => {
+    mount();
+    await screen.findByLabelText(new RegExp(text('permits.air.import.region.label')));
+    await pick(text('permits.air.import.region.label'), /^Atyrau/);
+    await pick(text('permits.air.import.area.label'), /^Offshore/);
+    fireEvent.click(button('wizard.next'));
+    await screen.findByRole('heading', { name: text('permits.air.import.step.file') });
+    fireEvent.click(button('permits.air.import.analyse'));
+    expect(await screen.findByText(text('permits.air.import.file.required'))).toBeTruthy();
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    if (input === null) throw new Error('file input');
+    await userEvent.upload(input, xlsx());
+    await waitFor(() => expect(screen.queryByText(text('permits.air.import.file.required'))).toBeNull());
+    expect(api.analyseAirImport).not.toHaveBeenCalled();
+  });
+});
