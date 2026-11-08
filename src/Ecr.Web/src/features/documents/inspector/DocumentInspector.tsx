@@ -282,8 +282,18 @@ export function DocumentInspector({
                 {formatPeriodKey(periodKey) || String(periodKey)}
               </span>
               {shownCell !== null && (
-                <span className="ecr-insp-chip" data-inspector-address="">
-                  {addressChip(shownCell.rowKey, shownCell.columnCode)}
+                // ✎ UAT 08.11 (d5): чип показував «rowKey · columnCode», а в місячних таблицях код колонки — назва
+                // місяця («August»), і чип поруч із заголовком читався як період. Тепер — «Column: <назва>».
+                <span
+                  className="ecr-insp-chip"
+                  data-inspector-address=""
+                  data-inspector-column={shownCell.columnCode}
+                  title={addressChip(shownCell.rowKey, shownCell.columnCode)}
+                >
+                  {addressChip(
+                    shownCell.rowKey,
+                    `${t('inspector.info.column')}: ${shownCell.columnHeader.length > 0 ? shownCell.columnHeader : shownCell.columnCode}`,
+                  )}
                 </span>
               )}
             </h2>

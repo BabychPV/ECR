@@ -80,6 +80,136 @@ test.describe('інспектор документа', () => {
   });
 });
 
+/**
+ * ✎ UAT 08.11, Water Report (рядок «Sea Water Intake», січень 2026): червоний рядок зі знаком «!», штриховка
+ * закритих місяців і «All changes saved» без слова про рядок. Людина: «штриховку прибрати залишити замок»,
+ * «чому строка червона і зі знаками оклику в кутку?», «треба перевірити список issues».
+ *
+ * ⚠ Стан «втрачене посилання» ставить нічна перевірка посилань (`OrphanScanPlan`), а відмову `PeriodClosed` —
+ * календар; API для них немає, і ламати календар спільного стенда не можна. Тому справжню відповідь зрізу першої
+ * таблиці доповнено (`route.fetch` + `fulfill`, як `staleCalculations.spec.ts`): перший рядок — `isOrphaned`, усі
+ * комірки двох перших рядків — `PeriodClosed`. Решта шляху (сітка, інспектор, рядок стану) — справжня.
+ */
+const WaterRow = 'Sea Water Intake (e2e)';
+
+async function openWithWaterLock(page: Page): Promise<{ key: string }> {
+  let target: number | null = null;
+  let firstRowKey = '';
+  await page.route(new RegExp(`/api/v1/documents/${DocumentId}/tables/(\\d+)$`), async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const response = await route.fetch();
+    const body = (await response.json()) as {
+      tableInstanceId: number;
+      columns: { code: string }[];
+      rows: { rowKey: string; label: string | null; isOrphaned: boolean }[];
+      cellPermissions: Record<string, string>;
+    };
+    if (target === null && body.rows.length > 0 && body.columns.length > 0) target = body.tableInstanceId;
+    if (body.tableInstanceId !== target) return route.fulfill({ response, json: body });
+
+    const [first, second] = body.rows;
+    if (first !== undefined) {
+      firstRowKey = first.rowKey;
+      first.isOrphaned = true;
+      first.label = WaterRow;
+    }
+    for (const row of [first, second]) {
+      if (row === undefined) continue;
+      for (const column of body.columns) body.cellPermissions[`${row.rowKey}:${column.code}`] = 'PeriodClosed';
+    }
+
+    return route.fulfill({ response, json: body });
+  });
+
+  await signIn(page);
+  await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
+  const label = page.locator('[data-row-attention]').first();
+  await expect(label).toBeVisible({ timeout: 60_000 });
+
+  return { key: `${String(target)}:${firstRowKey}` };
+}
+
+test.describe('Water lock (UAT 08.11)', () => {
+  test.skip(
+    PeriodKey === '' || DocumentId === '',
+    'ECR_E2E_OPTIONAL: стенда немає, перевіряти нічого. Стенд: tools/e2e-stand.ps1.',
+  );
+
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`Water lock: закрита комірка — замок, без штриховки (${scheme})`, async ({ page }) => {
+      test.slow();
+      await page.emulateMedia({ colorScheme: scheme });
+      await openWithWaterLock(page);
+
+      const locked = page.locator('revo-grid [data-cell-state="readOnly"]').first();
+      await expect(locked).toBeVisible({ timeout: 30_000 });
+      const look = await locked.evaluate((element) => {
+        const lock = getComputedStyle(element, '::after');
+
+        return {
+          background: getComputedStyle(element).backgroundImage,
+          lockContent: lock.content,
+          lockMask: lock.maskImage || lock.getPropertyValue('-webkit-mask-image'),
+        };
+      });
+      expect(look.background, 'штриховка повернулась').not.toContain('repeating-linear-gradient');
+      expect(look.lockContent, 'замок у куті зник').not.toBe('none');
+      expect(look.lockMask).not.toBe('none');
+    });
+  }
+
+  test('Water lock: червоний рядок — причина словами біля підпису', async ({ page }) => {
+    test.slow();
+    await openWithWaterLock(page);
+
+    const label = page.locator('[data-row-attention]').first();
+    await expect(label.locator('.ecr-row-label-text')).toHaveText(WaterRow);
+    const reason = label.locator('.ecr-row-attention-reason');
+    await expect(reason).toBeVisible();
+    await expect(reason).toContainText(/reopen the month to edit/i);
+    await expect(reason).not.toContainText(/separate approval/i);
+  });
+
+  test('Water lock: «!» відкриває Issues на пункті рядка', async ({ page }) => {
+    test.slow();
+    const { key } = await openWithWaterLock(page);
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+
+    await page.locator(`[data-row-attention-open="${key}"]`).click();
+
+    const aside = page.getByRole('complementary');
+    await expect(aside).toHaveAttribute('data-inspector', 'issues');
+    const item = aside.locator(`[data-inspector-attention="${key}"]`);
+    await expect(item).toContainText(WaterRow);
+    await expect(item).toBeFocused();
+    await expect(aside.locator('[data-inspector-locked]').first()).toContainText(/locked/i);
+  });
+
+  test('Water lock: шапка інспектора — період сторінки, комірка — назвою колонки', async ({ page }) => {
+    test.slow();
+    await openWithWaterLock(page);
+    await page.locator('[data-inspector-triggers]').getByRole('button').first().click();
+
+    const aside = page.getByRole('complementary');
+    await expect(aside.locator('[data-inspector-period]')).toHaveAttribute('data-inspector-period', PeriodKey);
+
+    await firstDataCell(page.locator('revo-grid').first()).click();
+    const address = aside.locator('[data-inspector-address]');
+    await expect(address).toBeVisible();
+    // ✎ d5: чип адреси каже, що це КОЛОНКА (її назва), а не період.
+    await expect(address).toHaveAttribute('data-inspector-column', /.+/);
+  });
+
+  test('Water lock: рядок стану — «N rows need attention» поруч зі збереженням', async ({ page }) => {
+    test.slow();
+    await openWithWaterLock(page);
+
+    const state = page.getByTestId('document-save-state');
+    await expect(state).toHaveAttribute('data-row-attention', /^[1-9]\d*$/);
+    await expect(state).toContainText(/\d+ rows? needs? attention/);
+  });
+});
+
 async function signIn(page: Page): Promise<void> {
   await page.goto('/login');
   await expect(page.getByRole('heading').first()).toBeVisible({ timeout: 30_000 });

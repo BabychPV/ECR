@@ -85,7 +85,9 @@ function mockFetch(
               status: 422,
               title: 'Recalculation is not allowed',
               errorCode: 'ECR-CALC-4221',
-              detail: 'Period 202401 has submitted sheets: reopen the period first.',
+              // ✎ UAT 08.11: формулювання каталогу (`CATALOG-en-base.sql`), не старе «reopen the period first».
+              detail:
+                'Period 202401 has submitted sheets: recalculation would change numbers already sent for approval. Return the submitted sheets for edits first.',
               messageKey: 'err.ECR-CALC-4221.sheetsSubmitted',
               period: '202401',
             },
@@ -304,7 +306,7 @@ describe('DocumentPage: застарілі числа методологій', (
       const shown = vi.mocked(notifications.show).mock.calls.map(([o]) => o);
       // ⛔ Мутаційний доказ: покажи «Recalculated»/«queued» на відмову — тут червоне.
       expect(shown.some((o) => o.color === 'statusSuccess')).toBe(false);
-      expect(JSON.stringify(shown.find((o) => o.color === 'statusError'))).toContain('has submitted sheets: reopen the period first');
+      expect(JSON.stringify(shown.find((o) => o.color === 'statusError'))).toContain('Return the submitted sheets for edits first');
       expect(screen.getByTestId(BannerId)).toBeDefined();
     },
     Slow,

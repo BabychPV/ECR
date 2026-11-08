@@ -94,6 +94,9 @@ describe('Гейт 1: другий носій унікальний', () => {
     };
     walk(root);
     expect(offenders).toEqual([]);
+    // Тема не обіцяє штрихування жодному стану: «лише читання» — замок.
+    expect(cellState.readOnly.shape).toBe('lock');
+    expect(NAMES.filter((name) => `${cellState[name].shape} ${cellState[name].marker}`.includes('hatch'))).toEqual([]);
   });
 });
 

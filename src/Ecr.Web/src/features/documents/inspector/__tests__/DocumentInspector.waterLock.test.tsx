@@ -13,6 +13,7 @@ import {
 } from '@/features/grid/rowAttentionStore';
 import { testTheme } from '@/test/render';
 import { DocumentInspector } from '../DocumentInspector';
+import { clearInspectedCell, publishInspectedCell } from '../inspectedCell';
 
 /**
  * ✎ UAT 08.11, Water Report (документ LAND-FULL, аркуш «Water Report», рядок «Sea Water Intake», січень 2026).
@@ -86,6 +87,7 @@ function Harness({ periodKey = 202601, checkedAt = null }: { periodKey?: number;
 afterEach(() => {
   cleanup();
   act(() => resetRowAttentionForTests());
+  act(() => clearInspectedCell());
 });
 
 describe('Water lock: Issues і шапка інспектора (UAT 08.11)', () => {
@@ -138,5 +140,35 @@ describe('Water lock: Issues і шапка інспектора (UAT 08.11)', ()
 
     rerender(<Harness periodKey={202608} />);
     expect(document.querySelector('[data-inspector-period]')?.getAttribute('data-inspector-period')).toBe('202608');
+  });
+
+  // ⛔ Червоне без фіксу: чип був «R7001000 · August» (код колонки місяця) — без «Column», і читався як період.
+  it('d5: чип адреси комірки — назва КОЛОНКИ з позначкою «Column», не голий код місяця', async () => {
+    act(() =>
+      publishInspectedCell({
+        tableInstanceId: 597,
+        periodKey: 202601,
+        rowKey: 'R7001000',
+        rowLabel: 'Sea Water Intake',
+        columnCode: 'August',
+        columnDefId: 7008,
+        columnHeader: 'August',
+        unitSymbol: null,
+        dataType: 'Decimal',
+        scale: 2,
+        isCalculated: false,
+        isReadOnly: true,
+        value: '',
+      }),
+    );
+    render(<Harness periodKey={202601} />);
+    act(() => publishTableAttention(597, January));
+    act(() => requestAttentionFocus('597:R7001000'));
+
+    await waitFor(() => expect(document.querySelector('[data-inspector-address]')).not.toBeNull());
+    const chip = document.querySelector('[data-inspector-address]');
+    expect(chip?.getAttribute('data-inspector-column')).toBe('August');
+    expect(chip?.textContent).toContain('inspector.info.column');
+    expect(chip?.textContent).toContain('R7001000');
   });
 });
