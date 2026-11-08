@@ -58,17 +58,20 @@ test.describe('Projects 08.11', () => {
   test('f1: one «Projects» item in the WORK group, no «Periods» or «Project settings»', async ({ page }) => {
     await signIn(page);
     await page.goto('/');
-    const nav = page.getByRole('navigation', { name: /Main|Головна|Основ/i }).first();
-    await expect(nav.getByRole('link', { name: /^Projects$/ })).toHaveCount(1, { timeout: 60_000 });
-    await expect(nav.getByRole('link', { name: /^Periods$/ })).toHaveCount(0);
-    await expect(nav.getByRole('link', { name: /^Project settings$/ })).toHaveCount(0);
+    // ⚠ Бічне меню (`AppShell.Navbar`) — `<nav>` БЕЗ доступної назви: шукаємо його за пунктом «Documents» (href «/»),
+    // пункти — за адресою (стабільно), а підпис — видимим текстом.
+    await expect(page.locator('nav a[href="/projects"]')).toHaveCount(1, { timeout: 60_000 });
+    const nav = page.locator('nav', { has: page.locator('a[href="/projects"]') });
+    await expect(nav.locator('a[href="/projects"]')).toContainText('Projects');
+    await expect(nav.locator('a[href="/admin/periods"], a[href="/admin/projects"]')).toHaveCount(0);
+    await expect(nav.getByText(/^(Periods|Project settings)$/)).toHaveCount(0);
     // Порядок у групі Work: Documents, Projects, My groups (далі — кампанія, якщо є право).
-    const work = await nav.getByRole('link').allTextContents();
-    const at = (name: string): number => work.findIndex((text) => text.trim() === name);
-    expect(at('Documents')).toBeLessThan(at('Projects'));
-    expect(at('Projects')).toBeLessThan(at('My groups'));
-    // Templates лишається в Configure.
-    expect(at('Projects')).toBeLessThan(at('Templates'));
+    const hrefs = await nav.locator('a').evaluateAll((links) => links.map((link) => link.getAttribute('href') ?? ''));
+    const at = (href: string): number => hrefs.indexOf(href);
+    expect(at('/'), hrefs.join(' ')).toBeLessThan(at('/projects'));
+    expect(at('/projects'), hrefs.join(' ')).toBeLessThan(at('/my-groups'));
+    // Templates лишається в Configure — після групи Work.
+    expect(at('/projects')).toBeLessThan(at('/admin/templates'));
   });
 
   test('f2: /admin/periods and /admin/projects redirect to Projects without an error page', async ({ page }) => {
@@ -183,7 +186,13 @@ test.describe('Projects 08.11', () => {
     await dialog.getByRole('textbox').fill(`E2EPD${String(Date.now())}`);
     await dialog.getByRole('button', { name: /^Clone/ }).click();
     await expect(page).toHaveURL(/\/projects\/\d+\/settings$/, { timeout: 60_000 });
+    // ⚠ Перехід іде переходом React (startTransition): адреса вже нова, а поки чанк вкладки вантажиться, на екрані
+    // ще стара сторінка з посиланнями на ДЖЕРЕЛО клону. Клік тоді вів назад на нього — чекаємо нову вкладку.
+    const cloneId = /\/projects\/(\d+)\/settings/.exec(page.url())?.[1] ?? '';
+    await expect(page.locator('[data-project-section="current-period"]')).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator('[data-project-tab="lifecycle"]')).toHaveAttribute('href', `/projects/${cloneId}/lifecycle`);
     await page.locator('[data-project-tab="lifecycle"]').click();
+    await expect(page).toHaveURL(new RegExp(`/projects/${cloneId}/lifecycle$`));
     await expect(page.getByRole('button', { name: 'Activate project…' })).toBeEnabled({ timeout: 60_000 });
     await expect(page.locator('[data-lifecycle-reason="archive"]')).toContainText('Only active projects can be archived');
 
