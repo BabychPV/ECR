@@ -135,7 +135,7 @@ describe('ProjectSettingsPage: важкі дії проєкту — через �
       respond('Active');
       show();
 
-      await screen.findByRole('button', { name: '⟦periods.archive⟧' });
+      await screen.findByRole('button', { name: '⟦projectSettings.archiveAction⟧' });
       expect(screen.queryByRole('button', { name: '⟦workflow.recalculate⟧' })).toBeNull();
     },
     Slow,
@@ -147,7 +147,7 @@ describe('ProjectSettingsPage: важкі дії проєкту — через �
       respond('Active');
       show();
 
-      const archive = await screen.findByRole('button', { name: '⟦periods.archive⟧' });
+      const archive = await screen.findByRole('button', { name: '⟦projectSettings.archiveAction⟧' });
 
       // ⛔ Мутація «повернути `variant="default"`» дає тут `default`.
       expect(archive.getAttribute('data-variant')).toBe('outline');
@@ -168,9 +168,9 @@ describe('ProjectSettingsPage: дії над проєктом — лише з г
       await screen.findByText((_, el) => el?.getAttribute('data-project-section') === 'project');
 
       // ⛔ Мутація «лише право, без гранта» (стара умова) показує тут «Archive»/«Clone».
-      expect(screen.queryByRole('button', { name: '⟦periods.archive⟧' })).toBeNull();
-      expect(screen.queryByRole('button', { name: '⟦periods.clone⟧' })).toBeNull();
-      expect(screen.queryByRole('button', { name: '⟦workflow.route⟧' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '⟦projectSettings.archiveAction⟧' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '⟦projectSettings.cloneAction⟧' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '⟦projectSettings.routeAction⟧' })).toBeNull();
     },
     Slow,
   );
@@ -181,8 +181,29 @@ describe('ProjectSettingsPage: дії над проєктом — лише з г
       respond('Active', 'Manage');
       show();
 
-      expect(await screen.findByRole('button', { name: '⟦periods.archive⟧' })).toBeTruthy();
-      expect(screen.getByRole('button', { name: '⟦periods.clone⟧' })).toBeTruthy();
+      expect(await screen.findByRole('button', { name: '⟦projectSettings.archiveAction⟧' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: '⟦projectSettings.cloneAction⟧' })).toBeTruthy();
+    },
+    Slow,
+  );
+
+  it(
+    '✎ UAT project-settings: кожна дія має рядок опису, пов’язаний через aria-describedby',
+    async () => {
+      respond('Active', 'Manage');
+      show();
+
+      // ⛔ Мутація «прибрати aria-describedby з кнопки» або «не показувати опис» дає тут червоне.
+      for (const [name, description] of [
+        ['⟦projectSettings.cloneAction⟧', '⟦projectSettings.cloneActionDesc⟧'],
+        ['⟦projectSettings.archiveAction⟧', '⟦projectSettings.archiveActionDesc⟧'],
+        ['⟦projectSettings.routeAction⟧', '⟦projectSettings.routeActionDesc⟧'],
+      ] as const) {
+        const button = await screen.findByRole('button', { name });
+        const describedBy = button.getAttribute('aria-describedby') ?? '';
+        expect(describedBy, name).not.toBe('');
+        expect(document.getElementById(describedBy)?.textContent, name).toBe(description);
+      }
     },
     Slow,
   );

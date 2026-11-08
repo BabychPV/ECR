@@ -9,6 +9,7 @@ import { t } from '@/shared/i18n';
 import { jobKindLabel } from '@/features/workflow/jobLabel';
 import { JobAttempt, JobDocumentLink, JobFailure, JobResultLink, JobRetry } from './JobFacts';
 import { isActiveJob, isShownInMyTasks, myTaskMessage } from './myTasks';
+import { MyTasksSection } from './MyTasksSection';
 
 /**
  * Шухляда «My tasks» — перелік ВЛАСНИХ фонових задач із шапки (`UI-07`).
@@ -111,11 +112,12 @@ export function MyTasksDrawer({
         onRetry={onRetry}
       >
         {(list) => (
-          <Stack gap="sm">
+          // ✎ UAT my-tasks-collapse: фонові задачі - такий самий блок, що згортається, як і решта.
+          <MyTasksSection id="my-tasks-jobs" title={t('myTasks.jobs.title')} count={list.length}>
             {list.map((job) => (
               <MyTaskRow key={job.jobId} job={job} onNavigate={onClose} />
             ))}
-          </Stack>
+          </MyTasksSection>
         )}
       </AsyncBoundary>
     </Drawer>

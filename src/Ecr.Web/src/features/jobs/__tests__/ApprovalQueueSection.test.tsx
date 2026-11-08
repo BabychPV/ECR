@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { testTheme } from '@/test/render';
+import { readSeedEnCatalog } from '@/test/seedSql';
 import { ApprovalQueueSection } from '@/features/jobs/ApprovalQueueSection';
 import { approvalQueueHref, type ApprovalQueueItem } from '@/features/jobs/useApprovalQueue';
 
@@ -143,6 +144,66 @@ describe('ApprovalQueueSection', () => {
     });
     expect(card.textContent).not.toContain('Ivan');
     expect(card.textContent).not.toContain('null');
+  });
+});
+
+describe('ApprovalQueueSection: місяці одного аркуша - однією групою (UAT my-tasks-collapse)', () => {
+  // Мутація: ключ групи без sheetDefId (лише документ) або без групування - тести червоні.
+  const months = [202601, 202602, 202603, 202604, 202605, 202606, 202607, 202608];
+
+  it('8 місяців одного аркуша - 1 рядок-група з 8 дітьми; одиночний - звичайний рядок; порядок сервера', async () => {
+    show(() => ({
+      status: 200,
+      body: {
+        items: [
+          ...months.map((periodKey) => item({ periodKey })),
+          item({ documentId: 12, documentKey: 'AIR-2026-X', periodKey: 202601 }),
+          item({ sheetDefId: 4, sheetCode: 'Mobile', periodKey: 202601 }),
+        ],
+        nextCursor: null,
+      },
+    }));
+    const group = await waitFor(() => {
+      const el = document.querySelector('[data-approval-group="11:3"]');
+      expect(el).not.toBeNull();
+
+      return el as HTMLElement;
+    });
+    const button = group.querySelector('[data-action="toggle-approval-group"]') as HTMLElement;
+    // Каталогу в тестах немає (`t()` дає ⟦ключ⟧): форма множини - `.other` для 8 в en; текст - сід (тест нижче).
+    expect(button.textContent).toContain('AIR-2026-09 · Stationary — ');
+    expect(button.textContent).toContain('myTasks.approval.months.other');
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    const children = group.querySelectorAll('[data-approval-document="11"]');
+    expect(children.length).toBe(8);
+    expect(document.getElementById(button.getAttribute('aria-controls') ?? '')?.hidden).toBe(true);
+    expect([...children].map((el) => el.querySelector('a')?.getAttribute('href'))).toEqual(
+      months.map((m) => `/documents/11?periodKey=${String(m)}&sheet=Stationary`),
+    );
+
+    fireEvent.click(button);
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(document.getElementById(button.getAttribute('aria-controls') ?? '')?.hidden).toBe(false);
+
+    // Одиночні рядки - не групи; група стоїть на місці першого свого рядка.
+    expect(document.querySelectorAll('[data-approval-group]').length).toBe(1);
+    const order = [...document.querySelectorAll('[data-approval-group], [data-approval-document="12"], [data-approval-sheet="Mobile"]')]
+      .map((el) => el.getAttribute('data-approval-group') ?? el.getAttribute('data-approval-document') ?? '');
+    expect(order[0]).toBe('11:3');
+  });
+
+  it('сід en: «{count} months» / «{count} month» для всіх форм множини', () => {
+    const catalog = readSeedEnCatalog();
+    expect(catalog).toContain("(N'myTasks.approval.months.one', N'en', N'{count} month'");
+    for (const form of ['few', 'many', 'other']) {
+      expect(catalog).toContain(`(N'myTasks.approval.months.${form}', N'en', N'{count} months'`);
+    }
+  });
+
+  it('один місяць - звичайний рядок, без групи', async () => {
+    show(() => ({ status: 200, body: { items: [item({})], nextCursor: null } }));
+    await waitFor(() => expect(document.querySelector('[data-approval-document="11"]')).not.toBeNull());
+    expect(document.querySelector('[data-approval-group]')).toBeNull();
   });
 });
 

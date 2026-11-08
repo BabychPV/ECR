@@ -139,7 +139,12 @@ describe('ProjectSettingsPage: поточний період — режим, «P
       expect(within(box).getByText('⟦projectSettings.currentIs (period=March 2026)⟧', { exact: false })).toBeTruthy();
       expect(within(box).queryByRole('button', { name: '⟦projectSettings.backToAuto⟧' })).toBeNull();
 
-      await user.click(within(box).getByRole('button', { name: '⟦projectSettings.pin⟧' }));
+      const pinButton = within(box).getByRole('button', { name: '⟦projectSettings.pinAction⟧' });
+      // ✎ UAT project-settings: опис дії пов'язаний із кнопкою.
+      expect(document.getElementById(pinButton.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+        '⟦projectSettings.pinActionDesc⟧',
+      );
+      await user.click(pinButton);
       const dialog = await screen.findByRole('dialog', { name: '⟦periods.pin⟧' });
       const confirm = within(dialog).getByRole('button', { name: '⟦periods.pin⟧' });
       // ⛔ Без періоду й причини — не шлемо.
@@ -177,7 +182,11 @@ describe('ProjectSettingsPage: поточний період — режим, «P
       const box = await section();
       expect(within(box).getByText('⟦projectSettings.modePinned (period=January 2026)⟧')).toBeTruthy();
       expect(within(box).getByText('⟦projectSettings.pinnedReason (reason=Year-end catch-up)⟧')).toBeTruthy();
-      expect(within(box).getByText('⟦projectSettings.automaticWouldBe (period=March 2026)⟧')).toBeTruthy();
+      // ✎ UAT project-settings: пояснення автоматичного режиму (форма тексту залежить від сьогоднішнього місяця —
+      // перевіряється окремо в `automaticExplanation.test.ts`).
+      const explain = box.querySelector('[data-current-period-explain]')?.textContent ?? '';
+      expect(explain).toContain('projectSettings.autoIs');
+      expect(explain).toContain('period=March 2026');
 
       await user.click(within(box).getByRole('button', { name: '⟦projectSettings.backToAuto⟧' }));
 
@@ -199,7 +208,7 @@ describe('ProjectSettingsPage: поточний період — режим, «P
 
       const box = await section();
       expect(within(box).getByText('⟦projectSettings.modePinned (period=January 2026)⟧')).toBeTruthy();
-      expect(within(box).queryByRole('button', { name: '⟦projectSettings.pin⟧' })).toBeNull();
+      expect(within(box).queryByRole('button', { name: '⟦projectSettings.pinAction⟧' })).toBeNull();
       expect(within(box).queryByRole('button', { name: '⟦projectSettings.backToAuto⟧' })).toBeNull();
     },
     Slow,

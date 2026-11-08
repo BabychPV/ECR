@@ -10,6 +10,7 @@ import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { projectsQuery } from './allProjects';
+import { SettingsAction } from './SettingsAction';
 
 // ⚠ Прямо зі схеми: `api/types.ts` — спільний файл.
 type CurrentPeriodSettingDto = components['schemas']['CurrentPeriodSettingDto'];
@@ -21,6 +22,28 @@ export const currentPeriodSettingKey = (projectId: number): readonly unknown[] =
   projectId,
   'current-period-setting',
 ];
+
+/**
+ * ✎ UAT project-settings: пояснення автоматичного режиму. Сервер обирає найраніший ВІДКРИТИЙ місяць (інакше
+ * найпізніший пільговий) — не місяць сьогоднішньої дати. Якщо обраний місяць не збігається з сьогоднішнім (місячний
+ * календар), текст називає сьогоднішній місяць і причину; немає відкритого — так і каже.
+ */
+export function automaticExplanation(
+  automaticKey: number | null,
+  periodKind: string | undefined,
+  label: (key: number | null) => string,
+  now: Date,
+): string {
+  if (automaticKey === null) return t('projectSettings.autoNone');
+  const todayKey = now.getFullYear() * 100 + now.getMonth() + 1;
+  const monthly = periodKind === undefined || periodKind === 'Monthly';
+  if (!monthly || automaticKey === todayKey) return t('projectSettings.autoIs', { period: label(automaticKey) });
+
+  return t(automaticKey < todayKey ? 'projectSettings.autoIsEarlier' : 'projectSettings.autoIsLater', {
+    period: label(automaticKey),
+    today: label(todayKey),
+  });
+}
 
 /**
  * ✎ Period clarity (людина 07.11, п. c): поточний період — у налаштуваннях проєкту, з видимим РЕЖИМОМ:
@@ -129,19 +152,26 @@ export function CurrentPeriodSetting({
               {t('projectSettings.pinnedReason', { reason: data.pinnedReason })}
             </Text>
           )}
-          {pinned && (
-            <Text size="xs" c="dimmed">
-              {t('projectSettings.automaticWouldBe', { period: label(data.automaticPeriodKey) })}
-            </Text>
-          )}
+          {/*
+           * ✎ UAT project-settings (людина 08.11: «By date it would be January 2026» у листопаді): автоматичний
+           * період — НЕ місяць сьогоднішньої дати, а найраніший відкритий (`PeriodStateCalculator.SelectCurrentPeriod`,
+           * D-77). Текст тепер так і каже, а коли він не збігається з сьогоднішнім місяцем — пояснює чому.
+           */}
+          <Text size="xs" c="dimmed" data-current-period-explain="">
+            {automaticExplanation(data.automaticPeriodKey, calendar?.periodKind, label, new Date())}
+          </Text>
         </>
       )}
 
       {canConfigure && data !== undefined && (
-        <Group gap="xs">
-          <Button variant="default" onClick={openPin}>
-            {t('projectSettings.pin')}
-          </Button>
+        <Stack gap="xs" align="flex-start">
+          <SettingsAction id="pin" description={t('projectSettings.pinActionDesc')}>
+            {(describedBy) => (
+              <Button variant="default" onClick={openPin} aria-describedby={describedBy}>
+                {t('projectSettings.pinAction')}
+              </Button>
+            )}
+          </SettingsAction>
           {pinned && (
             <Button
               variant="default"
@@ -152,7 +182,7 @@ export function CurrentPeriodSetting({
               {t('projectSettings.backToAuto')}
             </Button>
           )}
-        </Group>
+        </Stack>
       )}
 
       <Modal opened={pinning} onClose={() => setPinning(false)} title={t('periods.pin')}>

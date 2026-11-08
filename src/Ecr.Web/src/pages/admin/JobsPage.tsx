@@ -15,7 +15,7 @@ import { formatDecimal } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { useDetailPanel } from '@/shared/ui/DetailDrawer';
-import { FilterBar, type FilterOption } from '@/shared/ui/FilterBar';
+import { FilterBar, FilterInline, type FilterOption } from '@/shared/ui/FilterBar';
 import { ListPage } from '@/shared/ui/ListPage';
 import type { StatItem, StatStripItems } from '@/shared/ui/StatStrip';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
@@ -337,6 +337,7 @@ export function JobsPage(): JSX.Element {
       }}
       stats={stats === undefined ? undefined : { label: t('jobs.statsLabel'), items: stats, active: state === 'Failed' && since !== FailedWindow ? null : state, onSelect: selectStat }}
       filters={
+        <>
         <FilterBar
           search={{ label: t('jobs.search'), placeholder: t('jobs.searchPlaceholder') }}
           filters={[
@@ -348,18 +349,31 @@ export function JobsPage(): JSX.Element {
             /* ⚠ Підказка поруч, а не в назві: знятий прапорець показує ЧУЖІ
                задачі, і без пояснення відмова 403 у того, хто права не має,
                читається як збій екрана, а не як межа доступу. */
-            <Group align="center" gap="xs" wrap="nowrap">
+            /* ✎ UAT (P3): прапорець без підпису над собою — `FilterInline` (висота поля, по центру), як «Clear»;
+               довга підказка — рядком ПІД фільтрами (і `aria-describedby`), а не поруч, де вона переносилась і
+               зсувала прапорець нижче полів. */
+            <FilterInline>
               <Checkbox
                 label={t('jobs.mineOnly')}
                 checked={mineOnly}
+                aria-describedby="jobs-mine-only-hint"
                 onChange={(event) => setMine(event.currentTarget.checked ? '1' : null)}
+                data-jobs-mine-only=""
               />
-              <Text size="xs" c="dimmed">
-                {t('jobs.mineOnlyHint')}
-              </Text>
-            </Group>
+            </FilterInline>
           }
         />
+        <Text
+          id="jobs-mine-only-hint"
+          size="xs"
+          c="dimmed"
+          mb="md"
+          // Під рядом фільтрів (той має власний `mb="md"`): підтягнути підказку до прапорця.
+          mt={-10}
+        >
+          {t('jobs.mineOnlyHint')}
+        </Text>
+        </>
       }
       table={
         <DataTable<JobSummary>

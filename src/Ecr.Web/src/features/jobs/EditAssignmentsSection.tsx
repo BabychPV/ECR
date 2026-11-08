@@ -6,6 +6,7 @@ import { t } from '@/shared/i18n';
 import { useMyEditAssignments } from '@/features/editAssignments/api';
 import { editAssignmentHref, sliceLabel } from '@/features/editAssignments/model';
 import type { MyEditAssignment } from '@/features/editAssignments/types';
+import { MyTasksSection } from './MyTasksSection';
 
 /**
  * Секції «Assigned to me» і «Awaiting my validation» у шухляді «My tasks» (DESIGN-OWNER-EDIT-GRANTS §7).
@@ -74,10 +75,7 @@ function AssignmentGroup({
   if (items.length === 0) return null;
 
   return (
-    <Stack gap="xs" mb="md" component="section" aria-labelledby={`${id}-title`} data-testid={id}>
-      <Text id={`${id}-title`} fw={600} size="sm">
-        {title}
-      </Text>
+    <MyTasksSection id={id} title={title} count={items.length}>
       {items.map((item) => (
         <Card withBorder padding="xs" key={item.assignmentId} data-edit-assignment={item.assignmentId}>
           <Stack gap="xs">
@@ -119,7 +117,7 @@ function AssignmentGroup({
           </Stack>
         </Card>
       ))}
-    </Stack>
+    </MyTasksSection>
   );
 }
 

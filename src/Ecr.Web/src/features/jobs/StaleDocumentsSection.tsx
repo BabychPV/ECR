@@ -1,9 +1,10 @@
 import type { JSX } from 'react';
-import { Anchor, Card, Group, Stack, Text } from '@mantine/core';
+import { Anchor, Card, Group, Text } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
 import { staleDocumentHref } from './myTasks';
+import { MyTasksSection } from './MyTasksSection';
 import { useStaleDocuments } from './useStaleDocuments';
 
 /**
@@ -36,10 +37,7 @@ export function StaleDocumentsSection({
   if (stale.items.length === 0) return null;
 
   return (
-    <Stack gap="xs" mb="md" component="section" aria-labelledby="my-tasks-stale-title" data-testid="my-tasks-stale">
-      <Text id="my-tasks-stale-title" fw={600} size="sm">
-        {t('jobs.staleDocuments.title')}
-      </Text>
+    <MyTasksSection id="my-tasks-stale" title={t('jobs.staleDocuments.title')} count={stale.items.length}>
       <Text size="xs" c="dimmed">
         {t('jobs.staleDocuments.hint')}
       </Text>
@@ -62,6 +60,6 @@ export function StaleDocumentsSection({
           </Group>
         </Card>
       ))}
-    </Stack>
+    </MyTasksSection>
   );
 }

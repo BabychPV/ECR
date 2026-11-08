@@ -21,7 +21,15 @@ import { t } from '@/shared/i18n';
  * неї посилаються, автоматично: наступний `GET …/periods` (ідемпотентний)
  * підхопить нові значення сам.
  */
-export function PeriodPolicyManager(): JSX.Element {
+export function PeriodPolicyManager({
+  openerLabel,
+  describedBy,
+}: {
+  /** ✎ UAT project-settings: повна назва кнопки-відкривача; без неї — «Manage policies». */
+  readonly openerLabel?: string;
+  /** Id опису дії поруч із кнопкою (`aria-describedby`). */
+  readonly describedBy?: string;
+} = {}): JSX.Element {
   const queryClient = useQueryClient();
   const [opened, setOpened] = useState(false);
 
@@ -95,8 +103,8 @@ export function PeriodPolicyManager(): JSX.Element {
 
   return (
     <>
-      <Button variant="default" onClick={() => setOpened(true)}>
-        {t('periods.managePolicies')}
+      <Button variant="default" onClick={() => setOpened(true)} aria-describedby={describedBy}>
+        {openerLabel ?? t('periods.managePolicies')}
       </Button>
 
       <Modal

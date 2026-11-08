@@ -14,6 +14,7 @@ import { projectsQuery } from '@/features/projects/allProjects';
 import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
 import { CurrentPeriodSetting } from '@/features/projects/CurrentPeriodSetting';
 import { MountedLazyConfirmModal } from '@/features/projects/lazyPeriodsDialogs';
+import { SettingsAction } from '@/features/projects/SettingsAction';
 import { timeZones } from '@/features/projects/timeZones';
 import { useOpenerFocusReturn } from '@/features/projects/useOpenerFocusReturn';
 import { t } from '@/shared/i18n';
@@ -243,23 +244,34 @@ export function ProjectSettingsPage(): JSX.Element {
                   {t('periods.timezoneChange')}
                 </Button>
               )}
-              {managesProject && (
-                <Button variant="default" onClick={() => setCloning(true)}>
-                  {t('periods.clone')}
-                </Button>
-              )}
-              {/* ⛔ `X-29`: `outline` + `statusError` — кінцева дія червона, а не сіра поруч із «Clone». */}
-              {selected.status === 'Active' && managesProject && (
-                <Button
-                  variant="outline"
-                  color="statusError"
-                  loading={archive.isPending}
-                  onClick={() => setArchiving(true)}
-                >
-                  {t('periods.archive')}
-                </Button>
-              )}
             </Group>
+
+            {/* ✎ UAT project-settings (людина 08.11): кожна дія — повна назва й рядок опису (`aria-describedby`). */}
+            {managesProject && (
+              <SettingsAction id="clone" description={t('projectSettings.cloneActionDesc')}>
+                {(describedBy) => (
+                  <Button variant="default" onClick={() => setCloning(true)} aria-describedby={describedBy}>
+                    {t('projectSettings.cloneAction')}
+                  </Button>
+                )}
+              </SettingsAction>
+            )}
+            {/* ⛔ `X-29`: `outline` + `statusError` — кінцева дія червона, а не сіра поруч із «Clone». */}
+            {selected.status === 'Active' && managesProject && (
+              <SettingsAction id="archive" description={t('projectSettings.archiveActionDesc')}>
+                {(describedBy) => (
+                  <Button
+                    variant="outline"
+                    color="statusError"
+                    loading={archive.isPending}
+                    onClick={() => setArchiving(true)}
+                    aria-describedby={describedBy}
+                  >
+                    {t('projectSettings.archiveAction')}
+                  </Button>
+                )}
+              </SettingsAction>
+            )}
           </Section>
 
           {/* ✎ Period clarity (п. c): режим поточного періоду — Automatic by date / Pinned to <місяць> (`D-77`). */}
@@ -270,14 +282,26 @@ export function ProjectSettingsPage(): JSX.Element {
           {/* ⛔ Маршрут погодження (`ФВ-5.17`) і політики періодів (T6/#37) — налаштування проєкту, не місяця. */}
           {(managesProject || manages) && (
             <Section id="workflow" title={t('projectSettings.workflow')}>
-              <Group gap="xs">
-                {managesProject && <ApprovalRouteEditor projectId={selected.id} />}
-                {manages && (
-                  <Suspense fallback={null}>
-                    <PeriodPolicyManager />
-                  </Suspense>
-                )}
-              </Group>
+              {managesProject && (
+                <SettingsAction id="route" description={t('projectSettings.routeActionDesc')}>
+                  {(describedBy) => (
+                    <ApprovalRouteEditor
+                      projectId={selected.id}
+                      openerLabel={t('projectSettings.routeAction')}
+                      describedBy={describedBy}
+                    />
+                  )}
+                </SettingsAction>
+              )}
+              {manages && (
+                <SettingsAction id="policies" description={t('projectSettings.policiesActionDesc')}>
+                  {(describedBy) => (
+                    <Suspense fallback={null}>
+                      <PeriodPolicyManager openerLabel={t('projectSettings.policiesAction')} describedBy={describedBy} />
+                    </Suspense>
+                  )}
+                </SettingsAction>
+              )}
             </Section>
           )}
         </>

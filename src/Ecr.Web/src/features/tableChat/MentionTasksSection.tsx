@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
 import { Timestamp } from '@/shared/ui/Timestamp';
+import { MyTasksSection } from '@/features/jobs/MyTasksSection';
 import { isChatUnavailable, useMentionTasks } from './api';
 import { chatKey } from './chatKey';
 import { DiscussionPanelValue } from './chatStore';
@@ -61,10 +62,7 @@ export function MentionTasksSection({
   if (items.length === 0) return null;
 
   return (
-    <Stack gap="xs" mb="md" component="section" aria-labelledby="my-tasks-mentions-title" data-testid="my-tasks-mentions">
-      <Text id="my-tasks-mentions-title" fw={600} size="sm">
-        {t('tableChat.tasksTitle')}
-      </Text>
+    <MyTasksSection id="my-tasks-mentions" title={t('tableChat.tasksTitle')} count={items.length}>
       {items.map((task) => (
         <Card withBorder padding="xs" key={task.messageId} data-mention-task={task.messageId}>
           <Stack gap="xs">
@@ -91,6 +89,6 @@ export function MentionTasksSection({
           </Stack>
         </Card>
       ))}
-    </Stack>
+    </MyTasksSection>
   );
 }
