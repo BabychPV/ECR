@@ -7910,6 +7910,10 @@ export interface paths {
                     limit?: number;
                     /** @description Без успішних перерахунків формул — для шухляди «Мої задачі». */
                     hideRoutine?: boolean;
+                    projectId?: number;
+                    parentJobId?: string;
+                    hideChildren?: boolean;
+                    kind?: string;
                 };
                 header?: never;
                 path?: never;
@@ -26931,6 +26935,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Deletes a draft project. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -30720,6 +30781,11 @@ export interface components {
              * @description Скільки дочірніх задач позначено цим батьком.
              */
             total: number;
+            /**
+             * Format: int32
+             * @description Approved sheets skipped.
+             */
+            skippedSheets?: number;
         };
         /**
          * @description Куди лягає поле джерела.
@@ -31515,6 +31581,16 @@ export interface components {
              * @description Момент останнього оновлення в UTC.
              */
             updatedAt: string;
+            /**
+             * Format: int32
+             * @description Project of the job.
+             */
+            projectId?: null | number;
+            /** @description Project code. */
+            projectCode?: null | string;
+            /** @description Fan-out parent. */
+            fanOutParentJobId?: null | string;
+            fanOut?: null | components["schemas"]["FanOutStatus"];
         };
         /** @description Лічильники черги фонових задач. */
         JobsSummary: {

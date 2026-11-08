@@ -4515,6 +4515,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/projects/{id}/document-template` | `Document.Create` | 4 |
 | `POST` | `/api/v1/projects/{id}/activate` | `Project.Manage` | 1 |
 | `POST` | `/api/v1/projects/{id}/archive` | `Project.Manage` | 1 |
+| `DELETE` | `/api/v1/projects/{id}` | `Project.Manage` | 3 |
 | `POST` | `/api/v1/projects/{id}/clone` | `Project.Manage` | 3 |
 | `PUT` | `/api/v1/projects/{id}/current-period` | `Period.Configure` (✎ 2026-11-07: **застаріло** — `…/settings/current-period`) | 3 |
 | `GET` | `/api/v1/projects/{id}/settings/current-period` | `Document.View` | 3 |
@@ -5867,6 +5868,20 @@ public sealed record RowDto(
 Слово людини 07.11: «тільки погоджені не мають перераховуватися … навіть якщо подана лише одна таблиця в документі інші таблиці мають перерахуватися. це також має логуватися».
 
 ### Перерахунок (`POST /projects/{id}/recalculate`, `POST /documents/{id}/recalculate`)
+
+✎ 2026-11-08 (UAT recalc-progress): перерахунок проєкту ставиться злиттям з ціллю `project{id}-year` /
+`project{id}-p{periodKey}` і з автором-ініціатором (тепер видно в `mine=true`). Прогрес — `GET /jobs?mine=true&kind=projectRecalculation&projectId={id}`:
+рядок батька несе `projectId`, `projectCode`, `fanOut {total, queued, running, succeeded, failed, skippedSheets}` і
+`effectiveState` (`FannedOut` поки документи рахуються). Нові звуження `GET /jobs`: `projectId`, `parentJobId`,
+`hideChildren`, `kind` (`projectRecalculation` | `documentRecalculation`; інше — `422 err.ECR-REQ-0422.jobKind`);
+`JobSummary.fanOutParentJobId` — батько дочірньої задачі. Дзеркала Quartz дочірніх задач теж несуть батька.
+Дочірня задача, злита з уже поставленою на той самий документ, лишається за старим батьком (відома межа).
+
+`DELETE /api/v1/projects/{id}` (`Project.Manage` + грант Manage): лише `Draft` без документів і без історії
+(прогони, зрізи, архівації); пише `aud.StructureChange` (`Project`/`Delete`). Відмови `409 ECR-PRD-0409`:
+`deleteNotDraft` {status, documentCount}, `deleteHasDocuments` {documentCount}, `deleteHasHistory` {historyCount}.
+Збереження політики зсувів і зміна поточного періоду одразу доганяють стани місяців до ефективних (аудит
+`Period`/`AdvanceState`).
 
 - Відмови `ECR-CALC-4221 sheetsSubmitted` на цих маршрутах більше немає. Гранулярність — **аркуш × період**:
   - `Approved` — **пропускається** (комірки й результати методологій не змінюються; результати переносяться в новий прогін);

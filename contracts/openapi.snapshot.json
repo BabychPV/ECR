@@ -7937,6 +7937,11 @@
             "description": "Скільки дочірніх задач позначено цим батьком.",
             "format": "int32",
             "type": "integer"
+          },
+          "skippedSheets": {
+            "description": "Approved sheets skipped.",
+            "format": "int32",
+            "type": "integer"
           }
         },
         "required": [
@@ -9610,6 +9615,38 @@
             "description": "Момент останнього оновлення в UTC.",
             "format": "date-time",
             "type": "string"
+          },
+          "projectId": {
+            "description": "Project of the job.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "projectCode": {
+            "description": "Project code.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fanOutParentJobId": {
+            "description": "Fan-out parent.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fanOut": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FanOutStatus"
+              }
+            ]
           }
         },
         "required": [
@@ -40840,6 +40877,35 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "projectId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "parentJobId",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hideChildren",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -67385,6 +67451,39 @@
         "summary": "Готовність: база, планувальник задач, джерела збору.",
         "tags": [
           "Health"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "Conflict"
+          }
+        },
+        "summary": "Deletes a draft project.",
+        "tags": [
+          "Projects"
         ]
       }
     }
