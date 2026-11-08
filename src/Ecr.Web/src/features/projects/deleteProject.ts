@@ -7,8 +7,7 @@ import { projectsQuery } from './allProjects';
  * і без історії (грант Manage, запис у журналі змін); інакше — `409 ECR-PRD-0409` з ключем умови
  * (`deleteNotDraft` зі станом і кількістю документів, `deleteHasDocuments`, `deleteHasHistory`).
  *
- * ⚠ Кнопки на сторінці ЩЕ НЕМАЄ: вона чекає погодження макета людиною (сторінка проєкту, f/g). Тут — типізований
- * виклик і хук, з яких її збудують.
+ * Споживач — вкладка Lifecycle проєкту (`ProjectLifecycleTab`, «Delete draft project…», рядок c1).
  */
 export function deleteProject(projectId: number): Promise<void> {
   return apiFetch<void>(`/api/v1/projects/${String(projectId)}`, { method: 'DELETE' });
@@ -20,6 +19,8 @@ export function useDeleteProject(onDeleted?: () => void): UseMutationResult<void
 
   return useMutation({
     mutationFn: deleteProject,
+    // L9-01: відмову (409 ECR-PRD-0409) показує споживач сам (`ProjectLifecycleTab`, `showApiError`).
+    meta: { handled: true },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: projectsQuery.queryKey });
       onDeleted?.();

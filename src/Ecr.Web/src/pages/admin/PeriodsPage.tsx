@@ -9,7 +9,7 @@ import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Hint } from '@/shared/ui/Hint';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
-import { formatMonthYear } from '@/shared/format';
+import { formatMonthYear, formatPeriodKey } from '@/shared/format';
 import { siteMomentText, zoneClock } from '@/shared/siteMoment';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
@@ -284,6 +284,8 @@ export function PeriodsPage({ projectId }: { readonly projectId: number }): JSX.
   // ⛔ Право `Period.Reopen` не каже, ЧИЇ періоди: сервер вимагає ще й гранта
   // Manage на проєкт (`ReopenPeriodHandler`). Без цієї умови кнопка обіцяла б
   // дію, яка завершиться 403.
+  const reopeningPeriod = periods.data?.periods.find((period) => period.id === reopening);
+
   const reopens = can(session.data, 'Period.Reopen') && hasProjectGrant(session.data, projectId, 'Manage');
 
   return (
@@ -497,7 +499,14 @@ export function PeriodsPage({ projectId }: { readonly projectId: number }): JSX.
       <Modal
         opened={reopening !== null}
         onClose={() => setReopening(null)}
-        title={t('periods.reopen')}
+        // ✎ Live-прохід 08.11 (P3): заголовок називає місяць («Reopen January 2026?»), а не безособове «Reopen period».
+        title={
+          reopeningPeriod === undefined || periods.data === undefined
+            ? t('periods.reopen')
+            : t('periods.reopenTitle', {
+                period: formatPeriodKey(reopeningPeriod.periodKey, periods.data.periodKind),
+              })
+        }
       >
         <Stack gap="xs">
           <Textarea

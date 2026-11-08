@@ -127,7 +127,31 @@ SELECT v.[Key], v.Lang, v.Val
     (N'documents.strip.locked', N'kz', N'Бұғатталған'),
     (N'documents.strip.notOpen', N'kz', N'Әлі ашылмаған'),
     (N'documents.strip.unknown', N'kz', N'Күйі жүктелмеген'),
-    (N'documents.strip.current', N'kz', N'Жиектелген — ағымдағы ай')
+    (N'documents.strip.current', N'kz', N'Жиектелген — ағымдағы ай'),
+    (N'projects.lifecycle.delete', N'ru', N'Удалить черновик проекта…'),
+    (N'projects.lifecycle.delete.desc', N'ru', N'Удалить проект-черновик без документов. Отменить нельзя; пишется запись аудита.'),
+    (N'projects.lifecycle.delete.notAllowed', N'ru', N'Удалить можно только черновик без документов (этот: {status}, документов: {count})'),
+    (N'projects.delete.title', N'ru', N'Удалить {code}?'),
+    (N'projects.delete.consequence', N'ru', N'Проект {code} и его настройки удаляются навсегда. Отменить нельзя.'),
+    (N'projects.delete.noData', N'ru', N'Документов в нём нет, поэтому данные отчётов не теряются.'),
+    (N'projects.delete.audit', N'ru', N'Пишется запись аудита с вашим именем.'),
+    (N'projects.delete.typeCode', N'ru', N'Введите {code} для подтверждения'),
+    (N'projects.delete.confirm', N'ru', N'Удалить проект'),
+    (N'projects.deleted', N'ru', N'Проект {code} удалён; запись аудита сохранена.'),
+    (N'documents.ownerHidden', N'ru', N'Скрыто: часть документа вам не открыта, поэтому владелец и автор правок не показываются'),
+    (N'periods.reopenTitle', N'ru', N'Переоткрыть {period}?'),
+    (N'projects.lifecycle.delete', N'kz', N'Жоба нобайын жою…'),
+    (N'projects.lifecycle.delete.desc', N'kz', N'Құжаттары жоқ нобай жобаны жою. Қайтару мүмкін емес; аудит жазбасы жазылады.'),
+    (N'projects.lifecycle.delete.notAllowed', N'kz', N'Тек құжаттары жоқ нобайды жоюға болады (бұл жоба: {status}, құжаттар: {count})'),
+    (N'projects.delete.title', N'kz', N'{code} жою керек пе?'),
+    (N'projects.delete.consequence', N'kz', N'{code} жобасы мен оның баптаулары біржола жойылады. Қайтару мүмкін емес.'),
+    (N'projects.delete.noData', N'kz', N'Онда құжаттар жоқ, сондықтан есеп деректері жоғалмайды.'),
+    (N'projects.delete.audit', N'kz', N'Сіздің атыңызбен аудит жазбасы жазылады.'),
+    (N'projects.delete.typeCode', N'kz', N'Растау үшін {code} енгізіңіз'),
+    (N'projects.delete.confirm', N'kz', N'Жобаны жою'),
+    (N'projects.deleted', N'kz', N'{code} жобасы жойылды; аудит жазбасы сақталды.'),
+    (N'documents.ownerHidden', N'kz', N'Жасырылған: құжаттың бір бөлігі сізге ашық емес, сондықтан иесі мен түзету авторы көрсетілмейді'),
+    (N'periods.reopenTitle', N'kz', N'{period} қайта ашу керек пе?')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -198,7 +222,19 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'documents.strip.locked', N'en', N'Locked', 1),
     (N'documents.strip.notOpen', N'en', N'Not open yet', 1),
     (N'documents.strip.unknown', N'en', N'State not loaded', 1),
-    (N'documents.strip.current', N'en', N'Ringed box = current month', 1)
+    (N'documents.strip.current', N'en', N'Ringed box = current month', 1),
+    (N'projects.lifecycle.delete', N'en', N'Delete draft project…', 1),
+    (N'projects.lifecycle.delete.desc', N'en', N'Remove a draft project that has no documents. This cannot be undone; an audit entry is written.', 1),
+    (N'projects.lifecycle.delete.notAllowed', N'en', N'Only draft projects without documents can be deleted (this one: {status}, {count} documents)', 1),
+    (N'projects.delete.title', N'en', N'Delete {code}?', 1),
+    (N'projects.delete.consequence', N'en', N'The project {code} and its settings are removed for good. This cannot be undone.', 1),
+    (N'projects.delete.noData', N'en', N'It has no documents, so no report data is lost.', 1),
+    (N'projects.delete.audit', N'en', N'An audit entry is written with your name.', 1),
+    (N'projects.delete.typeCode', N'en', N'Type {code} to confirm', 1),
+    (N'projects.delete.confirm', N'en', N'Delete project', 1),
+    (N'projects.deleted', N'en', N'{code} was deleted; an audit entry was written.', 1),
+    (N'documents.ownerHidden', N'en', N'Hidden: part of this document is not open to you, so its owner and editors are not shown', 1),
+    (N'periods.reopenTitle', N'en', N'Reopen {period}?', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

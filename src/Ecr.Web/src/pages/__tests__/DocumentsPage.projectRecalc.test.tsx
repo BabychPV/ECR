@@ -45,6 +45,10 @@ function respond(projects: readonly Project[], permissions: readonly string[]): 
         });
       }
 
+      // ✎ lane A + Projects 08.11: календар проєкту читають і дія перерахунку (межі року), і перелік (роки, смуга).
+      if (/\/api\/v1\/projects\/\d+\/periods/.test(url)) {
+        return json({ projectId: 7, periodKind: 'Monthly', currentPeriodMode: 'Auto', timeZoneId: 'UTC', policy: null, periods: [] });
+      }
       if (url.includes('/api/v1/documents')) return json({ items: [], nextCursor: null, totalCount: 0 });
       if (url.includes('/api/v1/projects')) return json({ items: projects, nextCursor: null, totalCount: projects.length });
 

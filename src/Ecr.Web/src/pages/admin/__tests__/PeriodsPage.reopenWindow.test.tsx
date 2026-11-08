@@ -222,6 +222,19 @@ afterEach(() => {
 
 describe('PeriodsPage: строк перевідкриття періоду', () => {
   it(
+    'Live-прохід 08.11 (P3): заголовок діалогу називає місяць, а не безособове «Reopen period»',
+    async () => {
+      respond();
+      const { dialog } = await openReopen();
+
+      // ⛔ Без фіксу заголовок — `⟦periods.reopen⟧`, без місяця.
+      const heading = within(dialog).getByRole('heading');
+      expect(heading.textContent).toMatch(/^⟦periods\.reopenTitle \(period=.+ \d{4}\)⟧$/);
+    },
+    TestTimeout,
+  );
+
+  it(
     'А: порожнє поле — у тілі `until: null`, і межу названо на екрані',
     async () => {
       const state = respond();
