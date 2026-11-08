@@ -51,7 +51,16 @@ public sealed class PatchCellsPermitValidityTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
-    private readonly IPermitTypeStore _permitTypes = Substitute.For<IPermitTypeStore>();
+    private readonly IPermitRegistryIndex _permitTargets = Substitute.For<IPermitRegistryIndex>();
+
+    private void PermitTargetsAre(params int[] registryIds)
+    {
+#pragma warning disable CA2012 // NSubstitute: the call only configures the stub, the ValueTask is never awaited here
+        _permitTargets.PermitTargetIdsAsync(Arg.Any<CancellationToken>())
+                      .Returns(_ => new ValueTask<IReadOnlySet<int>>(new HashSet<int>(registryIds)));
+#pragma warning restore CA2012
+    }
+
     private readonly FakePermitGroupResolver _groups = new();
     private readonly ColumnDef _permitColumn;
     private readonly Dictionary<int, CellValueData> _stored = [];
@@ -134,8 +143,7 @@ public sealed class PatchCellsPermitValidityTests
 
         _periods.FindPeriodBoundsAsync(DocumentId, Period, Arg.Any<CancellationToken>())
                 .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
-        _permitTypes.ListPublishedHeaderRegistryIdsAsync(Arg.Any<CancellationToken>())
-                    .Returns(new HashSet<int> { PermitHeaderRegistry });
+        PermitTargetsAre(PermitHeaderRegistry, PermitGroupRegistry);
 
         Permit(validFrom: new DateOnly(2026, 3, 1), validTo: new DateOnly(2026, 12, 1));
     }
@@ -175,7 +183,7 @@ public sealed class PatchCellsPermitValidityTests
                _methodologies, _registries, _headers, Substitute.For<IAuditWriter>(),
                Substitute.For<IAuditReader>(), Substitute.For<IBackgroundJobScheduler>(), _uow, _user, _clock,
                Substitute.For<ISheetEditGate>(), Substitute.For<IUnitCatalog>(), groups: _groups,
-               permitTypes: withRule ? _permitTypes : null);
+               permitTargets: withRule ? _permitTargets : null);
 
     private Task<PatchCellsResponse> Write(params PatchCell[] cells)
         => Handler().HandleAsync(
@@ -305,12 +313,17 @@ public sealed class PatchCellsPermitValidityTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "ACC-1108-h5")]
     public async Task A_non_permit_lookup_keeps_the_period_end_rule()
     {
-        _permitTypes.ListPublishedHeaderRegistryIdsAsync(Arg.Any<CancellationToken>()).Returns(new HashSet<int>());
+        PermitTargetsAre();
         StoredValue(MarchId, 80m);
+
+        // Land-like target: the permit rule asks only the in-memory index — never the group resolver
+        // (PatchCellsQueryCountTests ratchet: EnsureFreshCalls == 0 and no extra round-trip).
+        _groups.ThrowOnUse = true;
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Write(PickPermit()));
 
         Assert.Equal("err.ECR-CELL-4223.entryNotValidOnDate", error.Details!["messageKey"]);
+        Assert.Equal(0, _groups.EnsureFreshCalls);
     }
 
     // ── h3: a value is entered ────────────────────────────────────────────

@@ -1,5 +1,4 @@
 // src/Ecr.Application/Validation/PermitCoverageIssues.cs
-using Ecr.Application.Permits.Groups;
 using Ecr.Application.Permits.Validity;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
@@ -25,8 +24,8 @@ namespace Ecr.Application.Validation;
 /// — the text is assembled in the READER's language on reading (<see cref="ValidationMessageTemplates.Localize"/>).
 /// </para>
 /// <para>
-/// ⚠ Cost: nothing unless the document has a permit-type column or header field — one query for permit type headers;
-/// then one batched slice read of the permit tables only, and one entries query.
+/// ⚠ Cost: nothing unless the document has a permit-type column or header field (in-memory test,
+/// <see cref="IPermitRegistryIndex"/>); then one batched slice read of the permit tables only, and one entries query.
 /// </para>
 /// </remarks>
 public static class PermitCoverageIssues
@@ -35,8 +34,7 @@ public static class PermitCoverageIssues
     public const string RowRuleCode = "PERMIT-VALIDITY";
 
     /// <summary>Runs the check over the period's original instances and the header.</summary>
-    /// <param name="permitTypes">Permit types; <c>null</c> — the rule is off.</param>
-    /// <param name="groups">Permit groups; <c>null</c> — none.</param>
+    /// <param name="permitTargets">Permit-type Lookup targets; <c>null</c> — the rule is off.</param>
     /// <param name="registries">Registry entries.</param>
     /// <param name="cells">Cell store (logical slices).</param>
     /// <param name="rows">Row store.</param>
@@ -50,8 +48,7 @@ public static class PermitCoverageIssues
     /// <param name="language">Language of the fallback text.</param>
     /// <param name="ct">Cancellation.</param>
     public static async Task<IReadOnlyList<ValidationMessage>> RunAsync(
-        IPermitTypeStore? permitTypes,
-        IPermitGroupResolver? groups,
+        IPermitRegistryIndex? permitTargets,
         IRegistryStore registries,
         ICellStore cells,
         IRowStore rows,
@@ -76,12 +73,12 @@ public static class PermitCoverageIssues
         var tables = snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
         var anyLookup = tables.Values.Any(t => t.Columns.Any(c => !c.IsDeleted && c.DataType == CellDataType.Lookup))
                         || snapshot.HeaderFields.Any(f => !f.IsDeleted && f.LookupRegistryDefId is not null);
-        if (permitTypes is null || !anyLookup)
+        if (permitTargets is null || !anyLookup)
         {
             return [];
         }
 
-        var isPermitTarget = await PermitTargets.LoadAsync(permitTypes, groups, ct).ConfigureAwait(false);
+        var isPermitTarget = await PermitTargets.LoadAsync(permitTargets, ct).ConfigureAwait(false);
 
         var permitColumnsOf = tables.Values
             .Select(t => (Table: t, Columns: t.Columns

@@ -92,8 +92,8 @@ public sealed partial class PatchCellsHandler(
     IRowChangeAudit? rowAudit = null,
 
     // ✎ Rule (h), human 08.11: permit validity vs months with data. Tells which Lookup columns are permit-type
-    // (target = published permit type header). `null` (direct constructor in tests) — the rule is off.
-    IPermitTypeStore? permitTypes = null)
+    // (target = published permit type header or permit group), from memory. `null` (direct constructor in tests) — off.
+    IPermitRegistryIndex? permitTargets = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">

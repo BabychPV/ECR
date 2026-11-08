@@ -189,7 +189,7 @@ public sealed class PatchDocumentHeaderHandler(
 
     // ✎ Rule (h), human 08.11 (Contract tab): a permit picked in a header field must cover every month the document
     // holds data in. `null` (direct constructor in tests) — the rule is off.
-    IPermitTypeStore? permitTypes = null,
+    IPermitRegistryIndex? permitTargets = null,
     IPermitDataMonthsReader? dataMonths = null)
 {
     /// <summary>Тип події журналу безпеки.</summary>
@@ -633,7 +633,7 @@ public sealed class PatchDocumentHeaderHandler(
         TemplateVersionSnapshot? snapshot,
         CancellationToken ct)
     {
-        if (permitTypes is null || dataMonths is null || snapshot is null)
+        if (permitTargets is null || dataMonths is null || snapshot is null)
         {
             return;
         }
@@ -649,7 +649,7 @@ public sealed class PatchDocumentHeaderHandler(
             return;
         }
 
-        var isPermitTarget = await Permits.Validity.PermitTargets.LoadAsync(permitTypes, groups, ct).ConfigureAwait(false);
+        var isPermitTarget = await Permits.Validity.PermitTargets.LoadAsync(permitTargets, ct).ConfigureAwait(false);
 
         var permitPicks = picked.Where(p => isPermitTarget(p.Field.LookupRegistryDefId!.Value)).ToList();
         if (permitPicks.Count == 0)

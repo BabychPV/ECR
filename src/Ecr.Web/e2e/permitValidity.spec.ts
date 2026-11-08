@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type APIResponse, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type APIResponse, type BrowserContext, type Page, type Route } from '@playwright/test';
 
 /**
  * Rule (h), human 08.11 (ACCEPTANCE-1108-post15 h1–h4): a permit must cover the months that hold data.
@@ -218,14 +218,41 @@ async function arrange(request: APIRequestContext): Promise<World> {
   return world;
 }
 
-/** Re-points the entry id in the next PATCH to `url` from `from` to `to` (the picker cannot offer the refusing permit). */
-async function rewriteNextPatch(page: Page, url: string, from: number, to: number): Promise<void> {
-  await page.route(url, async (route) => {
-    if (route.request().method() !== 'PATCH') return route.continue();
-    const body = route.request().postData() ?? '';
-    await page.unroute(url);
-    return route.continue({ postData: body.split(String(from)).join(String(to)) });
-  });
+/** Replaces every JSON value equal to `from` (number or its string) with `to` — the entry id, never a digit inside a hash. */
+function repoint(value: unknown, from: number, to: number): unknown {
+  if (value === from) return to;
+  if (value === String(from)) return String(to);
+  if (Array.isArray(value)) return value.map((item) => repoint(item, from, to));
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, repoint(item, from, to)]));
+  }
+
+  return value;
+}
+
+/**
+ * Re-points the entry id in the NEXT PATCH to `url` from `from` to `to` (the picker cannot offer the refusing permit).
+ * ⚠ The handler answers each request exactly once (continue or fallback) and is removed by the caller after the
+ * response: unrouting inside the handler made Playwright report «Route is already handled» and the PATCH went out
+ * unchanged (run 42500895032: 200 instead of 422).
+ */
+async function rewriteNextPatch(page: Page, url: string, from: number, to: number): Promise<() => Promise<void>> {
+  let used = false;
+  const handler = async (route: Route): Promise<void> => {
+    if (used || route.request().method() !== 'PATCH') {
+      await route.fallback();
+      return;
+    }
+
+    used = true;
+    const body = JSON.parse(route.request().postData() ?? '{}') as unknown;
+    const rewritten = JSON.stringify(repoint(body, from, to));
+    expect(rewritten, `тіло PATCH не містить id ${String(from)}`).not.toBe(JSON.stringify(body));
+    await route.continue({ postData: rewritten });
+  };
+  await page.route(url, handler);
+
+  return () => page.unroute(url, handler);
 }
 
 async function openDocument(page: Page, world: World): Promise<void> {
@@ -275,10 +302,11 @@ test.describe('Permit validity:', () => {
     await field.click();
     await page.getByRole('option', { name: new RegExp(`^${world.yearNumber}`) }).click();
 
-    await rewriteNextPatch(page, `**/api/v1/documents/${String(world.documentId)}/header`, world.yearId, world.otherId);
+    const unroute = await rewriteNextPatch(page, `**/api/v1/documents/${String(world.documentId)}/header`, world.yearId, world.otherId);
     const saved = page.waitForResponse((r) => r.request().method() === 'PATCH' && r.url().includes(`/documents/${String(world.documentId)}/header`));
     await page.getByTestId('document-header-panel').getByRole('button', { name: /^(Save|Зберегти|Сохранить|Сақтау)$/ }).click();
     const response = await saved;
+    await unroute();
     expect(response.status(), await response.text()).toBe(422);
     expect(((await response.json()) as { messageKey?: string }).messageKey).toBe('err.ECR-HDR-4223.permitNotCoveringMonths');
 
@@ -299,11 +327,12 @@ test.describe('Permit validity:', () => {
       await expect(page.getByRole('option', { name: new RegExp(`^${world.yearNumber}`) }).first()).toBeVisible({ timeout: 3_000 });
     }).toPass({ timeout: 30_000 });
 
-    await rewriteNextPatch(page, `**/api/v1/documents/${String(world.documentId)}/cells`, world.yearId, world.otherId);
+    const unroute = await rewriteNextPatch(page, `**/api/v1/documents/${String(world.documentId)}/cells`, world.yearId, world.otherId);
     const saved = page.waitForResponse((r) => r.request().method() === 'PATCH' && new URL(r.url()).pathname.endsWith('/cells'), { timeout: 90_000 });
     await page.getByRole('option', { name: new RegExp(`^${world.yearNumber}`) }).first().click();
     await page.keyboard.press('Control+s');
     const response = await saved;
+    await unroute();
     expect(response.status(), await response.text()).toBe(422);
     expect(((await response.json()) as { messageKey?: string }).messageKey).toBe('err.ECR-CELL-4223.permitNotCoveringMonths');
 

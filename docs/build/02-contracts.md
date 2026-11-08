@@ -3076,6 +3076,21 @@ public interface IPermitDataMonthsReader
 }
 ```
 
+#### `IPermitRegistryIndex`
+
+Правило (h): які реєстри є ціллю Lookup «типу дозвіл» — шапки опублікованих типів (`PRM_<TYPE>`) і групи (`PRMG_*`).
+Питається на гарячому шляху кожного `PATCH` таблиці з Lookup, тому відповідь — з пам'яті: singleton, оновлення не
+частіше ніж раз на `RefreshInterval` (30 с), теплий запит — нуль звернень до БД і жодного виклику резолвера груп
+(храповик `PatchCellsQueryCountTests`).
+
+```csharp
+public interface IPermitRegistryIndex
+{
+    public static TimeSpan RefreshInterval { get; }
+    public ValueTask<IReadOnlySet<int>> PermitTargetIdsAsync(CancellationToken ct);
+}
+```
+
 #### `IPermitBindingStore`
 
 Прив'язки таблиць аркуша версії шаблону до таблиць типів дозволів (Permits, PM-09; `cfg.PermitSheetBinding` +

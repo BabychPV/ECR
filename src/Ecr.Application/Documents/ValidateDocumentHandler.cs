@@ -28,10 +28,9 @@ public sealed class ValidateDocumentHandler(
 
     // ✎ Rule (h4), human 08.11: existing «permit does not cover the months with data» violations in Issues.
     // `null` (direct constructor in tests) — the check is off.
-    IPermitTypeStore? permitTypes = null,
+    IPermitRegistryIndex? permitTargets = null,
     IPeriodStore? periods = null,
-    IPermitDataMonthsReader? dataMonths = null,
-    Permits.Groups.ILookupTargetResolver? groups = null)
+    IPermitDataMonthsReader? dataMonths = null)
 {
     /// <summary>Виконує валідацію всіх аркушів документа за період.</summary>
     /// <param name="documentId">Документ.</param>
@@ -161,11 +160,11 @@ public sealed class ValidateDocumentHandler(
             .ConfigureAwait(false));
 
         // ✎ Rule (h4): rows (and the header) whose permit does not cover the months with data.
-        if (permitTypes is not null && periods is not null && instances.Count > 0)
+        if (permitTargets is not null && periods is not null && instances.Count > 0)
         {
             var permitSnapshot = await metadata.GetAsync(instances[0].TemplateVersionId, ct).ConfigureAwait(false);
             messages.AddRange(await PermitCoverageIssues
-                .RunAsync(permitTypes, groups, registries, cellStore, rowStore, periods, headers, dataMonths,
+                .RunAsync(permitTargets, registries, cellStore, rowStore, periods, headers, dataMonths,
                     permitSnapshot, documentId, instances, periodKey, currentUser.Language, ct)
                 .ConfigureAwait(false));
         }

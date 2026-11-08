@@ -28,7 +28,8 @@ namespace Ecr.Application.Documents;
 /// </para>
 /// <para>
 /// ⚠ Hot path: a table without Lookup columns, or a batch that neither changes a Lookup nor writes data, costs nothing.
-/// Otherwise one query for permit type headers; the slice is read only when a permit-type column exists.
+/// The permit-type test is in memory (<c>IPermitRegistryIndex</c>, no round-trip); the slice and the entries are read only
+/// when a permit-type column of the table is picked, or data is written in a row of a table that has one.
 /// </para>
 /// <para>
 /// Refusal: the existing <c>422 ECR-CELL-4223</c> (Lookup reference not usable) with its own <c>messageKey</c>
@@ -50,13 +51,13 @@ public sealed partial class PatchCellsHandler
             .Where(c => !c.IsDeleted && c.DataType == CellDataType.Lookup && c.LookupRegistryDefId is not null)
             .ToList();
 
-        if (permitTypes is null || lookups.Count == 0)
+        if (permitTargets is null || lookups.Count == 0)
         {
             return context.PermitColumnIds = new HashSet<int>();
         }
 
-        // PRMG: a target that is not a header may be a permit GROUP (hidden PRMG_* registry, snapshot TTL 5 s).
-        var isPermitTarget = await PermitTargets.LoadAsync(permitTypes, groups, ct).ConfigureAwait(false);
+        // In memory (IPermitRegistryIndex): a Land PATCH pays no round-trip and never asks the group resolver.
+        var isPermitTarget = await PermitTargets.LoadAsync(permitTargets, ct).ConfigureAwait(false);
 
         return context.PermitColumnIds = lookups
             .Where(c => isPermitTarget(c.LookupRegistryDefId!.Value))
@@ -71,7 +72,7 @@ public sealed partial class PatchCellsHandler
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
         CancellationToken ct)
     {
-        if (permitTypes is null || changes.Upserts.Count == 0)
+        if (permitTargets is null || changes.Upserts.Count == 0)
         {
             return;
         }
