@@ -81,8 +81,10 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow }: Unmatch
     // ✎ fg6 (людина 08.11): інформаційний банер компактний - один рядок підсумку (назва · кількість · час), підказка
     // ≤ 2 рядків при 1335 px, далі список; згорнутий - лише рядок підсумку.
     <Alert color="brand" variant="light" py="xs" data-testid="document-unmatched-rows">
-      <Group justify="space-between" wrap="nowrap" gap="sm" align="center">
-        <Text size="sm">
+      {/* ⛔ Перевірка людини 08.11 (b4 при 375 px): `preventGrowOverflow` Group за замовчуванням ділить ширину між
+          дітьми, і кнопка стискалась до «Shov». Тепер підсумок переноситься (flex 1, miw 0), а кнопка не стискається. */}
+      <Group justify="space-between" wrap="nowrap" gap="sm" align="center" preventGrowOverflow={false}>
+        <Text size="sm" flex={1} miw={0}>
           <Text span size="sm" fw={600} data-testid="document-unmatched-rows-title">
             {t('document.unmatchedRows.title')}
           </Text>
@@ -100,6 +102,7 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow }: Unmatch
           aria-controls={bodyId}
           onClick={toggle}
           data-testid="document-unmatched-rows-toggle"
+          style={{ flexShrink: 0 }}
         >
           {collapsed ? t('calculationIssues.show') : t('calculationIssues.hide')}
         </Button>

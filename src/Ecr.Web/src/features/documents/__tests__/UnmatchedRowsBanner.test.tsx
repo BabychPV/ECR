@@ -146,6 +146,15 @@ describe('UnmatchedRowsBanner', () => {
     expect(screen.getByTestId('document-unmatched-rows-summary').textContent).toContain('document.unmatchedRows.lastRun');
   });
 
+  it('вузький екран: перемикач не стискається (кнопка «Show rows» не обрізається до «Shov»)', () => {
+    show(sixty);
+
+    const toggle = screen.getByTestId('document-unmatched-rows-toggle');
+    expect(getComputedStyle(toggle).flexShrink).toBe('0');
+    // ⚠ З `preventGrowOverflow` (типово) Group Mantine дає дітям max-width частки рядка — саме це й різало кнопку.
+    expect(toggle.parentElement?.getAttribute('style') ?? '').not.toContain('--group-child-width');
+  });
+
   it('немає рядків - нічого не малюється', () => {
     show(rows([]));
 
