@@ -73,7 +73,7 @@ export function DatedRoleNotices({
             </Text>
             {!pending && (
               <Button
-                size="compact-xs"
+                size="xs"
                 variant="light"
                 aria-label={t('security.reassignRoleNamed', { role })}
                 onClick={() => onReassign(row.roleCode)}
