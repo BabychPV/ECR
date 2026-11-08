@@ -40,7 +40,8 @@ function periodWith(state: string, n: number) {
     periodKey: 202600 + n,
     sequence: n,
     startsAt: '2026-01-01',
-    endsAt: '2026-02-01',
+    // ✎ lane A (ефективний стан): межа в майбутньому — інакше Open/Grace після минулої межі показуються як Closed.
+    endsAt: '2099-02-01',
     state,
     graceEndsAt: null,
     reopenedUntil: null,

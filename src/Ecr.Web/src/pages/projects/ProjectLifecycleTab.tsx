@@ -1,4 +1,4 @@
-import { useState, type JSX, type ReactNode } from 'react';
+import { useEffect, useState, type JSX, type ReactNode } from 'react';
 import { Alert, Button, Group, Modal, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -10,7 +10,8 @@ import { useDocumentListSummary } from '@/features/documents/api';
 import { projectsQuery } from '@/features/projects/allProjects';
 import { MountedLazyConfirmModal } from '@/features/projects/lazyPeriodsDialogs';
 import { projectTabPath } from '@/features/projects/projectPaths';
-import { archiveBlock, calendarYears, monthList, type ArchiveBlock } from '@/features/projects/projectYear';
+import { useDeleteProject } from '@/features/projects/deleteProject';
+import { archiveBlock, calendarYears, deleteAllowed, monthList, type ArchiveBlock } from '@/features/projects/projectYear';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -83,8 +84,8 @@ function ActionRow({
 }
 
 /**
- * ✎ Projects (макет 08.11, рядки f6, c1–c4): життєвий цикл проєкту — Activate, Clone, Archive (і Delete draft після
- * зведення з lane A). Кожна дія — повна назва й рядок опису; недоступна — причина видимим текстом під нею.
+ * ✎ Projects (макет 08.11, рядки f6, c1–c4): життєвий цикл проєкту — Activate, Clone, Archive і Delete draft (видалення —
+ * `DELETE /api/v1/projects/{id}` lane A, лише чернетка без документів, з набором коду проєкту). Кожна дія — повна назва й рядок опису; недоступна — причина видимим текстом під нею.
  *
  * ⛔ `F-19`: право каже, ЩО можна, грант Manage — НАД ЧИМ; без обох кнопка обіцяла б 403.
  * ⛔ Архівація: лише активний і лише коли всі місяці заблоковані (`D-123`); невідомий календар — заборона.
@@ -107,6 +108,8 @@ export function ProjectLifecycleTab({ projectId }: { readonly projectId: number 
   const [archiving, setArchiving] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [cloneCode, setCloneCode] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteCode, setDeleteCode] = useState('');
 
   const refresh = async (): Promise<void> => {
     await queryClient.invalidateQueries({ queryKey: projectsQuery.queryKey });
@@ -154,6 +157,18 @@ export function ProjectLifecycleTab({ projectId }: { readonly projectId: number 
   const cloningBusy = usePendingLoading(clone.isPending);
   const archivingBusy = usePendingLoading(archive.isPending);
 
+  // c1 (lane A: `DELETE /api/v1/projects/{id}`): після видалення — перелік проєктів і тост.
+  const deletedCode = project?.code ?? '';
+  const remove = useDeleteProject(() => {
+    setDeleting(false);
+    showDone(t('projects.deleted', { code: deletedCode }));
+    void navigate('/projects');
+  });
+  const deletingBusy = usePendingLoading(remove.isPending);
+  useEffect(() => {
+    if (remove.error !== null) showApiError(remove.error);
+  }, [remove.error]);
+
   if (project === undefined) return null;
 
   const manages = can(session.data, 'Project.Manage') && hasProjectGrant(session.data ?? undefined, projectId, 'Manage');
@@ -161,6 +176,17 @@ export function ProjectLifecycleTab({ projectId }: { readonly projectId: number 
   const activateWhy = noRight ?? activateReason(project.status);
   const block = archiveBlock(project, calendar.data);
   const archiveWhy = noRight ?? (block === null ? null : archiveReason(block));
+  // c1/c2: лише чернетка без документів; кількість невідома — заборона з причиною «перевіряємо», а не дозвіл.
+  const deleteWhy =
+    noRight ??
+    (deleteAllowed(project, documents)
+      ? null
+      : documents === null
+        ? t('projects.lifecycle.unknown')
+        : t('projects.lifecycle.delete.notAllowed', {
+            status: t(statusKey('project', project.status)),
+            count: documents,
+          }));
 
   return (
     <>
@@ -206,12 +232,67 @@ export function ProjectLifecycleTab({ projectId }: { readonly projectId: number 
             </Button>
           )}
         />
+        <ActionRow
+          id="delete"
+          description={t('projects.lifecycle.delete.desc')}
+          reason={deleteWhy}
+          button={(describedBy) => (
+            <Button
+              color="statusError"
+              disabled={deleteWhy !== null}
+              onClick={() => {
+                setDeleteCode('');
+                setDeleting(true);
+              }}
+              aria-describedby={describedBy}
+            >
+              {t('projects.lifecycle.delete')}
+            </Button>
+          )}
+        />
       </div>
       {documents !== null && (
         <Text size="xs" c="dimmed" mt="xs" data-project-documents={documents}>
           {t('projects.lifecycle.documents', { count: documents })}
         </Text>
       )}
+
+      {/* c1: видалення чернетки — лише після набору коду проєкту; незворотне, сервер пише запис аудиту. */}
+      <Modal opened={deleting} onClose={() => setDeleting(false)} title={t('projects.delete.title', { code: project.code })}>
+        <Stack gap="xs">
+          <Text size="sm" c="statusError">
+            {t('projects.delete.consequence', { code: project.code })}
+          </Text>
+          <Text size="sm" c="dimmed">
+            {t('projects.delete.noData')}
+          </Text>
+          <Text size="sm" c="dimmed">
+            {t('projects.delete.audit')}
+          </Text>
+          <TextInput
+            label={t('projects.delete.typeCode', { code: project.code })}
+            value={deleteCode}
+            onChange={(event) => setDeleteCode(event.currentTarget.value)}
+            autoComplete="off"
+            spellCheck={false}
+            ff="monospace"
+            data-autofocus
+          />
+        </Stack>
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={() => setDeleting(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            color="statusError"
+            disabled={deleteCode !== project.code}
+            loading={deletingBusy}
+            onClick={() => remove.mutate(projectId)}
+          >
+            {t('projects.delete.confirm')}
+          </Button>
+        </Group>
+      </Modal>
 
       <MountedLazyConfirmModal
         opened={confirmingActivate}

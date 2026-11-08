@@ -44,6 +44,10 @@ function respond(
       const json = (body: unknown, code = 200): Response =>
         new Response(JSON.stringify(body), { status: code, headers: { 'Content-Type': 'application/json' } });
 
+      if (init?.method === 'DELETE') {
+        state.posts.push(`DELETE ${url}`);
+        return new Response(null, { status: 204 });
+      }
       if (init?.method === 'POST') {
         state.posts.push(url);
         return json(url.endsWith('/clone') ? { projectId: 8 } : null);
@@ -110,6 +114,50 @@ afterEach(() => {
 
 const Slow = 120_000;
 
+describe('ProjectLifecycleTab: Delete draft (c1, c2)', () => {
+  it(
+    'c2: активний проєкт із документами — Delete недоступна, причина називає стан і кількість',
+    async () => {
+      respond('Active');
+      show();
+
+      const remove = await screen.findByRole('button', { name: '⟦projects.lifecycle.delete⟧' });
+      await waitFor(() =>
+        expect(reason('delete')).toBe('⟦projects.lifecycle.delete.notAllowed (status=⟦status.project.Active⟧, count=92)⟧'),
+      );
+      // ⛔ Мутація «deleteAllowed без перевірки статусу» робить тут кнопку активною.
+      expect(remove.hasAttribute('disabled')).toBe(true);
+    },
+    Slow,
+  );
+
+  it(
+    'c1: чернетка без документів — підтвердження лише після набору коду; DELETE іде один раз',
+    async () => {
+      const state = respond('Draft', { periods: [period(1, 'Scheduled')], summaryDraft: 0 });
+      const user = userEvent.setup();
+      show();
+
+      const remove = await screen.findByRole('button', { name: '⟦projects.lifecycle.delete⟧' });
+      await waitFor(() => expect(remove.hasAttribute('disabled')).toBe(false));
+      await user.click(remove);
+
+      const dialog = await screen.findByRole('dialog', { name: '⟦projects.delete.title (code=LANDUI2026)⟧' });
+      const confirm = within(dialog).getByRole('button', { name: '⟦projects.delete.confirm⟧' });
+      expect(confirm.hasAttribute('disabled')).toBe(true);
+      await user.type(within(dialog).getByRole('textbox'), 'LANDUI202');
+      // ⛔ Мутація «порівнювати без урахування останнього символу/регістру» вмикає кнопку тут.
+      expect(confirm.hasAttribute('disabled')).toBe(true);
+      expect(state.posts).toEqual([]);
+      await user.type(within(dialog).getByRole('textbox'), '6');
+      await waitFor(() => expect(confirm.hasAttribute('disabled')).toBe(false));
+      await user.click(confirm);
+
+      await waitFor(() => expect(state.posts).toEqual(['DELETE /api/v1/projects/7']));
+    },
+    Slow,
+  );
+});
 describe('ProjectLifecycleTab: дії з видимими причинами (c2–c4)', () => {
   it(
     'c3: активний проєкт із відкритими місяцями — Archive недоступна, причина називає місяці',
@@ -200,6 +248,7 @@ describe('ProjectLifecycleTab: дії з видимими причинами (c2
         ['⟦projects.lifecycle.activate⟧', '⟦projects.lifecycle.activate.desc⟧'],
         ['⟦projects.lifecycle.clone⟧', '⟦projects.lifecycle.clone.desc⟧'],
         ['⟦projects.lifecycle.archive⟧', '⟦projects.lifecycle.archive.desc⟧'],
+        ['⟦projects.lifecycle.delete⟧', '⟦projects.lifecycle.delete.desc⟧'],
       ] as const) {
         const button = await screen.findByRole('button', { name });
         const describedBy = button.getAttribute('aria-describedby') ?? '';

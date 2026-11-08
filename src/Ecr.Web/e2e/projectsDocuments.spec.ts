@@ -159,7 +159,7 @@ test.describe('Projects 08.11', () => {
     await expect(page.getByRole('button', { name: /^Pin current period…$/ })).toBeVisible();
   });
 
-  test('f6 + c3 + c4: Lifecycle — Activate, Clone, Archive with visible reasons; Clone creates a draft', async ({ page }) => {
+  test('f6 + c1–c4: Lifecycle — Activate, Clone, Archive, Delete draft with visible reasons; Clone creates a draft, Delete removes it', async ({ page }) => {
     await signIn(page);
     const { card } = await ownProject(page);
 
@@ -170,7 +170,7 @@ test.describe('Projects 08.11', () => {
     await expect(page.locator('[data-lifecycle-reason="archive"]')).toContainText('All months must be locked; open:');
     await expect(page.locator('[data-lifecycle-reason="activate"]')).toHaveText('Already active.');
     // c4: кожна кнопка — повна назва й рядок опису, нічого не обрізано.
-    for (const name of ['Activate project…', 'Clone project…', 'Archive project…']) {
+    for (const name of ['Activate project…', 'Clone project…', 'Archive project…', 'Delete draft project…']) {
       const button = page.getByRole('button', { name });
       const describedBy = (await button.getAttribute('aria-describedby')) ?? '';
       await expect(page.locator(`[id="${describedBy}"]`)).toBeVisible();
@@ -186,6 +186,20 @@ test.describe('Projects 08.11', () => {
     await page.locator('[data-project-tab="lifecycle"]').click();
     await expect(page.getByRole('button', { name: 'Activate project…' })).toBeEnabled({ timeout: 60_000 });
     await expect(page.locator('[data-lifecycle-reason="archive"]')).toContainText('Only active projects can be archived');
+
+    // c1: чернетку без документів видаляють лише після набору коду; її більше немає в переліку.
+    const cloneCode = (await page.getByRole('heading', { level: 1 }).first().textContent()) ?? '';
+    await page.getByRole('button', { name: 'Delete draft project…' }).click();
+    const confirm = page.getByRole('dialog');
+    await expect(confirm.getByRole('button', { name: 'Delete project' })).toBeDisabled();
+    await confirm.getByRole('textbox').fill(cloneCode);
+    await confirm.getByRole('button', { name: 'Delete project' }).click();
+    await expect(page).toHaveURL(/\/projects$/, { timeout: 60_000 });
+    await expect(page.locator('[data-project-open]', { hasText: cloneCode })).toHaveCount(0);
+
+    // c2: активний проєкт із документами — Delete недоступна з причиною.
+    await page.goto(`/projects/${String(card.projectId)}/lifecycle`);
+    await expect(page.locator('[data-lifecycle-reason="delete"]')).toContainText('Only draft projects without documents can be deleted (this one: Active', { timeout: 60_000 });
   });
 
   test('g1 + g3: Documents has no Month control, Year lists only years with projects, every row has a rendered 12-month strip with a legend', async ({ page }) => {

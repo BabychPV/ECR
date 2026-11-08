@@ -16,6 +16,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { listDocuments, listDocumentTemplateVersions, type DocumentListPage } from '@/features/documents/api';
 import { DocumentListFilterBar } from '@/features/documents/DocumentListFilterBar';
+import { DocumentOwnerCell } from '@/features/documents/DocumentOwnerCell';
 import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSummaryStrip';
 import { useDocumentListFilters } from '@/features/documents/documentListFilters';
 import { EyeIcon, IssueCount } from '@/features/documents/DocumentListMarks';
@@ -29,7 +30,7 @@ import { DocumentYearStrip, DocumentYearStripHeader, DocumentYearStripLegend } f
 import { calendarYears, yearsWithProjects } from '@/features/projects/projectYear';
 import { CollapsibleNote } from '@/features/common/CollapsibleNote';
 import type { PeriodCalendarDto } from '@/api/types';
-import { useProjectCalendars } from '@/shared/ui/periodStates';
+import { useCalendarsOf } from '@/features/projects/projectCalendars';
 import { statusKey } from '@/shared/ui/StatusBadge';
 import { formatNumber } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
@@ -202,19 +203,19 @@ export function DocumentsPage(): JSX.Element {
 
   /*
    * ✎ g1/g3 (макет 08.11): календарі проєктів — для варіантів «Year» (ЛИШЕ роки, де є проєкти) і для смуги
-   * (неподаний місяць бере стан періоду: відкритий, заблокований, ще не відкритий). Ключ `['periods', id]` спільний
-   * із Projects, одночасність обмежена (`useProjectCalendars`, N4-08).
+   * (неподаний місяць бере стан періоду: відкритий, заблокований, ще не відкритий) —
+   * для всіх проєктів одним запитом-обгорткою (`useCalendarsOf`, пачки по 4 — N4-08; бюджет маршруту D-132).
    */
-  const calendars = useProjectCalendars((projects.data?.items ?? []).map((project) => project.id));
+  const calendars = useCalendarsOf((projects.data?.items ?? []).map((project) => project.id));
   const calendarOf = (projectId: number): PeriodCalendarDto | undefined =>
-    calendars[(projects.data?.items ?? []).findIndex((project) => project.id === projectId)]?.data;
+    calendars[(projects.data?.items ?? []).findIndex((project) => project.id === projectId)];
   const yearOptions = yearsWithProjects(
-    calendars.map((entry) => entry.data),
+    calendars,
     year,
   );
   // Найновіший рік із проєктами — ціль кнопки порожнього стану («Show 2026»).
   const latestYear = yearsWithProjects(
-    calendars.map((entry) => entry.data),
+    calendars,
     null,
   )[0];
   const projectsOfYear = (projects.data?.items ?? []).filter((project) =>
@@ -576,15 +577,7 @@ export function DocumentsPage(): JSX.Element {
                           <Table.Td data-column="owner">
                             {/* ✎ D-450: власник (автор документа, передається D-443). `null` — людини вже немає або
                                 доступ звужено (сервер ім'я не віддає) — видиме «—», а не порожнеча. */}
-                            {typeof document.ownerDisplayName === 'string' ? (
-                              <Text size="sm" className="ecr-docs-owner" title={document.ownerDisplayName}>
-                                {document.ownerDisplayName}
-                              </Text>
-                            ) : (
-                              <Text c="dimmed" title={t('documents.ownerUnknown')}>
-                                —
-                              </Text>
-                            )}
+                            <DocumentOwnerCell ownerDisplayName={document.ownerDisplayName} modifiedAt={document.modifiedAt} />
                           </Table.Td>
                           <Table.Td data-column="months">
                             <DocumentYearStrip
