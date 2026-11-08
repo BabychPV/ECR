@@ -27735,12 +27735,18 @@ export interface components {
             /** @description Код таблиці шаблону. */
             tableCode: string;
         };
+        /** @description Методологія підказки таблиці. */
+        CalculationIssueMethodologyDto: {
+            /** @description Код методології. */
+            code: string;
+            nameL10n: null | components["schemas"]["LocalizedText"];
+        };
         /** @description Що приймають правила методологій таблиці (UAT 08.11 b3). */
         CalculationIssueTableHintDto: {
             /** @description Колонки, які згадують правила, у порядку колонок таблиці. */
             columns: components["schemas"]["CalculationIssueColumnDto"][];
-            /** @description Методології, чиї правила дали варіанти. */
-            methodologyCodes: string[];
+            /** @description Методології, чиї правила дали варіанти: код і назва (людині показується назва). */
+            methodologies: components["schemas"]["CalculationIssueMethodologyDto"][];
             /** @description Допустимі комбінації: кожен елемент — значення в порядку Columns; порожній рядок у позиції —
              *     правило цю колонку не обмежує. Без повторів, за зростанням. */
             options: string[][];

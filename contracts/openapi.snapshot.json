@@ -1706,6 +1706,31 @@
         ],
         "type": "object"
       },
+      "CalculationIssueMethodologyDto": {
+        "description": "Методологія підказки таблиці.",
+        "properties": {
+          "code": {
+            "description": "Код методології.",
+            "type": "string"
+          },
+          "nameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва мовами каталогу; `null` — невідома (показується код)."
+              }
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "nameL10n"
+        ],
+        "type": "object"
+      },
       "CalculationIssueTableHintDto": {
         "description": "Що приймають правила методологій таблиці (UAT 08.11 b3).",
         "properties": {
@@ -1716,10 +1741,10 @@
             },
             "type": "array"
           },
-          "methodologyCodes": {
-            "description": "Методології, чиї правила дали варіанти.",
+          "methodologies": {
+            "description": "Методології, чиї правила дали варіанти: код і назва (людині показується назва).",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/CalculationIssueMethodologyDto"
             },
             "type": "array"
           },
@@ -1749,7 +1774,7 @@
         "required": [
           "tableCode",
           "sheetCopyId",
-          "methodologyCodes",
+          "methodologies",
           "columns",
           "options"
         ],

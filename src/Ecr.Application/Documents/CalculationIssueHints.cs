@@ -150,7 +150,7 @@ internal sealed class CalculationIssueHints(
         return new CalculationIssueHintSet(tables, current);
     }
 
-    private static (IReadOnlyList<string> Methodologies, IReadOnlyList<ColumnDef> Columns, IReadOnlyList<IReadOnlyList<string>> Options)?
+    private static (IReadOnlyList<CalculationIssueMethodologyDto> Methodologies, IReadOnlyList<ColumnDef> Columns, IReadOnlyList<IReadOnlyList<string>> Options)?
         HintOf(
             int tableDefId,
             TemplateVersionSnapshot snapshot,
@@ -218,14 +218,16 @@ internal sealed class CalculationIssueHints(
             .Take(MaxOptions)
             .ToList();
 
-        var methodologyCodes = applicable
-            .Select(a => labels.TryGetValue(a.Rule.MethodologyVersionId, out var label) ? label.MethodologyCode : null)
-            .OfType<string>()
-            .Distinct(StringComparer.Ordinal)
-            .Order(StringComparer.Ordinal)
+        // UAT 08.11 (свіжий погляд): людині — назва методології; код — лише запасний підпис.
+        var methodologies = applicable
+            .Select(a => labels.TryGetValue(a.Rule.MethodologyVersionId, out var label) ? label : null)
+            .OfType<MethodologyVersionLabel>()
+            .DistinctBy(l => l.MethodologyCode, StringComparer.Ordinal)
+            .OrderBy(l => l.MethodologyCode, StringComparer.Ordinal)
+            .Select(l => new CalculationIssueMethodologyDto(l.MethodologyCode, l.MethodologyNameL10n))
             .ToList();
 
-        return (methodologyCodes, columns, options);
+        return (methodologies, columns, options);
     }
 
     private async Task<IReadOnlyDictionary<(int TableDefId, string RowKey), IReadOnlyList<string>>> CurrentValuesAsync(

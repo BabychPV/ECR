@@ -117,7 +117,7 @@ public sealed record CalculationIssuesDto(
 /// <summary>Що приймають правила методологій таблиці (UAT 08.11 b3).</summary>
 /// <param name="TableCode">Код таблиці шаблону.</param>
 /// <param name="SheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
-/// <param name="MethodologyCodes">Методології, чиї правила дали варіанти.</param>
+/// <param name="Methodologies">Методології, чиї правила дали варіанти: код і назва (людині показується назва).</param>
 /// <param name="Columns">Колонки, які згадують правила, у порядку колонок таблиці.</param>
 /// <param name="Options">
 /// Допустимі комбінації: кожен елемент — значення в порядку <paramref name="Columns"/>; порожній рядок у позиції —
@@ -126,9 +126,14 @@ public sealed record CalculationIssuesDto(
 public sealed record CalculationIssueTableHintDto(
     string TableCode,
     long? SheetCopyId,
-    IReadOnlyList<string> MethodologyCodes,
+    IReadOnlyList<CalculationIssueMethodologyDto> Methodologies,
     IReadOnlyList<CalculationIssueColumnDto> Columns,
     IReadOnlyList<IReadOnlyList<string>> Options);
+
+/// <summary>Методологія підказки таблиці.</summary>
+/// <param name="Code">Код методології.</param>
+/// <param name="NameL10n">Назва мовами каталогу; <c>null</c> — невідома (показується код).</param>
+public sealed record CalculationIssueMethodologyDto(string Code, LocalizedText? NameL10n);
 
 /// <summary>Колонка, яку згадують правила методології.</summary>
 /// <param name="Code">Код колонки.</param>

@@ -40,7 +40,7 @@ public sealed class CalculationIssueHintsTests
 
         var table = Assert.Single(result.Tables!);
         Assert.Equal("T9_01", table.TableCode);
-        Assert.Equal(["ECW_C11_11_02"], table.MethodologyCodes);
+        var methodology = Assert.Single(table.Methodologies);
         var column = Assert.Single(table.Columns);
         Assert.Equal("IDCodeNAEProject", column.Code);
         Assert.Equal([["0903"], ["0905"]], table.Options.Select(o => o.ToArray()).ToList());
@@ -195,7 +195,7 @@ public sealed class CalculationIssueHintsTests
             methodologies.GetVersionLabelsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
                          .Returns(new Dictionary<int, MethodologyVersionLabel>
                          {
-                             [11] = new(11, "ECW_C11_11_02", "1.0"),
+                             [11] = new(11, "ECW_C11_11_02", "1.0", new LocalizedText(new Dictionary<string, string> { ["en"] = "Cooling medium" })),
                              [12] = new(12, "ECW_C11_11_02", "2.0"),
                          });
 

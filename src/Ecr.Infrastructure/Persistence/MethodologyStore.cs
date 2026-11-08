@@ -703,12 +703,12 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             where ids.Contains(version.Id)
             join methodology in db.Methodologies.AsNoTracking() on version.MethodologyId equals methodology.Id
             orderby version.Id
-            select new { version.Id, methodology.Code, version.Version })
+            select new { version.Id, methodology.Code, version.Version, methodology.NameL10n })
             .Take(MaxChildren)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        return labels.ToDictionary(l => l.Id, l => new MethodologyVersionLabel(l.Id, l.Code, l.Version));
+        return labels.ToDictionary(l => l.Id, l => new MethodologyVersionLabel(l.Id, l.Code, l.Version, l.NameL10n));
     }
 
     /// <inheritdoc />

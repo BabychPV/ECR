@@ -440,7 +440,9 @@ public sealed record CalculationFreshness(
 /// <param name="MethodologyVersionId">Версія.</param>
 /// <param name="MethodologyCode">Код методології.</param>
 /// <param name="Version">Номер версії («1.2.0»).</param>
-public sealed record MethodologyVersionLabel(int MethodologyVersionId, string MethodologyCode, string Version);
+/// <param name="MethodologyNameL10n">Назва методології мовами каталогу; <c>null</c> — не прочитана (UAT 08.11 b3: людині — назва, не код).</param>
+public sealed record MethodologyVersionLabel(
+    int MethodologyVersionId, string MethodologyCode, string Version, Ecr.Domain.ValueObjects.LocalizedText? MethodologyNameL10n = null);
 
 /// <summary>Одна публікація версії методології з журналу <c>aud.PublicationEvent</c> (F-16).</summary>
 /// <param name="Id">Запис журналу.</param>
