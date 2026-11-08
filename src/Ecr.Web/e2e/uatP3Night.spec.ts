@@ -114,7 +114,7 @@ test.describe('uatP3Night Periods page offers Recalculate project', () => {
       });
     });
 
-    await page.goto(`/admin/periods?projectId=${String(projectId)}`);
+    await page.goto(`/projects/${String(projectId)}/periods`);
     const action = page.getByRole('button', { name: /Recalculate project|Пересчитать проект|Жобаны қайта есептеу/i });
     await expect(action, 'на Periods немає перерахунку проєкту').toBeVisible({ timeout: 60_000 });
     await action.click();

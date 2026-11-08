@@ -82,7 +82,7 @@ function show(): void {
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={['/admin/periods?projectId=7']}>
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-          <PeriodsPage />
+          <PeriodsPage projectId={7} />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,
@@ -133,7 +133,7 @@ describe('PeriodsPage: рядок місяця — підпис, стан і о�
   );
 
   it(
-    'п. b: маршрут, політики, клон, пояс і архів — не тут; є посилання на налаштування проєкту',
+    'п. b: маршрут, політики, клон, пояс і архів — не тут (вони на вкладках Settings і Lifecycle проєкту)',
     async () => {
       mockFetch();
       show();
@@ -151,9 +151,6 @@ describe('PeriodsPage: рядок місяця — підпис, стан і о�
       ]) {
         expect(screen.queryByRole('button', { name })).toBeNull();
       }
-
-      const link = screen.getByRole('link', { name: '⟦projectSettings.title⟧' });
-      expect(link.getAttribute('href')).toBe('/admin/projects?projectId=7');
     },
     Slow,
   );

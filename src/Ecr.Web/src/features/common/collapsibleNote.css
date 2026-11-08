@@ -1,0 +1,23 @@
+/* ✎ fg6: пояснення — компактне (≤ ~2 рядки), згортається; кольори — лише токени набору. */
+.ecr-note {
+  max-width: 880px;
+}
+
+.ecr-note-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  border-radius: var(--mantine-radius-xs);
+  color: var(--mantine-color-text);
+}
+
+.ecr-note-chevron {
+  color: var(--mantine-color-dimmed);
+  width: 1em;
+}
+
+.ecr-note-body {
+  padding-left: calc(1em + 6px);
+  max-width: 860px;
+}

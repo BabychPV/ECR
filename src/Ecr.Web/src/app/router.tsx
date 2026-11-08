@@ -1,7 +1,8 @@
 ﻿import { Suspense, createElement, lazy, type JSX } from 'react';
 import { Loader, Center } from '@mantine/core';
-import { createBrowserRouter, type RouteObject } from 'react-router-dom';
+import { createBrowserRouter, Navigate, type RouteObject } from 'react-router-dom';
 import { AdminLayout } from './AdminLayout';
+import { LegacyProjectRedirect, ProjectTab } from './projectRoutes';
 import { AppLayout } from './AppLayout';
 import { HomeRoute } from './HomeRoute';
 import { RouteErrorPage } from './RouteErrorPage';
@@ -23,9 +24,9 @@ import {
   MethodologyVersionsPage,
   MyGroupsPage,
   NotificationsPage,
-  PeriodsPage,
-  ProjectSettingsPage,
   PermitsPage,
+  ProjectLayout,
+  ProjectsPage,
   RegistriesPage,
   RegistryConstructorPage,
   SecurityPage,
@@ -301,6 +302,36 @@ export const router = createBrowserRouter([
         handle: routes.documentDetail.handle,
       },
 
+      // ✎ Projects (макет 08.11): перелік проєктів і проєкт із вкладками Periods · Settings · Lifecycle.
+      {
+        path: childPath(routes.projects),
+        element: guarded(routes.projects.handle, <ProjectsPage />),
+        handle: routes.projects.handle,
+      },
+      {
+        path: childPath(routes.projectDetail),
+        element: guarded(routes.projectDetail.handle, <ProjectLayout />),
+        handle: routes.projectDetail.handle,
+        children: [
+          { index: true, element: <Navigate to="periods" replace /> },
+          {
+            path: relativePath(routes.projectPeriods, 'projects/:id'),
+            element: <ProjectTab tab="periods" />,
+            handle: routes.projectPeriods.handle,
+          },
+          {
+            path: relativePath(routes.projectSettings, 'projects/:id'),
+            element: <ProjectTab tab="settings" />,
+            handle: routes.projectSettings.handle,
+          },
+          {
+            path: relativePath(routes.projectLifecycle, 'projects/:id'),
+            element: <ProjectTab tab="lifecycle" />,
+            handle: routes.projectLifecycle.handle,
+          },
+        ],
+      },
+
       /**
        * Секція `/admin/*` — проміжний layout-маршрут (`PR nav-arch #2`,
        * директива: «мінімум `/admin/*`»). Усе, що раніше було 17 прямими
@@ -486,16 +517,13 @@ export const router = createBrowserRouter([
             element: guarded(routes.adminSecurity.handle, <SecurityPage />),
             handle: routes.adminSecurity.handle,
           },
-          {
-            path: relativePath(routes.adminPeriods, 'admin'),
-            element: guarded(routes.adminPeriods.handle, <PeriodsPage />),
-            handle: routes.adminPeriods.handle,
-          },
-          {
-            path: relativePath(routes.adminProjectSettings, 'admin'),
-            element: guarded(routes.adminProjectSettings.handle, <ProjectSettingsPage />),
-            handle: routes.adminProjectSettings.handle,
-          },
+          /*
+           * ✎ Projects (макет 08.11): колишні «Periods» і «Project settings» — перенаправлення на «Projects»
+           * (`?projectId=` веде одразу у вкладку проєкту), без сторінки помилки. Не записи реєстру: пунктів меню й
+           * крихт у них немає, як і в `/403`.
+           */
+          { path: 'periods', element: <LegacyProjectRedirect tab="periods" /> },
+          { path: 'projects', element: <LegacyProjectRedirect tab="settings" /> },
           {
             path: relativePath(routes.adminSources, 'admin'),
             element: guarded(routes.adminSources.handle, <SourcesPage />),

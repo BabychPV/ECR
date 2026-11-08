@@ -33,8 +33,8 @@ export const Routes = [
   { path: '/admin/expressions', name: 'expressions' },
   { path: '/admin/units', name: 'units' },
   { path: '/admin/security', name: 'security' },
-  { path: '/admin/periods', name: 'periods' },
-  { path: '/admin/projects', name: 'project-settings' },
+  // ✎ Projects (08.11): «Periods» і «Project settings» — один перелік /projects.
+  { path: '/projects', name: 'projects' },
   { path: '/admin/sources', name: 'sources' },
   { path: '/admin/mapping', name: 'mapping' },
   { path: '/admin/pipeline', name: 'pipeline' },

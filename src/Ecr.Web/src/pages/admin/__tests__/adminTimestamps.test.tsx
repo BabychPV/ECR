@@ -242,7 +242,7 @@ describe('PeriodsPage: межі періоду і крайні строки', ()
         ['/periods', { ...calendar, periods: [{ ...calendar.periods[0], endsAt: LocksAt }] }],
         ['/api/v1/projects', { items: [project], nextCursor: null, totalCount: 1 }],
       ]);
-      show(<PeriodsPage />, '/admin/periods?projectId=7');
+      show(<PeriodsPage projectId={7} />, '/admin/periods?projectId=7');
 
       await screen.findByRole('table', {}, { timeout: SlowEnvTimeout });
       await waitFor(() => expect(timeNode(LocksAt), '«Locks on» не намальовано елементом <time>').not.toBeNull(), {

@@ -110,26 +110,33 @@ const SlowEnvTimeout = 400_000;
 
 describe('DocumentsPage: посилання несе обраний період (F3)', () => {
   it(
-    'обраний період потрапляє в адресу документа — і для іменованого, і для безіменного',
+    // ✎ Projects/Documents 08.11: перелік лише за рік — місяць у посилання несе клітинка смуги, а назва веде на документ без місяця.
+    'стара адреса з минулим місяцем: клітинка смуги несе саме цей місяць — і для іменованого, і для безіменного',
     async () => {
       mockFetch();
       show(`/?periodKey=${String(PastPeriod)}`);
 
-      // ⛔ Мутаційний доказ: поверни `to={`/documents/${document.id}`}` — і
-      // обидва очікування падають на відсутньому `?periodKey=202401`.
+      // Назва документа — без місяця: обраного місяця в переліку року немає, і підставляти його було б неправдою.
       const withName = await screen.findByRole(
         'link',
         { name: 'Named document' },
         { timeout: SlowEnvTimeout },
       );
-      expect(withName.getAttribute('href')).toBe(`/documents/7?periodKey=${String(PastPeriod)}`);
+      expect(withName.getAttribute('href')).toBe('/documents/7');
 
       const withoutName = await screen.findByRole(
         'link',
         { name: 'DOC-000001' },
         { timeout: SlowEnvTimeout },
       );
-      expect(withoutName.getAttribute('href')).toBe(`/documents/1?periodKey=${String(PastPeriod)}`);
+      expect(withoutName.getAttribute('href')).toBe('/documents/1');
+
+      // ⛔ Гарантія F3 у перегляді року: клітинка місяця з адреси (рік 2024 узято з periodKey) веде саме на нього,
+      // а не на поточний місяць. Мутація «рік — завжди поточний» дає `data-month` іншого року — і тут червоне.
+      for (const id of [7, 1]) {
+        const cell = document.querySelector(`[data-month="${String(PastPeriod)}"][href^="/documents/${String(id)}?"]`);
+        expect(cell?.getAttribute('href')).toBe(`/documents/${String(id)}?periodKey=${String(PastPeriod)}`);
+      }
 
       // ⚠ Страховка від хибнозеленого: період тесту НЕ дорівнює поточному
       // місяцю, тобто збіг із підстановкою `currentPeriodKey()` виключений.

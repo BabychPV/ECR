@@ -1,23 +1,20 @@
-import { Suspense, lazy, useEffect, useState, type JSX } from 'react';
-import { Badge, Button, Group, Modal, ScrollArea, Select, Stack, Table, Text, Textarea, VisuallyHidden } from '@mantine/core';
+import { Suspense, lazy, useState, type JSX } from 'react';
+import { Badge, Button, Group, Modal, ScrollArea, Stack, Table, Text, Textarea, VisuallyHidden } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
-import type { PagedProjects, PeriodCalendarDto, ReopenPeriodRequest } from '@/api/types';
+import type { PeriodCalendarDto, ReopenPeriodRequest } from '@/api/types';
+import { CollapsibleNote } from '@/features/common/CollapsibleNote';
 import { hasProjectGrant } from '@/features/documents/projectGrant';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Hint } from '@/shared/ui/Hint';
-import { PageHeader } from '@/shared/ui/PageHeader';
-import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { formatMonthYear } from '@/shared/format';
 import { siteMomentText, zoneClock } from '@/shared/siteMoment';
 import { showApiError, showDone } from '@/shared/ui/notify';
-import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { projectsQuery } from '@/features/projects/allProjects';
 import { effectivePeriodState } from '@/features/projects/periodEffective';
-import { FilterRow } from '@/shared/ui/FilterBar';
 
 // Правило поясу майданчика живе в `shared/siteMoment`; ім'я лишається доступним звідси.
 export { siteMomentText } from '@/shared/siteMoment';
@@ -25,12 +22,6 @@ export { siteMomentText } from '@/shared/siteMoment';
 // UI-33: плитки року й «All projects» — окремим чанком (бюджет `D-132`).
 const PeriodYearTiles = lazy(async () => ({
   default: (await import('@/features/projects/PeriodsOverview')).PeriodYearTiles,
-}));
-const PeriodsStatStrip = lazy(async () => ({
-  default: (await import('@/features/projects/PeriodsOverview')).PeriodsStatStrip,
-}));
-const AllProjectsPeriods = lazy(async () => ({
-  default: (await import('@/features/projects/PeriodsOverview')).AllProjectsPeriods,
 }));
 // ✎ UAT-p3: людина шукала перерахунок саме тут — та сама дія, що й на переліку документів (окремим чанком, D-132).
 const ProjectRecalculateAction = lazy(async () => ({
@@ -172,8 +163,7 @@ export function endOfSiteDayUtc(day: Date, timeZoneId: string): string {
  * Життєвий цикл проєкту (створити, клонувати, активувати, заархівувати), маршрут, політики й пояс — у
  * налаштуваннях проєкту (`ProjectSettingsPage`), перерахунок — на переліку документів.
  */
-export function PeriodsPage(): JSX.Element {
-  const [projectId, setProjectId] = useUrlNumber('projectId');
+export function PeriodsPage({ projectId }: { readonly projectId: number }): JSX.Element {
   // UI-33: період, обраний плиткою року, — його рядок у календарі виділено.
   const [tileKey, setTileKey] = useState<number | null>(null);
   const queryClient = useQueryClient();
@@ -197,40 +187,12 @@ export function PeriodsPage(): JSX.Element {
 
   const periods = useQuery({
     queryKey: ['periods', projectId],
-    queryFn: () => apiFetch<PeriodCalendarDto>(`/api/v1/projects/${projectId ?? 0}/periods`),
-    enabled: projectId !== null,
+    queryFn: () => apiFetch<PeriodCalendarDto>(`/api/v1/projects/${String(projectId)}/periods`),
   });
 
+  // ✎ Projects (макет 08.11): проєкт — з адреси вкладки (`/projects/:id/periods`); вибору проєкту тут більше немає
+  // (колишній автовибір єдиного проєкту `U-10` і огляд «All projects» — тепер перелік `/projects`).
   const selected = (projects.data?.items ?? []).find((p) => p.id === projectId);
-
-  /*
-   * ⛔ `U-10`. Сторінка відкривалася на «Pick a project», хоча проєкт у
-   * системі ОДИН — тобто вимагала вибору там, де вибору немає, і до кліку
-   * лишалася порожньою.
-   *
-   * ⛔ Межа автовибору названа прямо, і вона вузька: обирається лише коли
-   * варіант рівно ОДИН. Автовибір «першого-ліпшого» з десяти тут заборонений
-   * — він мовчки показав би адміністраторові календар чужого проєкту, і
-   * найдорожче те, що на екрані ніщо не сказало б, що вибір зроблено за
-   * нього. Проєкти рівноправні: «поточного» серед них немає (на відміну від
-   * періоду, у якого є `isCurrent` — див. `DocumentsPage.tsx`), тож іншого
-   * чесного критерію, ніж «він один», не існує.
-   *
-   * ⚠ Вибір потрапляє в АДРЕСУ (`?projectId=`, `useUrlNumber`), а не в
-   * локальний стан: поле показує його, і посилання на сторінку лишається
-   * робочим. Це те саме, що зробила б людина кліком.
-   *
-   * ⚠ Ефект, а не обчислення під час рендера: `setProjectId` пише в адресу,
-   * тобто це побічна дія. Умова `projectId === null` тримає його одноразовим
-   * — знявши вибір, людина не отримає його назад тим самим тактом (окрема
-   * дія «скинути» на цій сторінці не передбачена, але й підміняти намір
-   * мовчки не можна).
-   */
-  const onlyProject = projects.data?.items.length === 1 ? projects.data.items[0] : undefined;
-
-  useEffect(() => {
-    if (projectId === null && onlyProject !== undefined) setProjectId(onlyProject.id);
-  }, [projectId, onlyProject, setProjectId]);
 
   /** Перечитує проєкти і календар після будь-якої зміни. */
   const refresh = async (): Promise<void> => {
@@ -322,83 +284,27 @@ export function PeriodsPage(): JSX.Element {
   // ⛔ Право `Period.Reopen` не каже, ЧИЇ періоди: сервер вимагає ще й гранта
   // Manage на проєкт (`ReopenPeriodHandler`). Без цієї умови кнопка обіцяла б
   // дію, яка завершиться 403.
-  const reopens =
-    can(session.data, 'Period.Reopen') &&
-    projectId !== null &&
-    hasProjectGrant(session.data, projectId, 'Manage');
+  const reopens = can(session.data, 'Period.Reopen') && hasProjectGrant(session.data, projectId, 'Manage');
 
   return (
     <>
-      <PageHeader
-        title={t('periods.title')}
-        actions={
-          <FilterRow>
-            <Select
-              size="xs"
-              miw={220}
-              label={t('periods.project')}
-              placeholder={t('periods.pickProject')}
-              /*
-               * ⚠ У варіанті списку компонента бути не може — потрібен РЯДОК.
-               * Тому підпис береться тим самим ключем каталогу, що й у
-               * `StatusBadge` (`statusKey`), а не кодом сервера: `Archived`
-               * англійською посеред казахського інтерфейсу — це той самий
-               * дефект, що й `{period.state}` у таблиці нижче, лише в
-               * випадному списку.
-               */
-              data={(projects.data?.items ?? []).map((p) => ({
-                value: String(p.id),
-                label: `${p.code} · ${t(statusKey('project', p.status))}`,
-              }))}
-              value={projectId === null ? null : String(projectId)}
-              onChange={(value) => {
-                setTileKey(null);
-                setProjectId(value === null ? null : Number(value));
-              }}
-            />
+      {/* ✎ UAT recalc-progress (a2) + Projects 08.11 (f4): прогрес перерахунку — на вкладці Periods проєкту. */}
+      <Suspense fallback={null}>
+        <ProjectRecalcBanner projectId={projectId} />
+      </Suspense>
 
-            {/* ✎ Period clarity (людина 07.11, п. b): маршрут погодження, політики, клон, пояс, життєвий цикл
-                проєкту — у налаштуваннях проєкту; перерахунок — на переліку документів. Тут — лише місяці. */}
-            <Button
-              variant="default"
-              component={Link}
-              to={projectId === null ? '/admin/projects' : `/admin/projects?projectId=${String(projectId)}`}
-              data-project-settings-link=""
-            >
-              {t('projectSettings.title')}
-            </Button>
-
-            {/* ✎ UAT-p3: перерахунок обраного проєкту — те саме правило, що на переліку документів (лише Active і
-                `Calculation.Recalculate`), той самий компонент і перелік пропущених. */}
-            {selected !== undefined && selected.status === 'Active' && can(session.data, 'Calculation.Recalculate') && (
-              <Suspense fallback={null}>
-                <ProjectRecalculateAction key={selected.id} project={selected} label={t('periods.recalcProject')} />
-              </Suspense>
-            )}
-          </FilterRow>
-        }
-      />
-
-      {/* Недоступний перелік проєктів лишає порожнім сам вибір — це треба
-          сказати, а не показати порожній Select. */}
-      <AsyncBoundary<PagedProjects>
-        isPending={projects.isPending}
-        error={projects.error}
-        data={projects.data}
-        isEmpty={(page) => page.items.length === 0}
-        emptyTitle={t('periods.noProjects')}
-        emptyHint={t('periods.noProjectsHint')}
-        onRetry={() => void projects.refetch()}
-      >
-        {() => null}
-      </AsyncBoundary>
-
-      {/* UI RC9 (макет `/admin/periods`): смуга показників — ПЕРШЕ під заголовком, а не під плитками. */}
-      {(projects.data?.items.length ?? 0) > 0 && (
-        <Suspense fallback={null}>
-          <PeriodsStatStrip projects={projects.data?.items ?? []} />
-        </Suspense>
-      )}
+      {/* ✎ Projects (макет 08.11, рядок f4): над календарем — заголовок року й «Recalculate project…» (лише Active і
+          `Calculation.Recalculate`, той самий компонент і перелік пропущених, що на переліку документів). */}
+      <Group justify="space-between" align="flex-start" mb="xs" wrap="wrap" gap="sm">
+        <CollapsibleNote noteId="periods-lock-only" summary={t('periods.lockOnlyNote')}>
+          {t('projects.periods.legend')}
+        </CollapsibleNote>
+        {selected !== undefined && selected.status === 'Active' && can(session.data, 'Calculation.Recalculate') && (
+          <Suspense fallback={null}>
+            <ProjectRecalculateAction key={selected.id} project={selected} label={t('periods.recalcProject')} />
+          </Suspense>
+        )}
+      </Group>
 
       {selected?.status === 'Draft' && (
         <Text c="statusWarning" size="sm" mb="xs">
@@ -406,17 +312,6 @@ export function PeriodsPage(): JSX.Element {
         </Text>
       )}
 
-      {projectId !== null && (
-        <Suspense fallback={null}>
-          <ProjectRecalcBanner projectId={projectId} />
-        </Suspense>
-      )}
-
-      {/*
-       * ⚠ Доки проєкт не обрано, `data` — `undefined`: запиту ще не було, і
-       * обгортка каже саме це, а не «періодів немає».
-       */}
-      {projectId !== null && (
       <AsyncBoundary<PeriodCalendarDto>
         isPending={periods.isPending}
         error={periods.error}
@@ -449,9 +344,6 @@ export function PeriodsPage(): JSX.Element {
           />
         </Suspense>
 
-        <Text size="sm" mb="xs" data-periods-lock-note="">
-          {t('periods.lockOnlyNote')}
-        </Text>
         <Text size="xs" c="dimmed" mb="xs">
           {t('periods.timeZone')}: {calendar.timeZoneId}
         </Text>
@@ -594,23 +486,6 @@ export function PeriodsPage(): JSX.Element {
         </>
         )}
       </AsyncBoundary>
-      )}
-
-      {/* UI-33: «All projects · current period» — без вибору проєкту це головний
-          вміст сторінки, а не порожній «Pick a project»; рядок обирає проєкт. */}
-      {(projects.data?.items.length ?? 0) > 0 && (
-        <Suspense fallback={null}>
-          <AllProjectsPeriods
-            projects={projects.data?.items ?? []}
-            selectedId={projectId}
-            onPick={(id) => {
-              setTileKey(null);
-              setProjectId(id);
-            }}
-            siteDate={siteDate}
-          />
-        </Suspense>
-      )}
 
       {/*
         ⛔ Не `ReasonModal`, і це не дублювання заради дублювання: перевідкриття

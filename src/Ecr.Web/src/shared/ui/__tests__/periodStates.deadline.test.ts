@@ -5,7 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { theme } from '@/shared/theme/theme';
-import { PeriodsStatStrip, periodNote } from '@/features/projects/PeriodsOverview';
+import { periodNote } from '@/features/projects/PeriodsOverview';
 import { siteMomentText } from '@/shared/siteMoment';
 import {
   MaxConcurrentCalendars,
@@ -225,19 +225,6 @@ describe('одночасність календарів (N4-08)', () => {
     expect(requested.size).toBe(ProjectCount);
     expect(maxInFlight).toBeLessThanOrEqual(MaxConcurrentCalendars);
   });
-
-  it('огляд періодів: не більше межі одночасно', async () => {
-    const projects = Array.from({ length: ProjectCount }, (_, index) => ({
-      id: index + 1,
-      code: `P${String(index + 1)}`,
-      status: 'Active',
-      periodKind: 'Month',
-    }));
-    renderWithClient(createElement(PeriodsStatStrip, { projects: projects as never }));
-
-    await drainUntilAllRequested();
-
-    expect(requested.size).toBe(ProjectCount);
-    expect(maxInFlight).toBeLessThanOrEqual(MaxConcurrentCalendars);
-  });
+  // ✎ Projects (08.11): огляд «All projects» (`PeriodsStatStrip`) замінив перелік `/projects`; він бере календарі
+  // тим самим `useProjectCalendars`, межу якого стереже перевірка завантажувача вище.
 });

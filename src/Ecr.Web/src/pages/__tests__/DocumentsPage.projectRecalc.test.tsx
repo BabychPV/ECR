@@ -99,7 +99,8 @@ describe('DocumentsPage: перерахунок проєкту (Period clarity �
     async () => {
       respond([Prj], ['Document.View']);
       show('/?projectId=7');
-      await screen.findByText(/⟦documents\.(empty|noMatch)⟧/);
+      // ✎ Projects/Documents 08.11: порожній стан року — `documents.emptyYear (year=…)` замість прибраного `documents.empty`.
+      await screen.findByText(/⟦documents\.(emptyYear \(year=\d+\)|noMatch)⟧/);
       expect(screen.queryByRole('button', { name: '⟦workflow.recalculate⟧' })).toBeNull();
     },
     Slow,
@@ -135,7 +136,8 @@ describe('DocumentsPage: перерахунок проєкту (Period clarity �
     async () => {
       respond([Prj, Other], ['Document.View']);
       show('/');
-      await screen.findByText(/⟦documents\.(empty|noMatch)⟧/);
+      // ✎ Projects/Documents 08.11: порожній стан року — `documents.emptyYear (year=…)` замість прибраного `documents.empty`.
+      await screen.findByText(/⟦documents\.(emptyYear \(year=\d+\)|noMatch)⟧/);
       expect(screen.queryByRole('button', { name: '⟦workflow.recalculate⟧' })).toBeNull();
     },
     Slow,
