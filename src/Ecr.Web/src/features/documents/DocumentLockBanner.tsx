@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import { Alert } from '@mantine/core';
+import { Alert, Group } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import type { DocumentLock } from './documentLock';
 
@@ -8,6 +8,11 @@ interface DocumentLockBannerProps {
   readonly lock: DocumentLock | null;
   /** Період — у тексті, щоб банер казав, ЯКИЙ саме закрито. */
   readonly periodKey: number;
+  /**
+   * Приймальна 08.11 (i1): дія закритого періоду — «Reopen … for this document…» (або недоступна кнопка з причиною).
+   * Показується лише під причиною `periodClosed`.
+   */
+  readonly periodAction?: JSX.Element | null;
 }
 
 /**
@@ -20,12 +25,13 @@ interface DocumentLockBannerProps {
  * ⚠ `role="status"`, а не `alert`: це стан документа, а не щойно сталася
  * помилка — читалка має сказати його, але не перебивати.
  */
-export function DocumentLockBanner({ lock, periodKey }: DocumentLockBannerProps): JSX.Element | null {
+export function DocumentLockBanner({ lock, periodKey, periodAction = null }: DocumentLockBannerProps): JSX.Element | null {
   if (lock === null) return null;
 
   return (
     <Alert color="statusWarning" variant="light" role="status" data-document-lock={lock}>
       {textOf(lock, periodKey)}
+      {lock === 'periodClosed' && periodAction !== null && <Group mt="xs">{periodAction}</Group>}
     </Alert>
   );
 }

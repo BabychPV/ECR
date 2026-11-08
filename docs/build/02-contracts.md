@@ -4573,6 +4573,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/me/editor-sets/{setId}` | — (лише власні набори; чужий — 404) | 8 |
 | `GET` | `/api/v1/documents/{id}/recall` | — | 3 |
 | `GET` | `/api/v1/documents/{id}/approver-edit` | `Document.View` (✎ D-448: чи може викликач правити поданий аркуш як погоджувач поточного кроку; невидимий документ — 404) | 3 |
+| `GET` | `/api/v1/documents/{documentId}/period-reopen` | — (✎ приймальна 08.11 (i): видимий документ; стан місяця `?periodKey=` для документа — діючий виняток, `canOpen`/`denial` для викликача, `defaultOpenUntil` = кінець доби майданчика; невидимий документ — 404) | 3 |
+| `POST` | `/api/v1/documents/{documentId}/period-reopen` | `Period.Reopen` у проєкті документа (✎ приймальна 08.11 (i): відкриває ЗАКРИТИЙ місяць лише для цього документа до `openUntil`, причина обов'язкова; решта документів місяця закрита; діючий виняток замінюється; аудит `DocumentPeriodReopen/Reopen` і `Close`; 404 — невидимий документ чи немає місяця, 409 `ECR-PRD-0409` — місяць не закритий / проєкт архівований, 422 `ECR-PRD-0422` — причина порожня/задовга, строк не в майбутньому) | 3 |
 | `GET` | `/api/v1/documents/{id}/tables` | `Document.View` (✎ TC02: таблиця копії несе `chatMessageCount` (оригінал — `null`) — живих повідомлень чату цієї копії в усіх її таблицях; клієнт показує число ДО підтвердження видалення копії, яка забирає чат разом з даними; `DELETE …/sheet-copies/{sheetCopyId}` пише його в журнал безпеки як `chatMessages`) | 6 |
 | `GET` | `/api/v1/documents/{id}/tables/status` | `Document.View` | 6 |
 | `POST` | `/api/v1/documents/{id}/export` | `Document.Export` | 5 |

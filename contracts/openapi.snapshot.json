@@ -5997,6 +5997,106 @@
         ],
         "type": "object"
       },
+      "DocumentPeriodReopenState": {
+        "description": "Стан «місяць відкрито для документа» для сторінки документа.",
+        "properties": {
+          "active": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DocumentPeriodReopenView",
+                "description": "Діючий виняток; `null` — немає."
+              }
+            ]
+          },
+          "canOpen": {
+            "description": "Чи може цей користувач відкрити місяць для документа зараз.",
+            "type": "boolean"
+          },
+          "defaultOpenUntil": {
+            "description": "Строк за замовчуванням — кінець доби майданчика (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "denial": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DocumentReopenDenial",
+                "description": "Чому не може; `null` — може."
+              }
+            ]
+          },
+          "periodKey": {
+            "description": "Місяць.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "periodKey",
+          "active",
+          "canOpen",
+          "denial",
+          "defaultOpenUntil"
+        ],
+        "type": "object"
+      },
+      "DocumentPeriodReopenView": {
+        "description": "Діючий виняток документа за місяць.",
+        "properties": {
+          "id": {
+            "description": "Ідентифікатор винятку.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "openUntil": {
+            "description": "До якого моменту (UTC) документ відкрито.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "openedAt": {
+            "description": "Коли відкрито (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "openedByName": {
+            "description": "Ім'я того, хто відкрив; `null` — невідоме.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "openedByUserId": {
+            "description": "Хто відкрив.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "periodKey": {
+            "description": "Місяць.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Причина відкриття.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "periodKey",
+          "openUntil",
+          "reason",
+          "openedByUserId",
+          "openedByName",
+          "openedAt"
+        ],
+        "type": "object"
+      },
       "DocumentPeriodRequest": {
         "description": "Дія над документом у межах одного періоду.",
         "properties": {
@@ -6029,6 +6129,15 @@
           "state"
         ],
         "type": "object"
+      },
+      "DocumentReopenDenial": {
+        "enum": [
+          "NoPermission",
+          "PeriodNotClosed",
+          "ProjectArchived",
+          "PeriodMissing",
+          null
+        ]
       },
       "DocumentSheetState": {
         "description": "Аркуш складу документа в переліку: код, назва, стан за період.",
@@ -12708,6 +12817,34 @@
           "Legacy",
           "Strict"
         ]
+      },
+      "OpenDocumentPeriodReopenRequest": {
+        "description": "Запит на відкриття закритого місяця для документа.",
+        "properties": {
+          "openUntil": {
+            "description": "До якого моменту (UTC); `null` — до кінця доби майданчика. Безстрокового немає.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "periodKey": {
+            "description": "Місяць (РРРРММ).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Причина; обов'язкова, потрапляє в журнал.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "periodKey",
+          "reason",
+          "openUntil"
+        ],
+        "type": "object"
       },
       "OutOfWindowBehavior": {
         "description": "Поведінка поза вікном доступу до періоду (ФВ-2.16).",
@@ -35165,6 +35302,217 @@
         "summary": "Передає власність документа.",
         "tags": [
           "DocumentOwner"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/period-reopen": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPeriodReopenState"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPeriodReopenState"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPeriodReopenState"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Стан місяця для документа: діючий виняток (якщо є), чи може поточний користувач відкрити місяць і чому ні,\nстрок за замовчуванням (кінець доби майданчика).",
+        "tags": [
+          "DocumentPeriodReopens"
+        ]
+      },
+      "post": {
+        "description": "`403` — немає права `Period.Reopen` у проєкті; `404` — документ невидимий або місяця немає;\n`409 ECR-PRD-0409` — місяць не закритий або проєкт архівований; `422 ECR-PRD-0422` — причина порожня\nчи задовга, строк не в майбутньому.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenDocumentPeriodReopenRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenDocumentPeriodReopenRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenDocumentPeriodReopenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPeriodReopenView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPeriodReopenView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPeriodReopenView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Відкриває закритий місяць лише для цього документа до `openUntil` (`null` — кінець доби майданчика).\nДіючий виняток замінюється новим строком і причиною.",
+        "tags": [
+          "DocumentPeriodReopens"
         ]
       }
     },
@@ -67319,6 +67667,9 @@
     },
     {
       "name": "DocumentOwner"
+    },
+    {
+      "name": "DocumentPeriodReopens"
     },
     {
       "name": "DocumentPermitBindings"
