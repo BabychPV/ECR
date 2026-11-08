@@ -4,30 +4,18 @@ import type { DocumentSummary } from '@/api/types';
 export type VersionSort = 'asc' | 'desc';
 
 /** Поля рядка переліку, з яких виводиться версія шаблону (контракт RPT-STABLE). */
-export type VersionSource = Pick<DocumentSummary, 'templateVersion' | 'templateVersionByPeriod'>;
-
-/** Версія шаблону рядка за ОДИН період і звідки вона взялась (для підказки «за період»). */
-export interface ResolvedVersion {
-  /** `null` — версії немає (старий документ без шаблону чи доступ звужено): «—», а не вигадане «v0». */
-  readonly version: string | null;
-  /** `true` — значення з розрідженої карти `templateVersionByPeriod` (версія періоду відрізняється від типової). */
-  readonly fromPeriod: boolean;
-}
+export type VersionSource = Pick<DocumentSummary, 'templateVersion'>;
 
 /**
- * Версія періоду = `templateVersionByPeriod[період] ?? templateVersion`.
+ * Версія шаблону рядка — типова `templateVersion` проєкту.
  *
- * ⚠ Ключ карти — рядок `YYYYMM`; період у адресі — число. `periodKey === null` (період не обрано) — типова версія,
- * бо відрізнятись нема від чого. Порожній рядок — не версія (`null`), інакше колонка малювала б порожній бейдж.
- *
- * ⛔ Порядок `??` не міняти: карта розріджена, і лише в ній стоять періоди, де версія ВІДРІЗНЯЄТЬСЯ від типової.
+ * ✎ Projects/Documents 08.11: перелік лише за рік, тож версії «за місяць» (`templateVersionByPeriod[період]`) у ньому
+ * немає — помісячну гілку прибрано. Порожній рядок — не версія (`null`), інакше колонка малювала б порожній бейдж;
+ * `null` — версії немає (старий документ без шаблону чи доступ звужено): «—», а не вигадане «v0».
  */
-export function resolveTemplateVersion(source: VersionSource, periodKey: number | null): ResolvedVersion {
-  const byPeriod = periodKey === null ? undefined : source.templateVersionByPeriod?.[String(periodKey)];
-  if (typeof byPeriod === 'string' && byPeriod.trim() !== '') return { version: byPeriod, fromPeriod: true };
-
+export function resolveTemplateVersion(source: VersionSource): string | null {
   const base = source.templateVersion;
-  return { version: typeof base === 'string' && base.trim() !== '' ? base : null, fromPeriod: false };
+  return typeof base === 'string' && base.trim() !== '' ? base : null;
 }
 
 /** Сегменти версії для порівняння: «2.10.0» → [2, 10, 0]; нечислові частини порівнюються як текст. */
@@ -77,10 +65,10 @@ export function mergeVersionOptions(onPage: readonly string[], selected: readonl
 }
 
 /** Різні версії, що є на сторінці, від меншої до більшої. */
-export function distinctVersions(items: readonly VersionSource[], periodKey: number | null): readonly string[] {
+export function distinctVersions(items: readonly VersionSource[]): readonly string[] {
   const found = new Set<string>();
   for (const item of items) {
-    const { version } = resolveTemplateVersion(item, periodKey);
+    const version = resolveTemplateVersion(item);
     if (version !== null) found.add(version);
   }
   return [...found].sort(compareVersions);

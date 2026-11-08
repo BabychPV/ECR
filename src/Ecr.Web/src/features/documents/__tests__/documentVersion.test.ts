@@ -12,43 +12,19 @@ import {
 } from '@/features/documents/documentVersion';
 
 /**
- * Колонка «Version» переліку документів: версія періоду = `templateVersionByPeriod[період] ?? templateVersion`.
- *
- * ⛔ Мутаційний доказ: у `resolveTemplateVersion` поміняй пріоритет (спершу `templateVersion`, потім карта) -
- * тест «карта перекриває типову» почервоніє. (Сортування й фільтр версії тепер серверні: `DocumentTemplateVersionListApiTests`.)
+ * Колонка «Version» переліку документів: типова версія `templateVersion` (✎ 08.11: перелік лише за рік — помісячної
+ * версії `templateVersionByPeriod` у ньому немає). (Сортування й фільтр версії — серверні: `DocumentTemplateVersionListApiTests`.)
  */
-const doc = (id: number, templateVersion: string | null, byPeriod?: Record<string, string> | null) => ({
-  id,
-  templateVersion,
-  templateVersionByPeriod: byPeriod ?? null,
-});
+const doc = (id: number, templateVersion: string | null) => ({ id, templateVersion });
 
 describe('resolveTemplateVersion', () => {
-  it('карта періоду перекриває типову версію', () => {
-    expect(resolveTemplateVersion(doc(1, '1.0', { '202609': '2.0' }), 202609)).toEqual({
-      version: '2.0',
-      fromPeriod: true,
-    });
+  it('типова версія як є', () => {
+    expect(resolveTemplateVersion(doc(1, '1.0'))).toBe('1.0');
   });
 
-  it('період поза картою — типова версія', () => {
-    expect(resolveTemplateVersion(doc(1, '1.0', { '202609': '2.0' }), 202610)).toEqual({
-      version: '1.0',
-      fromPeriod: false,
-    });
-  });
-
-  it('період не обрано — типова версія, карта не читається', () => {
-    expect(resolveTemplateVersion(doc(1, '1.0', { '202609': '2.0' }), null).version).toBe('1.0');
-  });
-
-  it('немає ні версії, ні карти (або порожні рядки) — null, а не вигадана версія', () => {
-    expect(resolveTemplateVersion(doc(1, null), 202609)).toEqual({ version: null, fromPeriod: false });
-    expect(resolveTemplateVersion(doc(1, '  ', { '202609': '' }), 202609).version).toBeNull();
-  });
-
-  it('порожнє значення в карті не затирає типову версію', () => {
-    expect(resolveTemplateVersion(doc(1, '1.0', { '202609': '' }), 202609).version).toBe('1.0');
+  it('немає версії або порожній рядок — null, а не вигадана версія', () => {
+    expect(resolveTemplateVersion(doc(1, null))).toBeNull();
+    expect(resolveTemplateVersion(doc(1, '  '))).toBeNull();
   });
 });
 
@@ -76,7 +52,7 @@ describe('серверні параметри колонки «Version»', () =>
   });
 
   it('distinctVersions: різні версії сторінки — впорядковані, без дублів і порожніх', () => {
-    expect(distinctVersions([doc(1, '2.10'), doc(2, '2.9'), doc(3, '2.9'), doc(4, null)], null)).toEqual(['2.9', '2.10']);
+    expect(distinctVersions([doc(1, '2.10'), doc(2, '2.9'), doc(3, '2.9'), doc(4, null)])).toEqual(['2.9', '2.10']);
   });
 
   it('mergeVersionOptions: обрані версії, яких немає на сторінці, лишаються у виборі (їх є чим зняти)', () => {
