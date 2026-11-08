@@ -315,11 +315,15 @@ public sealed class DocumentListSummaryStore(
                       ON a.DocumentId = s.DocumentId AND a.SheetDefId = s.SheetDefId AND a.PeriodKey = p.PeriodKey
                      AND a.PeriodKey > {from} AND a.PeriodKey < {to}
                      AND (a.SheetCopyId = s.Id OR (a.SheetCopyId IS NULL AND s.CopyOfId IS NULL))
-                    WHERE {restrict} = 0
+                    WHERE ({restrict} = 0
                        OR d.ProjectId IN (SELECT CAST(j.value AS int) FROM OPENJSON({projectsJson}) j)
                        OR (d.Id IN (SELECT CAST(pd.value AS bigint) FROM OPENJSON({participantDocsJson}) pd)
                            AND ({participantProject} = 0 OR d.ProjectId = {participantProject})
-                           AND d.ProjectId NOT IN (SELECT CAST(dn.value AS int) FROM OPENJSON({participantDeniedJson}) dn))
+                           AND d.ProjectId NOT IN (SELECT CAST(dn.value AS int) FROM OPENJSON({participantDeniedJson}) dn)))
+                      -- ✎ g2 (макет 08.11): рік — лише документи проєктів із періодом у цьому році (та сама межа, що
+                      -- в переліку, `DocumentStore.WhereProjectYear`); раніше рік без проєктів рахував чужі документи Draft.
+                      AND EXISTS (SELECT 1 FROM doc.Period py
+                                  WHERE py.ProjectId = d.ProjectId AND py.PeriodKey > {from} AND py.PeriodKey < {to})
                     GROUP BY d.Id, d.ProjectId
                 ) x
                 """)
