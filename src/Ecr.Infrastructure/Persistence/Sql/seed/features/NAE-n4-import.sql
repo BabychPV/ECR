@@ -39,7 +39,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-IMP-0422.regParentWithoutChildren', N'ru', N'У источника {key} нет строк веществ.'),
     (N'err.ECR-IMP-0422.regParentWithoutChildren', N'kz', N'{key} көзінде заттардың жолдары жоқ.'),
     (N'err.ECR-IMP-0422.regNoRows', N'ru', N'В файле нет строк данных.'),
-    (N'err.ECR-IMP-0422.regNoRows', N'kz', N'Файлда деректер жолдары жоқ.')
+    (N'err.ECR-IMP-0422.regNoRows', N'kz', N'Файлда деректер жолдары жоқ.'),
+    (N'err.ECR-IMP-0422.regNoParentRows', N'ru', N'Не прочитано ни одной строки источника: строки заголовка {from}–{to}, данные со строки {data}, но в ключевом столбце {column} («{field}») ниже заголовка нет значений. Проверьте строки заголовка и столбец ключа в профиле.'),
+    (N'err.ECR-IMP-0422.regNoParentRows', N'kz', N'Бірде-бір көз жолы оқылмады: тақырып жолдары {from}–{to}, деректер {data}-жолдан, бірақ {column} кілт бағанында («{field}») тақырыптан төмен мән жоқ. Профильдегі тақырып жолдары мен кілт бағанын тексеріңіз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -67,7 +69,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-IMP-0422.regChildWithoutParent', N'en', N'Row {row}: a substance row has no source above it.', 1),
     (N'err.ECR-IMP-0422.regParentWithoutChildren', N'en', N'Source {key} has no substance rows.', 1),
     (N'err.ECR-IMP-0422.regNoRows',             N'en', N'The file has no data rows.', 1),
-    (N'err.ECR-IMP-0422.regValueEmpty',         N'en', N'"{field}" is empty. The row is imported without it.', 1)
+    (N'err.ECR-IMP-0422.regValueEmpty',         N'en', N'"{field}" is empty. The row is imported without it.', 1),
+    (N'err.ECR-IMP-0422.regNoParentRows',       N'en', N'No source rows were read: header rows {from}–{to}, data from row {data}, but the key column {column} ("{field}") has no values below the header. Check the header rows and the key column of the profile.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

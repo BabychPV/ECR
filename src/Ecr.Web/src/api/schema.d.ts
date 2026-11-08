@@ -142,7 +142,53 @@ export interface paths {
             };
         };
         post?: never;
-        delete?: never;
+        /** Deletes an import profile (not the built-in one). Permission `Registry.EditDefinition`. */
+        delete: {
+            parameters: {
+                query?: {
+                    /** @description Token read with the profile (base64). */
+                    rowVersion?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Profile code. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -27036,6 +27082,9 @@ export interface components {
             analysis: components["schemas"]["ImportAnalysis"];
             /** @description Profile used; `null` for an unsaved specification. */
             profileCode: null | string;
+            /** @description ✎ Pass 3: fields of the profile that match no column of the target tables (neither by code nor by display name) — their
+             *     values are read but WILL NOT BE SAVED; the wizard warns about each. */
+            unsavedFields?: null | string[];
         };
         /** @description Result of `POST /api/v1/permits/{permitId}/air-limits/import/apply`. */
         AirLimitsImportResultDto: {
@@ -27158,6 +27207,8 @@ export interface components {
              * @default true
              */
             scopeInNaeTree: boolean;
+            /** @description ✎ Pass 3: fields that match no target column — their values will not be saved. */
+            unsavedFields?: null | string[];
         };
         /** @description Result of `POST /api/v1/air-limits/provision`. */
         AirLimitsProvisionReport: {

@@ -31,6 +31,7 @@ public static partial class RegistryImportParser
         var (headerFrom, headerTo, dataFrom) = LocateHeader(grid, spec);
         var headers = ReadHeaders(grid, headerFrom, headerTo);
         var columns = MapColumns(spec, headers, log);
+        spec = MatchByHeaderName(spec, headers, columns);
 
         var header = BuildReport(grid, spec, headers, columns, headerFrom, headerTo, dataFrom);
 
@@ -273,8 +274,10 @@ public static partial class RegistryImportParser
 
             if (claimedBy.TryGetValue(column.Value, out var other))
             {
+                // ✎ Pass 3b (UAT P2-2, profile TEST2): an optional field that matches a column another field already reads is left
+                // unread and reported on the field (a warning); only a required one blocks — before, it zeroed every row silently.
                 log.Add(new ImportIssue(
-                    ImportSeverity.Error, RegistryImportKeys.ColumnClaimed, null, ColumnLetters.ToLetters(column.Value), field.Name,
+                    field.Required ? ImportSeverity.Error : ImportSeverity.Warning, RegistryImportKeys.ColumnClaimed, null, ColumnLetters.ToLetters(column.Value), field.Name,
                     new Dictionary<string, string>
                     {
                         ["field"] = field.Name,
@@ -289,6 +292,49 @@ public static partial class RegistryImportParser
         }
 
         return mapped;
+    }
+
+    /// <summary>
+    /// Columns no field reads whose WHOLE header text (or the last header row) equals a candidate's name get that candidate
+    /// (<see cref="RegistryImportSpec.ByHeaderName"/>): it joins the fields with the column set, and the column is no longer unmapped.
+    /// </summary>
+    private static RegistryImportSpec MatchByHeaderName(RegistryImportSpec spec, ColumnHeader[] headers, Dictionary<string, int> columns)
+    {
+        if (spec.ByHeaderName.Count == 0)
+        {
+            return spec;
+        }
+
+        var used = columns.Values.ToHashSet();
+        var names = spec.Fields.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
+        var added = new List<ImportFieldSpec>();
+
+        foreach (var candidate in spec.ByHeaderName)
+        {
+            if (names.Contains(candidate.Field.Name))
+            {
+                continue;
+            }
+
+            var wanted = candidate.Names.Select(n => ImportText.Clean(n)).Where(n => n.Length > 0).ToList();
+            var hits = headers
+                .Where(h => h.Combined.Length > 0 && !used.Contains(h.Column)
+                            && wanted.Any(n => string.Equals(n, h.Combined, StringComparison.OrdinalIgnoreCase)
+                                               || string.Equals(n, h.LastRow, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            if (hits.Count != 1)
+            {
+                continue;
+            }
+
+            var column = hits[0].Column;
+            added.Add(candidate.Field.AtColumn(ColumnLetters.ToLetters(column)));
+            names.Add(candidate.Field.Name);
+            used.Add(column);
+            columns[candidate.Field.Name] = column;
+        }
+
+        return spec.WithFields([.. spec.Fields, .. added], []);
     }
 
     private static ImportHeaderReport BuildReport(
@@ -351,6 +397,13 @@ public static partial class RegistryImportParser
 
             Issues.Add(issue);
         }
+
+        /// <summary>A summary finding: first in the list and never dropped by the cap (it explains the others).</summary>
+        public void Pin(ImportIssue issue)
+        {
+            HasErrors |= issue.Severity == ImportSeverity.Error;
+            Issues.Insert(0, issue);
+        }
     }
 
     private sealed class RowReader
@@ -371,6 +424,7 @@ public static partial class RegistryImportParser
         private ImportGroupRow? _group;
         private int _skipped;
         private int _children;
+        private bool _sawParentKey;
 
         public RowReader(IImportGrid grid, RegistryImportSpec spec, Dictionary<string, int> columns, IssueLog log, ImportHeaderReport header)
         {
@@ -444,6 +498,7 @@ public static partial class RegistryImportParser
 
                 if (!pEmpty)
                 {
+                    _sawParentKey = true;
                     Flush();
                     StartParent(r, pField, pCol);
                 }
@@ -460,9 +515,25 @@ public static partial class RegistryImportParser
 
             Flush();
 
-            if (_parents.Count == 0 && !_log.HasErrors)
+            // A key cell that was found but did not read (or repeated) is already reported on its row: no summary for that.
+            var hasData = _parents.Count == 0 && !_sawParentKey && HasDataRows();
+            if (_parents.Count == 0 && (hasData || !_log.HasErrors))
             {
-                _log.Add(new ImportIssue(ImportSeverity.Error, RegistryImportKeys.NoRows));
+                // ✎ Pass 3b (UAT P2-2): rows under the header but none with a key — say where the key was looked for, so the user
+                // knows what to fix (header rows, data row, the key column), also next to the per-row findings it caused (substance
+                // rows «without a source»); an empty data area stays «no data rows».
+                _log.Pin(hasData
+                    ? new ImportIssue(
+                        ImportSeverity.Error, RegistryImportKeys.NoParentRows, null, ColumnLetters.ToLetters(pCol), pField.Name,
+                        new Dictionary<string, string>
+                        {
+                            ["from"] = _header.HeaderFromRow.ToString(CultureInfo.InvariantCulture),
+                            ["to"] = _header.HeaderToRow.ToString(CultureInfo.InvariantCulture),
+                            ["data"] = _header.DataFromRow.ToString(CultureInfo.InvariantCulture),
+                            ["column"] = ColumnLetters.ToLetters(pCol),
+                            ["field"] = pField.Name,
+                        })
+                    : new ImportIssue(ImportSeverity.Error, RegistryImportKeys.NoRows));
             }
 
             var childKeys = _childKeys.Count;
@@ -535,6 +606,19 @@ public static partial class RegistryImportParser
             _group = new ImportGroupRow(row, text);
             _groups.Add(_group);
             return true;
+        }
+
+        private bool HasDataRows()
+        {
+            for (var r = _header.DataFromRow; r <= _grid.RowCount; r++)
+            {
+                if (RowHasContent(r))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private bool RowHasContent(int row)

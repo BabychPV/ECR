@@ -116,6 +116,50 @@ public sealed class AirImportProfileHandler(
         return ToDto(existing);
     }
 
+    /// <summary>
+    /// Deletes a profile (pass 3). Permission <c>Registry.EditDefinition</c>; the token read with the profile is required; the
+    /// shipped profile is refused. Nothing references a profile by key (imports record its code in the audit text only), so
+    /// there is no «in use» refusal.
+    /// </summary>
+    /// <param name="code">Profile code.</param>
+    /// <param name="rowVersion">Token read with the profile.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task DeleteAsync(string code, string? rowVersion, CancellationToken ct)
+    {
+        await Security.PermissionCheck.RequireAsync(access, currentUser, EditPermission, ct).ConfigureAwait(false);
+        _ = currentUser.UserId
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401",
+                "Anonymous requests do not change registries.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
+
+        var tables = await accessor.Data.TablesAsync(ct).ConfigureAwait(false);
+        var trimmed = code?.Trim() ?? string.Empty;
+        var existing = (IsPasteMapping(trimmed) ? null : await profiles.FindAsync(tables.Sources.Id, trimmed, ct).ConfigureAwait(false))
+                       ?? throw NotFound(code);
+        if (IsBuiltIn(existing))
+        {
+            throw BuiltInReadOnly(existing.Code);
+        }
+
+        if (string.IsNullOrEmpty(rowVersion)
+            || !string.Equals(rowVersion, Convert.ToBase64String(existing.RowVersion), StringComparison.Ordinal))
+        {
+            throw Changed(existing.Code);
+        }
+
+        profiles.Expect(existing, existing.RowVersion);
+        profiles.Remove(existing);
+        try
+        {
+            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (ConcurrencyConflictException)
+        {
+            throw Changed(existing.Code);
+        }
+    }
+
     private static bool IsBuiltIn(RegistryImportProfile p) => p.Code == AirLimitsSchema.ProfileCode;
 
     /// <summary>The code of the paste mapping (<see cref="Import.PermitImportMappingHandler"/>) — not a wizard profile.</summary>

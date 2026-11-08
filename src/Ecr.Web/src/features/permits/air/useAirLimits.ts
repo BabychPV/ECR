@@ -3,6 +3,7 @@ import { saveBatch, type RegistryBatchResult } from '@/features/registries/rows/
 import {
   analyseAirImport,
   applyAirImport,
+  deleteImportProfile,
   getAirLimits,
   getAirScopeCodes,
   getAirScopeFields,
@@ -120,6 +121,20 @@ export function useSaveImportProfile() {
     meta: { handled: true },
     onSuccess: (saved) => {
       client.setQueryData(airKeys.profile(saved.code), saved);
+      return client.invalidateQueries({ queryKey: airKeys.profiles });
+    },
+  });
+}
+
+/** Pass 3: deletes a profile with the token it was read with; the list and the profile's own entry are refreshed. */
+export function useDeleteImportProfile() {
+  const client = useQueryClient();
+
+  return useMutation<void, Error, { readonly code: string; readonly rowVersion: string }>({
+    mutationFn: ({ code, rowVersion }) => deleteImportProfile(code, rowVersion),
+    meta: { handled: true },
+    onSuccess: (_done, { code }) => {
+      client.removeQueries({ queryKey: airKeys.profile(code) });
       return client.invalidateQueries({ queryKey: airKeys.profiles });
     },
   });

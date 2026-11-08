@@ -169,6 +169,97 @@ public static class AirLimitsSchema
     public static IReadOnlyList<Domain.Entities.Configuration.RegistryFieldDef> AddedSubstanceColumns(Domain.Entities.Configuration.RegistryDef substances)
         => AddedColumns(ChildColumns, substances, SubstanceSystemColumns);
 
+    /// <summary>
+    /// ✎ Pass 3 (UAT «Цех»): binds the profile's fields to the target columns. A field whose name is neither a built-in field nor
+    /// an added column's CODE, but equals an added column's display name in any language (case and outer spaces ignored), is
+    /// renamed to that column's code — the user named the field after the column they see. Every other non-key, stored field
+    /// that still matches no column is returned in <c>Unsaved</c>: the wizard warns that its values will not be saved.
+    /// </summary>
+    /// <param name="spec">The profile's specification.</param>
+    /// <param name="sources">The AIR_SOURCES definition.</param>
+    /// <param name="substances">The AIR_SOURCE_SUBSTANCES definition.</param>
+    public static (RegistryImport.RegistryImportSpec Spec, IReadOnlyList<string> Unsaved) BindFields(
+        RegistryImport.RegistryImportSpec spec,
+        Domain.Entities.Configuration.RegistryDef sources,
+        Domain.Entities.Configuration.RegistryDef substances)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        var parent = ParentColumnsOf(sources);
+        var child = ChildColumnsOf(substances);
+        var taken = spec.Fields.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
+        var renames = new Dictionary<string, string>(StringComparer.Ordinal);
+        var unsaved = new List<string>();
+        foreach (var field in spec.Fields)
+        {
+            if (field.Informational || field.Name == spec.ParentKeyField || field.Name == spec.ChildKeyField)
+            {
+                continue;
+            }
+
+            var isParent = field.Level == RegistryImport.ImportLevel.Parent;
+            if ((isParent ? parent : child).ContainsKey(field.Name))
+            {
+                continue;
+            }
+
+            var added = isParent ? AddedSourceColumns(sources) : AddedSubstanceColumns(substances);
+            var wanted = field.Name.Trim();
+            var column = added.FirstOrDefault(c => string.Equals(c.Code, wanted, StringComparison.OrdinalIgnoreCase)
+                                                   || c.NameL10n.Values.Values.Any(n => string.Equals(n.Trim(), wanted, StringComparison.OrdinalIgnoreCase)));
+            if (column is not null && !taken.Contains(column.Code))
+            {
+                renames[field.Name] = column.Code;
+                taken.Add(column.Code);
+            }
+            else
+            {
+                unsaved.Add(field.Name);
+            }
+        }
+
+        var bound = spec.WithRenamedFields(renames);
+        return (bound.WithFields(bound.Fields, HeaderNamed(bound, sources, substances)), unsaved);
+    }
+
+    /// <summary>
+    /// ✎ Pass 3b (UAT P2-1): every added column no field of the spec reads yet is offered for a file column whose whole header equals
+    /// the column's display name (any language): a re-import of the same file reads «Цех» into <c>FILE_B</c> without «Add as new
+    /// column» again, and the analysis no longer lists it as unmapped.
+    /// </summary>
+    private static List<RegistryImport.HeaderNamedField> HeaderNamed(
+        RegistryImport.RegistryImportSpec spec, Domain.Entities.Configuration.RegistryDef sources, Domain.Entities.Configuration.RegistryDef substances)
+    {
+        var taken = spec.Fields.Select(f => f.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return
+        [
+            .. AddedSourceColumns(sources).Where(c => Offered(c, taken)).Select(c => Candidate(c, RegistryImport.ImportLevel.Parent)),
+            .. AddedSubstanceColumns(substances).Where(c => Offered(c, taken)).Select(c => Candidate(c, RegistryImport.ImportLevel.Child)),
+        ];
+    }
+
+    /// <summary>A plain-value column (text, number, date) no field reads: a lookup or a formula is never filled from a header name.</summary>
+    private static bool Offered(Domain.Entities.Configuration.RegistryFieldDef column, HashSet<string> taken)
+        => !taken.Contains(column.Code)
+           && column.DataType is Domain.Enums.CellDataType.String or Domain.Enums.CellDataType.Int
+               or Domain.Enums.CellDataType.Decimal or Domain.Enums.CellDataType.Date;
+
+    private static RegistryImport.HeaderNamedField Candidate(Domain.Entities.Configuration.RegistryFieldDef column, RegistryImport.ImportLevel level)
+        => new(
+            new RegistryImport.ImportFieldSpec
+            {
+                Name = column.Code,
+                Level = level,
+                Parser = column.DataType switch
+                {
+                    Domain.Enums.CellDataType.Decimal => RegistryImport.ImportParser.Decimal,
+                    Domain.Enums.CellDataType.Int => RegistryImport.ImportParser.Integer,
+                    Domain.Enums.CellDataType.Date => RegistryImport.ImportParser.Date,
+                    _ => RegistryImport.ImportParser.Text,
+                },
+                FillDown = level == RegistryImport.ImportLevel.Parent ? RegistryImport.FillDown.Merge : RegistryImport.FillDown.None,
+            },
+            [.. column.NameL10n.Values.Values.Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.OrdinalIgnoreCase)]);
+
     private static List<Domain.Entities.Configuration.RegistryFieldDef> AddedColumns(
         IReadOnlyDictionary<string, string> builtIn, Domain.Entities.Configuration.RegistryDef table, HashSet<string> system)
     {

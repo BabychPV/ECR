@@ -80,14 +80,15 @@ function stepLabel(step: ImportStep): string {
   }
 }
 
-function stepHint(step: ImportStep): string {
+/** `profileSaved` — a profile was saved on this step (UAT P3: «Nothing is saved yet» next to «Profile … saved» was untrue). */
+function stepHint(step: ImportStep, profileSaved: boolean): string {
   switch (step) {
     case 'scope':
       return t('permits.air.import.hint.scope');
     case 'file':
       return t('permits.air.import.hint.file');
     case 'mapping':
-      return t('permits.air.import.hint.mapping');
+      return profileSaved ? t('permits.air.import.hint.mappingSaved') : t('permits.air.import.hint.mapping');
     case 'preview':
       return t('permits.air.import.hint.preview');
     case 'apply':
@@ -125,6 +126,8 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
   const [readingCurrent, setReadingCurrent] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const arrived = useRef(false);
+  // Pass 3: «Edit profile» on the File step — once the mapping step has the profile, its specification opens in the editor.
+  const editIntent = useRef(false);
 
   const analyse = useAnalyseAirImport();
   const previewCall = usePreviewAirImport(permitId);
@@ -159,6 +162,15 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
     if (arrived.current) heading.current?.focus({ preventScroll: false });
     arrived.current = true;
   }, [step]);
+
+  // The file was read with the profile itself: the editor's copy is that very specification, so no re-read is asked for.
+  const editSpec = profile.data?.spec;
+  useEffect(() => {
+    if (step !== 'mapping' || !editIntent.current || editSpec === undefined) return;
+    editIntent.current = false;
+    setAnalysedSpec(editSpec);
+    patchDraft({ spec: editSpec });
+  }, [step, editSpec, patchDraft]);
 
   const clearFailure = (): void => {
     setFailure(null);
@@ -283,7 +295,12 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
    * `rowVersion` — «Overwrite» after «a profile with this code already exists» (pass 2, 07.11): the token of the profile as it is
    * now; `null` — a new profile. A taken code or the built-in profile comes back as `saveConflict` for the form, not as a failure.
    */
-  const onSaveProfile = (code: string, name: string, rowVersion: string | null = null): void => {
+  const onSaveProfile = (
+    code: string,
+    name: string,
+    rowVersion: string | null = null,
+    names: Readonly<Record<string, string>> = { [language()]: name, en: name },
+  ): void => {
     const spec = draft.spec ?? profile.data?.spec;
     if (saveProfile.isPending || spec === undefined) return;
     clearFailure();
@@ -292,7 +309,7 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
     setSavedCode(null);
     const analysed = draft.spec === analysedSpec;
     saveProfile.mutate(
-      { code, body: { nameL10n: { [language()]: name, en: name }, spec, rowVersion } },
+      { code, body: { nameL10n: { ...names }, spec, rowVersion } },
       {
         onSuccess: (saved) => {
           setSavedCode(saved.code);
@@ -323,6 +340,21 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
       })
       .catch(setFailure)
       .finally(() => setReadingCurrent(false));
+  };
+
+  /**
+   * Pass 3 «Save to profile …» (after its confirmation): the edited mapping replaces the chosen profile under the same code and
+   * names, with the token the profile was read with — a change made meanwhile by someone else is refused (`profileChanged`).
+   */
+  const onResaveProfile = (): void => {
+    const current = profile.data;
+    if (current === undefined || current.builtIn) return;
+    onSaveProfile(current.code, current.nameL10n['en'] ?? current.code, current.rowVersion, current.nameL10n);
+  };
+
+  const editProfile = (): void => {
+    editIntent.current = true;
+    next();
   };
 
   const next = (): void => {
@@ -379,7 +411,7 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           {stepLabel(step)}
         </Title>
         <Text size="sm" c="dimmed">
-          {stepHint(step)}
+          {stepHint(step, savedCode !== null)}
         </Text>
       </div>
       {failure !== null && sendFailure === null && <ErrorAlert error={failure} />}
@@ -422,7 +454,19 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           problem={scopeIssue}
         />
       )}
-      {step === 'file' && <FileStep draft={draft} onChange={patchDraft} problem={problem} />}
+      {step === 'file' && (
+        <FileStep
+          draft={draft}
+          onChange={(patch) => {
+            patchDraft(patch);
+            // A shown «Choose a workbook» is re-checked against the new choice: a chosen .xlsx clears it.
+            if (problem !== null && 'file' in patch) setProblem(fileStepProblem({ ...draft, ...patch }));
+          }}
+          problem={problem}
+          mayEditProfile={mayEditProfile}
+          onEditProfile={editProfile}
+        />
+      )}
       {step === 'mapping' && analysis !== null && (
         <Suspense fallback={<Skeleton height={240} role="status" aria-label={t('common.loading')} />}>
           <MappingStep
@@ -434,6 +478,7 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           reanalysing={analysing}
           mayEditProfile={mayEditProfile}
           onSaveProfile={onSaveProfile}
+          onResaveProfile={onResaveProfile}
           saving={saving}
           savedCode={savedCode}
           saveConflict={saveConflict}

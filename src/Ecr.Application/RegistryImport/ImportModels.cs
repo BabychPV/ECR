@@ -62,6 +62,9 @@ public static class RegistryImportKeys
 
     /// <summary>The file holds no data rows.</summary>
     public const string NoRows = "err.ECR-IMP-0422.regNoRows";
+
+    /// <summary>The data area has rows, but none with a parent key in the key column (pass 3b: where it was looked for).</summary>
+    public const string NoParentRows = "err.ECR-IMP-0422.regNoParentRows";
 }
 
 /// <summary>Issue severity.</summary>

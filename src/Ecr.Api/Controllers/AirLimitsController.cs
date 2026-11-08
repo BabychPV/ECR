@@ -98,6 +98,20 @@ public sealed class AirLimitsController(
         return Ok(await profiles.SaveAsync(code, request, ct).ConfigureAwait(false));
     }
 
+    /// <summary>Deletes an import profile (not the built-in one). Permission <c>Registry.EditDefinition</c>.</summary>
+    /// <param name="code">Profile code.</param>
+    /// <param name="rowVersion">Token read with the profile (base64).</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpDelete("air-limits/import-profiles/{code}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteProfile(string code, [FromQuery] string? rowVersion, CancellationToken ct)
+    {
+        await profiles.DeleteAsync(code, rowVersion, ct).ConfigureAwait(false);
+        return NoContent();
+    }
+
     /// <summary>
     /// Wizard steps 1-3: reads the workbook with a profile (or an unsaved specification) and reports the header block, the
     /// mapped and unmapped columns, counts and findings. Stateless: nothing is stored. Permission <c>Registry.EditData</c>.

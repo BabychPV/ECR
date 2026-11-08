@@ -60,6 +60,17 @@ export function saveImportProfile(code: string, body: SaveImportProfileRequest):
   });
 }
 
+/**
+ * Deletes a profile (pass 3). `Registry.EditDefinition`; `rowVersion` — the token read with the profile: a stale one is
+ * `409 profileChanged`, the built-in profile is `409 profileBuiltIn`.
+ */
+export function deleteImportProfile(code: string, rowVersion: string): Promise<void> {
+  return apiFetch<void>(
+    `/api/v1/air-limits/import-profiles/${encodeURIComponent(code)}?rowVersion=${encodeURIComponent(rowVersion)}`,
+    { method: 'DELETE' },
+  );
+}
+
 /** Розкладка файлу за профілем чи незбереженою специфікацією; нічого не пишеться. Право `Registry.EditData`. */
 export function analyseAirImport(file: File, options: AirImportOptions): Promise<AirAnalysis> {
   return apiFetch<AirAnalysis>('/api/v1/air-limits/import/analyse', { method: 'POST', body: importForm(file, options) });

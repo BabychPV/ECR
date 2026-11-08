@@ -39,6 +39,14 @@ public sealed class RegistryImportSpec
     /// <summary>Field mapping.</summary>
     public IReadOnlyList<ImportFieldSpec> Fields { get; init; } = [];
 
+    /// <summary>
+    /// ✎ Pass 3b (UAT P2-1): fields the caller offers for file columns no field reads, matched by the WHOLE header text (case and
+    /// outer spaces ignored) — e.g. a column added to the target table earlier («Цех» → <c>FILE_B</c>). Not part of a profile
+    /// (never serialised); a candidate whose name is already a field, or whose header is found more than once, is not used.
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<HeaderNamedField> ByHeaderName { get; init; } = [];
+
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
@@ -144,6 +152,44 @@ public sealed class RegistryImportSpec
         return this;
     }
 
+    /// <summary>
+    /// A copy with some fields renamed (old name → new name); key fields keep their names. Used to bind a field the user named
+    /// after a target column's display name to that column's code (pass 3, «Цех»).
+    /// </summary>
+    /// <param name="renames">Old field name → new field name.</param>
+    /// <returns>The same spec when nothing is renamed, else a copy.</returns>
+    public RegistryImportSpec WithRenamedFields(IReadOnlyDictionary<string, string> renames)
+    {
+        ArgumentNullException.ThrowIfNull(renames);
+        if (renames.Count == 0)
+        {
+            return this;
+        }
+
+        return WithFields(
+            [.. Fields.Select(f => renames.TryGetValue(f.Name, out var to) && f.Name != ParentKeyField && f.Name != ChildKeyField
+                ? f.Renamed(to)
+                : f)],
+            ByHeaderName);
+    }
+
+    /// <summary>A copy with other fields and header-named candidates (everything else kept).</summary>
+    /// <param name="fields">Fields.</param>
+    /// <param name="byHeaderName">Candidates matched by the whole header text (<see cref="ByHeaderName"/>).</param>
+    public RegistryImportSpec WithFields(IReadOnlyList<ImportFieldSpec> fields, IReadOnlyList<HeaderNamedField> byHeaderName)
+        => new()
+        {
+            Sheet = Sheet,
+            Header = Header,
+            DataStartRow = DataStartRow,
+            GroupRows = GroupRows,
+            ParentKeyField = ParentKeyField,
+            ChildKeyField = ChildKeyField,
+            NaMarkers = NaMarkers,
+            Fields = fields,
+            ByHeaderName = byHeaderName,
+        };
+
     internal static BusinessRuleException Invalid(string where, string reason)
         => new(
             "ECR-IMP-0422",
@@ -232,7 +278,42 @@ public sealed class ImportFieldSpec
 
     /// <summary>Unit aliases for <see cref="ImportParser.Unit"/>: file text (folded) to canonical unit code.</summary>
     public IReadOnlyDictionary<string, string> Units { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>The same field under another name (every other property copied).</summary>
+    /// <param name="name">New name.</param>
+    public ImportFieldSpec Renamed(string name) => Copy(name, Column);
+
+    /// <summary>The same field read from an explicit column (every other property copied).</summary>
+    /// <param name="letter">Column letter.</param>
+    public ImportFieldSpec AtColumn(string letter) => Copy(Name, letter);
+
+    private ImportFieldSpec Copy(string name, string? column)
+        => new()
+        {
+            Name = name,
+            Level = Level,
+            Patterns = Patterns,
+            UnitQualifier = UnitQualifier,
+            Column = column,
+            Required = Required,
+            NonEmpty = NonEmpty,
+            Informational = Informational,
+            WarnIfEmpty = WarnIfEmpty,
+            Parser = Parser,
+            FillDown = FillDown,
+            Reference = Reference,
+            Pad = Pad,
+            Factor = Factor,
+            NonNegative = NonNegative,
+            Choices = Choices,
+            Units = Units,
+        };
 }
+
+/// <summary>A field read from the file column whose whole header text equals one of <paramref name="Names"/>.</summary>
+/// <param name="Field">The field (its column is set when matched).</param>
+/// <param name="Names">Header texts that select the column (case and outer spaces ignored).</param>
+public sealed record HeaderNamedField(ImportFieldSpec Field, IReadOnlyList<string> Names);
 
 /// <summary>Field level.</summary>
 public enum ImportLevel

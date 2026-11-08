@@ -1,5 +1,6 @@
 import { useId, useRef, useState, type JSX } from 'react';
 import { Button, Checkbox, Select, Text, TextInput } from '@mantine/core';
+import { serverMessage } from '@/features/registries/rc816/serverMessage';
 import { formatNumber } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
@@ -12,6 +13,7 @@ import {
   profileCodeFrom,
   profileCodeProblem,
   specFields,
+  sortIssues,
   specProblem,
   textToPatterns,
   withField,
@@ -49,6 +51,8 @@ export interface MappingStepProps {
   /** Право `Registry.EditDefinition`. */
   readonly mayEditProfile: boolean;
   readonly onSaveProfile: (code: string, name: string) => void;
+  /** Pass 3: «Save to profile …» — the edited mapping over the chosen (not built-in) profile, with its token. */
+  readonly onResaveProfile?: () => void;
   readonly saving: boolean;
   readonly savedCode: string | null;
   /** The last save was refused for its code: taken (offer «Overwrite») or the built-in profile (only another code). */
@@ -345,6 +349,13 @@ function FieldEditor({
   );
 }
 
+/** Why no source row was read: the first error (errors first, a summary without a row before the per-row ones). */
+function noRowsReason(issues: AirAnalysis['analysis']['issues']): string {
+  const first = sortIssues(issues).find((issue) => issue.severity === 'Error');
+
+  return first === undefined ? t('permits.air.import.noRows.unknown') : serverMessage(first.messageKey, first.args ?? {});
+}
+
 function levelLabel(level: string): string {
   if (level === 'Parent') return t('permits.air.import.map.level.parent');
   if (level === 'Child') return t('permits.air.import.map.level.child');
@@ -367,13 +378,20 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
   // A field without a column may be re-analysed (reported as «column not found»), not saved into a profile.
   const unpointed = spec === null ? null : fieldWithoutColumn(spec);
   const [saveOpen, setSaveOpen] = useState(false);
+  const [resaveOpen, setResaveOpen] = useState(false);
   const [seenSaved, setSeenSaved] = useState(savedCode);
   const base = baseSpec(spec, profile);
+  const unsaved = analysis.unsavedFields ?? [];
+  const mayResave =
+    mayEditProfile && spec !== null && profile !== undefined && !profile.builtIn && problem === null && unpointed === null;
 
   // A save that went through closes the form (the status line below says which profile is now selected).
   if (savedCode !== seenSaved) {
     setSeenSaved(savedCode);
-    if (savedCode !== null) setSaveOpen(false);
+    if (savedCode !== null) {
+      setSaveOpen(false);
+      setResaveOpen(false);
+    }
   }
 
   return (
@@ -415,6 +433,19 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
           <b>{formatNumber(body.stats.distinctChildKeys)}</b>
         </div>
       </div>
+      {header !== null && body.stats.parents === 0 && (
+        // Pass 3b (UAT P2-2): «0 / 0» with every column resolved said nothing; the first blocking finding says what to fix.
+        <Banner
+          tone="danger"
+          testId="air-no-rows-reason"
+          title={t('permits.air.import.noRows.title', {
+            sheet: body.sheetName,
+            from: formatNumber(header.headerFromRow),
+            to: formatNumber(header.headerToRow),
+          })}
+          text={noRowsReason(body.issues)}
+        />
+      )}
 
       <div className="pi-panel">
         <div className="pa-scroll" role="region" aria-label={t('permits.air.import.map.mappedAria')} tabIndex={0}>
@@ -441,6 +472,14 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
         </div>
       </div>
 
+      {unsaved.length > 0 && (
+        <Banner
+          tone="warning"
+          testId="air-unsaved-fields"
+          title={t('permits.air.import.unsaved.title')}
+          text={t('permits.air.import.unsaved.text', { fields: unsaved.map((name) => fieldLabel(name, columnNames)).join(', ') })}
+        />
+      )}
       {props.addProblem != null && (
         <Banner
           tone="warning"
@@ -488,8 +527,35 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
         )}
       </details>
 
+      {spec !== null && profile?.builtIn === true && (
+        <Text size="sm" c="dimmed" data-testid="air-profile-builtin">
+          {t('permits.air.import.profile.builtInNote', { code: profile.code })}
+        </Text>
+      )}
+      {resaveOpen && mayResave && (
+        <div className="pi-panel" data-testid="air-profile-resave-confirm">
+          <Banner
+            tone="warning"
+            title={t('permits.air.import.save.resaveTitle', { code: profile.code })}
+            text={t('permits.air.import.save.resaveText')}
+          />
+          <div className="pi-actions">
+            <Button variant="default" onClick={() => setResaveOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button loading={saving} onClick={() => props.onResaveProfile?.()}>
+              {t('permits.air.import.save.overwrite')}
+            </Button>
+          </div>
+        </div>
+      )}
       {mayEditProfile && base !== null && (
         <div className="pi-actions">
+          {mayResave && !resaveOpen && props.onResaveProfile !== undefined && (
+            <Button variant="default" onClick={() => setResaveOpen(true)}>
+              {t('permits.air.import.save.resave', { code: profile.code })}
+            </Button>
+          )}
           <Button
             variant="default"
             disabled={problem !== null || unpointed !== null}

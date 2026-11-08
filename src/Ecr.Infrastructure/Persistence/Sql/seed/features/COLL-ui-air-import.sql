@@ -404,7 +404,37 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.air.import.missing.createAllUnder', N'ru', N'Узел для всех нерешённых НАЕ'),
     (N'permits.air.import.missing.createAllUnder', N'kz', N'Шешілмеген барлық НАЕ үшін түйін'),
     (N'permits.air.import.missing.createAll', N'ru', N'Создать все нерешённые ({count}) под этим узлом'),
-    (N'permits.air.import.missing.createAll', N'kz', N'Шешілмеген барлығын ({count}) осы түйін астында жасау')
+    (N'permits.air.import.missing.createAll', N'kz', N'Шешілмеген барлығын ({count}) осы түйін астында жасау'),
+    (N'permits.air.import.profile.builtInNote', N'ru', N'{code} — встроенный профиль: только чтение, его нельзя изменить или удалить. Чтобы сохранить изменённое сопоставление, используйте «Сохранить как профиль…».'),
+    (N'permits.air.import.profile.builtInNote', N'kz', N'{code} — кірістірілген профиль: тек оқу үшін, оны өзгертуге немесе жоюға болмайды. Өзгертілген сәйкестікті сақтау үшін «Профиль ретінде сақтау…» пайдаланыңыз.'),
+    (N'permits.air.import.profile.edit', N'ru', N'Изменить профиль'),
+    (N'permits.air.import.profile.edit', N'kz', N'Профильді өзгерту'),
+    (N'permits.air.import.profile.delete', N'ru', N'Удалить профиль…'),
+    (N'permits.air.import.profile.delete', N'kz', N'Профильді жою…'),
+    (N'permits.air.import.profile.deleteTitle', N'ru', N'Удалить профиль {name} ({code})?'),
+    (N'permits.air.import.profile.deleteTitle', N'kz', N'{name} ({code}) профилін жою керек пе?'),
+    (N'permits.air.import.profile.deleteText', N'ru', N'Профиль удаляется для всех пользователей. Уже выполненные импорты не затрагиваются. Отменить это нельзя.'),
+    (N'permits.air.import.profile.deleteText', N'kz', N'Профиль барлық пайдаланушылар үшін жойылады. Орындалған импорттарға әсер етпейді. Мұны болдырмау мүмкін емес.'),
+    (N'permits.air.import.profile.deleteConfirm', N'ru', N'Удалить'),
+    (N'permits.air.import.profile.deleteConfirm', N'kz', N'Жою'),
+    (N'permits.air.import.profile.deleted', N'ru', N'Профиль {code} удалён'),
+    (N'permits.air.import.profile.deleted', N'kz', N'{code} профилі жойылды'),
+    (N'permits.air.import.save.resave', N'ru', N'Сохранить в профиль {code}…'),
+    (N'permits.air.import.save.resave', N'kz', N'{code} профиліне сақтау…'),
+    (N'permits.air.import.save.resaveTitle', N'ru', N'Перезаписать профиль {code}?'),
+    (N'permits.air.import.save.resaveTitle', N'kz', N'{code} профилін қайта жазу керек пе?'),
+    (N'permits.air.import.save.resaveText', N'ru', N'Сопоставление профиля заменяется текущим для всех, кто им пользуется.'),
+    (N'permits.air.import.save.resaveText', N'kz', N'Профиль сәйкестігі оны пайдаланатындардың барлығы үшін ағымдағымен ауыстырылады.'),
+    (N'permits.air.import.unsaved.title', N'ru', N'Часть значений не будет сохранена'),
+    (N'permits.air.import.unsaved.title', N'kz', N'Мәндердің бір бөлігі сақталмайды'),
+    (N'permits.air.import.unsaved.text', N'ru', N'Этим полям не соответствует ни одна колонка таблицы, их значения читаются, но не сохраняются: {fields}. Назовите поле как колонку таблицы (её код или название) или добавьте колонку («Добавить как новую колонку»).'),
+    (N'permits.air.import.unsaved.text', N'kz', N'Бұл өрістерге кестенің ешбір бағаны сәйкес келмейді, олардың мәндері оқылады, бірақ сақталмайды: {fields}. Өрісті кесте бағанының атымен (коды немесе атауы) атаңыз немесе бағанды қосыңыз («Жаңа баған ретінде қосу»).'),
+    (N'permits.air.import.hint.mappingSaved', N'ru', N'Профиль сохранён; данные разрешения ещё не импортированы.'),
+    (N'permits.air.import.hint.mappingSaved', N'kz', N'Профиль сақталды; рұқсат деректері әлі импортталған жоқ.'),
+    (N'permits.air.import.noRows.title', N'ru', N'Не прочитано ни одного источника (лист «{sheet}», строки заголовка {from}–{to})'),
+    (N'permits.air.import.noRows.title', N'kz', N'Бірде-бір көз оқылмады («{sheet}» парағы, тақырып жолдары {from}–{to})'),
+    (N'permits.air.import.noRows.unknown', N'ru', N'Проверьте строки заголовка и столбец НАЕ в сопоставлении и перечитайте файл.'),
+    (N'permits.air.import.noRows.unknown', N'kz', N'Сәйкестендірудегі тақырып жолдары мен НАЕ бағанын тексеріп, файлды қайта оқыңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -613,7 +643,22 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'permits.air.import.save.chooseAnother', N'en', N'Choose another code', 1),
     (N'permits.air.import.missing.warning', N'en', N'These are not file errors: the NAE codes are not in the NAE tree yet. Create the missing nodes or skip those rows, then run the preview again. Apply is possible once every code is decided.', 1),
     (N'permits.air.import.missing.createAllUnder', N'en', N'Node for all undecided NAE', 1),
-    (N'permits.air.import.missing.createAll', N'en', N'Create all undecided ({count}) under this node', 1)
+    (N'permits.air.import.missing.createAll', N'en', N'Create all undecided ({count}) under this node', 1),
+    (N'permits.air.import.profile.builtInNote', N'en', N'{code} is the built-in profile: read-only, it cannot be changed or deleted. To keep a changed mapping, use "Save as profile…".', 1),
+    (N'permits.air.import.profile.edit', N'en', N'Edit profile', 1),
+    (N'permits.air.import.profile.delete', N'en', N'Delete profile…', 1),
+    (N'permits.air.import.profile.deleteTitle', N'en', N'Delete profile {name} ({code})?', 1),
+    (N'permits.air.import.profile.deleteText', N'en', N'The profile is deleted for all users. Imports already made are not affected. This cannot be undone.', 1),
+    (N'permits.air.import.profile.deleteConfirm', N'en', N'Delete', 1),
+    (N'permits.air.import.profile.deleted', N'en', N'Profile {code} deleted', 1),
+    (N'permits.air.import.save.resave', N'en', N'Save to profile {code}…', 1),
+    (N'permits.air.import.save.resaveTitle', N'en', N'Overwrite profile {code}?', 1),
+    (N'permits.air.import.save.resaveText', N'en', N'The profile''s mapping is replaced with the current one for everyone who uses it.', 1),
+    (N'permits.air.import.unsaved.title', N'en', N'Some values will not be saved', 1),
+    (N'permits.air.import.unsaved.text', N'en', N'No column of the table matches these fields, so their values are read but not saved: {fields}. Name the field after a table column (its code or its name), or add the column ("Add as new column").', 1),
+    (N'permits.air.import.hint.mappingSaved', N'en', N'The profile is saved; the permit''s data is not imported yet.', 1),
+    (N'permits.air.import.noRows.title', N'en', N'No source was read (sheet "{sheet}", header rows {from}–{to})', 1),
+    (N'permits.air.import.noRows.unknown', N'en', N'Check the header rows and the NAE column of the mapping, then read the file again.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO
