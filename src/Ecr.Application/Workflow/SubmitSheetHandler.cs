@@ -74,7 +74,12 @@ public sealed class SubmitSheetHandler(
 
     // ✎ D-451: лист «Аркуш подано» погоджувачам поточного кроку — ПІСЛЯ коміту, без права валити подання.
     // У проді вприснутий завжди (`DependencyInjection`); `null` — тестові фабрики обробника без пошти.
-    SheetWorkflowNotifier? notifier = null)
+    SheetWorkflowNotifier? notifier = null,
+
+    // ✎ Rule (h): «the permit covers the months with entered data» blocks Submit. `null` (test factories) — off.
+    IPermitRegistryIndex? permitTargets = null,
+    IPeriodStore? periods = null,
+    IPermitDataMonthsReader? dataMonths = null)
 {
     /// <summary>
     /// Ключ тексту відмови подання з причиною <c>InsufficientGrantLevel</c> (D-285):
@@ -597,6 +602,22 @@ public sealed class SubmitSheetHandler(
                 .ConfigureAwait(false);
             blocking.AddRange(relationMessages.Where(m => m.Severity == ValidationSeverity.Error));
             warnings.AddRange(relationMessages.Where(m => m.Severity == ValidationSeverity.Warning));
+        }
+
+        // ✎ Rule (h), coordinator 08.11: Submit re-checks «the permit covers the months with entered data» for the rows
+        // of this sheet and the document header — the same check and text as «Validate» (PermitCoverageIssues). The
+        // permit-type test is in memory (IPermitRegistryIndex): a sheet without a permit column and a header without a
+        // permit field add no round-trip (SubmitSheetQueryCountTests).
+        if (permitTargets is not null && periods is not null)
+        {
+            var sheetInstances = instances.Where(i => tables.ContainsKey(i.TableDefId)).ToList();
+            var permitMessages = await Validation.PermitCoverageIssues
+                .RunAsync(permitTargets, registries, cellStore, rowStore, periods, headers, dataMonths,
+                    snapshot, documentId, sheetInstances, key, currentUser.Language, ct)
+                .ConfigureAwait(false);
+
+            // Only uncovered months block; the partial-month note (Warning) is for Issues, not a submit confirmation.
+            blocking.AddRange(permitMessages.Where(m => m.Severity == ValidationSeverity.Error));
         }
 
         if (blocking.Count > 0)

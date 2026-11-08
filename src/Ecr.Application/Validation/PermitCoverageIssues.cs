@@ -194,10 +194,47 @@ public static class PermitCoverageIssues
                 {
                     messages.Add(RowMessage(table.Id, rowKey, column, entry, uncovered, language));
                 }
+
+                // Human 08.11: a permit starting/ending mid-month still covers the month (never blocked) — the partial
+                // days are named in a non-blocking Warning at the month cell (or the permit cell without month columns).
+                foreach (var month in months.Except(uncovered))
+                {
+                    if (PermitMonthCoverage.PartialDays(entry.ValidFrom, entry.ValidTo, month) is not { } days)
+                    {
+                        continue;
+                    }
+
+                    var monthColumn = table.Columns.FirstOrDefault(c => monthOf.TryGetValue(c.Id, out var m) && m == month.Month);
+                    messages.Add(PartialMessage(table.Id, rowKey, column, monthColumn ?? column, entry, month, days, language));
+                }
             }
         }
 
         return messages;
+    }
+
+    private static ValidationMessage PartialMessage(
+        int tableDefId, string? rowKey, ColumnDef permitColumn, ColumnDef at, RegistryEntry entry, DateOnly month,
+        (DateOnly First, DateOnly Last) days, string language)
+    {
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["permit"] = entry.DisplayL10n.Get("en") is { Length: > 0 } shown ? shown : entry.Code,
+            ["column"] = permitColumn.HeaderL10n.Get("en") ?? permitColumn.Code,
+            ["month"] = month.ToString("MM.yyyy", System.Globalization.CultureInfo.InvariantCulture),
+            ["days"] = PermitMonthCoverage.DescribeDays(days),
+        };
+
+        return new ValidationMessage(
+            ValidationSeverity.Warning,
+            RowRuleCode,
+            ValidationMessageTemplates.Render(ValidationMessageTemplates.PermitPartialMonth, language, parameters),
+            tableDefId,
+            rowKey,
+            at.Code,
+            BlocksSave: false,
+            MessageKey: ValidationMessageTemplates.PermitPartialMonth,
+            Params: parameters);
     }
 
     private static async Task<List<ValidationMessage>> HeaderFindingsAsync(

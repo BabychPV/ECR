@@ -258,6 +258,29 @@ public sealed class PatchCellsPermitValidityTests
         await AssertWritten(PickPermit());
     }
 
+    /// <summary>
+    /// Coordinator 08.11: only entered/imported values count. A calculated January (a sum row over its children) does
+    /// not make January «with data», so a March–November permit is accepted. Red with the old rule.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "ACC-1108-h2")]
+    public async Task A_calculated_month_value_is_not_data_and_does_not_block_the_permit()
+    {
+        _stored[JanuaryId] = new CellValueData { ValueNumeric = 120m, IsCalculated = true };
+        StoredValue(MarchId, 80m);
+
+        await AssertWritten(PickPermit());
+    }
+
+    /// <summary>Human 08.11: a permit starting mid-month covers that month — a February value is accepted from 15.02.</summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "ACC-1108-h3")]
+    public async Task A_permit_starting_mid_month_accepts_a_value_in_that_month()
+    {
+        Permit(validFrom: new DateOnly(2026, 2, 15), validTo: new DateOnly(2026, 12, 1));
+        StoredPermit();
+
+        await AssertWritten(new PatchCell("February", 7m));
+    }
+
     /// <summary>S6: a month column the author cannot read still counts, but its month is not named in the refusal.</summary>
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "ACC-1108-h2")]
     public async Task A_hidden_month_is_refused_without_being_named()
@@ -292,7 +315,8 @@ public sealed class PatchCellsPermitValidityTests
         var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Write(PickPermit()));
 
         Assert.Equal("err.ECR-CELL-4223.permitNotCoveringMonths", error.Details!["messageKey"]);
-        Assert.StartsWith("Jan 2026, Feb 2026", (string)error.Details["months"]!);
+        // A run of consecutive uncovered months is named by its date range (coordinator 08.11).
+        Assert.Equal("01.01–31.12.2026", error.Details["months"]);
         Assert.Equal("01.01.2027 – …", error.Details["validity"]);
     }
 

@@ -57,8 +57,15 @@ public static class ValidationMessageTemplates
     /// <summary>Rule (h4): the header (Contract tab) permit does not cover months the document holds data in.</summary>
     public const string PermitHeaderMonthsNotCovered = "validation.permit.headerMonthsNotCovered";
 
+    /// <summary>Rule (h), human 08.11: the permit covers a month with data only partly — a non-blocking note.</summary>
+    public const string PermitPartialMonth = "validation.permit.partialMonth";
+
     private static readonly Dictionary<string, (string En, string Ru, string Kz)> Table = new(StringComparer.Ordinal)
     {
+        [PermitPartialMonth] = (
+            "Permit {permit} (column \"{column}\") is valid only {days} in month {month}: the values of that month are accepted, but the permit covers those days only.",
+            "Разрешение {permit} (колонка «{column}») действует только {days} в месяце {month}: значения этого месяца приняты, но разрешение покрывает только эти дни.",
+            "{permit} рұқсаты («{column}» бағаны) {month} айында тек {days} аралығында жарамды: осы айдың мәндері қабылданды, бірақ рұқсат тек осы күндерді қамтиды."),
         [PermitMonthsNotCovered] = (
             "Permit {permit} (column \"{column}\") is valid {validity} and does not cover the months with data: {months}. Pick a permit valid in those months, clear the values in those months, or extend the permit's validity.",
             "Разрешение {permit} (колонка «{column}») действует {validity} и не покрывает месяцы с данными: {months}. Выберите разрешение, действующее в эти месяцы, очистите значения за эти месяцы или продлите срок действия разрешения.",

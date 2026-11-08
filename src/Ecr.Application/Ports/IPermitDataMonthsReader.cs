@@ -8,7 +8,7 @@ namespace Ecr.Application.Ports;
 /// <remarks>
 /// <para>
 /// A month has data when a non-deleted row of an original (not a sheet copy) table instance of the document has a numeric
-/// value there (a computed zero is not data): month columns of a «months in columns» table give their month of the
+/// value there that was ENTERED or IMPORTED (a calculated value never counts): month columns of a «months in columns» table give their month of the
 /// instance year; a table without month columns gives every month of the instance period. In a table WITH month columns
 /// only the month columns count — its descriptors and opening balance are not monthly data.
 /// </para>

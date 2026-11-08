@@ -39,7 +39,7 @@ public sealed class PermitDataMonthsReader(EcrDbContext db) : IPermitDataMonthsR
                       && !excluded.Contains(inst.TableDefId)
                       && !excludedColumns.Contains(cell.ColumnDefId)
                       && cell.ValueNumeric != null
-                      && !(cell.IsCalculated && cell.ValueNumeric == 0m)
+                      && !cell.IsCalculated // only entered/imported values (coordinator 08.11)
                 group cell by new { cell.PeriodKeyValue, cell.ColumnDefId, inst.TableDefId } into g
                 orderby g.Key.PeriodKeyValue, g.Key.ColumnDefId
                 select new DataPair(g.Key.PeriodKeyValue, g.Key.ColumnDefId, g.Key.TableDefId))

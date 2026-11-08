@@ -119,6 +119,82 @@ public sealed class DocumentPermitMonthsTests(SqlServerFixture sql)
         Assert.Contains("01.2026", finding.GetProperty("message").GetString() ?? string.Empty, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Coordinator 08.11: Submit re-checks the rule server-side and refuses with the same explanation as «Validate».
+    /// Red without the PermitCoverageIssues step in SubmitSheetHandler: 204, the sheet is submitted.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "ACC-1108-h4")]
+    public async Task Submit_of_a_sheet_with_a_row_permit_violation_is_refused_with_the_explanation()
+    {
+        var s = await ArrangeAsync(rowPermit: true, submittable: true).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var response = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/submit", UriKind.Relative),
+            new { sheetDefId = s.SheetDefId, periodKey = 202601 }).ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(response.StatusCode == HttpStatusCode.UnprocessableEntity, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
+        Assert.Equal("ECR-SUB-4221", JsonDocument.Parse(body).RootElement.GetProperty("errorCode").GetString());
+        Assert.Contains("KZ-MARCH", body, StringComparison.Ordinal);
+        Assert.Contains("01.2026", body, StringComparison.Ordinal);
+        Assert.Contains("extend the permit", body, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Human 08.11: a permit valid from 15 January still covers January (no Error), and Issues names the partial days in a
+    /// non-blocking Warning. Red before: no Warning finding.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "ACC-1108-h4")]
+    public async Task A_permit_starting_mid_month_is_a_warning_naming_the_days_not_an_error()
+    {
+        var s = await ArrangeAsync(rowPermit: true, rowEntry: "midJan").ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var finding = await FindingAsync(client, app, s, f => f.GetProperty("ruleCode").GetString() == "PERMIT-VALIDITY")
+            .ConfigureAwait(true);
+
+        Assert.Equal("Warning", finding.GetProperty("severity").GetString());
+        Assert.Equal(s.RowKey, finding.GetProperty("rowKey").GetString());
+        var message = finding.GetProperty("message").GetString() ?? string.Empty;
+        Assert.Contains("KZ-MIDJAN", message, StringComparison.Ordinal);
+        Assert.Contains("15.01–31.01.2026", message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Coordinator 08.11: a CALCULATED value never makes a month «with data» — the same row with a calculated January
+    /// value is not listed. Red with the old rule (calculated non-zero counted).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "ACC-1108-h4")]
+    public async Task A_calculated_value_does_not_make_a_month_with_data()
+    {
+        var s = await ArrangeAsync(rowPermit: true, calculatedData: true).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var response = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/validate", UriKind.Relative),
+            new { periodKey = 202601 }).ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
+        Assert.DoesNotContain("PERMIT-VALIDITY", body, StringComparison.Ordinal);
+    }
+
     private static Uri HeaderUri(long documentId)
         => new($"/api/v1/documents/{documentId.ToString(CultureInfo.InvariantCulture)}/header", UriKind.Relative);
 
@@ -178,12 +254,23 @@ public sealed class DocumentPermitMonthsTests(SqlServerFixture sql)
     /// «Year»; header field PERMIT targets that header. <paramref name="headerPermit"/> stores «March» in the header;
     /// <paramref name="rowPermit"/> adds a permit Lookup column to the table and stores «March» in the row with data.
     /// </summary>
-    private async Task<Scenario> ArrangeAsync(bool headerPermit = false, bool rowPermit = false)
+    private async Task<Scenario> ArrangeAsync(
+        bool headerPermit = false, bool rowPermit = false, bool submittable = false, bool calculatedData = false,
+        string rowEntry = "march")
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var document = await builder.BuildAsync(columnCount: 2, rowCount: 1).ConfigureAwait(false);
+        if (submittable)
+        {
+            // D-441: a Scheduled period cannot be submitted — open it; the sheet is part of the document.
+            await builder.OpenPeriodAsync(document).ConfigureAwait(false);
+        }
 
         await using var db = builder.CreateContext();
+        if (submittable)
+        {
+            db.DocumentSheets.Add(new DocumentSheet(document.DocumentId, document.SheetDefId));
+        }
 
         var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
         var registry = new RegistryDef(EcrCode.Create($"PRM_PM{tag}"), Text("Permit header"), isTemporal: true);
@@ -198,7 +285,9 @@ public sealed class DocumentPermitMonthsTests(SqlServerFixture sql)
         march.SetValidity(new DateOnly(2026, 3, 1), new DateOnly(2026, 12, 1));
         var year = new RegistryEntry(registry.Id, EcrCode.Create("YEAR"), Text("KZ-YEAR"));
         year.SetValidity(new DateOnly(2026, 1, 1), new DateOnly(2027, 1, 1));
-        db.RegistryEntries.AddRange(march, year);
+        var midJan = new RegistryEntry(registry.Id, EcrCode.Create("MIDJAN"), Text("KZ-MIDJAN"));
+        midJan.SetValidity(new DateOnly(2026, 1, 15), new DateOnly(2027, 1, 1));
+        db.RegistryEntries.AddRange(march, year, midJan);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         var permit = new HeaderFieldDef(document.TemplateVersionId, EcrCode.Create(PermitCode), Text("Permit"), 0, CellDataType.Lookup);
@@ -209,7 +298,7 @@ public sealed class DocumentPermitMonthsTests(SqlServerFixture sql)
         // January data: C2 (Decimal) of the only row.
         db.CellValues.Add(new CellValue(
             new CellAddress(document.PeriodKey, document.RowIds[0], document.ColumnDefIds[1]),
-            document.TableDefId, new CellValueData { ValueNumeric = 12m }));
+            document.TableDefId, new CellValueData { ValueNumeric = 12m, IsCalculated = calculatedData }));
 
         var permitColumnCode = string.Empty;
         if (rowPermit)
@@ -221,7 +310,7 @@ public sealed class DocumentPermitMonthsTests(SqlServerFixture sql)
             await db.SaveChangesAsync().ConfigureAwait(false);
             db.CellValues.Add(new CellValue(
                 new CellAddress(document.PeriodKey, document.RowIds[0], column.Id),
-                document.TableDefId, new CellValueData { ValueRegistryEntryId = march.Id }));
+                document.TableDefId, new CellValueData { ValueRegistryEntryId = rowEntry == "midJan" ? midJan.Id : march.Id }));
         }
 
         if (headerPermit)
@@ -241,6 +330,11 @@ public sealed class DocumentPermitMonthsTests(SqlServerFixture sql)
 
         db.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
         db.RolePermissions.Add(new RolePermission(role.Id, "Registry.View"));
+        if (submittable)
+        {
+            db.RolePermissions.Add(new RolePermission(role.Id, "Document.Submit"));
+        }
+
         db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
         db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, document.ProjectId, GrantLevel.Write));
         await db.SaveChangesAsync().ConfigureAwait(false);
@@ -250,9 +344,10 @@ public sealed class DocumentPermitMonthsTests(SqlServerFixture sql)
             .Select(r => r.RowKeyValue)
             .SingleAsync().ConfigureAwait(false);
 
-        return new Scenario(document.DocumentId, permit.Id, userName, march.Id, year.Id, rowKey, permitColumnCode);
+        return new Scenario(document.DocumentId, permit.Id, userName, march.Id, year.Id, rowKey, permitColumnCode, document.SheetDefId);
     }
 
     private sealed record Scenario(
-        long DocumentId, int PermitFieldId, string UserName, long MarchPermitId, long YearPermitId, string RowKey, string PermitColumnCode);
+        long DocumentId, int PermitFieldId, string UserName, long MarchPermitId, long YearPermitId, string RowKey, string PermitColumnCode,
+        int SheetDefId);
 }

@@ -50,6 +50,8 @@ interface World {
   yearPermitId: number;
   yearNumber: string;
   otherNumber: string;
+  midId: number;
+  midNumber: string;
 }
 
 async function patchCells(
@@ -176,6 +178,9 @@ async function arrange(request: APIRequestContext): Promise<World> {
   const otherFrom = month < 12 ? iso(new Date(Date.UTC(year, month, 1))) : `${String(year)}-01-01`;
   const otherTo = month < 12 ? `${String(year + 1)}-01-01` : `${String(year)}-12-01`;
   await createPermit(otherNumber, otherFrom, otherTo);
+  // MID starts on the 15th of month M (human 08.11: a mid-month start covers the month, the days are named).
+  const midNumber = `E2E-PV-MID-${stamp}`;
+  await createPermit(midNumber, iso(new Date(Date.UTC(year, month - 1, 15))), `${String(year + 1)}-01-01`);
 
   const entries = await ok<{ id: number; display: string }[]>(
     await request.get(`/api/v1/registries/PRM_${typeCode}/entries?documentId=${String(document.documentId)}`),
@@ -189,7 +194,7 @@ async function arrange(request: APIRequestContext): Promise<World> {
   );
   const wrInstanceId = tables.find((t) => t.tableCode === 'WR')?.tableInstanceId ?? 0;
   const airInstanceId = tables.find((t) => t.tableCode === 'AIR')?.tableInstanceId ?? 0;
-  for (let n = 0; n < 3; n += 1) {
+  for (let n = 0; n < 4; n += 1) {
     await ok(await request.post(`/api/v1/documents/${String(document.documentId)}/rows`, { data: { tableInstanceId: wrInstanceId, rowKey: null } }), `рядок WR ${String(n)}`);
   }
   await ok(await request.post(`/api/v1/documents/${String(document.documentId)}/rows`, { data: { tableInstanceId: airInstanceId, rowKey: null } }), 'рядок AIR');
@@ -201,7 +206,9 @@ async function arrange(request: APIRequestContext): Promise<World> {
   const world: World = {
     documentId: document.documentId, periodKey, month, wrInstanceId, airInstanceId, rows: slice.rows.map((r) => r.rowKey),
     yearId: entryOf(yearNumber), otherId: entryOf(otherNumber), yearPermitId, yearNumber, otherNumber,
+    midId: entryOf(midNumber), midNumber,
   };
+  expect(world.midId, 'запис MID').toBeGreaterThan(0);
   expect(world.yearId, 'запис YEAR').toBeGreaterThan(0);
   expect(world.otherId, 'запис OTHER').toBeGreaterThan(0);
 
@@ -214,6 +221,7 @@ async function arrange(request: APIRequestContext): Promise<World> {
   );
   await ok(await patchCells(request, world, airInstanceId, airSlice.rows[0]!.rowKey, [{ columnCode: 'Q', value: '9' }]), 'AIR: дані');
   await ok(await patchCells(request, world, wrInstanceId, world.rows[1]!, [{ columnCode: 'PERMIT', value: world.otherId }]), 'R2: дозвіл OTHER');
+  await ok(await patchCells(request, world, wrInstanceId, world.rows[3]!, [{ columnCode: 'PERMIT', value: world.midId }]), 'R4: дозвіл MID');
 
   return world;
 }
@@ -399,6 +407,40 @@ test.describe('Permit validity:', () => {
     const inspector = page.getByRole('complementary');
     await expect(inspector.getByText(new RegExp(world.yearNumber)).first()).toBeVisible({ timeout: 30_000 });
     await expect(inspector.getByText(/extend the permit's validity/).first()).toBeVisible();
+    await page.close();
+  });
+
+  test('Permit validity: partial month — a permit from the 15th accepts that month and Issues names the days', async () => {
+    const page = await context.newPage();
+    await openDocument(page, world);
+    const monthCell = dataCell(page, 3, await gridColumn(page, MonthNames[world.month - 1]!));
+    await monthCell.click();
+    await page.evaluate(async () => {
+      await navigator.clipboard.writeText('4');
+    });
+    const saved = page.waitForResponse((r) => r.request().method() === 'PATCH' && new URL(r.url()).pathname.endsWith('/cells'), { timeout: 90_000 });
+    await page.keyboard.press('Control+v');
+    await page.keyboard.press('Control+s');
+    const response = await saved;
+    expect(response.status(), `місяць із дозволом від 15-го: ${await response.text()}`).toBe(200);
+
+    const year = Math.floor(world.periodKey / 100);
+    const mm = String(world.month).padStart(2, '0');
+    const lastDay = String(new Date(Date.UTC(year, world.month, 0)).getUTCDate()).padStart(2, '0');
+    const days = `15.${mm}–${lastDay}.${mm}.${String(year)}`;
+    const validation = await ok<{ messages: { ruleCode: string; rowKey: string | null; message: string; severity: string }[] }>(
+      await context.request.post(`/api/v1/documents/${String(world.documentId)}/validate`, { data: { periodKey: world.periodKey } }),
+      'Перевірити',
+    );
+    const warning = validation.messages.find((m) => m.ruleCode === 'PERMIT-VALIDITY' && m.rowKey === world.rows[3]);
+    expect(warning, JSON.stringify(validation.messages)).toBeDefined();
+    expect(warning?.severity, 'часткове покриття — попередження, не помилка').toBe('Warning');
+    expect(warning?.message).toContain(days);
+
+    await page.reload();
+    await expect(page.locator('revo-grid').first()).toBeVisible({ timeout: 60_000 });
+    await page.getByRole('button', { name: /issue/i }).first().click();
+    await expect(page.getByRole('complementary').getByText(new RegExp(days)).first()).toBeVisible({ timeout: 30_000 });
     await page.close();
   });
 });
