@@ -577,6 +577,19 @@ public sealed partial class ExceptionHandlingMiddleware(
                  ["messageKey"] = "err.ECR-RPT-4091.versionConcurrent",
              }),
 
+        // ⛔ P1 (людина 08.11, кореляція e16184de): повторне призначення ролі, чий рядок уже є
+        // (сплила строкова підміна), давало `UQ_RoleAssignment_User` у fallback — голий 500
+        // «Internal error». `UserStore.ReplaceRolesAsync` тепер оновлює наявний рядок; арм лишається
+        // на гонку двох одночасних збережень: конфлікт стану, 409 з ключем каталогу, а не 500.
+        Microsoft.EntityFrameworkCore.DbUpdateException e
+            when e.GetBaseException().Message.Contains("UQ_RoleAssignment_User", StringComparison.Ordinal) =>
+            (StatusCodes.Status409Conflict, ErrorCodes.SecurityConflict,
+             "Цю роль користувачу щойно призначив хтось інший: перечитайте ролі користувача й збережіть ще раз.",
+             new Dictionary<string, object?>
+             {
+                 ["messageKey"] = "err.ECR-SEC-0409.roleAssignmentConflict",
+             }),
+
         ConcurrencyConflictException e =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 

@@ -258,71 +258,56 @@ public sealed class UserStore(EcrDbContext db, SelfStampRotation? selfRotation =
                 });
         }
 
-        // ⚠ Кожна роль набору йде в одну з двох груп (`#48`, ФВ-6.16): якщо
-        // виклик задав для неї межі — вона СТРОКОВА (підміна на час
-        // відпустки), інакше — БЕЗСТРОКОВА, як і завжди. Групу визначає САМ
-        // ВИКЛИК, а не роль: та сама роль в іншому виклику може прийти без
-        // меж і стати постійною.
-        var permanentRoles = new List<(int Id, string Code)>();
-        var datedRoles = new List<(int Id, string Code, DateOnly? From, DateOnly? To)>();
-        foreach (var role in roles)
-        {
-            if (validity is not null
-                && validity.TryGetValue(role.Code, out var window)
-                && (window.ValidFrom is not null || window.ValidTo is not null))
-            {
-                datedRoles.Add((role.Id, role.Code, window.ValidFrom, window.ValidTo));
-            }
-            else
-            {
-                permanentRoles.Add((role.Id, role.Code));
-            }
-        }
-
-        // Безстрокові — заміна НАБОРОМ, як і раніше: строкові підміни нижче
-        // сюди не входять навіть якщо роль там уже є.
-        var permanent = await db.RoleAssignments
-            .Where(a => a.UserId == userId && a.ValidFrom == null && a.ValidTo == null)
+        // ⚠ Межі кожної ролі набору визначає САМ ВИКЛИК (`#48`, ФВ-6.16): є
+        // запис у `validity` з датою — роль СТРОКОВА (підміна на час
+        // відпустки), інакше — БЕЗСТРОКОВА. Та сама роль в іншому виклику може
+        // прийти без меж і стати постійною.
+        var assignments = await db.RoleAssignments
+            .Where(a => a.UserId == userId)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        db.RoleAssignments.RemoveRange(permanent);
+        var requestedIds = roles.Select(r => r.Id).ToHashSet();
 
-        // ⛔ ФВ-6.14: без словника областей (клієнт про них не знає) область
-        // переназначеної ролі ЗБЕРІГАЄТЬСЯ. Інакше звичайне «зберегти форму»
-        // перетворило б роль «лише в проєкті A» на роль у всіх проєктах.
-        var keptScopes = permanent
-            .Where(a => a.ScopeJson is not null)
-            .GroupBy(a => a.RoleId)
-            .ToDictionary(g => g.Key, g => g.First());
+        // Безстрокові ролі поза набором — знімаються (заміна НАБОРОМ, як і
+        // раніше). Строкові призначення ІНШИХ ролей не чіпаються: «заміна
+        // набору не має скасовувати те, що поставили окремим рішенням».
+        db.RoleAssignments.RemoveRange(assignments.Where(
+            a => !requestedIds.Contains(a.RoleId) && a.ValidFrom == null && a.ValidTo == null));
 
-        foreach (var role in permanentRoles)
+        foreach (var role in roles)
         {
-            var assignment = new RoleAssignment(role.Id, user);
-            ApplyScope(assignment, role.Code, scopes, keptScopes.GetValueOrDefault(role.Id));
-            db.RoleAssignments.Add(assignment);
-        }
+            DateOnly? from = null;
+            DateOnly? to = null;
+            if (validity is not null && validity.TryGetValue(role.Code, out var window))
+            {
+                (from, to) = (window.ValidFrom, window.ValidTo);
+            }
 
-        // Строкові — заміна ПОРОЛЬНО: попереднє строкове призначення саме цієї
-        // ролі цьому користувачу заміняється новими межами (ідемпотентно на
-        // повторний виклик), а строкові призначення ІНШИХ ролей і чужі
-        // групові — не чіпаються. Це та сама обіцянка, що й раніше («заміна
-        // набору не має скасовувати те, що поставили окремим рішенням»), лише
-        // тепер «окреме рішення» може бути і цим самим викликом для іншої ролі.
-        foreach (var (roleId, code, from, to) in datedRoles)
-        {
-            var existingDated = await db.RoleAssignments
-                .Where(a => a.UserId == userId && a.RoleId == roleId
-                            && (a.ValidFrom != null || a.ValidTo != null))
-                .ToListAsync(ct)
-                .ConfigureAwait(false);
+            // ⛔ P1 (людина 08.11, кореляція e16184de): призначення цієї ролі
+            // цьому користувачу вже може існувати — і БУДЬ-ЯКЕ: безстрокове,
+            // строкове чинне або строкове, що вже СПЛИЛО (форма його не
+            // показувала, бо `ListUserRolesAsync` віддає лише безстрокові).
+            // Раніше тут ішов INSERT поруч із наявним рядком, і
+            // `UQ_RoleAssignment_User` (одна роль — один рядок на
+            // користувача) давав голий 500 «Internal error». Тепер наявний
+            // рядок ОНОВЛЮЄТЬСЯ новими межами з запиту (порожній кінець —
+            // безстроково); область без словника `scopes` зберігається
+            // (ФВ-6.14: «зберегти форму» не розширює роль до всіх проєктів).
+            var existing = assignments.Where(a => a.RoleId == role.Id).ToList();
+            var assignment = existing.FirstOrDefault();
+            if (assignment is null)
+            {
+                assignment = new RoleAssignment(role.Id, user);
+                db.RoleAssignments.Add(assignment);
+            }
 
-            db.RoleAssignments.RemoveRange(existingDated);
+            // Дублікатів унікальний індекс не допускає; якщо база старіша за
+            // Q-222 — зайві рядки тієї самої ролі прибираються, а не множаться.
+            db.RoleAssignments.RemoveRange(existing.Skip(1));
 
-            var assignment = new RoleAssignment(roleId, user);
             assignment.SetValidity(from, to);
-            ApplyScope(assignment, code, scopes, existingDated.Find(a => a.ScopeJson is not null));
-            db.RoleAssignments.Add(assignment);
+            ApplyScope(assignment, role.Code, scopes, existing.Find(a => a.ScopeJson is not null));
         }
 
         // ⛔ Штамп безпеки крутиться: інакше вже побудований профіль доступу

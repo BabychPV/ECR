@@ -344,6 +344,11 @@ public sealed class ReplaceUserRolesHandler(
                     .EnsureRoleSetKeepsAdministratorAsync(users, userId, roleCodes, validity, domainScopes, clock.UtcNow, token)
                     .ConfigureAwait(false);
 
+                // ⛔ P2 «хто поставив LandRestricted ValidTo = 26.10»: межі кожного
+                // призначення — у події, старі → нові, і для звичайної правки
+                // меж, і для повторного призначення ролі, що сплила.
+                var beforeAssignments = await users.ListUserRoleAssignmentsAsync(userId, token).ConfigureAwait(false);
+
                 count = await users.ReplaceRolesAsync(userId, roleCodes, validity, domainScopes, token).ConfigureAwait(false);
 
                 await audit.WriteSecurityEventAsync(
@@ -368,6 +373,8 @@ public sealed class ReplaceUserRolesHandler(
                                     s => s.Key,
                                     s => new { sheets = s.Value.SheetCodes, from = s.Value.PeriodFrom?.Value, to = s.Value.PeriodTo?.Value },
                                     StringComparer.Ordinal),
+
+                            validity = ValidityChanges(beforeAssignments, roleCodes, validity),
                         }),
                         ChangedByUserId: actorId,
                         CorrelationId: currentUser.CorrelationId),
@@ -387,6 +394,51 @@ public sealed class ReplaceUserRolesHandler(
         await disableBootstrap.HandleAsync(ct).ConfigureAwait(false);
 
         return count;
+    }
+
+    /// <summary>
+    /// Межі чинності кожного зачепленого особистого призначення: код ролі →
+    /// <c>{ from: {validFrom, validTo} | null, to: {validFrom, validTo} | null }</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>from: null</c> — призначення не було; <c>to: null</c> — безстрокове
+    /// призначення знято. Строкові призначення ролей поза набором заміна не
+    /// чіпає (<c>UserStore.ReplaceRolesAsync</c>), тож їх тут немає.
+    /// </remarks>
+    private static Dictionary<string, object?> ValidityChanges(
+        IReadOnlyList<UserRoleAssignmentView> before,
+        IReadOnlyList<string> roleCodes,
+        IReadOnlyDictionary<string, RoleValidityWindow>? validity)
+    {
+        static object State(DateOnly? from, DateOnly? to) => new { validFrom = from, validTo = to };
+
+        var changes = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var code in roleCodes.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
+        {
+            var old = before.FirstOrDefault(a => string.Equals(a.RoleCode, code, StringComparison.Ordinal));
+            RoleValidityWindow? window = null;
+            if (validity is not null)
+            {
+                validity.TryGetValue(code, out window);
+            }
+
+            changes[code] = new
+            {
+                from = old is null ? null : State(old.ValidFrom, old.ValidTo),
+                to = State(window?.ValidFrom, window?.ValidTo),
+            };
+        }
+
+        foreach (var old in before)
+        {
+            if (!roleCodes.Contains(old.RoleCode, StringComparer.Ordinal)
+                && old.ValidFrom is null && old.ValidTo is null)
+            {
+                changes[old.RoleCode] = new { from = State(null, null), to = (object?)null };
+            }
+        }
+
+        return changes;
     }
 
     /// <summary>Перевіряє межі чинності з тіла запиту (ФВ-6.16).</summary>

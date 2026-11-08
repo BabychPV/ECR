@@ -10,6 +10,8 @@ import { logSuppressedDetail, problemText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
 import { RoleScopeFields, scopesToSend, scopesValid, useUserRoleScopes, type ScopeDraft } from './UserRoleScopes';
 import { scopeProblem } from './roleScope';
+import { DatedRoleNotices } from './DatedRoleNotices';
+import { roleLabel } from './roleLabel';
 
 /*
  * ⛔ Не прибирати як «невживаний експорт» (D-132, замір 2026-10-24). Rollup кладе модуль у спільний чанк за НАБОРОМ
@@ -30,6 +32,9 @@ const EffectiveAccessPanel = lazy(async () => ({
 
 /** Ключ `409`: заміна ролей лишила б систему без активного адміністратора (`ReplaceUserRolesHandler`). */
 const LastAdministratorKey = 'err.ECR-SEC-0409.lastAdministrator';
+
+/** Ключ `409`: призначення цієї ролі щойно змінив хтось інший (`UQ_RoleAssignment_User`, P1 08.11). */
+const RoleAssignmentConflictKey = 'err.ECR-SEC-0409.roleAssignmentConflict';
 
 /**
  * Ролі й адреса наявного користувача.
@@ -199,7 +204,8 @@ export function UserAccessEditor({
       if (
         error instanceof EcrApiError &&
         error.problem.status === 409 &&
-        error.problem.extensions2?.['messageKey'] === LastAdministratorKey
+        (error.problem.extensions2?.['messageKey'] === LastAdministratorKey ||
+          error.problem.extensions2?.['messageKey'] === RoleAssignmentConflictKey)
       ) {
         setRolesError(messageOf(error));
       }
@@ -328,6 +334,17 @@ export function UserAccessEditor({
                 }
               />
             </div>
+
+            {/* ⛔ P1 08.11: сплила строкова роль — не «відсутня», а «expired <дата>, re-assign?». */}
+            <DatedRoleNotices
+              userId={user?.id ?? null}
+              selected={selected}
+              label={(code) => roleLabel(roles.find((r) => r.code === code)) || code}
+              onReassign={(code) => {
+                setRolesError(null);
+                setSelected((current) => (current.includes(code) ? current : [...current, code]));
+              }}
+            />
 
             {/*
              * ⛔ НЕ `<Alert>`: Mantine ставить йому `role="alert"` за
