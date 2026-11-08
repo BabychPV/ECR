@@ -1,12 +1,10 @@
 import type { JSX, ReactNode } from 'react';
-import { Alert, Box, Button, Group, Skeleton, Stack, Text, Title } from '@mantine/core';
+import { Button, Skeleton, Stack, Text, Title } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { DocumentSummary } from '@/api/types';
-import { useTableStatus, type TableStatus } from '@/features/documents/api';
-import { documentState, hasSheetStates, sheetLabels, type SheetLabel } from '@/features/documents/documentSheets';
-import { useWorkflowHistory, type WorkflowEvent } from '@/features/workflow/api';
+import { documentState } from '@/features/documents/documentSheets';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { DetailDrawer, useDetailPanel } from '@/shared/ui/DetailDrawer';
@@ -15,15 +13,9 @@ import { KeyValue } from '@/shared/ui/KeyValue';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 
-/** Скільки останніх подій показує блок «Latest changes» (макет — три-чотири). */
-export const LatestChangesCount = 3;
-
 interface DocumentQuickLookProps {
   /** Значення `?panel=` — ідентифікатор документа. */
   readonly panelId: string;
-
-  /** Обраний період; без нього станів і заповненості немає (`D-93`). */
-  readonly periodKey: number | null;
 
   /** Рядок уже завантаженої сторінки переліку, якщо документ на ній є. */
   readonly document?: DocumentSummary | undefined;
@@ -45,14 +37,11 @@ interface DocumentQuickLookProps {
 
 /**
  * Швидкий перегляд документа зі списку (`UI-29`, макет `screens-work.js` →
- * `ctx.panel('*')` на екрані «/», `13-docs-quicklook.png`): аркуші зі станом і
- * заповненістю, хто й коли змінював, три останні переходи; дії «Close» і
- * «Open document».
+ * `ctx.panel('*')` на екрані «/», `13-docs-quicklook.png`): хто й коли змінював; дії «Close» і «Open document».
  *
- * ⛔ Прихований аркуш (P1, безпека): усе — лише з відповідей сервера, які вже
- * відфільтровані за роллю (`sheets`/`sheetStates`, `tables/status`,
- * `workflow/history`). Шторка нічого не рахує «по всіх аркушах»: аркуш, якого
- * немає в `sheets`, не з'являється ні рядком, ні числом.
+ * ✎ Projects/Documents 08.11: перелік документів — лише за РІК, тож шторка відкривається без місяця. Помісячні блоки
+ * (аркуші зі станом і заповненістю, «Can approve now» D-466, «Latest changes») прибрано разом із їхніми запитами
+ * (`tables/status`, `workflow/history`): без місяця вони були недосяжні. Стани аркушів за місяць — у самому документі.
  *
  * ~~⚠ «Owner» з макета тут немає: сервер не віддає автора документа, а
  * `modifiedByDisplayName` — це останній, хто змінював. Тому підпис чесний —
@@ -60,12 +49,10 @@ interface DocumentQuickLookProps {
  * ✎ D-450: сервер віддає власника (`ownerDisplayName`) — рядок «Owner» стоїть ПЕРЕД «Last changed by», і це різні
  * люди: власник відповідає за документ, останній редактор — лише останній, хто правив.
  *
- * ⚠ Запити — лише відкритої шторки (компонент монтується за `?panel=`), і
- * лише з періодом: без нього аркуші не мають станів, а таблиці — екземплярів.
+ * ⚠ Запит — лише відкритої шторки (компонент монтується за `?panel=`) і лише для документа поза сторінкою переліку.
  */
 export function DocumentQuickLook({
   panelId,
-  periodKey,
   document: fromList,
   listReady,
   projectCode,
@@ -79,20 +66,14 @@ export function DocumentQuickLook({
 
   // Посилання `?panel=` на документ поза завантаженою сторінкою — дочитати його.
   const fetched = useQuery({
-    queryKey: ['document', documentId, periodKey, 'quick-look'],
-    queryFn: () =>
-      apiFetch<DocumentSummary>(
-        `/api/v1/documents/${String(documentId)}` + (periodKey === null ? '' : `?periodKey=${String(periodKey)}`),
-      ),
-    // D-466: `stepApproverNames` віддає лише картка одного документа, перелік поля не несе - тож картку дочитуємо
-    // завжди (і коли рядок уже є на сторінці), а решта шторки лишається з рядка переліку.
-    enabled: valid && listReady,
+    queryKey: ['document', documentId, null, 'quick-look'],
+    queryFn: () => apiFetch<DocumentSummary>(`/api/v1/documents/${String(documentId)}`),
+    // Рядок уже є на сторінці — шторка вся з нього (картка без місяця нічого понад рядок не несе).
+    enabled: valid && listReady && fromList === undefined,
   });
 
   // ⚠ `?? undefined`: порожня відповідь (`null`) — це «документа немає», а не документ.
   const document = fromList ?? fetched.data ?? undefined;
-  // Поля кроку - лише з картки: рядок переліку їх не має, і «не прочиталось» ≠ «нікого немає».
-  const stepApprovers = fetched.data ?? undefined;
 
   if (!valid) return null;
 
@@ -137,35 +118,18 @@ export function DocumentQuickLook({
           <Skeleton height={120} radius="sm" />
         )
       ) : (
-        <QuickLookBody document={document} periodKey={periodKey} detail={stepApprovers} />
+        <QuickLookBody document={document} />
       )}
     </DetailDrawer>
   );
 }
 
-function QuickLookBody({
-  document,
-  periodKey,
-  detail,
-}: {
-  readonly document: DocumentSummary;
-  readonly periodKey: number | null;
-  /** Картка документа (`GET /documents/{id}`) - лише вона несе `stepApproverNames`. */
-  readonly detail?: DocumentSummary | undefined;
-}): JSX.Element {
-  const withStates = periodKey !== null && hasSheetStates(document);
-
+function QuickLookBody({ document }: { readonly document: DocumentSummary }): JSX.Element {
   return (
     <Stack gap="lg" data-quick-look={document.id}>
-      {withStates ? (
-        <SheetsSection document={document} periodKey={periodKey} />
-      ) : (
-        <Text size="sm" c="dimmed" data-quick-look-no-period="">
-          {t('documents.quickLookNoPeriod')}
-        </Text>
-      )}
-
-      {withStates && <StepApprovers names={detail?.stepApproverNames} truncated={detail?.stepApproverNamesTruncated} />}
+      <Text size="sm" c="dimmed" data-quick-look-no-period="">
+        {t('documents.quickLookNoPeriod')}
+      </Text>
 
       <Section title={t('documents.quickLookResponsible')}>
         <KeyValue
@@ -180,166 +144,17 @@ function QuickLookBody({
           ]}
         />
       </Section>
-
-      {withStates && <LatestChanges documentId={document.id} periodKey={periodKey} sheets={sheetLabels(document)} />}
     </Stack>
   );
 }
 
-/**
- * D-466 (AN-59, варіант C): хто МОЖЕ діяти на поточному кроці погодження поданих аркушів і копій.
- * `null` - нічого не подано / немає періоду / звужений читач: блоку немає зовсім (не порожній рядок).
- * `[]` - подано, але діяти не може ніхто: текстове застереження (не лише колір). Подавач може бути в списку (D-440).
- */
-function StepApprovers({
-  names,
-  truncated,
-}: {
-  readonly names: readonly string[] | null | undefined;
-  readonly truncated: boolean | undefined;
-}): JSX.Element | null {
-  if (names === null || names === undefined) return null;
-
-  return (
-    <Section title={t('documents.quickLookStepApprovers')}>
-      {names.length === 0 ? (
-        <Alert color="statusWarning" variant="light" data-quick-look-step-approvers-none="">
-          {t('documents.quickLookStepApproversNone')}
-        </Alert>
-      ) : (
-        <Text size="sm" data-quick-look-step-approvers="">
-          {names.join(', ')}
-          {truncated === true && <> {t('documents.quickLookStepApproversMore')}</>}
-        </Text>
-      )}
-    </Section>
-  );
-}
-
-function Section({ title, hint, children }: { readonly title: string; readonly hint?: string | undefined; readonly children: ReactNode }): JSX.Element {
+function Section({ title, children }: { readonly title: string; readonly children: ReactNode }): JSX.Element {
   return (
     <Stack gap="xs" component="section">
-      <Group gap="xs" align="baseline">
-        <Title order={3} size="sm">
-          {title}
-        </Title>
-        {hint !== undefined && (
-          <Text size="xs" c="dimmed">
-            {hint}
-          </Text>
-        )}
-      </Group>
+      <Title order={3} size="sm">
+        {title}
+      </Title>
       {children}
     </Stack>
-  );
-}
-
-/** Заповненість аркуша — з `TableStatusDto` лише ЙОГО таблиць (`R-13`: є що вводити). */
-export function sheetFill(tables: readonly TableStatus[], sheetCode: string): { filled: number; total: number } {
-  const own = tables.filter((table) => table.sheetCode === sheetCode && table.inputCells > 0);
-
-  return { filled: own.filter((table) => table.filledCells >= table.inputCells).length, total: own.length };
-}
-
-function SheetsSection({ document, periodKey }: { readonly document: DocumentSummary; readonly periodKey: number }): JSX.Element {
-  const tables = useTableStatus(document.id, periodKey);
-  const sheets = sheetLabels(document);
-  const approved = sheets.filter((sheet) => sheet.state === 'Approved').length;
-
-  return (
-    <Section title={t('documents.sheets')} hint={t('segments.approvedOf', { done: approved, total: sheets.length })}>
-      <Box role="list" data-quick-look-sheets="">
-        {sheets.map((sheet) => {
-          const fill = tables.data === undefined ? null : sheetFill(tables.data, sheet.code);
-
-          return (
-            <Group
-              key={sheet.code}
-              role="listitem"
-              justify="space-between"
-              wrap="nowrap"
-              py="xs"
-              style={{ borderBottom: '1px solid var(--ecr-border)' }}
-              data-quick-look-sheet={sheet.code}
-            >
-              <Box>
-                <Text size="sm" fw={500}>
-                  {sheet.label}
-                </Text>
-                {fill !== null && fill.total > 0 && (
-                  <Text size="xs" c="dimmed" data-quick-look-fill={`${String(fill.filled)}/${String(fill.total)}`}>
-                    {t('documents.quickLookTablesFilled', { filled: fill.filled, total: fill.total })}
-                  </Text>
-                )}
-              </Box>
-              <StatusBadge kind="sheet" state={sheet.state} quiet />
-            </Group>
-          );
-        })}
-      </Box>
-      {/* Заповненість не прочиталась — аркуші однаково видно, причина поруч. */}
-      {tables.error !== null && <ErrorAlert error={tables.error} onRetry={() => void tables.refetch()} />}
-    </Section>
-  );
-}
-
-/** Останні події, новіші першими. */
-export function latestEvents(events: readonly WorkflowEvent[], count = LatestChangesCount): WorkflowEvent[] {
-  return [...events].sort((a, b) => b.at.localeCompare(a.at)).slice(0, count);
-}
-
-function LatestChanges({
-  documentId,
-  periodKey,
-  sheets,
-}: {
-  readonly documentId: number;
-  readonly periodKey: number;
-  readonly sheets: readonly SheetLabel[];
-}): JSX.Element | null {
-  const history = useWorkflowHistory(documentId, periodKey, true);
-  const labelOf = new Map(sheets.map((sheet) => [sheet.code, sheet.label]));
-
-  /*
-   * ⛔ Друга лінія захисту прихованого аркуша: подія аркуша, якого немає серед
-   * видимих (`sheets` з тієї самої відповіді сервера), не показується, навіть
-   * якщо журнал її віддав.
-   */
-  const events = history.data?.filter((event) => labelOf.has(event.sheetCode));
-
-  // ⛔ `D15-06`: немає даних історії — блок не малюється (не «порожньо»).
-  if (events !== undefined && events.length === 0) return null;
-
-  return (
-    <Section title={t('documents.quickLookLatestChanges')}>
-      {history.error !== null ? (
-        <ErrorAlert error={history.error} onRetry={() => void history.refetch()} />
-      ) : events === undefined ? (
-        <Skeleton height={48} radius="sm" />
-      ) : (
-        <Stack gap="xs" role="list" data-quick-look-changes="">
-          {latestEvents(events).map((event, index) => (
-            // ⚠ Свого ідентифікатора подія не має; перелік лише читається.
-            <Group key={index} role="listitem" justify="space-between" wrap="nowrap" gap="sm" data-quick-look-event="">
-              <Group gap="xs" wrap="nowrap">
-                <Text size="sm" fw={500}>
-                  {labelOf.get(event.sheetCode)}
-                </Text>
-                <StatusBadge kind="sheet" state={event.toState} quiet />
-                {/* D-440: самопогодження видно і тут, тим самим текстом, що в «More → History» (`WorkflowHistory`). */}
-                {event.approvedBySubmitter && (
-                  <Text size="xs" c="dimmed" data-quick-look-approved-by-submitter="">
-                    {t('workflow.historyApprovedBySubmitter')}
-                  </Text>
-                )}
-              </Group>
-              <Text size="xs" c="dimmed">
-                {event.byDisplayName} · <Timestamp value={event.at} />
-              </Text>
-            </Group>
-          ))}
-        </Stack>
-      )}
-    </Section>
   );
 }
