@@ -247,6 +247,23 @@ test.describe('Projects 08.11', () => {
     await expect(page.getByRole('button', { name: /^Show \d{4}$/ })).toBeVisible();
   });
 
+  test('fg5: document grid header at 375 px — «Keyboard shortcuts» is not clipped', async ({ page }) => {
+    await signIn(page);
+    const { documentId, periodKey } = await ownProject(page);
+
+    await page.setViewportSize({ width: 375, height: 900 });
+    await page.goto(`/documents/${String(documentId)}?periodKey=${String(periodKey)}`);
+    const help = page.locator('[data-grid-key-help]').first();
+    await expect(help).toBeVisible({ timeout: 60_000 });
+    await expect(help).toHaveAccessibleName('Keyboard shortcuts');
+    // Нічого не обрізано: кнопка вміщає свій вміст і лежить у межах вікна.
+    const fits = await help.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      return el.scrollWidth <= el.clientWidth + 1 && box.right <= window.innerWidth + 0.5 && box.left >= -0.5;
+    });
+    expect(fits, 'кнопка «Keyboard shortcuts» обрізана або виходить за вікно').toBe(true);
+    expect(await pageOverflow(page), 'горизонтальна прокрутка сторінки документа').toBeLessThanOrEqual(0);
+  });
   for (const scheme of ['light', 'dark'] as const) {
     test(`fg5: Projects, tabs and Documents — no page overflow at 1335 and 375 px, axe clean (${scheme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: scheme });
