@@ -8,6 +8,7 @@ import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf } from '@/features/documents/documentLock';
 import { useDocumentPeriodReopen } from '@/features/documents/periodReopen/useDocumentPeriodReopen';
 import { testTheme } from '@/test/render';
+import { Catalog } from '@/test/__tests__/a11yFixtures';
 
 /**
  * Приймальна 08.11 (i): «Reopen January 2026 for this document…» у банері закритого періоду (i1), недоступна дія з
@@ -125,6 +126,12 @@ describe('useDocumentPeriodReopen', () => {
     // ⛔ Мутація: показувати кнопку активною без права — червоне.
     expect(disabled(action)).toBe(true);
     expect(screen.getByTestId('document-period-reopen-denied').textContent).toContain('⟦document.reopen.noPermission⟧');
+  });
+
+  it('i6 (приймальна P2): причина відмови — словами, без коду права', () => {
+    const text = Catalog['document.reopen.noPermission'];
+    expect(text).toBe('Only a user allowed to reopen periods in this project can reopen a locked month. Ask your period manager.');
+    expect(text).not.toMatch(/Period\.Reopen/);
   });
 
   it('i2: діючий виняток — банер «Reopened for this document until …», документ не замкнений (Grace), дії відкриття немає', async () => {
