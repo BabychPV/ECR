@@ -44,6 +44,16 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
                 SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo()));
     }
 
+    /// <inheritdoc />
+    public Task<bool> HasDocumentPeriodReopenAsync(
+        long documentId, PeriodKey periodKey, DateTime utcNow, CancellationToken ct)
+    {
+        var key = periodKey.Value;
+        return db.DocumentPeriodReopens
+            .AsNoTracking()
+            .AnyAsync(x => x.DocumentId == documentId && x.PeriodKeyValue == key && x.ClosedAt == null && x.OpenUntil > utcNow, ct);
+    }
+
     /// <summary>Порожній набір версій методологій для зрізу без розрахунків.</summary>
     /// <remarks>
     /// Колонка <c>NOT NULL</c> навмисно: «версій не було» і «версії не

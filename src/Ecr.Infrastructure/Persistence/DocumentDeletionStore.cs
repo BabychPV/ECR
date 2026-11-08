@@ -289,6 +289,9 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
             .Where(r => db.EditAssignments.Any(a => a.Id == r.AssignmentId && a.DocumentId == documentId))
             .ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.EditAssignments.Where(a => a.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
+        // Приймальна 08.11 (i): винятки «місяць відкрито для документа» — FK без каскаду; журнал лишається в аудиті.
+        await db.DocumentPeriodReopens.Where(x => x.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.DocumentSheets.Where(s => s.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.Documents.Where(d => d.Id == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
 

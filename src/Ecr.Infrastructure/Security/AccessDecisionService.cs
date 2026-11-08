@@ -2326,11 +2326,31 @@ public sealed class AccessDecisionService(
     /// </remarks>
     private async Task<MonthEnvironment?> MonthEnvironmentAsync(long documentId, PeriodKey instancePeriod, CancellationToken ct)
     {
+        var now = clock.UtcNow;
+        var yearFirst = instancePeriod.Year * 100;
         var project = await (
                 from d in db.Documents.AsNoTracking()
                 where d.Id == documentId
                 join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
-                select new { p.Id, p.Status, p.PeriodKind, p.PeriodEnd, p.YearGraceOffsetDays, p.TimeZoneId })
+                select new
+                {
+                    p.Id,
+                    p.Status,
+                    p.PeriodKind,
+                    p.PeriodEnd,
+                    p.YearGraceOffsetDays,
+                    p.TimeZoneId,
+
+                    // Приймальна 08.11 (i): місяці року, відкриті лише для ЦЬОГО документа, — тим самим запитом.
+                    Reopened = db.DocumentPeriodReopens
+                        .Where(x => x.DocumentId == documentId
+                                    && x.PeriodKeyValue > yearFirst
+                                    && x.PeriodKeyValue <= yearFirst + 12
+                                    && x.ClosedAt == null
+                                    && x.OpenUntil > now)
+                        .Select(x => x.PeriodKeyValue)
+                        .ToList(),
+                })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -2348,12 +2368,13 @@ public sealed class AccessDecisionService(
             project.PeriodEnd,
             project.YearGraceOffsetDays,
             SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo());
-        var now = clock.UtcNow;
 
         var states = new Dictionary<byte, PeriodState>(rows.Count);
         foreach (var row in rows)
         {
-            states[row.Sequence] = project.Status == ProjectStatus.Active ? PeriodStates.Effective(row, now, window) : row.State;
+            var effective = project.Status == ProjectStatus.Active ? PeriodStates.Effective(row, now, window) : row.State;
+            states[row.Sequence] = Domain.Services.DocumentPeriodReopenRule.Apply(
+                effective, project.Reopened.Contains(row.PeriodKeyValue));
         }
 
         return new MonthEnvironment(instancePeriod.Year, states);
@@ -3065,6 +3086,7 @@ public sealed class AccessDecisionService(
         // доти, коли запит не виконувався зовсім.
         var periodValue = periodKey.Value;
         var sheetForStatus = sheetDefId ?? 0;
+        var decisionNow = clock.UtcNow;
 
         var state = await (
                 from d in db.Documents.AsNoTracking()
@@ -3088,6 +3110,13 @@ public sealed class AccessDecisionService(
                     // ⛔ EA-B: ознака «у документа є передачі» — EXISTS у тому самому запиті,
                     // 0 нових звернень; документ без передач не читає їх ні в рішенні, ні під гейтом.
                     HasAssignments = db.EditAssignments.Any(x => x.DocumentId == documentId),
+
+                    // ⛔ Приймальна 08.11 (i): закритий місяць, відкритий лише для ЦЬОГО документа, — EXISTS у тому
+                    // самому запиті (0 нових звернень). Решта документів місяця винятку не мають і лишаються закриті.
+                    DocumentReopened = db.DocumentPeriodReopens.Any(x => x.DocumentId == documentId
+                                                                            && x.PeriodKeyValue == periodValue
+                                                                            && x.ClosedAt == null
+                                                                            && x.OpenUntil > decisionNow),
                     Period = db.Periods
                         .AsNoTracking()
                         .Where(x => x.ProjectId == d.ProjectId && x.PeriodKeyValue == periodValue)
@@ -3131,12 +3160,15 @@ public sealed class AccessDecisionService(
             : state.Status == ProjectStatus.Active
                 ? PeriodStates.Effective(
                     period,
-                    clock.UtcNow,
+                    decisionNow,
                     Domain.Services.YearGraceWindow.For(
                         state.PeriodEnd,
                         state.YearGraceOffsetDays,
                         SiteTimeZone.Create(state.TimeZoneId).ToTimeZoneInfo()))
                 : period.State;
+
+        // Приймальна 08.11 (i): діючий виняток документа піднімає Closed → Grace лише для нього (правка — пізня, D-70).
+        periodState = Domain.Services.DocumentPeriodReopenRule.Apply(periodState, state.DocumentReopened);
 
         var sheetStatus = sheetDefId is null ? null : state.SheetStatus;
 
