@@ -263,6 +263,66 @@ public sealed class PeriodPolicyRecomputeTests
         Assert.Equal(closedJanBefore, _closedJan.ComputedCloseAt);
     }
 
+    /// <summary>
+    /// UAT 08.11 (e): «кнопки реопен немає». Збереження політики, що переносить строк блокування лютого в минуле,
+    /// ОДРАЗУ переводить лютий у <c>Closed</c> (той самий шлях, що F-08 в архівації) і пише аудит переходу.
+    /// </summary>
+    /// <remarks>
+    /// До фіксу збережений <c>Open</c> лишався до прогону <c>PeriodStateJob</c>: Periods показувала «Open · closes
+    /// today» без Reopen. Мутація: прибрати виклик <c>PeriodStateCatchUp.ApplyAsync</c> в
+    /// <c>UpdatePeriodPolicyHandler</c> — червоніє (стан лишається <c>Open</c>, аудиту переходу немає).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.6")]
+    public async Task Збереження_політики_одразу_блокує_місяць_чий_новий_строк_минув_і_пише_аудит()
+    {
+        var project = ProjectBuilder.Project(PeriodKind.Monthly, ZoneId, AccessBuilder.ProjectId);
+        var feb = Make(202602, 2, new DateOnly(2026, 2, 1), new DateOnly(2026, 2, 28));
+        feb.AdvanceTo(PeriodState.Open, Now);
+        ProjectBuilder.Attach(project, [feb]);
+        project.Activate(Now);
+        _periods.FindProjectAsync(AccessBuilder.ProjectId, Arg.Any<CancellationToken>()).Returns(project);
+
+        // 20.03: стара межа лютого (+45 днів) — середина квітня; нова (+10) — 11.03, уже минула.
+        var at = new DateTime(2026, 3, 20, 6, 0, 0, DateTimeKind.Utc);
+        var audit = Substitute.For<IAuditWriter>();
+        var clock = Substitute.For<Ecr.Domain.Abstractions.IClock>();
+        clock.UtcNow.Returns(at);
+
+        await new UpdatePeriodPolicyHandler(_periods, _access, _user, _uow, audit, clock)
+            .HandleAsync(PolicyId, 0, 5, 10, 45, CancellationToken.None);
+
+        Assert.Equal(PeriodState.Closed, feb.State);
+        await audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r =>
+                r.EntityType == "Period"
+                && r.Operation == "AdvanceState"
+                && r.EntityId == feb.Id
+                && r.ChangedByUserId == AdminId
+                && r.OldJson!.Contains("Open")
+                && r.NewJson!.Contains("Closed")),
+            Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// UAT 08.11 (e), зворотний бік: чернетку (її періодів не веде задача станів) збереження політики не просуває.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.6")]
+    public async Task Збереження_політики_не_просуває_стани_чернетки()
+    {
+        var at = new DateTime(2026, 3, 20, 6, 0, 0, DateTimeKind.Utc);
+        var clock = Substitute.For<Ecr.Domain.Abstractions.IClock>();
+        clock.UtcNow.Returns(at);
+
+        await new UpdatePeriodPolicyHandler(_periods, _access, _user, _uow, Substitute.For<IAuditWriter>(), clock)
+            .HandleAsync(PolicyId, 0, 5, 10, 45, CancellationToken.None);
+
+        Assert.Equal(PeriodState.Open, _openFeb.State);
+    }
+
     private Ecr.Application.Periods.BuildPeriodCalendarHandler CalendarHandler(DateTime utcNow)
     {
         var clock = Substitute.For<Ecr.Domain.Abstractions.IClock>();

@@ -21,6 +21,7 @@ public sealed class ProjectsController(
     CloneProjectHandler cloneProject,
     ActivateProjectHandler activate,
     ArchiveProjectHandler archive,
+    DeleteProjectHandler delete,
     ListPeriodPoliciesHandler policies,
     CreatePeriodPolicyHandler createPolicy,
     UpdatePeriodPolicyHandler updatePolicy,
@@ -257,6 +258,28 @@ public sealed class ProjectsController(
     public async Task<IActionResult> Archive(int id, CancellationToken ct)
     {
         await archive.HandleAsync(id, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Видаляє проєкт. Право <c>Project.Manage</c> і грант <c>Manage</c> на проєкт (UAT 08.11).
+    /// </summary>
+    /// <remarks>
+    /// Лише ЧЕРНЕТКА без документів і без історії (прогони розрахунків, зрізи, архівації); видалення пишеться в
+    /// журнал змін. Інакше — <c>409 ECR-PRD-0409</c> з ключем умови: <c>deleteNotDraft</c> (стан і кількість
+    /// документів у подробицях), <c>deleteHasDocuments</c>, <c>deleteHasHistory</c>. Невидимий проєкт — <c>404</c>.
+    /// </remarks>
+    /// <param name="id">Проєкт.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpDelete("{id:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    {
+        await delete.HandleAsync(id, ct).ConfigureAwait(false);
 
         return NoContent();
     }

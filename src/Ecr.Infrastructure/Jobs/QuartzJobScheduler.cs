@@ -226,7 +226,7 @@ public sealed partial class QuartzJobScheduler(
             await progress
                 .QueueAsync(
                     jobId, typeof(TJob).FullName ?? typeof(TJob).Name, clock.UtcNow, ct, createdByUserId,
-                    correlationId, DocumentIdOf(json))
+                    correlationId, DocumentIdOf(json), FanOutParentOf(json))
                 .ConfigureAwait(false);
         }
 
@@ -253,6 +253,25 @@ public sealed partial class QuartzJobScheduler(
                && doc.RootElement.TryGetProperty("documentId", out var id)
                && id.ValueKind == JsonValueKind.Number
                && id.TryGetInt64(out var value)
+            ? value
+            : null;
+    }
+
+    /// <summary>
+    /// Батько розкладу — рядкова властивість <c>fanOutParentJobId</c> кореня payload (UAT recalc-progress, 08.11).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Те саме правило, що в черзі в базі (там стовпець <c>FanOutParentJobId</c> обчислює база з payload):
+    /// без нього дзеркало Quartz дитини не мало батька, і перерахунок проєкту «завершувався» за секунду.
+    /// </remarks>
+    internal static string? FanOutParentOf(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+
+        return doc.RootElement.ValueKind == JsonValueKind.Object
+               && doc.RootElement.TryGetProperty("fanOutParentJobId", out var parent)
+               && parent.ValueKind == JsonValueKind.String
+               && parent.GetString() is { Length: > 0 } value
             ? value
             : null;
     }
