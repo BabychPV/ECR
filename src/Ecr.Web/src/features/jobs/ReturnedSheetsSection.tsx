@@ -5,6 +5,7 @@ import { formatDateTime } from '@/shared/format/datetime';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
+import { MyTasksSection } from './MyTasksSection';
 import { approvalQueueHref } from './useApprovalQueue';
 import { returnedSheetItems, useReturnedSheets, type ReturnedSheetItem } from './useReturnedSheets';
 
@@ -45,10 +46,11 @@ export function ReturnedSheetsSection({
   if (items.length === 0) return null;
 
   return (
-    <Stack gap="xs" mb="md" component="section" aria-labelledby="my-tasks-returned-title" data-testid="my-tasks-returned">
-      <Text id="my-tasks-returned-title" fw={600} size="sm">
-        {t('myTasks.returned.title')}
-      </Text>
+    <MyTasksSection
+      id="my-tasks-returned"
+      title={t('myTasks.returned.title')}
+      count={`${String(items.length)}${query.hasNextPage ? '+' : ''}`}
+    >
       {items.map((item) => (
         <ReturnedRow key={`${String(item.documentId)}:${String(item.sheetDefId)}:${String(item.periodKey)}`} item={item} onNavigate={onNavigate} />
       ))}
@@ -63,7 +65,7 @@ export function ReturnedSheetsSection({
           {t('myTasks.returned.more')}
         </Button>
       )}
-    </Stack>
+    </MyTasksSection>
   );
 }
 
