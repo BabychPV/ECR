@@ -60,9 +60,14 @@ public interface IJobProgressStore
     /// <param name="createdByUserId">Хто поставив задачу; <c>null</c> — системна (Q-156).</param>
     /// <param name="correlationId">Кореляція запиту-постановника (BE-08).</param>
     /// <param name="documentId">Документ задачі; <c>null</c> — не документна (BE-08).</param>
+    /// <param name="fanOutParentJobId">
+    /// ✎ UAT recalc-progress (08.11): батько розкладу дочірньої задачі Quartz. Черга в базі пише його з payload
+    /// сама; рядок-дзеркало Quartz payload не мав, і перерахунок проєкту за 1 с після розкладу читався
+    /// «завершено» (<c>GetFanOutAsync</c> не бачив жодної дитини). <c>null</c> — не дитина.
+    /// </param>
     public Task QueueAsync(
         string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int? createdByUserId = null,
-        string? correlationId = null, long? documentId = null);
+        string? correlationId = null, long? documentId = null, string? fanOutParentJobId = null);
 
     /// <summary>Реєструє старт прогону.</summary>
     /// <param name="jobId">Ідентифікатор задачі.</param>
