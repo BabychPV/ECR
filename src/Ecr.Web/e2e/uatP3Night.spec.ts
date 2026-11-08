@@ -95,6 +95,58 @@ test.describe('uatP3Night Total row cells are read only and say why', () => {
   });
 });
 
+test.describe('uatP3Night Periods page offers Recalculate project', () => {
+  test('the selected project can be recalculated from Periods after a confirmation', async ({ page }) => {
+    test.skip(DocumentId === '', 'стенд не задав ECR_E2E_DOCUMENT');
+    await signIn(page);
+
+    const doc = await page.request.get(`/api/v1/documents/${DocumentId}`);
+    expect(doc.status(), `GET документа: ${await doc.text()}`).toBe(200);
+    const { projectId } = (await doc.json()) as { projectId: number };
+
+    const posts: string[] = [];
+    await page.route(`**/api/v1/projects/${String(projectId)}/recalculate`, async (route) => {
+      posts.push(route.request().url());
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '{"jobId":null,"nothingToRecalculate":true,"skippedSheets":[]}',
+      });
+    });
+
+    await page.goto(`/admin/periods?projectId=${String(projectId)}`);
+    const action = page.getByRole('button', { name: /Recalculate project|Пересчитать проект|Жобаны қайта есептеу/i });
+    await expect(action, 'на Periods немає перерахунку проєкту').toBeVisible({ timeout: 60_000 });
+    await action.click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog, 'перерахунок не спитав підтвердження').toBeVisible({ timeout: 15_000 });
+    expect(posts, 'запит пішов до підтвердження').toEqual([]);
+    await dialog.getByRole('button', { name: /^(Recalculate|Пересчитать|Қайта есептеу)$/i }).click();
+    await expect.poll(() => posts.length, { message: 'підтвердження не надіслало перерахунок', timeout: 30_000 }).toBe(1);
+  });
+});
+
+test.describe('uatP3Night Documents with all projects shows Recalculate disabled with a reason', () => {
+  test('the disabled Recalculate is focusable and tells to choose a project', async ({ page }) => {
+    await signIn(page);
+    const projects = await page.request.get('/api/v1/projects');
+    const count = ((await projects.json()) as { items: unknown[] }).items.length;
+    test.skip(count < 2, 'на стенді один проєкт — «All projects» не за замовчуванням');
+
+    await page.goto('/');
+    const button = page.locator('[data-project-recalculate-disabled]');
+    await expect(button, 'за All projects немає недоступної кнопки перерахунку').toBeVisible({ timeout: 60_000 });
+    await expect(button).toHaveAttribute('aria-disabled', 'true');
+    await button.focus();
+    await expect(button).toBeFocused();
+    await expect(page.getByRole('tooltip')).toContainText(/Choose a project|Выберите проект|жобаны таңдаңыз/i, {
+      timeout: 10_000,
+    });
+    await button.click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+});
+
 test.describe('uatP3Night Counters name the period and projects they count', () => {
   test('Documents strip and campaign overview show their scope labels', async ({ page }) => {
     test.skip(PeriodKey === '', 'стенд не задав ECR_E2E_PERIOD');

@@ -17,7 +17,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'documents.summaryScopeYear', N'kz', N'{year} жыл'),
     (N'documents.summaryScopeAllProjects', N'kz', N'барлық қолжетімді жобалар'),
     (N'documents.summaryScopeOneProject', N'kz', N'таңдалған жоба'),
-    (N'campaign.countersScope', N'kz', N'{period} · науқанның барлық жобалары')
+    (N'campaign.countersScope', N'kz', N'{period} · науқанның барлық жобалары'),
+    (N'periods.recalcProject', N'ru', N'Пересчитать проект…'),
+    (N'documents.recalcPickProject', N'ru', N'Выберите проект, чтобы пересчитать'),
+    (N'periods.recalcProject', N'kz', N'Жобаны қайта есептеу…'),
+    (N'documents.recalcPickProject', N'kz', N'Қайта есептеу үшін жобаны таңдаңыз')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -33,7 +37,9 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'documents.summaryScopeYear', N'en', N'Year {year}', 1),
     (N'documents.summaryScopeAllProjects', N'en', N'all projects you can see', 1),
     (N'documents.summaryScopeOneProject', N'en', N'selected project', 1),
-    (N'campaign.countersScope', N'en', N'{period} · all projects in the campaign', 1)
+    (N'campaign.countersScope', N'en', N'{period} · all projects in the campaign', 1),
+    (N'periods.recalcProject', N'en', N'Recalculate project…', 1),
+    (N'documents.recalcPickProject', N'en', N'Choose a project to recalculate', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

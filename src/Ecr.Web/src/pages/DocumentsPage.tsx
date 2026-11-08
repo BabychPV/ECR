@@ -213,6 +213,14 @@ export function DocumentsPage(): JSX.Element {
         : undefined) ?? null;
   const showRecalc =
     recalcProject !== null && recalcProject.status === 'Active' && can(session.data, 'Calculation.Recalculate');
+  /*
+   * ✎ UAT-p3 (людина не знайшла Recalculate): за «All projects» (2+ проєкти) дія не зникає, а лишається на місці
+   * недоступною з причиною «Choose a project to recalculate» (`DisabledReason`: aria-disabled, фокус і підказка).
+   */
+  const recalcNeedsProject =
+    filters.projectId === null &&
+    (projects.data?.items.length ?? 0) > 1 &&
+    can(session.data, 'Calculation.Recalculate');
 
   /**
    * ⛔ Директива D15 §0, правило L10. Тут стояло
@@ -323,6 +331,14 @@ export function DocumentsPage(): JSX.Element {
               <Suspense fallback={null}>
                 <ProjectRecalculateAction key={recalcProject.id} project={recalcProject} />
               </Suspense>
+            )}
+
+            {recalcNeedsProject && (
+              <DisabledReason reason={t('documents.recalcPickProject')}>
+                <Button variant="default" data-project-recalculate-disabled="">
+                  {t('workflow.recalculate')}
+                </Button>
+              </DisabledReason>
             )}
           </Group>
         }

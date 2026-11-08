@@ -26,8 +26,11 @@ import { errorCodeText } from '@/shared/ui/problemText';
  */
 export function ProjectRecalculateAction({
   project,
+  label,
 }: {
   readonly project: { readonly id: number; readonly code: string };
+  /** ✎ UAT-p3: підпис кнопки, коли він має назвати область («Recalculate project…» на Periods); типово — «Recalculate». */
+  readonly label?: string | undefined;
 }): JSX.Element {
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
@@ -123,7 +126,7 @@ export function ProjectRecalculateAction({
           onClick={() => setConfirming(true)}
           data-project-recalculate={project.id}
         >
-          {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
+          {recalcRunning ? t('workflow.recalcRunning') : (label ?? t('workflow.recalculate'))}
         </Button>
       </FilterInline>
 

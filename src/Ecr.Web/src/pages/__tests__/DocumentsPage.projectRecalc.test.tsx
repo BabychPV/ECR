@@ -106,9 +106,34 @@ describe('DocumentsPage: перерахунок проєкту (Period clarity �
   );
 
   it(
-    'кілька проєктів без вибору — дії немає',
+    'All projects: Recalculate stays visible but disabled and says to choose a project; a click sends nothing',
     async () => {
-      respond([Prj, Other], ['Calculation.Recalculate']);
+      // ✎ UAT-p3: людина не знайшла дію — за «All projects» вона лишається на місці недоступною з причиною.
+      const state = respond([Prj, Other], ['Calculation.Recalculate']);
+      const user = userEvent.setup();
+      show('/');
+
+      const button = await screen.findByRole('button', { name: '⟦workflow.recalculate⟧' });
+      expect(button.getAttribute('aria-disabled')).toBe('true');
+      expect(button.hasAttribute('disabled')).toBe(false);
+      const described = (button.getAttribute('aria-describedby') ?? '').split(' ').filter(Boolean);
+      expect(described.map((id) => document.getElementById(id)?.textContent ?? '').join(' ')).toContain(
+        'documents.recalcPickProject',
+      );
+
+      button.focus();
+      expect(document.activeElement).toBe(button);
+      await user.click(button);
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(state.posts).toEqual([]);
+    },
+    Slow,
+  );
+
+  it(
+    'без права — недоступної кнопки за All projects теж немає',
+    async () => {
+      respond([Prj, Other], ['Document.View']);
       show('/');
       await screen.findByText(/⟦documents\.(empty|noMatch)⟧/);
       expect(screen.queryByRole('button', { name: '⟦workflow.recalculate⟧' })).toBeNull();

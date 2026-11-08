@@ -27,7 +27,9 @@ test.describe('Майстер створення документа', () => {
     await expect(opener, 'немає кнопки створення документа').toBeVisible({ timeout: 30_000 });
     await opener.click();
 
-    const dialog = page.getByRole('dialog');
+    // ⚠ Іменований: після Esc поруч відкривається ще й «Discard what you entered?», і безіменний
+    // `getByRole('dialog')` резолвився в обидва (strict mode, прогін 42456847877).
+    const dialog = page.getByRole('dialog', { name: 'New document' });
     await expect(dialog).toBeVisible({ timeout: 10_000 });
     await expect(dialog.getByTestId('wizard-steps')).toBeVisible();
 
@@ -56,6 +58,7 @@ test.describe('Майстер створення документа', () => {
     await expect(discard).toBeVisible({ timeout: 10_000 });
     await discard.getByRole('button', { name: 'Discard', exact: true }).click();
     await expect(dialog).toBeHidden({ timeout: 10_000 });
+    await expect(discard).toBeHidden({ timeout: 10_000 });
     await expect(opener, 'фокус не повернувся на кнопку-відкривач').toBeFocused();
   });
 });
