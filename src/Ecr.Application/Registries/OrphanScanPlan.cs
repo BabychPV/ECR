@@ -32,9 +32,11 @@ public static class OrphanScanPlan
 
         foreach (var candidate in candidates)
         {
-            // ⛔ Закриті періоди не чіпаються. Їхні дані вже подані й
-            // погоджені; ознака нічого не розблокує і нічого не заборонить,
-            // зате перепише рядок, що входить у контрольну суму зрізу.
+            // ✎ Rule (h4), human 08.11: Closed («Locked») periods ARE re-evaluated — a flag set while the month was open
+            // must clear once the data or the permit is fixed (live: LAND-FULL doc 2, Water Report R7001000, January,
+            // flagged 28.10, frozen by the lock). Before, Closed was skipped as «already submitted», and the flag stayed
+            // on the row for good. Writing the flag changes only `IsOrphaned/OrphanedAt` (not cells, not the submission
+            // snapshot). Only Scheduled is skipped.
             if (!IsScannable(candidate.PeriodState))
             {
                 continue;
@@ -64,7 +66,7 @@ public static class OrphanScanPlan
     /// <summary>Чи перевіряється період узагалі.</summary>
     /// <param name="state">Стан періоду.</param>
     public static bool IsScannable(PeriodState state)
-        => state is PeriodState.Open or PeriodState.Grace;
+        => state is PeriodState.Open or PeriodState.Grace or PeriodState.Closed;
 }
 
 /// <summary>

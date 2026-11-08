@@ -71,7 +71,7 @@ public sealed class OrphanScannerProjectPeriodTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-8.13a")]
-    public async Task Рядок_закритого_періоду_не_змінюється_через_відкритий_період_іншого_проєкту()
+    public async Task Рядок_закритого_періоду_оцінюється_за_своїм_періодом_а_не_за_чужим_відкритим()
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
 
@@ -87,12 +87,14 @@ public sealed class OrphanScannerProjectPeriodTests(SqlServerFixture sql)
         closedPeriod.TransitionTo(PeriodState.Closed, new DateTime(2026, 2, 10, 0, 0, 0, DateTimeKind.Utc));
         await db.SaveChangesAsync(CancellationToken.None);
 
-        // Запис НЕчинний у січні — рядок відкритого проєкту має стати сиротою,
-        // а рядок закритого — лишитися як є.
-        var entry = await EntryAsync(db, new DateOnly(2026, 6, 1), null);
+        // ✎ Rule (h4), human 08.11: Closed periods are re-evaluated too. The closed project's row is judged by ITS
+        // OWN period (31.01, D1-01): the entry is valid in January for C, not for D's yearly window — so C's row stays
+        // valid and untouched, while D's monthly row (entry starting in June) becomes an orphan.
+        var entry = await EntryAsync(db, new DateOnly(2025, 6, 1), new DateOnly(2026, 2, 1));
+        var lateEntry = await EntryAsync(db, new DateOnly(2026, 6, 1), null, suffix: "L");
 
         await ReferenceAsync(db, closed, entry.Id);
-        await ReferenceAsync(db, open, entry.Id);
+        await ReferenceAsync(db, open, lateEntry.Id);
 
         var versionBefore = await RowVersionAsync(db, closed);
 
@@ -102,6 +104,34 @@ public sealed class OrphanScannerProjectPeriodTests(SqlServerFixture sql)
         Assert.True(await OrphanedAsync(check, open));
         Assert.False(await OrphanedAsync(check, closed));
         Assert.Equal(versionBefore, await RowVersionAsync(check, closed));
+    }
+
+    /// <summary>
+    /// ✎ Rule (h4): a Closed («Locked») period's row is flagged by its own period when the entry is not valid — the
+    /// scan no longer leaves locked months out.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "ACC-1108-h4")]
+    public async Task Рядок_закритого_періоду_з_нечинним_записом_позначається()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var closed = await builder.BuildAsync(periodKey: 202601, rowCount: 1, ct: CancellationToken.None);
+
+        await using var db = Context();
+        await OpenAsync(db, closed.ProjectId);
+        var closedPeriod = await db.Periods.SingleAsync(p => p.ProjectId == closed.ProjectId, CancellationToken.None);
+        closedPeriod.TransitionTo(PeriodState.Closed, new DateTime(2026, 2, 10, 0, 0, 0, DateTimeKind.Utc));
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var entry = await EntryAsync(db, new DateOnly(2026, 6, 1), null);
+        await ReferenceAsync(db, closed, entry.Id);
+
+        await ScanAsync();
+
+        await using var check = Context();
+        Assert.True(await OrphanedAsync(check, closed));
     }
 
     private static async Task OpenAsync(EcrDbContext db, params int[] projectIds)
@@ -115,10 +145,10 @@ public sealed class OrphanScannerProjectPeriodTests(SqlServerFixture sql)
         await db.SaveChangesAsync(CancellationToken.None);
     }
 
-    private async Task<RegistryEntry> EntryAsync(EcrDbContext db, DateOnly from, DateOnly? to)
+    private async Task<RegistryEntry> EntryAsync(EcrDbContext db, DateOnly from, DateOnly? to, string suffix = "")
     {
         var def = new Domain.Entities.Configuration.RegistryDef(
-            EcrCode.Create($"ORPHPRJ_{_tag}"), Text("Orphan project period"), isTemporal: true);
+            EcrCode.Create($"ORPHPRJ{suffix}_{_tag}"), Text("Orphan project period"), isTemporal: true);
         db.RegistryDefs.Add(def);
         await db.SaveChangesAsync(CancellationToken.None);
 
