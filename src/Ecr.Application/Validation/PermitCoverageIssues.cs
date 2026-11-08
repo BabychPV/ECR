@@ -172,7 +172,8 @@ public static class PermitCoverageIssues
             var permitIds = permitColumns.Select(c => c.Id).ToHashSet();
             var periodMonths = bounds is { } b ? PermitMonthCoverage.MonthsOfPeriod(b.PeriodStart, b.PeriodEnd) : [];
             var months = PermitMonthCoverage.RowMonthsWithData(monthOf, periodKey.Year, rowCells, permitIds, periodMonths);
-            if (months.Count == 0)
+            var calculatedOnly = PermitMonthCoverage.RowCalculatedOnlyMonths(monthOf, periodKey.Year, rowCells, permitIds, periodMonths);
+            if (months.Count == 0 && calculatedOnly.Count == 0)
             {
                 continue;
             }
@@ -193,6 +194,14 @@ public static class PermitCoverageIssues
                 if (uncovered.Count > 0)
                 {
                     messages.Add(RowMessage(table.Id, rowKey, column, entry, uncovered, language));
+                }
+
+                // Human 08.11 («Попередження», F13-p210): months with ONLY calculated values outside the permit — a Warning
+                // at the permit cell; Save, the header and Submit are never blocked by them.
+                var calculatedUncovered = PermitMonthCoverage.Uncovered(entry.ValidFrom, entry.ValidTo, calculatedOnly);
+                if (calculatedUncovered.Count > 0)
+                {
+                    messages.Add(CalculatedMessage(table.Id, rowKey, column, entry, calculatedUncovered, language));
                 }
 
                 // Human 08.11: a permit starting/ending mid-month still covers the month (never blocked) — the partial
@@ -319,6 +328,25 @@ public static class PermitCoverageIssues
             column.Code,
             BlocksSave: false,
             MessageKey: ValidationMessageTemplates.PermitMonthsNotCovered,
+            Params: parameters);
+    }
+
+    private static ValidationMessage CalculatedMessage(
+        int tableDefId, string? rowKey, ColumnDef column, RegistryEntry entry, IReadOnlyList<DateOnly> uncovered, string language)
+    {
+        var parameters = Parameters(entry, uncovered, column.HeaderL10n.Get("en") ?? column.Code);
+        var key = uncovered.Count == 1
+            ? ValidationMessageTemplates.PermitCalculatedNotCoveringOne
+            : ValidationMessageTemplates.PermitCalculatedNotCovering;
+        return new ValidationMessage(
+            ValidationSeverity.Warning,
+            RowRuleCode,
+            ValidationMessageTemplates.Render(key, language, parameters),
+            tableDefId,
+            rowKey,
+            column.Code,
+            BlocksSave: false,
+            MessageKey: key,
             Params: parameters);
     }
 

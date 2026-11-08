@@ -1,4 +1,5 @@
 using Ecr.Application.Permits.Validity;
+using Ecr.Application.Validation;
 using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
 using Xunit;
@@ -47,5 +48,87 @@ public sealed class PermitMonthCoverageTests
         Assert.False(PermitMonthCoverage.HasData(new CellValueData { ValueNumeric = 25m, IsCalculated = true }));
         Assert.False(PermitMonthCoverage.HasData(CellValueData.Empty));
         Assert.False(PermitMonthCoverage.HasData(null));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "ACC-1108-h4")]
+    public void A_calculated_value_is_calculated_data_and_a_calculated_zero_is_not()
+    {
+        Assert.True(PermitMonthCoverage.HasCalculatedData(new CellValueData { ValueNumeric = 25m, IsCalculated = true }));
+        Assert.False(PermitMonthCoverage.HasCalculatedData(new CellValueData { ValueNumeric = 0m, IsCalculated = true }));
+        Assert.False(PermitMonthCoverage.HasCalculatedData(new CellValueData { ValueNumeric = 25m }));
+        Assert.False(PermitMonthCoverage.HasCalculatedData(null));
+    }
+
+    /// <summary>
+    /// Human 08.11 («Попередження», F13-p210): a month with only calculated values is named apart (Warning); a month that
+    /// also holds an entered value stays a month with data (blocking) and is not repeated as calculated.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "ACC-1108-h4")]
+    public void Calculated_only_months_are_separate_from_months_with_entered_data()
+    {
+        // Columns 1..4 = Jan..Apr; column 5 is a second April column.
+        var monthOf = new Dictionary<int, int> { [1] = 1, [2] = 2, [3] = 3, [4] = 4, [5] = 4 };
+        var cells = new Dictionary<int, CellValueData>
+        {
+            [1] = new() { ValueNumeric = 10m, IsCalculated = true },  // Jan: calculated only
+            [2] = new() { ValueNumeric = 0m, IsCalculated = true },   // Feb: calculated zero — nothing
+            [3] = new() { ValueNumeric = 7m },                         // Mar: entered
+            [4] = new() { ValueNumeric = 3m, IsCalculated = true },   // Apr: calculated…
+            [5] = new() { ValueNumeric = 4m },                         // …and entered — blocking
+        };
+        var none = new HashSet<int>();
+
+        Assert.Equal([D(2026, 3, 1), D(2026, 4, 1)], PermitMonthCoverage.RowMonthsWithData(monthOf, 2026, cells, none, []));
+        Assert.Equal([D(2026, 1, 1)], PermitMonthCoverage.RowCalculatedOnlyMonths(monthOf, 2026, cells, none, []));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "ACC-1108-h4")]
+    public void Without_month_columns_the_period_is_calculated_only_unless_an_entered_value_is_there()
+    {
+        var noMonths = new Dictionary<int, int>();
+        var permit = new HashSet<int> { 9 };
+        IReadOnlyList<DateOnly> period = [D(2026, 1, 1)];
+        var calculated = new Dictionary<int, CellValueData>
+        {
+            [1] = new() { ValueNumeric = 10m, IsCalculated = true },
+            [9] = new() { ValueRegistryEntryId = 5 },
+        };
+        var mixed = new Dictionary<int, CellValueData>(calculated) { [2] = new() { ValueNumeric = 1m } };
+
+        Assert.Equal(period, PermitMonthCoverage.RowCalculatedOnlyMonths(noMonths, 2026, calculated, permit, period));
+        Assert.Empty(PermitMonthCoverage.RowMonthsWithData(noMonths, 2026, calculated, permit, period));
+        Assert.Empty(PermitMonthCoverage.RowCalculatedOnlyMonths(noMonths, 2026, mixed, permit, period));
+        Assert.Equal(period, PermitMonthCoverage.RowMonthsWithData(noMonths, 2026, mixed, permit, period));
+    }
+
+    /// <summary>
+    /// The calculated-months Warning names the fix through the permit only (calculated values cannot be cleared), and one
+    /// month reads «that month» (P3, 08.11).
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "ACC-1108-h4")]
+    public void The_calculated_months_warning_offers_only_the_permit_fix_and_reads_singular_for_one_month()
+    {
+        var p = new Dictionary<string, string>
+        {
+            ["permit"] = "KZ-1", ["column"] = "Permit", ["validity"] = "01.03.2026 – 30.11.2026", ["months"] = "01.2026",
+        };
+
+        foreach (var lang in new[] { "en", "ru", "kz" })
+        {
+            foreach (var key in new[] { ValidationMessageTemplates.PermitCalculatedNotCovering, ValidationMessageTemplates.PermitCalculatedNotCoveringOne })
+            {
+                var text = ValidationMessageTemplates.Render(key, lang, p);
+                Assert.Contains("KZ-1", text, StringComparison.Ordinal);
+                Assert.Contains("01.03.2026 – 30.11.2026", text, StringComparison.Ordinal);
+                Assert.Contains("01.2026", text, StringComparison.Ordinal);
+            }
+        }
+
+        var one = ValidationMessageTemplates.Render(ValidationMessageTemplates.PermitCalculatedNotCoveringOne, "en", p);
+        Assert.Contains("valid in that month", one, StringComparison.Ordinal);
+        Assert.DoesNotContain("clear", one, StringComparison.OrdinalIgnoreCase);
+        var many = ValidationMessageTemplates.Render(ValidationMessageTemplates.PermitCalculatedNotCovering, "en", p);
+        Assert.Contains("valid in those months", many, StringComparison.Ordinal);
+        Assert.DoesNotContain("clear", many, StringComparison.OrdinalIgnoreCase);
     }
 }

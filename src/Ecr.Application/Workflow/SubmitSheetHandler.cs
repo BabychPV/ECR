@@ -616,7 +616,8 @@ public sealed class SubmitSheetHandler(
                     snapshot, documentId, sheetInstances, key, currentUser.Language, ct)
                 .ConfigureAwait(false);
 
-            // Only uncovered months block; the partial-month note (Warning) is for Issues, not a submit confirmation.
+            // Only uncovered months with entered/imported data block; the partial-month note and the calculated-months
+            // Warning (human 08.11, «Попередження») are for Issues — never a Submit block or a submit confirmation.
             blocking.AddRange(permitMessages.Where(m => m.Severity == ValidationSeverity.Error));
         }
 

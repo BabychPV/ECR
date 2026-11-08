@@ -11,7 +11,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'validation.permit.headerMonthsNotCovered', N'ru', N'Поле шапки «{column}»: разрешение {permit} действует {validity} и не покрывает месяцы, за которые в документе есть данные: {months}. Выберите разрешение, действующее в эти месяцы, очистите значения за эти месяцы или продлите срок действия разрешения.'),
     (N'validation.permit.headerMonthsNotCovered', N'kz', N'«{column}» тақырып өрісі: {permit} рұқсаты {validity} аралығында жарамды және құжатта деректері бар айларды қамтымайды: {months}. Осы айларда жарамды рұқсатты таңдаңыз, осы айлардағы мәндерді тазалаңыз немесе рұқсаттың жарамдылық мерзімін ұзартыңыз.'),
     (N'validation.permit.partialMonth', N'ru', N'Разрешение {permit} (колонка «{column}») действует только {days} в месяце {month}: значения этого месяца приняты, но разрешение покрывает только эти дни.'),
-    (N'validation.permit.partialMonth', N'kz', N'{permit} рұқсаты («{column}» бағаны) {month} айында тек {days} аралығында жарамды: осы айдың мәндері қабылданды, бірақ рұқсат тек осы күндерді қамтиды.')
+    (N'validation.permit.partialMonth', N'kz', N'{permit} рұқсаты («{column}» бағаны) {month} айында тек {days} аралығында жарамды: осы айдың мәндері қабылданды, бірақ рұқсат тек осы күндерді қамтиды.'),
+    (N'validation.permit.calculatedNotCovering', N'ru', N'Разрешение {permit} (колонка «{column}») действует {validity} и не покрывает месяцы с вычисленными значениями: {months}. Сохранение и подача разрешены. Выберите разрешение, действующее в эти месяцы, или продлите срок действия разрешения.'),
+    (N'validation.permit.calculatedNotCovering', N'kz', N'{permit} рұқсаты («{column}» бағаны) {validity} аралығында жарамды және есептелген мәндері бар айларды қамтымайды: {months}. Сақтауға және тапсыруға болады. Осы айларда жарамды рұқсатты таңдаңыз немесе рұқсаттың жарамдылық мерзімін ұзартыңыз.'),
+    (N'validation.permit.calculatedNotCoveringOne', N'ru', N'Разрешение {permit} (колонка «{column}») действует {validity} и не покрывает месяц с вычисленными значениями: {months}. Сохранение и подача разрешены. Выберите разрешение, действующее в этом месяце, или продлите срок действия разрешения.'),
+    (N'validation.permit.calculatedNotCoveringOne', N'kz', N'{permit} рұқсаты («{column}» бағаны) {validity} аралығында жарамды және есептелген мәндері бар айды қамтымайды: {months}. Сақтауға және тапсыруға болады. Осы айда жарамды рұқсатты таңдаңыз немесе рұқсаттың жарамдылық мерзімін ұзартыңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -24,7 +28,9 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-HDR-4223.permitNotCoveringMonths', N'en', N'Not saved: permit {permit} in header field "{headerFieldCode}" is valid {validity} and does not cover {months}, where the document has data. Pick a permit valid in those months, clear the values in those months, or extend the permit''s validity.', 1),
     (N'validation.permit.monthsNotCovered', N'en', N'Permit {permit} (column "{column}") is valid {validity} and does not cover the months with data: {months}. Pick a permit valid in those months, clear the values in those months, or extend the permit''s validity.', 1),
     (N'validation.permit.headerMonthsNotCovered', N'en', N'Header field "{column}": permit {permit} is valid {validity} and does not cover the months the document holds data in: {months}. Pick a permit valid in those months, clear the values in those months, or extend the permit''s validity.', 1),
-    (N'validation.permit.partialMonth', N'en', N'Permit {permit} (column "{column}") is valid only {days} in month {month}: the values of that month are accepted, but the permit covers those days only.', 1)
+    (N'validation.permit.partialMonth', N'en', N'Permit {permit} (column "{column}") is valid only {days} in month {month}: the values of that month are accepted, but the permit covers those days only.', 1),
+    (N'validation.permit.calculatedNotCovering', N'en', N'Permit {permit} (column "{column}") is valid {validity} and does not cover the months with calculated values: {months}. Saving and submitting are allowed. Pick a permit valid in those months or extend the permit''s validity.', 1),
+    (N'validation.permit.calculatedNotCoveringOne', N'en', N'Permit {permit} (column "{column}") is valid {validity} and does not cover the month with calculated values: {months}. Saving and submitting are allowed. Pick a permit valid in that month or extend the permit''s validity.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

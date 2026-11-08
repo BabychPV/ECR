@@ -271,6 +271,19 @@ public sealed class PatchCellsPermitValidityTests
         await AssertWritten(PickPermit());
     }
 
+    /// <summary>
+    /// Human 08.11 («Попередження», F13-p210): a row whose January and February hold ONLY calculated values takes a
+    /// March–November permit — the calculated months are a Warning in Issues, never a refusal of the save.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "ACC-1108-h4")]
+    public async Task A_row_with_only_calculated_months_outside_the_permit_takes_the_permit()
+    {
+        _stored[JanuaryId] = new CellValueData { ValueNumeric = 120m, IsCalculated = true };
+        _stored[FebruaryId] = new CellValueData { ValueNumeric = 90m, IsCalculated = true };
+
+        await AssertWritten(PickPermit());
+    }
+
     /// <summary>Human 08.11: a permit starting mid-month covers that month — a February value is accepted from 15.02.</summary>
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "ACC-1108-h3")]
     public async Task A_permit_starting_mid_month_accepts_a_value_in_that_month()

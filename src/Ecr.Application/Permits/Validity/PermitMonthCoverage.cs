@@ -23,6 +23,8 @@ namespace Ecr.Application.Permits.Validity;
 /// ✎ Coordinator 08.11: only ENTERED or IMPORTED values make a month «with data». A calculated value
 /// (<see cref="CellValueData.IsCalculated"/>: template formula, methodology result) never does — a sum row over its
 /// children shows numbers in every month, and those months belong to the children, not to the permit of the sum row.
+/// ✎ Human 08.11 («Попередження», F13-p210): a month with ONLY calculated values outside the permit is named in Issues
+/// as a Warning (<see cref="RowCalculatedOnlyMonths"/>) — never a refusal, never a Submit block.
 /// </para>
 /// </remarks>
 public static class PermitMonthCoverage
@@ -45,13 +47,32 @@ public static class PermitMonthCoverage
             return false;
         }
 
-        return value.ValueNumeric is not null
-               || !string.IsNullOrWhiteSpace(value.ValueString)
-               || value.ValueDate is not null
-               || value.ValueBool is not null
-               || value.ValueRegistryEntryId is not null
-               || value.ValueUnitId is not null;
+        return HoldsValue(value);
     }
+
+    /// <summary>
+    /// Does the cell hold a CALCULATED value for the rule (human 08.11, «Попередження»): such a month outside the permit is
+    /// only a Warning in Issues, never a refusal. A calculated zero is not data — a formula over empty inputs gives 0 in
+    /// every month, and naming those months would bury the real ones.
+    /// </summary>
+    /// <param name="value">Stored value; <c>null</c> = no cell.</param>
+    public static bool HasCalculatedData(CellValueData? value)
+    {
+        if (value is null || value.IsEmpty || !value.IsCalculated)
+        {
+            return false;
+        }
+
+        return value.ValueNumeric is { } number ? number != 0m : HoldsValue(value);
+    }
+
+    private static bool HoldsValue(CellValueData value)
+        => value.ValueNumeric is not null
+           || !string.IsNullOrWhiteSpace(value.ValueString)
+           || value.ValueDate is not null
+           || value.ValueBool is not null
+           || value.ValueRegistryEntryId is not null
+           || value.ValueUnitId is not null;
 
     /// <summary>Live month columns of the table (month 1..12).</summary>
     /// <param name="table">Table.</param>
@@ -125,6 +146,42 @@ public static class PermitMonthCoverage
         }
 
         return cells.Any(p => !permitColumns.Contains(p.Key) && HasData(p.Value)) ? periodMonths : [];
+    }
+
+    /// <summary>
+    /// Months of one row that hold ONLY calculated values (human 08.11, «Попередження»): a month that also holds an entered
+    /// or imported value is a month with data (<see cref="RowMonthsWithData"/>, blocking) and is not repeated here. A table
+    /// without month columns: the row's period months when no non-permit cell holds entered data and some holds a
+    /// calculated one.
+    /// </summary>
+    /// <param name="monthOf">Month column id → month number; empty = table without month columns.</param>
+    /// <param name="year">Year of the row's period.</param>
+    /// <param name="cells">The row's cells: column id → value.</param>
+    /// <param name="permitColumns">Permit-type columns (not data).</param>
+    /// <param name="periodMonths">Months of the row's period.</param>
+    public static IReadOnlyList<DateOnly> RowCalculatedOnlyMonths(
+        IReadOnlyDictionary<int, int> monthOf,
+        int year,
+        IReadOnlyDictionary<int, CellValueData> cells,
+        IReadOnlySet<int> permitColumns,
+        IReadOnlyList<DateOnly> periodMonths)
+    {
+        ArgumentNullException.ThrowIfNull(monthOf);
+        ArgumentNullException.ThrowIfNull(cells);
+        ArgumentNullException.ThrowIfNull(permitColumns);
+        if (monthOf.Count > 0)
+        {
+            var entered = RowMonthsWithData(monthOf, year, cells, permitColumns, periodMonths).ToHashSet();
+            return [.. cells
+                .Where(p => monthOf.ContainsKey(p.Key) && HasCalculatedData(p.Value))
+                .Select(p => Month(year, monthOf[p.Key]))
+                .Where(m => !entered.Contains(m))
+                .Distinct()
+                .Order()];
+        }
+
+        var data = cells.Where(p => !permitColumns.Contains(p.Key)).ToList();
+        return !data.Any(p => HasData(p.Value)) && data.Any(p => HasCalculatedData(p.Value)) ? periodMonths : [];
     }
 
     /// <summary>

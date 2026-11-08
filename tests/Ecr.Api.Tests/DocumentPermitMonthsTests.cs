@@ -172,27 +172,56 @@ public sealed class DocumentPermitMonthsTests(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// Coordinator 08.11: a CALCULATED value never makes a month «with data» — the same row with a calculated January
-    /// value is not listed. Red with the old rule (calculated non-zero counted).
+    /// Human 08.11 («Попередження», F13-p210): a row whose only January value is CALCULATED and whose permit starts in
+    /// March is listed in Issues as a Warning at the permit cell — permit, validity, the month, the permit-only fix
+    /// («that month», no «clear the values»). Red before: the row was not listed at all.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "ACC-1108-h4")]
-    public async Task A_calculated_value_does_not_make_a_month_with_data()
+    public async Task A_calculated_only_month_outside_the_permit_is_a_warning_naming_the_permit_fix()
     {
         var s = await ArrangeAsync(rowPermit: true, calculatedData: true).ConfigureAwait(true);
 
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
+        var finding = await FindingAsync(client, app, s, f => f.GetProperty("ruleCode").GetString() == "PERMIT-VALIDITY")
+            .ConfigureAwait(true);
+
+        Assert.Equal("Warning", finding.GetProperty("severity").GetString());
+        Assert.Equal(s.RowKey, finding.GetProperty("rowKey").GetString());
+        Assert.Equal(s.PermitColumnCode, finding.GetProperty("columnCode").GetString());
+        var message = finding.GetProperty("message").GetString() ?? string.Empty;
+        Assert.Contains("KZ-MARCH", message, StringComparison.Ordinal);
+        Assert.Contains("01.03.2026 – 30.11.2026", message, StringComparison.Ordinal);
+        Assert.Contains("01.2026", message, StringComparison.Ordinal);
+        Assert.Contains("valid in that month", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("clear", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Human 08.11 («Попередження»): calculated months outside the permit never block Submit (nor ask to confirm). Red if
+    /// the calculated-months finding were an Error: 422 ECR-SUB-4221.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "ACC-1108-h4")]
+    public async Task Submit_is_not_blocked_by_calculated_only_months_outside_the_permit()
+    {
+        var s = await ArrangeAsync(rowPermit: true, submittable: true, calculatedData: true).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
         var response = await client.PostAsJsonAsync(
-            new Uri($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/validate", UriKind.Relative),
-            new { periodKey = 202601 }).ConfigureAwait(true);
+            new Uri($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/submit", UriKind.Relative),
+            new { sheetDefId = s.SheetDefId, periodKey = 202601 }).ConfigureAwait(true);
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
 
-        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
-        Assert.DoesNotContain("PERMIT-VALIDITY", body, StringComparison.Ordinal);
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
     }
 
     private static Uri HeaderUri(long documentId)

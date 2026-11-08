@@ -60,8 +60,25 @@ public static class ValidationMessageTemplates
     /// <summary>Rule (h), human 08.11: the permit covers a month with data only partly — a non-blocking note.</summary>
     public const string PermitPartialMonth = "validation.permit.partialMonth";
 
+    /// <summary>
+    /// Human 08.11 («Попередження», F13-p210): the row's permit does not cover months holding only CALCULATED values — a
+    /// non-blocking Warning; the fix is the permit, not the values (calculated values cannot be cleared).
+    /// </summary>
+    public const string PermitCalculatedNotCovering = "validation.permit.calculatedNotCovering";
+
+    /// <summary>The same as <see cref="PermitCalculatedNotCovering"/> when exactly one month is named («that month»).</summary>
+    public const string PermitCalculatedNotCoveringOne = "validation.permit.calculatedNotCoveringOne";
+
     private static readonly Dictionary<string, (string En, string Ru, string Kz)> Table = new(StringComparer.Ordinal)
     {
+        [PermitCalculatedNotCovering] = (
+            "Permit {permit} (column \"{column}\") is valid {validity} and does not cover the months with calculated values: {months}. Saving and submitting are allowed. Pick a permit valid in those months or extend the permit's validity.",
+            "Разрешение {permit} (колонка «{column}») действует {validity} и не покрывает месяцы с вычисленными значениями: {months}. Сохранение и подача разрешены. Выберите разрешение, действующее в эти месяцы, или продлите срок действия разрешения.",
+            "{permit} рұқсаты («{column}» бағаны) {validity} аралығында жарамды және есептелген мәндері бар айларды қамтымайды: {months}. Сақтауға және тапсыруға болады. Осы айларда жарамды рұқсатты таңдаңыз немесе рұқсаттың жарамдылық мерзімін ұзартыңыз."),
+        [PermitCalculatedNotCoveringOne] = (
+            "Permit {permit} (column \"{column}\") is valid {validity} and does not cover the month with calculated values: {months}. Saving and submitting are allowed. Pick a permit valid in that month or extend the permit's validity.",
+            "Разрешение {permit} (колонка «{column}») действует {validity} и не покрывает месяц с вычисленными значениями: {months}. Сохранение и подача разрешены. Выберите разрешение, действующее в этом месяце, или продлите срок действия разрешения.",
+            "{permit} рұқсаты («{column}» бағаны) {validity} аралығында жарамды және есептелген мәндері бар айды қамтымайды: {months}. Сақтауға және тапсыруға болады. Осы айда жарамды рұқсатты таңдаңыз немесе рұқсаттың жарамдылық мерзімін ұзартыңыз."),
         [PermitPartialMonth] = (
             "Permit {permit} (column \"{column}\") is valid only {days} in month {month}: the values of that month are accepted, but the permit covers those days only.",
             "Разрешение {permit} (колонка «{column}») действует только {days} в месяце {month}: значения этого месяца приняты, но разрешение покрывает только эти дни.",
