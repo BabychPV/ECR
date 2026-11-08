@@ -124,10 +124,11 @@ test.describe('myTasksCollapse: My tasks sections collapse and approval months g
       await page.request.get(`/api/v1/documents/${String(documentId)}?periodKey=${String(periodKey)}`),
       'GET document',
     );
-    await page.goto(`/admin/projects?projectId=${String(card.projectId)}`);
+    // ✎ Projects (08.11): налаштування — вкладка Settings проєкту; клон — на вкладці Lifecycle.
+    await page.goto(`/projects/${String(card.projectId)}/settings`);
 
     // ✎ UAT project-settings (людина 08.11): повна назва дії + опис поруч, пов'язаний через aria-describedby.
-    for (const name of [/^Pin current period…$/, /^Clone project…$/, /^Edit approval route…$/, /^Manage period policies…$/]) {
+    for (const name of [/^Pin current period…$/, /^Edit approval route…$/, /^Manage period policies…$/]) {
       const button = page.getByRole('button', { name });
       await expect(button).toBeVisible();
       const describedBy = (await button.getAttribute('aria-describedby')) ?? '';

@@ -1039,7 +1039,7 @@ test.describe('WALK: прохід системою від А до Я', () => {
       ['/admin/expressions', 'admin-expressions'],
       ['/admin/units', 'admin-units'],
       ['/admin/security', 'admin-security'],
-      ['/admin/periods', 'admin-periods'],
+      ['/projects', 'projects'],
       ['/admin/sources', 'admin-sources'],
       ['/admin/mapping', 'admin-mapping'],
       ['/admin/jobs', 'admin-jobs'],

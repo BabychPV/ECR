@@ -195,7 +195,7 @@ describe('UI-30: командна палітра', () => {
     expect(allowed).not.toContain('nav.templates');
     expect(optionsIn(t('palette.screens'))).toHaveLength(allowed.length);
     const shown = screen.getAllByRole('option').map((option) => option.textContent ?? '');
-    for (const key of ['nav.templates', 'nav.registries', 'nav.jobs', 'nav.security', 'nav.periods', 'nav.audit']) {
+    for (const key of ['nav.templates', 'nav.registries', 'nav.jobs', 'nav.security', 'nav.projects', 'nav.audit']) {
       expect(shown.some((text) => text.includes(t(key)))).toBe(false);
     }
 

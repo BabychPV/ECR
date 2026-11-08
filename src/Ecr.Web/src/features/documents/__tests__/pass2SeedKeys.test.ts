@@ -74,7 +74,6 @@ describe('Pass2 пп. 4–6: нові ключі каталогу', () => {
     'documents.createKeepEditing',
     'periods.tile.notOpenDraft',
     'periods.tile.notOpenInactive',
-    'periods.overview.statsScope',
   ];
 
   it('Pass2: код просить кожен ключ літералом', () => {

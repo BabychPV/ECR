@@ -354,8 +354,8 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     await page.keyboard.press('Enter');
     await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
 
-    // ✎ Period clarity: створення проєкту переїхало в налаштування проєкту.
-    await page.goto('/admin/projects');
+    // ✎ Projects (08.11): «New project» — на переліку проєктів.
+    await page.goto('/projects');
 
     const create = page.getByRole('button', { name: /New project|Новий проєкт/i }).first();
     await expect(create, 'немає кнопки створення проєкту').toBeVisible({ timeout: 30_000 });

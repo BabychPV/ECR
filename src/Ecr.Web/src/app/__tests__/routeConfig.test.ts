@@ -82,7 +82,8 @@ describe('app/routes — реєстр маршрутів', () => {
     // Макет `docs/design/hybrid` (`kit.js` GROUPS, `order` у `screens-*.js`); пункти, яких у
     // макеті немає (кампанія, конвеєр, сповіщення), — у кінці своєї групи.
     expect(navGroups.map((group) => [group.id, group.routes.map((route) => route.path)])).toEqual([
-      ['work', ['/', '/my-groups', '/admin/campaign']],
+      // ✎ Projects (людина 08.11: «проджект перенеси в розділ work»): Documents, Projects, My groups, кампанія.
+      ['work', ['/', '/projects', '/my-groups', '/admin/campaign']],
       [
         'configure',
         [
@@ -98,8 +99,8 @@ describe('app/routes — реєстр маршрутів', () => {
           '/admin/pi-data',
         ],
       ],
-      // ✎ Period clarity: налаштування проєкту — поруч із періодами, звідки переїхали.
-      ['access', ['/admin/security', '/admin/periods', '/admin/projects']],
+      // ✎ Projects (08.11): «Periods» і «Project settings» стали одним «Projects» у групі Work.
+      ['access', ['/admin/security']],
       [
         'operate',
         [
@@ -138,8 +139,7 @@ describe('app/routes — реєстр маршрутів', () => {
         '/admin/sources',
         '/admin/mapping',
         '/admin/pi-data',
-        '/admin/periods',
-        '/admin/projects',
+        '/projects',
         '/admin/jobs',
         '/admin/snapshots',
         '/admin/audit',

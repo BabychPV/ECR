@@ -1076,7 +1076,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'nav.methodologies',               N'en', N'Methodologies', 1),
     (N'nav.expressions',                 N'en', N'Expressions', 1),
     (N'nav.security',                    N'en', N'Security', 1),
-    (N'nav.periods',                     N'en', N'Periods', 1),
     (N'nav.sources',                     N'en', N'Sources', 1),
     (N'nav.jobs',                        N'en', N'Jobs', 1),
     (N'nav.health',                      N'en', N'Health', 1),
@@ -1098,7 +1097,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'document.periodGoTo',             N'en', N'Go to {period}', 1),
     (N'documents.sheets',                N'en', N'Sheets', 1),
     (N'documents.state',                 N'en', N'State', 1),
-    (N'documents.empty',                 N'en', N'No documents for this period', 1),
     (N'documents.more',                  N'en', N'Load more', 1),
     -- ⛔ `U-06`: підпис над деревом аркушів. Голий дріб «0 / 91» стояв тут
     -- без жодного слова і читався як «не введено нічого» на документі,
@@ -1697,9 +1695,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'security.bootstrap',              N'en', N'bootstrap', 1),
     (N'security.lockedOut',              N'en', N'locked out', 1),
     (N'security.mustChangePassword',     N'en', N'must change password', 1),
-    (N'periods.title',                   N'en', N'Periods', 1),
     (N'periods.pickProject',             N'en', N'Pick a project', 1),
-    (N'periods.project',                 N'en', N'Project', 1),
     (N'periods.key',                     N'en', N'Period', 1),
     (N'periods.sequence',                N'en', N'Sequence', 1),
     (N'periods.range',                   N'en', N'Accepts data', 1),
@@ -1793,7 +1789,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'health.database.missingFilegroups', N'en', N'Missing filegroups', 1),
     (N'health.database.partitionsAhead',  N'en', N'Partitions ahead', 1),
     (N'health.database.limitations',      N'en', N'Limitations in this mode', 1),
-    (N'documents.emptyHint',             N'en', N'Documents appear once the period is open and a template version is published.', 1),
     -- Фільтри переліку документів (BE-09b): стан — лише в межах періоду, «мої»
     -- — створені або подані мною. `noMatch*` — порожньо ЧЕРЕЗ фільтри, а не
     -- тому, що документів немає (`documents.empty*`).
@@ -2226,7 +2221,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'periods.cloned',                  N'en', N'The clone is ready and selected.', 1),
     (N'periods.archive',                 N'en', N'Archive', 1),
     (N'periods.archiveConfirm',          N'en', N'The project becomes read-only. It is not deleted: submitted forms still refer to it.', 1),
-    (N'periods.archiveOpenPeriods',       N'en', N'This project still has periods that are not Closed. Archiving is only allowed once every period is closed.', 1),
     (N'periods.archived',                N'en', N'The project is archived. It is not deleted: submitted forms still refer to it.', 1),
     (N'periods.current',                 N'en', N'current', 1),
     (N'periods.currentNotOpen',          N'en', N'current is not Open', 1),

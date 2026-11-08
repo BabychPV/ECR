@@ -5,33 +5,30 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DocumentsPage } from '@/pages/DocumentsPage';
 import { testTheme } from '@/test/render';
-import { statusTable } from '@/shared/ui/StatusBadge';
 
 /**
- * Колонка «State» переліку документів: позначка відсутності (F6) і стан, який
- * малює НАБІР, а не сама сторінка (UI-06).
+ * Стан документа в рядку переліку: позначка відсутності (F6), стан не лише кольором (UI-06), без внутрішніх кодів
+ * аркушів і без сліду прихованих аркушів (P1).
  *
- * UI-walkthrough F6 — «колонка State порожня без пояснення». На
- * `/?periodKey=190001` (період, якого немає в календарі) рядок документа
- * показано, а клітинка стану — порожня. Нічого не відрізняє «за цей період
- * станів немає» від «не завантажилося»; порожнеча в таблиці читається двояко.
+ * ✎ Projects/Documents 08.11 (макет `projects-documents-1108.html`, людина 08.11): перелік — лише за РІК. Колонок
+ * «Sheets» (смужка аркушів одного місяця) і «State» (бейдж стану за місяць) більше немає — їхні тести прибрано; ті
+ * самі гарантії тепер перевіряються на смузі 12 місяців (`DocumentYearStrip`, клітинки `[data-month]` з `data-cell`).
  *
- * ⛔ UI-06 — друга половина файлу. Тут стояв власний
- * `<Badge variant="light">{sheet}: {state}</Badge>`: код сервера як текст
- * інтерфейсу і ЖОДНОГО кольору. Тобто `Rejected` — аркуш повернено, робота
- * стоїть — виглядав точно так само, як `Approved`. Це п'ятий розбіжний спосіб
- * показу статусу, названий у шапці `StatusBadge.tsx` поіменно.
- *
- * ⚠ Тест дивиться саме на КЛІТИНКУ рядка, а не на сторінку загалом: «десь на
- * екрані є тире» (чи «десь на екрані є S1») — не те твердження, яке доводить
- * знахідку.
- *
- * ⚠ Тон читається з розмітки (`data-status-tone`), а не з кольору CSS.
- * Контраст самих тонів стереже `shared/ui/__tests__/statusBadgeContrast.test.ts`.
+ * ⚠ Тест дивиться саме на КЛІТИНКУ рядка, а не на сторінку загалом: «десь на екрані є тире» — не те твердження,
+ * яке доводить знахідку.
  */
-const MissingPeriod = 190001;
+const Year = 2026;
 
 const project = { id: 1, code: 'AUDIT_SMOKE_PRJ', status: 'Active' as const };
+
+/* Календар проєкту: січень заблоковано, лютий відкрито (поточний), березень ще не відкрито; решти місяців немає. */
+const calendar = {
+  periods: [
+    { periodKey: 202601, year: Year, sequence: 1, state: 'Closed', isCurrent: false },
+    { periodKey: 202602, year: Year, sequence: 2, state: 'Open', isCurrent: true },
+    { periodKey: 202603, year: Year, sequence: 3, state: 'Scheduled', isCurrent: false },
+  ],
+};
 
 const withoutStates = {
   id: 1,
@@ -40,13 +37,12 @@ const withoutStates = {
   projectId: 1,
   sheetCount: 1,
   sheetStates: {},
+  periodStates: [],
 };
 
 /*
- * ⚠ ВСІ чотири стани `DocumentStatus` одночасно, і саме в одному документі.
- * Тест на одному `Draft` лишався б зеленим і тоді, коли всі стани стали
- * однаковими: доказ — саме розрізнення. Аркуші названі по-різному навмисно —
- * пара «код аркуша + його стан» перевіряється нижче поіменно.
+ * ⚠ Різні стани погодження в РІЗНИХ місяцях одного документа: тест на одному стані лишався б зеленим і тоді, коли всі
+ * клітинки стали однаковими — доказ саме розрізнення.
  */
 const withStates = {
   id: 2,
@@ -55,14 +51,15 @@ const withStates = {
   projectId: 1,
   sheetCount: 4,
   sheetStates: { S1: 'Draft', S2: 'Submitted', S3: 'Rejected', GEN: 'Approved' },
+  periodStates: [
+    { periodKey: 202604, state: 'Approved' },
+    { periodKey: 202605, state: 'Submitted' },
+    { periodKey: 202606, state: 'Rejected' },
+    { periodKey: 202607, state: 'PartlySubmitted' },
+  ],
 };
 
-/*
- * ⚠ `Returned` — не вигаданий випадок: це стан із МАКЕТА, якого в домені немає
- * (повернення пише `Draft`, `ApprovalState.Reopen()`), і `sheetStates`
- * оголошено як `{ [key: string]: string }` — компілятор про такий стан не
- * скаже нічого.
- */
+/* ⚠ `Returned` — стан із МАКЕТА, якого в домені немає; `state` у схемі — рядок, компілятор про нього не скаже. */
 const withUnknown = {
   id: 3,
   businessKey: 'DOC-000003',
@@ -70,12 +67,10 @@ const withUnknown = {
   projectId: 1,
   sheetCount: 1,
   sheetStates: { S1: 'Returned' },
+  periodStates: [{ periodKey: 202608, state: 'Returned' }],
 };
 
-/*
- * ⚠ Один аркуш — і код у стані зайвий (знімок людини: `S99819007` перед
- * `SUBMITTED` на документі з одним аркушем).
- */
+/* ⚠ Внутрішній код аркуша (знімок людини: `S99819007` перед станом) — не текст інтерфейсу. */
 const singleSheet = {
   id: 4,
   businessKey: 'DOC-000004',
@@ -83,58 +78,12 @@ const singleSheet = {
   projectId: 1,
   sheetCount: 1,
   sheetStates: { S99819007: 'Submitted' },
+  periodStates: [{ periodKey: 202602, state: 'Submitted' }],
 };
 
 /*
- * ⚠ Аркушів ДВА, а рядок стану — лише в одного: код ще потрібен, інакше не
- * видно, чий це стан.
- */
-const partialStates = {
-  id: 5,
-  businessKey: 'DOC-000005',
-  createdAt: '2026-01-01T00:00:00Z',
-  projectId: 1,
-  sheetCount: 2,
-  sheetStates: { S7: 'Draft' },
-};
-
-/*
- * ⚠ Сервер віддає `sheets` — аркуші В ПОРЯДКУ аркушів і з назвою. Порядок
- * `sheets` навмисно НЕ збігається з порядком ключів `sheetStates`: так видно,
- * що клітинка йде за `sheets`, а не за словником. У `WTR` назви немає жодною
- * мовою — підпис має впасти на код. Назва `GEN` різна для `uk` і `en`: мова
- * інтерфейсу тут `en` (`/me`), тож має бути саме англійська.
- */
-const withNames = {
-  id: 6,
-  businessKey: 'DOC-000006',
-  createdAt: '2026-01-01T00:00:00Z',
-  projectId: 1,
-  sheetCount: 3,
-  sheetStates: { WTR: 'Rejected', AIR: 'Submitted', GEN: 'Draft' },
-  sheets: [
-    { code: 'GEN', nameL10n: { values: { uk: 'Загальні відомості', en: 'General info' } }, state: 'Draft' },
-    { code: 'AIR', nameL10n: { values: { en: 'Air emissions' } }, state: 'Submitted' },
-    { code: 'WTR', nameL10n: { values: {} }, state: 'Rejected' },
-  ],
-};
-
-/* ⚠ Один аркуш і `sheets` з назвою — підпису однаково немає: ні коду, ні назви. */
-const singleNamed = {
-  id: 7,
-  businessKey: 'DOC-000007',
-  createdAt: '2026-01-01T00:00:00Z',
-  projectId: 1,
-  sheetCount: 1,
-  sheetStates: { S42: 'Approved' },
-  sheets: [{ code: 'S42', nameL10n: { values: { en: 'Only sheet' } }, state: 'Approved' }],
-};
-
-/*
- * ⛔ Прихований аркуш (P1, безпека): роль бачить ОДИН аркуш із трьох. Сервер
- * віддає лише видимий у `sheets`/`sheetStates`, а `errorCount` — `null` (по
- * всіх аркушах роль рахувати не може). `sheetCount` навмисно лишено 3: якщо
- * клієнт рахує «N of M» від нього, число видає існування прихованих аркушів.
+ * ⛔ Прихований аркуш (P1, безпека): роль бачить ОДИН аркуш із трьох; `errorCount` — `null`. `sheetCount` навмисно 3:
+ * якщо рядок рахує щось від нього, число видає існування прихованих аркушів.
  */
 const scopedToOneSheet = {
   id: 8,
@@ -146,7 +95,12 @@ const scopedToOneSheet = {
   sheets: [{ code: 'AIR', nameL10n: { values: { en: 'Air emissions' } }, state: 'Submitted' }],
   errorCount: null,
   warningCount: null,
+  periodStates: [{ periodKey: 202602, state: 'Submitted' }],
 };
+
+function json(body: unknown): Response {
+  return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+}
 
 function mockFetch(): void {
   vi.stubGlobal(
@@ -155,51 +109,44 @@ function mockFetch(): void {
       const url = String(input);
 
       if (url.includes('/api/v1/me')) {
-        return new Response(
-          JSON.stringify({
-            denies: [],
-            grants: {},
-            isSimulation: false,
-            language: 'en',
-            mustChangePassword: false,
-            permissions: [],
-            simulatedForUserId: null,
-            userId: 1,
-            userName: 'tester',
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        );
-      }
-
-      if (url.includes('/api/v1/documents')) {
-        return new Response(
-          JSON.stringify({
-            items: [withoutStates, withStates, withUnknown, singleSheet, partialStates, withNames, singleNamed, scopedToOneSheet],
-            nextCursor: null,
-            totalCount: 8,
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        );
-      }
-
-      if (url.includes('/api/v1/projects')) {
-        return new Response(JSON.stringify({ items: [project], nextCursor: null, totalCount: 1 }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
+        return json({
+          denies: [],
+          grants: {},
+          isSimulation: false,
+          language: 'en',
+          mustChangePassword: false,
+          permissions: [],
+          simulatedForUserId: null,
+          userId: 1,
+          userName: 'tester',
         });
       }
 
-      return new Response(JSON.stringify(null), { status: 200 });
+      if (url.includes('/api/v1/documents/summary')) return json({ draft: 0, submitted: 0, approved: 0, rejected: 0, withIssues: 0 });
+      if (url.includes('/api/v1/documents/template-versions')) return json({ items: [], withoutVersionCount: 0 });
+
+      if (url.includes('/api/v1/documents')) {
+        return json({
+          items: [withoutStates, withStates, withUnknown, singleSheet, scopedToOneSheet],
+          nextCursor: null,
+          totalCount: 5,
+        });
+      }
+
+      if (/\/api\/v1\/projects\/1\/periods/.test(url)) return json(calendar);
+      if (url.includes('/api/v1/projects')) return json({ items: [project], nextCursor: null, totalCount: 1 });
+
+      return json(null);
     }),
   );
 }
 
-function show(): void {
+function show(entry: string): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
     <MantineProvider theme={testTheme}>
-      <MemoryRouter initialEntries={[`/?periodKey=${String(MissingPeriod)}`]}>
+      <MemoryRouter initialEntries={[entry]}>
         <QueryClientProvider client={client}>
           <DocumentsPage />
         </QueryClientProvider>
@@ -209,11 +156,11 @@ function show(): void {
 }
 
 /** Клітинка колонки рядка з таким бізнес-ключем (`data-column`). */
-function cellOf(businessKey: string, column: 'sheets' | 'state' | 'issues'): HTMLElement {
-  const row = screen.getByText(businessKey).closest('tr');
+function cellOf(businessKey: string, column: 'months' | 'issues'): HTMLElement {
+  const row = document.querySelector(`[data-document-row="${businessKey}"]`);
   if (row === null) throw new Error(`Рядок ${businessKey} не знайдено`);
 
-  const cell = within(row)
+  const cell = within(row as HTMLElement)
     .getAllByRole('cell')
     .find((node) => node.getAttribute('data-column') === column);
   if (cell === undefined) throw new Error(`Колонку ${column} у рядку ${businessKey} не знайдено`);
@@ -221,18 +168,10 @@ function cellOf(businessKey: string, column: 'sheets' | 'state' | 'issues'): HTM
   return cell;
 }
 
-/** Сегмент смужки аркушів (`SegmentBar`) — за кодом аркуша. */
-function segmentOf(businessKey: string, code: string): HTMLElement {
-  const node = cellOf(businessKey, 'sheets').querySelector(`[data-segment="${code}"]`);
-  if (node === null) throw new Error(`Сегмент аркуша «${code}» у рядку ${businessKey} не знайдено`);
-
-  return node as HTMLElement;
-}
-
-/** Бейдж стану документа в колонці «State». */
-function stateBadgeOf(businessKey: string): HTMLElement {
-  const node = cellOf(businessKey, 'state').querySelector('[data-status-state]');
-  if (node === null) throw new Error(`Бейдж стану в рядку ${businessKey} не знайдено`);
+/** Клітинка смуги місяця в рядку документа. */
+function monthOf(businessKey: string, periodKey: number): HTMLElement {
+  const node = cellOf(businessKey, 'months').querySelector(`[data-month="${String(periodKey)}"]`);
+  if (node === null) throw new Error(`Місяць ${String(periodKey)} у рядку ${businessKey} не знайдено`);
 
   return node as HTMLElement;
 }
@@ -243,155 +182,116 @@ afterEach(() => {
 
 const SlowEnvTimeout = 400_000;
 
-async function shown(businessKey: string): Promise<void> {
+async function shown(businessKey: string, entry = `/?year=${String(Year)}`): Promise<void> {
   mockFetch();
-  show();
+  show(entry);
   await screen.findByText(businessKey, {}, { timeout: SlowEnvTimeout });
 }
 
-/*
- * ✎ `UI-19` (2026-10-06): стани аркушів переїхали з колонки «State» у смужку
- * «Sheets» (`SegmentBar`, макет `10-docs-list-light.png`), а «State» тепер —
- * ОДИН бейдж стану документа (найгірший з аркушів, правило сервера
- * `DocumentListSummaryStore`). Твердження нижче ті самі, що були в UI-06/F6, —
- * змінилось лише, ДЕ вони перевіряються: пара «аркуш + стан» — це сегмент із
- * `data-segment` і `data-state`, назва аркуша — у його підказці.
- */
 describe('DocumentsPage: відсутність станів позначена видимо (F6)', () => {
   it(
-    'документ без станів за обраний період показує позначку відсутності, а не порожнечу',
+    // ✎ Projects/Documents 08.11: колонок «Sheets»/«State» немає — «—» замість порожнечі тепер дає смуга (стан місяця текстом) і «Issues».
+    'документ без станів погодження: кожна з 12 клітинок має стан текстом, а не порожнечу',
     async () => {
       await shown('DOC-000001');
 
-      // ⛔ Мутаційний доказ: прибери гілку з «—» — клітинки знову порожні.
-      expect(cellOf('DOC-000001', 'sheets').textContent?.trim()).toBe('—');
-      expect(cellOf('DOC-000001', 'state').textContent?.trim()).toBe('—');
+      const cells = [...cellOf('DOC-000001', 'months').querySelectorAll('[data-month]')];
+      expect(cells).toHaveLength(12);
+      // ⛔ Порожня клітинка без підпису читалась би двояко («немає» чи «не завантажилось»).
+      for (const cell of cells) {
+        expect(cell.getAttribute('data-cell')).not.toBeNull();
+        expect(cell.getAttribute('aria-label') ?? '').toMatch(/^⟦documents\.monthState \(month=\w+ 2026, state=⟦documents\.strip\.\w+⟧\)⟧$/);
+      }
+      // Стан неподаного місяця — з календаря проєкту; місяця поза календарем — «unknown», а не вигаданий.
+      expect(monthOf('DOC-000001', 202612).getAttribute('data-cell')).toBe('unknown');
+      expect(cellOf('DOC-000001', 'issues').textContent?.trim()).toBe('—');
     },
     SlowEnvTimeout,
   );
 
   it(
-    'документ зі станами показує смужку й бейдж, а не позначку відсутності',
+    // ✎ Projects/Documents 08.11: стара адреса з місяцем поза календарем (F6: `?periodKey=190001`) — рік 1900, клітинки «unknown», не порожні.
+    'стара адреса з місяцем без календаря: рядок є, клітинки року — «unknown» з підписом',
     async () => {
-      await shown('DOC-000002');
+      await shown('DOC-000001', '/?periodKey=190001');
 
-      // Підпис — через каталог (`D-138`: незавантажений каталог дає ⟦ключ⟧).
-      expect(stateBadgeOf('DOC-000002').textContent).toBe('⟦status.sheet.Rejected⟧');
-      expect(cellOf('DOC-000002', 'sheets').querySelectorAll('[data-segment]')).toHaveLength(4);
-      expect(cellOf('DOC-000002', 'sheets').textContent).not.toContain('—');
+      const cells = [...cellOf('DOC-000001', 'months').querySelectorAll('[data-month]')];
+      expect(cells.map((cell) => cell.getAttribute('data-month'))[0]).toBe('190001');
+      expect(new Set(cells.map((cell) => cell.getAttribute('data-cell')))).toEqual(new Set(['unknown']));
+      expect(cells[0]?.getAttribute('aria-label')).toBe(
+        '⟦documents.monthState (month=January 1900, state=⟦documents.strip.unknown⟧)⟧',
+      );
     },
     SlowEnvTimeout,
   );
 });
 
-describe('DocumentsPage: тон стану аркуша приходить із набору (UI-06)', () => {
+describe('DocumentsPage: стан місяця — не лише кольором (UI-06)', () => {
   it(
-    'чотири стани документа — і тони РІЗНІ, а не «без кольору» на всіх',
+    // ✎ Projects/Documents 08.11: тони сегментів аркушів прибрано разом із колонкою «Sheets» — розрізнення станів тепер у клітинках смуги.
+    'різні стани погодження дають РІЗНІ клітинки, і кожна названа текстом',
     async () => {
       await shown('DOC-000002');
 
-      const tone = (code: string): string | null => segmentOf('DOC-000002', code).getAttribute('data-tone');
+      expect(monthOf('DOC-000002', 202604).getAttribute('data-cell')).toBe('approved');
+      expect(monthOf('DOC-000002', 202605).getAttribute('data-cell')).toBe('submitted');
+      expect(monthOf('DOC-000002', 202606).getAttribute('data-cell')).toBe('returned');
+      // Частково подано — теж «подано» (людина бачить, що робота пішла).
+      expect(monthOf('DOC-000002', 202607).getAttribute('data-cell')).toBe('submitted');
 
-      expect(tone('S3')).toBe('danger');
-      expect(tone('S2')).toBe('info');
-      expect(tone('S1')).toBe('neutral');
-      expect(tone('GEN')).toBe('neutral');
+      // ⛔ Константний стан схлопнув би множину.
+      const states = [202604, 202605, 202606].map((key) => monthOf('DOC-000002', key).getAttribute('data-cell'));
+      expect(new Set(states).size).toBe(3);
 
-      // ⛔ Константний стан на всіх аркушах схлопнув би множину тонів.
-      expect(new Set(['S1', 'S2', 'S3', 'GEN'].map(tone)).size).toBe(3);
-
-      // Draft і Approved — обидва нейтральні (KIT §1.3), але різні ФОРМОЮ: стан у розмітці.
-      expect(segmentOf('DOC-000002', 'S1').getAttribute('data-state')).toBe('Draft');
-      expect(segmentOf('DOC-000002', 'GEN').getAttribute('data-state')).toBe('Approved');
+      // Не лише колір: знак у клітинці різний (✓ — затверджено, ✕ — повернуто), і стан — у підписі.
+      expect(monthOf('DOC-000002', 202604).textContent).toBe('✓');
+      expect(monthOf('DOC-000002', 202606).textContent).toBe('✕');
+      expect(monthOf('DOC-000002', 202606).getAttribute('aria-label')).toBe(
+        '⟦documents.monthState (month=June 2026, state=⟦documents.strip.returned⟧)⟧',
+      );
     },
     SlowEnvTimeout,
   );
 
   it(
-    'стан документа — найгірший з аркушів (Rejected > Draft > Submitted > Approved), як рахує сервер',
+    'неподаний місяць бере стан ПЕРІОДУ з календаря: заблоковано, відкрито (поточний), ще не відкрито',
     async () => {
-      await shown('DOC-000002');
+      await shown('DOC-000001');
 
-      expect(stateBadgeOf('DOC-000002').getAttribute('data-status-state')).toBe('Rejected');
-      expect(stateBadgeOf('DOC-000002').getAttribute('data-status-tone')).toBe('danger');
-      expect(stateBadgeOf('DOC-000005').getAttribute('data-status-state')).toBe('Draft');
-      expect(stateBadgeOf('DOC-000007').getAttribute('data-status-state')).toBe('Approved');
+      // Календар приїжджає окремим запитом — чекаємо, доки клітинка перестане бути «unknown».
+      await vi.waitFor(() => expect(monthOf('DOC-000001', 202601).getAttribute('data-cell')).toBe('locked'), {
+        timeout: SlowEnvTimeout,
+      });
+      expect(monthOf('DOC-000001', 202602).getAttribute('data-cell')).toBe('open');
+      expect(monthOf('DOC-000001', 202602).getAttribute('data-current')).toBe('true');
+      expect(monthOf('DOC-000001', 202603).getAttribute('data-cell')).toBe('notOpen');
     },
     SlowEnvTimeout,
   );
 
   it(
-    'аркуш і його стан — одна пара: підказка сегмента називає саме цей аркуш',
+    // ✎ Projects/Documents 08.11: бейджа «State» немає — невідомий стан не має видаватись за затверджений чи поданий.
+    'стан, якого домен не знає (`Returned`), не видається за затверджений чи поданий',
     async () => {
-      await shown('DOC-000002');
-
-      const rejected = segmentOf('DOC-000002', 'S3');
-      expect(rejected.getAttribute('data-state')).toBe('Rejected');
-      expect(rejected.getAttribute('title')).toBe('S3 — ⟦status.sheet.Rejected⟧');
-
-      // Читалка отримує весь перелік пар одним текстом.
-      const label = cellOf('DOC-000002', 'sheets').querySelector('[role="img"]')?.getAttribute('aria-label') ?? '';
-      expect(label).toContain('S3: ⟦status.sheet.Rejected⟧');
-      expect(label).toContain('GEN: ⟦status.sheet.Approved⟧');
-    },
-    SlowEnvTimeout,
-  );
-
-  it(
-    'стан, якого набір не знає, позначений як невідомий, а не мовчки нейтральний',
-    async () => {
-      expect(statusTable.sheet['Returned'], '`Returned` не має бути в таблиці набору').toBeUndefined();
-      expect(statusTable.sheet['Draft'], '`Draft` — відомий стан домену').toBeDefined();
-
       await shown('DOC-000003');
 
-      expect(segmentOf('DOC-000003', 'S1').getAttribute('data-tone')).toBe('warning');
-
-      const unknown = stateBadgeOf('DOC-000003');
-      expect(unknown.getAttribute('data-status-known')).toBe('false');
-      expect(unknown.getAttribute('data-status-tone')).toBe('warning');
-      expect(unknown.textContent).toBe('⟦status.sheet.Returned⟧');
+      const cell = monthOf('DOC-000003', 202608).getAttribute('data-cell');
+      expect(['approved', 'submitted']).not.toContain(cell);
+      expect(cell).toBe('unknown');
     },
     SlowEnvTimeout,
   );
 });
 
-describe('DocumentsPage: смужка аркушів — назва аркуша, а не код', () => {
+describe('DocumentsPage: рядок — без внутрішнього коду аркуша', () => {
   it(
-    'внутрішній код аркуша не стоїть у видимому тексті клітинки',
+    // ✎ Projects/Documents 08.11: колонки «Sheets» немає — твердження «коду аркуша немає у видимому тексті» перевіряється на всьому рядку.
+    'внутрішній код аркуша не стоїть у видимому тексті рядка',
     async () => {
       await shown('DOC-000004');
 
-      expect(cellOf('DOC-000004', 'sheets').textContent).not.toContain('S99819007');
-      expect(cellOf('DOC-000007', 'sheets').textContent).not.toContain('S42');
-    },
-    SlowEnvTimeout,
-  );
-
-  it(
-    'назва аркуша мовою інтерфейсу — у підказці сегмента; назви немає — код',
-    async () => {
-      await shown('DOC-000006');
-
-      expect(segmentOf('DOC-000006', 'GEN').getAttribute('title')).toContain('General info');
-      expect(segmentOf('DOC-000006', 'GEN').getAttribute('title')).not.toContain('Загальні відомості');
-      expect(segmentOf('DOC-000006', 'AIR').getAttribute('title')).toContain('Air emissions');
-      // ⛔ Запасний варіант: прибери його — підказка без назви.
-      expect(segmentOf('DOC-000006', 'WTR').getAttribute('title')).toContain('WTR');
-    },
-    SlowEnvTimeout,
-  );
-
-  it(
-    'аркуші йдуть у порядку `sheets` (порядок аркушів), а не ключів `sheetStates`',
-    async () => {
-      await shown('DOC-000006');
-
-      const states = [...cellOf('DOC-000006', 'sheets').querySelectorAll('[data-segment]')].map((node) =>
-        node.getAttribute('data-state'),
-      );
-
-      expect(states).toEqual(['Draft', 'Submitted', 'Rejected']);
+      const row = document.querySelector('[data-document-row="DOC-000004"]');
+      expect(row?.textContent).not.toContain('S99819007');
     },
     SlowEnvTimeout,
   );
@@ -399,27 +299,20 @@ describe('DocumentsPage: смужка аркушів — назва аркуша
 
 describe('DocumentsPage: прихований аркуш не видно ні рядком, ні числом (P1)', () => {
   it(
-    'роль зі scope на 1 аркуш: один сегмент, «0 of 1», помилки «—», жодного сліду інших аркушів',
+    // ✎ Projects/Documents 08.11: «0 of 1» жило в колонці «Sheets» (прибрана) — лишається: помилки «—» і жодного сліду інших аркушів.
+    'роль зі scope на 1 аркуш: помилки «—», у рядку немає ні числа аркушів, ні назв/кодів інших',
     async () => {
       await shown('DOC-000008');
-
-      const sheets = cellOf('DOC-000008', 'sheets');
-      expect(sheets.querySelectorAll('[data-segment]')).toHaveLength(1);
-
-      // ⛔ Мутаційний доказ: передай у `SegmentBar` `total={document.sheetCount}` —
-      // тут стане «0/3», тобто число видасть два приховані аркуші.
-      expect(sheets.querySelector('[data-segment-summary]')?.getAttribute('data-segment-summary')).toBe('0/1');
 
       // `errorCount: null` — «—», а не «0».
       expect(cellOf('DOC-000008', 'issues').textContent?.trim()).toBe('—');
 
-      // Стан документа — лише з видимого аркуша.
-      expect(stateBadgeOf('DOC-000008').getAttribute('data-status-state')).toBe('Submitted');
-
-      // Партій аркуша з частковими станами (DOC-000005: 1 стан при sheetCount 2) — так само.
-      expect(
-        cellOf('DOC-000005', 'sheets').querySelector('[data-segment-summary]')?.getAttribute('data-segment-summary'),
-      ).toBe('0/1');
+      const row = document.querySelector('[data-document-row="DOC-000008"]');
+      // ⛔ Мутація «рахувати від sheetCount» дала б «/3» або «of 3» у рядку.
+      expect(row?.textContent ?? '').not.toMatch(/\b3\b/);
+      expect(row?.textContent ?? '').not.toMatch(/segments\.approvedOf/);
+      // Стан лютого — лише з видимого аркуша (сервер уже порахував за роллю).
+      expect(monthOf('DOC-000008', 202602).getAttribute('data-cell')).toBe('submitted');
     },
     SlowEnvTimeout,
   );

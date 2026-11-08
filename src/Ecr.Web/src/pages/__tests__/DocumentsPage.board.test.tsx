@@ -154,12 +154,13 @@ describe('DocumentsPage — подання Board (UI-40)', () => {
   );
 
   it(
-    'посилання картки зберігає період, «око» відкриває швидкий перегляд',
+    'посилання картки веде на документ (без місяця), «око» відкриває швидкий перегляд',
     async () => {
+      // ✎ Projects/Documents 08.11: перелік лише за рік — стара адреса з periodKey дає рік, а картка веде на документ без місяця (місяць обирають у документі).
       show(`/?periodKey=${String(Period)}&view=board`);
       const root = await board();
 
-      expect(within(root).getByRole('link', { name: 'DOC-000012' }).getAttribute('href')).toBe(`/documents/12?periodKey=${String(Period)}`);
+      expect(within(root).getByRole('link', { name: 'DOC-000012' }).getAttribute('href')).toBe('/documents/12');
 
       await userEvent.click(within(root).getByRole('button', { name: /documents\.quickLook \(key=DOC-000012\)/ }));
       await waitFor(() => expect(screen.getByTestId('location').textContent).toContain('panel=12'), { timeout: SlowEnvTimeout });
@@ -174,7 +175,8 @@ describe('DocumentsPage — подання Board (UI-40)', () => {
       const root = await board();
 
       await userEvent.click(within(root.querySelector('[data-board-card="DOC-000014"]') as HTMLElement).getByText('Facility 14'));
-      await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(`/documents/14?periodKey=${String(Period)}`), { timeout: SlowEnvTimeout });
+      // ✎ Projects/Documents 08.11: перелік лише за рік — місяць у адресу документа більше не переноситься.
+      await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/documents/14'), { timeout: SlowEnvTimeout });
     },
     TestTimeout,
   );

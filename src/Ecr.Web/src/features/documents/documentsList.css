@@ -20,66 +20,115 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 /*
- * ✎ Period clarity (п. e): смуга 12 місяців у рядку документа. Клітинка — посилання з `aria-label`; стан — тоном
- * (`toneFills`) і знаком (не лише кольором). Рамка — колір межі теми, щоб клітинка без стану була видима.
+ * ✎ Period clarity (п. e) + ✎ g3 (макет 08.11, `.ms`/`.m`): смуга 12 місяців у рядку документа. Клітинка —
+ * посилання з `aria-label`; стан — заливкою й знаком, не лише кольором (`yearStripModel.ts`):
+ * open — порожня суцільна рамка; submitted — заливка наполовину; approved — суцільна «успіх» + ✓;
+ * locked — приглушена + замок; notOpen — пунктир; returned — «увага» + ✕; поточний місяць — кільце.
  */
 .ecr-year-strip {
-  display: flex;
-  gap: calc(var(--mantine-spacing-xs) / 4);
+  display: inline-grid;
+  grid-template-columns: repeat(12, 18px);
+  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
+  vertical-align: middle;
 }
 
 .ecr-year-strip-cell {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.5rem;
-  min-height: 1.75rem;
-  border: 1px solid var(--mantine-color-default-border);
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: -3px;
   border-radius: var(--mantine-radius-xs);
-  color: var(--mantine-color-text);
-  font-size: var(--mantine-font-size-xs);
-  line-height: 1;
   text-decoration: none;
 }
 
-/* Тони — ті самі пари, що `toneFills` у `StatusBadge` (`shared/ui`). */
-.ecr-year-strip-cell[data-tone='neutral'] {
-  background: var(--ecr-sunken);
-  color: var(--ecr-text);
+.ecr-year-strip-box {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--ecr-border-strong, var(--mantine-color-default-border));
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ecr-muted, var(--mantine-color-dimmed));
+  font: 500 10px/1 var(--mantine-font-family-monospace);
 }
 
-.ecr-year-strip-cell[data-tone='info'] {
-  background: var(--ecr-accent-soft);
-  color: var(--ecr-accent-text);
+.ecr-year-strip-box[data-cell='submitted'] {
+  border-color: var(--ecr-accent, var(--mantine-primary-color-filled));
+  background: linear-gradient(0deg, var(--ecr-accent, var(--mantine-primary-color-filled)) 50%, transparent 50%);
 }
 
-.ecr-year-strip-cell[data-tone='warning'] {
-  background: var(--ecr-sunken);
-  color: var(--ecr-warning);
+.ecr-year-strip-box[data-cell='approved'] {
+  border-color: var(--ecr-success, var(--mantine-color-green-filled));
+  background: var(--ecr-success, var(--mantine-color-green-filled));
+  color: var(--ecr-surface, var(--mantine-color-body));
 }
 
-.ecr-year-strip-cell[data-tone='danger'] {
-  background: var(--ecr-sunken);
-  color: var(--ecr-danger);
+.ecr-year-strip-box[data-cell='locked'] {
+  background: var(--ecr-sunken, var(--mantine-color-default-hover));
+  color: var(--ecr-muted, var(--mantine-color-dimmed));
 }
 
-.ecr-year-strip-cell[data-tone='muted'] {
-  background: var(--ecr-sunken);
-  color: var(--ecr-muted);
+.ecr-year-strip-box[data-cell='notOpen'],
+.ecr-year-strip-box[data-cell='unknown'] {
+  border-style: dashed;
+  border-color: var(--ecr-faint, var(--mantine-color-dimmed));
 }
 
-.ecr-year-strip-cell:hover {
+.ecr-year-strip-box[data-cell='returned'] {
+  border-color: var(--ecr-warning, var(--mantine-color-yellow-filled));
+  background: var(--ecr-warning, var(--mantine-color-yellow-filled));
+  color: var(--ecr-surface, var(--mantine-color-body));
+}
+
+.ecr-year-strip-box[data-current='true'] {
+  box-shadow: 0 0 0 1px var(--ecr-surface, var(--mantine-color-body)), 0 0 0 2px var(--ecr-accent, var(--mantine-primary-color-filled));
+}
+
+.ecr-year-strip-cell:hover .ecr-year-strip-box {
   border-color: var(--mantine-color-text);
 }
 
-.ecr-year-strip-mark {
-  min-height: 0.75em;
+.ecr-year-strip-letters {
+  color: var(--mantine-color-dimmed);
+  font: 500 10px/1 var(--mantine-font-family-monospace);
+}
+
+.ecr-year-strip-letter {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+}
+
+.ecr-year-strip-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin-bottom: var(--mantine-spacing-xs);
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-xs);
+}
+
+.ecr-year-strip-legend-title {
+  color: var(--mantine-color-text);
+  font-weight: 500;
+}
+
+.ecr-year-strip-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ecr-year-strip-legend .ecr-year-strip-box {
+  width: 14px;
+  height: 14px;
 }
 
 @media (max-width: 640px) {

@@ -66,7 +66,7 @@ export interface RouteCrumbConfig {
   resolveParam?: string;
 
   /** Який резолвер `breadcrumbResolvers.ts` читає кеш TanStack Query для {@link resolveParam}. */
-  resolveWith?: 'templateName' | 'templateVersionLabel' | 'registryName' | 'documentKey';
+  resolveWith?: 'templateName' | 'templateVersionLabel' | 'registryName' | 'documentKey' | 'projectCode';
 
   /**
    * UI-32: ще одна крихта ПІСЛЯ власної — з кешу сторінки, не з реєстру
@@ -515,31 +515,53 @@ export const routes = {
     },
     showInNav: true,
   },
-  adminPeriods: {
-    id: 'admin-periods',
-    path: '/admin/periods',
-    // ⛔ Було `Period.Manage` — права з такою назвою немає в каталозі
-    // (`sec.Permission`), той самий факт, що й у старому `AppLayout.tsx`
-    // (директива №09 `S-02`) — перенесено без зміни значення.
-    handle: { labelKey: 'nav.periods', permission: 'Period.Configure', icon: 'periods', descriptionKey: 'nav.periods.description' },
-    showInNav: true,
-  },
   /**
-   * ✎ Period clarity (людина 07.11, п. b/c): налаштування проєкту — маршрут погодження, політики, клон, пояс,
-   * життєвий цикл і режим поточного періоду. ⚠ Право те саме, що й у сторінки Periods, звідки вони переїхали
-   * (`Period.Configure`): хто бачив ці кнопки там, бачить і тут; кожна дія далі перевіряє своє право й грант.
-   * ⚠ Іконка — та сама, що в Periods: нова означала б правку `shared/ui/navIcons.tsx`.
+   * ✎ Projects (макет `projects-documents-1108.html`, людина 08.11: «так макет хороший»; «проджект перенеси в розділ
+   * work»): ОДИН пункт «Projects» замість «Periods» і «Project settings». Проєкт — це звітний рік: його місяці
+   * (вкладка Periods), налаштування (Settings) і життєвий цикл (Lifecycle). Старі адреси `/admin/periods` і
+   * `/admin/projects` ведуть сюди (`router.tsx`, `LegacyProjectRedirect`).
+   *
+   * ⛔ Право — `Period.Configure`, те саме, що мали обидва колишні пункти (було `Period.Manage` — права з такою
+   * назвою в каталозі немає, директива №09 `S-02`); кожна дія далі перевіряє своє право й грант Manage.
+   * ⚠ Іконка — та сама, що в Periods: нова означала б правку `shared/ui/navIcons.tsx` (там працює інша сесія).
    */
-  adminProjectSettings: {
-    id: 'admin-project-settings',
-    path: '/admin/projects',
+  projects: {
+    id: 'projects',
+    path: '/projects',
     handle: {
-      labelKey: 'nav.projectSettings',
+      labelKey: 'nav.projects',
       permission: 'Period.Configure',
       icon: 'periods',
-      descriptionKey: 'nav.projectSettings.description',
+      descriptionKey: 'nav.projects.description',
+      skeletonShape: 'table',
     },
     showInNav: true,
+  },
+  /** Проєкт: шапка й вкладки (`ProjectLayout`); крихта — код проєкту з кешу переліку. */
+  projectDetail: {
+    id: 'project-detail',
+    path: '/projects/:id',
+    handle: {
+      labelKey: 'nav.projects',
+      permission: 'Period.Configure',
+      numericParams: ['id'],
+      crumb: { ancestorIds: ['projects'], resolveParam: 'id', resolveWith: 'projectCode' },
+    },
+  },
+  projectPeriods: {
+    id: 'project-periods',
+    path: '/projects/:id/periods',
+    handle: { labelKey: 'projects.tab.periods', permission: 'Period.Configure', numericParams: ['id'] },
+  },
+  projectSettings: {
+    id: 'project-settings',
+    path: '/projects/:id/settings',
+    handle: { labelKey: 'projects.tab.settings', permission: 'Period.Configure', numericParams: ['id'] },
+  },
+  projectLifecycle: {
+    id: 'project-lifecycle',
+    path: '/projects/:id/lifecycle',
+    handle: { labelKey: 'projects.tab.lifecycle', permission: 'Period.Configure', numericParams: ['id'] },
   },
   adminSources: {
     id: 'admin-sources',
@@ -740,7 +762,8 @@ export interface NavGroup {
  * (`routeConfig.test.ts`): пункт поза групами зник би з меню мовчки.
  */
 export const navGroups: readonly NavGroup[] = [
-  { id: 'work', labelKey: 'nav.group.work', routes: [routes.home, routes.myGroups, routes.adminCampaign] },
+  // ✎ Projects (людина 08.11: «проджект перенеси в розділ work»): Documents, Projects, My groups, Reporting campaign.
+  { id: 'work', labelKey: 'nav.group.work', routes: [routes.home, routes.projects, routes.myGroups, routes.adminCampaign] },
   {
     id: 'configure',
     labelKey: 'nav.group.configure',
@@ -757,7 +780,7 @@ export const navGroups: readonly NavGroup[] = [
       routes.adminPiData,
     ],
   },
-  { id: 'access', labelKey: 'nav.group.access', routes: [routes.adminSecurity, routes.adminPeriods, routes.adminProjectSettings] },
+  { id: 'access', labelKey: 'nav.group.access', routes: [routes.adminSecurity] },
   {
     id: 'operate',
     labelKey: 'nav.group.operate',

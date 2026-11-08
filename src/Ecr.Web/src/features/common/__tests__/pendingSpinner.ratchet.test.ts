@@ -79,7 +79,8 @@ const Ledger: Readonly<Record<string, number>> = {
   // ✎ Period clarity (07.11): 7 = 1 (перевідкриття) + 5 (налаштування проєкту) + 1 (перерахунок, перелік документів) —
   // ті самі кнопки переїхали з PeriodsPage, нових записів немає.
   'pages/admin/PeriodsPage.tsx': 1,
-  'pages/admin/ProjectSettingsPage.tsx': 5,
+  // ✎ Projects (08.11): активацію, клон і архів перенесено на вкладку Lifecycle — там уже `usePendingLoading`.
+  'pages/admin/ProjectSettingsPage.tsx': 1,
   'pages/admin/SourcesPage.tsx': 1,
   'pages/admin/TableRelationsPage.tsx': 1,
   'pages/admin/TemplateCardPage.tsx': 1,
