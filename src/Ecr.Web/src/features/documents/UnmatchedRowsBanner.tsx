@@ -17,14 +17,21 @@ export function unmatchedCollapsedKey(userId: number | undefined): string {
 /** Скільки допустимих значень показується в підказці таблиці; решта — «+N» з переліком у тултіпі. */
 export const AllowedValuesShown = 8;
 
+/** Скільки груп-таблиць видно в розгорнутому банері (~160 px); решта — за «Show all N tables» (fg6 F13). */
+export const GroupsShown = 3;
+
 /** Скільки посилань на рядки показується в групі таблиці; решта — «і ще N». */
 export const RowLinksPerTable = 20;
 
+/**
+ * ✎ fg6 F13 (людина: «не має займати все вікно і має мати можливість згортатися»): без збереженого вибору банер
+ * ЗГОРНУТИЙ — лише рядок підсумку; розгорнутим він лишається тільки після явного «Show rows» (`0` у сховищі).
+ */
 function readCollapsed(key: string): boolean {
   try {
-    return window.localStorage.getItem(key) === '1';
+    return window.localStorage.getItem(key) !== '0';
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -68,6 +75,7 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow, narrow = 
   );
   const storageKey = unmatchedCollapsedKey(userId);
   const [collapsed, setCollapsed] = useState(() => readCollapsed(storageKey));
+  const [allGroups, setAllGroups] = useState(false);
 
   if (groups.length === 0) return null;
 
@@ -122,10 +130,8 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow, narrow = 
           gap="xs"
           mt="xs"
           aria-label={t('calculationIssues.listLabel')}
-          mah={260}
-          style={{ overflowY: 'auto' }}
         >
-          {groups.map((group) => {
+          {(allGroups ? groups : groups.slice(0, GroupsShown)).map((group) => {
             const shown = group.rows.slice(0, RowLinksPerTable);
             const more = group.rows.length - shown.length;
             const table = group.sheetName.length > 0 ? `${group.sheetName} · ${group.tableName}` : group.tableName;
@@ -187,6 +193,17 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow, narrow = 
             );
           })}
         </Stack>
+        {!allGroups && groups.length > GroupsShown && (
+          <Button
+            variant="subtle"
+            size="xs"
+            mt="xs"
+            onClick={() => setAllGroups(true)}
+            data-testid="document-unmatched-rows-all-tables"
+          >
+            {t('document.unmatchedRows.showAllTables', { count: String(groups.length) })}
+          </Button>
+        )}
       </Collapse>
     </Alert>
   );

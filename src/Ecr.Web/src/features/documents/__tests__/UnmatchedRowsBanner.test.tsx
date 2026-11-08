@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { issue, table } from '@/features/calculationIssues/__tests__/fixtures';
 import {
   AllowedValuesShown,
+  GroupsShown,
   plural,
   RowLinksPerTable,
   UnmatchedCollapsedKey,
@@ -82,10 +83,41 @@ describe('UnmatchedRowsBanner', () => {
     expect(screen.getByTestId('document-unmatched-rows-summary').getAttribute('role')).toBe('status');
   });
 
-  it('b4: згорнутий банер лишається згорнутим після перемонтування; кількість видно', async () => {
+  it('fg6 F13: за замовчуванням (чистий профіль) банер ЗГОРНУТИЙ - лише рядок підсумку', () => {
+    show(sixty);
+
+    expect(screen.getByTestId('document-unmatched-rows-toggle').getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByTestId('document-unmatched-rows-summary').textContent).toContain('⟦document.unmatchedRows.rows.other (count=4)⟧');
+  });
+
+  it('fg6 F13: розгорнутий - видно 3 таблиці, решта за «Show all N tables»', async () => {
+    const tables5 = Array.from({ length: 5 }, (_, i) => issue(i + 1, 1));
+    render(
+      <MantineProvider theme={testTheme}>
+        <UnmatchedRowsBanner
+          userId={7}
+          rows={rows(tables5)}
+          tables={Array.from({ length: 5 }, (_, i) => table(i + 1, `T${String(i + 1)} name`))}
+          onOpenRow={vi.fn()}
+        />
+      </MantineProvider>,
+    );
+    await userEvent.click(screen.getByTestId('document-unmatched-rows-toggle'));
+
+    expect(screen.getAllByTestId('document-unmatched-rows-group')).toHaveLength(GroupsShown);
+    const all = screen.getByTestId('document-unmatched-rows-all-tables');
+    expect(all.textContent).toBe('⟦document.unmatchedRows.showAllTables (count=5)⟧');
+    await userEvent.click(all);
+    expect(screen.getAllByTestId('document-unmatched-rows-group')).toHaveLength(5);
+    expect(screen.queryByTestId('document-unmatched-rows-all-tables')).toBeNull();
+  });
+
+  it('b4: розгорнутий і знову згорнутий банер лишається згорнутим після перемонтування; кількість видно', async () => {
     const first = show(sixty);
     const toggle = screen.getByTestId('document-unmatched-rows-toggle');
+    await userEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(window.localStorage.getItem(`${UnmatchedCollapsedKey}:7`)).toBe('0');
 
     await userEvent.click(toggle);
     expect(window.localStorage.getItem(`${UnmatchedCollapsedKey}:7`)).toBe('1');
@@ -96,13 +128,17 @@ describe('UnmatchedRowsBanner', () => {
     expect(screen.getByTestId('document-unmatched-rows-summary').textContent).toContain('⟦document.unmatchedRows.rows.other (count=4)⟧');
   });
 
-  it('fg6: згортання пам\'ятається для КОЖНОГО користувача - інший користувач бачить банер розгорнутим', async () => {
+  it('fg6: вибір пам\'ятається для КОЖНОГО користувача - розгорнув один, інший бачить згорнутим', async () => {
     const first = show(sixty, vi.fn(), 7);
     await userEvent.click(screen.getByTestId('document-unmatched-rows-toggle'));
     first.unmount();
 
-    show(sixty, vi.fn(), 8);
+    show(sixty, vi.fn(), 7);
     expect(screen.getByTestId('document-unmatched-rows-toggle').getAttribute('aria-expanded')).toBe('true');
+    cleanup();
+
+    show(sixty, vi.fn(), 8);
+    expect(screen.getByTestId('document-unmatched-rows-toggle').getAttribute('aria-expanded')).toBe('false');
   });
 
   it('fg6: згорнутий - лише рядок підсумку (назва · кількість), підказки й списку не видно', async () => {
@@ -121,13 +157,13 @@ describe('UnmatchedRowsBanner', () => {
     });
   });
 
-  it('b4: недоступне сховище не ламає банер - розгорнутий за замовчуванням', () => {
+  it('b4: недоступне сховище не ламає банер - згорнутий за замовчуванням (fg6 F13)', () => {
     const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('denied');
     });
     try {
       show(sixty);
-      expect(screen.getByTestId('document-unmatched-rows-toggle').getAttribute('aria-expanded')).toBe('true');
+      expect(screen.getByTestId('document-unmatched-rows-toggle').getAttribute('aria-expanded')).toBe('false');
     } finally {
       spy.mockRestore();
     }

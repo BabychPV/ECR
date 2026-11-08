@@ -77,7 +77,9 @@ describe('groupUnmatchedRows', () => {
 
     expect(groups[0]!.hint).toEqual({ columns: ['Code'], options: ['0903', '0905'], methodologies: ['M1'] });
     expect(groups[0]!.rows[0]!.currentValues).toEqual(['X']);
-    expect(groups[1]!.hint!.options).toEqual(['Kind = Gas', 'Kind = Coal · Fuel = Dry']);
+    // fg6 F13 P3: назви колонок — один раз («Kind, Fuel»), варіант — значення через « / », необмежена — «any».
+    expect(groups[1]!.hint!.columns).toEqual(['Kind', 'Fuel']);
+    expect(groups[1]!.hint!.options).toEqual(['Gas / ⟦document.unmatchedRows.anyValue⟧', 'Coal / Dry']);
     // Людині — назва методології; код — лише коли назви немає (M1).
     expect(groups[1]!.hint!.methodologies).toEqual(['Fuel combustion']);
   });

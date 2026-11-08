@@ -39,7 +39,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.unmatchedRows.emptyValue', N'ru', N'пусто'),
     (N'document.unmatchedRows.emptyValue', N'kz', N'бос'),
     (N'document.unmatchedRows.methodology', N'ru', N'Методология: {name}'),
-    (N'document.unmatchedRows.methodology', N'kz', N'Әдістеме: {name}')
+    (N'document.unmatchedRows.methodology', N'kz', N'Әдістеме: {name}'),
+    (N'document.unmatchedRows.showAllTables', N'ru', N'Показать все таблицы ({count})'),
+    (N'document.unmatchedRows.showAllTables', N'kz', N'Барлық кестелерді көрсету ({count})'),
+    (N'document.unmatchedRows.anyValue', N'ru', N'любое'),
+    (N'document.unmatchedRows.anyValue', N'kz', N'кез келген')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -66,7 +70,9 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'document.unmatchedRows.allowedMore', N'en', N'+{count} more', 1),
     (N'document.unmatchedRows.rowValue', N'en', N'Row {row}: «{value}»', 1),
     (N'document.unmatchedRows.emptyValue', N'en', N'empty', 1),
-    (N'document.unmatchedRows.methodology', N'en', N'Methodology: {name}', 1)
+    (N'document.unmatchedRows.methodology', N'en', N'Methodology: {name}', 1),
+    (N'document.unmatchedRows.showAllTables', N'en', N'Show all {count} tables', 1),
+    (N'document.unmatchedRows.anyValue', N'en', N'any', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

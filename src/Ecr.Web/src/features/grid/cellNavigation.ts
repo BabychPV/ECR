@@ -179,7 +179,28 @@ export async function revealGridCell(
     await grid.setCellsFocus?.(local, local);
   }
 
+  // ✎ fg6 F13: рядок, до якого перейшли, — у верхній третині вікна, а не на нижньому краї (людина: банер і сітка
+  // «не мають займати все вікно»). Рамка фокуса RevoGrid (`revogr-focus`) з'являється після кадру.
+  await new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+  scrollIntoUpperThird(grid.querySelector('revogr-focus') ?? grid);
+
   return true;
+}
+
+/**
+ * Прокручує СТОРІНКУ так, щоб верх елемента став на третину висоти вікна, — якщо він зараз не у верхніх 40 %
+ * (або вище за край). Уже видимий угорі елемент не смикається.
+ */
+export function scrollIntoUpperThird(element: Element, win: Window = window): void {
+  const height = win.innerHeight;
+  if (height <= 0) return;
+
+  const top = element.getBoundingClientRect().top;
+  if (top >= 0 && top <= height * 0.4) return;
+
+  win.scrollBy({ top: top - height / 3 });
 }
 
 /** Скільки тримається підсвітка цільової комірки. */

@@ -1,6 +1,7 @@
 import type { DocumentTableDto } from '@/api/types';
 import type { CalculationIssue, CalculationIssueTableHint } from '@/features/calculationIssues/api';
 import { copyFieldsOf } from '@/features/documents/sheetCopies/sheetCopyTypes';
+import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 
 /** Один рядок без правила в групі таблиці. */
@@ -124,9 +125,10 @@ function hintTextOf(hint: CalculationIssueTableHint): UnmatchedTableHint {
       single
         ? (option[0] ?? '')
         : option
-            .map((value, index) => (value === '' ? null : `${columns[index] ?? ''} = ${value}`))
-            .filter((part): part is string => part !== null)
-            .join(' · '),
+            // ✎ fg6 F13 P3: назви колонок — один раз у «Calculated only for «A, B»», варіант — значення через « / »;
+            // колонка, яку правило не обмежує, — «any».
+            .map((value) => (value === '' ? t('document.unmatchedRows.anyValue') : value))
+            .join(' / '),
     )
     .filter((text) => text.length > 0);
 

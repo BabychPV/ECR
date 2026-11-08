@@ -385,7 +385,7 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
   await expect(page.getByTestId('table-no-rule-badge'), 'позначка лише на одній таблиці').toHaveCount(1);
 
   // 3. UAT 08.11 b1: банер «Some rows are not included in the calculation» - група «аркуш · таблиця — кількість»,
-  //    без переліку «1 (S01), 2 (S02)…». Розгорнутий за замовчуванням (пам'ять згортання - чиста).
+  //    без переліку «1 (S01), 2 (S02)…». ✎ fg6 F13: ЗГОРНУТИЙ за замовчуванням (пам'ять згортання чиста) - розгортаємо.
   await page.evaluate(() => {
     try {
       // fg6: ключ - для кожного користувача (`ecr.unmatchedRows.collapsed:<userId>`).
@@ -393,7 +393,7 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
         if (key.startsWith('ecr.unmatchedRows.collapsed')) window.localStorage.removeItem(key);
       }
     } catch {
-      // Сховище недоступне — банер однаково розгорнутий.
+      // Сховище недоступне — банер однаково згорнутий за замовчуванням.
     }
   });
   await page.reload();
@@ -402,6 +402,9 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
   await expect(banner).toContainText('Some rows are not included in the calculation');
   await expect(page.getByTestId('document-unmatched-rows-summary')).toContainText('Not calculated: 1 row in 1 table');
   const toggle = page.getByTestId('document-unmatched-rows-toggle');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByTestId('document-unmatched-rows-hint')).toBeHidden();
+  await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   const group = banner.getByTestId('document-unmatched-rows-group');
   await expect(group).toHaveCount(1);
