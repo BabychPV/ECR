@@ -125,6 +125,38 @@ public sealed class RecurringTriggersInTestHostTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// Слово людини 08.11: «це завдання має спрацьовуватти частіше раз в 10 хв». Тригер, який
+    /// РЕАЛЬНО поставив застосунок для <c>PeriodStateJob</c>, спрацьовує шість разів на годину.
+    /// ⛔ Мутація: повернути <c>HourlyCron</c> у <c>RecurringScheduleService</c> — інтервал 60 хв, червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Стан_періодів_перераховується_кожні_10_хвилин()
+    {
+        using var app = NewApp();
+        var scheduler = await StartedSchedulerAsync(app);
+
+        var trigger = Assert.Single(
+            await RecurringTriggersAsync(scheduler),
+            t => t.JobKey.Name.StartsWith(nameof(PeriodStateJob) + ":", StringComparison.Ordinal));
+        var cron = Assert.IsAssignableFrom<ICronTrigger>(trigger);
+
+        var expression = new CronExpression(cron.CronExpressionString!) { TimeZone = cron.TimeZone };
+        var from = new DateTimeOffset(2026, 11, 8, 10, 0, 30, TimeSpan.Zero);
+        var fires = new List<DateTimeOffset>();
+        var next = expression.GetNextValidTimeAfter(from);
+        while (next is { } at && at < from.AddHours(1))
+        {
+            fires.Add(at);
+            next = expression.GetNextValidTimeAfter(at);
+        }
+
+        Assert.Equal(6, fires.Count);
+        Assert.All(fires.Zip(fires.Skip(1)), p => Assert.Equal(TimeSpan.FromMinutes(10), p.Second - p.First));
+    }
+
     private EcrApiFactory NewApp() => new(sql)
     {
         ExtraServices = services =>
