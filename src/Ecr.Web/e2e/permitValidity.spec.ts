@@ -268,9 +268,27 @@ async function openDocument(page: Page, world: World): Promise<void> {
   await expect(page.locator('revo-grid').first()).toBeVisible({ timeout: 60_000 });
 }
 
+/**
+ * Index of the grid column with this header. ⚠ RevoGrid virtualises columns horizontally: an off-screen month header is
+ * not in the DOM (run 42507055550: «Oct» never appeared). So the grid's own horizontal scroller (`grid-hscroll`, as in
+ * `colGroups.spec.ts`) is moved step by step until the header renders.
+ */
 async function gridColumn(page: Page, header: string): Promise<string> {
   const cell = page.locator('revo-grid revogr-header .rgHeaderCell', { hasText: header }).first();
-  await expect(cell, `заголовка «${header}» немає в сітці`).toBeVisible({ timeout: 60_000 });
+  const scroller = page.getByTestId('grid-hscroll');
+  await expect(page.locator('revo-grid revogr-header .rgHeaderCell').first()).toBeVisible({ timeout: 60_000 });
+  await scroller.evaluate((el) => {
+    el.scrollLeft = 0;
+  });
+  await expect(async () => {
+    if ((await cell.count()) === 0) {
+      await scroller.evaluate((el) => {
+        el.scrollLeft = Math.min(el.scrollLeft + Math.max(200, el.clientWidth / 2), el.scrollWidth);
+      });
+    }
+    await expect(cell).toBeVisible({ timeout: 1_000 });
+  }, `заголовка «${header}» немає в сітці навіть після прокрутки`).toPass({ timeout: 60_000 });
+  await cell.scrollIntoViewIfNeeded();
   const index = await cell.getAttribute('aria-colindex');
   if (index === null) throw new Error(`заголовок «${header}» без aria-colindex`);
 
