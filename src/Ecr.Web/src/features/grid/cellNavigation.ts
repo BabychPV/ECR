@@ -181,12 +181,41 @@ export async function revealGridCell(
 
   // ✎ fg6 F13: рядок, до якого перейшли, — у верхній третині вікна, а не на нижньому краї (людина: банер і сітка
   // «не мають займати все вікно»). Рамка фокуса RevoGrid (`revogr-focus`) з'являється після кадру.
-  await new Promise<void>((resolve) => {
-    window.requestAnimationFrame(() => resolve());
-  });
-  scrollIntoUpperThird(grid.querySelector('revogr-focus') ?? grid);
+  keepInUpperThird(() => grid.querySelector('revogr-focus') ?? grid);
 
   return true;
+}
+
+/** Скільки кадрів тримати рядок у верхній третині після переходу. */
+const UpperThirdFrames = 40;
+
+/**
+ * Тримає елемент у верхній третині вікна ~40 кадрів після переходу.
+ *
+ * ⛔ Один `scrollBy` не тримається: вибір таблиці в дереві — `navigate(?table=, replace)`, нова `location.key`, і
+ * глобальний `<ScrollRestoration/>` (`AppLayout`) робить `scrollTo(0, 0)` уже ПІСЛЯ фокуса (живий прохід F13: рядок
+ * лишався на y≈650 із 900, на 375 px — за краєм вікна). Тому — повтор кожен кадр, доки людина сама не прокрутила
+ * (колесо, дотик, клавіша, клік) — той самий прийом, що відновлення прокрутки при зміні періоду (`DocumentPage`).
+ */
+export function keepInUpperThird(target: () => Element): void {
+  let frames = 0;
+  let frame = 0;
+  let stopped = false;
+  const userScroll = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+  const stop = (): void => {
+    stopped = true;
+    window.cancelAnimationFrame(frame);
+    for (const type of userScroll) window.removeEventListener(type, stop);
+  };
+  for (const type of userScroll) window.addEventListener(type, stop, { passive: true, once: true });
+  const tick = (): void => {
+    if (stopped) return;
+    scrollIntoUpperThird(target());
+    frames += 1;
+    if (frames < UpperThirdFrames) frame = window.requestAnimationFrame(tick);
+    else stop();
+  };
+  frame = window.requestAnimationFrame(tick);
 }
 
 /**

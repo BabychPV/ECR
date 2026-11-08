@@ -4,6 +4,7 @@ import {
   completeCellNavigation,
   currentCellNavigation,
   requestCellNavigation,
+  keepInUpperThird,
   revealGridCell,
   scrollIntoUpperThird,
   subscribeCellNavigation,
@@ -33,6 +34,27 @@ describe('scrollIntoUpperThird (fg6 F13: рядок — у верхній тре
     scrollIntoUpperThird(at(200), win);
 
     expect(win.scrollBy).not.toHaveBeenCalled();
+  });
+
+  it('ScrollRestoration скинув прокрутку після фокуса - рядок повертається в наступних кадрах; колесо людини зупиняє', () => {
+    const queue: FrameRequestCallback[] = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => queue.push(cb));
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+    const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => undefined);
+    Object.defineProperty(window, 'innerHeight', { value: 900, configurable: true });
+    const flush = (n: number): void => {
+      for (let i = 0; i < n; i++) queue.shift()?.(0);
+    };
+
+    // Рядок «скинутий» на нижній край у КОЖНОМУ кадрі (як після scrollTo(0, 0)).
+    keepInUpperThird(() => at(850));
+    flush(3);
+    expect(scrollBy).toHaveBeenCalledTimes(3);
+
+    window.dispatchEvent(new Event('wheel'));
+    flush(5);
+    expect(scrollBy).toHaveBeenCalledTimes(3);
+    vi.restoreAllMocks();
   });
 
   it('рядок вище за край вікна (y=-120) - повертається на третину', () => {
