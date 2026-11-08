@@ -1,34 +1,154 @@
-import type { JSX } from 'react';
-import { Alert, Text } from '@mantine/core';
+import { useMemo, useState, type JSX } from 'react';
+import { Alert, Anchor, Button, Collapse, Group, Stack, Text } from '@mantine/core';
+import type { DocumentTableDto } from '@/api/types';
+import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
 import type { UnmatchedRows } from './useUnmatchedRows';
+import { groupUnmatchedRows, unmatchedRowCount } from './unmatchedRowsModel';
+
+/** Пам'ять «банер згорнуто» (глобально, як `ecr.calcResults.collapsed`): `1` згорнуто, `0` розгорнуто. */
+export const UnmatchedCollapsedKey = 'ecr.unmatchedRows.collapsed';
+
+/** Скільки посилань на рядки показується в групі таблиці; решта — «і ще N». */
+export const RowLinksPerTable = 20;
+
+function readCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(UnmatchedCollapsedKey) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeCollapsed(collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(UnmatchedCollapsedKey, collapsed ? '1' : '0');
+  } catch {
+    // Сховище недоступне — вибір просто не запам'ятається.
+  }
+}
 
 interface UnmatchedRowsBannerProps {
   readonly rows: UnmatchedRows;
+  /** Усі таблиці документа за період: назви таблиць і аркушів, екземпляр для переходу. */
+  readonly tables: readonly DocumentTableDto[];
+  /** Відкрити рядок у сітці: аркуш, прокрутка, фокус і підсвітка (шлях зауважень, `ФВ-5.6`). */
+  readonly onOpenRow: (tableInstanceId: number, rowKey: string) => void;
 }
 
 /**
- * Позначка «частину рядків не взято в розрахунок» над сіткою (D14).
+ * «Частину рядків не взято в розрахунок» над сіткою (D14 + AN-69; UAT 08.11 b1–b4).
  *
- * ⛔ Це ІНФОРМАЦІЯ, а не помилка: у Land рядок зі статусом, відмінним від Running, виключається навмисно, і
- * блокувань тут немає - ні подання, ні перерахунку. Тому тон `info` макета (`E.Banner({ tone: 'info' })`,
- * `docs/design/hybrid/KIT.md`), як у сусіднього `docs-narrow-note`: `Alert color="brand" variant="light"`.
+ * ⛔ Це ІНФОРМАЦІЯ, а не помилка: тон `info` макета (`Alert color="brand" variant="light"`), і речення
+ * «нічого виправляти не треба» — один раз, у підказці. Рядки, відсіяні статусом «не Running» (D-425), сюди не
+ * потрапляють — сервер пише лише ті, яким не підійшло жодне правило методології (`CalculationOrchestrator.UnmatchedRowsOf`).
  *
- * ⚠ Рядки - номер у порядку створення й публічний ключ, значень комірок немає; більше десяти сервер не віддає,
- * тому хвіст позначається «…» за `count`.
+ * ⚠ Групи — таблиця з аркушем і кількістю («Utility · 9.01 Unit 400 — rows: 2»), кожен рядок — кнопка-посилання,
+ * що відкриває його в сітці. Згортання пам'ятається (`localStorage` під `try/catch`), кількість видно і згорнутим.
+ *
+ * ⚠ Попередня згортна панель AN-69 (`CalculationIssuesPanel`, жовта, лише активний аркуш) показувала ТІ САМІ рядки
+ * вдруге іншим тоном — її замінено цим банером; позначки в дереві таблиць лишились.
  */
-export function UnmatchedRowsBanner({ rows }: UnmatchedRowsBannerProps): JSX.Element {
-  const shown = rows.rows.map((r) => `${String(r.rowNumber)} (${r.rowKey})`).join(', ');
-  const list = rows.count > rows.rows.length ? `${shown}, …` : shown;
+export function UnmatchedRowsBanner({ rows, tables, onOpenRow }: UnmatchedRowsBannerProps): JSX.Element | null {
+  const groups = useMemo(() => groupUnmatchedRows(rows.issues, tables), [rows.issues, tables]);
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+
+  if (groups.length === 0) return null;
+
+  const count = unmatchedRowCount(groups);
+  const toggle = (): void => {
+    const next = !collapsed;
+    setCollapsed(next);
+    writeCollapsed(next);
+  };
+  const bodyId = 'document-unmatched-rows-body';
 
   return (
-    // ⚠ `role="status"` - на обгортці: Mantine `Alert` власну `role` не приймає (завжди `alert`).
-    <div role="status" data-testid="document-unmatched-rows-status">
-      <Alert color="brand" variant="light" title={t('document.unmatchedRows.title')} data-testid="document-unmatched-rows">
-        <Text size="sm" data-testid="document-unmatched-rows-hint">
-          {t('document.unmatchedRows.hint', { count: String(rows.count), rows: list })}
+    <Alert color="brand" variant="light" data-testid="document-unmatched-rows">
+      <Group justify="space-between" wrap="nowrap" gap="sm" align="flex-start">
+        <div>
+          <Text size="sm" fw={600} data-testid="document-unmatched-rows-title">
+            {t('document.unmatchedRows.title')}
+          </Text>
+          {/* ⚠ `role="status"` — на тексті з кількістю: Mantine `Alert` власну `role` не приймає (завжди `alert`). */}
+          <Text size="sm" role="status" data-testid="document-unmatched-rows-summary">
+            {t('document.unmatchedRows.summary', { count: String(count), tables: String(groups.length) })}
+            {rows.finishedAt !== null && ` · ${t('document.unmatchedRows.lastRun', { time: formatDateTime(rows.finishedAt) })}`}
+          </Text>
+        </div>
+        <Button
+          variant="subtle"
+          size="xs"
+          aria-expanded={!collapsed}
+          aria-controls={bodyId}
+          onClick={toggle}
+          data-testid="document-unmatched-rows-toggle"
+        >
+          {collapsed ? t('calculationIssues.show') : t('calculationIssues.hide')}
+        </Button>
+      </Group>
+
+      <Collapse in={!collapsed} id={bodyId}>
+        <Text size="sm" mt="xs" data-testid="document-unmatched-rows-hint">
+          {t('document.unmatchedRows.hint')}
         </Text>
-      </Alert>
-    </div>
+        <Stack
+          role="list"
+          gap="xs"
+          mt="xs"
+          aria-label={t('calculationIssues.listLabel')}
+          mah={260}
+          style={{ overflowY: 'auto' }}
+        >
+          {groups.map((group) => {
+            const shown = group.rows.slice(0, RowLinksPerTable);
+            const more = group.rows.length - shown.length;
+            const table = group.sheetName.length > 0 ? `${group.sheetName} · ${group.tableName}` : group.tableName;
+
+            return (
+              <div role="listitem" key={group.key} data-testid="document-unmatched-rows-group">
+                <Text size="sm" span fw={500}>
+                  {t('document.unmatchedRows.group', { table, count: String(group.rows.length) })}
+                </Text>
+                {group.methodologyCode !== null && (
+                  <Text size="xs" span>
+                    {` · ${group.methodologyCode}`}
+                  </Text>
+                )}
+                <Group gap="xs" wrap="wrap">
+                  {shown.map((row) => {
+                    const label = t('document.unmatchedRows.row', { row: String(row.rowNumber) });
+                    const tableInstanceId = group.tableInstanceId;
+
+                    return tableInstanceId === null ? (
+                      <Text key={row.rowKey} size="sm" span>
+                        {label}
+                      </Text>
+                    ) : (
+                      <Anchor
+                        key={row.rowKey}
+                        component="button"
+                        type="button"
+                        size="sm"
+                        data-testid="document-unmatched-row-link"
+                        data-row-key={row.rowKey}
+                        onClick={() => onOpenRow(tableInstanceId, row.rowKey)}
+                      >
+                        {label}
+                      </Anchor>
+                    );
+                  })}
+                  {more > 0 && (
+                    <Text size="sm" span>
+                      {t('document.unmatchedRows.more', { count: String(more) })}
+                    </Text>
+                  )}
+                </Group>
+              </div>
+            );
+          })}
+        </Stack>
+      </Collapse>
+    </Alert>
   );
 }

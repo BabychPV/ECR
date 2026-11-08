@@ -384,22 +384,48 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
   await expect(calcItem).toHaveAttribute('aria-label', /Rows without a calculation rule: 1/);
   await expect(page.getByTestId('table-no-rule-badge'), 'позначка лише на одній таблиці').toHaveCount(1);
 
-  // 3. Панель на сторінці: заголовок з кількістю, згортний список з рядком.
-  const panel = page.getByTestId('calculation-issues-panel');
-  await expect(panel).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('calculation-issues-title')).toContainText('1');
-  const toggle = page.getByTestId('calculation-issues-toggle');
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await toggle.click();
+  // 3. UAT 08.11 b1: банер «Some rows are not included in the calculation» - група «аркуш · таблиця — кількість»,
+  //    без переліку «1 (S01), 2 (S02)…». Розгорнутий за замовчуванням (пам'ять згортання - чиста).
+  await page.evaluate(() => {
+    try {
+      window.localStorage.removeItem('ecr.unmatchedRows.collapsed');
+    } catch {
+      // Сховище недоступне — банер однаково розгорнутий.
+    }
+  });
+  await page.reload();
+  const banner = page.getByTestId('document-unmatched-rows');
+  await expect(banner).toBeVisible({ timeout: 60_000 });
+  await expect(banner).toContainText('Some rows are not included in the calculation');
+  await expect(page.getByTestId('document-unmatched-rows-summary')).toContainText('Rows: 1 · tables: 1');
+  const toggle = page.getByTestId('document-unmatched-rows-toggle');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  const item = panel.getByTestId('calculation-issue-item');
-  await expect(item).toHaveCount(1);
-  await expect(item).toContainText(/Calculated table · row 2/);
-  await expect(item).toContainText(arranged.methodologyCode);
+  const group = banner.getByTestId('document-unmatched-rows-group');
+  await expect(group).toHaveCount(1);
+  await expect(group).toContainText('Sheet 1 · Calculated table — rows: 1');
+  await expect(group).toContainText(arranged.methodologyCode);
 
-  // 4. Клік по рядку вибирає таблицю: до кліку вибрана перша за порядком (TPLAIN), після — TCALC.
-  await expect(page).not.toHaveURL(new RegExp(`[?&]table=${TableCalc}(&|$)`));
-  await item.getByRole('button').click();
-  await expect(page).toHaveURL(new RegExp(`[?&]table=${TableCalc}(&|$)`));
-  await expect(calcItem).toHaveAttribute('aria-selected', 'true');
+  // b3: одне речення «чому і як», «нічого виправляти» - рівно один раз.
+  const bannerText = (await banner.textContent()) ?? '';
+  expect(bannerText.split('nothing to fix').length - 1, '«nothing to fix» - один раз').toBe(1);
+  await expect(page.getByTestId('document-unmatched-rows-hint')).toContainText('press F9');
+
+  // b2: клік по рядку - сітка таблиці TCALC, фокус і підсвітка саме рядка Coal (№ 2).
+  const link = group.getByTestId('document-unmatched-row-link');
+  await expect(link).toHaveText('Row 2');
+  await expect(link).toHaveAttribute('data-row-key', arranged.coalRowKey);
+  await link.click();
+  await expect(calcItem).toHaveAttribute('aria-selected', 'true', { timeout: 30_000 });
+  await expect(page.locator('.ecr-cell-nav-target'), 'підсвічена комірка рядка').toHaveCount(1, { timeout: 30_000 });
+
+  // b4: згорнути, перезавантажити - лишається згорнутим, кількість видно.
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await page.reload();
+  await expect(page.getByTestId('document-unmatched-rows-toggle')).toHaveAttribute('aria-expanded', 'false', { timeout: 60_000 });
+  await expect(page.getByTestId('document-unmatched-rows-summary')).toContainText('Rows: 1');
+  await expect(page.getByTestId('document-unmatched-rows-hint')).toBeHidden();
+
+  // Стара жовта панель AN-69 з тими самими рядками більше не дублює банер.
+  await expect(page.getByTestId('calculation-issues-panel')).toHaveCount(0);
 }

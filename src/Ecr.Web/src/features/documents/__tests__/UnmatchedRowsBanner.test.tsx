@@ -1,43 +1,124 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
-import { UnmatchedRowsBanner } from '@/features/documents/UnmatchedRowsBanner';
+import { issue, table } from '@/features/calculationIssues/__tests__/fixtures';
+import { RowLinksPerTable, UnmatchedCollapsedKey, UnmatchedRowsBanner } from '@/features/documents/UnmatchedRowsBanner';
+import type { UnmatchedRows } from '@/features/documents/useUnmatchedRows';
 import { testTheme } from '@/test/render';
 
 /**
- * D14: рядок без правила розрахунку (напр. статус Removed) - інформаційна позначка на аркуші, не помилка.
+ * UAT 08.11 b1–b4: банер «Some rows are not included in the calculation».
  *
- * Мутація: прибрати ключі каталогу або список рядків - червоніють перевірки нижче.
+ * b1 — групи за таблицею з аркушем і кількістю, без повторів; b2 — кожен рядок - кнопка, що відкриває його в сітці;
+ * b3 — одне пояснення «чому і як» (ключ `document.unmatchedRows.hint`) рівно один раз; b4 — згортання пам'ятається
+ * після перемонтування (= перезавантаження), кількість видно й згорнутим.
+ *
+ * Мутації (перевірено вручну, див. звіт lane): не писати `localStorage` у `toggle` — червоніє b4; `onOpenRow` з
+ * `group.key` замість екземпляра — червоніє b2; прибрати `slice(0, RowLinksPerTable)` — червоніє «і ще N».
  */
 
-function show(rows: Parameters<typeof UnmatchedRowsBanner>[0]['rows']): void {
-  render(
-    <MantineProvider theme={testTheme}>
-      <UnmatchedRowsBanner rows={rows} />
-    </MantineProvider>,
-  );
+function rows(issues: UnmatchedRows['issues'], finishedAt: string | null = null): UnmatchedRows {
+  return { issues, finishedAt };
 }
 
-describe('UnmatchedRowsBanner', () => {
-  it('називає ключ рядка без правила, без кнопок дій і без тону помилки', () => {
-    show({ count: 1, rows: [{ tableInstanceId: 5, rowNumber: 2, rowKey: 'R-REMOVED' }] });
+function show(value: UnmatchedRows, onOpenRow = vi.fn()) {
+  const tables = [table(1, '9.01 Unit 400'), table(2, '9.03 Unit 430')];
+  const view = render(
+    <MantineProvider theme={testTheme}>
+      <UnmatchedRowsBanner rows={value} tables={tables} onOpenRow={onOpenRow} />
+    </MantineProvider>,
+  );
 
-    const banner = screen.getByTestId('document-unmatched-rows');
-    expect(banner.textContent).toContain('document.unmatchedRows.title');
-    // ⚠ Інформація, не помилка: роль status стоїть на обгортці (Alert завжди alert).
-    expect(screen.getByTestId('document-unmatched-rows-status').getAttribute('role')).toBe('status');
-    const hint = screen.getByTestId('document-unmatched-rows-hint').textContent ?? '';
-    expect(hint).toContain('document.unmatchedRows.hint');
-    expect(hint).toContain('2 (R-REMOVED)');
-    expect(screen.queryAllByRole('button')).toHaveLength(0);
+  return { ...view, onOpenRow };
+}
+
+const sixty = rows([
+  issue(1, 1, { rowKey: 'S01' }),
+  issue(1, 2, { rowKey: 'S02' }),
+  issue(2, 1, { rowKey: 'S01' }),
+  issue(2, 2, { rowKey: 'S02' }),
+]);
+
+describe('UnmatchedRowsBanner', () => {
+  beforeEach(() => window.localStorage.clear());
+  afterEach(() => window.localStorage.clear());
+
+  it('b1: групи «аркуш · таблиця — кількість», без повторів ключів у одному рядку', () => {
+    show(sixty);
+
+    const groups = screen.getAllByTestId('document-unmatched-rows-group').map((g) => g.textContent ?? '');
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toContain('⟦document.unmatchedRows.group (table=Sheet · 9.01 Unit 400, count=2)⟧');
+    expect(groups[1]).toContain('⟦document.unmatchedRows.group (table=Sheet · 9.03 Unit 430, count=2)⟧');
+    expect(screen.getByTestId('document-unmatched-rows-summary').textContent).toContain(
+      '⟦document.unmatchedRows.summary (count=4, tables=2)⟧',
+    );
+    // Старий текст «Row: 1 (S01), 2 (S02), 1 (S01)…» - більше немає.
+    expect(screen.getByTestId('document-unmatched-rows').textContent).not.toContain('(S01)');
   });
 
-  it('понад показані ключі - хвіст позначено трьома крапками й повною кількістю', () => {
-    const rows = Array.from({ length: 10 }, (_, i) => ({ tableInstanceId: 5, rowNumber: i + 1, rowKey: `K${String(i + 1)}` }));
-    show({ count: 14, rows });
+  it('b2: клік по рядку відкриває САМЕ цей рядок цієї таблиці', async () => {
+    const { onOpenRow } = show(sixty);
 
-    const hint = screen.getByTestId('document-unmatched-rows-hint').textContent ?? '';
-    expect(hint).toContain('10 (K10), …');
-    expect(hint).toContain('14');
+    const links = screen.getAllByTestId('document-unmatched-row-link');
+    expect(links).toHaveLength(4);
+    await userEvent.click(links[3]!);
+
+    expect(onOpenRow).toHaveBeenCalledExactlyOnceWith(102, 'S02');
+  });
+
+  it('b3: пояснення «чому і як» - один раз, тон інформації (status), не помилки', () => {
+    show(sixty);
+
+    const text = screen.getByTestId('document-unmatched-rows').textContent ?? '';
+    expect(text.split('document.unmatchedRows.hint').length - 1).toBe(1);
+    expect(screen.getByTestId('document-unmatched-rows-summary').getAttribute('role')).toBe('status');
+  });
+
+  it('b4: згорнутий банер лишається згорнутим після перемонтування; кількість видно', async () => {
+    const first = show(sixty);
+    const toggle = screen.getByTestId('document-unmatched-rows-toggle');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+    await userEvent.click(toggle);
+    expect(window.localStorage.getItem(UnmatchedCollapsedKey)).toBe('1');
+    first.unmount();
+
+    show(sixty);
+    expect(screen.getByTestId('document-unmatched-rows-toggle').getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByTestId('document-unmatched-rows-summary').textContent).toContain('count=4');
+  });
+
+  it('b4: недоступне сховище не ламає банер - розгорнутий за замовчуванням', () => {
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('denied');
+    });
+    try {
+      show(sixty);
+      expect(screen.getByTestId('document-unmatched-rows-toggle').getAttribute('aria-expanded')).toBe('true');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('понад межу посилань у таблиці - «і ще N», а не сотні кнопок', () => {
+    const many = Array.from({ length: RowLinksPerTable + 5 }, (_, i) => issue(1, i + 1));
+    show(rows(many));
+
+    expect(screen.getAllByTestId('document-unmatched-row-link')).toHaveLength(RowLinksPerTable);
+    expect(screen.getByTestId('document-unmatched-rows').textContent).toContain('⟦document.unmatchedRows.more (count=5)⟧');
+  });
+
+  it('час прогону - поруч із кількістю, коли відомий', () => {
+    show(rows([issue(1, 1)], '2026-11-08T10:00:00Z'));
+
+    expect(screen.getByTestId('document-unmatched-rows-summary').textContent).toContain('document.unmatchedRows.lastRun');
+  });
+
+  it('немає рядків - нічого не малюється', () => {
+    show(rows([]));
+
+    expect(screen.queryByTestId('document-unmatched-rows')).toBeNull();
   });
 });
