@@ -42,14 +42,17 @@ export function openMonthsText(periods: readonly CalendarPeriod[], kind: string)
  * пропускається. Замість старого «Every document of every period…», яке було неправдою.
  */
 export function recalcScopeText(
-  calendar: PeriodCalendarDto | undefined,
+  calendar: PeriodCalendarDto | null | undefined,
   projectCode: string,
   documentCount: number | null,
   now: number = Date.now(),
 ): string {
   const documents = documentCount ?? '—';
 
-  if (calendar === undefined) return t('recalcProgress.confirmScopeUnknown', { project: projectCode, documents });
+  // ⚠ Календар ще не приїхав (або відповідь без періодів) — область без місяців, а не падіння діалогу.
+  if (calendar === undefined || calendar === null || !Array.isArray(calendar.periods)) {
+    return t('recalcProgress.confirmScopeUnknown', { project: projectCode, documents });
+  }
 
   const open = calendar.periods.filter((period) => {
     const state = effectivePeriodState(period, now);

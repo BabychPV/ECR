@@ -55,6 +55,7 @@ import { copyFieldsOf, sheetTabKey } from '@/features/documents/sheetCopies/shee
 import { chatMessageCountOf, groupBySheet, sheetItemsOf, stateOfGroup } from '@/features/documents/sheetCopies/sheetGroups';
 import { parseChatKey } from '@/features/tableChat/chatKey';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
+import { ProjectRecalcBannerSlot } from '@/features/recalc/ProjectRecalcBannerSlot';
 import { t } from '@/shared/i18n';
 import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/settleEdits';
 
@@ -142,10 +143,6 @@ const UnmatchedRowsBanner = lazy(async () => ({
   default: (await import('@/features/documents/UnmatchedRowsBanner')).UnmatchedRowsBanner,
 }));
 
-// ✎ UAT recalc-progress (08.11): прогрес перерахунку проєкту документа — окремий чанк (`D-132`).
-const ProjectRecalcBanner = lazy(async () => ({
-  default: (await import('@/features/recalc/ProjectRecalcBanner')).ProjectRecalcBanner,
-}));
 
 // PM-11: «З дозволу» + «Оновити з дозволу» — окремий чанк (бюджет маршруту D-132).
 const PermitRefreshStrip = lazy(async () => ({
@@ -877,9 +874,7 @@ export function DocumentPage(): JSX.Element {
       )}
 
       {projectId !== null && (
-        <Suspense fallback={null}>
-          <ProjectRecalcBanner projectId={projectId} />
-        </Suspense>
+        <ProjectRecalcBannerSlot projectId={projectId} />
       )}
 
       {/* ⛔ `F-18`: ЧОМУ тут нічого не змінити — одразу під рядком дій, до
