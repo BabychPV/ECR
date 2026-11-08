@@ -48,7 +48,7 @@ public sealed class CalculationOrchestratorTests
         States(PeriodState.Open);
         _workflow.HasSubmittedSheetsAsync(Project, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                  .Returns(false);
-        _jobs.EnqueueAsync<IRecalculationJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>())
+        _jobs.EnqueueCoalescedAsync<IRecalculationJob>(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
              .Returns("job-1");
 
         // ⛔ Q-151 (аудит фази 1): `RunCalculationHandler` не перевіряв ЖОДНОГО
@@ -170,8 +170,7 @@ public sealed class CalculationOrchestratorTests
         Assert.Equal("err.ECR-CALC-4221.periodClosed", error.Details?["messageKey"]);
         Assert.Equal("202601", error.Details?["period"]);
         Assert.Contains("Reopen", error.Message, StringComparison.Ordinal);
-        await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
-            Arg.Any<object?>(), Arg.Any<CancellationToken>());
+        await _jobs.DidNotReceive().EnqueueCoalescedAsync<IRecalculationJob>(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
 
         // Після Reopen період у `Grace` — звичайний перерахунок проходить.
         States(PeriodState.Grace);
@@ -193,7 +192,7 @@ public sealed class CalculationOrchestratorTests
 
         Assert.Equal("job-1", outcome.JobId);
         Assert.False(outcome.NothingToRecalculate);
-        await _jobs.Received(1).EnqueueAsync<IRecalculationJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>());
+        await _jobs.Received(1).EnqueueCoalescedAsync<IRecalculationJob>(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
@@ -243,7 +242,7 @@ public sealed class CalculationOrchestratorTests
 
         Assert.True(outcome.NothingToRecalculate);
         Assert.Equal([(11L, 3, Period)], outcome.Skipped.Select(s => (s.DocumentId, s.SheetDefId, s.PeriodKey)));
-        await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>());
+        await _jobs.DidNotReceive().EnqueueCoalescedAsync<IRecalculationJob>(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
 
         // Старий вхід (без переліку) лишає «рахувати нічого» відмовою 4221.
         var legacy = await Assert.ThrowsAsync<BusinessRuleException>(
@@ -341,8 +340,7 @@ public sealed class CalculationOrchestratorTests
             () => Handler().HandleAsync(Project, Period, CancellationToken.None));
 
         Assert.Equal("ECR-AUTH-0403", error.ErrorCode);
-        await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
-            Arg.Any<object?>(), Arg.Any<CancellationToken>());
+        await _jobs.DidNotReceive().EnqueueCoalescedAsync<IRecalculationJob>(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
@@ -360,8 +358,7 @@ public sealed class CalculationOrchestratorTests
             () => Handler().HandleAsync(Project, Period, CancellationToken.None));
 
         Assert.Equal("ECR-AUTH-0403", error.ErrorCode);
-        await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
-            Arg.Any<object?>(), Arg.Any<CancellationToken>());
+        await _jobs.DidNotReceive().EnqueueCoalescedAsync<IRecalculationJob>(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
     }
 
     private RunCalculationHandler Handler()

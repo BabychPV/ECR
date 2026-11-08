@@ -310,8 +310,6 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     /// </remarks>
     public async Task<FanOutStatus?> GetFanOutAsync(string parentJobId, CancellationToken ct)
     {
-        var recalcCode = JobListKinds.RecalculationJobCode;
-
         // ⚠ За стовпцем `FanOutParentJobId` (persisted, JSON_VALUE з Payload) і його індексом
         // `IX_JobProgress_FanOutParent`: раніше JSON_VALUE у предикаті скановував усю
         // історію (вимір 2026-10-01, 500 тис. рядків: 47 116 читань / 2,5 с → 4 читання / 14 мс).
@@ -322,8 +320,8 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
                  SELECT State, COUNT(*) AS Cnt
                    FROM itg.JobProgress
                   WHERE FanOutParentJobId = {parentJobId}
-                    AND JobCode = {recalcCode}
-                    AND DocumentId IS NOT NULL
+                    AND (TargetKey LIKE N'IRecalculationJob~doc%'
+                         OR (Lane IS NULL AND JobId LIKE N'IRecalculationJob~doc%'))
                   GROUP BY State
                  """)
             .ToListAsync(ct)
@@ -339,7 +337,7 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
         int Of(string state) => rows.Where(r => r.State == state).Sum(r => r.Cnt);
 
         var succeeded = Of("Succeeded");
-        var skipped = succeeded == 0 ? 0 : await SkippedSheetsAsync(parentJobId, recalcCode, ct).ConfigureAwait(false);
+        var skipped = succeeded == 0 ? 0 : await SkippedSheetsAsync(parentJobId, ct).ConfigureAwait(false);
 
         return new FanOutStatus(
             total, Of("Queued"), Of("Running"), succeeded, Of("Failed") + Of("Cancelled"), skipped);
@@ -348,6 +346,9 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     /// <summary>Ключ підсумку журналу аркушів дочірньої задачі (<c>RecalculationJob</c>).</summary>
     private const string SheetLogKey = "jobs.recalcSheetLog";
 
+    /// <summary>Ціль документної дитини: черга в базі — <c>TargetKey</c>, Quartz — початок <c>JobId</c>.</summary>
+    private const string ChildPrefix = "IRecalculationJob~doc";
+
     /// <summary>
     /// Сума пропущених затверджених аркушів за підсумками <c>jobs.recalcSheetLog</c> виконаних дітей.
     /// </summary>
@@ -355,14 +356,15 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     /// ⚠ Підсумок — ОСТАННЄ повідомлення дитини (<c>RecalculationJob</c>), а <c>Finish</c> повідомлення не
     /// чіпає, тож він лежить у рядку до прибирання. Дитина без пропусків підсумку не пише — вона дає 0.
     /// </remarks>
-    private async Task<int> SkippedSheetsAsync(string parentJobId, string recalcCode, CancellationToken ct)
+    private async Task<int> SkippedSheetsAsync(string parentJobId, CancellationToken ct)
     {
         var quoted = "\"" + SheetLogKey + "\"";
 
         var messages = await db.JobProgresses
             .AsNoTracking()
             .Where(p => p.FanOutParentJobId == parentJobId
-                        && p.JobCode == recalcCode
+                        && ((p.TargetKey != null && p.TargetKey.StartsWith(ChildPrefix))
+                            || (p.Lane == null && p.JobId.StartsWith(ChildPrefix)))
                         && p.State == SucceededState
                         && p.Message != null
                         && p.Message.Contains(quoted))
