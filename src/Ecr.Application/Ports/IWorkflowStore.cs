@@ -87,6 +87,19 @@ public interface IWorkflowStore
     public Task<Domain.Enums.PeriodState> EffectivePeriodStateAsync(
         Period period, DateTime utcNow, CancellationToken ct);
 
+    /// <summary>
+    /// Приймальна 08.11 (i): чи діє на <paramref name="utcNow"/> виняток «закритий місяць відкрито лише для цього
+    /// документа» (<c>doc.DocumentPeriodReopen</c>).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Місяць.</param>
+    /// <param name="utcNow">Поточний момент.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>За замовчуванням — ні: сховища-підміни в тестах винятків не мають.</remarks>
+    public Task<bool> HasDocumentPeriodReopenAsync(
+        long documentId, PeriodKey periodKey, DateTime utcNow, CancellationToken ct)
+        => Task.FromResult(false);
+
     /// <summary>Зберігає іммутабельний зріз поданих даних (ФВ-5.7).</summary>
     /// <returns>Ідентифікатор зрізу.</returns>
     public Task<long> SaveSnapshotAsync(SubmissionSnapshotRecord snapshot, CancellationToken ct);

@@ -161,6 +161,10 @@ public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock?
         // пізню, а `IsLateEdit` (D-70) писав у журнал `0` — «вчасно» саме в годину
         // дедлайну. Один запит, як і доти (храповик кількості запитів PATCH):
         // проєкт — з того самого рядка, період — підзапитом.
+        // ⚠ Приймальна 08.11 (i): виняток документа діє лише за годинником. Без нього (пряме конструювання поза DI)
+        // — збережений стан, як до X6-01, і винятку немає.
+        var withException = clock is not null;
+        var now = clock?.UtcNow ?? default;
         var row = await (
                 from document in db.Documents.AsNoTracking()
                 where document.Id == documentId
@@ -171,6 +175,10 @@ public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock?
                     project.PeriodEnd,
                     project.YearGraceOffsetDays,
                     project.TimeZoneId,
+                    DocumentReopened = withException && db.DocumentPeriodReopens.Any(x => x.DocumentId == documentId
+                                                                            && x.PeriodKeyValue == periodKey
+                                                                            && x.ClosedAt == null
+                                                                            && x.OpenUntil > now),
                     Period = db.Periods
                         .AsNoTracking()
                         .Where(p => p.ProjectId == document.ProjectId && p.PeriodKeyValue == periodKey)
@@ -186,18 +194,18 @@ public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock?
 
         // ⚠ Лише для АКТИВНОГО проєкту — як у `AccessDecisionService`, `WorkflowStore`
         // і в самій задачі станів (`A7-25`): періоди чернетки за датами не просуваються.
-        if (clock is null || row.Status != Ecr.Domain.Enums.ProjectStatus.Active)
-        {
-            return period.State;
-        }
+        var effective = clock is null || row.Status != Ecr.Domain.Enums.ProjectStatus.Active
+            ? period.State
+            : PeriodStates.Effective(
+                period,
+                now,
+                Ecr.Domain.Services.YearGraceWindow.For(
+                    row.PeriodEnd,
+                    row.YearGraceOffsetDays,
+                    Ecr.Domain.ValueObjects.SiteTimeZone.Create(row.TimeZoneId).ToTimeZoneInfo()));
 
-        return PeriodStates.Effective(
-            period,
-            clock.UtcNow,
-            Ecr.Domain.Services.YearGraceWindow.For(
-                row.PeriodEnd,
-                row.YearGraceOffsetDays,
-                Ecr.Domain.ValueObjects.SiteTimeZone.Create(row.TimeZoneId).ToTimeZoneInfo()));
+        // Закритий місяць, відкритий лише для цього документа, — Grace для нього (пізня правка, автоперерахунок).
+        return Ecr.Domain.Services.DocumentPeriodReopenRule.Apply(effective, row.DocumentReopened);
     }
 
     /// <inheritdoc />

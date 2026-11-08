@@ -1256,6 +1256,15 @@ public sealed partial class RecalculationJob(
             .Select(p => (Domain.Enums.PeriodState?)p.State)
             .FirstOrDefault();
 
+        // ⛔ Приймальна 08.11 (i7): закритий місяць перемикається, лише коли ВСІ документи прогону мають діючий виняток
+        // за нього (у скоуп їх допустив `RefusedPeriodsAsync`); документ без винятку — та сама відмова, що й доти.
+        if (state == Domain.Enums.PeriodState.Closed && guards.Count > 0)
+        {
+            var reopened = await ReopenedPeriodsAsync([.. guards.Select(g => g.DocumentId)], period, ct).ConfigureAwait(false);
+            state = Domain.Services.DocumentPeriodReopenRule.Apply(
+                Domain.Enums.PeriodState.Closed, guards.All(g => reopened.Contains((g.DocumentId, period))));
+        }
+
         if (state is { } current
             && RecalculationWritePolicy.Check(current, false) != RecalculationWriteDenial.None)
         {
@@ -1362,6 +1371,19 @@ public sealed partial class RecalculationJob(
                                       && (request.PeriodKey == null || p.PeriodKeyValue == request.PeriodKey)),
                 ct)
             .ConfigureAwait(false);
+
+        // ⛔ Приймальна 08.11 (i7): місяць, відкритий лише для ЦЬОГО документа, у скоупі його перерахунку (як Grace);
+        // решта документів того самого місяця винятку не мають і пропускають його, як і раніше.
+        // Запит — лише коли є закритий місяць: інакше піднімати нічого.
+        if (states.Exists(s => s.State == Domain.Enums.PeriodState.Closed))
+        {
+            var reopened = await ReopenedPeriodsAsync([request.DocumentId], request.PeriodKey, ct).ConfigureAwait(false);
+            states = [.. states.Select(s => s with
+            {
+                State = Domain.Services.DocumentPeriodReopenRule.Apply(
+                    s.State, reopened.Contains((request.DocumentId, s.PeriodKeyValue))),
+            })];
+        }
 
         // ⛔ RC15 (P2-A): для області аркуша (`SheetDefId`) період відхиляється, коли поданий САМ цей аркуш; для
         // УСЬОГО документа — лише коли подані/затверджені ВСІ аркуші, що мають таблиці в періоді (рахувати
@@ -1816,6 +1838,33 @@ public sealed partial class RecalculationJob(
                     Domain.Services.YearGraceWindow.For(
                         r.PeriodEnd, r.YearGraceOffsetDays, SiteTimeZone.Create(r.TimeZoneId).ToTimeZoneInfo()))
                 : r.Period.State))];
+    }
+
+    /// <summary>
+    /// Приймальна 08.11 (i): пари (документ, місяць) з ДІЮЧИМ на <c>clock.UtcNow</c> винятком «місяць відкрито лише для
+    /// документа» (<c>doc.DocumentPeriodReopen</c>).
+    /// </summary>
+    /// <param name="documentIds">Документи.</param>
+    /// <param name="periodKey">Місяць; <c>null</c> — усі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task<HashSet<(long DocumentId, int PeriodKey)>> ReopenedPeriodsAsync(
+        IReadOnlyCollection<long> documentIds, int? periodKey, CancellationToken ct)
+    {
+        var now = clock.UtcNow;
+        var rows = await db.DocumentPeriodReopens
+            .AsNoTracking()
+            .Where(x => documentIds.Contains(x.DocumentId)
+                        && (periodKey == null || x.PeriodKeyValue == periodKey)
+                        && x.ClosedAt == null
+                        && x.OpenUntil > now)
+            .OrderBy(x => x.DocumentId)
+            .ThenBy(x => x.PeriodKeyValue)
+            .Select(x => new { x.DocumentId, x.PeriodKeyValue })
+            .Take(MaxPeriods * Math.Max(1, documentIds.Count))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows.Select(r => (r.DocumentId, r.PeriodKeyValue))];
     }
 
     /// <summary>Прогрес однієї фази: шкала зсунута й стиснута, повідомлення назване.</summary>

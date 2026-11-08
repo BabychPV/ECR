@@ -2824,6 +2824,24 @@ public interface IPeriodStore
 }
 ```
 
+#### `IDocumentPeriodReopenStore`
+
+✎ 2026-11-08, приймальна 08.11 (i): закритий місяць, відкритий для ОДНОГО документа (`doc.DocumentPeriodReopen`,
+міграція `DPR01_DocumentPeriodReopen`). Період лишається `Closed`; діючий виняток (`ClosedAt IS NULL AND OpenUntil > now`)
+піднімає стан місяця ДЛЯ ЦЬОГО документа до `Grace` (`DocumentPeriodReopenRule`) у рішенні про запис, у стані для пізньої
+правки й автоперерахунку (`PeriodStore.FindPeriodStateAsync`), у гейті перерахунку (`RecalculationJob`) і в поверненні
+аркуша (`ClosedPeriodGuard`). Прострочені закриває `PeriodStateJob` (відмітка + `Close` у журналі).
+
+```csharp
+public interface IDocumentPeriodReopenStore
+{
+    public Task<DocumentPeriodFacts?> GetFactsAsync(long documentId, int periodKey, DateTime utcNow, CancellationToken ct);
+    public Task<DocumentPeriodReopen?> FindOpenAsync(long documentId, int periodKey, CancellationToken ct);
+    public Task<DocumentPeriodReopenView?> FindActiveViewAsync(long documentId, int periodKey, DateTime utcNow, CancellationToken ct);
+    public void Add(DocumentPeriodReopen reopen);
+}
+```
+
 #### `IPrincipalNameResolver`
 
 Переклад між іменем групи каталогу (`ДОМЕН\Група`, `BUILTIN\…`) і її SID. Обидва методи відповідають `null`, коли каталог недоступний або ОС — не Windows: зберігається завжди SID.

@@ -288,6 +288,86 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
         Assert.Equal(15m, upsert.Value.ValueNumeric);
     }
 
+    /// <remarks>
+    /// Приймальна 08.11 (i7): закритий місяць, відкритий лише для ЦЬОГО документа, перераховується; інший документ того
+    /// самого місяця — ні (наступний тест). Мутація: не застосовувати <c>DocumentPeriodReopenRule</c> у
+    /// <c>RecalculationJob.RefusedPeriodsAsync</c> → <c>ECR-CALC-4221 periodClosed</c>, червоне.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.7")]
+    public async Task Місяць_відкритий_лише_для_документа_перераховується_для_нього()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await builder.BuildAsync();
+
+        await CloseAsync(builder, document.ProjectId, document.PeriodKey.Value);
+        await ReopenForDocumentAsync(builder, document.DocumentId, document.PeriodKey.Value);
+        Arrange(document);
+
+        await using var db = builder.CreateContext();
+        await Job(db).ExecuteAsync(
+            new RecalculationRequest(document.ProjectId, document.DocumentId, document.PeriodKey.Value, TriggeredByUserId: 7),
+            NoOpProgress.Instance, CancellationToken.None);
+
+        var upsert = Assert.Single(Applied());
+        Assert.Equal(document.PeriodKey.Value, upsert.Address.PeriodKey.Value);
+        Assert.Equal(15m, upsert.Value.ValueNumeric);
+    }
+
+    /// <remarks>
+    /// Межа (i7): виняток ІНШОГО документа цей документ не відкриває. Мутація: шукати виняток без умови документа
+    /// (будь-який документ місяця) → запис проходить, червоне.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.7")]
+    public async Task Виняток_іншого_документа_не_відкриває_перерахунок_цього()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await builder.BuildAsync();
+
+        await CloseAsync(builder, document.ProjectId, document.PeriodKey.Value);
+
+        long otherDocumentId;
+        await using (var setup = builder.CreateContext())
+        {
+            var other = new Document(document.ProjectId, $"OTHER-{Guid.NewGuid():N}"[..20], 1, DateTime.UtcNow);
+            setup.Documents.Add(other);
+            await setup.SaveChangesAsync();
+            otherDocumentId = other.Id;
+        }
+
+        await ReopenForDocumentAsync(builder, otherDocumentId, document.PeriodKey.Value);
+        Arrange(document);
+
+        await using var db = builder.CreateContext();
+        var thrown = await Record.ExceptionAsync(() => Job(db).ExecuteAsync(
+            new RecalculationRequest(document.ProjectId, document.DocumentId, document.PeriodKey.Value, TriggeredByUserId: 7),
+            NoOpProgress.Instance, CancellationToken.None));
+
+        Assert.Empty(AppliedOrEmpty());
+        var error = Assert.IsType<BusinessRuleException>(thrown);
+        Assert.Equal("err.ECR-CALC-4221.periodClosed", error.Details?["messageKey"]);
+    }
+
+    /// <summary>Діючий виняток «місяць відкрито для документа» на три доби (автор — новий користувач).</summary>
+    private static async Task ReopenForDocumentAsync(TestDocumentBuilder builder, long documentId, int periodKey)
+    {
+        await using var db = builder.CreateContext();
+        var name = $"rj_{Guid.NewGuid():N}"[..20];
+        var user = new Ecr.Domain.Entities.Security.User(name, name, AuthProvider.Local);
+        user.SetPassword(new Ecr.Infrastructure.Security.PasswordHasher().Hash("Recalc-Doc-Reopen-2026!"));
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        db.DocumentPeriodReopens.Add(DocumentPeriodReopen.Open(
+            documentId, periodKey, DateTime.UtcNow.AddDays(3), "Лист №18: лише цей документ", user.Id, DateTime.UtcNow));
+        await db.SaveChangesAsync();
+    }
+
     /// <summary>Переводить період проєкту в <c>Closed</c>.</summary>
     private static async Task CloseAsync(TestDocumentBuilder builder, int projectId, int periodKey)
     {

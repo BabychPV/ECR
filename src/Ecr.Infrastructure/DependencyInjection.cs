@@ -128,6 +128,7 @@ public static class DependencyInjection
         services.AddScoped<IDocumentVersionStore, DocumentVersionStore>();
         services.AddScoped<IDocumentVersionMigrationStore, DocumentVersionMigrationStore>();
         services.AddScoped<IPeriodStore, PeriodStore>();
+        services.AddScoped<IDocumentPeriodReopenStore, DocumentPeriodReopenStore>();
         services.AddScoped<IAuditReader, AuditReader>();
         services.AddScoped<IConsistencyIssueReader, ConsistencyIssueReader>();
         services.AddScoped<IDocumentStore, DocumentStore>();

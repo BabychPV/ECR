@@ -3333,6 +3333,74 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("DocumentIndexValue", "doc");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.DocumentPeriodReopen", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CloseReason")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime?>("ClosedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("ClosedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("OpenUntil")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime>("OpenedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("OpenedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PeriodKeyValue")
+                        .HasColumnType("int")
+                        .HasColumnName("PeriodKey");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OpenUntil")
+                        .HasDatabaseName("IX_DocumentPeriodReopen_OpenUntil")
+                        .HasFilter("[ClosedAt] IS NULL");
+
+                    b.HasIndex("DocumentId", "PeriodKeyValue")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_DocumentPeriodReopen_Active")
+                        .HasFilter("[ClosedAt] IS NULL");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("DocumentId", "PeriodKeyValue"), new[] { "OpenUntil" });
+
+                    b.ToTable("DocumentPeriodReopen", "doc", t =>
+                        {
+                            t.HasCheckConstraint("CK_DocumentPeriodReopen_Close", "(ClosedAt IS NULL AND CloseReason IS NULL AND ClosedByUserId IS NULL) OR (ClosedAt IS NOT NULL AND CloseReason IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_DocumentPeriodReopen_Period", "PeriodKey / 100 BETWEEN 1900 AND 9999 AND PeriodKey % 100 BETWEEN 1 AND 99");
+
+                            t.HasCheckConstraint("CK_DocumentPeriodReopen_Reason", "LEN(Reason) > 0");
+                        });
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.DocumentSheet", b =>
                 {
                     b.Property<long>("Id")
@@ -7638,6 +7706,23 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_DocIx_Doc");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.DocumentPeriodReopen", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Documents.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DocumentPeriodReopen_Document");
+
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("OpenedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DocumentPeriodReopen_OpenedBy");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.DocumentSheet", b =>

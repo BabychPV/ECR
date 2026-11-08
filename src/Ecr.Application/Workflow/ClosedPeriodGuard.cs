@@ -42,7 +42,9 @@ internal static class ClosedPeriodGuard
             ? PeriodState.Closed
             : await workflow.EffectivePeriodStateAsync(period, utcNow, ct).ConfigureAwait(false);
 
-        if (state == PeriodState.Closed)
+        // Приймальна 08.11 (i): місяць, відкритий лише для ЦЬОГО документа, — аркуш повертається, як у Grace.
+        if (state == PeriodState.Closed
+            && !await workflow.HasDocumentPeriodReopenAsync(documentId, key, utcNow, ct).ConfigureAwait(false))
         {
             throw new BusinessRuleException(
                 "ECR-PRD-4223",
