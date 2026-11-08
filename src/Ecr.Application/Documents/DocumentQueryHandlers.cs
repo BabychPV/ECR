@@ -172,7 +172,7 @@ public sealed class ListDocumentsHandler(
         var stateScope = periodKey ?? year;
 
         var profile = await ProfileAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
-        var staleByMe = ParseStaleBy(staleBy, resultsStale, periodKey);
+        var staleByMe = ParseStaleBy(staleBy, resultsStale, stateScope);
         ValidateOwner(ownerUserId, mine);
         var versionSort = ParseVersionSort(sort);
         var versions = ParseTemplateVersions(templateVersions);
@@ -471,13 +471,17 @@ public sealed class ListDocumentsHandler(
     }
 
     /// <summary>
-    /// Розбір <c>resultsStale</c>/<c>staleBy</c>: фільтр без періоду, невідоме <c>staleBy</c> і <c>staleBy</c> без
-    /// <c>resultsStale=true</c> — 422 (мовчазне «усі» читалося б як «застарілих немає»).
+    /// Розбір <c>resultsStale</c>/<c>staleBy</c>: фільтр без періоду й без року, невідоме <c>staleBy</c> і <c>staleBy</c>
+    /// без <c>resultsStale=true</c> — 422 (мовчазне «усі» читалося б як «застарілих немає»). ✎ g4 (координатор 08.11): з
+    /// роком без періоду фільтр приймається — застарілий хоч в одному періоді року.
     /// </summary>
+    /// <param name="staleBy">Значення <c>staleBy</c>.</param>
+    /// <param name="resultsStale">Значення <c>resultsStale</c>.</param>
+    /// <param name="scope">Період або (без нього) рік запиту; <c>null</c> — ні того, ні іншого.</param>
     /// <returns><c>true</c> — лише правки поточного користувача.</returns>
-    private static bool ParseStaleBy(string? staleBy, bool? resultsStale, int? periodKey)
+    private static bool ParseStaleBy(string? staleBy, bool? resultsStale, int? scope)
     {
-        if (resultsStale is not null && periodKey is null)
+        if (resultsStale is not null && scope is null)
         {
             throw new BusinessRuleException(
                 ErrorCodes.RequestInvalid,

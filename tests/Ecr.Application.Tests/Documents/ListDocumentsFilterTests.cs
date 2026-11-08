@@ -146,7 +146,7 @@ public sealed class ListDocumentsFilterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
-    public async Task Фільтр_застарілих_без_періоду_422_а_не_мовчазне_усі()
+    public async Task Фільтр_застарілих_без_періоду_й_без_року_422_а_не_мовчазне_усі()
     {
         var refused = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Handler().HandleAsync(
@@ -156,6 +156,28 @@ public sealed class ListDocumentsFilterTests
         Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
         Assert.Equal("err.ECR-REQ-0422.resultsStaleNeedsPeriod", refused.Details!["messageKey"]);
         await _documents.DidNotReceiveWithAnyArgs().ListAsync(default, default, default, null!, null, default);
+    }
+
+    /// <summary>
+    /// ✎ g4 (координатор 08.11): з роком без періоду фільтр застарілих (і <c>staleBy=me</c>) приймається й доходить до
+    /// сховища разом із роком — застарілий хоч в одному періоді року.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [InlineData(true, null, null)]
+    [InlineData(false, null, null)]
+    [InlineData(true, "me", UserId)]
+    public async Task Фільтр_застарілих_за_роком_без_періоду_доходить_до_сховища(
+        bool resultsStale, string? staleBy, int? expectedUser)
+    {
+        await Handler().HandleAsync(
+            null, periodKey: null, state: null, mine: false, hasLateEdits: null, query: null, resultsStale, staleBy,
+            ownerUserId: null, sort: null, templateVersions: null, year: 2026, new CursorRequest(50), default);
+
+        await _documents.Received(1).ListAsync(
+            Arg.Any<int?>(), new PeriodKeyFilter(null),
+            new DocumentListFilter(null, null, ResultsStale: resultsStale, StaleByUserId: expectedUser, Year: 2026),
+            Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
     }
 
     [Theory]

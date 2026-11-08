@@ -54,6 +54,9 @@ const listed: string[] = [];
 /** ✎ D-450: адреси запитів вибору власника (`GET /documents/owners`). */
 const ownerRequests: string[] = [];
 
+/** ✎ g4: адреси запитів зведення (`GET /documents/summary`). */
+const summaryRequests: string[] = [];
+
 /** ✎ D-450: люди, яких віддає вибір власника. */
 const Owners = {
   items: [
@@ -76,6 +79,7 @@ function mockFetch(reply: ListReply): void {
       }
 
       if (url.includes('/api/v1/documents/summary')) {
+        summaryRequests.push(url);
         return json({ draft: 1, submitted: 1, approved: 1, rejected: 0, withIssues: 0, staleResultsCount: 7, staleResultsMineCount: 2 });
       }
 
@@ -129,6 +133,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   listed.length = 0;
   ownerRequests.length = 0;
+  summaryRequests.length = 0;
   search = '';
   withProject = false;
 });
@@ -429,8 +434,10 @@ describe('DocumentsPage: пошук і фільтр проєкту (UI RC9, ма
     Slow,
   );
   it(
-    // ✎ Projects/Documents 08.11: перелік лише за рік — чіп «Needs recalculation» без місяця вимкнений (застарілість належить місяцю, 422), тож і зі старої адреси з periodKey він не фільтрує; бейдж у рядку лишається.
-    'застарілі результати: бейдж лише в рядку з resultsStale=true; у переліку року чіп вимкнений і resultsStale в запит не йде',
+    // ✎ g4 (координатор 08.11, «State filter, counters and the Needs recalculation chip count for the selected year
+    // only»): перелік лише за рік — чіп «Needs recalculation» УВІМКНЕНИЙ, рахує `staleResultsCount` зведення РОКУ, а
+    // `resultsStale=true` іде в запит разом із `year` (сервер: застарілий хоч в одному періоді року); бейдж у рядку лишається.
+    'застарілі результати за рік: бейдж у рядку, чіп увімкнений з числом зведення року, resultsStale іде в запит з year',
     async () => {
       mockFetch('rows');
       show('/?periodKey=202601&resultsStale=true');
@@ -439,23 +446,43 @@ describe('DocumentsPage: пошук і фільтр проєкту (UI RC9, ма
       expect(document.querySelectorAll('[data-results-stale]')).toHaveLength(1);
       expect(document.querySelector('[data-document-row="STALE-0003"] [data-results-stale]')).not.toBeNull();
 
-      const chip = await screen.findByRole('checkbox', { name: /documents.filterStale/ }, { timeout: Find });
-      expect((chip as HTMLInputElement).disabled).toBe(true);
-      expect(lastListed().has('resultsStale')).toBe(false);
+      const chip = await screen.findByRole('checkbox', { name: /documents\.filterStale(?!NoCount)/ }, { timeout: Find });
+      expect((chip as HTMLInputElement).disabled).toBe(false);
+      expect((chip as HTMLInputElement).checked).toBe(true);
+      expect(lastListed().get('resultsStale')).toBe('true');
+      expect(lastListed().get('year')).toBe('2026');
+      expect(lastListed().has('periodKey')).toBe(false);
+
+      // Число чіпа — зі зведення ЗА РІК (не за місяць): кожен запит зведення несе `year`, жоден — `periodKey`.
+      expect(summaryRequests.length).toBeGreaterThan(0);
+      for (const url of summaryRequests) {
+        const params = new URLSearchParams(url.split('?')[1] ?? '');
+        expect(params.get('year')).toBe('2026');
+        expect(params.has('periodKey')).toBe(false);
+      }
     },
     Slow,
   );
 
   it(
-    'застарілі результати: без періоду чіп вимкнений, а resultsStale з адреси в запит не йде (422 на сервері)',
+    'застарілі результати за рік: увімкнення чіпа додає resultsStale=true в адресу й у запит року, вимкнення — знімає',
     async () => {
       mockFetch('rows');
-      show('/?resultsStale=true');
+      show('/?year=2026');
 
       await screen.findByRole('table', {}, { timeout: Find });
-      const chip = await screen.findByRole('checkbox', { name: /documents.filterStaleNoCount/ }, { timeout: Find });
-      expect((chip as HTMLInputElement).disabled).toBe(true);
+      const chip = await screen.findByRole('checkbox', { name: /documents\.filterStale(?!NoCount)/ }, { timeout: Find });
+      expect((chip as HTMLInputElement).disabled).toBe(false);
       expect(lastListed().has('resultsStale')).toBe(false);
+
+      fireEvent.click(chip);
+      await waitFor(() => expect(lastListed().get('resultsStale')).toBe('true'), { timeout: Find });
+      expect(lastListed().get('year')).toBe('2026');
+      expect(search).toContain('resultsStale=true');
+
+      fireEvent.click(chip);
+      await waitFor(() => expect(lastListed().has('resultsStale')).toBe(false), { timeout: Find });
+      expect(search).not.toContain('resultsStale');
     },
     Slow,
   );

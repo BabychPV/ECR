@@ -5911,9 +5911,17 @@ public sealed record RowDto(
   місяць: `draft + partlySubmitted + submitted + approved + rejected` = кількість видимих документів, і кожне число
   дорівнює кількості рядків переліку з відповідним фільтром `state` за рік. `withIssues` — документи, у яких хоч в одному
   розпочатому періоді року ОСТАННІЙ підсумок перевірки має помилки (звуження — як за місяць); `sheetsApproved`/`sheetsTotal`
-  — клітинки; `staleResultsCount`/`staleResultsMineCount` = 0 (застарілість належить місяцю, фільтр `resultsStale` без
-  `periodKey` — `422`). `periodKey` важить більше за `year`; без обох — `422 documentStateNeedsPeriod`; рік поза
-  `2000..2999` — `422 documentYearOutOfRange`.
+  — клітинки; ~~`staleResultsCount`/`staleResultsMineCount` = 0 (застарілість належить місяцю, фільтр `resultsStale` без
+  `periodKey` — `422`)~~ ✎ 08.11 (координатор, рядок приймання g4: «State filter, counters and the Needs recalculation
+  chip count for the selected year only»): `staleResultsCount`/`staleResultsMineCount` — видимі документи (проєкт має
+  період у році), застарілі **хоч в одному періоді року** (див. «Застарілі результати за рік» нижче). `periodKey` важить
+  більше за `year`; без обох — `422 documentStateNeedsPeriod`; рік поза `2000..2999` — `422 documentYearOutOfRange`.
+- **Застарілі результати за рік** (✎ 08.11, g4): з `year` і без `periodKey` фільтр `resultsStale=true|false` (і
+  `staleBy=me`) приймається; документ застарілий за рік, якщо застарілий хоч в одному періоді року (об'єднання місячних
+  карт застарілості, той самий предикат, що й за місяць; беруться періоди року з актуальним прогоном). Позначка рядка
+  `resultsStale` за рік — `true`/`false` (не `null`), `resultsStaleSince` — найраніший момент серед місяців; правила
+  невизначеності (`resultsStaleUndetermined`, проєкти зі звуженням поза фільтром в обох напрямках, D-446) — як за місяць.
+  Без `periodKey` і без `year` — як і раніше `422 resultsStaleNeedsPeriod`. Форма відповіді не змінена.
 
 ### Поточний період — у налаштуваннях проєкту (п. c)
 
