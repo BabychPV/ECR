@@ -19,7 +19,17 @@ import { t } from '@/shared/i18n';
  * як було. Прибрати маршрут можна тією самою кнопкою, якою його заведено:
  * інакше помилково створений лишався б назавжди.
  */
-export function ApprovalRouteEditor({ projectId }: { projectId: number }): JSX.Element {
+export function ApprovalRouteEditor({
+  projectId,
+  openerLabel,
+  describedBy,
+}: {
+  projectId: number;
+  /** ✎ UAT project-settings: повна назва кнопки-відкривача; без неї — «Approval route». */
+  openerLabel?: string;
+  /** Id опису дії поруч із кнопкою (`aria-describedby`). */
+  describedBy?: string;
+}): JSX.Element {
   const queryClient = useQueryClient();
   const [opened, setOpened] = useState(false);
   const [steps, setSteps] = useState<number[]>([]);
@@ -71,8 +81,8 @@ export function ApprovalRouteEditor({ projectId }: { projectId: number }): JSX.E
 
   return (
     <>
-      <Button variant="default" onClick={() => setOpened(true)}>
-        {t('workflow.route')}
+      <Button variant="default" onClick={() => setOpened(true)} aria-describedby={describedBy}>
+        {openerLabel ?? t('workflow.route')}
       </Button>
 
       <Modal opened={opened} onClose={() => setOpened(false)} title={t('workflow.route')} size="lg">

@@ -151,7 +151,7 @@ async function openArchiveDialog(): Promise<{
   confirm: HTMLElement;
 }> {
   const user = userEvent.setup();
-  const open = await screen.findByRole('button', { name: /periods\.archive/ }, {
+  const open = await screen.findByRole('button', { name: /projectSettings\.archiveAction/ }, {
     timeout: SlowEnvTimeout,
   });
 

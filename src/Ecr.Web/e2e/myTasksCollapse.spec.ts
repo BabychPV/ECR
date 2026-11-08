@@ -116,4 +116,27 @@ test.describe('myTasksCollapse: My tasks sections collapse and approval months g
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
   });
+
+  test('project settings: every action shows a one-line description and the automatic period says why', async ({ page }) => {
+    await signIn(page);
+    const { documentId, periodKey } = await createMultiSheetDocument(page, 1, 1);
+    const card = await ok<{ readonly projectId: number }>(
+      await page.request.get(`/api/v1/documents/${String(documentId)}?periodKey=${String(periodKey)}`),
+      'GET document',
+    );
+    await page.goto(`/admin/projects?projectId=${String(card.projectId)}`);
+
+    // ✎ UAT project-settings (людина 08.11): повна назва дії + опис поруч, пов'язаний через aria-describedby.
+    for (const name of [/^Pin current period…$/, /^Clone project…$/, /^Edit approval route…$/, /^Manage period policies…$/]) {
+      const button = page.getByRole('button', { name });
+      await expect(button).toBeVisible();
+      const describedBy = (await button.getAttribute('aria-describedby')) ?? '';
+      expect(describedBy, String(name)).not.toBe('');
+      await expect(page.locator(`[id="${describedBy}"]`)).toBeVisible();
+      expect(((await page.locator(`[id="${describedBy}"]`).textContent()) ?? '').length).toBeGreaterThan(20);
+    }
+
+    // Автоматичний період — «найраніший відкритий місяць», а не «за датою».
+    await expect(page.locator('[data-current-period-explain]')).toHaveText(/earliest open month|no month is open/);
+  });
 });
