@@ -20,4 +20,32 @@ public interface IProjectStore
     /// </remarks>
     public Task<PagedResult<ProjectSummary>> ListAsync(
         CursorRequest page, IReadOnlyCollection<int> visibleIds, CancellationToken ct);
+
+    /// <summary>
+    /// Факти для рішення «чи можна видалити проєкт» (UAT 08.11, сценарій c); <c>null</c> — проєкту немає.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<ProjectDeletionFacts?> GetDeletionFactsAsync(int projectId, CancellationToken ct);
+
+    /// <summary>
+    /// Видаляє проєкт разом із його налаштуваннями (періоди, прив'язка версії шаблону, маршрут погодження, гранти).
+    /// Викликати лише після перевірки <see cref="ProjectDeletionFacts"/>; документів і історії видалення не чіпає —
+    /// з ними база відмовить зовнішнім ключем.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task DeleteAsync(int projectId, CancellationToken ct);
 }
+
+/// <summary>Факти проєкту для видалення.</summary>
+/// <param name="Code">Код проєкту (для журналу).</param>
+/// <param name="Status">Стан проєкту.</param>
+/// <param name="TemplateVersionId">Версія шаблону (для журналу).</param>
+/// <param name="DocumentCount">Скільки документів.</param>
+/// <param name="HistoryCount">
+/// Скільки записів історії, які видалення знищило б: прогони розрахунків, зрізи звітів, архівації, погодження
+/// перерахунку. Будь-який — відмова: це вже не «порожня чернетка».
+/// </param>
+public sealed record ProjectDeletionFacts(
+    string Code, Domain.Enums.ProjectStatus Status, int TemplateVersionId, int DocumentCount, int HistoryCount);

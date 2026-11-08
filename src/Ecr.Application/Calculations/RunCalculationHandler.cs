@@ -158,8 +158,12 @@ public sealed class RunCalculationHandler(
             return new RecalculationRequestOutcome(null, skipped, truncated);
         }
 
+        // ✎ UAT recalc-progress (08.11): ціль `project{id}-…` — за нею перелік задач знаходить перерахунок проєкту
+        // (`GET /jobs?projectId=&kind=projectRecalculation`), і сторінки відновлюють банер прогресу після переходу.
+        // Злиття, а не нова задача поруч: повторне «Перерахувати», поки розклад ще чекає, — та сама робота.
         var jobId = await jobs
-            .EnqueueAsync<IRecalculationJob>(
+            .EnqueueCoalescedAsync<IRecalculationJob>(
+                ProjectTargetOf(projectId, periodKey),
                 new
                 {
                     projectId,
@@ -167,11 +171,30 @@ public sealed class RunCalculationHandler(
                     triggeredByUserId = userId,
                     requestedAt = clock.UtcNow,
                 },
-                ct)
+                ct,
+
+                // ⛔ Автор задачі: без нього батько не потрапляв у «Мої задачі» (`mine=true`), хоча 92 його діти —
+                // потрапляли (їх ставить `FanOutAsync` з `TriggeredByUserId`).
+                userId)
             .ConfigureAwait(false);
 
         return new RecalculationRequestOutcome(jobId, skipped, truncated);
     }
+
+    /// <summary>
+    /// Ціль перерахунку проєкту: <c>project{id}-year</c> (повний рік) або <c>project{id}-p{periodKey}</c>.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="periodKey">Період; <c>null</c> — повний рік.</param>
+    /// <remarks>
+    /// ⚠ Префікс <c>project{id}-</c> — той, за яким перелік задач шукає перерахунок проєкту
+    /// (<see cref="JobListKinds.ProjectTargetPrefix"/>); перерахунок після переносу версії
+    /// (<c>MigrationRecalculation.TargetOf</c>, <c>project{id}-migrate-recalc</c>) має той самий префікс.
+    /// </remarks>
+    public static string ProjectTargetOf(int projectId, int? periodKey)
+        => periodKey is { } key
+            ? string.Create(CultureInfo.InvariantCulture, $"project{projectId}-p{key}")
+            : string.Create(CultureInfo.InvariantCulture, $"project{projectId}-year");
 
     /// <summary>
     /// Пропущені аркуші проєкту — лише ті, що читач бачить: схований від нього аркуш (звуження ролі, Deny) не
