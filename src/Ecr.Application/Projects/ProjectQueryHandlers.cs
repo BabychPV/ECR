@@ -19,6 +19,11 @@ namespace Ecr.Application.Projects;
 /// <param name="PeriodKind">Періодичність.</param>
 /// <param name="CurrentPeriodId">Поточний період — підказка UI, не правило доступу (D-77).</param>
 /// <param name="PeriodCount">Скільки періодів у календарі.</param>
+/// <param name="DocumentCount">
+/// ✎ UAT 08.11 (P2 живого проходу): скільки документів у проєкті — діалог «Recalculate the whole project?» називає
+/// область числом («92 documents»), а не «Every document of every period». Перерахунок проєкту однаково йде по всіх
+/// документах проєкту, тож число — та сама область, яку запускає людина з цим проєктом у переліку.
+/// </param>
 public sealed record ProjectSummary(
     int Id,
     string Code,
@@ -26,7 +31,8 @@ public sealed record ProjectSummary(
     string TimeZoneId,
     PeriodKind PeriodKind,
     int? CurrentPeriodId,
-    int PeriodCount);
+    int PeriodCount,
+    int DocumentCount = 0);
 
 /// <summary>Перелік проєктів. Право <c>Document.View</c> або <c>Report.ViewRegulatory</c>.</summary>
 /// <remarks>

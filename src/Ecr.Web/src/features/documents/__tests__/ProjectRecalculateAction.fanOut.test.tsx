@@ -106,6 +106,9 @@ function respond(): ServerState {
           periods: [
             // ⚠ Збережений `Open`, межа блокування давно минула — у діалозі місяць названо «пропускається».
             { id: 1, periodKey: 202601, year: 2026, sequence: 1, state: 'Open', startsAt: '2026-01-01T00:00:00+05:00', endsAt: '2026-03-17T00:00:00+05:00', graceEndsAt: '2026-02-15T00:00:00+05:00', reopenedUntil: null, isCurrent: false },
+            { id: 3, periodKey: 202609, year: 2026, sequence: 9, state: 'Grace', startsAt: '2026-09-01T00:00:00+05:00', endsAt: '2099-11-15T00:00:00+05:00', graceEndsAt: '2026-10-15T00:00:00+05:00', reopenedUntil: null, isCurrent: false },
+            { id: 4, periodKey: 202610, year: 2026, sequence: 10, state: 'Open', startsAt: '2026-10-01T00:00:00+05:00', endsAt: '2099-12-15T00:00:00+05:00', graceEndsAt: '2026-11-15T00:00:00+05:00', reopenedUntil: null, isCurrent: false },
+            { id: 5, periodKey: 202611, year: 2026, sequence: 11, state: 'Open', startsAt: '2026-11-01T00:00:00+05:00', endsAt: '2099-01-15T00:00:00+05:00', graceEndsAt: '2026-12-15T00:00:00+05:00', reopenedUntil: null, isCurrent: false },
             { id: 2, periodKey: 202612, year: 2026, sequence: 12, state: 'Scheduled', startsAt: '2026-12-01T00:00:00+05:00', endsAt: '2099-02-14T00:00:00+05:00', graceEndsAt: '2099-01-15T00:00:00+05:00', reopenedUntil: null, isCurrent: true },
           ],
         });
@@ -124,7 +127,7 @@ function show(): void {
       <MemoryRouter initialEntries={['/?projectId=7']}>
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
           <ProjectRecalcBanner projectId={7} />
-          <ProjectRecalculateAction project={{ id: 7, code: 'PRJ-7' }} />
+          <ProjectRecalculateAction project={{ id: 7, code: 'PRJ-7', documentCount: 92 }} />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,
@@ -140,7 +143,10 @@ async function startRecalc(): Promise<HTMLElement> {
 
   await user.click(await screen.findByRole('button', { name: '⟦workflow.recalculate⟧' }));
   const dialog = await screen.findByRole('dialog', { name: '⟦periods.recalcTitle (code=PRJ-7)⟧' });
-  await within(dialog).findByText(/recalcProgress\.confirmScopeSkipping \(project=PRJ-7, year=2026, months=/);
+  // ✎ P2 живого проходу 08.11: реальна область — відкриті місяці (суцільний відрізок; заблокований січень і запланований
+  // грудень поза нею) і число документів; старого «Every document of every period» немає.
+  await within(dialog).findByText(/recalcProgress\.confirmScope \(months=September–November 2026, documents=92\)/);
+  expect(within(dialog).queryByText(/Every document/)).toBeNull();
   await user.click(within(dialog).getByRole('button', { name: '⟦workflow.recalculate⟧' }));
 
   return dialog;

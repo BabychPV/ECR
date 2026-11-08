@@ -1293,7 +1293,11 @@ UPDATE t
     -- D-468 (квіз людини 07.11): закритий місяць має один шлях — Reopen; відмова називає його замість «окремого погодження».
     (N'err.ECR-CALC-4221.periodClosed', N'en', N'Period {period} is closed: closed periods are not recalculated automatically, a separate approval is required.', N'Period {period} is closed and is not recalculated. Reopen it first (with a reason), then run the recalculation.'),
     (N'err.ECR-CALC-4221.periodClosed', N'ru', N'Период {period} закрыт: закрытые периоды не пересчитываются автоматически, требуется отдельное утверждение.', N'Период {period} закрыт и не пересчитывается. Сначала откройте его повторно (с причиной), затем запустите пересчёт.'),
-    (N'err.ECR-CALC-4221.periodClosed', N'kz', N'{period} кезеңі жабық: жабық кезеңдер автоматты түрде қайта есептелмейді, жеке бекіту қажет.', N'{period} кезеңі жабық және қайта есептелмейді. Алдымен оны қайта ашыңыз (себебін көрсетіп), содан кейін қайта есептеуді іске қосыңыз.')
+    (N'err.ECR-CALC-4221.periodClosed', N'kz', N'{period} кезеңі жабық: жабық кезеңдер автоматты түрде қайта есептелмейді, жеке бекіту қажет.', N'{period} кезеңі жабық және қайта есептелмейді. Алдымен оны қайта ашыңыз (себебін көрсетіп), содан кейін қайта есептеуді іске қосыңыз.'),
+    -- UAT:recalc-progress (P2 живого проходу 08.11): область перерахунку називає діалог (місяці, документи); тут лишається лише «у фоні».
+    (N'periods.recalcConfirm', N'en', N'Every document of every period of this project is recalculated in the background. This can take a while, and figures in open documents may change when it finishes.', N'The recalculation runs in the background; figures in open documents may change when it finishes.'),
+    (N'periods.recalcConfirm', N'ru', N'Все документы всех периодов этого проекта будут пересчитаны в фоновом режиме. Это может занять некоторое время, а показатели в открытых документах по завершении могут измениться.', N'Пересчёт идёт в фоновом режиме; показатели в открытых документах по завершении могут измениться.'),
+    (N'periods.recalcConfirm', N'kz', N'Осы жобаның барлық кезеңдерінің барлық құжаттары фондық режимде қайта есептеледі. Бұл біраз уақыт алуы мүмкін, ал аяқталғаннан кейін ашық құжаттардағы көрсеткіштер өзгеруі мүмкін.', N'Қайта есептеу фондық режимде жүреді; аяқталғаннан кейін ашық құжаттардағы көрсеткіштер өзгеруі мүмкін.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1308,6 +1312,10 @@ SET @textUpdates = @@ROWCOUNT;
 DELETE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
+    -- UAT:recalc-progress (08.11): тост «finished with errors» замінено банером (recalcProgress.finishedWithErrors).
+    (N'workflow.recalcDoneWithErrors', N'ru', N'Пересчёт не завершён: выполнено {done} из {total} документов, ошибок {failed}. Показатели документов с ошибками не актуальны.'),
+    (N'workflow.recalcDoneWithErrors', N'kz', N'Қайта есептеу аяқталмады: {total} құжаттың {done} орындалды, қате {failed}. Қатесі бар құжаттардың көрсеткіштері өзекті емес.'),
+    (N'workflow.recalcDoneWithErrors',          N'en', N'Recalculation is not complete: done {done} of {total} documents, errors {failed}. Figures of the failed documents are not up to date.'),
     -- COLL:an43fix: мертвий ключ F-17 (кнопку Submit більше не сірять; відмову дає сервер). Два значення: початкове й D-285.
     (N'workflow.submitNeedsGrant',                 N'en', N'Submitting needs the Submit access level on this project or sheet; yours is {level}. Ask an administrator to raise it.'),
     (N'workflow.submitNeedsGrant',                 N'ru', N'Для подачи нужен уровень доступа «Подача» к этому проекту или листу; у вас — {level}. Попросите администратора повысить его.'),
@@ -4493,7 +4501,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'periods.activateTitle', N'ru', N'Активировать проект {code}?'),
     (N'periods.activateConfirm', N'ru', N'Периоды начнут открываться и закрываться по календарю, и в них можно будет создавать документы. Активный проект нельзя вернуть в черновик, а его часовой пояс больше нельзя будет изменить.'),
     (N'periods.recalcTitle', N'ru', N'Пересчитать весь проект {code}?'),
-    (N'periods.recalcConfirm', N'ru', N'Все документы всех периодов этого проекта будут пересчитаны в фоновом режиме. Это может занять некоторое время, а показатели в открытых документах по завершении могут измениться.'),
+    (N'periods.recalcConfirm', N'ru', N'Пересчёт идёт в фоновом режиме; показатели в открытых документах по завершении могут измениться.'),
     (N'audit.authorAny', N'ru', N'Любой'),
     (N'audit.userGone', N'ru', N'Пользователь #{id} (больше не существует)'),
     (N'audit.documentGone', N'ru', N'Документ #{id} (удалён)'),
@@ -7501,7 +7509,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'periods.activateTitle', N'kz', N'{code} жобасын белсендіру керек пе?'),
     (N'periods.activateConfirm', N'kz', N'Кезеңдер күнтізбе бойынша ашылып, жабыла бастайды және оларда құжаттар құруға болады. Белсенді жобаны нобайға қайтаруға болмайды, ал оның уақыт белдеуін енді өзгерту мүмкін болмайды.'),
     (N'periods.recalcTitle', N'kz', N'{code} жобасын толығымен қайта есептеу керек пе?'),
-    (N'periods.recalcConfirm', N'kz', N'Осы жобаның барлық кезеңдерінің барлық құжаттары фондық режимде қайта есептеледі. Бұл біраз уақыт алуы мүмкін, ал аяқталғаннан кейін ашық құжаттардағы көрсеткіштер өзгеруі мүмкін.'),
+    (N'periods.recalcConfirm', N'kz', N'Қайта есептеу фондық режимде жүреді; аяқталғаннан кейін ашық құжаттардағы көрсеткіштер өзгеруі мүмкін.'),
     (N'audit.authorAny', N'kz', N'Кез келген'),
     (N'audit.userGone', N'kz', N'Пайдаланушы #{id} (енді жоқ)'),
     (N'audit.documentGone', N'kz', N'Құжат #{id} (жойылған)'),

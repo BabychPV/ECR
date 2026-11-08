@@ -7910,9 +7910,13 @@ export interface paths {
                     limit?: number;
                     /** @description Без успішних перерахунків формул — для шухляди «Мої задачі». */
                     hideRoutine?: boolean;
+                    /** @description Лише задачі проєкту: документні — його документів, а також перерахунки всього проєкту. */
                     projectId?: number;
+                    /** @description Лише дочірні задачі цього розкладу (перерахунок проєкту → документи). */
                     parentJobId?: string;
+                    /** @description Без дочірніх задач розкладу — перерахунок проєкту одним рядком. */
                     hideChildren?: boolean;
+                    /** @description Вид задачі: `projectRecalculation` або `documentRecalculation`. Невідомий — `422`. */
                     kind?: string;
                 };
                 header?: never;
@@ -15089,6 +15093,81 @@ export interface paths {
         };
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Видаляє проєкт. Право `Project.Manage` і грант `Manage` на проєкт (UAT 08.11).
+         * @description Лише ЧЕРНЕТКА без документів і без історії (прогони розрахунків, зрізи, архівації); видалення пишеться в
+         *     журнал змін. Інакше — `409 ECR-PRD-0409` з ключем умови: `deleteNotDraft` (стан і кількість
+         *     документів у подробицях), `deleteHasDocuments`, `deleteHasHistory`. Невидимий проєкт — `404`.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Проєкт. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -26935,63 +27014,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Deletes a draft project. */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description No Content */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Conflict */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -30773,6 +30795,13 @@ export interface components {
             running: number;
             /**
              * Format: int32
+             * @description ✎ UAT recalc-progress: скільки затверджених аркушів дочірні задачі пропустили (сума `skipped` їхніх
+             *     підсумків `jobs.recalcSheetLog`); числа цих аркушів не змінено.
+             * @default 0
+             */
+            skippedSheets: number;
+            /**
+             * Format: int32
              * @description Виконано.
              */
             succeeded: number;
@@ -30781,11 +30810,6 @@ export interface components {
              * @description Скільки дочірніх задач позначено цим батьком.
              */
             total: number;
-            /**
-             * Format: int32
-             * @description Approved sheets skipped.
-             */
-            skippedSheets?: number;
         };
         /**
          * @description Куди лягає поле джерела.
@@ -31547,6 +31571,9 @@ export interface components {
             effectiveState?: null | string;
             /** @description Код каталогу помилок провалу (BE-08). */
             errorCode?: null | string;
+            fanOut?: null | components["schemas"]["FanOutStatus"];
+            /** @description Батько розкладу, якщо задача — дочірня (P4); інакше `null`. */
+            fanOutParentJobId?: null | string;
             /** @description Код задачі (тип). */
             jobCode: string;
             /** @description Ідентифікатор. */
@@ -31566,6 +31593,13 @@ export interface components {
              * @description Прогрес у відсотках.
              */
             percent: number;
+            /** @description Код того самого проєкту; `null` — не відомо. */
+            projectCode?: null | string;
+            /**
+             * Format: int32
+             * @description Проєкт задачі: документної — проєкт її документа, перерахунку проєкту — з цілі; `null` — не відомо.
+             */
+            projectId?: null | number;
             /** @description Як string? JobStatus.ResultUrl (UX-09). */
             resultUrl?: null | string;
             /**
@@ -31581,16 +31615,6 @@ export interface components {
              * @description Момент останнього оновлення в UTC.
              */
             updatedAt: string;
-            /**
-             * Format: int32
-             * @description Project of the job.
-             */
-            projectId?: null | number;
-            /** @description Project code. */
-            projectCode?: null | string;
-            /** @description Fan-out parent. */
-            fanOutParentJobId?: null | string;
-            fanOut?: null | components["schemas"]["FanOutStatus"];
         };
         /** @description Лічильники черги фонових задач. */
         JobsSummary: {
@@ -34898,6 +34922,14 @@ export interface components {
              * @description Поточний період — підказка UI, не правило доступу (D-77).
              */
             currentPeriodId: null | number;
+            /**
+             * Format: int32
+             * @description ✎ UAT 08.11 (P2 живого проходу): скільки документів у проєкті — діалог «Recalculate the whole project?» називає
+             *     область числом («92 documents»), а не «Every document of every period». Перерахунок проєкту однаково йде по всіх
+             *     документах проєкту, тож число — та сама область, яку запускає людина з цим проєктом у переліку.
+             * @default 0
+             */
+            documentCount: number;
             /**
              * Format: int32
              * @description Ідентифікатор.
