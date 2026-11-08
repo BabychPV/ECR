@@ -388,7 +388,10 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
   //    без переліку «1 (S01), 2 (S02)…». Розгорнутий за замовчуванням (пам'ять згортання - чиста).
   await page.evaluate(() => {
     try {
-      window.localStorage.removeItem('ecr.unmatchedRows.collapsed');
+      // fg6: ключ - для кожного користувача (`ecr.unmatchedRows.collapsed:<userId>`).
+      for (const key of Object.keys(window.localStorage)) {
+        if (key.startsWith('ecr.unmatchedRows.collapsed')) window.localStorage.removeItem(key);
+      }
     } catch {
       // Сховище недоступне — банер однаково розгорнутий.
     }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { issue, table } from '@/features/calculationIssues/__tests__/fixtures';
@@ -22,11 +22,11 @@ function rows(issues: UnmatchedRows['issues'], finishedAt: string | null = null)
   return { issues, finishedAt };
 }
 
-function show(value: UnmatchedRows, onOpenRow = vi.fn()) {
+function show(value: UnmatchedRows, onOpenRow = vi.fn(), userId: number | undefined = 7) {
   const tables = [table(1, '9.01 Unit 400'), table(2, '9.03 Unit 430')];
   const view = render(
     <MantineProvider theme={testTheme}>
-      <UnmatchedRowsBanner rows={value} tables={tables} onOpenRow={onOpenRow} />
+      <UnmatchedRowsBanner userId={userId} rows={value} tables={tables} onOpenRow={onOpenRow} />
     </MantineProvider>,
   );
 
@@ -82,12 +82,37 @@ describe('UnmatchedRowsBanner', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
 
     await userEvent.click(toggle);
-    expect(window.localStorage.getItem(UnmatchedCollapsedKey)).toBe('1');
+    expect(window.localStorage.getItem(`${UnmatchedCollapsedKey}:7`)).toBe('1');
     first.unmount();
 
     show(sixty);
     expect(screen.getByTestId('document-unmatched-rows-toggle').getAttribute('aria-expanded')).toBe('false');
     expect(screen.getByTestId('document-unmatched-rows-summary').textContent).toContain('count=4');
+  });
+
+  it('fg6: згортання пам\'ятається для КОЖНОГО користувача - інший користувач бачить банер розгорнутим', async () => {
+    const first = show(sixty, vi.fn(), 7);
+    await userEvent.click(screen.getByTestId('document-unmatched-rows-toggle'));
+    first.unmount();
+
+    show(sixty, vi.fn(), 8);
+    expect(screen.getByTestId('document-unmatched-rows-toggle').getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('fg6: згорнутий - лише рядок підсумку (назва · кількість), підказки й списку не видно', async () => {
+    show(sixty);
+    await userEvent.click(screen.getByTestId('document-unmatched-rows-toggle'));
+
+    const title = screen.getByTestId('document-unmatched-rows-title');
+    const summary = screen.getByTestId('document-unmatched-rows-summary');
+    // Назва й кількість - в ОДНОМУ абзаці (один рядок), а не двома блоками.
+    expect(title.parentElement).toBe(summary.parentElement);
+    const body = document.getElementById('document-unmatched-rows-body');
+    await waitFor(() => {
+      const hidden =
+        body?.getAttribute('aria-hidden') === 'true' || body?.style.display === 'none' || body?.style.height === '0px';
+      expect(hidden).toBe(true);
+    });
   });
 
   it('b4: недоступне сховище не ламає банер - розгорнутий за замовчуванням', () => {

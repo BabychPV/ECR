@@ -6,29 +6,36 @@ import { t } from '@/shared/i18n';
 import type { UnmatchedRows } from './useUnmatchedRows';
 import { groupUnmatchedRows, unmatchedRowCount } from './unmatchedRowsModel';
 
-/** Пам'ять «банер згорнуто» (глобально, як `ecr.calcResults.collapsed`): `1` згорнуто, `0` розгорнуто. */
+/** Префікс пам'яті «банер згорнуто»; ключ — `префікс:userId` (правило людини fg6: стан — для кожного користувача). */
 export const UnmatchedCollapsedKey = 'ecr.unmatchedRows.collapsed';
+
+/** Ключ пам'яті згортання для користувача; без відомого користувача — спільний префікс. */
+export function unmatchedCollapsedKey(userId: number | undefined): string {
+  return userId === undefined ? UnmatchedCollapsedKey : `${UnmatchedCollapsedKey}:${String(userId)}`;
+}
 
 /** Скільки посилань на рядки показується в групі таблиці; решта — «і ще N». */
 export const RowLinksPerTable = 20;
 
-function readCollapsed(): boolean {
+function readCollapsed(key: string): boolean {
   try {
-    return window.localStorage.getItem(UnmatchedCollapsedKey) === '1';
+    return window.localStorage.getItem(key) === '1';
   } catch {
     return false;
   }
 }
 
-function writeCollapsed(collapsed: boolean): void {
+function writeCollapsed(key: string, collapsed: boolean): void {
   try {
-    window.localStorage.setItem(UnmatchedCollapsedKey, collapsed ? '1' : '0');
+    window.localStorage.setItem(key, collapsed ? '1' : '0');
   } catch {
     // Сховище недоступне — вибір просто не запам'ятається.
   }
 }
 
 interface UnmatchedRowsBannerProps {
+  /** Користувач сесії: згортання пам'ятається окремо для кожного (fg6). */
+  readonly userId?: number | undefined;
   readonly rows: UnmatchedRows;
   /** Усі таблиці документа за період: назви таблиць і аркушів, екземпляр для переходу. */
   readonly tables: readonly DocumentTableDto[];
@@ -49,9 +56,10 @@ interface UnmatchedRowsBannerProps {
  * ⚠ Попередня згортна панель AN-69 (`CalculationIssuesPanel`, жовта, лише активний аркуш) показувала ТІ САМІ рядки
  * вдруге іншим тоном — її замінено цим банером; позначки в дереві таблиць лишились.
  */
-export function UnmatchedRowsBanner({ rows, tables, onOpenRow }: UnmatchedRowsBannerProps): JSX.Element | null {
+export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow }: UnmatchedRowsBannerProps): JSX.Element | null {
   const groups = useMemo(() => groupUnmatchedRows(rows.issues, tables), [rows.issues, tables]);
-  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const storageKey = unmatchedCollapsedKey(userId);
+  const [collapsed, setCollapsed] = useState(() => readCollapsed(storageKey));
 
   if (groups.length === 0) return null;
 
@@ -59,23 +67,26 @@ export function UnmatchedRowsBanner({ rows, tables, onOpenRow }: UnmatchedRowsBa
   const toggle = (): void => {
     const next = !collapsed;
     setCollapsed(next);
-    writeCollapsed(next);
+    writeCollapsed(storageKey, next);
   };
   const bodyId = 'document-unmatched-rows-body';
 
   return (
-    <Alert color="brand" variant="light" data-testid="document-unmatched-rows">
-      <Group justify="space-between" wrap="nowrap" gap="sm" align="flex-start">
-        <div>
-          <Text size="sm" fw={600} data-testid="document-unmatched-rows-title">
+    // ✎ fg6 (людина 08.11): інформаційний банер компактний - один рядок підсумку (назва · кількість · час), підказка
+    // ≤ 2 рядків при 1335 px, далі список; згорнутий - лише рядок підсумку.
+    <Alert color="brand" variant="light" py="xs" data-testid="document-unmatched-rows">
+      <Group justify="space-between" wrap="nowrap" gap="sm" align="center">
+        <Text size="sm">
+          <Text span size="sm" fw={600} data-testid="document-unmatched-rows-title">
             {t('document.unmatchedRows.title')}
           </Text>
+          {' · '}
           {/* ⚠ `role="status"` — на тексті з кількістю: Mantine `Alert` власну `role` не приймає (завжди `alert`). */}
-          <Text size="sm" role="status" data-testid="document-unmatched-rows-summary">
+          <Text span size="sm" role="status" data-testid="document-unmatched-rows-summary">
             {t('document.unmatchedRows.summary', { count: String(count), tables: String(groups.length) })}
             {rows.finishedAt !== null && ` · ${t('document.unmatchedRows.lastRun', { time: formatDateTime(rows.finishedAt) })}`}
           </Text>
-        </div>
+        </Text>
         <Button
           variant="subtle"
           size="xs"

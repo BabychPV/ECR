@@ -838,7 +838,12 @@ export function DocumentPage(): JSX.Element {
 
       {unmatchedRows.issues.length > 0 && (
         <Suspense fallback={null}>
-          <UnmatchedRowsBanner rows={unmatchedRows} tables={tables.data ?? []} onOpenRow={openUnmatchedRow} />
+          <UnmatchedRowsBanner
+            userId={session.data?.userId}
+            rows={unmatchedRows}
+            tables={tables.data ?? []}
+            onOpenRow={openUnmatchedRow}
+          />
         </Suspense>
       )}
 
