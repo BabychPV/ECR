@@ -48,6 +48,9 @@ export function PeriodPolicyManager({
 
   const refresh = async (): Promise<void> => {
     await queryClient.invalidateQueries({ queryKey: ['period-policies'] });
+    // ✎ UAT 08.11 (e1): сервер одразу просуває стани місяців за новими межами — календарі перечитуються, щоб
+    // Periods без очікування показала Locked/Reopen.
+    await queryClient.invalidateQueries({ queryKey: ['periods'] });
   };
 
   const create = useMutation({

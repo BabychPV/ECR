@@ -16,6 +16,7 @@ import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { projectsQuery } from '@/features/projects/allProjects';
+import { effectivePeriodState } from '@/features/projects/periodEffective';
 import { FilterRow } from '@/shared/ui/FilterBar';
 
 // Правило поясу майданчика живе в `shared/siteMoment`; ім'я лишається доступним звідси.
@@ -34,6 +35,10 @@ const AllProjectsPeriods = lazy(async () => ({
 // ✎ UAT-p3: людина шукала перерахунок саме тут — та сама дія, що й на переліку документів (окремим чанком, D-132).
 const ProjectRecalculateAction = lazy(async () => ({
   default: (await import('@/features/documents/ProjectRecalculateAction')).ProjectRecalculateAction,
+}));
+// ✎ UAT recalc-progress (08.11): прогрес перерахунку обраного проєкту з сервера — окремий чанк (D-132).
+const ProjectRecalcBanner = lazy(async () => ({
+  default: (await import('@/features/recalc/ProjectRecalcBanner')).ProjectRecalcBanner,
 }));
 /**
  * Поле дати — за `import()`, і не заради стилю.
@@ -285,6 +290,9 @@ export function PeriodsPage(): JSX.Element {
   const siteZone = periods.data?.timeZoneId ?? 'UTC';
 
   // UI-33: дата плиток і огляду — тим самим правилом поясу, що й колонки календаря.
+  // ✎ UAT 08.11 (e2): мить показу для ефективного стану місяців.
+  const nowMs = Date.now();
+
   const siteDate = (value: string, zone: string, inclusiveEnd: boolean): string | null =>
     siteMomentText(value, zone, true, inclusiveEnd);
 
@@ -396,6 +404,12 @@ export function PeriodsPage(): JSX.Element {
         <Text c="statusWarning" size="sm" mb="xs">
           {t('periods.draftHint')}
         </Text>
+      )}
+
+      {projectId !== null && (
+        <Suspense fallback={null}>
+          <ProjectRecalcBanner projectId={projectId} />
+        </Suspense>
       )}
 
       {/*
@@ -531,11 +545,14 @@ export function PeriodsPage(): JSX.Element {
                       розбіжність між екранами, заради усунення якої набір і
                       заведено (той самий дефект уже ловили окремо для
                       `SnapshotsPage`). */}
-                  <StatusBadge kind="period" state={period.state} />
+                  {/* ✎ UAT 08.11 (e2/e3): ЕФЕКТИВНИЙ стан — той, що й у сітці: минула межа блокування = Locked. */}
+                  <span data-period-state={effectivePeriodState(period, nowMs)}>
+                    <StatusBadge kind="period" state={effectivePeriodState(period, nowMs)} />
+                  </span>
                   {/* ⚠ Відкритий понад календар період видно окремо: інакше
                       `Open` після кінця місяця виглядає як несправність
                       календаря, а не як свідоме рішення людини. */}
-                  {period.reopenedUntil !== null && (
+                  {period.reopenedUntil !== null && effectivePeriodState(period, nowMs) !== 'Closed' && (
                     <Badge ml="xs" size="xs" color="statusWarning" variant="outline">
                       {/* ⚠ Тут `formatDateTime`, а не `<Timestamp>`: момент
                           підставляється ВСЕРЕДИНУ рядка каталогу, а компонент
@@ -558,7 +575,7 @@ export function PeriodsPage(): JSX.Element {
                 </Table.Td>
                 <Table.Td>
                   <Group gap="xs" justify="flex-end">
-                    {period.state === 'Closed' && reopens && (
+                    {effectivePeriodState(period, nowMs) === 'Closed' && reopens && (
                       <Button
                         size="xs"
                         variant="subtle"

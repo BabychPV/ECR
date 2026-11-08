@@ -1,12 +1,14 @@
 import { lazy, Suspense, useEffect, useState, type JSX } from 'react';
 import { Button, Checkbox, Group, Modal, Progress, Stack, Text, UnstyledButton } from '@mantine/core';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, generatePath } from 'react-router-dom';
 import type { JobSummary } from '@/api/types';
 import { routes } from '@/app/routes';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { useCancelJob, useRecentJobs } from '@/features/jobs/api';
 import { useJobStatus } from '@/features/jobs/useJobStatus';
+import { projectsQuery } from '@/features/projects/allProjects';
+import { isProjectRecalculation, progressOf, recalcProgressText } from '@/features/recalc/recalcProgress';
 import { useJobsSummary } from '@/features/jobs/useJobsSummary';
 import { JobAttempt, JobResultLink, JobRetry, jobAuthor } from '@/features/jobs/JobFacts';
 import { badgeStateOf } from '@/features/workflow/jobFollow';
@@ -121,6 +123,11 @@ export function JobsPage(): JSX.Element {
   // N4-03: плитка «failed in 24 h» ставить `state=Failed` + `since=24h`, щоб перелік рахувався тим самим
   // предикатом, що й число на плитці. Випадаючий фільтр стану лишається «усі провалені».
   const [since] = useUrlState('since');
+  // ✎ UAT recalc-progress (a5): проєкт і батько розкладу — фільтри СЕРВЕРА (до стелі переліку), теж в адресі.
+  const [projectParam] = useUrlState('project');
+  const [parent] = useUrlState('parent');
+  const projectFilter = projectParam === null || Number.isNaN(Number(projectParam)) ? null : Number(projectParam);
+  const projects = useQuery({ ...projectsQuery });
 
   // ⚠ Старе посилання `?id=` — у `?panel=`, заміною історії: «Назад» не має
   // повертати на адресу, яка одразу ж переписується знову.
@@ -139,7 +146,7 @@ export function JobsPage(): JSX.Element {
   // несподіванкою. ✎ UI-28: прапорець — в адресі (`?mine=1`), як і решта
   // фільтрів рядка: «Назад» повертає ціле подання, а не половину.
   const mineOnly = mine === '1';
-  const jobs = useRecentJobs(mineOnly);
+  const jobs = useRecentJobs(mineOnly, { projectId: projectFilter, parentJobId: parent });
   const all = jobs.data;
 
   const [finding, setFinding] = useState(false);
@@ -240,10 +247,13 @@ export function JobsPage(): JSX.Element {
       minWidth: 200,
       render: (job) => {
         const target = [
+          job.projectCode ?? '',
           job.documentId === null || job.documentId === undefined
             ? ''
             : t('jobs.openDocument', { id: job.documentId }),
-          job.message ?? '',
+          // ✎ a5: дитина розкладу названа частиною перерахунку проєкту; батько — з лічильниками дітей.
+          job.fanOutParentJobId === null || job.fanOutParentJobId === undefined ? '' : t('jobs.partOfProjectRecalc'),
+          isProjectRecalculation(job) ? recalcProgressText(progressOf(job)) : (job.message ?? ''),
         ]
           .filter((part) => part !== '')
           .join(' · ');
@@ -322,7 +332,7 @@ export function JobsPage(): JSX.Element {
     },
   ];
 
-  const filtered = needle !== '' || type !== null || state !== null;
+  const filtered = needle !== '' || type !== null || state !== null || projectFilter !== null || parent !== null;
 
   return (
     <ListPage
@@ -343,6 +353,11 @@ export function JobsPage(): JSX.Element {
           filters={[
             { id: 'type', label: t('jobs.filterType'), options: typeOptions },
             { id: 'state', label: t('jobs.filterState'), options: stateOptions() },
+            {
+              id: 'project',
+              label: t('jobs.filterProject'),
+              options: (projects.data?.items ?? []).map((p) => ({ value: String(p.id), label: p.code })),
+            },
           ]}
           clearLabel={t('filters.clear')}
           right={
@@ -387,7 +402,7 @@ export function JobsPage(): JSX.Element {
           emptyTitle={t('jobs.recentEmpty')}
           filtered={filtered}
           noMatchTitle={t('jobs.noMatch')}
-          onClearFilters={() => setParams({ q: null, type: null, state: null })}
+          onClearFilters={() => setParams({ q: null, type: null, state: null, project: null, parent: null })}
           clearFiltersLabel={t('filters.clear')}
           onRowClick={(job) => setPanel(job.jobId)}
           selectedKey={panel ?? undefined}
