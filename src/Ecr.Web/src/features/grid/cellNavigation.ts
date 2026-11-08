@@ -181,10 +181,25 @@ export async function revealGridCell(
 
   // ✎ fg6 F13: рядок, до якого перейшли, — у верхній третині вікна, а не на нижньому краї (людина: банер і сітка
   // «не мають займати все вікно»). Рамка фокуса RevoGrid (`revogr-focus`) з'являється після кадру.
-  keepInUpperThird(() => grid.querySelector('revogr-focus') ?? grid);
+  // ⚠ Не сам `revogr-focus`: його хост має нульовий прямокутник (top 0 — «уже вгорі»), і прокрутки не було
+  // (доказ F13: y≈650 без змін). Ціль — підсвічена комірка переходу або видима рамка фокуса, інакше вся сітка.
+  keepInUpperThird(() => visibleTargetOf(grid));
 
   return true;
 }
+
+/** Перший видимий (з ненульовим прямокутником) кандидат на «рядок переходу»; інакше — сама сітка. */
+function visibleTargetOf(grid: Element): Element {
+  for (const selector of ['.ecr-cell-nav-target', 'revogr-focus .focused-cell', 'revogr-focus > *']) {
+    const candidate = grid.querySelector(selector);
+    if (candidate === null) continue;
+    const rect = candidate.getBoundingClientRect();
+    if (rect.width > 0 || rect.height > 0) return candidate;
+  }
+
+  return grid;
+}
+
 
 /** Скільки кадрів тримати рядок у верхній третині після переходу. */
 const UpperThirdFrames = 40;
