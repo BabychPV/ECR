@@ -44,6 +44,8 @@ export function DocumentPeriodReopenDialog({
   const period = formatPeriodKey(periodKey);
 
   const mutation = useMutation({
+    // The dialog shows the refusal itself (ErrorAlert), so the global toast must stay silent.
+    meta: { handled: true },
     mutationFn: () =>
       postDocumentPeriodReopen(documentId, {
         periodKey,
