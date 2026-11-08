@@ -25,7 +25,7 @@ import {
   type TableAttention,
 } from '@/features/grid/rowAttentionStore';
 import { formatDateOnly } from '@/shared/format/dateOnly';
-import { formatTime } from '@/shared/format/datetime';
+import { formatDateTime } from '@/shared/format/datetime';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { formatCount } from '@/shared/format/plural';
 import { t } from '@/shared/i18n';
@@ -548,7 +548,8 @@ const IssuesTab = memo(function IssuesTab({
     const hint = [
       t('inspector.noIssuesHint'),
       t('inspector.noIssuesChecked', { period: checkedPeriod }),
-      checkedAt === null ? null : t('inspector.checkedAt', { time: formatTime(checkedAt) }),
+      // ✎ F13-p209 (d4): дата І час (мовою користувача): збережений результат міг бути не сьогоднішнім.
+      checkedAt === null ? null : t('inspector.checkedAt', { time: formatDateTime(checkedAt) }),
     ]
       .filter((part) => part !== null)
       .join(' ');

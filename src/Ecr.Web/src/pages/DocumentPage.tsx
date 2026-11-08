@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { isPeriodOutsideProject, nearestPeriod } from '@/features/documents/periodBounds';
 import { formatPeriodKey } from '@/shared/format';
 import { isHeaderFinding } from '@/features/documents/inspector/headerFinding';
+import { validationCheckedAt } from '@/features/documents/inspector/validationCheckedAt';
 import { Alert, Button, Group, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -970,7 +971,7 @@ export function DocumentPage(): JSX.Element {
           periodKey={periodKey}
           tables={tables.data ?? []}
           messages={shownValidation?.messages ?? null}
-          checkedAt={fresh?.scope === scope ? fresh.at : null}
+          checkedAt={validationCheckedAt(fresh?.scope === scope ? fresh : null, lastValidation.data)}
           validatedSeq={validatedSeq}
           extraTriggers={
             <Suspense fallback={null}>

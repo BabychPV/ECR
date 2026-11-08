@@ -3,7 +3,15 @@ import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { NoLocalFlags } from '../cellState';
 import { gridColumns } from '../DocumentGrid';
 import { cellKey } from '../permissions';
-import { describeColumns, lockedColumnsOf, rowAttentionReason, tableAttentionOf } from '../rowAttention';
+import {
+  coversPeriod,
+  describeColumns,
+  describeValidity,
+  lockedColumnsOf,
+  rowAttentionReason,
+  rowLookupProblemsOf,
+  tableAttentionOf,
+} from '../rowAttention';
 
 /**
  * ✎ UAT 08.11 (d2), Water Report, рядок «Sea Water Intake»: червоний рядок зі знаком «!» мав причину лише
@@ -54,6 +62,15 @@ function slice(orphaned = true): TableSliceDto {
     cellPermissions,
     cellConfirmations: {},
   } as TableSliceDto;
+}
+
+/** Колонка «Permit number» (Lookup на ціль Permits, id 50); у R1 — запис 7. */
+function withPermitColumn(dto: TableSliceDto): TableSliceDto {
+  return {
+    ...dto,
+    columns: [{ ...column('PermitNumber', 'Permit number', 99), dataType: 'Lookup', lookupRegistryDefId: 50 }, ...dto.columns],
+    rows: dto.rows.map((row) => (row.rowKey === 'R1' ? { ...row, cells: { ...row.cells, PermitNumber: 7 } } : row)),
+  };
 }
 
 interface Node {
@@ -126,6 +143,53 @@ describe('Water lock: причина червоного рядка словам�
     expect(describeColumns(dto, lockedColumnsOf(dto, 'R1'))).toBe('January–August');
     expect(describeColumns(dto, new Set(['JAN', 'FEB', 'SEP']))).toBe('January, February, September');
     expect(describeColumns(dto, new Set())).toBeNull();
+  });
+
+  // ✎ F13-p209 P2-2: причина називає дозвіл і його чинність; спершу «вибрати чинний дозвіл», потім «відкрити місяць».
+  // ⛔ Червоне без фіксу: текст був загальний `grid.rowAttention.orphaned` — без номера дозволу й чинності.
+  it('Water lock: дозвіл названо з чинністю, порядок — дозвіл, потім відкрити місяць', () => {
+    const dto = withPermitColumn(slice());
+    const problems = rowLookupProblemsOf(
+      dto,
+      (registryId, id) =>
+        registryId === 50 && id === 7 ? { label: 'KZ35VTE00340032', validFrom: '2026-03-01', validTo: null } : undefined,
+      (registryId) => registryId === 50,
+    );
+
+    expect([...problems.keys()]).toEqual(['R1']);
+    const reason = rowAttentionReason(dto, 'R1', problems.get('R1')) ?? '';
+    expect(reason).toContain('grid.rowAttention.permitNotCovering');
+    expect(reason).toContain('permit=KZ35VTE00340032');
+    expect(reason).toContain('validity=01.03.2026 – …');
+    expect(reason).toMatch(/period=[^,)]*2026/);
+    expect(reason).not.toContain('grid.rowAttention.orphaned');
+    expect(reason.indexOf('permitNotCovering')).toBeLessThan(reason.indexOf('grid.rowAttention.locked'));
+
+    // Той самий текст — у підписі рядка в сітці.
+    const columns = gridColumns(
+      dto, false, NoLocalFlags, {}, { blocked: new Map(), warning: new Map() },
+      new Map(), new Map(), new Map(), new Set(), null, null, new Set(), new Map(), new Map(), problems,
+    );
+    const template = columns[0]?.cellTemplate as unknown as (create: typeof h, cell: { model: Record<string, unknown> }) => Node;
+    const node = template(h, { model: { __rowKey: 'R1', __rowLabel: 'Sea Water Intake' } });
+    expect(textOf(find(node, 'ecr-row-attention-reason'))).toContain('permit=KZ35VTE00340032');
+    expect(tableAttentionOf(dto, problems).rows[0]?.reason).toContain('permit=KZ35VTE00340032');
+  });
+
+  it('чинність: validTo — виключна межа (як на сервері); запис, що покриває місяць, — не проблема', () => {
+    expect(describeValidity('2026-03-01', '2027-03-01')).toBe('01.03.2026 – 28.02.2027');
+    expect(describeValidity(null, '2026-01-01')).toBe('… – 31.12.2025');
+    expect(coversPeriod({ validFrom: '2026-01-31', validTo: null }, 202601)).toBe(true);
+    expect(coversPeriod({ validFrom: '2026-02-01', validTo: null }, 202601)).toBe(false);
+    expect(coversPeriod({ validFrom: null, validTo: '2026-01-01' }, 202601)).toBe(false);
+    expect(coversPeriod({ validFrom: null, validTo: '2026-01-02' }, 202601)).toBe(true);
+
+    const covering = rowLookupProblemsOf(
+      withPermitColumn(slice()),
+      () => ({ label: 'KZ1', validFrom: '2025-01-01', validTo: null }),
+      () => true,
+    );
+    expect(covering.size).toBe(0);
   });
 
   it('tableAttentionOf: лише рядки з утраченим посиланням; закриті місяці таблиці', () => {

@@ -205,6 +205,38 @@ test.describe('Water lock (UAT 08.11)', () => {
     await expect(address).toHaveAttribute('data-inspector-column', /.+/);
   });
 
+  // ✎ F13-p209 (d4): сервер віддає момент перевірки (`validatedAt`) — і у відповіді прогону, і в збереженому результаті;
+  // порожній Issues каже дату й час. Зауваження стенда (якщо є) прибрано в маршруті, щоб показати порожній стан.
+  test('Water lock: порожній Issues каже, коли була остання перевірка (дата й час)', async ({ page }) => {
+    test.slow();
+    await openWithWaterLock(page);
+
+    const validated = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === `/api/v1/documents/${DocumentId}/validate`,
+      { timeout: 90_000 },
+    );
+    await page.getByRole('button', { name: /Validate|Перевір/i }).first().click();
+    const fresh = (await (await validated).json()) as { validatedAt?: string | null };
+    expect(fresh.validatedAt, 'POST …/validate без validatedAt').toMatch(/^\d{4}-\d{2}-\d{2}T/);
+
+    const stored: { validatedAt?: string | null }[] = [];
+    await page.route(new RegExp(`/api/v1/documents/${DocumentId}/validation\\?`), async (route) => {
+      const response = await route.fetch();
+      const json = (await response.json()) as { validatedAt?: string | null; messages: unknown[] };
+      stored.push(json);
+      await route.fulfill({ response, json: { ...json, messages: [] } });
+    });
+    await page.reload();
+    await expect(page.locator(RowAttentionLabel).first()).toBeVisible({ timeout: 60_000 });
+    await page.locator('[data-inspector-triggers]').getByRole('button').first().click();
+
+    const empty = page.getByRole('complementary').locator('.ecr-insp-empty');
+    await expect(empty).toContainText(/Checked at [^.]*2026[^.]*\d{1,2}:\d{2}/);
+    expect(stored.at(-1)?.validatedAt, 'GET …/validation без validatedAt').toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
   test('Water lock: рядок стану — «N rows need attention» поруч зі збереженням', async ({ page }) => {
     test.slow();
     await openWithWaterLock(page);

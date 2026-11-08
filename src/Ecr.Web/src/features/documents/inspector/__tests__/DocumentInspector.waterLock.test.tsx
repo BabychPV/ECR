@@ -115,6 +115,8 @@ describe('Water lock: Issues і шапка інспектора (UAT 08.11)', ()
     const empty = document.querySelector('.ecr-insp-empty');
     expect(empty?.textContent).toContain('inspector.noIssuesChecked');
     expect(empty?.textContent).toContain('inspector.checkedAt');
+    // ✎ F13-p209 (d4): дата І час, не лише «09:15» — ⛔ червоне без фіксу (`formatTime`).
+    expect(empty?.textContent).toMatch(/inspector\.checkedAt \(time=[^)]*2026[^)]*\)/);
   });
 
   it('d4: інший період — чужих пунктів немає; кнопка Issues каже про рядок, що потребує уваги', () => {

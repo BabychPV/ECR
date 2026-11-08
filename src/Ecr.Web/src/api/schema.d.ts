@@ -40431,6 +40431,12 @@ export interface components {
              *     запускали, і порожній `Messages` тоді НЕ означає «зауважень немає»
              *     (`X-32`, `A7-28`). */
             validated: boolean;
+            /**
+             * Format: date-time
+             * @description ✎ UAT 08.11 (d4): коли виконано перевірку (UTC); `null` — перевірку ще не запускали. Порожній перелік
+             *     Issues без цього моменту не каже, КОЛИ саме «нічого не знайдено».
+             */
+            validatedAt?: null | string;
         };
         /** @description Правило валідації для відповіді API. */
         ValidationRuleDto: {

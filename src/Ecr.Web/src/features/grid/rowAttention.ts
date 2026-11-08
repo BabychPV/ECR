@@ -1,4 +1,5 @@
 import type { TableSliceDto } from '@/api/types';
+import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
 import { cellKey } from './permissions';
 import type { RowAttentionItem, TableAttention } from './rowAttentionStore';
@@ -58,28 +59,140 @@ export function lockedColumnsOf(slice: TableSliceDto, rowKey?: string): Set<stri
   return codes;
 }
 
-/** Причина для рядка словами; `null` — рядок уваги не потребує. */
-export function rowAttentionReason(slice: TableSliceDto, rowKey: string): string | null {
+/**
+ * ✎ UAT 08.11 (F13-p209 P2-2): ЯКЕ значення довідника рядка недійсне і чому — назва запису і його чинність
+ * («KZ35VTE00340032, чинний 01.03.2026 – …»), а не лише «значення недійсне». Формулювання — як у правила (h)
+ * (`err.ECR-CELL-4223.permitNotCoveringMonths`: «permit {permit} is valid {validity} and does not cover …»).
+ */
+export interface RowLookupProblem {
+  /** Колонка — ціль «Permits» (шапка типу дозволу або група): текст про дозвіл. */
+  readonly permit: boolean;
+  /** Назва колонки (для не-дозволів). */
+  readonly column: string;
+  /** Назва запису. */
+  readonly value: string;
+  /** Чинність `dd.MM.yyyy – dd.MM.yyyy` (`…` — без межі). */
+  readonly validity: string;
+}
+
+/** Що відомо про запис довідника: назва і чинність (`validTo` — виключна межа, як на сервері). */
+export interface LookupEntryValidity {
+  readonly label: string;
+  readonly validFrom: string | null;
+  readonly validTo: string | null;
+}
+
+function ddmmyyyy(iso: string): string {
+  const [year, month, day] = iso.slice(0, 10).split('-');
+
+  return `${day ?? ''}.${month ?? ''}.${year ?? ''}`;
+}
+
+/** Чинність так само, як `PermitMonthCoverage.DescribeValidity` сервера: `validTo` виключна, тож показ — день перед нею. */
+export function describeValidity(validFrom: string | null, validTo: string | null): string {
+  const from = validFrom === null ? '…' : ddmmyyyy(validFrom);
+  let to = '…';
+  if (validTo !== null) {
+    const date = new Date(`${validTo.slice(0, 10)}T00:00:00Z`);
+    date.setUTCDate(date.getUTCDate() - 1);
+    to = ddmmyyyy(date.toISOString());
+  }
+
+  return `${from} – ${to}`;
+}
+
+/** Чи запис чинний хоч один день місяця `periodKey` (`YYYYMM`). */
+export function coversPeriod(entry: Pick<LookupEntryValidity, 'validFrom' | 'validTo'>, periodKey: number): boolean {
+  const year = Math.floor(periodKey / 100);
+  const month = periodKey % 100;
+  const mm = String(month).padStart(2, '0');
+  const first = `${String(year)}-${mm}-01`;
+  const last = `${String(year)}-${mm}-${String(new Date(Date.UTC(year, month, 0)).getUTCDate()).padStart(2, '0')}`;
+  const from = entry.validFrom?.slice(0, 10) ?? null;
+  const to = entry.validTo?.slice(0, 10) ?? null;
+
+  return (from === null || from <= last) && (to === null || to > first);
+}
+
+/**
+ * Для кожного рядка з утраченим посиланням — перше значення довідника, чинність якого не покриває період зрізу.
+ * `entryOf` дає запис за довідником і id (перелік на дату або добраний закритий); невідомий запис — пропуск
+ * (тоді лишається загальний текст).
+ */
+export function rowLookupProblemsOf(
+  slice: TableSliceDto,
+  entryOf: (registryId: number, id: number) => LookupEntryValidity | undefined,
+  isPermitRegistry: (registryId: number) => boolean,
+): ReadonlyMap<string, RowLookupProblem> {
+  const problems = new Map<string, RowLookupProblem>();
+  const lookups = slice.columns.filter((column) => column.dataType === 'Lookup' && column.lookupRegistryDefId !== null);
+  if (lookups.length === 0) return problems;
+
+  for (const row of slice.rows) {
+    if (row.isOrphaned !== true) continue;
+    for (const column of lookups) {
+      const raw: unknown = row.cells[column.code];
+      const id = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : Number.NaN;
+      const registryId = column.lookupRegistryDefId;
+      if (!Number.isInteger(id) || registryId === null) continue;
+      const entry = entryOf(registryId, id);
+      if (entry === undefined || coversPeriod(entry, slice.periodKey)) continue;
+
+      problems.set(row.rowKey, {
+        permit: isPermitRegistry(registryId),
+        column: column.header || column.code,
+        value: entry.label,
+        validity: describeValidity(entry.validFrom, entry.validTo),
+      });
+      break;
+    }
+  }
+
+  return problems;
+}
+
+function problemText(problem: RowLookupProblem, periodKey: number): string {
+  const period = formatPeriodKey(periodKey) || String(periodKey);
+
+  return problem.permit
+    ? t('grid.rowAttention.permitNotCovering', { permit: problem.value, validity: problem.validity, period })
+    : t('grid.rowAttention.valueNotCovering', {
+        value: problem.value,
+        column: problem.column,
+        validity: problem.validity,
+        period,
+      });
+}
+
+/**
+ * Причина для рядка словами; `null` — рядок уваги не потребує. Порядок дій: спершу — що виправити (дозвіл,
+ * чинний у періоді), потім — що місяць закритий і його треба відкрити повторно.
+ */
+export function rowAttentionReason(slice: TableSliceDto, rowKey: string, problem?: RowLookupProblem): string | null {
   const row = slice.rows.find((candidate) => candidate.rowKey === rowKey);
   if (row?.isOrphaned !== true) return null;
 
   const locked = describeColumns(slice, lockedColumnsOf(slice, rowKey));
-  const orphaned = t('grid.rowAttention.orphaned');
+  const orphaned = problem === undefined ? t('grid.rowAttention.orphaned') : problemText(problem, slice.periodKey);
 
   return locked === null ? orphaned : `${orphaned} ${t('grid.rowAttention.locked', { months: locked })}`;
 }
 
-const bySlice = new WeakMap<TableSliceDto, TableAttention>();
+const NoProblems: ReadonlyMap<string, RowLookupProblem> = new Map();
+const bySlice = new WeakMap<TableSliceDto, { problems: ReadonlyMap<string, RowLookupProblem>; value: TableAttention }>();
 
-/** Стан таблиці для сховища; пам'ятається за об'єктом зрізу (новий зріз — новий стан, той самий — той самий). */
-export function tableAttentionOf(slice: TableSliceDto): TableAttention {
+/** Стан таблиці для сховища; пам'ятається за об'єктом зрізу і переліком проблем (ті самі — той самий стан). */
+export function tableAttentionOf(
+  slice: TableSliceDto,
+  problems: ReadonlyMap<string, RowLookupProblem> = NoProblems,
+): TableAttention {
   const cached = bySlice.get(slice);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined && cached.problems === problems) return cached.value;
 
   const rows: RowAttentionItem[] = [];
   for (const row of slice.rows) {
     if (row.isOrphaned !== true) continue;
-    const reason = rowAttentionReason(slice, row.rowKey);
+    const reason = rowAttentionReason(slice, row.rowKey, problems.get(row.rowKey));
     if (reason === null) continue;
     rows.push({
       key: `${String(slice.tableInstanceId)}:${row.rowKey}`,
@@ -97,7 +210,7 @@ export function tableAttentionOf(slice: TableSliceDto): TableAttention {
     rows,
     lockedMonths: describeColumns(slice, lockedColumnsOf(slice)),
   };
-  bySlice.set(slice, value);
+  bySlice.set(slice, { problems, value });
 
   return value;
 }

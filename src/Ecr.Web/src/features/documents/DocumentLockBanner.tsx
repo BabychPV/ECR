@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
 import { Alert } from '@mantine/core';
+import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
 import type { DocumentLock } from './documentLock';
 
@@ -31,13 +32,16 @@ export function DocumentLockBanner({ lock, periodKey }: DocumentLockBannerProps)
 }
 
 function textOf(lock: DocumentLock, periodKey: number): string {
+  // ✎ UAT 08.11 (F13-p209 P2-1): період — назвою («January 2026»), а не сирим ключем 202601.
+  const period = formatPeriodKey(periodKey) || String(periodKey);
+
   switch (lock) {
     case 'projectArchived':
       return t('document.lock.projectArchived');
     case 'periodClosed':
-      return t('document.lock.periodClosed', { period: periodKey });
+      return t('document.lock.periodClosed', { period });
     case 'periodNotOpen':
-      return t('document.lock.periodNotOpen', { period: periodKey });
+      return t('document.lock.periodNotOpen', { period });
     case 'sheetSubmitted':
       return t('grid.submittedReadOnlyHint');
     case 'sheetApproved':
