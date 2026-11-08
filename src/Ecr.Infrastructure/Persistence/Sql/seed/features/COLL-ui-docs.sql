@@ -20,12 +20,14 @@ SELECT v.[Key], v.Lang, v.Val
     (N'documents.quickLookClose', N'kz', N'Жылдам қарауды жабу'),
     (N'documents.openDocument', N'ru', N'Открыть документ'),
     (N'documents.openDocument', N'kz', N'Құжатты ашу'),
-    (N'documents.quickLookNoPeriod', N'ru', N'Выберите период, чтобы увидеть состояния листов и заполненность таблиц.'),
-    (N'documents.quickLookNoPeriod', N'kz', N'Парақтардың күйін және кестелердің толтырылуын көру үшін кезеңді таңдаңыз.'),
     (N'documents.quickLookResponsible', N'ru', N'Ответственные'),
     (N'documents.quickLookResponsible', N'kz', N'Жауаптылар'),
     (N'documents.lastChangedBy', N'ru', N'Последним изменил'),
     (N'documents.lastChangedBy', N'kz', N'Соңғы өзгерткен'),
+    (N'documents.quickLookTablesFilled', N'ru', N'Заполнено таблиц: {filled} из {total}'),
+    (N'documents.quickLookTablesFilled', N'kz', N'Толтырылған кестелер: {filled} / {total}'),
+    (N'documents.quickLookLatestChanges', N'ru', N'Последние изменения'),
+    (N'documents.quickLookLatestChanges', N'kz', N'Соңғы өзгерістер'),
     (N'documents.clearFilters', N'ru', N'Сбросить фильтры'),
     (N'documents.clearFilters', N'kz', N'Сүзгілерді тазалау')
        ) AS v ([Key], Lang, Val)
@@ -46,9 +48,10 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'documents.quickLook', N'en', N'Quick look at {key}', 1),
     (N'documents.quickLookClose', N'en', N'Close quick look', 1),
     (N'documents.openDocument', N'en', N'Open document', 1),
-    (N'documents.quickLookNoPeriod', N'en', N'Choose a period to see sheet states and filled tables.', 1),
     (N'documents.quickLookResponsible', N'en', N'Responsible', 1),
     (N'documents.lastChangedBy', N'en', N'Last changed by', 1),
+    (N'documents.quickLookTablesFilled', N'en', N'{filled} of {total} tables filled', 1),
+    (N'documents.quickLookLatestChanges', N'en', N'Latest changes', 1),
     (N'documents.clearFilters', N'en', N'Clear filters', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);

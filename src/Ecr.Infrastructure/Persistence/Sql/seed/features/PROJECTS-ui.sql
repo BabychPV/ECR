@@ -153,7 +153,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'projects.deleted', N'kz', N'{code} жобасы жойылды; аудит жазбасы сақталды.'),
     (N'documents.ownerHidden', N'kz', N'Жасырылған: құжаттың бір бөлігі сізге ашық емес, сондықтан иесі мен түзету авторы көрсетілмейді'),
     (N'periods.reopenTitle', N'kz', N'{period} қайта ашу керек пе?'),
-    (N'documents.ownerHiddenNote', N'kz', N'Иесі қолжетімділігіңізге байланысты жасырылған: бұл құжаттардың бір бөлігі сізге ашық емес.')
+    (N'documents.ownerHiddenNote', N'kz', N'Иесі қолжетімділігіңізге байланысты жасырылған: бұл құжаттардың бір бөлігі сізге ашық емес.'),
+    (N'documents.quickLookForPeriod', N'ru', N'За {period}'),
+    (N'documents.quickLookForPeriod', N'kz', N'{period} үшін'),
+    (N'documents.quickLookNoOpenPeriod', N'ru', N'Нет открытого периода в {year}'),
+    (N'documents.quickLookNoOpenPeriod', N'kz', N'{year} жылы ашық кезең жоқ')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -237,7 +241,9 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'projects.deleted', N'en', N'{code} was deleted; an audit entry was written.', 1),
     (N'documents.ownerHidden', N'en', N'Hidden: part of this document is not open to you, so its owner and editors are not shown', 1),
     (N'periods.reopenTitle', N'en', N'Reopen {period}?', 1),
-    (N'documents.ownerHiddenNote', N'en', N'Owner hidden by your access: part of these documents is not open to you.', 1)
+    (N'documents.ownerHiddenNote', N'en', N'Owner hidden by your access: part of these documents is not open to you.', 1),
+    (N'documents.quickLookForPeriod', N'en', N'For {period}', 1),
+    (N'documents.quickLookNoOpenPeriod', N'en', N'No open period in {year}', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO
@@ -342,23 +348,11 @@ SELECT v.[Key], v.Lang, v.OldVal
     (N'documents.emptyHint', N'en', N'Documents appear once the period is open and a template version is published.'),
     (N'documents.emptyHint', N'ru', N'Документы появятся, когда период будет открыт и версия шаблона опубликована.'),
     (N'documents.emptyHint', N'kz', N'Құжаттар кезең ашылып, үлгі нұсқасы жарияланғаннан кейін пайда болады.'),
-    -- ✎ 08.11: перелік лише за рік — помісячні блоки швидкого перегляду (заповненість таблиць, «Can approve now» D-466,
-    -- «Latest changes») і підказка помісячної версії шаблону в колонці «Version» недосяжні й прибрані.
-    (N'documents.quickLookTablesFilled', N'en', N'{filled} of {total} tables filled'),
-    (N'documents.quickLookTablesFilled', N'ru', N'Заполнено таблиц: {filled} из {total}'),
-    (N'documents.quickLookTablesFilled', N'kz', N'Толтырылған кестелер: {filled} / {total}'),
-    (N'documents.quickLookLatestChanges', N'en', N'Latest changes'),
-    (N'documents.quickLookLatestChanges', N'ru', N'Последние изменения'),
-    (N'documents.quickLookLatestChanges', N'kz', N'Соңғы өзгерістер'),
-    (N'documents.quickLookStepApprovers', N'en', N'Can approve now'),
-    (N'documents.quickLookStepApprovers', N'ru', N'Могут утвердить сейчас'),
-    (N'documents.quickLookStepApprovers', N'kz', N'Қазір бекіте алады'),
-    (N'documents.quickLookStepApproversMore', N'en', N'and others'),
-    (N'documents.quickLookStepApproversMore', N'ru', N'и другие'),
-    (N'documents.quickLookStepApproversMore', N'kz', N'және басқалар'),
-    (N'documents.quickLookStepApproversNone', N'en', N'Nobody can approve the current step: no user has the required rights. Contact an administrator.'),
-    (N'documents.quickLookStepApproversNone', N'ru', N'Текущий шаг утверждения некому утвердить: нет пользователя с нужными правами. Обратитесь к администратору.'),
-    (N'documents.quickLookStepApproversNone', N'kz', N'Ағымдағы бекіту қадамын бекітетін ешкім жоқ: қажетті құқығы бар пайдаланушы жоқ. Әкімшіге хабарласыңыз.'),
+    -- ✎ 08.11: перелік лише за рік — підказка помісячної версії шаблону в колонці «Version» недосяжна й прибрана;
+    -- «Choose a period…» швидкого перегляду замінено на «No open period in {year}» (блоки місяця — за поточним періодом).
+    (N'documents.quickLookNoPeriod', N'en', N'Choose a period to see sheet states and filled tables.'),
+    (N'documents.quickLookNoPeriod', N'ru', N'Выберите период, чтобы увидеть состояния листов и заполненность таблиц.'),
+    (N'documents.quickLookNoPeriod', N'kz', N'Парақтардың күйін және кестелердің толтырылуын көру үшін кезеңді таңдаңыз.'),
     (N'documents.versionForPeriod', N'en', N'Template version for {period}'),
     (N'documents.versionForPeriod', N'ru', N'Версия шаблона за {period}'),
     (N'documents.versionForPeriod', N'kz', N'{period} үшін үлгі нұсқасы')
