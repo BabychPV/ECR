@@ -105,10 +105,41 @@ public sealed record CalculationRunStatusDto(long? RunId, DateTime? FinishedAt, 
 
 /// <summary>Поточні проблеми розрахунку документа за період (AN-69).</summary>
 /// <param name="Items">Проблеми видимих читачеві таблиць; порожньо — проблем немає.</param>
-public sealed record CalculationIssuesDto(IReadOnlyList<CalculationIssueDto> Items);
+/// <param name="Tables">
+/// Що приймають правила методологій кожної таблиці з проблемами (UAT 08.11 b3): колонки, які згадують правила, і
+/// допустимі комбінації значень. Таблиці немає — підказки немає (правил з колонками цієї таблиці немає, чинної версії
+/// немає або хоч одна колонка прихована від читача).
+/// </param>
+public sealed record CalculationIssuesDto(
+    IReadOnlyList<CalculationIssueDto> Items,
+    IReadOnlyList<CalculationIssueTableHintDto>? Tables = null);
+
+/// <summary>Що приймають правила методологій таблиці (UAT 08.11 b3).</summary>
+/// <param name="TableCode">Код таблиці шаблону.</param>
+/// <param name="SheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+/// <param name="MethodologyCodes">Методології, чиї правила дали варіанти.</param>
+/// <param name="Columns">Колонки, які згадують правила, у порядку колонок таблиці.</param>
+/// <param name="Options">
+/// Допустимі комбінації: кожен елемент — значення в порядку <paramref name="Columns"/>; порожній рядок у позиції —
+/// правило цю колонку не обмежує. Без повторів, за зростанням.
+/// </param>
+public sealed record CalculationIssueTableHintDto(
+    string TableCode,
+    long? SheetCopyId,
+    IReadOnlyList<string> MethodologyCodes,
+    IReadOnlyList<CalculationIssueColumnDto> Columns,
+    IReadOnlyList<IReadOnlyList<string>> Options);
+
+/// <summary>Колонка, яку згадують правила методології.</summary>
+/// <param name="Code">Код колонки.</param>
+/// <param name="NameL10n">Заголовок колонки мовами каталогу.</param>
+public sealed record CalculationIssueColumnDto(string Code, LocalizedText NameL10n);
 
 /// <summary>Одна поточна проблема розрахунку: рядок, який правило методології не охопило (AN-69).</summary>
-/// <remarks>Значень комірок тут немає навмисно — лише адреса рядка.</remarks>
+/// <remarks>
+/// Значення комірок — лише в колонках, які згадують правила (<see cref="CalculationIssuesDto.Tables"/>), і лише коли
+/// читач бачить ці колонки (UAT 08.11 b3).
+/// </remarks>
 /// <param name="TableCode">Код таблиці шаблону.</param>
 /// <param name="SheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
 /// <param name="RowNumber">Номер рядка, з 1, у порядку створення.</param>
@@ -116,6 +147,10 @@ public sealed record CalculationIssuesDto(IReadOnlyList<CalculationIssueDto> Ite
 /// <param name="Kind">Вид проблеми; нині <c>NoMatchingRule</c>.</param>
 /// <param name="MethodologyCode">Методологія прив'язки таблиці; <c>null</c> — невідома.</param>
 /// <param name="DetectedAt">Коли виявлено (UTC).</param>
+/// <param name="CurrentValues">
+/// Значення рядка в колонках підказки таблиці (<c>tables[].columns</c>, той самий порядок);
+/// <c>null</c> — підказки для таблиці немає; порожній рядок у позиції — комірка порожня.
+/// </param>
 public sealed record CalculationIssueDto(
     string TableCode,
     long? SheetCopyId,
@@ -123,4 +158,5 @@ public sealed record CalculationIssueDto(
     string RowKey,
     string Kind,
     string? MethodologyCode,
-    DateTime DetectedAt);
+    DateTime DetectedAt,
+    IReadOnlyList<string>? CurrentValues = null);

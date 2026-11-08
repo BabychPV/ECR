@@ -1626,9 +1626,37 @@
         ],
         "type": "object"
       },
+      "CalculationIssueColumnDto": {
+        "description": "Колонка, яку згадують правила методології.",
+        "properties": {
+          "code": {
+            "description": "Код колонки.",
+            "type": "string"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Заголовок колонки мовами каталогу."
+          }
+        },
+        "required": [
+          "code",
+          "nameL10n"
+        ],
+        "type": "object"
+      },
       "CalculationIssueDto": {
         "description": "Одна поточна проблема розрахунку: рядок, який правило методології не охопило (AN-69).",
         "properties": {
+          "currentValues": {
+            "description": "Значення рядка в колонках підказки таблиці (`tables[].columns`, той самий порядок);\n`null` — підказки для таблиці немає; порожній рядок у позиції — комірка порожня.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "detectedAt": {
             "description": "Коли виявлено (UTC).",
             "format": "date-time",
@@ -1678,6 +1706,55 @@
         ],
         "type": "object"
       },
+      "CalculationIssueTableHintDto": {
+        "description": "Що приймають правила методологій таблиці (UAT 08.11 b3).",
+        "properties": {
+          "columns": {
+            "description": "Колонки, які згадують правила, у порядку колонок таблиці.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationIssueColumnDto"
+            },
+            "type": "array"
+          },
+          "methodologyCodes": {
+            "description": "Методології, чиї правила дали варіанти.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "options": {
+            "description": "Допустимі комбінації: кожен елемент — значення в порядку Columns; порожній рядок у позиції —\nправило цю колонку не обмежує. Без повторів, за зростанням.",
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "sheetCopyId": {
+            "description": "Копія аркуша; `null` — оригінал.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "tableCode": {
+            "description": "Код таблиці шаблону.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tableCode",
+          "sheetCopyId",
+          "methodologyCodes",
+          "columns",
+          "options"
+        ],
+        "type": "object"
+      },
       "CalculationIssuesDto": {
         "description": "Поточні проблеми розрахунку документа за період (AN-69).",
         "properties": {
@@ -1687,6 +1764,16 @@
               "$ref": "#/components/schemas/CalculationIssueDto"
             },
             "type": "array"
+          },
+          "tables": {
+            "description": "Що приймають правила методологій кожної таблиці з проблемами (UAT 08.11 b3): колонки, які згадують правила, і\nдопустимі комбінації значень. Таблиці немає — підказки немає (правил з колонками цієї таблиці немає, чинної версії\nнемає або хоч одна колонка прихована від читача).",
+            "items": {
+              "$ref": "#/components/schemas/CalculationIssueTableHintDto"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           }
         },
         "required": [

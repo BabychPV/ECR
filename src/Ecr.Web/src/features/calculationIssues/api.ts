@@ -7,6 +7,9 @@ export type CalculationIssue = components['schemas']['CalculationIssueDto'];
 /** Поточні проблеми розрахунку документа за період і копію аркуша. */
 export type CalculationIssues = components['schemas']['CalculationIssuesDto'];
 
+/** Що приймають правила методологій таблиці з проблемами (UAT 08.11 b3). */
+export type CalculationIssueTableHint = components['schemas']['CalculationIssueTableHintDto'];
+
 /**
  * Ключ кешу проблем розрахунку.
  *
