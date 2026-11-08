@@ -1,25 +1,19 @@
 import type { JSX } from 'react';
 import { Badge, Box, Group, Table, Text, UnstyledButton, VisuallyHidden } from '@mantine/core';
 import { t } from '@/shared/i18n';
-import { formatPeriodKey } from '@/shared/format/periodKey';
 import { resolveTemplateVersion, type VersionSort, type VersionSource } from './documentVersion';
 
 /**
- * Колонка «Version» переліку документів: версія ШАБЛОНУ документа за обраний у переліку період
- * (`templateVersionByPeriod[період] ?? templateVersion`, контракт RPT-STABLE).
+ * Колонка «Version» переліку документів: типова версія ШАБЛОНУ документа (`templateVersion`, контракт RPT-STABLE).
+ * ✎ Projects/Documents 08.11: перелік лише за рік — помісячної версії (`templateVersionByPeriod`) і підказки «за
+ * період» тут більше немає.
  *
  * Макет: окремого екрана колонки в `docs/design/hybrid/` немає — стиль найближчої колонки «Issues»
  * (приглушений текст у комірці, «—» для невідомого) + `Badge variant="outline"` з KIT для коду версії.
  * ⛔ Версії немає (`null`) — видиме «—» з поясненням у `title`, а не порожня комірка і не вигадане «v0».
  */
-export function DocumentVersionCell({
-  source,
-  periodKey,
-}: {
-  readonly source: VersionSource;
-  readonly periodKey: number | null;
-}): JSX.Element {
-  const { version, fromPeriod } = resolveTemplateVersion(source, periodKey);
+export function DocumentVersionCell({ source }: { readonly source: VersionSource }): JSX.Element {
+  const version = resolveTemplateVersion(source);
 
   if (version === null) {
     return (
@@ -28,10 +22,6 @@ export function DocumentVersionCell({
       </Text>
     );
   }
-
-  // Підказка й текст для читалки - лише коли значення взято з карти періоду: тоді воно ВІДРІЗНЯЄТЬСЯ від типового.
-  const period = periodKey === null ? '' : formatPeriodKey(periodKey) || String(periodKey);
-  const hint = fromPeriod ? t('documents.versionForPeriod', { period }) : undefined;
 
   return (
     <Badge
@@ -43,12 +33,9 @@ export function DocumentVersionCell({
       // ⚠ Текст - кольором тексту теми: `outline` + `gray` у світлій темі малює gray-6 (#868e96) на білому, < AA
       // (справжній axe на живому стенді); рамка лишається сірою.
       c="var(--mantine-color-text)"
-      title={hint}
       data-document-version={version}
-      data-version-source={fromPeriod ? 'period' : 'template'}
     >
       {t('documents.versionValue', { version })}
-      {hint !== undefined && <VisuallyHidden> — {hint}</VisuallyHidden>}
     </Badge>
   );
 }

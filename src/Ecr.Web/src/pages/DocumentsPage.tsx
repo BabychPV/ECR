@@ -376,7 +376,7 @@ export function DocumentsPage(): JSX.Element {
         // Варіанти — УСІ версії видимих документів (`GET /documents/template-versions`); обрані, яких сервер уже не
         // віддає, лишаються (їх є чим зняти). Поки відповіді немає (або вона відмовила) — версії поточної сторінки.
         versionOptions={mergeVersionOptions(
-          versionOptionsQuery.data?.versions ?? distinctVersions(query.data?.items ?? [], null),
+          versionOptionsQuery.data?.versions ?? distinctVersions(query.data?.items ?? []),
           filters.versions,
         )}
         staleOnPage={query.data?.items.filter((d) => d.resultsStale === true).length ?? 0}
@@ -516,7 +516,7 @@ export function DocumentsPage(): JSX.Element {
                 {/* ✎ Live-прохід 08.11 (P3, правило людини «видимий текст, а не підказки»): власника приховано
                     доступом (R-7, `DocumentOwnerCell`) — один приглушений рядок над таблицею, а не лише підказка. */}
                 {rows.some((row) => !hasOwner(row) && row.modifiedAt == null) && (
-                  <Text size="xs" c="dimmed" mb={4} data-owner-hidden-note="">
+                  <Text size="xs" c="dimmed" mb="xs" data-owner-hidden-note="">
                     {t('documents.ownerHiddenNote')}
                   </Text>
                 )}
@@ -629,7 +629,7 @@ export function DocumentsPage(): JSX.Element {
                             </Box>
                           </Table.Td>
                           <Table.Td data-column="version">
-                            <DocumentVersionCell source={document} periodKey={null} />
+                            <DocumentVersionCell source={document} />
                           </Table.Td>
                           <Table.Td data-column="quick-look">
                             {/* `UI-29`: швидкий перегляд у шторці під `?panel=<id>`. */}
@@ -667,15 +667,13 @@ export function DocumentsPage(): JSX.Element {
         }}
       </AsyncBoundary>
 
-      {/* ⚠ Шторка монтується лише за `?panel=` — запити заповненості й історії
-          йдуть після відкриття, а не для кожного рядка. Документ береться з уже
+      {/* ⚠ Шторка монтується лише за `?panel=`. Документ береться з уже
           завантаженої сторінки; посилання на документ поза нею шторка дочитує
           сама. */}
       {quickLookId !== null && (
         <Suspense fallback={null}>
           <DocumentQuickLook
             panelId={quickLookId}
-            periodKey={null}
             document={query.data?.items.find((item) => String(item.id) === quickLookId)}
             listReady={query.data !== undefined}
             onClose={() => {

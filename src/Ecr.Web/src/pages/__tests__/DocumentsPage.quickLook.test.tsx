@@ -6,18 +6,16 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { JSX } from 'react';
 import { DocumentsPage } from '@/pages/DocumentsPage';
-import { DocumentQuickLook, latestEvents, sheetFill } from '@/features/documents/DocumentQuickLook';
-import type { DocumentSummary } from '@/api/types';
 import { testTheme } from '@/test/render';
 
 /**
  * `UI-29`: швидкий перегляд документа зі списку (макет `screens-work.js` →
  * `ctx.panel('*')`, `13-docs-quicklook.png`).
  *
- * Приймання картки: 1) відкривається з «ока» і з `?panel=`; 2) аркуші зі станом і
- * заповненістю (✎ 08.11: лише з місяцем); 3) «Open document» веде на документ (✎ 08.11: без місяця); 4) без історії блок не
- * показується; 5) Esc закриває (і фокус вертається на «око»).
- * Плюс P1: подія журналу прихованого аркуша не показується.
+ * Приймання картки: 1) відкривається з «ока» і з `?panel=`; 2) «Open document» веде на документ (✎ 08.11: без
+ * місяця); 3) Esc закриває (і фокус вертається на «око»).
+ * ✎ 08.11: перелік лише за рік — помісячні блоки шторки (аркуші й заповненість, «Can approve now», «Latest changes»)
+ * прибрано як недосяжні разом із їхніми тестами; шторка не робить запитів `tables/status` і `workflow/history`.
  */
 const Period = 202609;
 const SlowEnvTimeout = 20_000;
@@ -42,36 +40,7 @@ const doc = {
   hasLateEdits: false,
 };
 
-const tables = [
-  { tableDefId: 1, sheetCode: 'GEN', inputCells: 4, filledCells: 4, errorCount: 0, warningCount: 0, isClosed: false, rowCount: 0 },
-  { tableDefId: 2, sheetCode: 'GEN', inputCells: 2, filledCells: 2, errorCount: 0, warningCount: 0, isClosed: false, rowCount: 0 },
-  { tableDefId: 3, sheetCode: 'AIR', inputCells: 9, filledCells: 3, errorCount: 3, warningCount: 0, isClosed: false, rowCount: 0 },
-  // Таблиця без полів для людини (`R-13`) — у заповненість не входить.
-  { tableDefId: 4, sheetCode: 'AIR', inputCells: 0, filledCells: 0, errorCount: null, warningCount: null, isClosed: false, rowCount: 0 },
-];
-
-const event = (sheetCode: string, at: string, toState: string) => ({
-  action: 'Submit',
-  at,
-  byDisplayName: 'Marat Zhakupov',
-  fromState: 'Draft',
-  toState,
-  reason: null,
-  sheetCode,
-  stepOrdinal: null,
-  approvedBySubmitter: false,
-});
-
-const history = [
-  event('GEN', '2026-10-01T09:00:00Z', 'Submitted'),
-  event('GEN', '2026-10-02T09:00:00Z', 'Approved'),
-  // ⛔ Аркуш, якого роль не бачить (немає в `sheets`) — у шторці його бути не може.
-  event('SECRET', '2026-10-04T09:00:00Z', 'Submitted'),
-  event('AIR', '2026-10-03T09:00:00Z', 'Submitted'),
-  event('AIR', '2026-10-03T12:00:00Z', 'Draft'),
-];
-
-function mockFetch(historyBody: unknown = history): void {
+function mockFetch(): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -92,8 +61,6 @@ function mockFetch(historyBody: unknown = history): void {
           userName: 'tester',
         });
       }
-      if (url.includes('/tables/status')) return json(tables);
-      if (url.includes('/workflow/history')) return json(historyBody);
       if (url.includes('/api/v1/documents/summary')) return json({ draft: 1, submitted: 0, approved: 0, rejected: 0, withIssues: 1 });
       if (url.includes('/api/v1/documents/11')) return json(doc);
       if (url.includes('/api/v1/documents')) return json({ items: [doc], nextCursor: null, totalCount: 1 });
@@ -121,32 +88,6 @@ function show(url = '/?year=2026'): void {
         <QueryClientProvider client={client}>
           <DocumentsPage />
           <LocationProbe />
-        </QueryClientProvider>
-      </MemoryRouter>
-    </MantineProvider>,
-  );
-}
-
-/**
- * ✎ Projects/Documents 08.11: перелік лише за рік, і сторінка відкриває шторку БЕЗ місяця — аркуші, заповненість і
- * «Latest changes» шторка показує лише з місяцем. Ці гарантії (P1: прихований аркуш) лишаються за самою шторкою —
- * тому вона тут монтується напряму з місяцем, як її змонтує будь-який споживач із періодом.
- */
-function showDrawerForPeriod(): void {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-
-  render(
-    <MantineProvider theme={testTheme}>
-      <MemoryRouter initialEntries={[`/?panel=11`]}>
-        <QueryClientProvider client={client}>
-          <DocumentQuickLook
-            panelId="11"
-            periodKey={Period}
-            document={doc as unknown as DocumentSummary}
-            listReady
-            projectCode={() => 'ATR'}
-            documentHref={(id) => `/documents/${String(id)}?periodKey=${String(Period)}`}
-          />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,
@@ -194,94 +135,8 @@ describe('DocumentsPage: швидкий перегляд (UI-29)', () => {
 
       const calls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
       expect(calls.some((url) => url.includes('/tables/status') || url.includes('/workflow/history'))).toBe(false);
-    },
-    TestTimeout,
-  );
-
-  it(
-    // ✎ Projects/Documents 08.11: аркуші й заповненість — гарантія самої шторки з місяцем (сторінка року її без місяця не відкриває).
-    'шторка з місяцем: аркуші, стан, заповненість лише їхніх таблиць',
-    async () => {
-      mockFetch();
-      showDrawerForPeriod();
-
-      const drawer = await screen.findByRole('dialog', {}, { timeout: SlowEnvTimeout });
-      await waitFor(() => expect(drawer.querySelector('[data-quick-look-fill="2/2"]')).not.toBeNull(), {
-        timeout: SlowEnvTimeout,
-      });
-      // AIR: 1 таблиця для людини (друга без полів), заповнена не повністю.
-      expect(drawer.querySelector('[data-quick-look-sheet="AIR"] [data-quick-look-fill]')?.getAttribute('data-quick-look-fill')).toBe('0/1');
-      expect(drawer.querySelector('[data-quick-look-sheet="GEN"] [data-status-state="Approved"]')).not.toBeNull();
-    },
-    TestTimeout,
-  );
-
-  it(
-    '«Latest changes»: три найновіші події видимих аркушів; подія прихованого аркуша не показується',
-    async () => {
-      mockFetch();
-      // ✎ Projects/Documents 08.11: «Latest changes» є лише в шторці з місяцем — монтуємо її напряму (P1 лишається).
-      showDrawerForPeriod();
-
-      const drawer = await screen.findByRole('dialog', {}, { timeout: SlowEnvTimeout });
-      await waitFor(() => expect(drawer.querySelectorAll('[data-quick-look-event]')).toHaveLength(3), {
-        timeout: SlowEnvTimeout,
-      });
-
-      const text = drawer.querySelector('[data-quick-look-changes]')?.textContent ?? '';
-      // ⛔ Мутаційний доказ: прибери фільтр за видимими аркушами — подія SECRET (найновіша) потрапить у перелік.
-      expect(text).not.toContain('SECRET');
-      expect(text).toContain('Air emissions');
-      // Назва аркуша, а не код.
-      expect(text).not.toContain('AIR');
-    },
-    TestTimeout,
-  );
-
-  it(
-    '«Latest changes»: самопогодження (D-440) позначене тим самим ключем, що й у «More → History», і лише на своїй події',
-    async () => {
-      mockFetch([
-        event('GEN', '2026-10-01T09:00:00Z', 'Submitted'),
-        { ...event('GEN', '2026-10-02T09:00:00Z', 'Approved'), action: 'Approve', fromState: 'Submitted', approvedBySubmitter: true },
-        event('AIR', '2026-10-03T09:00:00Z', 'Submitted'),
-      ]);
-      // ✎ Projects/Documents 08.11: «Latest changes» є лише в шторці з місяцем — монтуємо її напряму.
-      showDrawerForPeriod();
-
-      const drawer = await screen.findByRole('dialog', {}, { timeout: SlowEnvTimeout });
-      await waitFor(() => expect(drawer.querySelectorAll('[data-quick-look-event]')).toHaveLength(3), {
-        timeout: SlowEnvTimeout,
-      });
-
-      // Новіші першими: AIR Submitted, GEN Approved (самопогодження), GEN Submitted.
-      const rows = [...drawer.querySelectorAll('[data-quick-look-event]')];
-      // ⛔ Мутаційний доказ: прибери позначку з `LatestChanges` — рядок GEN Approved її не матиме.
-      expect(rows[1]?.querySelector('[data-quick-look-approved-by-submitter]')?.textContent).toBe(
-        '⟦workflow.historyApprovedBySubmitter⟧',
-      );
-      expect(rows[0]?.querySelector('[data-quick-look-approved-by-submitter]')).toBeNull();
-      expect(rows[2]?.querySelector('[data-quick-look-approved-by-submitter]')).toBeNull();
-    },
-    TestTimeout,
-  );
-
-  it(
-    'історії немає — блоку «Latest changes» немає (D15-06), а не порожній заголовок',
-    async () => {
-      mockFetch([]);
-      // ✎ Projects/Documents 08.11: блок історії є лише в шторці з місяцем — монтуємо її напряму.
-      showDrawerForPeriod();
-
-      const drawer = await screen.findByRole('dialog', {}, { timeout: SlowEnvTimeout });
-      await waitFor(() => expect(drawer.querySelector('[data-quick-look-fill="2/2"]')).not.toBeNull(), {
-        timeout: SlowEnvTimeout,
-      });
-      await new Promise((resolve) => {
-        setTimeout(resolve, 50);
-      });
-
-      expect(within(drawer).queryByText('⟦documents.quickLookLatestChanges⟧')).toBeNull();
+      // Документ уже на сторінці — картку окремо не дочитуємо (без місяця вона нічого понад рядок не несе).
+      expect(calls.some((url) => url.includes('/api/v1/documents/11'))).toBe(false);
     },
     TestTimeout,
   );
@@ -322,20 +177,4 @@ describe('DocumentsPage: швидкий перегляд (UI-29)', () => {
     },
     TestTimeout,
   );
-});
-
-describe('DocumentQuickLook: чисті помічники', () => {
-  it('sheetFill рахує лише таблиці аркуша, у яких людині є що вводити', () => {
-    expect(sheetFill(tables, 'GEN')).toEqual({ filled: 2, total: 2 });
-    expect(sheetFill(tables, 'AIR')).toEqual({ filled: 0, total: 1 });
-    expect(sheetFill(tables, 'NONE')).toEqual({ filled: 0, total: 0 });
-  });
-
-  it('latestEvents — новіші першими, не більше трьох', () => {
-    expect(latestEvents(history).map((item) => item.at)).toEqual([
-      '2026-10-04T09:00:00Z',
-      '2026-10-03T12:00:00Z',
-      '2026-10-03T09:00:00Z',
-    ]);
-  });
 });

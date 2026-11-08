@@ -6,12 +6,12 @@ import { Shell, Themes } from '@/test/__tests__/a11yFixtures';
 import { describe as describeViolations, findViolations } from '@/test/a11y';
 
 /**
- * Колонка «Version» переліку документів в обох темах: заголовок з `aria-sort`, версія з карти періоду
- * (з текстом для читалки), типова версія і «—» - без блокуючих порушень axe.
+ * Колонка «Version» переліку документів в обох темах: заголовок з `aria-sort`, типова версія і «—» - без блокуючих
+ * порушень axe. (✎ 08.11: помісячної версії з підказкою «за період» у переліку року більше немає.)
  */
 describe('DocumentVersionColumn — доступність', { timeout: 120_000 }, () => {
   for (const colorScheme of Themes) {
-    it(`${colorScheme}: заголовок, версія періоду, типова версія й «—» без порушень`, async () => {
+    it(`${colorScheme}: заголовок, типова версія й «—» без порушень`, async () => {
       const { container } = render(
         <Shell colorScheme={colorScheme}>
           <Table>
@@ -23,17 +23,12 @@ describe('DocumentVersionColumn — доступність', { timeout: 120_000 
             <Table.Tbody>
               <Table.Tr>
                 <Table.Td>
-                  <DocumentVersionCell source={{ templateVersion: '1.0', templateVersionByPeriod: { '202609': '2.0' } }} periodKey={202609} />
+                  <DocumentVersionCell source={{ templateVersion: '1.0' }} />
                 </Table.Td>
               </Table.Tr>
               <Table.Tr>
                 <Table.Td>
-                  <DocumentVersionCell source={{ templateVersion: '1.0' }} periodKey={202610} />
-                </Table.Td>
-              </Table.Tr>
-              <Table.Tr>
-                <Table.Td>
-                  <DocumentVersionCell source={{ templateVersion: null }} periodKey={202609} />
+                  <DocumentVersionCell source={{ templateVersion: null }} />
                 </Table.Td>
               </Table.Tr>
             </Table.Tbody>
@@ -42,7 +37,8 @@ describe('DocumentVersionColumn — доступність', { timeout: 120_000 
       );
 
       expect(container.querySelector('[data-column="version"]')?.getAttribute('aria-sort')).toBe('ascending');
-      expect(container.querySelector('[data-version-source="period"]')?.textContent).toContain('documents.versionForPeriod');
+      expect(container.querySelector('[data-document-version="1.0"]')).not.toBeNull();
+      expect(container.querySelector('[data-document-version="none"]')).not.toBeNull();
 
       const violations = await findViolations(document.body);
       expect(violations, describeViolations(violations)).toHaveLength(0);
