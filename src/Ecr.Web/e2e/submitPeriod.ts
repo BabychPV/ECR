@@ -46,3 +46,31 @@ export async function chooseSubmitPeriod(
 
   return submit;
 }
+
+/**
+ * ✎ UAT-p3 №1: «Подати: <місяць>» спершу питає (як Approve / Return for edits) — підтвердження в діалозі.
+ *
+ * @param page Сторінка документа.
+ * @param options `keyboard` — фокус на «Submit» діалогу й Enter (прохід `keyboardPath.spec.ts`).
+ * @returns Діалог підтвердження (уже закривається).
+ */
+export async function confirmSubmit(page: Page, options: { readonly keyboard?: boolean } = {}): Promise<Locator> {
+  const dialog = page.getByRole('dialog');
+  await expect(dialog, 'подання не спитало підтвердження').toBeVisible({ timeout: 15_000 });
+  const confirm = dialog.getByRole('button', { name: /^(Submit|Подать|Подати|Тапсыру)$/ });
+
+  if (options.keyboard === true) {
+    await confirm.focus();
+    await page.keyboard.press('Enter');
+  } else {
+    await confirm.click();
+  }
+
+  return dialog;
+}
+
+/** Клік «Подати: <місяць>» і підтвердження в діалозі (UAT-p3 №1). */
+export async function submitAndConfirm(page: Page, submit: Locator): Promise<void> {
+  await submit.click();
+  await confirmSubmit(page);
+}

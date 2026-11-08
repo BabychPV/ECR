@@ -1,3 +1,4 @@
+import { confirmSubmit } from '@/test/confirmSubmit';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -153,6 +154,7 @@ describe('SheetActions: відмова Submit через застарілі ре
     show();
 
     fireEvent.click(await screen.findByRole('button', { name: /submit/i }));
+    await confirmSubmit();
 
     const expected = catalogText(StaleKey);
     expect(expected).not.toBeNull();
@@ -175,6 +177,7 @@ describe('SheetActions: відмова Submit через застарілі ре
     show();
 
     fireEvent.click(await screen.findByRole('button', { name: /submit/i }));
+    await confirmSubmit();
 
     await waitFor(() => {
       expect(spy).toHaveBeenCalled();

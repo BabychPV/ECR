@@ -144,6 +144,28 @@ describe('gridColumns — числова колонка вирівнюється
     expect(columnTotals(data).has('C1')).toBe(true);
   });
 
+  it('pinned total row cell shows the read-only mark and says why it cannot be typed into', () => {
+    // ✎ UAT-p3 №2: порожня комірка підсумків поруч із «Total» (колонка без суми) не мала ні замка, ні підказки,
+    // а набір мовчки нічого не робив. Тепер — той самий стан readOnly, що й в інших комірок лише для читання.
+    const data = slice([column({ code: 'C1' }), column({ code: 'C2', dataType: 'String' })], { C1: '5', C2: 'x' });
+    const columns = built(data);
+
+    const plain = cellProps(columns, 'C2', { __rowKey: TotalsRowKey });
+    expect(String(plain['class'] ?? '')).toContain('ecr-cell--read-only');
+    expect(plain['data-cell-state']).toBe('readOnly');
+    expect(String(plain['title'] ?? '')).toContain('grid.totalsReadOnlyHint');
+
+    const summed = cellProps(columns, 'C1', { __rowKey: TotalsRowKey });
+    expect(String(summed['class'] ?? '')).toContain('ecr-cell--read-only');
+    expect(String(summed['class'] ?? '')).toContain('ecr-cell-numeric');
+    expect(String(summed['title'] ?? '')).toContain('grid.totalsReadOnlyHint');
+
+    // Редактор на підсумку не відкривається (набір не приймається) — як і раніше.
+    const found = columns.find((c) => c.prop === 'C2');
+    const readonly = found?.readonly;
+    expect(typeof readonly === 'function' ? readonly({ model: { __rowKey: TotalsRowKey } } as never) : readonly).toBe(true);
+  });
+
   it('заголовок числової колонки — теж праворуч, і підказка вимоги не губиться', () => {
     const plain = headerProps(built(slice([column()])), 'C1');
 

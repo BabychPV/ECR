@@ -31,6 +31,10 @@ const PeriodsStatStrip = lazy(async () => ({
 const AllProjectsPeriods = lazy(async () => ({
   default: (await import('@/features/projects/PeriodsOverview')).AllProjectsPeriods,
 }));
+// ✎ UAT-p3: людина шукала перерахунок саме тут — та сама дія, що й на переліку документів (окремим чанком, D-132).
+const ProjectRecalculateAction = lazy(async () => ({
+  default: (await import('@/features/documents/ProjectRecalculateAction')).ProjectRecalculateAction,
+}));
 /**
  * Поле дати — за `import()`, і не заради стилю.
  *
@@ -355,6 +359,14 @@ export function PeriodsPage(): JSX.Element {
             >
               {t('projectSettings.title')}
             </Button>
+
+            {/* ✎ UAT-p3: перерахунок обраного проєкту — те саме правило, що на переліку документів (лише Active і
+                `Calculation.Recalculate`), той самий компонент і перелік пропущених. */}
+            {selected !== undefined && selected.status === 'Active' && can(session.data, 'Calculation.Recalculate') && (
+              <Suspense fallback={null}>
+                <ProjectRecalculateAction key={selected.id} project={selected} label={t('periods.recalcProject')} />
+              </Suspense>
+            )}
           </FilterRow>
         }
       />

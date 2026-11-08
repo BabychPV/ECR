@@ -1,3 +1,4 @@
+import { confirmSubmit } from '@/test/confirmSubmit';
 import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -268,6 +269,7 @@ describe('DocumentPage: рядок дій (UI-14)', () => {
       );
 
       fireEvent.click(within(row).getByRole('button', { name: /workflow\.submitPeriod/ }));
+      await confirmSubmit();
       await waitFor(() =>
         expect(within(row).getByRole('button', { name: /workflow\.submitPeriod/ }).hasAttribute('data-loading')).toBe(
           true,

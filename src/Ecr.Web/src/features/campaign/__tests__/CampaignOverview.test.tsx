@@ -271,6 +271,16 @@ describe('огляд кампанії: підсумки з сервера', () =
     expect(document.querySelector('[data-stat="rejected"]')?.getAttribute('data-stat-tone')).toBe('danger');
   });
 
+  it('campaign counters name their month and that all projects are counted', async () => {
+    // ✎ UAT-p3 №3: числа кампанії й переліку документів рахують різні області — підпис називає свою.
+    mockServer(summaryOf(listed, hidden));
+    show(<CampaignOverview periodKey={Period} />);
+
+    await stat('approved');
+    const scope = document.querySelector('[data-campaign-scope]');
+    expect(scope?.textContent).toMatch(/campaign\.countersScope \(period=[^)]*\d{4}/);
+  });
+
   it('R-1: сервер віддав null лічильникам станів — смуги станів немає, є «—», а лічильники класів і перелік на місці', async () => {
     const nulled = (p: CampaignProject): CampaignProject => ({
       ...p,

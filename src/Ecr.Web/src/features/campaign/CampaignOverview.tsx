@@ -8,7 +8,7 @@ import {
   type CampaignSummary,
 } from '@/features/campaign/api';
 import { holdingUp, holdingUpRank, lastSubmissionDay } from '@/features/campaign/campaignView';
-import { formatDate } from '@/shared/format';
+import { formatDate, formatPeriodKey } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -58,13 +58,19 @@ export function CampaignOverview({ periodKey }: CampaignOverviewProps): JSX.Elem
       skeleton="table"
       onRetry={() => void summary.refetch()}
     >
-      {(data) => <CampaignBody summary={data} />}
+      {(data) => <CampaignBody summary={data} periodKey={periodKey} />}
     </AsyncBoundary>
   );
 }
 
 /** Зміст огляду, коли відповідь є. */
-function CampaignBody({ summary }: { readonly summary: CampaignSummary }): JSX.Element {
+function CampaignBody({
+  summary,
+  periodKey,
+}: {
+  readonly summary: CampaignSummary;
+  readonly periodKey: number | null;
+}): JSX.Element {
   const { totals } = summary;
   const lagging = holdingUp(summary.projects);
 
@@ -90,6 +96,13 @@ function CampaignBody({ summary }: { readonly summary: CampaignSummary }): JSX.E
 
       <Stack gap="xs">
         <Title order={4}>{t('documents.summaryLabel')}</Title>
+        {/* ✎ UAT-p3 №3: область лічильників — місяць кампанії і ВСІ проєкти (Q15-07), щоб не «суперечити» переліку
+            документів, який рахує за обраний рік/місяць і видимі проєкти. */}
+        {periodKey !== null && (
+          <Text size="xs" c="dimmed" data-campaign-scope="">
+            {t('campaign.countersScope', { period: formatPeriodKey(periodKey) || String(periodKey) })}
+          </Text>
+        )}
 
         {/*
           ⚠ Підписи станів — ті самі рядки каталогу, що й у `<StatusBadge>`

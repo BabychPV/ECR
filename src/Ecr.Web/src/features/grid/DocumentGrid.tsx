@@ -3478,16 +3478,24 @@ export function gridColumns(
         // рядка, якого користувач не вводив.
         if (isTotalsRow(model)) {
           const total = totals.get(column.code);
+          // ✎ UAT-p3 №2: комірка підсумків — лише для читання ВИДИМО (замок і штриховка, як інші), і з причиною
+          // текстом: раніше без підсумку в колонці (порожня комірка поруч із «Total») не було ні знака, ні
+          // підказки, а набір мовчки нічого не робив.
+          const readOnlyHint = t('grid.totalsReadOnlyHint');
 
+          // ⚠ `U-05`: підсумок вирівнюється тим самим правилом, що й
+          // колонка. Сума під стовпцем, вирівняним інакше, ніж вона сама,
+          // читається як чужий рядок.
+          const totalsClass = numericClass === null ? cellStateClass('readOnly') : `${cellStateClass('readOnly')} ${numericClass}`;
+          const totalsTitle =
+            total === undefined ? readOnlyHint : `${t('grid.totalsCellHint', { count: total.count })} ${readOnlyHint}`;
+
+          // ⚠ Умовні розгортання — та сама форма об'єкта, що й у гілці комірки нижче (інакше TS не зводить
+          // об'єднання типів повернення до `CellProps` за `exactOptionalPropertyTypes`).
           return {
             'data-grid-totals': 'cell',
-            // ⚠ `U-05`: підсумок вирівнюється тим самим правилом, що й
-            // колонка. Сума під стовпцем, вирівняним інакше, ніж вона сама,
-            // читається як чужий рядок.
-            ...(numericClass === null ? {} : { class: numericClass }),
-            ...(total === undefined
-              ? {}
-              : { title: t('grid.totalsCellHint', { count: total.count }) }),
+            ...(totalsClass === '' ? {} : { class: totalsClass, 'data-cell-state': 'readOnly' as const }),
+            ...(totalsTitle === '' ? {} : { title: totalsTitle }),
           };
         }
 

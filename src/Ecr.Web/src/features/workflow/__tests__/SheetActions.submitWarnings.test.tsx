@@ -1,3 +1,4 @@
+import { confirmSubmit } from '@/test/confirmSubmit';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -118,6 +119,7 @@ describe('SheetActions: подання з попередженнями (ФВ-5.1
     show();
 
     fireEvent.click(await screen.findByRole('button', { name: /workflow\.submitPeriod/ }));
+    await confirmSubmit();
 
     expect(await screen.findByText(WarningText)).toBeTruthy();
     expect(submitBodies).toHaveLength(1);
@@ -133,6 +135,7 @@ describe('SheetActions: подання з попередженнями (ФВ-5.1
     show();
 
     fireEvent.click(await screen.findByRole('button', { name: /workflow\.submitPeriod/ }));
+    await confirmSubmit();
     await screen.findByText(WarningText);
 
     fireEvent.click(await screen.findByRole('button', { name: '⟦workflow.submitAnyway⟧' }));
@@ -153,6 +156,7 @@ describe('SheetActions: подання з попередженнями (ФВ-5.1
     show();
 
     fireEvent.click(await screen.findByRole('button', { name: /workflow\.submitPeriod/ }));
+    await confirmSubmit();
     await screen.findByText(WarningText);
 
     fireEvent.click(await screen.findByRole('button', { name: '⟦common.cancel⟧' }));
@@ -169,6 +173,7 @@ describe('SheetActions: подання з попередженнями (ФВ-5.1
     show();
 
     fireEvent.click(await screen.findByRole('button', { name: /workflow\.submitPeriod/ }));
+    await confirmSubmit();
 
     await waitFor(() => {
       expect(spy).toHaveBeenCalled();

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -37,13 +38,22 @@ const calendar = {
   ],
 };
 
+/** POST-запити сторінки (UAT-p3: перерахунок проєкту). */
+const posts: string[] = [];
+
 function mockFetch(): void {
+  posts.length = 0;
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const json = (body: unknown): Response =>
         new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+      if (init?.method === 'POST') {
+        posts.push(url);
+        return json({ jobId: null, nothingToRecalculate: true, skippedSheets: [] });
+      }
 
       if (url.includes('/api/v1/me')) {
         return json({
@@ -123,7 +133,7 @@ describe('PeriodsPage: рядок місяця — підпис, стан і о�
   );
 
   it(
-    'п. b: маршрут, політики, клон, пояс, архів і перерахунок — не тут; є посилання на налаштування проєкту',
+    'п. b: маршрут, політики, клон, пояс і архів — не тут; є посилання на налаштування проєкту',
     async () => {
       mockFetch();
       show();
@@ -144,6 +154,25 @@ describe('PeriodsPage: рядок місяця — підпис, стан і о�
 
       const link = screen.getByRole('link', { name: '⟦projectSettings.title⟧' });
       expect(link.getAttribute('href')).toBe('/admin/projects?projectId=7');
+    },
+    Slow,
+  );
+
+  it(
+    'Periods offers Recalculate project for the selected active project, confirmed before any request',
+    async () => {
+      // ✎ UAT-p3: людина шукала перерахунок тут — та сама дія, що на переліку документів (ProjectRecalculateAction).
+      mockFetch();
+      const user = userEvent.setup();
+      show();
+      await row(202601);
+
+      await user.click(await screen.findByRole('button', { name: '⟦periods.recalcProject⟧' }));
+      const dialog = await screen.findByRole('dialog', { name: '⟦periods.recalcTitle (code=PRJ-7)⟧' });
+      expect(posts).toEqual([]);
+
+      await user.click(within(dialog).getByRole('button', { name: '⟦workflow.recalculate⟧' }));
+      await waitFor(() => expect(posts).toEqual(['/api/v1/projects/7/recalculate']));
     },
     Slow,
   );

@@ -429,7 +429,11 @@ export function useSheetActions({
   const here: ActionTarget = { sheetDefId, periodKey, sheetName, sheetCopyId };
 
   // Яка дія чекає на причину; `null` — діалог закритий.
-  const [asking, setAsking] = useState<'approve' | 'reject' | 'reopen' | 'recall' | null>(null);
+  // ✎ UAT-p3 №1: «Submit: <місяць>» теж питає (як Approve / Return) — ціль може бути не тим місяцем, що на екрані.
+  const [asking, setAsking] = useState<'submit' | 'approve' | 'reject' | 'reopen' | 'recall' | null>(null);
+  const closeSubmitConfirm = (): void => setAsking((now) => (now === 'submit' ? null : now));
+  // Місяць у тексті підтвердження — стан, а не `askedAt` (ref у рендері не читаємо).
+  const [askedPeriod, setAskedPeriod] = useState<number>(periodKey);
 
   // ⚠ Адреса, для якої відкрито діалог: підтвердження діє на аркуш, що питали, а не на той, що відкритий
   // на мить підтвердження (вкладку можна перемкнути й під діалогом - історія браузера, гарячі клавіші).
@@ -472,6 +476,7 @@ export function useSheetActions({
       }),
     onSuccess: async (_result, at) => {
       setWarnings(null);
+      closeSubmitConfirm();
       await refresh(at);
       // ✎ D-441: попередження «наступний — …» стоїть поруч із кнопкою ДО подання (`SubmitPeriodPicker`); після
       // нього кнопка сама переходить на наступний період.
@@ -482,6 +487,7 @@ export function useSheetActions({
     // виправити. Виняток — «попередження без підтвердження» (ФВ-5.19): це
     // питання, а не відмова, тож замість тосту — діалог із переліком.
     onError: (error, at) => {
+      closeSubmitConfirm();
       const pending = warningsToConfirm(error);
       if (pending === null) {
         setWarnings(null);
@@ -1004,6 +1010,17 @@ export function useSheetActions({
       />
 
       <LazyConfirmModal
+        opened={asking === 'submit'}
+        title={t('workflow.submitConfirmTitle', { period: periodLabel(askedPeriod) })}
+        text={t('workflow.submitConfirmHint', { period: periodLabel(askedPeriod) })}
+        verb={t('document.submit')}
+        danger={false}
+        isPending={submit.isPending || settled.settling}
+        onConfirm={() => settled.run(() => submit.mutateAsync({ ...askedAt.current, acknowledgeWarnings: false }))}
+        onClose={() => setAsking(null)}
+      />
+
+      <LazyConfirmModal
         opened={asking === 'approve'}
         title={t('workflow.approveTitle')}
         text={t('workflow.approveHint')}
@@ -1072,11 +1089,12 @@ export function useSheetActions({
           },
           // N3-01: адреса — знята в мить кліку; період — ЦІЛЬ подання, а не відкритий на екрані (D-441).
           // ⛔ Лише підтверджена ціль (`confirmedPeriod`): поки дані підставні, клік нічого не шле.
+          // UAT-p3 №1: клік лише відкриває підтвердження з назвою місяця; подає — «Submit» у діалозі.
           run: () => {
             if (confirmedPeriod === null) return;
-            settled.run(() =>
-              submit.mutateAsync({ ...here, periodKey: confirmedPeriod, acknowledgeWarnings: false }),
-            );
+            askedAt.current = { ...here, periodKey: confirmedPeriod };
+            setAskedPeriod(confirmedPeriod);
+            setAsking('submit');
           },
         }
       : null,

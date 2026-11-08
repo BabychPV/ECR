@@ -1117,7 +1117,16 @@ test.describe('WALK: прохід системою від А до Я', () => {
     await record('workflow-submit', async () => {
       const submit = page.getByRole('button', { name: /^Submit(:|$)/i }).first(); // ✎ D-441: «Submit: <період>»
       const present = (await submit.count()) > 0;
-      if (present) await submit.click();
+      // ✎ UAT-p3 №1: подання питає підтвердження.
+      if (present) {
+        await submit.click();
+        const confirm = page.getByRole('dialog').getByRole('button', { name: /^(Submit|Подать|Подати|Тапсыру)$/ });
+        const asked = await confirm
+          .waitFor({ state: 'visible', timeout: 5_000 })
+          .then(() => true)
+          .catch(() => false);
+        if (asked) await confirm.click();
+      }
       await page.waitForTimeout(4_000);
 
       const file = await shot(page, 'workflow-submitted');
