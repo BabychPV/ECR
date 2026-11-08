@@ -23,6 +23,14 @@ export function projectRecalcUrl(projectId: number | null): string {
     : `/api/v1/jobs?mine=true&kind=projectRecalculation&projectId=${String(projectId)}&limit=1`;
 }
 
+/**
+ * Рядки переліку; будь-що, крім масиву (старий сервер, заглушка відповіді, проксі-сторінка), — порожньо.
+ * ⚠ Банер не має права покласти сторінку, на якій змонтований (документ, перелік, Periods).
+ */
+export function rowsOf(data: unknown): JobSummary[] {
+  return Array.isArray(data) ? (data as JobSummary[]) : [];
+}
+
 /** Ключ запиту; префікс `['jobs']` — інвалідації переліку задач (повтор, скасування) зачіпають і його. */
 export function projectRecalcKey(projectId: number | null): readonly unknown[] {
   return ['jobs', 'project-recalc', projectId];
@@ -50,12 +58,12 @@ export function useProjectRecalcProgress(projectId: number | null, enabled = tru
     queryFn: () => apiFetch<JobSummary[]>(projectRecalcUrl(projectId)),
     enabled,
     refetchInterval: (q) =>
-      (q.state.data ?? []).filter(isProjectRecalculation).map(progressOf).some(isRecalcActive) ? RecalcPollMs : false,
+      rowsOf(q.state.data).filter(isProjectRecalculation).map(progressOf).some(isRecalcActive) ? RecalcPollMs : false,
     // ⚠ Без права на перелік (чужа сесія, анонім) банера просто немає — не червоне.
     retry: false,
   });
 
-  const items = (query.data ?? []).filter(isProjectRecalculation).map(progressOf);
+  const items = rowsOf(query.data).filter(isProjectRecalculation).map(progressOf);
 
   // Перехід «йде → завершено» по кожній задачі.
   const seenActive = useRef(new Set<string>());

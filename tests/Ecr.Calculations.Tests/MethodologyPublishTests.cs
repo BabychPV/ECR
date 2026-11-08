@@ -506,11 +506,16 @@ public sealed class MethodologyPublishTests
         Assert.Equal("ECR-CALC-4221", error.ErrorCode);
         await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
             Arg.Any<object?>(), Arg.Any<CancellationToken>());
+        await _jobs.DidNotReceive().EnqueueCoalescedAsync<IRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
 
         // ✎ 07.11 (D-468): погодження прибрано — шлях один, Reopen (період у `Grace`), далі звичайний перерахунок.
+        // ✎ UAT recalc-progress (08.11): перерахунок проєкту ставиться ЗЛИТТЯМ з ціллю `project{id}-p{key}` (за нею
+        // перелік задач знаходить його для банера прогресу), а не `EnqueueAsync` — заглушка стоїть на новому виклику.
         _periods.GetPeriodStatesAsync(1, 202601, Arg.Any<CancellationToken>())
                 .Returns(new List<PeriodStateRef> { new(202601, PeriodState.Grace) });
-        _jobs.EnqueueAsync<IRecalculationJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>())
+        _jobs.EnqueueCoalescedAsync<IRecalculationJob>(
+                "project1-p202601", Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
              .Returns("job-1");
 
         var jobId = await handler.HandleAsync(1, 202601, CancellationToken.None);
