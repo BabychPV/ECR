@@ -51,8 +51,22 @@ public static class ValidationMessageTemplates
     /// <summary>Правило не обчислилося: формула завелика для одного обчислення (бюджет кроків або глибини).</summary>
     public const string RuleBudget = "validation.rule.budget";
 
+    /// <summary>Rule (h4): the row's permit does not cover months that hold data.</summary>
+    public const string PermitMonthsNotCovered = "validation.permit.monthsNotCovered";
+
+    /// <summary>Rule (h4): the header (Contract tab) permit does not cover months the document holds data in.</summary>
+    public const string PermitHeaderMonthsNotCovered = "validation.permit.headerMonthsNotCovered";
+
     private static readonly Dictionary<string, (string En, string Ru, string Kz)> Table = new(StringComparer.Ordinal)
     {
+        [PermitMonthsNotCovered] = (
+            "Permit {permit} (column \"{column}\") is valid {validity} and does not cover the months with data: {months}. Pick a permit valid in those months, clear the values in those months, or extend the permit's validity.",
+            "Разрешение {permit} (колонка «{column}») действует {validity} и не покрывает месяцы с данными: {months}. Выберите разрешение, действующее в эти месяцы, очистите значения за эти месяцы или продлите срок действия разрешения.",
+            "{permit} рұқсаты («{column}» бағаны) {validity} аралығында жарамды және деректері бар айларды қамтымайды: {months}. Осы айларда жарамды рұқсатты таңдаңыз, осы айлардағы мәндерді тазалаңыз немесе рұқсаттың жарамдылық мерзімін ұзартыңыз."),
+        [PermitHeaderMonthsNotCovered] = (
+            "Header field \"{column}\": permit {permit} is valid {validity} and does not cover the months the document holds data in: {months}. Pick a permit valid in those months, clear the values in those months, or extend the permit's validity.",
+            "Поле шапки «{column}»: разрешение {permit} действует {validity} и не покрывает месяцы, за которые в документе есть данные: {months}. Выберите разрешение, действующее в эти месяцы, очистите значения за эти месяцы или продлите срок действия разрешения.",
+            "«{column}» тақырып өрісі: {permit} рұқсаты {validity} аралығында жарамды және құжатта деректері бар айларды қамтымайды: {months}. Осы айларда жарамды рұқсатты таңдаңыз, осы айлардағы мәндерді тазалаңыз немесе рұқсаттың жарамдылық мерзімін ұзартыңыз."),
         [CheckMismatch] = (
             "Check: {left} = {leftValue} does not match {right} = {rightValue}: deviation {deviation}, allowed {allowed} ({kind}).",
             "Сверка: {left} = {leftValue} не сходится с {right} = {rightValue}: отклонение {deviation}, допустимо {allowed} ({kind}).",

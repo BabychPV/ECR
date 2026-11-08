@@ -588,6 +588,7 @@ public static class DependencyInjection
         services.AddScoped<IPermitTypeStore, PermitTypeStore>();
         services.AddScoped<IPermitListStore, PermitListStore>(); // PM-08e
         services.AddScoped<IPermitGroupStore, PermitGroupStore>(); // PRMG: групи типів як ціль Lookup
+        services.AddScoped<IPermitDataMonthsReader, PermitDataMonthsReader>(); // rule (h): months with data of a document
 
         // PERMITS: permits — екземпляри дозволів (PM-04)
         services.AddScoped<IPermitStore, PermitStore>();

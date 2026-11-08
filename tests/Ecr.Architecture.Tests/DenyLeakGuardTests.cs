@@ -61,6 +61,8 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Validation/TableValidation.cs"] = "виробник: структура й обов'язковість",
         ["src/Ecr.Application/Validation/RequiredHeaderCheck.cs"] = "виробник: порожні обов'язкові поля шапки (D-PS); лише коди, без значень",
         ["src/Ecr.Application/Validation/RelationCheckRunner.cs"] = "виробник: зв'язки Check (джерело — правило 1)",
+        ["src/Ecr.Application/Validation/PermitCoverageIssues.cs"] =
+            "виробник (rule h4): дозвіл рядка/шапки не покриває місяців з даними; адреса — таблиця/рядок/колонка дозволу, назовні лише через ValidateDocumentHandler (HiddenValidationIssues.ForViewer)",
         ["src/Ecr.Application/Calculations/CheckEvaluator.cs"] = "виробник: текст звірки, SourceTableDefId",
         ["src/Ecr.Application/Validation/ValidationMessageTemplates.cs"] =
             "шаблони й Localize: працює над УЖЕ відфільтрованим списком (GetValidationResultHandler маскує до Localize; доказ — T1_01_Check_з_ключем_…)",
@@ -111,9 +113,15 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | деталь headerFieldCode | change.Code"] =
             (1, "те саме, що текст"),
         ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | текст | field.Code"] =
-            (2, "поле шапки, яке пише сам автор запиту; шапка — не Column/Table; другий — ECR-HDR-4223 (PS-P1D): те саме поле запиту, відмова після перевірки гранта на проєкт"),
+            (3, "поле шапки, яке пише сам автор запиту; шапка — не Column/Table; другий — ECR-HDR-4223 (PS-P1D): те саме поле запиту, відмова після перевірки гранта на проєкт; третій — ECR-HDR-4223 permitNotCoveringMonths (rule h1): те саме поле запиту"),
         ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | деталь headerFieldCode | field.Code"] =
-            (2, "те саме, що текст"),
+            (3, "те саме, що текст"),
+        ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | текст | monthsText"] =
+            (1, "rule h1: календарні місяці з числовими даними документа — лише таблиць і колонок, які автор ЧИТАЄ (HiddenTableIds/HiddenColumnIds виключено з DocumentMonthsWithDataAsync); не назва колонки і не значення"),
+        ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | деталь months | monthsText"] =
+            (1, "те саме, що текст"),
+        ["src/Ecr.Application/Documents/PatchCellsHandler.PermitValidity.cs | деталь columnCode | permitColumnCode"] =
+            (1, "rule h2/h3: колонка дозволу рядка — лише коли автор її ЧИТАЄ (scope.CanReadColumn), інакше порожньо; доказ — A_hidden_month_is_refused_without_being_named / PermitRefusal(permitReadable)"),
         ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | текст | missingCode"] =
             (1, "D-12: поле шапки, яке пише сам автор запиту (неіснуючий запис довідника); шапка — не Column/Table"),
         ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | деталь headerFieldCode | missingCode"] =

@@ -3058,6 +3058,24 @@ public interface IPermitStore
 }
 ```
 
+#### `IPermitDataMonthsReader`
+
+Правило (h), рішення людини 08.11 (вкладка Contract): у яких місяцях документ має дані — дозвіл, обраний у полі
+шапки, мусить покривати їх усі (`err.ECR-HDR-4223.permitNotCoveringMonths`; Issues — `validation.permit.headerMonthsNotCovered`).
+Місяць має дані, коли непорожній числовий (не обчислений нуль) рядок оригінального екземпляра таблиці документа:
+місячні стовпці таблиці «місяці в колонках» дають свій місяць року екземпляра (лише вони — описові стовпці таких таблиць
+не рахуються), таблиця без місячних стовпців — усі місяці періоду екземпляра. Таблиці з власною колонкою дозволу,
+приховані від автора таблиці й колонки виключає викликач.
+
+```csharp
+public interface IPermitDataMonthsReader
+{
+    public Task<IReadOnlyList<DateOnly>> DocumentMonthsWithDataAsync(
+        long documentId, IReadOnlyCollection<int> excludedTableDefIds, CancellationToken ct,
+        IReadOnlyCollection<int>? excludedColumnDefIds = null);
+}
+```
+
 #### `IPermitBindingStore`
 
 Прив'язки таблиць аркуша версії шаблону до таблиць типів дозволів (Permits, PM-09; `cfg.PermitSheetBinding` +

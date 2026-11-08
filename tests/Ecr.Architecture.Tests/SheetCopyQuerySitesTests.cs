@@ -58,6 +58,8 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Persistence/RowWindowMapStore.cs"] = "OriginalOnly",
         ["src/Ecr.Infrastructure/Persistence/SourceEventViewStore.cs"] = "OriginalOnly (стан блокування)",
         ["src/Ecr.Infrastructure/Persistence/PermitBindingService.cs"] = "OriginalOnly: рядки з дозволу — лише оригіналу",
+        ["src/Ecr.Infrastructure/Persistence/PermitDataMonthsReader.cs"] =
+            "rule (h): місяці з даними документа для дозволу шапки — лише оригінали (OriginalOnly), як «Перевірити»",
 
         // ── байдужі до копії: адресація за Id екземпляра/рядка або агрегат без ключа таблиці ──
         ["src/Ecr.Infrastructure/Persistence/PermitStore.cs"] = "«де вжито» за Id екземпляра рядка",

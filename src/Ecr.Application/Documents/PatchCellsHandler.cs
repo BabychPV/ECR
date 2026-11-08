@@ -89,7 +89,11 @@ public sealed partial class PatchCellsHandler(
 
     // ✎ Журнал рядків (`aud.RowChange`): нові рядки батчу (сітка, імпорт, книга) — «додано рядок» у журналі аркуша,
     // тією самою транзакцією. `null` — лише прямі конструктори тестів.
-    IRowChangeAudit? rowAudit = null)
+    IRowChangeAudit? rowAudit = null,
+
+    // ✎ Rule (h), human 08.11: permit validity vs months with data. Tells which Lookup columns are permit-type
+    // (target = published permit type header). `null` (direct constructor in tests) — the rule is off.
+    IPermitTypeStore? permitTypes = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -187,6 +191,7 @@ public sealed partial class PatchCellsHandler(
         var previous = await ReadPreviousValuesAsync(changes, ct).ConfigureAwait(false);
         await EnsureManualTextMatchesFormulaAsync(context, changes, previous, ct).ConfigureAwait(false);
         await EnsureRegistryReferencesExistAsync(context, changes, previous, ct).ConfigureAwait(false);
+        await EnsurePermitValidityCoversDataAsync(context, changes, previous, ct).ConfigureAwait(false);
         await EnsureUnitReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
@@ -485,6 +490,12 @@ public sealed partial class PatchCellsHandler(
 
         /// <summary>✎ D-461: план ручних значень/повернень формули; <c>null</c> — у батчі їх немає.</summary>
         public FormulaOverridePlan? OverridePlan { get; set; }
+
+        /// <summary>
+        /// Rule (h): ids of permit-type Lookup columns of the table (target is a permit type header or a permit group);
+        /// <c>null</c> until first asked (<see cref="PermitColumnIdsAsync"/>).
+        /// </summary>
+        public IReadOnlySet<int>? PermitColumnIds { get; set; }
     }
 
     /// <summary>Розподіл змін по upsert/delete разом із супутнім станом.</summary>
@@ -2217,7 +2228,15 @@ public sealed partial class PatchCellsHandler(
             .FindPeriodBoundsAsync(context.Instance.DocumentId, context.PeriodKey.Value, ct)
             .ConfigureAwait(false);
 
-        CheckLookupStandings(context, changed, standings, bounds);
+        // ✎ Rule (h): in a table with month columns a permit-type column is judged by the months that hold data
+        // (EnsurePermitValidityCoversDataAsync), not by the last day of the instance period — the instance of a
+        // «months in columns» table carries the whole year, and a permit valid March–November must be choosable for a
+        // row with data in March–November even when the instance period is January.
+        var dateExempt = Permits.Validity.PermitMonthCoverage.MonthColumns(context.Table).Count > 0
+            ? await PermitColumnIdsAsync(context, ct).ConfigureAwait(false)
+            : null;
+
+        CheckLookupStandings(context, changed, standings, bounds, dateExempt);
     }
 
     /// <summary>
@@ -2346,7 +2365,8 @@ public sealed partial class PatchCellsHandler(
         RequestContext context,
         List<(CellAddress Address, long? EntryId)> changed,
         Dictionary<long, RegistryEntryStanding> standings,
-        PeriodBounds? bounds)
+        PeriodBounds? bounds,
+        IReadOnlySet<int>? dateExemptColumns = null)
     {
         // Дата чинності — останній день періоду: D-158 (10-decisions.md), як пікер сітки, OrphanScanner і знімок розрахунку.
         var asOf = bounds?.PeriodEnd;
@@ -2364,6 +2384,12 @@ public sealed partial class PatchCellsHandler(
             if (!standing.IsActive)
             {
                 return LookupRejection.Inactive;
+            }
+
+            // ✎ Rule (h): a permit column of a month table is checked against its months with data instead.
+            if (dateExemptColumns is not null && dateExemptColumns.Contains(cell.Address.ColumnDefId))
+            {
+                return null;
             }
 
             return asOf is { } date && !standing.IsValidOn(date) ? LookupRejection.NotValidOnDate : null;

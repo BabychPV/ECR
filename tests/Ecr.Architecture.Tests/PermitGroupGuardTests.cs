@@ -247,7 +247,9 @@ public sealed partial class PermitGroupGuardTests
     [GeneratedRegex(@"\bEnsureFreshOnMismatchAsync\s*\(")]
     private static partial Regex FreshOnMismatchCall();
 
-    [GeneratedRegex(@"\b(?:LookupTargetEntries\s*\.\s*ListAsync|SourceEventMapSupport\s*\.\s*BuildSpecsAsync|SourceEventFieldPlans\s*\.\s*LoadAsync)\s*\(")]
+    // ✎ Rule (h), 08.11: `PermitTargets.LoadAsync(` кличе `EnsureFreshAsync` сам (файл помічника — теж споживач і
+    // перевіряється цим сторожем); `PermitCoverageIssues.RunAsync(` лише пересилає резолвер у `PermitTargets.LoadAsync`.
+    [GeneratedRegex(@"\b(?:LookupTargetEntries\s*\.\s*ListAsync|SourceEventMapSupport\s*\.\s*BuildSpecsAsync|SourceEventFieldPlans\s*\.\s*LoadAsync|PermitTargets\s*\.\s*LoadAsync|PermitCoverageIssues\s*\.\s*RunAsync)\s*\(")]
     private static partial Regex HelperCall();
 
     [Fact]
