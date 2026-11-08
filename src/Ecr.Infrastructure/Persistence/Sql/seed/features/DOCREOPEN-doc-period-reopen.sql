@@ -3,7 +3,7 @@ INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'document.reopen.action', N'ru', N'Открыть {period} для этого документа…'),
-    (N'document.reopen.noPermission', N'ru', N'Открыть закрытый месяц может только пользователь с правом Period.Reopen в этом проекте.'),
+    (N'document.reopen.noPermission', N'ru', N'Открыть закрытый месяц может только пользователь, которому в этом проекте разрешено открывать периоды. Обратитесь к ответственному за периоды.'),
     (N'document.reopen.dialogTitle', N'ru', N'Открыть {period} для этого документа'),
     (N'document.reopen.dialogScope', N'ru', N'Открывается только этот документ. Все остальные документы за {period} остаются закрытыми. Действие записывается в журнал аудита.'),
     (N'document.reopen.reason', N'ru', N'Причина'),
@@ -16,7 +16,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.reopen.done', N'ru', N'{period} открыт для этого документа до {until}.'),
     (N'err.ECR-PRD-0422.reopenReasonTooLong', N'ru', N'Причина слишком длинная: не больше {max} символов.'),
     (N'document.reopen.action', N'kz', N'{period} осы құжат үшін ашу…'),
-    (N'document.reopen.noPermission', N'kz', N'Жабық айды осы жобада Period.Reopen құқығы бар пайдаланушы ғана аша алады.'),
+    (N'document.reopen.noPermission', N'kz', N'Жабық айды осы жобада кезеңдерді ашуға рұқсаты бар пайдаланушы ғана аша алады. Кезеңдерге жауапты адамға жүгініңіз.'),
     (N'document.reopen.dialogTitle', N'kz', N'{period} осы құжат үшін ашу'),
     (N'document.reopen.dialogScope', N'kz', N'Тек осы құжат ашылады. {period} бойынша қалған құжаттардың бәрі жабық қалады. Әрекет аудит журналына жазылады.'),
     (N'document.reopen.reason', N'kz', N'Себеп'),
@@ -37,7 +37,7 @@ INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
     (N'document.reopen.action', N'en', N'Reopen {period} for this document…', 1),
-    (N'document.reopen.noPermission', N'en', N'Only a user with the Period.Reopen permission in this project can reopen a locked month.', 1),
+    (N'document.reopen.noPermission', N'en', N'Only a user allowed to reopen periods in this project can reopen a locked month. Ask your period manager.', 1),
     (N'document.reopen.dialogTitle', N'en', N'Reopen {period} for this document', 1),
     (N'document.reopen.dialogScope', N'en', N'Only this document is opened. Every other document stays locked for {period}. The action is recorded in the audit trail.', 1),
     (N'document.reopen.reason', N'en', N'Reason', 1),
