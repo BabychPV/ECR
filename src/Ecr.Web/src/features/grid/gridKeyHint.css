@@ -24,9 +24,27 @@
 }
 
 /* Вузький екран: лише кнопка довідки (аркуш там однаково лише для читання, `UI-42`). */
+/*
+ * ✎ fg5 (live-прохід 08.11): на 375 px назва «Keyboard shortcuts» обрізалась до «Keyboard sho…» під кнопкою Refresh —
+ * тепер на вузькому екрані лише значок (назва — в aria-label і title), нічого не обрізається.
+ */
+.ecr-keyhint-icon {
+  display: none;
+  font-size: 16px;
+  line-height: 1;
+}
+
 @media (max-width: 640px) {
-  .ecr-keyhint-text {
+  .ecr-keyhint-text,
+  .ecr-keyhint-label {
     display: none;
+  }
+
+  .ecr-keyhint-icon {
+    display: inline-grid;
+    place-items: center;
+    min-width: 24px;
+    min-height: 24px;
   }
 }
 

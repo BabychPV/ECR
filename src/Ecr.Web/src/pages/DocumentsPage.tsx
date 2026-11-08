@@ -43,7 +43,6 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
-import { ProjectRecalcBannerSlot } from '@/features/recalc/ProjectRecalcBannerSlot';
 import { t } from '@/shared/i18n';
 import { projectsQuery } from '@/features/projects/allProjects';
 import { DisabledReason } from '@/features/common/DisabledReason';
@@ -67,6 +66,14 @@ const CreateDocumentModal = lazy(async () => ({
  * Швидкий перегляд документа (`UI-29`) — за `import()`: шторку відкривають
  * рідко, а бюджет маршруту (`D-132`) не має рости заради неї.
  */
+/**
+ * Місце банера перерахунку (lane A) — за `import()`: хук опитування задач і модель прогресу не входять у граф маршруту
+ * (бюджет D-132: DocumentsPage на межі 250 КБ gzip після смуги року й лічильника застарілих за рік).
+ */
+const ProjectRecalcBannerSlot = lazy(async () => ({
+  default: (await import('@/features/recalc/ProjectRecalcBannerSlot')).ProjectRecalcBannerSlot,
+}));
+
 const DocumentQuickLook = lazy(async () => ({
   default: (await import('@/features/documents/DocumentQuickLook')).DocumentQuickLook,
 }));
@@ -356,7 +363,9 @@ export function DocumentsPage(): JSX.Element {
           порожній результат — ховав би кнопку, якою фільтр і знімають.
           ⚠ І в ТОМУ САМОМУ ряду, що й фільтри (рішення людини 2026-10-06). */}
       {/* ✎ UAT recalc-progress (a2): після повернення на перелік прогрес перерахунку відновлюється з сервера. */}
-      <ProjectRecalcBannerSlot projectId={filters.projectId} />
+      <Suspense fallback={null}>
+        <ProjectRecalcBannerSlot projectId={filters.projectId} />
+      </Suspense>
 
       {/* ✎ fg6: пояснення — компактне й згортається (пам'ятається на людину). */}
       <CollapsibleNote noteId="documents-year" summary={t('documents.oneDocumentNote')}>

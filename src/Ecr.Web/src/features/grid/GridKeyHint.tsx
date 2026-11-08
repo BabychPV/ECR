@@ -65,8 +65,14 @@ export function GridKeyHint({ readOnly }: { readonly readOnly: boolean }): JSX.E
             aria-haspopup="dialog"
             onClick={() => setOpened((value) => !value)}
             data-grid-key-help=""
+            // ✎ fg5 (375 px): на вузькому екрані — лише значок; назва лишається для читалки й підказки.
+            aria-label={t('grid.keys.help')}
+            title={t('grid.keys.help')}
           >
-            {t('grid.keys.help')}
+            <span className="ecr-keyhint-icon" aria-hidden="true">
+              ⌨
+            </span>
+            <span className="ecr-keyhint-label">{t('grid.keys.help')}</span>
           </UnstyledButton>
         </Popover.Target>
         <Popover.Dropdown aria-label={t('grid.keys.help')}>
