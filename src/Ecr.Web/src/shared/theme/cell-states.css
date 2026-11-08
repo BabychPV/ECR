@@ -116,6 +116,8 @@
    * `cursor: not-allowed`. Числа — повний контраст, нічого їх не перетинає.
    */
   cursor: not-allowed;
+  /* Місце під замок 11 px (`::after` нижче): число не наїжджає на знак. */
+  padding-right: 15px;
 }
 
 /*
@@ -127,10 +129,15 @@
 .ecr-cell--read-only::after {
   content: '';
   position: absolute;
+  /*
+   * ⚠ 11×14, а не 8×10. Виміряно (`D-140`, гейт 4, `cellStates.spec.ts`, CI 42506741735): без штрихування
+   * замок 8×10 лишався єдиною формою, і пара `readOnly`/`normal` після знеколірення різнилась на 1.9 % —
+   * нижче порога 2 %. Носій збільшено, поріг не чіпали.
+   */
   top: 3px;
-  right: 3px;
-  width: 8px;
-  height: 10px;
+  right: 2px;
+  width: 11px;
+  height: 14px;
   background-color: var(--ecr-cell-read-only-line);
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 10'%3E%3Cpath d='M2 4V3a2 2 0 0 1 4 0v1h1v6H1V4h1zm1 0h2V3a1 1 0 0 0-2 0v1z'/%3E%3C/svg%3E")
     no-repeat center / contain;
