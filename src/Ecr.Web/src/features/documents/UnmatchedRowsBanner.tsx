@@ -1,4 +1,4 @@
-import { useMemo, useState, type JSX } from 'react';
+import { Fragment, useMemo, useState, type JSX } from 'react';
 import { Alert, Anchor, Button, Collapse, Group, Stack, Text } from '@mantine/core';
 import type { DocumentTableDto } from '@/api/types';
 import { formatDateTime } from '@/shared/format/datetime';
@@ -142,17 +142,28 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow, narrow = 
                 )}
                 {group.hint !== null && <AllowedValues hint={group.hint} />}
                 <Group gap="xs" wrap="wrap">
-                  {shown.map((row) => {
+                  {shown.map((row, index) => {
                     const label = rowLabel(row);
                     const tableInstanceId = group.tableInstanceId;
+                    // ✎ Свіжий погляд 08.11: посилання розділені видимою « · », інакше «Row 2: «Coal» Row 3: «Oil»» читається однією фразою.
+                    const separator =
+                      index > 0 ? (
+                        <Text span size="sm" aria-hidden="true">
+                          ·
+                        </Text>
+                      ) : null;
 
                     return tableInstanceId === null ? (
-                      <Text key={row.rowKey} size="sm" span>
-                        {label}
-                      </Text>
+                      <Fragment key={row.rowKey}>
+                        {separator}
+                        <Text size="sm" span>
+                          {label}
+                        </Text>
+                      </Fragment>
                     ) : (
+                      <Fragment key={row.rowKey}>
+                      {separator}
                       <Anchor
-                        key={row.rowKey}
                         component="button"
                         type="button"
                         size="sm"
@@ -163,6 +174,7 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow, narrow = 
                       >
                         {label}
                       </Anchor>
+                      </Fragment>
                     );
                   })}
                   {more > 0 && (
@@ -245,7 +257,7 @@ function AllowedValues({ hint }: { readonly hint: UnmatchedTableHint }): JSX.Ele
           </Anchor>
         </>
       )}
-      {methodology.length > 0 && ` · ${methodology}`}
+      {methodology.length > 0 && ` · ${t('document.unmatchedRows.methodology', { name: methodology })}`}
     </Text>
   );
 }

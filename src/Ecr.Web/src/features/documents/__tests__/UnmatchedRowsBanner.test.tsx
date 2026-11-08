@@ -208,7 +208,10 @@ describe('UnmatchedRowsBanner', () => {
     expect(allowed).toContain(
       `⟦document.unmatchedRows.allowed (column=ID Code - NAE Project, values=${codes.slice(0, AllowedValuesShown).join(', ')})⟧`,
     );
-    expect(allowed).toContain('Cooling medium');
+    // Свіжий погляд 08.11: методологія підписана («Methodology: …»), а посилання рядків розділені видимою « · ».
+    expect(allowed).toContain('⟦document.unmatchedRows.methodology (name=Cooling medium)⟧');
+    const group = screen.getByTestId('document-unmatched-rows-group');
+    expect(group.textContent).toContain('value=Sample A-0)⟧·⟦document.unmatchedRows.rowValue (row=2');
     expect(allowed).not.toContain('ECW_C11_11_02');
     const more = screen.getByTestId('document-unmatched-rows-allowed-more');
     expect(more.textContent).toBe('⟦document.unmatchedRows.allowedMore (count=3)⟧');
