@@ -323,6 +323,14 @@ public sealed class DocumentStore(
                 documents = documents.Where(d => onlyProjects.Contains(d.ProjectId));
             }
 
+            // ✎ g2 (макет 08.11, людина: «Year 2024 — No documents for 2024»): перелік за РІК — лише документи
+            // проєктів, що мають період у цьому році. Раніше рік звужував лише смугу й фільтр стану, тож рік без
+            // проєктів показував документи 2026 із порожньою смугою, а лічильники рахували їх як Draft.
+            if (period.Value is null && filter.Year is { } listYear)
+            {
+                documents = WhereProjectYear(documents, listYear);
+            }
+
             // BE-09b: фільтри — у ЗАПИТІ, до `Take`; межа грантів вище лишається.
             if (filter.MineUserId is { } me)
             {
@@ -1603,6 +1611,19 @@ public sealed class DocumentStore(
         }
 
         return sheets;
+    }
+
+    /// <summary>
+    /// ✎ g2 (макет 08.11): документи проєктів, що мають хоч один період у році <paramref name="year"/> — межа переліку
+    /// за рік (той самий предикат, що в <c>DocumentListSummaryStore.SummarizeYearAsync</c>).
+    /// </summary>
+    private IQueryable<Document> WhereProjectYear(IQueryable<Document> documents, int year)
+    {
+        var from = year * 100;
+        var to = (year + 1) * 100;
+
+        return documents.Where(d => db.Periods.Any(p => p.ProjectId == d.ProjectId
+                                                        && p.PeriodKeyValue > from && p.PeriodKeyValue < to));
     }
 
     /// <summary>
