@@ -91,6 +91,8 @@ test.describe('інспектор документа', () => {
  * комірки двох перших рядків — `PeriodClosed`. Решта шляху (сітка, інспектор, рядок стану) — справжня.
  */
 const WaterRow = 'Sea Water Intake (e2e)';
+/** Row label of a flagged row in the grid (`DocumentGrid` row-label `cellTemplate`), not the save-state count. */
+const RowAttentionLabel = 'revo-grid .ecr-row-label--attention[data-row-attention]';
 
 async function openWithWaterLock(page: Page): Promise<{ key: string }> {
   let target: number | null = null;
@@ -123,8 +125,11 @@ async function openWithWaterLock(page: Page): Promise<{ key: string }> {
 
   await signIn(page);
   await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
-  const label = page.locator('[data-row-attention]').first();
+  // ⚠ Not bare `[data-row-attention]`: the save-state line carries the same attribute (a count, "0") and is always
+  // there, so the wait passed before the slice was routed (CI 42498099369: key "null:").
+  const label = page.locator(RowAttentionLabel).first();
   await expect(label).toBeVisible({ timeout: 60_000 });
+  expect(target, 'the slice of the first table was not routed').not.toBeNull();
 
   return { key: `${String(target)}:${firstRowKey}` };
 }
@@ -162,7 +167,7 @@ test.describe('Water lock (UAT 08.11)', () => {
     test.slow();
     await openWithWaterLock(page);
 
-    const label = page.locator('[data-row-attention]').first();
+    const label = page.locator(RowAttentionLabel).first();
     await expect(label.locator('.ecr-row-label-text')).toHaveText(WaterRow);
     const reason = label.locator('.ecr-row-attention-reason');
     await expect(reason).toBeVisible();
