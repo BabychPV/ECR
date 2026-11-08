@@ -678,6 +678,12 @@ export function DocumentsPage(): JSX.Element {
         <Suspense fallback={null}>
           <DocumentQuickLook
             panelId={quickLookId}
+            year={year}
+            // ✎ D-466 (огляд 08.11): блоки місяця шторки — за ПОТОЧНИМ періодом проєкту (`isCurrent`, D-77).
+            currentPeriodOf={(projectId) => {
+              const calendar = calendarOf(projectId);
+              return calendar === undefined ? undefined : (calendar.periods.find((p) => p.isCurrent)?.periodKey ?? null);
+            }}
             document={query.data?.items.find((item) => String(item.id) === quickLookId)}
             listReady={query.data !== undefined}
             onClose={() => {

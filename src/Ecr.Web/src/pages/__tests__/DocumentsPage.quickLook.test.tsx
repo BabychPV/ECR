@@ -6,16 +6,18 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { JSX } from 'react';
 import { DocumentsPage } from '@/pages/DocumentsPage';
+import { DocumentQuickLook, latestEvents, sheetFill } from '@/features/documents/DocumentQuickLook';
+import type { DocumentSummary } from '@/api/types';
 import { testTheme } from '@/test/render';
 
 /**
  * `UI-29`: швидкий перегляд документа зі списку (макет `screens-work.js` →
  * `ctx.panel('*')`, `13-docs-quicklook.png`).
  *
- * Приймання картки: 1) відкривається з «ока» і з `?panel=`; 2) «Open document» веде на документ (✎ 08.11: без
- * місяця); 3) Esc закриває (і фокус вертається на «око»).
- * ✎ 08.11: перелік лише за рік — помісячні блоки шторки (аркуші й заповненість, «Can approve now», «Latest changes»)
- * прибрано як недосяжні разом із їхніми тестами; шторка не робить запитів `tables/status` і `workflow/history`.
+ * Приймання картки: 1) відкривається з «ока» і з `?panel=`; 2) аркуші зі станом і
+ * заповненістю (✎ 08.11: лише з місяцем); 3) «Open document» веде на документ (✎ 08.11: без місяця); 4) без історії блок не
+ * показується; 5) Esc закриває (і фокус вертається на «око»).
+ * Плюс P1: подія журналу прихованого аркуша не показується.
  */
 const Period = 202609;
 const SlowEnvTimeout = 20_000;
@@ -40,7 +42,60 @@ const doc = {
   hasLateEdits: false,
 };
 
-function mockFetch(): void {
+const tables = [
+  { tableDefId: 1, sheetCode: 'GEN', inputCells: 4, filledCells: 4, errorCount: 0, warningCount: 0, isClosed: false, rowCount: 0 },
+  { tableDefId: 2, sheetCode: 'GEN', inputCells: 2, filledCells: 2, errorCount: 0, warningCount: 0, isClosed: false, rowCount: 0 },
+  { tableDefId: 3, sheetCode: 'AIR', inputCells: 9, filledCells: 3, errorCount: 3, warningCount: 0, isClosed: false, rowCount: 0 },
+  // Таблиця без полів для людини (`R-13`) — у заповненість не входить.
+  { tableDefId: 4, sheetCode: 'AIR', inputCells: 0, filledCells: 0, errorCount: null, warningCount: null, isClosed: false, rowCount: 0 },
+];
+
+const event = (sheetCode: string, at: string, toState: string) => ({
+  action: 'Submit',
+  at,
+  byDisplayName: 'Marat Zhakupov',
+  fromState: 'Draft',
+  toState,
+  reason: null,
+  sheetCode,
+  stepOrdinal: null,
+  approvedBySubmitter: false,
+});
+
+const history = [
+  event('GEN', '2026-10-01T09:00:00Z', 'Submitted'),
+  event('GEN', '2026-10-02T09:00:00Z', 'Approved'),
+  // ⛔ Аркуш, якого роль не бачить (немає в `sheets`) — у шторці його бути не може.
+  event('SECRET', '2026-10-04T09:00:00Z', 'Submitted'),
+  event('AIR', '2026-10-03T09:00:00Z', 'Submitted'),
+  event('AIR', '2026-10-03T12:00:00Z', 'Draft'),
+];
+
+/** Календар проєкту 1: поточний період (`isCurrent`, D-77) — `current`; `null` — поточного немає (чернетка). */
+function calendar(current: number | null): unknown {
+  return {
+    projectId: 1,
+    periodKind: 'Monthly',
+    currentPeriodMode: 'Auto',
+    timeZoneId: 'Asia/Atyrau',
+    policy: {},
+    periods: [202609, 202610].map((key, index) => ({
+      id: index + 1,
+      periodKey: key,
+      year: 2026,
+      sequence: key - 202600,
+      isCurrent: key === current,
+      state: 'Open',
+      startsAt: '2026-01-01T00:00:00Z',
+      endsAt: '2026-12-31T00:00:00Z',
+      periodEnd: '2026-12-31',
+      graceEndsAt: null,
+      reopenedUntil: null,
+    })),
+  };
+}
+
+function mockFetch(historyBody: unknown = history, current: number | null = Period): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -61,8 +116,15 @@ function mockFetch(): void {
           userName: 'tester',
         });
       }
+      if (url.includes('/tables/status')) return json(tables);
+      if (url.includes('/workflow/history')) return json(historyBody);
       if (url.includes('/api/v1/documents/summary')) return json({ draft: 1, submitted: 0, approved: 0, rejected: 0, withIssues: 1 });
+      // D-466: «хто може діяти» віддає лише картка за період.
+      if (url.includes('/api/v1/documents/11?periodKey=')) {
+        return json({ ...doc, stepApproverNames: ['Dana Reviewer'], stepApproverNamesTruncated: false });
+      }
       if (url.includes('/api/v1/documents/11')) return json(doc);
+      if (url.includes('/api/v1/projects/1/periods')) return json(calendar(current));
       if (url.includes('/api/v1/documents')) return json({ items: [doc], nextCursor: null, totalCount: 1 });
       if (url.includes('/api/v1/projects')) {
         return json({ items: [{ id: 1, code: 'ATR', status: 'Active' }], nextCursor: null, totalCount: 1 });
@@ -94,6 +156,32 @@ function show(url = '/?year=2026'): void {
   );
 }
 
+/**
+ * ✎ 08.11 (огляд, D-466): перелік лише за рік, а блоки місяця шторки — за ПОТОЧНИМ періодом проєкту. Гарантії блоків
+ * (P1: прихований аркуш, заповненість, історія) перевіряються на самій шторці з поточним періодом `Period`.
+ */
+function showDrawerForPeriod(): void {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+  render(
+    <MantineProvider theme={testTheme}>
+      <MemoryRouter initialEntries={[`/?panel=11`]}>
+        <QueryClientProvider client={client}>
+          <DocumentQuickLook
+            panelId="11"
+            currentPeriodOf={() => Period}
+            year={2026}
+            document={doc as unknown as DocumentSummary}
+            listReady
+            projectCode={() => 'ATR'}
+            documentHref={(id) => `/documents/${String(id)}?periodKey=${String(Period)}`}
+          />
+        </QueryClientProvider>
+      </MemoryRouter>
+    </MantineProvider>,
+  );
+}
+
 /** `findByRole` по всій таблиці в jsdom повільний — шукаємо «око» за атрибутом, а ім'я звіряємо окремо. */
 async function findEye(): Promise<HTMLButtonElement> {
   const eye = await waitFor(
@@ -115,8 +203,9 @@ afterEach(() => {
 
 describe('DocumentsPage: швидкий перегляд (UI-29)', () => {
   it(
-    // ✎ Projects/Documents 08.11: перелік лише за рік — шторка зі сторінки без місяця: пояснення замість аркушів, без запитів таблиць і історії.
-    '«око» відкриває шторку під ?panel=<id>: назва, відповідальні; станів аркушів за рік немає — пояснення, а не порожнеча',
+    // ✎ 08.11 (огляд координатора, P2 D-466): на `/` (перелік за рік) шторка показує блоки ПОТОЧНОГО періоду проєкту з
+    // видимим підписом місяця і «Can approve now».
+    '«око» на сторінці року відкриває шторку: підпис поточного місяця, аркуші з заповненістю і «Can approve now»',
     async () => {
       mockFetch();
       show();
@@ -129,14 +218,140 @@ describe('DocumentsPage: швидкий перегляд (UI-29)', () => {
 
       const drawer = await screen.findByRole('dialog', {}, { timeout: SlowEnvTimeout });
       expect(within(drawer).getByText('Atyrau refinery')).toBeTruthy();
-      expect(drawer.querySelector('[data-quick-look-no-period]')?.textContent).toBe('⟦documents.quickLookNoPeriod⟧');
       expect(within(drawer).getByText('Aigerim Sadykova')).toBeTruthy();
+
+      const label = await waitFor(
+        () => {
+          const found = drawer.querySelector(`[data-quick-look-period="${String(Period)}"]`);
+          if (found === null) throw new Error('підпису місяця ще немає');
+          return found;
+        },
+        { timeout: SlowEnvTimeout },
+      );
+      expect(label.textContent).toContain('documents.quickLookForPeriod');
+      expect(drawer.querySelector('[data-quick-look-no-period]')).toBeNull();
+
+      await waitFor(() => expect(drawer.querySelector('[data-quick-look-step-approvers]')?.textContent).toBe('Dana Reviewer'), {
+        timeout: SlowEnvTimeout,
+      });
+      await waitFor(() => expect(drawer.querySelector('[data-quick-look-fill="2/2"]')).not.toBeNull(), { timeout: SlowEnvTimeout });
+
+      const calls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+      expect(calls.some((url) => url.includes(`/api/v1/documents/11?periodKey=${String(Period)}`))).toBe(true);
+    },
+    TestTimeout,
+  );
+
+  it(
+    'проєкт без поточного періоду: «No open period in {year}» замість блоків місяця, без запитів таблиць і історії',
+    async () => {
+      mockFetch(history, null);
+      show();
+      const user = userEvent.setup();
+
+      await user.click(await findEye());
+      const drawer = await screen.findByRole('dialog', {}, { timeout: SlowEnvTimeout });
+
+      await waitFor(
+        () =>
+          expect(drawer.querySelector('[data-quick-look-no-period]')?.textContent).toBe(
+            '⟦documents.quickLookNoOpenPeriod (year=2026)⟧',
+          ),
+        { timeout: SlowEnvTimeout },
+      );
       expect(drawer.querySelector('[data-quick-look-fill]')).toBeNull();
+      expect(drawer.querySelector('[data-quick-look-step-approvers]')).toBeNull();
 
       const calls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
       expect(calls.some((url) => url.includes('/tables/status') || url.includes('/workflow/history'))).toBe(false);
-      // Документ уже на сторінці — картку окремо не дочитуємо (без місяця вона нічого понад рядок не несе).
-      expect(calls.some((url) => url.includes('/api/v1/documents/11'))).toBe(false);
+    },
+    TestTimeout,
+  );
+
+  it(
+    // ✎ Projects/Documents 08.11: аркуші й заповненість — гарантія самої шторки з місяцем (сторінка року її без місяця не відкриває).
+    'шторка з місяцем: аркуші, стан, заповненість лише їхніх таблиць',
+    async () => {
+      mockFetch();
+      showDrawerForPeriod();
+
+      const drawer = await screen.findByRole('dialog', {}, { timeout: SlowEnvTimeout });
+      await waitFor(() => expect(drawer.querySelector('[data-quick-look-fill="2/2"]')).not.toBeNull(), {
+        timeout: SlowEnvTimeout,
+      });
+      // AIR: 1 таблиця для людини (друга без полів), заповнена не повністю.
+      expect(drawer.querySelector('[data-quick-look-sheet="AIR"] [data-quick-look-fill]')?.getAttribute('data-quick-look-fill')).toBe('0/1');
+      expect(drawer.querySelector('[data-quick-look-sheet="GEN"] [data-status-state="Approved"]')).not.toBeNull();
+    },
+    TestTimeout,
+  );
+
+  it(
+    '«Latest changes»: три найновіші події видимих аркушів; подія прихованого аркуша не показується',
+    async () => {
+      mockFetch();
+      // ✎ Projects/Documents 08.11: «Latest changes» є лише в шторці з місяцем — монтуємо її напряму (P1 лишається).
+      showDrawerForPeriod();
+
+      const drawer = await screen.findByRole('dialog', {}, { timeout: SlowEnvTimeout });
+      await waitFor(() => expect(drawer.querySelectorAll('[data-quick-look-event]')).toHaveLength(3), {
+        timeout: SlowEnvTimeout,
+      });
+
+      const text = drawer.querySelector('[data-quick-look-changes]')?.textContent ?? '';
+      // ⛔ Мутаційний доказ: прибери фільтр за видимими аркушами — подія SECRET (найновіша) потрапить у перелік.
+      expect(text).not.toContain('SECRET');
+      expect(text).toContain('Air emissions');
+      // Назва аркуша, а не код.
+      expect(text).not.toContain('AIR');
+    },
+    TestTimeout,
+  );
+
+  it(
+    '«Latest changes»: самопогодження (D-440) позначене тим самим ключем, що й у «More → History», і лише на своїй події',
+    async () => {
+      mockFetch([
+        event('GEN', '2026-10-01T09:00:00Z', 'Submitted'),
+        { ...event('GEN', '2026-10-02T09:00:00Z', 'Approved'), action: 'Approve', fromState: 'Submitted', approvedBySubmitter: true },
+        event('AIR', '2026-10-03T09:00:00Z', 'Submitted'),
+      ]);
+      // ✎ Projects/Documents 08.11: «Latest changes» є лише в шторці з місяцем — монтуємо її напряму.
+      showDrawerForPeriod();
+
+      const drawer = await screen.findByRole('dialog', {}, { timeout: SlowEnvTimeout });
+      await waitFor(() => expect(drawer.querySelectorAll('[data-quick-look-event]')).toHaveLength(3), {
+        timeout: SlowEnvTimeout,
+      });
+
+      // Новіші першими: AIR Submitted, GEN Approved (самопогодження), GEN Submitted.
+      const rows = [...drawer.querySelectorAll('[data-quick-look-event]')];
+      // ⛔ Мутаційний доказ: прибери позначку з `LatestChanges` — рядок GEN Approved її не матиме.
+      expect(rows[1]?.querySelector('[data-quick-look-approved-by-submitter]')?.textContent).toBe(
+        '⟦workflow.historyApprovedBySubmitter⟧',
+      );
+      expect(rows[0]?.querySelector('[data-quick-look-approved-by-submitter]')).toBeNull();
+      expect(rows[2]?.querySelector('[data-quick-look-approved-by-submitter]')).toBeNull();
+    },
+    TestTimeout,
+  );
+
+  it(
+    'історії немає — блоку «Latest changes» немає (D15-06), а не порожній заголовок',
+    async () => {
+      mockFetch([]);
+      // ✎ Projects/Documents 08.11: блок історії є лише в шторці з місяцем — монтуємо її напряму.
+      showDrawerForPeriod();
+
+      const drawer = await screen.findByRole('dialog', {}, { timeout: SlowEnvTimeout });
+      await waitFor(() => expect(drawer.querySelector('[data-quick-look-fill="2/2"]')).not.toBeNull(), {
+        timeout: SlowEnvTimeout,
+      });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      expect(within(drawer).queryByText('⟦documents.quickLookLatestChanges⟧')).toBeNull();
     },
     TestTimeout,
   );
@@ -177,4 +392,20 @@ describe('DocumentsPage: швидкий перегляд (UI-29)', () => {
     },
     TestTimeout,
   );
+});
+
+describe('DocumentQuickLook: чисті помічники', () => {
+  it('sheetFill рахує лише таблиці аркуша, у яких людині є що вводити', () => {
+    expect(sheetFill(tables, 'GEN')).toEqual({ filled: 2, total: 2 });
+    expect(sheetFill(tables, 'AIR')).toEqual({ filled: 0, total: 1 });
+    expect(sheetFill(tables, 'NONE')).toEqual({ filled: 0, total: 0 });
+  });
+
+  it('latestEvents — новіші першими, не більше трьох', () => {
+    expect(latestEvents(history).map((item) => item.at)).toEqual([
+      '2026-10-04T09:00:00Z',
+      '2026-10-03T12:00:00Z',
+      '2026-10-03T09:00:00Z',
+    ]);
+  });
 });

@@ -1,13 +1,13 @@
 import { expect, test, type APIRequestContext, type Browser, type BrowserContext } from '@playwright/test';
 
 /**
- * D-466 (AN-59, варіант C): `stepApproverNames` картки документа проти РЕАЛЬНОГО сервера стенда
+ * D-466 (AN-59, варіант C): рядок «Can approve now» у швидкому перегляді документа проти РЕАЛЬНОГО сервера стенда
  * (`tools/e2e-stand.ps1`, workflow `e2e-stand`, `-Grep stepApproversLive`).
  *
  * Сценарій: `e2e-admin` подає аркуш; `GET /documents/{id}?periodKey=` віддає непорожній `stepApproverNames` (серед них
- * `E2E reviewer`, погоджувач стенда - див. `returnedToMeLive`).
- * ✎ 08.11: перелік документів лише за рік, і шторка швидкого перегляду відкривається без місяця — рядка «Can approve
- * now» (помісячного) у ній більше немає, тож UI-крок прибрано; перевіряється контракт API.
+ * `E2E reviewer`, погоджувач стенда - див. `returnedToMeLive`); шторка `?panel=<id>` на переліку року показує цей рядок
+ * з іменем під підписом поточного місяця (✎ 08.11).
+ * До подання (Draft) поле `null` і рядка немає.
  *
  * ⛔ Без стенда файл ПАДАЄ (`beforeAll`), а не пропускається (honesty-guard). `afterAll` повертає аркуш у `Draft`.
  * ⚠ Написано без локального прогону (стенда на машині автора немає): перший живий прогін - CI `e2e-stand`.
@@ -63,7 +63,7 @@ async function card(request: APIRequestContext): Promise<Card> {
   return (await response.json()) as Card;
 }
 
-test.describe('stepApprovers: stepApproverNames картки документа на реальному стенді (D-466)', () => {
+test.describe('stepApprovers: «Can approve now» у швидкому перегляді на реальному стенді (D-466)', () => {
   test.describe.configure({ mode: 'serial', timeout: 240_000 });
 
   let sheetDefId = 0;
@@ -86,7 +86,7 @@ test.describe('stepApprovers: stepApproverNames картки документа 
     }
   });
 
-  test('stepApprovers: подання -> API віддає непорожній список імен погоджувачів поточного кроку', async ({
+  test('stepApprovers: Draft -> поля немає; подання -> API віддає імена -> шторка показує рядок з іменем погоджувача', async ({
     browser,
   }) => {
     const admin = await signedIn(browser, Admin);
@@ -137,6 +137,21 @@ test.describe('stepApprovers: stepApproverNames картки документа 
       const after = await card(admin.request);
       expect(after.stepApproverNames, 'після подання stepApproverNames не має бути null').not.toBeNull();
       expect((after.stepApproverNames ?? []).length, 'на поточному кроці має бути хоч один погоджувач').toBeGreaterThan(0);
+      const first = (after.stepApproverNames ?? [])[0] as string;
+
+      // ── 3. UI: шторка швидкого перегляду показує рядок з іменем ───────────────────────────
+      const page = await admin.newPage();
+      await page.setViewportSize({ width: 1440, height: 900 });
+      // ✎ 08.11: перелік — за рік; шторка показує блоки ПОТОЧНОГО періоду проєкту (D-77) з підписом місяця. Період стенда
+      // (`ECR_E2E_PERIOD`) — перший `Open` календаря (e2e-stand.ps1), тобто поточний у режимі `Auto`.
+      await page.goto(`/?year=${String(Math.trunc(Number(PeriodKey) / 100))}&panel=${DocumentId}`);
+      await expect(page.locator(`[data-quick-look-period="${PeriodKey}"]`), 'шторка не за поточним періодом стенда').toBeVisible({
+        timeout: 30_000,
+      });
+      const row2 = page.locator('[data-quick-look-step-approvers]');
+      await expect(row2, 'у шторці немає рядка «Can approve now»').toBeVisible({ timeout: 30_000 });
+      await expect(row2).toContainText(first);
+      await page.close();
     } finally {
       await admin.close();
     }
