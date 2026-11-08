@@ -31,6 +31,7 @@ import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
+import { headerFieldRefusal } from './headerFieldRefusal';
 import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
 import { entryLabelsOf } from '@/features/registries/lookupEntryLabels';
 import { lookupTargetsQuery, usesDocumentWindow } from '@/features/registries/lookupTargets';
@@ -817,7 +818,8 @@ export function DocumentHeaderPanel({
         isEmptyHeaderValue(draft[field.code]) &&
         (showRequiredErrors || touched.has(field.code))
           ? t('document.header.requiredError')
-          : undefined
+          : // Rule (h1): a refusal naming this field (e.g. the permit does not cover the months with data) — under it.
+            (headerFieldRefusal(saveError, field.code) ?? undefined)
       }
       lookupEntries={
         field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
