@@ -2,7 +2,7 @@ import { useMemo, useState, type JSX } from 'react';
 import { Alert, Anchor, Button, Collapse, Group, Stack, Text } from '@mantine/core';
 import type { DocumentTableDto } from '@/api/types';
 import { formatDateTime } from '@/shared/format/datetime';
-import { t } from '@/shared/i18n';
+import { language, t } from '@/shared/i18n';
 import type { UnmatchedRows } from './useUnmatchedRows';
 import { groupUnmatchedRows, unmatchedRowCount, type UnmatchedRowRef, type UnmatchedTableHint } from './unmatchedRowsModel';
 
@@ -44,13 +44,15 @@ interface UnmatchedRowsBannerProps {
   readonly tables: readonly DocumentTableDto[];
   /** Відкрити рядок у сітці: аркуш, прокрутка, фокус і підсвітка (шлях зауважень, `ФВ-5.6`). */
   readonly onOpenRow: (tableInstanceId: number, rowKey: string) => void;
+  /** Вузький екран (документ лише для читання): дія підказки — відкрити документ ширше, а не F9 (UAT 08.11). */
+  readonly narrow?: boolean;
 }
 
 /**
  * «Частину рядків не взято в розрахунок» над сіткою (D14 + AN-69; UAT 08.11 b1–b4).
  *
- * ⛔ Це ІНФОРМАЦІЯ, а не помилка: тон `info` макета (`Alert color="brand" variant="light"`), і речення
- * «нічого виправляти не треба» — один раз, у підказці. Рядки, відсіяні статусом «не Running» (D-425), сюди не
+ * ⛔ Це ІНФОРМАЦІЯ, а не помилка: тон `info` макета (`Alert color="brand" variant="light"`); підказка каже, чому рядки
+ * не рахуються і що зробити, ЯКЩО рядок треба рахувати (свіжий погляд 08.11: без «нічого виправляти» поруч із дією). Рядки, відсіяні статусом «не Running» (D-425), сюди не
  * потрапляють — сервер пише лише ті, яким не підійшло жодне правило методології (`CalculationOrchestrator.UnmatchedRowsOf`).
  *
  * ⚠ Групи — таблиця з аркушем і кількістю («Utility · 9.01 Unit 400 — rows: 2»), кожен рядок — кнопка-посилання,
@@ -59,7 +61,7 @@ interface UnmatchedRowsBannerProps {
  * ⚠ Попередня згортна панель AN-69 (`CalculationIssuesPanel`, жовта, лише активний аркуш) показувала ТІ САМІ рядки
  * вдруге іншим тоном — її замінено цим банером; позначки в дереві таблиць лишились.
  */
-export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow }: UnmatchedRowsBannerProps): JSX.Element | null {
+export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow, narrow = false }: UnmatchedRowsBannerProps): JSX.Element | null {
   const groups = useMemo(
     () => groupUnmatchedRows(rows.issues, tables, rows.hints),
     [rows.issues, tables, rows.hints],
@@ -91,7 +93,10 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow }: Unmatch
           {' · '}
           {/* ⚠ `role="status"` — на тексті з кількістю: Mantine `Alert` власну `role` не приймає (завжди `alert`). */}
           <Text span size="sm" role="status" data-testid="document-unmatched-rows-summary">
-            {t('document.unmatchedRows.summary', { count: String(count), tables: String(groups.length) })}
+            {t('document.unmatchedRows.summary', {
+              rows: plural('document.unmatchedRows.rows', count),
+              tables: plural('document.unmatchedRows.tables', groups.length),
+            })}
             {rows.finishedAt !== null && ` · ${t('document.unmatchedRows.lastRun', { time: formatDateTime(rows.finishedAt) })}`}
           </Text>
         </Text>
@@ -110,7 +115,7 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow }: Unmatch
 
       <Collapse in={!collapsed} id={bodyId}>
         <Text size="sm" mt="xs" data-testid="document-unmatched-rows-hint">
-          {t('document.unmatchedRows.hint')}
+          {t(narrow ? 'document.unmatchedRows.hintNarrow' : 'document.unmatchedRows.hint')}
         </Text>
         <Stack
           role="list"
@@ -128,7 +133,7 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow }: Unmatch
             return (
               <div role="listitem" key={group.key} data-testid="document-unmatched-rows-group">
                 <Text size="sm" span fw={500}>
-                  {t('document.unmatchedRows.group', { table, count: String(group.rows.length) })}
+                  {t('document.unmatchedRows.group', { table, rows: plural('document.unmatchedRows.rows', group.rows.length) })}
                 </Text>
                 {group.hint === null && group.methodologyCode !== null && (
                   <Text size="xs" span>
@@ -153,6 +158,7 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow }: Unmatch
                         size="sm"
                         data-testid="document-unmatched-row-link"
                         data-row-key={row.rowKey}
+                        aria-label={`${table} · ${label}`}
                         onClick={() => onOpenRow(tableInstanceId, row.rowKey)}
                       >
                         {label}
@@ -172,6 +178,32 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow }: Unmatch
       </Collapse>
     </Alert>
   );
+}
+
+/**
+ * Кількість словом мовою інтерфейсу: ключі `<key>.one|few|other` (`Intl.PluralRules`; `many` читається як `other`).
+ * ⚠ Внутрішній код `kz` — для Intl це `kk` (казахська розрізняє лише one/other; у каталозі kz форми однакові).
+ */
+export function plural(key: 'document.unmatchedRows.rows' | 'document.unmatchedRows.tables', count: number): string {
+  let category: string;
+  try {
+    category = new Intl.PluralRules(language() === 'kz' ? 'kk' : language()).select(count);
+  } catch {
+    category = count === 1 ? 'one' : 'other';
+  }
+  const params = { count: String(count) };
+
+  // ⛔ Ключі — літералами: сторож `EndpointCoverageTests` не приймає ключ каталогу, зібраний зі змінних.
+  if (key === 'document.unmatchedRows.rows') {
+    if (category === 'one') return t('document.unmatchedRows.rows.one', params);
+    if (category === 'few') return t('document.unmatchedRows.rows.few', params);
+
+    return t('document.unmatchedRows.rows.other', params);
+  }
+  if (category === 'one') return t('document.unmatchedRows.tables.one', params);
+  if (category === 'few') return t('document.unmatchedRows.tables.few', params);
+
+  return t('document.unmatchedRows.tables.other', params);
 }
 
 /** Підпис рядка: номер і (з підказкою) поточне значення в колонках правил — «Row 2: «Sample A-0»». */
@@ -194,7 +226,7 @@ function AllowedValues({ hint }: { readonly hint: UnmatchedTableHint }): JSX.Ele
   const [all, setAll] = useState(false);
   const shown = all ? hint.options : hint.options.slice(0, AllowedValuesShown);
   const rest = hint.options.length - shown.length;
-  const methodology = hint.methodologyCodes.join(', ');
+  const methodology = hint.methodologies.join(', ');
 
   return (
     <Text size="sm" data-testid="document-unmatched-rows-allowed">

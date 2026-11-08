@@ -17,7 +17,8 @@ export interface UnmatchedTableHint {
   readonly columns: readonly string[];
   /** Допустимі варіанти — вже текстом («0903» або «Col A = x · Col B = y» для кількох колонок). */
   readonly options: readonly string[];
-  readonly methodologyCodes: readonly string[];
+  /** Назви методологій (код — лише коли назви немає). */
+  readonly methodologies: readonly string[];
 }
 
 /** Рядки без правила однієї таблиці документа (D14 + AN-69, UAT 08.11 b1). */
@@ -129,7 +130,9 @@ function hintTextOf(hint: CalculationIssueTableHint): UnmatchedTableHint {
     )
     .filter((text) => text.length > 0);
 
-  return { columns, options: [...new Set(options)], methodologyCodes: hint.methodologyCodes };
+  const methodologies = hint.methodologies.map((m) => localized(m.nameL10n ?? null) || m.code);
+
+  return { columns, options: [...new Set(options)], methodologies };
 }
 
 function groupKey(tableCode: string, sheetCopyId: number | null): string {

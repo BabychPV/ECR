@@ -240,7 +240,7 @@ describe('DocumentPage: застарілі числа методологій', (
       );
 
       const banner = await screen.findByTestId('document-unmatched-rows', undefined, { timeout: Slow });
-      expect(banner.textContent).toContain('⟦document.unmatchedRows.group (table=GEN · Table 0, count=1)⟧');
+      expect(banner.textContent).toContain('⟦document.unmatchedRows.group (table=GEN · Table 0, rows=⟦document.unmatchedRows.rows.one (count=1)⟧)⟧');
 
       fireEvent.click(screen.getByTestId('document-unmatched-row-link'));
       await waitFor(() => {

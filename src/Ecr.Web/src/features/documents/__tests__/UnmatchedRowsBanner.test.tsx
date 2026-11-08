@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { issue, table } from '@/features/calculationIssues/__tests__/fixtures';
 import {
   AllowedValuesShown,
+  plural,
   RowLinksPerTable,
   UnmatchedCollapsedKey,
   UnmatchedRowsBanner,
@@ -27,11 +28,11 @@ function rows(issues: UnmatchedRows['issues'], finishedAt: string | null = null)
   return { issues, hints: [], finishedAt };
 }
 
-function show(value: UnmatchedRows, onOpenRow = vi.fn(), userId: number | undefined = 7) {
+function show(value: UnmatchedRows, onOpenRow = vi.fn(), userId: number | undefined = 7, narrow = false) {
   const tables = [table(1, '9.01 Unit 400'), table(2, '9.03 Unit 430')];
   const view = render(
     <MantineProvider theme={testTheme}>
-      <UnmatchedRowsBanner userId={userId} rows={value} tables={tables} onOpenRow={onOpenRow} />
+      <UnmatchedRowsBanner userId={userId} rows={value} tables={tables} onOpenRow={onOpenRow} narrow={narrow} />
     </MantineProvider>,
   );
 
@@ -54,10 +55,10 @@ describe('UnmatchedRowsBanner', () => {
 
     const groups = screen.getAllByTestId('document-unmatched-rows-group').map((g) => g.textContent ?? '');
     expect(groups).toHaveLength(2);
-    expect(groups[0]).toContain('⟦document.unmatchedRows.group (table=Sheet · 9.01 Unit 400, count=2)⟧');
-    expect(groups[1]).toContain('⟦document.unmatchedRows.group (table=Sheet · 9.03 Unit 430, count=2)⟧');
+    expect(groups[0]).toContain('⟦document.unmatchedRows.group (table=Sheet · 9.01 Unit 400, rows=⟦document.unmatchedRows.rows.other (count=2)⟧)⟧');
+    expect(groups[1]).toContain('⟦document.unmatchedRows.group (table=Sheet · 9.03 Unit 430, rows=⟦document.unmatchedRows.rows.other (count=2)⟧)⟧');
     expect(screen.getByTestId('document-unmatched-rows-summary').textContent).toContain(
-      '⟦document.unmatchedRows.summary (count=4, tables=2)⟧',
+      '⟦document.unmatchedRows.summary (rows=⟦document.unmatchedRows.rows.other (count=4)⟧, tables=⟦document.unmatchedRows.tables.other (count=2)⟧)⟧',
     );
     // Старий текст «Row: 1 (S01), 2 (S02), 1 (S01)…» - більше немає.
     expect(screen.getByTestId('document-unmatched-rows').textContent).not.toContain('(S01)');
@@ -92,7 +93,7 @@ describe('UnmatchedRowsBanner', () => {
 
     show(sixty);
     expect(screen.getByTestId('document-unmatched-rows-toggle').getAttribute('aria-expanded')).toBe('false');
-    expect(screen.getByTestId('document-unmatched-rows-summary').textContent).toContain('count=4');
+    expect(screen.getByTestId('document-unmatched-rows-summary').textContent).toContain('⟦document.unmatchedRows.rows.other (count=4)⟧');
   });
 
   it('fg6: згортання пам\'ятається для КОЖНОГО користувача - інший користувач бачить банер розгорнутим', async () => {
@@ -155,6 +156,32 @@ describe('UnmatchedRowsBanner', () => {
     expect(toggle.parentElement?.getAttribute('style') ?? '').not.toContain('--group-child-width');
   });
 
+  it('свіжий погляд 08.11: вузький екран (лише читання) - підказка без F9, «відкрийте ширше»', () => {
+    show(sixty, vi.fn(), 7, true);
+
+    expect(screen.getByTestId('document-unmatched-rows-hint').textContent).toBe('⟦document.unmatchedRows.hintNarrow⟧');
+  });
+
+  it('свіжий погляд 08.11: широкий екран - підказка з дією F9 (ключ hint)', () => {
+    show(sixty);
+
+    expect(screen.getByTestId('document-unmatched-rows-hint').textContent).toBe('⟦document.unmatchedRows.hint⟧');
+  });
+
+  it('свіжий погляд 08.11: посилання рядка називає таблицю для читалки («Sheet · 9.03 Unit 430 · Row 2»)', () => {
+    show(sixty);
+
+    const links = screen.getAllByTestId('document-unmatched-row-link');
+    expect(links[3]!.getAttribute('aria-label')).toBe('Sheet · 9.03 Unit 430 · ⟦document.unmatchedRows.row (row=2)⟧');
+    // ⚠ Видимий текст — частина доступної назви (WCAG 2.5.3).
+    expect(links[3]!.getAttribute('aria-label')).toContain(links[3]!.textContent ?? '');
+  });
+
+  it('свіжий погляд 08.11: кількість словом - one для 1, other для решти', () => {
+    expect(plural('document.unmatchedRows.rows', 1)).toBe('⟦document.unmatchedRows.rows.one (count=1)⟧');
+    expect(plural('document.unmatchedRows.rows', 3)).toBe('⟦document.unmatchedRows.rows.other (count=3)⟧');
+  });
+
   it('немає рядків - нічого не малюється', () => {
     show(rows([]));
 
@@ -169,7 +196,7 @@ describe('UnmatchedRowsBanner', () => {
         {
           tableCode: 'T1',
           sheetCopyId: null,
-          methodologyCodes: ['ECW_C11_11_02'],
+          methodologies: [{ code: 'ECW_C11_11_02', nameL10n: { values: { en: 'Cooling medium' } } }],
           columns: [{ code: 'IDCodeNAEProject', nameL10n: { values: { en: 'ID Code - NAE Project' } } }],
           options: codes.map((code) => [code]),
         },
@@ -181,7 +208,8 @@ describe('UnmatchedRowsBanner', () => {
     expect(allowed).toContain(
       `⟦document.unmatchedRows.allowed (column=ID Code - NAE Project, values=${codes.slice(0, AllowedValuesShown).join(', ')})⟧`,
     );
-    expect(allowed).toContain('ECW_C11_11_02');
+    expect(allowed).toContain('Cooling medium');
+    expect(allowed).not.toContain('ECW_C11_11_02');
     const more = screen.getByTestId('document-unmatched-rows-allowed-more');
     expect(more.textContent).toBe('⟦document.unmatchedRows.allowedMore (count=3)⟧');
     await userEvent.click(more);

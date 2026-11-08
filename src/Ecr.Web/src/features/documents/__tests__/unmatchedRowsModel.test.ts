@@ -64,20 +64,22 @@ describe('groupUnmatchedRows', () => {
       [issue(1, 1, { currentValues: ['X'] }), issue(2, 1, { currentValues: ['A', ''] })],
       [table(1, 'One'), table(2, 'Two')],
       [
-        { tableCode: 'T1', sheetCopyId: null, methodologyCodes: ['M1'], columns: [column('C', 'Code')], options: [['0903'], ['0905']] },
+        { tableCode: 'T1', sheetCopyId: null, methodologies: [{ code: 'M1', nameL10n: null }], columns: [column('C', 'Code')], options: [['0903'], ['0905']] },
         {
           tableCode: 'T2',
           sheetCopyId: null,
-          methodologyCodes: ['M2'],
+          methodologies: [{ code: 'M2', nameL10n: { values: { en: 'Fuel combustion' } } }],
           columns: [column('K', 'Kind'), column('F', 'Fuel')],
           options: [['Gas', ''], ['Coal', 'Dry']],
         },
       ],
     );
 
-    expect(groups[0]!.hint).toEqual({ columns: ['Code'], options: ['0903', '0905'], methodologyCodes: ['M1'] });
+    expect(groups[0]!.hint).toEqual({ columns: ['Code'], options: ['0903', '0905'], methodologies: ['M1'] });
     expect(groups[0]!.rows[0]!.currentValues).toEqual(['X']);
     expect(groups[1]!.hint!.options).toEqual(['Kind = Gas', 'Kind = Coal · Fuel = Dry']);
+    // Людині — назва методології; код — лише коли назви немає (M1).
+    expect(groups[1]!.hint!.methodologies).toEqual(['Fuel combustion']);
   });
 
   it('b3: таблиця без підказки - поточні значення не показуються (немає з чим порівняти)', () => {

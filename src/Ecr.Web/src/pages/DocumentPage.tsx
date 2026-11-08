@@ -843,6 +843,7 @@ export function DocumentPage(): JSX.Element {
             rows={unmatchedRows}
             tables={tables.data ?? []}
             onOpenRow={openUnmatchedRow}
+            narrow={narrow}
           />
         </Suspense>
       )}
