@@ -1,5 +1,5 @@
-import type { JSX, ReactNode } from 'react';
-import { Card, Drawer, Group, Progress, Stack, Text } from '@mantine/core';
+import { useState, type JSX, type ReactNode } from 'react';
+import { Anchor, Card, Drawer, Group, Progress, Stack, Text } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import type { JobSummary } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -7,6 +7,9 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
 import { jobKindLabel } from '@/features/workflow/jobLabel';
+import { badgeStateOf } from '@/features/workflow/jobFollow';
+import { RecalcFailedDocuments } from '@/features/recalc/RecalcFailedDocuments';
+import { isProjectRecalculation, isRecalcActive, progressOf, recalcProgressText } from '@/features/recalc/recalcProgress';
 import { JobAttempt, JobDocumentLink, JobFailure, JobResultLink, JobRetry } from './JobFacts';
 import { isActiveJob, isShownInMyTasks, myTaskMessage } from './myTasks';
 import { MyTasksSection } from './MyTasksSection';
@@ -114,13 +117,66 @@ export function MyTasksDrawer({
         {(list) => (
           // ✎ UAT my-tasks-collapse: фонові задачі - такий самий блок, що згортається, як і решта.
           <MyTasksSection id="my-tasks-jobs" title={t('myTasks.jobs.title')} count={list.length}>
-            {list.map((job) => (
-              <MyTaskRow key={job.jobId} job={job} onNavigate={onClose} />
-            ))}
+            {list.map((job) =>
+              isProjectRecalculation(job) ? (
+                <ProjectRecalcTaskRow key={job.jobId} job={job} onNavigate={onClose} />
+              ) : (
+                <MyTaskRow key={job.jobId} job={job} onNavigate={onClose} />
+              ),
+            )}
           </MyTasksSection>
         )}
       </AsyncBoundary>
     </Drawer>
+  );
+}
+
+/**
+ * ✎ UAT recalc-progress (a4): перерахунок проєкту — ОДИН запис «Project recalculation CODE» із тими самими
+ * лічильниками, що й банер; провалені документи (з Retry) — у розгорнутому записі, а не 92 окремими рядками
+ * (сервер не віддає дітей: `hideChildren=true`).
+ */
+function ProjectRecalcTaskRow({
+  job,
+  onNavigate,
+}: {
+  readonly job: JobSummary;
+  readonly onNavigate: () => void;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const progress = progressOf(job);
+  const active = isRecalcActive(progress);
+  const percent =
+    progress.total === null || progress.total === 0 ? 0 : Math.round((progress.done * 100) / progress.total);
+
+  return (
+    <Card withBorder padding="sm" data-my-task="" data-job-id={job.jobId} data-project-recalc-task={progress.phase}>
+      <Stack gap="xs">
+        <Group justify="space-between" wrap="nowrap">
+          <Text size="sm" fw={500}>
+            {t('recalcProgress.myTaskTitle', { project: progress.projectCode })}
+          </Text>
+          <StatusBadge kind="job" state={badgeStateOf(job)} />
+        </Group>
+        {active && <Progress value={percent} animated />}
+        <Text size="sm" data-project-recalc-counts="">
+          {recalcProgressText(progress)}
+        </Text>
+        {progress.failed > 0 && (
+          <Anchor
+            component="button"
+            type="button"
+            size="xs"
+            ta="left"
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+          >
+            {t('recalcProgress.showFailed', { failed: progress.failed })}
+          </Anchor>
+        )}
+        {open && <RecalcFailedDocuments parentJobId={job.jobId} onNavigate={onNavigate} />}
+      </Stack>
+    </Card>
   );
 }
 

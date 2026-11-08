@@ -142,6 +142,11 @@ const UnmatchedRowsBanner = lazy(async () => ({
   default: (await import('@/features/documents/UnmatchedRowsBanner')).UnmatchedRowsBanner,
 }));
 
+// ✎ UAT recalc-progress (08.11): прогрес перерахунку проєкту документа — окремий чанк (`D-132`).
+const ProjectRecalcBanner = lazy(async () => ({
+  default: (await import('@/features/recalc/ProjectRecalcBanner')).ProjectRecalcBanner,
+}));
+
 // PM-11: «З дозволу» + «Оновити з дозволу» — окремий чанк (бюджет маршруту D-132).
 const PermitRefreshStrip = lazy(async () => ({
   default: (await import('@/features/permits/bindings/PermitRefreshStrip')).PermitRefreshStrip,
@@ -868,6 +873,12 @@ export function DocumentPage(): JSX.Element {
             onOpenRow={openUnmatchedRow}
             narrow={narrow}
           />
+        </Suspense>
+      )}
+
+      {projectId !== null && (
+        <Suspense fallback={null}>
+          <ProjectRecalcBanner projectId={projectId} />
         </Suspense>
       )}
 

@@ -84,6 +84,7 @@ const SeededStrings: Record<string, string> = {
   'periods.overview.noMatch': 'No project matches this filter',
   'periods.year.title': '{project} · {year}',
   'periods.tile.readOnly': 'read-only',
+  'periods.tile.lockedSince': 'Locked since {date}',
   'periods.tile.opens': 'opens {date}',
   'periods.tile.grace': 'grace period until {date} · edits are late',
   'periods.tile.closesToday': 'closes today',
@@ -205,7 +206,8 @@ describe('PeriodsPage: огляд усіх проєктів і плитки ро
     const tiles = within(year).getAllByRole('button');
     expect(tiles).toHaveLength(3);
     expect(tiles.map((tile) => tile.getAttribute('data-state'))).toEqual(['Closed', 'Open', 'Scheduled']);
-    expect(within(tiles[0] as HTMLElement).getByText('read-only')).toBeDefined();
+    // ✎ UAT 08.11 (e2): заблокований місяць називає мить блокування, а не лише «read-only».
+    expect(within(tiles[0] as HTMLElement).getByText(/^Locked since /)).toBeDefined();
     expect(within(tiles[1] as HTMLElement).getByText(/closes in 20 days/)).toBeDefined();
     expect(within(tiles[2] as HTMLElement).getByText(/^opens /)).toBeDefined();
 
@@ -234,6 +236,17 @@ describe('PeriodsOverview: «closes in N days» і рядок плитки', () 
     const p = { ...base, endsAt: new Date(now + DayMs / 2).toISOString() };
     expect(daysLeft(p, now)).toBe(0);
     expect(periodNote(p, calendar, siteDate, now)).toMatch(/^closes today · /);
+  });
+
+  /**
+   * ✎ UAT 08.11 (e2): збережений `Open`, межа блокування якого вже минула (задача станів ще не відпрацювала), —
+   * «Locked since …», ніколи «closes today». Мутація: прибрати гілку `effectivePeriodState` у `periodNote` — червоніє.
+   */
+  it('минула межа блокування при збереженому Open — «Locked since», не «closes today»', () => {
+    const p = { ...base, state: 'Open' as const, reopenedUntil: null, endsAt: new Date(now - 30 * DayMs).toISOString() };
+    expect(daysLeft(p, now)).toBeNull();
+    expect(periodNote(p, calendar, siteDate, now)).toMatch(/^Locked since /);
+    expect(periodNote(p, calendar, siteDate, now)).not.toMatch(/closes today/);
   });
 
   it('закритий і ще не відкритий періоди не мають «днів до закриття»', () => {

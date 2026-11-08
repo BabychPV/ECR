@@ -45,7 +45,12 @@ const FormulaRecalculationCode = 'Ecr.Application.Ports.IFormulaRecalculationJob
  * це не міняє: працюючий перерахунок і далі видно в шухляді.
  */
 export function pollingJobCount(jobs: readonly JobSummary[] | undefined): number {
-  return (jobs ?? []).filter((job) => isActiveJob(job.state) && job.jobCode !== FormulaRecalculationCode).length;
+  // ✎ UAT recalc-progress (a4): перерахунок проєкту, чиї документи ще рахуються (`FannedOut`), — теж активний,
+  // хоча збережений стан батька вже `Succeeded`: лічильники в шухляді мають рухатися.
+  return (jobs ?? []).filter(
+    (job) =>
+      (isActiveJob(job.state) || job.effectiveState === 'FannedOut') && job.jobCode !== FormulaRecalculationCode,
+  ).length;
 }
 
 /** Повне ім'я маркера експорту документа. */

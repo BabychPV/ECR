@@ -6,6 +6,7 @@ import { formatCount, formatPeriodKey } from '@/shared/format';
 import { wholeDaysUntil } from '@/shared/siteMoment';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { useProjectCalendars } from '@/shared/ui/periodStates';
+import { effectivePeriodState, lockedSinceOf } from './periodEffective';
 import { StatStrip } from '@/shared/ui/StatStrip';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
 import { TwoLine } from '@/shared/ui/TwoLine';
@@ -58,6 +59,9 @@ export function currentPeriodOf(calendar: PeriodCalendarDto): Period | null {
 export function daysLeft(period: Period, now: number): number | null {
   if (period.state !== 'Open' && period.state !== 'Grace') return null;
 
+  // ✎ UAT 08.11 (e2): межа блокування вже минула — днів «до закриття» немає (не «closes today»).
+  if (effectivePeriodState(period, now) === 'Closed') return null;
+
   return wholeDaysUntil(period.endsAt, now);
 }
 
@@ -85,6 +89,11 @@ export function periodNote(
     return projectStatus === 'Draft' ? t('periods.tile.notOpenDraft') : t('periods.tile.notOpenInactive');
   }
   const end = siteDate(period.endsAt, zone, true) ?? '';
+
+  // ✎ UAT 08.11 (e2): «Locked since 17 Mar 2026», а не «closes today» для минулої межі — ефективний стан.
+  if (effectivePeriodState(period, now) === 'Closed') {
+    return t('periods.tile.lockedSince', { date: siteDate(lockedSinceOf(period), zone, false) ?? '' });
+  }
 
   if (period.reopenedUntil !== null && (period.state === 'Open' || period.state === 'Grace')) {
     return t('periods.tile.reopened', { date: siteDate(period.reopenedUntil, zone, false) ?? '' });
@@ -146,7 +155,9 @@ export function PeriodYearTiles({
       <SimpleGrid cols={{ base: 2, xs: 3, md: 4, lg: 6 }} spacing="xs" role="group" aria-labelledby="periods-year-title">
         {periods.map((period) => {
           const caption = formatPeriodKey(period.periodKey, calendar.periodKind);
-          const state = t(statusKey('period', period.state));
+          // ✎ UAT 08.11 (e3): плитка показує той самий ЕФЕКТИВНИЙ стан, що й сітка.
+          const shown = effectivePeriodState(period, now);
+          const state = t(statusKey('period', shown));
           const note = periodNote(period, calendar, siteDate, now, projectStatus);
           const pressed = selectedKey === period.periodKey;
 
@@ -154,7 +165,7 @@ export function PeriodYearTiles({
             <UnstyledButton
               key={period.periodKey}
               data-period-tile={period.periodKey}
-              data-state={period.state}
+              data-state={shown}
               aria-pressed={pressed}
               aria-label={`${caption}, ${state}. ${note}`}
               onClick={() => onPick(period.periodKey)}
@@ -177,7 +188,7 @@ export function PeriodYearTiles({
                     </Text>
                   )}
                 </Group>
-                <StatusBadge kind="period" state={period.state} quiet={period.state !== 'Grace'} />
+                <StatusBadge kind="period" state={shown} quiet={shown !== 'Grace'} />
                 <Text size="xs" c="dimmed">
                   {note}
                 </Text>

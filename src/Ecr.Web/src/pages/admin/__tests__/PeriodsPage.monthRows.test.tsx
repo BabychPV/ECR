@@ -33,8 +33,8 @@ const calendar = {
   policy: { id: 1, code: 'ECR-Standard', openOffsetDays: 0, graceOffsetDays: 15, hardCloseOffsetDays: 45, yearGraceOffsetDays: 45 },
   periods: [
     { id: 1, periodKey: 202601, year: 2026, sequence: 1, startsAt: '2026-01-01T00:00:00+02:00', endsAt: '2026-03-17T00:00:00+02:00', state: 'Closed', graceEndsAt: '2026-02-15T00:00:00+02:00', reopenedUntil: null, isCurrent: false },
-    { id: 2, periodKey: 202602, year: 2026, sequence: 2, startsAt: '2026-02-01T00:00:00+02:00', endsAt: '2026-04-15T00:00:00+03:00', state: 'Grace', graceEndsAt: '2026-03-15T00:00:00+02:00', reopenedUntil: null, isCurrent: false },
-    { id: 3, periodKey: 202603, year: 2026, sequence: 3, startsAt: '2026-03-01T00:00:00+02:00', endsAt: '2026-05-15T00:00:00+03:00', state: 'Open', graceEndsAt: '2026-04-15T00:00:00+03:00', reopenedUntil: null, isCurrent: true },
+    { id: 2, periodKey: 202602, year: 2026, sequence: 2, startsAt: '2026-02-01T00:00:00+02:00', endsAt: '2099-04-15T00:00:00+03:00', state: 'Grace', graceEndsAt: '2026-03-15T00:00:00+02:00', reopenedUntil: null, isCurrent: false },
+    { id: 3, periodKey: 202603, year: 2026, sequence: 3, startsAt: '2026-03-01T00:00:00+02:00', endsAt: '2099-05-15T00:00:00+03:00', state: 'Open', graceEndsAt: '2026-04-15T00:00:00+03:00', reopenedUntil: null, isCurrent: true },
   ],
 };
 
@@ -216,7 +216,7 @@ describe('PeriodsPage: рядок місяця — підпис, стан і о�
         expect(tr.querySelectorAll('time')).toHaveLength(1);
       }
 
-      expect(feb.querySelector('time')?.getAttribute('dateTime')).toBe('2026-04-15T00:00:00+03:00');
+      expect(feb.querySelector('time')?.getAttribute('dateTime')).toBe('2099-04-15T00:00:00+03:00');
 
       const header = within(screen.getByRole('columnheader', { name: /periods\.locksOn(?!Hint)/ })).getByText(
         '⟦periods.locksOn⟧',
