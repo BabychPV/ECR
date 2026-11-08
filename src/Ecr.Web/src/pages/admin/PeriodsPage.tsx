@@ -14,6 +14,7 @@ import { formatMonthYear } from '@/shared/format';
 import { siteMomentText, zoneClock } from '@/shared/siteMoment';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
+import { ProjectRecalcBannerSlot } from '@/features/recalc/ProjectRecalcBannerSlot';
 import { t } from '@/shared/i18n';
 import { projectsQuery } from '@/features/projects/allProjects';
 import { effectivePeriodState } from '@/features/projects/periodEffective';
@@ -35,10 +36,6 @@ const AllProjectsPeriods = lazy(async () => ({
 // ✎ UAT-p3: людина шукала перерахунок саме тут — та сама дія, що й на переліку документів (окремим чанком, D-132).
 const ProjectRecalculateAction = lazy(async () => ({
   default: (await import('@/features/documents/ProjectRecalculateAction')).ProjectRecalculateAction,
-}));
-// ✎ UAT recalc-progress (08.11): прогрес перерахунку обраного проєкту з сервера — окремий чанк (D-132).
-const ProjectRecalcBanner = lazy(async () => ({
-  default: (await import('@/features/recalc/ProjectRecalcBanner')).ProjectRecalcBanner,
 }));
 /**
  * Поле дати — за `import()`, і не заради стилю.
@@ -407,9 +404,7 @@ export function PeriodsPage(): JSX.Element {
       )}
 
       {projectId !== null && (
-        <Suspense fallback={null}>
-          <ProjectRecalcBanner projectId={projectId} />
-        </Suspense>
+        <ProjectRecalcBannerSlot projectId={projectId} />
       )}
 
       {/*

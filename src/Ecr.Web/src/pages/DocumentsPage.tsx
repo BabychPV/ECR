@@ -40,6 +40,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
+import { ProjectRecalcBannerSlot } from '@/features/recalc/ProjectRecalcBannerSlot';
 import { t } from '@/shared/i18n';
 import { projectsQuery } from '@/features/projects/allProjects';
 import { DisabledReason } from '@/features/common/DisabledReason';
@@ -86,10 +87,6 @@ const ProjectRecalculateAction = lazy(async () => ({
   default: (await import('@/features/documents/ProjectRecalculateAction')).ProjectRecalculateAction,
 }));
 
-/** ✎ UAT recalc-progress (08.11): прогрес перерахунку проєкту з сервера — окремим чанком (`D-132`). */
-const ProjectRecalcBanner = lazy(async () => ({
-  default: (await import('@/features/recalc/ProjectRecalcBanner')).ProjectRecalcBanner,
-}));
 
 /**
  * Перелік документів.
@@ -362,9 +359,7 @@ export function DocumentsPage(): JSX.Element {
           порожній результат — ховав би кнопку, якою фільтр і знімають.
           ⚠ І в ТОМУ САМОМУ ряду, що й фільтри (рішення людини 2026-10-06). */}
       {/* ✎ UAT recalc-progress (a2): після повернення на перелік прогрес перерахунку відновлюється з сервера. */}
-      <Suspense fallback={null}>
-        <ProjectRecalcBanner projectId={filters.projectId} />
-      </Suspense>
+      <ProjectRecalcBannerSlot projectId={filters.projectId} />
 
       <Text size="sm" mb="xs" data-documents-year-note="">
         {t('documents.oneDocumentNote')}

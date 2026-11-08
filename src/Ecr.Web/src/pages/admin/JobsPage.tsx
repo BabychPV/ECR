@@ -253,7 +253,10 @@ export function JobsPage(): JSX.Element {
             : t('jobs.openDocument', { id: job.documentId }),
           // ✎ a5: дитина розкладу названа частиною перерахунку проєкту; батько — з лічильниками дітей.
           job.fanOutParentJobId === null || job.fanOutParentJobId === undefined ? '' : t('jobs.partOfProjectRecalc'),
-          isProjectRecalculation(job) ? recalcProgressText(progressOf(job)) : (job.message ?? ''),
+          // ⚠ Лише батько РОЗКЛАДУ (є лічильники дітей); старий перерахунок без дітей лишає своє повідомлення.
+          isProjectRecalculation(job) && job.fanOut !== null && job.fanOut !== undefined
+            ? recalcProgressText(progressOf(job))
+            : (job.message ?? ''),
         ]
           .filter((part) => part !== '')
           .join(' · ');
