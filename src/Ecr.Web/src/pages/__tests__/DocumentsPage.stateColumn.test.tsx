@@ -316,4 +316,18 @@ describe('DocumentsPage: прихований аркуш не видно ні р
     },
     SlowEnvTimeout,
   );
+
+  it(
+    // ✎ Live-прохід 08.11 (P3, «видимий текст, а не підказки»): власника приховано доступом — рядок над таблицею.
+    'власник прихований доступом (немає ні owner, ні modifiedAt) — видимий приглушений рядок над таблицею',
+    async () => {
+      await shown('DOC-000008');
+
+      // ⛔ Без фіксу рядка немає: причина жила лише в підказці клітинки.
+      const note = document.querySelector('[data-owner-hidden-note]');
+      expect(note?.textContent).toBe('⟦documents.ownerHiddenNote⟧');
+      expect(cellOf('DOC-000008', 'issues').closest('tr')?.querySelector('[data-owner="hidden"]')).not.toBeNull();
+    },
+    SlowEnvTimeout,
+  );
 });

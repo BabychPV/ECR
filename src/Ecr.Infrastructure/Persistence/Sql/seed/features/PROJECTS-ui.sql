@@ -140,6 +140,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'projects.deleted', N'ru', N'Проект {code} удалён; запись аудита сохранена.'),
     (N'documents.ownerHidden', N'ru', N'Скрыто: часть документа вам не открыта, поэтому владелец и автор правок не показываются'),
     (N'periods.reopenTitle', N'ru', N'Переоткрыть {period}?'),
+    (N'documents.ownerHiddenNote', N'ru', N'Владелец скрыт вашим доступом: часть этих документов вам не открыта.'),
     (N'projects.lifecycle.delete', N'kz', N'Жоба нобайын жою…'),
     (N'projects.lifecycle.delete.desc', N'kz', N'Құжаттары жоқ нобай жобаны жою. Қайтару мүмкін емес; аудит жазбасы жазылады.'),
     (N'projects.lifecycle.delete.notAllowed', N'kz', N'Тек құжаттары жоқ нобайды жоюға болады (бұл жоба: {status}, құжаттар: {count})'),
@@ -151,7 +152,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'projects.delete.confirm', N'kz', N'Жобаны жою'),
     (N'projects.deleted', N'kz', N'{code} жобасы жойылды; аудит жазбасы сақталды.'),
     (N'documents.ownerHidden', N'kz', N'Жасырылған: құжаттың бір бөлігі сізге ашық емес, сондықтан иесі мен түзету авторы көрсетілмейді'),
-    (N'periods.reopenTitle', N'kz', N'{period} қайта ашу керек пе?')
+    (N'periods.reopenTitle', N'kz', N'{period} қайта ашу керек пе?'),
+    (N'documents.ownerHiddenNote', N'kz', N'Иесі қолжетімділігіңізге байланысты жасырылған: бұл құжаттардың бір бөлігі сізге ашық емес.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -234,7 +236,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'projects.delete.confirm', N'en', N'Delete project', 1),
     (N'projects.deleted', N'en', N'{code} was deleted; an audit entry was written.', 1),
     (N'documents.ownerHidden', N'en', N'Hidden: part of this document is not open to you, so its owner and editors are not shown', 1),
-    (N'periods.reopenTitle', N'en', N'Reopen {period}?', 1)
+    (N'periods.reopenTitle', N'en', N'Reopen {period}?', 1),
+    (N'documents.ownerHiddenNote', N'en', N'Owner hidden by your access: part of these documents is not open to you.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

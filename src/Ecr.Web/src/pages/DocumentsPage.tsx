@@ -471,6 +471,7 @@ export function DocumentsPage(): JSX.Element {
         {(page) => {
           // Колонка «Version»: фільтр і сортування - СЕРВЕРНІ (`templateVersions`, `sort`), сторінка вже в потрібному порядку.
           const rows = page.items;
+          const hasOwner = (row: (typeof rows)[number]): boolean => typeof row.ownerDisplayName === 'string';
 
           return (
           <>
@@ -512,6 +513,13 @@ export function DocumentsPage(): JSX.Element {
             ) : (
               // `UI-42`: на вузькому екрані прокручується таблиця, а не сторінка (`documentsList.css`).
               <div className="ecr-docs-table-scroll">
+                {/* ✎ Live-прохід 08.11 (P3, правило людини «видимий текст, а не підказки»): власника приховано
+                    доступом (R-7, `DocumentOwnerCell`) — один приглушений рядок над таблицею, а не лише підказка. */}
+                {rows.some((row) => !hasOwner(row) && row.modifiedAt == null) && (
+                  <Text size="xs" c="dimmed" mb={4} data-owner-hidden-note="">
+                    {t('documents.ownerHiddenNote')}
+                  </Text>
+                )}
                 <Table
                   highlightOnHover
                   className="ecr-sticky-head"
