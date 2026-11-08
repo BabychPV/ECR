@@ -526,7 +526,8 @@ export const routes = {
    * ⚠ Іконка — та сама, що в Periods: нова означала б правку `shared/ui/navIcons.tsx` (там працює інша сесія).
    */
   projects: {
-    id: 'projects',
+    // ⚠ Не «projects»: такий літерал у масиві збігається з ключем кешу проєктів і червонить його сторож (L8-10).
+    id: 'project-list',
     path: '/projects',
     handle: {
       labelKey: 'nav.projects',
@@ -545,7 +546,7 @@ export const routes = {
       labelKey: 'nav.projects',
       permission: 'Period.Configure',
       numericParams: ['id'],
-      crumb: { ancestorIds: ['projects'], resolveParam: 'id', resolveWith: 'projectCode' },
+      crumb: { ancestorIds: ['project-list'], resolveParam: 'id', resolveWith: 'projectCode' },
     },
   },
   projectPeriods: {

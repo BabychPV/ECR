@@ -9,6 +9,7 @@ import type {
   TemplatePage,
   TemplateVersionPage,
 } from '@/api/types';
+import { projectsQuery } from '@/features/projects/allProjects';
 import { templateCardKey } from '@/features/templates/templateCardQuery';
 import { localized } from '@/shared/i18n/localized';
 import type { RouteHandle } from './routes';
@@ -113,7 +114,7 @@ function projectCodeLookup(params: CrumbParams): ResolverLookup {
   if (!Number.isFinite(projectId)) return { key: undefined, read: () => undefined };
 
   return {
-    key: queryKeys.projects.all(),
+    key: projectsQuery.queryKey,
     read: (data) => (data as PagedProjects).items.find((item) => item.id === projectId)?.code,
   };
 }
