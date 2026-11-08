@@ -262,7 +262,7 @@ public sealed class OrphanScanTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    public void Нічна_перевірка_не_чіпає_закриті_періоди()
+    public void Нічна_перевірка_переоцінює_закриті_періоди_але_не_заплановані()
     {
         var decision = OrphanScanPlan.Plan(
         [
@@ -282,18 +282,17 @@ public sealed class OrphanScanTests
                 new OrphanRowRef(202604, 1005), PeriodState.Scheduled, IsOrphaned: false, ReferenceIsValid: false),
         ]);
 
-        // ⛔ Закритий період не чіпається в ОБИДВА боки: ні поставити, ні
-        // зняти. Його дані вже подані й погоджені — ознака нічого не
-        // розблокує і нічого не заборонить, зате перепише рядок, що входить
-        // у контрольну суму зрізу подання.
+        // ✎ Rule (h4), human 08.11: a Closed («Locked») period is re-evaluated in BOTH directions — the flag set while
+        // the month was open clears once the data/permit is fixed (live: LAND-FULL doc 2, R7001000, January). Before,
+        // Closed was skipped and the flag froze.
         Assert.Equal(
-            [new OrphanRowRef(202602, 1001), new OrphanRowRef(202603, 1002)],
+            [new OrphanRowRef(202602, 1001), new OrphanRowRef(202603, 1002), new OrphanRowRef(202601, 1003)],
             decision.ToFlag);
-        Assert.Empty(decision.ToClear);
+        Assert.Equal([new OrphanRowRef(202601, 1004)], decision.ToClear);
 
         Assert.True(OrphanScanPlan.IsScannable(PeriodState.Open));
         Assert.True(OrphanScanPlan.IsScannable(PeriodState.Grace));
-        Assert.False(OrphanScanPlan.IsScannable(PeriodState.Closed));
+        Assert.True(OrphanScanPlan.IsScannable(PeriodState.Closed));
 
         // Scheduled теж не чіпається: документів у ньому ще немає, і
         // прохід по ньому — робота, яка нічого не знаходить за побудовою.

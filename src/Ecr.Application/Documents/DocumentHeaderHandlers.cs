@@ -185,7 +185,12 @@ public sealed class PatchDocumentHeaderHandler(
 
     // ⛔ PRMG: поле шапки може мати ціллю ГРУПУ типів дозволів; порівняння цілі - лише через `LookupTargetMatcher`.
     // `null` (прямий конструктор у тестах) - груп немає.
-    Permits.Groups.ILookupTargetResolver? groups = null)
+    Permits.Groups.ILookupTargetResolver? groups = null,
+
+    // ✎ Rule (h), human 08.11 (Contract tab): a permit picked in a header field must cover every month the document
+    // holds data in. `null` (direct constructor in tests) — the rule is off.
+    IPermitRegistryIndex? permitTargets = null,
+    IPermitDataMonthsReader? dataMonths = null)
 {
     /// <summary>Тип події журналу безпеки.</summary>
     public const string EventType = "DocumentHeaderChanged";
@@ -378,7 +383,7 @@ public sealed class PatchDocumentHeaderHandler(
             await documentGate.EnterHeaderAsync(documentId, exclusive: true, innerCt).ConfigureAwait(false);
 
             changed = await PersistAsync(
-                documentId, project, profile, request.BaseVersion, toSave, codeById, fieldsById, userId, innerCt)
+                documentId, project, profile, request.BaseVersion, toSave, codeById, fieldsById, userId, innerCt, snapshot)
                 .ConfigureAwait(false);
 
             if (enlist && changed > 0)
@@ -440,7 +445,8 @@ public sealed class PatchDocumentHeaderHandler(
         Dictionary<int, string> codeById,
         IReadOnlyDictionary<int, HeaderFieldDef> fieldsById,
         int userId,
-        CancellationToken ct)
+        CancellationToken ct,
+        TemplateVersionSnapshot? snapshot = null)
     {
         var facts = await workflowFacts.LockWorkflowFactsAsync(documentId, ct).ConfigureAwait(false);
         _ = await documentLock.FindForUpdateAsync(documentId, ct).ConfigureAwait(false);
@@ -487,6 +493,7 @@ public sealed class PatchDocumentHeaderHandler(
         }
 
         await EnsureLookupEntriesUsableAsync(project, profile, changes, fieldsById, ct).ConfigureAwait(false);
+        await EnsureHeaderPermitCoversDataAsync(documentId, profile, changes, fieldsById, snapshot, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
         await headers.SaveValuesAsync(documentId, changes, ct).ConfigureAwait(false);
@@ -595,6 +602,117 @@ public sealed class PatchDocumentHeaderHandler(
                     ["headerFieldCode"] = field.Code,
                     ["windowFrom"] = project.PeriodStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     ["windowTo"] = project.PeriodEnd.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                });
+        }
+    }
+
+    /// <summary>
+    /// Rule (h1), human 08.11, Contract tab: a permit picked in a header field must cover every month the document holds
+    /// data in. Refusal — <c>ECR-HDR-4223</c> (the header entry is not usable) with <c>permitNotCoveringMonths</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Permit-type field: its target is a published permit type header or a permit group (the same test as for sheet
+    /// columns, <c>PatchCellsHandler.PermitColumnIdsAsync</c>). A permit without a validity window covers everything —
+    /// no read of the document's data then.
+    /// </para>
+    /// <para>
+    /// ⚠ Tables with their own permit column are left out: their rows answer to their own permit (rule h2), so a water
+    /// permit row does not make the contract's air permit cover January.
+    /// </para>
+    /// <para>
+    /// Only CHANGED fields reach here (<paramref name="changes"/>): a permit that stopped covering after it was chosen
+    /// does not block editing other header fields — the Issues check (h4) lists it instead.
+    /// </para>
+    /// </remarks>
+    private async Task EnsureHeaderPermitCoversDataAsync(
+        long documentId,
+        AccessProfile profile,
+        Dictionary<int, Domain.ValueObjects.DocumentHeaderValueData> changes,
+        IReadOnlyDictionary<int, HeaderFieldDef> fieldsById,
+        TemplateVersionSnapshot? snapshot,
+        CancellationToken ct)
+    {
+        if (permitTargets is null || dataMonths is null || snapshot is null)
+        {
+            return;
+        }
+
+        var picked = changes
+            .Where(pair => pair.Value.ValueRegistryEntryId is not null
+                           && fieldsById.TryGetValue(pair.Key, out var f) && f.LookupRegistryDefId is not null)
+            .Select(pair => (Field: fieldsById[pair.Key], EntryId: pair.Value.ValueRegistryEntryId!.Value))
+            .ToList();
+
+        if (picked.Count == 0)
+        {
+            return;
+        }
+
+        var isPermitTarget = await Permits.Validity.PermitTargets.LoadAsync(permitTargets, ct).ConfigureAwait(false);
+
+        var permitPicks = picked.Where(p => isPermitTarget(p.Field.LookupRegistryDefId!.Value)).ToList();
+        if (permitPicks.Count == 0)
+        {
+            return;
+        }
+
+        var entries = (await registries
+                .FindEntriesByIdsAsync([.. permitPicks.Select(p => p.EntryId).Distinct()], ct)
+                .ConfigureAwait(false))
+            .ToDictionary(e => e.Id);
+
+        var windowed = permitPicks
+            .Where(p => entries.TryGetValue(p.EntryId, out var e) && (e.ValidFrom is not null || e.ValidTo is not null))
+            .OrderBy(p => p.Field.Code, StringComparer.Ordinal)
+            .ToList();
+        if (windowed.Count == 0)
+        {
+            return;
+        }
+
+        var ownPermitTables = snapshot.Sheets
+            .SelectMany(s => s.Tables)
+            .Where(t => t.Columns.Any(c => !c.IsDeleted && c.DataType == CellDataType.Lookup
+                                           && c.LookupRegistryDefId is { } target && isPermitTarget(target)))
+            .Select(t => t.Id)
+            .ToList();
+
+        // ⛔ S6: the refusal names months with data — only of tables and columns the author can read; a hidden table's
+        // data must not show through «Jan 2026».
+        var scope = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var months = await dataMonths
+            .DocumentMonthsWithDataAsync(
+                documentId, [.. ownPermitTables.Concat(scope.HiddenTableIds()).Distinct()], ct, scope.HiddenColumnIds())
+            .ConfigureAwait(false);
+        if (months.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var (field, entryId) in windowed)
+        {
+            var entry = entries[entryId];
+            var uncovered = Permits.Validity.PermitMonthCoverage.Uncovered(entry.ValidFrom, entry.ValidTo, months);
+            if (uncovered.Count == 0)
+            {
+                continue;
+            }
+
+            var permit = PatchCellsHandler.PermitName(entry, currentUser.Language);
+            var validity = Permits.Validity.PermitMonthCoverage.DescribeValidity(entry.ValidFrom, entry.ValidTo);
+            var monthsText = Permits.Validity.PermitMonthCoverage.DescribeMonths(uncovered, currentUser.Language);
+
+            throw new BusinessRuleException(
+                ErrorCodes.HeaderEntryNotUsable,
+                $"Дозвіл «{permit}» ({validity}) у полі шапки «{field.Code}» не покриває місяців з даними: {monthsText}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-HDR-4223.permitNotCoveringMonths",
+                    ["headerFieldCode"] = field.Code,
+                    ["permit"] = permit,
+                    ["validity"] = validity,
+                    ["months"] = monthsText,
                 });
         }
     }

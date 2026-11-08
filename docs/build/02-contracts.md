@@ -3058,6 +3058,39 @@ public interface IPermitStore
 }
 ```
 
+#### `IPermitDataMonthsReader`
+
+Правило (h), рішення людини 08.11 (вкладка Contract): у яких місяцях документ має дані — дозвіл, обраний у полі
+шапки, мусить покривати їх усі (`err.ECR-HDR-4223.permitNotCoveringMonths`; Issues — `validation.permit.headerMonthsNotCovered`).
+Місяць має дані, коли ВВЕДЕНЕ чи ІМПОРТОВАНЕ (не обчислене формулою чи методологією) числове значення має рядок оригінального екземпляра таблиці документа:
+місячні стовпці таблиці «місяці в колонках» дають свій місяць року екземпляра (лише вони — описові стовпці таких таблиць
+не рахуються), таблиця без місячних стовпців — усі місяці періоду екземпляра. Таблиці з власною колонкою дозволу,
+приховані від автора таблиці й колонки виключає викликач.
+
+```csharp
+public interface IPermitDataMonthsReader
+{
+    public Task<IReadOnlyList<DateOnly>> DocumentMonthsWithDataAsync(
+        long documentId, IReadOnlyCollection<int> excludedTableDefIds, CancellationToken ct,
+        IReadOnlyCollection<int>? excludedColumnDefIds = null);
+}
+```
+
+#### `IPermitRegistryIndex`
+
+Правило (h): які реєстри є ціллю Lookup «типу дозвіл» — шапки опублікованих типів (`PRM_<TYPE>`) і групи (`PRMG_*`).
+Питається на гарячому шляху кожного `PATCH` таблиці з Lookup, тому відповідь — з пам'яті: singleton, оновлення не
+частіше ніж раз на `RefreshInterval` (30 с), теплий запит — нуль звернень до БД і жодного виклику резолвера груп
+(храповик `PatchCellsQueryCountTests`).
+
+```csharp
+public interface IPermitRegistryIndex
+{
+    public static TimeSpan RefreshInterval { get; }
+    public ValueTask<IReadOnlySet<int>> PermitTargetIdsAsync(CancellationToken ct);
+}
+```
+
 #### `IPermitBindingStore`
 
 Прив'язки таблиць аркуша версії шаблону до таблиць типів дозволів (Permits, PM-09; `cfg.PermitSheetBinding` +

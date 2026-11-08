@@ -47,7 +47,7 @@ public sealed partial class ConsistencyCheckJobTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    public void Не_чіпає_закриті_періоди()
+    public void Переоцінює_закриті_періоди_в_обидва_боки()
     {
         var decision = OrphanScanPlan.Plan(
         [
@@ -56,12 +56,11 @@ public sealed partial class ConsistencyCheckJobTests
             new OrphanCandidate(Row(3), PeriodState.Closed, IsOrphaned: true, ReferenceIsValid: true),
         ]);
 
-        // ⛔ Закритий період не чіпається в ОБИДВА боки: ні поставити, ні
-        // зняти. Його дані вже подані й погоджені — ознака нічого не
-        // розблокує і нічого не заборонить, зате перепише рядок, що входить у
-        // контрольну суму зрізу подання.
-        Assert.Equal([Row(1)], decision.ToFlag);
-        Assert.Empty(decision.ToClear);
+        // ✎ Rule (h4), human 08.11: закритий («Locked») період переоцінюється в ОБИДВА боки — інакше ознака,
+        // поставлена у відкритому місяці, не знімається після виправлення ніколи (живий випадок: LAND-FULL doc 2,
+        // R7001000, січень). Пишеться лише IsOrphaned/OrphanedAt — не комірки й не зріз подання.
+        Assert.Equal([Row(1), Row(2)], decision.ToFlag);
+        Assert.Equal([Row(3)], decision.ToClear);
 
         // ⚠ Але ЗНАХІДКУ в закритому періоді записують — там вона
         // найнебезпечніша, бо дані вже подані. Різниця в тому, ЩО робиться:

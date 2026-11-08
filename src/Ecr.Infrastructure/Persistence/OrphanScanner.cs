@@ -1,9 +1,11 @@
+using Ecr.Application.Permits.Validity;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -82,6 +84,11 @@ public sealed class OrphanScanner : IOrphanScanner
     private readonly RegistryResolver _resolver;
     private readonly IClock _clock;
     private readonly OrphanScanBudget _budget;
+    private readonly ICellStore? _cells;
+    private readonly IPermitTypeStore? _permitTypes;
+
+    /// <summary>Published permit type headers, read once per scanner (scope); <c>null</c> until asked.</summary>
+    private IReadOnlySet<int>? _permitHeaders;
 
     /// <summary>Створює сканер.</summary>
     /// <param name="db">Контекст бази.</param>
@@ -96,13 +103,25 @@ public sealed class OrphanScanner : IOrphanScanner
     /// порцію меншою за набір; із зашитими <c>500 000</c> для цього довелося б
     /// засівати півмільйона рядків, тобто такого тесту не було б узагалі.
     /// </remarks>
+    /// <param name="cells">
+    /// ✎ Rule (h), human 08.11: the LOGICAL cell store (Q-17 routing merged) — months with data of a permit-bound row of a
+    /// «months in columns» table. <c>null</c> — permit references are judged by the period end like any other.
+    /// </param>
+    /// <param name="permitTypes">Which registries are permit type headers; <c>null</c> — as for <paramref name="cells"/>.</param>
     public OrphanScanner(
-        EcrDbContext db, RegistryResolver resolver, IClock clock, OrphanScanBudget? budget = null)
+        EcrDbContext db,
+        RegistryResolver resolver,
+        IClock clock,
+        OrphanScanBudget? budget = null,
+        ICellStore? cells = null,
+        IPermitTypeStore? permitTypes = null)
     {
         _db = db;
         _resolver = resolver;
         _clock = clock;
         _budget = budget ?? OrphanScanBudget.Nightly;
+        _cells = cells;
+        _permitTypes = permitTypes;
     }
 
     /// <inheritdoc />
@@ -226,8 +245,9 @@ public sealed class OrphanScanner : IOrphanScanner
     /// Ключі періодів, у яких хоч один проєкт має відкритий період.
     /// </summary>
     /// <remarks>
-    /// Закриті не чіпаються: їхні дані вже подані, ознака нічого не розблокує
-    /// і не заборонить (ФВ-8.13a).
+    /// ✎ Rule (h4), 08.11: закриті («Locked») теж — інакше ознака, поставлена в
+    /// відкритому місяці, не знімається після виправлення ніколи. Лише
+    /// <c>Scheduled</c> поза проходом.
     /// <para>
     /// ⛔ ЛИШЕ КЛЮЧІ — грубий фільтр партицій, а НЕ джерело дати чи стану
     /// (R5-D1 / D1-01). `PeriodKeyValue` (`Year*100+Sequence`) унікальний у
@@ -245,9 +265,13 @@ public sealed class OrphanScanner : IOrphanScanner
     /// </remarks>
     private async Task<PeriodScope> OpenPeriodsAsync(CancellationToken ct)
     {
+        // ✎ Rule (h4), human 08.11: Closed («Locked») periods are scanned too — otherwise a flag set while the month
+        // was open never clears after the data or the permit is fixed (live case: LAND-FULL doc 2, Water Report
+        // R7001000, January, flagged 28.10 and frozen since the month was locked). Only Scheduled is skipped: nothing
+        // there yet.
         var keys = await _db.Periods
             .AsNoTracking()
-            .Where(p => p.State == PeriodState.Open || p.State == PeriodState.Grace)
+            .Where(p => p.State == PeriodState.Open || p.State == PeriodState.Grace || p.State == PeriodState.Closed)
             .Select(p => p.PeriodKeyValue)
             .Distinct()
             .OrderBy(k => k)
@@ -330,10 +354,11 @@ public sealed class OrphanScanner : IOrphanScanner
                 equals new { P = period.PeriodKeyValue, Pr = period.ProjectId }
             where !row.IsDeleted
                   && periodKeys.Contains(row.PeriodKeyValue)
-                  && (period.State == PeriodState.Open || period.State == PeriodState.Grace)
+                  && (period.State == PeriodState.Open || period.State == PeriodState.Grace
+                      || period.State == PeriodState.Closed)
                   && (row.PeriodKeyValue > after.PeriodKeyValue
                       || (row.PeriodKeyValue == after.PeriodKeyValue && row.Id > after.RowId))
-            select new { cell, row, period.PeriodEnd, period.State };
+            select new { cell, row, period.PeriodEnd, period.State, inst.TableDefId };
 
         // ⛔ Фільтр на конкретний запис звужує запит ДО проєкції в іменований
         // `CellReference`, а не після неї. `SetEntryValidityHandler` (єдиний
@@ -358,7 +383,9 @@ public sealed class OrphanScanner : IOrphanScanner
                 x.row.IsOrphaned,
                 x.cell.ValueRegistryEntryId!.Value,
                 x.PeriodEnd,
-                x.State))
+                x.State,
+                x.row.TableInstanceId,
+                x.TableDefId))
             .Take(_budget.BatchCells + 1)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -398,6 +425,7 @@ public sealed class OrphanScanner : IOrphanScanner
         }
 
         var entryById = await EntriesAsync(references, ct).ConfigureAwait(false);
+        var permitVerdicts = await PermitVerdictsAsync(references, entryById, ct).ConfigureAwait(false);
 
         // ⚠ Рядок осиротілий, якщо ХОЧ ОДНЕ його посилання нечинне. Саме «хоч
         // одне», а не «всі»: рядок із чинним дозволом і нечинним водним
@@ -412,9 +440,14 @@ public sealed class OrphanScanner : IOrphanScanner
                 var head = group.First();
                 var asOf = head.PeriodEnd;
 
+                // ✎ Rule (h): a permit reference of a «months in columns» row is valid when the permit covers the
+                // row's months with data (PermitVerdictsAsync), not when it is valid on the period end — the same
+                // rule the write path and Issues apply, so fixing the data clears the flag.
                 var allValid = group.All(r =>
                     entryById.TryGetValue(r.RegistryEntryId, out var entry)
-                    && _resolver.IsSelectable(entry, asOf));
+                    && (permitVerdicts.TryGetValue((r.PeriodKeyValue, r.RowId, r.RegistryEntryId), out var covered)
+                        ? covered
+                        : _resolver.IsSelectable(entry, asOf)));
 
                 return new OrphanCandidate(
                     new OrphanRowRef(group.Key.PeriodKeyValue, group.Key.RowId),
@@ -550,6 +583,90 @@ public sealed class OrphanScanner : IOrphanScanner
                 $"Рядок ({tail.PeriodKeyValue}, {tail.RowId}) має більше посилань на довідник, "
                 + "ніж уміщає одне читання сканера: пачка не може просунутися.");
     }
+
+    /// <summary>
+    /// Rule (h): verdicts for permit references (entry of a published permit type header) of rows in tables with month
+    /// columns — active, not deleted, and covering every month the row holds data in (a row without data: touching the
+    /// year). Other references are not in the result and keep <see cref="RegistryResolver.IsSelectable"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Months come from the LOGICAL slice (<see cref="ICellStore.ReadSlicesAsync(IReadOnlyList{long}, PeriodKey, CancellationToken)"/>,
+    /// Q-17 owners merged), one read per period of the batch and only for instances holding permit rows — permit rows
+    /// are few, the batch of other references pays one header query per scanner.
+    /// </remarks>
+    private async Task<Dictionary<(int PeriodKeyValue, long RowId, long EntryId), bool>> PermitVerdictsAsync(
+        List<CellReference> references, Dictionary<long, RegistryEntry> entryById, CancellationToken ct)
+    {
+        var verdicts = new Dictionary<(int PeriodKeyValue, long RowId, long EntryId), bool>();
+        if (_cells is null || _permitTypes is null)
+        {
+            return verdicts;
+        }
+
+        _permitHeaders ??= await _permitTypes.ListPublishedHeaderRegistryIdsAsync(ct).ConfigureAwait(false);
+        var headers = _permitHeaders;
+
+        var permitRefs = references
+            .Where(r => entryById.TryGetValue(r.RegistryEntryId, out var e) && headers.Contains(e.RegistryDefId))
+            .ToList();
+        if (permitRefs.Count == 0)
+        {
+            return verdicts;
+        }
+
+        var tableIds = permitRefs.Select(r => r.TableDefId).Distinct().ToList();
+        var monthColumns = await _db.ColumnDefs
+            .AsNoTracking()
+            .Where(c => tableIds.Contains(c.TableDefId) && !c.IsDeleted && c.IsMonthColumn && c.MonthNumber != null)
+            .OrderBy(c => c.Id)
+            .Select(c => new MonthColumnRef(c.Id, c.TableDefId, c.MonthNumber!.Value))
+            .Take(MaxMonthColumns)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var monthOfTable = monthColumns
+            .GroupBy(c => c.TableDefId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyDictionary<int, int>)g.ToDictionary(c => c.Id, c => (int)c.Month));
+
+        IReadOnlySet<int> noPermitColumns = new HashSet<int>();
+
+        foreach (var byPeriod in permitRefs.Where(r => monthOfTable.ContainsKey(r.TableDefId)).GroupBy(r => r.PeriodKeyValue))
+        {
+            var instanceIds = byPeriod.Select(r => r.TableInstanceId).Distinct().ToList();
+            var slices = await _cells
+                .ReadSlicesAsync(instanceIds, new PeriodKey(byPeriod.Key), ct)
+                .ConfigureAwait(false);
+            var cellsOfRow = slices.Values
+                .SelectMany(s => s)
+                .GroupBy(c => c.Address.TableRowId)
+                .ToDictionary(g => g.Key, g => g.ToDictionary(c => c.Address.ColumnDefId, c => c.Value));
+
+            foreach (var reference in byPeriod)
+            {
+                var entry = entryById[reference.RegistryEntryId];
+                var year = reference.PeriodKeyValue / 100;
+                var months = PermitMonthCoverage.RowMonthsWithData(
+                    monthOfTable[reference.TableDefId],
+                    year,
+                    cellsOfRow.TryGetValue(reference.RowId, out var rowCells) ? rowCells : [],
+                    noPermitColumns,
+                    []);
+
+                var covered = entry.IsActive && !entry.IsDeleted && (months.Count > 0
+                    ? PermitMonthCoverage.Uncovered(entry.ValidFrom, entry.ValidTo, months).Count == 0
+                    : entry.Window.OverlapsSegment(new DateOnly(year, 1, 1), new DateOnly(year + 1, 1, 1)));
+
+                verdicts[(reference.PeriodKeyValue, reference.RowId, reference.RegistryEntryId)] = covered;
+            }
+        }
+
+        return verdicts;
+    }
+
+    /// <summary>Ceiling of month columns read for one batch (12 per table, tables of one batch are few).</summary>
+    private const int MaxMonthColumns = 100_000;
+
+    /// <summary>A month column of a table (rule h).</summary>
+    private sealed record MonthColumnRef(int Id, int TableDefId, byte Month);
 
     /// <summary>Записи довідника, на які посилається пачка.</summary>
     private async Task<Dictionary<long, RegistryEntry>> EntriesAsync(
@@ -696,13 +813,17 @@ public sealed class OrphanScanner : IOrphanScanner
     /// <param name="RegistryEntryId">Запис довідника, на який посилається комірка.</param>
     /// <param name="PeriodEnd">Кінець періоду ПРОЄКТУ рядка — дата резолвінгу (D1-01).</param>
     /// <param name="PeriodState">Стан періоду ПРОЄКТУ рядка.</param>
+    /// <param name="TableInstanceId">Instance of the row (rule h: logical slice of a permit row).</param>
+    /// <param name="TableDefId">Table of the row (rule h: month columns).</param>
     private sealed record CellReference(
         long RowId,
         int PeriodKeyValue,
         bool IsOrphaned,
         long RegistryEntryId,
         DateOnly PeriodEnd,
-        PeriodState PeriodState);
+        PeriodState PeriodState,
+        long TableInstanceId,
+        int TableDefId);
 
     /// <summary>Посилання рядка на запис довідника в межах одного періоду.</summary>
     /// <remarks>
