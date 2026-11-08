@@ -34,6 +34,7 @@ import { useVersionMigrationAction } from '@/features/documents/VersionMigration
 import { useEditAssignmentsAction } from '@/features/editAssignments/EditAssignmentsAction';
 import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
+import { useDocumentPeriodReopen } from '@/features/documents/periodReopen/useDocumentPeriodReopen';
 import { DocumentProgress } from '@/features/documents/DocumentProgress';
 import { useDocumentPending } from '@/features/grid/autosave';
 import type { HeldEdit } from '@/features/grid/pendingStore';
@@ -603,9 +604,16 @@ export function DocumentPage(): JSX.Element {
   // `periodKey` для квартальних/річних проєктів — не `YYYYMM`, тож виводити дату з нього не можна.
   const periodEnd = calendar.data?.periods?.find((period) => period.periodKey === periodKey)?.periodEnd ?? null;
 
+  // Приймальна 08.11 (i): закритий місяць, відкритий лише для цього документа, — Grace для нього (як на сервері).
+  const periodReopen = useDocumentPeriodReopen({
+    documentId,
+    periodKey,
+    periodState: calendar.data?.periods?.find((period) => period.periodKey === periodKey)?.state,
+  });
+
   const lock = documentLockOf({
     projectStatus: projects.data?.items?.find((project) => project.id === projectId)?.status,
-    periodState: calendar.data?.periods?.find((period) => period.periodKey === periodKey)?.state,
+    periodState: periodReopen.periodState,
     sheetState: state,
   });
 
@@ -816,6 +824,7 @@ export function DocumentPage(): JSX.Element {
           resultsStale={document.resultsStale ?? null}
           resultsStaleSince={document.resultsStaleSince ?? null}
           staleReminderHost={staleReminderHost}
+          periodAction={periodReopen.lockAction}
           status={
             <>
               {/* ✎ UI-15: чип стану аркуша і заповненість одним рядком
@@ -853,7 +862,10 @@ export function DocumentPage(): JSX.Element {
       {/* ⛔ `F-18`: ЧОМУ тут нічого не змінити — одразу під рядком дій, до
           будь-якої сітки: сірі комірки без пояснення читаються як збій.
           ✎ UI-26: за наявного аркуша банер малює панель дій (з контекстом). */}
-      {active === undefined && <DocumentLockBanner lock={lock} periodKey={periodKey} />}
+      {active === undefined && <DocumentLockBanner lock={lock} periodKey={periodKey} periodAction={periodReopen.lockAction} />}
+
+      {periodReopen.banner}
+      {periodReopen.dialog}
 
       {/* EA-5b: передача місяця - «Місяць передано вам», «Заповнено», коментар повернення. Права комірок рішає сервер. */}
       <Suspense fallback={null}>

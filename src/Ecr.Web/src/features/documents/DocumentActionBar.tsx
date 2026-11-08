@@ -64,6 +64,8 @@ interface DocumentActionBarProps {
   readonly staleReminderHost?: RefObject<StaleReminderState>;
   /** ✎ UAT-recalc-ux: поданий аркуш перераховано після подання — позначка в банері для погоджувача. */
   readonly recalculatedAfterSubmission?: boolean;
+  /** Приймальна 08.11 (i1): дія банера закритого періоду — «Reopen … for this document…». */
+  readonly periodAction?: JSX.Element | null;
 }
 
 /**
@@ -101,6 +103,7 @@ export function DocumentActionBar({
   resultsStale,
   resultsStaleSince,
   staleReminderHost,
+  periodAction = null,
 }: DocumentActionBarProps): JSX.Element {
   const actions = useSheetActions({ documentId, sheetDefId, sheetCopyId, sheetName, periodKey, state, lock });
   useStaleResultsReminder(documentId, resultsStale === true, actions.recalculate !== null, staleReminderHost);
@@ -277,6 +280,7 @@ export function DocumentActionBar({
         lock={lock}
         canDecide={actions.approve !== null || actions.reject !== null}
         recalculatedAfterSubmission={recalculatedAfterSubmission}
+        periodAction={periodAction}
       />
 
       {/* ✎ resultsStale: входи змінилися після прогону - банер і кнопка «Recalculate» (автоперерахунку немає). */}
