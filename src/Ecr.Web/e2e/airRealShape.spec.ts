@@ -307,8 +307,10 @@ test.describe('Air real shape', () => {
     await expect(page.getByText(/changed after you opened it/)).toHaveCount(0);
     await page.getByRole('button', { name: 'Overwrite', exact: true }).click();
     await expect(conflict).toHaveCount(0, { timeout: 30_000 });
-    const stored = await ok<{ nameL10n: Record<string, string> }>(await admin.get(`/api/v1/air-limits/import-profiles/${code}`), 'saved profile');
-    expect(stored.nameL10n['en']).toBe('Pass2 e2e again');
+    // The conflict panel closes before the overwrite PUT has necessarily landed: poll the stored name.
+    await expect
+      .poll(async () => (await ok<{ nameL10n: Record<string, string> }>(await admin.get(`/api/v1/air-limits/import-profiles/${code}`), 'saved profile')).nameL10n['en'], { timeout: 30_000 })
+      .toBe('Pass2 e2e again');
 
     await save('Mine', 'ERA_TABLE_33');
     await expect(conflict).toContainText('The built-in profile cannot be overwritten', { timeout: 30_000 });
