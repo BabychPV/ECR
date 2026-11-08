@@ -1,7 +1,7 @@
-import type { JSX } from 'react';
-import { Button, Center, Stack, Text, Title } from '@mantine/core';
+import { Suspense, type JSX } from 'react';
+import { Button, Center, Skeleton, Stack, Text, Title } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { Link, NavLink, Outlet, useParams } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { PeriodCalendarDto } from '@/api/types';
 import { projectsQuery } from '@/features/projects/allProjects';
@@ -31,6 +31,7 @@ function tabLabel(tab: ProjectTabId): string {
  */
 export function ProjectLayout(): JSX.Element {
   const projectId = Number(useParams()['id']);
+  const { pathname } = useLocation();
   const projects = useQuery({ ...projectsQuery });
   const project = projects.data?.items.find((item) => item.id === projectId);
   // Той самий ключ, що й у вкладки Periods і переліку проєктів (`['periods', id]`) — спільний кеш.
@@ -90,7 +91,15 @@ export function ProjectLayout(): JSX.Element {
               </NavLink>
             ))}
           </nav>
-          <Outlet />
+          {/*
+           * ⛔ Перехід між проєктами (Clone → вкладка клону) іде переходом React: поки чанк нової вкладки вантажиться,
+           * без власної межі на екрані лишалась СТАРА сторінка — з вкладками, що вели на ДЖЕРЕЛО (там Archive і
+           * Delete). Межа з ключем адреси монтується наново на кожну вкладку/проєкт: шапка й вкладки одразу показують
+           * проєкт з адреси, а вміст — скелет, доки вантажиться.
+           */}
+          <Suspense key={pathname} fallback={<Skeleton height={160} radius="sm" data-project-tab-loading="" />}>
+            <Outlet />
+          </Suspense>
         </>
       )}
     </AsyncBoundary>
