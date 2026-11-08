@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { CalculationRunStatusDto } from '@/api/types';
 import { apiFetch } from '@/api/client';
-import type { CalculationIssue } from '@/features/calculationIssues/api';
+import type { CalculationIssue, CalculationIssueTableHint } from '@/features/calculationIssues/api';
 import { useCalculationIssues } from '@/features/calculationIssues/useCalculationIssues';
 import { calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
 
@@ -10,11 +10,14 @@ import { calculationResultsKey } from '@/features/methodologies/calculationResul
 export interface UnmatchedRows {
   /** Рядки оригіналів аркушів і (якщо відкрита копія) рядки цієї копії. */
   readonly issues: readonly CalculationIssue[];
+  /** Що приймають правила таблиць із проблемами (UAT 08.11 b3); порожньо — підказок немає. */
+  readonly hints: readonly CalculationIssueTableHint[];
   /** Кінець актуального прогону (UTC); `null` — невідомо (немає права `Calculation.View` чи прогону). */
   readonly finishedAt: string | null;
 }
 
 const Empty: readonly CalculationIssue[] = [];
+const NoHints: readonly CalculationIssueTableHint[] = [];
 
 /**
  * Рядки документа, яким не підійшло жодне правило розрахунку (D14 + AN-69, UAT 08.11 b1).
@@ -54,5 +57,12 @@ export function useUnmatchedRows(
     return [...own, ...(copy.data?.items ?? Empty).filter((issue) => issue.sheetCopyId === activeCopyId)];
   }, [originals.data, copy.data, activeCopyId]);
 
-  return { issues, finishedAt: run.data?.finishedAt ?? null };
+  const hints = useMemo(() => {
+    const own = (originals.data?.tables ?? NoHints).filter((hint) => (hint.sheetCopyId ?? null) === null);
+    if (activeCopyId === null) return own;
+
+    return [...own, ...(copy.data?.tables ?? NoHints).filter((hint) => hint.sheetCopyId === activeCopyId)];
+  }, [originals.data, copy.data, activeCopyId]);
+
+  return { issues, hints, finishedAt: run.data?.finishedAt ?? null };
 }

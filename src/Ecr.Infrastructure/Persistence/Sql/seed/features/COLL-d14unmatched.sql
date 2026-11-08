@@ -15,7 +15,15 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.unmatchedRows.more', N'ru', N'и ещё {count}'),
     (N'document.unmatchedRows.more', N'kz', N'тағы {count}'),
     (N'document.unmatchedRows.lastRun', N'ru', N'последний расчёт: {time}'),
-    (N'document.unmatchedRows.lastRun', N'kz', N'соңғы есептеу: {time}')
+    (N'document.unmatchedRows.lastRun', N'kz', N'соңғы есептеу: {time}'),
+    (N'document.unmatchedRows.allowed', N'ru', N'Рассчитывается только для «{column}»: {values}'),
+    (N'document.unmatchedRows.allowed', N'kz', N'Тек «{column}» мына мәндері үшін есептеледі: {values}'),
+    (N'document.unmatchedRows.allowedMore', N'ru', N'+ещё {count}'),
+    (N'document.unmatchedRows.allowedMore', N'kz', N'+тағы {count}'),
+    (N'document.unmatchedRows.rowValue', N'ru', N'Строка {row}: «{value}»'),
+    (N'document.unmatchedRows.rowValue', N'kz', N'{row}-жол: «{value}»'),
+    (N'document.unmatchedRows.emptyValue', N'ru', N'пусто'),
+    (N'document.unmatchedRows.emptyValue', N'kz', N'бос')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -30,7 +38,11 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'document.unmatchedRows.group', N'en', N'{table} — rows: {count}', 1),
     (N'document.unmatchedRows.row', N'en', N'Row {row}', 1),
     (N'document.unmatchedRows.more', N'en', N'and {count} more', 1),
-    (N'document.unmatchedRows.lastRun', N'en', N'last calculation: {time}', 1)
+    (N'document.unmatchedRows.lastRun', N'en', N'last calculation: {time}', 1),
+    (N'document.unmatchedRows.allowed', N'en', N'Calculated only for «{column}»: {values}', 1),
+    (N'document.unmatchedRows.allowedMore', N'en', N'+{count} more', 1),
+    (N'document.unmatchedRows.rowValue', N'en', N'Row {row}: «{value}»', 1),
+    (N'document.unmatchedRows.emptyValue', N'en', N'empty', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

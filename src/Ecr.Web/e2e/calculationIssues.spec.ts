@@ -407,6 +407,8 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
   await expect(group).toHaveCount(1);
   await expect(group).toContainText('Sheet 1 · Calculated table — rows: 1');
   await expect(group).toContainText(arranged.methodologyCode);
+  // b3 (рішення координатора 08.11): допустимі значення правил таблиці й поточне значення рядка.
+  await expect(group.getByTestId('document-unmatched-rows-allowed')).toContainText('Calculated only for «KIND»: Gas');
 
   // b3: одне речення «чому і як», «нічого виправляти» - рівно один раз.
   const bannerText = (await banner.textContent()) ?? '';
@@ -415,7 +417,7 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
 
   // b2: клік по рядку - сітка таблиці TCALC, фокус і підсвітка саме рядка Coal (№ 2).
   const link = group.getByTestId('document-unmatched-row-link');
-  await expect(link).toHaveText('Row 2');
+  await expect(link).toHaveText('Row 2: «Coal»');
   await expect(link).toHaveAttribute('data-row-key', arranged.coalRowKey);
   await link.click();
   await expect(calcItem).toHaveAttribute('aria-selected', 'true', { timeout: 30_000 });

@@ -1,10 +1,10 @@
 import { useMemo, useState, type JSX } from 'react';
-import { Alert, Anchor, Button, Collapse, Group, Stack, Text } from '@mantine/core';
+import { Alert, Anchor, Button, Collapse, Group, Stack, Text, Tooltip } from '@mantine/core';
 import type { DocumentTableDto } from '@/api/types';
 import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
 import type { UnmatchedRows } from './useUnmatchedRows';
-import { groupUnmatchedRows, unmatchedRowCount } from './unmatchedRowsModel';
+import { groupUnmatchedRows, unmatchedRowCount, type UnmatchedRowRef, type UnmatchedTableHint } from './unmatchedRowsModel';
 
 /** Префікс пам'яті «банер згорнуто»; ключ — `префікс:userId` (правило людини fg6: стан — для кожного користувача). */
 export const UnmatchedCollapsedKey = 'ecr.unmatchedRows.collapsed';
@@ -13,6 +13,9 @@ export const UnmatchedCollapsedKey = 'ecr.unmatchedRows.collapsed';
 export function unmatchedCollapsedKey(userId: number | undefined): string {
   return userId === undefined ? UnmatchedCollapsedKey : `${UnmatchedCollapsedKey}:${String(userId)}`;
 }
+
+/** Скільки допустимих значень показується в підказці таблиці; решта — «+N» з переліком у тултіпі. */
+export const AllowedValuesShown = 8;
 
 /** Скільки посилань на рядки показується в групі таблиці; решта — «і ще N». */
 export const RowLinksPerTable = 20;
@@ -57,7 +60,10 @@ interface UnmatchedRowsBannerProps {
  * вдруге іншим тоном — її замінено цим банером; позначки в дереві таблиць лишились.
  */
 export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow }: UnmatchedRowsBannerProps): JSX.Element | null {
-  const groups = useMemo(() => groupUnmatchedRows(rows.issues, tables), [rows.issues, tables]);
+  const groups = useMemo(
+    () => groupUnmatchedRows(rows.issues, tables, rows.hints),
+    [rows.issues, tables, rows.hints],
+  );
   const storageKey = unmatchedCollapsedKey(userId);
   const [collapsed, setCollapsed] = useState(() => readCollapsed(storageKey));
 
@@ -121,14 +127,15 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow }: Unmatch
                 <Text size="sm" span fw={500}>
                   {t('document.unmatchedRows.group', { table, count: String(group.rows.length) })}
                 </Text>
-                {group.methodologyCode !== null && (
+                {group.hint === null && group.methodologyCode !== null && (
                   <Text size="xs" span>
                     {` · ${group.methodologyCode}`}
                   </Text>
                 )}
+                {group.hint !== null && <AllowedValues hint={group.hint} />}
                 <Group gap="xs" wrap="wrap">
                   {shown.map((row) => {
-                    const label = t('document.unmatchedRows.row', { row: String(row.rowNumber) });
+                    const label = rowLabel(row);
                     const tableInstanceId = group.tableInstanceId;
 
                     return tableInstanceId === null ? (
@@ -161,5 +168,42 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow }: Unmatch
         </Stack>
       </Collapse>
     </Alert>
+  );
+}
+
+/** Підпис рядка: номер і (з підказкою) поточне значення в колонках правил — «Row 2: «Sample A-0»». */
+function rowLabel(row: UnmatchedRowRef): string {
+  if (row.currentValues === null) return t('document.unmatchedRows.row', { row: String(row.rowNumber) });
+
+  const value = row.currentValues.map((v) => (v === '' ? t('document.unmatchedRows.emptyValue') : v)).join(' / ');
+
+  return t('document.unmatchedRows.rowValue', { row: String(row.rowNumber), value });
+}
+
+/**
+ * «Calculated only for <колонка>: 0903, 0905, … +N» — допустимі значення правил таблиці (UAT 08.11 b3).
+ *
+ * ⚠ Решта понад `AllowedValuesShown` — у тултіпі на «+N»; тултіп Mantine відкривається й з клавіатури (фокус на «+N»).
+ */
+function AllowedValues({ hint }: { readonly hint: UnmatchedTableHint }): JSX.Element {
+  const shown = hint.options.slice(0, AllowedValuesShown);
+  const rest = hint.options.slice(AllowedValuesShown);
+  const methodology = hint.methodologyCodes.join(', ');
+
+  return (
+    <Text size="sm" data-testid="document-unmatched-rows-allowed">
+      {t('document.unmatchedRows.allowed', { column: hint.columns.join(', '), values: shown.join(', ') })}
+      {rest.length > 0 && (
+        <>
+          {' '}
+          <Tooltip label={rest.join(', ')} multiline w={360} withArrow>
+            <Text span size="sm" fw={600} tabIndex={0} data-testid="document-unmatched-rows-allowed-more">
+              {t('document.unmatchedRows.allowedMore', { count: String(rest.length) })}
+            </Text>
+          </Tooltip>
+        </>
+      )}
+      {methodology.length > 0 && ` · ${methodology}`}
+    </Text>
   );
 }

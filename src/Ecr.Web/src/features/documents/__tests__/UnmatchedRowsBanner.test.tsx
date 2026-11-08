@@ -3,7 +3,12 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { issue, table } from '@/features/calculationIssues/__tests__/fixtures';
-import { RowLinksPerTable, UnmatchedCollapsedKey, UnmatchedRowsBanner } from '@/features/documents/UnmatchedRowsBanner';
+import {
+  AllowedValuesShown,
+  RowLinksPerTable,
+  UnmatchedCollapsedKey,
+  UnmatchedRowsBanner,
+} from '@/features/documents/UnmatchedRowsBanner';
 import type { UnmatchedRows } from '@/features/documents/useUnmatchedRows';
 import { testTheme } from '@/test/render';
 
@@ -19,7 +24,7 @@ import { testTheme } from '@/test/render';
  */
 
 function rows(issues: UnmatchedRows['issues'], finishedAt: string | null = null): UnmatchedRows {
-  return { issues, finishedAt };
+  return { issues, hints: [], finishedAt };
 }
 
 function show(value: UnmatchedRows, onOpenRow = vi.fn(), userId: number | undefined = 7) {
@@ -145,5 +150,38 @@ describe('UnmatchedRowsBanner', () => {
     show(rows([]));
 
     expect(screen.queryByTestId('document-unmatched-rows')).toBeNull();
+  });
+
+  it('b3: допустимі значення правил - перші 8 у тексті, решта «+N» у тултіпі; рядок - з поточним значенням', async () => {
+    const codes = Array.from({ length: AllowedValuesShown + 3 }, (_, i) => `09${String(i).padStart(2, '0')}`);
+    show({
+      issues: [issue(1, 1, { rowKey: 'S01', currentValues: ['Sample A-0'] }), issue(1, 2, { rowKey: 'S02', currentValues: [''] })],
+      hints: [
+        {
+          tableCode: 'T1',
+          sheetCopyId: null,
+          methodologyCodes: ['ECW_C11_11_02'],
+          columns: [{ code: 'IDCodeNAEProject', nameL10n: { values: { en: 'ID Code - NAE Project' } } }],
+          options: codes.map((code) => [code]),
+        },
+      ],
+      finishedAt: null,
+    });
+
+    const allowed = screen.getByTestId('document-unmatched-rows-allowed').textContent ?? '';
+    expect(allowed).toContain(
+      `⟦document.unmatchedRows.allowed (column=ID Code - NAE Project, values=${codes.slice(0, AllowedValuesShown).join(', ')})⟧`,
+    );
+    expect(allowed).toContain('ECW_C11_11_02');
+    const more = screen.getByTestId('document-unmatched-rows-allowed-more');
+    expect(more.textContent).toBe('⟦document.unmatchedRows.allowedMore (count=3)⟧');
+    await userEvent.hover(more);
+    expect(await screen.findByText(codes.slice(AllowedValuesShown).join(', '))).toBeDefined();
+
+    const links = screen.getAllByTestId('document-unmatched-row-link').map((l) => l.textContent);
+    expect(links).toEqual([
+      '⟦document.unmatchedRows.rowValue (row=1, value=Sample A-0)⟧',
+      '⟦document.unmatchedRows.rowValue (row=2, value=⟦document.unmatchedRows.emptyValue⟧)⟧',
+    ]);
   });
 });

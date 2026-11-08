@@ -58,6 +58,35 @@ describe('groupUnmatchedRows', () => {
     ]);
   });
 
+  it('b3: підказка однієї колонки - самі значення; кількох - «Колонка = значення», без обмеженої колонки', () => {
+    const column = (code: string, en: string) => ({ code, nameL10n: { values: { en } } });
+    const groups = groupUnmatchedRows(
+      [issue(1, 1, { currentValues: ['X'] }), issue(2, 1, { currentValues: ['A', ''] })],
+      [table(1, 'One'), table(2, 'Two')],
+      [
+        { tableCode: 'T1', sheetCopyId: null, methodologyCodes: ['M1'], columns: [column('C', 'Code')], options: [['0903'], ['0905']] },
+        {
+          tableCode: 'T2',
+          sheetCopyId: null,
+          methodologyCodes: ['M2'],
+          columns: [column('K', 'Kind'), column('F', 'Fuel')],
+          options: [['Gas', ''], ['Coal', 'Dry']],
+        },
+      ],
+    );
+
+    expect(groups[0]!.hint).toEqual({ columns: ['Code'], options: ['0903', '0905'], methodologyCodes: ['M1'] });
+    expect(groups[0]!.rows[0]!.currentValues).toEqual(['X']);
+    expect(groups[1]!.hint!.options).toEqual(['Kind = Gas', 'Kind = Coal · Fuel = Dry']);
+  });
+
+  it('b3: таблиця без підказки - поточні значення не показуються (немає з чим порівняти)', () => {
+    const groups = groupUnmatchedRows([issue(1, 1, { currentValues: ['X'] })], [table(1, 'One')], []);
+
+    expect(groups[0]!.hint).toBeNull();
+    expect(groups[0]!.rows[0]!.currentValues).toBeNull();
+  });
+
   it('копія аркуша - окрема група з екземпляром копії', () => {
     const tables = [table(1, 'Contract'), { ...table(1, 'Contract', 9), tableInstanceId: 900, copyOrdinal: 2 }];
     const groups = groupUnmatchedRows([issue(1, 1), issue(1, 1, { sheetCopyId: 9 })], tables);
