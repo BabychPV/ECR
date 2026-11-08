@@ -1,3 +1,4 @@
+import { confirmSubmit } from '@/test/confirmSubmit';
 import { isValidElement, type ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -158,6 +159,7 @@ describe('D-285: «Submit» при гранті Write — активна, від
       expect(screen.queryByTestId('submit-needs-grant')).toBeNull();
 
       fireEvent.click(submit);
+      await confirmSubmit();
 
       await waitFor(() => expect(posts.some((p) => p.url.includes('/submit'))).toBe(true));
       await waitFor(() => expect(notifications.show).toHaveBeenCalled());

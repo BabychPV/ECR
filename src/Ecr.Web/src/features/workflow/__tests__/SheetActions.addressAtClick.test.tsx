@@ -1,3 +1,4 @@
+import { confirmSubmit } from '@/test/confirmSubmit';
 import type { JSX } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
@@ -134,6 +135,7 @@ describe('AN-77 N3-01: адреса дії знімається в мить кл
     const view = render(tree(2, 202601));
 
     fireEvent.click(await screen.findByRole('button', { name: /submit/i }));
+    await confirmSubmit();
     await saverIsHeld();
 
     view.rerender(tree(3, 202601));
@@ -150,6 +152,7 @@ describe('AN-77 N3-01: адреса дії знімається в мить кл
     const view = render(tree(2, 202601));
 
     fireEvent.click(await screen.findByRole('button', { name: /submit/i }));
+    await confirmSubmit();
     await saverIsHeld();
 
     view.rerender(tree(2, 202602));

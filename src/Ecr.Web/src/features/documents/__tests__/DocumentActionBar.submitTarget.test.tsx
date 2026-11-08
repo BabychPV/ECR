@@ -1,3 +1,4 @@
+import { confirmSubmit } from '@/test/confirmSubmit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -137,6 +138,7 @@ describe('DocumentActionBar: «Подати: <період>» (D-441)', () => {
     expect((await screen.findByTestId('submit-next-period')).textContent).toContain('workflow.submitNextPeriod');
 
     fireEvent.click(submit);
+    await confirmSubmit();
 
     await waitFor(() => expect(submits).toHaveLength(1));
     expect(submits[0]).toMatchObject({ sheetDefId: 42, periodKey: Jan });
@@ -160,6 +162,7 @@ describe('DocumentActionBar: «Подати: <період>» (D-441)', () => {
     expect(screen.queryByTestId('submit-next-period')).toBeNull();
 
     fireEvent.click(submit);
+    await confirmSubmit();
     await waitFor(() => expect(submits).toHaveLength(1));
     expect(submits[0]).toMatchObject({ periodKey: Feb });
   });

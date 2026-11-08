@@ -1,3 +1,4 @@
+import { confirmSubmit } from '@/test/confirmSubmit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { JSX } from 'react';
@@ -239,6 +240,7 @@ describe.each([
     expect(screen.queryByTestId('document-actions-pending')).toBeNull();
 
     fireEvent.click(submit);
+    await confirmSubmit();
     await waitFor(() => expect(server.submits).toHaveLength(1));
     expect(server.submits[0]).toEqual({ sheetDefId: next.sheetDefId, periodKey: Feb, acknowledgeWarnings: false });
   });

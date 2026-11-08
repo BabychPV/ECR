@@ -1,5 +1,5 @@
 import { expect, test, type Browser, type Locator, type Page, type Response } from '@playwright/test';
-import { chooseSubmitPeriod } from './submitPeriod';
+import { chooseSubmitPeriod, submitAndConfirm } from './submitPeriod';
 
 /**
  * CELL-STYLE L4 (UI): колір РЯДКА / КОЛОНКИ / ТАБЛИЦІ з тулбара сітки на РЕАЛЬНОМУ стенді
@@ -435,7 +435,7 @@ async function submitSheet(page: Page): Promise<void> {
       new URL(response.url()).pathname === `/api/v1/documents/${DocumentId}/submit`,
     { timeout: 90_000 },
   );
-  await submit.click();
+  await submitAndConfirm(page, submit);
   expect((await submitted).status(), 'сервер не прийняв подання').toBe(204);
 
   await expect(page.getByRole('tab', { selected: true }), 'аркуш не перейшов у Submitted').toContainText('Submitted', {

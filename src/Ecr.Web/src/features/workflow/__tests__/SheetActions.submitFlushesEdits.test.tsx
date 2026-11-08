@@ -1,3 +1,4 @@
+import { confirmSubmit } from '@/test/confirmSubmit';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -122,6 +123,7 @@ describe('AN-28 L8-01: Submit зберігає незбережене', () => {
     show();
 
     fireEvent.click(await screen.findByRole('button', { name: /submit/i }));
+    await confirmSubmit();
 
     await waitFor(() => {
       expect(log).toEqual(['flush', 'POST submit']);
@@ -134,6 +136,7 @@ describe('AN-28 L8-01: Submit зберігає незбережене', () => {
     show();
 
     fireEvent.click(await screen.findByRole('button', { name: /submit/i }));
+    await confirmSubmit();
 
     await waitFor(() => {
       expect(log).toEqual(['flush']);

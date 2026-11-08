@@ -1,6 +1,6 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { axeViolations } from './axeRule';
-import { chooseSubmitPeriod } from './submitPeriod';
+import { chooseSubmitPeriod, submitAndConfirm } from './submitPeriod';
 
 /**
  * Дрібні UI-пункти проходу C (рішення людини 27.10, lane `integ-ui-minor-p3`) - на справжньому стенді
@@ -166,7 +166,7 @@ async function submitSheet(page: Page): Promise<void> {
       new URL(response.url()).pathname === `/api/v1/documents/${DocumentId}/submit`,
     { timeout: 90_000 },
   );
-  await submit.click();
+  await submitAndConfirm(page, submit);
   expect((await submitted).status(), 'сервер не прийняв подання').toBe(204);
   await expect(page.getByRole('tab', { selected: true }), 'аркуш не перейшов у Submitted').toContainText('Submitted', {
     timeout: 15_000,

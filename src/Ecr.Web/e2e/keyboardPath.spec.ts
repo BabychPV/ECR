@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Response } from '@playwright/test';
 import { expectFocusRing, expectFocusTrapped, expectFocusVisible, focusState } from './focus';
-import { chooseSubmitPeriod } from './submitPeriod';
+import { chooseSubmitPeriod, confirmSubmit } from './submitPeriod';
 
 /**
  * Прохід оператора **без миші** від входу до виходу (`ФВ-14.16`, `D-141`).
@@ -263,6 +263,8 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     await expectFocusRing(page, submit, 'кнопка подання');
     const submitted = waitForWrite(page, 'POST', 'submit');
     await page.keyboard.press('Enter');
+    // ✎ UAT-p3 №1: подання питає підтвердження — так само клавіатурою.
+    await confirmSubmit(page, { keyboard: true });
 
     // ⛔ Спершу ВІДПОВІДЬ сервера, потім бейдж. Подання синхронне
     // (`SubmitSheetHandler`: свіжа валідація аркуша й зріз УСІХ його таблиць

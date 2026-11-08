@@ -108,13 +108,15 @@ describe('AN-28 P2-2: Submit під час збереження набраног
     slowDirtyGrid();
     show();
 
-    const button = await screen.findByRole('button', { name: /submit/i });
+    // ✎ UAT-p3 №1: кнопка відкриває підтвердження; подає — «Submit» у діалозі, і саме його клацають двічі.
+    fireEvent.click(await screen.findByRole('button', { name: /workflow\.submitPeriod/ }));
+    const button = await screen.findByRole('button', { name: '⟦document.submit⟧' });
     fireEvent.click(button);
     // Синхронний другий клік - до будь-якого рендеру.
     fireEvent.click(button);
 
     await waitFor(() => {
-      expect((button as HTMLButtonElement).disabled).toBe(true);
+      expect(button.hasAttribute('data-loading') || (button as HTMLButtonElement).disabled).toBe(true);
     });
     fireEvent.click(button);
 

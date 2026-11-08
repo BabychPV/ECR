@@ -1,3 +1,4 @@
+import { confirmSubmit } from '@/test/confirmSubmit';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanup, render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -86,6 +87,7 @@ describe('SheetActions: копія аркуша (sheetCopyId у запитах)'
     show(77);
 
     fireEvent.click(await screen.findByRole('button', { name: /workflow\.submitPeriod/ }));
+    await confirmSubmit();
 
     await waitFor(() => {
       expect(submitBodies).toHaveLength(1);
@@ -98,6 +100,7 @@ describe('SheetActions: копія аркуша (sheetCopyId у запитах)'
     show(null);
 
     fireEvent.click(await screen.findByRole('button', { name: /workflow\.submitPeriod/ }));
+    await confirmSubmit();
 
     await waitFor(() => {
       expect(submitBodies).toHaveLength(1);

@@ -1,5 +1,5 @@
 import { expect, test, type Browser, type BrowserContext } from '@playwright/test';
-import { chooseSubmitPeriod } from './submitPeriod';
+import { chooseSubmitPeriod, submitAndConfirm } from './submitPeriod';
 
 /**
  * D-441 (AN-128): «Подати» на РЕАЛЬНОМУ стенді (`tools/e2e-stand.ps1`, workflow `e2e-stand`,
@@ -106,7 +106,7 @@ test.describe('submissionTarget: «Подати: <період>» на реал�
         sent.body = route.request().postDataJSON() as { sheetDefId?: number; periodKey?: number };
         await route.fulfill({ status: 204, body: '' });
       });
-      await submit.click();
+      await submitAndConfirm(page, submit);
       await expect.poll(() => sent.body?.periodKey, { message: 'кнопка не надіслала подання', timeout: 30_000 }).toBe(
         target.targetPeriodKey,
       );
@@ -363,7 +363,7 @@ test.describe('submissionTarget: «Подати: <період>» на реал�
       if (target.targetPeriodKey !== null) {
         await expect(submit).toHaveAttribute('data-period-key', String(target.targetPeriodKey), { timeout: 30_000 });
         await expect(submit).toBeEnabled();
-        await submit.click();
+        await submitAndConfirm(page, submit);
         await expect.poll(() => sent.length, { message: 'кнопка не надіслала подання', timeout: 30_000 }).toBe(1);
         expect(sent[0]?.periodKey).toBe(target.targetPeriodKey);
       } else {
