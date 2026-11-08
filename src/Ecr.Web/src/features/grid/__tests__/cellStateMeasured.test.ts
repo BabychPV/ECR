@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { deltaE00, simulate, toLab, type Dichromacy } from '@/shared/theme/colorScience';
@@ -58,8 +58,15 @@ describe('Гейт 1: другий носій унікальний', () => {
 
       const shape = cellState[name].shape;
 
-      if (shape.includes('hatch')) {
-        expect(body, `${name}: обіцяно штрихування`).toContain('repeating-linear-gradient');
+      if (shape.includes('lock')) {
+        // ✎ UAT 08.11: «лише читання» — замок у куті (маска SVG кольором лінії стану), без штрихування.
+        const after = css.slice(css.indexOf(`.ecr-cell--${slug}::after`));
+        const afterBody = after.slice(0, after.indexOf('}'));
+        expect(afterBody, `${name}: обіцяно замок`).toContain('mask');
+        expect(afterBody, `${name}: замок кольором лінії стану (контраст ≥ 3:1)`).toContain(
+          `var(--ecr-cell-${slug}-line)`,
+        );
+        expect(body, `${name}: штрихування прибрано`).not.toContain('repeating-linear-gradient');
       }
 
       if (shape.includes('solid-bar')) expect(body).toContain('border-left: 3px solid');
@@ -67,9 +74,26 @@ describe('Гейт 1: другий носій унікальний', () => {
       if (shape.includes('double-bar')) expect(body).toContain('border-left: 3px double');
       if (shape.includes('dotted-bar')) expect(body).toContain('border-left: 3px dotted');
 
-      const promisesMarker = /corner|formula|warning|dot$/.test(shape);
+      const promisesMarker = /corner|formula|warning|dot$|lock/.test(shape);
       if (promisesMarker) expect(marker, `${name}: обіцяно маркер`).toBe(true);
     }
+  });
+
+  it('UAT 08.11: штрихування немає в жодній сітці чи таблиці («про замок це стосується всіх таблиць»)', () => {
+    const root = path.resolve(process.cwd(), 'src');
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== '__tests__' && entry.name !== 'node_modules') walk(full);
+        } else if (/\.(css|tsx?)$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
+          if (readFileSync(full, 'utf8').includes('repeating-linear-gradient')) offenders.push(path.relative(root, full));
+        }
+      }
+    };
+    walk(root);
+    expect(offenders).toEqual([]);
   });
 });
 

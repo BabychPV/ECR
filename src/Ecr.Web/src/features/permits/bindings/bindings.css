@@ -20,16 +20,28 @@
   font-size: var(--mantine-font-size-sm);
 }
 
-/* Комірка, яку пише машина: штрихування, як «лише читання» в сітці документа. */
+/*
+ * Комірка, яку пише машина: як «лише читання» в сітці документа — фон стану і замок у куті, без штрихування
+ * (✎ UAT 08.11, людина: «штриховку прибрати залишити замок», «про замок це стосується всіх таблиць»).
+ */
 .pm-t :is(td, th).is-locked {
+  position: relative;
   background-color: var(--ecr-cell-read-only-bg);
-  background-image: repeating-linear-gradient(
-    45deg,
-    transparent,
-    transparent 6px,
-    var(--ecr-cell-read-only-line) 6px,
-    var(--ecr-cell-read-only-line) 7px
-  );
+  padding-right: 14px;
+}
+
+.pm-t :is(td, th).is-locked::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 8px;
+  height: 10px;
+  background-color: var(--ecr-cell-read-only-line);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 10'%3E%3Cpath d='M2 4V3a2 2 0 0 1 4 0v1h1v6H1V4h1zm1 0h2V3a1 1 0 0 0-2 0v1z'/%3E%3C/svg%3E")
+    no-repeat center / contain;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 10'%3E%3Cpath d='M2 4V3a2 2 0 0 1 4 0v1h1v6H1V4h1zm1 0h2V3a1 1 0 0 0-2 0v1z'/%3E%3C/svg%3E")
+    no-repeat center / contain;
 }
 
 .pm-bind-fields {

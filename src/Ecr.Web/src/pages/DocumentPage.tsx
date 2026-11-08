@@ -323,7 +323,8 @@ export function DocumentPage(): JSX.Element {
    * ДО того, як прийде відповідь, і та все одно лягла б на новий період.
    * Тому адресу несе сама мутація (її змінна), а показ порівнює її з поточною.
    */
-  const [fresh, setFresh] = useState<{ scope: string; result: ValidationResultResponse } | null>(
+  // ✎ UAT 08.11 (d4): `at` — коли прогін у цій вкладці завершився (сервер час збереженого результату не віддає).
+  const [fresh, setFresh] = useState<{ scope: string; result: ValidationResultResponse; at: Date } | null>(
     null,
   );
   // `UI-25`: кожна завершена перевірка — сигнал інспектору відкрити Issues, якщо є що.
@@ -344,7 +345,7 @@ export function DocumentPage(): JSX.Element {
         },
       ),
     onSuccess: (result, target) => {
-      setFresh({ scope: target.scope, result });
+      setFresh({ scope: target.scope, result, at: new Date() });
       setValidatedSeq((value) => value + 1);
 
       const errors = result.messages.filter((message) => message.severity === 'Error');
@@ -819,7 +820,7 @@ export function DocumentPage(): JSX.Element {
                 issues={null}
                 onShowIssues={() => undefined}
               />
-              <DocumentSaveState readOnly={gridReadOnly} />
+              <DocumentSaveState readOnly={gridReadOnly} periodKey={periodKey} />
               {/* ✎ D-446: застарілість не визначена — частину документа читачеві закрито (те саме, що в рядку переліку). */}
               {document.resultsStaleUndetermined === 'PartiallyHidden' && <StaleResultsUndeterminedMark />}
             </>
@@ -969,6 +970,7 @@ export function DocumentPage(): JSX.Element {
           periodKey={periodKey}
           tables={tables.data ?? []}
           messages={shownValidation?.messages ?? null}
+          checkedAt={fresh?.scope === scope ? fresh.at : null}
           validatedSeq={validatedSeq}
           extraTriggers={
             <Suspense fallback={null}>

@@ -70,6 +70,7 @@ import {
   splitOverrideEdits,
 } from './formulaOverride';
 import { markOverrideReason, overrideReasonOf, previousOverrideReasonOf } from './overrideReasons';
+import { publishTableAttention, requestAttentionFocus, rowAttentionReason, tableAttentionOf } from './rowAttention';
 
 /**
  * ✎ D-461: крок історії зі станом «ручне значення / формула» до й після (`annotateOverrideHistory`) — Undo/Redo
@@ -474,6 +475,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         : { ...fullSlice, rows: fullSlice.rows.filter((row) => manualIndex.rowKeys.has(row.rowKey)) },
     [fullSlice, filteringManual, manualIndex],
   );
+
+  // ✎ UAT 08.11 (Water Report): рядки з утраченим посиланням і закриті місяці — у спільне сховище, з якого
+  // читають Issues (пункт і пояснення) і рядок стану збереження. Зріз той самий, що в сітці (`rowAttention.ts`).
+  useEffect(() => {
+    if (fullSlice === undefined) return undefined;
+    publishTableAttention(tableInstanceId, tableAttentionOf(fullSlice));
+
+    return () => publishTableAttention(tableInstanceId, null);
+  }, [fullSlice, tableInstanceId]);
 
   // AN-142: поданий аркуш із редаговною (за рішенням сервера) коміркою - текстом якоря - не замикається цілком.
   const readOnly = useMemo(
@@ -3478,7 +3488,7 @@ export function gridColumns(
         // рядка, якого користувач не вводив.
         if (isTotalsRow(model)) {
           const total = totals.get(column.code);
-          // ✎ UAT-p3 №2: комірка підсумків — лише для читання ВИДИМО (замок і штриховка, як інші), і з причиною
+          // ✎ UAT-p3 №2: комірка підсумків — лише для читання ВИДИМО (замок, як інші; штриховки з UAT 08.11 немає), і з причиною
           // текстом: раніше без підсумку в колонці (порожня комірка поруч із «Total») не було ні знака, ні
           // підказки, а набір мовчки нічого не робив.
           const readOnlyHint = t('grid.totalsReadOnlyHint');
@@ -3620,7 +3630,11 @@ export function gridColumns(
 
         // Стан доступний і ТЕКСТОМ, не лише кольором/формою: причина заборони
         // чи незаповненого входу вже є на сервері — читалка має її почути.
+        // ✎ UAT 08.11: червоний стан рядка — і текстом у комірці, не лише кольором і «!».
+        const orphanedHint = state === 'orphaned' ? t('grid.rowAttention.orphaned') : null;
+
         const hint = [
+          orphanedHint,
           manualHint,
           decision.hint,
           overridableHint,
@@ -3710,7 +3724,41 @@ export function gridColumns(
           cellTemplate: (createElement, cell) => {
             const label = String(cell.model[RowLabelProp] ?? '');
 
-            return createElement('span', { class: 'ecr-row-label', title: label }, label);
+            // ✎ UAT 08.11 (Water Report, «Sea Water Intake»): червоний рядок зі знаком «!» мав причину лише
+            // кольором. Тепер — словами поруч із підписом, і «!» — кнопка, що відкриває Issues на цьому пункті.
+            const rowKey = isTotalsRow(cell.model) ? null : rowKeyOf(cell.model);
+            // ⚠ Спершу дешева перевірка мапою рядків (`CL-03`): шаблон кличуть на кожен видимий рядок.
+            const reason =
+              rowKey === null || rowIndexOf(slice).get(rowKey)?.isOrphaned !== true ? null : rowAttentionReason(slice, rowKey);
+            if (reason === null || rowKey === null) {
+              return createElement('span', { class: 'ecr-row-label', title: label }, label);
+            }
+
+            const itemKey = `${String(slice.tableInstanceId)}:${rowKey}`;
+
+            return createElement(
+              'span',
+              { class: 'ecr-row-label ecr-row-label--attention', title: `${label} — ${reason}`, 'data-row-attention': rowKey },
+              [
+              createElement(
+                'button',
+                {
+                  type: 'button',
+                  class: 'ecr-row-attention-btn',
+                  'aria-label': t('grid.rowAttention.open', { row: label }),
+                  title: t('grid.rowAttention.open', { row: label }),
+                  'data-row-attention-open': itemKey,
+                  onClick: (event: Event) => {
+                    event.stopPropagation();
+                    requestAttentionFocus(itemKey);
+                  },
+                },
+                '!',
+              ),
+              createElement('span', { class: 'ecr-row-label-text' }, label),
+              createElement('span', { class: 'ecr-row-attention-reason' }, reason),
+              ],
+            );
           },
         },
         ...dataColumns,
