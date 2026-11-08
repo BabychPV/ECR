@@ -283,7 +283,7 @@ test.describe('Air real shape', () => {
    * Human pass 2 (07.11, P2): «Save as profile…» under a code that exists said «changed after you opened it». Now: a taken code →
    * «A profile with this code already exists» + «Overwrite» (re-saved with the profile's current token); the built-in
    * ERA_TABLE_33 → its own refusal, only «Choose another code», and it stays unchanged. Nothing is imported.
-   * ⚠ The profile PASS2_<stamp> stays on the stand (profiles have no delete endpoint); its code is unique per run.
+   * ⚠ The profile PASS2_<stamp> stays on the stand; its code is unique per run.
    */
   test('Air pass2: a taken profile code offers Overwrite; the built-in profile is never overwritten', async ({ page }) => {
     const code = `PASS2_${Stamp}`;
@@ -354,6 +354,135 @@ test.describe('Air real shape', () => {
     await expect(page.getByText('NAE created in the tree')).toBeVisible();
     const card = await ok<{ sources: unknown[] }>(await admin.get(`/api/v1/permits/${String(state.permitId)}/air-limits`), 'card');
     expect(card.sources).toHaveLength(2);
+  });
+
+  /** Pass 3: «Region and area» → «File» with the workbook chosen; the analysis is NOT started. */
+  async function toFile(page: Page, file: Buffer): Promise<void> {
+    const prepared = scope;
+    if (prepared === null) throw new Error('scope not prepared');
+    await page.goto(`/admin/permits/${String(state.permitId)}/import`);
+    await expect(page.getByRole('heading', { name: 'Region and area', level: 2 })).toBeVisible({ timeout: 30_000 });
+    await fillScope(page, prepared);
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'File', level: 2 })).toBeVisible({ timeout: 30_000 });
+    await page.locator('input[type="file"]').setInputFiles({ name: 'Параметры (e2e).xlsx', mimeType: Xlsx, buffer: file });
+  }
+
+  async function chooseProfile(page: Page, label: string): Promise<void> {
+    await page.getByRole('textbox', { name: /^Import profile/ }).click();
+    await page.getByRole('option', { name: label, exact: true }).click();
+  }
+
+  async function newProfile(code: string, name: string): Promise<void> {
+    const builtIn = await ok<{ spec: unknown }>(await admin.get('/api/v1/air-limits/import-profiles/ERA_TABLE_33'), 'built-in profile');
+    await ok(
+      await admin.put(`/api/v1/air-limits/import-profiles/${code}`, { data: { nameL10n: { en: name }, spec: builtIn.spec, rowVersion: null } }),
+      `profile ${code}`,
+    );
+  }
+
+  /** UAT pass 3: the built-in profile is read-only and says so in visible text; it offers no edit and no delete. */
+  test('Air pass3: the built-in profile is read-only and says why', async ({ page }) => {
+    await signIn(page);
+    await toFile(page, realShapeWorkbook(RealShapeSources));
+    // The first profile by code is the built-in one, chosen by default.
+    await expect(page.getByRole('textbox', { name: /^Import profile/ })).toHaveValue(/\(ERA_TABLE_33\)$/);
+    await expect(page.getByTestId('air-profile-builtin')).toContainText('ERA_TABLE_33 is the built-in profile: read-only');
+    await expect(page.getByRole('button', { name: 'Delete profile…' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Edit profile' })).toHaveCount(0);
+  });
+
+  /**
+   * UAT pass 3 («existing profiles cannot be edited or re-saved»): «Edit profile» opens the chosen profile's mapping in the editor;
+   * a field is added; «Save to profile …» asks first and re-saves under the SAME code with the profile's token and names.
+   */
+  test('Air pass3: edit an existing profile and re-save it under the same code', async ({ page }) => {
+    const code = `PASS3E_${Stamp}`;
+    const field = 'Workshop pass3';
+    await newProfile(code, 'Pass3 edit e2e');
+    const before = await ok<{ rowVersion: string }>(await admin.get(`/api/v1/air-limits/import-profiles/${code}`), 'profile');
+
+    await signIn(page);
+    await toFile(page, realShapeWorkbook(RealShapeSources));
+    await chooseProfile(page, `Pass3 edit e2e (${code})`);
+    await page.getByRole('button', { name: 'Edit profile' }).click();
+    await expect(page.getByRole('heading', { name: 'Mapping', level: 2 })).toBeVisible({ timeout: 30_000 });
+    // The editor is open with the profile's fields; nothing to re-read yet.
+    await expect(page.getByRole('textbox', { name: 'New field name' })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('button', { name: /Next: preview/ })).toBeEnabled();
+
+    await page.getByRole('textbox', { name: 'New field name' }).fill(field);
+    await page.getByRole('button', { name: 'Add field', exact: true }).click();
+    await page.getByRole('textbox', { name: `File column of field ${field}` }).click();
+    await page.getByRole('option', { name: 'B — Цех' }).click();
+    await page.getByRole('button', { name: 'Re-analyse file' }).click();
+    // A field that matches no table column is said to be not saved (pass 3), not silently dropped.
+    await expect(page.getByTestId('air-unsaved-fields')).toContainText(field, { timeout: 60_000 });
+
+    await page.getByRole('button', { name: `Save to profile ${code}…` }).click();
+    const confirm = page.getByTestId('air-profile-resave-confirm');
+    await expect(confirm).toContainText(`Overwrite profile ${code}?`);
+    await confirm.getByRole('button', { name: 'Overwrite', exact: true }).click();
+    await expect(page.getByText(`Profile ${code} saved and selected.`)).toBeVisible({ timeout: 30_000 });
+
+    const after = await ok<{ rowVersion: string; nameL10n: Record<string, string>; spec: { fields: { name: string; column: string | null }[] } }>(
+      await admin.get(`/api/v1/air-limits/import-profiles/${code}`),
+      'profile',
+    );
+    expect(after.rowVersion).not.toBe(before.rowVersion);
+    expect(after.nameL10n['en']).toBe('Pass3 edit e2e');
+    expect(after.spec.fields.find((f) => f.name === field)?.column).toBe('B');
+    await ok(await admin.delete(`/api/v1/air-limits/import-profiles/${code}?rowVersion=${encodeURIComponent(after.rowVersion)}`), 'cleanup');
+  });
+
+  /** UAT pass 3: «Delete profile…» asks first; after the delete the profile is gone and the built-in one is chosen. */
+  test('Air pass3: delete a profile after a confirmation', async ({ page }) => {
+    const code = `PASS3D_${Stamp}`;
+    await newProfile(code, 'Pass3 delete e2e');
+
+    await signIn(page);
+    await toFile(page, realShapeWorkbook(RealShapeSources));
+    await chooseProfile(page, `Pass3 delete e2e (${code})`);
+    await page.getByRole('button', { name: 'Delete profile…' }).click();
+    const confirm = page.getByTestId('air-profile-delete-confirm');
+    await expect(confirm).toContainText(`Delete profile Pass3 delete e2e (${code})?`);
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(confirm).toHaveCount(0, { timeout: 30_000 });
+    expect((await admin.get(`/api/v1/air-limits/import-profiles/${code}`)).status()).toBe(404);
+    await expect(page.getByTestId('air-profile-builtin')).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('textbox', { name: /^Import profile/ }).click();
+    await expect(page.getByRole('option', { name: `Pass3 delete e2e (${code})`, exact: true })).toHaveCount(0);
+  });
+
+  /**
+   * UAT pass 3 («Цех» imported, the Sources grid shows «—»): the human's profile field was NAMED after the column («цех»), not
+   * given its code (FILE_B…). Here the field «Add as new column» created is renamed to the column's display name in lower case;
+   * the import now binds it to the column by that name — no «will not be saved» warning — and the grid shows the values.
+   */
+  test('Air pass3: a field named after the column «Цех» reaches the Sources grid', async ({ page }) => {
+    const sources = RealShapeSources.map((source, i) => ({ ...source, workshop: `Цех P3-${String(i + 1)}` }));
+    await signIn(page);
+    await toMapping(page, realShapeWorkbook(sources));
+    await addWorkshop(page);
+
+    const added = page.getByRole('textbox', { name: 'Field name', exact: true }).last();
+    await expect(added).toHaveValue(/^FILE_B/);
+    await added.fill(Workshop.toLowerCase());
+    await page.getByRole('button', { name: 'Re-analyse file' }).click();
+    await expect(page.getByRole('button', { name: /Next: preview/ })).toBeEnabled({ timeout: 60_000 });
+    await expect(page.getByTestId('air-unsaved-fields')).toHaveCount(0);
+
+    await page.getByRole('button', { name: /Next: preview/ }).click();
+    await expect(page.getByRole('heading', { name: 'Preview', level: 2 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('air-unsaved-fields')).toHaveCount(0);
+    await page.getByRole('button', { name: /Apply import/ }).click();
+    await expect(page.getByRole('heading', { name: 'Result', level: 2 })).toBeVisible({ timeout: 60_000 });
+
+    await page.goto(`/admin/permits/${String(state.permitId)}?tab=air`);
+    await expect(page.getByRole('columnheader', { name: Workshop })).toBeVisible({ timeout: 30_000 });
+    for (const source of sources) {
+      await expect(page.getByRole('cell', { name: source.workshop, exact: true })).toBeVisible();
+    }
   });
 
   /** Human pass 2 (07.11, P3): the step pills looked like buttons but did nothing. A completed step now goes back to it. */

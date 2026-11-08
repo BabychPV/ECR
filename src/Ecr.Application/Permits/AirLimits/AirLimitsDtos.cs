@@ -118,7 +118,11 @@ public sealed record AirScopeFieldsDto(string TypeCode, AirScopeFieldDto Region,
 /// <summary>Result of <c>POST /api/v1/air-limits/import/analyse</c>: layout of the file, no database.</summary>
 /// <param name="ProfileCode">Profile used; <c>null</c> for an unsaved specification.</param>
 /// <param name="Analysis">Header block, mapped and unmapped columns, counts, findings.</param>
-public sealed record AirLimitsAnalysisDto(string? ProfileCode, ImportAnalysis Analysis);
+/// <param name="UnsavedFields">
+/// ✎ Pass 3: fields of the profile that match no column of the target tables (neither by code nor by display name) — their
+/// values are read but WILL NOT BE SAVED; the wizard warns about each.
+/// </param>
+public sealed record AirLimitsAnalysisDto(string? ProfileCode, ImportAnalysis Analysis, IReadOnlyList<string>? UnsavedFields = null);
 
 /// <summary>Result of <c>POST /api/v1/permits/{permitId}/air-limits/import/preview</c>.</summary>
 /// <param name="PermitId">Permit.</param>
@@ -132,6 +136,7 @@ public sealed record AirLimitsAnalysisDto(string? ProfileCode, ImportAnalysis An
 /// <param name="ScopeInNaeTree">
 /// The region (and area) map to the NAE tree; <c>false</c> — «region/area not in NAE tree»: NAE codes are matched without the tree scope.
 /// </param>
+/// <param name="UnsavedFields">✎ Pass 3: fields that match no target column — their values will not be saved.</param>
 public sealed record AirLimitsPreviewDto(
     long PermitId,
     string PermitNumber,
@@ -141,7 +146,8 @@ public sealed record AirLimitsPreviewDto(
     RegistryImportPreview Preview,
     long? RegionEntryId = null,
     long? AreaEntryId = null,
-    bool ScopeInNaeTree = true);
+    bool ScopeInNaeTree = true,
+    IReadOnlyList<string>? UnsavedFields = null);
 
 /// <summary>Result of <c>POST /api/v1/permits/{permitId}/air-limits/import/apply</c>.</summary>
 /// <param name="PermitId">Permit.</param>

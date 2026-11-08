@@ -581,6 +581,68 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         Assert.Contains("entryChanged", stale.GetRawText(), StringComparison.Ordinal);
     }
 
+    /// <remarks>
+    /// Pass 3 (UAT «Цех»): the human added the column «Цех» (code <c>FILE_B</c>) and then a profile field named «цех» with the
+    /// header pattern «Цех» in the Advanced editor. The import stored a field only under a column CODE, so the values were parsed
+    /// and silently dropped — the card showed «—». Now a field named after a column's display name (any case) is bound to that
+    /// column, and a field that matches no column is reported by the analysis and the preview (<c>unsavedFields</c>).
+    /// Red without the fix: <c>BindFields</c> returning the spec unchanged → the card's added value is absent.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task AddedColumns__a_field_named_after_the_column_display_name_reaches_the_card_and_an_unbound_field_is_reported()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+        var stamp = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var workshop = $"FILE_B_{stamp}";
+        var title = $"Цех {stamp}";
+        await AddColumnAsync(app, client, AirLimitsSchema.SourcesTable, workshop, "String", title);
+
+        var era = Ecr.Application.RegistryImport.BuiltInImportProfiles.EraTable33;
+        JsonElement Spec(params Ecr.Application.RegistryImport.ImportFieldSpec[] extra) => JsonDocument.Parse(new Ecr.Application.RegistryImport.RegistryImportSpec
+        {
+            Sheet = era.Sheet,
+            Header = era.Header,
+            DataStartRow = era.DataStartRow,
+            GroupRows = era.GroupRows,
+            ParentKeyField = era.ParentKeyField,
+            ChildKeyField = era.ChildKeyField,
+            NaMarkers = era.NaMarkers,
+            Fields =
+            [
+                .. era.Fields,
+                // The live profile's field: the display name in lower case, the header «Цех» by pattern (not by letter).
+                new Ecr.Application.RegistryImport.ImportFieldSpec { Name = title.ToLowerInvariant(), Level = Ecr.Application.RegistryImport.ImportLevel.Parent, Patterns = ["Цех"] },
+                .. extra,
+            ],
+        }.ToJson()).RootElement.Clone();
+        var spec = Spec();
+
+        var bytes = WithWorkshops();
+        var analysis = await ReadAsync(app, await PostFileAsync(
+            client,
+            "/api/v1/air-limits/import/analyse",
+            bytes,
+            new { spec = Spec(new Ecr.Application.RegistryImport.ImportFieldSpec { Name = $"nowhere{stamp}", Level = Ecr.Application.RegistryImport.ImportLevel.Parent, Column = "C" }) }));
+        Assert.Equal([$"nowhere{stamp}"], analysis.GetProperty("unsavedFields").EnumerateArray().Select(e => e.GetString()).ToList());
+
+        var region = NewRegion();
+        var permitId = await NewPermitAsync(client, app);
+        var resolutions = await ResolveAllAsync(app, client, permitId, region);
+        await ApplyBytesAsync(app, client, permitId, bytes, new { region, area = "OFFSHORE", resolutions, spec });
+
+        var card = await CardAsync(app, client, permitId);
+        var sources = card.GetProperty("sources").EnumerateArray().ToList();
+        Assert.Equal(373, sources.Count);
+        Assert.All(sources, s => Assert.StartsWith(
+            "WS-",
+            s.GetProperty("added").TryGetProperty(workshop, out var v) ? v.GetString() : null,
+            StringComparison.Ordinal));
+    }
+
     /// <summary>ERA table 3.3 with two extra profile fields: column B → a source field, column AB (integer) → a substance field.</summary>
     private static JsonElement AddedColumnsSpec(string parentField, string childField)
     {
@@ -624,7 +686,7 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
     }
 
     /// <summary>Adds a column to a table of the AIR type the way the type editor does: new version → PUT → publish.</summary>
-    private static async Task AddColumnAsync(EcrApiFactory app, HttpClient client, string table, string code, string dataType)
+    private static async Task AddColumnAsync(EcrApiFactory app, HttpClient client, string table, string code, string dataType, string? name = null)
     {
         var type = await ReadAsync(app, await client.GetAsync(new Uri($"/api/v1/permit-types/{AirLimitsSchema.TypeCode}", UriKind.Relative)));
         if (!type.GetProperty("hasUnpublishedChanges").GetBoolean())
@@ -639,7 +701,7 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         columns.Add(JsonSerializer.SerializeToElement(
             new
             {
-                code, nameL10n = new Dictionary<string, string> { ["en"] = code }, dataType, order, required = false, key = false,
+                code, nameL10n = new Dictionary<string, string> { ["en"] = name ?? code }, dataType, order, required = false, key = false,
                 choices = (string[]?)null, group = (string?)null, listRegistryCode = (string?)null, listScope = (string?)null,
                 precision = (int?)null, scale = (int?)null, siblingTableCode = (string?)null, unitId = (int?)null,
             },
@@ -802,6 +864,58 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
             "err.ECR-REG-0409.profileBuiltIn");
         var after = await ReadAsync(app, await client.GetAsync(builtInUri));
         Assert.Equal(builtIn.GetProperty("rowVersion").GetString(), after.GetProperty("rowVersion").GetString());
+    }
+
+    /// <summary>
+    /// Air pass 3 (UAT: «existing profiles cannot be edited, re-saved or deleted»): <c>DELETE …/import-profiles/{code}</c> needs
+    /// <c>Registry.EditDefinition</c> and the token read with the profile — a stale or missing one is <c>profileChanged</c> and
+    /// nothing is deleted; the built-in profile is <c>profileBuiltIn</c>; an unknown code is 404. After the delete the profile is
+    /// gone from the list and the GET is 404. Red without the fix: no DELETE route (405).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task DeleteProfile__needs_the_current_token_never_takes_the_built_in_and_removes_the_profile()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var admin = await SignedInAsync(app, Admin);
+
+        var spec = (await ReadAsync(app, await admin.GetAsync(new Uri("/api/v1/air-limits/import-profiles/ERA_TABLE_33", UriKind.Relative)))).GetProperty("spec");
+        var code = $"PASS3_{Guid.NewGuid():N}".ToUpperInvariant();
+        var uri = new Uri($"/api/v1/air-limits/import-profiles/{code}", UriKind.Relative);
+        var created = await ReadAsync(app, await admin.PutAsJsonAsync(
+            uri, new { nameL10n = new Dictionary<string, string> { ["en"] = "first" }, spec, rowVersion = (string?)null }));
+        var firstToken = created.GetProperty("rowVersion").GetString()!;
+        var resaved = await ReadAsync(app, await admin.PutAsJsonAsync(
+            uri, new { nameL10n = new Dictionary<string, string> { ["en"] = "second" }, spec, rowVersion = firstToken }));
+        var token = resaved.GetProperty("rowVersion").GetString()!;
+
+        Uri Delete(string profile, string? rowVersion)
+            => new($"/api/v1/air-limits/import-profiles/{profile}{(rowVersion is null ? string.Empty : "?rowVersion=" + Uri.EscapeDataString(rowVersion))}", UriKind.Relative);
+
+        using (var importer = await SignedInAsync(app, Importer))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, (await importer.DeleteAsync(Delete(code, token))).StatusCode);
+        }
+
+        await AssertErrorAsync(app, await admin.DeleteAsync(Delete(code, null)), HttpStatusCode.Conflict, "err.ECR-REG-0409.profileChanged");
+        await AssertErrorAsync(app, await admin.DeleteAsync(Delete(code, firstToken)), HttpStatusCode.Conflict, "err.ECR-REG-0409.profileChanged");
+        Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync(uri)).StatusCode);
+
+        var builtIn = await ReadAsync(app, await admin.GetAsync(new Uri("/api/v1/air-limits/import-profiles/ERA_TABLE_33", UriKind.Relative)));
+        await AssertErrorAsync(
+            app,
+            await admin.DeleteAsync(Delete("ERA_TABLE_33", builtIn.GetProperty("rowVersion").GetString())),
+            HttpStatusCode.Conflict,
+            "err.ECR-REG-0409.profileBuiltIn");
+        Assert.Equal(HttpStatusCode.NotFound, (await admin.DeleteAsync(Delete($"NOPE_{code}", token))).StatusCode);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await admin.DeleteAsync(Delete(code, token))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync(uri)).StatusCode);
+        var list = await ReadAsync(app, await admin.GetAsync(new Uri("/api/v1/air-limits/import-profiles", UriKind.Relative)));
+        Assert.DoesNotContain(list.EnumerateArray(), p => p.GetProperty("code").GetString() == code);
+        Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync(new Uri("/api/v1/air-limits/import-profiles/ERA_TABLE_33", UriKind.Relative))).StatusCode);
     }
 
     [Fact]

@@ -43,7 +43,9 @@ public sealed class AirLimitsImportHandler(
 
         var tables = await accessor.Data.TablesAsync(ct).ConfigureAwait(false);
         var (spec, code) = await SpecAsync(options, tables, ct).ConfigureAwait(false);
-        return new AirLimitsAnalysisDto(code, await importer.AnalyseAsync(file, spec, ct).ConfigureAwait(false));
+        // The analysis keeps the user's field names (the wizard matches findings by them); it only reports the unbound ones.
+        var unsaved = AirLimitsSchema.BindFields(spec, tables.Sources, tables.Substances).Unsaved;
+        return new AirLimitsAnalysisDto(code, await importer.AnalyseAsync(file, spec, ct).ConfigureAwait(false), unsaved);
     }
 
     /// <summary>Preview: nothing is written. Permission <c>Registry.EditData</c> on the permit's tables.</summary>
@@ -58,7 +60,7 @@ public sealed class AirLimitsImportHandler(
         var preview = await importer.PreviewAsync(file, ctx.Spec, ctx.Request with { ExpectedFingerprint = null }, ct).ConfigureAwait(false);
         return new AirLimitsPreviewDto(
             permitId, ctx.Number, ctx.Region, ctx.Area, ctx.ProfileCode, preview,
-            ctx.Scope.Region.EntryId, ctx.Scope.Area?.EntryId, ScopeInNaeTree: ctx.Scope.InTree);
+            ctx.Scope.Region.EntryId, ctx.Scope.Area?.EntryId, ScopeInNaeTree: ctx.Scope.InTree, UnsavedFields: ctx.Unsaved);
     }
 
     /// <summary>Apply: the same plan as the preview, all or nothing, one transaction.</summary>
@@ -91,7 +93,8 @@ public sealed class AirLimitsImportHandler(
             ctx.Scope.Area?.EntryId);
     }
 
-    private sealed record Ctx(RegistryImportSpec Spec, string? ProfileCode, ImportRequest Request, string Number, AirImportScope Scope)
+    private sealed record Ctx(
+        RegistryImportSpec Spec, string? ProfileCode, ImportRequest Request, string Number, AirImportScope Scope, IReadOnlyList<string> Unsaved)
     {
         /// <summary>Region shown in the answer: the NAE tree region code of the scope.</summary>
         public string Region => Scope.NaeRegion;
@@ -129,7 +132,9 @@ public sealed class AirLimitsImportHandler(
         var match = AirScopeMatcher.Match(region.Label, area?.Label, (await naeScopes.ReadAsync(ct).ConfigureAwait(false)).Regions);
         var air = AirImportScope.From(match, region, area);
 
-        var (spec, profileCode) = await SpecAsync(options, tables, ct).ConfigureAwait(false);
+        var (raw, profileCode) = await SpecAsync(options, tables, ct).ConfigureAwait(false);
+        // ✎ Pass 3: a field named after a column's display name («Цех») is bound to that column; preview and apply share it.
+        var (spec, unsaved) = AirLimitsSchema.BindFields(raw, tables.Sources, tables.Substances);
 
         var resolutions = options.Resolutions ?? [];
         if (resolutions.Any(r => r.Action == MissingAction.Create))
@@ -149,7 +154,7 @@ public sealed class AirLimitsImportHandler(
             null,
             profileCode);
 
-        return new Ctx(spec, profileCode, request, number, air);
+        return new Ctx(spec, profileCode, request, number, air, unsaved);
     }
 
     /// <summary>

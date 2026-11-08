@@ -21,6 +21,10 @@ public interface IRegistryImportProfileStore
     /// <param name="profile">Profile.</param>
     public void Add(RegistryImportProfile profile);
 
+    /// <summary>Removes a tracked profile (pass 3: «Delete profile» in the wizard).</summary>
+    /// <param name="profile">Tracked profile.</param>
+    public void Remove(RegistryImportProfile profile);
+
     /// <summary>Makes the next save compare against the token the caller read (optimistic concurrency).</summary>
     /// <param name="profile">Tracked profile.</param>
     /// <param name="rowVersion">Token read with the profile.</param>

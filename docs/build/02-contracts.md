@@ -4781,6 +4781,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/air-limits/import-profiles` | `Registry.View` | 8 |
 | `GET` | `/api/v1/air-limits/import-profiles/{code}` | `Registry.View` | 8 |
 | `PUT` | `/api/v1/air-limits/import-profiles/{code}` | `Registry.EditDefinition` | 8 |
+| `DELETE` | `/api/v1/air-limits/import-profiles/{code}?rowVersion=` | `Registry.EditDefinition` | 8 |
 | `POST` | `/api/v1/air-limits/import/analyse` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/permits/{permitId}/air-limits/import/preview` | `Registry.EditData` + грант `Write` на таблиці дозволу | 8 |
 | `POST` | `/api/v1/permits/{permitId}/air-limits/import/apply` | `Registry.EditData` + грант `Write` на таблиці дозволу | 8 |

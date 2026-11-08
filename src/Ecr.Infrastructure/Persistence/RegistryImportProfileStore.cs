@@ -20,6 +20,9 @@ public sealed class RegistryImportProfileStore(EcrDbContext db) : IRegistryImpor
     public void Add(RegistryImportProfile profile) => db.RegistryImportProfiles.Add(profile);
 
     /// <inheritdoc />
+    public void Remove(RegistryImportProfile profile) => db.RegistryImportProfiles.Remove(profile);
+
+    /// <inheritdoc />
     public void Expect(RegistryImportProfile profile, byte[] rowVersion)
         => db.Entry(profile).Property(p => p.RowVersion).OriginalValue = rowVersion;
 }

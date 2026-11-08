@@ -280,6 +280,8 @@ public sealed partial class PermitImportMapHttpTests
 
         public void Add(RegistryImportProfile profile) => inner.Add(profile);
 
+        public void Remove(RegistryImportProfile profile) => inner.Remove(profile);
+
         public void Expect(RegistryImportProfile profile, byte[] rowVersion) => inner.Expect(profile, rowVersion);
     }
 }

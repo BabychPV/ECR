@@ -334,6 +334,16 @@
               "null",
               "string"
             ]
+          },
+          "unsavedFields": {
+            "description": "✎ Pass 3: fields of the profile that match no column of the target tables (neither by code nor by display name) — their\nvalues are read but WILL NOT BE SAVED; the wizard warns about each.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           }
         },
         "required": [
@@ -573,6 +583,16 @@
             "default": true,
             "description": "The region (and area) map to the NAE tree; `false` — «region/area not in NAE tree»: NAE codes are matched without the tree scope.",
             "type": "boolean"
+          },
+          "unsavedFields": {
+            "description": "✎ Pass 3: fields that match no target column — their values will not be saved.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           }
         },
         "required": [
@@ -29466,6 +29486,76 @@
       }
     },
     "/api/v1/air-limits/import-profiles/{code}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Profile code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Token read with the profile (base64).",
+            "in": "query",
+            "name": "rowVersion",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Deletes an import profile (not the built-in one). Permission `Registry.EditDefinition`.",
+        "tags": [
+          "AirLimits"
+        ]
+      },
       "get": {
         "parameters": [
           {

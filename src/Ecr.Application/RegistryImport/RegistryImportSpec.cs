@@ -144,6 +144,35 @@ public sealed class RegistryImportSpec
         return this;
     }
 
+    /// <summary>
+    /// A copy with some fields renamed (old name → new name); key fields keep their names. Used to bind a field the user named
+    /// after a target column's display name to that column's code (pass 3, «Цех»).
+    /// </summary>
+    /// <param name="renames">Old field name → new field name.</param>
+    /// <returns>The same spec when nothing is renamed, else a copy.</returns>
+    public RegistryImportSpec WithRenamedFields(IReadOnlyDictionary<string, string> renames)
+    {
+        ArgumentNullException.ThrowIfNull(renames);
+        if (renames.Count == 0)
+        {
+            return this;
+        }
+
+        return new RegistryImportSpec
+        {
+            Sheet = Sheet,
+            Header = Header,
+            DataStartRow = DataStartRow,
+            GroupRows = GroupRows,
+            ParentKeyField = ParentKeyField,
+            ChildKeyField = ChildKeyField,
+            NaMarkers = NaMarkers,
+            Fields = [.. Fields.Select(f => renames.TryGetValue(f.Name, out var to) && f.Name != ParentKeyField && f.Name != ChildKeyField
+                ? f.Renamed(to)
+                : f)],
+        };
+    }
+
     internal static BusinessRuleException Invalid(string where, string reason)
         => new(
             "ECR-IMP-0422",
@@ -232,6 +261,30 @@ public sealed class ImportFieldSpec
 
     /// <summary>Unit aliases for <see cref="ImportParser.Unit"/>: file text (folded) to canonical unit code.</summary>
     public IReadOnlyDictionary<string, string> Units { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>The same field under another name (every other property copied).</summary>
+    /// <param name="name">New name.</param>
+    public ImportFieldSpec Renamed(string name)
+        => new()
+        {
+            Name = name,
+            Level = Level,
+            Patterns = Patterns,
+            UnitQualifier = UnitQualifier,
+            Column = Column,
+            Required = Required,
+            NonEmpty = NonEmpty,
+            Informational = Informational,
+            WarnIfEmpty = WarnIfEmpty,
+            Parser = Parser,
+            FillDown = FillDown,
+            Reference = Reference,
+            Pad = Pad,
+            Factor = Factor,
+            NonNegative = NonNegative,
+            Choices = Choices,
+            Units = Units,
+        };
 }
 
 /// <summary>Field level.</summary>

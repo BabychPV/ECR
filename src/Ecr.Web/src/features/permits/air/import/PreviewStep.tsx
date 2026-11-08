@@ -19,7 +19,7 @@ import {
   type Resolution,
   type ResolutionChoice,
 } from './importModel';
-import type { ColumnNames } from './fieldLabels';
+import { fieldLabel, type ColumnNames } from './fieldLabels';
 import { IssuesTable } from './IssuesTable';
 import { nodeOptions } from './naeNodes';
 
@@ -291,6 +291,16 @@ export function PreviewStep(props: PreviewStepProps): JSX.Element {
       )}
       {!preview.scopeInNaeTree && (
         <Banner tone="warning" title={t('permits.air.import.scope.notInTreeTitle')} text={t('permits.air.import.scope.notInTreeText')} />
+      )}
+      {(preview.unsavedFields ?? []).length > 0 && (
+        <Banner
+          tone="warning"
+          testId="air-unsaved-fields"
+          title={t('permits.air.import.unsaved.title')}
+          text={t('permits.air.import.unsaved.text', {
+            fields: (preview.unsavedFields ?? []).map((name) => fieldLabel(name, props.columnNames)).join(', '),
+          })}
+        />
       )}
       <div className="pi-stats">
         <div className="pi-stat">

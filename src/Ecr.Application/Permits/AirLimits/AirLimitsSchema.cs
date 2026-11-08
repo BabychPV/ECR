@@ -169,6 +169,57 @@ public static class AirLimitsSchema
     public static IReadOnlyList<Domain.Entities.Configuration.RegistryFieldDef> AddedSubstanceColumns(Domain.Entities.Configuration.RegistryDef substances)
         => AddedColumns(ChildColumns, substances, SubstanceSystemColumns);
 
+    /// <summary>
+    /// ✎ Pass 3 (UAT «Цех»): binds the profile's fields to the target columns. A field whose name is neither a built-in field nor
+    /// an added column's CODE, but equals an added column's display name in any language (case and outer spaces ignored), is
+    /// renamed to that column's code — the user named the field after the column they see. Every other non-key, stored field
+    /// that still matches no column is returned in <c>Unsaved</c>: the wizard warns that its values will not be saved.
+    /// </summary>
+    /// <param name="spec">The profile's specification.</param>
+    /// <param name="sources">The AIR_SOURCES definition.</param>
+    /// <param name="substances">The AIR_SOURCE_SUBSTANCES definition.</param>
+    public static (RegistryImport.RegistryImportSpec Spec, IReadOnlyList<string> Unsaved) BindFields(
+        RegistryImport.RegistryImportSpec spec,
+        Domain.Entities.Configuration.RegistryDef sources,
+        Domain.Entities.Configuration.RegistryDef substances)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        var parent = ParentColumnsOf(sources);
+        var child = ChildColumnsOf(substances);
+        var taken = spec.Fields.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
+        var renames = new Dictionary<string, string>(StringComparer.Ordinal);
+        var unsaved = new List<string>();
+        foreach (var field in spec.Fields)
+        {
+            if (field.Informational || field.Name == spec.ParentKeyField || field.Name == spec.ChildKeyField)
+            {
+                continue;
+            }
+
+            var isParent = field.Level == RegistryImport.ImportLevel.Parent;
+            if ((isParent ? parent : child).ContainsKey(field.Name))
+            {
+                continue;
+            }
+
+            var added = isParent ? AddedSourceColumns(sources) : AddedSubstanceColumns(substances);
+            var wanted = field.Name.Trim();
+            var column = added.FirstOrDefault(c => string.Equals(c.Code, wanted, StringComparison.OrdinalIgnoreCase)
+                                                   || c.NameL10n.Values.Values.Any(n => string.Equals(n.Trim(), wanted, StringComparison.OrdinalIgnoreCase)));
+            if (column is not null && !taken.Contains(column.Code))
+            {
+                renames[field.Name] = column.Code;
+                taken.Add(column.Code);
+            }
+            else
+            {
+                unsaved.Add(field.Name);
+            }
+        }
+
+        return (spec.WithRenamedFields(renames), unsaved);
+    }
+
     private static List<Domain.Entities.Configuration.RegistryFieldDef> AddedColumns(
         IReadOnlyDictionary<string, string> builtIn, Domain.Entities.Configuration.RegistryDef table, HashSet<string> system)
     {
