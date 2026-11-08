@@ -209,8 +209,11 @@ export function DocumentInspector({
   useEffect(() => {
     const key = pendingFocus.current;
     if (key === null || tab !== 'issues') return;
-    const item = aside.current?.querySelector<HTMLElement>(`[data-inspector-attention="${CSS.escape(key)}"]`);
-    if (item === null || item === undefined) return;
+    // By dataset, not a selector: the key is free text (row codes), and no escaping is needed.
+    const item = Array.from(aside.current?.querySelectorAll<HTMLElement>('[data-inspector-attention]') ?? []).find(
+      (candidate) => candidate.dataset['inspectorAttention'] === key,
+    );
+    if (item === undefined) return;
     pendingFocus.current = null;
     item.scrollIntoView?.({ block: 'nearest' });
     item.focus();
