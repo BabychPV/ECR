@@ -1,5 +1,5 @@
 import { useMemo, useState, type JSX } from 'react';
-import { Alert, Anchor, Button, Collapse, Group, Stack, Text, Tooltip } from '@mantine/core';
+import { Alert, Anchor, Button, Collapse, Group, Stack, Text } from '@mantine/core';
 import type { DocumentTableDto } from '@/api/types';
 import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
@@ -183,24 +183,31 @@ function rowLabel(row: UnmatchedRowRef): string {
 /**
  * «Calculated only for <колонка>: 0903, 0905, … +N» — допустимі значення правил таблиці (UAT 08.11 b3).
  *
- * ⚠ Решта понад `AllowedValuesShown` — у тултіпі на «+N»; тултіп Mantine відкривається й з клавіатури (фокус на «+N»).
+ * ⚠ Решта понад `AllowedValuesShown` — за кнопкою «+N more», що розгортає перелік на місці. Не `Tooltip` Mantine:
+ * він тягне Floating UI у граф маршруту, і бюджет документа (`D-132`, 250 КБ gzip) переповнювався на 0.7 КБ;
+ * кнопка ще й доступна з клавіатури й на дотик без наведення.
  */
 function AllowedValues({ hint }: { readonly hint: UnmatchedTableHint }): JSX.Element {
-  const shown = hint.options.slice(0, AllowedValuesShown);
-  const rest = hint.options.slice(AllowedValuesShown);
+  const [all, setAll] = useState(false);
+  const shown = all ? hint.options : hint.options.slice(0, AllowedValuesShown);
+  const rest = hint.options.length - shown.length;
   const methodology = hint.methodologyCodes.join(', ');
 
   return (
     <Text size="sm" data-testid="document-unmatched-rows-allowed">
       {t('document.unmatchedRows.allowed', { column: hint.columns.join(', '), values: shown.join(', ') })}
-      {rest.length > 0 && (
+      {rest > 0 && (
         <>
           {' '}
-          <Tooltip label={rest.join(', ')} multiline w={360} withArrow>
-            <Text span size="sm" fw={600} tabIndex={0} data-testid="document-unmatched-rows-allowed-more">
-              {t('document.unmatchedRows.allowedMore', { count: String(rest.length) })}
-            </Text>
-          </Tooltip>
+          <Anchor
+            component="button"
+            type="button"
+            size="sm"
+            onClick={() => setAll(true)}
+            data-testid="document-unmatched-rows-allowed-more"
+          >
+            {t('document.unmatchedRows.allowedMore', { count: String(rest) })}
+          </Anchor>
         </>
       )}
       {methodology.length > 0 && ` · ${methodology}`}

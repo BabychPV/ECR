@@ -152,7 +152,7 @@ describe('UnmatchedRowsBanner', () => {
     expect(screen.queryByTestId('document-unmatched-rows')).toBeNull();
   });
 
-  it('b3: допустимі значення правил - перші 8 у тексті, решта «+N» у тултіпі; рядок - з поточним значенням', async () => {
+  it('b3: допустимі значення правил - перші 8 у тексті, решта за кнопкою «+N»; рядок - з поточним значенням', async () => {
     const codes = Array.from({ length: AllowedValuesShown + 3 }, (_, i) => `09${String(i).padStart(2, '0')}`);
     show({
       issues: [issue(1, 1, { rowKey: 'S01', currentValues: ['Sample A-0'] }), issue(1, 2, { rowKey: 'S02', currentValues: [''] })],
@@ -175,8 +175,9 @@ describe('UnmatchedRowsBanner', () => {
     expect(allowed).toContain('ECW_C11_11_02');
     const more = screen.getByTestId('document-unmatched-rows-allowed-more');
     expect(more.textContent).toBe('⟦document.unmatchedRows.allowedMore (count=3)⟧');
-    await userEvent.hover(more);
-    expect(await screen.findByText(codes.slice(AllowedValuesShown).join(', '))).toBeDefined();
+    await userEvent.click(more);
+    expect(screen.getByTestId('document-unmatched-rows-allowed').textContent).toContain(`values=${codes.join(', ')})⟧`);
+    expect(screen.queryByTestId('document-unmatched-rows-allowed-more')).toBeNull();
 
     const links = screen.getAllByTestId('document-unmatched-row-link').map((l) => l.textContent);
     expect(links).toEqual([
