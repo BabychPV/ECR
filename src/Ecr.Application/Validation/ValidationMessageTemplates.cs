@@ -69,8 +69,25 @@ public static class ValidationMessageTemplates
     /// <summary>The same as <see cref="PermitCalculatedNotCovering"/> when exactly one month is named («that month»).</summary>
     public const string PermitCalculatedNotCoveringOne = "validation.permit.calculatedNotCoveringOne";
 
+    /// <summary>
+    /// Human 08.11 («Попередження»): the header (Contract tab) permit does not cover months of the document holding only
+    /// CALCULATED values — a non-blocking Warning; the fix is the permit.
+    /// </summary>
+    public const string PermitHeaderCalculatedNotCovering = "validation.permit.headerCalculatedNotCovering";
+
+    /// <summary>The same as <see cref="PermitHeaderCalculatedNotCovering"/> when exactly one month is named.</summary>
+    public const string PermitHeaderCalculatedNotCoveringOne = "validation.permit.headerCalculatedNotCoveringOne";
+
     private static readonly Dictionary<string, (string En, string Ru, string Kz)> Table = new(StringComparer.Ordinal)
     {
+        [PermitHeaderCalculatedNotCovering] = (
+            "Header field \"{column}\": permit {permit} is valid {validity} and does not cover the months the document holds calculated values in: {months}. Saving and submitting are allowed. Pick a permit valid in those months or extend the permit's validity.",
+            "Поле шапки «{column}»: разрешение {permit} действует {validity} и не покрывает месяцы, за которые в документе есть вычисленные значения: {months}. Сохранение и подача разрешены. Выберите разрешение, действующее в эти месяцы, или продлите срок действия разрешения.",
+            "«{column}» тақырып өрісі: {permit} рұқсаты {validity} аралығында жарамды және құжатта есептелген мәндері бар айларды қамтымайды: {months}. Сақтауға және тапсыруға болады. Осы айларда жарамды рұқсатты таңдаңыз немесе рұқсаттың жарамдылық мерзімін ұзартыңыз."),
+        [PermitHeaderCalculatedNotCoveringOne] = (
+            "Header field \"{column}\": permit {permit} is valid {validity} and does not cover the month the document holds calculated values in: {months}. Saving and submitting are allowed. Pick a permit valid in that month or extend the permit's validity.",
+            "Поле шапки «{column}»: разрешение {permit} действует {validity} и не покрывает месяц, за который в документе есть вычисленные значения: {months}. Сохранение и подача разрешены. Выберите разрешение, действующее в этом месяце, или продлите срок действия разрешения.",
+            "«{column}» тақырып өрісі: {permit} рұқсаты {validity} аралығында жарамды және құжатта есептелген мәндері бар айды қамтымайды: {months}. Сақтауға және тапсыруға болады. Осы айда жарамды рұқсатты таңдаңыз немесе рұқсаттың жарамдылық мерзімін ұзартыңыз."),
         [PermitCalculatedNotCovering] = (
             "Permit {permit} (column \"{column}\") is valid {validity} and does not cover the months with calculated values: {months}. Saving and submitting are allowed. Pick a permit valid in those months or extend the permit's validity.",
             "Разрешение {permit} (колонка «{column}») действует {validity} и не покрывает месяцы с вычисленными значениями: {months}. Сохранение и подача разрешены. Выберите разрешение, действующее в эти месяцы, или продлите срок действия разрешения.",

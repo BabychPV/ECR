@@ -31,4 +31,24 @@ public interface IPermitDataMonthsReader
         IReadOnlyCollection<int> excludedTableDefIds,
         CancellationToken ct,
         IReadOnlyCollection<int>? excludedColumnDefIds = null);
+
+    /// <summary>
+    /// The months with data (as <see cref="DocumentMonthsWithDataAsync"/>) and, in the same read, the months that hold
+    /// ONLY calculated non-zero values (human 08.11, «Попередження»): no entered/imported value of the covered tables in
+    /// that month. Calculated-only months are a non-blocking Warning in Issues, never a refusal or a Submit block.
+    /// </summary>
+    /// <param name="documentId">Document.</param>
+    /// <param name="excludedTableDefIds">Tables not to look at.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <param name="excludedColumnDefIds">Columns not to look at.</param>
+    public Task<PermitDocumentMonths> DocumentMonthsByKindAsync(
+        long documentId,
+        IReadOnlyCollection<int> excludedTableDefIds,
+        CancellationToken ct,
+        IReadOnlyCollection<int>? excludedColumnDefIds = null);
 }
+
+/// <summary>Months of a document by kind of data (rule h, human 08.11).</summary>
+/// <param name="WithData">Months with entered/imported data — blocking.</param>
+/// <param name="CalculatedOnly">Months with only calculated non-zero values — a Warning.</param>
+public sealed record PermitDocumentMonths(IReadOnlyList<DateOnly> WithData, IReadOnlyList<DateOnly> CalculatedOnly);

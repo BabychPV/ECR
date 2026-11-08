@@ -224,6 +224,98 @@ public sealed class DocumentPermitMonthsTests(SqlServerFixture sql)
         Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
     }
 
+    /// <summary>
+    /// Human 08.11 («Попередження», header): the document's only January value is CALCULATED and the header permit starts
+    /// in March — Issues lists one Warning at the header field naming the permit, validity, the month and the permit-only
+    /// fix. Red before: no header finding at all (the reader counted entered values only).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "ACC-1108-h4")]
+    public async Task Header_calculated_only_month_outside_the_permit_is_a_warning_at_the_header_field()
+    {
+        var s = await ArrangeAsync(headerPermit: true, calculatedData: true).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var finding = await FindingAsync(client, app, s, f => f.GetProperty("tableDefId").GetInt32() == 0
+            && f.GetProperty("ruleCode").GetString() == "ECR-HDR-0422").ConfigureAwait(true);
+
+        Assert.Equal("Warning", finding.GetProperty("severity").GetString());
+        var message = finding.GetProperty("message").GetString() ?? string.Empty;
+        Assert.Contains($"\"{PermitCode}\"", message, StringComparison.Ordinal);
+        Assert.Contains("KZ-MARCH", message, StringComparison.Ordinal);
+        Assert.Contains("01.03.2026 – 30.11.2026", message, StringComparison.Ordinal);
+        Assert.Contains("01.2026", message, StringComparison.Ordinal);
+        Assert.Contains("valid in that month or extend", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("clear", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A month holding both an entered and a calculated value is a month with data: one Error at the header field (blocking,
+    /// unchanged), no Warning repeating it. Red if calculated-only months were not reduced by entered months: two findings.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "ACC-1108-h4")]
+    public async Task Header_month_with_entered_and_calculated_values_stays_an_error()
+    {
+        var s = await ArrangeAsync(headerPermit: true, calculatedData: true, enteredToo: true).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var finding = await FindingAsync(client, app, s, f => f.GetProperty("tableDefId").GetInt32() == 0
+            && f.GetProperty("ruleCode").GetString() == "ECR-HDR-0422").ConfigureAwait(true);
+
+        Assert.Equal("Error", finding.GetProperty("severity").GetString());
+        Assert.Contains("clear the values", finding.GetProperty("message").GetString() ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    /// <summary>Calculated-only months never refuse the header save (ECR-HDR-4223 is for entered/imported months).</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "ACC-1108-h1")]
+    public async Task Header_permit_missing_only_calculated_months_is_saved()
+    {
+        var s = await ArrangeAsync(calculatedData: true).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var response = await PatchPermitAsync(client, app, s, s.MarchPermitId).ConfigureAwait(true);
+
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
+        Assert.Equal(s.MarchPermitId, await StoredPermitAsync(s).ConfigureAwait(true));
+    }
+
+    /// <summary>
+    /// Calculated-only months outside the HEADER permit never block Submit. Red if the header Warning were an Error: 422.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "ACC-1108-h4")]
+    public async Task Submit_is_not_blocked_by_calculated_only_months_outside_the_header_permit()
+    {
+        var s = await ArrangeAsync(headerPermit: true, submittable: true, calculatedData: true).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var response = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/submit", UriKind.Relative),
+            new { sheetDefId = s.SheetDefId, periodKey = 202601 }).ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
+    }
+
     private static Uri HeaderUri(long documentId)
         => new($"/api/v1/documents/{documentId.ToString(CultureInfo.InvariantCulture)}/header", UriKind.Relative);
 
@@ -285,10 +377,10 @@ public sealed class DocumentPermitMonthsTests(SqlServerFixture sql)
     /// </summary>
     private async Task<Scenario> ArrangeAsync(
         bool headerPermit = false, bool rowPermit = false, bool submittable = false, bool calculatedData = false,
-        string rowEntry = "march")
+        string rowEntry = "march", bool enteredToo = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var document = await builder.BuildAsync(columnCount: 2, rowCount: 1).ConfigureAwait(false);
+        var document = await builder.BuildAsync(columnCount: enteredToo ? 3 : 2, rowCount: 1).ConfigureAwait(false);
         if (submittable)
         {
             // D-441: a Scheduled period cannot be submitted — open it; the sheet is part of the document.
@@ -328,6 +420,13 @@ public sealed class DocumentPermitMonthsTests(SqlServerFixture sql)
         db.CellValues.Add(new CellValue(
             new CellAddress(document.PeriodKey, document.RowIds[0], document.ColumnDefIds[1]),
             document.TableDefId, new CellValueData { ValueNumeric = 12m, IsCalculated = calculatedData }));
+        if (enteredToo)
+        {
+            // Mixed January: an entered value in C3 beside the calculated C2.
+            db.CellValues.Add(new CellValue(
+                new CellAddress(document.PeriodKey, document.RowIds[0], document.ColumnDefIds[2]),
+                document.TableDefId, new CellValueData { ValueNumeric = 5m }));
+        }
 
         var permitColumnCode = string.Empty;
         if (rowPermit)

@@ -24,25 +24,59 @@ public sealed class PermitDataMonthsReader(EcrDbContext db) : IPermitDataMonthsR
         CancellationToken ct,
         IReadOnlyCollection<int>? excludedColumnDefIds = null)
     {
+        var pairs = await PairsAsync(documentId, excludedTableDefIds, excludedColumnDefIds, withCalculated: false, ct)
+            .ConfigureAwait(false);
+        return (await MonthsAsync(documentId, pairs, ct).ConfigureAwait(false)).Entered;
+    }
+
+    /// <inheritdoc />
+    public async Task<PermitDocumentMonths> DocumentMonthsByKindAsync(
+        long documentId,
+        IReadOnlyCollection<int> excludedTableDefIds,
+        CancellationToken ct,
+        IReadOnlyCollection<int>? excludedColumnDefIds = null)
+    {
+        var pairs = await PairsAsync(documentId, excludedTableDefIds, excludedColumnDefIds, withCalculated: true, ct)
+            .ConfigureAwait(false);
+        var (entered, calculated) = await MonthsAsync(documentId, pairs, ct).ConfigureAwait(false);
+        var enteredSet = entered.ToHashSet();
+        return new PermitDocumentMonths(entered, [.. calculated.Where(m => !enteredSet.Contains(m))]);
+    }
+
+    private async Task<List<DataPair>> PairsAsync(
+        long documentId,
+        IReadOnlyCollection<int> excludedTableDefIds,
+        IReadOnlyCollection<int>? excludedColumnDefIds,
+        bool withCalculated,
+        CancellationToken ct)
+    {
         ArgumentNullException.ThrowIfNull(excludedTableDefIds);
         var excluded = excludedTableDefIds.ToList();
         var excludedColumns = excludedColumnDefIds?.ToList() ?? [];
 
+        var cells =
+            from cell in db.CellValues.AsNoTracking()
+            join row in db.TableRows.AsNoTracking()
+                on new { P = cell.PeriodKeyValue, I = cell.TableRowId } equals new { P = row.PeriodKeyValue, I = row.Id }
+            join inst in db.TableInstances.AsNoTracking().OriginalOnly()
+                on new { P = row.PeriodKeyValue, I = row.TableInstanceId } equals new { P = inst.PeriodKeyValue, I = inst.Id }
+            where inst.DocumentId == documentId
+                  && !row.IsDeleted
+                  && !excluded.Contains(inst.TableDefId)
+                  && !excludedColumns.Contains(cell.ColumnDefId)
+                  && cell.ValueNumeric != null
+            select new { cell, inst.TableDefId };
+
+        cells = withCalculated
+            // Human 08.11 («Попередження»): a calculated zero is not data (PermitMonthCoverage.HasCalculatedData).
+            ? cells.Where(x => !x.cell.IsCalculated || x.cell.ValueNumeric != 0m)
+            : cells.Where(x => !x.cell.IsCalculated); // only entered/imported values (coordinator 08.11)
+
         var pairs = await (
-                from cell in db.CellValues.AsNoTracking()
-                join row in db.TableRows.AsNoTracking()
-                    on new { P = cell.PeriodKeyValue, I = cell.TableRowId } equals new { P = row.PeriodKeyValue, I = row.Id }
-                join inst in db.TableInstances.AsNoTracking().OriginalOnly()
-                    on new { P = row.PeriodKeyValue, I = row.TableInstanceId } equals new { P = inst.PeriodKeyValue, I = inst.Id }
-                where inst.DocumentId == documentId
-                      && !row.IsDeleted
-                      && !excluded.Contains(inst.TableDefId)
-                      && !excludedColumns.Contains(cell.ColumnDefId)
-                      && cell.ValueNumeric != null
-                      && !cell.IsCalculated // only entered/imported values (coordinator 08.11)
-                group cell by new { cell.PeriodKeyValue, cell.ColumnDefId, inst.TableDefId } into g
+                from x in cells
+                group x by new { x.cell.PeriodKeyValue, x.cell.ColumnDefId, x.TableDefId, x.cell.IsCalculated } into g
                 orderby g.Key.PeriodKeyValue, g.Key.ColumnDefId
-                select new DataPair(g.Key.PeriodKeyValue, g.Key.ColumnDefId, g.Key.TableDefId))
+                select new DataPair(g.Key.PeriodKeyValue, g.Key.ColumnDefId, g.Key.TableDefId, g.Key.IsCalculated))
             .Take(MaxPairs + 1)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -53,9 +87,16 @@ public sealed class PermitDataMonthsReader(EcrDbContext db) : IPermitDataMonthsR
                 $"Документ {documentId}: понад {MaxPairs} пар (період, колонка) з даними — межу перевищено.");
         }
 
+        return pairs;
+    }
+
+    /// <summary>Months of the entered pairs and of the calculated pairs (each ascending), one metadata pass for both.</summary>
+    private async Task<(IReadOnlyList<DateOnly> Entered, IReadOnlyList<DateOnly> Calculated)> MonthsAsync(
+        long documentId, List<DataPair> pairs, CancellationToken ct)
+    {
         if (pairs.Count == 0)
         {
-            return [];
+            return ([], []);
         }
 
         var tableIds = pairs.Select(p => p.TableDefId).Distinct().ToList();
@@ -81,9 +122,11 @@ public sealed class PermitDataMonthsReader(EcrDbContext db) : IPermitDataMonthsR
             .ConfigureAwait(false);
         var spanOf = periods.ToDictionary(p => p.PeriodKeyValue);
 
-        var months = new SortedSet<DateOnly>();
+        var enteredMonths = new SortedSet<DateOnly>();
+        var calculatedMonths = new SortedSet<DateOnly>();
         foreach (var pair in pairs)
         {
+            var months = pair.IsCalculated ? calculatedMonths : enteredMonths;
             if (monthTables.Contains(pair.TableDefId))
             {
                 if (monthOf.TryGetValue(pair.ColumnDefId, out var month))
@@ -100,10 +143,10 @@ public sealed class PermitDataMonthsReader(EcrDbContext db) : IPermitDataMonthsR
             }
         }
 
-        return [.. months];
+        return ([.. enteredMonths], [.. calculatedMonths]);
     }
 
-    private sealed record DataPair(int PeriodKeyValue, int ColumnDefId, int TableDefId);
+    private sealed record DataPair(int PeriodKeyValue, int ColumnDefId, int TableDefId, bool IsCalculated);
 
     private sealed record MonthColumn(int Id, int TableDefId, byte Month);
 

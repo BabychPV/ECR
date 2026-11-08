@@ -286,13 +286,22 @@ public static class PermitCoverageIssues
             return [];
         }
 
-        var months = await dataMonths.DocumentMonthsWithDataAsync(documentId, ownPermitTables, ct).ConfigureAwait(false);
+        var byKind = await dataMonths.DocumentMonthsByKindAsync(documentId, ownPermitTables, ct).ConfigureAwait(false);
         var messages = new List<ValidationMessage>();
 
         foreach (var (field, entryId) in windowed.OrderBy(p => p.Field.Code, StringComparer.Ordinal))
         {
             var entry = entries[entryId];
-            var uncovered = PermitMonthCoverage.Uncovered(entry.ValidFrom, entry.ValidTo, months);
+
+            // Human 08.11 («Попередження»): months of the covered tables with ONLY calculated values outside the permit — a
+            // Warning at the header field; the header save (ECR-HDR-4223) and Submit are never blocked by them.
+            var calculatedUncovered = PermitMonthCoverage.Uncovered(entry.ValidFrom, entry.ValidTo, byKind.CalculatedOnly);
+            if (calculatedUncovered.Count > 0)
+            {
+                messages.Add(HeaderCalculatedMessage(field.Code, entry, calculatedUncovered, language));
+            }
+
+            var uncovered = PermitMonthCoverage.Uncovered(entry.ValidFrom, entry.ValidTo, byKind.WithData);
             if (uncovered.Count == 0)
             {
                 continue;
@@ -345,6 +354,25 @@ public static class PermitCoverageIssues
             tableDefId,
             rowKey,
             column.Code,
+            BlocksSave: false,
+            MessageKey: key,
+            Params: parameters);
+    }
+
+    private static ValidationMessage HeaderCalculatedMessage(
+        string fieldCode, RegistryEntry entry, IReadOnlyList<DateOnly> uncovered, string language)
+    {
+        var parameters = Parameters(entry, uncovered, fieldCode);
+        var key = uncovered.Count == 1
+            ? ValidationMessageTemplates.PermitHeaderCalculatedNotCoveringOne
+            : ValidationMessageTemplates.PermitHeaderCalculatedNotCovering;
+        return new ValidationMessage(
+            ValidationSeverity.Warning,
+            ErrorCodes.HeaderValueInvalid,
+            ValidationMessageTemplates.Render(key, language, parameters),
+            TableDefId: 0,
+            RowKey: null,
+            ColumnCode: null,
             BlocksSave: false,
             MessageKey: key,
             Params: parameters);
