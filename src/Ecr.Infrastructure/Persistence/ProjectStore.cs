@@ -37,7 +37,8 @@ public sealed class ProjectStore(EcrDbContext db) : IProjectStore
                 p.TimeZoneId,
                 p.PeriodKind,
                 p.CurrentPeriodId,
-                db.Periods.Count(period => period.ProjectId == p.Id)))
+                db.Periods.Count(period => period.ProjectId == p.Id),
+                db.Documents.Count(document => document.ProjectId == p.Id)))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 

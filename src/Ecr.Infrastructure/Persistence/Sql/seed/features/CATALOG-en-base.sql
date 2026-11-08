@@ -4035,7 +4035,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'periods.activateTitle', N'en', N'Activate project {code}?', 1),
     (N'periods.activateConfirm', N'en', N'Periods start opening and closing by the calendar, and documents can be created in them. An active project cannot go back to draft, and its time zone can no longer be changed.', 1),
     (N'periods.recalcTitle', N'en', N'Recalculate the whole project {code}?', 1),
-    (N'periods.recalcConfirm', N'en', N'Every document of every period of this project is recalculated in the background. This can take a while, and figures in open documents may change when it finishes.', 1),
+    (N'periods.recalcConfirm', N'en', N'The recalculation runs in the background; figures in open documents may change when it finishes.', 1),
     -- R-18/X-35: журнал змін називає людей, документи й колонки, а не номери.
     (N'audit.authorAny', N'en', N'Anyone', 1),
     (N'audit.userGone', N'en', N'User #{id} (no longer exists)', 1),

@@ -8,31 +8,57 @@ import { MountedLazyConfirmModal } from '@/features/projects/lazyPeriodsDialogs'
 import { isRecalcActive } from '@/features/recalc/recalcProgress';
 import { projectRecalcKey, useProjectRecalcProgress } from '@/features/recalc/useProjectRecalcProgress';
 import { RecalcSkippedList, type RecalcRequestOutcome } from '@/features/workflow/RecalcSkippedList';
-import { formatPeriodKey } from '@/shared/format';
+import { formatMonthName, formatPeriodKey } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { FilterInline } from '@/shared/ui/FilterBar';
 import { showApiError, showDone } from '@/shared/ui/notify';
 
+type CalendarPeriod = PeriodCalendarDto['periods'][number];
+
 /**
- * Область перерахунку проєкту для діалогу підтвердження (сценарій a1): рік, «усі документи», місяці, що
- * пропускаються (заблоковані за ЕФЕКТИВНИМ станом — сервер вилучає їх із річного перерахунку).
+ * Відкриті місяці стислим рядком: суцільний відрізок — «September–November 2026», інакше перелік через кому.
+ */
+export function openMonthsText(periods: readonly CalendarPeriod[], kind: string): string {
+  if (periods.length === 0) return '';
+
+  const sorted = [...periods].sort((a, b) => a.periodKey - b.periodKey);
+  const first = sorted[0] as CalendarPeriod;
+  const last = sorted.at(-1) as CalendarPeriod;
+  const contiguous =
+    kind === 'Monthly' &&
+    first.year === last.year &&
+    sorted.every((period, index) => period.sequence === first.sequence + index);
+
+  if (contiguous && sorted.length > 1) {
+    return `${formatMonthName(first.sequence)}–${formatMonthName(last.sequence)} ${String(first.year)}`;
+  }
+
+  return sorted.map((period) => formatPeriodKey(period.periodKey, kind)).join(', ');
+}
+
+/**
+ * Область перерахунку проєкту для діалогу підтвердження (сценарій a1; P2 живого проходу 08.11): ВІДКРИТІ місяці
+ * (за ефективним станом — заблоковані сервер вилучає з річного перерахунку), кількість документів, і що
+ * пропускається. Замість старого «Every document of every period…», яке було неправдою.
  */
 export function recalcScopeText(
   calendar: PeriodCalendarDto | undefined,
   projectCode: string,
+  documentCount: number | null,
   now: number = Date.now(),
 ): string {
-  if (calendar === undefined) return t('recalcProgress.confirmScopeUnknown', { project: projectCode });
+  const documents = documentCount ?? '—';
 
-  const current = calendar.periods.find((period) => period.isCurrent) ?? calendar.periods.at(-1);
-  const year = current?.year ?? new Date(now).getFullYear();
-  const locked = calendar.periods
-    .filter((period) => period.year === year && effectivePeriodState(period, now) === 'Closed')
-    .map((period) => formatPeriodKey(period.periodKey, calendar.periodKind));
+  if (calendar === undefined) return t('recalcProgress.confirmScopeUnknown', { project: projectCode, documents });
 
-  return locked.length === 0
-    ? t('recalcProgress.confirmScope', { project: projectCode, year })
-    : t('recalcProgress.confirmScopeSkipping', { project: projectCode, year, months: locked.join(', ') });
+  const open = calendar.periods.filter((period) => {
+    const state = effectivePeriodState(period, now);
+    return state === 'Open' || state === 'Grace';
+  });
+
+  return open.length === 0
+    ? t('recalcProgress.confirmScopeNoOpen', { documents })
+    : t('recalcProgress.confirmScope', { months: openMonthsText(open, calendar.periodKind), documents });
 }
 
 /**
@@ -49,7 +75,8 @@ export function ProjectRecalculateAction({
   project,
   label,
 }: {
-  readonly project: { readonly id: number; readonly code: string };
+  /** `documentCount` — з переліку проєктів (`ProjectSummary.documentCount`); без нього діалог пише «—». */
+  readonly project: { readonly id: number; readonly code: string; readonly documentCount?: number | undefined };
   /** ✎ UAT-p3: підпис кнопки, коли він має назвати область («Recalculate project…» на Periods); типово — «Recalculate». */
   readonly label?: string | undefined;
 }): JSX.Element {
@@ -108,7 +135,7 @@ export function ProjectRecalculateAction({
       <MountedLazyConfirmModal
         opened={confirming}
         title={t('periods.recalcTitle', { code: project.code })}
-        text={`${recalcScopeText(calendar.data, project.code)} ${t('periods.recalcConfirm')}`}
+        text={`${recalcScopeText(calendar.data, project.code, project.documentCount ?? null)}. ${t('periods.recalcConfirm')}`}
         verb={t('workflow.recalculate')}
         danger={false}
         isPending={recalculate.isPending}
