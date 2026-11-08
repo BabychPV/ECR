@@ -36,7 +36,7 @@ const areas: readonly (readonly [number, string, readonly string[]])[] = [
   [9, 'Редактор конвеєра', ['/admin/pipeline']],
   [10, 'Редактор виразів', ['/admin/expressions']],
   [11, "Правила прив'язки", ['/admin/mapping']],
-  [12, 'Періоди і матриця доступу', ['/admin/periods']],
+  [12, 'Періоди і матриця доступу', ['/projects']],
   [13, 'Розклад збору', ['/admin/sources']],
   [14, 'Перерахунок: запуск, черга, прогрес', ['/admin/jobs']],
   [15, 'Операційний дашборд', ['/admin/health', '/admin/consistency']],

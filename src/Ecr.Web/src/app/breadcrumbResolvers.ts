@@ -3,6 +3,7 @@ import { queryKeys } from '@/api/queryKeys';
 import type {
   DocumentSummary,
   DocumentTableDto,
+  PagedProjects,
   RegistryDefinitionDto,
   TemplateCard,
   TemplatePage,
@@ -106,10 +107,22 @@ function registryNameLookup(params: CrumbParams): ResolverLookup {
   };
 }
 
+/** ✎ Projects (макет 08.11): код проєкту `/projects/:id` — з кешу переліку проєктів (`projectsQuery`), без запиту. */
+function projectCodeLookup(params: CrumbParams): ResolverLookup {
+  const projectId = Number(params['id']);
+  if (!Number.isFinite(projectId)) return { key: undefined, read: () => undefined };
+
+  return {
+    key: queryKeys.projects.all(),
+    read: (data) => (data as PagedProjects).items.find((item) => item.id === projectId)?.code,
+  };
+}
+
 const lookups: Record<Exclude<NonNullable<CrumbResolverId>, 'documentKey'>, (params: CrumbParams) => ResolverLookup> = {
   templateName: templateNameLookup,
   templateVersionLabel: templateVersionLabelLookup,
   registryName: registryNameLookup,
+  projectCode: projectCodeLookup,
 };
 
 /**

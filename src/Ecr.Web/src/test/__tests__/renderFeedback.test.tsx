@@ -713,8 +713,9 @@ describe("Зворотний зв'язок під час рендера — ст
     await guardRoute(routes.adminUnits, <UnitsPage />, '/admin/units');
   }, 60_000);
 
-  it('/admin/periods — 10 спостерігачів, створюваних під час рендера', async () => {
-    await guardRoute(routes.adminPeriods, <PeriodsPage />, '/admin/periods');
+  // ✎ Projects (08.11): колишній /admin/periods — тепер вкладка Periods проєкту.
+  it('/projects/:id/periods — 10 спостерігачів, створюваних під час рендера', async () => {
+    await guardRoute(routes.projectPeriods, <PeriodsPage projectId={1} />, '/projects/1/periods');
   }, 60_000);
 
   it('/admin/templates/:id/versions/:versionId — 19 спостерігачів, максимум застосунку', async () => {

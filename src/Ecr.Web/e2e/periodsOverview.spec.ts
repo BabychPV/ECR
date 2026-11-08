@@ -1,38 +1,35 @@
 import { expect, test, type Page } from '@playwright/test';
 
 /**
- * UI-33: Periods за макетом (`docs/design/hybrid/screens-ops.js`, `/admin/periods`) — огляд
- * «All projects · current period» і плитки періодів року обраного проєкту.
- *
- * ⚠ Стенд може мати один проєкт (тоді він обирається сам, `U-10`) або кілька (тоді спершу
- * видно лише огляд). Тест проходить обидві гілки: через огляд обирає перший проєкт, якщо
- * проєкт ще не обрано.
+ * UI-33 → ✎ Projects (макет 08.11, рядки f3/f4): огляд усіх проєктів — перелік `/projects`; клац по проєкту
+ * відкриває вкладку Periods з плитками року, плитка з клавіатури виділяє рядок календаря.
  */
 const Operator = { user: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
 
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
 const DocumentId = process.env['ECR_E2E_DOCUMENT'] ?? '';
 
-test.describe('Periods: огляд проєктів і плитки року (UI-33)', () => {
+test.describe('Projects: перелік і плитки року на вкладці Periods (UI-33, f3/f4)', () => {
   test.skip(
     PeriodKey === '' || DocumentId === '',
     'ECR_E2E_OPTIONAL: стенда немає, перевіряти нічого. Стенд: tools/e2e-stand.ps1.',
   );
 
-  test('огляд видно без вибору; плитка з клавіатури виділяє рядок календаря', async ({ page }) => {
+  test('перелік видно одразу; проєкт відкривається на Periods; плитка з клавіатури виділяє рядок календаря', async ({ page }) => {
     await signIn(page, Operator.user, Operator.password);
-    await page.goto('/admin/periods');
+    await page.goto('/projects');
 
-    const overview = page.getByTestId('periods-overview');
-    await expect(overview, 'немає огляду «All projects»').toBeVisible({ timeout: 30_000 });
-    await expect(overview.getByRole('table')).toBeVisible({ timeout: 30_000 });
+    // Not a bare `.first()`: other specs create `E2E <name> project` fixtures on the shared stand.
+    const link = page
+      .locator('[data-project-open]')
+      .filter({ hasNotText: /E2E[ -]?(groups|bottom)|E2E(Groups|Bottom)Prj|E2EPass2|E2EPD/i })
+      .first();
+    await expect(link, 'немає переліку проєктів').toBeVisible({ timeout: 30_000 });
+    await link.click();
+    await expect(page).toHaveURL(/\/projects\/\d+\/periods$/);
 
     const year = page.getByTestId('periods-year');
-    if (!(await year.isVisible())) {
-      // Body rows only (the header row's first button is the Project sort toggle, not a project). Not a bare `.first()`: other specs (colGroups, sheetBottom, ...) create `E2E <name> project` fixtures on the shared stand.
-      await overview.locator('tbody').getByRole('row').filter({ hasNotText: /E2E[ -]?(groups|bottom)|E2E(Groups|Bottom)Prj/i }).getByRole('button').first().click();
-    }
-    await expect(year, 'вибір проєкту не показав плиток року').toBeVisible({ timeout: 30_000 });
+    await expect(year, 'вкладка Periods не показала плиток року').toBeVisible({ timeout: 30_000 });
 
     const tiles = year.locator('[data-period-tile]');
     expect(await tiles.count(), 'жодної плитки періоду').toBeGreaterThan(0);
@@ -49,7 +46,6 @@ test.describe('Periods: огляд проєктів і плитки року (UI
     await expect(page.locator(`[data-period-row="${key ?? ''}"]`)).toHaveAttribute('data-selected', 'true');
   });
 });
-
 async function signIn(page: Page, user: string, password: string): Promise<void> {
   await page.goto('/login');
   await expect(page.getByRole('heading').first(), 'сторінка входу не відрендерилася').toBeVisible({

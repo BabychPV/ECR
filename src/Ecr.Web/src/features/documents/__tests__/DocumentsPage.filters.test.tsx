@@ -165,7 +165,9 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
       await screen.findByRole('table', {}, { timeout: Find });
 
       expect(listed.length).toBeGreaterThan(0);
-      expect(lastListed().get('periodKey')).toBe('202601');
+      // ✎ Projects/Documents 08.11: перелік лише за рік — стара адреса з periodKey дає year=2026, місяць у запит не йде.
+      expect(lastListed().get('year')).toBe('2026');
+      expect(lastListed().has('periodKey')).toBe(false);
       expect(lastListed().has('state')).toBe(false);
       expect(lastListed().has('mine')).toBe(false);
       expect(lastListed().has('hasLateEdits')).toBe(false);
@@ -182,7 +184,9 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
       fireEvent.change(await stateField(), { target: { value: 'Rejected' } });
 
       await waitFor(() => expect(lastListed().get('state')).toBe('Rejected'), { timeout: Find });
-      expect(lastListed().get('periodKey')).toBe('202601');
+      // ✎ Projects/Documents 08.11: стан діє за рік (year з місяця старої адреси), periodKey у запит не йде.
+      expect(lastListed().get('year')).toBe('2026');
+      expect(lastListed().has('periodKey')).toBe(false);
       expect(lastListed().has('cursor')).toBe(false);
       expect(new URLSearchParams(search).get('state')).toBe('Rejected');
     },
@@ -287,7 +291,8 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
       show('/?hasLateEdits=true');
 
       await screen.findByText('⟦documents.noMatch⟧', {}, { timeout: Find });
-      expect(screen.queryByText('⟦documents.empty⟧')).toBeNull();
+      // ✎ Projects/Documents 08.11: «документів немає» — тепер `documents.emptyYear (year=…)`.
+      expect(screen.queryByText(/documents\.emptyYear/)).toBeNull();
 
       fireEvent.click(screen.getByRole('button', { name: '⟦documents.resetFilters⟧' }));
 
@@ -320,14 +325,15 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
       show('/?periodKey=202601&state=Rejected&mine=true');
 
       await screen.findByText('⟦documents.noMatch⟧', {}, { timeout: Find });
-      expect(screen.queryByText('⟦documents.empty⟧')).toBeNull();
+      // ✎ Projects/Documents 08.11: «документів немає» — тепер `documents.emptyYear (year=…)`.
+      expect(screen.queryByText(/documents\.emptyYear/)).toBeNull();
 
       fireEvent.click(screen.getByRole('button', { name: '⟦documents.resetFilters⟧' }));
 
       await waitFor(() => expect(new URLSearchParams(search).has('state')).toBe(false), { timeout: Find });
       const params = new URLSearchParams(search);
       expect(params.has('mine')).toBe(false);
-      // Період належить екрану, а не фільтрам: скидання його не чіпає.
+      // Період (рік) належить екрану, а не фільтрам: скидання його не чіпає.
       expect(params.get('periodKey')).toBe('202601');
 
       await waitFor(() => expect(lastListed().has('state')).toBe(false), { timeout: Find });
@@ -345,7 +351,8 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
       mockFetch('empty');
       show('/?periodKey=202601');
 
-      await screen.findByText('⟦documents.empty⟧', {}, { timeout: Find });
+      // ✎ Projects/Documents 08.11: «документів немає» — тепер за рік (`documents.emptyYear`, рік з місяця старої адреси).
+      await screen.findByText('⟦documents.emptyYear (year=2026)⟧', {}, { timeout: Find });
       expect(screen.queryByText('⟦documents.noMatch⟧')).toBeNull();
       expect(screen.queryByRole('button', { name: '⟦documents.resetFilters⟧' })).toBeNull();
     },
@@ -362,7 +369,8 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
 
       expect(alert.textContent ?? '').toContain('ECR-AUTH-0403');
       expect(screen.queryByText('⟦documents.noMatch⟧')).toBeNull();
-      expect(screen.queryByText('⟦documents.empty⟧')).toBeNull();
+      // ✎ Projects/Documents 08.11: «документів немає» — тепер `documents.emptyYear (year=…)`.
+      expect(screen.queryByText(/documents\.emptyYear/)).toBeNull();
     },
     Slow,
   );
@@ -421,22 +429,19 @@ describe('DocumentsPage: пошук і фільтр проєкту (UI RC9, ма
     Slow,
   );
   it(
-    'застарілі результати: бейдж лише в рядку з resultsStale=true; чіп з лічильником ставить resultsStale=true в запит',
+    // ✎ Projects/Documents 08.11: перелік лише за рік — чіп «Needs recalculation» без місяця вимкнений (застарілість належить місяцю, 422), тож і зі старої адреси з periodKey він не фільтрує; бейдж у рядку лишається.
+    'застарілі результати: бейдж лише в рядку з resultsStale=true; у переліку року чіп вимкнений і resultsStale в запит не йде',
     async () => {
       mockFetch('rows');
-      show('/?periodKey=202601');
+      show('/?periodKey=202601&resultsStale=true');
 
       await screen.findByRole('table', {}, { timeout: Find });
       expect(document.querySelectorAll('[data-results-stale]')).toHaveLength(1);
-      expect(lastListed().has('resultsStale')).toBe(false);
+      expect(document.querySelector('[data-document-row="STALE-0003"] [data-results-stale]')).not.toBeNull();
 
       const chip = await screen.findByRole('checkbox', { name: /documents.filterStale/ }, { timeout: Find });
-      expect((chip as HTMLInputElement).disabled).toBe(false);
-
-      fireEvent.click(chip);
-
-      await waitFor(() => expect(lastListed().get('resultsStale')).toBe('true'), { timeout: Find });
-      expect(new URLSearchParams(search).get('resultsStale')).toBe('true');
+      expect((chip as HTMLInputElement).disabled).toBe(true);
+      expect(lastListed().has('resultsStale')).toBe(false);
     },
     Slow,
   );
@@ -487,8 +492,8 @@ describe('DocumentsPage: власник документа (D-450)', () => {
       fireEvent.click(await ownersField());
 
       await waitFor(() => expect(ownerRequests.length).toBeGreaterThan(0), { timeout: Find });
-      // Той самий період, що в переліку: межі читача рахуються в ньому.
-      expect(new URLSearchParams(ownerRequests[0]?.split('?')[1] ?? '').get('periodKey')).toBe('202601');
+      // ✎ Projects/Documents 08.11: перелік лише за рік — люди теж без місяця (periodKey старої адреси в запит не йде).
+      expect(new URLSearchParams(ownerRequests[0]?.split('?')[1] ?? '').has('periodKey')).toBe(false);
     },
     Slow,
   );

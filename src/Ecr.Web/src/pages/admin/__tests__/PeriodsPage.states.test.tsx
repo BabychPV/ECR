@@ -77,7 +77,7 @@ function show(path = '/admin/periods'): void {
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={[path]}>
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-          <PeriodsPage />
+          <PeriodsPage projectId={1} />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,
@@ -89,41 +89,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('PeriodsPage — стани переліку проєктів', () => {
-  it('500: показує помилку з кодом, а не «проєктів немає»', async () => {
-    serve({ projects: () => problem(500, 'ECR-SYS-0500') });
-    show();
-
-    expect(await screen.findByText('ECR-SYS-0500', { exact: false })).toBeTruthy();
-    expect(screen.queryByText('⟦periods.noProjects⟧')).toBeNull();
-  });
-
-  it('403: стан «немає права», а не «проєктів немає»', async () => {
-    serve({ projects: () => problem(403, 'ECR-AUTH-0403') });
-    show();
-
-    const alerts = await screen.findAllByRole('alert');
-    expect(alerts.map((a) => a.textContent).join(' ')).toContain('ECR-AUTH-0403');
-    expect(screen.queryByText('⟦periods.noProjects⟧')).toBeNull();
-  });
-
-  it('порожній перелік: пояснення «проєктів немає» і жодного коду помилки', async () => {
-    serve({ projects: () => json({ items: [], nextCursor: null, totalCount: 0 }) });
-    show();
-
-    expect(await screen.findByText('⟦periods.noProjects⟧')).toBeTruthy();
-    expect(screen.queryByText('ECR-', { exact: false })).toBeNull();
-  });
-
-  it('у дорозі: «завантаження», а не «проєктів немає»', async () => {
-    serve({ projects: pending });
-    show();
-
-    const busy = await screen.findAllByRole('status');
-    expect(busy.some((node) => node.getAttribute('aria-busy') === 'true')).toBe(true);
-    expect(screen.queryByText('⟦periods.noProjects⟧')).toBeNull();
-  });
-});
 
 describe('PeriodsPage — стани календаря обраного проєкту', () => {
   const listed = (): Promise<Response> => json({ items: projects, nextCursor: null, totalCount: projects.length });

@@ -71,7 +71,7 @@ const SlowEnvTimeout = 400_000;
 
 describe('DocumentsPage: зведення переліку (BE-09)', () => {
   it(
-    'смуга показує числа сервера за період з адреси; кнопки — лише лічильники стану',
+    'смуга показує числа сервера за рік з адреси; кнопки — лише лічильники стану',
     async () => {
       mockFetch();
       show('/?periodKey=202601');
@@ -88,7 +88,10 @@ describe('DocumentsPage: зведення переліку (BE-09)', () => {
       // «з проблемами» — не стан, фільтра за ним немає.
       expect(within(strip).queryAllByRole('button')).toHaveLength(3);
       expect(strip.querySelector('[data-summary-counter="withIssues"]')?.tagName).toBe('DIV');
-      expect(requested.some((url) => url.includes('/documents/summary?periodKey=202601'))).toBe(true);
+      // ✎ Projects/Documents 08.11: перелік лише за рік — стара адреса з periodKey дає зведення за її РІК (year=2026), без periodKey.
+      const summaries = requested.filter((url) => url.includes('/documents/summary')).map((url) => new URL(url, 'http://x'));
+      expect(summaries.some((u) => u.searchParams.get('year') === '2026')).toBe(true);
+      expect(summaries.every((u) => !u.searchParams.has('periodKey'))).toBe(true);
     },
     SlowEnvTimeout,
   );
@@ -126,7 +129,7 @@ describe('DocumentsPage: зведення переліку (BE-09)', () => {
   );
 
   it(
-    'Period clarity: без місяця — зведення ЗА РІК (year, без periodKey), смуга з числами сервера',
+    'Period clarity: зведення ЗА РІК (year, без periodKey), смуга з числами сервера',
     async () => {
       mockFetch();
       show('/?year=2025');

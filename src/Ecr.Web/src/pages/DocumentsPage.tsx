@@ -19,15 +19,19 @@ import { DocumentListFilterBar } from '@/features/documents/DocumentListFilterBa
 import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSummaryStrip';
 import { useDocumentListFilters } from '@/features/documents/documentListFilters';
 import { EyeIcon, IssueCount } from '@/features/documents/DocumentListMarks';
-import { documentState, hasSheetStates, sheetLabels } from '@/features/documents/documentSheets';
 import { distinctVersions, mergeVersionOptions, nextVersionSort } from '@/features/documents/documentVersion';
 import { DocumentVersionCell, DocumentVersionTh } from '@/features/documents/DocumentVersionColumn';
 import { parseDocumentsView } from '@/features/documents/documentsBoardModel';
 import '@/features/documents/documentsList.css';
 import { LateEditsMark } from '@/features/documents/LateEditsMark';
 import { StaleResultsMark, StaleResultsUndeterminedMark } from '@/features/documents/StaleResultsMark';
-import { DocumentYearStrip } from '@/features/documents/DocumentYearStrip';
-import { formatMonthName, formatNumber } from '@/shared/format';
+import { DocumentYearStrip, DocumentYearStripHeader, DocumentYearStripLegend } from '@/features/documents/DocumentYearStrip';
+import { calendarYears, yearsWithProjects } from '@/features/projects/projectYear';
+import { CollapsibleNote } from '@/features/common/CollapsibleNote';
+import type { PeriodCalendarDto } from '@/api/types';
+import { useProjectCalendars } from '@/shared/ui/periodStates';
+import { statusKey } from '@/shared/ui/StatusBadge';
+import { formatNumber } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -35,8 +39,6 @@ import { useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { FilterInline } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
-import { SegmentBar } from '@/shared/ui/SegmentBar';
-import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
@@ -58,9 +60,6 @@ const loadCreateDocumentModal = () => import('@/features/documents/CreateDocumen
 const CreateDocumentModal = lazy(async () => ({
   default: (await loadCreateDocumentModal()).CreateDocumentModal,
 }));
-
-/** Місяці селектора: «All months» (`''` — рік) і дванадцять місяців обраного року. */
-const MonthNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 
 /**
  * Швидкий перегляд документа (`UI-29`) — за `import()`: шторку відкривають
@@ -99,23 +98,18 @@ const ProjectRecalcBanner = lazy(async () => ({
  * Обраний місяць — колишній перегляд за період: стан аркушів і документа за ОДИН місяць (`D-93`).
  */
 export function DocumentsPage(): JSX.Element {
-  // ⛔ Період і курсор — в АДРЕСІ (`ФВ-14.29`). Перелік документів за
-  // конкретний період — це те, що надсилають колезі; у локальному стані таке
-  // посилання вело б на порожній екран із проханням обрати період наново.
-  const [periodKey] = useUrlNumber('periodKey');
   /*
-   * ✎ Period clarity (людина 07.11, п. e): типово — РІК («All months»), рядок документа несе смугу 12 місяців.
-   * Обраний місяць (`?periodKey=`) — колишній перегляд за місяць. Рік — з місяця, інакше з `?year=`, інакше поточний.
-   * ⛔ Автовибору місяця при вході більше немає: «один документ на об'єкт, усі місяці всередині».
+   * ✎ g1 (макет `projects-documents-1108.html`, людина 08.11: «так макет хороший»): фільтра «Month» більше НЕМАЄ —
+   * документ завжди тримає всі 12 місяців, тож перелік — завжди за РІК; місяць обирають клітинкою смуги або в самому
+   * документі. Рік — в АДРЕСІ (`?year=`, `ФВ-14.29`: перелік надсилають колезі). Стара адреса з `?periodKey=`
+   * (закладки й посилання до 08.11) дає рік цього місяця, а не помилку.
+   *
+   * ⚠ Сусідні компоненти (смуга лічильників, фільтри, шторка) і далі приймають місяць — тут він завжди `null`.
    */
+  const [legacyPeriodKey] = useUrlNumber('periodKey');
   const [urlYear] = useUrlNumber('year');
-  const year = periodKey !== null ? Math.trunc(periodKey / 100) : (urlYear ?? new Date().getFullYear());
-  // Роки селектора: три попередні, поточний і наступний, плюс рік з адреси, якщо він поза ними.
   const thisYear = new Date().getFullYear();
-  const yearOptions = [...new Set([thisYear - 3, thisYear - 2, thisYear - 1, thisYear, thisYear + 1, year])].sort(
-    (a, b) => b - a,
-  );
-  const yearView = periodKey === null;
+  const year = urlYear ?? (legacyPeriodKey !== null ? Math.trunc(legacyPeriodKey / 100) : thisYear);
   const [cursor] = useUrlState('cursor');
   // `UI-40`: подання — в адресі (`?view=board`, як у макеті), щоб посилання відкривало дошку.
   const [viewParam] = useUrlState('view');
@@ -142,7 +136,7 @@ export function DocumentsPage(): JSX.Element {
   if (panel !== null && panel !== quickLookId) setQuickLookId(panel);
 
   // `BE-09b`: стан і «мої» — теж в адресі; без періоду стан у запит не йде.
-  const filters = useDocumentListFilters(periodKey, year);
+  const filters = useDocumentListFilters(null, year);
 
   // `UI-18`: пошук іде в запит після паузи в наборі; поле й адреса оновлюються одразу.
   const appliedQ = useDebouncedFilter(filters.q.trim());
@@ -152,8 +146,8 @@ export function DocumentsPage(): JSX.Element {
   const query = useQuery({
     queryKey: [
       'documents',
-      periodKey,
-      periodKey === null ? year : null,
+      null,
+      year,
       cursor,
       filters.state,
       filters.mine,
@@ -167,7 +161,7 @@ export function DocumentsPage(): JSX.Element {
     ],
     queryFn: () =>
       listDocuments({
-        periodKey,
+        periodKey: null,
         year,
         cursor,
         state: filters.state,
@@ -184,8 +178,8 @@ export function DocumentsPage(): JSX.Element {
 
   // Варіанти фільтра «Version»: усі версії видимих документів (за проєктом і періодом), а не лише сторінки.
   const versionOptionsQuery = useQuery({
-    queryKey: ['documents', 'template-versions', filters.projectId, periodKey],
-    queryFn: () => listDocumentTemplateVersions({ projectId: filters.projectId, periodKey }),
+    queryKey: ['documents', 'template-versions', filters.projectId, null],
+    queryFn: () => listDocumentTemplateVersions({ projectId: filters.projectId, periodKey: null }),
   });
 
   // ⛔ Аудит-пас 5: колонка «Project» показувала голий числовий `projectId`
@@ -205,6 +199,27 @@ export function DocumentsPage(): JSX.Element {
    * твердження про доступ було б неправдою про дані.
    */
   const noProjects = projects.isSuccess && projects.data.items.length === 0;
+
+  /*
+   * ✎ g1/g3 (макет 08.11): календарі проєктів — для варіантів «Year» (ЛИШЕ роки, де є проєкти) і для смуги
+   * (неподаний місяць бере стан періоду: відкритий, заблокований, ще не відкритий). Ключ `['periods', id]` спільний
+   * із Projects, одночасність обмежена (`useProjectCalendars`, N4-08).
+   */
+  const calendars = useProjectCalendars((projects.data?.items ?? []).map((project) => project.id));
+  const calendarOf = (projectId: number): PeriodCalendarDto | undefined =>
+    calendars[(projects.data?.items ?? []).findIndex((project) => project.id === projectId)]?.data;
+  const yearOptions = yearsWithProjects(
+    calendars.map((entry) => entry.data),
+    year,
+  );
+  // Найновіший рік із проєктами — ціль кнопки порожнього стану («Show 2026»).
+  const latestYear = yearsWithProjects(
+    calendars.map((entry) => entry.data),
+    null,
+  )[0];
+  const projectsOfYear = (projects.data?.items ?? []).filter((project) =>
+    calendarYears(calendarOf(project.id)).includes(year),
+  );
 
   /*
    * ✎ Period clarity (п. b): перерахунок — дія ПРОЄКТУ: той, що обрано фільтром, або єдиний. Лише активному
@@ -258,8 +273,7 @@ export function DocumentsPage(): JSX.Element {
    * на цю поведінку мусить задавати період ЯВНО і ВІДМІННИЙ від поточного —
    * інакше він зелений і без фіксу.
    */
-  const documentHref = (documentId: number): string =>
-    `/documents/${documentId}` + (periodKey === null ? '' : `?periodKey=${periodKey}`);
+  const documentHref = (documentId: number): string => `/documents/${documentId}`;
 
   return (
     <>
@@ -276,41 +290,23 @@ export function DocumentsPage(): JSX.Element {
                 (некерований DOM встигав показати введене), але жоден запит
                 ніколи не бачив `periodKey` в адресі. `useUrlParamsSetter`
                 оновлює обидва параметри ОДНИМ переходом. */}
-            {/* ✎ Period clarity (п. e): рік і місяць замість поля «Period». «All months» — перегляд року (типово);
-                місяць — перегляд за місяць. Фільтр стану лишається: він діє і за рік (`year`), і за місяць. */}
+            {/* ✎ g1 (макет 08.11): рік — ЄДИНИЙ фільтр часу, і в ньому лише роки, у яких є проєкти. Зміна року
+                знімає фільтр проєкту й стану (вони належали попередньому року) і курсор. */}
             <NativeSelect
               size="xs"
               label={t('documents.year')}
               data={yearOptions.map((value) => ({ value: String(value), label: String(value) }))}
               value={String(year)}
               onChange={(event) => {
-                const next = Number(event.currentTarget.value);
-                setUrlParams(
-                  periodKey === null
-                    ? { year: next, cursor: null }
-                    : { periodKey: next * 100 + (periodKey % 100), year: null, cursor: null },
-                );
+                setUrlParams({
+                  year: Number(event.currentTarget.value),
+                  periodKey: null,
+                  projectId: null,
+                  state: null,
+                  cursor: null,
+                });
               }}
               data-documents-year=""
-            />
-            <NativeSelect
-              size="xs"
-              miw={140}
-              label={t('documents.month')}
-              data={[
-                { value: '', label: t('documents.allMonths') },
-                ...MonthNumbers.map((month) => ({ value: String(month), label: formatMonthName(month) })),
-              ]}
-              value={periodKey === null ? '' : String(periodKey % 100)}
-              onChange={(event) => {
-                const month = event.currentTarget.value;
-                setUrlParams(
-                  month === ''
-                    ? { periodKey: null, year, cursor: null, resultsStale: null }
-                    : { periodKey: year * 100 + Number(month), year: null, cursor: null },
-                );
-              }}
-              data-documents-month=""
             />
 
             {/* ⛔ Створення документа не мало в інтерфейсі жодної кнопки
@@ -366,19 +362,20 @@ export function DocumentsPage(): JSX.Element {
         <ProjectRecalcBanner projectId={filters.projectId} />
       </Suspense>
 
-      <Text size="sm" mb="xs" data-documents-year-note="">
-        {t('documents.oneDocumentNote')}
-      </Text>
+      {/* ✎ fg6: пояснення — компактне й згортається (пам'ятається на людину). */}
+      <CollapsibleNote noteId="documents-year" summary={t('documents.oneDocumentNote')}>
+        {t('documents.yearOnlyNote')}
+      </CollapsibleNote>
 
       <DocumentListFilterBar
-        periodKey={periodKey}
-        year={periodKey === null ? year : null}
+        periodKey={null}
+        year={year}
         filters={filters}
         projects={projects.data?.items ?? []}
         // Варіанти — УСІ версії видимих документів (`GET /documents/template-versions`); обрані, яких сервер уже не
         // віддає, лишаються (їх є чим зняти). Поки відповіді немає (або вона відмовила) — версії поточної сторінки.
         versionOptions={mergeVersionOptions(
-          versionOptionsQuery.data?.versions ?? distinctVersions(query.data?.items ?? [], periodKey),
+          versionOptionsQuery.data?.versions ?? distinctVersions(query.data?.items ?? [], null),
           filters.versions,
         )}
         staleOnPage={query.data?.items.filter((d) => d.resultsStale === true).length ?? 0}
@@ -401,7 +398,7 @@ export function DocumentsPage(): JSX.Element {
         )}
         {/* ✎ Period clarity (п. e): за «All months» — лічильники ЗА РІК (`GET /documents/summary?year=`), тим самим
             правилом, що й фільтр стану за рік; за місяць — як і раніше. */}
-        <DocumentListSummaryStrip periodKey={periodKey} year={periodKey === null ? year : null} filters={filters} />
+        <DocumentListSummaryStrip periodKey={null} year={year} filters={filters} />
         {/* ✎ `UI-40` (макет: `E.Segmented` «Table · Board» праворуч у рядку фільтрів):
             фільтри, період і курсор — СПІЛЬНІ для обох подань, бо лежать в адресі. */}
         <FilterInline ml="auto">
@@ -418,6 +415,9 @@ export function DocumentsPage(): JSX.Element {
           />
         </FilterInline>
       </DocumentListFilterBar>
+
+      {/* ✎ g3 (макет 08.11): легенда клітинок смуги — під фільтрами, лише для таблиці (дошка смуги не має). */}
+      {view === 'table' && <DocumentYearStripLegend />}
 
       {/*
        * ⛔ Три порожні стани не виглядають однаково (L10): «фільтр нічого не
@@ -436,19 +436,31 @@ export function DocumentsPage(): JSX.Element {
             ? t('documents.noMatch')
             : noProjects
               ? t('documents.noProjects')
-              : t('documents.empty')
+              : t('documents.emptyYear', { year })
         }
         emptyHint={
           filters.active
             ? t('documents.noMatchHint')
             : noProjects
               ? t('documents.noProjectsHint')
-              : t('documents.emptyHint')
+              : projectsOfYear.length > 0
+                ? t('documents.emptyYearProjects', {
+                    year,
+                    projects: projectsOfYear
+                      .map((project) => `${project.code} (${t(statusKey('project', project.status))})`)
+                      .join(', '),
+                  })
+                : t('documents.emptyYearNoProject', { year })
         }
         emptyAction={
           filters.active ? (
             <Button variant="default" onClick={filters.reset}>
               {t('documents.resetFilters')}
+            </Button>
+          ) : latestYear !== undefined && latestYear !== year ? (
+            // ✎ g2 (макет 08.11): з порожнього року — одним кліком до року, де є робота.
+            <Button variant="default" onClick={() => setUrlParams({ year: latestYear, cursor: null })} data-show-year={latestYear}>
+              {t('documents.showYear', { year: latestYear })}
             </Button>
           ) : undefined
         }
@@ -503,25 +515,22 @@ export function DocumentsPage(): JSX.Element {
                   highlightOnHover
                   className="ecr-sticky-head"
                   data-documents-table=""
-                  data-documents-scope={yearView ? 'year' : 'month'}
+                  data-documents-scope="year"
                 >
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th>{t('documents.document')}</Table.Th>
                       <Table.Th data-column="owner">{t('documents.owner')}</Table.Th>
-                      {/* ✎ Period clarity: за рік — смуга 12 місяців замість аркушів і стану одного місяця. */}
-                      {yearView ? (
-                        <Table.Th data-column="months">{t('documents.months', { year })}</Table.Th>
-                      ) : (
-                        <Table.Th>{t('documents.sheets')}</Table.Th>
-                      )}
+                      {/* ✎ Period clarity / g3: смуга 12 місяців — над нею перші літери місяців (макет `.ms.hd`). */}
+                      <Table.Th data-column="months">
+                        <DocumentYearStripHeader year={year} />
+                      </Table.Th>
                       <Table.Th>{t('documents.issues')}</Table.Th>
                       <Table.Th data-column="updated">{t('documents.updated')}</Table.Th>
                       <DocumentVersionTh
                         sort={filters.versionSort}
                         onSort={() => filters.setVersionSort(nextVersionSort(filters.versionSort))}
                       />
-                      {!yearView && <Table.Th>{t('documents.state')}</Table.Th>}
                       <Table.Th>
                         <VisuallyHidden>{t('documents.quickLookColumn')}</VisuallyHidden>
                       </Table.Th>
@@ -530,7 +539,6 @@ export function DocumentsPage(): JSX.Element {
                   <Table.Tbody>
                     {rows.map((document) => {
                       const name = localized(document.nameL10n);
-                      const state = documentState(document);
                       const errors = document.errorCount;
 
                       return (
@@ -578,27 +586,15 @@ export function DocumentsPage(): JSX.Element {
                               </Text>
                             )}
                           </Table.Td>
-                          {yearView ? (
-                            <Table.Td data-column="months">
-                              <DocumentYearStrip
-                                documentId={document.id}
-                                businessKey={document.businessKey}
-                                year={year}
-                                periodStates={document.periodStates}
-                              />
-                            </Table.Td>
-                          ) : (
-                            <Table.Td data-column="sheets">
-                              {/* ⛔ UI-walkthrough F6: станів за період немає — видиме
-                                  «—», а не порожнеча, яка читається і як «не
-                                  завантажилось». */}
-                              {hasSheetStates(document) ? (
-                                <SegmentBar segments={sheetLabels(document)} />
-                              ) : (
-                                <Text c="dimmed">—</Text>
-                              )}
-                            </Table.Td>
-                          )}
+                          <Table.Td data-column="months">
+                            <DocumentYearStrip
+                              documentId={document.id}
+                              businessKey={document.businessKey}
+                              year={year}
+                              periodStates={document.periodStates}
+                              calendar={calendarOf(document.projectId)}
+                            />
+                          </Table.Td>
                           <Table.Td data-column="issues" data-document-errors={errors ?? 'none'}>
                             {/* ⛔ BE-09: `null` — документ НЕ ПЕРЕВІРЯЛИ (або роль не
                                 бачить усіх аркушів) — «—», а не «0»: нуль під
@@ -632,13 +628,8 @@ export function DocumentsPage(): JSX.Element {
                             </Box>
                           </Table.Td>
                           <Table.Td data-column="version">
-                            <DocumentVersionCell source={document} periodKey={periodKey} />
+                            <DocumentVersionCell source={document} periodKey={null} />
                           </Table.Td>
-                          {!yearView && (
-                            <Table.Td data-column="state">
-                              {state === null ? <Text c="dimmed">—</Text> : <StatusBadge kind="sheet" state={state} quiet />}
-                            </Table.Td>
-                          )}
                           <Table.Td data-column="quick-look">
                             {/* `UI-29`: швидкий перегляд у шторці під `?panel=<id>`. */}
                             <ActionIcon
@@ -683,7 +674,7 @@ export function DocumentsPage(): JSX.Element {
         <Suspense fallback={null}>
           <DocumentQuickLook
             panelId={quickLookId}
-            periodKey={periodKey}
+            periodKey={null}
             document={query.data?.items.find((item) => String(item.id) === quickLookId)}
             listReady={query.data !== undefined}
             onClose={() => {
@@ -702,7 +693,7 @@ export function DocumentsPage(): JSX.Element {
           <CreateDocumentModal
             opened={creating}
             onClose={() => setCreating(false)}
-            preferredPeriodKey={periodKey}
+            preferredPeriodKey={null}
           />
         </Suspense>
       )}

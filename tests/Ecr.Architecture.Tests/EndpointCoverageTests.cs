@@ -720,14 +720,14 @@ public sealed partial class EndpointCoverageTests
     [
         "nav.documents", "password.title", "nav.templates", "version.title", "tables.relationsTitle",
         "nav.registries", "registries.constructor", "nav.methodologies", "methodologies.versionsTitle",
-        "nav.expressions", "nav.units", "nav.security", "nav.periods", "nav.sources", "nav.mapping", "nav.pipeline",
+        "nav.expressions", "nav.units", "nav.security", "nav.projects", "nav.sources", "nav.mapping", "nav.pipeline",
         "nav.jobs", "nav.snapshots", "nav.campaign", "nav.audit", "nav.consistency", "nav.uiStrings",
         "nav.notifications", "nav.health", "nav.myGroups", "documents.title",
         "registries.data.title",
         "nav.permits", "permits.types.title", "permits.typeEditor.title", "permits.lists.title",
         "permits.bindings.title", "permits.binding.title", "permits.detail.title",
         "nav.piData",
-        "nav.projectSettings",
+        "projects.tab.periods", "projects.tab.settings", "projects.tab.lifecycle",
     ];
 
     /// <summary>Підписи груп бічного меню (UI-12, <c>navGroups</c> у <c>routes.ts</c>).</summary>
@@ -739,8 +739,7 @@ public sealed partial class EndpointCoverageTests
     [
         "nav.documents.description", "nav.myGroups.description", "nav.templates.description",
         "nav.registries.description", "nav.methodologies.description", "nav.units.description",
-        "nav.sources.description", "nav.mapping.description", "nav.periods.description",
-        "nav.projectSettings.description",
+        "nav.sources.description", "nav.mapping.description", "nav.projects.description",
         "nav.jobs.description", "nav.snapshots.description", "nav.audit.description",
         "nav.consistency.description", "nav.uiStrings.description", "nav.health.description",
         "nav.permits.description", "permits.types.description", "permits.lists.description",

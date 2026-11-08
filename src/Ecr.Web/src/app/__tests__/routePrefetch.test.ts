@@ -163,7 +163,7 @@ describe('prefetchRoute — прогрів даних (лише фабричні
       routes.adminMethodologyVersions,
       routes.adminExpressions,
       routes.adminSecurity,
-      routes.adminPeriods,
+      routes.projects,
       routes.adminSources,
       routes.adminMapping,
       routes.adminJobs,

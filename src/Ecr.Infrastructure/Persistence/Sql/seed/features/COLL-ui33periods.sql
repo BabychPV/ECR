@@ -13,18 +13,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'periods.tile.readOnly', N'ru', N'только чтение'),
     (N'periods.tile.now', N'ru', N'сейчас'),
     (N'periods.year.title', N'ru', N'{project} · {year}'),
-    (N'periods.overview.title', N'ru', N'Все проекты · текущий период'),
-    (N'periods.overview.hint', N'ru', N'выберите проект, чтобы увидеть его календарь выше'),
-    (N'periods.overview.project', N'ru', N'Проект'),
-    (N'periods.overview.current', N'ru', N'Текущий период'),
-    (N'periods.overview.state', N'ru', N'Состояние'),
-    (N'periods.overview.closes', N'ru', N'Закрывается'),
-    (N'periods.overview.inGrace', N'ru', N'за {period}'),
-    (N'periods.overview.stats', N'ru', N'Периоды всех проектов'),
-    (N'periods.overview.stat.open', N'ru', N'открыто'),
-    (N'periods.overview.stat.grace', N'ru', N'в льготном периоде'),
-    (N'periods.overview.stat.soon', N'ru', N'закрываются в течение ≤ 3 дней'),
-    (N'periods.overview.noMatch', N'ru', N'Нет проектов под этот фильтр'),
     (N'periods.tile.closesToday', N'kz', N'бүгін жабылады'),
     (N'periods.tile.closesIn.one', N'kz', N'{count} күннен кейін жабылады'),
     (N'periods.tile.closesIn.other', N'kz', N'{count} күннен кейін жабылады'),
@@ -36,25 +24,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'periods.tile.readOnly', N'kz', N'тек оқу'),
     (N'periods.tile.now', N'kz', N'қазір'),
     (N'periods.year.title', N'kz', N'{project} · {year}'),
-    (N'periods.overview.title', N'kz', N'Барлық жобалар · ағымдағы кезең'),
-    (N'periods.overview.hint', N'kz', N'күнтізбесін жоғарыда көру үшін жобаны таңдаңыз'),
-    (N'periods.overview.project', N'kz', N'Жоба'),
-    (N'periods.overview.current', N'kz', N'Ағымдағы кезең'),
-    (N'periods.overview.state', N'kz', N'Күйі'),
-    (N'periods.overview.closes', N'kz', N'Жабылады'),
-    (N'periods.overview.inGrace', N'kz', N'{period} үшін'),
-    (N'periods.overview.stats', N'kz', N'Барлық жобалардың кезеңдері'),
-    (N'periods.overview.stat.open', N'kz', N'ашық'),
-    (N'periods.overview.stat.grace', N'kz', N'жеңілдік кезеңінде'),
-    (N'periods.overview.stat.soon', N'kz', N'≤ 3 күнде жабылады'),
-    (N'periods.overview.noMatch', N'kz', N'Бұл сүзгіге сай жоба жоқ'),
     -- Pass2 п. 6 (людський прохід 07.11): плитки неактивного проєкту не обіцяють дат; смуга названа «всі проєкти».
     (N'periods.tile.notOpenDraft', N'ru', N'не открыт — проект черновик'),
     (N'periods.tile.notOpenDraft', N'kz', N'ашылмаған — жоба нобай күйінде'),
     (N'periods.tile.notOpenInactive', N'ru', N'не открыт — проект неактивен'),
-    (N'periods.tile.notOpenInactive', N'kz', N'ашылмаған — жоба белсенді емес'),
-    (N'periods.overview.statsScope', N'ru', N'Все проекты:'),
-    (N'periods.overview.statsScope', N'kz', N'Барлық жобалар:')
+    (N'periods.tile.notOpenInactive', N'kz', N'ашылмаған — жоба белсенді емес')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -74,22 +48,9 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'periods.tile.readOnly', N'en', N'read-only', 1),
     (N'periods.tile.now', N'en', N'now', 1),
     (N'periods.year.title', N'en', N'{project} · {year}', 1),
-    (N'periods.overview.title', N'en', N'All projects · current period', 1),
-    (N'periods.overview.hint', N'en', N'select a project to show its calendar above', 1),
-    (N'periods.overview.project', N'en', N'Project', 1),
-    (N'periods.overview.current', N'en', N'Current period', 1),
-    (N'periods.overview.state', N'en', N'State', 1),
-    (N'periods.overview.closes', N'en', N'Closes', 1),
-    (N'periods.overview.inGrace', N'en', N'for {period}', 1),
-    (N'periods.overview.stats', N'en', N'Periods of all projects', 1),
-    (N'periods.overview.stat.open', N'en', N'open', 1),
-    (N'periods.overview.stat.grace', N'en', N'in grace period', 1),
-    (N'periods.overview.stat.soon', N'en', N'closing in ≤ 3 days', 1),
-    (N'periods.overview.noMatch', N'en', N'No project matches this filter', 1),
     -- Pass2 п. 6 (людський прохід 07.11): плитки неактивного проєкту не обіцяють дат; смуга названа «всі проєкти».
     (N'periods.tile.notOpenDraft', N'en', N'not open — the project is a draft', 1),
-    (N'periods.tile.notOpenInactive', N'en', N'not open — the project is not active', 1),
-    (N'periods.overview.statsScope', N'en', N'All projects:', 1)
+    (N'periods.tile.notOpenInactive', N'en', N'not open — the project is not active', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

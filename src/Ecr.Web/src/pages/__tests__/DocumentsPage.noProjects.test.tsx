@@ -45,6 +45,12 @@ function serve(options: { readonly projects: readonly unknown[]; readonly projec
         });
       }
 
+      // ✎ Projects/Documents 08.11: календар проєкту — для підказки порожнього року (які проєкти мають цей рік).
+      if (/\/api\/v1\/projects\/\d+\/periods/.test(url)) {
+        const year = new Date().getFullYear();
+        return json({ periods: [{ periodKey: year * 100 + 1, year, sequence: 1, state: 'Open' }] });
+      }
+
       if (url.includes('/api/v1/projects')) {
         if (options.projectsFail === true) {
           return json({ title: 'Server error', status: 500, errorCode: 'ECR-SYS-0500', correlationId: 'c' }, 500);
@@ -86,19 +92,24 @@ describe('DocumentsPage — порожній стан без жодного пр
     // ⚠ Текст стоїть двічі: заголовок порожнього стану і підказка недоступної кнопки.
     expect((await screen.findAllByText('⟦documents.noProjects⟧', {}, Find)).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('⟦documents.noProjectsHint⟧')).toBeTruthy();
-    expect(screen.queryByText('⟦documents.empty⟧')).toBeNull();
-    expect(screen.queryByText('⟦documents.emptyHint⟧')).toBeNull();
+    // ✎ Projects/Documents 08.11: порожній стан року — `documents.emptyYear` замість прибраного `documents.empty`.
+    expect(screen.queryByText(/documents\.emptyYear/)).toBeNull();
 
     // «New document» не активна: обрати проєкт неможливо.
     const create = screen.getByRole('button', { name: '⟦documents.create⟧' });
     expect(create.hasAttribute('disabled') || create.getAttribute('data-disabled') === 'true').toBe(true);
   });
 
-  it('проєкт є, документів немає — колишній текст про період, кнопка активна', async () => {
+  // ✎ Projects/Documents 08.11: перелік лише за рік — порожній стан «за рік N документів немає» з проєктами цього року.
+  it('проєкт є, документів немає — текст про порожній рік із проєктом цього року, кнопка активна', async () => {
     serve({ projects: [{ id: 1, code: 'PRJ', status: 'Active' }] });
     show();
+    const year = String(new Date().getFullYear());
 
-    expect(await screen.findByText('⟦documents.empty⟧', {}, Find)).toBeTruthy();
+    expect(await screen.findByText(`⟦documents.emptyYear (year=${year})⟧`, {}, Find)).toBeTruthy();
+    expect(
+      await screen.findByText(`⟦documents.emptyYearProjects (year=${year}, projects=PRJ (⟦status.project.Active⟧))⟧`, {}, Find),
+    ).toBeTruthy();
     expect(screen.queryByText('⟦documents.noProjects⟧')).toBeNull();
 
     const create = screen.getByRole('button', { name: '⟦documents.create⟧' });
@@ -108,8 +119,11 @@ describe('DocumentsPage — порожній стан без жодного пр
   it('перелік проєктів не прочитано — тверджень про доступ немає (не «немає проєктів»)', async () => {
     serve({ projects: [], projectsFail: true });
     show();
+    const year = String(new Date().getFullYear());
 
-    expect(await screen.findByText('⟦documents.empty⟧', {}, Find)).toBeTruthy();
+    // ✎ Projects/Documents 08.11: нейтральний текст — тепер порожній рік (`documents.emptyYear`), без переліку проєктів.
+    expect(await screen.findByText(`⟦documents.emptyYear (year=${year})⟧`, {}, Find)).toBeTruthy();
+    expect(screen.getByText(`⟦documents.emptyYearNoProject (year=${year})⟧`)).toBeTruthy();
     expect(screen.queryByText('⟦documents.noProjects⟧')).toBeNull();
   });
 });

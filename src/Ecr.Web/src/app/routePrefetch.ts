@@ -93,12 +93,21 @@ export const ExpressionsPage = lazy(ExpressionsPageLoader);
 const SecurityPageLoader = async () => ({ default: (await import('@/pages/admin/SecurityPage')).SecurityPage });
 export const SecurityPage = lazy(SecurityPageLoader);
 
+// ✎ Projects (макет 08.11): перелік проєктів і проєкт із вкладками Periods · Settings · Lifecycle.
+const ProjectsPageLoader = async () => ({ default: (await import('@/pages/projects/ProjectsPage')).ProjectsPage });
+export const ProjectsPage = lazy(ProjectsPageLoader);
+const ProjectLayoutLoader = async () => ({ default: (await import('@/pages/projects/ProjectLayout')).ProjectLayout });
+export const ProjectLayout = lazy(ProjectLayoutLoader);
 const PeriodsPageLoader = async () => ({ default: (await import('@/pages/admin/PeriodsPage')).PeriodsPage });
 export const PeriodsPage = lazy(PeriodsPageLoader);
 const ProjectSettingsPageLoader = async () => ({
   default: (await import('@/pages/admin/ProjectSettingsPage')).ProjectSettingsPage,
 });
 export const ProjectSettingsPage = lazy(ProjectSettingsPageLoader);
+const ProjectLifecycleTabLoader = async () => ({
+  default: (await import('@/pages/projects/ProjectLifecycleTab')).ProjectLifecycleTab,
+});
+export const ProjectLifecycleTab = lazy(ProjectLifecycleTabLoader);
 
 const SourcesPageLoader = async () => ({ default: (await import('@/pages/admin/SourcesPage')).SourcesPage });
 export const SourcesPage = lazy(SourcesPageLoader);
@@ -180,8 +189,7 @@ const routeChunkLoaders: Partial<Record<string, () => Promise<unknown>>> = {
   [routes.adminMethodologyVersions.id]: MethodologyVersionsPageLoader,
   [routes.adminExpressions.id]: ExpressionsPageLoader,
   [routes.adminSecurity.id]: SecurityPageLoader,
-  [routes.adminPeriods.id]: PeriodsPageLoader,
-  [routes.adminProjectSettings.id]: ProjectSettingsPageLoader,
+  [routes.projects.id]: ProjectsPageLoader,
   [routes.adminSources.id]: SourcesPageLoader,
   [routes.adminMapping.id]: MappingPreviewPageLoader,
   [routes.adminPiData.id]: PiDataPageLoader,

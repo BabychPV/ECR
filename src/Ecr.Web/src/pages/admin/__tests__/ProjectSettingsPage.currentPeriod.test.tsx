@@ -107,7 +107,7 @@ function show(): void {
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={['/admin/projects?projectId=7']}>
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-          <ProjectSettingsPage />
+          <ProjectSettingsPage projectId={7} />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,
