@@ -62,7 +62,9 @@ test.describe('recalcProgress: прогрес перерахунку проєк�
     await page.goto(`/?projectId=${String(projectId)}`);
     await page.getByRole('button', { name: Recalculate }).first().click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog).toContainText(/Recalculates all documents of|Пересчитываются все документы|барлық құжаттары/);
+    // a1 + P2 живого проходу: реальна область — відкриті місяці й число документів; старого «Every document…» немає.
+    await expect(dialog).toContainText(/(Open months|No open months|Открыт\S* месяц|Ашық ай)[\s\S]*\d+/);
+    await expect(dialog).not.toContainText(/Every document of every period/);
     await dialog.getByRole('button', { name: Recalculate }).click();
 
     await expect(page.getByText(/queued|в очередь|кезекке/i).first()).toBeVisible({ timeout: 30_000 });

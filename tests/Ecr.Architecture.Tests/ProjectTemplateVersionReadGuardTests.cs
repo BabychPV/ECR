@@ -42,6 +42,9 @@ public sealed partial class ProjectTemplateVersionReadGuardTests
         ["src/Ecr.Application/Documents/GetDocumentTemplateHandler.cs"] = (1, Kind.Current),
         ["src/Ecr.Application/Periods/ReopenPeriodHandler.cs"] = (1, Kind.Current),
         ["src/Ecr.Application/Periods/SetCurrentPeriodHandler.cs"] = (1, Kind.Current),
+        // UAT 08.11: версія в записі журналу переходу стану / видалення проєкту — та сама мітка, що в PeriodStateJob.
+        ["src/Ecr.Application/Periods/PeriodStateCatchUp.cs"] = (1, Kind.Current),
+        ["src/Ecr.Infrastructure/Persistence/ProjectStore.cs"] = (1, Kind.Current),
         ["src/Ecr.Infrastructure/Jobs/PeriodStateJob.cs"] = (1, Kind.Current),
         ["src/Ecr.Infrastructure/Jobs/ConsistencyCheckJob.cs"] = (1, Kind.Current),
         ["src/Ecr.Infrastructure/Startup/MetadataWarmup.cs"] = (1, Kind.Current),
