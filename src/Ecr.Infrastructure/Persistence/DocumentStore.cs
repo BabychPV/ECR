@@ -303,10 +303,27 @@ public sealed class DocumentStore(
         var starFetched = false;
         IReadOnlyDictionary<long, DateTime?>? starMap = null;
         IReadOnlyDictionary<long, DateTime?>? staleMap = null;
+
+        // ✎ g4 (координатор 08.11): за РІК без періоду застарілість — об'єднання місячних карт року (`StaleResultsYear`);
+        // періоди року з актуальним прогоном беруться ОДИН раз на запит (і для фільтра, і для позначки рядків).
+        var staleYear = period.Value is null ? filter.Year : null;
+        var staleYearKeys = staleYear is { } yearOfStale
+            ? await StaleResultsYear.PeriodKeysAsync(db, yearOfStale, projectId, ct).ConfigureAwait(false)
+            : null;
         if (filter.ResultsStale is not null && period.Value is { } staleByPeriod)
         {
             // LP-45 (етап 2): ідентифікатори беруться з карти періоду (кеш), а не підзапитом по журналу правок.
             staleMap = (await StaleMap.GetAsync(staleByPeriod, [filter.StaleByUserId], ct).ConfigureAwait(false))[0];
+            if (filter.StaleByUserId is null)
+            {
+                starFetched = true;
+                starMap = staleMap;
+            }
+        }
+        else if (filter.ResultsStale is not null && staleYearKeys is not null)
+        {
+            staleMap = (await StaleResultsYear.GetAsync(StaleMap, staleYearKeys, [filter.StaleByUserId], ct)
+                .ConfigureAwait(false))[0];
             if (filter.StaleByUserId is null)
             {
                 starFetched = true;
@@ -375,11 +392,12 @@ public sealed class DocumentStore(
 
             // resultsStale: той самий предикат, що дає позначку в рядку (`StaleResultsQuery`), - підзапитом ДО `Take`.
             // ⛔ Проєкти зі звуженням виключаються в обох напрямках (`false` теж): інакше «не застарілі» = решта,
-            // тобто те саме знання навиворіт. Без періоду фільтр не діє (застарілість належить періоду).
+            // тобто те саме знання навиворіт. Без періоду фільтр діє лише за роком (✎ g4: застарілий хоч в одному
+            // періоді року); без обох — не діє (обробник відмовляє 422).
             // ✎ D-446: документ-надання, видимий учасникові ЦІЛКОМ, — у фільтрі як звичайний; частково схований — поза ним.
             // LP-45 / D-432: карта «*» береться ОДИН раз на запит переліку - фільтр і позначка рядків бачать одну й ту саму
             // карту (без другого читання відбитка й без гонки з фоновим оновленням між двома зверненнями).
-            if (filter.ResultsStale is { } wantStale && period.Value is { } staleBy)
+            if (filter.ResultsStale is { } wantStale && (period.Value is not null || staleYearKeys is not null))
             {
                 var narrowed = filter.NarrowedProjectIds?.ToArray() ?? [];
 
@@ -395,7 +413,9 @@ public sealed class DocumentStore(
                 if (staleMap is null)
                 {
                     // Карта переповнена: підзапитом по журналу, як у 1885c2c77 (без кешу).
-                    var staleSubquery = StaleResultsQuery.Documents(db, staleBy, filter.StaleByUserId).Select(r => r.DocumentId);
+                    var staleSubquery = period.Value is { } staleBy
+                        ? StaleResultsQuery.Documents(db, staleBy, filter.StaleByUserId).Select(r => r.DocumentId)
+                        : StaleResultsYear.Documents(db, staleYearKeys!, filter.StaleByUserId);
                     documents = wantStale
                         ? documents.Where(d => staleSubquery.Contains(d.Id))
                         : documents.Where(d => !staleSubquery.Contains(d.Id));
@@ -503,7 +523,7 @@ public sealed class DocumentStore(
 
         // І застарілість результатів - теж ОДИН запит на сторінку.
         var staleByDocument = await StaleResultsBatchAsync(
-            [.. page1.Select(d => d.Id)], period, starFetched, starMap, ct).ConfigureAwait(false);
+            [.. page1.Select(d => d.Id)], period, staleYearKeys, starFetched, starMap, ct).ConfigureAwait(false);
 
         // ✎ 2026-11-07 Period clarity: смуга станів року — теж ОДИН запит на сторінку.
         var periodStates = filter.Year is { } stripYear
@@ -1950,15 +1970,18 @@ public sealed class DocumentStore(
 
     /// <summary>
     /// Документи сторінки із застарілими результатами (значення - відколи) - одним запитом;
-    /// <c>null</c> - періоду немає, застарілість не визначена.
+    /// <c>null</c> - ні періоду, ні року немає, застарілість не визначена. ✎ g4: за роком (<paramref name="yearKeys"/>) —
+    /// застарілий хоч в одному періоді року, «відколи» — найраніший момент.
     /// </summary>
     private async Task<Dictionary<long, DateTime?>?> StaleResultsBatchAsync(
-        IReadOnlyList<long> documentIds, PeriodKeyFilter period,
+        IReadOnlyList<long> documentIds, PeriodKeyFilter period, int[]? yearKeys,
         bool mapFetched, IReadOnlyDictionary<long, DateTime?>? fetchedMap, CancellationToken ct)
     {
         if (period.Value is not { } periodKey)
         {
-            return null;
+            return yearKeys is null
+                ? null
+                : await StaleResultsYearBatchAsync(documentIds, yearKeys, mapFetched, fetchedMap, ct).ConfigureAwait(false);
         }
 
         if (documentIds.Count == 0)
@@ -1976,6 +1999,46 @@ public sealed class DocumentStore(
         }
 
         var found = new Dictionary<long, DateTime?>();
+        foreach (var id in documentIds)
+        {
+            if (map.TryGetValue(id, out var since))
+            {
+                found[id] = since;
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// ✎ g4: позначка сторінки за РІК — з об'єднаної карти року (<see cref="StaleResultsYear"/>); карта переповнена —
+    /// вузький прямий запит по ids сторінки за кожен період року, об'єднаний так само.
+    /// </summary>
+    private async Task<Dictionary<long, DateTime?>> StaleResultsYearBatchAsync(
+        IReadOnlyList<long> documentIds, int[] yearKeys,
+        bool mapFetched, IReadOnlyDictionary<long, DateTime?>? fetchedMap, CancellationToken ct)
+    {
+        if (documentIds.Count == 0 || yearKeys.Length == 0)
+        {
+            return [];
+        }
+
+        var map = mapFetched
+            ? fetchedMap
+            : (await StaleResultsYear.GetAsync(StaleMap, yearKeys, [null], ct).ConfigureAwait(false))[0];
+
+        var found = new Dictionary<long, DateTime?>();
+        if (map is null)
+        {
+            foreach (var periodKey in yearKeys)
+            {
+                var month = await StaleResultsDirectAsync(documentIds, new PeriodKeyFilter(periodKey), ct).ConfigureAwait(false);
+                StaleResultsYear.Merge(found, month!);
+            }
+
+            return found;
+        }
+
         foreach (var id in documentIds)
         {
             if (map.TryGetValue(id, out var since))

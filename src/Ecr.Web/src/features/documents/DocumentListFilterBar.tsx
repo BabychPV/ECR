@@ -71,11 +71,11 @@ export function DocumentListFilterBar({
   ownerName,
   versionOptions = [],
 }: DocumentListFilterBarProps): JSX.Element {
-  const noPeriod = periodKey === null;
   // ✎ Period clarity: стан — за місяць або за рік; недоступний лише без обох.
-  const noStateScope = noPeriod && year === null;
+  // ✎ g4 (координатор 08.11): те саме для чіпа «Needs recalculation» — за роком він рахує й фільтрує рік.
+  const noStateScope = periodKey === null && year === null;
   // Той самий запит, що в смузі лічильників (`DocumentListSummaryStrip`): один ключ — один мережевий виклик.
-  const summaryStale = useDocumentListSummary(periodKey, undefined, filters.projectId).data?.staleResultsCount;
+  const summaryStale = useDocumentListSummary(periodKey, undefined, filters.projectId, year).data?.staleResultsCount;
   const staleCount = summaryStale === undefined ? undefined : Math.max(summaryStale, staleOnPage);
   // ⛔ Поле показує ВЛАСНЕ значення, а не адресу (`useFieldDraft`), як і `FilterBar`: кероване адресою
   // воно губило літери, бо адреса оновлюється переходом і запізнюється.
@@ -205,15 +205,15 @@ export function DocumentListFilterBar({
 
         {/*
          * ✎ RC14-D: чіп «Needs recalculation (N)» — `resultsStale=true`. Лічильник — `staleResultsCount` зі
-         * зведення (сервер вже виключив проєкти зі звуженим доступом читача). Без періоду вимкнений: застарілість
-         * належить періоду (`ECR-REQ-0422.resultsStaleNeedsPeriod`); активний чіп лишається, поки фільтр у
-         * адресі, щоб його було чим зняти.
+         * зведення (сервер вже виключив проєкти зі звуженим доступом читача). ✎ g4: за роком — зведення РОКУ і
+         * фільтр `resultsStale` з `year` (застарілий хоч в одному періоді року). Без періоду й без року вимкнений
+         * (`ECR-REQ-0422.resultsStaleNeedsPeriod`).
          */}
         <FilterInline>
           <Chip
             size="xs"
             checked={filters.resultsStale}
-            disabled={noPeriod}
+            disabled={noStateScope}
             onChange={(checked) => {
               filters.setResultsStale(checked);
             }}

@@ -133,8 +133,8 @@ interface DocumentListParams {
   /**
    * Лише документи зі застарілими результатами методологій (`resultsStale=true`).
    *
-   * ⛔ Лише разом із `periodKey`: застарілість належить періоду, без нього сервер відповість `422`
-   * (`ECR-REQ-0422.resultsStaleNeedsPeriod`).
+   * ⛔ Лише разом із `periodKey` або (✎ g4) `year` — тоді застарілий хоч в одному періоді року; без обох сервер
+   * відповість `422` (`ECR-REQ-0422.resultsStaleNeedsPeriod`).
    */
   resultsStale?: boolean;
   /** Підрядок ключа чи назви документа (`UI-18`); порожній — без пошуку. */
