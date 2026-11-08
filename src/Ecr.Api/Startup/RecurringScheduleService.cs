@@ -87,6 +87,12 @@ public sealed partial class RecurringScheduleService(
     public const string HourlyCron = "0 5 * * * ?";
 
     /// <summary>
+    /// Cron стану періодів: кожні 10 хв (хх:02, хх:12, …), не збігається з погодинними хх:05.
+    /// Слово людини 08.11: «це завдання має спрацьовуватти частіше раз в 10 хв».
+    /// </summary>
+    public const string TenMinuteCron = "0 2/10 * * * ?";
+
+    /// <summary>
     /// Стеля розкладів збору.
     /// </summary>
     /// <remarks>
@@ -392,7 +398,7 @@ public sealed partial class RecurringScheduleService(
             .ConfigureAwait(false);
 
         await scheduler
-            .ScheduleAsync<Infrastructure.Jobs.PeriodStateJob>(HourlyCron, null, CancellationToken.None)
+            .ScheduleAsync<Infrastructure.Jobs.PeriodStateJob>(TenMinuteCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
         // ⛔ І ОДИН РАЗ ОДРАЗУ. Стан періоду — функція від дати, а не подія:

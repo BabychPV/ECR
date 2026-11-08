@@ -517,7 +517,8 @@ Server Agent ідуть за локальним часом сервера SQL. �
 | Коли | Задачі |
 |---|---|
 | щоночі 02:15 | `PartitionCheckJob`, `ConsistencyCheckJob`, `OrphanScanJob`, `ReportRetentionJob`, `ReportSnapshotFormatJob`, `SubmissionSnapshotRetentionJob` (AN-134, за замовчуванням лише dry-run), `SupersededResultsSweepJob` (Q-17, вимкнено за замовчуванням) |
-| щогодини, хх:05 | `PeriodStateJob` (також один раз на старті), `NotificationJob`, `RowWindowRefetchJob` (повторне підтягування вікон рядків за пізніми даними PI) |
+| кожні 10 хв, хх:02/12/… | `PeriodStateJob` (також один раз на старті) |
+| щогодини, хх:05 | `NotificationJob`, `RowWindowRefetchJob` (повторне підтягування вікон рядків за пізніми даними PI) |
 | щоночі 03:30 | нічний перерахунок, лише якщо `Jobs:NightlyRecalculation:Enabled=true` |
 | за cron розкладу сутності | збір даних (`ext.CollectionSchedule`, по одному розкладу на сутність джерела; формат і залежності — `admin-guide.md` §5.1–5.2) |
 | щохвилини / щогодини | прибирання покинутих задач і прогонів збору (`AbandonedWorkSweeper`) / видалення завершених записів `itg.JobProgress` (ретенція) — цикл `RecurringScheduleService`, не Quartz |
