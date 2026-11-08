@@ -62,8 +62,8 @@ export interface DocumentListFilters {
   /**
    * Лише документи зі застарілими результатами методологій («Needs recalculation»).
    *
-   * ⛔ Як і `state`, `false` без періоду, хоч би що стояло в адресі: застарілість належить періоду, і сервер
-   * відповів би `422`.
+   * ⛔ Як і `state`, `false` без періоду й без року, хоч би що стояло в адресі: сервер відповів би `422`.
+   * ✎ g4: за роком — застарілий хоч в одному періоді року.
    */
   readonly resultsStale: boolean;
 
@@ -133,7 +133,8 @@ export function useDocumentListFilters(periodKey: number | null, year: number | 
   const owner = parseOwnerFilter(rawOwner);
   const mine = owner === null && rawMine === 'true';
   const hasLateEdits = rawHasLateEdits === 'true';
-  const resultsStale = periodKey !== null && rawResultsStale === 'true';
+  // ✎ g4 (координатор 08.11): застарілість визначена і за РІК (сервер: застарілий хоч в одному періоді року).
+  const resultsStale = (periodKey !== null || year !== null) && rawResultsStale === 'true';
   const q = rawQ ?? '';
   const parsedProject = rawProjectId === null ? Number.NaN : Number(rawProjectId);
   const projectId = Number.isInteger(parsedProject) && parsedProject > 0 ? parsedProject : null;

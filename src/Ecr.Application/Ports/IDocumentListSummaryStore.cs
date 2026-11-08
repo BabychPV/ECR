@@ -38,10 +38,14 @@ public interface IDocumentListSummaryStore
     /// <param name="year">Рік.</param>
     /// <param name="visibleProjectIds">Межа грантів, як у <see cref="SummarizeAsync"/>.</param>
     /// <param name="restrictions">Обмеження читача, як у <see cref="SummarizeAsync"/>.</param>
+    /// <param name="currentUserId">
+    /// ✎ g4: користувач для <c>StaleResultsMineCount</c> року (застарілі його правками хоч в одному періоді року);
+    /// <c>null</c> — «моїх» немає.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     public Task<DocumentListSummaryResponse> SummarizeYearAsync(
         int? projectId, int year, IReadOnlyCollection<int>? visibleProjectIds,
-        SummaryRestrictions? restrictions, CancellationToken ct);
+        SummaryRestrictions? restrictions, int? currentUserId, CancellationToken ct);
 
     /// <summary>По одному документу кожного з проєктів — щоб побудувати межі читання проєкту.</summary>
     /// <param name="projectIds">Проєкти.</param>
