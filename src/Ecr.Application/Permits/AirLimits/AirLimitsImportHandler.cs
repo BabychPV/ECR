@@ -44,8 +44,10 @@ public sealed class AirLimitsImportHandler(
         var tables = await accessor.Data.TablesAsync(ct).ConfigureAwait(false);
         var (spec, code) = await SpecAsync(options, tables, ct).ConfigureAwait(false);
         // The analysis keeps the user's field names (the wizard matches findings by them); it only reports the unbound ones.
-        var unsaved = AirLimitsSchema.BindFields(spec, tables.Sources, tables.Substances).Unsaved;
-        return new AirLimitsAnalysisDto(code, await importer.AnalyseAsync(file, spec, ct).ConfigureAwait(false), unsaved);
+        var (bound, unsaved) = AirLimitsSchema.BindFields(spec, tables.Sources, tables.Substances);
+        // ✎ Pass 3b (P2-1): a file column named like an added column is read into it, so it is mapped, not «unmapped».
+        var read = spec.WithFields(spec.Fields, bound.ByHeaderName);
+        return new AirLimitsAnalysisDto(code, await importer.AnalyseAsync(file, read, ct).ConfigureAwait(false), unsaved);
     }
 
     /// <summary>Preview: nothing is written. Permission <c>Registry.EditData</c> on the permit's tables.</summary>

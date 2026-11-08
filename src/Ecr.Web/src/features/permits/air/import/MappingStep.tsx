@@ -1,5 +1,6 @@
 import { useId, useRef, useState, type JSX } from 'react';
 import { Button, Checkbox, Select, Text, TextInput } from '@mantine/core';
+import { serverMessage } from '@/features/registries/rc816/serverMessage';
 import { formatNumber } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
@@ -12,6 +13,7 @@ import {
   profileCodeFrom,
   profileCodeProblem,
   specFields,
+  sortIssues,
   specProblem,
   textToPatterns,
   withField,
@@ -347,6 +349,13 @@ function FieldEditor({
   );
 }
 
+/** Why no source row was read: the first error (errors first, a summary without a row before the per-row ones). */
+function noRowsReason(issues: AirAnalysis['analysis']['issues']): string {
+  const first = sortIssues(issues).find((issue) => issue.severity === 'Error');
+
+  return first === undefined ? t('permits.air.import.noRows.unknown') : serverMessage(first.messageKey, first.args ?? {});
+}
+
 function levelLabel(level: string): string {
   if (level === 'Parent') return t('permits.air.import.map.level.parent');
   if (level === 'Child') return t('permits.air.import.map.level.child');
@@ -424,6 +433,19 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
           <b>{formatNumber(body.stats.distinctChildKeys)}</b>
         </div>
       </div>
+      {header !== null && body.stats.parents === 0 && (
+        // Pass 3b (UAT P2-2): «0 / 0» with every column resolved said nothing; the first blocking finding says what to fix.
+        <Banner
+          tone="danger"
+          testId="air-no-rows-reason"
+          title={t('permits.air.import.noRows.title', {
+            sheet: body.sheetName,
+            from: formatNumber(header.headerFromRow),
+            to: formatNumber(header.headerToRow),
+          })}
+          text={noRowsReason(body.issues)}
+        />
+      )}
 
       <div className="pi-panel">
         <div className="pa-scroll" role="region" aria-label={t('permits.air.import.map.mappedAria')} tabIndex={0}>

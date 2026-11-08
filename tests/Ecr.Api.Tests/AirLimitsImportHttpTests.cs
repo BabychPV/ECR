@@ -643,6 +643,47 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
             StringComparison.Ordinal));
     }
 
+    /// <remarks>
+    /// Pass 3b (UAT P2-1): after «Add as new column» created «Цех» (<c>FILE_B</c>), a re-import of the same file with the built-in
+    /// profile listed column B again under «Unmapped columns … Add as new column». Now a file column whose whole header equals an
+    /// added column's display name is read into it: the analysis maps B to the column, the apply stores the values.
+    /// Red without the fix: B is in <c>unmapped</c> and the card has no value for the column.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task AddedColumns__a_file_column_named_like_an_added_column_is_mapped_to_it_without_a_profile_field()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+        var stamp = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var workshop = $"FILE_B_{stamp}";
+        var title = $"Цех {stamp}";
+        await AddColumnAsync(app, client, AirLimitsSchema.SourcesTable, workshop, "String", title);
+        var bytes = WithWorkshops(header: $" {title.ToLowerInvariant()} ");
+
+        var analysis = await ReadAsync(app, await PostFileAsync(client, "/api/v1/air-limits/import/analyse", bytes, new { }));
+        var header = analysis.GetProperty("analysis").GetProperty("header");
+        Assert.True(
+            header.GetProperty("mapped").EnumerateArray().Any(m => m.GetProperty("field").GetString() == workshop && m.GetProperty("columnLetter").GetString() == "B"),
+            header.GetRawText());
+        Assert.DoesNotContain(header.GetProperty("unmapped").EnumerateArray(), u => u.GetProperty("columnLetter").GetString() == "B");
+        Assert.Empty(analysis.GetProperty("unsavedFields").EnumerateArray());
+
+        var region = NewRegion();
+        var permitId = await NewPermitAsync(client, app);
+        var resolutions = await ResolveAllAsync(app, client, permitId, region);
+        await ApplyBytesAsync(app, client, permitId, bytes, new { region, area = "OFFSHORE", resolutions });
+
+        var sources = (await CardAsync(app, client, permitId)).GetProperty("sources").EnumerateArray().ToList();
+        Assert.Equal(373, sources.Count);
+        Assert.All(sources, s => Assert.StartsWith(
+            "WS-",
+            s.GetProperty("added").TryGetProperty(workshop, out var v) ? v.GetString() : null,
+            StringComparison.Ordinal));
+    }
+
     /// <summary>ERA table 3.3 with two extra profile fields: column B → a source field, column AB (integer) → a substance field.</summary>
     private static JsonElement AddedColumnsSpec(string parentField, string childField)
     {
@@ -670,11 +711,16 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
     }
 
     /// <summary>The synthetic workbook with column B («Цех», empty in the form) filled on every source row (the NAE number sits in G).</summary>
-    private static byte[] WithWorkshops()
+    private static byte[] WithWorkshops(string? header = null)
     {
         using var input = new MemoryStream(Synthetic.Bytes);
         using var book = new ClosedXML.Excel.XLWorkbook(input);
         var sheet = book.Worksheets.First();
+        if (header is not null)
+        {
+            sheet.Cell("B4").Value = header;
+        }
+
         foreach (var row in sheet.RowsUsed().Where(r => r.RowNumber() > 7 && !r.Cell("G").IsEmpty()))
         {
             row.Cell("B").Value = "WS-" + row.Cell("G").GetFormattedString();

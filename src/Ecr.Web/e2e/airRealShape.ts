@@ -64,9 +64,15 @@ export const RealShapeSources: readonly RealShapeSource[] = [
   { nae: '0003', name: 'UNIT E2E-003. Резервуар (e2e)', workshop: 'Цех 2', height: 4, substances: [['0301', 'Азота диоксид (e2e)', 0.1, 0.4], ['0330', 'Сера диоксид (e2e)', 0.2, 0.5], ['0337', 'Углерод оксид (e2e)', 0.3, 0.6]] },
 ];
 
-/** The workbook: source columns A…V merged down over each source's substance rows, as in the real form. */
-export function realShapeWorkbook(sources: readonly RealShapeSource[]): Buffer {
+/**
+ * The workbook: source columns A…V merged down over each source's substance rows, as in the real form. `workshopHeader` —
+ * another header text of column B (row 4) instead of «Цех», so a test can name an added column after it without the others
+ * matching it (pass 3b).
+ */
+export function realShapeWorkbook(sources: readonly RealShapeSource[], workshopHeader?: string): Buffer {
   const rows: Cell[][] = Title.map((r) => [...r]);
+  const header = rows[3];
+  if (workshopHeader !== undefined && header !== undefined) header[1] = workshopHeader; // B4
   const merges = [...Merges, 'A8:AB8'];
 
   for (const source of sources) {

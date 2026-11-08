@@ -172,6 +172,66 @@ describe('Air pass3: a field that matches no table column', () => {
   });
 });
 
+/*
+ * Pass 3b (UAT 08.11, P2-2 and P3). Red without the fix (reverted in the worktree, nothing committed): `MappingStep` without
+ * the `air-no-rows-reason` banner — the first two tests are red; `stepHint` without `profileSaved` — the last one is red.
+ */
+describe('Air pass3b: no source rows and the subtitle after a save', () => {
+  const zero = { parents: 0, children: 0, distinctChildKeys: 0, groupRows: 0, skippedRows: 0 };
+
+  it('0 sources with a blocking finding: the banner names the sheet, the header rows and the finding', async () => {
+    const claimed = {
+      severity: 'Error' as const,
+      messageKey: 'err.ECR-IMP-0422.regColumnClaimed',
+      row: null,
+      column: 'F',
+      field: 'test',
+      args: { column: 'F', other: 'emissionPointName', field: 'test' },
+    };
+    api.analyseAirImport.mockResolvedValue(analysis({ stats: zero, canContinue: false, issues: [claimed] }));
+    await toFile();
+    fireEvent.click(button('permits.air.import.analyse'));
+    const banner = await screen.findByTestId('air-no-rows-reason');
+    expect(within(banner).getByText(fill('permits.air.import.noRows.title', { sheet: 'Sheet1', from: '4', to: '6' }))).toBeTruthy();
+    expect(within(banner).getByText(fill('err.ECR-IMP-0422.regColumnClaimed', claimed.args))).toBeTruthy();
+  });
+
+  it('0 sources: the summary without a row comes before the per-row findings', async () => {
+    const perRow = { severity: 'Error' as const, messageKey: 'err.ECR-IMP-0422.regChildWithoutParent', row: 8, column: 'W', field: 'substanceCode', args: { row: '8' } };
+    const summary = {
+      severity: 'Error' as const,
+      messageKey: 'err.ECR-IMP-0422.regNoParentRows',
+      row: null,
+      column: 'V',
+      field: 'naeCode',
+      args: { from: '4', to: '6', data: '8', column: 'V', field: 'naeCode' },
+    };
+    api.analyseAirImport.mockResolvedValue(analysis({ stats: zero, canContinue: false, issues: [perRow, summary] }));
+    await toFile();
+    fireEvent.click(button('permits.air.import.analyse'));
+    const banner = await screen.findByTestId('air-no-rows-reason');
+    expect(within(banner).getByText(fill('err.ECR-IMP-0422.regNoParentRows', summary.args))).toBeTruthy();
+  });
+
+  it('after «Save as profile» the subtitle says the profile is saved and the data is not imported yet', async () => {
+    api.saveImportProfile.mockResolvedValue({ ...mineProfile(), code: 'TEST2', rowVersion: 'rv-2' });
+    await toFile();
+    fireEvent.click(button('permits.air.import.analyse'));
+    await screen.findByTestId('air-header-report');
+    expect(screen.getByText(text('permits.air.import.hint.mapping'))).toBeTruthy();
+    expect(screen.queryByTestId('air-no-rows-reason')).toBeNull();
+
+    fireEvent.click(button('permits.air.import.map.saveProfile'));
+    await userEvent.type(screen.getByRole('textbox', { name: new RegExp(`^${text('permits.air.import.save.name')}`) }), 'test2');
+    const code = screen.getByRole('textbox', { name: new RegExp(`^${text('permits.air.import.save.code')}`) });
+    await userEvent.clear(code);
+    await userEvent.type(code, 'TEST2');
+    fireEvent.click(button('permits.air.import.save.submit'));
+    expect(await screen.findByText(text('permits.air.import.hint.mappingSaved'))).toBeTruthy();
+    expect(screen.queryByText(text('permits.air.import.hint.mapping'))).toBeNull();
+  });
+});
+
 describe('Air pass3 hand pass: the File step', () => {
   it('«Choose a workbook» shown after Next without a file goes away once a workbook is chosen', async () => {
     mount();

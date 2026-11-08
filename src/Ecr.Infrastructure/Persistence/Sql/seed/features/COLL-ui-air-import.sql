@@ -428,7 +428,13 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.air.import.unsaved.title', N'ru', N'Часть значений не будет сохранена'),
     (N'permits.air.import.unsaved.title', N'kz', N'Мәндердің бір бөлігі сақталмайды'),
     (N'permits.air.import.unsaved.text', N'ru', N'Этим полям не соответствует ни одна колонка таблицы, их значения читаются, но не сохраняются: {fields}. Назовите поле как колонку таблицы (её код или название) или добавьте колонку («Добавить как новую колонку»).'),
-    (N'permits.air.import.unsaved.text', N'kz', N'Бұл өрістерге кестенің ешбір бағаны сәйкес келмейді, олардың мәндері оқылады, бірақ сақталмайды: {fields}. Өрісті кесте бағанының атымен (коды немесе атауы) атаңыз немесе бағанды қосыңыз («Жаңа баған ретінде қосу»).')
+    (N'permits.air.import.unsaved.text', N'kz', N'Бұл өрістерге кестенің ешбір бағаны сәйкес келмейді, олардың мәндері оқылады, бірақ сақталмайды: {fields}. Өрісті кесте бағанының атымен (коды немесе атауы) атаңыз немесе бағанды қосыңыз («Жаңа баған ретінде қосу»).'),
+    (N'permits.air.import.hint.mappingSaved', N'ru', N'Профиль сохранён; данные разрешения ещё не импортированы.'),
+    (N'permits.air.import.hint.mappingSaved', N'kz', N'Профиль сақталды; рұқсат деректері әлі импортталған жоқ.'),
+    (N'permits.air.import.noRows.title', N'ru', N'Не прочитано ни одного источника (лист «{sheet}», строки заголовка {from}–{to})'),
+    (N'permits.air.import.noRows.title', N'kz', N'Бірде-бір көз оқылмады («{sheet}» парағы, тақырып жолдары {from}–{to})'),
+    (N'permits.air.import.noRows.unknown', N'ru', N'Проверьте строки заголовка и столбец НАЕ в сопоставлении и перечитайте файл.'),
+    (N'permits.air.import.noRows.unknown', N'kz', N'Сәйкестендірудегі тақырып жолдары мен НАЕ бағанын тексеріп, файлды қайта оқыңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -649,7 +655,10 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'permits.air.import.save.resaveTitle', N'en', N'Overwrite profile {code}?', 1),
     (N'permits.air.import.save.resaveText', N'en', N'The profile''s mapping is replaced with the current one for everyone who uses it.', 1),
     (N'permits.air.import.unsaved.title', N'en', N'Some values will not be saved', 1),
-    (N'permits.air.import.unsaved.text', N'en', N'No column of the table matches these fields, so their values are read but not saved: {fields}. Name the field after a table column (its code or its name), or add the column ("Add as new column").', 1)
+    (N'permits.air.import.unsaved.text', N'en', N'No column of the table matches these fields, so their values are read but not saved: {fields}. Name the field after a table column (its code or its name), or add the column ("Add as new column").', 1),
+    (N'permits.air.import.hint.mappingSaved', N'en', N'The profile is saved; the permit''s data is not imported yet.', 1),
+    (N'permits.air.import.noRows.title', N'en', N'No source was read (sheet "{sheet}", header rows {from}–{to})', 1),
+    (N'permits.air.import.noRows.unknown', N'en', N'Check the header rows and the NAE column of the mapping, then read the file again.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

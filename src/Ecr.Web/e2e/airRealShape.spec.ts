@@ -501,4 +501,93 @@ test.describe('Air real shape', () => {
     await page.getByRole('button', { name: /Next: analyse file/ }).click();
     await expect(page.getByRole('heading', { name: 'Mapping', level: 2 })).toBeVisible({ timeout: 30_000 });
   });
+
+  async function dropProfile(code: string): Promise<void> {
+    const current = await ok<{ rowVersion: string }>(await admin.get(`/api/v1/air-limits/import-profiles/${code}`), `profile ${code}`);
+    await ok(await admin.delete(`/api/v1/air-limits/import-profiles/${code}?rowVersion=${encodeURIComponent(current.rowVersion)}`), `delete ${code}`);
+  }
+
+  /**
+   * UAT pass 3b (P2-1): after «Add as new column» made a column for file column B, a new import of the same file listed B again
+   * under «Unmapped columns … Add as new column». A file column whose whole header equals the column's name is now read into it.
+   * The header is unique to this run, so the other tests (which add «Цех (e2e)» for the header «Цех») are not affected.
+   */
+  test('Air pass3b: a re-import matches file column B to the column added for it, by its name', async ({ page }) => {
+    const name = `Цех 3b ${Stamp}`;
+    const file = realShapeWorkbook(RealShapeSources, name);
+    await signIn(page);
+    await toMapping(page, file);
+    await page.getByText(/^Unmapped columns:/).click();
+    await page.getByRole('button', { name: 'Add file column B as a new column' }).click();
+    await expect(page.getByRole('textbox', { name: 'Column name' })).toHaveValue(name);
+    await page.getByRole('button', { name: 'Add column', exact: true }).click();
+    await expect(page.getByText(`Column «${name}» added. The file was re-read with it.`)).toBeVisible({ timeout: 60_000 });
+
+    // A new import of the same file with the built-in profile: B is matched to the column by its name; nothing to add again.
+    await toMapping(page, file);
+    await expect(page.getByRole('region', { name: 'Matched columns' }).getByRole('rowheader', { name, exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Add file column B as a new column' })).toHaveCount(0);
+  });
+
+  /**
+   * UAT pass 3b (P2-2, the human's profile TEST2): a field «test» with the SAME header as «emissionPointName» (column F). Required:
+   * no source is read, and the banner says why (the sheet, the header rows and the finding). Optional: the sources are read and
+   * the finding is only a warning on the field — before, either way gave «0 / 0» with no reason.
+   */
+  test('Air pass3b: a profile with a field on a column another field reads says why no source is read', async ({ page }) => {
+    const builtIn = await ok<{ spec: { fields: Record<string, unknown>[] } }>(
+      await admin.get('/api/v1/air-limits/import-profiles/ERA_TABLE_33'),
+      'built-in profile',
+    );
+    const patterns = builtIn.spec.fields.find((field) => field['name'] === 'emissionPointName')?.['patterns'];
+    const blocking = `P3BREQ_${Stamp}`;
+    const optional = `P3BOPT_${Stamp}`;
+    for (const [code, required] of [[blocking, true], [optional, false]] as const) {
+      const spec = { ...builtIn.spec, fields: [...builtIn.spec.fields, { name: 'test', level: 'parent', patterns, required }] };
+      await ok(
+        await admin.put(`/api/v1/air-limits/import-profiles/${code}`, { data: { nameL10n: { en: `Pass3b ${code}` }, spec, rowVersion: null } }),
+        `profile ${code}`,
+      );
+    }
+    const claimed = 'Column F is already used by "emissionPointName" and cannot also be "test".';
+
+    await signIn(page);
+    await toFile(page, realShapeWorkbook(RealShapeSources));
+    await chooseProfile(page, `Pass3b ${blocking} (${blocking})`);
+    await page.getByRole('button', { name: /Next: analyse file/ }).click();
+    const reason = page.getByTestId('air-no-rows-reason');
+    await expect(reason).toContainText('No source was read (sheet', { timeout: 30_000 });
+    await expect(reason).toContainText('header rows 4–6');
+    await expect(reason).toContainText(claimed);
+
+    await page.getByRole('list', { name: 'Import steps' }).getByRole('button', { name: '2 File' }).click();
+    await chooseProfile(page, `Pass3b ${optional} (${optional})`);
+    await page.getByRole('button', { name: /Next: analyse file/ }).click();
+    await expect(page.getByRole('heading', { name: 'Mapping', level: 2 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(claimed)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('air-no-rows-reason')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Next: preview/ })).toBeEnabled();
+
+    await dropProfile(blocking);
+    await dropProfile(optional);
+  });
+
+  /** UAT pass 3b (P3): «Nothing is saved yet» stayed next to «Profile … saved and selected». */
+  test('Air pass3b: after a profile is saved the Mapping subtitle says the data is not imported yet', async ({ page }) => {
+    const code = `P3BSAVE_${Stamp}`;
+    await signIn(page);
+    await toMapping(page, realShapeWorkbook(RealShapeSources));
+    const before = 'Check how the columns of the file are matched to fields. Nothing is saved yet.';
+    await expect(page.getByText(before, { exact: true })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Save as profile…' }).click();
+    await page.getByRole('textbox', { name: /^Profile name/ }).fill('Pass3b save e2e');
+    await page.getByRole('textbox', { name: /^Profile code/ }).fill(code);
+    await page.getByRole('button', { name: 'Save profile', exact: true }).click();
+    await expect(page.getByText(`Profile ${code} saved and selected.`)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("The profile is saved; the permit's data is not imported yet.", { exact: true })).toBeVisible();
+    await expect(page.getByText(before, { exact: true })).toHaveCount(0);
+
+    await dropProfile(code);
+  });
 });

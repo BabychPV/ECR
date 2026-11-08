@@ -80,14 +80,15 @@ function stepLabel(step: ImportStep): string {
   }
 }
 
-function stepHint(step: ImportStep): string {
+/** `profileSaved` — a profile was saved on this step (UAT P3: «Nothing is saved yet» next to «Profile … saved» was untrue). */
+function stepHint(step: ImportStep, profileSaved: boolean): string {
   switch (step) {
     case 'scope':
       return t('permits.air.import.hint.scope');
     case 'file':
       return t('permits.air.import.hint.file');
     case 'mapping':
-      return t('permits.air.import.hint.mapping');
+      return profileSaved ? t('permits.air.import.hint.mappingSaved') : t('permits.air.import.hint.mapping');
     case 'preview':
       return t('permits.air.import.hint.preview');
     case 'apply':
@@ -410,7 +411,7 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           {stepLabel(step)}
         </Title>
         <Text size="sm" c="dimmed">
-          {stepHint(step)}
+          {stepHint(step, savedCode !== null)}
         </Text>
       </div>
       {failure !== null && sendFailure === null && <ErrorAlert error={failure} />}

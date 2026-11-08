@@ -212,6 +212,98 @@ public sealed class RegistryImportParserTests
         Assert.Contains(Parse(TwoSources(), spec).Issues, i => i.MessageKey == RegistryImportKeys.ColumnClaimed && i.Field == "twin");
     }
 
+    /// <remarks>
+    /// Pass 3b (UAT P2-2, the live profile TEST2): the built-in fields plus an optional field «test» with the SAME header pattern
+    /// as <c>emissionPointName</c> (column F). The claimed column was an error that ended the parse before any row: «NAE in file 0
+    /// / Substance rows 0». Now the optional field is a warning on the field and the rows are read; a required one still blocks.
+    /// Red without the fix: severity Error → 0 parents.
+    /// </remarks>
+    [Fact]
+    public void An_optional_field_on_a_column_another_field_reads_is_a_warning_on_the_field_and_the_rows_are_read()
+    {
+        var point = Era.Fields.Single(f => f.Name == "emissionPointName");
+        RegistryImportSpec Twin(bool required) => new RegistryImportSpec
+        {
+            GroupRows = Era.GroupRows,
+            ParentKeyField = Era.ParentKeyField,
+            ChildKeyField = Era.ChildKeyField,
+            Fields = [.. Era.Fields, new ImportFieldSpec { Name = "test", Level = ImportLevel.Parent, Patterns = point.Patterns, Required = required }],
+        }.Validated();
+
+        var optional = Parse(TwoSources(), Twin(required: false));
+        var issue = Assert.Single(optional.Issues, i => i.MessageKey == RegistryImportKeys.ColumnClaimed);
+        Assert.Equal((ImportSeverity.Warning, "test", "F", "emissionPointName"), (issue.Severity, issue.Field, issue.Column, issue.Args!["other"]));
+        Assert.False(optional.HasErrors);
+        Assert.Equal(3, optional.Stats.Parents);
+
+        var required = Parse(TwoSources(), Twin(required: true));
+        Assert.Contains(required.Issues, i => i.Severity == ImportSeverity.Error && i.MessageKey == RegistryImportKeys.ColumnClaimed);
+        Assert.Empty(required.Parents);
+    }
+
+    /// <remarks>
+    /// Pass 3b (UAT P2-2): rows under the header but none with a key used to end as nothing at all, or as «The file has no data
+    /// rows». The finding now names the header rows, the data row and the key column. Red without the fix: <c>regNoRows</c>.
+    /// </remarks>
+    [Fact]
+    public void Rows_without_any_parent_key_name_the_header_rows_and_the_key_column()
+    {
+        var spec = new RegistryImportSpec
+        {
+            GroupRows = Era.GroupRows,
+            ParentKeyField = Era.ParentKeyField,
+            ChildKeyField = Era.ChildKeyField,
+            Fields = [.. Era.Fields.Where(f => f.Name != "naeCode"), new ImportFieldSpec
+            {
+                // The key read from the empty column V: every data row has content, none has a key.
+                Name = "naeCode", Level = ImportLevel.Parent, Column = "V", Required = true, Parser = ImportParser.Code, Reference = "nae",
+            }],
+        }.Validated();
+
+        var parsed = Parse(TwoSources(), spec);
+
+        Assert.Empty(parsed.Parents);
+        // Next to the per-row «substance without a source» findings the rows caused, and without a row: it sorts first.
+        Assert.Contains(parsed.Issues, i => i.MessageKey == RegistryImportKeys.ChildWithoutParent);
+        var issue = Assert.Single(parsed.Issues, i => i.MessageKey == RegistryImportKeys.NoParentRows);
+        Assert.Equal((ImportSeverity.Error, "V", "naeCode", (int?)null), (issue.Severity, issue.Column, issue.Field, issue.Row));
+        Assert.Equal(("4", "6", "8", "V"), (issue.Args!["from"], issue.Args["to"], issue.Args["data"], issue.Args["column"]));
+    }
+
+    /// <remarks>
+    /// Pass 3b (UAT P2-1): a column added to the table earlier («Цех», <c>FILE_B</c>) is offered by its name; the file column whose
+    /// whole header is «Цех» is read into it and is no longer «unmapped». A header that only CONTAINS the name is not taken.
+    /// Red without the fix: B stays in <c>Unmapped</c> and the value is not read.
+    /// </remarks>
+    [Fact]
+    public void A_column_whose_whole_header_equals_an_offered_name_is_read_into_that_field()
+    {
+        var era = TwoSources();
+        era.Grid.Set(4, 2, "  цех ");
+        for (var r = 8; r <= era.Grid.RowCount; r++)
+        {
+            if (!ImportText.IsEmpty(era.Grid.Get(r, 7).Value))
+            {
+                era.Grid.Set(r, 2, "WS-" + ImportText.AsText(era.Grid.Get(r, 7).Value));
+            }
+        }
+
+        var spec = Era.WithFields(
+            Era.Fields,
+            [
+                new HeaderNamedField(new ImportFieldSpec { Name = "FILE_B", Level = ImportLevel.Parent }, ["Workshop", "Цех"]),
+                new HeaderNamedField(new ImportFieldSpec { Name = "FILE_X", Level = ImportLevel.Parent }, ["Код"]),
+            ]);
+
+        var parsed = Parse(era, spec);
+
+        Assert.False(parsed.HasErrors, string.Join("; ", parsed.Issues.Select(i => i.MessageKey + " " + i.Field)));
+        Assert.Equal("B", Assert.Single(parsed.Header!.Mapped, m => m.Field == "FILE_B").ColumnLetter);
+        Assert.DoesNotContain(parsed.Header.Unmapped, u => u.ColumnLetter == "B");
+        Assert.DoesNotContain(parsed.Header.Mapped, m => m.Field == "FILE_X");
+        Assert.All(parsed.Parents, p => Assert.StartsWith("WS-", (string?)p.Values["FILE_B"], StringComparison.Ordinal));
+    }
+
     [Fact]
     public void An_explicit_column_bypasses_header_matching()
     {
