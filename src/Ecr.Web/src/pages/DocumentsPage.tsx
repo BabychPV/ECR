@@ -86,6 +86,11 @@ const ProjectRecalculateAction = lazy(async () => ({
   default: (await import('@/features/documents/ProjectRecalculateAction')).ProjectRecalculateAction,
 }));
 
+/** ✎ UAT recalc-progress (08.11): прогрес перерахунку проєкту з сервера — окремим чанком (`D-132`). */
+const ProjectRecalcBanner = lazy(async () => ({
+  default: (await import('@/features/recalc/ProjectRecalcBanner')).ProjectRecalcBanner,
+}));
+
 /**
  * Перелік документів.
  *
@@ -356,6 +361,11 @@ export function DocumentsPage(): JSX.Element {
           межею кожен клік знімав би її разом із фокусом на час запиту, а
           порожній результат — ховав би кнопку, якою фільтр і знімають.
           ⚠ І в ТОМУ САМОМУ ряду, що й фільтри (рішення людини 2026-10-06). */}
+      {/* ✎ UAT recalc-progress (a2): після повернення на перелік прогрес перерахунку відновлюється з сервера. */}
+      <Suspense fallback={null}>
+        <ProjectRecalcBanner projectId={filters.projectId} />
+      </Suspense>
+
       <Text size="sm" mb="xs" data-documents-year-note="">
         {t('documents.oneDocumentNote')}
       </Text>
