@@ -1,7 +1,7 @@
 import type { JSX } from 'react';
 import { Group, Text, UnstyledButton } from '@mantine/core';
 import { useDocumentListSummary, type DocumentStateFilter } from '@/features/documents/api';
-import { formatNumber } from '@/shared/format';
+import { formatNumber, formatPeriodKey } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { FilterInline } from '@/shared/ui/FilterBar';
 import { statusKey, statusTone, toneFills, type StatusTone } from '@/shared/ui/StatusBadge';
@@ -60,6 +60,18 @@ interface Counter {
  * фільтрувати — стан поза періодом не визначений (`D-93`), — тож перевірка
  * `periodKey` стоїть тут явно, а не лише в `enabled` запиту.
  */
+/**
+ * ✎ UAT-p3 №3: підпис області лічильників — рік («Year 2026») або місяць («March 2026») і проєкти (обраний чи всі
+ * видимі). Рік має перевагу — тим самим правилом, що й запит `useDocumentListSummary`.
+ */
+export function summaryScopeLabel(periodKey: number | null, year: number | null, projectId: number | null): string {
+  const period =
+    year !== null ? t('documents.summaryScopeYear', { year: String(year) }) : formatPeriodKey(periodKey ?? 0) || String(periodKey);
+  const projects = projectId === null ? t('documents.summaryScopeAllProjects') : t('documents.summaryScopeOneProject');
+
+  return t('documents.summaryScope', { period, projects });
+}
+
 export function DocumentListSummaryStrip({
   periodKey,
   year = null,
@@ -133,6 +145,10 @@ export function DocumentListSummaryStrip({
 
   return (
     <FilterInline gap="lg" role="group" aria-label={t('documents.summaryLabel')} data-summary-strip="">
+      {/* ✎ UAT-p3 №3: за який період і які проєкти пораховано — інакше числа «суперечать» огляду кампанії. */}
+      <Text span size="xs" c="dimmed" data-summary-scope="">
+        {summaryScopeLabel(periodKey, year, filters.projectId ?? null)}
+      </Text>
       {counters.map((counter) => {
         const pressed = counter.state !== null && counter.state === active;
 
