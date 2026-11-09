@@ -327,12 +327,14 @@ public sealed partial class PatchCellsHandler
 
         await EnsureWorkbookReferencesAsync(active, previous, Bounds, ct).ConfigureAwait(false);
 
-        // ✎ Feature (j) j3: a workbook value into a month the row shares between two permits — the same refusal as the
-        // grid (ECR-CELL-4225); the import must not bypass the split (coordinator 09.11).
+        // ✎ Rule (h) and feature (j) j3: an imported value counts like an entered one — the workbook path runs the same
+        // permit checks as the grid write: months the permit (history-aware) does not cover are refused (ECR-CELL-4223
+        // permitNotCoveringMonths), and a month the row shares between two permits must be split (ECR-CELL-4225).
         foreach (var item in active)
         {
             await BlamedAsync(item.Id, async () =>
                 {
+                    await EnsurePermitValidityCoversDataAsync(item.Context, item.Planned, previous, ct).ConfigureAwait(false);
                     await EnsureSharedMonthsAreSplitAsync(item.Context, item.Planned, previous, item.Request.Origin, ct)
                         .ConfigureAwait(false);
                     return true;

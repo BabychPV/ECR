@@ -33,6 +33,39 @@ public sealed partial class DocumentPermitHistoryTests
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.OK, (await AddRowAsync(client, s, s.MidJanId, "2026-01-15").ConfigureAwait(true)).StatusCode);
 
+        var (status, body) = await ImportAsync(app, client, s).ConfigureAwait(true);
+
+        Assert.True(status == HttpStatusCode.UnprocessableEntity, $"apply: {status}\n{body}\n{app.ErrorsText}");
+        Assert.Equal("ECR-CELL-4225", JsonDocument.Parse(body).RootElement.GetProperty("errorCode").GetString());
+        Assert.Equal(12m, await CellAsync(s).ConfigureAwait(true));
+    }
+
+    /// <summary>
+    /// Rule (h) through Excel import (coordinator 09.11: «entered/imported values count»): the row's permit FEB is valid
+    /// from 01.02, the workbook writes January — refused exactly like the grid write (ECR-CELL-4223 permitNotCoveringMonths).
+    /// Red before: the workbook path never ran the rule — apply 200, 30 stored.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "ACC-1108-h3")]
+    public async Task Excel_import_into_a_month_the_permit_does_not_cover_is_refused_like_the_grid()
+    {
+        var s = await ArrangeAsync(rowBase: "feb").ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var (status, body) = await ImportAsync(app, client, s).ConfigureAwait(true);
+
+        Assert.True(status == HttpStatusCode.UnprocessableEntity, $"apply: {status}\n{body}\n{app.ErrorsText}");
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-CELL-4223", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-CELL-4223.permitNotCoveringMonths", problem.GetProperty("messageKey").GetString());
+        Assert.Equal(12m, await CellAsync(s).ConfigureAwait(true));
+    }
+
+    private async Task<(HttpStatusCode Status, string Body)> ImportAsync(EcrApiFactory app, HttpClient client, Scenario s)
+    {
         var document = s.DocumentId.ToString(CultureInfo.InvariantCulture);
         using var content = new MultipartFormDataContent();
         using var file = new ByteArrayContent(await BookAsync(s).ConfigureAwait(true));
@@ -47,11 +80,7 @@ public sealed partial class DocumentPermitHistoryTests
         using var applied = await client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{document}/import/apply", UriKind.Relative), new { previewToken = token })
             .ConfigureAwait(true);
-        var body = await applied.Content.ReadAsStringAsync().ConfigureAwait(true);
-
-        Assert.True(applied.StatusCode == HttpStatusCode.UnprocessableEntity, $"apply: {applied.StatusCode}\n{body}\n{app.ErrorsText}");
-        Assert.Equal("ECR-CELL-4225", JsonDocument.Parse(body).RootElement.GetProperty("errorCode").GetString());
-        Assert.Equal(12m, await CellAsync(s).ConfigureAwait(true));
+        return (applied.StatusCode, await applied.Content.ReadAsStringAsync().ConfigureAwait(true));
     }
 
     /// <summary>A workbook of the document's table: C2 of the row = 30 (the map sheet `_ecr` addresses the cell).</summary>
