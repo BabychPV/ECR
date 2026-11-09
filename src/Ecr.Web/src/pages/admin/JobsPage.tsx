@@ -8,7 +8,7 @@ import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { useCancelJob, useRecentJobs } from '@/features/jobs/api';
 import { useJobStatus } from '@/features/jobs/useJobStatus';
 import { projectsQuery } from '@/features/projects/allProjects';
-import { isProjectRecalculation, progressOf, recalcProgressText } from '@/features/recalc/recalcProgress';
+import { isProjectRecalculation, progressOf, projectRecalcTitle, recalcProgressText } from '@/features/recalc/recalcProgress';
 import { useJobsSummary } from '@/features/jobs/useJobsSummary';
 import { JobAttempt, JobResultLink, JobRetry, jobAuthor } from '@/features/jobs/JobFacts';
 import { badgeStateOf } from '@/features/workflow/jobFollow';
@@ -74,7 +74,7 @@ function stateOptions(): readonly FilterOption[] {
 /** Рядок, за яким шукає поле пошуку: назва, ідентифікатор, автор, документ, повідомлення. */
 function searchText(job: JobSummary): string {
   return [
-    jobKindLabel(job.jobCode),
+    projectRecalcTitle(job) ?? jobKindLabel(job.jobCode),
     humanizeJobId(job.jobId),
     job.jobId,
     jobAuthor(job.createdByDisplayName),
@@ -243,7 +243,7 @@ export function JobsPage(): JSX.Element {
       // перекладене мовою читача, показується як є).
       key: 'jobCode',
       label: t('jobs.recentCode'),
-      sortValue: (job) => jobKindLabel(job.jobCode),
+      sortValue: (job) => projectRecalcTitle(job) ?? jobKindLabel(job.jobCode),
       minWidth: 200,
       render: (job) => {
         const target = [
@@ -274,7 +274,7 @@ export function JobsPage(): JSX.Element {
                   setPanel(job.jobId);
                 }}
               >
-                {jobKindLabel(job.jobCode)}
+                {projectRecalcTitle(job) ?? jobKindLabel(job.jobCode)}
               </UnstyledButton>
             }
             // ⛔ `X-22`: довге повідомлення (ключ експорту на 32 знаки)
@@ -416,7 +416,10 @@ export function JobsPage(): JSX.Element {
           ? undefined
           : {
               panelId: panel,
-              title: summary === undefined ? humanizeJobId(panel) : jobKindLabel(summary.jobCode),
+              title:
+                summary === undefined
+                  ? humanizeJobId(panel)
+                  : (projectRecalcTitle(summary) ?? jobKindLabel(summary.jobCode)),
               subtitle: summary === undefined ? undefined : humanizeJobId(summary.jobId),
               badge: openBadge === undefined ? undefined : <StatusBadge kind="job" state={badgeStateOf(openBadge)} />,
               closeLabel: t('common.close'),

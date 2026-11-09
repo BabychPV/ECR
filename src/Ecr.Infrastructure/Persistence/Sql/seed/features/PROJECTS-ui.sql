@@ -64,7 +64,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'documents.strip.locked', N'ru', N'Заблокирован'),
     (N'documents.strip.notOpen', N'ru', N'Ещё не открыт'),
     (N'documents.strip.unknown', N'ru', N'Состояние не загружено'),
-    (N'documents.strip.current', N'ru', N'В рамке — текущий месяц'),
+    (N'documents.strip.current', N'ru', N'В рамке — текущий период'),
     (N'nav.projects', N'kz', N'Жобалар'),
     (N'nav.projects.description', N'kz', N'Жоба — бір есепті жыл: оның айлары, баптаулары және құжаттары. Мұның бәрін бір жерден басқару үшін жобаны ашыңыз.'),
     (N'projects.tab.periods', N'kz', N'Кезеңдер'),
@@ -127,7 +127,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'documents.strip.locked', N'kz', N'Бұғатталған'),
     (N'documents.strip.notOpen', N'kz', N'Әлі ашылмаған'),
     (N'documents.strip.unknown', N'kz', N'Күйі жүктелмеген'),
-    (N'documents.strip.current', N'kz', N'Жиектелген — ағымдағы ай'),
+    (N'documents.strip.current', N'kz', N'Жиектелген — ағымдағы кезең'),
     (N'projects.lifecycle.delete', N'ru', N'Удалить черновик проекта…'),
     (N'projects.lifecycle.delete.desc', N'ru', N'Удалить проект-черновик без документов. Отменить нельзя; пишется запись аудита.'),
     (N'projects.lifecycle.delete.notAllowed', N'ru', N'Удалить можно только черновик без документов (этот: {status}, документов: {count})'),
@@ -228,7 +228,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'documents.strip.locked', N'en', N'Locked', 1),
     (N'documents.strip.notOpen', N'en', N'Not open yet', 1),
     (N'documents.strip.unknown', N'en', N'State not loaded', 1),
-    (N'documents.strip.current', N'en', N'Ringed box = current month', 1),
+    (N'documents.strip.current', N'en', N'Ringed box = current period', 1),
     (N'projects.lifecycle.delete', N'en', N'Delete draft project…', 1),
     (N'projects.lifecycle.delete.desc', N'en', N'Remove a draft project that has no documents. This cannot be undone; an audit entry is written.', 1),
     (N'projects.lifecycle.delete.notAllowed', N'en', N'Only draft projects without documents can be deleted (this one: {status}, {count} documents)', 1),
@@ -357,6 +357,18 @@ SELECT v.[Key], v.Lang, v.OldVal
     (N'documents.versionForPeriod', N'ru', N'Версия шаблона за {period}'),
     (N'documents.versionForPeriod', N'kz', N'{period} үшін үлгі нұсқасы')
        ) AS v ([Key], Lang, OldVal)
+OPTION (RECOMPILE);
+GO
+-- PROJECTS:ui ── кінець секції ──
+-- PROJECTS:ui ── змінені тексти: після збереження політики стани місяців оновлюються одразу (PeriodStateCatchUp), а не «при наступній перебудові календаря» (приймання e1, 09.11) ──
+-- Нове значення вже стоїть у MERGE (CATALOG-en-base.sql — en, 00-prelude.sql — ru/kz); епілог оновлює, лише поки в базі старе.
+INSERT INTO #UiChanged ([Key], Lang, OldVal, NewVal)
+SELECT v.[Key], v.Lang, v.OldVal, v.NewVal
+  FROM (VALUES
+    (N'periods.policyUpdated', N'en', N'The policy is updated. Projects pick up the new offsets on their next calendar rebuild.', N'Policy saved. Month states updated.'),
+    (N'periods.policyUpdated', N'ru', N'Политика обновлена. Проекты получат новые смещения при следующем перестроении календаря.', N'Политика сохранена. Состояния месяцев обновлены.'),
+    (N'periods.policyUpdated', N'kz', N'Саясат жаңартылды. Жобалар жаңа ығысуларды күнтізбе келесі рет қайта құрылғанда алады.', N'Саясат сақталды. Айлардың күйлері жаңартылды.')
+       ) AS v ([Key], Lang, OldVal, NewVal)
 OPTION (RECOMPILE);
 GO
 -- PROJECTS:ui ── кінець секції ──

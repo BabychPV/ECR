@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { PeriodCalendarDto } from '@/api/types';
 
@@ -22,9 +22,17 @@ export async function fetchCalendars(projectIds: readonly number[]): Promise<(Pe
 /**
  * ✎ g1/g3 (макет 08.11): календарі ВСІХ видимих проєктів для переліку документів — роки фільтра «Year» і стан
  * періоду в смузі 12 місяців. Один запит-обгортка замість `useQueries`/`useProjectCalendars`: маршрут DocumentsPage
- * стоїть біля межі `D-132` (250 КБ gzip), а модуль `periodStates` тягнув би форматування дат, якого тут не треба.
+ * стоїть біля межі `D-132` (250 КБ gzip), а модуль `periodStates` тягнув би форматування дат, якого тут не треба
+ * (`useQueries` теж не влазить: +1 КБ, перевірено 09.11).
+ *
+ * ✎ g1 (приймання 09.11, P3): рамка смуги — поточний період проєкту (`isCurrent`, D-77), той самий, що в шапці
+ * проєкту. ⛔ Корінь розбіжності: обгортка кешується під ВЛАСНИМ ключем зі `staleTime` 60 с, а «Pin current
+ * period…», Reopen, Activate оновлюють календар під ключем `['periods', id]` (шапка проєкту, Periods, Settings) —
+ * і перелік документів ще хвилину обводив старий поточний період. Тепер для кожного проєкту береться СВІЖІШИЙ із
+ * двох: календар `['periods', id]`, якщо його оновлено після обгортки, інакше — з обгортки.
  */
 export function useCalendarsOf(projectIds: readonly number[]): readonly (PeriodCalendarDto | undefined)[] {
+  const queryClient = useQueryClient();
   const key = projectIds.join(',');
   const query = useQuery({
     queryKey: ['periods', 'many', key],
@@ -33,5 +41,11 @@ export function useCalendarsOf(projectIds: readonly number[]): readonly (PeriodC
     staleTime: 60_000,
   });
 
-  return query.data ?? [];
+  const many = query.data;
+  if (many === undefined) return [];
+
+  return projectIds.map((id, index) => {
+    const own = queryClient.getQueryState<PeriodCalendarDto>(['periods', id]);
+    return own?.data !== undefined && own.dataUpdatedAt > query.dataUpdatedAt ? own.data : many[index];
+  });
 }

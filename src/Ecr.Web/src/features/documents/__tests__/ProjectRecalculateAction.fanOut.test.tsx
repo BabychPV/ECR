@@ -34,6 +34,8 @@ interface Fan {
 
 interface ServerState {
   queued: boolean;
+  /** Батько ще в черзі: розкладу немає (state: Queued, fanOut: null). */
+  parentQueued: boolean;
   effectiveState: string;
   fanOut: Fan;
   listReads: number;
@@ -42,6 +44,7 @@ interface ServerState {
 function respond(): ServerState {
   const state: ServerState = {
     queued: false,
+    parentQueued: false,
     effectiveState: 'FannedOut',
     fanOut: { total: 3, queued: 2, running: 0, succeeded: 1, failed: 0, skippedSheets: 2 },
     listReads: 0,
@@ -83,15 +86,15 @@ function respond(): ServerState {
           {
             jobId: 'IRecalculationJob~project7-year~1',
             jobCode: 'Ecr.Application.Ports.IRecalculationJob',
-            state: 'Succeeded',
-            percent: 100,
+            state: state.parentQueued ? 'Queued' : 'Succeeded',
+            percent: state.parentQueued ? 0 : 100,
             updatedAt: new Date().toISOString(),
             startedAt: new Date().toISOString(),
             documentId: null,
             projectId: 7,
             projectCode: 'PRJ-7',
-            effectiveState: state.effectiveState,
-            fanOut: state.fanOut,
+            effectiveState: state.parentQueued ? 'Queued' : state.effectiveState,
+            fanOut: state.parentQueued ? null : state.fanOut,
           },
         ]);
       }
@@ -121,13 +124,13 @@ function respond(): ServerState {
   return state;
 }
 
-function show(): void {
+function show(count: number | null = 92): void {
   render(
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={['/?projectId=7']}>
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
           <ProjectRecalcBanner projectId={7} />
-          <ProjectRecalculateAction project={{ id: 7, code: 'PRJ-7', documentCount: 92 }} />
+          <ProjectRecalculateAction project={{ id: 7, code: 'PRJ-7', documentCount: count ?? undefined }} />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,
@@ -170,7 +173,7 @@ describe('ProjectRecalculateAction + ProjectRecalcBanner: «finished» лише 
       await startRecalc();
 
       // a1: «Queued…», ніколи «finished».
-      await waitFor(() => expect(shown()).toContain('⟦recalcProgress.queuedToast (project=PRJ-7)⟧'));
+      await waitFor(() => expect(shown()).toContain('⟦recalcProgress.queuedDocumentsToast (project=PRJ-7, total=92)⟧'));
       expect(shown().some((m) => /finished/i.test(m))).toBe(false);
 
       // a2: банер із прогресом; опитування триває.
@@ -195,6 +198,41 @@ describe('ProjectRecalculateAction + ProjectRecalcBanner: «finished» лише 
           { timeout: 15_000 },
         ),
       ).toBeTruthy();
+    },
+    Slow,
+  );
+
+  it(
+    'a1: до розкладу тост і банер кажуть «Queued N documents» з реальним N (documentCount проєкту)',
+    async () => {
+      // ⛔ До фіксу: тост «Recalculation of X queued. Progress is shown above the list.» без N, а банер, поки батько
+      // в черзі (fanOut ще немає), — «Queued recalculation of X…» без N.
+      const state = respond();
+      state.parentQueued = true;
+      show(92);
+
+      await startRecalc();
+
+      await waitFor(() => expect(shown()).toContain('⟦recalcProgress.queuedDocumentsToast (project=PRJ-7, total=92)⟧'));
+      expect(await screen.findByText('⟦recalcProgress.queuedDocuments (project=PRJ-7, total=92)⟧')).toBeTruthy();
+      expect(screen.queryByText(/recalcProgress\.queuedProject/)).toBeNull();
+    },
+    Slow,
+  );
+
+  it(
+    'a1: без числа документів — тост без N (не вигадане число)',
+    async () => {
+      const state = respond();
+      state.parentQueued = true;
+      show(null);
+
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: '⟦workflow.recalculate⟧' }));
+      const dialog = await screen.findByRole('dialog', { name: '⟦periods.recalcTitle (code=PRJ-7)⟧' });
+      await user.click(within(dialog).getByRole('button', { name: '⟦workflow.recalculate⟧' }));
+
+      await waitFor(() => expect(shown()).toContain('⟦recalcProgress.queuedToast (project=PRJ-7)⟧'));
     },
     Slow,
   );
