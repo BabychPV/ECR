@@ -111,7 +111,16 @@ test.describe('Doc reopen', () => {
       await page.request.get(`/api/v1/audit/structure?from=${today}T00:00:00Z&to=${today}T23:59:59Z&entityType=DocumentPeriodReopen&limit=100`),
       'журнал структурних змін',
     );
-    const entry = audit.items.find((item) => item.changeReason === reason);
+    // The reason is stored as a message key with params ({"k":"document.reopen.audit.reopened","p":{"reason":…,"until":…}}).
+    const reopenedWith = (changeReason: string | null): boolean => {
+      try {
+        const parsed = JSON.parse(changeReason ?? '') as { k?: string; p?: Record<string, string> };
+        return parsed.k === 'document.reopen.audit.reopened' && parsed.p?.['reason'] === reason && (parsed.p['until'] ?? '') !== '';
+      } catch {
+        return false;
+      }
+    };
+    const entry = audit.items.find((item) => reopenedWith(item.changeReason));
     expect(entry, 'у журналі немає відкриття з цією причиною').toBeDefined();
     expect(entry?.operation).toBe('Reopen');
     expect(entry?.newJson ?? '').toContain(`"documentId":${String(first)}`);
