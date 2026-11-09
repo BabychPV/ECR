@@ -4459,6 +4459,18 @@ public sealed class NotFoundException(string errorCode, string message)
 **Довгі операції:** повертають `202 Accepted` з тілом
 `{ "jobId": "...", "statusUrl": "/api/v1/jobs/{jobId}" }`.
 
+**Вихід після бездіяльності (`D-471`):** cookie несе момент останньої дії людини (`ecr:act`). Дія — лише запит,
+що змінює стан (`POST`/`PUT`/`PATCH`/`DELETE`) без заголовка `X-Ecr-Background`, або явний
+`POST /api/v1/session/activity` (`204`); `GET`/`HEAD` (усі опитування) сеанс не продовжують ніколи. Межа —
+`GET`/`PUT /api/v1/security/session-settings` (`{ idleTimeoutMinutes }`, 5–480, за замовчуванням 30; поза межами —
+`422 ECR-REQ-0422`, `messageKey` `err.ECR-REQ-0422.idleTimeoutOutOfRange`; право `Security.ManageUsers`; подія
+журналу `SessionSettingsUpdated`), діє для чинних сеансів без перезапуску (кеш вузла 30 с). `GET /api/v1/me` віддає
+`idleTimeoutMinutes`. Після межі будь-який захищений запит дає `401 ECR-AUTH-0401` з `messageKey`
+`err.ECR-AUTH-0401.idleTimeout` і `idleMinutes`; cookie стирається. `POST /api/v1/logout/idle` (`204`) — вихід
+таймером вкладки, БЕЗ ротації штампа (інші пристрої не зачіпає). Кожен вихід пише подію `SignedOut`
+(`reason`: `user` | `idle`, для `idle` — `by`: `client` | `server` і `idleTimeoutMinutes`), одну на сеанс.
+Порти: `IIdleTimeoutPolicy` (чинна межа з кешем вузла, мінімум) і `ISessionSettingsStore` (`sys_ecr.SystemSetting`).
+
 ---
 
 <a id="api-endpoints"></a>
@@ -4469,6 +4481,10 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/login/windows` | — | 1 |
 | `POST` | `/api/v1/login/local` | — | 3 |
 | `POST` | `/api/v1/logout` | — | 1 |
+| `POST` | `/api/v1/logout/idle` | — | 7 |
+| `POST` | `/api/v1/session/activity` | — | 7 |
+| `GET` | `/api/v1/security/session-settings` | `Security.ManageUsers` | 7 |
+| `PUT` | `/api/v1/security/session-settings` | `Security.ManageUsers` | 7 |
 | `GET` | `/api/v1/me` | — | 1 |
 | `GET` | `/api/v1/me/preferences` | — | 4 |
 | `PUT` | `/api/v1/me/preferences/{key}` | — | 4 |

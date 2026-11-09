@@ -49,6 +49,8 @@ import { useNavbarCollapsed } from '@/shared/theme/navbarCollapse';
 import { BrandMark } from '@/shared/ui/BrandMark';
 import { RouteAnnouncer } from '@/shared/ui/RouteAnnouncer';
 import { UnsavedGuard } from '@/shared/ui/UnsavedGuard';
+// D-471: годинник бездіяльності — лінивий чанк, як і 404: бюджет спільного чанка оболонки (D-132).
+const IdleSignOut = lazy(async () => ({ default: (await import('@/shared/session/IdleSignOut')).IdleSignOut }));
 import { flushUnsaved, hasUnsavedChanges } from '@/shared/ui/unsavedSources';
 import { UserMenu } from '@/shared/ui/UserMenu';
 
@@ -433,6 +435,11 @@ export function AppLayout(): JSX.Element {
        * навігація й відбувається.
        */}
       <UnsavedGuard />
+
+      {/* D-471: вихід після бездіяльності — один годинник на застосунок, спільний для вкладок. */}
+      <Suspense fallback={null}>
+        <IdleSignOut minutes={me.idleTimeoutMinutes ?? 30} />
+      </Suspense>
 
       <AppShell
         // UI-32: смуга 40 px, як у макеті (`.app{grid-template-rows:40px …}`); контроли в ній —

@@ -87,6 +87,11 @@ const RoleBrowser = lazy(async () => ({
   default: (await import('@/features/security/RoleBrowser')).RoleBrowser,
 }));
 
+/** Вкладка «Session» (D-471, вихід після бездіяльності) — за `import()`: бюджет маршруту, як і решта вкладок. */
+const SessionSettingsPanel = lazy(async () => ({
+  default: (await import('@/features/security/SessionSettingsPanel')).SessionSettingsPanel,
+}));
+
 /** Ролі груп каталогу — за `import()` з тієї ж причини, що й гранти: бюджет маршруту. */
 const GroupAssignmentsPanel = lazy(async () => ({
   default: (await import('@/features/security/GroupAssignmentsPanel')).GroupAssignmentsPanel,
@@ -241,7 +246,9 @@ export function SecurityPage(): JSX.Element {
       ? t('security.subtitle.grants')
       : tab === 'users'
         ? t('security.subtitle.users')
-        : t('security.subtitle.roles');
+        : tab === 'session'
+          ? t('security.subtitle.session')
+          : t('security.subtitle.roles');
 
   return (
     <>
@@ -286,6 +293,10 @@ export function SecurityPage(): JSX.Element {
           <Tabs.Tab value="roles">{t('security.roles')}</Tabs.Tab>
           <Tabs.Tab value="grants">{t('security.grants')}</Tabs.Tab>
           <Tabs.Tab value="users">{t('security.users')}</Tabs.Tab>
+          {/* D-471: налаштування сеансу — лише тим, хто керує обліковими записами (право сервера те саме). */}
+          {can(session.data, 'Security.ManageUsers') && (
+            <Tabs.Tab value="session">{t('security.session')}</Tabs.Tab>
+          )}
         </Tabs.List>
 
         <Tabs.Panel value="roles">
@@ -330,6 +341,14 @@ export function SecurityPage(): JSX.Element {
                 <GrantsPanel roles={roles.data ?? []} />
               </Suspense>
             </div>
+          )}
+        </Tabs.Panel>
+
+        <Tabs.Panel value="session">
+          {tab === 'session' && (
+            <Suspense fallback={null}>
+              <SessionSettingsPanel canManage={canWrite('Security.ManageUsers')} />
+            </Suspense>
           )}
         </Tabs.Panel>
 

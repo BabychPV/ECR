@@ -35,6 +35,8 @@ public sealed class SimulationReadOnlyMiddleware(RequestDelegate next)
     [
         "/api/v1/security/simulation",
         "/api/v1/logout",
+        "/api/v1/logout/idle", // D-471: вихід після бездіяльності — теж вихід
+        "/api/v1/session/activity", // D-471: активність не змінює даних
         "/api/v1/login/local",
         "/api/v1/login/windows",
     ];
