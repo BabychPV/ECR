@@ -26,6 +26,17 @@ export type AddHeaderPermitRequest = components['schemas']['AddHeaderPermitReque
 /** Body: undo the latest permit added to a header field. */
 export type UndoHeaderPermitRequest = components['schemas']['UndoHeaderPermitRequest'];
 
+/** Body: the parts of month cells shared by two permits (j2/jh3; typed by the user, partial save allowed). */
+export type SaveCellSplitsRequest = components['schemas']['SaveCellSplitsRequest'];
+
+/** `PUT /api/v1/documents/{id}/permit-history/splits` — saves month parts; a fully split cell gets the total. */
+export function saveCellSplits(documentId: number, body: SaveCellSplitsRequest): Promise<DocumentPermitHistory> {
+  return apiFetch<DocumentPermitHistory>(`/api/v1/documents/${String(documentId)}/permit-history/splits`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
 /**
  * Cache key — under the document prefix (`queryKeys.document.ofDocument`), so any invalidation of the document reaches it.
  */
