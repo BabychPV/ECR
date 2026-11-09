@@ -17,7 +17,7 @@ import {
 } from '@mantine/core';
 import { BrandMark } from '@/shared/ui/BrandMark';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { apiFetch, EcrApiError, LOGIN_REASON_PARAM } from '@/api/client';
+import { apiFetch, EcrApiError, LOGIN_IDLE_MINUTES_PARAM, LOGIN_REASON_PARAM } from '@/api/client';
 import type { CurrentUserDto, LocalLoginRequest } from '@/api/types';
 import {
   anyLostEdits,
@@ -146,6 +146,10 @@ export function LoginPage(): JSX.Element {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const sessionInvalidated = searchParams.get(LOGIN_REASON_PARAM) === 'session-invalidated';
+  // D-471: вихід після бездіяльності — з межею, якщо адреса її несе (ціле 1–480, інакше текст без числа).
+  const idleSignedOut = searchParams.get(LOGIN_REASON_PARAM) === 'idle';
+  const idleMinutes = Number(searchParams.get(LOGIN_IDLE_MINUTES_PARAM));
+  const idleMinutesKnown = Number.isInteger(idleMinutes) && idleMinutes >= 1 && idleMinutes <= 480;
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<unknown>(null);
@@ -359,6 +363,15 @@ export function LoginPage(): JSX.Element {
             {sessionInvalidated && (
               <Alert color="blue" variant="light" data-login-reason="session-invalidated">
                 {sessionInvalidatedText()}
+              </Alert>
+            )}
+
+            {/* D-471: вихід після бездіяльності — людина має знати, що це не збій і не чужа дія. */}
+            {idleSignedOut && (
+              <Alert color="blue" variant="light" role="status" data-login-reason="idle">
+                {idleMinutesKnown
+                  ? t('login.idleSignedOut', { minutes: idleMinutes })
+                  : t('login.idleSignedOutNoMinutes')}
               </Alert>
             )}
 
