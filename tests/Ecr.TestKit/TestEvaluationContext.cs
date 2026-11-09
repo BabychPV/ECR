@@ -129,6 +129,9 @@ public sealed class TestEvaluationContext : IBudgetedEvaluationContext
     /// <inheritdoc />
     public string? CurrentSubstanceCode { get; set; }
 
+    /// <inheritdoc />
+    public string? SheetName { get; set; }
+
     /// <summary>Ключ комірки.</summary>
     public static string Key(string sheet, string table, string row, string column)
         => $"{sheet}|{table}|{row}|{column}";

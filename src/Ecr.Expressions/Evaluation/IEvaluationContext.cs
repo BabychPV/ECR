@@ -97,6 +97,17 @@ public interface IEvaluationContext
     /// </remarks>
     public string? CurrentSubstanceCode => null;
 
+    /// <summary>
+    /// Показувана назва аркуша, у якому обчислюється формула (<c>SHEETNAME()</c>, діалект шаблону): для копії аркуша —
+    /// «&lt;Назва&gt; N»; <c>null</c> — контекст аркуша не має (правило валідації, перевірка виразу, звіт).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Замовчування — <c>null</c>, як у <see cref="CurrentSubstanceCode"/>: контексти без аркуша функцію бачать як
+    /// порожнє значення (<c>null</c>, 02b §7), а не виняток. Контекст перерахунку документа
+    /// (<c>SliceEvaluationContext</c>) дає назву екземпляра аркуша, а без даних документа — назву аркуша шаблону.
+    /// </remarks>
+    public string? SheetName => null;
+
     /// <summary>Календарний контекст. Значення залежать від <c>CalendarMode</c> (D-78).</summary>
     public PeriodContext Period { get; }
 

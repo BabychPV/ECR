@@ -46,7 +46,7 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.15a")]
-    public async Task Діалект_шаблону_дає_рівно_свої_двадцять_функцій()
+    public async Task Діалект_шаблону_дає_рівно_свої_двадцять_одну_функцію()
     {
         await using var db = Context();
         var result = await Handler(db)
@@ -58,7 +58,9 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
         // 2026-09-27: п'ятнадцять, REGFIND і REGONE — функції довідників
         // (RT-20a, D-159; 02b «Функції довідників»).
         // 2026-09-28: двадцять, агрегати REGSUM/REGAVG/REGMIN/REGMAX/REGCOUNT (RT-20b).
-        Assert.Equal(20, result.Functions.Count);
+        // 2026-11-09: двадцять одна, SHEETNAME — назва екземпляра аркуша (копії «<Назва> N»).
+        Assert.Equal(21, result.Functions.Count);
+        Assert.Contains(result.Functions, f => f.Name == "SHEETNAME" && f.MaxArgs == 0 && f.ResultType == "Text");
         Assert.Contains(result.Functions, f => f.Name == "CONVERT");
         Assert.Contains(result.Functions, f => f.Name == "REGFIELD");
         Assert.Contains(result.Functions, f => f.Name == "REGFIND");

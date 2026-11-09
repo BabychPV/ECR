@@ -39,6 +39,9 @@ internal sealed class RegistryRowScope(IEvaluationContext inner, long entryId) :
     public string? CurrentSubstanceCode => inner.CurrentSubstanceCode;
 
     /// <inheritdoc />
+    public string? SheetName => inner.SheetName;
+
+    /// <inheritdoc />
     public IReadOnlyList<ExpressionValue> Read(CellReferenceNode reference) => inner.Read(reference);
 
     /// <inheritdoc />

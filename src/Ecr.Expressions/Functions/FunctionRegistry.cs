@@ -4,8 +4,8 @@ using Ecr.Expressions.Evaluation;
 namespace Ecr.Expressions.Functions;
 
 /// <summary>
-/// Каталог функцій діалекту <c>Template</c> — рівно двадцять (<c>02b</c> §7,
-/// «Функції довідників»).
+/// Каталог функцій діалекту <c>Template</c> — рівно двадцять одна (<c>02b</c> §7,
+/// «Функції довідників», «SHEETNAME»).
 /// Розширення — зміна контракту, тобто <c>questions.md</c> і зупинка.
 /// </summary>
 /// <remarks>
@@ -89,7 +89,15 @@ public sealed class FunctionRegistry
         new("REGMIN", 3, 3, false, ExpressionValueType.Null),
         new("REGMAX", 3, 3, false, ExpressionValueType.Null),
         new("REGCOUNT", 2, 2, false, ExpressionValueType.Number),
+
+        // ✎ 2026-11-09 (рішення людини через координатора, копії аркушів «<Назва> 2,3…» — 08.11): двадцять перша —
+        // показувана назва екземпляра аркуша, у якому рахується формула (`02b` §7, «SHEETNAME»). Без аргументів, ТЕКСТ.
+        // Перейменування групи аркуша ставить перерахунок формул аркуша (`DocumentSheetCopyHandler`).
+        new(SheetNameFunction, 0, 0, false, ExpressionValueType.Text),
     ];
+
+    /// <summary>Ім'я функції назви аркуша — одне написання для каталогу, обчислення й сканера використань.</summary>
+    public const string SheetNameFunction = "SHEETNAME";
 
     private static readonly Dictionary<string, FunctionSignature> Template =
         TemplateSet.ToDictionary(f => f.Name, StringComparer.OrdinalIgnoreCase);
@@ -194,6 +202,7 @@ public sealed class FunctionRegistry
             "IF" => TemplateFunctions.If(args[0], args[1], args[2]),
             "IFERROR" => TemplateFunctions.IfError(args[0], args[1]),
             "CONVERT" => ConvertFunction.Invoke(args, context),
+            SheetNameFunction => TemplateFunctions.SheetName(context),
 
             // ⛔ Не «невідома функція»: вони є в наборі, але вже обчислені
             // значення аргументів їм не годяться — умова `REGONE` мусить
