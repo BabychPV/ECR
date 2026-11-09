@@ -156,14 +156,16 @@ public sealed partial class DocumentPermitHistoryTests(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// Coordinator 09.11 (Ship 1): a header permit change mid-month is refused with «add the permit per row», naming the rows
-    /// that rely on the header permit and hold data in that month.
+    /// Ship 2 (jh1–jh3): a header permit change mid-month is accepted; the row of a table WITHOUT its own permit column
+    /// relies on the header permit, so its January value needs a split exactly like a row's own change: listed in the history
+    /// (source «header»), PERMIT-SPLIT in Issues, one value refused (4225), the split stores A+B and clears the finding.
+    /// Red before: 422 permitChangeMidMonth.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Finding", "ACC-1108-jh1")]
-    public async Task A_header_permit_change_mid_month_is_refused_naming_the_rows_to_change()
+    [Trait("Finding", "ACC-1108-jh2")]
+    public async Task A_header_permit_change_mid_month_makes_the_relying_rows_split_like_a_row_change()
     {
         var s = await ArrangeAsync(rowBase: null).ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
@@ -171,15 +173,31 @@ public sealed partial class DocumentPermitHistoryTests(SqlServerFixture sql)
 
         var response = await AddHeaderAsync(client, s, s.MidJanId, "2026-01-15").ConfigureAwait(true);
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
 
-        Assert.True(response.StatusCode == HttpStatusCode.UnprocessableEntity, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
-        var problem = JsonDocument.Parse(body).RootElement;
-        Assert.Equal("err.ECR-HDR-4223.permitChangeMidMonth", problem.GetProperty("messageKey").GetString());
-        var detail = problem.GetProperty("detail").GetString() ?? string.Empty;
-        Assert.Contains($" · {s.RowKey}", detail, StringComparison.Ordinal);
-        Assert.Contains("15.01.2026", detail, StringComparison.Ordinal);
-        Assert.Contains("add the new permit in the rows", detail, StringComparison.Ordinal);
-        Assert.Equal(0, await SegmentCountAsync(s).ConfigureAwait(true));
+        var history = JsonDocument.Parse(await (await client.GetAsync(new Uri($"{Base(s)}?periodKey=202601", UriKind.Relative)).ConfigureAwait(true))
+            .Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        Assert.Equal(1, history.GetProperty("cellsNeedingSplit").GetInt32());
+        var row = history.GetProperty("rows")[0];
+        Assert.Equal("header", row.GetProperty("permitSource").GetString());
+        Assert.Equal(s.RowKey, row.GetProperty("rowKey").GetString());
+
+        Assert.Contains(await FindingsAsync(client, s).ConfigureAwait(true), f => f.Rule == "PERMIT-SPLIT" && f.Column == s.DataColumnCode);
+
+        var single = await client.PatchAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/cells", UriKind.Relative),
+            new
+            {
+                tableInstanceId = s.TableInstanceId, periodKey = 202601, origin = "UserEdit",
+                rows = new[] { new { rowKey = s.RowKey, baseVersion = await RowVersionAsync(s).ConfigureAwait(true), cells = new[] { new { columnCode = s.DataColumnCode, value = (object)20m } } } },
+            }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, single.StatusCode);
+        Assert.Equal("ECR-CELL-4225", JsonDocument.Parse(await single.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement.GetProperty("errorCode").GetString());
+
+        var split = await SplitAsync(client, s, 5m, 7m).ConfigureAwait(true);
+        Assert.True(split.StatusCode == HttpStatusCode.OK, $"{split.StatusCode}: {await split.Content.ReadAsStringAsync().ConfigureAwait(true)}\n{app.ErrorsText}");
+        Assert.Equal(12m, await CellAsync(s).ConfigureAwait(true));
+        Assert.DoesNotContain(await FindingsAsync(client, s).ConfigureAwait(true), f => f.Rule == "PERMIT-SPLIT");
     }
 
     /// <summary>Human default 2: a header change on the 1st is accepted and shows in the history.</summary>

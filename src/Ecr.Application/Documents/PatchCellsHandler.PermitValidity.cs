@@ -352,9 +352,21 @@ public sealed partial class PatchCellsHandler
             .Select(id => (Id: id, Key: changes.RowKeyById.GetValueOrDefault(id)))
             .Where(p => p.Key is not null)
             .ToDictionary(p => p.Key!, p => p.Id, StringComparer.Ordinal);
-        if (keys.Count == 0)
+        if (keys.Count == 0 || permitTargets is null)
         {
             return result;
+        }
+
+        // ⛔ Hot path (PatchCellsQueryCountTests): no query unless the table has a permit column or the document's header a
+        // permit field — both from memory.
+        var ownPermit = (await PermitColumnIdsAsync(context, ct).ConfigureAwait(false)).Count > 0;
+        if (!ownPermit)
+        {
+            var isPermitTarget = await PermitTargets.LoadAsync(permitTargets, ct).ConfigureAwait(false);
+            if (!context.Snapshot.HeaderFields.Any(f => !f.IsDeleted && f.LookupRegistryDefId is { } t && isPermitTarget(t)))
+            {
+                return result;
+            }
         }
 
         var all = await permitHistory.ListAsync(context.Instance.DocumentId, ct).ConfigureAwait(false);
@@ -367,7 +379,39 @@ public sealed partial class PatchCellsHandler
             result[group.Key] = [.. group.OrderBy(s => s.ValidFrom)];
         }
 
+        // ✎ Ship 2 (jh2): a table WITHOUT its own permit column relies on the header permit — every row of it shares the
+        // header's history. Keyed by (row, −header field id): a negative column marks «the header permit».
+        if (!ownPermit)
+        {
+            var header = all.Select(r => r.Segment).Where(s => s.HeaderFieldDefId is not null)
+                .GroupBy(s => s.HeaderFieldDefId!.Value)
+                .OrderBy(g => g.Key)
+                .FirstOrDefault();
+            if (header is not null)
+            {
+                IReadOnlyList<Domain.Entities.Documents.PermitSegment> segments = [.. header.OrderBy(s => s.ValidFrom)];
+                foreach (var rowId in keys.Values)
+                {
+                    result[(rowId, -header.Key)] = segments;
+                }
+            }
+        }
+
         return result;
+    }
+
+    /// <summary>The base permit of a history key: the row's permit cell, or (negative column) the header field's value.</summary>
+    private async Task<long> BasePermitOfAsync(
+        RequestContext context, CellChangeLists changes, long rowId, int columnId, CancellationToken ct)
+    {
+        if (columnId < 0)
+        {
+            var values = await headers.GetValuesAsync(context.Instance.DocumentId, ct).ConfigureAwait(false);
+            return values.TryGetValue(-columnId, out var value) ? value.ValueRegistryEntryId ?? 0 : 0;
+        }
+
+        var cells = await LogicalRowsAsync(context, changes, new HashSet<long> { rowId }, ct).ConfigureAwait(false);
+        return cells[rowId].GetValueOrDefault(columnId)?.ValueRegistryEntryId ?? 0;
     }
 
     /// <summary>
@@ -404,12 +448,7 @@ public sealed partial class PatchCellsHandler
             return;
         }
 
-        var permitColumns = await PermitColumnIdsAsync(context, ct).ConfigureAwait(false);
-        if (permitColumns.Count == 0)
-        {
-            return;
-        }
-
+        // ✎ Ship 2: a table without its own permit column relies on the header permit (RowHistoryAsync gives its history).
         var rowIds = writes.Select(w => w.Address.TableRowId).ToHashSet();
         var history = await RowHistoryAsync(context, changes, rowIds, ct).ConfigureAwait(false);
         if (history.Count == 0)
@@ -435,8 +474,8 @@ public sealed partial class PatchCellsHandler
 
         // Names of the permits of the first refused month (base permit = the row's permit cell).
         var first = hits[0];
-        var cells = await LogicalRowsAsync(context, changes, new HashSet<long> { first.Write.Address.TableRowId }, ct).ConfigureAwait(false);
-        var baseId = cells[first.Write.Address.TableRowId].GetValueOrDefault(first.History.Key.ColumnId)?.ValueRegistryEntryId ?? 0;
+        var baseId = await BasePermitOfAsync(context, changes, first.Write.Address.TableRowId, first.History.Key.ColumnId, ct)
+            .ConfigureAwait(false);
         var spans = Permits.History.PermitHistoryCoverage.SpansOf(baseId, first.History.Value);
         var inMonth = Permits.History.PermitTimeline.InMonth(spans, first.Month);
         var entries = (await registries.FindEntriesByIdsAsync([.. inMonth.Select(s => s.EntryId).Distinct()], ct).ConfigureAwait(false))
