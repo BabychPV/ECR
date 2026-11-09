@@ -268,26 +268,23 @@ public sealed class DocumentSheetCopyHandler(
             return;
         }
 
+        // Лише періоди, де аркуш уже має екземпляри (оригінал чи копія): у решті назва порахується при першому
+        // відкритті (`GetDocumentTablesHandler` → `SheetNameRecalculation`), а прогін без екземплярів — марна задача.
+        var opened = await copies
+            .PeriodsWithInstancesAsync(documentId, [.. sheet.Tables.Select(t => t.Id)], ct)
+            .ConfigureAwait(false);
+
         foreach (var period in project.Periods.OrderBy(p => p.PeriodKeyValue))
         {
-            if (period.State == PeriodState.Scheduled
+            if ((opened is not null && !opened.Contains(period.PeriodKeyValue))
+                || period.State == PeriodState.Scheduled
                 || Calculations.RecalculationWritePolicy.Check(period.State, hasSubmittedSheets: false)
                 != Calculations.RecalculationWriteDenial.None)
             {
                 continue;
             }
 
-            await jobs.EnqueueCoalescedAsync<IRecalculationJob>(
-                    RecalculateDocumentHandler.TargetOf(documentId, period.Key),
-                    new
-                    {
-                        DocumentId = documentId,
-                        PeriodKey = period.PeriodKeyValue,
-                        TriggeredByUserId = (int?)userId,
-                        SheetDefId = (int?)sheetDefId,
-                    },
-                    ct,
-                    userId)
+            await SheetNameRecalculation.EnqueueAsync(jobs, documentId, period.Key, sheetDefId, userId, ct)
                 .ConfigureAwait(false);
         }
     }

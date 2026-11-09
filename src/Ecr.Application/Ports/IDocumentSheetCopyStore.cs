@@ -112,4 +112,16 @@ public interface IDocumentSheetCopyStore
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Скільки живих повідомлень видалено разом з чатом.</returns>
     public Task<int> DeleteChatAsync(long documentId, long sheetCopyId, CancellationToken ct);
+
+    /// <summary>
+    /// SHEETNAME(): періоди документа, у яких уже є екземпляри цих таблиць (оригінал чи копія) — лише їх варто
+    /// перераховувати після зміни назви групи; решта періодів отримає значення при першому відкритті.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="tableDefIds">Таблиці аркуша.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ключі періодів; <c>null</c> — сховище не вміє відповісти (ручні обгортки в тестах): без звуження.</returns>
+    public Task<IReadOnlySet<int>?> PeriodsWithInstancesAsync(
+        long documentId, IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+        => Task.FromResult<IReadOnlySet<int>?>(null);
 }
