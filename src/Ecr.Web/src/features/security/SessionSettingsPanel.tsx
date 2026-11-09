@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Button, Group, NumberInput, Stack, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import type { SessionSettingsInput, SessionSettingsView } from '@/api/types';
 import { MeQueryKey } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -77,6 +78,8 @@ function SessionSettingsForm({
     },
     onError: showApiError,
   });
+  // ФВ-14.26: спінер — лише коли збереження справді триває, не з першого кадру.
+  const saving = usePendingLoading(save.isPending);
 
   const hint = t('security.session.idleHint', {
     min: view.minIdleTimeoutMinutes,
@@ -115,7 +118,7 @@ function SessionSettingsForm({
           <Group>
             <Button
               type="submit"
-              loading={save.isPending}
+              loading={saving}
               disabled={!valid || minutes === view.idleTimeoutMinutes}
             >
               {t('security.session.save')}
