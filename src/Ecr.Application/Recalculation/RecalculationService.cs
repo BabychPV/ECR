@@ -58,7 +58,11 @@ public sealed class RecalculationService(
 
     // RPT-STABLE Part B: збережена мапа перейменування колонок (псевдонім на межі версій). Необов'язковий: без нього
     // колонка зі зміненим кодом на межі версій не знаходиться (NULL), як і колонка, якої немає.
-    IColumnRenameMap? columnRenames = null) : ISubmitRecalculation
+    IColumnRenameMap? columnRenames = null,
+
+    // SHEETNAME(): назви груп і копії аркушів документа — читаються лише коли формула версії згадує SHEETNAME
+    // (`SheetDisplayNames.MayUse`). Необов'язковий: без нього SHEETNAME() дає назву аркуша шаблону.
+    IDocumentSheetCopyStore? sheetCopies = null) : ISubmitRecalculation
 {
     /// <summary>
     /// LP-40: джерела знімків довідників цього екземпляра сервісу (скоуп = один прогін задачі чи запит):
@@ -747,6 +751,16 @@ public sealed class RecalculationService(
                 registrySnapshots, registryStore, ct)
             .ConfigureAwait(false);
 
+        // SHEETNAME(): назви аркушів «виду» прогону («<Назва> N» для копії). Один запит — лише коли хоч одна формула версії
+        // згадує SHEETNAME (за текстом, без розбору; разом із каскадними цілями нижче); інакше — нуль звернень.
+        var sheetNames = sheetCopies is not null
+                         && SheetDisplayNames.MayUse(formulas.Values.Select(f => f.Formula.Expression))
+            ? SheetDisplayNames.For(
+                snapshot,
+                await sheetCopies.ListGroupsAsync(instance.DocumentId, ct).ConfigureAwait(false),
+                copyScope?.CopyId)
+            : null;
+
         SliceEvaluationContext NewContext(
             IReadOnlyDictionary<long, IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>>? fields)
             => new(
@@ -755,7 +769,8 @@ public sealed class RecalculationService(
                 catalogue, rowIdsByTable, fields,
                 formulaDependencies: dependencies,
                 logger: logger,
-                registries: templateRegistries);
+                registries: templateRegistries,
+                sheetNames: sheetNames);
 
         var context = NewContext(registryFields);
 

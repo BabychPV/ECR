@@ -210,7 +210,10 @@ public sealed class RowLocalPreview(
             var parsed = formulaEngine.Parse(formula.Expression, formula.Dialect).Expression;
             if (parsed is null
                 || !RowLocalFormulaClassifier.IsRowLocal(formula, parsed.Root)
-                || TemplateRegistryUse.Scan(parsed.Root, null))
+                || TemplateRegistryUse.Scan(parsed.Root, null)
+
+                // SHEETNAME(): назви копії аркуша перегляд не читає — значення пише фоновий перерахунок.
+                || SheetDisplayNames.MayUse([formula.Expression]))
             {
                 continue;
             }
