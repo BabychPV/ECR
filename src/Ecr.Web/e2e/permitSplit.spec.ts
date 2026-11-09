@@ -323,8 +323,10 @@ test.describe('Permit split:', () => {
     const gap = page.locator('[data-permit-gap]');
     await expect(gap).toBeVisible({ timeout: 30_000 });
     await expect(gap).toContainText(`10.${pad(world.month)}–14.${pad(world.month)}`);
-    await expect(gap.getByRole('button', { name: /valid from/ })).toBeVisible();
+    // F13 p220: B is valid only from the 15th, so no start date closes 10–14 — no «valid from» move, only «add a permit»
+    // (the move case, where the new permit IS valid on the suggested day, is PermitTimelineTests).
     await expect(gap.getByRole('button', { name: /Add a permit for/ })).toBeVisible();
+    await expect(gap.getByRole('button', { name: /valid from/ })).toHaveCount(0);
     await shot(page, 'j4');
   });
 
