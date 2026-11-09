@@ -737,10 +737,13 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
             }
         }
 
-        return [.. items.Select(i =>
+        var labelled = items.Select(i =>
             labels.TryGetValue((TrimSchema(i.EntityType), i.EntityId), out var label) ? i with { EntityLabel = label }
             : SnapshotCode(i) is { } code ? i with { EntityLabel = code }
-            : i)];
+            : i).ToList();
+
+        // (j6) Історія дозволу й поділ місяця: підпис — із JSON самого запису (сегмент міг бути скасований і видалений).
+        return await WithPermitHistoryLabelsAsync(connection, labelled, ct).ConfigureAwait(false);
     }
 
     /// <summary>
