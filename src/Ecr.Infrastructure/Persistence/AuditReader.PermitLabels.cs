@@ -58,17 +58,20 @@ public sealed partial class AuditReader
         // (en, the stored default language) of the document's rows with these table codes and keys; a row without a template
         // label (dynamic row) keeps its key. ⛔ RS: the segment/part carries its sheet copy — the row is taken from THAT copy's
         // instance (SheetCopyId NULL = the original), never from a sibling copy with the same row key.
-        var rowNames = new Dictionary<(long DocumentId, string Table, long CopyId, string RowKey), string>();
+        var rowNames = new Dictionary<(long DocumentId, string Table, long CopyId, string RowKey), (string? Label, int Position)>();
         var keyed = parsed.Values.Where(s => s.Table is not null && s.RowKey is not null).ToList();
         if (keyed.Count > 0)
         {
             await using var command = connection.CreateCommand();
             command.CommandText = """
-                SELECT DISTINCT ti.DocumentId, td.Code, r.RowKey, JSON_VALUE(rd.LabelL10n, N'$.en'), COALESCE(ti.SheetCopyId, 0)
+                SELECT DISTINCT ti.DocumentId, td.Code, r.RowKey, JSON_VALUE(rd.LabelL10n, N'$.en'), COALESCE(ti.SheetCopyId, 0),
+                       (SELECT COUNT(*) FROM doc.TableRow AS o
+                         WHERE o.PeriodKey = r.PeriodKey AND o.TableInstanceId = r.TableInstanceId AND o.IsDeleted = 0
+                           AND o.Ordinal <= r.Ordinal)
                 FROM doc.TableRow AS r
                 JOIN doc.TableInstance AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
                 JOIN cfg.TableDef AS td ON td.Id = ti.TableDefId
-                JOIN cfg.RowDef AS rd ON rd.Id = r.RowDefId OR (r.RowDefId IS NULL AND rd.TableDefId = ti.TableDefId AND rd.RowKey = r.RowKey)
+                LEFT JOIN cfg.RowDef AS rd ON rd.Id = r.RowDefId OR (r.RowDefId IS NULL AND rd.TableDefId = ti.TableDefId AND rd.RowKey = r.RowKey)
                 WHERE ti.DocumentId IN (SELECT CAST([value] AS bigint) FROM OPENJSON(@docs))
                   AND r.RowKey IN (SELECT [value] FROM OPENJSON(@keys));
                 """;
@@ -77,10 +80,8 @@ public sealed partial class AuditReader
             await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                if (!reader.IsDBNull(3) && reader.GetString(3) is { Length: > 0 } name)
-                {
-                    rowNames[(reader.GetInt64(0), reader.GetString(1), Convert.ToInt64(reader.GetValue(4), CultureInfo.InvariantCulture), reader.GetString(2))] = name;
-                }
+                rowNames[(reader.GetInt64(0), reader.GetString(1), Convert.ToInt64(reader.GetValue(4), CultureInfo.InvariantCulture), reader.GetString(2))] =
+                    (reader.IsDBNull(3) ? null : reader.GetString(3), Convert.ToInt32(reader.GetValue(5), CultureInfo.InvariantCulture));
             }
         }
 
@@ -89,9 +90,11 @@ public sealed partial class AuditReader
             {
                 EntityLabel = s.Label(
                     documents.GetValueOrDefault(s.DocumentId),
-                    s.Table is not null && s.RowKey is not null
-                        ? rowNames.GetValueOrDefault((s.DocumentId, s.Table, s.SheetCopyId ?? 0, s.RowKey))
-                        : null),
+                    s.Table is null || s.RowKey is null
+                        ? null
+                        : rowNames.TryGetValue((s.DocumentId, s.Table, s.SheetCopyId ?? 0, s.RowKey), out var found)
+                            ? Ecr.Application.Permits.History.PermitTimeline.RowName(found.Label, found.Position, s.BasePermit)
+                            : Ecr.Application.Permits.History.PermitTimeline.RowName(null, 0, s.BasePermit)),
             }
             : item)];
     }
@@ -101,6 +104,9 @@ public sealed partial class AuditReader
         long DocumentId, string? Table, string? RowKey, string? Column, string? HeaderField, string? ValidFrom, string? Permit,
         string? PreviousPermit, string? Month, IReadOnlyList<string> PartPermits, long? SheetCopyId)
     {
+        /// <summary>The row's (base) permit for a row without a name: the previous permit of a change, else part A's.</summary>
+        public string? BasePermit => PreviousPermit ?? (PartPermits.Count > 0 ? PartPermits[0] : Permit);
+
         public static PermitAuditState? TryParse(string? json)
         {
             if (string.IsNullOrWhiteSpace(json))

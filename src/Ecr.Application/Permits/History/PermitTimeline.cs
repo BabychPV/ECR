@@ -132,6 +132,25 @@ public static class PermitTimeline
         return first.First >= changeFrom ? first.Last.AddDays(1) : first.First;
     }
 
+    /// <summary>
+    /// Fresh eyes 09.11: how OUR refusals and audit labels name a row — never the technical key (a hex GUID for dynamic
+    /// rows): the template row's label; otherwise «row N» (1-based position in the table) and the row's permit number.
+    /// The client names rows the same way (<c>rowName.ts</c>).
+    /// </summary>
+    /// <param name="label">The template row's label; <c>null</c> — a dynamic row.</param>
+    /// <param name="position">1-based position of the row in the table; 0 — unknown.</param>
+    /// <param name="permit">The row's permit number; <c>null</c> — none.</param>
+    public static string RowName(string? label, int position, string? permit)
+    {
+        if (!string.IsNullOrWhiteSpace(label))
+        {
+            return label;
+        }
+
+        var row = position > 0 ? $"row {position.ToString(CultureInfo.InvariantCulture)}" : "row";
+        return string.IsNullOrWhiteSpace(permit) ? row : $"{row} · {permit}";
+    }
+
     private static DateOnly Min(DateOnly a, DateOnly b) => a < b ? a : b;
 
     private static List<DayRange> Merge(List<DayRange> ranges)

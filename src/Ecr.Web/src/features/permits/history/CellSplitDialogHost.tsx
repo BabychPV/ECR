@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
 import type { TableSliceDto } from '@/api/types';
 import { CellSplitDialog } from './CellSplitDialog';
+import { rowDisplayName } from './rowName';
 import { cellKey, permitGridMarksOf } from './splitModel';
 import { closeCellSplit, type SplitTarget } from './splitRequest';
 import { usePermitHistory } from './usePermitHistory';
@@ -28,7 +29,11 @@ export function CellSplitDialogHost({ target }: { readonly target: SplitTarget }
       target={target}
       mark={mark}
       historyPending={history.isPending}
-      rowLabel={row?.label ?? target.rowKey}
+      rowLabel={rowDisplayName(
+        slice,
+        target.rowKey,
+        permitGridMarksOf(history.data, target.tableDefId, target.sheetCopyId).rows.get(target.rowKey)?.permits[0]?.permit,
+      )}
       unit={column?.unitSymbol ?? null}
       baseVersion={row?.rowVersion ?? null}
       onClose={closeCellSplit}
