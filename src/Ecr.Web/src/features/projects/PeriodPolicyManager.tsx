@@ -1,8 +1,14 @@
 import { useState, type JSX } from 'react';
-import { Button, Group, Modal, NumberInput, Stack, Table, TextInput, VisuallyHidden } from '@mantine/core';
+import { Button, Group, Modal, NumberInput, Stack, Table, Text, TextInput, VisuallyHidden } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
-import type { CreatePeriodPolicyRequest, PeriodPolicyDto, UpdatePeriodPolicyRequest } from '@/api/types';
+import type {
+  CreatePeriodPolicyRequest,
+  PeriodCalendarDto,
+  PeriodPolicyDto,
+  UpdatePeriodPolicyRequest,
+} from '@/api/types';
+import { PolicyDatePreview } from './PolicyDatePreview';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
@@ -24,11 +30,20 @@ import { t } from '@/shared/i18n';
 export function PeriodPolicyManager({
   openerLabel,
   describedBy,
+  calendar,
+  projectCode,
 }: {
   /** ✎ UAT project-settings: повна назва кнопки-відкривача; без неї — «Manage policies». */
   readonly openerLabel?: string;
   /** Id опису дії поруч із кнопкою (`aria-describedby`). */
   readonly describedBy?: string;
+  /**
+   * ✎ f5: календар проєкту, з вкладки Settings якого відкрито діалог, — для прев'ю дат (поточний і наступний
+   * період, вікно року). Політики спільні між проєктами; прев'ю — для ЦЬОГО проєкту. Без нього — зразковий місяць.
+   */
+  readonly calendar?: PeriodCalendarDto | undefined;
+  /** Код того самого проєкту — у підписі прев'ю. */
+  readonly projectCode?: string | undefined;
 } = {}): JSX.Element {
   const queryClient = useQueryClient();
   const [opened, setOpened] = useState(false);
@@ -100,8 +115,31 @@ export function PeriodPolicyManager({
       yearGraceOffsetDays: policy.yearGraceOffsetDays,
     };
 
+  // ✎ f5: прев'ю — для рядка, який редагують останнім; доти — для політики цього проєкту.
+  const [lastEdited, setLastEdited] = useState<number | null>(null);
+  const projectPolicyId = calendar?.policy.id ?? null;
+
   const setDraft = (id: number, patch: Partial<UpdatePeriodPolicyRequest>, policy: PeriodPolicyDto): void => {
     setEditing({ ...editing, [id]: { ...draftFor(policy), ...patch } });
+    setLastEdited(id);
+  };
+
+  /** Прев'ю дат рядка: календар проєкту — лише для його ВЛАСНОЇ політики; інша політика — на зразковому місяці. */
+  const rowPreview = (all: readonly PeriodPolicyDto[]): JSX.Element | null => {
+    const previewed = all.find((policy) => policy.id === (lastEdited ?? projectPolicyId));
+    if (previewed === undefined) return null;
+
+    const ofProject = previewed.id === projectPolicyId && projectCode !== undefined;
+
+    return (
+      <PolicyDatePreview
+        id="period-policy-preview"
+        offsets={draftFor(previewed)}
+        calendar={ofProject ? calendar : undefined}
+        projectTitle={t('periods.policyPreview.title', { project: projectCode ?? '', policy: previewed.code })}
+        sampleTitle={t('periods.policyPreview.sample', { policy: previewed.code })}
+      />
+    );
   };
 
   return (
@@ -140,6 +178,7 @@ export function PeriodPolicyManager({
           onRetry={() => void policies.refetch()}
         >
           {(all) => (
+            <>
             <Table striped>
               <Table.Thead>
                 <Table.Tr>
@@ -160,7 +199,14 @@ export function PeriodPolicyManager({
 
                   return (
                     <Table.Tr key={policy.id}>
-                      <Table.Td>{policy.code}</Table.Td>
+                      <Table.Td>
+                        {policy.code}
+                        {policy.id === projectPolicyId && projectCode !== undefined && (
+                          <Text size="xs" c="dimmed" data-policy-used-by="">
+                            {t('periods.policyPreview.usedBy', { project: projectCode })}
+                          </Text>
+                        )}
+                      </Table.Td>
                       <Table.Td>
                         {/* ⚠ Підпис колонки вже стоїть у `Table.Th`: `aria-label`,
                             а не видимий `label`, — інакше кожна клітинка була б
@@ -226,6 +272,8 @@ export function PeriodPolicyManager({
                 })}
               </Table.Tbody>
             </Table>
+            {rowPreview(all)}
+            </>
           )}
         </AsyncBoundary>
 
@@ -263,6 +311,20 @@ export function PeriodPolicyManager({
               onChange={(value) => setDraftYearGrace(typeof value === 'number' ? value : null)}
             />
           </Group>
+
+          {/* ✎ f5: дати нової політики — на календарі цього проєкту («якби він її мав»), без проєкту — на зразку. */}
+          <PolicyDatePreview
+            id="period-policy-new-preview"
+            offsets={{
+              openOffsetDays: draftOpen ?? 0,
+              graceOffsetDays: draftGrace ?? 0,
+              hardCloseOffsetDays: draftHardClose ?? 0,
+              yearGraceOffsetDays: draftYearGrace ?? 0,
+            }}
+            calendar={projectCode === undefined ? undefined : calendar}
+            projectTitle={t('periods.policyPreview.newTitle', { project: projectCode ?? '' })}
+            sampleTitle={t('periods.policyPreview.sampleNew')}
+          />
 
           <Group justify="flex-end">
             {/* ⛔ Заблоковано і на невдалому запиті переліку теж: без нього
