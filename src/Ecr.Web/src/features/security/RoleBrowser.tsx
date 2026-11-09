@@ -1,5 +1,5 @@
 import { Suspense, lazy, useState, type JSX } from 'react';
-import { SegmentedControl } from '@mantine/core';
+import { Button, Checkbox, SegmentedControl } from '@mantine/core';
 import type { PermissionCatalogItem, RoleView } from '@/api/types';
 import { PermissionCaption } from '@/features/security/PermissionCaption';
 import { RoleActions } from '@/features/security/RoleActions';
@@ -11,6 +11,7 @@ import {
   type PermissionGroup,
 } from '@/features/security/permissionGroups';
 import { roleLabel } from '@/features/security/roleLabel';
+import { permissionLabel } from '@/features/security/permissionLabel';
 import { Banner } from '@/shared/ui/Banner';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
@@ -23,6 +24,11 @@ import './securityRoles.css';
  */
 const RoleMatrix = lazy(async () => ({
   default: (await import('@/features/security/RoleMatrix')).RoleMatrix,
+}));
+
+/** Перегляд впливу і збереження — окремим чанком: відкривається лише після правки прав. */
+const RolePermissionsReview = lazy(async () => ({
+  default: (await import('@/features/security/RolePermissionsReview')).RolePermissionsReview,
 }));
 
 interface RoleBrowserProps {
@@ -41,11 +47,10 @@ interface RoleBrowserProps {
  * ⚠ Обрана роль і подання — в адресі (`?role=<код>`, `?view=compare`), як у
  * макеті: «подивись права Approver» — це посилання, а не інструкція.
  *
- * ⛔ Права ролі тут лише ДЛЯ ЧИТАННЯ — і для вбудованої, і для власної. У
- * макеті власну роль правлять прапорцями, але сервер не має запиту зміни
- * набору прав наявної ролі (`/api/v1/roles/{id}` — лише `DELETE`; є
- * `clone`, `code`, `grants`). Прапорці, що нічого не можуть зберегти, були б
- * обманом; прогалина записана в `audit/ui-todo-contracts.md`.
+ * ✎ (v) рішення людини 08.11: права ВЛАСНОЇ ролі правляться прапорцями, як у макеті (`paintDetail`, `edit`):
+ * «Edit permissions» → прапорці → смуга незбережених змін → «Review and save…» — спершу вплив на носіїв
+ * (`RolePermissionsReview`), окреме підтвердження небезпечних прав, `PUT /roles/{id}/permissions` з `If-Match`.
+ * Вбудована роль — замок і причина текстом (банер), кнопки правки немає; сервер теж відмовляє (409).
  *
  * ⚠ Що з макета не перенесено, бо цього немає у відповіді `GET /roles`:
  * опис ролі (`description`), лічильник «N users have this role», пояснення,
@@ -183,12 +188,52 @@ interface RoleDetailProps {
   readonly catalog: ReadonlySet<string>;
 }
 
+/** Чернетка прав ролі: від чого почали (для звірки з переглядом) і що зараз позначено. */
+interface PermissionDraft {
+  readonly roleId: number;
+  readonly base: readonly string[];
+  readonly perms: ReadonlySet<string>;
+}
+
+/** Додані й прибрані права чернетки відносно її основи. */
+export function draftDiff(draft: PermissionDraft): { added: string[]; removed: string[] } {
+  const base = new Set(draft.base);
+
+  return {
+    added: [...draft.perms].filter((code) => !base.has(code)).sort(),
+    removed: [...draft.base].filter((code) => !draft.perms.has(code)).sort(),
+  };
+}
+
 function RoleDetail({ role, permissions, canManage, catalog }: RoleDetailProps): JSX.Element {
   // ⚠ Право ролі, якого немає в каталозі (каталог старший за роль чи навпаки),
   // не губиться: окрема група «Other» знизу. Інакше роль показувалася б
   // вужчою, ніж вона є.
   const unknown = role.permissions.filter((code) => !catalog.has(code));
   const groups = groupPermissions(permissions);
+  const dangerousCodes = new Set(permissions.filter((p) => p.isDangerous).map((p) => p.code));
+
+  const [stored, setDraft] = useState<PermissionDraft | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  // ⚠ Чернетка належить ролі, з якої почали: перемкнули роль — правка іншої не показується.
+  const draft = stored !== null && stored.roleId === role.id ? stored : null;
+  const editable = canManage && !role.isBuiltIn;
+  const diff = draft === null ? null : draftDiff(draft);
+  const changes = diff === null ? 0 : diff.added.length + diff.removed.length;
+  const addedDangerous = diff === null ? [] : diff.added.filter((code) => dangerousCodes.has(code));
+
+  const startEditing = (): void => {
+    const base = [...new Set([...role.permissions, ...role.dangerousPermissions])].sort();
+    setDraft({ roleId: role.id, base, perms: new Set(base) });
+  };
+
+  const toggle = (code: string, on: boolean): void => {
+    if (draft === null) return;
+    const perms = new Set(draft.perms);
+    if (on) perms.add(code);
+    else perms.delete(code);
+    setDraft({ ...draft, perms });
+  };
 
   return (
     <section className="ecr-sec-detail" aria-label={roleLabel(role)} data-testid="role-detail">
@@ -202,8 +247,59 @@ function RoleDetail({ role, permissions, canManage, catalog }: RoleDetailProps):
           {!role.isBuiltIn && <p className="ecr-sec-muted">{t('security.customReadOnly')}</p>}
         </div>
 
+        {editable && draft === null && (
+          <Button
+            variant="default"
+            leftSection={<SecurityIcon name="pencil" size={14} />}
+            onClick={startEditing}
+            data-testid="role-edit-permissions"
+          >
+            {t('security.editPermissions')}
+          </Button>
+        )}
         {canManage && <RoleActions role={role} placement="header" />}
       </div>
+
+      {draft !== null && diff !== null && (
+        <Banner
+          tone="info"
+          testId="role-permissions-dirty"
+          title={
+            changes === 0 ? t('security.editingPermissionsTitle') : t('security.unsavedPermissionChanges', { count: changes })
+          }
+          text={
+            changes === 0
+              ? t('security.editingPermissionsHint')
+              : [
+                  [...diff.added.map((code) => `+ ${permissionLabel(code)}`), ...diff.removed.map((code) => `− ${permissionLabel(code)}`)].join(' · '),
+                  addedDangerous.length > 0 ? t('security.unsavedDangerousNote', { count: addedDangerous.length }) : '',
+                ]
+                  .filter((part) => part !== '')
+                  .join(' — ')
+          }
+          actions={[
+            { label: t('security.discardPermissionChanges'), onClick: () => setDraft(null) },
+            ...(changes === 0
+              ? []
+              : [{ label: t('security.reviewAndSave'), onClick: () => setReviewing(true), variant: 'filled' as const }]),
+          ]}
+        />
+      )}
+
+      {draft !== null && reviewing && (
+        <Suspense fallback={null}>
+          <RolePermissionsReview
+            role={role}
+            base={draft.base}
+            next={[...draft.perms]}
+            onClose={() => setReviewing(false)}
+            onSaved={() => {
+              setReviewing(false);
+              setDraft(null);
+            }}
+          />
+        </Suspense>
+      )}
 
       {role.isBuiltIn && (
         <Banner
@@ -216,7 +312,13 @@ function RoleDetail({ role, permissions, canManage, catalog }: RoleDetailProps):
       )}
 
       {groups.map((group) => (
-        <PermissionGroupBlock key={`${role.id}:${group.group}`} role={role} group={group} />
+        <PermissionGroupBlock
+          key={`${role.id}:${group.group}`}
+          role={role}
+          group={group}
+          draft={draft}
+          onToggle={toggle}
+        />
       ))}
 
       {unknown.length > 0 && (
@@ -227,14 +329,27 @@ function RoleDetail({ role, permissions, canManage, catalog }: RoleDetailProps):
             group: '',
             items: unknown.map((code) => ({ code, group: '', isDangerous: role.dangerousPermissions.includes(code) })),
           }}
+          draft={draft}
+          onToggle={toggle}
         />
       )}
     </section>
   );
 }
 
-function PermissionGroupBlock({ role, group }: { readonly role: RoleView; readonly group: PermissionGroup }): JSX.Element {
-  const granted = group.items.filter((item) => roleHas(role, item.code));
+function PermissionGroupBlock({
+  role,
+  group,
+  draft,
+  onToggle,
+}: {
+  readonly role: RoleView;
+  readonly group: PermissionGroup;
+  readonly draft: PermissionDraft | null;
+  readonly onToggle: (code: string, on: boolean) => void;
+}): JSX.Element {
+  const has = (code: string): boolean => (draft === null ? roleHas(role, code) : draft.perms.has(code));
+  const granted = group.items.filter((item) => has(item.code));
   const dangerous = granted.filter((item) => item.isDangerous).length;
   // ⚠ Розгорнуто за замовчуванням ті групи, де роль щось має: порожні групи
   // згорнуті, щоб надане було видно без прокрутки (макет розгортає одну).
@@ -262,11 +377,39 @@ function PermissionGroupBlock({ role, group }: { readonly role: RoleView; readon
       {open && (
         <ul className="ecr-sec-group-b" id={id}>
           {group.items.map((item) => {
-            const has = roleHas(role, item.code);
+            const granted = has(item.code);
+
+            if (draft !== null) {
+              return (
+                <li
+                  key={item.code}
+                  className="ecr-sec-perm"
+                  data-editing="true"
+                  data-granted={String(granted)}
+                  data-permission={item.code}
+                >
+                  <Checkbox
+                    checked={granted}
+                    aria-label={permissionLabel(item.code)}
+                    onChange={(event) => onToggle(item.code, event.currentTarget.checked)}
+                  />
+                  <PermissionCaption code={item.code} />
+                  {item.isDangerous ? (
+                    <span className="ecr-sec-danger">
+                      <SecurityIcon name="shieldAlert" />
+                      {t('security.dangerousMark')}
+                    </span>
+                  ) : (
+                    <span />
+                  )}
+                  <span />
+                </li>
+              );
+            }
 
             return (
-              <li key={item.code} className="ecr-sec-perm" data-granted={String(has)} data-permission={item.code}>
-                <SecurityIcon name={has ? 'check' : 'minus'} />
+              <li key={item.code} className="ecr-sec-perm" data-granted={String(granted)} data-permission={item.code}>
+                <SecurityIcon name={granted ? 'check' : 'minus'} />
                 <PermissionCaption code={item.code} />
                 {item.isDangerous ? (
                   <span className="ecr-sec-danger">
@@ -276,7 +419,7 @@ function PermissionGroupBlock({ role, group }: { readonly role: RoleView; readon
                 ) : (
                   <span />
                 )}
-                <span className="ecr-sec-sr">{has ? t('security.granted') : t('security.notGranted')}</span>
+                <span className="ecr-sec-sr">{granted ? t('security.granted') : t('security.notGranted')}</span>
               </li>
             );
           })}
