@@ -385,6 +385,46 @@ public sealed class FakeUserStore : IUserStore
         => Task.FromResult(Roles.Any(r => r.Id == roleId));
 
     /// <inheritdoc />
+    public Task ReplaceRolePermissionsAsync(int roleId, IReadOnlyList<string> permissionCodes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(permissionCodes);
+
+        var index = Roles.FindIndex(r => r.Id == roleId);
+        if (index >= 0)
+        {
+            var codes = permissionCodes.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+            Roles[index] = Roles[index] with
+            {
+                Permissions = codes,
+                DangerousPermissions = [.. codes.Where(Dangerous.Contains)],
+            };
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task<Ecr.Application.Security.RoleCarriers> ListRoleCarriersAsync(int roleId, DateOnly asOf, CancellationToken ct)
+    {
+        var code = RoleCodeById(roleId);
+        var carriers = _users
+            .Where(u => Grants.Exists(g => g.UserName == u.UserName && g.RoleCode == code))
+            .Select(u => new Ecr.Application.Security.RoleCarrierUser(
+                u.Id,
+                u.UserName,
+                u.DisplayName,
+                [.. Grants
+                    .Where(g => g.UserName == u.UserName && g.RoleCode != code)
+                    .SelectMany(g => Roles.FirstOrDefault(r => r.Code == g.RoleCode)?.Permissions ?? [])
+                    .Distinct(StringComparer.Ordinal)]))
+            .ToList();
+
+        return Task.FromResult(new Ecr.Application.Security.RoleCarriers(
+            carriers,
+            [.. GroupAssignments.Where(g => g.RoleCode == code).Select(g => g.Sid).Distinct(StringComparer.Ordinal)]));
+    }
+
+    /// <inheritdoc />
     public Task<int> RotateStampsForRoleAsync(int roleId, CancellationToken ct)
     {
         var affected = Grants

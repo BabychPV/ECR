@@ -208,9 +208,33 @@ public sealed class AccessDecisionService(
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        return revision is null
-            ? $"{Fingerprint(groupSids)}.0.0.0.0"
-            : $"{Fingerprint(groupSids)}.{revision.Assignments}.{revision.LastAssignment}.{revision.Grants}.{revision.LastGrant}";
+        if (revision is null)
+        {
+            return $"{Fingerprint(groupSids)}.0.0.0.0";
+        }
+
+        // ⛔ (v) 08.11: права ВЛАСНОЇ ролі тепер правляться (`ReplaceRolePermissionsHandler`). Штамп крутиться лише
+        // прямим носіям; член групи зберігав би зняте право до сплину профілю. Тому в ревізію входить і відбиток
+        // НАБОРУ прав ролей цих груп: ключ `sec.RolePermission` — (RoleId, PermissionCode), IDENTITY немає, тож
+        // хешується сам вміст (рядків — одиниці-десятки на роль).
+        var permissionRows = await db.RolePermissions
+            .AsNoTracking()
+            .Where(rp => assignments.Any(a => a.RoleId == rp.RoleId))
+            .Select(rp => new { rp.RoleId, rp.PermissionCode })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Коди прав — службові ідентифікатори каталогу (не колонки й не значення комірок), у текст відмови не йдуть.
+        var permissionText = new System.Text.StringBuilder();
+        foreach (var rp in permissionRows.OrderBy(x => x.RoleId).ThenBy(x => x.PermissionCode, StringComparer.Ordinal))
+        {
+            permissionText.Append(rp.RoleId.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(':').Append(rp.PermissionCode).Append('\n');
+        }
+
+        var permissionHash = System.Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(permissionText.ToString())))[..16];
+
+        return $"{Fingerprint(groupSids)}.{revision.Assignments}.{revision.LastAssignment}.{revision.Grants}.{revision.LastGrant}.{permissionHash}";
     }
 
     /// <summary>Рядок призначення для відбитка вмісту (AN-138).</summary>
