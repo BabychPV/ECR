@@ -223,7 +223,8 @@ test.describe('Idle sign-out:', () => {
     await page.setViewportSize({ width: 1335, height: 860 });
     await signIn(page);
     await page.goto(`/admin/audit?view=security&eventType=SignedOut&from=${today}&to=${today}`);
-    await expect(page.getByText('SignedOut').first()).toBeVisible({ timeout: 30_000 });
+    // Тип події екран показує людською назвою («Signed out»), причина — у деталях.
+    await expect(page.getByRole('cell', { name: /"reason":"idle"/ }).first()).toBeVisible({ timeout: 30_000 });
     await shot(page, 'id6-audit-row-light-1335');
   });
 });
