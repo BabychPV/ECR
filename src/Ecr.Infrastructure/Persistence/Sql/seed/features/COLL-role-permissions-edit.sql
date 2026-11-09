@@ -71,7 +71,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'security.rolePermissionsSaved', N'ru', N'Права роли {role} сохранены'),
     (N'security.rolePermissionsSaved', N'kz', N'{role} рөлінің құқықтары сақталды'),
     (N'audit.eventLabel.RolePermissionsChanged', N'ru', N'Изменены права роли'),
-    (N'audit.eventLabel.RolePermissionsChanged', N'kz', N'Рөл құқықтары өзгертілді')
+    (N'audit.eventLabel.RolePermissionsChanged', N'kz', N'Рөл құқықтары өзгертілді'),
+    (N'security.roleChangedMeanwhileTitle', N'ru', N'Роль тем временем изменили: добавлено {added}, убрано {removed}'),
+    (N'security.roleChangedMeanwhileTitle', N'kz', N'Рөл осы уақытта өзгертілді: қосылды {added}, алынды {removed}')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -115,7 +117,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'security.backToEditing', N'en', N'Back to editing', 1),
     (N'security.savePermissions', N'en', N'Save permissions', 1),
     (N'security.rolePermissionsSaved', N'en', N'Permissions of {role} saved', 1),
-    (N'audit.eventLabel.RolePermissionsChanged', N'en', N'Role permissions changed', 1)
+    (N'audit.eventLabel.RolePermissionsChanged', N'en', N'Role permissions changed', 1),
+    (N'security.roleChangedMeanwhileTitle', N'en', N'The role changed meanwhile: {added} added, {removed} removed', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO
