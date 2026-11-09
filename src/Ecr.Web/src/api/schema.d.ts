@@ -4025,6 +4025,140 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{documentId}/period-reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Стан місяця для документа: діючий виняток (якщо є), чи може поточний користувач відкрити місяць і чому ні,
+         *     строк за замовчуванням (кінець доби майданчика). */
+        get: {
+            parameters: {
+                query?: {
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentPeriodReopenState"];
+                        "text/json": components["schemas"]["DocumentPeriodReopenState"];
+                        "text/plain": components["schemas"]["DocumentPeriodReopenState"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Відкриває закритий місяць лише для цього документа до `openUntil` (`null` — кінець доби майданчика).
+         *     Діючий виняток замінюється новим строком і причиною.
+         * @description `403` — немає права `Period.Reopen` у проєкті; `404` — документ невидимий або місяця немає;
+         *     `409 ECR-PRD-0409` — місяць не закритий або проєкт архівований; `422 ECR-PRD-0422` — причина порожня
+         *     чи задовга, строк не в майбутньому.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["OpenDocumentPeriodReopenRequest"];
+                    "application/json": components["schemas"]["OpenDocumentPeriodReopenRequest"];
+                    "text/json": components["schemas"]["OpenDocumentPeriodReopenRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentPeriodReopenView"];
+                        "text/json": components["schemas"]["DocumentPeriodReopenView"];
+                        "text/plain": components["schemas"]["DocumentPeriodReopenView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{documentId}/permit-bindings/{code}/refresh": {
         parameters: {
             query?: never;
@@ -29781,6 +29915,55 @@ export interface components {
              *     решту знаходить пошук `q` за іменем. */
             items: components["schemas"]["DocumentOwnerOption"][];
         };
+        /** @description Стан «місяць відкрито для документа» для сторінки документа. */
+        DocumentPeriodReopenState: {
+            active: null | components["schemas"]["DocumentPeriodReopenView"];
+            /** @description Чи може цей користувач відкрити місяць для документа зараз. */
+            canOpen: boolean;
+            /**
+             * Format: date-time
+             * @description Строк за замовчуванням — кінець доби майданчика (UTC).
+             */
+            defaultOpenUntil: string;
+            denial: null | components["schemas"]["DocumentReopenDenial"];
+            /**
+             * Format: int32
+             * @description Місяць.
+             */
+            periodKey: number;
+        };
+        /** @description Діючий виняток документа за місяць. */
+        DocumentPeriodReopenView: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор винятку.
+             */
+            id: number;
+            /**
+             * Format: date-time
+             * @description До якого моменту (UTC) документ відкрито.
+             */
+            openUntil: string;
+            /**
+             * Format: date-time
+             * @description Коли відкрито (UTC).
+             */
+            openedAt: string;
+            /** @description Ім'я того, хто відкрив; `null` — невідоме. */
+            openedByName: null | string;
+            /**
+             * Format: int32
+             * @description Хто відкрив.
+             */
+            openedByUserId: number;
+            /**
+             * Format: int32
+             * @description Місяць.
+             */
+            periodKey: number;
+            /** @description Причина відкриття. */
+            reason: string;
+        };
         /** @description Дія над документом у межах одного періоду. */
         DocumentPeriodRequest: {
             /**
@@ -29799,6 +29982,8 @@ export interface components {
             /** @description `Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved`. */
             state: string;
         };
+        /** @enum {unknown} */
+        DocumentReopenDenial: "NoPermission" | "PeriodNotClosed" | "ProjectArchived" | "PeriodMissing" | null;
         /** @description Аркуш складу документа в переліку: код, назва, стан за період. */
         DocumentSheetState: {
             /** @description Код аркуша (`SheetDef.Code`); він же ключ у `DocumentSummary.SheetStates`. */
@@ -32993,6 +33178,21 @@ export interface components {
          * @enum {unknown}
          */
         NumericMode: "Legacy" | "Strict";
+        /** @description Запит на відкриття закритого місяця для документа. */
+        OpenDocumentPeriodReopenRequest: {
+            /**
+             * Format: date-time
+             * @description До якого моменту (UTC); `null` — до кінця доби майданчика. Безстрокового немає.
+             */
+            openUntil: null | string;
+            /**
+             * Format: int32
+             * @description Місяць (РРРРММ).
+             */
+            periodKey: number;
+            /** @description Причина; обов'язкова, потрапляє в журнал. */
+            reason: string;
+        };
         /**
          * @description Поведінка поза вікном доступу до періоду (ФВ-2.16).
          * @enum {unknown}

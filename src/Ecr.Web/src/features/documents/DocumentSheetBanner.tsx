@@ -23,6 +23,8 @@ interface DocumentSheetBannerProps {
    * погоджувач має знати, що числа зрушили. Зникає з повторним поданням або затвердженням.
    */
   readonly recalculatedAfterSubmission?: boolean;
+  /** Приймальна 08.11 (i1): дія закритого періоду для `DocumentLockBanner`. */
+  readonly periodAction?: JSX.Element | null;
 }
 
 /**
@@ -49,12 +51,13 @@ export function DocumentSheetBanner({
   lock,
   canDecide,
   recalculatedAfterSubmission = false,
+  periodAction = null,
 }: DocumentSheetBannerProps): JSX.Element | null {
   const contextual =
     !widerLock(lock) && (lock === 'sheetSubmitted' || lock === 'sheetApproved' || state === 'Rejected');
   const history = useWorkflowHistory(documentId, periodKey, contextual, sheetCopyId);
 
-  if (!contextual) return <DocumentLockBanner lock={lock} periodKey={periodKey} />;
+  if (!contextual) return <DocumentLockBanner lock={lock} periodKey={periodKey} periodAction={periodAction} />;
 
   const event = latestInto(history.data, sheetCode, sheetCopyId, state);
   const who = event === null ? null : { name: event.byDisplayName, date: formatDate(event.at) };

@@ -119,6 +119,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     /// <summary>Передачі зрізу документа виконавцям (EA-1): зріз, ексклюзивність, стан валідації.</summary>
     public DbSet<EditAssignment> EditAssignments => Set<EditAssignment>();
 
+    /// <summary>Закритий місяць, відкритий для ОДНОГО документа (приймальна 08.11 (i)).</summary>
+    public DbSet<DocumentPeriodReopen> DocumentPeriodReopens => Set<DocumentPeriodReopen>();
+
     /// <summary>Виконавці передач із власним станом Передано/Заповнено/Повернуто (EA-1).</summary>
     public DbSet<EditAssignmentRecipient> EditAssignmentRecipients => Set<EditAssignmentRecipient>();
 

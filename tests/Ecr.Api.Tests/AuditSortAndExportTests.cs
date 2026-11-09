@@ -170,6 +170,23 @@ public sealed class AuditSortAndExportTests(SqlServerFixture sql)
         Assert.Equal(JsonValueKind.Null, items[1].GetProperty("entityLabel").ValueKind);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Структура_підписує_виняток_місяця_номером_документа_і_місяцем()
+    {
+        using var app = new EcrApiFactory(sql);
+        var client = await LoginAsync(app, ["Security.ViewAudit"]);
+        var doc = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(ct: CancellationToken.None);
+        var author = await CreateUserAsync("Reopener");
+
+        var (reopenId, businessKey) = await WriteReopenAsync(doc.DocumentId, 202601, author);
+        await WriteStructureAsync("DocumentPeriodReopen", reopenId, Base, author);
+
+        var items = await ItemsAsync(client, $"/api/v1/audit/structure?{Window()}&changedByUserId={author}&sort=ChangedAtAsc");
+        Assert.Equal($"{businessKey} · 2026-01", items[0].GetProperty("entityLabel").GetString());
+    }
+
     // ---------- експорт ----------
 
     [Fact]
@@ -530,6 +547,25 @@ public sealed class AuditSortAndExportTests(SqlServerFixture sql)
         command.Parameters.AddWithValue("@id", columnDefId);
 
         return (string)(await command.ExecuteScalarAsync())!;
+    }
+
+    private async Task<(int Id, string BusinessKey)> WriteReopenAsync(long documentId, int periodKey, int author)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO doc.DocumentPeriodReopen (DocumentId, PeriodKey, OpenUntil, Reason, OpenedByUserId, OpenedAt)
+            VALUES (@doc, @period, DATEADD(day, 1, SYSUTCDATETIME()), N'test', @author, SYSUTCDATETIME());
+            SELECT CAST(SCOPE_IDENTITY() AS int), (SELECT BusinessKey FROM doc.Document WHERE Id = @doc);
+            """;
+        command.Parameters.AddWithValue("@doc", documentId);
+        command.Parameters.AddWithValue("@period", periodKey);
+        command.Parameters.AddWithValue("@author", author);
+        await using var reader = await command.ExecuteReaderAsync();
+        await reader.ReadAsync();
+
+        return (reader.GetInt32(0), reader.GetString(1));
     }
 
     private async Task<string> ExportEventAsync(string eventType, string marker)

@@ -286,7 +286,7 @@ public sealed partial class ReopenPeriodHandler(
     /// інша доба, і вікно правок обірвалося б на кілька годин раніше — рівно
     /// тоді, коли ним користуються.
     /// </remarks>
-    private static DateTime EndOfSiteDay(DateTime utcNow, string timeZoneId)
+    internal static DateTime EndOfSiteDay(DateTime utcNow, string timeZoneId)
     {
         var zone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
         var local = TimeZoneInfo.ConvertTimeFromUtc(utcNow, zone);

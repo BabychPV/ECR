@@ -200,6 +200,24 @@ public sealed partial class PeriodStateJob(
                 (i + 1) * 100 / Math.Max(1, projects.Count), project.Code, ct).ConfigureAwait(false);
         }
 
+        // ⛔ Приймальна 08.11 (i3): прострочені винятки «місяць відкрито для документа» — закриваються самі, з журналом.
+        // Діяти вони перестають рівно на `OpenUntil` (рішення про запис порівнює строк сам), тут — лише відмітка
+        // закриття й запис «Close» в аудит. Збій не зупиняє стани періодів: він — ще один збій прогону.
+        try
+        {
+            await CloseExpiredDocumentReopensAsync(utcNow, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            foreach (var entry in db.ChangeTracker.Entries<DocumentPeriodReopen>().ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+
+            LogDocumentReopensFailed(_logger, ex);
+            failures.Add(new FailedEntry(DocumentReopensCode, ex));
+        }
+
         await RecordFindingsAsync(skipped, failures, utcNow, ct).ConfigureAwait(false);
 
         await EnqueueOrphanScanAfterReopenAsync(ct).ConfigureAwait(false);
@@ -266,6 +284,70 @@ public sealed partial class PeriodStateJob(
         {
             LogOrphanScanNotEnqueued(_logger, _yearReopens, ex);
         }
+    }
+
+    /// <summary><c>CorrelationId</c> журналу закриття прострочених винятків документа.</summary>
+    public const string DocumentReopenCorrelationId = "period-state:document-reopen";
+
+    /// <summary>Скільки прострочених винятків документа закривати за прогін (решта — наступним, за 10 хв).</summary>
+    public const int MaxExpiredDocumentReopens = 500;
+
+    /// <summary>Мітка збою закриття винятків у знахідках прогону (замість коду проєкту).</summary>
+    private const string DocumentReopensCode = "document-reopen";
+
+    /// <summary>
+    /// Закриває прострочені винятки «закритий місяць відкрито для документа» (<c>doc.DocumentPeriodReopen</c>) і
+    /// пише «Close» в <c>aud.StructureChange</c> — у тій самій транзакції (журнал не розходиться з тим, що описує).
+    /// </summary>
+    /// <param name="utcNow">Момент прогону.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task CloseExpiredDocumentReopensAsync(DateTime utcNow, CancellationToken ct)
+    {
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            // ⚠ Повтор стратегії — з чистого трекера: відкочена спроба лишила б винятки «закритими» лише в пам'яті.
+            foreach (var entry in db.ChangeTracker.Entries<DocumentPeriodReopen>().ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+
+            var expired = await (
+                    from x in db.DocumentPeriodReopens
+                    where x.ClosedAt == null && x.OpenUntil <= utcNow
+                    // ⚠ Без `AsNoTracking` на приєднаних наборах: воно діє на ВЕСЬ запит, і закриття не збереглося б.
+                    join d in db.Documents on x.DocumentId equals d.Id
+                    join p in db.Projects on d.ProjectId equals p.Id
+                    orderby x.OpenUntil, x.Id
+                    select new
+                    {
+                        Exception = x,
+                        d.BusinessKey,
+
+                        // Версія ПЕРІОДУ винятку (шкала версій проєкту), а не чинна версія проєкту.
+                        TemplateVersionId = EcrDbContext.VersionOf(p.Id, x.PeriodKeyValue),
+                    })
+                .Take(MaxExpiredDocumentReopens)
+                .ToListAsync(innerCt)
+                .ConfigureAwait(false);
+
+            if (expired.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var row in expired)
+            {
+                row.Exception.Close(utcNow, userId: null, DocumentPeriodReopen.ClosedExpired);
+            }
+
+            await db.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            await _audit.WriteStructureChangesAsync(
+                [.. expired.Select(row => Application.Periods.OpenDocumentPeriodReopenHandler.CloseRecord(
+                    row.Exception, row.TemplateVersionId, row.BusinessKey, utcNow, userId: null,
+                    DocumentReopenCorrelationId))],
+                innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 
     /// <summary>Переводить періоди одного проєкту; повертає пропущені зворотні переходи.</summary>
@@ -734,6 +816,11 @@ public sealed partial class PeriodStateJob(
         Level = LogLevel.Error,
         Message = "PeriodStateJob: не вдалося записати знахідки прогону в itg.MaintenanceRun (пропусків {Skipped}, збоїв {Failed}).")]
     private static partial void LogFindingsNotRecorded(ILogger logger, int skipped, int failed, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "PeriodStateJob: прострочені винятки «місяць відкрито для документа» не закрито; діяти вони вже перестали, відмітку й журнал допише наступний прогін.")]
+    private static partial void LogDocumentReopensFailed(ILogger logger, Exception exception);
 
     [LoggerMessage(
         Level = LogLevel.Information,

@@ -12,8 +12,18 @@ interface AuthoredRow {
   readonly changedByDisplayName?: string | null | undefined;
 }
 
-/** Ім'я автора рядка; зниклий запис — чесне «користувач #id» (`R-18`). */
+/**
+ * Умовний Id системи в журналах — задачі (`PeriodStateJob.SystemUserId`, перерахунок, дозволи) пишуть `0`;
+ * користувача з таким Id не буває.
+ */
+export const SystemUserId = 0;
+
+/**
+ * Ім'я автора рядка; зниклий запис — чесне «користувач #id» (`R-18`); системний запис (`0`) — «Система»
+ * (F13-p213 i5: автозакриття показувало «User #0 (no longer exists)»).
+ */
 export function authorName(row: AuthoredRow): string {
+  if (row.changedByUserId === SystemUserId) return t('audit.systemActor');
   return row.changedByDisplayName ?? t('audit.userGone', { id: row.changedByUserId });
 }
 
@@ -81,7 +91,7 @@ export function useAuthorOptions(
     }
 
     if (selected !== null && !names.has(selected)) {
-      names.set(selected, t('audit.userGone', { id: selected }));
+      names.set(selected, authorName({ changedByUserId: selected }));
     }
 
     return [...names.entries()]

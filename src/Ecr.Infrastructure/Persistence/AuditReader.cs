@@ -693,6 +693,13 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
             ["SheetDef"] = ("cfg.SheetDef", "Code"),
             ["RowDef"] = ("cfg.RowDef", "RowKey"),
             ["RegistryDef"] = ("cfg.RegistryDef", "Code"),
+
+            // Приймальна 08.11 (i5): «Document period reopen · 1» нічого не казав — підпис «номер документа · 2026-01».
+            // Номер — підзапитом за ключем рядка (не join, щоб лишити форму запиту спільною); CONCAT не дає NULL.
+            ["DocumentPeriodReopen"] = (
+                "doc.DocumentPeriodReopen r",
+                "CONCAT((SELECT d.BusinessKey FROM doc.Document d WHERE d.Id = r.DocumentId), N' · ', "
+                + "r.PeriodKey / 100, N'-', RIGHT(CONCAT(N'0', r.PeriodKey % 100), 2))"),
         };
 
     /// <summary>
