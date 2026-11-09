@@ -228,9 +228,15 @@ async function addB(page: Page, world: World, row: number): Promise<void> {
   await form.getByLabel('Permit').click();
   await form.getByLabel('Permit').fill(world.bNumber);
   await page.getByRole('option', { name: new RegExp(`^${world.bNumber}`) }).click();
+  // ⚠ The date field shows `YYYY-MM-DD` and commits typed text on blur; `fill` of «15.10.2026» left the default 01.10
+  // (CI 42610809703: the add went out from 01.10 and was refused as a gap). Type the ISO date key by key, then blur, and
+  // check the explanation line took it before submitting.
   const date = form.getByLabel('Valid for this row from');
-  await date.fill(`15.${pad(world.month)}.${String(world.year)}`);
+  await date.click();
+  await date.press('ControlOrMeta+A');
+  await date.pressSequentially(`${String(world.year)}-${pad(world.month)}-15`);
   await date.press('Tab');
+  await expect(form.locator('[data-add-keeps]')).toContainText(`from 15.${pad(world.month)}.${String(world.year)}`);
   await form.getByRole('button', { name: 'Add permit' }).click();
 }
 
