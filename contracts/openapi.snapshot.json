@@ -2977,6 +2977,72 @@
         ],
         "type": "object"
       },
+      "CellSplitItem": {
+        "description": "One month cell and its parts typed by the user (never divided by days).",
+        "properties": {
+          "baseVersion": {
+            "description": "Row version the user started from (as in `PATCH …/cells`).",
+            "type": "string"
+          },
+          "columnCode": {
+            "description": "The month column (or a numeric column of a table without month columns).",
+            "type": "string"
+          },
+          "parts": {
+            "description": "Part values A, B, … in date order; `null` — not entered yet.",
+            "type": "array"
+          },
+          "rowKey": {
+            "description": "Row key.",
+            "type": "string"
+          },
+          "tableInstanceId": {
+            "description": "A table instance of the document.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tableInstanceId",
+          "rowKey",
+          "columnCode",
+          "baseVersion",
+          "parts"
+        ],
+        "type": "object"
+      },
+      "CellSplitValueDto": {
+        "description": "One month cell of a shared month.",
+        "properties": {
+          "columnCode": {
+            "description": "The month column.",
+            "type": "string"
+          },
+          "isSplit": {
+            "description": "Every part holds a value (the cell no longer blocks Submit).",
+            "type": "boolean"
+          },
+          "parts": {
+            "description": "Entered part values by part number (A, B, …); `null` — not entered.",
+            "type": "array"
+          },
+          "total": {
+            "description": "The stored value (the sum once split; the single «unsplit» value before).",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "columnCode",
+          "total",
+          "parts",
+          "isSplit"
+        ],
+        "type": "object"
+      },
       "CellStyleAccessDto": {
         "description": "Чи можна фарбувати комірки таблиці (CELL-STYLE P1A): те, що клієнт має знати, щоб не вмикати «Заливку»/«Колір\nтексту» там, де `PATCH …/cell-styles` однаково відмовить 403.",
         "properties": {
@@ -22262,6 +22328,28 @@
         ],
         "type": "object"
       },
+      "SaveCellSplitsRequest": {
+        "description": "j2/jh3: save the parts of month cells (partial save allowed — a cell whose parts are all entered gets the total).",
+        "properties": {
+          "items": {
+            "description": "Cells to split.",
+            "items": {
+              "$ref": "#/components/schemas/CellSplitItem"
+            },
+            "type": "array"
+          },
+          "periodKey": {
+            "description": "The period the user is in (`YYYYMM`).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "periodKey",
+          "items"
+        ],
+        "type": "object"
+      },
       "SaveColumnBatchItem": {
         "description": "Колонка пачки: код і ті самі налаштування, що в SaveColumnDefRequest.",
         "properties": {
@@ -26087,6 +26175,13 @@
       "SplitMonthDto": {
         "description": "A month of a row that must be split between permits (j2).",
         "properties": {
+          "cells": {
+            "description": "The month cells of the row: current total and the entered parts (pre-fill of the split dialog).",
+            "items": {
+              "$ref": "#/components/schemas/CellSplitValueDto"
+            },
+            "type": "array"
+          },
           "columnCodes": {
             "description": "Cells of the row with entered data in that month that are not split yet.",
             "items": {
@@ -26110,7 +26205,8 @@
         "required": [
           "month",
           "columnCodes",
-          "parts"
+          "parts",
+          "cells"
         ],
         "type": "object"
       },
@@ -36718,6 +36814,149 @@
           }
         },
         "summary": "Undoes the latest permit added to a row's permit cell.",
+        "tags": [
+          "DocumentPermitHistory"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/permit-history/splits": {
+      "put": {
+        "description": "`403 ECR-ACCS-0403` — a month cell not editable; `409 ECR-CELL-0409` — the row changed (`baseVersion`);\n`422 ECR-REQ-0422 permitSplitInvalid` — no history, the month is not shared, wrong number of parts.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveCellSplitsRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveCellSplitsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveCellSplitsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPermitHistoryDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPermitHistoryDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPermitHistoryDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "j2/jh3: saves the parts of month cells shared by two permits — typed by the user, never divided by days. A cell with\nevery part entered gets the total (sum of the parts) through the ordinary cell write; partial save keeps the old value.",
         "tags": [
           "DocumentPermitHistory"
         ]

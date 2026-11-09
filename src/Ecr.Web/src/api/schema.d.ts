@@ -4637,6 +4637,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{documentId}/permit-history/splits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * j2/jh3: saves the parts of month cells shared by two permits — typed by the user, never divided by days. A cell with
+         *     every part entered gets the total (sum of the parts) through the ordinary cell write; partial save keeps the old value.
+         * @description `403 ECR-ACCS-0403` — a month cell not editable; `409 ECR-CELL-0409` — the row changed (`baseVersion`);
+         *     `422 ECR-REQ-0422 permitSplitInvalid` — no history, the month is not shared, wrong number of parts.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveCellSplitsRequest"];
+                    "application/json": components["schemas"]["SaveCellSplitsRequest"];
+                    "text/json": components["schemas"]["SaveCellSplitsRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentPermitHistoryDto"];
+                        "text/json": components["schemas"]["DocumentPermitHistoryDto"];
+                        "text/plain": components["schemas"]["DocumentPermitHistoryDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{documentId}/rows": {
         parameters: {
             query?: never;
@@ -28960,6 +29055,36 @@ export interface components {
              */
             windowPeriodKey: number;
         };
+        /** @description One month cell and its parts typed by the user (never divided by days). */
+        CellSplitItem: {
+            /** @description Row version the user started from (as in `PATCH …/cells`). */
+            baseVersion: string;
+            /** @description The month column (or a numeric column of a table without month columns). */
+            columnCode: string;
+            /** @description Part values A, B, … in date order; `null` — not entered yet. */
+            parts: unknown[];
+            /** @description Row key. */
+            rowKey: string;
+            /**
+             * Format: int64
+             * @description A table instance of the document.
+             */
+            tableInstanceId: number;
+        };
+        /** @description One month cell of a shared month. */
+        CellSplitValueDto: {
+            /** @description The month column. */
+            columnCode: string;
+            /** @description Every part holds a value (the cell no longer blocks Submit). */
+            isSplit: boolean;
+            /** @description Entered part values by part number (A, B, …); `null` — not entered. */
+            parts: unknown[];
+            /**
+             * Format: decimal
+             * @description The stored value (the sum once split; the single «unsplit» value before).
+             */
+            total: null | string;
+        };
         /** @description Чи можна фарбувати комірки таблиці (CELL-STYLE P1A): те, що клієнт має знати, щоб не вмикати «Заливку»/«Колір
          *     тексту» там, де `PATCH …/cell-styles` однаково відмовить 403. */
         CellStyleAccessDto: {
@@ -37899,6 +38024,16 @@ export interface components {
              *     не збігається з жодним рядком, і прив'язка мовчки не спрацьовувала б. */
             matchJson: string;
         };
+        /** @description j2/jh3: save the parts of month cells (partial save allowed — a cell whose parts are all entered gets the total). */
+        SaveCellSplitsRequest: {
+            /** @description Cells to split. */
+            items: components["schemas"]["CellSplitItem"][];
+            /**
+             * Format: int32
+             * @description The period the user is in (`YYYYMM`).
+             */
+            periodKey: number;
+        };
         /** @description Колонка пачки: код і ті самі налаштування, що в SaveColumnDefRequest. */
         SaveColumnBatchItem: {
             /** @description Код колонки. */
@@ -39589,6 +39724,8 @@ export interface components {
         };
         /** @description A month of a row that must be split between permits (j2). */
         SplitMonthDto: {
+            /** @description The month cells of the row: current total and the entered parts (pre-fill of the split dialog). */
+            cells: components["schemas"]["CellSplitValueDto"][];
             /** @description Cells of the row with entered data in that month that are not split yet. */
             columnCodes: string[];
             /**
