@@ -135,14 +135,16 @@ function RecalcRow({
       {/* ✎ debt-1109 x4: при 375 px дії не вміщались поруч із текстом і вилазили за край — рядок переноситься,
           дії стають під текстом праворуч; на широкому екрані — як і раніше, один рядок. */}
       <Group gap="xs" wrap="wrap" justify="space-between" data-recalc-head="">
+        {/* ✎ debt-1109 F13 (P3 C): розгорнутий банер ПЕРЕНОСИТЬ текст (при 375 px він обрізався «…» і губив N і
+            назву проєкту); обрізання — лише згорнутому підсумку, що за fg6 займає один рядок. */}
         <Text
           size="sm"
           fw={500}
           {...(tone === undefined ? {} : { c: tone })}
-          className="ecr-ellipsis"
+          {...(collapsed ? { className: 'ecr-ellipsis' } : {})}
           title={text}
           data-recalc-text=""
-          style={{ flex: '1 1 14rem', minWidth: 0 }}
+          style={{ flex: '1 1 14rem', minWidth: 0, ...(collapsed ? {} : { overflowWrap: 'anywhere' as const }) }}
         >
           {text}
         </Text>
