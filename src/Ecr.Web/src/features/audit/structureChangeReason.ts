@@ -1,5 +1,6 @@
 import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
+import { siteMomentText } from '@/shared/siteMoment';
 
 /**
  * Причина структурної зміни (`StructureChange.ChangeReason`) мовою інтерфейсу.
@@ -81,12 +82,21 @@ function render(key: string, params: Record<string, string>): string | null {
     // FP-7: зміна вікна дії запису довідника — скільки рядків перераховано (`SetEntryValidityHandler`).
     case 'registryAudit.entryValidityRescanned':
       return t('registryAudit.entryValidityRescanned', params);
-    // F13-p213 (i5): місяць для одного документа — строк ISO, показ у локалі читача.
-    case 'document.reopen.audit.reopened':
+    // F13-p213 (i5): місяць для одного документа — строк ISO.
+    // ✎ debt-1109 i4-P3: у часі МАЙДАНЧИКА (`zone` із конверта), як рядок вкладки Periods; старі записи без `zone` —
+    // у поясі читача, як і раніше.
+    case 'document.reopen.audit.reopened': {
+      const until = params['until'];
+      const zone = params['zone'];
+      const { zone: _zone, ...rest } = params;
       return t('document.reopen.audit.reopened', {
-        ...params,
-        until: params['until'] === undefined ? '' : formatDateTime(params['until']),
+        ...rest,
+        until:
+          until === undefined
+            ? ''
+            : (zone === undefined || zone.length === 0 ? null : siteMomentText(until, zone)) ?? formatDateTime(until),
       });
+    }
     case 'document.reopen.audit.closedExpired':
       return t('document.reopen.audit.closedExpired', params);
     case 'document.reopen.audit.closedReplaced':
