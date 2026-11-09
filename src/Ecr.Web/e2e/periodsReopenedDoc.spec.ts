@@ -58,7 +58,8 @@ test.describe('Periods reopened doc', () => {
     await page.goto(`/projects/${String(card.projectId)}/periods`);
     const row = page.locator(`[data-period-row="${String(periodKey)}"]`);
     await expect(row).toBeVisible({ timeout: 60_000 });
-    await expect(row.locator('[data-period-state="Closed"]')).toBeVisible();
+    // ✎ debt-1109 i4-P3: з винятками бейджа «Locked» над рядком немає (рядок сам каже «Locked · …») — атрибут стану є.
+    await expect(row.locator('[data-period-state="Closed"]')).toBeAttached();
 
     const summary = row.getByTestId('period-reopened-summary');
     await expect(summary).toBeVisible({ timeout: 30_000 });
