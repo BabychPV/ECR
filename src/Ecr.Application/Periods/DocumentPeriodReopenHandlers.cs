@@ -1,4 +1,5 @@
 // src/Ecr.Application/Periods/DocumentPeriodReopenHandlers.cs
+using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
@@ -194,7 +195,7 @@ public sealed class OpenDocumentPeriodReopenHandler(
                         periodKey,
                         openUntil = opened.OpenUntil,
                     }),
-                    ChangeReason: opened.Reason,
+                    ChangeReason: ReopenedReason(opened),
                     ChangedByUserId: userId,
                     CorrelationId: currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
@@ -234,10 +235,31 @@ public sealed class OpenDocumentPeriodReopenHandler(
                 openUntil = exception.OpenUntil,
             }),
             NewJson: JsonSerializer.Serialize(new { state = nameof(PeriodState.Closed), closedAt = exception.ClosedAt }),
-            ChangeReason: exception.CloseReason,
+            ChangeReason: CloseReasonOf(exception.CloseReason),
             ChangedByUserId: userId ?? 0,
             CorrelationId: correlationId);
     }
+
+    /// <summary>
+    /// Причина запису «Reopen» конвертом (F13-p213 i5): причина людини і строк ISO — клієнт показує строк у локалі
+    /// читача (<c>structureChangeReason.ts</c>). Причина ≤ 400 символів + конверт уміщаються в <c>nvarchar(1000)</c>.
+    /// </summary>
+    internal static string ReopenedReason(DocumentPeriodReopen exception)
+        => Sources.IntegrationAuditReason.Encode(
+            "document.reopen.audit.reopened",
+            ("reason", exception.Reason),
+            ("until", DateTime.SpecifyKind(exception.OpenUntil, DateTimeKind.Utc).ToString("O", CultureInfo.InvariantCulture)));
+
+    /// <summary>
+    /// Причина запису «Close» конвертом: «строк минув» / «замінено новим» словами мовою читача, а не сире «Expired»
+    /// (F13-p213 i5). Невідома причина — як є.
+    /// </summary>
+    internal static string? CloseReasonOf(string? closeReason) => closeReason switch
+    {
+        DocumentPeriodReopen.ClosedExpired => Sources.IntegrationAuditReason.Encode("document.reopen.audit.closedExpired"),
+        DocumentPeriodReopen.ClosedReplaced => Sources.IntegrationAuditReason.Encode("document.reopen.audit.closedReplaced"),
+        _ => closeReason,
+    };
 
     /// <summary>Чому відкрити місяць для документа не можна; <c>null</c> — можна.</summary>
     /// <param name="profile">Профіль прав.</param>

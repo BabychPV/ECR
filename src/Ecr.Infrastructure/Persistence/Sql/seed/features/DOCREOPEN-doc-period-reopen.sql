@@ -27,7 +27,13 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.reopen.activeTitle', N'kz', N'Осы құжат үшін {until} дейін ашық'),
     (N'document.reopen.activeBody', N'kz', N'Қалған құжаттар үшін {period} жабық қалады. Себеп: «{reason}». Ашқан: {by}.'),
     (N'document.reopen.done', N'kz', N'{period} осы құжат үшін {until} дейін ашылды.'),
-    (N'err.ECR-PRD-0422.reopenReasonTooLong', N'kz', N'Себеп тым ұзын: {max} таңбадан аспауы керек.')
+    (N'err.ECR-PRD-0422.reopenReasonTooLong', N'kz', N'Себеп тым ұзын: {max} таңбадан аспауы керек.'),
+    (N'document.reopen.audit.reopened', N'ru', N'Открыт для этого документа до {until}. Причина: «{reason}»'),
+    (N'document.reopen.audit.closedExpired', N'ru', N'Срок открытия истёк: месяц снова закрыт для этого документа'),
+    (N'document.reopen.audit.closedReplaced', N'ru', N'Заменено новым открытием для этого документа'),
+    (N'document.reopen.audit.reopened', N'kz', N'Осы құжат үшін {until} дейін ашылды. Себеп: «{reason}»'),
+    (N'document.reopen.audit.closedExpired', N'kz', N'Ашық мерзімі өтті: ай осы құжат үшін қайта жабылды'),
+    (N'document.reopen.audit.closedReplaced', N'kz', N'Осы құжат үшін жаңа ашумен ауыстырылды')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -48,7 +54,10 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'document.reopen.activeTitle', N'en', N'Reopened for this document until {until}', 1),
     (N'document.reopen.activeBody', N'en', N'{period} stays locked for every other document. Reason: «{reason}». Opened by {by}.', 1),
     (N'document.reopen.done', N'en', N'{period} is reopened for this document until {until}.', 1),
-    (N'err.ECR-PRD-0422.reopenReasonTooLong', N'en', N'The reason is too long: at most {max} characters.', 1)
+    (N'err.ECR-PRD-0422.reopenReasonTooLong', N'en', N'The reason is too long: at most {max} characters.', 1),
+    (N'document.reopen.audit.reopened', N'en', N'Reopened for this document until {until}. Reason: «{reason}»', 1),
+    (N'document.reopen.audit.closedExpired', N'en', N'Open-until reached: the month is locked again for this document', 1),
+    (N'document.reopen.audit.closedReplaced', N'en', N'Replaced by a new reopen for this document', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

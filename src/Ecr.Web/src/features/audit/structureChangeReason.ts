@@ -1,3 +1,4 @@
+import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
 
 /**
@@ -80,6 +81,16 @@ function render(key: string, params: Record<string, string>): string | null {
     // FP-7: зміна вікна дії запису довідника — скільки рядків перераховано (`SetEntryValidityHandler`).
     case 'registryAudit.entryValidityRescanned':
       return t('registryAudit.entryValidityRescanned', params);
+    // F13-p213 (i5): місяць для одного документа — строк ISO, показ у локалі читача.
+    case 'document.reopen.audit.reopened':
+      return t('document.reopen.audit.reopened', {
+        ...params,
+        until: params['until'] === undefined ? '' : formatDateTime(params['until']),
+      });
+    case 'document.reopen.audit.closedExpired':
+      return t('document.reopen.audit.closedExpired', params);
+    case 'document.reopen.audit.closedReplaced':
+      return t('document.reopen.audit.closedReplaced', params);
     default:
       return null;
   }
