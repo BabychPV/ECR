@@ -165,6 +165,50 @@ export const LOGIN_IDLE_MINUTES_PARAM = 'minutes';
 /** Ключ відмови сервера «сеанс завершено через бездіяльність» (`IdleSession.IdleTimeoutMessageKey`). */
 export const IDLE_TIMEOUT_MESSAGE_KEY = 'err.ECR-AUTH-0401.idleTimeout';
 
+/** Ключ `sessionStorage` позначки «вкладку виведено після бездіяльності» (борг 09.11). */
+export const IDLE_SIGNOUT_MARKER_KEY = 'ecr.idleSignedOut';
+
+/** Скільки позначка дійсна: довше — це вже не «щойно вивели», а давній вихід. */
+const IdleSignOutMarkerTtlMs = 12 * 60 * 60 * 1000;
+
+/**
+ * ✎ Борг 09.11: сервер віддає `401 idleTimeout` лише на ПЕРШИЙ запит із простроченим cookie й тут же його стирає;
+ * перезавантаження сторінки далі отримує звичайний `401`, і сторінка входу губила «вас виведено через N хв
+ * бездіяльності». Позначка вкладки (`sessionStorage`, ця вкладка й лише до входу) переживає перезавантаження.
+ */
+export function rememberIdleSignOut(idleMinutes?: number): void {
+  try {
+    sessionStorage.setItem(
+      IDLE_SIGNOUT_MARKER_KEY,
+      JSON.stringify({ minutes: idleMinutes ?? null, at: Date.now() }),
+    );
+  } catch {
+    // Сховище недоступне (приватне вікно) — лишається текст із адреси.
+  }
+}
+
+/** Позначка виходу після бездіяльності, якщо вона свіжа; інакше `null`. */
+export function readIdleSignOut(): { minutes: number | null } | null {
+  try {
+    const raw = sessionStorage.getItem(IDLE_SIGNOUT_MARKER_KEY);
+    if (raw === null) return null;
+    const parsed = JSON.parse(raw) as { minutes?: unknown; at?: unknown };
+    if (typeof parsed.at !== 'number' || Date.now() - parsed.at > IdleSignOutMarkerTtlMs) return null;
+    return { minutes: typeof parsed.minutes === 'number' ? parsed.minutes : null };
+  } catch {
+    return null;
+  }
+}
+
+/** Знімає позначку (після входу). */
+export function forgetIdleSignOut(): void {
+  try {
+    sessionStorage.removeItem(IDLE_SIGNOUT_MARKER_KEY);
+  } catch {
+    // Нічого прибирати.
+  }
+}
+
 /** Адреса сторінки входу з поверненням і (необов'язковою) причиною. */
 export function loginUrl(from: string, reason?: LoginReason, idleMinutes?: number): string {
   const base = `${LOGIN_PATH}?from=${encodeURIComponent(from)}`;
@@ -266,6 +310,7 @@ export function signOutForIdle(idleMinutes: number): void {
   signedOut = true;
   const from = typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search;
   runBeforeLoginRedirect(from);
+  rememberIdleSignOut(idleMinutes);
   redirectToLogin(from, 'idle', idleMinutes);
 }
 
@@ -629,7 +674,10 @@ async function apiFetchRaw(
     const cause = await loginCauseOf(response);
     runBeforeLoginRedirect(from);
     // ✎ D-471: сервер завершив сеанс через бездіяльність — сусідні вкладки йдуть на вхід разом із цією.
-    if (cause.reason === 'idle') announceIdleExpired(cause.idleMinutes);
+    if (cause.reason === 'idle') {
+      rememberIdleSignOut(cause.idleMinutes);
+      announceIdleExpired(cause.idleMinutes);
+    }
     redirectToLogin(from, cause.reason, cause.idleMinutes);
     /*
      * ⛔ Заголовок — із КАТАЛОГУ, не літералом. Тут стояло «Потрібна
