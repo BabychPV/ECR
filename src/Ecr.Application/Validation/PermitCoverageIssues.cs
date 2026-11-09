@@ -104,6 +104,13 @@ public static class PermitCoverageIssues
                 .ConfigureAwait(false));
         }
 
+        if (history is not null)
+        {
+            messages.AddRange(await HeaderSplitFindingsAsync(
+                    history, registries, cells, rows, headers, tables, permitColumnsOf, documentId, instances, periodKey, language, ct)
+                .ConfigureAwait(false));
+        }
+
         return messages;
     }
 
@@ -335,6 +342,118 @@ public static class PermitCoverageIssues
                     BlocksSave: false,
                     MessageKey: ValidationMessageTemplates.PermitSplitNeeded,
                     Params: parameters));
+            }
+        }
+
+        return messages;
+    }
+
+    /// <summary>
+    /// Ship 2 (jh2): rows of tables WITHOUT their own permit column rely on the header permit; when the header permit
+    /// changed mid-month, each of their cells with entered data in that month must be split — <c>PERMIT-SPLIT</c> Error at
+    /// the cell (blocks Submit), as for a row's own permit change.
+    /// </summary>
+    private static async Task<List<ValidationMessage>> HeaderSplitFindingsAsync(
+        IPermitHistoryStore history,
+        IRegistryStore registries,
+        ICellStore cells,
+        IRowStore rows,
+        IDocumentHeaderStore headers,
+        Dictionary<int, TableDef> tables,
+        Dictionary<int, List<ColumnDef>> permitColumnsOf,
+        long documentId,
+        IReadOnlyList<TableInstanceRef> instances,
+        PeriodKey periodKey,
+        string language,
+        CancellationToken ct)
+    {
+        var relying = instances.Where(i => !permitColumnsOf.ContainsKey(i.TableDefId) && tables.ContainsKey(i.TableDefId)).ToList();
+        if (relying.Count == 0)
+        {
+            return [];
+        }
+
+        var segments = (await history.ListAsync(documentId, ct).ConfigureAwait(false))
+            .Select(r => r.Segment)
+            .Where(s => s.HeaderFieldDefId is not null)
+            .GroupBy(s => s.HeaderFieldDefId!.Value)
+            .OrderBy(g => g.Key)
+            .FirstOrDefault();
+        if (segments is null)
+        {
+            return [];
+        }
+
+        var values = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);
+        if (!values.TryGetValue(segments.Key, out var headerValue) || headerValue.ValueRegistryEntryId is not { } baseId)
+        {
+            return [];
+        }
+
+        var spans = Permits.History.PermitHistoryCoverage.SpansOf(baseId, segments);
+        var shared = Permits.History.PermitTimeline.SharedMonths(spans);
+        if (shared.Count == 0)
+        {
+            return [];
+        }
+
+        var entries = (await registries.FindEntriesByIdsAsync([.. spans.Select(s => s.EntryId).Distinct()], ct).ConfigureAwait(false))
+            .ToDictionary(e => e.Id);
+        var parts = await history.PartsAsync(documentId, [.. shared.Select(m => (m.Year * 100) + m.Month)], ct).ConfigureAwait(false);
+        var ids = relying.ConvertAll(i => i.TableInstanceId);
+        var slices = await cells.ReadSlicesAsync(ids, periodKey, ct).ConfigureAwait(false);
+        var keys = await rows.GetRowIdsBatchAsync(ids, periodKey, ct).ConfigureAwait(false);
+        var messages = new List<ValidationMessage>();
+
+        foreach (var instance in relying)
+        {
+            var table = tables[instance.TableDefId];
+            var keyOf = keys.TryGetValue(instance.TableInstanceId, out var map) ? map.ToDictionary(p => p.Value, p => p.Key) : [];
+            foreach (var rowCells in (slices.GetValueOrDefault(instance.TableInstanceId) ?? []).GroupBy(c => c.Address.TableRowId))
+            {
+                if (keyOf.GetValueOrDefault(rowCells.Key) is not { } rowKey)
+                {
+                    continue;
+                }
+
+                var byColumn = rowCells.ToDictionary(c => c.Address.ColumnDefId, c => c.Value);
+                foreach (var month in shared)
+                {
+                    var inMonth = Permits.History.PermitTimeline.InMonth(spans, month);
+                    var monthKey = (month.Year * 100) + month.Month;
+                    var permits = string.Join(" / ", inMonth.Select(s => entries.TryGetValue(s.EntryId, out var e)
+                        ? (e.DisplayL10n.Get("en") is { Length: > 0 } shown ? shown : e.Code.ToString())
+                        : "…"));
+                    foreach (var cell in Permits.History.PermitHistoryReader.DataCellsInMonth(
+                                 table, periodKey, byColumn, new HashSet<int>(), month))
+                    {
+                        var cellParts = parts
+                            .Where(p => p.PeriodKeyValue == monthKey && p.TableDefId == table.Id && p.SheetCopyId == instance.SheetCopyId
+                                        && string.Equals(p.RowKey, rowKey, StringComparison.Ordinal) && p.ColumnDefId == cell.Id)
+                            .ToList();
+                        if (Permits.History.PermitHistoryReader.IsSplit(cellParts, inMonth.Count))
+                        {
+                            continue;
+                        }
+
+                        var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+                        {
+                            ["month"] = month.ToString("MM.yyyy", System.Globalization.CultureInfo.InvariantCulture),
+                            ["column"] = cell.HeaderL10n.Get("en") ?? cell.Code,
+                            ["permits"] = permits,
+                        };
+                        messages.Add(new ValidationMessage(
+                            ValidationSeverity.Error,
+                            SplitRuleCode,
+                            ValidationMessageTemplates.Render(ValidationMessageTemplates.PermitSplitNeeded, language, parameters),
+                            table.Id,
+                            rowKey,
+                            cell.Code,
+                            BlocksSave: false,
+                            MessageKey: ValidationMessageTemplates.PermitSplitNeeded,
+                            Params: parameters));
+                    }
+                }
             }
         }
 

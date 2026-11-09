@@ -125,11 +125,9 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Documents/PatchCellsHandler.PermitValidity.cs | деталь row | rowName"] =
             (1, "feature (j) j3 (4225): назва рядка, у комірку якого автор САМ пише (після рішення про доступ до цієї комірки); не hex-ключ"),
         ["src/Ecr.Application/Permits/History/PermitHistoryHandlers.cs | деталь headerFieldCode | header.Field.Code"] =
-            (2, "feature (j) jh1: поле шапки, яке пише сам автор запиту (permitChangeMidMonth, permitGap) — після гранта на проєкт; шапка — не Column/Table"),
+            (1, "feature (j) jh1: поле шапки, яке пише сам автор запиту (permitGap) — після гранта на проєкт; шапка — не Column/Table"),
         ["src/Ecr.Application/Permits/History/PermitHistoryHandlers.cs | деталь headerFieldCode | fieldCode"] =
             (1, "feature (j) jh1: те саме поле шапки запиту (foreignRegistry/deletedEntry/inactiveEntry), як у DocumentHeaderHandlers"),
-        ["src/Ecr.Application/Permits/History/PermitHistoryHandlers.cs | текст | table.Code"] =
-            (1, "feature (j) jh1: рядки, що спираються на дозвіл шапки, — лише таблиць, які автор ЧИТАЄ (readable.CanReadTable); прихована таблиця не названа й не порахована"),
         ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | текст | missingCode"] =
             (1, "D-12: поле шапки, яке пише сам автор запиту (неіснуючий запис довідника); шапка — не Column/Table"),
         ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | деталь headerFieldCode | missingCode"] =

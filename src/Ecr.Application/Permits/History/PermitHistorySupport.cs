@@ -245,10 +245,16 @@ internal static class PermitHistoryReader
 {
     /// <summary>One row with history, as read for the DTO.</summary>
     internal sealed record RowTarget(
-        TableDef Table, ColumnDef Column, long? SheetCopyId, string RowKey, PeriodKey Period, long BaseEntryId,
+        TableDef Table, ColumnDef? Column, long? SheetCopyId, string RowKey, PeriodKey Period, long BaseEntryId,
         IReadOnlyDictionary<int, CellValueData> Cells, IReadOnlyList<PermitSegment> Segments,
-        IReadOnlyDictionary<int, string?> AddedBy)
+        IReadOnlyDictionary<int, string?> AddedBy, string? HeaderFieldCode = null)
     {
+        /// <summary>The permit column's id (0 — the row relies on the header permit, Ship 2).</summary>
+        public int PermitColumnId => Column?.Id ?? 0;
+
+        /// <summary>The permit column's code, or the header field's code for a row relying on the header permit.</summary>
+        public string PermitCode => Column?.Code ?? HeaderFieldCode ?? string.Empty;
+
         /// <summary>The spans of the history.</summary>
         public IReadOnlyList<PermitSpan> Spans { get; } =
             PermitTimeline.Spans(BaseEntryId, Segments.Select(s => (s.ValidFrom, s.RegistryEntryId)));
@@ -314,7 +320,7 @@ internal static class PermitHistoryReader
                 .Where(g => IsSplit(g.Value, spans.Count))
                 .Select(g => g.Key)
                 .ToHashSet();
-            var pending = DataCellsInMonth(row.Table, row.Period, row.Cells, new HashSet<int> { row.Column.Id }, month)
+            var pending = DataCellsInMonth(row.Table, row.Period, row.Cells, new HashSet<int> { row.PermitColumnId }, month)
                 .Where(c => !done.Contains(c.Id))
                 .Select(c => c.Code)
                 .ToList();
@@ -324,7 +330,7 @@ internal static class PermitHistoryReader
             List<ColumnDef> cellColumns = monthColumns.Count > 0
                 ? [.. monthColumns.Where(c => row.Period.Year == month.Year && c.MonthNumber == month.Month)]
                 : row.Table.Columns
-                    .Where(c => !c.IsDeleted && c.DataType is CellDataType.Decimal or CellDataType.Int && c.Id != row.Column.Id
+                    .Where(c => !c.IsDeleted && c.DataType is CellDataType.Decimal or CellDataType.Int && c.Id != row.PermitColumnId
                                 && (rowParts.ContainsKey(c.Id)
                                     || DataCellsInMonth(row.Table, row.Period, row.Cells, new HashSet<int>(), month).Any(d => d.Id == c.Id)))
                     .ToList();
@@ -341,8 +347,9 @@ internal static class PermitHistoryReader
         }
 
         return new RowPermitHistoryDto(
-            row.Table.Id, row.Table.Code, row.SheetCopyId, row.RowKey, row.Column.Code,
-            Items(row.Spans, row.Segments, row.AddedBy, entries, language), split);
+            row.Table.Id, row.Table.Code, row.SheetCopyId, row.RowKey, row.PermitCode,
+            Items(row.Spans, row.Segments, row.AddedBy, entries, language), split,
+            row.Column is null ? "header" : "row");
     }
 
     /// <summary>History items: the base permit, then each segment with who added it.</summary>
