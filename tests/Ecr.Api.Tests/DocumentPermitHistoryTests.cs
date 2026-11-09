@@ -31,7 +31,7 @@ namespace Ecr.Api.Tests;
 /// no <c>PermitSegment</c> record.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class DocumentPermitHistoryTests(SqlServerFixture sql)
+public sealed partial class DocumentPermitHistoryTests(SqlServerFixture sql)
 {
     private const string Password = "Api-Doc-PermitH-2026!";
     private const string HeaderCode = "PERMIT";
@@ -232,17 +232,18 @@ public sealed class DocumentPermitHistoryTests(SqlServerFixture sql)
         return await db.PermitSegments.CountAsync(x => x.DocumentId == s.DocumentId).ConfigureAwait(false);
     }
 
-    private async Task<string> AuditAsync(Scenario s, string operation)
+    private async Task<string> AuditAsync(Scenario s, string operation, string entityType = "PermitSegment")
     {
         await using var connection = new SqlConnection(sql.ConnectionString);
         await connection.OpenAsync().ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT TOP (1) COALESCE(NewJson, OldJson) FROM aud.StructureChange
-             WHERE EntityType = N'PermitSegment' AND Operation = @op AND ChangedByUserId = @user
+             WHERE EntityType = @entity AND Operation = @op AND ChangedByUserId = @user
              ORDER BY ChangedAt DESC;
             """;
         command.Parameters.AddWithValue("@op", operation);
+        command.Parameters.AddWithValue("@entity", entityType);
         command.Parameters.AddWithValue("@user", s.UserId);
         return (await command.ExecuteScalarAsync().ConfigureAwait(false)) as string ?? string.Empty;
     }
@@ -348,10 +349,10 @@ public sealed class DocumentPermitHistoryTests(SqlServerFixture sql)
 
         return new Scenario(
             document.DocumentId, instanceId, userName, user.Id, rowKey, permitColumnCode, dataColumnCode.ToString(),
-            midJan.Id, feb.Id);
+            midJan.Id, feb.Id, document.RowIds[0], document.ColumnDefIds[1]);
     }
 
     private sealed record Scenario(
         long DocumentId, long TableInstanceId, string UserName, int UserId, string RowKey, string PermitColumnCode,
-        string DataColumnCode, long MidJanId, long FebId);
+        string DataColumnCode, long MidJanId, long FebId, long RowId, int DataColumnId);
 }
