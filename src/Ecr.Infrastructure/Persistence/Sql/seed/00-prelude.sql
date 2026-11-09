@@ -5754,7 +5754,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'documents.lateEdits', N'kz', N'Кешіккен түзетулер'),
     (N'documents.lateEditsHint', N'kz', N'Құжат тапсыру мерзімінен кейін өңделді.'),
     (N'documents.noMatch', N'kz', N'Сүзгілерге сәйкес құжаттар жоқ.'),
-    (N'documents.noMatchHint', N'kz', N'Күйді өзгертіңіз, «Иесі» өрісінде «Барлығының құжаттары» таңдаңыз немесе сүзгілерді тастаңыз.'),
+    (N'documents.noMatchHint', N'kz', N'Күйді өзгертіңіз, «Иесі» өрісінде «Барлығының құжаттары» таңдаңыз немесе сүзгілерді тазалаңыз.'),
     (N'documents.resetFilters', N'kz', N'Сүзгілерді тастау'),
     (N'document.noSheetsHint', N'kz', N'Кезең әлі ашылмаған болуы мүмкін: парақ даналары ол ашылғанда құрылады.'),
     (N'templates.empty', N'kz', N'Әзірге үлгілер жоқ'),
