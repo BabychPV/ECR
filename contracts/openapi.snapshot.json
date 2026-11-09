@@ -22141,6 +22141,11 @@
             "description": "The permit column.",
             "type": "string"
           },
+          "permitSource": {
+            "default": "row",
+            "description": "`row` — the row's own permit column; `header` — the row relies on the header permit\n        (Ship 2: `ColumnCode` is then the header field's code).",
+            "type": "string"
+          },
           "permits": {
             "description": "The history, base permit first.",
             "items": {
