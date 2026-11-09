@@ -187,6 +187,50 @@ public sealed class AuditSortAndExportTests(SqlServerFixture sql)
         Assert.Equal($"{businessKey} · 2026-01", items[0].GetProperty("entityLabel").GetString());
     }
 
+    /// <remarks>
+    /// (j6) Mutation (red proof): drop <c>WithPermitHistoryLabelsAsync</c> from <c>AuditReader.WithEntityLabelsAsync</c> —
+    /// entityLabel is null (the client shows the raw id).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "ACC-1108-j6")]
+    public async Task Структура_підписує_зміну_дозволу_і_поділ_місяця_з_JSON_запису_навіть_коли_сегмент_видалено()
+    {
+        using var app = new EcrApiFactory(sql);
+        var client = await LoginAsync(app, ["Security.ViewAudit"]);
+        var doc = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(ct: CancellationToken.None);
+        var author = await CreateUserAsync("Permit history");
+        var businessKey = await ScalarStringAsync($"SELECT BusinessKey FROM doc.Document WHERE Id = {doc.DocumentId}");
+
+        // h+ rule: the row is named as people see it — its template label, not its key.
+        var tableCode = await ScalarStringAsync($"SELECT Code FROM cfg.TableDef WHERE Id = {doc.TableDefId}");
+        var rowKey = await ScalarStringAsync($"SELECT RowKey FROM doc.TableRow WHERE Id = {doc.RowIds[0]}");
+        Assert.Equal("1", await ScalarStringAsync(
+            $"UPDATE cfg.RowDef SET LabelL10n = N'{{\"en\":\"Sea Water Intake\"}}' WHERE TableDefId = {doc.TableDefId} AND RowKey = N'{rowKey}'; SELECT CAST(@@ROWCOUNT AS nvarchar(10));"));
+
+        // No doc.PermitSegment row with this id exists (an undone segment is deleted): the label comes from the record's JSON.
+        var segment = $$"""{"documentId":{{doc.DocumentId}},"table":"{{tableCode}}","rowKey":"{{rowKey}}","sheetCopyId":null,"column":"PERMIT","headerField":null,"validFrom":"2026-03-15","permit":"B-2","permitId":12,"previousPermit":"A-1","previousPermitId":11}""";
+        await WriteStructureAsync("PermitSegment", 2_000_000_021, Base, author, "Add", newJson: segment);
+        await WriteStructureAsync("PermitSegment", 2_000_000_021, Base.AddMinutes(1), author, "Remove", oldJson: segment);
+        var header = $$"""{"documentId":{{doc.DocumentId}},"table":null,"rowKey":null,"sheetCopyId":null,"column":null,"headerField":"PERMIT_H","validFrom":"2026-04-01","permit":"C-3","permitId":13,"previousPermit":null,"previousPermitId":null}""";
+        await WriteStructureAsync("PermitSegment", 2_000_000_022, Base.AddMinutes(2), author, "Add", newJson: header);
+        var split = $$"""{"documentId":{{doc.DocumentId}},"table":"T","sheetCopyId":null,"rowKey":"R1","column":"M03","month":"2026-03","total":12,"parts":[{"part":1,"permit":"A-1","permitId":11,"from":"2026-03-01","to":"2026-03-14","value":5.5},{"part":2,"permit":"B-2","permitId":12,"from":"2026-03-15","to":"2026-03-31","value":6.5}]}""";
+        await WriteStructureAsync("CellPermitPart", doc.ColumnDefIds[1], Base.AddMinutes(3), author, "Split", newJson: split);
+        await WriteStructureAsync("CellPermitPart", doc.ColumnDefIds[1], Base.AddMinutes(4), author, "Split", newJson: "not json");
+
+        var items = await ItemsAsync(client, $"/api/v1/audit/structure?{Window()}&changedByUserId={author}&sort=ChangedAtAsc");
+        Assert.Equal(
+            [
+                $"{businessKey} · Sea Water Intake · A-1 → B-2 · 2026-03-15",
+                $"{businessKey} · Sea Water Intake · A-1 → B-2 · 2026-03-15",
+                $"{businessKey} · PERMIT_H · C-3 · 2026-04-01",
+                $"{businessKey} · row · A-1 · M03 · 2026-03 · A-1: 5.5 + B-2: 6.5 = 12",
+                null,
+            ],
+            items.Select(i => i.GetProperty("entityLabel").GetString()).ToList());
+    }
+
     // ---------- експорт ----------
 
     [Fact]
@@ -488,21 +532,34 @@ public sealed class AuditSortAndExportTests(SqlServerFixture sql)
         await command.ExecuteNonQueryAsync();
     }
 
-    private async Task WriteStructureAsync(string entityType, int entityId, DateTime at, int author)
+    private async Task WriteStructureAsync(
+        string entityType, int entityId, DateTime at, int author, string operation = "Update", string? newJson = null, string? oldJson = null)
     {
         await using var connection = new SqlConnection(sql.ConnectionString);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO aud.StructureChange
-                (ChangedAt, TemplateVersionId, EntityType, EntityId, ChangeClass, Operation, ChangedByUserId)
-            VALUES (@at, 0, @type, @id, 0, N'Update', @author);
+                (ChangedAt, TemplateVersionId, EntityType, EntityId, ChangeClass, Operation, OldJson, NewJson, ChangedByUserId)
+            VALUES (@at, 0, @type, @id, 0, @op, @old, @new, @author);
             """;
         command.Parameters.Add("@at", System.Data.SqlDbType.DateTime2).Value = at;
         command.Parameters.AddWithValue("@type", entityType);
         command.Parameters.AddWithValue("@id", entityId);
+        command.Parameters.AddWithValue("@op", operation);
+        command.Parameters.AddWithValue("@old", (object?)oldJson ?? DBNull.Value);
+        command.Parameters.AddWithValue("@new", (object?)newJson ?? DBNull.Value);
         command.Parameters.AddWithValue("@author", author);
         await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task<string> ScalarStringAsync(string text)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = text;
+        return (string)(await command.ExecuteScalarAsync())!;
     }
 
     private async Task WriteSecurityAsync(string eventType, int targetUser, DateTime at, int author, string? details = null)

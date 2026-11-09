@@ -122,6 +122,12 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     /// <summary>Закритий місяць, відкритий для ОДНОГО документа (приймальна 08.11 (i)).</summary>
     public DbSet<DocumentPeriodReopen> DocumentPeriodReopens => Set<DocumentPeriodReopen>();
 
+    /// <summary>Feature (j): later permits «from date» of a row's permit cell or of a header field.</summary>
+    public DbSet<PermitSegment> PermitSegments => Set<PermitSegment>();
+
+    /// <summary>Feature (j): parts of a month value split between permits.</summary>
+    public DbSet<CellPermitPart> CellPermitParts => Set<CellPermitPart>();
+
     /// <summary>Виконавці передач із власним станом Передано/Заповнено/Повернуто (EA-1).</summary>
     public DbSet<EditAssignmentRecipient> EditAssignmentRecipients => Set<EditAssignmentRecipient>();
 

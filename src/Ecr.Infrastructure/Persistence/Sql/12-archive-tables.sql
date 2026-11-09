@@ -84,6 +84,27 @@ CREATE TABLE arc.CellValue
 ) ON [DATA_ARCHIVE];
 GO
 
+-- Feature (j): parts of month values split between permits (doc.CellPermitPart) — archived with their period, so the
+-- per-permit attribution of an archived year is not lost (the month total itself lives in arc.CellValue).
+IF OBJECT_ID(N'arc.CellPermitPart', N'U') IS NULL
+CREATE TABLE arc.CellPermitPart
+(
+    PeriodKey       int            NOT NULL,
+    Id              bigint         NOT NULL,
+    DocumentId      bigint         NOT NULL,
+    TableDefId      int            NOT NULL,
+    SheetCopyId     bigint         NULL,
+    RowKey          nvarchar(100)  NOT NULL,
+    ColumnDefId     int            NOT NULL,
+    PartNo          tinyint        NOT NULL,
+    RegistryEntryId int            NOT NULL,
+    DayFrom         date           NOT NULL,
+    DayTo           date           NOT NULL,
+    ValueNumeric    decimal(34,16) NULL,
+    INDEX CCI_arc_CellPermitPart CLUSTERED COLUMNSTORE
+) ON [DATA_ARCHIVE];
+GO
+
 IF OBJECT_ID(N'arc.CellChange', N'U') IS NULL
 CREATE TABLE arc.CellChange
 (

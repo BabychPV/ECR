@@ -1,4 +1,5 @@
 import {
+  Fragment,
   Suspense,
   lazy,
   memo,
@@ -37,6 +38,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { ruleLabel } from '@/features/documents/ruleLabel';
+import { closeCellSplit, requestCellSplit, useCellSplitRequest } from '@/features/permits/history/splitRequest';
 import { clearInspectedCell, useInspectedCell, type InspectedCell } from './inspectedCell';
 import {
   addressChip,
@@ -50,6 +52,19 @@ import { SheetLog, type InspectorSheet, type SheetLogTarget } from './SheetLog';
 import './inspector.css';
 
 export type { InspectorSheet, SheetLogTarget } from './SheetLog';
+
+/** Feature (j): the permit history of a row / the parts of a split month in Info — lazy (`D-132`). */
+const RowPermitSection = lazy(async () => ({
+  default: (await import('@/features/permits/history/RowPermitSection')).RowPermitSection,
+}));
+
+/** Feature (j): the split dialog — loaded only when someone asks to split a month. */
+const CellSplitDialogHost = lazy(async () => ({
+  default: (await import('@/features/permits/history/CellSplitDialogHost')).CellSplitDialogHost,
+}));
+
+/** Feature (j) j3: the validation finding of a month shared by two permits and holding one value. */
+export const PermitSplitRule = 'PERMIT-SPLIT';
 
 /**
  * D-463 «Звідки це значення» — лінивий чанк (`D-132`): секцію бачать лише у вкладці Info і лише для комірки,
@@ -247,8 +262,30 @@ export function DocumentInspector({
   useEffect(
     () => () => {
       clearInspectedCell();
+      closeCellSplit();
     },
     [documentId],
+  );
+
+  const splitRequest = useCellSplitRequest();
+  // ✎ (j): «Split <month>» of a PERMIT-SPLIT finding — the finding names the table, the row and the month column.
+  const tablesRef = useRef(tables);
+  tablesRef.current = tables;
+  const onSplitIssue = useCallback(
+    (finding: ValidationFindingDto) => {
+      const table = tablesRef.current.find((candidate) => candidate.tableDefId === finding.tableDefId);
+      if (table === undefined || finding.rowKey === null || finding.columnCode === null) return;
+      requestCellSplit({
+        documentId,
+        periodKey,
+        tableInstanceId: table.tableInstanceId,
+        tableDefId: table.tableDefId,
+        sheetCopyId: table.sheetCopyId ?? null,
+        rowKey: finding.rowKey,
+        columnCode: finding.columnCode,
+      });
+    },
+    [documentId, periodKey],
   );
 
   // ⛔ C1-02: корінь інспектора підписаний на комірку під курсором (`useInspectedCell` нижче), тож
@@ -286,6 +323,12 @@ export function DocumentInspector({
         onHistory={() => toggle('history')}
         extra={extraTriggers}
       />
+
+      {splitRequest !== null && splitRequest.documentId === documentId && (
+        <Suspense fallback={null}>
+          <CellSplitDialogHost target={splitRequest} />
+        </Suspense>
+      )}
 
       {opened && (
         <aside ref={aside} className="ecr-insp" aria-label={t('inspector.title')} onKeyDown={onKeyDown} data-inspector={tab}>
@@ -348,6 +391,7 @@ export function DocumentInspector({
                 groups={groups}
                 rowLabels={rowLabels}
                 onSelect={onSelectIssue}
+                onSplit={onSplitIssue}
                 checkedPeriod={formatPeriodKey(periodKey) || String(periodKey)}
                 checkedAt={checkedAt}
               />
@@ -540,12 +584,15 @@ const IssuesTab = memo(function IssuesTab({
   groups,
   rowLabels,
   onSelect,
+  onSplit,
   checkedPeriod,
   checkedAt,
 }: {
   groups: readonly InspectorIssueGroup[] | null;
   rowLabels: ReadonlyMap<string, string>;
   onSelect: (finding: ValidationFindingDto) => void;
+  /** ✎ (j): «Split <month>» of a `PERMIT-SPLIT` finding. */
+  onSplit: (finding: ValidationFindingDto) => void;
   checkedPeriod: string;
   checkedAt: Date | null;
 }): JSX.Element {
@@ -599,7 +646,7 @@ const IssuesTab = memo(function IssuesTab({
             const rowAddress = finding.rowKey === null ? null : `${String(finding.tableDefId)}:${finding.rowKey}`;
             const rowName = rowAddress === null ? undefined : rowLabels.get(rowAddress);
 
-            return (
+            const issue = (
               <Row
                 key={index}
                 {...(navigable
@@ -628,6 +675,17 @@ const IssuesTab = memo(function IssuesTab({
                   <StatusBadge kind="severity" state={finding.severity} quiet />
                 </span>
               </Row>
+            );
+            if (finding.ruleCode !== PermitSplitRule || finding.rowKey === null || finding.columnCode === null) return issue;
+
+            // ✎ (j) j3: a sibling button (not inside the issue button) opens the split of that month cell.
+            return (
+              <Fragment key={index}>
+                {issue}
+                <Button size="xs" variant="subtle" data-inspector-split={finding.columnCode} onClick={() => onSplit(finding)}>
+                  {t('permits.split.action', { column: finding.columnCode })}
+                </Button>
+              </Fragment>
             );
           })}
           {group.issues.length > limitOf(groupKeyOf(group)) && (
@@ -890,6 +948,15 @@ function InfoTab({
   return (
     <Box p="sm" data-inspector-info="">
       <KeyValue items={items} />
+      <Suspense fallback={null}>
+        <RowPermitSection
+          documentId={documentId}
+          periodKey={periodKey}
+          tableDefId={table.tableDefId}
+          sheetCopyId={table.sheetCopyId ?? null}
+          cell={cell}
+        />
+      </Suspense>
       <Suspense fallback={null}>
         <CellSourceSection
           cell={{

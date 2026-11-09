@@ -1500,6 +1500,127 @@ SELECT r.Id AS SourceSubstanceId, a.PermitId, a.SourceId, s.NaeId, s.NaeCode, a.
  WHERE pt.Code = N'AIR' AND pt.Status = 1;
 GO
 
+-- ══ (j5) rpt.v_DocumentCellsByPermit — числові комірки ЗА ДОЗВОЛОМ-ВЛАСНИКОМ (функція (j), людина 08.11) ═════════════════
+-- Сирі дані для SSRS «факт за дозволом»: рядок вʼюхи = (комірка, дозвіл, якому зараховано її значення). Без агрегацій.
+-- Лише числові (Int=1, Decimal=2) непорожні комірки таблиць, що мають колонку дозволу рядка (Lookup на опублікований тип
+-- дозволу `cfg.PermitTypeDef.HeaderRegistryDefId` або групу `cfg.PermitGroup`, як `IPermitRegistryIndex`), або — коли такої
+-- колонки немає — поле дозволу в шапці документа.
+--   * Місяць ПОДІЛЕНО (усі частини місяця мають значення в `doc.CellPermitPart`) → рядок на частину: PermitId частини,
+--     IsPart = 1, PartNo, DayFrom/DayTo, ValueNumeric частини. Частини ЗАМІНЮЮТЬ комірку (у комірці — їхня сума).
+--   * Інакше → один рядок зі значенням комірки і дозволом, чинним в ОСТАННІЙ день місяця (колонка місяця: рік періоду +
+--     `MonthNumber`; інша колонка: кінець періоду `doc.Period.PeriodEnd`): найпізніший `doc.PermitSegment` із
+--     ValidFrom <= цього дня, інакше базовий дозвіл (значення комірки дозволу / поля шапки). Обчислені комірки не діляться
+--     ніколи — так само дозвіл останнього дня.
+-- Гарантія: SUM(ValueNumeric) у межах комірки = значення комірки (поділена — сума частин), без подвоєння.
+-- Місяць комірки — як у застосунку (`SaveCellSplitsHandler`): рік із PeriodKey комірки, місяць — MonthNumber колонки, інакше
+-- номер періоду. За Q-17 (@MonthRouting) місячні комірки лежать в екземплярі свого місяця: адреса частин і історії — логічна
+-- (документ, таблиця, копія аркуша, RowKey), тож базовий дозвіл шукається спершу в тому самому рядку, далі — у рядку з тим
+-- самим RowKey в інших екземплярах того ж року (найпізніший період).
+-- ⚠ Лише живі дані `doc.*`; Status — колонка, як у rpt.v_DocumentCells. PermitSource: 'row' | 'header'.
+CREATE OR ALTER VIEW rpt.v_DocumentCellsByPermit
+AS
+SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
+       d.Id AS DocumentId, d.BusinessKey AS DocumentKey,
+       cv.PeriodKey,
+       sd.Code AS SheetCode, CAST(COALESCE(dsh.CopyOrdinal, 1) AS smallint) AS SheetCopyOrdinal, td.Code AS TableCode,
+       r.Id AS RowId, r.RowKey,
+       cd.Code AS ColumnCode, cd.MonthNumber,
+       CASE WHEN sp.IsSplit = 1 THEN pp.RegistryEntryId ELSE COALESCE(sg.RegistryEntryId, bs.BaseId) END AS PermitId,
+       -- F13 p220 j5: the permit NUMBER as people know it (the entry's display, as the app names permits), not the
+       -- registry code E000…; PermitId keeps the entry id.
+       COALESCE(NULLIF(JSON_VALUE(pe.DisplayL10n, N'$.en'), N''), pe.Code) AS PermitCode,
+       CAST(CASE WHEN rp.ColumnDefId IS NOT NULL THEN N'row' ELSE N'header' END AS nvarchar(6)) AS PermitSource,
+       CAST(COALESCE(sp.IsSplit, 0) AS bit) AS IsPart,
+       pp.PartNo, pp.DayFrom, pp.DayTo,
+       CASE WHEN sp.IsSplit = 1 THEN pp.ValueNumeric ELSE cv.ValueNumeric END AS ValueNumeric,
+       cv.IsCalculated,
+       CAST(COALESCE(a.Status, 0) AS tinyint) AS Status
+FROM doc.CellValue          AS cv
+JOIN doc.TableRow           AS r  ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId AND r.IsDeleted = 0
+JOIN doc.TableInstance      AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
+JOIN doc.Document           AS d  ON d.Id = ti.DocumentId
+JOIN doc.Project            AS p  ON p.Id = d.ProjectId
+JOIN cfg.ColumnDef          AS cd ON cd.Id = cv.ColumnDefId AND cd.DataType IN (1, 2)
+JOIN cfg.TableDef           AS td ON td.Id = ti.TableDefId
+JOIN cfg.SheetDef           AS sd ON sd.Id = td.SheetDefId
+LEFT JOIN wf.ApprovalState  AS a  ON a.DocumentId = d.Id AND a.SheetDefId = sd.Id AND a.PeriodKey = cv.PeriodKey
+                                 AND (a.SheetCopyId = ti.SheetCopyId OR (a.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
+LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId
+LEFT JOIN doc.Period        AS per ON per.ProjectId = d.ProjectId AND per.PeriodKey = cv.PeriodKey
+-- Місяць комірки (NULL — номер поза 1..12: лише кінець періоду, без поділу).
+CROSS APPLY (SELECT CASE WHEN COALESCE(cd.MonthNumber, cv.PeriodKey % 100) BETWEEN 1 AND 12
+                         THEN DATEFROMPARTS(cv.PeriodKey / 100, COALESCE(cd.MonthNumber, cv.PeriodKey % 100), 1) END AS MonthStart) AS mo
+CROSS APPLY (SELECT CASE WHEN cd.MonthNumber IS NOT NULL THEN EOMONTH(mo.MonthStart)
+                         ELSE COALESCE(per.PeriodEnd, EOMONTH(mo.MonthStart)) END AS AsOf,
+                    YEAR(mo.MonthStart) * 100 + MONTH(mo.MonthStart) AS MonthKey) AS dt
+-- Колонка дозволу рядка: та, що має історію для цього рядка, інакше перша за порядком.
+OUTER APPLY (SELECT TOP (1) pc.Id AS ColumnDefId
+               FROM cfg.ColumnDef AS pc
+              WHERE pc.TableDefId = td.Id AND pc.IsDeleted = 0 AND pc.DataType = 5
+                AND (pc.LookupRegistryDefId IN (SELECT t.HeaderRegistryDefId FROM cfg.PermitTypeDef AS t WHERE t.Status = 1)
+                     OR pc.LookupRegistryDefId IN (SELECT g.RegistryDefId FROM cfg.PermitGroup AS g))
+              ORDER BY CASE WHEN EXISTS (SELECT 1 FROM doc.PermitSegment AS s
+                                          WHERE s.DocumentId = d.Id AND s.TableDefId = td.Id AND s.ColumnDefId = pc.Id
+                                            AND s.RowKey = r.RowKey
+                                            AND (s.SheetCopyId = ti.SheetCopyId OR (s.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL)))
+                            THEN 0 ELSE 1 END, pc.Ordinal, pc.Id) AS rp
+-- Поле дозволу шапки — лише для таблиць БЕЗ колонки дозволу рядка: з історією, інакше перше за порядком.
+OUTER APPLY (SELECT TOP (1) hf.Id AS HeaderFieldDefId, hv.ValueRegistryEntryId
+               FROM doc.DocumentHeaderValue AS hv
+               JOIN cfg.HeaderFieldDef AS hf ON hf.Id = hv.HeaderFieldDefId AND hf.IsDeleted = 0
+              WHERE rp.ColumnDefId IS NULL AND hv.DocumentId = d.Id AND hv.IsEmpty = 0 AND hv.ValueRegistryEntryId IS NOT NULL
+                AND (hf.LookupRegistryDefId IN (SELECT t.HeaderRegistryDefId FROM cfg.PermitTypeDef AS t WHERE t.Status = 1)
+                     OR hf.LookupRegistryDefId IN (SELECT g.RegistryDefId FROM cfg.PermitGroup AS g))
+              ORDER BY CASE WHEN EXISTS (SELECT 1 FROM doc.PermitSegment AS s
+                                          WHERE s.DocumentId = d.Id AND s.HeaderFieldDefId = hf.Id) THEN 0 ELSE 1 END,
+                       hf.Ordinal, hf.Id) AS hp
+-- Базовий дозвіл: комірка дозволу того самого рядка, інакше рядка з тим самим RowKey в іншому екземплярі року (Q-17).
+CROSS APPLY (SELECT CASE WHEN rp.ColumnDefId IS NULL THEN hp.ValueRegistryEntryId ELSE (
+             SELECT TOP (1) b.ValueRegistryEntryId
+               FROM doc.TableInstance AS bi
+               JOIN doc.TableRow AS br ON br.PeriodKey = bi.PeriodKey AND br.TableInstanceId = bi.Id AND br.RowKey = r.RowKey
+                                      AND br.IsDeleted = 0
+               JOIN doc.CellValue AS b ON b.PeriodKey = br.PeriodKey AND b.TableRowId = br.Id AND b.ColumnDefId = rp.ColumnDefId
+                                      AND b.IsEmpty = 0 AND b.ValueRegistryEntryId IS NOT NULL
+              WHERE bi.DocumentId = d.Id AND bi.TableDefId = td.Id
+                AND bi.PeriodKey BETWEEN (cv.PeriodKey / 100) * 100 AND (cv.PeriodKey / 100) * 100 + 99
+                AND (bi.SheetCopyId = ti.SheetCopyId OR (bi.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
+              ORDER BY CASE WHEN br.Id = r.Id AND br.PeriodKey = r.PeriodKey THEN 0 ELSE 1 END, bi.PeriodKey DESC) END AS BaseId) AS bs
+-- Дозвіл, чинний в останній день місяця/періоду (найпізніша зміна історії з ValidFrom <= AsOf).
+OUTER APPLY (SELECT TOP (1) s.RegistryEntryId
+               FROM doc.PermitSegment AS s
+              WHERE s.DocumentId = d.Id AND s.ValidFrom <= dt.AsOf
+                AND ((rp.ColumnDefId IS NOT NULL AND s.TableDefId = td.Id AND s.ColumnDefId = rp.ColumnDefId AND s.RowKey = r.RowKey
+                      AND (s.SheetCopyId = ti.SheetCopyId OR (s.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL)))
+                     OR (rp.ColumnDefId IS NULL AND s.HeaderFieldDefId = hp.HeaderFieldDefId))
+              ORDER BY s.ValidFrom DESC) AS sg
+-- Поділ: дозволів у місяці = 1 + змін історії з датою всередині місяця (зміна з 1-го місяць не ділить); комірку поділено,
+-- коли кожна з цих частин має значення (як `PermitHistoryReader.IsSplit`). Обчислені комірки не діляться.
+OUTER APPLY (SELECT CASE WHEN cv.IsCalculated = 0 AND mo.MonthStart IS NOT NULL AND x.Spans >= 2
+                          AND (SELECT COUNT(q.ValueNumeric)
+                                 FROM doc.CellPermitPart AS q
+                                WHERE q.PeriodKey = dt.MonthKey AND q.DocumentId = d.Id AND q.TableDefId = td.Id
+                                  AND (q.SheetCopyId = ti.SheetCopyId OR (q.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
+                                  AND q.RowKey = r.RowKey AND q.ColumnDefId = cv.ColumnDefId AND q.PartNo <= x.Spans) = x.Spans
+                         THEN 1 ELSE 0 END AS IsSplit, x.Spans
+               FROM (SELECT 1 + COUNT(*) AS Spans
+                       FROM doc.PermitSegment AS s
+                      WHERE s.DocumentId = d.Id AND s.ValidFrom > mo.MonthStart AND s.ValidFrom <= EOMONTH(mo.MonthStart)
+                        AND ((rp.ColumnDefId IS NOT NULL AND s.TableDefId = td.Id AND s.ColumnDefId = rp.ColumnDefId
+                              AND s.RowKey = r.RowKey
+                              AND (s.SheetCopyId = ti.SheetCopyId OR (s.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL)))
+                             OR (rp.ColumnDefId IS NULL AND s.HeaderFieldDefId = hp.HeaderFieldDefId))) AS x) AS sp
+-- Частини поділеної комірки (для неподіленої — один порожній рядок OUTER APPLY: комірка цілою).
+OUTER APPLY (SELECT q.PartNo, q.RegistryEntryId, q.DayFrom, q.DayTo, q.ValueNumeric
+               FROM doc.CellPermitPart AS q
+              WHERE sp.IsSplit = 1 AND q.PeriodKey = dt.MonthKey AND q.DocumentId = d.Id AND q.TableDefId = td.Id
+                AND (q.SheetCopyId = ti.SheetCopyId OR (q.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
+                AND q.RowKey = r.RowKey AND q.ColumnDefId = cv.ColumnDefId AND q.PartNo <= sp.Spans) AS pp
+LEFT JOIN dic.RegistryEntry AS pe ON pe.Id = CASE WHEN sp.IsSplit = 1 THEN pp.RegistryEntryId ELSE COALESCE(sg.RegistryEntryId, bs.BaseId) END
+WHERE cv.IsEmpty = 0 AND cv.ValueNumeric IS NOT NULL
+  AND (rp.ColumnDefId IS NOT NULL OR hp.HeaderFieldDefId IS NOT NULL);
+GO
+
 -- ⛔ Право читання для ОБЛІКОВОГО ЗАПИСУ SSRS — роль бази `rpt_reader`:
 -- SELECT на всю схему `rpt` і нічого більше. Вʼюхи й таблиці `doc`/`cfg`/`wf`/
 -- `uom` належать тому самому власнику (dbo), тож ланцюг власності не

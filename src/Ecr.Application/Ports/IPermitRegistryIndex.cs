@@ -25,4 +25,17 @@ public interface IPermitRegistryIndex
     /// <summary>Registry ids of permit type headers (published) and permit groups.</summary>
     /// <param name="ct">Cancellation.</param>
     public ValueTask<IReadOnlySet<int>> PermitTargetIdsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Drops the cached set: the next read reloads it. Called after a permit type is published and after a permit group
+    /// is created — the moments the set changes.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ e2e 42630598595 (full run): a type published and used within <see cref="RefreshInterval"/> of an earlier read was
+    /// not «permit-type» yet, so a months-in-columns permit column fell back to the period-end check and a legit permit was
+    /// refused (ECR-CELL-4223 entryNotValidOnDate). «Harmless staleness» held only when a human was slower than 30 s.
+    /// </remarks>
+    public void Invalidate()
+    {
+    }
 }

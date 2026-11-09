@@ -1,0 +1,45 @@
+/* Feature (j): the permit cell of a row with history and the month cells shared by two permits (mockup j1b/j2cell). */
+.ecr-permit-history {
+  display: grid;
+  line-height: 1.15;
+  font-size: 12px;
+}
+
+.ecr-permit-history-line:first-child {
+  color: var(--mantine-color-dimmed);
+}
+
+.ecr-cell-split {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  justify-content: space-between;
+}
+
+/* F13 p220: a narrow month column clipped «Split neede» — the label ellipsizes; the full hint is the cell's title. */
+.ecr-cell-split-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ecr-cell-split--needed {
+  color: var(--mantine-color-statusWarning-text);
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.ecr-cell-split-needed {
+  background: var(--ecr-warning-soft);
+}
+
+.ecr-cell-split-glyph {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  background: linear-gradient(to top left, transparent calc(50% - 1px), currentColor 50%, transparent calc(50% + 1px));
+}

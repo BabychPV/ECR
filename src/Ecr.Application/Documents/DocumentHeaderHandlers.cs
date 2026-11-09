@@ -724,7 +724,7 @@ public sealed class PatchDocumentHeaderHandler(
     /// <param name="profile">Профіль прав.</param>
     /// <param name="project">Проєкт документа разом із періодами.</param>
     /// <param name="sheetStatus">Найсуворіший стан аркуша × період документа.</param>
-    private static void EnsureEditable(
+    internal static void EnsureEditable(
         AccessProfile profile, Domain.Entities.Documents.Project project, DocumentStatus sheetStatus)
     {
         // ⚠ Шапка не належить періоду: закритий рік (усі періоди Closed)

@@ -51,6 +51,10 @@ public sealed class TemplateVersionDiscardStore(EcrDbContext db) : ITemplateVers
     public static readonly IReadOnlySet<string> CoveredByTableInstance = new HashSet<string>(StringComparer.Ordinal)
     {
         "doc.CellValue",
+
+        // Feature (j): parts of month values split between permits — a document's data of a table instance (the
+        // month cell they split lives in doc.CellValue), never without one.
+        "doc.CellPermitPart",
     };
 
     // Множини Id структури версії: аркуші, таблиці, колонки, рядки, формули, поля шапки, прив'язки пермітів.

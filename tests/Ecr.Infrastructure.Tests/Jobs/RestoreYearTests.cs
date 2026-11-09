@@ -229,6 +229,58 @@ public sealed class RestoreYearTests(SqlServerFixture sql)
         Assert.False(await OrphanAsync(period, doc.RowIds[1]));
     }
 
+    /// <summary>
+    /// Feature (j): the month parts split between permits (<c>doc.CellPermitPart</c>) move to <c>arc.CellPermitPart</c> with
+    /// their period and come back on restore — the per-permit attribution of an archived year is not lost.
+    /// </summary>
+    /// <remarks>
+    /// Mutation proof (local): drop the parts INSERT from <c>usp_ArchiveYear</c> — the gap check (50014) refuses the TRUNCATE
+    /// and the archive fails; drop it from <c>usp_RestoreYear</c> — the restored count is 0.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "ACC-1108-j5")]
+    public async Task Архівація_і_розархівація_переносять_частини_місяця_між_дозволами()
+    {
+        const int period = 202712;
+        var doc = await DocumentAsync(period);
+        await CellAsync(doc, 0, 1, 12m);
+        long entryId;
+        await using (var db = sql.CreateContext())
+        {
+            var text = new Ecr.Domain.ValueObjects.LocalizedText(new Dictionary<string, string> { ["en"] = "Permit" });
+            var registry = new Ecr.Domain.Entities.Configuration.RegistryDef(
+                Ecr.Domain.ValueObjects.EcrCode.Create($"PRM_ARC{Guid.NewGuid():N}"[..20].ToUpperInvariant()), text, isTemporal: true);
+            db.RegistryDefs.Add(registry);
+            await db.SaveChangesAsync();
+            var entry = new Ecr.Domain.Entities.Dictionaries.RegistryEntry(registry.Id, Ecr.Domain.ValueObjects.EcrCode.Create("A"), text);
+            db.RegistryEntries.Add(entry);
+            await db.SaveChangesAsync();
+            entryId = entry.Id;
+        }
+
+        await ExecuteAsync($"""
+            DECLARE @entry int = {entryId};
+            INSERT INTO doc.CellPermitPart
+                (PeriodKey, DocumentId, TableDefId, SheetCopyId, RowKey, ColumnDefId, PartNo, RegistryEntryId, DayFrom, DayTo, ValueNumeric)
+            VALUES ({period}, {doc.DocumentId}, {doc.TableDefId}, NULL, N'R1', {doc.ColumnDefIds[1]}, 1, @entry, '2027-12-01', '2027-12-14', 5.5),
+                   ({period}, {doc.DocumentId}, {doc.TableDefId}, NULL, N'R1', {doc.ColumnDefIds[1]}, 2, @entry, '2027-12-15', '2027-12-31', 6.5);
+            """);
+
+        await ArchiveAsync(doc.ProjectId, period, period);
+
+        Assert.Equal(0, await CountAsync("doc.CellPermitPart", period));
+        Assert.Equal(2, await CountAsync("arc.CellPermitPart", period));
+
+        await RestoreAsync(doc.ProjectId, period, period);
+
+        Assert.Equal(2, await CountAsync("doc.CellPermitPart", period));
+        Assert.Equal(0, await CountAsync("arc.CellPermitPart", period));
+        Assert.Equal(12m, await ScalarAsync<decimal>(
+            $"SELECT SUM(ValueNumeric) FROM doc.CellPermitPart WHERE PeriodKey = {period} AND DocumentId = {doc.DocumentId}"));
+    }
+
     private async Task<bool> OrphanAsync(int period, long rowId)
         => await ScalarAsync<int>(
             $"SELECT CAST(IsOrphaned AS int) FROM doc.TableRow WHERE PeriodKey = {period} AND Id = {rowId}")

@@ -327,6 +327,21 @@ public sealed partial class PatchCellsHandler
 
         await EnsureWorkbookReferencesAsync(active, previous, Bounds, ct).ConfigureAwait(false);
 
+        // ✎ Rule (h) and feature (j) j3: an imported value counts like an entered one — the workbook path runs the same
+        // permit checks as the grid write: months the permit (history-aware) does not cover are refused (ECR-CELL-4223
+        // permitNotCoveringMonths), and a month the row shares between two permits must be split (ECR-CELL-4225).
+        foreach (var item in active)
+        {
+            await BlamedAsync(item.Id, async () =>
+                {
+                    await EnsurePermitValidityCoversDataAsync(item.Context, item.Planned, previous, ct).ConfigureAwait(false);
+                    await EnsureSharedMonthsAreSplitAsync(item.Context, item.Planned, previous, item.Request.Origin, ct)
+                        .ConfigureAwait(false);
+                    return true;
+                })
+                .ConfigureAwait(false);
+        }
+
         var now = clock.UtcNow;
         var isLateEdit = await DetermineIsLateEditAsync(
                 documentId, [.. active.Select(x => x.Context.Table.SheetDefId).Distinct()], period.Value, ct,
@@ -809,6 +824,12 @@ public sealed partial class PatchCellsHandler
         {
             // Кілька наборів — сховище вже назвало винний; один — називаємо тут.
             throw named;
+        }
+
+        // ✎ Feature (j): cells the workbook clears take their split parts with them — the book's transaction.
+        foreach (var item in active)
+        {
+            await ClearPartsOfClearedCellsAsync(item.Context, item.Applied!, ct).ConfigureAwait(false);
         }
 
         // Попередні значення для аудиту: фізичні адреси власників додаються до прочитаних на вході.

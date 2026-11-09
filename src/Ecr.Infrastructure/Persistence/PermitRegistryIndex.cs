@@ -54,6 +54,9 @@ public sealed class PermitRegistryIndex(IServiceScopeFactory scopes) : IPermitRe
         }
     }
 
+    /// <inheritdoc />
+    public void Invalidate() => _snapshot = null;
+
     private async Task<IReadOnlySet<int>> LoadAsync(CancellationToken ct)
     {
         await using var scope = scopes.CreateAsyncScope();

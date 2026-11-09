@@ -237,6 +237,14 @@ public static class DependencyInjection
         services.AddScoped<Periods.GetDocumentPeriodReopenHandler>();
         services.AddScoped<Periods.ListProjectDocumentReopensHandler>();
         services.AddScoped<Periods.CloseDocumentPeriodReopenHandler>();
+
+        // Feature (j): permit history «from date» of a row / header field.
+        services.AddScoped<Permits.History.AddRowPermitHandler>();
+        services.AddScoped<Permits.History.UndoRowPermitHandler>();
+        services.AddScoped<Permits.History.AddHeaderPermitHandler>();
+        services.AddScoped<Permits.History.UndoHeaderPermitHandler>();
+        services.AddScoped<Permits.History.GetPermitHistoryHandler>();
+        services.AddScoped<Permits.History.SaveCellSplitsHandler>();
         services.AddScoped<Periods.GetPeriodCalendarHandler>();
 
         // Робочий процес (модулі 3.4–3.6)
