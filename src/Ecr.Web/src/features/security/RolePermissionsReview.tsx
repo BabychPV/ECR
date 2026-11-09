@@ -3,9 +3,9 @@ import { Button, Checkbox, Group, Modal, Stack, Table, Text } from '@mantine/cor
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, apiFetchResponse, EcrApiError } from '@/api/client';
 import type { RolePermissionsPreview, RoleView } from '@/api/types';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { showApiError, showDone } from '@/shared/ui/notify';
-import { logSuppressedDetail, problemText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
 import { PermissionCaption } from './PermissionCaption';
 import { permissionLabel } from './permissionLabel';
@@ -77,13 +77,16 @@ export function RolePermissionsReview({
     },
     onError: (error) => {
       if (error instanceof EcrApiError && error.problem.extensions2?.['messageKey'] === StaleKey) {
-        setConflict(messageOf(error));
+        // ⚠ Каталожний текст із НАЗВОЮ ролі, а не кодом із подробиць сервера (свіжий погляд 09.11, P3).
+        setConflict(t('err.ECR-SEC-0409.permissionsStale', { code: roleLabel(role) }));
         return;
       }
       showApiError(error);
     },
   });
 
+  // ФВ-14.26: спінер «Save» — із затримкою, не з першого кадру (храповик pendingSpinner).
+  const saving = usePendingLoading(save.isPending);
   const dangerous = preview.data?.addedDangerous ?? [];
   const blocked = changedMeanwhile || conflict !== null || (dangerous.length > 0 && !confirmed);
 
@@ -222,7 +225,7 @@ export function RolePermissionsReview({
                 {t('security.backToEditing')}
               </Button>
               <Button
-                loading={save.isPending}
+                loading={saving}
                 disabled={blocked || (data.added.length === 0 && data.removed.length === 0)}
                 onClick={() => save.mutate(data.version)}
               >
@@ -272,11 +275,4 @@ function ChangeList({
       </ul>
     </Stack>
   );
-}
-
-function messageOf(error: unknown): string {
-  const shown = problemText(error);
-  logSuppressedDetail(shown);
-
-  return shown.detail ?? shown.title;
 }

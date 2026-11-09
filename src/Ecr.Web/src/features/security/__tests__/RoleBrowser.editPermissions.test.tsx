@@ -37,6 +37,7 @@ const Roles: RoleView[] = [
   {
     id: 11,
     code: 'LandRestricted',
+    nameL10n: { values: { en: 'Land restricted' } },
     isActive: true,
     isBuiltIn: false,
     permissions: ['Document.View'],
@@ -219,6 +220,9 @@ describe('RoleBrowser: правка прав власної ролі ((v) 08.11)
     fireEvent.click(within(impact).getByRole('button', { name: /security\.savePermissions/ }));
 
     const conflict = await within(impact).findByTestId('role-permissions-conflict');
+    // P3 09.11: роль названо назвою, а не кодом.
+    expect(conflict.textContent).toContain('code=Land restricted');
+    expect(conflict.textContent).not.toContain('code=LandRestricted');
     expect(within(conflict).getByRole('button', { name: /security\.reloadRole/ })).not.toBeNull();
   });
 });
