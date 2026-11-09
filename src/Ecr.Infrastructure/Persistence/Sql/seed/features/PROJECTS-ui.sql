@@ -393,9 +393,9 @@ SELECT v.[Key], v.Lang, v.OldVal, v.NewVal
     (N'periods.policyUpdated', N'ru', N'Политика обновлена. Проекты получат новые смещения при следующем перестроении календаря.', N'Политика сохранена. Состояния месяцев обновлены.'),
     (N'periods.policyUpdated', N'kz', N'Саясат жаңартылды. Жобалар жаңа ығысуларды күнтізбе келесі рет қайта құрылғанда алады.', N'Саясат сақталды. Айлардың күйлері жаңартылды.'),
     -- g4: порожній відфільтрований перелік називає справжній фільтр — «Owner» → «Everyone’s documents», а не «Mine».
-    (N'documents.noMatchHint', N'en', N'Change the state or turn off "Mine".', N'Change the state, set Owner to «Everyone’s documents», or reset the filters.'),
+    (N'documents.noMatchHint', N'en', N'Change the state or turn off "Mine".', N'Change the state, set Owner to «Everyone’s documents», or clear the filters.'),
     (N'documents.noMatchHint', N'ru', N'Измените состояние или отключите «Мои».', N'Измените состояние, в поле «Владелец» выберите «Документы всех» или сбросьте фильтры.'),
-    (N'documents.noMatchHint', N'kz', N'Күйді өзгертіңіз немесе «Менікі» сүзгісін өшіріңіз.', N'Күйді өзгертіңіз, «Иесі» өрісінде «Барлығының құжаттары» таңдаңыз немесе сүзгілерді тастаңыз.'),
+    (N'documents.noMatchHint', N'kz', N'Күйді өзгертіңіз немесе «Менікі» сүзгісін өшіріңіз.', N'Күйді өзгертіңіз, «Иесі» өрісінде «Барлығының құжаттары» таңдаңыз немесе сүзгілерді тазалаңыз.'),
     -- a5: підказка Jobs — людська назва права ({permission} = permission.System.ViewHealth), а не код.
     (N'jobs.mineOnlyHint', N'en', N'Your own jobs are visible without the System.ViewHealth permission; the full queue is not.', N'Your own jobs are visible without the «{permission}» permission; the full queue is not.'),
     (N'jobs.mineOnlyHint', N'ru', N'Свои задачи видны без права System.ViewHealth, а вся очередь — нет.', N'Свои задачи видны без права «{permission}», а вся очередь — нет.'),
