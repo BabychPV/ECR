@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
 import {
+  attentionRowCount,
   publishTableAttention,
   requestAttentionFocus,
   resetRowAttentionForTests,
@@ -229,5 +230,40 @@ describe('Water lock: Issues і шапка інспектора (UAT 08.11)', ()
     await waitFor(() => expect(document.activeElement).toBe(item));
     expect(document.querySelector('[data-inspector-attention]')).toBeNull();
     expect(document.querySelector('[data-inspector-attention-list]')).toBeNull();
+  });
+
+  /*
+   * ✎ debt-1109 (F13 p214, P3): попередження дозволу + закриті місяці — заголовок «Rows that need attention» казав 0,
+   * а рядок стану поруч — «1 row needs attention». Тепер число одне: `attentionRowCount`, як у `DocumentSaveState`.
+   * ⛔ Червоне без фіксу: заголовок рахував лише рядки розділу (без попереджень) — «0».
+   */
+  it('заголовок розділу «увага» = число рядка стану (попередження включно)', async () => {
+    const warningLocked: TableAttention = {
+      tableInstanceId: 597,
+      tableDefId: 701,
+      periodKey: 202601,
+      rows: [
+        {
+          key: '597:R7001000',
+          tableInstanceId: 597,
+          periodKey: 202601,
+          rowKey: 'R7001000',
+          rowLabel: 'Sea Water Intake',
+          reason: 'permit warning',
+          severity: 'Warning',
+          focusKey: 'finding:701:R7001000',
+        },
+      ],
+      lockedMonths: 'February–August',
+    };
+    render(<Harness />);
+    act(() => publishTableAttention(597, warningLocked));
+    act(() => requestAttentionFocus('597:locked'));
+
+    await waitFor(() => expect(document.querySelector('[data-inspector-attention-list]')).not.toBeNull());
+    expect(document.querySelector('[data-inspector-attention-count]')?.textContent).toBe(
+      String(attentionRowCount([warningLocked], 202601)),
+    );
+    expect(document.querySelector('[data-inspector-attention-count]')?.textContent).toBe('1');
   });
 });
