@@ -65,4 +65,20 @@ public sealed class PermitHistoryStore(EcrDbContext db) : IPermitHistoryStore
 
     /// <inheritdoc />
     public void Remove(PermitSegment segment) => db.PermitSegments.Remove(segment);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CellPermitPart>> CellPartsAsync(
+        int periodKey, long documentId, int tableDefId, long? sheetCopyId, string rowKey, int columnDefId, CancellationToken ct)
+        => await db.CellPermitParts
+            .Where(p => p.PeriodKeyValue == periodKey && p.DocumentId == documentId && p.TableDefId == tableDefId
+                        && p.SheetCopyId == sheetCopyId && p.RowKey == rowKey && p.ColumnDefId == columnDefId)
+            .OrderBy(p => p.PartNo)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public void AddPart(CellPermitPart part) => db.CellPermitParts.Add(part);
+
+    /// <inheritdoc />
+    public void RemovePart(CellPermitPart part) => db.CellPermitParts.Remove(part);
 }

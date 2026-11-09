@@ -304,18 +304,39 @@ internal static class PermitHistoryReader
                 .ToList();
 
             // A cell is split when every part of it holds a value.
-            var done = parts
+            var rowParts = parts
                 .Where(p => p.PeriodKeyValue == monthKey && p.TableDefId == row.Table.Id && p.SheetCopyId == row.SheetCopyId
                             && string.Equals(p.RowKey, row.RowKey, StringComparison.Ordinal))
                 .GroupBy(p => p.ColumnDefId)
-                .Where(g => g.Count() >= spans.Count && g.All(p => p.ValueNumeric is not null))
+                .ToDictionary(g => g.Key, g => g.ToList());
+            var done = rowParts
+                .Where(g => IsSplit(g.Value, spans.Count))
                 .Select(g => g.Key)
                 .ToHashSet();
             var pending = DataCellsInMonth(row.Table, row.Period, row.Cells, new HashSet<int> { row.Column.Id }, month)
                 .Where(c => !done.Contains(c.Id))
                 .Select(c => c.Code)
                 .ToList();
-            split.Add(new SplitMonthDto(month, pending, spans));
+
+            // The cells of the month: the month column of a month table, or the numeric cells holding data or parts.
+            var monthColumns = PermitMonthCoverage.MonthColumns(row.Table);
+            List<ColumnDef> cellColumns = monthColumns.Count > 0
+                ? [.. monthColumns.Where(c => row.Period.Year == month.Year && c.MonthNumber == month.Month)]
+                : row.Table.Columns
+                    .Where(c => !c.IsDeleted && c.DataType is CellDataType.Decimal or CellDataType.Int && c.Id != row.Column.Id
+                                && (rowParts.ContainsKey(c.Id)
+                                    || DataCellsInMonth(row.Table, row.Period, row.Cells, new HashSet<int>(), month).Any(d => d.Id == c.Id)))
+                    .ToList();
+            var cellValues = cellColumns
+                .Select(c => new CellSplitValueDto(
+                    c.Code,
+                    row.Cells.TryGetValue(c.Id, out var v) && !v.IsEmpty ? v.ValueNumeric : null,
+                    [.. Enumerable.Range(1, spans.Count).Select(n => rowParts.TryGetValue(c.Id, out var ps)
+                        ? ps.FirstOrDefault(p => p.PartNo == n)?.ValueNumeric
+                        : null)],
+                    done.Contains(c.Id)))
+                .ToList();
+            split.Add(new SplitMonthDto(month, pending, spans, cellValues));
         }
 
         return new RowPermitHistoryDto(
@@ -355,6 +376,11 @@ internal static class PermitHistoryReader
         return [.. candidates.Where(c => !skip.Contains(c.Id)
                                          && cells.TryGetValue(c.Id, out var v) && PermitMonthCoverage.HasData(v) && v.ValueNumeric is not null)];
     }
+
+    /// <summary>A cell is split when every one of its <paramref name="partCount"/> parts holds a value.</summary>
+    public static bool IsSplit(IReadOnlyCollection<CellPermitPart> parts, int partCount)
+        => parts.Count >= partCount && parts.Where(p => p.PartNo <= partCount).All(p => p.ValueNumeric is not null)
+           && parts.Count(p => p.PartNo <= partCount) == partCount;
 
     private static string Name(IReadOnlyDictionary<long, RegistryEntry> entries, long id, string? language)
         => entries.TryGetValue(id, out var e) ? PatchCellsHandler.PermitName(e, language) : id.ToString(CultureInfo.InvariantCulture);

@@ -21,8 +21,27 @@ public sealed class DocumentPermitHistoryController(
     AddRowPermitHandler addRow,
     UndoRowPermitHandler undoRow,
     AddHeaderPermitHandler addHeader,
-    UndoHeaderPermitHandler undoHeader) : ControllerBase
+    UndoHeaderPermitHandler undoHeader,
+    SaveCellSplitsHandler splits) : ControllerBase
 {
+    /// <summary>
+    /// j2/jh3: saves the parts of month cells shared by two permits — typed by the user, never divided by days. A cell with
+    /// every part entered gets the total (sum of the parts) through the ordinary cell write; partial save keeps the old value.
+    /// </summary>
+    /// <remarks>
+    /// <c>403 ECR-ACCS-0403</c> — a month cell not editable; <c>409 ECR-CELL-0409</c> — the row changed (<c>baseVersion</c>);
+    /// <c>422 ECR-REQ-0422 permitSplitInvalid</c> — no history, the month is not shared, wrong number of parts.
+    /// </remarks>
+    [HttpPut("splits")]
+    [ProducesResponseType<DocumentPermitHistoryDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<DocumentPermitHistoryDto>> SaveSplits(
+        long documentId, [FromBody] SaveCellSplitsRequest request, CancellationToken ct)
+        => Ok(await splits.HandleAsync(documentId, request, ct).ConfigureAwait(false));
+
     /// <summary>
     /// The document's permit history (header fields and visible rows that have one) and the cells that still need to be
     /// split between two permits, read in <paramref name="periodKey"/>.

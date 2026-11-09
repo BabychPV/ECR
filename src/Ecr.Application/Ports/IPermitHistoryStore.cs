@@ -35,4 +35,14 @@ public interface IPermitHistoryStore
 
     /// <summary>Removes a tracked segment (saved by the unit of work).</summary>
     public void Remove(PermitSegment segment);
+
+    /// <summary>Parts of ONE month cell, TRACKED, by part number.</summary>
+    public Task<IReadOnlyList<CellPermitPart>> CellPartsAsync(
+        int periodKey, long documentId, int tableDefId, long? sheetCopyId, string rowKey, int columnDefId, CancellationToken ct);
+
+    /// <summary>Adds a part (saved by the unit of work).</summary>
+    public void AddPart(CellPermitPart part);
+
+    /// <summary>Removes a tracked part (saved by the unit of work).</summary>
+    public void RemovePart(CellPermitPart part);
 }
