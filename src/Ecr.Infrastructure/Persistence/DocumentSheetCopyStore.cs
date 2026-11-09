@@ -73,6 +73,23 @@ public sealed class DocumentSheetCopyStore(EcrDbContext db) : IDocumentSheetCopy
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlySet<int>?> PeriodsWithInstancesAsync(
+        long documentId, IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableDefIds);
+
+        var ids = tableDefIds.ToList();
+        var keys = await db.TableInstances.AsNoTracking()
+            .Where(i => i.DocumentId == documentId && ids.Contains(i.TableDefId))
+            .Select(i => i.PeriodKeyValue)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return keys.ToHashSet();
+    }
+
+    /// <inheritdoc />
     public async Task<SheetCopyGroup?> FindGroupAsync(long documentId, int sheetDefId, CancellationToken ct)
     {
         var original = await db.DocumentSheets.AsNoTracking()

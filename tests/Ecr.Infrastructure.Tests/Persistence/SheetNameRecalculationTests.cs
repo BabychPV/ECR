@@ -100,6 +100,78 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         Assert.DoesNotContain(world.Jobs.ReceivedCalls(), c => c.GetMethodInfo().Name.StartsWith("Enqueue", StringComparison.Ordinal));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "SHEETNAME-1109")]
+    public async Task Нова_копія_при_першому_відкритті_ставить_перерахунок_і_дає_назву_з_номером()
+    {
+        var world = await ArrangeAsync();
+        var copy = await world.Run(h => h.AddAsync(world.Doc.DocumentId, world.Doc.SheetDefId, default));
+        world.Jobs.ClearReceivedCalls();
+
+        // Перше відкриття періоду після додавання копії — екземпляр копії створює саме воно (без ручного «Перерахувати»).
+        await world.OpenTablesAsync();
+
+        var call = Assert.Single(world.Jobs.ReceivedCalls(), c => c.GetMethodInfo().Name == "EnqueueCoalescedAsync");
+        Assert.Equal(RecalculateDocumentHandler.TargetOf(world.Doc.DocumentId, world.Doc.PeriodKey), call.GetArguments()[0]);
+
+        // Друге відкриття нічого не створює — і нічого не ставить.
+        world.Jobs.ClearReceivedCalls();
+        await world.OpenTablesAsync();
+        Assert.DoesNotContain(world.Jobs.ReceivedCalls(), c => c.GetMethodInfo().Name.StartsWith("Enqueue", StringComparison.Ordinal));
+
+        await world.RecalculateSheetAsync();
+        Assert.Equal("Vessel 2", await TextAsync(world.Doc, await CopyRowAsync(world.Doc, copy.SheetCopyId)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "SHEETNAME-1109")]
+    public async Task Перейменування_й_нова_копія_ставлять_перерахунок_лише_в_періоди_з_екземплярами_аркуша()
+    {
+        var world = await ArrangeAsync();
+
+        // Другий відкритий період проєкту, у якому документ ще не відкривали (екземплярів немає).
+        await using (var db = new EcrDbContext(
+                         new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options))
+        {
+            var april = new Period(
+                world.Doc.ProjectId, new PeriodKey(202604), 4, new DateOnly(2026, 4, 1), new DateOnly(2026, 4, 30));
+            april.AdvanceTo(PeriodState.Open, Now);
+            db.Periods.Add(april);
+            await db.SaveChangesAsync();
+        }
+
+        await world.Run(h => h.AddAsync(world.Doc.DocumentId, world.Doc.SheetDefId, default));
+        await world.Run(h => h.RenameGroupAsync(
+            world.Doc.DocumentId, world.Doc.SheetDefId, new Dictionary<string, string> { ["en"] = "Contract" }, default));
+
+        var targets = world.Jobs.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == "EnqueueCoalescedAsync")
+            .Select(c => (string)c.GetArguments()[0]!)
+            .ToList();
+
+        // Додавання + перейменування — по одній задачі, і лише за березень (там є екземпляр); квітня немає.
+        var march = RecalculateDocumentHandler.TargetOf(world.Doc.DocumentId, world.Doc.PeriodKey);
+        Assert.Equal([march, march], targets);
+    }
+
+    private async Task<long> CopyRowAsync(TestDocument doc, long sheetCopyId)
+    {
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+
+        return await db.TableRows.AsNoTracking()
+            .Where(r => r.PeriodKeyValue == doc.PeriodKey.Value
+                        && db.TableInstances.Any(i => i.Id == r.TableInstanceId
+                                                      && i.PeriodKeyValue == doc.PeriodKey.Value
+                                                      && i.SheetCopyId == sheetCopyId))
+            .Select(r => r.Id)
+            .SingleAsync();
+    }
+
     private async Task<World> ArrangeAsync(string expression = "SHEETNAME()")
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
@@ -120,9 +192,12 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         var access = Substitute.For<IAccessDecisionService>();
         var profile = new AccessBuilder { UserId = UserId }
             .Permission(DocumentSheetCopyHandler.Permission)
+            .Permission(GetDocumentTablesHandler.Permission)
             .Grant(ResourceKind.Project, doc.ProjectId, GrantLevel.Write)
             .Build();
         access.BuildProfileAsync(UserId, Arg.Any<CancellationToken>()).Returns(profile);
+        access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), doc.DocumentId, Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
         access.ReadScopeAsync(Arg.Any<AccessProfile>(), doc.DocumentId, Arg.Any<CancellationToken>())
             .Returns(_ => DocumentReadScope.For(profile, doc.ProjectId, snapshot));
 
@@ -228,6 +303,17 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         {
             await using var db = builder.CreateContext();
             await action(Handler(db)).ConfigureAwait(false);
+        }
+
+        /// <summary>Відкриття документа за період (<c>GET …/tables</c>): ліниве створення екземплярів.</summary>
+        public async Task OpenTablesAsync()
+        {
+            await using var db = builder.CreateContext();
+            var clock = new FixedClock();
+            var handler = new GetDocumentTablesHandler(
+                new RowStore(db, new BulkCellLoader(db.Database.GetConnectionString()!, 1000), clock),
+                Substitute.For<IPermitBindingStore>(), metadata, access, user, new DocumentSheetCopyStore(db), Jobs);
+            await handler.HandleAsync(Doc.DocumentId, Doc.PeriodKey.Value, CancellationToken.None);
         }
 
         /// <summary>Те, що робить <c>RecalculationJob</c> з payload постановки: повний прогін аркуша за період.</summary>
