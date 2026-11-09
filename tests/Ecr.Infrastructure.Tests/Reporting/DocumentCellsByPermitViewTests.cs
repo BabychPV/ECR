@@ -126,7 +126,8 @@ public sealed class DocumentCellsByPermitViewTests(SqlServerFixture sql)
 
     /// <summary>
     /// Q-17 month routing: the March cell of R5 lives in ANOTHER instance of the year (period 202602) whose row has no permit
-    /// cell — the base permit comes from the same RowKey in the 202601 instance; with the segment B from 15.02, March is B.
+    /// cell — the base permit comes from the same RowKey in the 202601 instance; B is in force only from 15.03, so the routed
+    /// February value is the base permit A (only the fallback can find it).
     /// Red without the fallback: the routed cell had no owning permit (no row / null PermitId).
     /// </summary>
     [Fact]
@@ -140,7 +141,7 @@ public sealed class DocumentCellsByPermitViewTests(SqlServerFixture sql)
 
         var anchor = await RowAsync(kit, kit.T, "R5", 5);
         await CellAsync(kit.T, anchor, kit.Col["PERMIT"], permit: kit.A);
-        await SegmentAsync(kit, kit.T, "R5", new DateOnly(2026, 2, 15), kit.B);
+        await SegmentAsync(kit, kit.T, "R5", new DateOnly(2026, 3, 15), kit.B);
 
         // The owner instance of period 202602 (another month of the same year) holds the routed March value.
         const int owner = 202602;
@@ -161,15 +162,16 @@ public sealed class DocumentCellsByPermitViewTests(SqlServerFixture sql)
             await using var command = connection.CreateCommand();
             command.CommandText =
                 "INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated) "
-                + $"VALUES ({owner}, {ownerRow}, {kit.Col["M03"]}, {kit.T}, 3, 0)";
+                + $"VALUES ({owner}, {ownerRow}, {kit.Col["M02"]}, {kit.T}, 3, 0)";
             await command.ExecuteNonQueryAsync();
         }
 
         var rows = await QueryAsync(
             "SELECT PermitId, ValueNumeric FROM rpt.v_DocumentCellsByPermit "
-            + $"WHERE DocumentId = {kit.DocumentId} AND RowKey = N'R5' AND ColumnCode = N'M03'");
+            + $"WHERE DocumentId = {kit.DocumentId} AND RowKey = N'R5' AND ColumnCode = N'M02'");
         var row = Assert.Single(rows);
-        Assert.Equal(kit.B, Convert.ToInt64(row[0], CultureInfo.InvariantCulture));
+        Assert.NotNull(row[0]);
+        Assert.Equal(kit.A, Convert.ToInt64(row[0], CultureInfo.InvariantCulture));
         Assert.Equal(3m, (decimal)row[1]!);
     }
 
