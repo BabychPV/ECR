@@ -1306,7 +1306,17 @@ UPDATE t
     (N'recalcProgress.running', N'en', N'Recalculating {project}: {done} of {total} documents, {skipped} skipped, {failed} failed', N'Recalculating {project}: {done} of {documentCount}, {skipped} skipped, {failed} failed'),
     (N'recalcProgress.confirmScope', N'en', N'Open months {months} · {documents} documents · approved sheets and locked months are skipped', N'Open months {months} · {documentCount} · approved sheets and locked months are skipped'),
     (N'recalcProgress.confirmScopeNoOpen', N'en', N'No open months · {documents} documents · approved sheets and locked months are skipped', N'No open months · {documentCount} · approved sheets and locked months are skipped'),
-    (N'recalcProgress.confirmScopeUnknown', N'en', N'{project}: {documents} documents · approved sheets and locked months are skipped', N'{project}: {documentCount} · approved sheets and locked months are skipped')
+    (N'recalcProgress.confirmScopeUnknown', N'en', N'{project}: {documents} documents · approved sheets and locked months are skipped', N'{project}: {documentCount} · approved sheets and locked months are skipped'),
+    (N'recalcProgress.running', N'ru', N'Пересчёт {project}: {done} из {total} документов, пропущено {skipped}, ошибок {failed}', N'Пересчёт {project}: обработано {done}, всего {documentCount}, пропущено {skipped}, ошибок {failed}'),
+    (N'recalcProgress.confirmScope', N'ru', N'Открытые месяцы {months} · документов: {documents} · утверждённые листы и заблокированные месяцы пропускаются', N'Открытые месяцы {months} · {documentCount} · утверждённые листы и заблокированные месяцы пропускаются'),
+    (N'recalcProgress.confirmScopeNoOpen', N'ru', N'Открытых месяцев нет · документов: {documents} · утверждённые листы и заблокированные месяцы пропускаются', N'Открытых месяцев нет · {documentCount} · утверждённые листы и заблокированные месяцы пропускаются'),
+    (N'recalcProgress.confirmScopeUnknown', N'ru', N'{project}: документов {documents} · утверждённые листы и заблокированные месяцы пропускаются', N'{project}: {documentCount} · утверждённые листы и заблокированные месяцы пропускаются'),
+    (N'recalcProgress.queuedDocuments', N'kz', N'Қайта есептеуге {total} құжат кезекте ({project})', N'Қайта есептеуге {documentCount} кезекте ({project})'),
+    (N'recalcProgress.queuedDocumentsToast', N'kz', N'Қайта есептеуге {total} құжат кезекте ({project}). Барысы — осы беттің жоғарғы жағында.', N'Қайта есептеуге {documentCount} кезекте ({project}). Барысы — осы беттің жоғарғы жағында.'),
+    (N'recalcProgress.running', N'kz', N'{project} қайта есептелуде: {total} құжаттың {done}, өткізілді {skipped}, қате {failed}', N'{project} қайта есептелуде: өңделді {done}, барлығы {documentCount}, өткізілді {skipped}, қате {failed}'),
+    (N'recalcProgress.confirmScope', N'kz', N'Ашық айлар {months} · құжаттар: {documents} · бекітілген парақтар мен бұғатталған айлар өткізіледі', N'Ашық айлар {months} · {documentCount} · бекітілген парақтар мен бұғатталған айлар өткізіледі'),
+    (N'recalcProgress.confirmScopeNoOpen', N'kz', N'Ашық айлар жоқ · құжаттар: {documents} · бекітілген парақтар мен бұғатталған айлар өткізіледі', N'Ашық айлар жоқ · {documentCount} · бекітілген парақтар мен бұғатталған айлар өткізіледі'),
+    (N'recalcProgress.confirmScopeUnknown', N'kz', N'{project}: құжаттар {documents} · бекітілген парақтар мен бұғатталған айлар өткізіледі', N'{project}: {documentCount} · бекітілген парақтар мен бұғатталған айлар өткізіледі')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
