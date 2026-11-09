@@ -149,6 +149,19 @@ describe('useDocumentPeriodReopen', () => {
     expect(screen.queryByTestId('document-period-reopen')).toBeNull();
   });
 
+  it('закритий місяць, стан ще вантажиться: місце дії вже зайняте (без зсуву панелі листа нижче)', async () => {
+    calls.length = 0;
+    // Відповідь не приходить: стан винятку «в дорозі».
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)));
+    show('Closed');
+
+    // ⛔ Мутація: прибрати заглушку на час завантаження — кнопка з'явиться пізніше й зсуне сітку (e2e sheetBottom), червоне.
+    const pending = await screen.findByTestId('document-period-reopen-pending');
+    expect(pending.closest('[data-document-lock="periodClosed"]')).not.toBeNull();
+    expect(disabled(pending)).toBe(true);
+    expect(screen.queryByTestId('document-period-reopen')).toBeNull();
+  });
+
   it('відкритий місяць: стану винятку не питає й нічого не показує', async () => {
     stub(closedState({}));
     show('Open');

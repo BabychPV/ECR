@@ -75,7 +75,14 @@ export function useDocumentPeriodReopen({ documentId, periodKey, periodState }: 
   const period = formatPeriodKey(periodKey);
 
   let lockAction: JSX.Element | null = null;
-  if (state !== undefined && active === null) {
+  if (closed && query.isPending) {
+    // Keep the action's place while its state loads: a late button shifted the sheet panel below it.
+    lockAction = (
+      <Button size="xs" variant="light" loading disabled data-testid="document-period-reopen-pending" aria-hidden="true" tabIndex={-1}>
+        {t('document.reopen.action', { period })}
+      </Button>
+    );
+  } else if (state !== undefined && active === null) {
     if (state.canOpen) {
       lockAction = (
         <Button size="xs" variant="light" onClick={() => setOpened(true)} data-testid="document-period-reopen">
