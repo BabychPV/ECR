@@ -88,6 +88,44 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         Assert.Equal("Vessel 2", await TextAsync(world.Doc, newRow));
     }
 
+    /// <remarks>
+    /// Борг 09.11: перелік «пропущено затверджені» після перерахунку не називав затверджених копій
+    /// (<c>OriginalOnly()</c> у <c>WorkflowStore.ListApprovedSheetsAsync</c>), хоча прогін пропускає їх окремо.
+    /// Мутація (локально): повернути <c>OriginalOnly()</c> — копії в переліку немає, тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "SHEETNAME-1109")]
+    public async Task Перелік_пропущених_затверджених_називає_копію_з_номером()
+    {
+        var world = await ArrangeAsync();
+        var copy = await world.Run(h => h.AddAsync(world.Doc.DocumentId, world.Doc.SheetDefId, default));
+        await ApproveOriginalAsync(world.Doc);
+        await ApproveCopyAsync(world.Doc, copy.SheetCopyId);
+
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        var rows = await new WorkflowStore(db).ListApprovedSheetsAsync(
+            projectId: null, world.Doc.DocumentId, world.Doc.PeriodKey.Value, 10, CancellationToken.None);
+
+        // Назва аркуша в базі — від TestDocumentBuilder («Sheet <tag>»); знімок метаданих тут не читається.
+        var baseName = $"Sheet {world.Doc.SheetCode["SHEET".Length..]}";
+        Assert.Collection(
+            rows,
+            original =>
+            {
+                Assert.Null(original.SheetCopyId);
+                Assert.Equal($"{baseName} 1", original.SheetDisplayName!.Values["en"]);
+            },
+            copied =>
+            {
+                Assert.Equal(copy.SheetCopyId, copied.SheetCopyId);
+                Assert.Equal($"{baseName} 2", copied.SheetDisplayName!.Values["en"]);
+                Assert.Equal(world.Doc.SheetDefId, copied.SheetDefId);
+            });
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -406,6 +444,17 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         await using var db = new EcrDbContext(
             new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
         var state = new ApprovalState(doc.DocumentId, doc.SheetDefId, doc.PeriodKey.Value);
+        state.Submit(UserId, Now);
+        state.Approve(UserId, Now);
+        db.ApprovalStates.Add(state);
+        await db.SaveChangesAsync();
+    }
+
+    private async Task ApproveCopyAsync(TestDocument doc, long sheetCopyId)
+    {
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        var state = new ApprovalState(doc.DocumentId, doc.SheetDefId, doc.PeriodKey.Value, sheetCopyId);
         state.Submit(UserId, Now);
         state.Approve(UserId, Now);
         db.ApprovalStates.Add(state);

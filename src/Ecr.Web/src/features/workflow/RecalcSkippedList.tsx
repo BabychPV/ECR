@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import type { components } from '@/api/schema';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
+import { sheetTabKey } from '@/features/documents/sheetCopies/sheetCopyTypes';
 
 /** Аркуш, який перерахунок пропустив (затверджений), — `02-contracts.md`, UAT-recalc-ux. */
 export type SkippedSheet = components['schemas']['SkippedSheet'];
@@ -17,8 +18,14 @@ export interface RecalcRequestOutcome {
 }
 
 /** Адреса аркуша документа в періоді — та сама форма, що на сторінці документа (`?periodKey=&sheet=`). */
-export function skippedSheetHref(sheet: Pick<SkippedSheet, 'documentId' | 'periodKey' | 'sheetCode'>): string {
-  const query = new URLSearchParams({ periodKey: String(sheet.periodKey), sheet: sheet.sheetCode });
+export function skippedSheetHref(
+  sheet: Pick<SkippedSheet, 'documentId' | 'periodKey' | 'sheetCode'> & Partial<Pick<SkippedSheet, 'sheetCopyId'>>,
+): string {
+  // ✎ Борг 09.11: копія аркуша — своя вкладка (`код~id`, `sheetTabKey`).
+  const query = new URLSearchParams({
+    periodKey: String(sheet.periodKey),
+    sheet: sheetTabKey(sheet.sheetCode, sheet.sheetCopyId ?? null),
+  });
   return `/documents/${String(sheet.documentId)}?${query.toString()}`;
 }
 
@@ -53,13 +60,17 @@ export function RecalcSkippedList({ outcome }: RecalcSkippedListProps): JSX.Elem
         <List size="sm" spacing="xs" mt="xs" listStyleType="none">
           {skipped.map((sheet) => {
             const documentName = localized(sheet.documentName ?? null);
-            const sheetName = localized(sheet.sheetName);
+            // ✎ Борг 09.11: показувана назва в документі («Vessel 2» для копії), інакше назва шаблону.
+            const displayName = localized(sheet.sheetDisplayName ?? null);
+            const sheetName = displayName.length > 0 ? displayName : localized(sheet.sheetName);
             const label = `${documentName.length > 0 ? documentName : sheet.documentCode} · ${
               sheetName.length > 0 ? sheetName : sheet.sheetCode
             } · ${String(sheet.periodKey)}`;
 
             return (
-              <List.Item key={`${String(sheet.documentId)}-${String(sheet.sheetDefId)}-${String(sheet.periodKey)}`}>
+              <List.Item
+                key={`${String(sheet.documentId)}-${String(sheet.sheetDefId)}-${String(sheet.sheetCopyId ?? 0)}-${String(sheet.periodKey)}`}
+              >
                 <Anchor component={Link} to={skippedSheetHref(sheet)} data-recalc-skipped-link="">
                   {label}
                 </Anchor>
