@@ -14,6 +14,12 @@ import { problemText } from '@/shared/ui/problemText';
 import { dottedDate, permitGapOf } from './splitModel';
 import { useAddRowPermit } from './usePermitHistory';
 
+/** Long button labels (permit number + date) wrap instead of running past the narrow Inspector. */
+const WrapLabel = {
+  root: { height: 'auto', whiteSpace: 'normal' as const, paddingBlock: 4 },
+  label: { whiteSpace: 'normal' as const, textAlign: 'left' as const, overflowWrap: 'anywhere' as const },
+};
+
 /** Options shown at once (the registry may hold thousands; search goes over all of them). */
 const OptionsLimit = 50;
 
@@ -141,13 +147,17 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
         )}
 
         {gap !== null ? (
-          <Alert color="statusError" role="alert" data-permit-gap="">
-            <Text size="sm">{problemText(add.error).detail ?? problemText(add.error).title}</Text>
-            <Group gap="xs" mt="xs">
+          <Alert color="statusError" role="alert" data-permit-gap="" styles={{ body: { minWidth: 0 } }}>
+            {/* Fresh eyes 09.11: the Inspector is narrow — the text wraps and the fixes stack, nothing is cut off. */}
+            <Text size="sm" style={{ overflowWrap: 'anywhere' }}>
+              {problemText(add.error).detail ?? problemText(add.error).title}
+            </Text>
+            <Stack gap="xs" mt="xs" align="flex-start" data-gap-actions="">
               {gap.suggestedFrom !== null && (
                 <Button
                   size="xs"
                   variant="subtle"
+                  styles={WrapLabel}
                   data-gap-move=""
                   onClick={() => {
                     const date = gap.suggestedFrom ?? from;
@@ -161,6 +171,7 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
               <Button
                 size="xs"
                 variant="subtle"
+                styles={WrapLabel}
                 data-gap-add=""
                 onClick={() => {
                   add.reset();
@@ -169,13 +180,13 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
               >
                 {t('permits.history.gapAdd', { days: gap.days })}
               </Button>
-            </Group>
+            </Stack>
           </Alert>
         ) : (
           <ErrorAlert error={add.error} />
         )}
 
-        <Group justify="flex-end" gap="xs">
+        <Group justify="flex-end" gap="xs" wrap="wrap">
           <Button size="xs" variant="default" onClick={props.onCancel}>
             {t('common.cancel')}
           </Button>
