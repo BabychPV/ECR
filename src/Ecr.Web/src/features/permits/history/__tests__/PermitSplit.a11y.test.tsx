@@ -55,7 +55,7 @@ describe('feature (j): accessibility', { timeout: 120_000 }, () => {
             <CellSplitDialog
               target={{ documentId: 3, periodKey: 202602, tableInstanceId: 41, tableDefId: 701, sheetCopyId: null, rowKey: 'R1', columnCode: 'Feb' }}
               mark={mark}
-              loading={false}
+              historyPending={false}
               rowLabel="Sea Water Intake"
               unit="thousand m³"
               baseVersion="v"

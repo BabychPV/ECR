@@ -35,7 +35,7 @@ function open(onClose = vi.fn()): { onClose: typeof onClose; dialog: HTMLElement
     <CellSplitDialog
       target={target}
       mark={mark}
-      loading={false}
+      historyPending={false}
       rowLabel="Sea Water Intake"
       unit="thousand m³"
       baseVersion="AAAB"

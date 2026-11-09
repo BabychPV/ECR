@@ -3,6 +3,7 @@ import { Button, Group, Text } from '@mantine/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
 import type { TableSliceDto } from '@/api/types';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { isPermitTarget, lookupTargetsQuery } from '@/features/registries/lookupTargets';
 import { formatDateTime } from '@/shared/format/datetime';
 import { formatDecimal } from '@/shared/format/number';
@@ -61,6 +62,7 @@ export function RowPermitSection({ documentId, periodKey, tableDefId, sheetCopyI
   const mark = marks.cells.get(cellKey(cell.rowKey, cell.columnCode));
 
   const undo = useUndoRowPermit(documentId);
+  const undoLoading = usePendingLoading(undo.isPending);
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState<string | null>(null);
 
@@ -173,7 +175,7 @@ export function RowPermitSection({ documentId, periodKey, tableDefId, sheetCopyI
               <Button
                 size="xs"
                 variant="subtle"
-                loading={undo.isPending}
+                loading={undoLoading}
                 data-permit-undo=""
                 onClick={() => {
                   setAdded(null);
