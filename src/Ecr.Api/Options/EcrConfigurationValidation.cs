@@ -51,6 +51,9 @@ public static partial class EcrConfigurationValidation
         ("Cache:AccessProfileSlidingMinutes", 1),
         ("Auth:SlidingHours", 1),
         ("Auth:StampCacheSeconds", 0),
+
+        // D-471: нижня межа виходу після бездіяльності; 0 вимкнув би межу, понад 5 — політика обмежує сама.
+        (Infrastructure.Security.IdleTimeoutPolicy.MinimumMinutesKey, 1),
         (Startup.HttpsTransport.PortKey, 0),
         ("Security:RateLimit:LoginPermitPerMinute", 1),
 

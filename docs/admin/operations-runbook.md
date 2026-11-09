@@ -264,7 +264,7 @@ ORDER BY [Ts];
 | `Auth:CookieName` | ні | `ecr.auth` | Значення на старті не перевіряється. |
 | `Auth:DataProtection:AllowUnprotectedKeys` | ні | — | `true` або `false`. |
 | `Auth:EnableNegotiate` | ні | `true` | `true` або `false`. |
-| `Auth:IdleTimeout:MinimumMinutes` | ні | `5` | Значення на старті не перевіряється. |
+| `Auth:IdleTimeout:MinimumMinutes` | ні | `5` | Ціле число, не менше 1. |
 | `Auth:RequireHttps` | ні | `true` | `true` або `false`. |
 | `Auth:SlidingHours` | ні | `8` | Ціле число, не менше 1. |
 | `Auth:StampCacheSeconds` | ні | `5` | Ціле число, не менше 0. |
