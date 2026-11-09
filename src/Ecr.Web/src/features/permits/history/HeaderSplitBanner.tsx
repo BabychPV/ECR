@@ -5,7 +5,7 @@ import { formatMonthYear } from '@/shared/format/period';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { HeaderSplitDialog, lineKey, useLineSlices } from './HeaderSplitDialog';
-import { headerSplitLinesOf, pendingRowsByTable } from './headerSplitModel';
+import { headerSplitLinesOf, orderedLines, pendingRowsByTable } from './headerSplitModel';
 import { rowDisplayName } from './rowName';
 import { dayMonth, dottedDate, monthOf } from './splitModel';
 import { usePermitHistory } from './usePermitHistory';
@@ -27,9 +27,10 @@ export interface HeaderSplitBannerProps {
  */
 export function HeaderSplitBanner({ documentId, periodKey, tables, readOnly, onReveal }: HeaderSplitBannerProps): JSX.Element | null {
   const history = usePermitHistory(documentId, periodKey);
-  const lines = headerSplitLinesOf(history.data, tables);
+  const found = headerSplitLinesOf(history.data, tables);
+  const slices = useLineSlices(documentId, periodKey, found.some((line) => line.needsSplit) ? found : []);
+  const lines = orderedLines(found, tables, slices);
   const pending = lines.filter((line) => line.needsSplit);
-  const slices = useLineSlices(documentId, periodKey, pending.length === 0 ? [] : lines);
   const [showRows, setShowRows] = useState(false);
   const [splitting, setSplitting] = useState(false);
 

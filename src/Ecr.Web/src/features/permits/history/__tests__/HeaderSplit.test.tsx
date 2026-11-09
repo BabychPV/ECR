@@ -56,8 +56,9 @@ function airRow(rowKey: string, total: string | null, extra: Partial<ReturnType<
 const history: DocumentPermitHistory = {
   header: [{ fieldCode: 'PermitNo', permits: seaWaterRow().permits }],
   rows: [
-    airRow('NO2', '26.7'),
+    // The server lists the rows newest first (CI 42684887329: «row 2» before «row 1»): the UI orders them like the table.
     airRow('SO2', '7.3'),
+    airRow('NO2', '26.7'),
     // A calculated row (server lists nothing to split) — never a line (F13 p220 j7).
     airRow('SUM', null, { splitMonths: [{ ...seaWaterRow().splitMonths[0]!, columnCodes: [], cells: [{ columnCode: 'Feb', total: '34', parts: [null, null], isSplit: false }] }] }),
     // A row with its own permit column — not the header's business.
@@ -99,7 +100,7 @@ function wrap(node: React.ReactNode, queries = client()): void {
 describe('header split model', () => {
   it('lines: only rows relying on the header and cells the server lists; counts by table', () => {
     const lines = headerSplitLinesOf(history, tables);
-    expect(lines.map((line) => `${line.row.rowKey}:${line.columnCode}`)).toEqual(['NO2:Feb', 'SO2:Feb']);
+    expect(lines.map((line) => `${line.row.rowKey}:${line.columnCode}`)).toEqual(['SO2:Feb', 'NO2:Feb']);
     expect(lines[0]?.table?.tableInstanceId).toBe(51);
     expect(pendingRowsByTable(lines).map((entry) => [entry.tableDefId, entry.rows])).toEqual([[801, 2]]);
   });
@@ -117,9 +118,8 @@ describe('HeaderSplitBanner (jh2/jh3)', () => {
     expect(banner.textContent).toContain('"table":"Air emissions","count":2');
 
     fireEvent.click(within(banner).getByRole('button', { name: 'permits.header.showRows' }));
-    const rows = banner.querySelector('[data-header-split-rows]')?.textContent ?? '';
-    expect(rows).toContain('Air emissions — Nitrogen dioxide');
-    expect(rows).toContain('Air emissions — Sulphur dioxide');
+    const rows = [...banner.querySelectorAll('[data-header-split-rows] li')].map((item) => item.textContent);
+    expect(rows).toEqual(['Air emissions — Nitrogen dioxide', 'Air emissions — Sulphur dioxide']);
   });
 
   it('nothing relying on the header to split — no banner', () => {
@@ -136,7 +136,7 @@ describe('HeaderSplitBanner (jh2/jh3)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'permits.header.splitAll' }));
     const dialog = screen.getByRole('dialog');
 
-    expect(dialog.querySelectorAll('[data-header-split-line]')).toHaveLength(2);
+    expect([...dialog.querySelectorAll('[data-header-split-line]')].map((line) => line.getAttribute('data-header-split-line'))).toEqual(['NO2', 'SO2']);
     expect(dialog.textContent).toContain('permits.header.was {"value":"26.7"}');
     expect(dialog.textContent).toContain('permits.header.progress {"done":0,"count":2}');
 

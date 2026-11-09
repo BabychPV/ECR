@@ -1,4 +1,4 @@
-import type { DocumentTableDto } from '@/api/types';
+import type { DocumentTableDto, TableSliceDto } from '@/api/types';
 import type { DocumentPermitHistory, RowPermitHistory } from './api';
 import { wireDecimal, type SplitCellValue, type SplitMonth } from './splitModel';
 
@@ -86,4 +86,29 @@ export function pendingRowsByTable(lines: readonly HeaderSplitLine[]): readonly 
   }
 
   return [...byTable.values()].map((entry) => entry.count);
+}
+
+/**
+ * The lines in the order people see them (CI 42684887329, fresh eyes: «row 2» was listed before «row 1»): by the page's
+ * table order, then by the row's position in its table (the slice), then as the server gave them.
+ */
+export function orderedLines(
+  lines: readonly HeaderSplitLine[],
+  tables: readonly DocumentTableDto[] | undefined,
+  slices: ReadonlyMap<number, TableSliceDto>,
+): readonly HeaderSplitLine[] {
+  const tableIndex = (line: HeaderSplitLine): number => {
+    const index = line.table === null ? -1 : (tables ?? []).indexOf(line.table);
+    return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+  };
+  const rowIndex = (line: HeaderSplitLine): number => {
+    const slice = line.table === null ? undefined : slices.get(line.table.tableInstanceId);
+    const index = slice?.rows.findIndex((row) => row.rowKey === line.row.rowKey) ?? -1;
+    return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+  };
+
+  return lines
+    .map((line, index) => ({ line, index }))
+    .sort((a, b) => tableIndex(a.line) - tableIndex(b.line) || rowIndex(a.line) - rowIndex(b.line) || a.index - b.index)
+    .map((entry) => entry.line);
 }
