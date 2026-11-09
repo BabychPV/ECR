@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { renderWithMantine } from '@/test/render';
 import { RecalcSkippedList, skippedSheetHref, type SkippedSheet } from '@/features/workflow/RecalcSkippedList';
+import { sheetTabKey } from '@/features/documents/sheetCopies/sheetCopyTypes';
 
 /**
  * ✎ UAT-recalc-ux: після перерахунку людина бачить, які ЗАТВЕРДЖЕНІ аркуші пропущено, і переходить до кожного —
@@ -54,6 +55,33 @@ describe('RecalcSkippedList', () => {
 
     expect(container.querySelector('[data-recalc-nothing]')).not.toBeNull();
     expect(container.querySelectorAll('[data-recalc-skipped-link]')).toHaveLength(1);
+  });
+
+  // ✎ Борг 09.11. Мутація: брати `sheetName` замість `sheetDisplayName` або код без копії в адресі — падає.
+  it('затверджена копія — назва «Vessel 2» і посилання на вкладку копії', () => {
+    const { container } = renderWithProviders(
+      <RecalcSkippedList
+        outcome={{
+          jobId: 'j1',
+          skipped: [
+            sheet({ sheetName: { values: { en: 'Vessel' } }, sheetDisplayName: { values: { en: 'Vessel 1' } } }),
+            sheet({
+              sheetName: { values: { en: 'Vessel' } },
+              sheetDisplayName: { values: { en: 'Vessel 2' } },
+              sheetCopyId: 77,
+            }),
+          ],
+        }}
+      />,
+    );
+
+    fireEvent.click(container.querySelector('summary') as Element);
+    const links = screen.getAllByRole('link');
+    expect(links.map((l) => l.textContent)).toEqual(['Land 89 · Vessel 1 · 202602', 'Land 89 · Vessel 2 · 202602']);
+    expect(links[1]?.getAttribute('href')).toBe(
+      `/documents/89?${new URLSearchParams({ periodKey: '202602', sheet: sheetTabKey('S161', 77) }).toString()}`,
+    );
+    expect(links[1]?.getAttribute('href')).not.toBe(links[0]?.getAttribute('href'));
   });
 
   it('адреса кодує код аркуша', () => {
