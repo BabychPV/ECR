@@ -37,6 +37,28 @@ export function projectRecalcKey(projectId: number | null): readonly unknown[] {
 }
 
 /**
+ * ✎ a1 (приймання 08.11, P3): скільки документів поставлено в чергу — відомо клієнту ДО розкладу.
+ *
+ * ⚠ Перерахунок року (`periodKey: null`) розкладає ВСІ документи проєкту (`RecalculationJob.ProjectDocumentIdsAsync`),
+ * тобто рівно `ProjectSummary.documentCount` (`ProjectStore`: `COUNT(*) FROM doc.Document WHERE ProjectId`). Поки
+ * батько ще в черзі, лічильників розкладу (`fanOut`) немає, і банер казав «Queued recalculation of X…» без N. Тепер
+ * він бере N, запам'ятане при постановці; щойно сервер віддасть `fanOut.total`, діє воно.
+ */
+const expectedTotals = new Map<string, number>();
+
+/** Запам'ятати очікуване N для задачі перерахунку проєкту (відповідь `POST /projects/{id}/recalculate`). */
+export function rememberRecalcTotal(jobId: string, total: number): void {
+  expectedTotals.set(jobId, total);
+}
+
+/** Стан із N: серверне `fanOut.total`, а до розкладу — запам'ятане при постановці. */
+export function withExpectedTotal(progress: RecalcProgress): RecalcProgress {
+  if (progress.total !== null) return progress;
+  const expected = expectedTotals.get(progress.jobId);
+  return expected === undefined ? progress : { ...progress, total: expected };
+}
+
+/**
  * Перерахунки проєкту з СЕРВЕРА — щоб сторінка, на яку повернулись (перелік документів, Periods, документ), бачила
  * прогрес, а не лише «Мої задачі» (людина 08.11: «якщо я залишу сторінку з документами і повернуся я не бачу
  * прогресу»).
@@ -63,7 +85,7 @@ export function useProjectRecalcProgress(projectId: number | null, enabled = tru
     retry: false,
   });
 
-  const items = rowsOf(query.data).filter(isProjectRecalculation).map(progressOf);
+  const items = rowsOf(query.data).filter(isProjectRecalculation).map(progressOf).map(withExpectedTotal);
 
   // Перехід «йде → завершено» по кожній задачі.
   const seenActive = useRef(new Set<string>());

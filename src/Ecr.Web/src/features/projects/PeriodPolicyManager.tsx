@@ -17,9 +17,9 @@ import { t } from '@/shared/i18n';
  * незалежно від обраної політики: змінити його інакше, ніж редагуючи
  * `09-seed.sql` і перерозгортаючи базу, не можна було нічим.
  *
- * ⚠ Зміна offsets наявної політики НЕ перераховує межі проєктів, які вже на
- * неї посилаються, автоматично: наступний `GET …/periods` (ідемпотентний)
- * підхопить нові значення сам.
+ * ✎ UAT 08.11 (e1): зміна offsets наявної політики одразу просуває стани місяців проєктів, що на неї посилаються
+ * (сервер, PeriodStateCatchUp), тому тост — «Policy saved. Month states updated.» (`periods.policyUpdated`), а не
+ * «on their next calendar rebuild».
  */
 export function PeriodPolicyManager({
   openerLabel,
