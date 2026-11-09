@@ -602,6 +602,10 @@ public static class RegistryEntryHardReferences
     public static IReadOnlyDictionary<string, string> CheckedForeignKeys { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["FK_CellValue_Entry"] = Cells,
+
+        // Feature (j): a permit in a row/header history or a month part is a document's use of the entry — counted as cells.
+        ["FK_PermitSegment_Entry"] = Cells,
+        ["FK_CellPermitPart_Entry"] = Cells,
         ["FK_DocumentHeaderValue_Entry"] = HeaderValues,
         ["FK_RegValue_Ref"] = RegistryValues,
         ["FK_RegEntry_Parent"] = ChildEntries,

@@ -83,6 +83,9 @@ public sealed class CellPermitPartConfiguration : IEntityTypeConfiguration<CellP
 
         builder.HasIndex(x => new { x.PeriodKeyValue, x.DocumentId, x.TableDefId, x.SheetCopyId, x.RowKey, x.ColumnDefId, x.PartNo })
                .IsUnique()
+               // ⛔ No filter: EF would add «[SheetCopyId] IS NOT NULL» for the nullable column and leave the ORIGINAL sheet
+               // (SheetCopyId NULL) without uniqueness. SQL Server treats NULLs as equal in a unique index — what we want.
+               .HasFilter(null)
                .HasDatabaseName("UQ_CellPermitPart_Cell");
 
         builder.HasOne<Document>().WithMany().HasForeignKey(x => x.DocumentId)

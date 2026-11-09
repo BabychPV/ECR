@@ -97,7 +97,7 @@ CREATE TABLE arc.CellPermitPart
     RowKey          nvarchar(100)  NOT NULL,
     ColumnDefId     int            NOT NULL,
     PartNo          tinyint        NOT NULL,
-    RegistryEntryId bigint         NOT NULL,
+    RegistryEntryId int            NOT NULL,
     DayFrom         date           NOT NULL,
     DayTo           date           NOT NULL,
     ValueNumeric    decimal(34,16) NULL,
