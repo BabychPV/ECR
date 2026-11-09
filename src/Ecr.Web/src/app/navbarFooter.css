@@ -1,0 +1,10 @@
+/*
+ * ✎ debt-1109 sep (людина 09.11): лінія між останнім пунктом меню (група Operate, «Notifications») і «Collapse menu».
+ *
+ * ⚠ Токен макета `--border` (`docs/design/hybrid/KIT.md`, «лінії»; так само `.dlg-f`/`.drawer-f` з `border-top`) —
+ * у застосунку `--ecr-border`, однаковий для світлої й темної схем через `cssVariablesResolver`. У згорнутому меню
+ * лінія — на ширину вузької рейки (панель має власний відступ `p="xs"`), без окремого правила.
+ */
+.ecr-nav-footer {
+  border-top: 1px solid var(--ecr-border);
+}

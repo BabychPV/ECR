@@ -55,6 +55,7 @@ import { UserMenu } from '@/shared/ui/UserMenu';
 
 import './routeTransition.css';
 import './narrowShell.css';
+import './navbarFooter.css';
 
 /**
  * Ідентифікатор основного вмісту — ціль для «Пропустити навігацію» нижче.
@@ -581,7 +582,7 @@ export function AppLayout(): JSX.Element {
             ))}
           </AppShell.Section>
           {!me.mustChangePassword && desktop && (
-            <AppShell.Section pt="xs">
+            <AppShell.Section pt="xs" className="ecr-nav-footer" data-nav-footer="">
               <NavbarCollapseToggle collapsed={iconsOnly} controls={NavbarItemsId} />
             </AppShell.Section>
           )}
