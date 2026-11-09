@@ -65,7 +65,9 @@ export function progressOf(job: JobSummary): RecalcProgress {
     projectId: job.projectId ?? null,
     projectCode: job.projectCode ?? (job.projectId === null || job.projectId === undefined ? '' : String(job.projectId)),
     phase,
-    total: fan === null ? null : fan.total,
+    // ✎ a1 (живий стенд 09.11): поки батько ще розкладає (Queued/Running), `fanOut.total` — лише вже поставлені діти
+    // («Queued 1 documents» при трьох); N невідоме, доки розклад не завершено (банер бере `withExpectedTotal`).
+    total: fan === null || phase === 'queued' ? null : fan.total,
     done: succeeded + failed,
     skipped: fan?.skippedSheets ?? 0,
     failed,
