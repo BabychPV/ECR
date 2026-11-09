@@ -153,6 +153,11 @@ const PermitRefreshStrip = lazy(async () => ({
   default: (await import('@/features/permits/bindings/PermitRefreshStrip')).PermitRefreshStrip,
 }));
 
+// Feature (j) Ship 2 (jh2/jh3): rows to split after a mid-month header permit change — its own chunk.
+const HeaderSplitBanner = lazy(async () => ({
+  default: (await import('@/features/permits/history/HeaderSplitBanner')).HeaderSplitBanner,
+}));
+
 /**
  * Пропозиція повернути загублені правки — сьома лінива панель (`D-132`).
  *
@@ -945,8 +950,19 @@ export function DocumentPage(): JSX.Element {
           проєкт, що й `PATCH …/cells` (`hasProjectWriteGrant`,
           `BusinessKeyChangeAction.tsx`), без окремого функціонального права. */}
       <Suspense fallback={null}>
+        <HeaderSplitBanner
+          documentId={documentId}
+          periodKey={periodKey}
+          tables={tables.data}
+          readOnly={readOnly}
+          onReveal={openUnmatchedRow}
+        />
+      </Suspense>
+
+      <Suspense fallback={null}>
         <DocumentHeaderPanel
           documentId={documentId}
+          periodKey={periodKey}
           businessKey={document.businessKey}
           templateVersion={document.templateVersion ?? undefined}
           showRequiredErrors={validatedSeq > 0}

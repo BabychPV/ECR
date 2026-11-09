@@ -32,6 +32,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import { headerFieldRefusal } from './headerFieldRefusal';
+import { HeaderPermitSection } from '@/features/permits/history/HeaderPermitSection';
 import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
 import { entryLabelsOf } from '@/features/registries/lookupEntryLabels';
 import { lookupTargetsQuery, usesDocumentWindow } from '@/features/registries/lookupTargets';
@@ -335,6 +336,11 @@ export interface DocumentHeaderPanelProps {
   readonly showRequiredErrors?: boolean;
   /** Лічильник запитів «відкрити шапку» (клік по знахідці шапки в Issues): зростання розгортає секцію. */
   readonly openRequest?: number | undefined;
+  /**
+   * Feature (j) Ship 2 (jh1): the period the page shows (`YYYYMM`). With it, a header permit field shows its permit
+   * history and «Add permit from date…» (a mid-month change makes the relying tables split the month).
+   */
+  readonly periodKey?: number | undefined;
 }
 
 /**
@@ -353,6 +359,7 @@ export function DocumentHeaderPanel({
   templateVersion,
   showRequiredErrors = false,
   openRequest,
+  periodKey,
 }: DocumentHeaderPanelProps): JSX.Element | null {
   const queryClient = useQueryClient();
   // ✎ RC16-Z35: поля, з яких людина вже пішла (blur) — помилка «обов'язкове» з'являється після цього.
@@ -800,7 +807,35 @@ export function DocumentHeaderPanel({
             .map((key) => [key, null] as const),
         ].sort((a, b) => contractRank(a[0]) - contractRank(b[0]));
 
-  const renderField = (field: DocumentHeaderField, key: ContractKey | null): JSX.Element => (
+  // jh1: the permit registry of a header permit field (a published permit type or a group), else `undefined`.
+  const permitRegistryOf = (field: DocumentHeaderField): { code: string } | undefined =>
+    field.dataType === 'Lookup' && field.lookupRegistryDefId !== null && field.lookupRegistryDefId !== undefined
+      ? lookupRegistryCodes.find((registry) => registry.id === field.lookupRegistryDefId && registry.inProjectWindow)
+      : undefined;
+
+  const renderField = (field: DocumentHeaderField, key: ContractKey | null): JSX.Element => {
+    const input = renderInput(field, key);
+    const permitRegistry = periodKey === undefined ? undefined : permitRegistryOf(field);
+    if (periodKey === undefined || permitRegistry === undefined) return input;
+
+    const saved = Number(cellText(field.value));
+
+    return (
+      <Stack key={field.code} gap="xs">
+        {input}
+        <HeaderPermitSection
+          documentId={documentId}
+          periodKey={periodKey}
+          fieldCode={field.code}
+          registryCode={permitRegistry.code}
+          currentEntryId={cellText(field.value).length > 0 && Number.isFinite(saved) ? saved : null}
+          canEdit={canEdit && dirty.length === 0}
+        />
+      </Stack>
+    );
+  };
+
+  const renderInput = (field: DocumentHeaderField, key: ContractKey | null): JSX.Element => (
     <HeaderFieldInput
       key={field.code}
       field={field}

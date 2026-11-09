@@ -36,6 +36,7 @@ export function CellSplitDialogHost({ target }: { readonly target: SplitTarget }
       )}
       unit={column?.unitSymbol ?? null}
       baseVersion={row?.rowVersion ?? null}
+      fromHeader={permitGridMarksOf(history.data, target.tableDefId, target.sheetCopyId).rows.get(target.rowKey)?.permitSource === 'header'}
       onClose={closeCellSplit}
     />
   );

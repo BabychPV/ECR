@@ -6,6 +6,7 @@ import { Catalog, Shell, Themes } from '@/test/__tests__/a11yFixtures';
 import { describe as describeViolations, findViolations } from '@/test/a11y';
 import { permitHistoryKey } from '../api';
 import { CellSplitDialog } from '../CellSplitDialog';
+import { HeaderSplitBanner } from '../HeaderSplitBanner';
 import { RowPermitSection } from '../RowPermitSection';
 import { permitGridMarksOf } from '../splitModel';
 import { historyOf, seaWaterRow } from './historyFixture';
@@ -101,6 +102,38 @@ describe('feature (j): accessibility', { timeout: 120_000 }, () => {
       await screen.findByRole('textbox', { name: 'Permit' });
       expect(container.textContent).not.toContain('⟦');
       const violations = await findViolations(container);
+      expect(violations, describeViolations(violations)).toHaveLength(0);
+    });
+
+    it(`${colorScheme}: jh2 header banner + jh3 «Split all» dialog — no violations, no ⟦keys⟧`, async () => {
+      const queries = client();
+      const month = seaWaterRow().splitMonths[0]!;
+      queries.setQueryData(permitHistoryKey(3, 202602), {
+        header: [{ fieldCode: 'PermitNo', permits: seaWaterRow().permits }],
+        rows: [seaWaterRow({ tableDefId: 801, tableCode: 'AIR', rowKey: 'NO2', columnCode: 'PermitNo', permitSource: 'header', splitMonths: [month] })],
+        cellsNeedingSplit: 1,
+      });
+      queries.setQueryData(queryKeys.slices.one(51, 202602), {
+        columns: [{ code: 'Feb', dataType: 'Decimal', unitSymbol: 't' }],
+        rows: [{ rowKey: 'NO2', label: 'Nitrogen dioxide', rowVersion: 'v', cells: {} }],
+      });
+      const tables = [{ tableDefId: 801, sheetCopyId: null, tableInstanceId: 51, tableCode: 'AIR', tableNameL10n: { values: { en: 'Air emissions' } } }];
+      const { container } = render(
+        <Shell colorScheme={colorScheme}>
+          <QueryClientProvider client={queries}>
+            <HeaderSplitBanner documentId={3} periodKey={202602} tables={tables as never} readOnly={false} />
+          </QueryClientProvider>
+        </Shell>,
+      );
+
+      expect(container.textContent).not.toContain('⟦');
+      const bannerViolations = await findViolations(container);
+      expect(bannerViolations, describeViolations(bannerViolations)).toHaveLength(0);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Split all…' }));
+      const dialog = await screen.findByRole('dialog');
+      expect(dialog.textContent).not.toContain('⟦');
+      const violations = await findViolations(dialog);
       expect(violations, describeViolations(violations)).toHaveLength(0);
     });
   }

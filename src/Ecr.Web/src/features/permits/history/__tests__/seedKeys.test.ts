@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { readSeedSql } from '@/test/seedSql';
 
 /**
- * Feature (j) P3 catalog: every `permits.cell.*` / `permits.history.*` / `permits.split.*` key the code asks for is in
+ * Feature (j) P3 catalog (Ship 2: + `permits.header.*`): every `permits.cell.*` / `permits.history.*` / `permits.split.*` key the code asks for is in
  * the `PERMITS: midmonth-split-ui` section in en, ru and kz with the same placeholders; no extra keys; English without
  * Cyrillic, ru/kz translated; no key duplicated elsewhere in the seed.
  */
@@ -31,7 +31,7 @@ function usedKeys(): Set<string> {
   ];
   const keys = new Set<string>();
   for (const file of files) {
-    for (const match of readFileSync(file, 'utf8').matchAll(/permits\.(?:cell|history|split)\.[A-Za-z]+/g)) keys.add(match[0]);
+    for (const match of readFileSync(file, 'utf8').matchAll(/permits\.(?:cell|history|split|header)\.[A-Za-z]+/g)) keys.add(match[0]);
   }
 
   return keys;
