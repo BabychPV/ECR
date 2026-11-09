@@ -8,7 +8,7 @@
  * 12 клітинок рядка виглядали однаково й нічого не казали. Тепер неподаний місяць бере стан ПЕРІОДУ з календаря
  * проєкту (`GET /projects/{id}/periods`): відкритий, заблокований чи ще не відкритий.
  */
-export type StripCell = 'open' | 'submitted' | 'approved' | 'returned' | 'locked' | 'notOpen' | 'unknown';
+export type StripCell = 'open' | 'late' | 'submitted' | 'approved' | 'returned' | 'locked' | 'notOpen' | 'unknown';
 
 /** Стан клітинки з (стан погодження документа за місяць, стан періоду проєкту). */
 export function stripCell(documentState: string | null, periodState: string | null): StripCell {
@@ -18,8 +18,11 @@ export function stripCell(documentState: string | null, periodState: string | nu
 
   switch (periodState) {
     case 'Open':
-    case 'Grace':
       return 'open';
+    // ✎ F13 g3 (09.11): Grace — окремий стан «Late (flagged)», як на вкладці Periods (перевідкритий місяць — теж
+    // Grace); доти смуга казала «Open», а Periods — «Late».
+    case 'Grace':
+      return 'late';
     case 'Closed':
       return 'locked';
     case 'Scheduled':
@@ -29,5 +32,5 @@ export function stripCell(documentState: string | null, periodState: string | nu
   }
 }
 
-/** Порядок легенди — як у макеті (O, S, A, L, N) і «Returned» наприкінці. */
-export const StripLegend: readonly StripCell[] = ['open', 'submitted', 'approved', 'locked', 'notOpen', 'returned'];
+/** Порядок легенди — як у макеті (O, S, A, L, N), «Late» одразу за «Open» і «Returned» наприкінці. */
+export const StripLegend: readonly StripCell[] = ['open', 'late', 'submitted', 'approved', 'locked', 'notOpen', 'returned'];

@@ -70,6 +70,11 @@ export function PolicyDatePreview({
       <Text size="xs" data-policy-preview-year="">
         {t('periods.policyPreview.year', { date: dateText(yearEditsUntil(projectEnd, offsets)) })}
       </Text>
+      {/* ✎ F13 e1 (09.11): збереження перераховує Open/Late/Scheduled в обидва боки, а заблоковані — ні (назад
+          веде лише Reopen із причиною). Кажемо це ДО збереження, а не лишаємо людину гадати, чому вересень не відкрився. */}
+      <Text size="xs" c="dimmed" data-policy-preview-locked-stay="">
+        {t('periods.policyPreview.lockedStay')}
+      </Text>
       {offsets.graceOffsetDays > offsets.hardCloseOffsetDays && (
         <Text size="xs" c="statusWarning" data-policy-preview-invalid="">
           {t('periods.policyPreview.orderInvalid')}

@@ -173,7 +173,12 @@ SELECT v.[Key], v.Lang, v.Val
     (N'periods.policyPreview.period', N'kz', N'{period}: ашылады {opens} · кешіккен түзетулер {late} бастап белгіленеді · жабылады {locks}'),
     (N'periods.policyPreview.year', N'kz', N'Жыл аяқталғаннан кейін кешіккен түзетулер {date} қоса алғанда қабылданады.'),
     (N'periods.policyPreview.orderInvalid', N'kz', N'Кешіккен түзетулер ай жабылғаннан кейін басталар еді — бұлай сақтауға болмайды.'),
-    (N'periods.policyPreview.usedBy', N'kz', N'{project} қолданады')
+    (N'periods.policyPreview.usedBy', N'kz', N'{project} қолданады'),
+    -- F13 e1 (09.11): відпущена політика повертає Late/Open-місяці, а заблоковані — ні; g3: Late у смузі
+    (N'periods.policyPreview.lockedStay', N'ru', N'Уже заблокированные месяцы остаются заблокированными; переоткройте их на вкладке «Периоды».'),
+    (N'periods.policyPreview.lockedStay', N'kz', N'Бұғатталған айлар бұғатталған күйінде қалады; оларды «Кезеңдер» қойындысында қайта ашыңыз.'),
+    (N'documents.strip.late', N'ru', N'С опозданием (отмечается)'),
+    (N'documents.strip.late', N'kz', N'Кешіккен (белгіленеді)')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -267,7 +272,9 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'periods.policyPreview.period', N'en', N'{period}: opens {opens} · late edits flagged from {late} · locks on {locks}', 1),
     (N'periods.policyPreview.year', N'en', N'After the year ends, late edits are accepted until {date} inclusive.', 1),
     (N'periods.policyPreview.orderInvalid', N'en', N'Late edits would start after the month locks — this cannot be saved.', 1),
-    (N'periods.policyPreview.usedBy', N'en', N'Used by {project}', 1)
+    (N'periods.policyPreview.usedBy', N'en', N'Used by {project}', 1),
+    (N'periods.policyPreview.lockedStay', N'en', N'Months already locked stay locked; reopen them on the Periods tab.', 1),
+    (N'documents.strip.late', N'en', N'Late (flagged)', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO
