@@ -16963,6 +16963,77 @@
         },
         "type": "object"
       },
+      "ProjectDocumentReopenItem": {
+        "description": "Діючий виняток документа проєкту — рядок вкладки Periods (приймальна i4).",
+        "properties": {
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "documentName": {
+            "description": "Номер документа (`BusinessKey`).",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор винятку.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "openUntil": {
+            "description": "До якого моменту (UTC) документ відкрито.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "openedByName": {
+            "description": "Ім'я того, хто відкрив; `null` — невідоме.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "periodKey": {
+            "description": "Місяць.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Причина відкриття.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "documentId",
+          "documentName",
+          "periodKey",
+          "openUntil",
+          "reason",
+          "openedByName"
+        ],
+        "type": "object"
+      },
+      "ProjectDocumentReopens": {
+        "description": "Діючі винятки «місяць відкрито для документа» в проєкті — для вкладки Periods.",
+        "properties": {
+          "canClose": {
+            "description": "Чи може поточний користувач закрити виняток («Close now»): право `Period.Reopen` у проєкті.",
+            "type": "boolean"
+          },
+          "items": {
+            "description": "Винятки ВИДИМИХ користувачеві документів, за місяцем і номером документа.",
+            "items": {
+              "$ref": "#/components/schemas/ProjectDocumentReopenItem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "canClose",
+          "items"
+        ],
+        "type": "object"
+      },
       "ProjectIdResponse": {
         "description": "Створений проєкт.",
         "properties": {
@@ -35471,6 +35542,78 @@
       }
     },
     "/api/v1/documents/{documentId}/period-reopen": {
+      "delete": {
+        "description": "`403` — немає права `Period.Reopen` у проєкті; `404` — документ невидимий. Журнал\n`DocumentPeriodReopen/Close`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Закриває діючий виняток до строку («Close now» на вкладці Periods, приймальна i4): місяць знову закритий і для\nцього документа. Нічого відкритого — нічого не робить.",
+        "tags": [
+          "DocumentPeriodReopens"
+        ]
+      },
       "get": {
         "parameters": [
           {
@@ -52513,6 +52656,69 @@
         ]
       }
     },
+    "/api/v1/projects/{projectId}/document-reopens": {
+      "get": {
+        "description": "`404` — проєкт невидимий або відсутній. Документи, яких викликач не бачить, у відповідь не потрапляють.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDocumentReopens"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDocumentReopens"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDocumentReopens"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Діючі винятки видимих документів проєкту (за місяцем і номером документа) і чи може викликач закрити їх.",
+        "tags": [
+          "ProjectDocumentReopens"
+        ]
+      }
+    },
     "/api/v1/public/bootstrap": {
       "get": {
         "description": "⚠ Дія не приймає ЖОДНОГО параметра — ні шляху, ні рядка запиту, ні тіла.\nЦе і є доказ того, що відповідь не може залежати від імені користувача:\nїй нізвідки його взяти.",
@@ -68054,6 +68260,9 @@
     },
     {
       "name": "Preferences"
+    },
+    {
+      "name": "ProjectDocumentReopens"
     },
     {
       "name": "Projects"

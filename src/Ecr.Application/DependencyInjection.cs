@@ -231,6 +231,8 @@ public static class DependencyInjection
         services.AddScoped<Periods.ReopenPeriodHandler>();
         services.AddScoped<Periods.OpenDocumentPeriodReopenHandler>();
         services.AddScoped<Periods.GetDocumentPeriodReopenHandler>();
+        services.AddScoped<Periods.ListProjectDocumentReopensHandler>();
+        services.AddScoped<Periods.CloseDocumentPeriodReopenHandler>();
         services.AddScoped<Periods.GetPeriodCalendarHandler>();
 
         // Робочий процес (модулі 3.4–3.6)

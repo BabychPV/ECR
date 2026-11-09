@@ -37,7 +37,34 @@ public interface IDocumentPeriodReopenStore
     /// <summary>Додає новий виняток до одиниці роботи.</summary>
     /// <param name="exception">Виняток.</param>
     public void Add(DocumentPeriodReopen exception);
+
+    /// <summary>
+    /// Діючі винятки всіх документів проєкту (вкладка Periods, приймальна i4) — БЕЗ фільтра видимості: його накладає
+    /// обробник.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="utcNow">Момент: прострочені, але ще не позначені закритими, не повертаються.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<ProjectDocumentReopenItem>> ListActiveForProjectAsync(
+        int projectId, DateTime utcNow, CancellationToken ct);
 }
+
+/// <summary>Діючий виняток документа проєкту — рядок вкладки Periods (приймальна i4).</summary>
+/// <param name="Id">Ідентифікатор винятку.</param>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="DocumentName">Номер документа (<c>BusinessKey</c>).</param>
+/// <param name="PeriodKey">Місяць.</param>
+/// <param name="OpenUntil">До якого моменту (UTC) документ відкрито.</param>
+/// <param name="Reason">Причина відкриття.</param>
+/// <param name="OpenedByName">Ім'я того, хто відкрив; <c>null</c> — невідоме.</param>
+public sealed record ProjectDocumentReopenItem(
+    int Id,
+    long DocumentId,
+    string DocumentName,
+    int PeriodKey,
+    DateTime OpenUntil,
+    string Reason,
+    string? OpenedByName);
 
 /// <summary>Факти документа й місяця для відкриття винятку.</summary>
 /// <param name="ProjectId">Проєкт документа.</param>

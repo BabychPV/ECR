@@ -31,6 +31,9 @@ public sealed class DocumentPeriodReopen : Entity<int>
     /// <summary>Причина закриття: відкрито новий виняток того самого документа й місяця.</summary>
     public const string ClosedReplaced = "Replaced";
 
+    /// <summary>Причина закриття: людина закрила виняток до строку («Close now» на вкладці Periods, приймальна i4).</summary>
+    public const string ClosedManually = "Closed";
+
     private DocumentPeriodReopen() { }
 
     /// <summary>Документ.</summary>
@@ -57,7 +60,7 @@ public sealed class DocumentPeriodReopen : Entity<int>
     /// <summary>Хто закрив; <c>null</c> — система (строк минув) або ще не закрито.</summary>
     public int? ClosedByUserId { get; private set; }
 
-    /// <summary>Чому закрито: <see cref="ClosedExpired"/>, <see cref="ClosedReplaced"/>.</summary>
+    /// <summary>Чому закрито: <see cref="ClosedExpired"/>, <see cref="ClosedReplaced"/>, <see cref="ClosedManually"/>.</summary>
     public string? CloseReason { get; private set; }
 
     /// <summary>Версія рядка.</summary>
