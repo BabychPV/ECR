@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type APIResponse, type BrowserContext, type Page } from '@playwright/test';
 
 /**
  * Feature (j), human 08.11 (ACCEPTANCE-1108-post15 j1–j7): a permit changes mid-month — the row keeps its permit history
@@ -9,11 +9,12 @@ import { expect, test, type APIRequestContext, type APIResponse, type Page } fro
  * month M), EARLY (valid until the 9th of M); template «Water» / table «WR» (PERMIT Lookup + Jan…Dec); project (Monthly,
  * current year), document, open period M; rows R1 (A, 12 in M), R2 (EARLY), R3 (A, no data).
  *
- * Screenshots (one per script line, light 1335): set `ECR_SHOTS_DIR` (e.g. C:\EcrScratch\permites-stand\shots-j).
+ * Screenshots: one per script line, light 1335, into the test output folder (`test-results` — the CI artifact
+ * `e2e-stand-report-shard-N`).
  * ⚠ Data is one-shot (a published type cannot be deleted); codes carry a timestamp.
  */
+const Admin = { user: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
-const ShotsDir = process.env['ECR_SHOTS_DIR'] ?? '';
 const MonthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
 async function ok<T>(response: APIResponse, what: string): Promise<T> {
@@ -210,10 +211,9 @@ function dataCell(page: Page, row: number, index: string) {
   return page.locator(`revo-grid revogr-data[type="rgRow"] .rgCell[data-rgrow="${String(row)}"][aria-colindex="${index}"]`);
 }
 
+/** One screenshot per script line, light 1335 (the context viewport), into the test's output folder (CI artifact). */
 async function shot(page: Page, name: string): Promise<void> {
-  if (ShotsDir.length === 0) return;
-  await page.setViewportSize({ width: 1335, height: 900 });
-  await page.screenshot({ path: `${ShotsDir}/light-1335-${name}.png` });
+  await page.screenshot({ path: test.info().outputPath(`light-1335-${name}.png`) });
 }
 
 /** Inspector «Info» of the selected permit cell → «Add permit from date…» with B from the 15th of the month. */
@@ -224,7 +224,7 @@ async function addB(page: Page, world: World, row: number): Promise<void> {
   const form = page.getByRole('form', { name: 'New permit for the row' });
   await form.getByLabel('Permit').click();
   await form.getByLabel('Permit').fill(world.bNumber);
-  await page.getByRole('option', { name: world.bNumber }).click();
+  await page.getByRole('option', { name: new RegExp(`^${world.bNumber}`) }).click();
   const date = form.getByLabel('Valid for this row from');
   await date.fill(`15.${pad(world.month)}.${String(world.year)}`);
   await date.press('Tab');
@@ -232,14 +232,26 @@ async function addB(page: Page, world: World, row: number): Promise<void> {
 }
 
 test.describe('Permit split:', () => {
+  test.skip(PeriodKey === '', 'ECR_E2E_OPTIONAL: стенда немає. Стенд: tools/e2e-stand.ps1.');
   test.describe.configure({ mode: 'serial', timeout: 600_000 });
+  let context: BrowserContext;
   let world: World;
 
-  test.beforeAll(async ({ request }) => {
-    world = await arrange(request);
+  // Signed in as the e2e admin (as permitValidity.spec.ts): the API world and every page share this context.
+  test.beforeAll(async ({ browser }) => {
+    test.setTimeout(600_000);
+    context = await browser.newContext({ viewport: { width: 1335, height: 900 } });
+    const login = await context.request.post('/api/v1/login/local', { data: { userName: Admin.user, password: Admin.password } });
+    expect(login.ok(), `вхід: ${String(login.status())} ${await login.text()}`).toBe(true);
+    world = await arrange(context.request);
   });
 
-  test('j1: the row keeps its permit history — «until» / «from» in the permit cell, no new row', async ({ page }) => {
+  test.afterAll(async () => {
+    await context.close();
+  });
+
+  test('j1: the row keeps its permit history — «until» / «from» in the permit cell, no new row', async () => {
+    const page = await context.newPage();
     await openDocument(page, world);
     await addB(page, world, 0);
     const permitCell = dataCell(page, 0, await gridColumn(page, 'Permit number'));
@@ -253,7 +265,8 @@ test.describe('Permit split:', () => {
     expect(slice.rows, 'нового рядка немає').toHaveLength(3);
   });
 
-  test('j3: one value into the shared month is refused (4225) and Submit is blocked until split', async ({ page }) => {
+  test('j3: one value into the shared month is refused (4225) and Submit is blocked until split', async () => {
+    const page = await context.newPage();
     const refused = await patchCells(page.request, world, world.rows[0]!, [{ columnCode: world.monthCode, value: '20' }]);
     expect(refused.status()).toBe(422);
     expect(((await refused.json()) as { errorCode?: string }).errorCode).toBe('ECR-CELL-4225');
@@ -269,7 +282,8 @@ test.describe('Permit split:', () => {
     await shot(page, 'j3');
   });
 
-  test('j2: Enter opens the split, A is pre-filled, A + B is saved as the total and the finding clears', async ({ page }) => {
+  test('j2: Enter opens the split, A is pre-filled, A + B is saved as the total and the finding clears', async () => {
+    const page = await context.newPage();
     await openDocument(page, world);
     const cell = dataCell(page, 0, await gridColumn(page, MonthNames[world.month - 1]!));
     await cell.click();
@@ -293,7 +307,8 @@ test.describe('Permit split:', () => {
     expect(validate.messages.some((m) => m.ruleCode === 'PERMIT-SPLIT'), 'PERMIT-SPLIT знято').toBe(false);
   });
 
-  test('j4: a gap between the permits is refused naming the days, with the two fixes', async ({ page }) => {
+  test('j4: a gap between the permits is refused naming the days, with the two fixes', async () => {
+    const page = await context.newPage();
     await openDocument(page, world);
     await addB(page, world, 1);
     const gap = page.locator('[data-permit-gap]');
@@ -304,7 +319,8 @@ test.describe('Permit split:', () => {
     await shot(page, 'j4');
   });
 
-  test('j6: undo the latest permit; the audit names the row and both permits', async ({ page }) => {
+  test('j6: undo the latest permit; the audit names the row and both permits', async () => {
+    const page = await context.newPage();
     await openDocument(page, world);
     await addB(page, world, 2);
     const permitCell = dataCell(page, 2, await gridColumn(page, 'Permit number'));
