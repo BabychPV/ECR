@@ -168,6 +168,57 @@ async function shot(page: Page, name: string): Promise<void> {
   }
 }
 
+test('SHEETNAME: copy marker — подана копія після перерахунку показує «Recalculated after submission»', async ({ page }) => {
+  // F13 p218 #788: сервер позначав копію («VESSELS#id»), а сторінка шукала позначку за голим кодом — банер копії мовчав.
+  await signIn(page);
+  const doc = await arrange(page);
+
+  await tables(page, doc);
+  const copy = await ok<{ sheetCopyId: number }>(
+    await page.request.post(`/api/v1/documents/${String(doc.documentId)}/sheets/${String(doc.sheetDefId)}/copies`),
+    'копія аркуша',
+  );
+  const copyTable = (await tables(page, doc)).find((table) => table.sheetCopyId === copy.sheetCopyId);
+  expect(copyTable, 'у відповіді немає таблиці копії').toBeDefined();
+  await ok(
+    await page.request.post(`/api/v1/documents/${String(doc.documentId)}/rows`, {
+      data: { tableInstanceId: copyTable?.tableInstanceId ?? 0, rowKey: null },
+    }),
+    'рядок копії',
+  );
+
+  await ok(
+    await page.request.post(`/api/v1/documents/${String(doc.documentId)}/submit`, {
+      data: { sheetDefId: doc.sheetDefId, periodKey: doc.periodKey, acknowledgeWarnings: true, sheetCopyId: copy.sheetCopyId },
+    }),
+    'подання копії',
+  );
+  await ok(
+    await page.request.post(`/api/v1/documents/${String(doc.documentId)}/recalculate`, { data: { periodKey: doc.periodKey } }),
+    'ручний перерахунок',
+  );
+
+  const copyKey = `${SheetCode}#${String(copy.sheetCopyId)}`;
+  await expect
+    .poll(
+      async () => {
+        const summary = await ok<{ sheets?: { code: string; recalculatedAfterSubmission?: boolean }[] }>(
+          await page.request.get(`/api/v1/documents/${String(doc.documentId)}?periodKey=${String(doc.periodKey)}`),
+          'картка документа',
+        );
+        return summary.sheets?.find((s) => s.code === copyKey)?.recalculatedAfterSubmission ?? false;
+      },
+      { timeout: 180_000, intervals: [1_000, 2_000, 5_000] },
+    )
+    .toBe(true);
+
+  await page.goto(
+    `/documents/${String(doc.documentId)}?periodKey=${String(doc.periodKey)}&sheet=${SheetCode}~${String(copy.sheetCopyId)}`,
+  );
+  await expect(page.locator('[data-recalculated-after-submission]')).toBeVisible({ timeout: 60_000 });
+  await shot(page, '04-submitted-copy-recalculated-marker');
+});
+
 test('SHEETNAME: копія аркуша показує «<Назва> 2» і оновлюється після перейменування групи', async ({ page }) => {
   await signIn(page);
   const doc = await arrange(page);

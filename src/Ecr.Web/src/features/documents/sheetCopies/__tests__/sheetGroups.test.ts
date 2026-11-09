@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DocumentTableDto } from '@/api/types';
-import { groupBySheet, sheetItemsOf, stateOfGroup } from '../sheetGroups';
+import { groupBySheet, recalculatedAfterSubmissionOf, sheetItemsOf, stateOfGroup } from '../sheetGroups';
 
 type CopyFields = Partial<Pick<DocumentTableDto, 'sheetCopyId' | 'copyOrdinal' | 'isCopyable' | 'displayNameL10n'>>;
 
@@ -85,6 +85,29 @@ describe('groupBySheet: вкладки копій аркуша', () => {
 
     expect(original && stateOfGroup(original, states)).toBe('Submitted');
     expect(copy && stateOfGroup(copy, states)).toBe('Rejected');
+  });
+
+  it('SHEETNAME: copy marker — подана копія бачить свою позначку «перераховано після подання», а не оригіналу', () => {
+    // F13 p218 #788: DocumentPage шукав позначку за голим кодом («VESSELS»), а ключ копії — «VESSELS#1829».
+    // Мутація: порівнювати з кодом аркуша (`stateKey` до «#») — червоніють обидва твердження.
+    const [original, copy] = groupBySheet([
+      table(1, 'VESSELS', { sheetCopyId: null, copyOrdinal: 1 }),
+      table(2, 'VESSELS', { sheetCopyId: 1829, copyOrdinal: 2 }),
+    ]);
+    const copyMarked = [
+      { code: 'VESSELS', recalculatedAfterSubmission: false },
+      { code: 'VESSELS#1829', recalculatedAfterSubmission: true },
+    ];
+    const originalMarked = [
+      { code: 'VESSELS', recalculatedAfterSubmission: true },
+      { code: 'VESSELS#1829', recalculatedAfterSubmission: false },
+    ];
+
+    expect(copy && recalculatedAfterSubmissionOf(copy, copyMarked)).toBe(true);
+    expect(original && recalculatedAfterSubmissionOf(original, copyMarked)).toBe(false);
+    // Позначка оригіналу не протікає в копію.
+    expect(copy && recalculatedAfterSubmissionOf(copy, originalMarked)).toBe(false);
+    expect(original && recalculatedAfterSubmissionOf(original, originalMarked)).toBe(true);
   });
 
   it('смуга аркушів: код пункту — ключ вкладки, стан копії — з власного ключа «КОД#id», не з оригіналу', () => {
