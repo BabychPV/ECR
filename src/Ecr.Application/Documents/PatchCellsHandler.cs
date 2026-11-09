@@ -2919,6 +2919,10 @@ public sealed partial class PatchCellsHandler(
             changes = changes with { NewRowVersions = newVersions, Routed = routed?.Groups };
             applied = changes;
 
+            // ✎ Feature (j) P2: a cleared month cell of a row with permit history takes its split parts with it — the
+            // same transaction (no parts without the value they split).
+            await ClearPartsOfClearedCellsAsync(context, changes, innerCt).ConfigureAwait(false);
+
             // ⚠ `WR-04` п. 1: окремого `rowStore.TouchRowsAsync` тут більше
             // НЕМАЄ. `ApplyAsync` уже «торкнувся» ВСІХ рядків `changes.Touched`
             // у цій самій транзакції: рядки із заявленою версією — захопленням
