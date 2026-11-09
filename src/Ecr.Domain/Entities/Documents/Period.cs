@@ -260,6 +260,55 @@ public sealed class Period : Entity<int>
         }
     }
 
+    /// <summary>
+    /// Чи може стан періоду бути виведений із політики заново — і НАЗАД теж (<see cref="RederiveTo"/>).
+    /// </summary>
+    /// <remarks>
+    /// Ні для збереженого <c>Closed</c> (назад веде лише Reopen із причиною), ні для перевідкритого
+    /// (<see cref="ReopenedUntil"/> задано — його тримає дедлайн Reopen, а не межі), ні для періоду без
+    /// порахованих меж (нульові межі дали б будь-що).
+    /// </remarks>
+    public bool AcceptsPolicyRederive
+        => State != PeriodState.Closed && ReopenedUntil is null && ComputedCloseAt != default;
+
+    /// <summary>
+    /// Переводить період у стан, виведений із ПОТОЧНОЇ політики після її зміни людиною, — у тому числі назад
+    /// (<c>Grace → Open</c>, <c>Open → Scheduled</c>): відпущена політика повертає місяцю той стан, який
+    /// вона дає зараз (F13 e1, 09.11).
+    /// </summary>
+    /// <param name="target">Стан за поточними межами (<c>PeriodStateCalculator.Calculate</c>).</param>
+    /// <param name="utcNow">Момент переходу.</param>
+    /// <exception cref="DomainException">Зворотний перехід для закритого чи перевідкритого періоду, або в <c>Closed</c>.</exception>
+    /// <remarks>
+    /// ⛔ <c>Closed</c> — лише вперед: заблокований місяць лишається заблокованим, відкриває його тільки Reopen
+    /// з причиною (ФВ-1.10). Уперед — той самий <see cref="AdvanceTo"/>, що й у задачі станів.
+    /// </remarks>
+    public void RederiveTo(PeriodState target, DateTime utcNow)
+    {
+        if (target >= State)
+        {
+            AdvanceTo(target, utcNow);
+            return;
+        }
+
+        if (!AcceptsPolicyRederive || target == PeriodState.Closed)
+        {
+            throw new DomainException(
+                "ECR-PRD-0409",
+                $"Перехід періоду {PeriodKeyValue} зі стану {State} у {target} не допускається.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0409.transitionNotAllowed",
+                    ["periodKey"] = PeriodKeyValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["from"] = State.ToString(),
+                    ["to"] = target.ToString(),
+                });
+        }
+
+        State = target;
+        StateChangedAt = utcNow;
+    }
+
     /// <summary>Відкриває закритий період до вказаного моменту. Причина обов'язкова.</summary>
     /// <param name="until">До якого моменту діє тимчасове відкриття.</param>
     /// <param name="reason">Причина; зберігається і потрапляє в аудит.</param>

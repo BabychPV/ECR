@@ -323,6 +323,92 @@ public sealed class PeriodPolicyRecomputeTests
         Assert.Equal(PeriodState.Open, _openFeb.State);
     }
 
+    /// <summary>
+    /// F13 e1 (09.11), зворотний бік: політику 3/20 повернули на 15/45 — жовтень із «Late» (Grace) ОДРАЗУ
+    /// повертається в Open з аудитом, а заблокований вересень лишається Locked.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: у <c>PeriodStateCatchUp</c> брати лише <c>Effective</c> (вперед) — жовтень лишається Grace, червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.6")]
+    public async Task Відпущена_політика_повертає_Late_місяць_у_Open_а_Locked_лишає()
+    {
+        var (sep, oct, audit) = await LoosenAfterTightPolicy();
+
+        Assert.Equal(PeriodState.Closed, sep.State);
+        Assert.Equal(PeriodState.Open, oct.State);
+        await audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r =>
+                r.EntityType == "Period"
+                && r.Operation == "AdvanceState"
+                && r.EntityId == oct.Id
+                && r.OldJson!.Contains("Grace")
+                && r.NewJson!.Contains("Open")),
+            Arg.Any<CancellationToken>());
+        await audit.DidNotReceive().WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r => r.EntityType == "Period" && r.EntityId == sep.Id),
+            Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>F13 e1: перевідкритий місяць відпущена політика назад не веде — його тримає дедлайн Reopen.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.10")]
+    public async Task Відпущена_політика_не_чіпає_перевідкритий_місяць()
+    {
+        var at = new DateTime(2026, 11, 9, 6, 0, 0, DateTimeKind.Utc);
+        _policy.UpdateOffsets(0, 3, 20, 45);
+        var project = ProjectBuilder.Project(PeriodKind.Monthly, ZoneId, AccessBuilder.ProjectId);
+        var jan = Make(202601, 1, new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));
+        jan.AdvanceTo(PeriodState.Closed, at.AddDays(-2));
+        jan.Reopen(at.AddDays(1), "F13 e4", at.AddDays(-1));
+        ProjectBuilder.Attach(project, [jan]);
+        project.Activate(at.AddDays(-300));
+        _periods.FindProjectAsync(AccessBuilder.ProjectId, Arg.Any<CancellationToken>()).Returns(project);
+
+        await PolicyHandler(at).HandleAsync(PolicyId, 0, 15, 45, 45, CancellationToken.None);
+
+        Assert.Equal(PeriodState.Grace, jan.State);
+        Assert.NotNull(jan.ReopenedUntil);
+    }
+
+    /// <summary>Домен: назад у Closed чи з Closed <see cref="Period.RederiveTo"/> не веде.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.10")]
+    public void RederiveTo_не_відкриває_заблокований_місяць()
+    {
+        var ex = Assert.Throws<Ecr.Domain.Abstractions.DomainException>(() => _closedJan.RederiveTo(PeriodState.Open, Now));
+        Assert.Equal("ECR-PRD-0409", ex.ErrorCode);
+        Assert.Equal(PeriodState.Closed, _closedJan.State);
+    }
+
+    private async Task<(Period Sep, Period Oct, IAuditWriter Audit)> LoosenAfterTightPolicy()
+    {
+        // 09.11 06:00Z. Політика 3/20: вересень заблоковано 20.10, жовтень Late з 03.11 до 20.11.
+        var at = new DateTime(2026, 11, 9, 6, 0, 0, DateTimeKind.Utc);
+        _policy.UpdateOffsets(0, 3, 20, 45);
+        var project = ProjectBuilder.Project(PeriodKind.Monthly, ZoneId, AccessBuilder.ProjectId);
+        var sep = Make(202609, 9, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30));
+        sep.AdvanceTo(PeriodState.Closed, at.AddDays(-20));
+        var oct = Make(202610, 10, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
+        oct.AdvanceTo(PeriodState.Grace, at.AddDays(-6));
+        ProjectBuilder.Attach(project, [sep, oct]);
+        project.Activate(at.AddDays(-300));
+        _periods.FindProjectAsync(AccessBuilder.ProjectId, Arg.Any<CancellationToken>()).Returns(project);
+        var audit = Substitute.For<IAuditWriter>();
+        var clock = Substitute.For<Ecr.Domain.Abstractions.IClock>();
+        clock.UtcNow.Returns(at);
+
+        // 15/45: жовтень Open до 15.11.
+        await new UpdatePeriodPolicyHandler(_periods, _access, _user, _uow, audit, clock)
+            .HandleAsync(PolicyId, 0, 15, 45, 45, CancellationToken.None);
+
+        return (sep, oct, audit);
+    }
+
     private Ecr.Application.Periods.BuildPeriodCalendarHandler CalendarHandler(DateTime utcNow)
     {
         var clock = Substitute.For<Ecr.Domain.Abstractions.IClock>();
