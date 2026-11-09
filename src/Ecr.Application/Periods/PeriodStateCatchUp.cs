@@ -17,7 +17,8 @@ namespace Ecr.Application.Periods;
 /// сторінка Periods показувала «Open · closes today» і не давала Reopen, хоча сітка вже не приймала запису
 /// (рішення про запис бере ефективний стан, F-08). Тепер — той самий шлях, що в архівації (F-08,
 /// <c>ArchiveProjectHandler</c>): <see cref="PeriodStateCalculator.Effective"/> → <see cref="Period.AdvanceTo"/>,
-/// лише ВПЕРЕД і лише для активного проєкту (неактивні задача станів теж не веде).
+/// лише для активного проєкту (неактивні задача станів теж не веде). ✎ F13 e1 (09.11): незаблоковані й
+/// неперевідкриті місяці — в обидва боки (<see cref="Period.RederiveTo"/>), <c>Closed</c> — лише вперед.
 /// <para>
 /// ⚠ На відміну від архівації, кожен перехід АУДИТУЄТЬСЯ (<c>aud.StructureChange</c>, <c>Period</c> /
 /// <c>AdvanceState</c>, причина — дія людини): перехід стався від її дії, а не від годинника.
@@ -82,14 +83,20 @@ public static class PeriodStateCatchUp
         foreach (var period in project.Periods)
         {
             var before = period.State;
-            var target = States.Effective(period, utcNow, yearGrace);
+
+            // ⛔ F13 e1 (09.11): відпущена політика (15/45 після 3/20) лишала жовтень «Late», хоча за нею він Open
+            // — `Effective` веде лише вперед. Незаблокований і неперевідкритий місяць тепер отримує стан, який
+            // політика дає ЗАРАЗ, в обидва боки; `Closed` і перевідкритий — як і раніше, лише вперед.
+            var target = period.AcceptsPolicyRederive
+                ? States.Calculate(period, utcNow, TimeZoneInfo.Utc, yearGrace)
+                : States.Effective(period, utcNow, yearGrace);
 
             if (target == before)
             {
                 continue;
             }
 
-            period.AdvanceTo(target, utcNow);
+            period.RederiveTo(target, utcNow);
             advanced.Add(new Advanced(period, before, period.State));
 
             await audit.WriteStructureChangeAsync(
