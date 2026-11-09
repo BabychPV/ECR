@@ -2,8 +2,7 @@
 .ecr-permit-history {
   display: grid;
   line-height: 1.15;
-  font-size: 11px;
-  font-family: var(--mantine-font-family-monospace);
+  font-size: 12px;
 }
 
 .ecr-permit-history-line:first-child {
@@ -13,9 +12,18 @@
 .ecr-cell-split {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   width: 100%;
+  min-width: 0;
   justify-content: space-between;
+}
+
+/* F13 p220: a narrow month column clipped «Split neede» — the label ellipsizes; the full hint is the cell's title. */
+.ecr-cell-split-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ecr-cell-split--needed {

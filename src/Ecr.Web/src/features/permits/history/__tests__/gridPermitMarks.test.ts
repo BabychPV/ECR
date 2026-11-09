@@ -98,6 +98,23 @@ describe('withPermitMarks', () => {
     expect(cell(marked[2]!, 'R2', '3').properties['title']).toBeUndefined();
   });
 
+  it('F13 p220 j7: a CALCULATED row (server lists no cell to split) — no «Split needed», the value and «credited to …»', () => {
+    const month = seaWaterRow().splitMonths[0]!;
+    const calc = seaWaterRow({ splitMonths: [{ ...month, columnCodes: [] }] });
+    const marks = permitGridMarksOf(historyOf(calc), 701, null);
+    const shown = withPermitMarks(columns, slice, marks, rowKeyOf);
+    const { template, properties } = cell(shown[1]!, 'R1', '12.4');
+
+    expect(template).toBe('#12.4');
+    expect(String(properties['class'])).not.toContain('ecr-cell-split');
+    expect(String(properties['title'])).toContain('permits.cell.credited');
+    expect(String(properties['title'])).toContain('KZ46VCZ14622410');
+    expect(String(properties['title'])).toContain('28.02.2026');
+    expect(
+      splitTargetOfEditStart(marks, { prop: 'Feb', model: { __rowKey: 'R1' } }, { documentId: 3, periodKey: 202602, tableInstanceId: 41, tableDefId: 701, sheetCopyId: null }, rowKeyOf),
+    ).toBeNull();
+  });
+
   it('untouched columns are the same objects; no history — nothing changes', () => {
     expect(marked[3]).toBe(columns[3]);
     expect(withPermitMarks(columns, slice, NoPermitMarks, rowKeyOf).every((column, index) => column === columns[index])).toBe(true);

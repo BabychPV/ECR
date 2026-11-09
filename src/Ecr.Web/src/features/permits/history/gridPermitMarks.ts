@@ -2,7 +2,7 @@ import type { CellProps, CellTemplate, ColumnRegular } from '@revolist/revogrid'
 import type { TableSliceDto } from '@/api/types';
 import { formatMonthName } from '@/shared/format/period';
 import { t } from '@/shared/i18n';
-import { cellKey, dayMonth, monthOf, type PermitGridMarks, type SplitCellMark } from './splitModel';
+import { cellKey, dayMonth, dottedDate, monthOf, type PermitGridMarks, type SplitCellMark } from './splitModel';
 import type { SplitTarget } from './splitRequest';
 import './permitMarks.css';
 
@@ -24,6 +24,7 @@ export function withPermitMarks(
   if (marks.rows.size === 0) return [...columns];
 
   const splitColumns = new Set([...marks.cells.values()].map((mark) => mark.columnCode));
+  const creditedColumns = new Set([...marks.credited.keys()].map((key) => key.slice(key.indexOf(':') + 1)));
   const permitColumns = new Set([...marks.rows.values()].map((row) => row.columnCode));
   const calculated = new Set(
     slice.columns
@@ -35,7 +36,7 @@ export function withPermitMarks(
     const code = typeof column.prop === 'string' ? column.prop : String(column.prop ?? '');
     const isPermit = permitColumns.has(code);
     const isSplit = splitColumns.has(code);
-    const isCalculated = calculated.has(code);
+    const isCalculated = calculated.has(code) || creditedColumns.has(code);
     if (!isPermit && !isSplit && !isCalculated) return column;
 
     const original = column.cellTemplate;
@@ -61,7 +62,7 @@ export function withPermitMarks(
       if (mark?.needsSplit === true) {
         return h('span', { class: 'ecr-cell-split ecr-cell-split--needed', 'data-split-cell': 'needed' }, [
           h('span', { class: 'ecr-cell-split-glyph', 'aria-hidden': 'true' }),
-          h('span', {}, t('permits.cell.splitNeeded')),
+          h('span', { class: 'ecr-cell-split-label', title: t('permits.cell.splitNeeded') }, t('permits.cell.splitNeeded')),
         ]);
       }
       if (mark?.isSplit === true) {
@@ -78,12 +79,19 @@ export function withPermitMarks(
       const own = (originalProps?.(props) ?? {}) as CellProps;
       const rowKey = rowKeyOf(props.model);
       const mark = isSplit ? marks.cells.get(cellKey(rowKey, code)) : undefined;
+      const credited = marks.credited.get(cellKey(rowKey, code));
       const note =
         mark !== undefined
           ? splitHint(mark)
-          : isCalculated && marks.rows.has(rowKey)
-            ? t('permits.history.calculatedNotSplit')
-            : null;
+          : credited !== undefined
+            ? t('permits.cell.credited', {
+                month: formatMonthName(monthOf(credited.month).month),
+                permit: credited.permit,
+                date: dottedDate(credited.lastDay),
+              })
+            : calculated.has(code) && marks.rows.has(rowKey)
+              ? t('permits.history.calculatedNotSplit')
+              : null;
       if (note === null) return own;
 
       const title = typeof own['title'] === 'string' && own['title'].length > 0 ? `${own['title']}\n${note}` : note;

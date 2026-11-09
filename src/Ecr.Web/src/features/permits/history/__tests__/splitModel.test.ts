@@ -55,6 +55,20 @@ describe('parts and total', () => {
     expect(initialParts(feb)).toEqual(['12.4', null]);
   });
 
+  it('F13 p220 j7: the pre-fill is shown like the grid — «3», not the wire «3.0000000000000000»', () => {
+    const month = seaWaterRow().splitMonths[0]!;
+    const wire = seaWaterRow({
+      splitMonths: [{ ...month, cells: [{ columnCode: 'Feb', total: '3.0000000000000000', parts: [null, null], isSplit: false }] }],
+    });
+    const feb = permitGridMarksOf(historyOf(wire), 701, null).cells.get('R1:Feb')!;
+    expect(initialParts(feb)).toEqual(['3', null]);
+
+    const parts = seaWaterRow({
+      splitMonths: [{ ...month, cells: [{ columnCode: 'Feb', total: '4.0000', parts: ['1.5000', '2.50'], isSplit: true }] }],
+    });
+    expect(initialParts(permitGridMarksOf(historyOf(parts), 701, null).cells.get('R1:Feb')!)).toEqual(['1.5', '2.5']);
+  });
+
   it('total is exact decimal A + B, not float', () => {
     expect(addDecimals(['0.1', '0.2'])).toBe('0.3');
     expect(addDecimals(['5.8', '6.6'])).toBe('12.4');

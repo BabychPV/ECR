@@ -105,7 +105,7 @@ export function RowPermitSection({ documentId, periodKey, tableDefId, sheetCopyI
     );
   }
 
-  if (row !== undefined && cell.isCalculated) {
+  if (row !== undefined && (cell.isCalculated || marks.credited.has(cellKey(cell.rowKey, cell.columnCode)))) {
     return (
       <Text size="xs" c="dimmed" p="sm" data-permit-calculated-note="">
         {t('permits.history.calculatedNotSplit')}

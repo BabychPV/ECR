@@ -24,13 +24,25 @@ export interface SplitCellMark {
   readonly isSplit: boolean;
 }
 
+/**
+ * A month cell that holds a value the server does NOT ask to split (a calculated cell, e.g. a Group row's formula — F13
+ * p220 j7): never split, credited to the permit valid on the month's last day.
+ */
+export interface CreditedCellMark {
+  readonly month: string;
+  readonly permit: string;
+  readonly lastDay: string;
+}
+
 /** What the grid of one table instance needs: split cells by `rowKey:columnCode`, rows with history by `rowKey`. */
 export interface PermitGridMarks {
   readonly cells: ReadonlyMap<string, SplitCellMark>;
   readonly rows: ReadonlyMap<string, RowPermitHistory>;
+  /** Calculated month cells of rows with history (no split marks, only «credited to …»). */
+  readonly credited: ReadonlyMap<string, CreditedCellMark>;
 }
 
-export const NoPermitMarks: PermitGridMarks = { cells: new Map(), rows: new Map() };
+export const NoPermitMarks: PermitGridMarks = { cells: new Map(), rows: new Map(), credited: new Map() };
 
 export function cellKey(rowKey: string, columnCode: string): string {
   return `${rowKey}:${columnCode}`;
@@ -55,19 +67,28 @@ export function permitGridMarksOf(
   if (rows.length === 0) return NoPermitMarks;
 
   const cells = new Map<string, SplitCellMark>();
+  const credited = new Map<string, CreditedCellMark>();
   for (const row of rows) {
     for (const month of row.splitMonths) {
       const codes = new Set([...month.cells.map((cell) => cell.columnCode), ...month.columnCodes]);
       for (const columnCode of codes) {
         const cell = month.cells.find((candidate) => candidate.columnCode === columnCode) ?? null;
         const isSplit = cell?.isSplit === true;
-        const needsSplit = !isSplit && (month.columnCodes.includes(columnCode) || (cell !== null && cell.total !== null));
+        // ⛔ F13 p220 j7: «needs a split» is the SERVER's list only. A value it does not list, with no part entered, is
+        // a calculated cell (never split) — it was marked «Split needed» here and no editor could open on it.
+        const needsSplit = !isSplit && month.columnCodes.includes(columnCode);
+        const anyPart = (cell?.parts ?? []).some((part) => wireDecimal(part) !== null);
+        const last = month.parts[month.parts.length - 1];
+        if (!isSplit && !needsSplit && !anyPart && cell !== null && wireDecimal(cell.total) !== null && last !== undefined) {
+          credited.set(cellKey(row.rowKey, columnCode), { month: month.month, permit: last.permit, lastDay: last.dayTo });
+          continue;
+        }
         cells.set(cellKey(row.rowKey, columnCode), { rowKey: row.rowKey, columnCode, month, cell, needsSplit, isSplit });
       }
     }
   }
 
-  return { cells, rows: new Map(rows.map((row) => [row.rowKey, row])) };
+  return { cells, rows: new Map(rows.map((row) => [row.rowKey, row])), credited };
 }
 
 /** `yyyy-MM-dd` → `dd.MM`; anything else as is. */
@@ -137,6 +158,13 @@ function scaled(text: string, scale: number): bigint {
   return negative ? -digits : digits;
 }
 
+/** «3.0000000000000000» → «3», «1.50» → «1.5» (the server's decimal(28,16) shown like the grid; F13 p220). */
+export function shortDecimal(text: string | null): string | null {
+  if (text === null || !text.includes('.')) return text;
+
+  return text.replace(/0+$/, '').replace(/\.$/, '');
+}
+
 /** Exact sum of canonical decimals (no float): the month total = A + B. */
 export function addDecimals(values: readonly string[]): string {
   const scale = Math.max(0, ...values.map((value) => value.split('.')[1]?.length ?? 0));
@@ -162,12 +190,12 @@ export function totalOfParts(parts: readonly (string | null)[]): string | null {
  */
 export function initialParts(mark: SplitCellMark): readonly (string | null)[] {
   const count = mark.month.parts.length;
-  const entered = (mark.cell?.parts ?? []).map(wireDecimal);
+  const entered = (mark.cell?.parts ?? []).map((part) => shortDecimal(wireDecimal(part)));
   if (entered.some((part) => part !== null)) {
     return Array.from({ length: count }, (_, index) => entered[index] ?? null);
   }
 
-  const single = wireDecimal(mark.cell?.total);
+  const single = shortDecimal(wireDecimal(mark.cell?.total));
 
   return Array.from({ length: count }, (_, index) => (index === 0 ? single : null));
 }

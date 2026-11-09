@@ -91,7 +91,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.history.rowPosition', N'ru', N'строка {n}'),
     (N'permits.history.rowPosition', N'kz', N'{n}-жол'),
     (N'permits.history.rowUnknown', N'ru', N'эта строка'),
-    (N'permits.history.rowUnknown', N'kz', N'осы жол')
+    (N'permits.history.rowUnknown', N'kz', N'осы жол'),
+    (N'permits.cell.credited', N'ru', N'{month}: вычисляемое значение не делится — учитывается для {permit}, действующего на {date}.'),
+    (N'permits.cell.credited', N'kz', N'{month}: есептелетін мән бөлінбейді — {date} күні жарамды {permit} рұқсатына есептеледі.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -144,7 +146,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'permits.split.save', N'en', N'Save parts', 1),
     (N'permits.split.action', N'en', N'Split {column}', 1),
     (N'permits.history.rowPosition', N'en', N'row {n}', 1),
-    (N'permits.history.rowUnknown', N'en', N'this row', 1)
+    (N'permits.history.rowUnknown', N'en', N'this row', 1),
+    (N'permits.cell.credited', N'en', N'{month}: calculated, not split — credited to {permit}, valid on {date}.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

@@ -126,14 +126,17 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
             if (add.error !== null) add.reset();
           }}
         />
-        <Text size="xs" c="dimmed" data-add-keeps="">
-          {t('permits.history.addKeeps', {
-            current: currentLabel ?? '—',
-            next: chosenLabel ?? '—',
-            until: dottedDate(previousDay(from)),
-            from: dottedDate(from),
-          })}
-        </Text>
+        {/* F13 p220 j7: no «— from 01.10» preview before a permit is picked. */}
+        {chosenLabel !== null && (
+          <Text size="xs" c="dimmed" data-add-keeps="">
+            {t('permits.history.addKeeps', {
+              current: currentLabel ?? '—',
+              next: chosenLabel,
+              until: dottedDate(previousDay(from)),
+              from: dottedDate(from),
+            })}
+          </Text>
+        )}
         {!from.endsWith('-01') && (
           <Text size="xs" c="statusWarning" data-add-split-hint="">
             {t('permits.history.addSplitHint')}
