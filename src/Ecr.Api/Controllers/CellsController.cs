@@ -152,13 +152,13 @@ public sealed class CellsController(
             ? (RowKey?)null
             : RowKey.Create(request.RowKey);
 
-        var rowKey = await rowHandler
-            .HandleAsync(documentId, request.TableInstanceId, requested, profile, ct)
+        var created = await rowHandler
+            .CreateAsync(documentId, request.TableInstanceId, requested, profile, ct)
             .ConfigureAwait(false);
 
         return Created(
             $"/api/v1/documents/{documentId}/tables/{request.TableInstanceId}",
-            new Contracts.RowKeyResponse(rowKey.Value));
+            new Contracts.RowKeyResponse(created.RowKey.Value, created.RecalculationJobId));
     }
 
     /// <summary>М'яко видаляє динамічний рядок таблиці (D3).</summary>
