@@ -124,6 +124,55 @@ public sealed class DocumentCellsByPermitViewTests(SqlServerFixture sql)
         Assert.Empty(mismatches);
     }
 
+    /// <summary>
+    /// Q-17 month routing: the March cell of R5 lives in ANOTHER instance of the year (period 202602) whose row has no permit
+    /// cell — the base permit comes from the same RowKey in the 202601 instance; with the segment B from 15.02, March is B.
+    /// Red without the fallback: the routed cell had no owning permit (no row / null PermitId).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "ACC-1108-j5")]
+    public async Task Routed_month_cell_takes_the_base_permit_from_the_same_row_key_in_another_instance_of_the_year()
+    {
+        var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        var kit = await BuildAsync(tag);
+
+        var anchor = await RowAsync(kit, kit.T, "R5", 5);
+        await CellAsync(kit.T, anchor, kit.Col["PERMIT"], permit: kit.A);
+        await SegmentAsync(kit, kit.T, "R5", new DateOnly(2026, 2, 15), kit.B);
+
+        // The owner instance of period 202602 (another month of the same year) holds the routed March value.
+        const int owner = 202602;
+        var loader = new BulkCellLoader(sql.ConnectionString, 1000);
+        long ownerRow;
+        await using (var db = sql.CreateContext())
+        {
+            var instanceId = await loader.ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None);
+            db.TableInstances.Add(new TableInstance(new PeriodKey(owner), instanceId, kit.DocumentId, kit.T, Now));
+            ownerRow = await loader.ReserveIdsAsync("doc.TableRowSeq", 1, CancellationToken.None);
+            db.TableRows.Add(new TableRow(new PeriodKey(owner), ownerRow, instanceId, RowKey.Create("R5"), 5, Now));
+            await db.SaveChangesAsync();
+        }
+
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                "INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated) "
+                + $"VALUES ({owner}, {ownerRow}, {kit.Col["M03"]}, {kit.T}, 3, 0)";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var rows = await QueryAsync(
+            "SELECT PermitId, ValueNumeric FROM rpt.v_DocumentCellsByPermit "
+            + $"WHERE DocumentId = {kit.DocumentId} AND RowKey = N'R5' AND ColumnCode = N'M03'");
+        var row = Assert.Single(rows);
+        Assert.Equal(kit.B, Convert.ToInt64(row[0], CultureInfo.InvariantCulture));
+        Assert.Equal(3m, (decimal)row[1]!);
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private sealed record Kit(
