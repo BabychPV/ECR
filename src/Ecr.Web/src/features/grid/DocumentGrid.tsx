@@ -610,7 +610,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   }, [recalc.outcome, recalculationJobId]);
 
   // Додавання рядка динамічної таблиці (`ФВ-3.2`) — `useAddRow.ts` (A7-39, Y7-03).
-  const addRow = useAddRow(documentId, tableInstanceId, () => void slice.refetch());
+  const addRow = useAddRow(documentId, tableInstanceId, () => void slice.refetch(), periodKey);
   const history = useRef(new UndoStack(`${tableInstanceId}:${periodKey}`));
   const [rejected, setRejected] = useState<PasteRejection[]>([]);
 
