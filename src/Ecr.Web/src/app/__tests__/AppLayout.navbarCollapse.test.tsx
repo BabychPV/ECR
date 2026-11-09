@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -261,6 +263,25 @@ describe('AppLayout: бічне меню згортається до іконо�
     expect(localStorage.getItem(StorageKey)).toBe('true');
     // Відлуння значення сервера назад на сервер не йде.
     expect(puts).toEqual([]);
+  });
+
+  /*
+   * ✎ debt-1109 sep (людина 09.11): лінія між останнім пунктом меню і «Collapse menu» — у розгорнутому І згорнутому
+   * меню. ⛔ Червоне без фіксу: секція кнопки без класу `ecr-nav-footer`, а `navbarFooter.css` немає.
+   */
+  it.each([false, true])('sep: «Collapse menu» відділено лінією токена --ecr-border (згорнуте: %s)', async (collapsed) => {
+    localStorage.setItem(StorageKey, String(collapsed));
+    renderAppLayout();
+    await shellReady();
+
+    const button = screen.getByRole('button', { name: collapsed ? 'Expand menu' : 'Collapse menu' });
+    const footer = button.closest('[data-nav-footer]');
+    expect(footer?.classList.contains('ecr-nav-footer')).toBe(true);
+    // Пункти меню — над лінією, у своїй секції, а не в секції кнопки.
+    expect(footer?.querySelector('a')).toBeNull();
+
+    const css = readFileSync(path.resolve(process.cwd(), 'src/app/navbarFooter.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(css).toMatch(/\.ecr-nav-footer\s*\{[^}]*border-top\s*:\s*1px solid var\(--ecr-border\)/u);
   });
 
   it('на мобільному «лише іконки» не діє: шухляда показує назви', async () => {
