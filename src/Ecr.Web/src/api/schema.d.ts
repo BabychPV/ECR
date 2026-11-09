@@ -4303,6 +4303,389 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{documentId}/permit-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The document's permit history (header fields and visible rows that have one) and the cells that still need to be
+         *     split between two permits, read in periodKey. */
+        get: {
+            parameters: {
+                query?: {
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentPermitHistoryDto"];
+                        "text/json": components["schemas"]["DocumentPermitHistoryDto"];
+                        "text/plain": components["schemas"]["DocumentPermitHistoryDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/permit-history/header": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * jh1: adds a permit to a header field, in force from `validFrom` (Ship 1: the 1st of a month).
+         * @description `422 ECR-HDR-4223 permitChangeMidMonth` — a date not on the 1st: add the permit per row (the rows relying on
+         *     the header permit with data in that month are named); `422 ECR-HDR-4223 permitGap` — uncovered days named.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["AddHeaderPermitRequest"];
+                    "application/json": components["schemas"]["AddHeaderPermitRequest"];
+                    "text/json": components["schemas"]["AddHeaderPermitRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HeaderPermitHistoryDto"];
+                        "text/json": components["schemas"]["HeaderPermitHistoryDto"];
+                        "text/plain": components["schemas"]["HeaderPermitHistoryDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/permit-history/header/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undoes the latest permit added to a header field. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UndoHeaderPermitRequest"];
+                    "application/json": components["schemas"]["UndoHeaderPermitRequest"];
+                    "text/json": components["schemas"]["UndoHeaderPermitRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HeaderPermitHistoryDto"];
+                        "text/json": components["schemas"]["HeaderPermitHistoryDto"];
+                        "text/plain": components["schemas"]["HeaderPermitHistoryDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/permit-history/rows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * j1: adds a permit to a row's permit cell, in force from `validFrom`.
+         * @description `403 ECR-ACCS-0403` — the permit cell is not editable for the user; `404` — invisible document/table;
+         *     `422 ECR-CELL-4223 permitGap` — days between the permits without a valid permit (named); `422
+         *     ECR-CELL-4223 missingEntry` — the permit cannot be chosen here; `422 ECR-REQ-0422` — not a permit column,
+         *     no row/base permit, or the date is outside the window or not after the latest change.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["AddRowPermitRequest"];
+                    "application/json": components["schemas"]["AddRowPermitRequest"];
+                    "text/json": components["schemas"]["AddRowPermitRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RowPermitHistoryDto"];
+                        "text/json": components["schemas"]["RowPermitHistoryDto"];
+                        "text/plain": components["schemas"]["RowPermitHistoryDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/permit-history/rows/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undoes the latest permit added to a row's permit cell.
+         * @description `422 ECR-REQ-0422 permitHistoryNothingToUndo` — nothing added, or its months are already split.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UndoRowPermitRequest"];
+                    "application/json": components["schemas"]["UndoRowPermitRequest"];
+                    "text/json": components["schemas"]["UndoRowPermitRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RowPermitHistoryDto"];
+                        "text/json": components["schemas"]["RowPermitHistoryDto"];
+                        "text/plain": components["schemas"]["RowPermitHistoryDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{documentId}/rows": {
         parameters: {
             query?: never;
@@ -27507,6 +27890,48 @@ export interface components {
          * @enum {unknown}
          */
         AccessMatrixState: "Editable" | "Partial" | "Blocked";
+        /** @description jh1: add a permit to a header field, in force from DateOnly AddHeaderPermitRequest.ValidFrom. */
+        AddHeaderPermitRequest: {
+            /** @description Header field code. */
+            fieldCode: string;
+            /**
+             * Format: int32
+             * @description The period the user is in (`YYYYMM`) — the reporting window and the rows to name.
+             */
+            periodKey: number;
+            /**
+             * Format: int64
+             * @description The new permit.
+             */
+            registryEntryId: number;
+            /**
+             * Format: date
+             * @description First day the new permit is in force for the document.
+             */
+            validFrom: string;
+        };
+        /** @description j1: add a permit to a row's permit cell, in force from DateOnly AddRowPermitRequest.ValidFrom. */
+        AddRowPermitRequest: {
+            /** @description The permit column. */
+            columnCode: string;
+            /**
+             * Format: int64
+             * @description The new permit.
+             */
+            registryEntryId: number;
+            /** @description Row key. */
+            rowKey: string;
+            /**
+             * Format: int64
+             * @description A table instance of the document (any period of the row).
+             */
+            tableInstanceId: number;
+            /**
+             * Format: date
+             * @description First day the new permit is in force for the row.
+             */
+            validFrom: string;
+        };
         /** @description Скільки ролей тепер призначено користувачеві. */
         AffectedRolesResponse: {
             /**
@@ -30325,6 +30750,18 @@ export interface components {
             /** @description `Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved`. */
             state: string;
         };
+        /** @description Permit history of a document and how many cells still need a split. */
+        DocumentPermitHistoryDto: {
+            /**
+             * Format: int32
+             * @description Cells with entered data in a month shared by two permits and not split yet.
+             */
+            cellsNeedingSplit: number;
+            /** @description Header fields with history. */
+            header: components["schemas"]["HeaderPermitHistoryDto"][];
+            /** @description Rows with history (only those the reader can see). */
+            rows: components["schemas"]["RowPermitHistoryDto"][];
+        };
         /** @enum {unknown} */
         DocumentReopenDenial: "NoPermission" | "PeriodNotClosed" | "ProjectArchived" | "PeriodMissing" | null;
         /** @description Аркуш складу документа в переліку: код, назва, стан за період. */
@@ -31524,6 +31961,13 @@ export interface components {
             ordinal: number;
             /** @description Код батьківської групи тієї ж таблиці; `null` — корінь. */
             parentCode: null | string;
+        };
+        /** @description Permit history of one header field. */
+        HeaderPermitHistoryDto: {
+            /** @description Header field code. */
+            fieldCode: string;
+            /** @description The history, base permit first. */
+            permits: components["schemas"]["PermitHistoryItemDto"][];
         };
         /** @description Where the header block is. */
         HeaderSpec: {
@@ -34429,6 +34873,38 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description One permit of a history and the days it is in force. */
+        PermitHistoryItemDto: {
+            /**
+             * Format: date-time
+             * @description When (UTC); `null` for the base permit.
+             */
+            addedAt: null | string;
+            /** @description Who added it; `null` for the base permit. */
+            addedBy: null | string;
+            /**
+             * Format: date
+             * @description First day in force; `null` — the base permit.
+             */
+            from: null | string;
+            /** @description Permit number as people know it. */
+            permit: string;
+            /**
+             * Format: int64
+             * @description The permit.
+             */
+            registryEntryId: number;
+            /**
+             * Format: int32
+             * @description The stored segment; `null` — the base permit (the cell/header value).
+             */
+            segmentId: null | number;
+            /**
+             * Format: date
+             * @description Last day in force; `null` — still in force.
+             */
+            until: null | string;
+        };
         /** @description A derived cell. */
         PermitImportDerivedCellDto: {
             /** @description Column code. */
@@ -34693,6 +35169,31 @@ export interface components {
              * @description Ідентифікатор запису довідника.
              */
             id: number;
+        };
+        /** @description One part of a month split between permits. */
+        PermitPartSpanDto: {
+            /**
+             * Format: date
+             * @description First day of the part.
+             */
+            dayFrom: string;
+            /**
+             * Format: date
+             * @description Last day of the part.
+             */
+            dayTo: string;
+            /**
+             * Format: int32
+             * @description 1 = A, 2 = B, …
+             */
+            partNo: number;
+            /** @description Permit number. */
+            permit: string;
+            /**
+             * Format: int64
+             * @description The permit of the part.
+             */
+            registryEntryId: number;
         };
         /** @description Колонка аркуша в перегляді. */
         PermitPreviewColumnDto: {
@@ -37541,6 +38042,29 @@ export interface components {
          * @enum {unknown}
          */
         RowKind: "Group" | "Item" | "Balance" | "Note" | "Header";
+        /** @description Permit history of one row's permit cell. */
+        RowPermitHistoryDto: {
+            /** @description The permit column. */
+            columnCode: string;
+            /** @description The history, base permit first. */
+            permits: components["schemas"]["PermitHistoryItemDto"][];
+            /** @description Row key. */
+            rowKey: string;
+            /**
+             * Format: int64
+             * @description Sheet copy; `null` — the original.
+             */
+            sheetCopyId: null | number;
+            /** @description Months that still need a split. */
+            splitMonths: components["schemas"]["SplitMonthDto"][];
+            /** @description Table code. */
+            tableCode: string;
+            /**
+             * Format: int32
+             * @description Table.
+             */
+            tableDefId: number;
+        };
         /** @description Прив'язка «атрибут PI → колонка, вікно = рядок» у відповіді (HSE301 §4.4). */
         RowWindowMapDto: {
             /** @description Код колонки кінця. */
@@ -39429,6 +39953,18 @@ export interface components {
             /** @description Текстове значення для нечислових атрибутів. */
             valueString: null | string;
         };
+        /** @description A month of a row that must be split between permits (j2). */
+        SplitMonthDto: {
+            /** @description Cells of the row with entered data in that month that are not split yet. */
+            columnCodes: string[];
+            /**
+             * Format: date
+             * @description First day of the month.
+             */
+            month: string;
+            /** @description The parts the month splits into. */
+            parts: components["schemas"]["PermitPartSpanDto"][];
+        };
         /** @description Запит на початок симуляції. */
         StartSimulationRequest: {
             /** @description Причина; потрапляє в `aud.SimulationSession`. */
@@ -40567,6 +41103,23 @@ export interface components {
              * @description Таблиця колонки.
              */
             tableDefId: number;
+        };
+        /** @description Undo the latest permit added to a header field. */
+        UndoHeaderPermitRequest: {
+            /** @description Header field code. */
+            fieldCode: string;
+        };
+        /** @description Undo the latest permit added to a row's permit cell. */
+        UndoRowPermitRequest: {
+            /** @description The permit column. */
+            columnCode: string;
+            /** @description Row key. */
+            rowKey: string;
+            /**
+             * Format: int64
+             * @description A table instance of the document.
+             */
+            tableInstanceId: number;
         };
         /** @description Одиниця для форми редагування — з усім, що форма показує, і версією. */
         UnitDetail: {
