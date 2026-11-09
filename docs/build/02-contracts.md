@@ -2858,6 +2858,9 @@ public interface IPermitHistoryStore
     public Task<IReadOnlyList<PermitSegment>> HeaderSegmentsAsync(long documentId, int headerFieldDefId, CancellationToken ct);
     public Task<IReadOnlyList<CellPermitPart>> PartsAsync(long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct);
     public Task<bool> RowHasPartsOfAsync(long documentId, int tableDefId, long? sheetCopyId, string rowKey, long registryEntryId, CancellationToken ct);
+    public Task<IReadOnlyList<CellPermitPart>> CellPartsAsync(int periodKey, long documentId, int tableDefId, long? sheetCopyId, string rowKey, int columnDefId, CancellationToken ct);
+    public void AddPart(CellPermitPart part);
+    public void RemovePart(CellPermitPart part);
     public void Add(PermitSegment segment);
     public void Remove(PermitSegment segment);
 }
@@ -4234,6 +4237,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-CELL-4222` | 422 | значення поза межами реєстру або дії дозволу |
 | `ECR-CELL-4223` | 422 | посилання `Lookup`-комірки на запис довідника, якого не існує |
 | `ECR-CELL-4224` | 422 | `PATCH …/tables/{tableInstanceId}/cell-styles`: колір не `#rrggbb`, понад 2000 комірок в `items` або понад 50 000 в `scope` (`tooManyCells`), дубль або порожня зміна, невірна форма `scope`, комірки немає в зрізі; причина — у `messageKey` |
+| `ECR-CELL-4225` | 422 | (j) одне значення в місяць, який рядок ділить між двома дозволами (дозвіл змінився посеред місяця): запис сітки (`PATCH …/cells`, j3) чи імпорт Excel; місяць треба поділити (`PUT …/permit-history/splits`); `messageKey` `splitRequired` — рядок, місяць, дозволи; обчислені значення не діляться |
 | `ECR-HDR-0404` | 404 | код у `PATCH …/documents/{id}/header` не відповідає жодному полю шапки версії шаблону документа |
 | `ECR-HDR-0422` | 422 | значення поля шапки документа не відповідає типу чи обов'язковості |
 | `ECR-HDR-4223` | 422 | поле шапки `Lookup` посилається на запис довідника, який не можна обрати: чужий довідник, видалений, вимкнений або нечинний жодного дня звітного вікна проєкту (дозвіл `Permit` із закінченим строком); причина — у `messageKey` (PS-P1D, D-11) |
@@ -4634,6 +4638,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/projects/{projectId}/document-reopens` | — (✎ приймальна i4: видимий проєкт; діючі винятки «місяць відкрито для документа» — `items` (документ, номер, місяць, `openUntil`, причина, хто відкрив) лише ВИДИМИХ документів, за місяцем і номером; `canClose` — `Period.Reopen` у проєкті; невидимий проєкт — 404) | 3 |
 | `GET` | `/api/v1/documents/{documentId}/permit-history` | — (✎ (j) 09.11: видимий документ; історія дозволів полів шапки й видимих рядків «KZ…A до 14.02 · KZ…B з 15.02» і місяці, які ще треба поділити між дозволами (`cellsNeedingSplit`), у періоді `?periodKey=`; невидимий документ — 404) | 3 |
 | `POST` | `/api/v1/documents/{documentId}/permit-history/rows` | право редагувати комірку дозволу рядка (`CanEditCell`) (✎ (j1) 09.11: дозвіл рядка «з дати» в тому самому документі й рядку; аудит `PermitSegment/Add` — хто, обидва дозволи, дата; 403 `ECR-ACCS-0403 deniedCells`; 422 `ECR-CELL-4223 permitGap` — дні без чинного дозволу між дозволами названо (j4); 422 `ECR-CELL-4223 missingEntry`; 422 `ECR-REQ-0422 permitHistoryTarget`/`permitHistoryDate`) | 3 |
+| `PUT` | `/api/v1/documents/{documentId}/permit-history/splits` | право редагувати місячну комірку (`CanEditCell`) (✎ (j2/jh3) 09.11: частини місяця, який ділять два дозволи рядка, — вводить користувач, без пропорції за днями; комірка з усіма частинами отримує суму звичайним записом комірки (аудит значення, перерахунок, `baseVersion`), часткове збереження лишає старе значення «неподіленим»; частини — `doc.CellPermitPart`, аудит `CellPermitPart/Split` (хто, частини, дозволи, дні); 409 `ECR-CELL-0409`; 422 `ECR-REQ-0422 permitSplitInvalid`) | 3 |
 | `POST` | `/api/v1/documents/{documentId}/permit-history/rows/undo` | право редагувати комірку дозволу рядка (✎ (j) 09.11: скасовує останній доданий дозвіл рядка; аудит `PermitSegment/Remove`; 422 `ECR-REQ-0422 permitHistoryNothingToUndo` — нічого не додано або його місяці вже поділено) | 3 |
 | `POST` | `/api/v1/documents/{documentId}/permit-history/header` | грант Write на проєкт + стан документа, як запис шапки (✎ (jh1) 09.11: дозвіл поля шапки «з дати»; Ship 1 — лише з 1-го числа; посеред місяця — 422 `ECR-HDR-4223 permitChangeMidMonth` з переліком рядків, що спираються на дозвіл шапки й мають дані в тому місяці («додайте дозвіл у рядках»); 422 `ECR-HDR-4223 permitGap`; аудит `PermitSegment/Add`) | 3 |
 | `POST` | `/api/v1/documents/{documentId}/permit-history/header/undo` | грант Write на проєкт (✎ (j) 09.11: скасовує останній доданий дозвіл поля шапки; аудит `PermitSegment/Remove`; 422 `ECR-REQ-0422 permitHistoryNothingToUndo`) | 3 |
