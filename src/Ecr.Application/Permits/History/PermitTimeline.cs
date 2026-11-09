@@ -118,6 +118,20 @@ public static class PermitTimeline
         return Merge(gaps);
     }
 
+    /// <summary>
+    /// j4 fix «move the start date to …»: the change date that closes the first gap. The previous permit ended BEFORE the
+    /// change — start the new permit on its first uncovered day (gap start); the new permit starts AFTER the change — move
+    /// the change to the new permit's first valid day (the day after the gap).
+    /// </summary>
+    /// <param name="gaps">Gaps from <see cref="GapDays"/> (at least one).</param>
+    /// <param name="changeFrom">The requested change date.</param>
+    public static DateOnly SuggestedFrom(IReadOnlyList<DayRange> gaps, DateOnly changeFrom)
+    {
+        ArgumentNullException.ThrowIfNull(gaps);
+        var first = gaps[0];
+        return first.First >= changeFrom ? first.Last.AddDays(1) : first.First;
+    }
+
     private static DateOnly Min(DateOnly a, DateOnly b) => a < b ? a : b;
 
     private static List<DayRange> Merge(List<DayRange> ranges)
