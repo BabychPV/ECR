@@ -1,0 +1,37 @@
+/* Feature (j): the permit cell of a row with history and the month cells shared by two permits (mockup j1b/j2cell). */
+.ecr-permit-history {
+  display: grid;
+  line-height: 1.15;
+  font-size: 11px;
+  font-family: var(--mantine-font-family-monospace);
+}
+
+.ecr-permit-history-line:first-child {
+  color: var(--mantine-color-dimmed);
+}
+
+.ecr-cell-split {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  justify-content: space-between;
+}
+
+.ecr-cell-split--needed {
+  color: var(--mantine-color-statusWarning-text);
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.ecr-cell-split-needed {
+  background: var(--ecr-warning-soft);
+}
+
+.ecr-cell-split-glyph {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  background: linear-gradient(to top left, transparent calc(50% - 1px), currentColor 50%, transparent calc(50% + 1px));
+}
