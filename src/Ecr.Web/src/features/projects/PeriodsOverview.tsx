@@ -111,6 +111,11 @@ interface PeriodYearTilesProps {
   /** Стан проєкту (`Draft`/`Active`/`Archived`); не `Active` — плитки не обіцяють дат відкриття (Pass2 п. 6). */
   readonly projectStatus?: string | undefined;
   readonly siteDate: SiteDate;
+  /**
+   * ✎ debt-1109 i4-P3: «Locked · N document(s) reopened until …» закритого місяця з винятками (той самий рядок, що в
+   * календарі нижче); `null`/немає — винятків немає. Плитки раніше показували просто «Locked since …».
+   */
+  readonly reopenedNote?: ((periodKey: number) => string | null) | undefined;
   /** Ключ виділеної плитки (`aria-pressed`). */
   readonly selectedKey: number | null;
   readonly onPick: (periodKey: number) => void;
@@ -126,6 +131,7 @@ export function PeriodYearTiles({
   projectCode,
   projectStatus,
   siteDate,
+  reopenedNote,
   selectedKey,
   onPick,
 }: PeriodYearTilesProps): JSX.Element | null {
@@ -147,7 +153,8 @@ export function PeriodYearTiles({
           // ✎ UAT 08.11 (e3): плитка показує той самий ЕФЕКТИВНИЙ стан, що й сітка.
           const shown = effectivePeriodState(period, now);
           const state = t(statusKey('period', shown));
-          const note = periodNote(period, calendar, siteDate, now, projectStatus);
+          const reopened = shown === 'Closed' ? (reopenedNote?.(period.periodKey) ?? null) : null;
+          const note = reopened ?? periodNote(period, calendar, siteDate, now, projectStatus);
           const pressed = selectedKey === period.periodKey;
 
           return (
@@ -155,6 +162,7 @@ export function PeriodYearTiles({
               key={period.periodKey}
               data-period-tile={period.periodKey}
               data-state={shown}
+              data-tile-reopened={reopened === null ? undefined : ''}
               aria-pressed={pressed}
               aria-label={`${caption}, ${state}. ${note}`}
               onClick={() => onPick(period.periodKey)}
@@ -177,7 +185,8 @@ export function PeriodYearTiles({
                     </Text>
                   )}
                 </Group>
-                <StatusBadge kind="period" state={shown} quiet={shown !== 'Grace'} />
+                {/* Рядок винятків сам каже «Locked» — без бейджа, як у календарі. */}
+                {reopened === null && <StatusBadge kind="period" state={shown} quiet={shown !== 'Grace'} />}
                 <Text size="xs" c="dimmed">
                   {note}
                 </Text>
