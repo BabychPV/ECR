@@ -3,13 +3,13 @@ INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'recalcProgress.queuedProject', N'ru', N'Пересчёт {project} поставлен в очередь…'),
-    (N'recalcProgress.queuedDocuments', N'ru', N'В очереди {total} документов на пересчёт ({project})'),
+    (N'recalcProgress.queuedDocuments', N'ru', N'В очереди на пересчёт: {documentCount} ({project})'),
     (N'recalcProgress.running', N'ru', N'Пересчёт {project}: {done} из {total} документов, пропущено {skipped}, ошибок {failed}'),
     (N'recalcProgress.finished', N'ru', N'Завершено: пересчитано {recalculated}, пропущено {skipped} (утверждены), ошибок {failed} ({project})'),
     (N'recalcProgress.finishedWithErrors', N'ru', N'Завершено с ошибками: пересчитано {recalculated}, пропущено {skipped} (утверждены), ошибок {failed} ({project})'),
     (N'recalcProgress.failed', N'ru', N'Пересчёт {project} не выполнен'),
     (N'recalcProgress.queuedToast', N'ru', N'Пересчёт {project} поставлен в очередь. Прогресс — вверху этой страницы.'),
-    (N'recalcProgress.queuedDocumentsToast', N'ru', N'В очереди {total} документов на пересчёт ({project}). Прогресс — вверху этой страницы.'),
+    (N'recalcProgress.queuedDocumentsToast', N'ru', N'В очереди на пересчёт: {documentCount} ({project}). Прогресс — вверху этой страницы.'),
     (N'recalcProgress.confirmScope', N'ru', N'Открытые месяцы {months} · документов: {documents} · утверждённые листы и заблокированные месяцы пропускаются'),
     (N'recalcProgress.confirmScopeNoOpen', N'ru', N'Открытых месяцев нет · документов: {documents} · утверждённые листы и заблокированные месяцы пропускаются'),
     (N'recalcProgress.confirmScopeUnknown', N'ru', N'{project}: документов {documents} · утверждённые листы и заблокированные месяцы пропускаются'),
@@ -55,7 +55,15 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.jobKind', N'kz', N'«{kind}» тапсырма түрі жоқ.'),
     (N'err.ECR-PRD-0409.deleteNotDraft', N'kz', N'Тек құжатсыз жоба жобасын жоюға болады (бұл: {status}, құжаттар {documentCount}).'),
     (N'err.ECR-PRD-0409.deleteHasDocuments', N'kz', N'Тек құжатсыз жоба жобасын жоюға болады (мұнда құжаттар {documentCount}).'),
-    (N'err.ECR-PRD-0409.deleteHasHistory', N'kz', N'Жобада есептеу, кесінді немесе мұрағаттау тарихы бар ({historyCount}): жою мүмкін емес.')
+    (N'err.ECR-PRD-0409.deleteHasHistory', N'kz', N'Жобада есептеу, кесінді немесе мұрағаттау тарихы бар ({historyCount}): жою мүмкін емес.'),
+    (N'recalcProgress.documentCount.one', N'ru', N'{count} документ'),
+    (N'recalcProgress.documentCount.few', N'ru', N'{count} документа'),
+    (N'recalcProgress.documentCount.many', N'ru', N'{count} документов'),
+    (N'recalcProgress.documentCount.other', N'ru', N'{count} документа'),
+    (N'recalcProgress.documentCount.one', N'kz', N'{count} құжат'),
+    (N'recalcProgress.documentCount.few', N'kz', N'{count} құжат'),
+    (N'recalcProgress.documentCount.many', N'kz', N'{count} құжат'),
+    (N'recalcProgress.documentCount.other', N'kz', N'{count} құжат')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -65,16 +73,16 @@ INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
     (N'recalcProgress.queuedProject', N'en', N'Queued recalculation of {project}…', 1),
-    (N'recalcProgress.queuedDocuments', N'en', N'Queued {total} documents for recalculation ({project})', 1),
-    (N'recalcProgress.running', N'en', N'Recalculating {project}: {done} of {total} documents, {skipped} skipped, {failed} failed', 1),
+    (N'recalcProgress.queuedDocuments', N'en', N'Queued {documentCount} for recalculation ({project})', 1),
+    (N'recalcProgress.running', N'en', N'Recalculating {project}: {done} of {documentCount}, {skipped} skipped, {failed} failed', 1),
     (N'recalcProgress.finished', N'en', N'Finished: {recalculated} recalculated, {skipped} skipped (approved), {failed} failed ({project})', 1),
     (N'recalcProgress.finishedWithErrors', N'en', N'Finished with errors: {recalculated} recalculated, {skipped} skipped (approved), {failed} failed ({project})', 1),
     (N'recalcProgress.failed', N'en', N'Recalculation of {project} failed', 1),
     (N'recalcProgress.queuedToast', N'en', N'Recalculation of {project} queued. Progress is shown at the top of this page.', 1),
-    (N'recalcProgress.queuedDocumentsToast', N'en', N'Queued {total} documents for recalculation ({project}). Progress is shown at the top of this page.', 1),
-    (N'recalcProgress.confirmScope', N'en', N'Open months {months} · {documents} documents · approved sheets and locked months are skipped', 1),
-    (N'recalcProgress.confirmScopeNoOpen', N'en', N'No open months · {documents} documents · approved sheets and locked months are skipped', 1),
-    (N'recalcProgress.confirmScopeUnknown', N'en', N'{project}: {documents} documents · approved sheets and locked months are skipped', 1),
+    (N'recalcProgress.queuedDocumentsToast', N'en', N'Queued {documentCount} for recalculation ({project}). Progress is shown at the top of this page.', 1),
+    (N'recalcProgress.confirmScope', N'en', N'Open months {months} · {documentCount} · approved sheets and locked months are skipped', 1),
+    (N'recalcProgress.confirmScopeNoOpen', N'en', N'No open months · {documentCount} · approved sheets and locked months are skipped', 1),
+    (N'recalcProgress.confirmScopeUnknown', N'en', N'{project}: {documentCount} · approved sheets and locked months are skipped', 1),
     (N'recalcProgress.openJobs', N'en', N'Open in Jobs', 1),
     (N'recalcProgress.openList', N'en', N'Open documents', 1),
     (N'recalcProgress.dismiss', N'en', N'Dismiss', 1),
@@ -90,7 +98,11 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-REQ-0422.jobKind', N'en', N'Job kind «{kind}» does not exist.', 1),
     (N'err.ECR-PRD-0409.deleteNotDraft', N'en', N'Only draft projects without documents can be deleted (this one: {status}, {documentCount} documents).', 1),
     (N'err.ECR-PRD-0409.deleteHasDocuments', N'en', N'Only draft projects without documents can be deleted (this one has {documentCount} documents).', 1),
-    (N'err.ECR-PRD-0409.deleteHasHistory', N'en', N'The project already has calculation, snapshot or archive history ({historyCount} records) and cannot be deleted.', 1)
+    (N'err.ECR-PRD-0409.deleteHasHistory', N'en', N'The project already has calculation, snapshot or archive history ({historyCount} records) and cannot be deleted.', 1),
+    (N'recalcProgress.documentCount.one', N'en', N'{count} document', 1),
+    (N'recalcProgress.documentCount.few', N'en', N'{count} documents', 1),
+    (N'recalcProgress.documentCount.many', N'en', N'{count} documents', 1),
+    (N'recalcProgress.documentCount.other', N'en', N'{count} documents', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

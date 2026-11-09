@@ -148,7 +148,7 @@ async function startRecalc(): Promise<HTMLElement> {
   const dialog = await screen.findByRole('dialog', { name: '⟦periods.recalcTitle (code=PRJ-7)⟧' });
   // ✎ P2 живого проходу 08.11: реальна область — відкриті місяці (суцільний відрізок; заблокований січень і запланований
   // грудень поза нею) і число документів; старого «Every document of every period» немає.
-  await within(dialog).findByText(/recalcProgress\.confirmScope \(months=September–November 2026, documents=92\)/);
+  await within(dialog).findByText(/recalcProgress\.confirmScope \(months=September–November 2026, documents=92, documentCount=⟦recalcProgress\.documentCount\.other \(count=92\)⟧\)/);
   expect(within(dialog).queryByText(/Every document/)).toBeNull();
   await user.click(within(dialog).getByRole('button', { name: '⟦workflow.recalculate⟧' }));
 
@@ -173,13 +173,13 @@ describe('ProjectRecalculateAction + ProjectRecalcBanner: «finished» лише 
       await startRecalc();
 
       // a1: «Queued…», ніколи «finished».
-      await waitFor(() => expect(shown()).toContain('⟦recalcProgress.queuedDocumentsToast (project=PRJ-7, total=92)⟧'));
+      await waitFor(() => expect(shown()).toContain('⟦recalcProgress.queuedDocumentsToast (project=PRJ-7, total=92, documentCount=⟦recalcProgress.documentCount.other (count=92)⟧)⟧'));
       expect(shown().some((m) => /finished/i.test(m))).toBe(false);
 
       // a2: банер із прогресом; опитування триває.
       expect(
         await screen.findByText(
-          '⟦recalcProgress.running (project=PRJ-7, done=1, total=3, skipped=2, failed=0)⟧',
+          '⟦recalcProgress.running (project=PRJ-7, done=1, total=3, documentCount=⟦recalcProgress.documentCount.other (count=3)⟧, skipped=2, failed=0)⟧',
         ),
       ).toBeTruthy();
       const reads = state.listReads;
@@ -213,8 +213,8 @@ describe('ProjectRecalculateAction + ProjectRecalcBanner: «finished» лише 
 
       await startRecalc();
 
-      await waitFor(() => expect(shown()).toContain('⟦recalcProgress.queuedDocumentsToast (project=PRJ-7, total=92)⟧'));
-      expect(await screen.findByText('⟦recalcProgress.queuedDocuments (project=PRJ-7, total=92)⟧')).toBeTruthy();
+      await waitFor(() => expect(shown()).toContain('⟦recalcProgress.queuedDocumentsToast (project=PRJ-7, total=92, documentCount=⟦recalcProgress.documentCount.other (count=92)⟧)⟧'));
+      expect(await screen.findByText('⟦recalcProgress.queuedDocuments (project=PRJ-7, total=92, documentCount=⟦recalcProgress.documentCount.other (count=92)⟧)⟧')).toBeTruthy();
       expect(screen.queryByText(/recalcProgress\.queuedProject/)).toBeNull();
     },
     Slow,

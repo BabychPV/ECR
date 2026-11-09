@@ -33,7 +33,7 @@ describe('приймання 08.11 — тексти лінії f/g', () => {
       expect(value(key), key).toContain('at the top of this page');
     }
 
-    expect(value('recalcProgress.queuedDocumentsToast')).toMatch(/^Queued \{total\} documents/u);
+    expect(value('recalcProgress.queuedDocumentsToast')).toMatch(/^Queued \{documentCount\} for recalculation/u);
   });
 
   it('g1: легенда рамки — поточний період, а не календарний місяць', () => {

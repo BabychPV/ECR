@@ -1,5 +1,6 @@
 import type { JobSummary } from '@/api/types';
 import { FannedOut, SucceededWithErrors } from '@/features/workflow/jobFollow';
+import { formatCount } from '@/shared/format/plural';
 import { t } from '@/shared/i18n';
 
 /**
@@ -82,6 +83,14 @@ export function isRecalcActive(progress: RecalcProgress): boolean {
 }
 
 /**
+ * ✎ debt-1109 x1: «N документів» узгодженою формою (`.one/.few/.many/.other`) — ніколи «1 documents».
+ * Невідома кількість (`null`) — «— documents» (форма `.other`).
+ */
+export function documentCountText(count: number | null): string {
+  return count === null ? t('recalcProgress.documentCount.other', { count: '—' }) : formatCount(count, 'recalcProgress.documentCount');
+}
+
+/**
  * Рядок стану мовою інтерфейсу — однаковий у банері, «Моїх задачах» і на сторінці задач.
  *
  * ⛔ Тексти — зі сценарію приймання (a1–a3, a6): «Queued N documents», «Recalculating X: k of N documents, m skipped,
@@ -95,14 +104,15 @@ export function recalcProgressText(progress: RecalcProgress): string {
     case 'queued':
       return progress.total === null
         ? t('recalcProgress.queuedProject', { project })
-        : t('recalcProgress.queuedDocuments', { project, total: progress.total });
+        : t('recalcProgress.queuedDocuments', { project, total: progress.total, documentCount: documentCountText(progress.total) });
     case 'running':
       return progress.done === 0
-        ? t('recalcProgress.queuedDocuments', { project, total: progress.total ?? 0 })
+        ? t('recalcProgress.queuedDocuments', { project, total: progress.total ?? 0, documentCount: documentCountText(progress.total ?? 0) })
         : t('recalcProgress.running', {
             project,
             done: progress.done,
             total: progress.total ?? 0,
+            documentCount: documentCountText(progress.total ?? 0),
             skipped: progress.skipped,
             failed: progress.failed,
           });
