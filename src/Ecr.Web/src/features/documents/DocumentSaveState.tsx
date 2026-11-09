@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { Anchor, Group, Text } from '@mantine/core';
 import { hasSendablePending, subscribePending, usePendingCount } from '@/features/grid/pendingStore';
+import { attentionRowCount, useTableAttention } from '@/features/grid/rowAttentionStore';
 import { revealFirstHeldEdit } from '@/features/grid/settleEdits';
 import { formatTime } from '@/shared/format/datetime';
 import { formatCount } from '@/shared/format/plural';
@@ -10,6 +11,11 @@ import { t } from '@/shared/i18n';
 interface DocumentSaveStateProps {
   /** Аркуш не редагується (стан, період, архів): «Read-only» замість «Saved». */
   readonly readOnly: boolean;
+  /**
+   * ✎ UAT 08.11 (d6): період сторінки — щоб поруч зі «Збережено» сказати про рядки, що потребують уваги
+   * (`features/grid/rowAttention.ts`). Не задано — рядок стану лише про збереження, як доти.
+   */
+  readonly periodKey?: number | undefined;
 }
 
 /**
@@ -34,8 +40,12 @@ interface DocumentSaveStateProps {
  * ⚠ `role="status"` + `aria-live="polite"`: читалка скаже зміну в паузі, не
  * перебиваючи введення.
  */
-export function DocumentSaveState({ readOnly }: DocumentSaveStateProps): JSX.Element | null {
+export function DocumentSaveState({ readOnly, periodKey }: DocumentSaveStateProps): JSX.Element | null {
   const count = usePendingCount();
+  // ✎ UAT 08.11 (d6): «All changes saved» правдиве (незбережених правок немає), але стояло поруч із червоним
+  // рядком без жодного слова — і читалося як суперечність. Рядок стану тепер каже і про рядки, що потребують уваги.
+  const allAttention = useTableAttention();
+  const attentionRows = periodKey === undefined ? 0 : attentionRowCount(allAttention, periodKey);
   const sendable = useSyncExternalStore(subscribePending, hasSendablePending, () => false);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const previous = useRef(count);
@@ -62,11 +72,24 @@ export function DocumentSaveState({ readOnly }: DocumentSaveStateProps): JSX.Ele
   }
 
   return (
-    <Group gap="xs" wrap="nowrap" role="status" aria-live="polite" data-testid="document-save-state" data-save-state={state}>
+    <Group
+      gap="xs"
+      wrap="nowrap"
+      role="status"
+      aria-live="polite"
+      data-testid="document-save-state"
+      data-save-state={state}
+      data-row-attention={attentionRows}
+    >
       <Text size="xs" c={held ? 'statusError' : 'dimmed'} fw={held ? 500 : undefined} style={{ whiteSpace: 'nowrap' }}>
         {text}
         {held && ` · ${t('document.saveState.notSaved')}`}
       </Text>
+      {attentionRows > 0 && (
+        <Text size="xs" c="statusWarning" fw={500} style={{ whiteSpace: 'nowrap' }} data-save-attention="">
+          {`· ${formatCount(attentionRows, 'grid.rowAttention.count')}`}
+        </Text>
+      )}
       {held && (
         <Anchor component="button" type="button" size="xs" onClick={() => revealFirstHeldEdit()}>
           {t('document.saveState.show')}

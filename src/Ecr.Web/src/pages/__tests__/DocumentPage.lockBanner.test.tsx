@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DocumentPage } from '@/pages/DocumentPage';
 import { documentLockOf } from '@/features/documents/documentLock';
+import { formatPeriodKey } from '@/shared/format/periodKey';
 import { testTheme } from '@/test/render';
 
 /**
@@ -168,7 +169,9 @@ describe('DocumentPage: банер причини і жодної прирече
       show({ projectStatus: 'Active', periodState: 'Closed', sheetState: 'Draft' });
 
       const banner = await screen.findByText(/document\.lock\.periodClosed/, {}, { timeout: SlowEnvTimeout });
-      expect(banner.textContent).toContain(`period=${String(Period)}`);
+      // ✎ F13-p209 P2-1: період назвою («January 2024»), не сирим ключем.
+      expect(banner.textContent).toContain(`period=${formatPeriodKey(Period)}`);
+      expect(banner.textContent).not.toContain(`period=${String(Period)}`);
 
       const row = screen.getByTestId('document-actions');
       // ⚠ Кнопка «Validate» лишається: перевірка нічого не змінює.

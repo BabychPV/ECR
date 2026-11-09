@@ -181,8 +181,9 @@ export const cellState = {
   readOnly: {
     light: { bg: '#f5f5f5', line: '#616161' },
     dark: { bg: '#2a2a2a', line: '#9a9a9a' },
-    marker: 'hatch',
-    shape: 'hatch',
+    // ✎ UAT 08.11 (людина: «штриховку прибрати залишити замок»): форма — замок у куті, не штрихування.
+    marker: 'lock',
+    shape: 'lock',
   },
 
   /** Рахує система: значення зміниться при наступному перерахунку. */

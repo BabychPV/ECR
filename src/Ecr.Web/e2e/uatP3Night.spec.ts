@@ -142,7 +142,11 @@ test.describe('uatP3Night Documents with all projects shows Recalculate disabled
     await expect(page.getByRole('tooltip')).toContainText(/Choose a project|Выберите проект|жобаны таңдаңыз/i, {
       timeout: 10_000,
     });
-    await button.click();
+    // ⚠ `force`, бо `DisabledReason` ставить `aria-disabled="true"`, а Playwright (1.55) вважає таку
+    // кнопку «not enabled» і без `force` чекає до тайм-ауту (CI 42506741735: 55 × «element is not enabled»).
+    // Перевірка не слабшає: справжній клік мишею і Enter із фокуса — і жодного діалогу.
+    await button.click({ force: true });
+    await page.keyboard.press('Enter');
     await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 });

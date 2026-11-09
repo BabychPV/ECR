@@ -7,7 +7,7 @@ import type { RegistryEntryDto } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 
-type RegistryEntryDetailDto = components['schemas']['RegistryEntryDetailDto'];
+export type RegistryEntryDetailDto = components['schemas']['RegistryEntryDetailDto'];
 
 /**
  * PS-P2 (D-PS-6): закритий запис довідника не доходить до переліку на дату
@@ -83,6 +83,30 @@ function combineLabels(results: UseQueryResult<RegistryEntryDetailDto>[]): (Regi
 export function useUnlistedLookupLabels(
   requests: readonly UnlistedLookupRequest[],
 ): ReadonlyMap<number, ReadonlyMap<number, string>> {
+  const details = useUnlistedLookupDetails(requests);
+
+  return useMemo(() => unlistedLabelsOf(details), [details]);
+}
+
+/** Підписи з записів: `registryId → (id → підпис)`. */
+export function unlistedLabelsOf(
+  details: ReadonlyMap<number, ReadonlyMap<number, RegistryEntryDetailDto>>,
+): ReadonlyMap<number, ReadonlyMap<number, string>> {
+  const byRegistry = new Map<number, Map<number, string>>();
+  for (const [registryId, entries] of details) {
+    byRegistry.set(registryId, new Map([...entries].map(([id, detail]) => [id, unlistedEntryLabel(detail)])));
+  }
+
+  return byRegistry;
+}
+
+/**
+ * Самі записи закритих/позаперелікових значень: `registryId → (id → запис)`. ✎ UAT 08.11 (F13-p209 P2-2): причина
+ * червоного рядка називає значення і його чинність (`rowAttention.ts`), а не лише «значення недійсне».
+ */
+export function useUnlistedLookupDetails(
+  requests: readonly UnlistedLookupRequest[],
+): ReadonlyMap<number, ReadonlyMap<number, RegistryEntryDetailDto>> {
   const flat = useMemo<Flat[]>(
     () =>
       requests.flatMap((request) =>
@@ -105,17 +129,17 @@ export function useUnlistedLookupLabels(
   });
 
   return useMemo(() => {
-    const byRegistry = new Map<number, Map<number, string>>();
+    const byRegistry = new Map<number, Map<number, RegistryEntryDetailDto>>();
     flat.forEach(({ registryId, id }, index) => {
       const detail = details[index];
       if (detail === undefined) return;
 
-      let labels = byRegistry.get(registryId);
-      if (labels === undefined) {
-        labels = new Map();
-        byRegistry.set(registryId, labels);
+      let entries = byRegistry.get(registryId);
+      if (entries === undefined) {
+        entries = new Map();
+        byRegistry.set(registryId, entries);
       }
-      labels.set(id, unlistedEntryLabel(detail));
+      entries.set(id, detail);
     });
 
     return byRegistry;

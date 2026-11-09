@@ -43,7 +43,7 @@ import { isMissingColumns, isSliceEmpty } from './emptiness';
 import { columnWidth, widthsFromEvent } from './columnWidths';
 import { createLookupCellEditor, lookupCellDisplay, lookupIdOfText } from './LookupCellEditor';
 import { entriesOfLevel, sharedLookupLevel } from './lookupLevel';
-import { unlistedIdsOf, useUnlistedLookupLabels } from './unlistedLookupEntries';
+import { unlistedIdsOf, unlistedLabelsOf, useUnlistedLookupDetails } from './unlistedLookupEntries';
 import { boolCellDisplay, createBoolCellEditor } from './BoolCellEditor';
 import { createUnitCellEditor, unitCellDisplay, unitIdOfCode } from './UnitCellEditor';
 import { createDateCellEditor } from './DateCellEditor';
@@ -70,6 +70,14 @@ import {
   splitOverrideEdits,
 } from './formulaOverride';
 import { markOverrideReason, overrideReasonOf, previousOverrideReasonOf } from './overrideReasons';
+import {
+  publishTableAttention,
+  requestAttentionFocus,
+  rowAttentionReason,
+  rowLookupProblemsOf,
+  tableAttentionOf,
+  type RowLookupProblem,
+} from './rowAttention';
 
 /**
  * ✎ D-461: крок історії зі станом «ручне значення / формула» до й після (`annotateOverrideHistory`) — Undo/Redo
@@ -201,7 +209,8 @@ import './headerGroups.css';
 import './frozenColumns.css';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
-import { lookupTargetsQuery } from '@/features/registries/lookupTargets';
+import { isPermitTarget, lookupTargetsQuery } from '@/features/registries/lookupTargets';
+import { localized } from '@/shared/i18n/localized';
 
 /** Властивості grid. */
 interface DocumentGridProps {
@@ -1257,7 +1266,43 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     });
   }, [data, lookupRegistryCodes, lookupEntriesByRegistryId]);
 
-  const unlistedLabelsByRegistryId = useUnlistedLookupLabels(unlistedRequests);
+  const unlistedDetailsByRegistryId = useUnlistedLookupDetails(unlistedRequests);
+  const unlistedLabelsByRegistryId = useMemo(
+    () => unlistedLabelsOf(unlistedDetailsByRegistryId),
+    [unlistedDetailsByRegistryId],
+  );
+
+  // ✎ UAT 08.11 (F13-p209 P2-2): рядок з утраченим посиланням — ЯКЕ значення й чому («дозвіл KZ…, чинний
+  // 01.03.2026 – …, не покриває January 2026»). Дані вже на клієнті: перелік на дату і добрані закриті записи.
+  const rowLookupProblems = useMemo(() => {
+    if (fullSlice === undefined) return new Map<string, RowLookupProblem>();
+    const permitRegistries = new Set(
+      (registriesList.data ?? []).filter((registry) => isPermitTarget(registry)).map((registry) => registry.id),
+    );
+
+    return rowLookupProblemsOf(
+      fullSlice,
+      (registryId, id) => {
+        const listed = lookupEntriesByRegistryId.get(registryId)?.find((entry) => entry.id === id);
+        if (listed !== undefined) return { label: listed.display || listed.code, validFrom: listed.validFrom, validTo: listed.validTo };
+        const detail = unlistedDetailsByRegistryId.get(registryId)?.get(id);
+
+        return detail === undefined
+          ? undefined
+          : { label: localized(detail.displayL10n) || detail.code, validFrom: detail.validFrom, validTo: detail.validTo };
+      },
+      (registryId) => permitRegistries.has(registryId),
+    );
+  }, [fullSlice, registriesList.data, lookupEntriesByRegistryId, unlistedDetailsByRegistryId]);
+
+  // ✎ UAT 08.11 (Water Report): рядки з утраченим посиланням і закриті місяці — у спільне сховище, з якого
+  // читають Issues (пункт і пояснення) і рядок стану збереження. Зріз той самий, що в сітці (`rowAttention.ts`).
+  useEffect(() => {
+    if (fullSlice === undefined) return undefined;
+    publishTableAttention(tableInstanceId, tableAttentionOf(fullSlice, rowLookupProblems));
+
+    return () => publishTableAttention(tableInstanceId, null);
+  }, [fullSlice, tableInstanceId, rowLookupProblems]);
 
   /*
    * ⚠ `X-13`: довідники, що ЩЕ ЇДУТЬ. Редактор такої колонки показує
@@ -1372,6 +1417,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             outOfWindow,
             unlistedLabelsByRegistryId,
             monthStatus,
+            rowLookupProblems,
           ),
     [
       data,
@@ -1388,6 +1434,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       outOfWindow,
       unlistedLabelsByRegistryId,
       monthStatus,
+      rowLookupProblems,
     ],
   );
 
@@ -3257,6 +3304,9 @@ export function gridColumns(
 
   // ✎ D-441: код місячної колонки → стан аркуша за її період (`Submitted`/`Approved`); решта без позначки.
   monthStatus: ReadonlyMap<string, MarkedMonthStatus> = new Map(),
+
+  // ✎ UAT 08.11 (F13-p209 P2-2): рядок з утраченим посиланням → ЯКЕ значення недійсне і його чинність.
+  rowLookupProblems: ReadonlyMap<string, RowLookupProblem> = new Map(),
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -3478,7 +3528,7 @@ export function gridColumns(
         // рядка, якого користувач не вводив.
         if (isTotalsRow(model)) {
           const total = totals.get(column.code);
-          // ✎ UAT-p3 №2: комірка підсумків — лише для читання ВИДИМО (замок і штриховка, як інші), і з причиною
+          // ✎ UAT-p3 №2: комірка підсумків — лише для читання ВИДИМО (замок, як інші; штриховки з UAT 08.11 немає), і з причиною
           // текстом: раніше без підсумку в колонці (порожня комірка поруч із «Total») не було ні знака, ні
           // підказки, а набір мовчки нічого не робив.
           const readOnlyHint = t('grid.totalsReadOnlyHint');
@@ -3620,7 +3670,11 @@ export function gridColumns(
 
         // Стан доступний і ТЕКСТОМ, не лише кольором/формою: причина заборони
         // чи незаповненого входу вже є на сервері — читалка має її почути.
+        // ✎ UAT 08.11: червоний стан рядка — і текстом у комірці, не лише кольором і «!».
+        const orphanedHint = state === 'orphaned' ? t('grid.rowAttention.orphaned') : null;
+
         const hint = [
+          orphanedHint,
           manualHint,
           decision.hint,
           overridableHint,
@@ -3710,7 +3764,41 @@ export function gridColumns(
           cellTemplate: (createElement, cell) => {
             const label = String(cell.model[RowLabelProp] ?? '');
 
-            return createElement('span', { class: 'ecr-row-label', title: label }, label);
+            // ✎ UAT 08.11 (Water Report, «Sea Water Intake»): червоний рядок зі знаком «!» мав причину лише
+            // кольором. Тепер — словами поруч із підписом, і «!» — кнопка, що відкриває Issues на цьому пункті.
+            const rowKey = isTotalsRow(cell.model) ? null : rowKeyOf(cell.model);
+            // ⚠ Спершу дешева перевірка мапою рядків (`CL-03`): шаблон кличуть на кожен видимий рядок.
+            const reason =
+              rowKey === null || rowIndexOf(slice).get(rowKey)?.isOrphaned !== true ? null : rowAttentionReason(slice, rowKey, rowLookupProblems.get(rowKey));
+            if (reason === null || rowKey === null) {
+              return createElement('span', { class: 'ecr-row-label', title: label }, label);
+            }
+
+            const itemKey = `${String(slice.tableInstanceId)}:${rowKey}`;
+
+            return createElement(
+              'span',
+              { class: 'ecr-row-label ecr-row-label--attention', title: `${label} — ${reason}`, 'data-row-attention': rowKey },
+              [
+              createElement(
+                'button',
+                {
+                  type: 'button',
+                  class: 'ecr-row-attention-btn',
+                  'aria-label': t('grid.rowAttention.open', { row: label }),
+                  title: t('grid.rowAttention.open', { row: label }),
+                  'data-row-attention-open': itemKey,
+                  onClick: (event: Event) => {
+                    event.stopPropagation();
+                    requestAttentionFocus(itemKey);
+                  },
+                },
+                '!',
+              ),
+              createElement('span', { class: 'ecr-row-label-text' }, label),
+              createElement('span', { class: 'ecr-row-attention-reason' }, reason),
+              ],
+            );
           },
         },
         ...dataColumns,

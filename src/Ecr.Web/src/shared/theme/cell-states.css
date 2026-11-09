@@ -110,18 +110,14 @@
   background: var(--ecr-cell-read-only-bg);
 
   /*
-   * ⚠ Штрихування, а не сірий фон. Просто сіра комірка для користувача
-   * виглядає як зависання: він клацає ще раз, потім іще, і зрештою повідомляє,
-   * що система не працює. Штрихування читається як «сюди не можна» без слів.
+   * ✎ UAT 08.11 (людина: «штриховку прибрати залишити замок», «про замок це стосується всіх таблиць»):
+   * штрихування знято в УСІХ сітках і таблицях. Форма стану «лише читання» — замок у куті (`::after`
+   * нижче, колір — лінія стану, контраст ≥ 3:1 в обох темах, `cellStateMeasured.test.ts`), фон стану і
+   * `cursor: not-allowed`. Числа — повний контраст, нічого їх не перетинає.
    */
-  background-image: repeating-linear-gradient(
-    45deg,
-    transparent,
-    transparent 6px,
-    var(--ecr-cell-read-only-line) 6px,
-    var(--ecr-cell-read-only-line) 7px
-  );
   cursor: not-allowed;
+  /* Місце під замок 11 px (`::after` нижче): число не наїжджає на знак. */
+  padding-right: 15px;
 }
 
 /*
@@ -133,11 +129,16 @@
 .ecr-cell--read-only::after {
   content: '';
   position: absolute;
+  /*
+   * ⚠ 11×14, а не 8×10. Виміряно (`D-140`, гейт 4, `cellStates.spec.ts`, CI 42506741735): без штрихування
+   * замок 8×10 лишався єдиною формою, і пара `readOnly`/`normal` після знеколірення різнилась на 1.9 % —
+   * нижче порога 2 %. Носій збільшено, поріг не чіпали.
+   */
   top: 3px;
-  right: 3px;
-  width: 8px;
-  height: 10px;
-  background-color: var(--ecr-muted);
+  right: 2px;
+  width: 11px;
+  height: 14px;
+  background-color: var(--ecr-cell-read-only-line);
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 10'%3E%3Cpath d='M2 4V3a2 2 0 0 1 4 0v1h1v6H1V4h1zm1 0h2V3a1 1 0 0 0-2 0v1z'/%3E%3C/svg%3E")
     no-repeat center / contain;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 10'%3E%3Cpath d='M2 4V3a2 2 0 0 1 4 0v1h1v6H1V4h1zm1 0h2V3a1 1 0 0 0-2 0v1z'/%3E%3C/svg%3E")
@@ -145,26 +146,9 @@
 }
 
 /*
- * ✎ D-442 (BRIEF-1021 П.3, макет `docs/design/hybrid/`, екран документа): у ЗАТВЕРДЖЕНОМУ аркуші
- * «лише читання» — стан усього аркуша, і штриховка кожної комірки перетворювала б звіт на рябу сітку.
- * Числа — повний контраст, без штриховки; аркушевий клас ставить `DocumentGrid` (`sheetLockClass`).
- *
- * ⛔ D-128: колір не єдиний носій. Знімається ЛИШЕ штриховка — замок у куті (`::after` вище) і
- * `cursor: not-allowed` лишаються формою стану; фон `--ecr-cell-read-only-bg` теж.
+ * D-442 (затверджений аркуш, `.ecr-sheet-locked`) і CL-21 (вузький екран) раніше знімали штриховку
+ * окремими правилами; з UAT 08.11 її немає ніде, тож і правил-винятків немає. D-128 тримає замок.
  */
-.ecr-sheet-locked .ecr-cell--read-only {
-  background-image: none;
-}
-
-/*
- * CL-21 (B-7): на вузькому екрані (<= 640 px, межа макета) діагональна штриховка перетинає цифри вузької колонки і
- * знижує читабельність. Лишається форма стану без неї: фон --ecr-cell-read-only-bg, замок у куті, cursor: not-allowed.
- */
-@media (max-width: 640px) {
-  .ecr-cell--read-only {
-    background-image: none;
-  }
-}
 
 /* ── calculated: рахує система ─────────────────────────────────────────── */
 .ecr-cell--calculated {
@@ -201,6 +185,54 @@
   font-weight: 700;
   line-height: 1;
   color: var(--ecr-cell-orphaned-line);
+}
+
+/*
+ * ✎ UAT 08.11 (Water Report, «Sea Water Intake»): причина червоного рядка — СЛОВАМИ поруч із підписом рядка
+ * (`DocumentGrid`, колонка підпису), а «!» — кнопка, що відкриває Issues на цьому пункті. Текст причини —
+ * колір тексту сітки (повний контраст), знак — лінія стану `orphaned` на його ж заливці (≥ 3:1, гейт 3).
+ */
+.ecr-row-label--attention {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ecr-row-label--attention .ecr-row-label-text {
+  flex: 0 0 auto;
+}
+
+.ecr-row-attention-reason {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--ecr-grid-text);
+}
+
+.ecr-row-attention-btn {
+  flex: 0 0 auto;
+  /* 24 px — мінімальна ціль (WCAG 2.5.8, axe `target-size`); рядок сітки — 28 px. */
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--ecr-cell-orphaned-line);
+  border-radius: 50%;
+  background: var(--ecr-cell-orphaned-bg);
+  color: var(--ecr-cell-orphaned-line);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ecr-row-attention-btn:focus-visible {
+  outline: 2px solid var(--ecr-cell-orphaned-line);
+  outline-offset: 1px;
 }
 
 /* ── rounded: значення округлене при вставці (D-116) ───────────────────── */

@@ -18,7 +18,14 @@ import { useCellChanges } from '@/features/audit/api';
 import { cellAuthorHint, cellAuthorName } from '@/features/audit/authorOptions';
 import { cellChangeReasonText } from '@/features/audit/cellChangeReason';
 import { useTableStatus } from '@/features/documents/api';
+import {
+  attentionForPeriod,
+  useAttentionFocus,
+  useTableAttention,
+  type TableAttention,
+} from '@/features/grid/rowAttentionStore';
 import { formatDateOnly } from '@/shared/format/dateOnly';
+import { formatDateTime } from '@/shared/format/datetime';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { formatCount } from '@/shared/format/plural';
 import { t } from '@/shared/i18n';
@@ -103,6 +110,11 @@ export interface DocumentInspectorProps {
   readonly sheet?: InspectorSheet | null | undefined;
   /** Перехід у комірку з рядка журналу аркуша (той самий шлях, що й для зауважень). */
   readonly onOpenCell?: ((target: SheetLogTarget) => void) | undefined;
+  /**
+   * ✎ UAT 08.11: коли пройшла показана перевірка — відомо лише для прогону в цій вкладці (сервер час
+   * збереженого результату не віддає); `null` — невідомо.
+   */
+  readonly checkedAt?: Date | null | undefined;
 }
 
 export function DocumentInspector({
@@ -115,6 +127,7 @@ export function DocumentInspector({
   extraTriggers,
   sheet = null,
   onOpenCell,
+  checkedAt = null,
 }: DocumentInspectorProps): JSX.Element {
   const [panel, setPanel] = useUrlState(PanelParam);
   const [historyMode, setHistoryMode] = useState<HistoryMode>('sheet');
@@ -128,6 +141,11 @@ export function DocumentInspector({
 
   const groups = useMemo(() => (messages === null ? null : groupIssues(messages, tables)), [messages, tables]);
   const counts = groups === null ? null : countIssues(groups);
+
+  // ✎ UAT 08.11: рядки з утраченим посиланням і закриті місяці ЦЬОГО періоду (публікують сітки).
+  const allAttention = useTableAttention();
+  const attention = useMemo(() => attentionForPeriod(allAttention, periodKey), [allAttention, periodKey]);
+  const attentionRows = attention.reduce((sum, table) => sum + table.rows.length, 0);
 
   // ⛔ N3-09: `takeFocus` - лише для відкриття ЛЮДИНОЮ (кнопка). Автовідкриття після перевірки приходить
   // асинхронно (збереження набраного до 3 с + запит) і не має красти фокус із редактора комірки.
@@ -178,6 +196,29 @@ export function DocumentInspector({
     if (counts !== null && counts.all > 0 && tab !== 'issues') open('issues', false);
   }, [validatedSeq, counts?.all]);
 
+  // ✎ UAT 08.11: «!» біля підпису рядка відкриває Issues і ставить фокус на пункт цього рядка.
+  const attentionFocus = useAttentionFocus();
+  const pendingFocus = useRef<string | null>(null);
+  const lastFocusSeq = useRef(attentionFocus?.seq ?? 0);
+  useEffect(() => {
+    if (attentionFocus === null || attentionFocus.seq === lastFocusSeq.current) return;
+    lastFocusSeq.current = attentionFocus.seq;
+    pendingFocus.current = attentionFocus.key;
+    if (tab !== 'issues') open('issues', false);
+  }, [attentionFocus?.seq]);
+  useEffect(() => {
+    const key = pendingFocus.current;
+    if (key === null || tab !== 'issues') return;
+    // By dataset, not a selector: the key is free text (row codes), and no escaping is needed.
+    const item = Array.from(aside.current?.querySelectorAll<HTMLElement>('[data-inspector-attention]') ?? []).find(
+      (candidate) => candidate.dataset['inspectorAttention'] === key,
+    );
+    if (item === undefined) return;
+    pendingFocus.current = null;
+    item.scrollIntoView?.({ block: 'nearest' });
+    item.focus();
+  });
+
   const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (event.key === 'Escape') {
       event.stopPropagation();
@@ -222,6 +263,7 @@ export function DocumentInspector({
     <>
       <InspectorTriggers
         counts={counts}
+        attentionRows={attentionRows}
         tab={tab}
         issuesButton={issuesButton}
         onIssues={() => toggle('issues')}
@@ -234,9 +276,24 @@ export function DocumentInspector({
           <div className="ecr-insp-head">
             <h2>
               {t('inspector.title')}
+              {/* ✎ UAT 08.11 (d5): шапка називає період, ЗА ЯКИЙ показано все нижче, — той самий `periodKey`, що й
+                  сітка й перевірка; комірка іншого періоду тут не показується (`shownCell`). */}
+              <span className="ecr-insp-chip" data-inspector-period={periodKey}>
+                {formatPeriodKey(periodKey) || String(periodKey)}
+              </span>
               {shownCell !== null && (
-                <span className="ecr-insp-chip" data-inspector-address="">
-                  {addressChip(shownCell.rowKey, shownCell.columnCode)}
+                // ✎ UAT 08.11 (d5): чип показував «rowKey · columnCode», а в місячних таблицях код колонки — назва
+                // місяця («August»), і чип поруч із заголовком читався як період. Тепер — «Column: <назва>».
+                <span
+                  className="ecr-insp-chip"
+                  data-inspector-address=""
+                  data-inspector-column={shownCell.columnCode}
+                  title={addressChip(shownCell.rowKey, shownCell.columnCode)}
+                >
+                  {addressChip(
+                    shownCell.rowKey,
+                    `${t('inspector.info.column')}: ${shownCell.columnHeader.length > 0 ? shownCell.columnHeader : shownCell.columnCode}`,
+                  )}
                 </span>
               )}
             </h2>
@@ -270,7 +327,13 @@ export function DocumentInspector({
             </Tabs.List>
 
             <Tabs.Panel value="issues" className="ecr-insp-body">
-              <IssuesTab groups={groups} onSelect={onSelectIssue} />
+              <AttentionSection attention={attention} tables={tables} />
+              <IssuesTab
+                groups={groups}
+                onSelect={onSelectIssue}
+                checkedPeriod={formatPeriodKey(periodKey) || String(periodKey)}
+                checkedAt={checkedAt}
+              />
             </Tabs.Panel>
             <Tabs.Panel value="history" className="ecr-insp-body">
               <HistoryTab
@@ -296,6 +359,7 @@ export function DocumentInspector({
 /** Кнопки над сітками: «K issues» і «History» (макет: `#doc-issues-btn`, `#doc-history-btn`). */
 function InspectorTriggers({
   counts,
+  attentionRows,
   tab,
   issuesButton,
   onIssues,
@@ -303,20 +367,26 @@ function InspectorTriggers({
   extra,
 }: {
   counts: ReturnType<typeof countIssues> | null;
+  attentionRows: number;
   tab: InspectorTab | null;
   issuesButton: RefObject<HTMLButtonElement | null>;
   onIssues: () => void;
   onHistory: () => void;
   extra?: ReactNode;
 }): JSX.Element {
-  const tone = counts === null || counts.all === 0 ? 'gray' : counts.errors > 0 ? 'statusError' : 'statusWarning';
+  const noFindings = counts === null || counts.all === 0;
+  // ✎ UAT 08.11: «No issues» поруч із червоним рядком читалося як «Issues не працює». Рядок, що потребує уваги,
+  // — не результат перевірки правил, але кнопка каже про нього, щойно зауважень перевірки немає.
+  const tone = noFindings ? (attentionRows > 0 ? 'statusWarning' : 'gray') : counts !== null && counts.errors > 0 ? 'statusError' : 'statusWarning';
   const label =
-    counts === null
-      ? t('inspector.tabIssues')
-      : counts.all === 0
-        ? t('inspector.noIssues')
-        : // Множина за `Intl.PluralRules` (`D15-08`), як у прогресі документа: «1 issue», «2 issues», а не «2 issue(s)».
-          formatCount(counts.all, 'document.issuesCount');
+    noFindings && attentionRows > 0
+      ? formatCount(attentionRows, 'grid.rowAttention.count')
+      : counts === null
+        ? t('inspector.tabIssues')
+        : counts.all === 0
+          ? t('inspector.noIssues')
+          : // Множина за `Intl.PluralRules` (`D15-08`), як у прогресі документа: «1 issue», «2 issues», а не «2 issue(s)».
+            formatCount(counts.all, 'document.issuesCount');
 
   return (
     <Group gap="xs" justify="flex-end" data-inspector-triggers="">
@@ -379,15 +449,83 @@ function groupKeyOf(group: InspectorIssueGroup): string {
 }
 
 /**
+ * ✎ UAT 08.11 (d3/d4): рядки, що потребують уваги, і закриті місяці — ПЕРЕД результатами перевірки правил.
+ * Це не зауваження перевірки (її лічильник їх не рахує), тож окремий розділ із власним заголовком. Пункт рядка
+ * отримує фокус, коли людина натискає «!» біля підпису рядка в сітці.
+ */
+function AttentionSection({
+  attention,
+  tables,
+}: {
+  attention: readonly TableAttention[];
+  tables: readonly DocumentTableDto[];
+}): JSX.Element | null {
+  if (attention.length === 0) return null;
+
+  const titleOf = (tableInstanceId: number): string => {
+    const table = tables.find((candidate) => candidate.tableInstanceId === tableInstanceId);
+
+    return table === undefined ? '' : tableTitleOf(table);
+  };
+
+  return (
+    <section aria-label={t('inspector.attention.title')} data-inspector-attention-list="">
+      <h3 className="ecr-insp-group">
+        <span>{t('inspector.attention.title')}</span>
+        <span>{attention.reduce((sum, table) => sum + table.rows.length, 0)}</span>
+      </h3>
+      {attention.flatMap((table) => [
+        ...table.rows.map((row) => (
+          <div
+            key={row.key}
+            className="ecr-insp-issue"
+            data-severity="Warning"
+            data-inspector-attention={row.key}
+            tabIndex={-1}
+          >
+            <span className="ecr-insp-sev">
+              <Glyph size={16} d="M12 4l9 16H3zM12 10v4M12 17v.5" />
+            </span>
+            <span>
+              <b>{row.rowLabel}</b> — {row.reason}
+            </span>
+            <span className="ecr-insp-where">
+              <span className="ecr-insp-chip">{row.rowKey}</span>
+              <span>{titleOf(table.tableInstanceId)}</span>
+            </span>
+          </div>
+        )),
+        ...(table.lockedMonths === null
+          ? []
+          : [
+              <div key={`${String(table.tableInstanceId)}:locked`} className="ecr-insp-issue" data-inspector-locked={table.tableInstanceId}>
+                <span className="ecr-insp-sev">
+                  <Glyph size={16} d="M7 11V8a5 5 0 0 1 10 0v3M5 11h14v10H5z" />
+                </span>
+                <span>
+                  {t('inspector.attention.lockedMonths', { table: titleOf(table.tableInstanceId), months: table.lockedMonths })}
+                </span>
+              </div>,
+            ]),
+      ])}
+    </section>
+  );
+}
+
+/**
  * Перелік зауважень. ⛔ `memo` (`C1-02`): батько рендериться на кожен рух курсора, а `groups`
  * (`useMemo`) і `onSelect` (`useCallback`) між ними стабільні — тож перелік не перебудовується.
  */
 const IssuesTab = memo(function IssuesTab({
   groups,
   onSelect,
+  checkedPeriod,
+  checkedAt,
 }: {
   groups: readonly InspectorIssueGroup[] | null;
   onSelect: (finding: ValidationFindingDto) => void;
+  checkedPeriod: string;
+  checkedAt: Date | null;
 }): JSX.Element {
   // Скільки показано в кожній групі; свіжа перевірка (нові `groups`) починає знову з першої порції.
   const [shown, setShown] = useState<{ of: typeof groups; by: Readonly<Record<string, number>> }>({
@@ -405,7 +543,18 @@ const IssuesTab = memo(function IssuesTab({
   }
 
   if (groups.length === 0) {
-    return <Empty title={t('inspector.noIssuesTitle')} hint={t('inspector.noIssuesHint')} />;
+    // ✎ UAT 08.11 (d4): порожній перелік каже, ЩО перевірено (правила видимих таблиць за період) і КОЛИ — час
+    // відомий для прогону в цій вкладці; для збереженого результату — «остання перевірка».
+    const hint = [
+      t('inspector.noIssuesHint'),
+      t('inspector.noIssuesChecked', { period: checkedPeriod }),
+      // ✎ F13-p209 (d4): дата І час (мовою користувача): збережений результат міг бути не сьогоднішнім.
+      checkedAt === null ? null : t('inspector.checkedAt', { time: formatDateTime(checkedAt) }),
+    ]
+      .filter((part) => part !== null)
+      .join(' ');
+
+    return <Empty title={t('inspector.noIssuesTitle')} hint={hint} />;
   }
 
   return (

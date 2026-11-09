@@ -54,7 +54,8 @@ describe('D-442: затверджений аркуш — без штриховк
   });
 
   it('CSS знімає лише штриховку, а не замок і не курсор', () => {
-    expect(ruleBody('.ecr-sheet-locked .ecr-cell--read-only')).toContain('background-image: none');
+    // ✎ UAT 08.11: штриховки немає в жодному стані «лише читання» — ні на затвердженому аркуші, ні деінде.
+    expect(ruleBody('.ecr-cell--read-only')).not.toContain('repeating-linear-gradient');
     expect(css).not.toMatch(/\.ecr-sheet-locked \.ecr-cell--read-only::after/);
 
     // Другий носій стану — форма: замок у куті й курсор у самого стану.

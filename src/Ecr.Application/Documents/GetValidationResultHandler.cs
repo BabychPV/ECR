@@ -66,6 +66,20 @@ public sealed class GetValidationResultHandler(
     /// <param name="ct">Токен скасування.</param>
     public async Task<IReadOnlyList<ValidationMessage>?> HandleAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct)
+        => (await ReadAsync(documentId, periodKey, ct).ConfigureAwait(false))?.Messages;
+
+    /// <summary>
+    /// Останній результат разом із моментом прогону; <c>null</c> — перевірку за цей період ще не запускали.
+    /// </summary>
+    /// <remarks>
+    /// ✎ UAT 08.11 (d4): порожній перелік Issues має казати, КОЛИ була остання перевірка. Момент прогону
+    /// (<c>wf.ValidationResult.RunAt</c>, UTC) зберігався завжди, але не доходив до клієнта.
+    /// </remarks>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<StoredValidationResult?> ReadAsync(
+        long documentId, PeriodKey periodKey, CancellationToken ct)
     {
         // ⛔ Ті самі дві перевірки, що й у самої валідації (`A7-53`, `ФВ-6.13`):
         // список зауважень несе підписи рядків і колонок, тобто ЗМІСТ
@@ -147,7 +161,7 @@ public sealed class GetValidationResultHandler(
         {
             // ⚡ Дешевий шлях «зауважень немає»: жодного походу в
             // IDocumentStore/IMetadataCache не потрібно.
-            return messages;
+            return new StoredValidationResult(messages, summary.RunAt);
         }
 
         // ⛔ B-11 follow-up: перерезолвити Message мовою ПОТОЧНОГО читача за
@@ -171,12 +185,19 @@ public sealed class GetValidationResultHandler(
             ? await uiStrings.GetAsync(language, ct).ConfigureAwait(false)
             : null;
 
-        return messages
-            .Select(m => rulesByKey.TryGetValue((m.TableDefId, m.RuleCode), out var rule)
-                ? m with { Message = rule.MessageL10n.Get(language) ?? rule.Code }
-                // Правило видалили/перейменували з часу останньої перевірки —
-                // лишаємо збережений текст (запасний варіант, не виняток).
-                : ValidationMessageTemplates.Localize(m, language, catalog))
-            .ToList();
+        return new StoredValidationResult(
+            messages
+                .Select(m => rulesByKey.TryGetValue((m.TableDefId, m.RuleCode), out var rule)
+                    ? m with { Message = rule.MessageL10n.Get(language) ?? rule.Code }
+                    // Правило видалили/перейменували з часу останньої перевірки —
+                    // лишаємо збережений текст (запасний варіант, не виняток).
+                    : ValidationMessageTemplates.Localize(m, language, catalog))
+                .ToList(),
+            summary.RunAt);
     }
 }
+
+/// <summary>Збережений результат перевірки для читача.</summary>
+/// <param name="Messages">Зауваження, видимі читачеві, його мовою.</param>
+/// <param name="RunAt">Момент прогону (UTC).</param>
+public sealed record StoredValidationResult(IReadOnlyList<ValidationMessage> Messages, DateTime RunAt);

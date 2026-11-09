@@ -1281,7 +1281,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
 
     (N'deny.NoGrant',                    N'en', N'You do not have permission to edit this cell.', 1),
     (N'deny.PeriodNotOpenYet',           N'en', N'The period is not open yet: data entry starts on the opening date.', 1),
-    (N'deny.PeriodClosed',               N'en', N'The period is closed: changes need a separate approval.', 1),
+    (N'deny.PeriodClosed',               N'en', N'The period is locked — reopen it to make changes.', 1),
     (N'deny.OutOfAccessWindow',          N'en', N'The access window for this period and your role has already closed.', 1),
     (N'deny.DocumentSubmitted',          N'en', N'The document is submitted: it must be returned for rework first.', 1),
     (N'deny.DocumentApproved',           N'en', N'The document is approved: it must be returned for rework first.', 1),
@@ -3897,7 +3897,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'workflow.approveTitle', N'en', N'Approve this sheet?', 1),
     (N'workflow.approveHint', N'en', N'Approved figures become final for this period and go into regulatory reports. To change them later, the sheet has to be returned for edits.', 1),
     (N'document.lock.projectArchived', N'en', N'This project is archived: its documents are read-only.', 1),
-    (N'document.lock.periodClosed', N'en', N'Period {period} is closed: its data can no longer be edited, imported, submitted or recalculated. Ask a period manager to reopen it.', 1),
+    (N'document.lock.periodClosed', N'en', N'{period} is locked: its data can no longer be edited, imported, submitted or recalculated. To edit it, reopen the month on Projects → Periods, or reopen it for this document if that action is offered to you.', 1),
     (N'document.lock.periodNotOpen', N'en', N'Period {period} is not open yet: data entry starts when it opens.', 1),
     (N'document.lock.sheetApproved', N'en', N'This sheet has been approved; editing is closed until it is returned for edits.', 1),
 

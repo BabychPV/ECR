@@ -278,7 +278,10 @@ public sealed class DocumentsController(
     // (`A7-16`, `A7-32`).
     [ProducesResponseType<ValidationResultResponse>(StatusCodes.Status200OK)]
     public async Task<IActionResult> Validate(
-        long id, [FromBody] DocumentPeriodRequest request, CancellationToken ct)
+        long id,
+        [FromBody] DocumentPeriodRequest request,
+        [FromServices] Ecr.Domain.Abstractions.IClock clock,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -300,7 +303,9 @@ public sealed class DocumentsController(
                 m.Severity.ToString(), m.RuleCode, m.Message,
                 m.TableDefId, m.RowKey, m.ColumnCode, m.BlocksSave,
                 ValidationFindingDto.DisplayCodeOf(m.RuleCode)))],
-            Validated: true));
+            Validated: true,
+            // ✎ UAT 08.11 (d4): момент цього прогону; збережений підсумок має той самий з точністю до мілісекунд.
+            ValidatedAt: DateTime.SpecifyKind(clock.UtcNow, DateTimeKind.Utc)));
     }
 
     /// <summary>
@@ -334,15 +339,20 @@ public sealed class DocumentsController(
     public async Task<IActionResult> LastValidation(
         long id, [FromQuery] int periodKey, CancellationToken ct)
     {
-        var messages = await validationResult
-            .HandleAsync(id, PeriodKey.Parse(periodKey), ct)
+        var stored = await validationResult
+            .ReadAsync(id, PeriodKey.Parse(periodKey), ct)
             .ConfigureAwait(false);
 
         // ⚠ `X-32`: «ще не перевіряли» — `200` з `validated: false`, а не `404`
         // (коментар над дією).
-        return messages is null
-            ? Ok(new ValidationResultResponse(id, periodKey, [], Validated: false))
-            : Ok(new ValidationResultResponse(
+        if (stored is null)
+        {
+            return Ok(new ValidationResultResponse(id, periodKey, [], Validated: false));
+        }
+
+        var messages = stored.Messages;
+
+        return Ok(new ValidationResultResponse(
                 id,
                 periodKey,
                 // ⚠ Тут значення приходить зі ЗБЕРЕЖЕНОГО підсумку, а не з
@@ -354,7 +364,8 @@ public sealed class DocumentsController(
                     m.Severity.ToString(), m.RuleCode, m.Message,
                     m.TableDefId, m.RowKey, m.ColumnCode, m.BlocksSave,
                     ValidationFindingDto.DisplayCodeOf(m.RuleCode)))],
-                Validated: true));
+                Validated: true,
+                ValidatedAt: DateTime.SpecifyKind(stored.RunAt, DateTimeKind.Utc)));
     }
 
     /// <summary>Перерахунок документа, або лише одного його аркуша. Право <c>Document.View</c> у проєкті документа + видимість (Read); проєктний перерахунок — <c>Calculation.Recalculate</c>.</summary>
@@ -964,8 +975,16 @@ public sealed record ImportApplyRequest(
 /// ⚠ <c>200</c> означає «перевірку виконано», а не «зауважень немає»: рішення,
 /// чи можна подавати, ухвалює клієнт за наявністю рівня <c>Error</c>.
 /// </remarks>
+/// <param name="ValidatedAt">
+/// ✎ UAT 08.11 (d4): коли виконано перевірку (UTC); <c>null</c> — перевірку ще не запускали. Порожній перелік
+/// Issues без цього моменту не каже, КОЛИ саме «нічого не знайдено».
+/// </param>
 public sealed record ValidationResultResponse(
-    long DocumentId, int PeriodKey, IReadOnlyList<ValidationFindingDto> Messages, bool Validated);
+    long DocumentId,
+    int PeriodKey,
+    IReadOnlyList<ValidationFindingDto> Messages,
+    bool Validated,
+    DateTime? ValidatedAt = null);
 
 /// <summary>Одне зауваження перевірки.</summary>
 /// <param name="Severity">Рівень: <c>Error</c>, <c>Warning</c>, <c>Info</c>.</param>

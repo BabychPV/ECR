@@ -81,6 +81,23 @@ public sealed class GetValidationResultHandlerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-5.19")]
+    public async Task UAT_0811_d4_збережений_результат_несе_момент_прогону_і_коли_зауважень_немає()
+    {
+        // ✎ UAT 08.11 (d4): порожній Issues казав «нічого не знайдено», але не КОЛИ. Момент прогону — з підсумку.
+        var runAt = new DateTime(2026, 11, 8, 9, 15, 0, DateTimeKind.Utc);
+        _results.GetLatestAsync(DocumentId, Period, Arg.Any<CancellationToken>())
+            .Returns(new ValidationSummary(DocumentId, Period, runAt, 0, 0, 0, "[]"));
+
+        var result = await Handler().ReadAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Empty(result!.Messages);
+        Assert.Equal(runAt, result.RunAt);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "B-11")]
     [Trait("Requirement", "ФВ-5.6")]
     public async Task Підсумок_повертається_мовою_читача_а_не_автора_перевірки()
