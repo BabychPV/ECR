@@ -187,6 +187,8 @@ public static class DependencyInjection
         services.AddScoped<Security.ListPermissionsHandler>();
         services.AddScoped<Security.ListResourceGrantsHandler>();
         services.AddScoped<Security.ReplaceResourceGrantsHandler>();
+        services.AddScoped<Security.PreviewRolePermissionsHandler>();
+        services.AddScoped<Security.ReplaceRolePermissionsHandler>();
         services.AddScoped<Security.SetReceivesAlertsHandler>();
         services.AddScoped<Security.CreateRoleHandler>();
         services.AddScoped<Security.RenameRoleHandler>();

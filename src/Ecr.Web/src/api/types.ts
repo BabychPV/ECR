@@ -783,6 +783,12 @@ export type GrantableSheet = Schemas['GrantableSheet'];
 /** Особисте призначення ролі користувачу з межами й областю (`GET /users/{id}/role-assignments`). */
 export type UserRoleAssignmentView = Schemas['UserRoleAssignmentView'];
 
+/** Попередній перегляд зміни прав власної ролі ((v) 08.11, `POST /roles/{id}/permissions/preview`). */
+export type RolePermissionsPreview = Schemas['RolePermissionsPreview'];
+
+/** Носій ролі з підсумковим доступом до → після. */
+export type RoleImpactUser = Schemas['RoleImpactUser'];
+
 /** Розріз «ресурс → рівень → грант ролі» (ФВ-6.16, `GET /security/users/{id}/effective-access`). */
 export type EffectiveAccessView = Schemas['EffectiveAccessView'];
 

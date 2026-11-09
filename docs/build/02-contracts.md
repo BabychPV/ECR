@@ -4180,7 +4180,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-AUTH-0429` | 429 | вичерпано хвилинну межу спроб входу з АДРЕСИ (`S-10`); у відповіді `Retry-After`. Обліковка при цьому не заблокована — це `ECR-AUTH-0423`, інший суб'єкт і інша дія користувача |
 | `ECR-ACCS-0403` | 403 | відмова `IAccessDecisionService`; у `Extensions2.reason` — `EditDenyReason` |
 | `ECR-SEC-0404` | 404 | користувача або ролі не існує (або роль вимкнена) |
-| `ECR-SEC-0409` | 409 | конфлікт зі станом безпеки: роль із таким кодом уже існує (`UQ_Role`), роль вбудована чи зайнята; дія над власним записом або над останнім адміністратором (BE-12); виправлення SID доменного запису, який уже входив (`windowsSidConfirmed`, X5-01); гонка двох збережень ролей користувача на `UQ_RoleAssignment_User` (`roleAssignmentConflict`, P1 08.11 — повторне призначення сплилої ролі оновлює наявний рядок, а не вставляє другий) |
+| `ECR-SEC-0409` | 409 | конфлікт зі станом безпеки: роль із таким кодом уже існує (`UQ_Role`), роль вбудована чи зайнята; дія над власним записом або над останнім адміністратором (BE-12); виправлення SID доменного запису, який уже входив (`windowsSidConfirmed`, X5-01); гонка двох збережень ролей користувача на `UQ_RoleAssignment_User` (`roleAssignmentConflict`, P1 08.11 — повторне призначення сплилої ролі оновлює наявний рядок, а не вставляє другий); права власної ролі (D-469): вбудована роль (`roleBuiltInPermissions`), набір змінено після перегляду (`permissionsStale`, `If-Match`), додане небезпечне право без `confirmDangerous` (`dangerousPermissionsNeedConfirmation`), зняття `Security.ManageUsers` в останнього носія (`roleKeepsLastAdministrator`); без `If-Match` — `422 ECR-REQ-0422` (`rolePermissionsIfMatch`) |
 | `ECR-USR-0422` | 422 | дані облікового запису не проходять перевірку: алерти без пошти, доменний запис без SID або з SID не у формі `S-1-…` (`windowsSidMalformed`, X5-01), локальний без разового пароля |
 | `ECR-USR-0409` | 409 | обліковий запис із таким іменем уже існує; SID уже прив'язаний до іншого запису (`windowsSidTaken`); Windows-вхід, чиє ім'я зайняте записом з іншим SID (`windowsSidMismatch`, X5-01: раніше 500 на `UQ_User_Name`) |
 | `ECR-TMPL-0404` | 404 | шаблон або версія не знайдені |
@@ -4682,6 +4682,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/users` | `Security.ManageUsers` | 3 |
 | `GET` | `/api/v1/roles/{id}/grants` | `Security.ManageRoles` | 3 |
 | `PUT` | `/api/v1/roles/{id}/grants` | `Security.ManageRoles` | 3 |
+| `POST` | `/api/v1/roles/{id}/permissions/preview` | `Security.ManageRoles` | 3 |
+| `PUT` | `/api/v1/roles/{id}/permissions` | `Security.ManageRoles` | 3 |
 | `GET` | `/api/v1/security/projects` | `Security.ManageRoles` або `Security.ManageUsers` | 3 |
 | `GET` | `/api/v1/security/project-sheets` | `Security.ManageRoles` або `Security.ManageUsers` | 3 |
 | `POST` | `/api/v1/roles/{id}/clone` | `Security.ManageRoles` | 3 |

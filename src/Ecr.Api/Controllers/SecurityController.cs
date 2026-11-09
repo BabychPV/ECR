@@ -37,6 +37,8 @@ public sealed class SecurityController(
     Ecr.Application.Security.ResetUserPasswordHandler resetPassword,
     Ecr.Application.Security.SetUserLockHandler setLock,
     Ecr.Application.Security.CorrectWindowsSidHandler correctSid,
+    Ecr.Application.Security.PreviewRolePermissionsHandler previewRolePermissions,
+    Ecr.Application.Security.ReplaceRolePermissionsHandler replaceRolePermissions,
     Ecr.Domain.Abstractions.IClock clock,
     ICurrentUser currentUser) : ControllerBase
 {
@@ -284,6 +286,59 @@ public sealed class SecurityController(
         var ifMatch = Request.Headers[Microsoft.Net.Http.Headers.HeaderNames.IfMatch].ToString();
 
         var version = await replaceGrants.HandleAsync(id, request.Grants, ifMatch, ct).ConfigureAwait(false);
+
+        Response.Headers[Microsoft.Net.Http.Headers.HeaderNames.ETag] = $"\"{version}\"";
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Попередній перегляд зміни набору прав ВЛАСНОЇ ролі: додані й прибрані права, небезпечні серед доданих,
+    /// носії (користувачі з підсумковим доступом до → після, групи) і версія чинного набору. Нічого не змінює.
+    /// Право <c>Security.ManageRoles</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Рішення людини 08.11 ((v)). Вбудована роль — <c>409 ECR-SEC-0409</c>
+    /// (<c>err.ECR-SEC-0409.roleBuiltInPermissions</c>); невідоме право — <c>404 ECR-SEC-0404</c>.
+    /// </remarks>
+    [HttpPost("roles/{id:int}/permissions/preview")]
+    [ProducesResponseType<Ecr.Application.Security.RolePermissionsPreview>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> PreviewRolePermissions(
+        int id, [FromBody] RolePermissionsRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await previewRolePermissions.HandleAsync(id, request.PermissionCodes, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Замінює набір прав ВЛАСНОЇ ролі цілком. Право <c>Security.ManageRoles</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>If-Match</c> з <c>version</c> попереднього перегляду: набір змінили після читання — <c>409
+    /// ECR-SEC-0409</c> (<c>err.ECR-SEC-0409.permissionsStale</c>, актуальна версія в <c>details.version</c>); без
+    /// заголовка — <c>422 ECR-REQ-0422</c> (<c>err.ECR-REQ-0422.rolePermissionsIfMatch</c>). Додане небезпечне право без
+    /// <c>confirmDangerous: true</c> — <c>409</c> (<c>err.ECR-SEC-0409.dangerousPermissionsNeedConfirmation</c>).
+    /// Вбудована роль — <c>409</c> (<c>roleBuiltInPermissions</c>); зняття <c>Security.ManageUsers</c> в останнього
+    /// носія — <c>409</c> (<c>roleKeepsLastAdministrator</c>). Нова версія — у <c>ETag</c> відповіді <c>204</c>.
+    /// </remarks>
+    [HttpPut("roles/{id:int}/permissions")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ReplaceRolePermissions(
+        int id, [FromBody] ReplaceRolePermissionsRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var ifMatch = Request.Headers[Microsoft.Net.Http.Headers.HeaderNames.IfMatch].ToString();
+
+        var version = await replaceRolePermissions
+            .HandleAsync(id, request.PermissionCodes, request.ConfirmDangerous, ifMatch, ct)
+            .ConfigureAwait(false);
 
         Response.Headers[Microsoft.Net.Http.Headers.HeaderNames.ETag] = $"\"{version}\"";
 
@@ -649,6 +704,15 @@ public sealed record RenameRoleRequest(string Code, IReadOnlyDictionary<string, 
 /// <param name="Grants">Новий набір; порожній прибирає доступ ролі повністю.</param>
 public sealed record ReplaceGrantsRequest(
     IReadOnlyList<Ecr.Application.Security.ResourceGrantDto> Grants);
+
+/// <summary>Новий повний набір прав ролі — для попереднього перегляду впливу.</summary>
+/// <param name="PermissionCodes">Коди прав; порожній — роль без жодного права.</param>
+public sealed record RolePermissionsRequest(IReadOnlyList<string> PermissionCodes);
+
+/// <summary>Запит на заміну набору прав власної ролі.</summary>
+/// <param name="PermissionCodes">Новий повний набір кодів прав.</param>
+/// <param name="ConfirmDangerous">Окреме підтвердження доданих небезпечних прав; без нього їх додавання — 409.</param>
+public sealed record ReplaceRolePermissionsRequest(IReadOnlyList<string> PermissionCodes, bool ConfirmDangerous = false);
 
 /// <summary>Запит на створення користувача.</summary>
 /// <param name="UserName">Ім'я входу.</param>

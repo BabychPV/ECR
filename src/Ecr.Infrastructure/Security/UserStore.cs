@@ -665,6 +665,88 @@ public sealed class UserStore(EcrDbContext db, SelfStampRotation? selfRotation =
         return users.Count;
     }
 
+    /// <inheritdoc />
+    public async Task ReplaceRolePermissionsAsync(int roleId, IReadOnlyList<string> permissionCodes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(permissionCodes);
+
+        // ⚠ Різницею, а не «видалити все й вставити»: ключ рядка — (RoleId, PermissionCode), і повторна вставка
+        // того самого права в одному коміті з його видаленням покладалася б на порядок команд EF.
+        var existing = await db.RolePermissions
+            .Where(rp => rp.RoleId == roleId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var wanted = new HashSet<string>(permissionCodes, StringComparer.Ordinal);
+
+        db.RolePermissions.RemoveRange(existing.Where(rp => !wanted.Contains(rp.PermissionCode)));
+
+        foreach (var code in wanted.Where(code => !existing.Exists(rp => string.Equals(rp.PermissionCode, code, StringComparison.Ordinal))))
+        {
+            db.RolePermissions.Add(new RolePermission(roleId, code));
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<Ecr.Application.Security.RoleCarriers> ListRoleCarriersAsync(
+        int roleId, DateOnly asOf, CancellationToken ct)
+    {
+        var rows = await db.RoleAssignments
+            .AsNoTracking()
+            .Where(a => a.RoleId == roleId)
+            .OrderBy(a => a.Id)
+            .Take(MaxAssignments)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Чинність рахує домен (`IsEffectiveOn`, `H-23a`), а не копія умови в запиті.
+        var effective = rows.Where(a => a.IsEffectiveOn(asOf)).ToList();
+        var userIds = effective.Where(a => a.UserId != null).Select(a => a.UserId!.Value).Distinct().ToList();
+        var groupSids = effective.Where(a => a.PrincipalSid != null).Select(a => a.PrincipalSid!).Distinct().ToList();
+
+        if (userIds.Count == 0)
+        {
+            return new Ecr.Application.Security.RoleCarriers([], groupSids);
+        }
+
+        var users = await db.Users
+            .AsNoTracking()
+            .Where(u => userIds.Contains(u.Id))
+            .Select(u => new { u.Id, u.UserName, u.DisplayName })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Інші особисті призначення цих людей — на АКТИВНІ ролі; чинність — доменом.
+        var others = await db.RoleAssignments
+            .AsNoTracking()
+            .Where(a => a.UserId != null && userIds.Contains(a.UserId.Value) && a.RoleId != roleId)
+            .Join(db.Roles.Where(r => r.IsActive), a => a.RoleId, r => r.Id, (a, _) => a)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var otherRoleIds = others.Where(a => a.IsEffectiveOn(asOf)).Select(a => a.RoleId).Distinct().ToList();
+        var permissionsByRole = (await db.RolePermissions
+                .AsNoTracking()
+                .Where(rp => otherRoleIds.Contains(rp.RoleId))
+                .Select(rp => new { rp.RoleId, rp.PermissionCode })
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .GroupBy(x => x.RoleId)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.PermissionCode).ToList());
+
+        return new Ecr.Application.Security.RoleCarriers(
+            [.. users.Select(u => new Ecr.Application.Security.RoleCarrierUser(
+                u.Id,
+                u.UserName,
+                u.DisplayName,
+                [.. others
+                    .Where(a => a.UserId == u.Id && a.IsEffectiveOn(asOf))
+                    .SelectMany(a => permissionsByRole.GetValueOrDefault(a.RoleId) ?? [])
+                    .Distinct(StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal)]))],
+            groupSids);
+    }
+
     /// <summary>
     /// Стеля вибірки призначень у діагностиці.
     /// </summary>

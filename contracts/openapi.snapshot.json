@@ -20515,6 +20515,27 @@
         ],
         "type": "object"
       },
+      "ReplaceRolePermissionsRequest": {
+        "description": "Запит на заміну набору прав власної ролі.",
+        "properties": {
+          "confirmDangerous": {
+            "default": false,
+            "description": "Окреме підтвердження доданих небезпечних прав; без нього їх додавання — 409.",
+            "type": "boolean"
+          },
+          "permissionCodes": {
+            "description": "Новий повний набір кодів прав.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "permissionCodes"
+        ],
+        "type": "object"
+      },
       "ReplaceScope": {
         "description": "What the apply will replace; shown BEFORE it (legacy semantics with an explicit confirmation).",
         "properties": {
@@ -21262,6 +21283,159 @@
         },
         "required": [
           "roleId"
+        ],
+        "type": "object"
+      },
+      "RoleImpactGroup": {
+        "description": "Група каталогу з чинним призначенням ролі.",
+        "properties": {
+          "sid": {
+            "description": "SID групи.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sid"
+        ],
+        "type": "object"
+      },
+      "RoleImpactUser": {
+        "description": "Користувач, якому зміна прав ролі змінить підсумковий доступ (або ні).",
+        "properties": {
+          "displayName": {
+            "description": "Ім'я для показу.",
+            "type": "string"
+          },
+          "effectiveAfter": {
+            "description": "Скільки матиме після збереження.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "effectiveBefore": {
+            "description": "Скільки прав людина має зараз (усі її чинні особисті ролі).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "gained": {
+            "description": "Права, яких у людини ще НЕМАЄ і які вона отримає (з урахуванням інших її ролей).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "lost": {
+            "description": "Права, які людина ВТРАТИТЬ (жодна інша її роль їх не дає).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "userId": {
+            "description": "Обліковий запис.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "userName": {
+            "description": "Ім'я входу.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "userName",
+          "displayName",
+          "gained",
+          "lost",
+          "effectiveBefore",
+          "effectiveAfter"
+        ],
+        "type": "object"
+      },
+      "RolePermissionsPreview": {
+        "description": "Попередній перегляд зміни набору прав ролі (рішення людини 08.11, (v)).",
+        "properties": {
+          "added": {
+            "description": "Права, що додаються.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "addedDangerous": {
+            "description": "Додані небезпечні права — збереження вимагає окремого підтвердження.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "current": {
+            "description": "Чинний набір прав ролі на момент перегляду — клієнт звіряє його з тим, від чого почав правку.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "groups": {
+            "description": "Групи з чинним призначенням ролі.",
+            "items": {
+              "$ref": "#/components/schemas/RoleImpactGroup"
+            },
+            "type": "array"
+          },
+          "removed": {
+            "description": "Права, що прибираються.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "roleCode": {
+            "description": "Код ролі.",
+            "type": "string"
+          },
+          "roleId": {
+            "description": "Роль.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "users": {
+            "description": "Прямі носії ролі (чинне особисте призначення) з підсумковим доступом до → після.",
+            "items": {
+              "$ref": "#/components/schemas/RoleImpactUser"
+            },
+            "type": "array"
+          },
+          "version": {
+            "description": "Версія ЧИННОГО набору — її клієнт повертає в `If-Match` збереження.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "roleId",
+          "roleCode",
+          "version",
+          "current",
+          "added",
+          "removed",
+          "addedDangerous",
+          "users",
+          "groups"
+        ],
+        "type": "object"
+      },
+      "RolePermissionsRequest": {
+        "description": "Новий повний набір прав ролі — для попереднього перегляду впливу.",
+        "properties": {
+          "permissionCodes": {
+            "description": "Коди прав; порожній — роль без жодного права.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "permissionCodes"
         ],
         "type": "object"
       },
@@ -57136,6 +57310,215 @@
           }
         },
         "summary": "Замінює набір грантів ролі цілком. Право `Security.ManageRoles`.",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
+    "/api/v1/roles/{id}/permissions": {
+      "put": {
+        "description": "⛔ `If-Match` з `version` попереднього перегляду: набір змінили після читання — `409\nECR-SEC-0409` (`err.ECR-SEC-0409.permissionsStale`, актуальна версія в `details.version`); без\nзаголовка — `422 ECR-REQ-0422` (`err.ECR-REQ-0422.rolePermissionsIfMatch`). Додане небезпечне право без\n`confirmDangerous: true` — `409` (`err.ECR-SEC-0409.dangerousPermissionsNeedConfirmation`).\nВбудована роль — `409` (`roleBuiltInPermissions`); зняття `Security.ManageUsers` в останнього\nносія — `409` (`roleKeepsLastAdministrator`). Нова версія — у `ETag` відповіді `204`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceRolePermissionsRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceRolePermissionsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceRolePermissionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Замінює набір прав ВЛАСНОЇ ролі цілком. Право `Security.ManageRoles`.",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
+    "/api/v1/roles/{id}/permissions/preview": {
+      "post": {
+        "description": "⛔ Рішення людини 08.11 ((v)). Вбудована роль — `409 ECR-SEC-0409`\n(`err.ECR-SEC-0409.roleBuiltInPermissions`); невідоме право — `404 ECR-SEC-0404`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RolePermissionsRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RolePermissionsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RolePermissionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RolePermissionsPreview"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RolePermissionsPreview"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RolePermissionsPreview"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Попередній перегляд зміни набору прав ВЛАСНОЇ ролі: додані й прибрані права, небезпечні серед доданих,\nносії (користувачі з підсумковим доступом до → після, групи) і версія чинного набору. Нічого не змінює.\nПраво `Security.ManageRoles`.",
         "tags": [
           "Security"
         ]
