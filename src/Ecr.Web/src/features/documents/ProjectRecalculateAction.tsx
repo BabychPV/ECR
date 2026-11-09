@@ -6,7 +6,11 @@ import type { PeriodCalendarDto, ProjectRecalculationRequest } from '@/api/types
 import { effectivePeriodState } from '@/features/projects/periodEffective';
 import { MountedLazyConfirmModal } from '@/features/projects/lazyPeriodsDialogs';
 import { isRecalcActive } from '@/features/recalc/recalcProgress';
-import { projectRecalcKey, useProjectRecalcProgress } from '@/features/recalc/useProjectRecalcProgress';
+import {
+  projectRecalcKey,
+  rememberRecalcTotal,
+  useProjectRecalcProgress,
+} from '@/features/recalc/useProjectRecalcProgress';
 import { RecalcSkippedList, type RecalcRequestOutcome } from '@/features/workflow/RecalcSkippedList';
 import { formatMonthName, formatPeriodKey } from '@/shared/format';
 import { t } from '@/shared/i18n';
@@ -110,7 +114,15 @@ export function ProjectRecalculateAction({
       if (job.jobId === null || job.jobId === undefined) return;
 
       // ⛔ a1: «Queued…», ніколи «finished» — завершення скаже банер, коли завершаться всі документи.
-      showDone(t('recalcProgress.queuedToast', { project: project.code }));
+      // ✎ a1 (08.11, P3): «Queued N documents» з реальним N — рік розкладає всі документи проєкту (= documentCount);
+      // банер бере те саме N, поки сервер ще не розклав (`withExpectedTotal`). Без числа — текст без N.
+      const total = project.documentCount;
+      if (total === undefined) {
+        showDone(t('recalcProgress.queuedToast', { project: project.code }));
+      } else {
+        rememberRecalcTotal(job.jobId, total);
+        showDone(t('recalcProgress.queuedDocumentsToast', { project: project.code, total }));
+      }
       void queryClient.invalidateQueries({ queryKey: projectRecalcKey(project.id) });
       void queryClient.invalidateQueries({ queryKey: projectRecalcKey(null) });
     },

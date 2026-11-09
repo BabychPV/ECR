@@ -123,6 +123,14 @@ export function recalcProgressText(progress: RecalcProgress): string {
   }
 }
 
+/**
+ * ✎ a5 (приймання 08.11, P3): назва рядка перерахунку ПРОЄКТУ — «Project recalculation <CODE>», як у «Моїх задачах»;
+ * у переліку задач батько називався «Recalculation», так само як його документні діти. `null` — не батько розкладу.
+ */
+export function projectRecalcTitle(job: JobSummary): string | null {
+  return isProjectRecalculation(job) ? t('recalcProgress.myTaskTitle', { project: progressOf(job).projectCode }) : null;
+}
+
 /** Скільки годин завершений перерахунок лишається на банері (далі — лише в «Моїх задачах»). */
 export const FinishedVisibleHours = 24;
 

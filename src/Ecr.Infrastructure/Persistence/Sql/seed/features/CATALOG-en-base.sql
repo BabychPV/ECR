@@ -2520,7 +2520,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'periods.policyYearGrace',         N'en', N'Year grace (days)', 1),
     (N'periods.policyCreate',            N'en', N'Add policy', 1),
     (N'periods.policyCreated',           N'en', N'The policy is created.', 1),
-    (N'periods.policyUpdated',           N'en', N'The policy is updated. Projects pick up the new offsets on their next calendar rebuild.', 1),
+    (N'periods.policyUpdated',           N'en', N'Policy saved. Month states updated.', 1),
     -- T6/#52: зміна поясу майданчика — дозволена лише поки жоден період не
     -- відкривався (ФВ-1.1a); кнопка доступна лише чернетці з тієї ж причини,
     -- що й активація вище.
