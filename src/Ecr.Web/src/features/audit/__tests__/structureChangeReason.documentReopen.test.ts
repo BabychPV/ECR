@@ -23,7 +23,7 @@ describe('журнал структури: місяць для одного до
     expect(shown).toContain('Лист №17');
   });
 
-  it.each(['document.reopen.audit.closedExpired', 'document.reopen.audit.closedReplaced'])(
+  it.each(['document.reopen.audit.closedExpired', 'document.reopen.audit.closedReplaced', 'document.reopen.audit.closedManually'])(
     'закриття %s — ключ каталогу, не сирий JSON',
     (key) => {
       const shown = structureChangeReasonText(JSON.stringify({ k: key }));

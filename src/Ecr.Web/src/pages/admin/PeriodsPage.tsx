@@ -16,6 +16,8 @@ import { ProjectRecalcBannerSlot } from '@/features/recalc/ProjectRecalcBannerSl
 import { t } from '@/shared/i18n';
 import { projectsQuery } from '@/features/projects/allProjects';
 import { effectivePeriodState } from '@/features/projects/periodEffective';
+import { PeriodReopenedDocuments } from '@/features/projects/PeriodReopenedDocuments';
+import { getProjectDocumentReopens, projectDocumentReopensKey } from '@/features/documents/periodReopen/api';
 
 // Правило поясу майданчика живе в `shared/siteMoment`; ім'я лишається доступним звідси.
 export { siteMomentText } from '@/shared/siteMoment';
@@ -185,6 +187,13 @@ export function PeriodsPage({ projectId }: { readonly projectId: number }): JSX.
   const periods = useQuery({
     queryKey: ['periods', projectId],
     queryFn: () => apiFetch<PeriodCalendarDto>(`/api/v1/projects/${String(projectId)}/periods`),
+  });
+
+  // ✎ Приймальна i4: закриті місяці, відкриті для окремих документів, — «Locked · N document(s) reopened until …».
+  // Помилка переліку не ховає календар: рядки лишаються просто «Locked».
+  const documentReopens = useQuery({
+    queryKey: projectDocumentReopensKey(projectId),
+    queryFn: () => getProjectDocumentReopens(projectId),
   });
 
   // ✎ Projects (макет 08.11): проєкт — з адреси вкладки (`/projects/:id/periods`); вибору проєкту тут більше немає
@@ -438,6 +447,16 @@ export function PeriodsPage({ projectId }: { readonly projectId: number }): JSX.
                   <span data-period-state={effectivePeriodState(period, nowMs)}>
                     <StatusBadge kind="period" state={effectivePeriodState(period, nowMs)} />
                   </span>
+                  {effectivePeriodState(period, nowMs) === 'Closed' && (
+                    <PeriodReopenedDocuments
+                      projectId={projectId}
+                      periodKey={period.periodKey}
+                      periodCaption={periodCaption(period.year, period.sequence, calendar.periodKind)}
+                      timeZoneId={calendar.timeZoneId}
+                      items={(documentReopens.data?.items ?? []).filter((item) => item.periodKey === period.periodKey)}
+                      canClose={documentReopens.data?.canClose === true}
+                    />
+                  )}
                   {/* ⚠ Відкритий понад календар період видно окремо: інакше
                       `Open` після кінця місяця виглядає як несправність
                       календаря, а не як свідоме рішення людини. */}
