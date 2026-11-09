@@ -48,7 +48,11 @@ public sealed class SaveCellSplitsHandler(
     PatchCellsHandler patchCells,
     GetPermitHistoryHandler history,
     IDocumentHeaderStore headers,
-    IPermitRegistryIndex? permitTargets = null)
+    IPermitRegistryIndex? permitTargets = null,
+
+    // F13 p223 (1): the stored Issues of the year are re-run after the split. `null` (tests) — not re-run.
+    ValidateDocumentHandler? revalidate = null,
+    IValidationResultStore? validationResults = null)
 {
     /// <summary>Entity type of the split audit records (<c>aud.StructureChange</c>).</summary>
     public const string AuditEntityType = "CellPermitPart";
@@ -160,6 +164,7 @@ public sealed class SaveCellSplitsHandler(
             }
         }, ct).ConfigureAwait(false);
 
+        await PermitHistoryRevalidation.RunAsync(revalidate, validationResults, documentId, request.PeriodKey / 100, ct).ConfigureAwait(false);
         return await history.HandleAsync(documentId, request.PeriodKey, ct).ConfigureAwait(false);
     }
 

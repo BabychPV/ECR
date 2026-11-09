@@ -380,7 +380,12 @@ export function DocumentPage(): JSX.Element {
    * Що показувати в панелі: свіже — **лише для своєї адреси** — інакше
    * прочитане, інакше нічого.
    */
-  const freshForScope = fresh?.scope === scope ? fresh.result : null;
+  // ✎ F13 p223 (1): a permit change re-runs the stored check on the server and refetches it — a stored result read AFTER
+  // this tab's own run is newer and wins (else Issues kept the undone change's PERMIT-SPLIT).
+  const freshForScope =
+    fresh?.scope === scope && !(lastValidation.data?.validated === true && lastValidation.dataUpdatedAt > fresh.at.getTime())
+      ? fresh.result
+      : null;
   const shownValidation =
     freshForScope ?? (lastValidation.data?.validated === false ? null : (lastValidation.data ?? null));
 

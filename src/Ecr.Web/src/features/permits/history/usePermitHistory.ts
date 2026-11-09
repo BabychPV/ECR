@@ -40,6 +40,8 @@ export async function refreshAfterPermitChange(queryClient: QueryClient, documen
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: queryKeys.document.ofDocument(documentId) }),
     queryClient.invalidateQueries({ queryKey: queryKeys.slices.all() }),
+    // F13 p223 (1): the server re-ran the stored check — the page's Issues (`DocumentPage`) are read again.
+    queryClient.invalidateQueries({ queryKey: ['validation', documentId] }),
   ]);
 }
 

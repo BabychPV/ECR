@@ -45,7 +45,9 @@ public sealed class AddRowPermitHandler(
     ICurrentUser currentUser,
     IClock clock,
     IPermitRegistryIndex? permitTargets = null,
-    Groups.ILookupTargetResolver? groups = null)
+    Groups.ILookupTargetResolver? groups = null,    // F13 p223 (1): the stored Issues of the change's year are re-run after the write. `null` (tests) — not re-run.
+    ValidateDocumentHandler? revalidate = null,
+    IValidationResultStore? validationResults = null)
 {
     /// <summary>Adds the permit and returns the row's history.</summary>
     public async Task<RowPermitHistoryDto> HandleAsync(long documentId, AddRowPermitRequest request, CancellationToken ct)
@@ -129,6 +131,7 @@ public sealed class AddRowPermitHandler(
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
+        await PermitHistoryRevalidation.RunAsync(revalidate, validationResults, documentId, request.ValidFrom.Year, ct).ConfigureAwait(false);
         return await PermitHistoryReader.RowAsync(store, registries, row, currentUser.Language, ct).ConfigureAwait(false);
     }
 }
@@ -148,7 +151,9 @@ public sealed class UndoRowPermitHandler(
     IAuditWriter audit,
     ICurrentUser currentUser,
     IClock clock,
-    IPermitRegistryIndex? permitTargets = null)
+    IPermitRegistryIndex? permitTargets = null,    // F13 p223 (1): the stored Issues of the change's year are re-run after the write. `null` (tests) — not re-run.
+    ValidateDocumentHandler? revalidate = null,
+    IValidationResultStore? validationResults = null)
 {
     /// <summary>Removes the latest permit and returns the row's history.</summary>
     public async Task<RowPermitHistoryDto> HandleAsync(long documentId, UndoRowPermitRequest request, CancellationToken ct)
@@ -190,6 +195,7 @@ public sealed class UndoRowPermitHandler(
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
+        await PermitHistoryRevalidation.RunAsync(revalidate, validationResults, documentId, last.ValidFrom.Year, ct).ConfigureAwait(false);
         return await PermitHistoryReader.RowAsync(store, registries, row, currentUser.Language, ct).ConfigureAwait(false);
     }
 }
@@ -215,7 +221,9 @@ public sealed class AddHeaderPermitHandler(
     ICurrentUser currentUser,
     IClock clock,
     IPermitRegistryIndex? permitTargets = null,
-    Groups.ILookupTargetResolver? groups = null)
+    Groups.ILookupTargetResolver? groups = null,    // F13 p223 (1): the stored Issues of the change's year are re-run after the write. `null` (tests) — not re-run.
+    ValidateDocumentHandler? revalidate = null,
+    IValidationResultStore? validationResults = null)
 {
     /// <summary>How many rows a mid-month refusal named (Ship 1); kept for the client contract of earlier refusals.</summary>
     public const int NamedRowsLimit = 10;
@@ -301,6 +309,7 @@ public sealed class AddHeaderPermitHandler(
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
+        await PermitHistoryRevalidation.RunAsync(revalidate, validationResults, documentId, request.ValidFrom.Year, ct).ConfigureAwait(false);
         return await PermitHistoryReader.HeaderAsync(store, registries, documentId, header.Field, header.BaseEntryId, currentUser.Language, ct)
             .ConfigureAwait(false);
     }
@@ -341,7 +350,9 @@ public sealed class UndoHeaderPermitHandler(
     IAuditWriter audit,
     ICurrentUser currentUser,
     IClock clock,
-    IPermitRegistryIndex? permitTargets = null)
+    IPermitRegistryIndex? permitTargets = null,    // F13 p223 (1): the stored Issues of the change's year are re-run after the write. `null` (tests) — not re-run.
+    ValidateDocumentHandler? revalidate = null,
+    IValidationResultStore? validationResults = null)
 {
     /// <summary>Removes the latest permit and returns the field's history.</summary>
     public async Task<HeaderPermitHistoryDto> HandleAsync(long documentId, UndoHeaderPermitRequest request, CancellationToken ct)
@@ -375,6 +386,7 @@ public sealed class UndoHeaderPermitHandler(
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
+        await PermitHistoryRevalidation.RunAsync(revalidate, validationResults, documentId, last.ValidFrom.Year, ct).ConfigureAwait(false);
         return await PermitHistoryReader.HeaderAsync(store, registries, documentId, header.Field, header.BaseEntryId, currentUser.Language, ct)
             .ConfigureAwait(false);
     }
