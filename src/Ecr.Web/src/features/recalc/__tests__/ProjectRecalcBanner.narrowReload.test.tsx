@@ -110,6 +110,22 @@ describe('ProjectRecalcBanner: вузький екран і раннє пере�
     expect(actions?.getAttribute('style') ?? '').toContain('--group-wrap: wrap');
   });
 
+  // ✎ debt-1109 F13 (P3 C). Мутація: повернути `className="ecr-ellipsis"` безумовно — червоне.
+  it('C: розгорнутий банер переносить текст, а не обрізає «…»; згорнутий — один рядок з обрізанням', async () => {
+    serve('Succeeded');
+    await show();
+
+    const text = await screen.findByText((_, el) => el?.hasAttribute('data-recalc-text') === true);
+    expect(text.classList.contains('ecr-ellipsis')).toBe(false);
+    expect(text.getAttribute('style') ?? '').toContain('overflow-wrap: anywhere');
+
+    (document.querySelector('[data-recalc-toggle]') as HTMLElement).click();
+    const collapsed = await screen.findByText(
+      (_, el) => el?.hasAttribute('data-recalc-text') === true && el.classList.contains('ecr-ellipsis'),
+    );
+    expect(collapsed).toBeTruthy();
+  });
+
   it('x5: N, запам\'ятане при постановці, видно після перезавантаження (новий модуль, порожня пам\'ять)', async () => {
     const before = await import('@/features/recalc/useProjectRecalcProgress');
     before.rememberRecalcTotal('P9', 3);
