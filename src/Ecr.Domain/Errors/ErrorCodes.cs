@@ -290,6 +290,16 @@ public static class ErrorCodes
     public const string CellStyleInvalid = "ECR-CELL-4224";
 
     /// <summary>
+    /// Feature (j), human 08.11: a single value written into a month shared by two permits of the row (the permit changed
+    /// mid-month) — the month must be split between the permits (<c>PUT …/permit-history/splits</c>), never one value.
+    /// </summary>
+    /// <remarks>
+    /// Grid save (j3) and Excel import alike; calculated values are never split. <c>messageKey</c>
+    /// <c>err.ECR-CELL-4225.splitRequired</c> names the row, the month and both permits; <c>cells</c> marks the cells.
+    /// </remarks>
+    public const string CellSplitRequired = "ECR-CELL-4225";
+
+    /// <summary>
     /// Код у <c>PATCH …/documents/{id}/header</c> не відповідає жодному полю
     /// шапки версії шаблону цього документа.
     /// </summary>
