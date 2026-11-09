@@ -94,11 +94,14 @@ export function PeriodPolicyManager({
 
   const [editing, setEditing] = useState<Record<number, UpdatePeriodPolicyRequest>>({});
 
+  // ⛔ UAT 08.11 (f/g): тіло — ЗАВЖДИ поточні значення рядка (`draftFor`), а не `editing[id]`. На
+  // невідредагованому рядку `editing[id]` був `undefined`, `JSON.stringify(undefined)` — теж, і «Save»
+  // слав PUT без тіла (415). Повторне збереження незмінних зсувів законне: сервер ще раз просуває стани.
   const update = useMutation({
-    mutationFn: (id: number) =>
+    mutationFn: ({ id, body }: { readonly id: number; readonly body: UpdatePeriodPolicyRequest }) =>
       apiFetch<PeriodPolicyDto>(`/api/v1/projects/period-policies/${id}`, {
         method: 'PUT',
-        body: JSON.stringify(editing[id]),
+        body: JSON.stringify(body satisfies UpdatePeriodPolicyRequest),
       }),
     onSuccess: async () => {
       await refresh();
@@ -261,8 +264,8 @@ export function PeriodPolicyManager({
                         <Button
                           size="xs"
                           variant="subtle"
-                          loading={update.isPending && update.variables === policy.id}
-                          onClick={() => update.mutate(policy.id)}
+                          loading={update.isPending && update.variables.id === policy.id}
+                          onClick={() => update.mutate({ id: policy.id, body: draft })}
                         >
                           {t('common.save')}
                         </Button>
