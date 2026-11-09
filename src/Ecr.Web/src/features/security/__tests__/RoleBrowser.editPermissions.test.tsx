@@ -165,7 +165,10 @@ describe('RoleBrowser: правка прав власної ролі ((v) 08.11)
 
     // Носії й групи — до збереження.
     const user = within(impact).getByText('Land owner').closest('tr') as HTMLElement;
-    expect(user.textContent).toContain('+ Document.Reopen');
+    // Назва права (тут — без каталогу, тож код), код — у підказці.
+    const gained = user.querySelector('[data-change="added"]') as HTMLElement;
+    expect(gained.getAttribute('title')).toBe('Document.Reopen');
+    expect(gained.textContent).toContain('Document.Reopen');
     expect(within(impact).getByTestId('role-impact-groups').textContent).toContain('S-1-5-21-1-2-3-500');
 
     const save = within(impact).getByRole('button', { name: /security\.savePermissions/ }) as HTMLButtonElement;
