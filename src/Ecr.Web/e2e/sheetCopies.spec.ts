@@ -167,10 +167,11 @@ test('копія аркуша: додати -> вкладка «Назва 2» -
 
   // Додати копію: з’являється «<Назва> 2» і стає активною; на копії «Delete copy» є.
   await page.getByTestId('sheet-copy-add').click();
-  const copyTab = page.getByRole('tab', { name: new RegExp(`${SheetName} 2`) });
+  // ✎ debt-1109 SHEETNAME-P3: номер — рівно раз (було «… 1 1», «… 2 2»: сервер уже віддає назву з номером).
+  const copyTab = page.getByRole('tab', { name: new RegExp(`${SheetName} 2(?! 2)`) });
   await expect(copyTab).toBeVisible({ timeout: 30_000 });
   await expect(copyTab).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('tab', { name: new RegExp(`${SheetName} 1`) })).toBeVisible();
+  await expect(page.getByRole('tab', { name: new RegExp(`${SheetName} 1(?! 1)`) })).toBeVisible();
   await expect(page.getByTestId('sheet-copy-delete')).toBeVisible();
 
   // Перейменувати групу: нова назва — на обох вкладках.

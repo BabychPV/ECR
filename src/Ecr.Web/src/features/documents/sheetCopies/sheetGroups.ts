@@ -1,5 +1,5 @@
 import type { DocumentTableDto } from '@/api/types';
-import { copyFieldsOf, groupNameOf, sheetStateKey, sheetTabKey, sheetTabLabel } from './sheetCopyTypes';
+import { copyFieldsOf, groupNameOf, groupNameValuesOf, sheetStateKey, sheetTabKey, sheetTabLabel } from './sheetCopyTypes';
 
 /** Вкладка документа: аркуш шаблону або його копія — з таблицями. */
 export interface SheetGroup {
@@ -83,8 +83,13 @@ export function groupBySheet(tables: DocumentTableDto[]): SheetGroup[] {
       code: table.sheetCode,
       stateKey: sheetStateKey(table.sheetCode, copy.sheetCopyId),
       key,
-      name: sheetTabLabel(groupNameOf(table), copy.copyOrdinal, copy.sheetCopyId !== null, withCopies.has(table.sheetCode)),
-      groupNameValues: { ...((copy.displayNameL10n ?? table.sheetNameL10n).values ?? {}) },
+      name: sheetTabLabel(
+        groupNameOf(table, withCopies.has(table.sheetCode)),
+        copy.copyOrdinal,
+        copy.sheetCopyId !== null,
+        withCopies.has(table.sheetCode),
+      ),
+      groupNameValues: groupNameValuesOf(table, withCopies.has(table.sheetCode)),
       ordinal: table.sheetOrdinal,
       copyOrdinal: copy.copyOrdinal,
       sheetCopyId: copy.sheetCopyId,

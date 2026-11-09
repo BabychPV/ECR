@@ -57,7 +57,37 @@ export function sheetTabLabel(name: string, copyOrdinal: number, isCopy: boolean
   return isCopy || groupHasCopies ? `${name} ${String(copyOrdinal)}` : name;
 }
 
-/** Назва групи аркушів: перейменована (`displayNameL10n`), інакше назва шаблону. */
-export function groupNameOf(table: DocumentTableDto): string {
-  return localized(table.displayNameL10n) || localized(table.sheetNameL10n) || '—';
+/**
+ * Назва групи БЕЗ номера з показуваної назви сервера.
+ *
+ * ✎ debt-1109 SHEETNAME-P3 (F13 p218): сервер віддає `displayNameL10n` уже з номером — «<Назва> N» (`SheetCopyNaming.
+ * Display`, коли в групі є копії; без копій — назва як є), а клієнт додавав номер ще раз: «Raft 1 1». Номер `N` у кінці
+ * знімається тут, а ставить його один раз `sheetTabLabel`.
+ */
+export function stripCopyOrdinal(name: string, copyOrdinal: number): string {
+  const suffix = ` ${String(copyOrdinal)}`;
+
+  return name.endsWith(suffix) && name.length > suffix.length ? name.slice(0, -suffix.length) : name;
+}
+
+/** Назва групи аркушів: назва в документі (з показуваної назви, без номера), інакше назва шаблону. */
+export function groupNameOf(table: DocumentTableDto, groupHasCopies: boolean): string {
+  const display = localized(table.displayNameL10n);
+
+  // Без копій сервер номера не додає — назву «Unit 1», яку дала людина, не чіпаємо.
+  return (display === '' || !groupHasCopies ? display : stripCopyOrdinal(display, table.copyOrdinal)) || localized(table.sheetNameL10n) || '—';
+}
+
+/** Назва групи всіма мовами без номера — для діалогу перейменування. */
+export function groupNameValuesOf(table: DocumentTableDto, groupHasCopies: boolean): Record<string, string> {
+  const values = (table.displayNameL10n ?? table.sheetNameL10n).values ?? {};
+
+  return Object.fromEntries(
+    Object.entries(values).map(([lang, value]) => [
+      lang,
+      table.displayNameL10n === null || table.displayNameL10n === undefined || !groupHasCopies
+        ? value
+        : stripCopyOrdinal(value, table.copyOrdinal),
+    ]),
+  );
 }
