@@ -93,7 +93,7 @@ export function PeriodReopenedDocuments({
                 </Text>
               )}
               <Button
-                size="compact-xs"
+                size="xs"
                 variant="light"
                 disabled={!canClose}
                 onClick={() => setClosing(item)}
