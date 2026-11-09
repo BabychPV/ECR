@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { RegistryEntryDto } from '@/api/types';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { DateOnlyInput } from '@/features/registries/rc816/DateOnlyInput';
 import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
 import { entryLabelsOf } from '@/features/registries/lookupEntryLabels';
@@ -64,6 +65,7 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
     staleTime: LookupEntriesStaleTimeMs,
   });
   const add = useAddRowPermit(documentId);
+  const addLoading = usePendingLoading(add.isPending);
 
   const current = entries.data?.find((entry) => entry.id === currentEntryId);
   const [entryId, setEntryId] = useState<string | null>(null);
@@ -177,7 +179,7 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
           <Button size="xs" variant="default" onClick={props.onCancel}>
             {t('common.cancel')}
           </Button>
-          <Button size="xs" type="submit" loading={add.isPending} disabled={chosen === undefined}>
+          <Button size="xs" type="submit" loading={addLoading} disabled={chosen === undefined}>
             {t('permits.history.addSubmit')}
           </Button>
         </Group>

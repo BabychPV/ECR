@@ -1,5 +1,6 @@
 import { useState, type JSX } from 'react';
 import { Alert, Button, Group, Modal, Stack, Text, TextInput } from '@mantine/core';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { decimalTextOf } from '@/features/grid/rounding';
 import { formatDecimal } from '@/shared/format/number';
 import { formatMonthYear } from '@/shared/format/period';
@@ -21,7 +22,7 @@ export interface CellSplitDialogProps {
   readonly target: SplitTarget;
   /** The split cell; `null` — the history has no split for it (nothing to split, or still loading). */
   readonly mark: SplitCellMark | null;
-  readonly loading: boolean;
+  readonly historyPending: boolean;
   readonly rowLabel: string;
   readonly unit: string | null;
   /** The row version the grid holds (as `PATCH …/cells`); `null` — unknown, the server checks nothing then. */
@@ -46,8 +47,9 @@ function shown(value: string): string {
  * starts with the old single value when the month was not split yet; the total A + B updates live. ⛔ ECR never divides
  * the value by days — nothing here computes a part. Save sends the parts (a part may stay empty: partial save).
  */
-export function CellSplitDialog({ target, mark, loading, rowLabel, unit, baseVersion, onClose }: CellSplitDialogProps): JSX.Element {
+export function CellSplitDialog({ target, mark, historyPending, rowLabel, unit, baseVersion, onClose }: CellSplitDialogProps): JSX.Element {
   const save = useSaveCellSplits(target.documentId);
+  const saveLoading = usePendingLoading(save.isPending);
   const [texts, setTexts] = useState<readonly string[] | null>(null);
 
   const parts = mark?.month.parts ?? [];
@@ -90,7 +92,7 @@ export function CellSplitDialog({ target, mark, loading, rowLabel, unit, baseVer
     >
       {mark === null ? (
         <Text size="sm" role="status">
-          {loading ? t('permits.split.loading') : t('permits.split.nothing')}
+          {historyPending ? t('permits.split.loading') : t('permits.split.nothing')}
         </Text>
       ) : (
         <form
@@ -151,7 +153,7 @@ export function CellSplitDialog({ target, mark, loading, rowLabel, unit, baseVer
               <Button variant="default" onClick={onClose}>
                 {t('common.cancel')}
               </Button>
-              <Button type="submit" loading={save.isPending} disabled={invalid.some(Boolean)}>
+              <Button type="submit" loading={saveLoading} disabled={invalid.some(Boolean)}>
                 {t('permits.split.save')}
               </Button>
             </Group>
