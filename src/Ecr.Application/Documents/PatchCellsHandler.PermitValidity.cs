@@ -453,13 +453,29 @@ public sealed partial class PatchCellsHandler
             .Distinct()
             .ToList<object>();
 
+        // Fresh eyes 09.11: the row by its name — never the hex key (the key stays in `rowKey`/`cells` for the client).
+        var firstKey = changes.RowKeyById.GetValueOrDefault(first.Write.Address.TableRowId) ?? string.Empty;
+        var label = context.Snapshot.RowsByKey.TryGetValue((context.Instance.TableDefId, firstKey), out var rowDef)
+            ? rowDef.LabelL10n.Get(language ?? "en")
+            : null;
+        var position = 0;
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            var live = await rowStore.GetRowsAsync(context.Instance.TableInstanceId, context.PeriodKey, ct).ConfigureAwait(false);
+            position = live.Select(r => r.RowKey).ToList().IndexOf(firstKey) + 1;
+        }
+
+        var basePermit = entries.TryGetValue(baseId, out var baseEntry) ? PermitName(baseEntry, language) : null;
+        var rowName = Permits.History.PermitTimeline.RowName(label, position, basePermit);
+
         throw new BusinessRuleException(
             ErrorCodes.CellSplitRequired,
             $"Місяць {first.Month:MM.yyyy} рядка ділиться між дозволами ({permits}) — введіть частину для кожного дозволу.",
             new Dictionary<string, object?>
             {
                 ["messageKey"] = "err.ECR-CELL-4225.splitRequired",
-                ["rowKey"] = changes.RowKeyById.GetValueOrDefault(first.Write.Address.TableRowId) ?? string.Empty,
+                ["row"] = rowName,
+                ["rowKey"] = firstKey,
                 ["month"] = first.Month.ToString("MM.yyyy", CultureInfo.InvariantCulture),
                 ["permits"] = permits,
                 ["cellCount"] = marked.Count.ToString(CultureInfo.InvariantCulture),

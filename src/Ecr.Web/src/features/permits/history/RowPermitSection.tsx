@@ -11,6 +11,7 @@ import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { AddRowPermitForm } from './AddRowPermitForm';
 import { cellKey, dayMonth, dottedDate, permitGridMarksOf, wireDecimal } from './splitModel';
+import { rowDisplayName } from './rowName';
 import { requestCellSplit } from './splitRequest';
 import { usePermitHistory, useUndoRowPermit } from './usePermitHistory';
 
@@ -59,6 +60,8 @@ export function RowPermitSection({ documentId, periodKey, tableDefId, sheetCopyI
   const history = usePermitHistory(documentId, periodKey);
   const marks = permitGridMarksOf(history.data, tableDefId, sheetCopyId);
   const row = marks.rows.get(cell.rowKey);
+  // Never the hex row key in our texts: the row's label, else «row N · permit» (fresh eyes 09.11).
+  const rowName = rowDisplayName(slice, cell.rowKey, row?.permits[0]?.permit);
   const mark = marks.cells.get(cellKey(cell.rowKey, cell.columnCode));
 
   const undo = useUndoRowPermit(documentId);
@@ -144,7 +147,7 @@ export function RowPermitSection({ documentId, periodKey, tableDefId, sheetCopyI
 
       {added !== null && (
         <Text size="xs" role="status" data-permit-added="">
-          {t('permits.history.added', { date: dottedDate(added), row: cell.rowLabel })}
+          {t('permits.history.added', { date: dottedDate(added), row: rowName })}
         </Text>
       )}
       <ErrorAlert error={undo.error} />
@@ -156,7 +159,7 @@ export function RowPermitSection({ documentId, periodKey, tableDefId, sheetCopyI
             periodKey={periodKey}
             tableInstanceId={cell.tableInstanceId}
             rowKey={cell.rowKey}
-            rowLabel={cell.rowLabel}
+            rowLabel={rowName}
             columnCode={cell.columnCode}
             registryCode={registry.code}
             currentEntryId={Number.isFinite(currentEntryId) ? currentEntryId : null}
