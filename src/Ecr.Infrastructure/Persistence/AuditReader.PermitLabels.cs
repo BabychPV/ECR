@@ -56,14 +56,15 @@ public sealed partial class AuditReader
 
         // Row names (h+ rule: a row is named as people see it — «Sea Water Intake», not «R1»): the template row's label
         // (en, the stored default language) of the document's rows with these table codes and keys; a row without a template
-        // label (dynamic row) keeps its key.
-        var rowNames = new Dictionary<(long DocumentId, string Table, string RowKey), string>();
+        // label (dynamic row) keeps its key. ⛔ RS: the segment/part carries its sheet copy — the row is taken from THAT copy's
+        // instance (SheetCopyId NULL = the original), never from a sibling copy with the same row key.
+        var rowNames = new Dictionary<(long DocumentId, string Table, long CopyId, string RowKey), string>();
         var keyed = parsed.Values.Where(s => s.Table is not null && s.RowKey is not null).ToList();
         if (keyed.Count > 0)
         {
             await using var command = connection.CreateCommand();
             command.CommandText = """
-                SELECT DISTINCT ti.DocumentId, td.Code, r.RowKey, JSON_VALUE(rd.LabelL10n, N'$.en')
+                SELECT DISTINCT ti.DocumentId, td.Code, r.RowKey, JSON_VALUE(rd.LabelL10n, N'$.en'), COALESCE(ti.SheetCopyId, 0)
                 FROM doc.TableRow AS r
                 JOIN doc.TableInstance AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
                 JOIN cfg.TableDef AS td ON td.Id = ti.TableDefId
@@ -78,7 +79,7 @@ public sealed partial class AuditReader
             {
                 if (!reader.IsDBNull(3) && reader.GetString(3) is { Length: > 0 } name)
                 {
-                    rowNames[(reader.GetInt64(0), reader.GetString(1), reader.GetString(2))] = name;
+                    rowNames[(reader.GetInt64(0), reader.GetString(1), Convert.ToInt64(reader.GetValue(4), CultureInfo.InvariantCulture), reader.GetString(2))] = name;
                 }
             }
         }
@@ -88,7 +89,9 @@ public sealed partial class AuditReader
             {
                 EntityLabel = s.Label(
                     documents.GetValueOrDefault(s.DocumentId),
-                    s.Table is not null && s.RowKey is not null ? rowNames.GetValueOrDefault((s.DocumentId, s.Table, s.RowKey)) : null),
+                    s.Table is not null && s.RowKey is not null
+                        ? rowNames.GetValueOrDefault((s.DocumentId, s.Table, s.SheetCopyId ?? 0, s.RowKey))
+                        : null),
             }
             : item)];
     }
@@ -96,7 +99,7 @@ public sealed partial class AuditReader
     /// <summary>Поля JSON запису, потрібні підпису.</summary>
     private sealed record PermitAuditState(
         long DocumentId, string? Table, string? RowKey, string? Column, string? HeaderField, string? ValidFrom, string? Permit,
-        string? PreviousPermit, string? Month, IReadOnlyList<string> PartPermits)
+        string? PreviousPermit, string? Month, IReadOnlyList<string> PartPermits, long? SheetCopyId)
     {
         public static PermitAuditState? TryParse(string? json)
         {
@@ -120,7 +123,10 @@ public sealed partial class AuditReader
                     : [];
                 return new PermitAuditState(
                     documentId, Text(root, "table"), Text(root, "rowKey"), Text(root, "column"), Text(root, "headerField"),
-                    Text(root, "validFrom"), Text(root, "permit"), Text(root, "previousPermit"), Text(root, "month"), parts);
+                    Text(root, "validFrom"), Text(root, "permit"), Text(root, "previousPermit"), Text(root, "month"), parts,
+                    root.TryGetProperty("sheetCopyId", out var copy) && copy.ValueKind == JsonValueKind.Number && copy.TryGetInt64(out var copyId)
+                        ? copyId
+                        : null);
             }
             catch (JsonException)
             {
