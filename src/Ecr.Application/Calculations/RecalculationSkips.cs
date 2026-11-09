@@ -60,9 +60,17 @@ public static class RecalculationSkips
     /// <param name="documentId">Документ.</param>
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="periodKey">Період.</param>
-    public static string AuditCorrelation(long documentId, int sheetDefId, int periodKey)
-        => string.Create(
-            System.Globalization.CultureInfo.InvariantCulture, $"sheet-recalc:{documentId}:{sheetDefId}:{periodKey}");
+    /// <param name="sheetCopyId">
+    /// ✎ F13 p218 #788: копія аркуша (RS) — свій ключ <c>…:{аркуш}#{копія}:{період}</c> (той самий роздільник, що
+    /// <c>SheetCopyNaming.StateKey</c>); <c>null</c> — оригінал, ключ як і доти.
+    /// </param>
+    public static string AuditCorrelation(long documentId, int sheetDefId, int periodKey, long? sheetCopyId = null)
+        => sheetCopyId is { } copy
+            ? string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"sheet-recalc:{documentId}:{sheetDefId}{Domain.ValueObjects.SheetCopyNaming.StateKeySeparator}{copy}:{periodKey}")
+            : string.Create(
+                System.Globalization.CultureInfo.InvariantCulture, $"sheet-recalc:{documentId}:{sheetDefId}:{periodKey}");
 
     /// <summary>Перелік із сховища (стеля + 1) → обрізаний перелік і ознака обрізання.</summary>
     /// <param name="rows">Рядки сховища (до <see cref="MaxListed"/> + 1).</param>

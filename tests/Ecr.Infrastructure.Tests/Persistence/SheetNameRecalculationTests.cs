@@ -211,6 +211,151 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         Assert.Null(await TextAsync(world.Doc, world.Doc.RowIds[0]));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "F13-p218-788")]
+    public async Task Подана_копія_перераховується_з_позначкою_і_записом_журналу()
+    {
+        // F13 p218 #788 (правило людини 07.11): подана копія — перераховується З позначкою «перераховано після подання»
+        // і записом журналу, як оригінал. Доти журнал і позначка бачили лише оригінали («marked: 0»).
+        var world = await ArrangeAsync();
+        var copy = await world.Run(h => h.AddAsync(world.Doc.DocumentId, world.Doc.SheetDefId, default));
+        var copyRow = await AddCopyInstanceAsync(world.Doc, copy.SheetCopyId);
+        await using (var db = new EcrDbContext(
+                         new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options))
+        {
+            var state = new ApprovalState(world.Doc.DocumentId, world.Doc.SheetDefId, world.Doc.PeriodKey.Value, copy.SheetCopyId);
+            state.Submit(UserId, Now.AddMinutes(-5));
+            db.ApprovalStates.Add(state);
+            await db.SaveChangesAsync();
+        }
+
+        var messages = await world.RunRecalculationJobAsync(new RecalculationRequest(
+            world.Doc.ProjectId, world.Doc.DocumentId, world.Doc.PeriodKey.Value, TriggeredByUserId: UserId));
+
+        Assert.Equal("Vessel 2", await TextAsync(world.Doc, copyRow));
+
+        // Запис журналу — з ключем копії.
+        var correlation = RecalculationSkips.AuditCorrelation(
+            world.Doc.DocumentId, world.Doc.SheetDefId, world.Doc.PeriodKey.Value, copy.SheetCopyId);
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT COUNT(*) FROM aud.StructureChange WHERE EntityType = @t AND Operation = @o AND CorrelationId = @c";
+            command.Parameters.AddWithValue("@t", RecalculationSkips.AuditEntityType);
+            command.Parameters.AddWithValue("@o", RecalculationSkips.AuditRecalculatedAfterSubmission);
+            command.Parameters.AddWithValue("@c", correlation);
+            Assert.Equal(1, (int)(await command.ExecuteScalarAsync())!);
+        }
+
+        // Підсумок задачі: «перераховано поданих» ≥ 1.
+        var marked = messages
+            .Select(m => { try { return JsonDocument.Parse(m); } catch (JsonException) { return null; } })
+            .Where(d => d is not null && d.RootElement.ValueKind == JsonValueKind.Object
+                        && d.RootElement.TryGetProperty("k", out var k) && k.GetString() == "jobs.recalcSheetLog")
+            .Select(d => int.Parse(d!.RootElement.GetProperty("p").GetProperty("recalculatedSubmitted").GetString()!,
+                System.Globalization.CultureInfo.InvariantCulture))
+            .ToList();
+        Assert.True(marked.Count == 1 && marked[0] >= 1, $"повідомлення задачі: {string.Join(" | ", messages)}");
+
+        // Картка документа: позначка на стані КОПІЇ («КОД#sheetCopyId»).
+        await using (var db = new EcrDbContext(
+                         new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options))
+        {
+            var summary = await new DocumentStore(db).FindAsync(
+                world.Doc.DocumentId, new PeriodKeyFilter(world.Doc.PeriodKey.Value), CancellationToken.None);
+            var copyState = Assert.Single(summary!.Sheets!, s => s.Code == SheetCopyNaming.StateKey(world.Doc.SheetCode, copy.SheetCopyId));
+            Assert.True(copyState.RecalculatedAfterSubmission);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "F13-p218-788")]
+    public async Task Методології_копій_не_рахуються_за_побудовою_тож_затверджений_оригінал_копію_не_позбавляє()
+    {
+        // Ризик «IsActive по SheetDefId позбавляє методологій копію-чернетку затвердженого оригіналу» не застосовний:
+        // методології прив'язані до таблиць ОРИГІНАЛУ (RS 03.11, release notes «методології — лише оригінали»), і план
+        // прив'язок копій не містить ні до, ні після затвердження оригіналу. Тест фіксує це твердження.
+        var world = await ArrangeAsync();
+        var copy = await world.Run(h => h.AddAsync(world.Doc.DocumentId, world.Doc.SheetDefId, default));
+        await AddCopyInstanceAsync(world.Doc, copy.SheetCopyId);
+        await AddBindingAsync(world.Doc);
+        var copyInstances = await CopyInstanceIdsAsync(world.Doc, copy.SheetCopyId);
+
+        var draft = new RecordingRunner();
+        await world.RunRecalculationJobAsync(
+            new RecalculationRequest(world.Doc.ProjectId, world.Doc.DocumentId, world.Doc.PeriodKey.Value, TriggeredByUserId: UserId),
+            draft);
+
+        // Чернетка: методологія рахується на оригіналі, на копії — ніколи.
+        Assert.Contains(draft.Instances, id => id == world.Doc.TableInstanceId);
+        Assert.DoesNotContain(draft.Instances, copyInstances.Contains);
+
+        await ApproveOriginalAsync(world.Doc);
+        var approved = new RecordingRunner();
+        await world.RunRecalculationJobAsync(
+            new RecalculationRequest(world.Doc.ProjectId, world.Doc.DocumentId, world.Doc.PeriodKey.Value, TriggeredByUserId: UserId),
+            approved);
+
+        // Затверджений оригінал пропущено; копія, як і доти, без методологій — нічого не втратила.
+        Assert.Empty(approved.Instances);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "F13-p218-788")]
+    public async Task Перерахунок_проєкту_не_вважає_все_затвердженим_коли_копія_чернетка()
+    {
+        // WorkflowStore.AllSheetsApprovedAsync (перерахунок проєкту «рахувати нічого») бачив лише оригінали.
+        var world = await ArrangeAsync();
+        var copy = await world.Run(h => h.AddAsync(world.Doc.DocumentId, world.Doc.SheetDefId, default));
+        await ApproveOriginalAsync(world.Doc);
+
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        var store = new WorkflowStore(db);
+        Assert.False(await store.AllSheetsApprovedAsync(world.Doc.ProjectId, world.Doc.PeriodKey.Value, CancellationToken.None));
+
+        var state = new ApprovalState(world.Doc.DocumentId, world.Doc.SheetDefId, world.Doc.PeriodKey.Value, copy.SheetCopyId);
+        state.Submit(UserId, Now);
+        state.Approve(UserId, Now);
+        db.ApprovalStates.Add(state);
+        await db.SaveChangesAsync();
+
+        Assert.True(await store.AllSheetsApprovedAsync(world.Doc.ProjectId, world.Doc.PeriodKey.Value, CancellationToken.None));
+    }
+
+    private async Task AddBindingAsync(TestDocument doc)
+    {
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        var methodology = new Ecr.Domain.Entities.Calculations.Methodology(
+            EcrCode.Create($"SNM{Guid.NewGuid():N}"[..16]), Name("m"));
+        db.Methodologies.Add(methodology);
+        await db.SaveChangesAsync();
+        db.CalculationBindings.Add(new CalculationBinding(
+            doc.TableDefId, doc.ColumnDefIds[0], methodology.Id, "out", "{}"));
+        db.MethodologyVersions.Add(new Ecr.Domain.Entities.Calculations.MethodologyVersion(
+            methodology.Id, "1.0", CalculationLevel.Configuration, 1, Now));
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<List<long>> CopyInstanceIdsAsync(TestDocument doc, long sheetCopyId)
+    {
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        return await db.TableInstances.AsNoTracking()
+            .Where(i => i.DocumentId == doc.DocumentId && i.SheetCopyId == sheetCopyId)
+            .Select(i => i.Id)
+            .ToListAsync();
+    }
+
     private async Task ApproveOriginalAsync(TestDocument doc)
     {
         await using var db = new EcrDbContext(
@@ -388,18 +533,29 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         }
 
         /// <summary>Справжній <c>RecalculationJob</c> над цим документом (методологій немає — оркестратор порожній).</summary>
-        public async Task RunRecalculationJobAsync(object? payload)
+        public async Task<List<string>> RunRecalculationJobAsync(object? payload, ICalculationRunner? calculationRunner = null)
         {
             await using var db = builder.CreateContext();
             var clock = new FixedClock();
-            var runner = new EmptyRunner();
+            var runner = calculationRunner ?? new EmptyRunner();
             var runs = new RunCalculationHandler(
                 Substitute.For<IPeriodStore>(), Substitute.For<IWorkflowStore>(), new CalculationResultStore(db, clock),
                 Substitute.For<IBackgroundJobScheduler>(), new UnitOfWork(db), Substitute.For<IAccessDecisionService>(),
                 Substitute.For<ICurrentUser>(), clock, Substitute.For<IAuditWriter>());
 
-            var job = new RecalculationJob(db, runner, runs, Service(db), clock, sheetGate: new SheetEditGate(db));
-            await job.ExecuteAsync(payload, Substitute.For<IJobProgress>(), CancellationToken.None);
+            var messages = new List<string>();
+            var progress = Substitute.For<IJobProgress>();
+            progress.ReportAsync(Arg.Any<int>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+                .Returns(call =>
+                {
+                    messages.Add(call.ArgAt<string?>(1) ?? string.Empty);
+                    return Task.CompletedTask;
+                });
+
+            var job = new RecalculationJob(
+                db, runner, runs, Service(db), clock, sheetGate: new SheetEditGate(db), audit: new AuditWriter(db));
+            await job.ExecuteAsync(payload, progress, CancellationToken.None);
+            return messages;
         }
 
         private DocumentSheetCopyHandler Handler(EcrDbContext db)
@@ -431,6 +587,20 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
                 periods, metadata, versions, new RealFormulaEngine(), units, Substitute.For<IRegistryStore>(), headers,
                 new AuditWriter(db), clock, new UnitOfWork(db), new SheetEditGate(db),
                 sheetCopies: new DocumentSheetCopyStore(db));
+        }
+    }
+
+    /// <summary>Оркестратор, що лише запам'ятовує екземпляри, на яких рахувались прив'язки.</summary>
+    private sealed class RecordingRunner : ICalculationRunner
+    {
+        public List<long> Instances { get; } = [];
+
+        public Task<ModuleProfile> RunAsync(
+            long calculationRunId, long documentId, PeriodKey periodKey,
+            IReadOnlyList<CalculationBindingRef> bindings, IJobProgress progress, CancellationToken ct)
+        {
+            Instances.AddRange(bindings.Select(b => b.TableInstanceId));
+            return Task.FromResult(new ModuleProfile());
         }
     }
 

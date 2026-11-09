@@ -541,13 +541,15 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             return false;
         }
 
-        // Є що рахувати: документ без складу або з аркушем складу (оригіналом), що не затверджений.
+        // Є що рахувати: документ без складу або з рядком складу, що не затверджений. ✎ F13 p218 #788: рядок складу —
+        // оригінал АБО копія (RS: стан копії свій, SheetCopyId = Id рядка); копія-чернетка затвердженого оригіналу — є що рахувати.
         var recalculable = await documents
             .AnyAsync(
                 d => !db.DocumentSheets.Any(s => s.DocumentId == d.Id && s.IsIncluded && s.CopyOfId == null)
-                     || db.DocumentSheets.Any(s => s.DocumentId == d.Id && s.IsIncluded && s.CopyOfId == null
+                     || db.DocumentSheets.Any(s => s.DocumentId == d.Id && s.IsIncluded
                          && !db.ApprovalStates.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId
-                             && a.SheetCopyId == null && a.PeriodKey == periodKey
+                             && ((s.CopyOfId == null && a.SheetCopyId == null) || a.SheetCopyId == s.Id)
+                             && a.PeriodKey == periodKey
                              && a.Status == Domain.Enums.DocumentStatus.Approved)),
                 ct)
             .ConfigureAwait(false);

@@ -807,15 +807,16 @@ public sealed partial class RecalculationJob(
 
         foreach (var (documentId, periods) in scopeByDocument.Where(pair => pair.Value.Length > 0))
         {
+            // ✎ F13 p218 #788: по СКОУПУ (аркуш × копія, RS) — подана копія перераховується з позначкою й записом журналу,
+            // затверджена — пропускається із записом, так само як оригінал (правило людини 07.11).
             var rows = await db.ApprovalStates
                 .AsNoTracking()
-                .OriginalOnly()
                 .Where(a => a.DocumentId == documentId && periods.Contains(a.PeriodKey)
                             && (request.SheetDefId == null || a.SheetDefId == request.SheetDefId)
                             && (a.Status == Domain.Enums.DocumentStatus.Approved
                                 || (writeSubmitted && a.Status == Domain.Enums.DocumentStatus.Submitted)))
-                .Join(db.SheetDefs, a => a.SheetDefId, s => s.Id, (a, s) => new { a.SheetDefId, a.PeriodKey, a.Status, s.TemplateVersionId, s.Code })
-                .OrderBy(r => r.PeriodKey).ThenBy(r => r.SheetDefId)
+                .Join(db.SheetDefs, a => a.SheetDefId, s => s.Id, (a, s) => new { a.SheetDefId, a.SheetCopyId, a.PeriodKey, a.Status, s.TemplateVersionId, s.Code })
+                .OrderBy(r => r.PeriodKey).ThenBy(r => r.SheetDefId).ThenBy(r => r.SheetCopyId)
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 
@@ -843,6 +844,7 @@ public sealed partial class RecalculationJob(
                     {
                         documentId,
                         sheetDefId = row.SheetDefId,
+                        sheetCopyId = row.SheetCopyId,
                         sheetCode = row.Code,
                         periodKey = row.PeriodKey,
                         state = row.Status.ToString(),
@@ -850,7 +852,7 @@ public sealed partial class RecalculationJob(
                     }),
                     ChangeReason: approvedRow ? "recalc-skipped-approved" : "recalc-after-submission",
                     ChangedByUserId: request.TriggeredByUserId ?? 0,
-                    CorrelationId: RecalculationSkips.AuditCorrelation(documentId, row.SheetDefId, row.PeriodKey)));
+                    CorrelationId: RecalculationSkips.AuditCorrelation(documentId, row.SheetDefId, row.PeriodKey, row.SheetCopyId)));
             }
         }
 
