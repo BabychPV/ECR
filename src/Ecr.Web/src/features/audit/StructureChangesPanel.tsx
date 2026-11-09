@@ -7,6 +7,7 @@ import { SortableTh } from '@/features/audit/SortableTh';
 import { FilterHints, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Timestamp } from '@/shared/ui/Timestamp';
+import { siteMomentText } from '@/shared/siteMoment';
 import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
 import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
@@ -14,6 +15,22 @@ import { t } from '@/shared/i18n';
 import { entityTypeLabel, operationLabel } from './auditLabels';
 import { structureChangeReasonText, structureChangeReasonZone } from './structureChangeReason';
 import './auditTable.css';
+
+/**
+ * ✎ debt-1109 F13 (P3 A): час запису в поясі МАЙДАНЧИКА, коли конверт причини його несе (журнал «Reopen»: «коли» і
+ * «до …» — в одному часі); інакше — звичайний `Timestamp` (пояс читача). Точне значення — у `dateTime`/`title`.
+ * ⚠ Тут, а не пропом `Timestamp`: той у спільному чанку всіх маршрутів, а бюджет `DocumentPage` — на межі.
+ */
+function ChangedAt({ value, zone }: { value: string; zone: string | null }): JSX.Element {
+  const inSite = zone === null ? null : siteMomentText(value, zone);
+  if (inSite === null) return <Timestamp value={value} />;
+
+  return (
+    <time dateTime={value} title={value} data-timestamp="ok">
+      {inSite}
+    </time>
+  );
+}
 
 /**
  * Журнал структурних змін (`BE-16`) — друга вкладка екрана аудиту.
@@ -121,7 +138,7 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
                         ⚠ `key` рядка й далі бере СИРИЙ `changedAt`: ключ — для
                         React, а не для ока. */}
                     <Table.Td>
-                      <Timestamp value={change.changedAt} zone={structureChangeReasonZone(change.changeReason)} />
+                      <ChangedAt value={change.changedAt} zone={structureChangeReasonZone(change.changeReason)} />
                     </Table.Td>
                     {/* ⛔ `R-18`: ім'я з сервера; номер — у підказці. */}
                     <Table.Td title={`#${String(change.changedByUserId)}`}>{authorName(change)}</Table.Td>
