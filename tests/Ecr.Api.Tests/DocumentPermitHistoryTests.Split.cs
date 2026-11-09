@@ -127,6 +127,89 @@ public sealed partial class DocumentPermitHistoryTests
         Assert.Contains("01.2026", finding.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Coordinator 09.11 (no debt): total and parts are ONE transaction — the parts write failing (a test trigger) leaves
+    /// the old total. Red before the fix: the total was written in its own transaction and stayed 12.75 without parts.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "ACC-1108-j2")]
+    public async Task A_failing_parts_write_leaves_the_total_unchanged()
+    {
+        var s = await ArrangeAsync(rowBase: "year").ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, (await AddRowAsync(client, s, s.MidJanId, "2026-01-15").ConfigureAwait(true)).StatusCode);
+
+        var trigger = $"TR_TestFailParts_{s.DocumentId.ToString(CultureInfo.InvariantCulture)}";
+        await ExecAsync(
+            $"CREATE TRIGGER doc.{trigger} ON doc.CellPermitPart AFTER INSERT AS "
+            + $"IF EXISTS (SELECT 1 FROM inserted WHERE DocumentId = {s.DocumentId.ToString(CultureInfo.InvariantCulture)}) "
+            + "THROW 50999, N'test: parts write fails', 1;",
+            0).ConfigureAwait(true);
+        try
+        {
+            var response = await SplitAsync(client, s, 5.5m, 7.25m).ConfigureAwait(true);
+            Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
+        }
+        finally
+        {
+            await ExecAsync($"DROP TRIGGER doc.{trigger};", 0).ConfigureAwait(true);
+        }
+
+        Assert.Equal(12m, await CellAsync(s).ConfigureAwait(true));
+        Assert.Equal(0, await PartCountAsync(s).ConfigureAwait(true));
+    }
+
+    /// <summary>Clearing a split month cell takes its parts with it (same transaction). Red without the clean-up: 2 parts left.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "ACC-1108-j2")]
+    public async Task Clearing_a_split_cell_deletes_its_parts()
+    {
+        var s = await ArrangeAsync(rowBase: "year").ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, (await AddRowAsync(client, s, s.MidJanId, "2026-01-15").ConfigureAwait(true)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await SplitAsync(client, s, 5.5m, 7.25m).ConfigureAwait(true)).StatusCode);
+        Assert.Equal(2, await PartCountAsync(s).ConfigureAwait(true));
+
+        var response = await client.PatchAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/cells", UriKind.Relative),
+            new
+            {
+                tableInstanceId = s.TableInstanceId,
+                periodKey = 202601,
+                origin = "UserEdit",
+                rows = new[]
+                {
+                    new
+                    {
+                        rowKey = s.RowKey,
+                        baseVersion = await RowVersionAsync(s).ConfigureAwait(true),
+                        cells = new[] { new { columnCode = s.DataColumnCode, value = (object?)null } },
+                    },
+                },
+            }).ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
+        Assert.Null(await CellAsync(s).ConfigureAwait(true));
+        Assert.Equal(0, await PartCountAsync(s).ConfigureAwait(true));
+    }
+
+    private async Task<int> PartCountAsync(Scenario s)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM doc.CellPermitPart WHERE DocumentId = @id;";
+        command.Parameters.AddWithValue("@id", s.DocumentId);
+        return (int)(await command.ExecuteScalarAsync().ConfigureAwait(false))!;
+    }
+
     private async Task<HttpResponseMessage> SplitAsync(HttpClient client, Scenario s, decimal? a, decimal? b)
         => await client.PutAsJsonAsync(
             new Uri($"{Base(s)}/splits", UriKind.Relative),
@@ -188,7 +271,12 @@ public sealed partial class DocumentPermitHistoryTests
         await connection.OpenAsync().ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = text;
-        command.Parameters.AddWithValue("@id", id);
+
+        // ⚠ No parameter for DDL: a parameterized command runs via sp_executesql, where CREATE TRIGGER is a syntax error.
+        if (text.Contains("@id", StringComparison.Ordinal))
+        {
+            command.Parameters.AddWithValue("@id", id);
+        }
         await command.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 }
