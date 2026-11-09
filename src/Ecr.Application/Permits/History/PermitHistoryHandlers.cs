@@ -65,12 +65,19 @@ public sealed class AddRowPermitHandler(
         var entries = (await registries.FindEntriesByIdsAsync([previousId, request.RegistryEntryId], ct).ConfigureAwait(false))
             .ToDictionary(e => e.Id);
 
-        if (!entries.TryGetValue(request.RegistryEntryId, out var next) || next.IsDeleted || !next.IsActive
+        if (entries.TryGetValue(request.RegistryEntryId, out var candidate))
+        {
+            await Groups.LookupTargetMatcher
+                .EnsureFreshOnMismatchAsync(groups, [(row.Column.LookupRegistryDefId, candidate.RegistryDefId)], ct)
+                .ConfigureAwait(false);
+        }
+
+        if (candidate is not { } next || next.IsDeleted || !next.IsActive
             || !Groups.LookupTargetMatcher.Belongs(groups, row.Profile, row.Column.LookupRegistryDefId, next.RegistryDefId, row.ProjectId))
         {
             throw new BusinessRuleException(
                 ErrorCodes.CellRegistryEntryMissing,
-                $"Запис {request.RegistryEntryId} не можна обрати для колонки {row.Column.Code}.",
+                $"Запис {request.RegistryEntryId} не можна обрати для колонки дозволу.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-CELL-4223.missingEntry",
@@ -87,13 +94,22 @@ public sealed class AddRowPermitHandler(
         var gaps = PermitTimeline.GapDays(previous?.ValidTo, request.ValidFrom, next.ValidFrom, next.ValidTo, window.PeriodEnd);
         if (gaps.Count > 0)
         {
-            var language = currentUser.Language;
+            var gap = PermitHistoryRules.Gap(previous, next, gaps, currentUser.Language);
             throw new BusinessRuleException(
                 ErrorCodes.CellRegistryEntryMissing,
-                $"Між дозволами немає чинного дозволу: {string.Join(", ", gaps)}.",
-                PermitHistoryRules.GapDetails(
-                    "err.ECR-CELL-4223.permitGap", previous, next, gaps, language,
-                    ("rowKey", row.RowKey), ("columnCode", row.Column.Code)));
+                $"Між дозволами немає чинного дозволу: {gap.Days}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-4223.permitGap",
+                    ["permit"] = gap.Permit,
+                    ["validity"] = gap.Validity,
+                    ["next"] = gap.Next,
+                    ["nextValidity"] = gap.NextValidity,
+                    ["days"] = gap.Days,
+                    ["dayCount"] = gap.DayCount,
+                    ["suggestedFrom"] = gap.SuggestedFrom,
+                    ["rowKey"] = row.RowKey,
+                });
         }
 
         var now = clock.UtcNow;
@@ -219,7 +235,7 @@ public sealed class AddHeaderPermitHandler(
 
         if (request.ValidFrom.Day != 1)
         {
-            var affected = await RowsRelyingOnHeaderAsync(documentId, header.Snapshot, request, ct).ConfigureAwait(false);
+            var affected = await RowsRelyingOnHeaderAsync(documentId, header, request, ct).ConfigureAwait(false);
             throw new BusinessRuleException(
                 ErrorCodes.HeaderEntryNotUsable,
                 $"Зміна дозволу шапки посеред місяця ({request.ValidFrom:dd.MM.yyyy}): додайте дозвіл у рядках.",
@@ -240,20 +256,27 @@ public sealed class AddHeaderPermitHandler(
         var previousId = segments.Count > 0 ? segments[^1].RegistryEntryId : header.BaseEntryId;
         var entries = (await registries.FindEntriesByIdsAsync([previousId, request.RegistryEntryId], ct).ConfigureAwait(false))
             .ToDictionary(e => e.Id);
-        if (!entries.TryGetValue(request.RegistryEntryId, out var next)
+        if (entries.TryGetValue(request.RegistryEntryId, out var candidate))
+        {
+            await Groups.LookupTargetMatcher
+                .EnsureFreshOnMismatchAsync(groups, [(header.Field.LookupRegistryDefId, candidate.RegistryDefId)], ct)
+                .ConfigureAwait(false);
+        }
+
+        if (candidate is not { } next
             || !Groups.LookupTargetMatcher.Belongs(groups, header.Profile, header.Field.LookupRegistryDefId, next.RegistryDefId, header.ProjectId))
         {
-            throw HeaderEntry("foreignRegistry", header.Field.Code);
+            throw HeaderEntry(EntryProblem.ForeignRegistry, header.Field.Code);
         }
 
         if (next.IsDeleted)
         {
-            throw HeaderEntry("deletedEntry", header.Field.Code);
+            throw HeaderEntry(EntryProblem.Deleted, header.Field.Code);
         }
 
         if (!next.IsActive)
         {
-            throw HeaderEntry("inactiveEntry", header.Field.Code);
+            throw HeaderEntry(EntryProblem.Inactive, header.Field.Code);
         }
 
         if (previousId == next.Id)
@@ -265,12 +288,22 @@ public sealed class AddHeaderPermitHandler(
         var gaps = PermitTimeline.GapDays(previous?.ValidTo, request.ValidFrom, next.ValidFrom, next.ValidTo, window.PeriodEnd);
         if (gaps.Count > 0)
         {
+            var gap = PermitHistoryRules.Gap(previous, next, gaps, currentUser.Language);
             throw new BusinessRuleException(
                 ErrorCodes.HeaderEntryNotUsable,
-                $"Між дозволами шапки немає чинного дозволу: {string.Join(", ", gaps)}.",
-                PermitHistoryRules.GapDetails(
-                    "err.ECR-HDR-4223.permitGap", previous, next, gaps, currentUser.Language,
-                    ("headerFieldCode", header.Field.Code)));
+                $"Між дозволами шапки немає чинного дозволу: {gap.Days}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-HDR-4223.permitGap",
+                    ["permit"] = gap.Permit,
+                    ["validity"] = gap.Validity,
+                    ["next"] = gap.Next,
+                    ["nextValidity"] = gap.NextValidity,
+                    ["days"] = gap.Days,
+                    ["dayCount"] = gap.DayCount,
+                    ["suggestedFrom"] = gap.SuggestedFrom,
+                    ["headerFieldCode"] = header.Field.Code,
+                });
         }
 
         var now = clock.UtcNow;
@@ -290,32 +323,46 @@ public sealed class AddHeaderPermitHandler(
             .ConfigureAwait(false);
     }
 
-    private static BusinessRuleException HeaderEntry(string reason, string fieldCode)
+    private enum EntryProblem
+    {
+        ForeignRegistry,
+        Deleted,
+        Inactive,
+    }
+
+    private static BusinessRuleException HeaderEntry(EntryProblem problem, string fieldCode)
         => new(
             ErrorCodes.HeaderEntryNotUsable,
-            $"Запис не можна обрати для поля шапки {fieldCode} ({reason}).",
+            $"Запис не можна обрати для поля дозволу шапки ({problem}).",
             new Dictionary<string, object?>
             {
-                ["messageKey"] = $"err.ECR-HDR-4223.{reason}",
+                ["messageKey"] = problem switch
+                {
+                    EntryProblem.Deleted => "err.ECR-HDR-4223.deletedEntry",
+                    EntryProblem.Inactive => "err.ECR-HDR-4223.inactiveEntry",
+                    _ => "err.ECR-HDR-4223.foreignRegistry",
+                },
                 ["headerFieldCode"] = fieldCode,
             });
 
     /// <summary>
     /// «Table · row» of the rows that rely on the header permit (tables WITHOUT their own permit column) and hold entered
-    /// data in the month of the change.
+    /// data in the month of the change — only tables the author can READ (a hidden table is neither named nor counted).
     /// </summary>
     private async Task<List<string>> RowsRelyingOnHeaderAsync(
-        long documentId, TemplateVersionSnapshot snapshot, AddHeaderPermitRequest request, CancellationToken ct)
+        long documentId, PermitHistoryHeader header, AddHeaderPermitRequest request, CancellationToken ct)
     {
+        var period = new PeriodKey(request.PeriodKey);
+        var readable = (await access.ReadScopeAsync(header.Profile, documentId, ct).ConfigureAwait(false)).InPeriod(period);
         var isPermitTarget = permitTargets is null
             ? (_ => false)
             : await PermitTargets.LoadAsync(permitTargets, ct).ConfigureAwait(false);
-        var tables = snapshot.Sheets.SelectMany(s => s.Tables)
-            .Where(t => !t.Columns.Any(c => !c.IsDeleted && c.DataType == CellDataType.Lookup
-                                            && c.LookupRegistryDefId is { } target && isPermitTarget(target)))
+        var tables = header.Snapshot.Sheets.SelectMany(s => s.Tables)
+            .Where(t => readable.CanReadTable(t.Id)
+                        && !t.Columns.Any(c => !c.IsDeleted && c.DataType == CellDataType.Lookup
+                                               && c.LookupRegistryDefId is { } target && isPermitTarget(target)))
             .ToDictionary(t => t.Id);
 
-        var period = new PeriodKey(request.PeriodKey);
         var instances = (await rows.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false))
             .Where(i => tables.ContainsKey(i.TableDefId))
             .ToList();

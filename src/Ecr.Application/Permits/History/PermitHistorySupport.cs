@@ -189,29 +189,20 @@ internal static class PermitHistoryRules
             "Немає доданого дозволу, який можна скасувати (або його місяці вже поділено).",
             new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.permitHistoryNothingToUndo" });
 
-    /// <summary>j4 refusal details: both permits, the uncovered days, the date that would close the first gap.</summary>
-    public static Dictionary<string, object?> GapDetails(
-        string messageKey, RegistryEntry? previous, RegistryEntry next, IReadOnlyList<DayRange> gaps, string? language,
-        params (string Key, string Value)[] extra)
-    {
-        var details = new Dictionary<string, object?>
-        {
-            ["messageKey"] = messageKey,
-            ["permit"] = previous is null ? "…" : PatchCellsHandler.PermitName(previous, language),
-            ["validity"] = previous is null ? "…" : PermitMonthCoverage.DescribeValidity(previous.ValidFrom, previous.ValidTo),
-            ["next"] = PatchCellsHandler.PermitName(next, language),
-            ["nextValidity"] = PermitMonthCoverage.DescribeValidity(next.ValidFrom, next.ValidTo),
-            ["days"] = string.Join(", ", gaps.Select(g => g.ToString())),
-            ["dayCount"] = gaps.Sum(g => g.Last.DayNumber - g.First.DayNumber + 1).ToString(CultureInfo.InvariantCulture),
-            ["suggestedFrom"] = gaps[0].First.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-        };
-        foreach (var (key, value) in extra)
-        {
-            details[key] = value;
-        }
+    /// <summary>j4 refusal parameters: both permits, the uncovered days, the date that would close the first gap.</summary>
+    public static GapText Gap(RegistryEntry? previous, RegistryEntry next, IReadOnlyList<DayRange> gaps, string? language)
+        => new(
+            Permit: previous is null ? "…" : PatchCellsHandler.PermitName(previous, language),
+            Validity: previous is null ? "…" : PermitMonthCoverage.DescribeValidity(previous.ValidFrom, previous.ValidTo),
+            Next: PatchCellsHandler.PermitName(next, language),
+            NextValidity: PermitMonthCoverage.DescribeValidity(next.ValidFrom, next.ValidTo),
+            Days: string.Join(", ", gaps.Select(g => g.ToString())),
+            DayCount: gaps.Sum(g => g.Last.DayNumber - g.First.DayNumber + 1).ToString(CultureInfo.InvariantCulture),
+            SuggestedFrom: gaps[0].First.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture));
 
-        return details;
-    }
+    /// <summary>Parameters of a j4 refusal (language-neutral strings).</summary>
+    internal sealed record GapText(
+        string Permit, string Validity, string Next, string NextValidity, string Days, string DayCount, string SuggestedFrom);
 
     /// <summary>j6: the audit record of an add/undo — who (record author), both permits, the date, the target.</summary>
     public static StructureChangeRecord AuditRecord(
