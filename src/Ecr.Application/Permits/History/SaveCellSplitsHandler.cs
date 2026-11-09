@@ -47,6 +47,7 @@ public sealed class SaveCellSplitsHandler(
     IClock clock,
     PatchCellsHandler patchCells,
     GetPermitHistoryHandler history,
+    IDocumentHeaderStore headers,
     IPermitRegistryIndex? permitTargets = null)
 {
     /// <summary>Entity type of the split audit records (<c>aud.StructureChange</c>).</summary>
@@ -205,15 +206,30 @@ public sealed class SaveCellSplitsHandler(
             .GroupBy(s => s.ColumnDefId!.Value)
             .Where(g => table.Columns.Any(c => c.Id == g.Key && c.LookupRegistryDefId is { } t && isPermitTarget(t)))
             .ToList();
-        if (rowSegments.Count != 1)
+        IReadOnlyList<PermitSpan> spans;
+        if (rowSegments.Count == 1)
+        {
+            var slice = await cells.ReadSliceAsync(instance.TableInstanceId, period, ct).ConfigureAwait(false);
+            var baseId = slice.FirstOrDefault(c => c.Address.TableRowId == rowId && c.Address.ColumnDefId == rowSegments[0].Key)
+                ?.Value.ValueRegistryEntryId ?? throw PartsInvalid("У рядку ще не обрано дозвіл.");
+            spans = PermitHistoryCoverage.SpansOf(baseId, rowSegments[0]);
+        }
+        else if (rowSegments.Count == 0
+                 && !table.Columns.Any(c => !c.IsDeleted && c.LookupRegistryDefId is { } t && isPermitTarget(t))
+                 && segments.Where(s => s.HeaderFieldDefId is not null).GroupBy(s => s.HeaderFieldDefId!.Value).OrderBy(g => g.Key)
+                     .FirstOrDefault() is { } header)
+        {
+            // ✎ Ship 2 (jh3): a table without its own permit column relies on the header permit and its history.
+            var values = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);
+            var baseId = values.TryGetValue(header.Key, out var value) && value.ValueRegistryEntryId is { } id
+                ? id
+                : throw PartsInvalid("У шапці ще не обрано дозвіл.");
+            spans = PermitHistoryCoverage.SpansOf(baseId, header);
+        }
+        else
         {
             throw PartsInvalid("У рядка немає історії дозволу.");
         }
-
-        var slice = await cells.ReadSliceAsync(instance.TableInstanceId, period, ct).ConfigureAwait(false);
-        var baseId = slice.FirstOrDefault(c => c.Address.TableRowId == rowId && c.Address.ColumnDefId == rowSegments[0].Key)
-            ?.Value.ValueRegistryEntryId ?? throw PartsInvalid("У рядку ще не обрано дозвіл.");
-        var spans = PermitHistoryCoverage.SpansOf(baseId, rowSegments[0]);
 
         var monthNumber = column.MonthNumber is { } m ? (int)m : period.Sequence;
         var month = new DateOnly(period.Year, monthNumber, 1);
