@@ -1297,7 +1297,16 @@ UPDATE t
     -- UAT:recalc-progress (P2 живого проходу 08.11): область перерахунку називає діалог (місяці, документи); тут лишається лише «у фоні».
     (N'periods.recalcConfirm', N'en', N'Every document of every period of this project is recalculated in the background. This can take a while, and figures in open documents may change when it finishes.', N'The recalculation runs in the background; figures in open documents may change when it finishes.'),
     (N'periods.recalcConfirm', N'ru', N'Все документы всех периодов этого проекта будут пересчитаны в фоновом режиме. Это может занять некоторое время, а показатели в открытых документах по завершении могут измениться.', N'Пересчёт идёт в фоновом режиме; показатели в открытых документах по завершении могут измениться.'),
-    (N'periods.recalcConfirm', N'kz', N'Осы жобаның барлық кезеңдерінің барлық құжаттары фондық режимде қайта есептеледі. Бұл біраз уақыт алуы мүмкін, ал аяқталғаннан кейін ашық құжаттардағы көрсеткіштер өзгеруі мүмкін.', N'Қайта есептеу фондық режимде жүреді; аяқталғаннан кейін ашық құжаттардағы көрсеткіштер өзгеруі мүмкін.')
+    (N'periods.recalcConfirm', N'kz', N'Осы жобаның барлық кезеңдерінің барлық құжаттары фондық режимде қайта есептеледі. Бұл біраз уақыт алуы мүмкін, ал аяқталғаннан кейін ашық құжаттардағы көрсеткіштер өзгеруі мүмкін.', N'Қайта есептеу фондық режимде жүреді; аяқталғаннан кейін ашық құжаттардағы көрсеткіштер өзгеруі мүмкін.'),
+    -- debt-1109 x1: «1 documents» — кількість документів підставляється узгодженою формою (`recalcProgress.documentCount.*`).
+    (N'recalcProgress.queuedDocuments', N'en', N'Queued {total} documents for recalculation ({project})', N'Queued {documentCount} for recalculation ({project})'),
+    (N'recalcProgress.queuedDocuments', N'ru', N'В очереди {total} документов на пересчёт ({project})', N'В очереди на пересчёт: {documentCount} ({project})'),
+    (N'recalcProgress.queuedDocumentsToast', N'en', N'Queued {total} documents for recalculation ({project}). Progress is shown at the top of this page.', N'Queued {documentCount} for recalculation ({project}). Progress is shown at the top of this page.'),
+    (N'recalcProgress.queuedDocumentsToast', N'ru', N'В очереди {total} документов на пересчёт ({project}). Прогресс — вверху этой страницы.', N'В очереди на пересчёт: {documentCount} ({project}). Прогресс — вверху этой страницы.'),
+    (N'recalcProgress.running', N'en', N'Recalculating {project}: {done} of {total} documents, {skipped} skipped, {failed} failed', N'Recalculating {project}: {done} of {documentCount}, {skipped} skipped, {failed} failed'),
+    (N'recalcProgress.confirmScope', N'en', N'Open months {months} · {documents} documents · approved sheets and locked months are skipped', N'Open months {months} · {documentCount} · approved sheets and locked months are skipped'),
+    (N'recalcProgress.confirmScopeNoOpen', N'en', N'No open months · {documents} documents · approved sheets and locked months are skipped', N'No open months · {documentCount} · approved sheets and locked months are skipped'),
+    (N'recalcProgress.confirmScopeUnknown', N'en', N'{project}: {documents} documents · approved sheets and locked months are skipped', N'{project}: {documentCount} · approved sheets and locked months are skipped')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;

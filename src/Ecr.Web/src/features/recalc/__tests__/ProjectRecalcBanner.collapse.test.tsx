@@ -61,7 +61,7 @@ describe('ProjectRecalcBanner: згортання пам\'ятається дл�
     serve();
     show();
 
-    const text = '⟦recalcProgress.running (project=LANDUI2026, done=8, total=92, skipped=1, failed=0)⟧';
+    const text = '⟦recalcProgress.running (project=LANDUI2026, done=8, total=92, documentCount=⟦recalcProgress.documentCount.other (count=92)⟧, skipped=1, failed=0)⟧';
     expect(await screen.findByText(text)).toBeTruthy();
     expect(screen.getByRole('progressbar')).toBeTruthy();
 
