@@ -190,7 +190,8 @@ internal static class PermitHistoryRules
             new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.permitHistoryNothingToUndo" });
 
     /// <summary>j4 refusal parameters: both permits, the uncovered days, the date that would close the first gap.</summary>
-    public static GapText Gap(RegistryEntry? previous, RegistryEntry next, IReadOnlyList<DayRange> gaps, string? language)
+    public static GapText Gap(
+        RegistryEntry? previous, RegistryEntry next, IReadOnlyList<DayRange> gaps, DateOnly changeFrom, string? language)
         => new(
             Permit: previous is null ? "…" : PatchCellsHandler.PermitName(previous, language),
             Validity: previous is null ? "…" : PermitMonthCoverage.DescribeValidity(previous.ValidFrom, previous.ValidTo),
@@ -198,7 +199,7 @@ internal static class PermitHistoryRules
             NextValidity: PermitMonthCoverage.DescribeValidity(next.ValidFrom, next.ValidTo),
             Days: string.Join(", ", gaps.Select(g => g.ToString())),
             DayCount: gaps.Sum(g => g.Last.DayNumber - g.First.DayNumber + 1).ToString(CultureInfo.InvariantCulture),
-            SuggestedFrom: gaps[0].First.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture));
+            SuggestedFrom: PermitTimeline.SuggestedFrom(gaps, changeFrom).ToString("dd.MM.yyyy", CultureInfo.InvariantCulture));
 
     /// <summary>Parameters of a j4 refusal (language-neutral strings).</summary>
     internal sealed record GapText(

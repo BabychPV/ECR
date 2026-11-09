@@ -104,4 +104,20 @@ public sealed class PermitTimelineTests
 
         Assert.Equal([new DayRange(D(2, 10), D(2, 17))], gaps);
     }
+
+    /// <summary>
+    /// j4 «move the start date to …» (CI 42610809703 e2e: change 01.10, new permit from 15.10 — the suggestion was 01.10,
+    /// i.e. the same refused date). Previous ended early → its first uncovered day; new permit starts late → its first day.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "ACC-1108-j4")]
+    public void The_suggested_start_date_closes_the_gap_on_the_side_that_causes_it()
+    {
+        var late = PermitTimeline.GapDays(null, D(10, 1), D(10, 15), null, D(12, 31));
+        Assert.Equal(D(10, 15), PermitTimeline.SuggestedFrom(late, D(10, 1)));
+
+        var early = PermitTimeline.GapDays(D(2, 10), D(2, 15), D(2, 15), null, D(12, 31));
+        Assert.Equal(D(2, 10), PermitTimeline.SuggestedFrom(early, D(2, 15)));
+    }
 }
