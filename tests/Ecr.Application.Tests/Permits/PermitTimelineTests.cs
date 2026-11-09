@@ -115,9 +115,29 @@ public sealed class PermitTimelineTests
     public void The_suggested_start_date_closes_the_gap_on_the_side_that_causes_it()
     {
         var late = PermitTimeline.GapDays(null, D(10, 1), D(10, 15), null, D(12, 31));
-        Assert.Equal(D(10, 15), PermitTimeline.SuggestedFrom(late, D(10, 1)));
+        Assert.Equal(D(10, 15), PermitTimeline.SuggestedFrom(late, D(10, 1), D(10, 15), null, D(12, 31)));
 
-        var early = PermitTimeline.GapDays(D(2, 10), D(2, 15), D(2, 15), null, D(12, 31));
-        Assert.Equal(D(2, 10), PermitTimeline.SuggestedFrom(early, D(2, 15)));
+        var early = PermitTimeline.GapDays(D(2, 10), D(2, 15), D(1, 1), null, D(12, 31));
+        Assert.Equal(D(2, 10), PermitTimeline.SuggestedFrom(early, D(2, 15), D(1, 1), null, D(12, 31)));
+    }
+
+    /// <summary>
+    /// F13 p220 j4: the new permit expired 09.04, added from 15.10 — the suggestion was «01.01.2027» (after the window, and
+    /// still refused). No start date can close such a gap, nor one where the new permit is not valid on the previous
+    /// permit's first uncovered day: no suggestion (only «add a permit for those days»).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "F13-p220-j4")]
+    public void No_start_date_is_suggested_when_none_would_close_the_gap()
+    {
+        var expired = PermitTimeline.GapDays(null, D(10, 15), D(1, 1), D(4, 10), D(12, 31));
+        Assert.Null(PermitTimeline.SuggestedFrom(expired, D(10, 15), D(1, 1), D(4, 10), D(12, 31)));
+
+        var bothSides = PermitTimeline.GapDays(D(2, 10), D(2, 15), D(2, 15), null, D(12, 31));
+        Assert.Null(PermitTimeline.SuggestedFrom(bothSides, D(2, 15), D(2, 15), null, D(12, 31)));
+
+        var afterWindow = PermitTimeline.GapDays(null, D(10, 1), new DateOnly(2027, 1, 5), null, D(12, 31));
+        Assert.Null(PermitTimeline.SuggestedFrom(afterWindow, D(10, 1), new DateOnly(2027, 1, 5), null, D(12, 31)));
     }
 }

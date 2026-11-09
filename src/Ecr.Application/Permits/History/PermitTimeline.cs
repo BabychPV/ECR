@@ -1,4 +1,4 @@
-// src/Ecr.Application/Permits/History/PermitTimeline.cs
+﻿// src/Ecr.Application/Permits/History/PermitTimeline.cs
 using System.Globalization;
 
 namespace Ecr.Application.Permits.History;
@@ -123,13 +123,25 @@ public static class PermitTimeline
     /// change — start the new permit on its first uncovered day (gap start); the new permit starts AFTER the change — move
     /// the change to the new permit's first valid day (the day after the gap).
     /// </summary>
+    /// <remarks>
+    /// F13 p220: only a date that really closes the gap — the new permit is valid on it, and it lies inside the window
+    /// (<paramref name="horizon"/>). A new permit that expired before the change, or a gap on both sides, has none:
+    /// <c>null</c> (the refusal then offers only «add a permit for those days»).
+    /// </remarks>
     /// <param name="gaps">Gaps from <see cref="GapDays"/> (at least one).</param>
     /// <param name="changeFrom">The requested change date.</param>
-    public static DateOnly SuggestedFrom(IReadOnlyList<DayRange> gaps, DateOnly changeFrom)
+    /// <param name="newValidFrom">New permit: first valid day; <c>null</c> — from the beginning.</param>
+    /// <param name="newValidTo">New permit: first invalid day (exclusive); <c>null</c> — open-ended.</param>
+    /// <param name="horizon">Last day of the document's reporting window.</param>
+    public static DateOnly? SuggestedFrom(
+        IReadOnlyList<DayRange> gaps, DateOnly changeFrom, DateOnly? newValidFrom, DateOnly? newValidTo, DateOnly horizon)
     {
         ArgumentNullException.ThrowIfNull(gaps);
         var first = gaps[0];
-        return first.First >= changeFrom ? first.Last.AddDays(1) : first.First;
+        var candidate = first.First >= changeFrom ? first.Last.AddDays(1) : first.First;
+        var newValidOn = (newValidFrom is null || newValidFrom <= candidate) && (newValidTo is null || newValidTo > candidate);
+        var closes = gaps.Count == 1;
+        return newValidOn && closes && candidate <= horizon && candidate != changeFrom ? candidate : null;
     }
 
     /// <summary>

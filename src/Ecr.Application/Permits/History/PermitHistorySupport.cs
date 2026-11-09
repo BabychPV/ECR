@@ -191,7 +191,7 @@ internal static class PermitHistoryRules
 
     /// <summary>j4 refusal parameters: both permits, the uncovered days, the date that would close the first gap.</summary>
     public static GapText Gap(
-        RegistryEntry? previous, RegistryEntry next, IReadOnlyList<DayRange> gaps, DateOnly changeFrom, string? language)
+        RegistryEntry? previous, RegistryEntry next, IReadOnlyList<DayRange> gaps, DateOnly changeFrom, DateOnly horizon, string? language)
         => new(
             Permit: previous is null ? "…" : PatchCellsHandler.PermitName(previous, language),
             Validity: previous is null ? "…" : PermitMonthCoverage.DescribeValidity(previous.ValidFrom, previous.ValidTo),
@@ -199,11 +199,11 @@ internal static class PermitHistoryRules
             NextValidity: PermitMonthCoverage.DescribeValidity(next.ValidFrom, next.ValidTo),
             Days: string.Join(", ", gaps.Select(g => g.ToString())),
             DayCount: gaps.Sum(g => g.Last.DayNumber - g.First.DayNumber + 1).ToString(CultureInfo.InvariantCulture),
-            SuggestedFrom: PermitTimeline.SuggestedFrom(gaps, changeFrom).ToString("dd.MM.yyyy", CultureInfo.InvariantCulture));
+            SuggestedFrom: PermitTimeline.SuggestedFrom(gaps, changeFrom, next.ValidFrom, next.ValidTo, horizon)?.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture));
 
     /// <summary>Parameters of a j4 refusal (language-neutral strings).</summary>
     internal sealed record GapText(
-        string Permit, string Validity, string Next, string NextValidity, string Days, string DayCount, string SuggestedFrom);
+        string Permit, string Validity, string Next, string NextValidity, string Days, string DayCount, string? SuggestedFrom);
 
     /// <summary>j6: the audit record of an add/undo — who (record author), both permits, the date, the target.</summary>
     public static StructureChangeRecord AuditRecord(
@@ -219,9 +219,9 @@ internal static class PermitHistoryRules
             column = tableCode is null ? null : columnOrFieldCode,
             headerField = tableCode is null ? columnOrFieldCode : null,
             validFrom = segment.ValidFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            permit = next?.Code,
+            permit = next is null ? null : PatchCellsHandler.PermitName(next, null),
             permitId = segment.RegistryEntryId,
-            previousPermit = previous?.Code,
+            previousPermit = previous is null ? null : PatchCellsHandler.PermitName(previous, null),
             previousPermitId = previous?.Id,
         });
 

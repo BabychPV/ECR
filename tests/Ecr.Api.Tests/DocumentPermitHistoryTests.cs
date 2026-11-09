@@ -73,8 +73,8 @@ public sealed partial class DocumentPermitHistoryTests(SqlServerFixture sql)
 
         // j6: who added it, both permits and the date.
         var audit = await AuditAsync(s, "Add").ConfigureAwait(true);
-        Assert.Contains("\"permit\":\"MIDJAN\"", audit, StringComparison.Ordinal);
-        Assert.Contains("\"previousPermit\":\"YEAR\"", audit, StringComparison.Ordinal);
+        Assert.Contains("\"permit\":\"KZ-MIDJAN\"", audit, StringComparison.Ordinal);
+        Assert.Contains("\"previousPermit\":\"KZ-YEAR\"", audit, StringComparison.Ordinal);
         Assert.Contains("\"validFrom\":\"2026-01-15\"", audit, StringComparison.Ordinal);
     }
 
@@ -145,7 +145,7 @@ public sealed partial class DocumentPermitHistoryTests(SqlServerFixture sql)
         Assert.True(undo.StatusCode == HttpStatusCode.OK, $"{undo.StatusCode}: {body}\n{app.ErrorsText}");
         Assert.Single(JsonDocument.Parse(body).RootElement.GetProperty("permits").EnumerateArray());
         Assert.Equal(0, await SegmentCountAsync(s).ConfigureAwait(true));
-        Assert.Contains("\"permit\":\"MIDJAN\"", await AuditAsync(s, "Remove").ConfigureAwait(true), StringComparison.Ordinal);
+        Assert.Contains("\"permit\":\"KZ-MIDJAN\"", await AuditAsync(s, "Remove").ConfigureAwait(true), StringComparison.Ordinal);
 
         var again = await client.PostAsJsonAsync(
             new Uri($"{Base(s)}/rows/undo", UriKind.Relative),

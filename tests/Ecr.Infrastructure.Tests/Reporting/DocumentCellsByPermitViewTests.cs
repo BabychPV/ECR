@@ -104,11 +104,11 @@ public sealed class DocumentCellsByPermitViewTests(SqlServerFixture sql)
             ],
             rows);
 
-        // Days of the parts and the permit code.
+        // Days of the parts and the permit NUMBER as people know it (F13 p220 j5: not the registry code E000…).
         var parts = await QueryAsync(
             $"SELECT DayFrom, DayTo, PermitCode FROM rpt.v_DocumentCellsByPermit WHERE DocumentId = {kit.DocumentId} AND IsPart = 1 ORDER BY PartNo");
         Assert.Equal(
-            [(new DateTime(2026, 3, 1), new DateTime(2026, 3, 14), $"A{tag}"), (new DateTime(2026, 3, 15), new DateTime(2026, 3, 31), $"B{tag}")],
+            [(new DateTime(2026, 3, 1), new DateTime(2026, 3, 14), "A"), (new DateTime(2026, 3, 15), new DateTime(2026, 3, 31), "B")],
             parts.Select(p => ((DateTime)p[0]!, (DateTime)p[1]!, (string)p[2]!)).ToList());
 
         // ⛔ Never doubled: per cell, the sum of the rows = the cell value of rpt.v_DocumentCells.

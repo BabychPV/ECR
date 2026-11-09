@@ -225,7 +225,7 @@ public sealed class AuditSortAndExportTests(SqlServerFixture sql)
                 $"{businessKey} · Sea Water Intake · A-1 → B-2 · 2026-03-15",
                 $"{businessKey} · Sea Water Intake · A-1 → B-2 · 2026-03-15",
                 $"{businessKey} · PERMIT_H · C-3 · 2026-04-01",
-                $"{businessKey} · row · A-1 · M03 · 2026-03 · A-1 + B-2",
+                $"{businessKey} · row · A-1 · M03 · 2026-03 · A-1: 5.5 + B-2: 6.5 = 12",
                 null,
             ],
             items.Select(i => i.GetProperty("entityLabel").GetString()).ToList());

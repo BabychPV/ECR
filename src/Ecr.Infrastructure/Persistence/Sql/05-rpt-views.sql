@@ -1526,7 +1526,9 @@ SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
        r.Id AS RowId, r.RowKey,
        cd.Code AS ColumnCode, cd.MonthNumber,
        CASE WHEN sp.IsSplit = 1 THEN pp.RegistryEntryId ELSE COALESCE(sg.RegistryEntryId, bs.BaseId) END AS PermitId,
-       pe.Code AS PermitCode,
+       -- F13 p220 j5: the permit NUMBER as people know it (the entry's display, as the app names permits), not the
+       -- registry code E000…; PermitId keeps the entry id.
+       COALESCE(NULLIF(JSON_VALUE(pe.DisplayL10n, N'$.en'), N''), pe.Code) AS PermitCode,
        CAST(CASE WHEN rp.ColumnDefId IS NOT NULL THEN N'row' ELSE N'header' END AS nvarchar(6)) AS PermitSource,
        CAST(COALESCE(sp.IsSplit, 0) AS bit) AS IsPart,
        pp.PartNo, pp.DayFrom, pp.DayTo,

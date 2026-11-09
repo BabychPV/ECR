@@ -102,7 +102,8 @@ public sealed partial class AuditReader
     /// <summary>Поля JSON запису, потрібні підпису.</summary>
     private sealed record PermitAuditState(
         long DocumentId, string? Table, string? RowKey, string? Column, string? HeaderField, string? ValidFrom, string? Permit,
-        string? PreviousPermit, string? Month, IReadOnlyList<string> PartPermits, long? SheetCopyId)
+        string? PreviousPermit, string? Month, IReadOnlyList<string> PartPermits, long? SheetCopyId,
+        IReadOnlyList<string?> PartValues, string? Total)
     {
         /// <summary>The row's (base) permit for a row without a name: the previous permit of a change, else part A's.</summary>
         public string? BasePermit => PreviousPermit ?? (PartPermits.Count > 0 ? PartPermits[0] : Permit);
@@ -124,15 +125,18 @@ public sealed partial class AuditReader
                     return null;
                 }
 
-                var parts = root.TryGetProperty("parts", out var p) && p.ValueKind == JsonValueKind.Array
-                    ? p.EnumerateArray().Select(x => Text(x, "permit")).Where(x => x is not null).Select(x => x!).ToList()
+                var partItems = root.TryGetProperty("parts", out var p) && p.ValueKind == JsonValueKind.Array
+                    ? p.EnumerateArray().Where(x => Text(x, "permit") is not null).ToList()
                     : [];
+                var parts = partItems.Select(x => Text(x, "permit")!).ToList();
                 return new PermitAuditState(
                     documentId, Text(root, "table"), Text(root, "rowKey"), Text(root, "column"), Text(root, "headerField"),
                     Text(root, "validFrom"), Text(root, "permit"), Text(root, "previousPermit"), Text(root, "month"), parts,
                     root.TryGetProperty("sheetCopyId", out var copy) && copy.ValueKind == JsonValueKind.Number && copy.TryGetInt64(out var copyId)
                         ? copyId
-                        : null);
+                        : null,
+                    [.. partItems.Select(x => Number(x, "value"))],
+                    Number(root, "total"));
             }
             catch (JsonException)
             {
@@ -152,7 +156,12 @@ public sealed partial class AuditReader
             {
                 Add(parts, Column);
                 Add(parts, Month);
-                Add(parts, PartPermits.Count > 0 ? string.Join(" + ", PartPermits) : null);
+                // F13 p220 j6: the part values A and B and the total, not only the permits.
+                Add(parts, PartPermits.Count == 0
+                    ? null
+                    : string.Join(" + ", PartPermits.Select((permit, i) =>
+                          PartValues.ElementAtOrDefault(i) is { } value ? $"{permit}: {value}" : permit))
+                      + (Total is null ? string.Empty : $" = {Total}"));
             }
             else
             {
@@ -170,6 +179,12 @@ public sealed partial class AuditReader
                 parts.Add(value);
             }
         }
+
+        /// <summary>A JSON number as people read it: «5.5», «12» (no trailing zeros); anything else — <c>null</c>.</summary>
+        private static string? Number(JsonElement element, string name)
+            => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var number)
+                ? (number / 1.000000000000000000000000000000000m).ToString(CultureInfo.InvariantCulture)
+                : null;
 
         private static string? Text(JsonElement element, string name)
             => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

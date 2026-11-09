@@ -94,7 +94,7 @@ public sealed class AddRowPermitHandler(
         var gaps = PermitTimeline.GapDays(previous?.ValidTo, request.ValidFrom, next.ValidFrom, next.ValidTo, window.PeriodEnd);
         if (gaps.Count > 0)
         {
-            var gap = PermitHistoryRules.Gap(previous, next, gaps, request.ValidFrom, currentUser.Language);
+            var gap = PermitHistoryRules.Gap(previous, next, gaps, request.ValidFrom, window.PeriodEnd, currentUser.Language);
             throw new BusinessRuleException(
                 ErrorCodes.CellRegistryEntryMissing,
                 $"Між дозволами немає чинного дозволу: {gap.Days}.",
@@ -288,7 +288,7 @@ public sealed class AddHeaderPermitHandler(
         var gaps = PermitTimeline.GapDays(previous?.ValidTo, request.ValidFrom, next.ValidFrom, next.ValidTo, window.PeriodEnd);
         if (gaps.Count > 0)
         {
-            var gap = PermitHistoryRules.Gap(previous, next, gaps, request.ValidFrom, currentUser.Language);
+            var gap = PermitHistoryRules.Gap(previous, next, gaps, request.ValidFrom, window.PeriodEnd, currentUser.Language);
             throw new BusinessRuleException(
                 ErrorCodes.HeaderEntryNotUsable,
                 $"Між дозволами шапки немає чинного дозволу: {gap.Days}.",

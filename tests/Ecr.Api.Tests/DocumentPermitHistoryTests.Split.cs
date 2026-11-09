@@ -97,8 +97,8 @@ public sealed partial class DocumentPermitHistoryTests
                 : p.GetDecimal()));
 
         var audit = await AuditAsync(s, "Split", "CellPermitPart").ConfigureAwait(true);
-        Assert.Contains("\"permit\":\"YEAR\"", audit, StringComparison.Ordinal);
-        Assert.Contains("\"permit\":\"MIDJAN\"", audit, StringComparison.Ordinal);
+        Assert.Contains("\"permit\":\"KZ-YEAR\"", audit, StringComparison.Ordinal);
+        Assert.Contains("\"permit\":\"KZ-MIDJAN\"", audit, StringComparison.Ordinal);
         Assert.Contains("\"from\":\"2026-01-15\"", audit, StringComparison.Ordinal);
 
         Assert.DoesNotContain(await FindingsAsync(client, s).ConfigureAwait(true), f => f.Rule == "PERMIT-SPLIT");

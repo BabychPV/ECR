@@ -234,7 +234,7 @@ public sealed class SaveCellSplitsHandler(
         var parts = inMonth
             .Select(s => new PartSpan(
                 s.EntryId,
-                entries.TryGetValue(s.EntryId, out var e) ? $"{e.Code}" : string.Empty,
+                entries.TryGetValue(s.EntryId, out var e) ? PatchCellsHandler.PermitName(e, null) : string.Empty,
                 s.From is { } f && f > month ? f : month,
                 s.Until is { } u && u < last ? u : last))
             .ToList();
