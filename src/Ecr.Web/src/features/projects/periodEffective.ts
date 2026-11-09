@@ -23,7 +23,13 @@ export function effectivePeriodState(period: PeriodMoment, now: number): string 
   return !Number.isNaN(lockAt) && lockAt <= now ? 'Closed' : period.state;
 }
 
-/** Мить, з якої місяць заблоковано (для «Locked since …»): строк перевідкриття, інакше жорстке закриття. */
+/**
+ * Мить, з якої місяць заблоковано (для «Locked since …»): межа блокування самого періоду (`endsAt`).
+ *
+ * ✎ debt-1109 F13 (P3 B): тут стояв строк перевідкриття (`reopenedUntil ?? endsAt`), і після ДОСТРОКОВОГО
+ * закриття перевідкриття плитка року казала «Locked since Nov 10» — дату закриття винятку, а не періоду.
+ * Перевідкриття — окремий рядок плитки («reopened until …»), поки воно діє.
+ */
 export function lockedSinceOf(period: PeriodMoment): string {
-  return period.reopenedUntil ?? period.endsAt;
+  return period.endsAt;
 }
