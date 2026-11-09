@@ -1,12 +1,16 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
 import {
+  addHeaderPermit,
   addRowPermit,
   getPermitHistory,
   permitHistoryKey,
   saveCellSplits,
+  undoHeaderPermit,
   undoRowPermit,
+  type AddHeaderPermitRequest,
   type AddRowPermitRequest,
+  type UndoHeaderPermitRequest,
   type DocumentPermitHistory,
   type SaveCellSplitsRequest,
   type UndoRowPermitRequest,
@@ -59,6 +63,32 @@ export function useUndoRowPermit(documentId: number) {
   return useMutation({
     meta: { handled: true },
     mutationFn: (body: UndoRowPermitRequest) => undoRowPermit(documentId, body),
+    onSuccess: () => {
+      void refreshAfterPermitChange(queryClient, documentId);
+    },
+  });
+}
+
+/** jh1: add a permit to a header field from a date. The refusal is shown in the form itself (`handled`). */
+export function useAddHeaderPermit(documentId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    meta: { handled: true },
+    mutationFn: (body: AddHeaderPermitRequest) => addHeaderPermit(documentId, body),
+    onSuccess: () => {
+      void refreshAfterPermitChange(queryClient, documentId);
+    },
+  });
+}
+
+/** jh1: undo the latest permit added to a header field. The refusal is shown next to the link (`handled`). */
+export function useUndoHeaderPermit(documentId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    meta: { handled: true },
+    mutationFn: (body: UndoHeaderPermitRequest) => undoHeaderPermit(documentId, body),
     onSuccess: () => {
       void refreshAfterPermitChange(queryClient, documentId);
     },

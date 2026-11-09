@@ -12,7 +12,12 @@ import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { problemText } from '@/shared/ui/problemText';
 import { dottedDate, permitGapOf } from './splitModel';
-import { useAddRowPermit } from './usePermitHistory';
+import { useAddHeaderPermit, useAddRowPermit } from './usePermitHistory';
+
+/** A row's permit cell or a header permit field. */
+export type PermitAddTarget =
+  | { readonly kind: 'row'; readonly tableInstanceId: number; readonly rowKey: string; readonly columnCode: string }
+  | { readonly kind: 'header'; readonly fieldCode: string };
 
 /** Options shown at once (the registry may hold thousands; search goes over all of them). */
 const OptionsLimit = 50;
@@ -20,10 +25,8 @@ const OptionsLimit = 50;
 export interface AddRowPermitFormProps {
   readonly documentId: number;
   readonly periodKey: number;
-  readonly tableInstanceId: number;
-  readonly rowKey: string;
-  readonly rowLabel: string;
-  readonly columnCode: string;
+  /** Whose permit: a row's permit cell (j1) or a header field (jh1, Ship 2). */
+  readonly target: PermitAddTarget;
   /** Code of the permit registry the column points to. */
   readonly registryCode: string;
   /** The permit the row holds now (registry entry id); it is not offered again. */
@@ -64,7 +67,10 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
     queryFn: () => apiFetch<RegistryEntryDto[]>(`${permitsUrl}?documentId=${String(documentId)}`),
     staleTime: LookupEntriesStaleTimeMs,
   });
-  const add = useAddRowPermit(documentId);
+  const header = props.target.kind === 'header';
+  const addRow = useAddRowPermit(documentId);
+  const addHeader = useAddHeaderPermit(documentId);
+  const add = header ? addHeader : addRow;
   const addLoading = usePendingLoading(add.isPending);
 
   const current = entries.data?.find((entry) => entry.id === currentEntryId);
@@ -79,16 +85,22 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
 
   const submit = (date: string): void => {
     if (chosen === undefined || date.length === 0) return;
-    add.mutate(
-      {
-        tableInstanceId: props.tableInstanceId,
-        rowKey: props.rowKey,
-        columnCode: props.columnCode,
-        registryEntryId: chosen.id,
-        validFrom: date,
-      },
-      { onSuccess: () => props.onDone(date) },
-    );
+    const target = props.target;
+    const onSuccess = (): void => props.onDone(date);
+    if (target.kind === 'header') {
+      addHeader.mutate({ fieldCode: target.fieldCode, registryEntryId: chosen.id, validFrom: date, periodKey }, { onSuccess });
+    } else {
+      addRow.mutate(
+        {
+          tableInstanceId: target.tableInstanceId,
+          rowKey: target.rowKey,
+          columnCode: target.columnCode,
+          registryEntryId: chosen.id,
+          validFrom: date,
+        },
+        { onSuccess },
+      );
+    }
   };
 
   const gap = permitGapOf(add.error);
@@ -97,7 +109,7 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
 
   return (
     <form
-      aria-label={t('permits.history.addTitle')}
+      aria-label={header ? t('permits.header.addTitle') : t('permits.history.addTitle')}
       data-add-row-permit=""
       onSubmit={(event) => {
         event.preventDefault();
@@ -119,7 +131,7 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
           data-autofocus
         />
         <DateOnlyInput
-          label={t('permits.history.validFrom')}
+          label={header ? t('permits.header.validFrom') : t('permits.history.validFrom')}
           value={from}
           onChange={(next) => {
             setValidFrom(next);
@@ -129,7 +141,7 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
         {/* F13 p220 j7: no «— from 01.10» preview before a permit is picked. */}
         {chosenLabel !== null && (
           <Text size="xs" c="dimmed" data-add-keeps="">
-            {t('permits.history.addKeeps', {
+            {t(header ? 'permits.header.addKeeps' : 'permits.history.addKeeps', {
               current: currentLabel ?? '—',
               next: chosenLabel,
               until: dottedDate(previousDay(from)),
@@ -139,7 +151,7 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
         )}
         {!from.endsWith('-01') && (
           <Text size="xs" c="statusWarning" data-add-split-hint="">
-            {t('permits.history.addSplitHint')}
+            {header ? t('permits.header.addSplitHint') : t('permits.history.addSplitHint')}
           </Text>
         )}
 
