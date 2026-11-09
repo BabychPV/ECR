@@ -237,6 +237,7 @@ public static class DependencyInjection
         services.AddScoped<Permits.History.AddHeaderPermitHandler>();
         services.AddScoped<Permits.History.UndoHeaderPermitHandler>();
         services.AddScoped<Permits.History.GetPermitHistoryHandler>();
+        services.AddScoped<Permits.History.SaveCellSplitsHandler>();
         services.AddScoped<Periods.GetPeriodCalendarHandler>();
 
         // Робочий процес (модулі 3.4–3.6)

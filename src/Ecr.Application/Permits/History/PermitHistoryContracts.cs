@@ -49,7 +49,30 @@ public sealed record PermitPartSpanDto(int PartNo, long RegistryEntryId, string 
 /// <param name="Month">First day of the month.</param>
 /// <param name="ColumnCodes">Cells of the row with entered data in that month that are not split yet.</param>
 /// <param name="Parts">The parts the month splits into.</param>
-public sealed record SplitMonthDto(DateOnly Month, IReadOnlyList<string> ColumnCodes, IReadOnlyList<PermitPartSpanDto> Parts);
+/// <param name="Cells">The month cells of the row: current total and the entered parts (pre-fill of the split dialog).</param>
+public sealed record SplitMonthDto(
+    DateOnly Month, IReadOnlyList<string> ColumnCodes, IReadOnlyList<PermitPartSpanDto> Parts, IReadOnlyList<CellSplitValueDto> Cells);
+
+/// <summary>One month cell of a shared month.</summary>
+/// <param name="ColumnCode">The month column.</param>
+/// <param name="Total">The stored value (the sum once split; the single «unsplit» value before).</param>
+/// <param name="Parts">Entered part values by part number (A, B, …); <c>null</c> — not entered.</param>
+/// <param name="IsSplit">Every part holds a value (the cell no longer blocks Submit).</param>
+public sealed record CellSplitValueDto(string ColumnCode, decimal? Total, IReadOnlyList<decimal?> Parts, bool IsSplit);
+
+/// <summary>j2/jh3: save the parts of month cells (partial save allowed — a cell whose parts are all entered gets the total).</summary>
+/// <param name="PeriodKey">The period the user is in (<c>YYYYMM</c>).</param>
+/// <param name="Items">Cells to split.</param>
+public sealed record SaveCellSplitsRequest(int PeriodKey, IReadOnlyList<CellSplitItem> Items);
+
+/// <summary>One month cell and its parts typed by the user (never divided by days).</summary>
+/// <param name="TableInstanceId">A table instance of the document.</param>
+/// <param name="RowKey">Row key.</param>
+/// <param name="ColumnCode">The month column (or a numeric column of a table without month columns).</param>
+/// <param name="BaseVersion">Row version the user started from (as in <c>PATCH …/cells</c>).</param>
+/// <param name="Parts">Part values A, B, … in date order; <c>null</c> — not entered yet.</param>
+public sealed record CellSplitItem(
+    long TableInstanceId, string RowKey, string ColumnCode, string BaseVersion, IReadOnlyList<decimal?> Parts);
 
 /// <summary>Permit history of one row's permit cell.</summary>
 /// <param name="TableDefId">Table.</param>
