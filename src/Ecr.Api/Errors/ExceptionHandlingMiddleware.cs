@@ -808,6 +808,11 @@ public sealed partial class ExceptionHandlingMiddleware(
             e.StatusCode == StatusCodes.Status413PayloadTooLarge
                 ? (StatusCodes.Status413PayloadTooLarge, ErrorCodes.RequestInvalid,
                    "Тіло запиту перевищує дозволений розмір.", RequestTooLargeDetails)
+                // ✎ debt-1109 x3: PUT/POST без тіла чи з чужим Content-Type — 415 зі статусом від
+                // `UnsupportedMediaTypeRefusalFilter`, а не голий 415 без `errorCode`.
+                : e.StatusCode == StatusCodes.Status415UnsupportedMediaType
+                ? (StatusCodes.Status415UnsupportedMediaType, ErrorCodes.RequestInvalid,
+                   "Запит не відповідає очікуваній формі: тіло відсутнє або не JSON.", MalformedRequestDetails)
                 : (StatusCodes.Status400BadRequest, ErrorCodes.RequestInvalid,
                    "Запит не відповідає очікуваній формі: перевірте типи полів і синтаксис JSON.",
                    MalformedRequestDetails),
