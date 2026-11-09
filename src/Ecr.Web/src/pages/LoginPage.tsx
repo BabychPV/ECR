@@ -17,7 +17,14 @@ import {
 } from '@mantine/core';
 import { BrandMark } from '@/shared/ui/BrandMark';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { apiFetch, EcrApiError, LOGIN_IDLE_MINUTES_PARAM, LOGIN_REASON_PARAM } from '@/api/client';
+import {
+  apiFetch,
+  EcrApiError,
+  forgetIdleSignOut,
+  LOGIN_IDLE_MINUTES_PARAM,
+  LOGIN_REASON_PARAM,
+  readIdleSignOut,
+} from '@/api/client';
 import type { CurrentUserDto, LocalLoginRequest } from '@/api/types';
 import {
   anyLostEdits,
@@ -147,8 +154,13 @@ export function LoginPage(): JSX.Element {
   const [searchParams] = useSearchParams();
   const sessionInvalidated = searchParams.get(LOGIN_REASON_PARAM) === 'session-invalidated';
   // D-471: вихід після бездіяльності — з межею, якщо адреса її несе (ціле 1–480, інакше текст без числа).
-  const idleSignedOut = searchParams.get(LOGIN_REASON_PARAM) === 'idle';
-  const idleMinutes = Number(searchParams.get(LOGIN_IDLE_MINUTES_PARAM));
+  // ✎ Борг 09.11: після перезавантаження адреса вже без причини (сервер віддав `idleTimeout` лише раз) — тоді
+  // причину й межу несе позначка вкладки (`rememberIdleSignOut`). Інша явна причина в адресі її перекриває.
+  const reasonParam = searchParams.get(LOGIN_REASON_PARAM);
+  const [idleMarker] = useState(() => (reasonParam === null ? readIdleSignOut() : null));
+  const idleSignedOut = reasonParam === 'idle' || idleMarker !== null;
+  const idleMinutes =
+    reasonParam === 'idle' ? Number(searchParams.get(LOGIN_IDLE_MINUTES_PARAM)) : Number(idleMarker?.minutes ?? NaN);
   const idleMinutesKnown = Number.isInteger(idleMinutes) && idleMinutes >= 1 && idleMinutes <= 480;
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
@@ -194,6 +206,7 @@ export function LoginPage(): JSX.Element {
       // ⛔ AN-108 / S2-05: інші вкладки цього браузера працювали під ПОПЕРЕДНІМ сеансом — вони покидають його
       // (слід незбережених правок їхнього власника, перезавантаження), а не відправляють їх під новим cookie.
       announceSessionChange();
+      forgetIdleSignOut();
 
       // ⚠ Слід втрачених правок читається лише ПІСЛЯ входу і лише свого
       // користувача: до входу невідомо, чий він, а показати його будь-кому
