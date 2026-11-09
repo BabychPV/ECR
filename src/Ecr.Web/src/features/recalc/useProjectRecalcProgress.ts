@@ -46,15 +46,36 @@ export function projectRecalcKey(projectId: number | null): readonly unknown[] {
  */
 const expectedTotals = new Map<string, number>();
 
+/**
+ * ✎ debt-1109 x5: перезавантаження ДО розкладу губило N (карта жила лише в пам'яті) — банер знову казав «Queued
+ * recalculation of X…». Тепер N ще й у `sessionStorage` вкладки; кожне звернення в try/catch, без сховища — як раніше.
+ */
+const StoragePrefix = 'ecr.recalcTotal.';
+
 /** Запам'ятати очікуване N для задачі перерахунку проєкту (відповідь `POST /projects/{id}/recalculate`). */
 export function rememberRecalcTotal(jobId: string, total: number): void {
   expectedTotals.set(jobId, total);
+  try {
+    globalThis.sessionStorage?.setItem(`${StoragePrefix}${jobId}`, String(total));
+  } catch {
+    // Сховище недоступне — N живе до перезавантаження.
+  }
 }
 
-/** Стан із N: серверне `fanOut.total`, а до розкладу — запам'ятане при постановці. */
+function storedTotal(jobId: string): number | undefined {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(`${StoragePrefix}${jobId}`);
+    const value = raw === null || raw === undefined ? Number.NaN : Number(raw);
+    return Number.isInteger(value) && value >= 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Стан із N: серверне `fanOut.total`, а до розкладу — запам'ятане при постановці (і після перезавантаження). */
 export function withExpectedTotal(progress: RecalcProgress): RecalcProgress {
   if (progress.total !== null) return progress;
-  const expected = expectedTotals.get(progress.jobId);
+  const expected = expectedTotals.get(progress.jobId) ?? storedTotal(progress.jobId);
   return expected === undefined ? progress : { ...progress, total: expected };
 }
 

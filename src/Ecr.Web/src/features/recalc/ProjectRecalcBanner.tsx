@@ -132,7 +132,9 @@ function RecalcRow({
       data-recalc-phase={item.phase}
       data-collapsed={collapsed ? 'true' : 'false'}
     >
-      <Group gap="xs" wrap="nowrap" justify="space-between">
+      {/* ✎ debt-1109 x4: при 375 px дії не вміщались поруч із текстом і вилазили за край — рядок переноситься,
+          дії стають під текстом праворуч; на широкому екрані — як і раніше, один рядок. */}
+      <Group gap="xs" wrap="wrap" justify="space-between" data-recalc-head="">
         <Text
           size="sm"
           fw={500}
@@ -140,10 +142,11 @@ function RecalcRow({
           className="ecr-ellipsis"
           title={text}
           data-recalc-text=""
+          style={{ flex: '1 1 14rem', minWidth: 0 }}
         >
           {text}
         </Text>
-        <Group gap="xs" wrap="nowrap">
+        <Group gap="xs" wrap="wrap" justify="flex-end" ml="auto" data-recalc-actions="">
           {!collapsed && canSeeJobs && (
             <Anchor component={Link} to={`/admin/jobs?mine=1&parent=${encodeURIComponent(item.jobId)}`} size="xs">
               {t('recalcProgress.openJobs')}
