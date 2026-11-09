@@ -446,6 +446,12 @@ export type ValidationResultResponse = Schemas['ValidationResultResponse'];
 /** Зміна отримання алертів. */
 export type SetAlertsRequest = Schemas['SetAlertsRequest'];
 
+/** Налаштування сеансу: вихід після бездіяльності (D-471). */
+export type SessionSettingsView = Schemas['SessionSettingsView'];
+
+/** Зміна налаштувань сеансу (D-471). */
+export type SessionSettingsInput = Schemas['SessionSettingsInput'];
+
 /** Каталог рядків інтерфейсу. */
 export type UiStringCatalog = Schemas['UiStringCatalog'];
 

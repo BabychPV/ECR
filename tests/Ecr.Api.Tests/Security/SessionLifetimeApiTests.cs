@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
 
 namespace Ecr.Api.Tests.Security;
@@ -24,6 +25,8 @@ public sealed class SessionLifetimeApiTests(SqlServerFixture sql)
     private const string Password = "Api-Session-Life-2026!";
 
     private static readonly Uri Me = new("/api/v1/me", UriKind.Relative);
+
+    private static readonly Uri Activity = new("/api/v1/session/activity", UriKind.Relative);
 
     private readonly string _tag = Guid.NewGuid().ToString("N")[..8];
 
@@ -67,20 +70,28 @@ public sealed class SessionLifetimeApiTests(SqlServerFixture sql)
         var time = new ShiftedTime();
         using var baseApp = new EcrApiFactory(sql);
         using var app = baseApp.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
             services.PostConfigure<CookieAuthenticationOptions>(
-                CookieAuthenticationDefaults.AuthenticationScheme, options => options.TimeProvider = time)));
+                CookieAuthenticationDefaults.AuthenticationScheme, options => options.TimeProvider = time);
+
+            // ✎ D-471: межа бездіяльності — найбільша (8 год), щоб кроки по 5 год мірили саме абсолютну межу.
+            services.RemoveAll<Ecr.Application.Ports.IIdleTimeoutPolicy>();
+            services.AddSingleton<Ecr.Application.Ports.IIdleTimeoutPolicy>(
+                new IdleSignOutApiTests.FixedPolicy(Ecr.Application.Security.SessionSettings.MaxIdleTimeoutMinutes));
+        }));
         using var client = app.CreateClient();
 
         var login = await LoginAsync(client).ConfigureAwait(true);
         Assert.True(login.IsSuccessStatusCode, $"Вхід: {login.StatusCode}");
 
-        // Запит кожні 5 год: ковзний строк (8 год) щоразу продовжує cookie —
-        // саме так «підтримувана» сесія до S21 жила безкінечно.
+        // Дія людини кожні 5 год: ковзний строк (8 год) щоразу продовжує cookie —
+        // саме так «підтримувана» сесія до S21 жила безкінечно. ✎ D-471: дія —
+        // сигнал активності; опитування (GET) сеансу вже не продовжує.
         time.Offset = TimeSpan.FromHours(5);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(Me).ConfigureAwait(true)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync(Activity, content: null).ConfigureAwait(true)).StatusCode);
 
         time.Offset = TimeSpan.FromHours(10);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(Me).ConfigureAwait(true)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync(Activity, content: null).ConfigureAwait(true)).StatusCode);
 
         // 13 год від входу, 3 год від останнього продовження — ковзний строк
         // ще дійсний, абсолютний — ні.

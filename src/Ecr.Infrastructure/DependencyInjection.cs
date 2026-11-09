@@ -472,6 +472,10 @@ public static class DependencyInjection
         services.AddSingleton<ISmtpPasswordProtector>(sp => sp.GetRequiredService<Notifications.SmtpPasswordProtector>());
         services.AddScoped<ISmtpSettingsStore, Notifications.SmtpSettingsStore>();
 
+        // D-471: вихід після бездіяльності — значення в `sys_ecr.SystemSetting`, межа з коротким кешем.
+        services.AddScoped<ISessionSettingsStore, Security.SessionSettingsStore>();
+        services.AddSingleton<IIdleTimeoutPolicy, Security.IdleTimeoutPolicy>();
+
         // BE-33. ⛔ Перелік хостів вебхука — лише з конфігурації процесу:
         // порожній перелік означає «жоден вебхук не приймається».
         services.AddScoped<INotificationStore, Notifications.NotificationStore>();

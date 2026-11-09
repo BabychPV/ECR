@@ -182,6 +182,8 @@ public static class DependencyInjection
         services.AddScoped<Security.GetCurrentUserHandler>();
         services.AddScoped<Security.StartSimulationHandler>();
         services.AddScoped<Security.EndSimulationHandler>();
+        services.AddScoped<Security.GetSessionSettingsHandler>();
+        services.AddScoped<Security.SaveSessionSettingsHandler>();
 
         // Безпека: ролі, користувачі, аудит (модулі 3.2, 3.9)
         services.AddScoped<Security.ListRolesHandler>();
