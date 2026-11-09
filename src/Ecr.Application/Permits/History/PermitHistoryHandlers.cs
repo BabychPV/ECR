@@ -100,7 +100,8 @@ public sealed class AddRowPermitHandler(
                 $"Між дозволами немає чинного дозволу: {gap.Days}.",
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = "err.ECR-CELL-4223.permitGap",
+                    // F13 p220 re-check: no start date closes the gap — the «add a permit» text, never a raw {suggestedFrom}.
+                    ["messageKey"] = gap.SuggestedFrom is null ? "err.ECR-CELL-4223.permitGapNoMove" : "err.ECR-CELL-4223.permitGap",
                     ["permit"] = gap.Permit,
                     ["validity"] = gap.Validity,
                     ["next"] = gap.Next,
@@ -294,7 +295,8 @@ public sealed class AddHeaderPermitHandler(
                 $"Між дозволами шапки немає чинного дозволу: {gap.Days}.",
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = "err.ECR-HDR-4223.permitGap",
+                    // F13 p220 re-check: no start date closes the gap — the «add a permit» text, never a raw {suggestedFrom}.
+                    ["messageKey"] = gap.SuggestedFrom is null ? "err.ECR-HDR-4223.permitGapNoMove" : "err.ECR-HDR-4223.permitGap",
                     ["permit"] = gap.Permit,
                     ["validity"] = gap.Validity,
                     ["next"] = gap.Next,

@@ -232,7 +232,9 @@ export interface PermitGapRefusal {
 export function permitGapOf(error: unknown): PermitGapRefusal | null {
   if (!(error instanceof EcrApiError)) return null;
   const ext = error.problem.extensions2 ?? {};
-  if (ext['messageKey'] !== 'err.ECR-CELL-4223.permitGap') return null;
+  // F13 p220 re-check: `…permitGapNoMove` — no start date closes the gap (no «move» fix); row and header variants.
+  const key = ext['messageKey'];
+  if (typeof key !== 'string' || !/^err\.ECR-(CELL|HDR)-4223\.permitGap(NoMove)?$/.test(key)) return null;
 
   return {
     next: typeof ext['next'] === 'string' ? ext['next'] : '',

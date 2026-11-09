@@ -156,6 +156,32 @@ describe('RowPermitSection (j1)', () => {
     await waitFor(() => expect(addRowPermit).toHaveBeenLastCalledWith(3, expect.objectContaining({ validFrom: '2026-02-10' })));
   });
 
+  it('F13 p220 re-check j4: no start date closes the gap (suggestedFrom null) — only «add a permit», no «{…}» anywhere', async () => {
+    addRowPermit.mockRejectedValueOnce(
+      new EcrApiError({
+        title: 'Gap',
+        status: 422,
+        errorCode: 'ECR-CELL-4223',
+        correlationId: 'c',
+        detail: 'Not saved: 10.02–14.02.2026 have no valid permit for this row. Add a permit for those days.',
+        extensions2: { messageKey: 'err.ECR-CELL-4223.permitGapNoMove', next: 'KZ46VCZ14622410', days: '10.02–14.02.2026', suggestedFrom: null },
+      }),
+    );
+    show({}, []);
+    fireEvent.click(screen.getByRole('button', { name: 'permits.history.add' }));
+    pickPermit(/KZ46VCZ14622410/);
+    fireEvent.click(screen.getByRole('button', { name: 'permits.history.addSubmit' }));
+
+    const gap = await waitFor(() => {
+      const found = document.querySelector('[data-permit-gap]');
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    expect(within(gap).getByRole('button', { name: /permits\.history\.gapAdd .*"days":"10\.02–14\.02\.2026"/ })).toBeTruthy();
+    expect(gap.querySelector('[data-gap-move]')).toBeNull();
+    expect(gap.textContent).not.toMatch(/\{\w+\}/);
+  });
+
   it('j2: the split month cell shows the parts; Edit parts opens the split dialog for it', () => {
     show({ columnCode: 'Feb', value: '12.4' });
 

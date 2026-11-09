@@ -95,8 +95,11 @@ public sealed partial class DocumentPermitHistoryTests(SqlServerFixture sql)
         Assert.True(response.StatusCode == HttpStatusCode.UnprocessableEntity, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
         var problem = JsonDocument.Parse(body).RootElement;
         Assert.Equal("ECR-CELL-4223", problem.GetProperty("errorCode").GetString());
-        Assert.Equal("err.ECR-CELL-4223.permitGap", problem.GetProperty("messageKey").GetString());
+        // F13 p220 re-check: MIDJAN is not valid on 10.01, so no start date closes the gap — the «add a permit» variant,
+        // never a raw «{suggestedFrom}» in the text.
+        Assert.Equal("err.ECR-CELL-4223.permitGapNoMove", problem.GetProperty("messageKey").GetString());
         var detail = problem.GetProperty("detail").GetString() ?? string.Empty;
+        Assert.DoesNotContain("{", detail, StringComparison.Ordinal);
         Assert.Contains("10.01–14.01.2026", detail, StringComparison.Ordinal);
         Assert.Contains("KZ-EARLY", detail, StringComparison.Ordinal);
         Assert.Contains("KZ-MIDJAN", detail, StringComparison.Ordinal);
