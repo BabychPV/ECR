@@ -5566,6 +5566,14 @@
             "description": "Ресурсні гранти: `\"{ResourceKind}:{Id}\"` → рівень.",
             "type": "object"
           },
+          "idleTimeoutMinutes": {
+            "description": "Вихід після стількох хвилин без дій (D-471); попередження — за хвилину. `/me` заповнює завжди.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "isSimulation": {
             "description": "Сеанс симуляції «очима користувача» (ФВ-6.16a).",
             "type": "boolean"
@@ -23758,6 +23766,52 @@
           "targetRoleId",
           "detailsJson",
           "changedByUserId"
+        ],
+        "type": "object"
+      },
+      "SessionSettingsInput": {
+        "description": "Запит на зміну налаштувань сеансу.",
+        "properties": {
+          "idleTimeoutMinutes": {
+            "description": "Вихід після стількох хвилин без дій.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "idleTimeoutMinutes"
+        ],
+        "type": "object"
+      },
+      "SessionSettingsView": {
+        "description": "Налаштування сеансу для екрана «Безпека».",
+        "properties": {
+          "defaultIdleTimeoutMinutes": {
+            "description": "Значення за замовчуванням.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "idleTimeoutMinutes": {
+            "description": "Вихід після стількох хвилин без дій.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "maxIdleTimeoutMinutes": {
+            "description": "Найбільше допустиме значення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "minIdleTimeoutMinutes": {
+            "description": "Найменше допустиме значення.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "idleTimeoutMinutes",
+          "minIdleTimeoutMinutes",
+          "maxIdleTimeoutMinutes",
+          "defaultIdleTimeoutMinutes"
         ],
         "type": "object"
       },
@@ -42047,6 +42101,20 @@
         ]
       }
     },
+    "/api/v1/logout/idle": {
+      "post": {
+        "description": "⚠ На відміну від `POST /api/v1/logout`, штамп НЕ прокручується: бездіяльність однієї вкладки (браузера) не\nмає виводити ту саму людину з іншого пристрою, де вона працює. Копія цієї cookie однаково мертва: момент\nостанньої дії в ній старий, і сервер відкине її за межею (IdleSession).",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        },
+        "summary": "Вихід через бездіяльність: таймер вкладки дійшов до межі (D-471).",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
     "/api/v1/me": {
       "get": {
         "description": "Клієнт має знати права наперед, щоб не показувати кнопки, які все одно\nдадуть 403.",
@@ -58836,6 +58904,105 @@
         ]
       }
     },
+    "/api/v1/security/session-settings": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSettingsView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSettingsView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSettingsView"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Поточне значення й межі.",
+        "tags": [
+          "SessionSettings"
+        ]
+      },
+      "put": {
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionSettingsInput"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionSettingsInput"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionSettingsInput"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSettingsView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSettingsView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSettingsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює межу бездіяльності; діє без перезапуску і для чинних сеансів.",
+        "tags": [
+          "SessionSettings"
+        ]
+      }
+    },
     "/api/v1/security/simulation": {
       "delete": {
         "parameters": [
@@ -59131,6 +59298,20 @@
         "summary": "Те саме про ЧУЖИЙ запис. Право `Security.ManageUsers`.",
         "tags": [
           "Security"
+        ]
+      }
+    },
+    "/api/v1/session/activity": {
+      "post": {
+        "description": "Тіла немає: момент дії ставить сам сервер (IdleSession) під час перевірки cookie, і\nвідповідь несе перевидану cookie. Опитування (GET) цього не роблять ніколи.",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        },
+        "summary": "Сигнал «людина діє» — клацання й клавіші, що не дійшли до сервера (D-471).",
+        "tags": [
+          "Auth"
         ]
       }
     },
@@ -68682,6 +68863,9 @@
     },
     {
       "name": "Security"
+    },
+    {
+      "name": "SessionSettings"
     },
     {
       "name": "SheetChanges"

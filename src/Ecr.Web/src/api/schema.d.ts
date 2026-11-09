@@ -8577,6 +8577,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/logout/idle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Вихід через бездіяльність: таймер вкладки дійшов до межі (D-471).
+         * @description ⚠ На відміну від `POST /api/v1/logout`, штамп НЕ прокручується: бездіяльність однієї вкладки (браузера) не
+         *     має виводити ту саму людину з іншого пристрою, де вона працює. Копія цієї cookie однаково мертва: момент
+         *     останньої дії в ній старий, і сервер відкине її за межею (IdleSession).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me": {
         parameters: {
             query?: never;
@@ -20584,6 +20623,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/security/session-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Поточне значення й межі. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SessionSettingsView"];
+                        "text/json": components["schemas"]["SessionSettingsView"];
+                        "text/plain": components["schemas"]["SessionSettingsView"];
+                    };
+                };
+            };
+        };
+        /** Змінює межу бездіяльності; діє без перезапуску і для чинних сеансів. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SessionSettingsInput"];
+                    "application/json": components["schemas"]["SessionSettingsInput"];
+                    "text/json": components["schemas"]["SessionSettingsInput"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SessionSettingsView"];
+                        "text/json": components["schemas"]["SessionSettingsView"];
+                        "text/plain": components["schemas"]["SessionSettingsView"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/security/simulation": {
         parameters: {
             query?: never;
@@ -20824,6 +20941,44 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/session/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Сигнал «людина діє» — клацання й клавіші, що не дійшли до сервера (D-471).
+         * @description Тіла немає: момент дії ставить сам сервер (IdleSession) під час перевірки cookie, і
+         *     відповідь несе перевидану cookie. Опитування (GET) цього не роблять ніколи.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -29975,6 +30130,11 @@ export interface components {
             grants: {
                 [key: string]: string;
             };
+            /**
+             * Format: int32
+             * @description Вихід після стількох хвилин без дій (D-471); попередження — за хвилину. `/me` заповнює завжди.
+             */
+            idleTimeoutMinutes?: null | number;
             /** @description Сеанс симуляції «очима користувача» (ФВ-6.16a). */
             isSimulation: boolean;
             /** @description Мова інтерфейсу з профілю. */
@@ -38411,6 +38571,37 @@ export interface components {
              * @description Користувач, якого стосується подія; `null` — не стосується.
              */
             targetUserId: null | number;
+        };
+        /** @description Запит на зміну налаштувань сеансу. */
+        SessionSettingsInput: {
+            /**
+             * Format: int32
+             * @description Вихід після стількох хвилин без дій.
+             */
+            idleTimeoutMinutes: number;
+        };
+        /** @description Налаштування сеансу для екрана «Безпека». */
+        SessionSettingsView: {
+            /**
+             * Format: int32
+             * @description Значення за замовчуванням.
+             */
+            defaultIdleTimeoutMinutes: number;
+            /**
+             * Format: int32
+             * @description Вихід після стількох хвилин без дій.
+             */
+            idleTimeoutMinutes: number;
+            /**
+             * Format: int32
+             * @description Найбільше допустиме значення.
+             */
+            maxIdleTimeoutMinutes: number;
+            /**
+             * Format: int32
+             * @description Найменше допустиме значення.
+             */
+            minIdleTimeoutMinutes: number;
         };
         /** @description Запит на зміну отримання алертів. */
         SetAlertsRequest: {

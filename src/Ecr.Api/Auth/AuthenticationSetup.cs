@@ -121,6 +121,8 @@ public static partial class AuthenticationSetup
                 // 401 на 302 з HTML, і клієнт побачив би «успіх» замість відмови.
                 options.Events.OnRedirectToLogin = context =>
                 {
+                    // D-471: сеанс щойно відкинуто через бездіяльність — відповідь із причиною, а не порожній 401.
+                    IdleSession.ThrowIfExpired(context.HttpContext);
                     context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                     return Task.CompletedTask;
                 };
@@ -156,11 +158,17 @@ public static partial class AuthenticationSetup
     /// <param name="context">Контекст підпису cookie.</param>
     private static Task StampAuthTime(CookieSigningInContext context)
     {
-        if (context.Principal?.Identity is ClaimsIdentity identity && !identity.HasClaim(c => c.Type == AuthTimeClaim))
+        if (context.Principal?.Identity is ClaimsIdentity identity)
         {
             var now = (context.Options.TimeProvider ?? TimeProvider.System).GetUtcNow();
-            identity.AddClaim(new Claim(
-                AuthTimeClaim, now.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)));
+            if (!identity.HasClaim(c => c.Type == AuthTimeClaim))
+            {
+                identity.AddClaim(new Claim(
+                    AuthTimeClaim, now.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)));
+            }
+
+            // D-471: вхід — теж дія людини; відлік бездіяльності починається з нього.
+            IdleSession.StampOnSignIn(identity, now);
         }
 
         return Task.CompletedTask;
@@ -181,6 +189,8 @@ public static partial class AuthenticationSetup
         if (long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var seconds)
             && now - DateTimeOffset.FromUnixTimeSeconds(seconds) < AbsoluteSessionLifetime)
         {
+            // D-471: у межах 12 год — ще й межа бездіяльності (її відмова сама стирає cookie й пише журнал).
+            await IdleSession.ValidateAsync(context, now).ConfigureAwait(false);
             return;
         }
 

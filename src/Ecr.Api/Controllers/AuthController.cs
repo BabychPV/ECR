@@ -17,7 +17,8 @@ public sealed class AuthController(
     LoginHandler login,
     GetCurrentUserHandler currentUserHandler,
     Ecr.Application.Common.ICurrentUser currentUser,
-    Ecr.Application.Ports.ISimulationService simulation) : ControllerBase
+    Ecr.Application.Ports.ISimulationService simulation,
+    Ecr.Application.Ports.IIdleTimeoutPolicy idleTimeout) : ControllerBase
 {
     /// <summary>Вхід доменного користувача.</summary>
     /// <remarks>
@@ -104,10 +105,43 @@ public sealed class AuthController(
             await login.SignOutAsync(userId, ct).ConfigureAwait(false);
         }
 
+        // D-471: вихід лишає слід у журналі безпеки з причиною — поруч із виходом через бездіяльність.
+        await IdleSession.AuditSignOutAsync(HttpContext, User, new { reason = "user" }).ConfigureAwait(false);
+
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme)
                          .ConfigureAwait(false);
         return NoContent();
     }
+
+    /// <summary>Вихід через бездіяльність: таймер вкладки дійшов до межі (D-471).</summary>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ На відміну від <c>POST /api/v1/logout</c>, штамп НЕ прокручується: бездіяльність однієї вкладки (браузера) не
+    /// має виводити ту саму людину з іншого пристрою, де вона працює. Копія цієї cookie однаково мертва: момент
+    /// останньої дії в ній старий, і сервер відкине її за межею (<see cref="IdleSession"/>).
+    /// </remarks>
+    [HttpPost("logout/idle")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> LogoutIdle(CancellationToken ct)
+    {
+        var minutes = await idleTimeout.GetMinutesAsync(ct).ConfigureAwait(false);
+        await IdleSession.AuditIdleSignOutAsync(HttpContext, User, minutes, by: "client").ConfigureAwait(false);
+
+        await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme)
+                         .ConfigureAwait(false);
+        return NoContent();
+    }
+
+    /// <summary>Сигнал «людина діє» — клацання й клавіші, що не дійшли до сервера (D-471).</summary>
+    /// <remarks>
+    /// Тіла немає: момент дії ставить сам сервер (<see cref="IdleSession"/>) під час перевірки cookie, і
+    /// відповідь несе перевидану cookie. Опитування (GET) цього не роблять ніколи.
+    /// </remarks>
+    [HttpPost("session/activity")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public IActionResult Activity() => NoContent();
 
     /// <summary>Поточний користувач і його права для UI.</summary>
     /// <param name="ct">Токен скасування.</param>
@@ -140,7 +174,8 @@ public sealed class AuthController(
             view.IsSimulation,
             view.SimulatedForUserId,
             view.SimulatedForUserName,
-            view.SimulationSessionId));
+            view.SimulationSessionId,
+            await idleTimeout.GetMinutesAsync(ct).ConfigureAwait(false)));
     }
 
     /// <summary>
@@ -237,6 +272,7 @@ public sealed record LocalLoginRequest(string UserName, string Password);
 /// <param name="SimulatedForUserId">Кого симулюють; <c>null</c> — не симуляція.</param>
 /// <param name="SimulatedForUserName">Ім'я того, кого симулюють, — для банера «Viewing as …» (V-06).</param>
 /// <param name="SimulationSessionId">Сеанс симуляції цього входу — щоб завершити його з будь-якої вкладки.</param>
+/// <param name="IdleTimeoutMinutes">Вихід після стількох хвилин без дій (D-471); попередження — за хвилину. <c>/me</c> заповнює завжди.</param>
 public sealed record CurrentUserDto(
     int UserId,
     string? UserName,
@@ -248,4 +284,5 @@ public sealed record CurrentUserDto(
     bool IsSimulation,
     int? SimulatedForUserId,
     string? SimulatedForUserName = null,
-    long? SimulationSessionId = null);
+    long? SimulationSessionId = null,
+    int? IdleTimeoutMinutes = null);

@@ -40,6 +40,10 @@ public static class PasswordChangeGate
         "/api/v1/logout",
         "/api/v1/me",
         "/api/v1/ui-strings",
+
+        // D-471: активність людини на екрані зміни пароля теж тримає сеанс (вихід після бездіяльності);
+        // `/api/v1/logout/idle` покриває `/api/v1/logout` вище (межа сегмента).
+        "/api/v1/session/activity",
     ];
 
     /// <summary>Префікс каталогу рядків — із нього дозволене лише ЧИТАННЯ однієї мови.</summary>
