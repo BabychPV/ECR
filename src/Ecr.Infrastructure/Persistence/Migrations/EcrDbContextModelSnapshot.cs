@@ -3092,6 +3092,66 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.CellPermitPart", b =>
+                {
+                    b.Property<int>("PeriodKeyValue")
+                        .HasColumnType("int")
+                        .HasColumnName("PeriodKey");
+
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("ColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<DateOnly>("DayFrom")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly>("DayTo")
+                        .HasColumnType("date");
+
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("PartNo")
+                        .HasColumnType("tinyint");
+
+                    b.Property<int>("RegistryEntryId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RowKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<long?>("SheetCopyId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("TableDefId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("ValueNumeric")
+                        .HasPrecision(34, 16)
+                        .HasColumnType("decimal(34,16)");
+
+                    b.HasKey("PeriodKeyValue", "Id")
+                        .HasName("PK_CellPermitPart");
+
+                    b.HasIndex("PeriodKeyValue", "DocumentId", "TableDefId", "SheetCopyId", "RowKey", "ColumnDefId", "PartNo")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_CellPermitPart_Cell");
+
+                    b.ToTable("CellPermitPart", "doc", t =>
+                        {
+                            t.HasCheckConstraint("CK_CellPermitPart_Days", "DayTo >= DayFrom");
+
+                            t.HasCheckConstraint("CK_CellPermitPart_PartNo", "PartNo >= 1");
+                        });
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.CellStyle", b =>
                 {
                     b.Property<int>("PeriodKeyValue")
@@ -3791,6 +3851,63 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("PeriodPolicy", "doc", t =>
                         {
                             t.HasCheckConstraint("CK_PP_Order", "GraceOffsetDays <= HardCloseOffsetDays");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.PermitSegment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("ColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("HeaderFieldDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RegistryEntryId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RowKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<long?>("SheetCopyId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("TableDefId")
+                        .HasColumnType("int");
+
+                    b.Property<DateOnly>("ValidFrom")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentId", "HeaderFieldDefId", "ValidFrom")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_PermitSegment_Header")
+                        .HasFilter("[HeaderFieldDefId] IS NOT NULL");
+
+                    b.HasIndex("DocumentId", "TableDefId", "SheetCopyId", "RowKey", "ColumnDefId", "ValidFrom")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_PermitSegment_Row")
+                        .HasFilter("[TableDefId] IS NOT NULL");
+
+                    b.ToTable("PermitSegment", "doc", t =>
+                        {
+                            t.HasCheckConstraint("CK_PermitSegment_Target", "(HeaderFieldDefId IS NOT NULL AND TableDefId IS NULL AND RowKey IS NULL AND ColumnDefId IS NULL AND SheetCopyId IS NULL) OR (HeaderFieldDefId IS NULL AND TableDefId IS NOT NULL AND RowKey IS NOT NULL AND ColumnDefId IS NOT NULL)");
                         });
                 });
 
@@ -7622,6 +7739,30 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Navigation("Entry");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.CellPermitPart", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Documents.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_CellPermitPart_Document");
+
+                    b.HasOne("Ecr.Domain.Entities.Dictionaries.RegistryEntry", null)
+                        .WithMany()
+                        .HasForeignKey("RegistryEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_CellPermitPart_Entry");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.TableDef", null)
+                        .WithMany()
+                        .HasForeignKey("TableDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_CellPermitPart_Table");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.CellValue", b =>
                 {
                     b.HasOne("Ecr.Domain.Entities.Dictionaries.RegistryEntry", null)
@@ -7842,6 +7983,30 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_Period_Project");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.PermitSegment", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PermitSegment_CreatedBy");
+
+                    b.HasOne("Ecr.Domain.Entities.Documents.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PermitSegment_Document");
+
+                    b.HasOne("Ecr.Domain.Entities.Dictionaries.RegistryEntry", null)
+                        .WithMany()
+                        .HasForeignKey("RegistryEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PermitSegment_Entry");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.Project", b =>
