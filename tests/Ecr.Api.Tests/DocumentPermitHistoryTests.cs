@@ -316,7 +316,7 @@ public sealed partial class DocumentPermitHistoryTests(SqlServerFixture sql)
             await db.SaveChangesAsync().ConfigureAwait(false);
             db.CellValues.Add(new CellValue(
                 new CellAddress(document.PeriodKey, document.RowIds[0], column.Id),
-                document.TableDefId, new CellValueData { ValueRegistryEntryId = rowBase == "early" ? early.Id : year.Id }));
+                document.TableDefId, new CellValueData { ValueRegistryEntryId = rowBase switch { "early" => early.Id, "feb" => feb.Id, _ => year.Id } }));
         }
 
         var userName = $"prmh_{Guid.NewGuid():N}"[..20];
