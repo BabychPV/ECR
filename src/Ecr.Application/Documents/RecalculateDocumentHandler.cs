@@ -21,7 +21,10 @@ public sealed class RecalculateDocumentHandler(
     Common.ICurrentUser currentUser,
     IDocumentStore documents,
     IPeriodStore periods,
-    IWorkflowStore workflow)
+    IWorkflowStore workflow,
+    // ✎ F13 p218: копії аркушів (RS) — «рахувати нічого» лише коли затверджені оригінал І всі копії аркуша. Необов'язковий
+    // заради тестів, що конструюють обробник вручну (без нього копій немає — як і доти).
+    IDocumentSheetCopyStore? sheetCopies = null)
 {
     /// <summary>Право на перерахунок СВОГО документа: лише читання (`02-contracts.md` §9).</summary>
     /// <remarks>
@@ -225,9 +228,22 @@ public sealed class RecalculateDocumentHandler(
             // Задача (`RecalculationJob.RefusedPeriodsAsync`) перевіряє те саме ще раз на своєму шляху запису.
             // ✎ UAT-recalc-ux (слово людини 07.11: «тільки погоджені не мають перераховуватися»): пропускається лише
             // ЗАТВЕРДЖЕНИЙ аркуш; поданий перераховується (задача пише його журналом і позначкою для погоджувача).
-            bool IsSubmitted(int sheetId) => sheets.Any(s =>
+            // ✎ F13 p218 (правило людини 07.11): аркуш «нічого рахувати» лише коли затверджений його ОРИГІНАЛ і КОЖНА копія
+            // (RS: стан копії свій, `SheetCopyId`). Доти будь-який затверджений рядок аркуша (і оригінал, і копія) робив
+            // увесь аркуш «затвердженим», і копії-чернетки лишались без перерахунку.
+            var copiesBySheet = sheetCopies is null
+                ? new Dictionary<int, IReadOnlyList<SheetCopyOrdinal>>()
+                : (await sheetCopies.ListGroupsAsync(documentId, ct).ConfigureAwait(false))
+                    .ToDictionary(g => g.SheetDefId, g => g.Copies);
+
+            bool Approved(int sheetId, long? copyId) => sheets.Any(s =>
                 s.SheetDefId == sheetId
+                && s.SheetCopyId == copyId
                 && s.Status is Domain.Enums.DocumentStatus.Approved);
+
+            bool IsSubmitted(int sheetId)
+                => Approved(sheetId, null)
+                   && (copiesBySheet.GetValueOrDefault(sheetId) ?? []).All(c => Approved(sheetId, c.SheetCopyId));
 
             bool submitted;
             if (sheetDefId is { } scopeSheetId)

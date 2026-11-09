@@ -1,5 +1,6 @@
 // tests/Ecr.Infrastructure.Tests/Persistence/SheetNameRecalculationTests.cs
 using System.Text.Json;
+using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Ports;
@@ -8,9 +9,11 @@ using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Expressions.Evaluation;
+using Ecr.Infrastructure.Jobs;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
@@ -156,6 +159,67 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         // Додавання + перейменування — по одній задачі, і лише за березень (там є екземпляр); квітня немає.
         var march = RecalculateDocumentHandler.TargetOf(world.Doc.DocumentId, world.Doc.PeriodKey);
         Assert.Equal([march, march], targets);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "F13-p218")]
+    public async Task Затверджений_оригінал_перейменування_задача_проходить_копія_Barge_2_оригінал_незмінний()
+    {
+        // F13 p218 (P2): затверджений оригінал + перейменування -> задача падала ECR-CALC-4221 цілим періодом, копія-чернетка
+        // лишалась «Fleet 2» під вкладкою «Barge 2». Правило людини 07.11: пропускати лише затверджені аркуші.
+        var world = await ArrangeAsync();
+        var copy = await world.Run(h => h.AddAsync(world.Doc.DocumentId, world.Doc.SheetDefId, default));
+        var copyRow = await AddCopyInstanceAsync(world.Doc, copy.SheetCopyId);
+        await world.Run(h => h.RenameGroupAsync(
+            world.Doc.DocumentId, world.Doc.SheetDefId, new Dictionary<string, string> { ["en"] = "Fleet" }, default));
+        await world.RecalculateSheetAsync();
+        Assert.Equal("Fleet 1", await TextAsync(world.Doc, world.Doc.RowIds[0]));
+        await ApproveOriginalAsync(world.Doc);
+        world.Jobs.ClearReceivedCalls();
+
+        await world.Run(h => h.RenameGroupAsync(
+            world.Doc.DocumentId, world.Doc.SheetDefId, new Dictionary<string, string> { ["en"] = "Barge" }, default));
+        var payload = Assert.Single(world.Jobs.ReceivedCalls(), c => c.GetMethodInfo().Name == "EnqueueCoalescedAsync")
+            .GetArguments()[1];
+
+        // Та сама задача, що поставило перейменування, справжнім RecalculationJob: без винятку.
+        await world.RunRecalculationJobAsync(payload);
+
+        Assert.Equal("Barge 2", await TextAsync(world.Doc, copyRow));
+        Assert.Equal("Fleet 1", await TextAsync(world.Doc, world.Doc.RowIds[0]));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "F13-p218")]
+    public async Task Ручний_перерахунок_документа_з_затвердженим_оригіналом_рахує_копію_а_не_відмовляє_періодом()
+    {
+        // Загальний шлях: «Перерахувати» документа (без області аркуша) — єдиний аркуш затверджений, його копія — чернетка.
+        // Доти період вважався «поданим цілком» за оригіналом і відмовляв 4221.
+        var world = await ArrangeAsync();
+        var copy = await world.Run(h => h.AddAsync(world.Doc.DocumentId, world.Doc.SheetDefId, default));
+        var copyRow = await AddCopyInstanceAsync(world.Doc, copy.SheetCopyId);
+        await ApproveOriginalAsync(world.Doc);
+
+        await world.RunRecalculationJobAsync(new RecalculationRequest(
+            world.Doc.ProjectId, world.Doc.DocumentId, world.Doc.PeriodKey.Value, TriggeredByUserId: UserId));
+
+        Assert.Equal("Vessel 2", await TextAsync(world.Doc, copyRow));
+        Assert.Null(await TextAsync(world.Doc, world.Doc.RowIds[0]));
+    }
+
+    private async Task ApproveOriginalAsync(TestDocument doc)
+    {
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        var state = new ApprovalState(doc.DocumentId, doc.SheetDefId, doc.PeriodKey.Value);
+        state.Submit(UserId, Now);
+        state.Approve(UserId, Now);
+        db.ApprovalStates.Add(state);
+        await db.SaveChangesAsync();
     }
 
     private async Task<long> CopyRowAsync(TestDocument doc, long sheetCopyId)
@@ -323,6 +387,21 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
             await Service(db).RecalculateAllAsync(Doc.DocumentId, Doc.PeriodKey, CancellationToken.None, Doc.SheetDefId);
         }
 
+        /// <summary>Справжній <c>RecalculationJob</c> над цим документом (методологій немає — оркестратор порожній).</summary>
+        public async Task RunRecalculationJobAsync(object? payload)
+        {
+            await using var db = builder.CreateContext();
+            var clock = new FixedClock();
+            var runner = new EmptyRunner();
+            var runs = new RunCalculationHandler(
+                Substitute.For<IPeriodStore>(), Substitute.For<IWorkflowStore>(), new CalculationResultStore(db, clock),
+                Substitute.For<IBackgroundJobScheduler>(), new UnitOfWork(db), Substitute.For<IAccessDecisionService>(),
+                Substitute.For<ICurrentUser>(), clock, Substitute.For<IAuditWriter>());
+
+            var job = new RecalculationJob(db, runner, runs, Service(db), clock, sheetGate: new SheetEditGate(db));
+            await job.ExecuteAsync(payload, Substitute.For<IJobProgress>(), CancellationToken.None);
+        }
+
         private DocumentSheetCopyHandler Handler(EcrDbContext db)
             => new(
                 new DocumentStore(db), new DocumentSheetCopyStore(db), metadata, new SheetEditGate(db), access,
@@ -353,6 +432,15 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
                 new AuditWriter(db), clock, new UnitOfWork(db), new SheetEditGate(db),
                 sheetCopies: new DocumentSheetCopyStore(db));
         }
+    }
+
+    /// <summary>Оркестратор методологій без прив'язок: прогін методологій порожній.</summary>
+    private sealed class EmptyRunner : ICalculationRunner
+    {
+        public Task<ModuleProfile> RunAsync(
+            long calculationRunId, long documentId, PeriodKey periodKey,
+            IReadOnlyList<CalculationBindingRef> bindings, IJobProgress progress, CancellationToken ct)
+            => Task.FromResult(new ModuleProfile());
     }
 
     private sealed class FixedClock : IClock

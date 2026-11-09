@@ -110,6 +110,37 @@ public sealed class RecalculateDocumentSheetScopeTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "F13-p218")]
+    public async Task Затверджені_оригінали_але_копія_чернетка_документ_і_область_ставляться_в_чергу()
+    {
+        // F13 p218 (правило людини 07.11): затверджено оригінали обох аркушів складу, але копія аркуша 3 — чернетка.
+        // Рахувати є що (копію): ні документ, ні область аркуша 3 не відмовляють 4221 і не відповідають «нічого».
+        // Мутація: повернути `IsSubmitted` до «будь-який затверджений рядок аркуша» — обидва виклики дають 4221.
+        var fixture = Arrange(submittedSheet: 3, hiddenSheet: null, alsoSubmittedSheet: 1, approved: true, copyOfSheet3: 77);
+
+        var whole = await fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: null, CancellationToken.None);
+        var scoped = await fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: 3, CancellationToken.None);
+
+        Assert.Equal("job-1", whole);
+        Assert.Equal("job-1", scoped);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "F13-p218")]
+    public async Task Затверджені_оригінал_і_копія_область_відхиляється_як_раніше()
+    {
+        // Легітимна відмова лишається: затверджено все в області (оригінал і копія) — рахувати нічого.
+        var fixture = Arrange(submittedSheet: 3, hiddenSheet: null, approved: true, copyOfSheet3: 77, copyApproved: true);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: 3, CancellationToken.None));
+
+        Assert.Equal("err.ECR-CALC-4221.sheetsSubmitted", error.Details?["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-9.7")]
     public async Task Перерахунок_усього_документа_у_закритому_періоді_відхиляється_як_раніше()
     {
@@ -258,7 +289,7 @@ public sealed class RecalculateDocumentSheetScopeTests
 
     private static Fixture Arrange(
         int? submittedSheet, int? hiddenSheet, PeriodState periodState = PeriodState.Open, int? alsoSubmittedSheet = null,
-        bool approved = false)
+        bool approved = false, long? copyOfSheet3 = null, bool copyApproved = false)
     {
         var builder = new AccessBuilder { UserId = 9 }
             .Permission(RecalculateDocumentHandler.Permission)
@@ -314,6 +345,20 @@ public sealed class RecalculateDocumentSheetScopeTests
             states.Add(state);
         }
 
+        var copies = Substitute.For<IDocumentSheetCopyStore>();
+        IReadOnlyList<SheetCopyGroupInfo> groups = copyOfSheet3 is { } copyId
+            ? [new SheetCopyGroupInfo(3, null, [new SheetCopyOrdinal(copyId, 2)])]
+            : [];
+        copies.ListGroupsAsync(Document, Arg.Any<CancellationToken>()).Returns(groups);
+
+        if (copyOfSheet3 is { } approvedCopy && copyApproved)
+        {
+            var state = new ApprovalState(Document, 3, Period, approvedCopy);
+            state.Submit(userId: 5, DateTime.UtcNow);
+            state.Approve(userId: 6, DateTime.UtcNow);
+            states.Add(state);
+        }
+
         var workflow = Substitute.For<IWorkflowStore>();
         workflow.GetSheetsAsync(Document, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                 .Returns(states);
@@ -326,7 +371,7 @@ public sealed class RecalculateDocumentSheetScopeTests
                 Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
             .Returns("job-1");
 
-        return new Fixture(new RecalculateDocumentHandler(jobs, access, user, documents, periods, workflow), jobs, workflow);
+        return new Fixture(new RecalculateDocumentHandler(jobs, access, user, documents, periods, workflow, copies), jobs, workflow);
     }
 
     private static TemplateVersionSnapshot SnapshotOfTwoSheets()

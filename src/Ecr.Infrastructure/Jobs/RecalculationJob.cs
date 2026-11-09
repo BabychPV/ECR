@@ -338,9 +338,9 @@ public sealed partial class RecalculationJob(
                 // ⛔ RC15 (P2-A): перерахунок УСЬОГО документа пропускає подані/затверджені аркуші: ні їхні комірки
                 // (їх не пише `RecalculationService`), ні результати методологій (прив'язки пропускаються нижче;
                 // результати переносяться з попереднього прогону) не змінюються.
-                var skippedSheets = docRequest.SheetDefId is null
-                    ? await SubmittedSheetsAsync(docRequest, request.PeriodKey, ct).ConfigureAwait(false)
-                    : new Dictionary<int, HashSet<int>>();
+                // ✎ F13 p218: і для області аркуша — період із затвердженим оригіналом тепер допускається заради його
+                // копій-чернеток, а методології оригіналу (його прив'язки) мусять лишитися пропущеними.
+                var skippedSheets = await SubmittedSheetsAsync(docRequest, request.PeriodKey, ct).ConfigureAwait(false);
                 var skippedPairs = skippedSheets.Where(pair => periods.Contains(pair.Key)).Sum(pair => pair.Value.Count);
                 if (logger is not null && skippedPairs > 0)
                 {
@@ -1121,9 +1121,8 @@ public sealed partial class RecalculationJob(
         // їх. Методології, що прив'язані ЛИШЕ до неактивних таблиць, прогін не рахує — їхні результати
         // переносяться (`ResultCarryOver`) з попереднього актуального прогону.
         bool IsActive(InstanceRow row)
-            => request.SheetDefId is { } scope
-                ? row.SheetDefId == scope
-                : !(skippedSheets.TryGetValue(row.PeriodKeyValue, out var skipped) && skipped.Contains(row.SheetDefId));
+            => (request.SheetDefId is not { } scope || row.SheetDefId == scope)
+               && !(skippedSheets.TryGetValue(row.PeriodKeyValue, out var skipped) && skipped.Contains(row.SheetDefId));
 
         var methodologiesByTable = bindings
             .GroupBy(b => b.TableDefId)
@@ -1388,33 +1387,37 @@ public sealed partial class RecalculationJob(
         // ⛔ RC15 (P2-A): для області аркуша (`SheetDefId`) період відхиляється, коли поданий САМ цей аркуш; для
         // УСЬОГО документа — лише коли подані/затверджені ВСІ аркуші, що мають таблиці в періоді (рахувати
         // нічого). Частково подані періоди лишаються в скоупі: подані аркуші пропускає `SubmittedSheetsAsync`.
-        var submittedBySheet = await SubmittedSheetsAsync(request, request.PeriodKey, ct).ConfigureAwait(false);
-        HashSet<int> submittedKeys;
+        // ✎ F13 p218 (P2, правило людини 07.11 «пропускати лише погоджені, решту перераховувати; подані — з позначкою»):
+        // «рахувати нічого» — це КОЖЕН екземплярний скоуп (аркуш × копія, RS) періоду пропущений, а не лише оригінал.
+        // Доти стан брався з оригіналу (`OriginalOnly`): затверджений оригінал відмовляв періодом (4221) і чернетці-копії
+        // того самого аркуша (SHEETNAME після перейменування, ручний «Перерахувати» документа з копіями). Пропуск
+        // затверджених — по аркушу у фазі формул (`RecalculationService.EnterSheetsAsync`) і методологій (`IsActive`).
+        var skippedScopes = await SkippedScopesAsync(request, ct).ConfigureAwait(false);
+        var candidatePeriods = skippedScopes.Select(s => s.PeriodKey).Distinct().ToList();
+        HashSet<int> submittedKeys = [];
 
-        if (request.SheetDefId is not null)
+        if (candidatePeriods.Count > 0)
         {
-            submittedKeys = [.. submittedBySheet.Where(pair => pair.Value.Contains(request.SheetDefId.Value)).Select(pair => pair.Key)];
-        }
-        else
-        {
-            var submittedPeriods = submittedBySheet.Keys.ToList();
-            var instanceSheets = submittedPeriods.Count == 0
-                ? []
-                : await db.TableInstances
-                    .AsNoTracking()
-                    .OriginalOnly()
-                    .Where(i => i.DocumentId == request.DocumentId && submittedPeriods.Contains(i.PeriodKeyValue))
-                    .Join(db.TableDefs, i => i.TableDefId, td => td.Id, (i, td) => new { i.PeriodKeyValue, td.SheetDefId })
-                    .Distinct()
-                    .ToListAsync(ct)
-                    .ConfigureAwait(false);
+            var instanceScopes = await db.TableInstances
+                .AsNoTracking()
+                .Where(i => i.DocumentId == request.DocumentId && candidatePeriods.Contains(i.PeriodKeyValue))
+                .Join(db.TableDefs, i => i.TableDefId, td => td.Id, (i, td) => new { i.PeriodKeyValue, td.SheetDefId, i.SheetCopyId })
+                .Where(x => request.SheetDefId == null || x.SheetDefId == request.SheetDefId)
+                .Distinct()
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
 
-            submittedKeys = [.. submittedPeriods.Where(period =>
+            submittedKeys = [.. candidatePeriods.Where(period =>
             {
-                var sheets = instanceSheets.Where(x => x.PeriodKeyValue == period).Select(x => x.SheetDefId).ToList();
-                return sheets.Count > 0 && sheets.All(submittedBySheet[period].Contains);
+                var scopes = instanceScopes
+                    .Where(x => x.PeriodKeyValue == period)
+                    .Select(x => (x.SheetDefId, CopyKey: x.SheetCopyId ?? 0))
+                    .Distinct()
+                    .ToList();
+                return scopes.Count > 0 && scopes.All(s => skippedScopes.Contains((period, s.SheetDefId, s.CopyKey)));
             })];
         }
+
         var refused = new HashSet<int>();
 
         foreach (var period in states)
@@ -1452,6 +1455,28 @@ public sealed partial class RecalculationJob(
     /// ставила б позначку «перераховано після подання» на всі подані аркуші, і позначка перестала б щось означати.
     /// </remarks>
     internal static bool WritesSubmitted(RecalculationRequest request) => request.TriggeredByUserId is > 0;
+
+    /// <summary>
+    /// Екземплярні скоупи (період, аркуш, копія; <c>0</c> — оригінал), які прогін ПРОПУСКАЄ: затверджені, а без людини —
+    /// і подані. Те саме правило, що <see cref="SubmittedSheetsAsync"/>, але з копіями (RS): стан копії свій.
+    /// </summary>
+    private async Task<HashSet<(int PeriodKey, int SheetDefId, long CopyKey)>> SkippedScopesAsync(
+        RecalculationRequest request, CancellationToken ct)
+    {
+        var writeSubmitted = WritesSubmitted(request);
+        var rows = await db.ApprovalStates
+            .AsNoTracking()
+            .Where(s => s.DocumentId == request.DocumentId
+                        && (request.PeriodKey == null || s.PeriodKey == request.PeriodKey)
+                        && (request.SheetDefId == null || s.SheetDefId == request.SheetDefId)
+                        && ((s.Status == Domain.Enums.DocumentStatus.Submitted && !writeSubmitted)
+                            || s.Status == Domain.Enums.DocumentStatus.Approved))
+            .Select(s => new { s.PeriodKey, s.SheetDefId, s.SheetCopyId })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows.Select(r => (r.PeriodKey, r.SheetDefId, r.SheetCopyId ?? 0L))];
+    }
 
     /// <summary>Аркуші документа за періодами, які прогін ПРОПУСКАЄ: затверджені, а без людини — і подані (ФВ-9.17).</summary>
     /// <param name="request">Завдання.</param>
