@@ -12,7 +12,7 @@ import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { entityTypeLabel, operationLabel } from './auditLabels';
-import { structureChangeReasonText } from './structureChangeReason';
+import { structureChangeReasonText, structureChangeReasonZone } from './structureChangeReason';
 import './auditTable.css';
 
 /**
@@ -121,7 +121,7 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
                         ⚠ `key` рядка й далі бере СИРИЙ `changedAt`: ключ — для
                         React, а не для ока. */}
                     <Table.Td>
-                      <Timestamp value={change.changedAt} />
+                      <Timestamp value={change.changedAt} zone={structureChangeReasonZone(change.changeReason)} />
                     </Table.Td>
                     {/* ⛔ `R-18`: ім'я з сервера; номер — у підказці. */}
                     <Table.Td title={`#${String(change.changedByUserId)}`}>{authorName(change)}</Table.Td>
