@@ -214,6 +214,73 @@
           "Blocked"
         ]
       },
+      "AddHeaderPermitRequest": {
+        "description": "jh1: add a permit to a header field, in force from DateOnly AddHeaderPermitRequest.ValidFrom.",
+        "properties": {
+          "fieldCode": {
+            "description": "Header field code.",
+            "type": "string"
+          },
+          "periodKey": {
+            "description": "The period the user is in (`YYYYMM`) — the reporting window and the rows to name.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "registryEntryId": {
+            "description": "The new permit.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "validFrom": {
+            "description": "First day the new permit is in force for the document.",
+            "format": "date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fieldCode",
+          "registryEntryId",
+          "validFrom",
+          "periodKey"
+        ],
+        "type": "object"
+      },
+      "AddRowPermitRequest": {
+        "description": "j1: add a permit to a row's permit cell, in force from DateOnly AddRowPermitRequest.ValidFrom.",
+        "properties": {
+          "columnCode": {
+            "description": "The permit column.",
+            "type": "string"
+          },
+          "registryEntryId": {
+            "description": "The new permit.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "rowKey": {
+            "description": "Row key.",
+            "type": "string"
+          },
+          "tableInstanceId": {
+            "description": "A table instance of the document (any period of the row).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "validFrom": {
+            "description": "First day the new permit is in force for the row.",
+            "format": "date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tableInstanceId",
+          "rowKey",
+          "columnCode",
+          "registryEntryId",
+          "validFrom"
+        ],
+        "type": "object"
+      },
       "AffectedRolesResponse": {
         "description": "Скільки ролей тепер призначено користувачеві.",
         "properties": {
@@ -6242,6 +6309,36 @@
         ],
         "type": "object"
       },
+      "DocumentPermitHistoryDto": {
+        "description": "Permit history of a document and how many cells still need a split.",
+        "properties": {
+          "cellsNeedingSplit": {
+            "description": "Cells with entered data in a month shared by two permits and not split yet.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "header": {
+            "description": "Header fields with history.",
+            "items": {
+              "$ref": "#/components/schemas/HeaderPermitHistoryDto"
+            },
+            "type": "array"
+          },
+          "rows": {
+            "description": "Rows with history (only those the reader can see).",
+            "items": {
+              "$ref": "#/components/schemas/RowPermitHistoryDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "header",
+          "rows",
+          "cellsNeedingSplit"
+        ],
+        "type": "object"
+      },
       "DocumentReopenDenial": {
         "enum": [
           "NoPermission",
@@ -8650,6 +8747,27 @@
           "parentCode",
           "ordinal",
           "labelL10n"
+        ],
+        "type": "object"
+      },
+      "HeaderPermitHistoryDto": {
+        "description": "Permit history of one header field.",
+        "properties": {
+          "fieldCode": {
+            "description": "Header field code.",
+            "type": "string"
+          },
+          "permits": {
+            "description": "The history, base permit first.",
+            "items": {
+              "$ref": "#/components/schemas/PermitHistoryItemDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "fieldCode",
+          "permits"
         ],
         "type": "object"
       },
@@ -14793,6 +14911,69 @@
         ],
         "type": "object"
       },
+      "PermitHistoryItemDto": {
+        "description": "One permit of a history and the days it is in force.",
+        "properties": {
+          "addedAt": {
+            "description": "When (UTC); `null` for the base permit.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "addedBy": {
+            "description": "Who added it; `null` for the base permit.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "from": {
+            "description": "First day in force; `null` — the base permit.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "permit": {
+            "description": "Permit number as people know it.",
+            "type": "string"
+          },
+          "registryEntryId": {
+            "description": "The permit.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "segmentId": {
+            "description": "The stored segment; `null` — the base permit (the cell/header value).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "until": {
+            "description": "Last day in force; `null` — still in force.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "segmentId",
+          "registryEntryId",
+          "permit",
+          "from",
+          "until",
+          "addedBy",
+          "addedAt"
+        ],
+        "type": "object"
+      },
       "PermitImportDerivedCellDto": {
         "description": "A derived cell.",
         "properties": {
@@ -15424,6 +15605,43 @@
           "id",
           "code",
           "displayL10n"
+        ],
+        "type": "object"
+      },
+      "PermitPartSpanDto": {
+        "description": "One part of a month split between permits.",
+        "properties": {
+          "dayFrom": {
+            "description": "First day of the part.",
+            "format": "date",
+            "type": "string"
+          },
+          "dayTo": {
+            "description": "Last day of the part.",
+            "format": "date",
+            "type": "string"
+          },
+          "partNo": {
+            "description": "1 = A, 2 = B, …",
+            "format": "int32",
+            "type": "integer"
+          },
+          "permit": {
+            "description": "Permit number.",
+            "type": "string"
+          },
+          "registryEntryId": {
+            "description": "The permit of the part.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "partNo",
+          "registryEntryId",
+          "permit",
+          "dayFrom",
+          "dayTo"
         ],
         "type": "object"
       },
@@ -21560,6 +21778,60 @@
           "Header"
         ]
       },
+      "RowPermitHistoryDto": {
+        "description": "Permit history of one row's permit cell.",
+        "properties": {
+          "columnCode": {
+            "description": "The permit column.",
+            "type": "string"
+          },
+          "permits": {
+            "description": "The history, base permit first.",
+            "items": {
+              "$ref": "#/components/schemas/PermitHistoryItemDto"
+            },
+            "type": "array"
+          },
+          "rowKey": {
+            "description": "Row key.",
+            "type": "string"
+          },
+          "sheetCopyId": {
+            "description": "Sheet copy; `null` — the original.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "splitMonths": {
+            "description": "Months that still need a split.",
+            "items": {
+              "$ref": "#/components/schemas/SplitMonthDto"
+            },
+            "type": "array"
+          },
+          "tableCode": {
+            "description": "Table code.",
+            "type": "string"
+          },
+          "tableDefId": {
+            "description": "Table.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tableDefId",
+          "tableCode",
+          "sheetCopyId",
+          "rowKey",
+          "columnCode",
+          "permits",
+          "splitMonths"
+        ],
+        "type": "object"
+      },
       "RowWindowMapDto": {
         "description": "Прив'язка «атрибут PI → колонка, вікно = рядок» у відповіді (HSE301 §4.4).",
         "properties": {
@@ -25767,6 +26039,36 @@
         ],
         "type": "object"
       },
+      "SplitMonthDto": {
+        "description": "A month of a row that must be split between permits (j2).",
+        "properties": {
+          "columnCodes": {
+            "description": "Cells of the row with entered data in that month that are not split yet.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "month": {
+            "description": "First day of the month.",
+            "format": "date",
+            "type": "string"
+          },
+          "parts": {
+            "description": "The parts the month splits into.",
+            "items": {
+              "$ref": "#/components/schemas/PermitPartSpanDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "month",
+          "columnCodes",
+          "parts"
+        ],
+        "type": "object"
+      },
       "StartSimulationRequest": {
         "description": "Запит на початок симуляції.",
         "properties": {
@@ -27995,6 +28297,43 @@
           "header",
           "isRequired",
           "isUnfillable"
+        ],
+        "type": "object"
+      },
+      "UndoHeaderPermitRequest": {
+        "description": "Undo the latest permit added to a header field.",
+        "properties": {
+          "fieldCode": {
+            "description": "Header field code.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fieldCode"
+        ],
+        "type": "object"
+      },
+      "UndoRowPermitRequest": {
+        "description": "Undo the latest permit added to a row's permit cell.",
+        "properties": {
+          "columnCode": {
+            "description": "The permit column.",
+            "type": "string"
+          },
+          "rowKey": {
+            "description": "Row key.",
+            "type": "string"
+          },
+          "tableInstanceId": {
+            "description": "A table instance of the document.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tableInstanceId",
+          "rowKey",
+          "columnCode"
         ],
         "type": "object"
       },
@@ -35775,6 +36114,567 @@
         "summary": "Додає в таблицю документа нові рядки дозволу й оновлює ліміти та довідкові значення, не видаляючи рядків.",
         "tags": [
           "DocumentPermitBindings"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/permit-history": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPermitHistoryDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPermitHistoryDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPermitHistoryDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "The document's permit history (header fields and visible rows that have one) and the cells that still need to be\nsplit between two permits, read in periodKey.",
+        "tags": [
+          "DocumentPermitHistory"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/permit-history/header": {
+      "post": {
+        "description": "`422 ECR-HDR-4223 permitChangeMidMonth` — a date not on the 1st: add the permit per row (the rows relying on\nthe header permit with data in that month are named); `422 ECR-HDR-4223 permitGap` — uncovered days named.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddHeaderPermitRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddHeaderPermitRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddHeaderPermitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeaderPermitHistoryDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeaderPermitHistoryDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeaderPermitHistoryDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "jh1: adds a permit to a header field, in force from `validFrom` (Ship 1: the 1st of a month).",
+        "tags": [
+          "DocumentPermitHistory"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/permit-history/header/undo": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UndoHeaderPermitRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UndoHeaderPermitRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UndoHeaderPermitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeaderPermitHistoryDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeaderPermitHistoryDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeaderPermitHistoryDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Undoes the latest permit added to a header field.",
+        "tags": [
+          "DocumentPermitHistory"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/permit-history/rows": {
+      "post": {
+        "description": "`403 ECR-ACCS-0403` — the permit cell is not editable for the user; `404` — invisible document/table;\n`422 ECR-CELL-4223 permitGap` — days between the permits without a valid permit (named); `422\nECR-CELL-4223 missingEntry` — the permit cannot be chosen here; `422 ECR-REQ-0422` — not a permit column,\nno row/base permit, or the date is outside the window or not after the latest change.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddRowPermitRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddRowPermitRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddRowPermitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RowPermitHistoryDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RowPermitHistoryDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RowPermitHistoryDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "j1: adds a permit to a row's permit cell, in force from `validFrom`.",
+        "tags": [
+          "DocumentPermitHistory"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/permit-history/rows/undo": {
+      "post": {
+        "description": "`422 ECR-REQ-0422 permitHistoryNothingToUndo` — nothing added, or its months are already split.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UndoRowPermitRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UndoRowPermitRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UndoRowPermitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RowPermitHistoryDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RowPermitHistoryDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RowPermitHistoryDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Undoes the latest permit added to a row's permit cell.",
+        "tags": [
+          "DocumentPermitHistory"
         ]
       }
     },
@@ -67793,6 +68693,9 @@
     },
     {
       "name": "DocumentPermitBindings"
+    },
+    {
+      "name": "DocumentPermitHistory"
     },
     {
       "name": "Documents"
