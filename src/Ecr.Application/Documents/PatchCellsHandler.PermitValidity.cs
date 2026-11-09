@@ -467,6 +467,60 @@ public sealed partial class PatchCellsHandler
             });
     }
 
+    /// <summary>
+    /// Feature (j) P2: parts of the cells this batch clears (deleted or explicitly empty), in rows with a permit history —
+    /// removed in the write transaction. Rows without history cost nothing (no segment, no query of parts).
+    /// </summary>
+    private async Task ClearPartsOfClearedCellsAsync(RequestContext context, CellChangeLists changes, CancellationToken ct)
+    {
+        if (permitHistory is null)
+        {
+            return;
+        }
+
+        var cleared = changes.Deletes
+            .Concat(changes.Upserts.Where(u => u.Value.IsEmpty).Select(u => u.Address))
+            .Where(a => a.TableRowId > 0)
+            .ToList();
+        if (cleared.Count == 0)
+        {
+            return;
+        }
+
+        var history = await RowHistoryAsync(context, changes, [.. cleared.Select(a => a.TableRowId)], ct).ConfigureAwait(false);
+        if (history.Count == 0)
+        {
+            return;
+        }
+
+        var monthOf = PermitMonthCoverage.MonthColumns(context.Table).ToDictionary(c => c.Id, c => (int)c.MonthNumber!.Value);
+        var year = context.PeriodKey.Year;
+        var removed = false;
+        foreach (var address in cleared.Where(a => history.Keys.Any(k => k.RowId == a.TableRowId)))
+        {
+            if (changes.RowKeyById.GetValueOrDefault(address.TableRowId) is not { } rowKey)
+            {
+                continue;
+            }
+
+            var month = monthOf.TryGetValue(address.ColumnDefId, out var m) ? m : context.PeriodKey.Sequence;
+            var parts = await permitHistory.CellPartsAsync(
+                    (year * 100) + month, context.Instance.DocumentId, context.Instance.TableDefId, context.Instance.SheetCopyId,
+                    rowKey, address.ColumnDefId, ct)
+                .ConfigureAwait(false);
+            foreach (var part in parts)
+            {
+                permitHistory.RemovePart(part);
+                removed = true;
+            }
+        }
+
+        if (removed)
+        {
+            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+    }
+
     /// <summary>The permit as people know it: its number (display text in the reader's language), else its code.</summary>
     internal static string PermitName(RegistryEntry entry, string? language)
         => entry.DisplayL10n.Get(language ?? "en") is { Length: > 0 } shown ? shown : entry.Code;
