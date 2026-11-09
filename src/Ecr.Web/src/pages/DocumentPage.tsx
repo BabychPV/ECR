@@ -55,7 +55,6 @@ import { copyFieldsOf, sheetTabKey } from '@/features/documents/sheetCopies/shee
 import { chatMessageCountOf, groupBySheet, sheetItemsOf, stateOfGroup } from '@/features/documents/sheetCopies/sheetGroups';
 import { parseChatKey } from '@/features/tableChat/chatKey';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
-import { ProjectRecalcBannerSlot } from '@/features/recalc/ProjectRecalcBannerSlot';
 import { t } from '@/shared/i18n';
 import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/settleEdits';
 
@@ -143,6 +142,11 @@ const UnmatchedRowsBanner = lazy(async () => ({
   default: (await import('@/features/documents/UnmatchedRowsBanner')).UnmatchedRowsBanner,
 }));
 
+// Місце банера перерахунку проєкту (lane A) — за `import()`, як на Documents: хук опитування задач і модель
+// прогресу не входять у граф маршруту (бюджет D-132: DocumentPage 250.5 КБ gzip після зведення з банерами #782).
+const ProjectRecalcBannerSlot = lazy(async () => ({
+  default: (await import('@/features/recalc/ProjectRecalcBannerSlot')).ProjectRecalcBannerSlot,
+}));
 
 // PM-11: «З дозволу» + «Оновити з дозволу» — окремий чанк (бюджет маршруту D-132).
 const PermitRefreshStrip = lazy(async () => ({
@@ -874,7 +878,9 @@ export function DocumentPage(): JSX.Element {
       )}
 
       {projectId !== null && (
-        <ProjectRecalcBannerSlot projectId={projectId} />
+        <Suspense fallback={null}>
+          <ProjectRecalcBannerSlot projectId={projectId} />
+        </Suspense>
       )}
 
       {/* ⛔ `F-18`: ЧОМУ тут нічого не змінити — одразу під рядком дій, до
