@@ -2,11 +2,12 @@ import type { TableSliceDto } from '@/api/types';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
 import { cellKey } from './permissions';
-import type { RowAttentionItem, TableAttention } from './rowAttentionStore';
+import type { PeriodRowFindings, RowAttentionItem, TableAttention } from './rowAttentionStore';
 
 export {
   publishTableAttention,
   requestAttentionFocus,
+  useRowFindings,
   type RowAttentionItem,
   type TableAttention,
 } from './rowAttentionStore';
@@ -178,39 +179,96 @@ export function rowAttentionReason(slice: TableSliceDto, rowKey: string, problem
   return locked === null ? orphaned : `${orphaned} ${t('grid.rowAttention.locked', { months: locked })}`;
 }
 
-const NoProblems: ReadonlyMap<string, RowLookupProblem> = new Map();
-const bySlice = new WeakMap<TableSliceDto, { problems: ReadonlyMap<string, RowLookupProblem>; value: TableAttention }>();
+/**
+ * ✎ F13-p210: попередження перевірки на рядку — правило (h) `PERMIT-VALIDITY`, рівень `Warning` (дозвіл не
+ * покриває місяці лише з обчисленими значеннями). Береться з результату перевірки, який уже читає Issues: лише
+ * знахідки цього періоду, цієї таблиці і в комірці дозволу (колонка-довідник зрізу); текст — сервера, мовою
+ * читача. Кілька знахідок рядка — через пробіл. Порожньо — рядок попередження не має.
+ */
+export function rowWarningsOf(
+  slice: TableSliceDto,
+  tableDefId: number,
+  findings: PeriodRowFindings | null,
+): ReadonlyMap<string, string> {
+  const warnings = new Map<string, string>();
+  if (findings === null || findings.periodKey !== slice.periodKey) return warnings;
 
-/** Стан таблиці для сховища; пам'ятається за об'єктом зрізу і переліком проблем (ті самі — той самий стан). */
+  const lookupColumns = new Set(slice.columns.filter((column) => column.dataType === 'Lookup').map((column) => column.code));
+  const rowKeys = new Set(slice.rows.map((row) => row.rowKey));
+  for (const finding of findings.findings) {
+    if (finding.tableDefId !== tableDefId || !rowKeys.has(finding.rowKey)) continue;
+    if (finding.columnCode === null || !lookupColumns.has(finding.columnCode)) continue;
+    const before = warnings.get(finding.rowKey);
+    if (before?.includes(finding.message) === true) continue;
+    warnings.set(finding.rowKey, before === undefined ? finding.message : `${before} ${finding.message}`);
+  }
+
+  return warnings;
+}
+
+/** Куди веде «!» попередження: перший пункт перевірки цього рядка в Issues. */
+export function rowWarningFocusKey(tableDefId: number, rowKey: string): string {
+  return `finding:${String(tableDefId)}:${rowKey}`;
+}
+
+const NoProblems: ReadonlyMap<string, RowLookupProblem> = new Map();
+const NoWarnings: ReadonlyMap<string, string> = new Map();
+const bySlice = new WeakMap<
+  TableSliceDto,
+  {
+    problems: ReadonlyMap<string, RowLookupProblem>;
+    warnings: ReadonlyMap<string, string>;
+    tableDefId: number | undefined;
+    value: TableAttention;
+  }
+>();
+
+/**
+ * Стан таблиці для сховища; пам'ятається за об'єктом зрізу, переліком проблем і попереджень (ті самі — той
+ * самий стан). Рядок з утраченим посиланням — помилка (його попередження, якщо є, дописується в причину);
+ * рядок лише з попередженням — пункт `severity: 'Warning'`, що веде на знахідку перевірки.
+ */
 export function tableAttentionOf(
   slice: TableSliceDto,
   problems: ReadonlyMap<string, RowLookupProblem> = NoProblems,
+  warnings: ReadonlyMap<string, string> = NoWarnings,
+  tableDefId?: number,
 ): TableAttention {
   const cached = bySlice.get(slice);
-  if (cached !== undefined && cached.problems === problems) return cached.value;
+  if (cached?.problems === problems && cached.warnings === warnings && cached.tableDefId === tableDefId) return cached.value;
 
   const rows: RowAttentionItem[] = [];
   for (const row of slice.rows) {
-    if (row.isOrphaned !== true) continue;
-    const reason = rowAttentionReason(slice, row.rowKey, problems.get(row.rowKey));
-    if (reason === null) continue;
-    rows.push({
+    const warning = warnings.get(row.rowKey);
+    const reason = row.isOrphaned === true ? rowAttentionReason(slice, row.rowKey, problems.get(row.rowKey)) : null;
+    if (reason === null && warning === undefined) continue;
+    const base = {
       key: `${String(slice.tableInstanceId)}:${row.rowKey}`,
       tableInstanceId: slice.tableInstanceId,
       periodKey: slice.periodKey,
       rowKey: row.rowKey,
       rowLabel: row.label ?? row.rowKey,
-      reason,
-    });
+    };
+    if (reason !== null) {
+      rows.push({ ...base, reason: warning === undefined ? reason : `${reason} ${warning}` });
+    } else if (warning !== undefined) {
+      rows.push({
+        ...base,
+        reason: warning,
+        severity: 'Warning',
+        ...(tableDefId === undefined ? {} : { focusKey: rowWarningFocusKey(tableDefId, row.rowKey) }),
+      });
+    }
   }
 
   const value: TableAttention = {
     tableInstanceId: slice.tableInstanceId,
+    ...(tableDefId === undefined ? {} : { tableDefId }),
     periodKey: slice.periodKey,
     rows,
     lockedMonths: describeColumns(slice, lockedColumnsOf(slice)),
   };
-  bySlice.set(slice, { problems, value });
+  bySlice.set(slice, { problems, warnings, tableDefId, value });
 
   return value;
 }

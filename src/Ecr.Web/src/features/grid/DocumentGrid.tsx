@@ -75,7 +75,10 @@ import {
   requestAttentionFocus,
   rowAttentionReason,
   rowLookupProblemsOf,
+  rowWarningFocusKey,
+  rowWarningsOf,
   tableAttentionOf,
+  useRowFindings,
   type RowLookupProblem,
 } from './rowAttention';
 
@@ -1297,12 +1300,20 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
   // ✎ UAT 08.11 (Water Report): рядки з утраченим посиланням і закриті місяці — у спільне сховище, з якого
   // читають Issues (пункт і пояснення) і рядок стану збереження. Зріз той самий, що в сітці (`rowAttention.ts`).
+  // ✎ F13-p210: попередження перевірки (дозвіл не покриває місяці лише з обчисленими значеннями) — на самому рядку,
+  // з результату перевірки, який уже читає Issues (`DocumentPage` → `publishRowFindings`).
+  const rowFindings = useRowFindings();
+  const rowWarnings = useMemo(
+    () => (fullSlice === undefined ? new Map<string, string>() : rowWarningsOf(fullSlice, tableDefId, rowFindings)),
+    [fullSlice, tableDefId, rowFindings],
+  );
+
   useEffect(() => {
     if (fullSlice === undefined) return undefined;
-    publishTableAttention(tableInstanceId, tableAttentionOf(fullSlice, rowLookupProblems));
+    publishTableAttention(tableInstanceId, tableAttentionOf(fullSlice, rowLookupProblems, rowWarnings, tableDefId));
 
     return () => publishTableAttention(tableInstanceId, null);
-  }, [fullSlice, tableInstanceId, rowLookupProblems]);
+  }, [fullSlice, tableInstanceId, rowLookupProblems, rowWarnings, tableDefId]);
 
   /*
    * ⚠ `X-13`: довідники, що ЩЕ ЇДУТЬ. Редактор такої колонки показує
@@ -1418,6 +1429,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             unlistedLabelsByRegistryId,
             monthStatus,
             rowLookupProblems,
+            rowWarnings,
+            tableDefId,
           ),
     [
       data,
@@ -1435,6 +1448,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       unlistedLabelsByRegistryId,
       monthStatus,
       rowLookupProblems,
+      rowWarnings,
+      tableDefId,
     ],
   );
 
@@ -3307,6 +3322,10 @@ export function gridColumns(
 
   // ✎ UAT 08.11 (F13-p209 P2-2): рядок з утраченим посиланням → ЯКЕ значення недійсне і його чинність.
   rowLookupProblems: ReadonlyMap<string, RowLookupProblem> = new Map(),
+
+  // ✎ F13-p210: рядок → попередження перевірки (текст сервера), і таблиця, до якої ведуть знахідки.
+  rowWarnings: ReadonlyMap<string, string> = new Map(),
+  tableDefId?: number,
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -3768,12 +3787,49 @@ export function gridColumns(
             // кольором. Тепер — словами поруч із підписом, і «!» — кнопка, що відкриває Issues на цьому пункті.
             const rowKey = isTotalsRow(cell.model) ? null : rowKeyOf(cell.model);
             // ⚠ Спершу дешева перевірка мапою рядків (`CL-03`): шаблон кличуть на кожен видимий рядок.
-            const reason =
+            const orphanedReason =
               rowKey === null || rowIndexOf(slice).get(rowKey)?.isOrphaned !== true ? null : rowAttentionReason(slice, rowKey, rowLookupProblems.get(rowKey));
-            if (reason === null || rowKey === null) {
+            const warning = rowKey === null ? undefined : rowWarnings.get(rowKey);
+            if (rowKey === null || (orphanedReason === null && warning === undefined)) {
               return createElement('span', { class: 'ecr-row-label', title: label }, label);
             }
 
+            // ✎ F13-p210: лише попередження (не помилка) — жовтий стан і знак «⚠» (форма, не лише колір); «⚠» веде на
+            // пункт перевірки в Issues. Нічого не блокує.
+            if (orphanedReason === null && warning !== undefined) {
+              const focusKey =
+                tableDefId === undefined ? `${String(slice.tableInstanceId)}:${rowKey}` : rowWarningFocusKey(tableDefId, rowKey);
+
+              return createElement(
+                'span',
+                {
+                  class: 'ecr-row-label ecr-row-label--attention ecr-row-label--warning',
+                  title: `${label} — ${warning}`,
+                  'data-row-warning': rowKey,
+                },
+                [
+                  createElement(
+                    'button',
+                    {
+                      type: 'button',
+                      class: 'ecr-row-attention-btn ecr-row-attention-btn--warning',
+                      'aria-label': t('grid.rowAttention.open', { row: label }),
+                      title: t('grid.rowAttention.open', { row: label }),
+                      'data-row-attention-open': focusKey,
+                      onClick: (event: Event) => {
+                        event.stopPropagation();
+                        requestAttentionFocus(focusKey);
+                      },
+                    },
+                    '⚠',
+                  ),
+                  createElement('span', { class: 'ecr-row-label-text' }, label),
+                  createElement('span', { class: 'ecr-row-attention-reason' }, warning),
+                ],
+              );
+            }
+
+            const reason = warning === undefined ? (orphanedReason ?? '') : `${orphanedReason ?? ''} ${warning}`;
             const itemKey = `${String(slice.tableInstanceId)}:${rowKey}`;
 
             return createElement(

@@ -4,7 +4,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import type { DocumentTableDto } from '@/api/types';
+import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
 import {
   publishTableAttention,
   requestAttentionFocus,
@@ -63,7 +63,15 @@ const January: TableAttention = {
 
 vi.stubGlobal('fetch', vi.fn(async () => new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })));
 
-function Harness({ periodKey = 202601, checkedAt = null }: { periodKey?: number; checkedAt?: Date | null }): JSX.Element {
+function Harness({
+  periodKey = 202601,
+  checkedAt = null,
+  messages = [],
+}: {
+  periodKey?: number;
+  checkedAt?: Date | null;
+  messages?: ValidationFindingDto[];
+}): JSX.Element {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   return (
@@ -74,7 +82,7 @@ function Harness({ periodKey = 202601, checkedAt = null }: { periodKey?: number;
             documentId={2}
             periodKey={periodKey}
             tables={Tables}
-            messages={[]}
+            messages={messages}
             onSelectFinding={() => undefined}
             checkedAt={checkedAt}
           />
@@ -172,5 +180,54 @@ describe('Water lock: Issues і шапка інспектора (UAT 08.11)', ()
     expect(chip?.getAttribute('data-inspector-column')).toBe('August');
     expect(chip?.textContent).toContain('inspector.info.column');
     expect(chip?.textContent).toContain('R7001000');
+  });
+
+  /*
+   * ✎ F13-p210: попередження правила дозволу (місяці лише з обчисленими значеннями поза чинністю) — на рядку в сітці
+   * жовтим; у Issues воно лишається пунктом ПЕРЕВІРКИ (попередження, не помилка), адреса — назва рядка, а «⚠» рядка
+   * веде на цей пункт. Розділ «увага» його не дублює.
+   * ⛔ Червоне без фіксу: чип «R7001000 · PermitNumber»; немає `data-inspector-finding`; пункт у розділі «увага».
+   */
+  it('F13-p210: попередження дозволу — пункт перевірки з назвою рядка; «⚠» веде на нього; без дубля', async () => {
+    const warning: ValidationFindingDto = {
+      blocksSave: false,
+      columnCode: 'PermitNumber',
+      message: 'Permit KZ1 (column "Permit number") is valid 01.03.2026 – … and does not cover the month with calculated values: 01.2026.',
+      rowKey: 'R7001000',
+      ruleCode: 'PERMIT-VALIDITY',
+      severity: 'Warning',
+      tableDefId: 701,
+    };
+    const withWarning: TableAttention = {
+      tableInstanceId: 597,
+      tableDefId: 701,
+      periodKey: 202601,
+      rows: [
+        {
+          key: '597:R7001000',
+          tableInstanceId: 597,
+          periodKey: 202601,
+          rowKey: 'R7001000',
+          rowLabel: 'Sea Water Intake',
+          reason: warning.message,
+          severity: 'Warning',
+          focusKey: 'finding:701:R7001000',
+        },
+      ],
+      lockedMonths: null,
+    };
+    render(<Harness messages={[warning]} />);
+    act(() => publishTableAttention(597, withWarning));
+    act(() => requestAttentionFocus('finding:701:R7001000'));
+
+    await waitFor(() => expect(document.querySelector('[data-inspector="issues"]')).not.toBeNull());
+    const item = document.querySelector<HTMLElement>('[data-inspector-finding="finding:701:R7001000"]');
+    expect(item?.getAttribute('data-severity')).toBe('Warning');
+    const chip = item?.querySelector('.ecr-insp-chip');
+    expect(chip?.textContent).toBe('Sea Water Intake · PermitNumber');
+    expect(chip?.textContent).not.toContain('R7001000');
+    await waitFor(() => expect(document.activeElement).toBe(item));
+    expect(document.querySelector('[data-inspector-attention]')).toBeNull();
+    expect(document.querySelector('[data-inspector-attention-list]')).toBeNull();
   });
 });

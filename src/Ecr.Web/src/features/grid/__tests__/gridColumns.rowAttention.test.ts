@@ -10,8 +10,10 @@ import {
   lockedColumnsOf,
   rowAttentionReason,
   rowLookupProblemsOf,
+  rowWarningsOf,
   tableAttentionOf,
 } from '../rowAttention';
+import { attentionRowCount, permitRowWarningsOf, rowLabelsOf, type PeriodRowFindings } from '../rowAttentionStore';
 
 /**
  * ✎ UAT 08.11 (d2), Water Report, рядок «Sea Water Intake»: червоний рядок зі знаком «!» мав причину лише
@@ -200,5 +202,89 @@ describe('Water lock: причина червоного рядка словам�
     expect(state.lockedMonths).toBe('January–August');
     expect(rowAttentionReason(slice(false), 'R1')).toBeNull();
     expect(tableAttentionOf(slice(false)).rows).toEqual([]);
+  });
+});
+
+/*
+ * ✎ F13-p210: попередження правила (h) `PERMIT-VALIDITY` (місяці лише з обчисленими значеннями поза чинністю
+ * дозволу) — на самому рядку, жовтим, зі знаком «⚠»; текст — сервера (дозвіл, чинність, місяці, що зробити).
+ * Не помилка: стан рядка — `Warning`, «⚠» веде на пункт перевірки, рядок стану рахує його серед «потребують уваги».
+ * ⛔ Червоне без фіксу: підпис рядка R2 без попередження був голим `span.ecr-row-label`.
+ */
+describe('F13-p210: попередження дозволу на рядку', () => {
+  const Message =
+    'Permit KZ1 (column "Permit number") is valid 01.03.2026 – … and does not cover the month with calculated values: 01.2026. Pick a permit valid in that month or extend the permit\'s validity.';
+
+  function permitSlice(): TableSliceDto {
+    const dto = withPermitColumn(slice(false));
+    return { ...dto, rows: dto.rows.map((row) => (row.rowKey === 'R2' ? { ...row, cells: { PermitNumber: 7 } } : row)) };
+  }
+
+  const findings = (periodKey = 202601): PeriodRowFindings => ({
+    periodKey,
+    findings: permitRowWarningsOf([
+      { tableDefId: 701, rowKey: 'R2', columnCode: 'PermitNumber', ruleCode: 'PERMIT-VALIDITY', severity: 'Warning', message: Message },
+      // Помилка того самого правила, інше правило, знахідка без рядка — не попередження рядка.
+      { tableDefId: 701, rowKey: 'R1', columnCode: 'PermitNumber', ruleCode: 'PERMIT-VALIDITY', severity: 'Error', message: 'err' },
+      { tableDefId: 701, rowKey: 'R1', columnCode: 'PermitNumber', ruleCode: 'REQ', severity: 'Warning', message: 'req' },
+      { tableDefId: 701, rowKey: null, columnCode: null, ruleCode: 'PERMIT-VALIDITY', severity: 'Warning', message: 'tbl' },
+    ]),
+  });
+
+  it('підпис рядка: жовтий стан, знак «⚠», назва рядка і текст попередження', () => {
+    const dto = permitSlice();
+    const warnings = rowWarningsOf(dto, 701, findings());
+    expect([...warnings.entries()]).toEqual([['R2', Message]]);
+
+    const columns = gridColumns(
+      dto, false, NoLocalFlags, {}, { blocked: new Map(), warning: new Map() },
+      new Map(), new Map(), new Map(), new Set(), null, null, new Set(), new Map(), new Map(), new Map(), warnings, 701,
+    );
+    const template = columns[0]?.cellTemplate as unknown as (create: typeof h, cell: { model: Record<string, unknown> }) => Node;
+    const node = template(h, { model: { __rowKey: 'R2', __rowLabel: 'Fresh Water Intake' } });
+
+    expect(node.cls).toContain('ecr-row-label--warning');
+    expect(node.attrs['data-row-warning']).toBe('R2');
+    expect(node.attrs['data-row-attention']).toBeUndefined();
+    const button = find(node, 'ecr-row-attention-btn');
+    expect(button?.cls).toContain('ecr-row-attention-btn--warning');
+    expect(textOf(button)).toBe('⚠');
+    expect(button?.attrs['data-row-attention-open']).toBe('finding:701:R2');
+    expect(textOf(find(node, 'ecr-row-label-text'))).toBe('Fresh Water Intake');
+    expect(textOf(find(node, 'ecr-row-attention-reason'))).toBe(Message);
+    expect(String(node.attrs['title'])).toBe(`Fresh Water Intake — ${Message}`);
+
+    // Рядок без попередження — як був.
+    expect(template(h, { model: { __rowKey: 'R1', __rowLabel: 'Sea Water Intake' } }).cls).toBe('ecr-row-label');
+  });
+
+  it('лише цей період, ця таблиця, комірка дозволу і відомий рядок', () => {
+    const dto = permitSlice();
+    expect(rowWarningsOf(dto, 701, findings(202602)).size).toBe(0);
+    expect(rowWarningsOf(dto, 702, findings()).size).toBe(0);
+    expect(rowWarningsOf(dto, 701, null).size).toBe(0);
+    expect(
+      rowWarningsOf(dto, 701, { periodKey: 202601, findings: [{ tableDefId: 701, rowKey: 'R2', columnCode: 'JAN', message: 'partial' }] }).size,
+    ).toBe(0);
+    expect(
+      rowWarningsOf(dto, 701, { periodKey: 202601, findings: [{ tableDefId: 701, rowKey: 'R9', columnCode: 'PermitNumber', message: 'x' }] }).size,
+    ).toBe(0);
+  });
+
+  it('стан таблиці: пункт `Warning` з назвою рядка; рахується серед «потребують уваги», не помилка', () => {
+    const dto = permitSlice();
+    const state = tableAttentionOf(dto, new Map(), rowWarningsOf(dto, 701, findings()), 701);
+
+    expect(state.tableDefId).toBe(701);
+    expect(state.rows).toHaveLength(1);
+    expect(state.rows[0]).toMatchObject({
+      rowKey: 'R2',
+      rowLabel: 'Fresh Water Intake',
+      reason: Message,
+      severity: 'Warning',
+      focusKey: 'finding:701:R2',
+    });
+    expect(attentionRowCount([state], 202601)).toBe(1);
+    expect(rowLabelsOf([state]).get('701:R2')).toBe('Fresh Water Intake');
   });
 });
