@@ -20,6 +20,7 @@ import { cellChangeReasonText } from '@/features/audit/cellChangeReason';
 import { useTableStatus } from '@/features/documents/api';
 import {
   attentionForPeriod,
+  rowLabelsOf,
   useAttentionFocus,
   useTableAttention,
   type TableAttention,
@@ -144,8 +145,19 @@ export function DocumentInspector({
 
   // ✎ UAT 08.11: рядки з утраченим посиланням і закриті місяці ЦЬОГО періоду (публікують сітки).
   const allAttention = useTableAttention();
-  const attention = useMemo(() => attentionForPeriod(allAttention, periodKey), [allAttention, periodKey]);
+  // ✎ F13-p210: попередження перевірки на рядку вже є пунктом переліку перевірки нижче — розділ «увага» їх не
+  // дублює; лічильник кнопки рахує лише рядки поза перевіркою.
+  const attention = useMemo(
+    () =>
+      attentionForPeriod(
+        allAttention.map((table) => ({ ...table, rows: table.rows.filter((row) => row.severity !== 'Warning') })),
+        periodKey,
+      ),
+    [allAttention, periodKey],
+  );
   const attentionRows = attention.reduce((sum, table) => sum + table.rows.length, 0);
+  // Назви рядків, відомі сіткам: адреса знахідки в Issues — «Sea Water Intake», а не «R7001000».
+  const rowLabels = useMemo(() => rowLabelsOf(allAttention), [allAttention]);
 
   // ⛔ N3-09: `takeFocus` - лише для відкриття ЛЮДИНОЮ (кнопка). Автовідкриття після перевірки приходить
   // асинхронно (збереження набраного до 3 с + запит) і не має красти фокус із редактора комірки.
@@ -210,9 +222,9 @@ export function DocumentInspector({
     const key = pendingFocus.current;
     if (key === null || tab !== 'issues') return;
     // By dataset, not a selector: the key is free text (row codes), and no escaping is needed.
-    const item = Array.from(aside.current?.querySelectorAll<HTMLElement>('[data-inspector-attention]') ?? []).find(
-      (candidate) => candidate.dataset['inspectorAttention'] === key,
-    );
+    const item = Array.from(
+      aside.current?.querySelectorAll<HTMLElement>('[data-inspector-attention], [data-inspector-finding]') ?? [],
+    ).find((candidate) => candidate.dataset['inspectorAttention'] === key || candidate.dataset['inspectorFinding'] === key);
     if (item === undefined) return;
     pendingFocus.current = null;
     item.scrollIntoView?.({ block: 'nearest' });
@@ -330,6 +342,7 @@ export function DocumentInspector({
               <AttentionSection attention={attention} tables={tables} />
               <IssuesTab
                 groups={groups}
+                rowLabels={rowLabels}
                 onSelect={onSelectIssue}
                 checkedPeriod={formatPeriodKey(periodKey) || String(periodKey)}
                 checkedAt={checkedAt}
@@ -518,11 +531,13 @@ function AttentionSection({
  */
 const IssuesTab = memo(function IssuesTab({
   groups,
+  rowLabels,
   onSelect,
   checkedPeriod,
   checkedAt,
 }: {
   groups: readonly InspectorIssueGroup[] | null;
+  rowLabels: ReadonlyMap<string, string>;
   onSelect: (finding: ValidationFindingDto) => void;
   checkedPeriod: string;
   checkedAt: Date | null;
@@ -573,6 +588,9 @@ const IssuesTab = memo(function IssuesTab({
               кожне веде в клітинку: кнопка, а не рядок, — фокус із клавіатури. */}
           {group.issues.slice(0, limitOf(groupKeyOf(group))).map(({ finding, index, navigable }) => {
             const Row = navigable ? 'button' : 'div';
+            // ✎ F13-p210: адреса — назва рядка, якщо її знає сітка («Sea Water Intake · PermitNumber»); інакше ключ.
+            const rowAddress = finding.rowKey === null ? null : `${String(finding.tableDefId)}:${finding.rowKey}`;
+            const rowName = rowAddress === null ? undefined : rowLabels.get(rowAddress);
 
             return (
               <Row
@@ -582,6 +600,7 @@ const IssuesTab = memo(function IssuesTab({
                   : {})}
                 className="ecr-insp-issue"
                 data-severity={finding.severity}
+                {...(rowAddress === null ? {} : { 'data-inspector-finding': `finding:${rowAddress}` })}
               >
                 <span className="ecr-insp-sev">
                   <Glyph
@@ -595,7 +614,9 @@ const IssuesTab = memo(function IssuesTab({
                 </span>
                 <span>{finding.message}</span>
                 <span className="ecr-insp-where">
-                  <span className="ecr-insp-chip">{addressChip(finding.rowKey, finding.columnCode)}</span>
+                  <span className="ecr-insp-chip" {...(rowName === undefined ? {} : { title: addressChip(finding.rowKey, finding.columnCode) })}>
+                    {addressChip(rowName ?? finding.rowKey, finding.columnCode)}
+                  </span>
                   <span title={finding.ruleCode}>{finding.displayCode ?? ruleLabel(finding.ruleCode)}</span>
                   <StatusBadge kind="severity" state={finding.severity} quiet />
                 </span>

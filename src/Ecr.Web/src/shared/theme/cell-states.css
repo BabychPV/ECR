@@ -235,6 +235,32 @@
   outline-offset: 1px;
 }
 
+/*
+ * ✎ F13-p210: попередження перевірки на рядку (дозвіл не покриває місяці лише з обчисленими значеннями) — НЕ
+ * помилка: жовтий тон попередження (той самий, що в маркера `ecr-cell-required-input-warning`), квадратна форма
+ * і знак «⚠» замість червоного кола зі «!» — відрізняється й без кольору.
+ */
+.ecr-row-label--warning {
+  --ecr-row-warning-line: #8a6100;
+  --ecr-row-warning-bg: #fff4d6;
+}
+
+:root[data-mantine-color-scheme='dark'] .ecr-row-label--warning {
+  --ecr-row-warning-line: #ffd24d;
+  --ecr-row-warning-bg: #3a2f0b;
+}
+
+.ecr-row-attention-btn--warning {
+  border-color: var(--ecr-row-warning-line);
+  border-radius: 4px;
+  background: var(--ecr-row-warning-bg);
+  color: var(--ecr-row-warning-line);
+}
+
+.ecr-row-attention-btn--warning:focus-visible {
+  outline-color: var(--ecr-row-warning-line);
+}
+
 /* ── rounded: значення округлене при вставці (D-116) ───────────────────── */
 .ecr-cell--rounded {
   background: var(--ecr-cell-rounded-bg);

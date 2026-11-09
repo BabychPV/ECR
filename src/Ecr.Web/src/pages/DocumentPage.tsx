@@ -36,6 +36,7 @@ import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
 import { DocumentProgress } from '@/features/documents/DocumentProgress';
 import { useDocumentPending } from '@/features/grid/autosave';
+import { permitRowWarningsOf, publishRowFindings } from '@/features/grid/rowAttentionStore';
 import type { HeldEdit } from '@/features/grid/pendingStore';
 import { editsDeferToServer, isEditable } from '@/features/workflow/SheetActions';
 import { useApproverEditAvailability } from '@/features/workflow/api';
@@ -370,6 +371,17 @@ export function DocumentPage(): JSX.Element {
   const freshForScope = fresh?.scope === scope ? fresh.result : null;
   const shownValidation =
     freshForScope ?? (lastValidation.data?.validated === false ? null : (lastValidation.data ?? null));
+
+  // ✎ F13-p210: попередження правила дозволу (рядкові) з ПОКАЗАНОГО результату — сіткам, щоб рядок їх показав;
+  // той самий результат, що в Issues, без нового запиту.
+  useEffect(() => {
+    publishRowFindings(
+      shownValidation === null
+        ? null
+        : { periodKey: shownValidation.periodKey, findings: permitRowWarningsOf(shownValidation.messages) },
+    );
+  }, [shownValidation]);
+  useEffect(() => () => publishRowFindings(null), []);
 
   /*
    * ⛔ «Прочитати не вдалося» — це НЕ «ще не перевіряли», і до цього місця
