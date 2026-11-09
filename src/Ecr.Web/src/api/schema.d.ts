@@ -38319,6 +38319,9 @@ export interface components {
         };
         /** @description Створений рядок динамічної таблиці. */
         RowKeyResponse: {
+            /** @description Задача формул нового рядка (колонки `SHEETNAME()`); `null` — задачі немає. Клієнт стежить за нею, як за
+             *     `recalculationJobId` PATCH. */
+            recalculationJobId?: null | string;
             /** @description Ключ рядка; на нього посилаються формули й аудит. */
             rowKey: string;
         };

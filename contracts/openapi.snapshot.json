@@ -22122,6 +22122,13 @@
       "RowKeyResponse": {
         "description": "Створений рядок динамічної таблиці.",
         "properties": {
+          "recalculationJobId": {
+            "description": "Задача формул нового рядка (колонки `SHEETNAME()`); `null` — задачі немає. Клієнт стежить за нею, як за\n`recalculationJobId` PATCH.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "rowKey": {
             "description": "Ключ рядка; на нього посилаються формули й аудит.",
             "type": "string"

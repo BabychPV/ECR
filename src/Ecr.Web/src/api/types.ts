@@ -537,6 +537,9 @@ export type SetCurrentPeriodRequest = Schemas['SetCurrentPeriodRequest'];
 /** Створення рядка динамічної таблиці (`ФВ-3.2`). */
 export type CreateRowRequest = Schemas['CreateRowRequest'];
 
+/** Створений рядок: ключ і задача формул SHEETNAME нового рядка (`recalculationJobId`). */
+export type RowKeyResponse = Schemas['RowKeyResponse'];
+
 /** Видалення рядка динамічної таблиці (`D3-A`). */
 export type DeleteRowResponse = Schemas['DeleteRowResponse'];
 
