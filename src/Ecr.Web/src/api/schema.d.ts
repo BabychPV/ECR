@@ -19623,6 +19623,163 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/roles/{id}/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Замінює набір прав ВЛАСНОЇ ролі цілком. Право `Security.ManageRoles`.
+         * @description ⛔ `If-Match` з `version` попереднього перегляду: набір змінили після читання — `409
+         *     ECR-SEC-0409` (`err.ECR-SEC-0409.permissionsStale`, актуальна версія в `details.version`); без
+         *     заголовка — `422 ECR-REQ-0422` (`err.ECR-REQ-0422.rolePermissionsIfMatch`). Додане небезпечне право без
+         *     `confirmDangerous: true` — `409` (`err.ECR-SEC-0409.dangerousPermissionsNeedConfirmation`).
+         *     Вбудована роль — `409` (`roleBuiltInPermissions`); зняття `Security.ManageUsers` в останнього
+         *     носія — `409` (`roleKeepsLastAdministrator`). Нова версія — у `ETag` відповіді `204`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ReplaceRolePermissionsRequest"];
+                    "application/json": components["schemas"]["ReplaceRolePermissionsRequest"];
+                    "text/json": components["schemas"]["ReplaceRolePermissionsRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/roles/{id}/permissions/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Попередній перегляд зміни набору прав ВЛАСНОЇ ролі: додані й прибрані права, небезпечні серед доданих,
+         *     носії (користувачі з підсумковим доступом до → після, групи) і версія чинного набору. Нічого не змінює.
+         *     Право `Security.ManageRoles`.
+         * @description ⛔ Рішення людини 08.11 ((v)). Вбудована роль — `409 ECR-SEC-0409`
+         *     (`err.ECR-SEC-0409.roleBuiltInPermissions`); невідоме право — `404 ECR-SEC-0404`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["RolePermissionsRequest"];
+                    "application/json": components["schemas"]["RolePermissionsRequest"];
+                    "text/json": components["schemas"]["RolePermissionsRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RolePermissionsPreview"];
+                        "text/json": components["schemas"]["RolePermissionsPreview"];
+                        "text/plain": components["schemas"]["RolePermissionsPreview"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/row-window-maps": {
         parameters: {
             query?: never;
@@ -36721,6 +36878,16 @@ export interface components {
             /** @description Повний склад таблиць після правки. */
             tables: components["schemas"]["PermitTypeTableDto"][];
         };
+        /** @description Запит на заміну набору прав власної ролі. */
+        ReplaceRolePermissionsRequest: {
+            /**
+             * @description Окреме підтвердження доданих небезпечних прав; без нього їх додавання — 409.
+             * @default false
+             */
+            confirmDangerous: boolean;
+            /** @description Новий повний набір кодів прав. */
+            permissionCodes: string[];
+        };
         /** @description What the apply will replace; shown BEFORE it (legacy semantics with an explicit confirmation). */
         ReplaceScope: {
             /** @description Other owners are touched: the apply needs their keys in IReadOnlyList&lt;string&gt;? ImportRequest.ConfirmedOtherOwners. */
@@ -37059,6 +37226,66 @@ export interface components {
              * @description Ідентифікатор.
              */
             roleId: number;
+        };
+        /** @description Група каталогу з чинним призначенням ролі. */
+        RoleImpactGroup: {
+            /** @description SID групи. */
+            sid: string;
+        };
+        /** @description Користувач, якому зміна прав ролі змінить підсумковий доступ (або ні). */
+        RoleImpactUser: {
+            /** @description Ім'я для показу. */
+            displayName: string;
+            /**
+             * Format: int32
+             * @description Скільки матиме після збереження.
+             */
+            effectiveAfter: number;
+            /**
+             * Format: int32
+             * @description Скільки прав людина має зараз (усі її чинні особисті ролі).
+             */
+            effectiveBefore: number;
+            /** @description Права, яких у людини ще НЕМАЄ і які вона отримає (з урахуванням інших її ролей). */
+            gained: string[];
+            /** @description Права, які людина ВТРАТИТЬ (жодна інша її роль їх не дає). */
+            lost: string[];
+            /**
+             * Format: int32
+             * @description Обліковий запис.
+             */
+            userId: number;
+            /** @description Ім'я входу. */
+            userName: string;
+        };
+        /** @description Попередній перегляд зміни набору прав ролі (рішення людини 08.11, (v)). */
+        RolePermissionsPreview: {
+            /** @description Права, що додаються. */
+            added: string[];
+            /** @description Додані небезпечні права — збереження вимагає окремого підтвердження. */
+            addedDangerous: string[];
+            /** @description Чинний набір прав ролі на момент перегляду — клієнт звіряє його з тим, від чого почав правку. */
+            current: string[];
+            /** @description Групи з чинним призначенням ролі. */
+            groups: components["schemas"]["RoleImpactGroup"][];
+            /** @description Права, що прибираються. */
+            removed: string[];
+            /** @description Код ролі. */
+            roleCode: string;
+            /**
+             * Format: int32
+             * @description Роль.
+             */
+            roleId: number;
+            /** @description Прямі носії ролі (чинне особисте призначення) з підсумковим доступом до → після. */
+            users: components["schemas"]["RoleImpactUser"][];
+            /** @description Версія ЧИННОГО набору — її клієнт повертає в `If-Match` збереження. */
+            version: string;
+        };
+        /** @description Новий повний набір прав ролі — для попереднього перегляду впливу. */
+        RolePermissionsRequest: {
+            /** @description Коди прав; порожній — роль без жодного права. */
+            permissionCodes: string[];
         };
         /** @description Область дії призначення ролі в тілі запиту й у відповіді (ФВ-6.14, D-214). */
         RoleScopeDto: {

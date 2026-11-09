@@ -227,6 +227,21 @@ public interface IUserStore
     /// </remarks>
     public Task<int> RotateStampsForRoleAsync(int roleId, CancellationToken ct);
 
+    /// <summary>Замінює набір прав ролі цілком (без власного збереження — коміт робить обробник).</summary>
+    /// <param name="roleId">Роль.</param>
+    /// <param name="permissionCodes">Новий набір кодів прав (відомих каталогу).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task ReplaceRolePermissionsAsync(int roleId, IReadOnlyList<string> permissionCodes, CancellationToken ct);
+
+    /// <summary>
+    /// Носії ролі на дату: користувачі з ЧИННИМ особистим призначенням (з правами їхніх інших чинних ролей) і
+    /// групи з чинним призначенням — для попереднього перегляду зміни прав ролі.
+    /// </summary>
+    /// <param name="roleId">Роль.</param>
+    /// <param name="asOf">Дата чинності призначень.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<Security.RoleCarriers> ListRoleCarriersAsync(int roleId, DateOnly asOf, CancellationToken ct);
+
     /// <summary>
     /// Призначення ролей, адресовані особі <b>або</b> будь-якому з переданих
     /// SID груп — разом із тим, чи діють вони на дату.
