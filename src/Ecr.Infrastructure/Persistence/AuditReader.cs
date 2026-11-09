@@ -693,6 +693,7 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
             ["SheetDef"] = ("cfg.SheetDef", "Code"),
             ["RowDef"] = ("cfg.RowDef", "RowKey"),
             ["RegistryDef"] = ("cfg.RegistryDef", "Code"),
+            ["Project"] = ("doc.Project", "Code"),
         };
 
     /// <summary>
@@ -730,7 +731,41 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         }
 
         return [.. items.Select(i =>
-            labels.TryGetValue((TrimSchema(i.EntityType), i.EntityId), out var label) ? i with { EntityLabel = label } : i)];
+            labels.TryGetValue((TrimSchema(i.EntityType), i.EntityId), out var label) ? i with { EntityLabel = label }
+            : SnapshotCode(i) is { } code ? i with { EntityLabel = code }
+            : i)];
+    }
+
+    /// <summary>
+    /// Код ВИДАЛЕНОЇ сутності — зі знімка, який журнал записав у момент видалення (<c>OldJson.code</c>, <c>NewJson</c>
+    /// порожній).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ F13 c1 (09.11): рядок видалення проєкту читався «Project · 2 Deleted —»: чинного рядка вже немає, і підпис
+    /// падав на номер, хоча код (<c>DeleteProjectHandler</c>) лежав у самому записі.
+    /// </remarks>
+    private static string? SnapshotCode(StructureChangeView item)
+    {
+        if (item.NewJson is not null || string.IsNullOrWhiteSpace(item.OldJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var json = System.Text.Json.JsonDocument.Parse(item.OldJson);
+
+            return json.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && json.RootElement.TryGetProperty("code", out var code)
+                   && code.ValueKind == System.Text.Json.JsonValueKind.String
+                   && !string.IsNullOrWhiteSpace(code.GetString())
+                ? code.GetString()
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     private static string TrimSchema(string entityType)
