@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { currentCellNavigation } from '@/features/grid/cellNavigation';
 import { DocumentPage } from '@/pages/DocumentPage';
 
 /**
@@ -31,6 +32,17 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
+/** Рядок таблиці T0 без правила (`GET …/calculation-issues`). */
+const unmatched = (rowKey: string, rowNumber: number): unknown => ({
+  detectedAt: '2026-01-02T00:00:00Z',
+  kind: 'NoMatchingRule',
+  methodologyCode: 'M1',
+  rowKey,
+  rowNumber,
+  sheetCopyId: null,
+  tableCode: 'T0',
+});
+
 const result = (isStale: boolean): unknown => ({
   rowKey: 'R1',
   outputCode: 'OUT',
@@ -46,6 +58,7 @@ function mockFetch(
   staleSequence: boolean[],
   recalcRefusal = false,
   runStatus: unknown = { runId: null, finishedAt: null, unmatchedRows: null },
+  issues: unknown[] = [],
 ): { posts: () => number } {
   let summaryReads = 0;
   let posts = 0;
@@ -71,6 +84,8 @@ function mockFetch(
 
       // ✎ D14: стан прогону - рядки без правила (calculation-run); адреса не містить calculation-results.
       if (url.includes('/calculation-run')) return jsonResponse(runStatus);
+      // ✎ UAT 08.11 b1: перелік рядків без правила - calculation-issues (усі рядки з кодом таблиці).
+      if (url.includes('/calculation-issues')) return jsonResponse({ items: issues });
 
       // Числи методологій: власний запит ПАНЕЛІ (вона тут замінена заглушкою) — відкриття документа його не робить.
       if (url.includes('/calculation-results')) {
@@ -151,8 +166,9 @@ function show(
   staleSequence: boolean[],
   recalcRefusal = false,
   runStatus?: unknown,
+  issues?: unknown[],
 ): { posts: () => number } {
-  const probe = mockFetch(permissions, staleSequence, recalcRefusal, runStatus);
+  const probe = mockFetch(permissions, staleSequence, recalcRefusal, runStatus, issues);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
@@ -215,28 +231,34 @@ describe('DocumentPage: застарілі числа методологій', (
   );
 
   it(
-    'D14: рядок без правила (Removed) - інформаційна позначка з ключем рядка, не помилка',
+    'D14 b1/b2: рядок без правила - група таблиці з назвою; клік відкриває саме цей рядок у сітці',
     async () => {
-      show(['Document.View', 'Calculation.View'], [false], false, {
-        runId: 7,
-        finishedAt: '2026-01-02T00:00:00Z',
-        unmatchedRows: { count: 1, rows: [{ tableInstanceId: 1, rowNumber: 2, rowKey: 'R-REMOVED' }] },
-      });
+      show(
+        ['Document.View', 'Calculation.View'],
+        [false],
+        false,
+        { runId: 7, finishedAt: '2026-01-02T00:00:00Z', unmatchedRows: null },
+        [unmatched('R-REMOVED', 2)],
+      );
 
       const banner = await screen.findByTestId('document-unmatched-rows', undefined, { timeout: Slow });
-      expect(banner).toBeDefined();
-      expect(screen.getByTestId('document-unmatched-rows-hint').textContent).toContain('2 (R-REMOVED)');
+      expect(banner.textContent).toContain('⟦document.unmatchedRows.group (table=GEN · Table 0, rows=⟦document.unmatchedRows.rows.one (count=1)⟧)⟧');
+
+      fireEvent.click(screen.getByTestId('document-unmatched-row-link'));
+      await waitFor(() => {
+        expect(currentCellNavigation()).toMatchObject({ tableInstanceId: 1, tableDefId: 1, rowKey: 'R-REMOVED', columnCode: null });
+      });
     },
     Slow,
   );
 
   it(
-    'D14: прогін без рядків без правила - позначки немає (стан прогону прочитано)',
+    'D14: рядків без правила немає - позначки немає (перелік прочитано)',
     async () => {
       show(['Document.View', 'Calculation.View'], [false]);
       await screen.findByRole('button', ValidateButton, { timeout: Slow });
       await waitFor(() => {
-        expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/calculation-run'))).toBe(true);
+        expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/calculation-issues'))).toBe(true);
       });
       expect(screen.queryByTestId('document-unmatched-rows')).toBeNull();
     },
@@ -244,13 +266,13 @@ describe('DocumentPage: застарілі числа методологій', (
   );
 
   it(
-    'D14: без права Calculation.View запиту стану прогону немає',
+    'D14: без права Calculation.View запиту стану прогону немає, а перелік рядків (Document.View) є',
     async () => {
-      show(['Document.View'], [false], false, { runId: 1, finishedAt: null, unmatchedRows: { count: 1, rows: [] } });
+      show(['Document.View'], [false], false, { runId: 1, finishedAt: null, unmatchedRows: null }, [unmatched('R1', 1)]);
 
-      await screen.findByRole('button', ValidateButton, { timeout: Slow });
+      await screen.findByTestId('document-unmatched-rows', undefined, { timeout: Slow });
       expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/calculation-run'))).toBe(false);
-      expect(screen.queryByTestId('document-unmatched-rows')).toBeNull();
+      expect(screen.getByTestId('document-unmatched-rows-summary').textContent).not.toContain('lastRun');
     },
     Slow,
   );

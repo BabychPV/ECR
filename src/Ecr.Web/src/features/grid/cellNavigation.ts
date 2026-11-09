@@ -179,7 +179,72 @@ export async function revealGridCell(
     await grid.setCellsFocus?.(local, local);
   }
 
+  // ✎ fg6 F13: рядок, до якого перейшли, — у верхній третині вікна, а не на нижньому краї (людина: банер і сітка
+  // «не мають займати все вікно»). Рамка фокуса RevoGrid (`revogr-focus`) з'являється після кадру.
+  // ⚠ Не сам `revogr-focus`: його хост має нульовий прямокутник (top 0 — «уже вгорі»), і прокрутки не було
+  // (доказ F13: y≈650 без змін). Ціль — підсвічена комірка переходу або видима рамка фокуса, інакше вся сітка.
+  keepInUpperThird(() => visibleTargetOf(grid));
+
   return true;
+}
+
+/** Перший видимий (з ненульовим прямокутником) кандидат на «рядок переходу»; інакше — сама сітка. */
+function visibleTargetOf(grid: Element): Element {
+  for (const selector of ['.ecr-cell-nav-target', 'revogr-focus .focused-cell', 'revogr-focus > *']) {
+    const candidate = grid.querySelector(selector);
+    if (candidate === null) continue;
+    const rect = candidate.getBoundingClientRect();
+    if (rect.width > 0 || rect.height > 0) return candidate;
+  }
+
+  return grid;
+}
+
+
+/** Скільки кадрів тримати рядок у верхній третині після переходу. */
+const UpperThirdFrames = 40;
+
+/**
+ * Тримає елемент у верхній третині вікна ~40 кадрів після переходу.
+ *
+ * ⛔ Один `scrollBy` не тримається: вибір таблиці в дереві — `navigate(?table=, replace)`, нова `location.key`, і
+ * глобальний `<ScrollRestoration/>` (`AppLayout`) робить `scrollTo(0, 0)` уже ПІСЛЯ фокуса (живий прохід F13: рядок
+ * лишався на y≈650 із 900, на 375 px — за краєм вікна). Тому — повтор кожен кадр, доки людина сама не прокрутила
+ * (колесо, дотик, клавіша, клік) — той самий прийом, що відновлення прокрутки при зміні періоду (`DocumentPage`).
+ */
+export function keepInUpperThird(target: () => Element): void {
+  let frames = 0;
+  let frame = 0;
+  let stopped = false;
+  const userScroll = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+  const stop = (): void => {
+    stopped = true;
+    window.cancelAnimationFrame(frame);
+    for (const type of userScroll) window.removeEventListener(type, stop);
+  };
+  for (const type of userScroll) window.addEventListener(type, stop, { passive: true, once: true });
+  const tick = (): void => {
+    if (stopped) return;
+    scrollIntoUpperThird(target());
+    frames += 1;
+    if (frames < UpperThirdFrames) frame = window.requestAnimationFrame(tick);
+    else stop();
+  };
+  frame = window.requestAnimationFrame(tick);
+}
+
+/**
+ * Прокручує СТОРІНКУ так, щоб верх елемента став на третину висоти вікна, — якщо він зараз не у верхніх 40 %
+ * (або вище за край). Уже видимий угорі елемент не смикається.
+ */
+export function scrollIntoUpperThird(element: Element, win: Window = window): void {
+  const height = win.innerHeight;
+  if (height <= 0) return;
+
+  const top = element.getBoundingClientRect().top;
+  if (top >= 0 && top <= height * 0.4) return;
+
+  win.scrollBy({ top: top - height / 3 });
 }
 
 /** Скільки тримається підсвітка цільової комірки. */

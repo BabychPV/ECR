@@ -14,12 +14,26 @@ namespace Ecr.Application.Documents;
 /// ⚠ Право — <c>Document.View</c> (аркуш показує проблему поряд з даними), невидимий документ — той самий 404, що й
 /// в інших читань документа. Рядки схованих таблиць (власна чи аркуша заборона) у відповіді ВІДСУТНІ: ключ рядка
 /// схованої таблиці не повинен витікати.
+///
+/// ✎ UAT 08.11 b3: разом із проблемами — що приймають правила таблиці (<see cref="CalculationIssueHints"/>) і поточні
+/// значення рядка в тих колонках. Без джерела підказки (конструктор у старих тестах) — лише перелік, як доти.
 /// </remarks>
 public sealed class GetCalculationIssuesHandler(
     ICalculationIssueStore issues,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IRowStore? rowStore = null,
+    ICellStore? cellStore = null,
+    IMetadataCache? metadata = null,
+    IPeriodStore? periods = null,
+    IMethodologyStore? methodologies = null,
+    IColumnPathMapper? columnMapper = null)
 {
+    private readonly CalculationIssueHints? hints =
+        rowStore is null || cellStore is null || metadata is null || periods is null || methodologies is null
+            ? null
+            : new CalculationIssueHints(rowStore, cellStore, metadata, periods, methodologies, columnMapper);
+
     /// <summary>Право на перегляд документа (`02-contracts.md` §9).</summary>
     public const string Permission = "Document.View";
 
@@ -49,12 +63,25 @@ public sealed class GetCalculationIssuesHandler(
             ? (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(key)
             : await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
 
+        var visible = rows.Where(r => readable.CanReadTable(r.TableDefId)).ToList();
+
+        var built = hints is null || visible.Count == 0 || !key.IsValid
+            ? CalculationIssueHintSet.Empty
+            : await hints.BuildAsync(documentId, key, sheetCopyId, visible, readable.CanReadColumn, ct)
+                .ConfigureAwait(false);
+
         return new CalculationIssuesDto(
-        [
-            .. rows
-                .Where(r => readable.CanReadTable(r.TableDefId))
-                .Select(r => new CalculationIssueDto(
-                    r.TableCode, r.SheetCopyId, r.RowNumber, r.RowKey, r.Kind, r.MethodologyCode, r.DetectedAt)),
-        ]);
+            [
+                .. visible.Select(r => new CalculationIssueDto(
+                    r.TableCode,
+                    r.SheetCopyId,
+                    r.RowNumber,
+                    r.RowKey,
+                    r.Kind,
+                    r.MethodologyCode,
+                    r.DetectedAt,
+                    built.CurrentValues.GetValueOrDefault((r.TableDefId, r.RowKey)))),
+            ],
+            built.Tables.Count == 0 ? null : built.Tables);
     }
 }

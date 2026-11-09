@@ -27699,8 +27699,18 @@ export interface components {
             tableDefId: number;
             tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
+        /** @description Колонка, яку згадують правила методології. */
+        CalculationIssueColumnDto: {
+            /** @description Код колонки. */
+            code: string;
+            /** @description Заголовок колонки мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+        };
         /** @description Одна поточна проблема розрахунку: рядок, який правило методології не охопило (AN-69). */
         CalculationIssueDto: {
+            /** @description Значення рядка в колонках підказки таблиці (`tables[].columns`, той самий порядок);
+             *     `null` — підказки для таблиці немає; порожній рядок у позиції — комірка порожня. */
+            currentValues?: null | string[];
             /**
              * Format: date-time
              * @description Коли виявлено (UTC).
@@ -27725,10 +27735,37 @@ export interface components {
             /** @description Код таблиці шаблону. */
             tableCode: string;
         };
+        /** @description Методологія підказки таблиці. */
+        CalculationIssueMethodologyDto: {
+            /** @description Код методології. */
+            code: string;
+            nameL10n: null | components["schemas"]["LocalizedText"];
+        };
+        /** @description Що приймають правила методологій таблиці (UAT 08.11 b3). */
+        CalculationIssueTableHintDto: {
+            /** @description Колонки, які згадують правила, у порядку колонок таблиці. */
+            columns: components["schemas"]["CalculationIssueColumnDto"][];
+            /** @description Методології, чиї правила дали варіанти: код і назва (людині показується назва). */
+            methodologies: components["schemas"]["CalculationIssueMethodologyDto"][];
+            /** @description Допустимі комбінації: кожен елемент — значення в порядку Columns; порожній рядок у позиції —
+             *     правило цю колонку не обмежує. Без повторів, за зростанням. */
+            options: string[][];
+            /**
+             * Format: int64
+             * @description Копія аркуша; `null` — оригінал.
+             */
+            sheetCopyId: null | number;
+            /** @description Код таблиці шаблону. */
+            tableCode: string;
+        };
         /** @description Поточні проблеми розрахунку документа за період (AN-69). */
         CalculationIssuesDto: {
             /** @description Проблеми видимих читачеві таблиць; порожньо — проблем немає. */
             items: components["schemas"]["CalculationIssueDto"][];
+            /** @description Що приймають правила методологій кожної таблиці з проблемами (UAT 08.11 b3): колонки, які згадують правила, і
+             *     допустимі комбінації значень. Таблиці немає — підказки немає (правил з колонками цієї таблиці немає, чинної версії
+             *     немає або хоч одна колонка прихована від читача). */
+            tables?: null | components["schemas"]["CalculationIssueTableHintDto"][];
         };
         /**
          * @description Рівень драбини виразності для методології (ФВ-9.2).

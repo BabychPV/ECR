@@ -145,11 +145,6 @@ const PermitRefreshStrip = lazy(async () => ({
   default: (await import('@/features/permits/bindings/PermitRefreshStrip')).PermitRefreshStrip,
 }));
 
-// AN-69: панель «рядки без правила методології» - окремим чанком, у бюджет маршруту (`D-132`) не входить.
-const CalculationIssuesPanel = lazy(async () => ({
-  default: (await import('@/features/calculationIssues/CalculationIssuesPanel')).CalculationIssuesPanel,
-}));
-
 /**
  * Пропозиція повернути загублені правки — сьома лінива панель (`D-132`).
  *
@@ -442,9 +437,10 @@ export function DocumentPage(): JSX.Element {
   // таблиці цього періоду прочитано (`heldToReveal`): `tables.data` до того - чужого періоду.
   const heldToReveal = useRef<HeldEdit | null>(null);
 
-  const revealHeld = useCallback(
-    (held: HeldEdit): void => {
-      const target = tables.data?.find((table) => table.tableInstanceId === held.tableInstanceId);
+  // ✎ UAT 08.11 b2: той самий шлях відкриває рядок із банера «рядки без правила» (`columnCode = null` - перша колонка).
+  const revealRow = useCallback(
+    (tableInstanceId: number, rowKey: string, columnCode: string | null): void => {
+      const target = tables.data?.find((table) => table.tableInstanceId === tableInstanceId);
       if (target === undefined) return;
 
       const targetKey = sheetTabKey(target.sheetCode, copyFieldsOf(target).sheetCopyId);
@@ -453,12 +449,20 @@ export function DocumentPage(): JSX.Element {
         module.requestCellNavigation({
           tableDefId: target.tableDefId,
           tableInstanceId: target.tableInstanceId,
-          rowKey: held.edit.rowKey,
-          columnCode: held.edit.columnCode,
+          rowKey,
+          columnCode,
         }),
       );
     },
     [tables.data, activeCode, setSheet],
+  );
+  const revealHeld = useCallback(
+    (held: HeldEdit): void => revealRow(held.tableInstanceId, held.edit.rowKey, held.edit.columnCode),
+    [revealRow],
+  );
+  const openUnmatchedRow = useCallback(
+    (tableInstanceId: number, rowKey: string): void => revealRow(tableInstanceId, rowKey, null),
+    [revealRow],
   );
 
   useEffect(
@@ -685,8 +689,13 @@ export function DocumentPage(): JSX.Element {
   // довідниками й звуженими читачами), БЕЗ запиту calculation-results при відкритті документа (на Land до 174 тис.
   // рядків). Окремий бейдж прибрано: банер під рядком дій каже те саме. Числа панель вантажить лише після розгортання.
   const calculationsStale = summary.data?.resultsStale === true;
-  // ✎ D14: рядки без правила розрахунку - інформація під рядком дій, не помилка.
-  const unmatchedRows = useUnmatchedRows(documentId, periodKey, can(session.data, 'Calculation.View'));
+  // ✎ D14 + AN-69 (UAT 08.11 b1): рядки без правила розрахунку - інформація під рядком дій, не помилка.
+  const unmatchedRows = useUnmatchedRows(
+    documentId,
+    periodKey,
+    active?.sheetCopyId ?? null,
+    can(session.data, 'Calculation.View'),
+  );
 
   const refetchBoth = (): void => {
     void summary.refetch();
@@ -829,9 +838,15 @@ export function DocumentPage(): JSX.Element {
         />
       )}
 
-      {unmatchedRows !== null && (
+      {unmatchedRows.issues.length > 0 && (
         <Suspense fallback={null}>
-          <UnmatchedRowsBanner rows={unmatchedRows} />
+          <UnmatchedRowsBanner
+            userId={session.data?.userId}
+            rows={unmatchedRows}
+            tables={tables.data ?? []}
+            onOpenRow={openUnmatchedRow}
+            narrow={narrow}
+          />
         </Suspense>
       )}
 
@@ -850,19 +865,6 @@ export function DocumentPage(): JSX.Element {
       {active !== undefined && active.tables.some((table) => table.permitBinding != null) && (
         <Suspense fallback={null}>
           <PermitRefreshStrip documentId={documentId} periodKey={periodKey} tables={active.tables} readOnly={readOnly} />
-        </Suspense>
-      )}
-
-      {/* AN-69: рядки, яких розрахунок не охопив жодним правилом методології, - згортна панель активного аркуша.
-          Сама мовчить, коли проблем немає або документ невидимий (404). */}
-      {active !== undefined && (
-        <Suspense fallback={null}>
-          <CalculationIssuesPanel
-            documentId={documentId}
-            periodKey={periodKey}
-            sheetCopyId={active.sheetCopyId ?? null}
-            tables={active.tables}
-          />
         </Suspense>
       )}
 
