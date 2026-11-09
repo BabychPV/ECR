@@ -535,6 +535,11 @@ $env:ECR_Auth__RequireHttps = 'false'
 # згода на незахищене кільце (тоді старт пише Critical, а db — Degraded).
 $env:ECR_Auth__DataProtection__AllowUnprotectedKeys = 'true'
 
+# D-471: нижня межа «виходу після бездіяльності» — 1 хв замість 5 лише на одноразовому стенді: `idleSignOut.spec.ts`
+# сам ставить 1 хв через екран і повертає 30 після себе. Без цього e2e чекав би по 5 хв на кожен сценарій.
+# Значення за замовчуванням (30 хв) ця змінна НЕ змінює: решта набору живе з ним.
+$env:ECR_Auth__IdleTimeout__MinimumMinutes = '1'
+
 # AN-142 (Q-17): маршрутизація місячних колонок діє ЛИШЕ для таблиць `MonthsInColumns`; сід-шаблон стенда
 # (DataGen: `PerPeriodInstance`) нею не зачеплений. Потрібна `anchorTextSubmittedLive.spec.ts`: вона збирає таку
 # таблицю через API і перевіряє правку тексту якоря в поданому році.
