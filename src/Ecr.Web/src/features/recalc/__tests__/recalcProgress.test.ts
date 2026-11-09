@@ -4,7 +4,7 @@ import { recentJobsUrl, myTasksUrl } from '@/features/jobs/api';
 import { pollingJobCount } from '@/features/jobs/myTasks';
 import { visibleRecalcs } from '@/features/recalc/ProjectRecalcBanner';
 import { isProjectRecalculation, progressOf, RecalculationJobCode } from '@/features/recalc/recalcProgress';
-import { projectRecalcUrl } from '@/features/recalc/useProjectRecalcProgress';
+import { projectRecalcUrl, rememberRecalcTotal, withExpectedTotal } from '@/features/recalc/useProjectRecalcProgress';
 
 /**
  * ✎ UAT recalc-progress (08.11): стан перерахунку проєкту з рядка переліку задач.
@@ -46,6 +46,20 @@ describe('progressOf', () => {
     expect(progressOf(parent({ state: 'Failed', effectiveState: null, fanOut: null })).phase).toBe('failed');
     expect(progressOf(parent({ effectiveState: 'SucceededWithErrors' })).phase).toBe('finishedWithErrors');
     expect(progressOf(parent({ effectiveState: 'Succeeded' })).phase).toBe('finished');
+  });
+
+  it('a1: поки батько ще розкладає (Running), часткове fanOut.total — не N; N — запам’ятане при постановці', () => {
+    // ⛔ Живий стенд 09.11: батько Running, розкладено 1 з 3 документів → банер «Queued 1 documents…».
+    const fanning = parent({
+      jobId: 'IRecalculationJob~project9-year~1',
+      state: 'Running',
+      effectiveState: null,
+      fanOut: { total: 1, queued: 1, running: 0, succeeded: 0, failed: 0, skippedSheets: 0 },
+    });
+
+    expect(progressOf(fanning).total).toBeNull();
+    rememberRecalcTotal('IRecalculationJob~project9-year~1', 3);
+    expect(withExpectedTotal(progressOf(fanning)).total).toBe(3);
   });
 
   it('документна дитина — не перерахунок проєкту', () => {
