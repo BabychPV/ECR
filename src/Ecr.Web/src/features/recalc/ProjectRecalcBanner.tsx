@@ -6,7 +6,7 @@ import type { CurrentUserDto } from '@/api/types';
 import { can, MeQueryKey } from '@/shared/session/useSession';
 import { t } from '@/shared/i18n';
 import { RecalcFailedDocuments } from './RecalcFailedDocuments';
-import { isRecalcActive, isRecentlyFinished, recalcProgressText, type RecalcProgress } from './recalcProgress';
+import { inProjects, isRecalcActive, isRecentlyFinished, recalcProgressText, type RecalcProgress } from './recalcProgress';
 import { useProjectRecalcProgress } from './useProjectRecalcProgress';
 
 /*
@@ -49,6 +49,11 @@ export function visibleRecalcs(
 interface ProjectRecalcBannerProps {
   /** Проєкт; `null` — останні власні перерахунки будь-якого проєкту (перелік документів «All projects»). */
   readonly projectId: number | null;
+  /**
+   * ✎ g2: показувати перерахунки лише цих проєктів (перелік документів — проєкти обраного року); `undefined` — усі
+   * рядки запиту, як і раніше (сторінка документа, Periods).
+   */
+  readonly onlyProjects?: readonly number[] | undefined;
 }
 
 /**
@@ -57,7 +62,7 @@ interface ProjectRecalcBannerProps {
  *
  * ⚠ Самодостатній (лише `projectId`): той самий компонент переїде на вкладку Periods сторінки проєкту.
  */
-export function ProjectRecalcBanner({ projectId }: ProjectRecalcBannerProps): JSX.Element | null {
+export function ProjectRecalcBanner({ projectId, onlyProjects }: ProjectRecalcBannerProps): JSX.Element | null {
   const queryClient = useQueryClient();
   const me = queryClient.getQueryData<CurrentUserDto>(MeQueryKey);
   const userId = me?.userId ?? null;
@@ -70,7 +75,7 @@ export function ProjectRecalcBanner({ projectId }: ProjectRecalcBannerProps): JS
   const isDismissed = (jobId: string): boolean =>
     dismissed.includes(jobId) || read(bannerStorageKey(userId, `dismissed.${jobId}`));
 
-  const shown = visibleRecalcs(items, isDismissed, Date.now());
+  const shown = visibleRecalcs(inProjects(items, onlyProjects), isDismissed, Date.now());
   if (shown.length === 0) return null;
 
   const toggle = (): void => {

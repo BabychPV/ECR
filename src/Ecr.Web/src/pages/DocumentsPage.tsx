@@ -363,8 +363,15 @@ export function DocumentsPage(): JSX.Element {
           порожній результат — ховав би кнопку, якою фільтр і знімають.
           ⚠ І в ТОМУ САМОМУ ряду, що й фільтри (рішення людини 2026-10-06). */}
       {/* ✎ UAT recalc-progress (a2): після повернення на перелік прогрес перерахунку відновлюється з сервера. */}
+      {/* ✎ g2 (приймання 08.11): лише перерахунки проєктів ОБРАНОГО року (у яких є період цього року), а за
+          обраним проєктом — лише його. Інакше «Finished: …» проєкту 2026 стояв над переліком 2024. */}
       <Suspense fallback={null}>
-        <ProjectRecalcBannerSlot projectId={filters.projectId} />
+        <ProjectRecalcBannerSlot
+          projectId={filters.projectId}
+          onlyProjects={projectsOfYear
+            .map((project) => project.id)
+            .filter((id) => filters.projectId === null || id === filters.projectId)}
+        />
       </Suspense>
 
       {/* ✎ fg6: пояснення — компактне й згортається (пам'ятається на людину). */}
