@@ -502,16 +502,19 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     public async Task<IReadOnlyList<Application.Calculations.SkippedSheet>> ListApprovedSheetsAsync(
         int? projectId, long? documentId, int? periodKey, int take, CancellationToken ct)
     {
-        // RS: стан копії не робить затвердженим аркуш-оригінал — той самий зріз, що й `RecalculationJob.SkippedSheetsAsync`.
+        // RS: перерахунок пропускає аркуш × КОПІЮ окремо (`SkippedScopesAsync`), тож і перелік — кожен затверджений
+        // стан, з копією (✎ борг 09.11: раніше `OriginalOnly()` мовчки ховав затверджені копії з переліку).
         var rows = await (
-                from state in db.ApprovalStates.AsNoTracking().OriginalOnly()
+                from state in db.ApprovalStates.AsNoTracking()
                 join document in db.Documents.AsNoTracking() on state.DocumentId equals document.Id
                 join sheet in db.SheetDefs.AsNoTracking() on state.SheetDefId equals sheet.Id
+                from copy in db.DocumentSheets.AsNoTracking().Where(c => c.Id == state.SheetCopyId).DefaultIfEmpty()
                 where (projectId == null || document.ProjectId == projectId)
                       && (documentId == null || document.Id == documentId)
                       && (periodKey == null || state.PeriodKey == periodKey)
                       && state.Status == Domain.Enums.DocumentStatus.Approved
-                orderby document.Id, state.PeriodKey, sheet.Ordinal, sheet.Id
+                orderby document.Id, state.PeriodKey, sheet.Ordinal, sheet.Id,
+                    copy == null ? Domain.Entities.Documents.DocumentSheet.OriginalOrdinal : copy.CopyOrdinal
                 select new
                 {
                     document.Id,
@@ -522,13 +525,42 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
                     SheetName = sheet.NameL10n,
                     state.PeriodKey,
                     state.Status,
+                    state.SheetCopyId,
+                    CopyOrdinal = copy == null ? Domain.Entities.Documents.DocumentSheet.OriginalOrdinal : copy.CopyOrdinal,
                 })
             .Take(take)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        return [.. rows.Select(r => new Application.Calculations.SkippedSheet(
-            r.Id, r.BusinessKey, r.NameL10n, r.SheetDefId, r.Code, r.SheetName, r.PeriodKey, r.Status.ToString()))];
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        // Назва групи й «чи є копії» — одним запитом на документи переліку (≤ стелі переліку).
+        var documentIds = rows.Select(r => r.Id).Distinct().ToList();
+        var groups = (await db.DocumentSheets.AsNoTracking()
+                .Where(s => documentIds.Contains(s.DocumentId))
+                .Select(s => new { s.DocumentId, s.SheetDefId, s.CopyOfId, s.NameOverrideL10n })
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .GroupBy(s => (s.DocumentId, s.SheetDefId))
+            .ToDictionary(
+                g => g.Key,
+                g => (Override: g.FirstOrDefault(s => s.CopyOfId == null)?.NameOverrideL10n, HasCopies: g.Any(s => s.CopyOfId != null)));
+
+        return [.. rows.Select(r =>
+        {
+            var group = groups.TryGetValue((r.Id, r.SheetDefId), out var found) ? found : (Override: null, HasCopies: false);
+            var display = Domain.ValueObjects.SheetCopyNaming.Display(
+                Domain.ValueObjects.SheetCopyNaming.Effective(r.SheetName, group.Override),
+                r.CopyOrdinal,
+                group.HasCopies || r.SheetCopyId is not null);
+
+            return new Application.Calculations.SkippedSheet(
+                r.Id, r.BusinessKey, r.NameL10n, r.SheetDefId, r.Code, r.SheetName, r.PeriodKey, r.Status.ToString(),
+                r.SheetCopyId, display);
+        })];
     }
 
     /// <inheritdoc />

@@ -39597,10 +39597,17 @@ export interface components {
             /** @description Код аркуша. */
             sheetCode: string;
             /**
+             * Format: int64
+             * @description ✎ Борг 09.11: копія аркуша (RS), яку пропущено; `null` — оригінал. Перерахунок пропускає аркуш × копію
+             *     окремо, тож і перелік називає копію.
+             */
+            sheetCopyId?: null | number;
+            /**
              * Format: int32
              * @description Аркуш.
              */
             sheetDefId: number;
+            sheetDisplayName?: null | components["schemas"]["LocalizedText"];
             /** @description Назва аркуша мовами каталогу. */
             sheetName: components["schemas"]["LocalizedText"];
             /** @description `Approved`. */
