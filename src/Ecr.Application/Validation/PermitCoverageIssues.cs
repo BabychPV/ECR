@@ -33,6 +33,9 @@ public static class PermitCoverageIssues
     /// <summary>Rule code of a row finding.</summary>
     public const string RowRuleCode = "PERMIT-VALIDITY";
 
+    /// <summary>Rule code of feature (j) j3: a month shared by two permits of the row holds one value (blocks Submit).</summary>
+    public const string SplitRuleCode = "PERMIT-SPLIT";
+
     /// <summary>Runs the check over the period's original instances and the header.</summary>
     /// <param name="permitTargets">Permit-type Lookup targets; <c>null</c> — the rule is off.</param>
     /// <param name="registries">Registry entries.</param>
@@ -47,6 +50,7 @@ public static class PermitCoverageIssues
     /// <param name="periodKey">Period.</param>
     /// <param name="language">Language of the fallback text.</param>
     /// <param name="ct">Cancellation.</param>
+    /// <param name="history">Feature (j): permit history of rows; <c>null</c> — rows have no history.</param>
     public static async Task<IReadOnlyList<ValidationMessage>> RunAsync(
         IPermitRegistryIndex? permitTargets,
         IRegistryStore registries,
@@ -60,7 +64,8 @@ public static class PermitCoverageIssues
         IReadOnlyList<TableInstanceRef> instances,
         PeriodKey periodKey,
         string language,
-        CancellationToken ct)
+        CancellationToken ct,
+        IPermitHistoryStore? history = null)
     {
         ArgumentNullException.ThrowIfNull(registries);
         ArgumentNullException.ThrowIfNull(cells);
@@ -89,7 +94,7 @@ public static class PermitCoverageIssues
 
         var messages = new List<ValidationMessage>();
         messages.AddRange(await RowFindingsAsync(
-                registries, cells, rows, periods, tables, permitColumnsOf, documentId, instances, periodKey, language, ct)
+                registries, cells, rows, periods, tables, permitColumnsOf, documentId, instances, periodKey, language, history, ct)
             .ConfigureAwait(false));
 
         if (dataMonths is not null)
@@ -113,6 +118,7 @@ public static class PermitCoverageIssues
         IReadOnlyList<TableInstanceRef> instances,
         PeriodKey periodKey,
         string language,
+        IPermitHistoryStore? history,
         CancellationToken ct)
     {
         var permitInstances = instances.Where(i => permitColumnsOf.ContainsKey(i.TableDefId)).ToList();
@@ -150,16 +156,36 @@ public static class PermitCoverageIssues
             return [];
         }
 
+        // ✎ Feature (j) P2: rows with a permit history (logical key: table, sheet copy, row key, permit column).
+        var segmentsOf = history is null
+            ? []
+            : (await history.ListAsync(documentId, ct).ConfigureAwait(false))
+                .Select(r => r.Segment)
+                .Where(s => s.TableDefId is not null)
+                .GroupBy(s => (s.TableDefId!.Value, s.SheetCopyId, s.RowKey!, s.ColumnDefId!.Value))
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<Domain.Entities.Documents.PermitSegment>)[.. g.OrderBy(s => s.ValidFrom)]);
+
         var entryIds = byRow
             .SelectMany(r => r.Cells.Values.Select(v => v.ValueRegistryEntryId))
             .OfType<long>()
+            .Concat(segmentsOf.Values.SelectMany(s => s.Select(x => x.RegistryEntryId)))
             .Distinct()
             .ToList();
         var entries = (await registries.FindEntriesByIdsAsync(entryIds, ct).ConfigureAwait(false)).ToDictionary(e => e.Id);
-        if (!entries.Values.Any(e => e.ValidFrom is not null || e.ValidTo is not null))
+        if (segmentsOf.Count == 0 && !entries.Values.Any(e => e.ValidFrom is not null || e.ValidTo is not null))
         {
             return [];
         }
+
+        var parts = segmentsOf.Count == 0
+            ? []
+            : await history!.PartsAsync(
+                    documentId,
+                    [.. segmentsOf.Values
+                        .SelectMany(s => s.Where(x => x.ValidFrom.Day > 1).Select(x => (x.ValidFrom.Year * 100) + x.ValidFrom.Month))
+                        .Distinct()],
+                    ct)
+                .ConfigureAwait(false);
 
         var bounds = await periods.FindPeriodBoundsAsync(documentId, periodKey.Value, ct).ConfigureAwait(false);
         var messages = new List<ValidationMessage>();
@@ -190,6 +216,15 @@ public static class PermitCoverageIssues
                     continue;
                 }
 
+                if (rowKey is not null
+                    && segmentsOf.TryGetValue((table.Id, instance.SheetCopyId, rowKey, column.Id), out var segments))
+                {
+                    messages.AddRange(HistoryFindings(
+                        table, instance, rowKey, column, entryId, segments, entries, parts, rowCells, months, calculatedOnly,
+                        periodKey, language));
+                    continue;
+                }
+
                 var uncovered = PermitMonthCoverage.Uncovered(entry.ValidFrom, entry.ValidTo, months);
                 if (uncovered.Count > 0)
                 {
@@ -216,6 +251,90 @@ public static class PermitCoverageIssues
                     var monthColumn = table.Columns.FirstOrDefault(c => monthOf.TryGetValue(c.Id, out var m) && m == month.Month);
                     messages.Add(PartialMessage(table.Id, rowKey, column, monthColumn ?? column, entry, month, days, language));
                 }
+            }
+        }
+
+        return messages;
+    }
+
+    /// <summary>
+    /// Feature (j) P2: findings of a row WITH permit history. Months with data — against every permit in force in them, each
+    /// on its own days (Error, as without history); calculated-only months — against the permit in force on the month's last
+    /// day (never split, coordinator 09.11; Warning); a shared month holding one value — <c>PERMIT-SPLIT</c> Error at the cell
+    /// (blocks Submit, j3). No partial-month warning: the split itself names the days.
+    /// </summary>
+    private static List<ValidationMessage> HistoryFindings(
+        TableDef table,
+        TableInstanceRef instance,
+        string rowKey,
+        ColumnDef column,
+        long baseEntryId,
+        IReadOnlyList<Domain.Entities.Documents.PermitSegment> segments,
+        Dictionary<long, RegistryEntry> entries,
+        IReadOnlyList<Domain.Entities.Documents.CellPermitPart> parts,
+        IReadOnlyDictionary<int, CellValueData> rowCells,
+        IReadOnlyList<DateOnly> months,
+        IReadOnlyList<DateOnly> calculatedOnly,
+        PeriodKey periodKey,
+        string language)
+    {
+        var messages = new List<ValidationMessage>();
+        var spans = Permits.History.PermitHistoryCoverage.SpansOf(baseEntryId, segments);
+
+        var uncovered = Permits.History.PermitHistoryCoverage.Uncovered(spans, entries, months);
+        if (uncovered.Count > 0
+            && Permits.History.PermitHistoryCoverage.FirstUncoveredEntry(spans, entries, uncovered[0]) is { } guiltyId
+            && entries.TryGetValue(guiltyId, out var guilty))
+        {
+            messages.Add(RowMessage(table.Id, rowKey, column, guilty, uncovered, language));
+        }
+
+        foreach (var group in calculatedOnly
+                     .Select(m => (Month: m, Entry: Permits.History.PermitHistoryCoverage.OnLastDay(spans, m).EntryId))
+                     .GroupBy(x => x.Entry))
+        {
+            if (entries.TryGetValue(group.Key, out var credited)
+                && PermitMonthCoverage.Uncovered(credited.ValidFrom, credited.ValidTo, group.Select(x => x.Month)) is { Count: > 0 } missed)
+            {
+                messages.Add(CalculatedMessage(table.Id, rowKey, column, credited, missed, language));
+            }
+        }
+
+        foreach (var month in Permits.History.PermitTimeline.SharedMonths(spans))
+        {
+            var inMonth = Permits.History.PermitTimeline.InMonth(spans, month);
+            var monthKey = (month.Year * 100) + month.Month;
+            var permits = string.Join(" / ", inMonth.Select(s => entries.TryGetValue(s.EntryId, out var e)
+                ? (e.DisplayL10n.Get("en") is { Length: > 0 } shown ? shown : e.Code.ToString())
+                : "…"));
+            foreach (var cell in Permits.History.PermitHistoryReader.DataCellsInMonth(
+                         table, periodKey, rowCells, new HashSet<int> { column.Id }, month))
+            {
+                var cellParts = parts
+                    .Where(p => p.PeriodKeyValue == monthKey && p.TableDefId == table.Id && p.SheetCopyId == instance.SheetCopyId
+                                && string.Equals(p.RowKey, rowKey, StringComparison.Ordinal) && p.ColumnDefId == cell.Id)
+                    .ToList();
+                if (Permits.History.PermitHistoryReader.IsSplit(cellParts, inMonth.Count))
+                {
+                    continue;
+                }
+
+                var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["month"] = month.ToString("MM.yyyy", System.Globalization.CultureInfo.InvariantCulture),
+                    ["column"] = cell.HeaderL10n.Get("en") ?? cell.Code,
+                    ["permits"] = permits,
+                };
+                messages.Add(new ValidationMessage(
+                    ValidationSeverity.Error,
+                    SplitRuleCode,
+                    ValidationMessageTemplates.Render(ValidationMessageTemplates.PermitSplitNeeded, language, parameters),
+                    table.Id,
+                    rowKey,
+                    cell.Code,
+                    BlocksSave: false,
+                    MessageKey: ValidationMessageTemplates.PermitSplitNeeded,
+                    Params: parameters));
             }
         }
 

@@ -30,7 +30,10 @@ public sealed class ValidateDocumentHandler(
     // `null` (direct constructor in tests) — the check is off.
     IPermitRegistryIndex? permitTargets = null,
     IPeriodStore? periods = null,
-    IPermitDataMonthsReader? dataMonths = null)
+    IPermitDataMonthsReader? dataMonths = null,
+
+    // ✎ Feature (j) P2: permit history of rows (history-aware rule, PERMIT-SPLIT). `null` (tests) — no history.
+    IPermitHistoryStore? permitHistory = null)
 {
     /// <summary>Виконує валідацію всіх аркушів документа за період.</summary>
     /// <param name="documentId">Документ.</param>
@@ -165,7 +168,7 @@ public sealed class ValidateDocumentHandler(
             var permitSnapshot = await metadata.GetAsync(instances[0].TemplateVersionId, ct).ConfigureAwait(false);
             messages.AddRange(await PermitCoverageIssues
                 .RunAsync(permitTargets, registries, cellStore, rowStore, periods, headers, dataMonths,
-                    permitSnapshot, documentId, instances, periodKey, currentUser.Language, ct)
+                    permitSnapshot, documentId, instances, periodKey, currentUser.Language, ct, permitHistory)
                 .ConfigureAwait(false));
         }
 

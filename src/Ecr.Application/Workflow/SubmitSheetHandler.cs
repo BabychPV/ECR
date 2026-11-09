@@ -79,7 +79,11 @@ public sealed class SubmitSheetHandler(
     // ✎ Rule (h): «the permit covers the months with entered data» blocks Submit. `null` (test factories) — off.
     IPermitRegistryIndex? permitTargets = null,
     IPeriodStore? periods = null,
-    IPermitDataMonthsReader? dataMonths = null)
+    IPermitDataMonthsReader? dataMonths = null,
+
+    // ✎ Feature (j) P2: permit history of rows — the rule checks each month against the permits in force; unsplit shared
+    // months block Submit (PERMIT-SPLIT). `null` (direct constructor in tests) — no history.
+    IPermitHistoryStore? permitHistory = null)
 {
     /// <summary>
     /// Ключ тексту відмови подання з причиною <c>InsufficientGrantLevel</c> (D-285):
@@ -613,7 +617,7 @@ public sealed class SubmitSheetHandler(
             var sheetInstances = instances.Where(i => tables.ContainsKey(i.TableDefId)).ToList();
             var permitMessages = await Validation.PermitCoverageIssues
                 .RunAsync(permitTargets, registries, cellStore, rowStore, periods, headers, dataMonths,
-                    snapshot, documentId, sheetInstances, key, currentUser.Language, ct)
+                    snapshot, documentId, sheetInstances, key, currentUser.Language, ct, permitHistory)
                 .ConfigureAwait(false);
 
             // Only uncovered months with entered/imported data block; the partial-month note and the calculated-months
