@@ -275,6 +275,76 @@ test('SHEETNAME: копія аркуша показує «<Назва> 2» і о
   await shot(page, '02-copy-sheetname-after-rename');
 });
 
+test('SHEETNAME: debt-1109b — новий рядок у копії отримує «Vessel 2» без ручного перерахунку', async ({ page }) => {
+  await signIn(page);
+  const doc = await arrange(page);
+
+  await tables(page, doc);
+  const copy = await ok<{ sheetCopyId: number }>(
+    await page.request.post(`/api/v1/documents/${String(doc.documentId)}/sheets/${String(doc.sheetDefId)}/copies`),
+    'копія аркуша',
+  );
+  const copyTable = (await tables(page, doc)).find((table) => table.sheetCopyId === copy.sheetCopyId);
+  expect(copyTable, 'у відповіді немає таблиці копії').toBeDefined();
+
+  // Рядок — кнопкою сітки на вкладці копії (той самий POST rows, що й у людини).
+  await page.goto(
+    `/documents/${String(doc.documentId)}?periodKey=${String(doc.periodKey)}&sheet=${SheetCode}~${String(copy.sheetCopyId)}`,
+  );
+  const created = page.waitForResponse(
+    (response) => response.url().endsWith(`/api/v1/documents/${String(doc.documentId)}/rows`) && response.request().method() === 'POST',
+  );
+  await page.getByRole('button', { name: /^(Add row|Добавить строку|Жол қосу)$/ }).first().click({ timeout: 60_000 });
+  const body = (await (await created).json()) as { recalculationJobId?: string | null };
+  expect(body.recalculationJobId, 'POST rows без задачі формул SHEETNAME').toBeTruthy();
+
+  // Без перейменування й без «Recalculate»: значення пише задача формул нового рядка, сітка оновлюється сама.
+  await expect
+    .poll(() => sheetValue(page, doc, copyTable?.tableInstanceId ?? 0), { timeout: 180_000, intervals: [1_000, 2_000, 5_000] })
+    .toBe('Vessel 2');
+  await expect(page.getByRole('gridcell', { name: /Vessel 2/ })).toBeVisible({ timeout: 60_000 });
+  await shot(page, '05-debt-b-new-row-in-copy-sheetname');
+});
+
+test('SHEETNAME: debt-1109b — перерахунок проєкту називає затверджену копію «Vessel 2» і веде на її вкладку', async ({ page }) => {
+  await signIn(page);
+  const doc = await arrange(page);
+  const id = String(doc.documentId);
+  const period = String(doc.periodKey);
+
+  await tables(page, doc);
+  const copy = await ok<{ sheetCopyId: number }>(
+    await page.request.post(`/api/v1/documents/${id}/sheets/${String(doc.sheetDefId)}/copies`),
+    'копія аркуша',
+  );
+  await tables(page, doc);
+  await ok(
+    await page.request.post(`/api/v1/documents/${id}/submit`, {
+      data: { sheetDefId: doc.sheetDefId, periodKey: doc.periodKey, acknowledgeWarnings: true, sheetCopyId: copy.sheetCopyId },
+    }),
+    'подання копії',
+  );
+  await ok(
+    await page.request.post(`/api/v1/documents/${id}/approve`, {
+      data: { sheetDefId: doc.sheetDefId, periodKey: doc.periodKey, approved: true, reason: null, sheetCopyId: copy.sheetCopyId },
+    }),
+    'затвердження копії',
+  );
+  const card = await ok<{ projectId: number }>(await page.request.get(`/api/v1/documents/${id}?periodKey=${period}`), 'картка');
+
+  await page.goto(`/?projectId=${String(card.projectId)}`);
+  await page.getByRole('button', { name: /^(Recalculate|Пересчитать|Қайта есептеу)$/ }).first().click();
+  await page.getByRole('dialog').getByRole('button', { name: /^(Recalculate|Пересчитать|Қайта есептеу)$/ }).click();
+
+  const skipped = page.locator('[data-recalc-skipped]');
+  await expect(skipped, 'перелік пропущених аркушів не з’явився').toBeVisible({ timeout: 180_000 });
+  await skipped.locator('summary').click();
+  const link = skipped.locator('[data-recalc-skipped-link]', { hasText: 'Vessel 2' });
+  await expect(link).toHaveCount(1);
+  await expect(link).toHaveAttribute('href', new RegExp(`sheet=${SheetCode}(~|%7E)${String(copy.sheetCopyId)}`));
+  await shot(page, '06-debt-b-skipped-approved-copy');
+});
+
 test('SHEETNAME: редактор виразів пропонує функцію в автодоповненні', async ({ page }) => {
   test.slow();
   await signIn(page);
