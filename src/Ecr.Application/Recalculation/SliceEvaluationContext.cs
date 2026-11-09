@@ -105,6 +105,11 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
     /// (<c>REGFIND</c>, <c>REGONE</c>, агрегати). Контекст віддає його лише формулам, які ці форми
     /// містять (<see cref="Registries"/>); <c>null</c> — знімка немає, <c>REG*</c> дає <c>#REF</c>.
     /// </param>
+    /// <param name="sheetNames">
+    /// <c>SHEETNAME()</c>: аркуш шаблону → показувана назва в «виді» прогону («Vessel 2» для копії,
+    /// <see cref="SheetDisplayNames.For"/>); <c>null</c> чи аркуша немає в словнику — назва аркуша шаблону
+    /// (<see cref="SheetDisplayNames.BaseName"/>).
+    /// </param>
     public SliceEvaluationContext(
         TemplateVersionSnapshot snapshot,
         IReadOnlyDictionary<CellKey, ExpressionValue> values,
@@ -115,9 +120,12 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
         IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null,
         IReadOnlyList<FormulaDependency>? formulaDependencies = null,
         ILogger? logger = null,
-        IRegistrySnapshot? registries = null)
+        IRegistrySnapshot? registries = null,
+        IReadOnlyDictionary<int, string>? sheetNames = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        _sheetNames = sheetNames;
+        _sheets = snapshot.Sheets.ToDictionary(s => s.Id);
         _formulaDependencies = formulaDependencies;
         _logger = logger;
         _registryView = registries is null ? null : new LookupFallbackSnapshot(registries, this);
@@ -275,6 +283,33 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
 
     /// <inheritdoc />
     public PeriodContext Period { get; }
+
+    private readonly IReadOnlyDictionary<int, string>? _sheetNames;
+    private readonly Dictionary<int, SheetDef> _sheets;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Аркуш — той, якому належить таблиця формули (<see cref="CurrentTableDefId"/>). Назва екземпляра береться з
+    /// даних документа (<c>sheetNames</c> конструктора), а без них — назва аркуша шаблону: так контекст без документа
+    /// (перегляд, тест) дає осмислене значення, а не порожнечу (02b §7, «SHEETNAME»).
+    /// </remarks>
+    public string? SheetName
+    {
+        get
+        {
+            if (!_tables.TryGetValue(CurrentTableDefId, out var table))
+            {
+                return null;
+            }
+
+            if (_sheetNames is not null && _sheetNames.TryGetValue(table.SheetDefId, out var name))
+            {
+                return name;
+            }
+
+            return _sheets.TryGetValue(table.SheetDefId, out var sheet) ? SheetDisplayNames.BaseName(sheet) : null;
+        }
+    }
 
     /// <summary>Таблиця формули, яку обчислюємо зараз.</summary>
     public int CurrentTableDefId { get; set; }
