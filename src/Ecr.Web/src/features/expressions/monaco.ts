@@ -27,6 +27,7 @@ import {
 } from '@/shared/theme/expressionTheme';
 import { buildLanguageConfiguration, buildMonarchLanguage } from './language';
 import {
+  functionSnippet,
   signatureOf,
   suggestionsAt,
   TriggerCharacters,
@@ -416,7 +417,10 @@ function suggestion(
 
   const insert =
     item.kind === 'function'
-      ? { insertText: `${item.insert}($0)`, insertTextRules: snippet }
+      ? {
+          insertText: functionSnippet(item.fn ?? { name: item.insert, maxArgs: null }),
+          insertTextRules: snippet,
+        }
       : item.chain === true
         ? {
             insertText: `${escapeSnippet(item.insert)}].[$0]`,
