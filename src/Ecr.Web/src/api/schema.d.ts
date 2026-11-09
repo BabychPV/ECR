@@ -38171,6 +38171,12 @@ export interface components {
         RowPermitHistoryDto: {
             /** @description The permit column. */
             columnCode: string;
+            /**
+             * @description `row` — the row's own permit column; `header` — the row relies on the header permit
+             *             (Ship 2: `ColumnCode` is then the header field's code).
+             * @default row
+             */
+            permitSource: string;
             /** @description The history, base permit first. */
             permits: components["schemas"]["PermitHistoryItemDto"][];
             /** @description Row key. */

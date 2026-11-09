@@ -8,6 +8,7 @@ export function seaWaterRow(overrides: Partial<RowPermitHistory> = {}): RowPermi
     sheetCopyId: null,
     rowKey: 'R1',
     columnCode: 'Permit',
+    permitSource: 'row',
     permits: [
       { segmentId: null, registryEntryId: 11, permit: 'KZ29VCZ14622425', from: null, until: '2026-02-14', addedBy: null, addedAt: null },
       {
