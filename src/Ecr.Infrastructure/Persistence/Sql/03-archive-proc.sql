@@ -324,10 +324,13 @@ BEGIN
                    WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
        OR EXISTS (SELECT 1 FROM arc.TableInstance
                    WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
+       OR EXISTS (SELECT 1 FROM arc.CellPermitPart
+                   WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
     BEGIN
         DELETE FROM arc.CellValue     WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
         DELETE FROM arc.TableRow      WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
         DELETE FROM arc.TableInstance WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+        DELETE FROM arc.CellPermitPart WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
     END;
 
     SET @k = @FromPeriodKey;
@@ -425,6 +428,16 @@ BEGIN
 
             SET @lastId = @hiId;
         END;
+
+        -- Feature (j): month parts split between permits — sparse (rows with a mid-month permit change only), one INSERT
+        -- per period. Checked at the moment of the TRUNCATE (step 2), like the other tables.
+        INSERT INTO arc.CellPermitPart WITH (TABLOCK)
+            (PeriodKey, Id, DocumentId, TableDefId, SheetCopyId, RowKey, ColumnDefId, PartNo, RegistryEntryId,
+             DayFrom, DayTo, ValueNumeric)
+        SELECT PeriodKey, Id, DocumentId, TableDefId, SheetCopyId, RowKey, ColumnDefId, PartNo, RegistryEntryId,
+               DayFrom, DayTo, ValueNumeric
+        FROM doc.CellPermitPart
+        WHERE PeriodKey = @k;
 
         SELECT @dstCount = COUNT_BIG(*),
                @dstSum   = ISNULL(SUM(ValueNumeric), 0)
@@ -534,8 +547,18 @@ BEGIN
         FROM arc.TableInstance
         WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
 
+        -- Feature (j): parts — the same «everything in the source is in the archive» check, under TABLOCKX.
+        DECLARE @gapSrcParts bigint, @gapDstParts bigint;
+        SELECT @gapSrcParts = COUNT_BIG(*)
+        FROM doc.CellPermitPart WITH (TABLOCKX)
+        WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+        SELECT @gapDstParts = COUNT_BIG(*)
+        FROM arc.CellPermitPart
+        WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+
         IF @gapSrcCells <> @gapDstCells OR @gapSrcSum <> @gapDstSum
            OR @gapSrcRows <> @gapDstRows OR @gapSrcInst <> @gapDstInst
+           OR @gapSrcParts <> @gapDstParts
         BEGIN
             -- ⛔ `THROW` усередині транзакції: `XACT_ABORT` відкочує і зняття
             --    ключів, і — головне — не дає дійти до `TRUNCATE`. Джерело
@@ -557,6 +580,8 @@ BEGIN
         SET @sql = N'TRUNCATE TABLE doc.TableRow      WITH (PARTITIONS (' + @range + N'));';
         EXEC sp_executesql @sql;
         SET @sql = N'TRUNCATE TABLE doc.TableInstance WITH (PARTITIONS (' + @range + N'));';
+        EXEC sp_executesql @sql;
+        SET @sql = N'TRUNCATE TABLE doc.CellPermitPart WITH (PARTITIONS (' + @range + N'));';
         EXEC sp_executesql @sql;
 
         ALTER TABLE doc.TableRow WITH CHECK
@@ -818,6 +843,19 @@ BEGIN
             SELECT @lastRow = @hiRow, @lastCol = @hiCol;
         END;
 
+        -- Feature (j): month parts back by their logical key (a new identity — the key is the cell + part number).
+        INSERT INTO doc.CellPermitPart (PeriodKey, DocumentId, TableDefId, SheetCopyId, RowKey, ColumnDefId, PartNo,
+                                        RegistryEntryId, DayFrom, DayTo, ValueNumeric)
+        SELECT a.PeriodKey, a.DocumentId, a.TableDefId, a.SheetCopyId, a.RowKey, a.ColumnDefId, a.PartNo,
+               a.RegistryEntryId, a.DayFrom, a.DayTo, a.ValueNumeric
+        FROM arc.CellPermitPart AS a
+        WHERE a.PeriodKey = @k
+          AND NOT EXISTS (SELECT 1 FROM doc.CellPermitPart AS d
+                           WHERE d.PeriodKey = a.PeriodKey AND d.DocumentId = a.DocumentId
+                             AND d.TableDefId = a.TableDefId
+                             AND (d.SheetCopyId = a.SheetCopyId OR (d.SheetCopyId IS NULL AND a.SheetCopyId IS NULL))
+                             AND d.RowKey = a.RowKey AND d.ColumnDefId = a.ColumnDefId AND d.PartNo = a.PartNo);
+
         SET @k = @k + 1;
     END;
 
@@ -886,6 +924,7 @@ BEGIN
         DELETE FROM arc.CellValue     WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
         DELETE FROM arc.TableRow      WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
         DELETE FROM arc.TableInstance WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+        DELETE FROM arc.CellPermitPart WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
 
     COMMIT;
 
