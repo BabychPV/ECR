@@ -293,6 +293,46 @@
   white-space: nowrap;
 }
 
+/* (v) D-469: перелік змін у перегляді впливу — знак «+»/«−» в одному рядку з назвою права, код і позначка
+   «Dangerous» під назвою; без маркерів списку. */
+.ecr-sec-change-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--mantine-spacing-xs);
+}
+
+.ecr-sec-change-list > li {
+  display: grid;
+  grid-template-columns: 1.25em minmax(0, 1fr);
+  column-gap: var(--mantine-spacing-xs);
+  align-items: start;
+}
+
+.ecr-sec-change-list > li > [aria-hidden='true'] {
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+.ecr-sec-change-list > li > .ecr-sec-danger {
+  grid-column: 2;
+}
+
+/* Що зміниться для носія — назви прав, кожна в своєму рядку, знак поруч. */
+.ecr-sec-impact-changes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--mantine-font-size-sm);
+}
+
+.ecr-sec-impact-changes > li {
+  display: flex;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
 /* ── Порівняння ролей: права — рядки, ролі — колонки ── */
 .ecr-sec-matrix-wrap {
   overflow: auto;

@@ -8,6 +8,7 @@ import { showApiError, showDone } from '@/shared/ui/notify';
 import { logSuppressedDetail, problemText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
 import { PermissionCaption } from './PermissionCaption';
+import { permissionLabel } from './permissionLabel';
 import { roleLabel } from './roleLabel';
 import { SecurityIcon } from './securityIcons';
 
@@ -135,9 +136,15 @@ export function RolePermissionsReview({
                                 {t('security.impactNoChange')}
                               </Text>
                             ) : (
-                              <Text size="sm">
-                                {[...user.gained.map((code) => `+ ${code}`), ...user.lost.map((code) => `− ${code}`)].join(' · ')}
-                              </Text>
+                              <ul className="ecr-sec-impact-changes">
+                                {[...user.gained.map((code) => ['+', code] as const), ...user.lost.map((code) => ['−', code] as const)].map(([sign, code]) => (
+                                  <li key={`${sign}${code}`} title={code} data-change={sign === '+' ? 'added' : 'removed'}>
+                                    <span aria-hidden="true">{sign}</span>
+                                    <span className="ecr-sec-sr">{sign === '+' ? t('security.changeAdded') : t('security.changeRemoved')}</span>
+                                    {permissionLabel(code)}
+                                  </li>
+                                ))}
+                              </ul>
                             )}
                           </Table.Td>
                         </Table.Tr>
@@ -179,7 +186,14 @@ export function RolePermissionsReview({
                 <Checkbox
                   checked={confirmed}
                   onChange={(event) => setConfirmed(event.currentTarget.checked)}
-                  label={t('security.dangerousConfirmLabel', { permissions: data.addedDangerous.join(', ') })}
+                  label={t('security.dangerousConfirmLabel', {
+                    permissions: data.addedDangerous.map((code) => permissionLabel(code)).join(', '),
+                  })}
+                  description={
+                    <Text span size="xs" ff="monospace">
+                      {data.addedDangerous.join(', ')}
+                    </Text>
+                  }
                 />
               </Stack>
             )}
