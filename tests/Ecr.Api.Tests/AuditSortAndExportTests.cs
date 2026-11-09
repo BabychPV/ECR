@@ -203,8 +203,14 @@ public sealed class AuditSortAndExportTests(SqlServerFixture sql)
         var author = await CreateUserAsync("Permit history");
         var businessKey = await ScalarStringAsync($"SELECT BusinessKey FROM doc.Document WHERE Id = {doc.DocumentId}");
 
+        // h+ rule: the row is named as people see it — its template label, not its key.
+        var tableCode = await ScalarStringAsync($"SELECT Code FROM cfg.TableDef WHERE Id = {doc.TableDefId}");
+        var rowKey = await ScalarStringAsync($"SELECT RowKey FROM doc.TableRow WHERE Id = {doc.RowIds[0]}");
+        Assert.Equal("1", await ScalarStringAsync(
+            $"UPDATE cfg.RowDef SET LabelL10n = N'{{\"en\":\"Sea Water Intake\"}}' WHERE TableDefId = {doc.TableDefId} AND RowKey = N'{rowKey}'; SELECT CAST(@@ROWCOUNT AS nvarchar(10));"));
+
         // No doc.PermitSegment row with this id exists (an undone segment is deleted): the label comes from the record's JSON.
-        var segment = $$"""{"documentId":{{doc.DocumentId}},"table":"T","rowKey":"R1","sheetCopyId":null,"column":"PERMIT","headerField":null,"validFrom":"2026-03-15","permit":"B-2","permitId":12,"previousPermit":"A-1","previousPermitId":11}""";
+        var segment = $$"""{"documentId":{{doc.DocumentId}},"table":"{{tableCode}}","rowKey":"{{rowKey}}","sheetCopyId":null,"column":"PERMIT","headerField":null,"validFrom":"2026-03-15","permit":"B-2","permitId":12,"previousPermit":"A-1","previousPermitId":11}""";
         await WriteStructureAsync("PermitSegment", 2_000_000_021, Base, author, "Add", newJson: segment);
         await WriteStructureAsync("PermitSegment", 2_000_000_021, Base.AddMinutes(1), author, "Remove", oldJson: segment);
         var header = $$"""{"documentId":{{doc.DocumentId}},"table":null,"rowKey":null,"sheetCopyId":null,"column":null,"headerField":"PERMIT_H","validFrom":"2026-04-01","permit":"C-3","permitId":13,"previousPermit":null,"previousPermitId":null}""";
@@ -216,8 +222,8 @@ public sealed class AuditSortAndExportTests(SqlServerFixture sql)
         var items = await ItemsAsync(client, $"/api/v1/audit/structure?{Window()}&changedByUserId={author}&sort=ChangedAtAsc");
         Assert.Equal(
             [
-                $"{businessKey} · T/R1 · A-1 → B-2 · 2026-03-15",
-                $"{businessKey} · T/R1 · A-1 → B-2 · 2026-03-15",
+                $"{businessKey} · Sea Water Intake · A-1 → B-2 · 2026-03-15",
+                $"{businessKey} · Sea Water Intake · A-1 → B-2 · 2026-03-15",
                 $"{businessKey} · PERMIT_H · C-3 · 2026-04-01",
                 $"{businessKey} · T/R1 · M03 · 2026-03 · A-1 + B-2",
                 null,

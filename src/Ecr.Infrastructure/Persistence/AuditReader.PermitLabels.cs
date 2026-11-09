@@ -54,8 +54,42 @@ public sealed partial class AuditReader
             }
         }
 
+        // Row names (h+ rule: a row is named as people see it — «Sea Water Intake», not «R1»): the template row's label
+        // (en, the stored default language) of the document's rows with these table codes and keys; a row without a template
+        // label (dynamic row) keeps its key.
+        var rowNames = new Dictionary<(long DocumentId, string Table, string RowKey), string>();
+        var keyed = parsed.Values.Where(s => s.Table is not null && s.RowKey is not null).ToList();
+        if (keyed.Count > 0)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT DISTINCT ti.DocumentId, td.Code, r.RowKey, JSON_VALUE(rd.LabelL10n, N'$.en')
+                FROM doc.TableRow AS r
+                JOIN doc.TableInstance AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
+                JOIN cfg.TableDef AS td ON td.Id = ti.TableDefId
+                JOIN cfg.RowDef AS rd ON rd.Id = r.RowDefId OR (r.RowDefId IS NULL AND rd.TableDefId = ti.TableDefId AND rd.RowKey = r.RowKey)
+                WHERE ti.DocumentId IN (SELECT CAST([value] AS bigint) FROM OPENJSON(@docs))
+                  AND r.RowKey IN (SELECT [value] FROM OPENJSON(@keys));
+                """;
+            command.Parameters.Add("@docs", SqlDbType.NVarChar, -1).Value = JsonSerializer.Serialize(keyed.Select(s => s.DocumentId).Distinct());
+            command.Parameters.Add("@keys", SqlDbType.NVarChar, -1).Value = JsonSerializer.Serialize(keyed.Select(s => s.RowKey).Distinct());
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                if (!reader.IsDBNull(3) && reader.GetString(3) is { Length: > 0 } name)
+                {
+                    rowNames[(reader.GetInt64(0), reader.GetString(1), reader.GetString(2))] = name;
+                }
+            }
+        }
+
         return [.. items.Select((item, i) => parsed.TryGetValue(i, out var s)
-            ? item with { EntityLabel = s.Label(documents.GetValueOrDefault(s.DocumentId)) }
+            ? item with
+            {
+                EntityLabel = s.Label(
+                    documents.GetValueOrDefault(s.DocumentId),
+                    s.Table is not null && s.RowKey is not null ? rowNames.GetValueOrDefault((s.DocumentId, s.Table, s.RowKey)) : null),
+            }
             : item)];
     }
 
@@ -95,13 +129,13 @@ public sealed partial class AuditReader
         }
 
         /// <summary>
-        /// Зміна дозволу: <c>DOC-1 · T/R1 · A → B · 2026-03-15</c> (поле шапки — <c>DOC-1 · PERMIT_H · …</c>);
-        /// поділ: <c>DOC-1 · T/R1 · M03 · 2026-03 · A + B</c>.
+        /// Зміна дозволу: <c>DOC-1 · Sea Water Intake · A → B · 2026-03-15</c> (рядок без назви — <c>T/R1</c>; поле шапки —
+        /// <c>DOC-1 · PERMIT_H · …</c>); поділ: <c>DOC-1 · Sea Water Intake · M03 · 2026-03 · A + B</c>.
         /// </summary>
-        public string Label(string? documentKey)
+        public string Label(string? documentKey, string? rowName)
         {
             var parts = new List<string> { documentKey ?? $"#{DocumentId.ToString(CultureInfo.InvariantCulture)}" };
-            Add(parts, Table is null ? HeaderField : RowKey is null ? Table : $"{Table}/{RowKey}");
+            Add(parts, Table is null ? HeaderField : rowName ?? (RowKey is null ? Table : $"{Table}/{RowKey}"));
             if (Month is not null)
             {
                 Add(parts, Column);
