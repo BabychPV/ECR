@@ -20,6 +20,7 @@ import { cellChangeReasonText } from '@/features/audit/cellChangeReason';
 import { useTableStatus } from '@/features/documents/api';
 import {
   attentionForPeriod,
+  attentionRowCount,
   rowLabelsOf,
   useAttentionFocus,
   useTableAttention,
@@ -156,6 +157,9 @@ export function DocumentInspector({
     [allAttention, periodKey],
   );
   const attentionRows = attention.reduce((sum, table) => sum + table.rows.length, 0);
+  // ✎ debt-1109: заголовок розділу «увага» — те саме число, що рядок стану (`DocumentSaveState`): ОДНА функція
+  // `attentionRowCount` з попередженнями включно (вони перелічені пунктами перевірки нижче). Було «0» проти «1».
+  const attentionTotal = attentionRowCount(allAttention, periodKey);
   // Назви рядків, відомі сіткам: адреса знахідки в Issues — «Sea Water Intake», а не «R7001000».
   const rowLabels = useMemo(() => rowLabelsOf(allAttention), [allAttention]);
 
@@ -339,7 +343,7 @@ export function DocumentInspector({
             </Tabs.List>
 
             <Tabs.Panel value="issues" className="ecr-insp-body">
-              <AttentionSection attention={attention} tables={tables} />
+              <AttentionSection attention={attention} tables={tables} count={attentionTotal} />
               <IssuesTab
                 groups={groups}
                 rowLabels={rowLabels}
@@ -469,9 +473,12 @@ function groupKeyOf(group: InspectorIssueGroup): string {
 function AttentionSection({
   attention,
   tables,
+  count,
 }: {
   attention: readonly TableAttention[];
   tables: readonly DocumentTableDto[];
+  /** Рядків, що потребують уваги, — як у рядку стану (з попередженнями перевірки). */
+  count: number;
 }): JSX.Element | null {
   if (attention.length === 0) return null;
 
@@ -485,7 +492,7 @@ function AttentionSection({
     <section aria-label={t('inspector.attention.title')} data-inspector-attention-list="">
       <h3 className="ecr-insp-group">
         <span>{t('inspector.attention.title')}</span>
-        <span>{attention.reduce((sum, table) => sum + table.rows.length, 0)}</span>
+        <span data-inspector-attention-count={count}>{count}</span>
       </h3>
       {attention.flatMap((table) => [
         ...table.rows.map((row) => (
