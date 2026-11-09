@@ -228,7 +228,10 @@ public sealed class CreatePermitGroupHandler(
     PermitGroupSnapshotCache cache,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+
+    // ✎ e2e 42630598595: the permit-type index learns the new group registry at once. `null` (tests) — no index.
+    IPermitRegistryIndex? permitIndex = null)
 {
     /// <summary>Право на зміну типів дозволів (і їхніх груп).</summary>
     public const string Permission = "Permit.EditType";
@@ -295,6 +298,7 @@ public sealed class CreatePermitGroupHandler(
         }, ct).ConfigureAwait(false);
 
         cache.Invalidate();
+        permitIndex?.Invalidate();
 
         var types = (await permits.ListSummariesAsync(ct).ConfigureAwait(false)).ToDictionary(t => t.Id);
         return PermitGroupAssembler.ToDto(group!, types, new Dictionary<int, RegistryTemplateUsage>());

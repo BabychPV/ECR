@@ -37,7 +37,11 @@ public sealed class PublishPermitTypeHandler(
     IAuditWriter audit,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+
+    // ✎ e2e 42630598595: the permit-type index learns the new header at once (not within its 30 s interval).
+    // `null` (direct constructor in tests) — no index.
+    IPermitRegistryIndex? permitIndex = null)
 {
     /// <summary>Право на публікацію опису довідників.</summary>
     public const string Permission = "Permit.PublishType";
@@ -107,6 +111,8 @@ public sealed class PublishPermitTypeHandler(
             throw PermitTypeErrors.Changed(type.Code, type.RowVersion);
         }
 
+        // After the commit: the next permit-rule read sees the newly published header.
+        permitIndex?.Invalidate();
         return PermitTypeAssembler.ToDto(type, content);
     }
 
