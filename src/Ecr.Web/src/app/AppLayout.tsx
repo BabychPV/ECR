@@ -41,7 +41,9 @@ const NotFoundPage = lazy(async () => ({ default: (await import('./NotFoundPage'
 import { routeTransitionClassName } from './motionTokens';
 import { useRouteTransitionFocus } from './useRouteTransitionFocus';
 import { usePreferenceSync } from '@/features/preferences/usePreferenceSync';
-import { MyTasksLauncher } from '@/features/jobs/MyTasksLauncher';
+// ✎ debt-1109 x8: кнопка «My tasks» з лічильниками (черги завдань, передач, погоджень, повернень) — лінивим чанком,
+// як і 404 та годинник бездіяльності: спільний чанк оболонки довів DocumentPage/DocumentsPage до межі 250 КБ (D-132).
+const MyTasksLauncher = lazy(async () => ({ default: (await import('@/features/jobs/MyTasksLauncher')).MyTasksLauncher }));
 import { SearchLauncher } from '@/features/search/SearchLauncher';
 import { useSession } from '@/shared/session/useSession';
 import { isCatalogResolved, language, loadCatalog, loginChosenLanguage, t } from '@/shared/i18n';
@@ -549,7 +551,9 @@ export function AppLayout(): JSX.Element {
                       параметра (`Q-156`). Умова права сховала б перелік саме від
                       тих, заради кого він існує. У статичному бандлі — лише кнопка
                       й лічильник; шухляда — динамічним `import()`, як палітра. */}
-                  <MyTasksLauncher />
+                  <Suspense fallback={null}>
+                    <MyTasksLauncher />
+                  </Suspense>
                 </>
               )}
               <UserMenu userName={me.userName ?? '—'} changePasswordPath={routes.changePassword.path} />

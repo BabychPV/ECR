@@ -17,14 +17,8 @@ import {
 } from '@mantine/core';
 import { BrandMark } from '@/shared/ui/BrandMark';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import {
-  apiFetch,
-  EcrApiError,
-  forgetIdleSignOut,
-  LOGIN_IDLE_MINUTES_PARAM,
-  LOGIN_REASON_PARAM,
-  readIdleSignOut,
-} from '@/api/client';
+import { apiFetch, EcrApiError, LOGIN_IDLE_MINUTES_PARAM, LOGIN_REASON_PARAM } from '@/api/client';
+import { forgetIdleSignOut, readIdleSignOut } from '@/shared/session/idleMarker';
 import type { CurrentUserDto, LocalLoginRequest } from '@/api/types';
 import {
   anyLostEdits,

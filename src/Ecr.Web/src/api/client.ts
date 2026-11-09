@@ -168,44 +168,17 @@ export const IDLE_TIMEOUT_MESSAGE_KEY = 'err.ECR-AUTH-0401.idleTimeout';
 /** Ключ `sessionStorage` позначки «вкладку виведено після бездіяльності» (борг 09.11). */
 export const IDLE_SIGNOUT_MARKER_KEY = 'ecr.idleSignedOut';
 
-/** Скільки позначка дійсна: довше — це вже не «щойно вивели», а давній вихід. */
-const IdleSignOutMarkerTtlMs = 12 * 60 * 60 * 1000;
-
 /**
  * ✎ Борг 09.11: сервер віддає `401 idleTimeout` лише на ПЕРШИЙ запит із простроченим cookie й тут же його стирає;
  * перезавантаження сторінки далі отримує звичайний `401`, і сторінка входу губила «вас виведено через N хв
  * бездіяльності». Позначка вкладки (`sessionStorage`, ця вкладка й лише до входу) переживає перезавантаження.
+ * Читання/зняття — `shared/session/idleMarker.ts` (лише сторінка входу; спільний чанк — на межі бюджету, D-132).
  */
 export function rememberIdleSignOut(idleMinutes?: number): void {
   try {
-    sessionStorage.setItem(
-      IDLE_SIGNOUT_MARKER_KEY,
-      JSON.stringify({ minutes: idleMinutes ?? null, at: Date.now() }),
-    );
+    sessionStorage.setItem(IDLE_SIGNOUT_MARKER_KEY, JSON.stringify({ minutes: idleMinutes ?? null, at: Date.now() }));
   } catch {
     // Сховище недоступне (приватне вікно) — лишається текст із адреси.
-  }
-}
-
-/** Позначка виходу після бездіяльності, якщо вона свіжа; інакше `null`. */
-export function readIdleSignOut(): { minutes: number | null } | null {
-  try {
-    const raw = sessionStorage.getItem(IDLE_SIGNOUT_MARKER_KEY);
-    if (raw === null) return null;
-    const parsed = JSON.parse(raw) as { minutes?: unknown; at?: unknown };
-    if (typeof parsed.at !== 'number' || Date.now() - parsed.at > IdleSignOutMarkerTtlMs) return null;
-    return { minutes: typeof parsed.minutes === 'number' ? parsed.minutes : null };
-  } catch {
-    return null;
-  }
-}
-
-/** Знімає позначку (після входу). */
-export function forgetIdleSignOut(): void {
-  try {
-    sessionStorage.removeItem(IDLE_SIGNOUT_MARKER_KEY);
-  } catch {
-    // Нічого прибирати.
   }
 }
 
