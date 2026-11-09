@@ -507,7 +507,7 @@ public sealed partial class EndpointCoverageTests
                 "expressions.fn.ln", "expressions.fn.log", "expressions.fn.log10", "expressions.fn.pow",
                 "expressions.fn.sign", "expressions.fn.sin", "expressions.fn.sqrt", "expressions.fn.tan",
                 "expressions.fn.truncate", "expressions.fn.substance", "expressions.fn.ifs",
-                "expressions.fn.in",
+                "expressions.fn.in", "expressions.fn.sheetname",
             ],
             "Короткий опис функції в переліку доповнення й при наведенні."),
 
