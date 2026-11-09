@@ -27,6 +27,8 @@ export interface CellSplitDialogProps {
   readonly unit: string | null;
   /** The row version the grid holds (as `PATCH …/cells`); `null` — unknown, the server checks nothing then. */
   readonly baseVersion: string | null;
+  /** Ship 2: the row relies on the document header permit (no permit column of its own). */
+  readonly fromHeader?: boolean;
   readonly onClose: () => void;
 }
 
@@ -47,7 +49,7 @@ function shown(value: string): string {
  * starts with the old single value when the month was not split yet; the total A + B updates live. ⛔ ECR never divides
  * the value by days — nothing here computes a part. Save sends the parts (a part may stay empty: partial save).
  */
-export function CellSplitDialog({ target, mark, historyPending, rowLabel, unit, baseVersion, onClose }: CellSplitDialogProps): JSX.Element {
+export function CellSplitDialog({ target, mark, historyPending, rowLabel, unit, baseVersion, fromHeader = false, onClose }: CellSplitDialogProps): JSX.Element {
   const save = useSaveCellSplits(target.documentId);
   const saveLoading = usePendingLoading(save.isPending);
   const [texts, setTexts] = useState<readonly string[] | null>(null);
@@ -104,7 +106,7 @@ export function CellSplitDialog({ target, mark, historyPending, rowLabel, unit, 
           <Stack gap="sm">
             {changedOn !== undefined && (
               <Alert color="blue" variant="light" data-split-why="">
-                {t('permits.split.why', { date: dottedDate(changedOn), month: monthLabel })}
+                {t(fromHeader ? 'permits.header.splitWhy' : 'permits.split.why', { date: dottedDate(changedOn), month: monthLabel })}
               </Alert>
             )}
             {parts.map((part, index) => (
