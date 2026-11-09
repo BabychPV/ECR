@@ -126,9 +126,13 @@ public sealed partial class PatchCellsHandler
         var rowIds = pickedRows.Select(p => p.TableRowId).Concat(writtenMonths.Keys).ToHashSet();
         var rows = await LogicalRowsAsync(context, changes, rowIds, ct).ConfigureAwait(false);
 
+        // ✎ Feature (j) P2: rows with a permit history — each month against the permits in force in it.
+        var history = await RowHistoryAsync(context, changes, rowIds, ct).ConfigureAwait(false);
+
         var entryIds = rows.Values
             .SelectMany(cells => permitColumns.Select(id => cells.GetValueOrDefault(id)?.ValueRegistryEntryId))
             .OfType<long>()
+            .Concat(history.Values.SelectMany(segments => segments.Select(s => s.RegistryEntryId)))
             .Distinct()
             .ToList();
         if (entryIds.Count == 0)
@@ -192,6 +196,25 @@ public sealed partial class PatchCellsHandler
                 }
                 else
                 {
+                    continue;
+                }
+
+                if (history.TryGetValue((rowId, permitColumn), out var segments))
+                {
+                    // A permit history: the picked (base) permit answers only for the months it is in force in; a written
+                    // month answers to every permit in force in it, each on its own days.
+                    var spans = Permits.History.PermitHistoryCoverage.SpansOf(entryId, segments);
+                    IReadOnlyList<DateOnly> scoped = pickedRows.Contains((rowId, permitColumn))
+                        ? [.. months.Where(m => Permits.History.PermitTimeline.InMonth(spans, m).Any(s => s.From is null))]
+                        : months;
+                    var missed = Permits.History.PermitHistoryCoverage.Uncovered(spans, entries, scoped);
+                    if (missed.Count > 0)
+                    {
+                        var guilty = Permits.History.PermitHistoryCoverage.FirstUncoveredEntry(spans, entries, missed[0]) is { } id
+                                     && entries.TryGetValue(id, out var e) ? e : entry;
+                        violations.Add(new PermitViolation(rowId, permitColumn, guilty, missed, markColumns));
+                    }
+
                     continue;
                 }
 
@@ -309,6 +332,138 @@ public sealed partial class PatchCellsHandler
                 ["columnCode"] = permitColumnCode,
                 ["cellCount"] = cells.Count.ToString(CultureInfo.InvariantCulture),
                 ["cells"] = cells,
+            });
+    }
+
+    /// <summary>
+    /// Feature (j) P2: the permit segments of the batch's rows (logical address: table, sheet copy, row key, permit column),
+    /// keyed by (row id, permit column). Empty — no history (every row without one costs at most one query per batch).
+    /// </summary>
+    private async Task<Dictionary<(long RowId, int ColumnId), IReadOnlyList<Domain.Entities.Documents.PermitSegment>>> RowHistoryAsync(
+        RequestContext context, CellChangeLists changes, HashSet<long> rowIds, CancellationToken ct)
+    {
+        var result = new Dictionary<(long RowId, int ColumnId), IReadOnlyList<Domain.Entities.Documents.PermitSegment>>();
+        if (permitHistory is null || rowIds.Count == 0)
+        {
+            return result;
+        }
+
+        var keys = rowIds
+            .Select(id => (Id: id, Key: changes.RowKeyById.GetValueOrDefault(id)))
+            .Where(p => p.Key is not null)
+            .ToDictionary(p => p.Key!, p => p.Id, StringComparer.Ordinal);
+        if (keys.Count == 0)
+        {
+            return result;
+        }
+
+        var all = await permitHistory.ListAsync(context.Instance.DocumentId, ct).ConfigureAwait(false);
+        foreach (var group in all
+                     .Select(r => r.Segment)
+                     .Where(s => s.TableDefId == context.Instance.TableDefId && s.SheetCopyId == context.Instance.SheetCopyId
+                                 && s.RowKey is not null && keys.ContainsKey(s.RowKey))
+                     .GroupBy(s => (keys[s.RowKey!], s.ColumnDefId!.Value)))
+        {
+            result[group.Key] = [.. group.OrderBy(s => s.ValidFrom)];
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Feature (j) j3: a single entered/imported value into a month the row shares between two permits is refused
+    /// (<c>422 ECR-CELL-4225 splitRequired</c>) — the month is split (<c>PUT …/permit-history/splits</c>), never one value.
+    /// The split handler's own total write (<see cref="Permits.History.PermitSplitWrite"/>), calculated values and
+    /// non-human origins (collection, recalculation) are not refused.
+    /// </summary>
+    private async Task EnsureSharedMonthsAreSplitAsync(
+        RequestContext context,
+        CellChangeLists changes,
+        IReadOnlyDictionary<CellAddress, CellValueData> previous,
+        string origin,
+        CancellationToken ct)
+    {
+        if (permitHistory is null || permitTargets is null || Permits.History.PermitSplitWrite.Active
+            || changes.Upserts.Count == 0 || !CellChangeOrigins.IsHuman(origin))
+        {
+            return;
+        }
+
+        var monthOf = PermitMonthCoverage.MonthColumns(context.Table).ToDictionary(c => c.Id, c => (int)c.MonthNumber!.Value);
+        var numeric = context.Table.Columns
+            .Where(c => !c.IsDeleted && c.DataType is CellDataType.Decimal or CellDataType.Int)
+            .Select(c => c.Id)
+            .ToHashSet();
+        var writes = changes.Upserts
+            .Where(u => PermitMonthCoverage.HasData(u.Value) && u.Value.ValueNumeric is not null
+                        && (monthOf.Count > 0 ? monthOf.ContainsKey(u.Address.ColumnDefId) : numeric.Contains(u.Address.ColumnDefId))
+                        && !(previous.TryGetValue(u.Address, out var was) && was == u.Value))
+            .ToList();
+        if (writes.Count == 0)
+        {
+            return;
+        }
+
+        var permitColumns = await PermitColumnIdsAsync(context, ct).ConfigureAwait(false);
+        if (permitColumns.Count == 0)
+        {
+            return;
+        }
+
+        var rowIds = writes.Select(w => w.Address.TableRowId).ToHashSet();
+        var history = await RowHistoryAsync(context, changes, rowIds, ct).ConfigureAwait(false);
+        if (history.Count == 0)
+        {
+            return;
+        }
+
+        var year = context.PeriodKey.Year;
+        DateOnly MonthOf(int columnId)
+            => monthOf.TryGetValue(columnId, out var m) ? new DateOnly(year, m, 1) : new DateOnly(year, context.PeriodKey.Sequence, 1);
+
+        var hits = writes
+            .Select(w => (Write: w, Month: MonthOf(w.Address.ColumnDefId),
+                          History: history.FirstOrDefault(h => h.Key.RowId == w.Address.TableRowId
+                              && Permits.History.PermitTimeline.SharedMonths(
+                                  Permits.History.PermitHistoryCoverage.SpansOf(0, h.Value)).Contains(MonthOf(w.Address.ColumnDefId)))))
+            .Where(h => h.History.Value is not null)
+            .ToList();
+        if (hits.Count == 0)
+        {
+            return;
+        }
+
+        // Names of the permits of the first refused month (base permit = the row's permit cell).
+        var first = hits[0];
+        var cells = await LogicalRowsAsync(context, changes, new HashSet<long> { first.Write.Address.TableRowId }, ct).ConfigureAwait(false);
+        var baseId = cells[first.Write.Address.TableRowId].GetValueOrDefault(first.History.Key.ColumnId)?.ValueRegistryEntryId ?? 0;
+        var spans = Permits.History.PermitHistoryCoverage.SpansOf(baseId, first.History.Value);
+        var inMonth = Permits.History.PermitTimeline.InMonth(spans, first.Month);
+        var entries = (await registries.FindEntriesByIdsAsync([.. inMonth.Select(s => s.EntryId).Distinct()], ct).ConfigureAwait(false))
+            .ToDictionary(e => e.Id);
+        var language = currentUser.Language;
+        var permits = string.Join(" / ", inMonth.Select(s => entries.TryGetValue(s.EntryId, out var e) ? PermitName(e, language) : "…"));
+        string CodeOf(int columnId) => context.Snapshot.ColumnsById.TryGetValue(columnId, out var c) ? c.Code : string.Empty;
+        var marked = hits
+            .Select(h => new
+            {
+                RowKey = changes.RowKeyById.GetValueOrDefault(h.Write.Address.TableRowId) ?? string.Empty,
+                ColumnCode = CodeOf(h.Write.Address.ColumnDefId),
+            })
+            .Distinct()
+            .ToList<object>();
+
+        throw new BusinessRuleException(
+            ErrorCodes.CellSplitRequired,
+            $"Місяць {first.Month:MM.yyyy} рядка ділиться між дозволами ({permits}) — введіть частину для кожного дозволу.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CELL-4225.splitRequired",
+                ["rowKey"] = changes.RowKeyById.GetValueOrDefault(first.Write.Address.TableRowId) ?? string.Empty,
+                ["month"] = first.Month.ToString("MM.yyyy", CultureInfo.InvariantCulture),
+                ["permits"] = permits,
+                ["cellCount"] = marked.Count.ToString(CultureInfo.InvariantCulture),
+                ["cells"] = marked,
             });
     }
 

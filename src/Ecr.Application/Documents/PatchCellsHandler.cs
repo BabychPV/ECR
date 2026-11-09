@@ -93,7 +93,12 @@ public sealed partial class PatchCellsHandler(
 
     // ✎ Rule (h), human 08.11: permit validity vs months with data. Tells which Lookup columns are permit-type
     // (target = published permit type header or permit group), from memory. `null` (direct constructor in tests) — off.
-    IPermitRegistryIndex? permitTargets = null)
+    IPermitRegistryIndex? permitTargets = null,
+
+    // ✎ Feature (j) P2: permit history of rows (a permit changed mid-month) — the validity rule checks each month against
+    // the permits in force in it, and a single value into a month shared by two permits is refused (ECR-CELL-4225).
+    // `null` (direct constructor in tests) — no history.
+    IPermitHistoryStore? permitHistory = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -192,6 +197,7 @@ public sealed partial class PatchCellsHandler(
         await EnsureManualTextMatchesFormulaAsync(context, changes, previous, ct).ConfigureAwait(false);
         await EnsureRegistryReferencesExistAsync(context, changes, previous, ct).ConfigureAwait(false);
         await EnsurePermitValidityCoversDataAsync(context, changes, previous, ct).ConfigureAwait(false);
+        await EnsureSharedMonthsAreSplitAsync(context, changes, previous, request.Origin, ct).ConfigureAwait(false);
         await EnsureUnitReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
