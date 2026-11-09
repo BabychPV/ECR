@@ -258,6 +258,7 @@ public sealed class OpenDocumentPeriodReopenHandler(
     {
         DocumentPeriodReopen.ClosedExpired => Sources.IntegrationAuditReason.Encode("document.reopen.audit.closedExpired"),
         DocumentPeriodReopen.ClosedReplaced => Sources.IntegrationAuditReason.Encode("document.reopen.audit.closedReplaced"),
+        DocumentPeriodReopen.ClosedManually => Sources.IntegrationAuditReason.Encode("document.reopen.audit.closedManually"),
         _ => closeReason,
     };
 

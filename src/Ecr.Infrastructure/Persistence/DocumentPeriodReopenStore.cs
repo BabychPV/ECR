@@ -83,4 +83,20 @@ public sealed class DocumentPeriodReopenStore(EcrDbContext db) : IDocumentPeriod
 
     /// <inheritdoc />
     public void Add(DocumentPeriodReopen exception) => db.DocumentPeriodReopens.Add(exception);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ProjectDocumentReopenItem>> ListActiveForProjectAsync(
+        int projectId, DateTime utcNow, CancellationToken ct)
+        => await (from x in db.DocumentPeriodReopens.AsNoTracking()
+                  where x.ClosedAt == null && x.OpenUntil > utcNow
+                  join d in db.Documents.AsNoTracking() on x.DocumentId equals d.Id
+                  where d.ProjectId == projectId
+                  join u in db.Users.AsNoTracking() on x.OpenedByUserId equals u.Id into users
+                  from u in users.DefaultIfEmpty()
+                  orderby x.PeriodKeyValue, d.BusinessKey
+                  select new ProjectDocumentReopenItem(
+                      x.Id, x.DocumentId, d.BusinessKey, x.PeriodKeyValue, x.OpenUntil, x.Reason,
+                      u == null ? null : u.DisplayName))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
 }

@@ -19,7 +19,8 @@ namespace Ecr.Api.Controllers;
 [Authorize]
 public sealed class DocumentPeriodReopensController(
     GetDocumentPeriodReopenHandler get,
-    OpenDocumentPeriodReopenHandler open) : ControllerBase
+    OpenDocumentPeriodReopenHandler open,
+    CloseDocumentPeriodReopenHandler close) : ControllerBase
 {
     /// <summary>
     /// Стан місяця для документа: діючий виняток (якщо є), чи може поточний користувач відкрити місяць і чому ні,
@@ -55,6 +56,25 @@ public sealed class DocumentPeriodReopensController(
         return Ok(await open
             .HandleAsync(documentId, request.PeriodKey, request.Reason, request.OpenUntil, ct)
             .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Закриває діючий виняток до строку («Close now» на вкладці Periods, приймальна i4): місяць знову закритий і для
+    /// цього документа. Нічого відкритого — нічого не робить.
+    /// </summary>
+    /// <remarks>
+    /// <c>403</c> — немає права <c>Period.Reopen</c> у проєкті; <c>404</c> — документ невидимий. Журнал
+    /// <c>DocumentPeriodReopen/Close</c>.
+    /// </remarks>
+    [HttpDelete]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Close(long documentId, [FromQuery] int periodKey, CancellationToken ct)
+    {
+        await close.HandleAsync(documentId, periodKey, ct).ConfigureAwait(false);
+
+        return NoContent();
     }
 }
 

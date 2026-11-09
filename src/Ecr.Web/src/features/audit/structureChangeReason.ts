@@ -91,6 +91,9 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('document.reopen.audit.closedExpired', params);
     case 'document.reopen.audit.closedReplaced':
       return t('document.reopen.audit.closedReplaced', params);
+    // i4: «Close now» на вкладці Periods — людина закрила виняток до строку.
+    case 'document.reopen.audit.closedManually':
+      return t('document.reopen.audit.closedManually', params);
     default:
       return null;
   }

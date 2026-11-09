@@ -39,3 +39,26 @@ export function postDocumentPeriodReopen(
     body: JSON.stringify(body),
   });
 }
+
+/** Діючі винятки видимих документів проєкту і чи може викликач їх закрити (вкладка Periods, приймальна i4). */
+export type ProjectDocumentReopens = components['schemas']['ProjectDocumentReopens'];
+
+/** Один діючий виняток документа проєкту. */
+export type ProjectDocumentReopenItem = components['schemas']['ProjectDocumentReopenItem'];
+
+/** Ключ кешу переліку винятків проєкту — поруч із календарем `['periods', projectId]`. */
+export function projectDocumentReopensKey(projectId: number): readonly unknown[] {
+  return ['periods', projectId, 'document-reopens'];
+}
+
+/** `GET /api/v1/projects/{id}/document-reopens` — діючі винятки видимих документів проєкту. */
+export function getProjectDocumentReopens(projectId: number): Promise<ProjectDocumentReopens> {
+  return apiFetch<ProjectDocumentReopens>(`/api/v1/projects/${String(projectId)}/document-reopens`);
+}
+
+/** `DELETE /api/v1/documents/{id}/period-reopen?periodKey=` — «Close now»: закриває виняток до строку. */
+export function closeDocumentPeriodReopen(documentId: number, periodKey: number): Promise<void> {
+  return apiFetch<void>(`/api/v1/documents/${String(documentId)}/period-reopen?periodKey=${String(periodKey)}`, {
+    method: 'DELETE',
+  });
+}

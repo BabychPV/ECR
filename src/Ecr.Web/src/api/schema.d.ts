@@ -4153,7 +4153,56 @@ export interface paths {
                 };
             };
         };
-        delete?: never;
+        /**
+         * Закриває діючий виняток до строку («Close now» на вкладці Periods, приймальна i4): місяць знову закритий і для
+         *     цього документа. Нічого відкритого — нічого не робить.
+         * @description `403` — немає права `Period.Reopen` у проєкті; `404` — документ невидимий. Журнал
+         *     `DocumentPeriodReopen/Close`.
+         */
+        delete: {
+            parameters: {
+                query?: {
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -16136,6 +16185,60 @@ export interface paths {
                 };
             };
         };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectId}/document-reopens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Діючі винятки видимих документів проєкту (за місяцем і номером документа) і чи може викликач закрити їх.
+         * @description `404` — проєкт невидимий або відсутній. Документи, яких викликач не бачить, у відповідь не потрапляють.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectDocumentReopens"];
+                        "text/json": components["schemas"]["ProjectDocumentReopens"];
+                        "text/plain": components["schemas"]["ProjectDocumentReopens"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -35225,6 +35328,42 @@ export interface components {
             status?: null | number;
             title?: null | string;
             type?: null | string;
+        };
+        /** @description Діючий виняток документа проєкту — рядок вкладки Periods (приймальна i4). */
+        ProjectDocumentReopenItem: {
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /** @description Номер документа (`BusinessKey`). */
+            documentName: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор винятку.
+             */
+            id: number;
+            /**
+             * Format: date-time
+             * @description До якого моменту (UTC) документ відкрито.
+             */
+            openUntil: string;
+            /** @description Ім'я того, хто відкрив; `null` — невідоме. */
+            openedByName: null | string;
+            /**
+             * Format: int32
+             * @description Місяць.
+             */
+            periodKey: number;
+            /** @description Причина відкриття. */
+            reason: string;
+        };
+        /** @description Діючі винятки «місяць відкрито для документа» в проєкті — для вкладки Periods. */
+        ProjectDocumentReopens: {
+            /** @description Чи може поточний користувач закрити виняток («Close now»): право `Period.Reopen` у проєкті. */
+            canClose: boolean;
+            /** @description Винятки ВИДИМИХ користувачеві документів, за місяцем і номером документа. */
+            items: components["schemas"]["ProjectDocumentReopenItem"][];
         };
         /** @description Створений проєкт. */
         ProjectIdResponse: {
