@@ -32,6 +32,22 @@ export function structureChangeReasonText(raw: string): string {
   return render(k, { ...(p as Record<string, string> | undefined) }) ?? raw;
 }
 
+/**
+ * ✎ debt-1109 F13 (P3 A): пояс майданчика з конверта причини (`p.zone`, журнал «Reopen») — у ньому показується й
+ * стовпець часу запису, щоб «коли» і «до …» стояли в одному часі. Немає конверта чи поля — `null` (пояс читача).
+ */
+export function structureChangeReasonZone(raw: string | null | undefined): string | null {
+  if (raw === null || raw === undefined || !raw.startsWith('{')) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as { p?: { zone?: unknown } | null };
+    const zone = parsed.p?.zone;
+    return typeof zone === 'string' && zone.length > 0 ? zone : null;
+  } catch {
+    return null;
+  }
+}
+
 function render(key: string, params: Record<string, string>): string | null {
   switch (key) {
     case 'integrationAudit.scheduleCreated':
