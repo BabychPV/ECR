@@ -25,6 +25,7 @@ const Strings: Record<string, string> = {
   'periods.policyPreview.year': 'Year edits until {date}.',
   'periods.policyPreview.orderInvalid': 'Late edits would start after the lock.',
   'periods.policyPreview.usedBy': 'Used by {project}',
+  'periods.policyPreview.lockedStay': 'Months already locked stay locked; reopen them on the Periods tab.',
 };
 
 const policies = [
@@ -123,6 +124,17 @@ describe('PeriodPolicyManager — прев\'ю дат (f5)', () => {
     // 31.10 + 60 = 30.12.2026.
     await waitFor(() =>
       expect(previewLine('period-policy-preview', 202610)).toContain(`locks on ${shown(2026, 12, 30)}`),
+    );
+  });
+
+  // ✎ F13 e1 (09.11): збереження відпущеної політики повертає Late → Open, а заблоковані місяці — ні; прев'ю каже це
+  // ДО збереження. Мутація: прибрати рядок `lockedStay` з `PolicyDatePreview` — червоний.
+  it('попереджає, що заблоковані місяці лишаються заблокованими', async () => {
+    await open({ calendar, projectCode: 'PRJ' });
+    await screen.findByText('Dates for PRJ with policy STD:');
+
+    expect(document.querySelector('#period-policy-preview [data-policy-preview-locked-stay]')?.textContent).toBe(
+      'Months already locked stay locked; reopen them on the Periods tab.',
     );
   });
 

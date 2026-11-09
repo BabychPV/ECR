@@ -19,6 +19,8 @@ export function stripCellLabel(cell: StripCell): string {
   switch (cell) {
     case 'open':
       return t('documents.strip.open');
+    case 'late':
+      return t('documents.strip.late');
     case 'submitted':
       return t('documents.strip.submitted');
     case 'approved':
@@ -34,8 +36,8 @@ export function stripCellLabel(cell: StripCell): string {
   }
 }
 
-/** Знак у клітинці (не лише колір): ✓ затверджено, ✕ — повернуто; замок — заблоковано (SVG, не емодзі). */
-const Marks: Readonly<Partial<Record<StripCell, string>>> = { approved: '✓', returned: '✕' };
+/** Знак у клітинці (не лише колір): ✓ затверджено, ✕ — повернуто, ! — пізні правки; замок — заблоковано (SVG, не емодзі). */
+const Marks: Readonly<Partial<Record<StripCell, string>>> = { approved: '✓', returned: '✕', late: '!' };
 
 function LockMark(): JSX.Element {
   return (

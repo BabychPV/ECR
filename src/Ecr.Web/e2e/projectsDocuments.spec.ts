@@ -273,6 +273,38 @@ test.describe('Projects 08.11', () => {
     expect(fits, 'кнопка «Keyboard shortcuts» обрізана або виходить за вікно').toBe(true);
     expect(await pageOverflow(page), 'горизонтальна прокрутка сторінки документа').toBeLessThanOrEqual(0);
   });
+  /*
+   * ✎ F13 fg5 (09.11): на живих даних Documents @ 375 px прокручувався вбік на 109 px — смуга лічильників
+   * (`FilterInline`, один рядок) з УСІМА лічильниками. Тест нижче цього не ловив: на стенді немає частково поданих і
+   * повернутих документів, а ці два лічильники смуга показує лише коли вони не нульові. Тут відповідь
+   * `GET /documents/summary` — справжня, лише з підставленими числами (усі лічильники, чотиризначні): перевіряється
+   * верстка справжньої сторінки, а не дані. Без переносу смуги (`documentsList.css`) — червоний.
+   */
+  test('fg5: Documents at 375 px with every counter shown (Partly submitted, Rejected, 4-digit) — no page overflow', async ({ page }) => {
+    await signIn(page);
+    const { card, periodKey } = await ownProject(page);
+    const year = Math.trunc(periodKey / 100);
+
+    await page.route('**/api/v1/documents/summary?*', async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({
+        response,
+        json: { ...body, draft: 1090, partlySubmitted: 1002, submitted: 1000, rejected: 1001, approved: 1000, withIssues: 1000 },
+      });
+    });
+
+    await page.setViewportSize({ width: 375, height: 900 });
+    await page.goto(`/?year=${String(year)}&projectId=${String(card.projectId)}`);
+    const strip = page.locator('[data-summary-strip]');
+    await expect(strip.locator('[data-summary-counter="rejected"]')).toBeVisible({ timeout: 60_000 });
+    await expect(strip.locator('[data-summary-counter="partlySubmitted"]')).toBeVisible();
+    await expect(strip.locator('[data-summary-counter="withIssues"]')).toBeVisible();
+    expect(await pageOverflow(page), 'Documents @ 375 px з усіма лічильниками: горизонтальна прокрутка').toBeLessThanOrEqual(0);
+    const box = await strip.boundingBox();
+    expect((box?.x ?? 0) + (box?.width ?? 0), 'смуга лічильників виходить за вікно').toBeLessThanOrEqual(375.5);
+  });
+
   for (const scheme of ['light', 'dark'] as const) {
     test(`fg5: Projects, tabs and Documents — no page overflow at 1335 and 375 px, axe clean (${scheme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: scheme });

@@ -50,7 +50,10 @@ describe('yearStripModel.stripCell', () => {
     expect(stripCell('Rejected', 'Open')).toBe('returned');
     expect(stripCell('Draft', 'Closed')).toBe('locked');
     expect(stripCell('Draft', 'Scheduled')).toBe('notOpen');
-    expect(stripCell(null, 'Grace')).toBe('open');
+    expect(stripCell(null, 'Open')).toBe('open');
+    // ✎ F13 g3: Grace — окремий «Late (flagged)», як на вкладці Periods (доти смуга казала «Open»).
+    expect(stripCell(null, 'Grace')).toBe('late');
+    expect(stripCell('Draft', 'Grace')).toBe('late');
     expect(stripCell('Draft', null)).toBe('unknown');
   });
 });
@@ -81,10 +84,12 @@ describe('DocumentYearStrip (g3)', () => {
     expect(links).toHaveLength(12);
     expect(links.map((link) => link.getAttribute('data-cell'))).toEqual([
       'approved', 'locked', 'locked', 'locked', 'locked', 'locked', 'locked', 'locked', 'locked',
-      'submitted', 'open', 'notOpen',
+      'submitted', 'late', 'notOpen',
     ]);
     expect(links[10]!.getAttribute('href')).toBe('/documents/5?periodKey=202611');
     expect(links[10]!.getAttribute('data-current')).toBe('true');
+    expect(links[10]!.getAttribute('aria-label')).toContain('documents.strip.late');
+    expect(links[10]!.textContent).toBe('!');
     // Стан не лише кольором: читалка чує місяць і стан.
     expect(links[0]!.getAttribute('aria-label')).toContain('documents.strip.approved');
   });
@@ -97,7 +102,7 @@ describe('DocumentYearStrip (g3)', () => {
     );
 
     const legend = screen.getByRole('group');
-    for (const key of ['open', 'submitted', 'approved', 'locked', 'notOpen', 'returned', 'current']) {
+    for (const key of ['open', 'late', 'submitted', 'approved', 'locked', 'notOpen', 'returned', 'current']) {
       expect(legend.textContent).toContain(`documents.strip.${key}`);
     }
   });

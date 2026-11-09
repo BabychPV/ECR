@@ -69,6 +69,14 @@
   color: var(--ecr-surface, var(--mantine-color-body));
 }
 
+/* ✎ F13 g3: late — Grace-місяць («Late (flagged)», як на вкладці Periods): рамка «увага» і знак «!», не лише колір. */
+.ecr-year-strip-box[data-cell='late'] {
+  border-width: 2px;
+  border-color: var(--ecr-warning, var(--mantine-color-yellow-filled));
+  color: var(--mantine-color-text);
+  font-weight: 700;
+}
+
 .ecr-year-strip-box[data-cell='locked'] {
   background: var(--ecr-sunken, var(--mantine-color-default-hover));
   color: var(--ecr-muted, var(--mantine-color-dimmed));
@@ -129,6 +137,24 @@
 .ecr-year-strip-legend .ecr-year-strip-box {
   width: 14px;
   height: 14px;
+}
+
+/*
+ * ✎ F13 fg5 (09.11): смуга лічильників — `FilterInline` (`shared/ui`), тобто один рядок фіксованої висоти поля
+ * (`wrap="nowrap"`, `h` інлайном). З усіма лічильниками («… · Partly submitted · … · Rejected · … · With issues») на
+ * 375 px сторінка прокручувалась убік на 109 px. На вузькому екрані смуга переноситься й росте у висоту; `!important`
+ * — лише тому, що висоту й `nowrap` спільний компонент ставить інлайном і змінною, а `shared/ui` тут не чіпаємо.
+ */
+@media (max-width: 640px) {
+  .ecr-docs-summary-strip {
+    flex-wrap: wrap !important;
+    height: auto !important;
+    min-height: 30px;
+    min-width: 0;
+    max-width: 100%;
+    row-gap: 4px !important;
+    column-gap: var(--mantine-spacing-md) !important;
+  }
 }
 
 @media (max-width: 640px) {
