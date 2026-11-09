@@ -26,7 +26,8 @@ import {
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import { NavbarDesktopBreakpoint, NavbarDesktopQuery } from '@/app/navbarBreakpoint';
 import { notifications } from '@mantine/notifications';
-import { Navigate, Outlet, ScrollRestoration, useLocation, useMatches } from 'react-router-dom';
+import { Navigate, Outlet, useLocation, useMatches } from 'react-router-dom';
+import { AppScrollRestoration } from './AppScrollRestoration';
 import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
 import { NavbarCollapseToggle } from './NavbarCollapseToggle';
 import { NavRouteLink } from './NavRouteLink';
@@ -409,7 +410,7 @@ export function AppLayout(): JSX.Element {
        * розмонтовувався б разом із дочірнім деревом і саме в цю мить
        * пропускав би подію зміни локації, яку мав відновити.
        */}
-      <ScrollRestoration />
+      <AppScrollRestoration />
 
       {/*
        * Вихід із документа з незбереженими правками (`D14-12` крок 3,

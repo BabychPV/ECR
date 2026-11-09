@@ -201,36 +201,26 @@ function visibleTargetOf(grid: Element): Element {
 }
 
 
-/** Скільки кадрів тримати рядок у верхній третині після переходу. */
-const UpperThirdFrames = 40;
-
 /**
- * Тримає елемент у верхній третині вікна ~40 кадрів після переходу.
+ * Ставить елемент у верхню третину вікна в НАСТУПНОМУ кадрі (рамка фокуса RevoGrid з'являється після кадру).
  *
- * ⛔ Один `scrollBy` не тримається: вибір таблиці в дереві — `navigate(?table=, replace)`, нова `location.key`, і
- * глобальний `<ScrollRestoration/>` (`AppLayout`) робить `scrollTo(0, 0)` уже ПІСЛЯ фокуса (живий прохід F13: рядок
- * лишався на y≈650 із 900, на 375 px — за краєм вікна). Тому — повтор кожен кадр, доки людина сама не прокрутила
- * (колесо, дотик, клавіша, клік) — той самий прийом, що відновлення прокрутки при зміні періоду (`DocumentPage`).
+ * ✎ debt-1109 x7: раніше — повтор 40 кадрів поспіль: вибір таблиці (`navigate(?table=, replace)`) давав нову
+ * `location.key`, і `<ScrollRestoration/>` робив `scrollTo(0, 0)` уже ПІСЛЯ фокуса. Тепер ключ відновлення — шлях
+ * (`scrollRestorationKey`), зміна лише запиту прокрутку не скидає, і утримання не потрібне. Людина, що встигла
+ * прокрутити сама (колесо, дотик, клавіша, клік), — важливіша: кадр скасовується.
  */
 export function keepInUpperThird(target: () => Element): void {
-  let frames = 0;
   let frame = 0;
-  let stopped = false;
   const userScroll = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
   const stop = (): void => {
-    stopped = true;
     window.cancelAnimationFrame(frame);
     for (const type of userScroll) window.removeEventListener(type, stop);
   };
   for (const type of userScroll) window.addEventListener(type, stop, { passive: true, once: true });
-  const tick = (): void => {
-    if (stopped) return;
+  frame = window.requestAnimationFrame(() => {
+    stop();
     scrollIntoUpperThird(target());
-    frames += 1;
-    if (frames < UpperThirdFrames) frame = window.requestAnimationFrame(tick);
-    else stop();
-  };
-  frame = window.requestAnimationFrame(tick);
+  });
 }
 
 /**
