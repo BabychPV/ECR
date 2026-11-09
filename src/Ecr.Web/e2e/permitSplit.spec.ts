@@ -219,7 +219,10 @@ async function shot(page: Page, name: string): Promise<void> {
 /** Inspector «Info» of the selected permit cell → «Add permit from date…» with B from the 15th of the month. */
 async function addB(page: Page, world: World, row: number): Promise<void> {
   await dataCell(page, row, await gridColumn(page, 'Permit number')).click();
-  await page.getByRole('tab', { name: /Info/ }).click();
+  // The Inspector is closed by default (CI 42602797929: no «Info» tab in the page) — open it from the toolbar first.
+  const info = page.getByRole('tab', { name: /^Info/ });
+  if ((await info.count()) === 0) await page.getByRole('button', { name: 'History of the selected cell' }).click();
+  await info.click();
   await page.getByRole('button', { name: 'Add permit from date…' }).click();
   const form = page.getByRole('form', { name: 'New permit for the row' });
   await form.getByLabel('Permit').click();
