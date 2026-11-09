@@ -98,6 +98,8 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Persistence/SheetChangeStore.cs"] =
             "опитування змін і стан аркуша — екземплярів і стану своєї копії (@copy)",
         ["src/Ecr.Infrastructure/Persistence/AuditReader.cs"] = "журнал переходів несе SheetCopyId події",
+        ["src/Ecr.Infrastructure/Persistence/AuditReader.PermitLabels.cs"] =
+            "(j6) назва рядка в підписі зміни дозволу/поділу — з екземпляра копії, яку несе запис (sheetCopyId; NULL — оригінал)",
 
         // ── склад документа, видалення, перенос версії (RS6) ──
         ["src/Ecr.Infrastructure/Persistence/DocumentSheetCopyStore.cs"] =
