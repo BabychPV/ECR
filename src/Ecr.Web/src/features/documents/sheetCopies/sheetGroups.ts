@@ -30,6 +30,17 @@ export function stateOfGroup(group: Pick<SheetGroup, 'stateKey'>, states: Readon
 }
 
 /**
+ * ✎ UAT-recalc-ux / F13 p218 #788: позначка «перераховано після подання» вкладки — за КЛЮЧЕМ СТАНУ (`КОД` оригіналу,
+ * `КОД#sheetCopyId` копії), як і сам стан. За голим кодом подана копія позначки не бачила, а оригінал віддавав би свою.
+ */
+export function recalculatedAfterSubmissionOf(
+  group: Pick<SheetGroup, 'stateKey'>,
+  sheets: readonly { code: string; recalculatedAfterSubmission?: boolean | null }[],
+): boolean {
+  return sheets.some((s) => s.code === group.stateKey && s.recalculatedAfterSubmission === true);
+}
+
+/**
  * TC02: скільки живих повідомлень чату буде видалено разом із копією (показується ДО підтвердження).
  * Сервер віддає число в кожній таблиці копії (`null` — оригінал); береться перше задане. Немає — `null`.
  */

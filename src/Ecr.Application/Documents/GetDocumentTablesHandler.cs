@@ -31,7 +31,10 @@ public sealed class GetDocumentTablesHandler(
     ICurrentUser currentUser,
     // RS: назви груп і копії аркушів; необов'язковий лише заради тестів, що конструюють обробник вручну (без нього копій
     // у відповіді немає — лише оригінали).
-    IDocumentSheetCopyStore? sheetCopies = null)
+    IDocumentSheetCopyStore? sheetCopies = null,
+    // SHEETNAME(): перше відкриття (нові екземпляри, зокрема нової копії) ставить перерахунок аркушів, формули яких
+    // згадують SHEETNAME, — інакше формула без входів чекала б ручного «Перерахувати». Необов'язковий заради тестів.
+    IBackgroundJobScheduler? jobs = null)
 {
     /// <summary>Право на перегляд документа (`02-contracts.md` §9).</summary>
     public const string Permission = "Document.View";
@@ -68,7 +71,7 @@ public sealed class GetDocumentTablesHandler(
         // побудова календаря періодів: виклик ідемпотентний, а альтернатива
         // (заводити тисячу рядків наперед на кожен документ) коштує більше й
         // здебільшого дарма.
-        await rowStore.EnsureTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
+        var created = await rowStore.EnsureTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
 
         var instances = await rowStore
             .GetTableInstancesAsync(documentId, key, ct)
@@ -85,6 +88,22 @@ public sealed class GetDocumentTablesHandler(
         var snapshot = await metadata
             .GetAsync(instances[0].TemplateVersionId, ct)
             .ConfigureAwait(false);
+
+        // SHEETNAME(): щойно створені екземпляри (перше відкриття періоду чи нової копії) — перерахунок аркушів із
+        // SHEETNAME за цей період. Після коміту створення (EnsureTableInstancesAsync комітить сам), тож задача бачить
+        // нові екземпляри; задача сама перевіряє, чи в період можна писати.
+        if (created > 0 && jobs is not null)
+        {
+            var sheets = SheetNameRecalculation.SheetsUsing(snapshot)
+                .Where(s => s.Tables.Any(t => instances.Any(i => i.TableDefId == t.Id)))
+                .ToList();
+            if (sheets.Count > 0)
+            {
+                await SheetNameRecalculation
+                    .EnqueueAsync(jobs, documentId, key, sheets.Count == 1 ? sheets[0].Id : null, currentUser.UserId, ct)
+                    .ConfigureAwait(false);
+            }
+        }
 
         // ⛔ S6 (ФВ-6.6): таблиця під забороною (своєю чи аркуша) не з'являється
         // в переліку — ні назвою, ні кодом, ні `tableInstanceId`. Зріз на неї

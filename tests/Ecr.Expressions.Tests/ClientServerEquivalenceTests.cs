@@ -168,13 +168,15 @@ public sealed class ClientServerEquivalenceTests
         // причини: даних довідника в клієнтської підказки немає й не буде.
         // Агрегати REGSUM/REGAVG/REGMIN/REGMAX/REGCOUNT (RT-20b) — так само:
         // перебирають рядки знімка довідника, якого клієнт не має.
+        // SHEETNAME (2026-11-09) — назва екземпляра аркуша документа: у клієнтської підказки під час введення
+        // аркуша-екземпляра немає (`evaluate.ts` рахує лише літерали), тож розходитися тут нічому.
         var shared = declared.Except(
-            ["CONVERT", "REGFIELD", "REGFIND", "REGONE", "REGSUM", "REGAVG", "REGMIN", "REGMAX", "REGCOUNT"],
+            ["CONVERT", "REGFIELD", "REGFIND", "REGONE", "REGSUM", "REGAVG", "REGMIN", "REGMAX", "REGCOUNT", "SHEETNAME"],
             StringComparer.OrdinalIgnoreCase);
 
         // Функція, якої немає в наборі, — це функція, чию поведінку клієнт і
         // сервер ніде не звіряють. Саме там і з'явиться перше розходження.
-        Assert.Equal(20, declared.Count);
+        Assert.Equal(21, declared.Count);
         Assert.Empty(shared.Except(covered, StringComparer.OrdinalIgnoreCase));
     }
 

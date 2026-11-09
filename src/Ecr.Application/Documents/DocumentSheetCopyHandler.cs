@@ -42,7 +42,13 @@ public sealed class DocumentSheetCopyHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+
+    // SHEETNAME(): зміна назви «<Назва> N» (перейменування, нова копія, перенумерація) ставить перерахунок формул аркуша
+    // тим самим шляхом, що правка шапки (`IRecalculationJob`). Необов'язкові лише заради тестів, що конструюють обробник
+    // вручну; DI підставляє обидва.
+    IBackgroundJobScheduler? jobs = null,
+    IPeriodStore? periods = null)
 {
     /// <summary>Право на зміну складу документа.</summary>
     public const string Permission = "Document.Create";
@@ -90,7 +96,14 @@ public sealed class DocumentSheetCopyHandler(
                 AddedEventType, userId,
                 new { documentId, projectId, sheetDefId, originalId = group.OriginalId, sheetCopyId = copyId, ordinal },
                 innerCt).ConfigureAwait(false);
+
+            // Перша копія робить оригінал «<Назва> 1».
+            await EnqueueSheetNameRecalculationAsync(documentId, projectId, sheetDefId, userId, inTransaction: true, innerCt)
+                .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        await EnqueueSheetNameRecalculationAsync(documentId, projectId, sheetDefId, userId, inTransaction: false, ct)
+            .ConfigureAwait(false);
 
         return created;
     }
@@ -131,7 +144,13 @@ public sealed class DocumentSheetCopyHandler(
                     oldName = group.NameOverride?.Values, newName = normalized.Values,
                 },
                 innerCt).ConfigureAwait(false);
+
+            await EnqueueSheetNameRecalculationAsync(documentId, projectId, sheetDefId, userId, inTransaction: true, innerCt)
+                .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        await EnqueueSheetNameRecalculationAsync(documentId, projectId, sheetDefId, userId, inTransaction: false, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Видаляє копію аркуша з даними всіх періодів; решту копій групи перенумеровує.</summary>
@@ -146,6 +165,7 @@ public sealed class DocumentSheetCopyHandler(
     public async Task DeleteCopyAsync(long documentId, long sheetCopyId, CancellationToken ct)
     {
         var (profile, userId, projectId) = await AuthorizeAsync(documentId, ct).ConfigureAwait(false);
+        var sheetDefId = 0;
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
@@ -198,7 +218,75 @@ public sealed class DocumentSheetCopyHandler(
                     sheetCopyId, ordinal = copy.Ordinal, cells, chatMessages,
                 },
                 innerCt).ConfigureAwait(false);
+
+            // Перенумерація (3→2) і остання видалена копія (оригінал знову без номера) міняють назви.
+            sheetDefId = copy.SheetDefId;
+            await EnqueueSheetNameRecalculationAsync(documentId, projectId, sheetDefId, userId, inTransaction: true, innerCt)
+                .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        if (sheetDefId != 0)
+        {
+            await EnqueueSheetNameRecalculationAsync(documentId, projectId, sheetDefId, userId, inTransaction: false, ct)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// SHEETNAME(): ставить перерахунок формул аркуша за кожен період, куди перерахунок має право писати, — якщо формули
+    /// аркуша згадують <c>SHEETNAME</c>. Той самий шлях, що правка шапки (<c>DocumentHeaderHandlers</c>): задача
+    /// <see cref="Ports.IRecalculationJob"/> на ціль «документ × період», без витіснення (<c>Coalesced</c>).
+    /// </summary>
+    /// <remarks>
+    /// <c>inTransaction</c> — виклик усередині транзакції запису: черга в базі (<c>EnlistsInCallerTransaction</c>) ставить
+    /// задачу разом із перейменуванням — або обидва, або нічого. Quartz у пам'яті — лише після коміту (до коміту задача
+    /// прочитала б стару назву).
+    /// <para></para>
+    /// ⚠ Подані й затверджені аркуші задача не перезаписує (<c>RecalculationService.EnterSheetsAsync</c>): назва в їхніх
+    /// зрізах лишається тією, з якою подавали. Нова копія отримує значення, щойно її екземпляри відкрито й перераховано.
+    /// </remarks>
+    private async Task EnqueueSheetNameRecalculationAsync(
+        long documentId, int projectId, int sheetDefId, int userId, bool inTransaction, CancellationToken ct)
+    {
+        if (jobs is null || periods is null || jobs.EnlistsInCallerTransaction != inTransaction)
+        {
+            return;
+        }
+
+        var versionId = await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
+        var snapshot = await metadata.GetAsync(versionId, ct).ConfigureAwait(false);
+        var sheet = snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId);
+        if (sheet is null
+            || !Recalculation.SheetDisplayNames.MayUse(sheet.Tables.SelectMany(t => t.Formulas).Select(f => f.Expression)))
+        {
+            return;
+        }
+
+        var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false);
+        if (project is null)
+        {
+            return;
+        }
+
+        // Лише періоди, де аркуш уже має екземпляри (оригінал чи копія): у решті назва порахується при першому
+        // відкритті (`GetDocumentTablesHandler` → `SheetNameRecalculation`), а прогін без екземплярів — марна задача.
+        var opened = await copies
+            .PeriodsWithInstancesAsync(documentId, [.. sheet.Tables.Select(t => t.Id)], ct)
+            .ConfigureAwait(false);
+
+        foreach (var period in project.Periods.OrderBy(p => p.PeriodKeyValue))
+        {
+            if ((opened is not null && !opened.Contains(period.PeriodKeyValue))
+                || period.State == PeriodState.Scheduled
+                || Calculations.RecalculationWritePolicy.Check(period.State, hasSubmittedSheets: false)
+                != Calculations.RecalculationWriteDenial.None)
+            {
+                continue;
+            }
+
+            await SheetNameRecalculation.EnqueueAsync(jobs, documentId, period.Key, sheetDefId, userId, ct)
+                .ConfigureAwait(false);
+        }
     }
 
     private async Task<(AccessProfile Profile, int UserId, int ProjectId)> AuthorizeAsync(

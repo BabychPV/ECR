@@ -353,6 +353,21 @@ public static class TemplateFunctions
     }
 
     /// <summary>
+    /// <c>SHEETNAME()</c> — показувана назва аркуша, у якому рахується формула («Vessel 2» для копії аркуша).
+    /// </summary>
+    /// <param name="context">Контекст обчислення — джерело назви (<see cref="IEvaluationContext.SheetName"/>).</param>
+    /// <remarks>
+    /// ⚠ Контекст без аркуша (правило валідації, перевірка виразу) дає <c>null</c>, а не помилку: «назви немає» — не
+    /// зіпсоване значення, і <c>IFERROR</c> навколо нього не потрібен (02b §7).
+    /// </remarks>
+    public static ExpressionValue SheetName(IEvaluationContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        return context.SheetName is { Length: > 0 } name ? ExpressionValue.Text(name) : ExpressionValue.Null;
+    }
+
+    /// <summary>
     /// Числа з аргументів: <c>null</c> поглинаються, помилка зупиняє агрегат.
     /// </summary>
     private static List<decimal> Numbers(IReadOnlyList<ExpressionValue> args, out ExpressionValue? failure)
