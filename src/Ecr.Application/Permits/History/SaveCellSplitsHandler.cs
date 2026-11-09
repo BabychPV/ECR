@@ -78,28 +78,29 @@ public sealed class SaveCellSplitsHandler(
             plans.Add(await PlanAsync(documentId, profile, item, segments, isPermitTarget, ct).ConfigureAwait(false));
         }
 
-        // 2. Totals of fully split cells — the ordinary cell write (one batch per instance and row version).
-        using (PermitSplitWrite.Begin())
-        {
-            foreach (var group in plans.Where(p => p.Total is not null).GroupBy(p => p.Instance.TableInstanceId))
-            {
-                var first = group.First();
-                var patch = new PatchCellsRequest(
-                    first.Instance.TableInstanceId,
-                    first.Instance.PeriodKey,
-                    CellChangeOrigins.UserEdit,
-                    [.. group.GroupBy(p => p.RowKey, StringComparer.Ordinal).Select(r => new PatchRow(
-                        r.Key,
-                        r.First().BaseVersion,
-                        [.. r.Select(p => new PatchCell(p.Column.Code, p.Total))]))]);
-                await patchCells.HandleAsync(patch, ct, first.Instance).ConfigureAwait(false);
-            }
-        }
-
-        // 3. The parts and their audit.
+        // 2 + 3. ONE transaction (coordinator 09.11, no debt): the totals — the ordinary cell write, whose own
+        // ExecuteInTransactionAsync JOINS the current transaction — and the parts with their audit. A failure of either
+        // leaves neither: never a new total without its parts.
         var now = clock.UtcNow;
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            using (PermitSplitWrite.Begin())
+            {
+                foreach (var group in plans.Where(p => p.Total is not null).GroupBy(p => p.Instance.TableInstanceId))
+                {
+                    var first = group.First();
+                    var patch = new PatchCellsRequest(
+                        first.Instance.TableInstanceId,
+                        first.Instance.PeriodKey,
+                        CellChangeOrigins.UserEdit,
+                        [.. group.GroupBy(p => p.RowKey, StringComparer.Ordinal).Select(r => new PatchRow(
+                            r.Key,
+                            r.First().BaseVersion,
+                            [.. r.Select(p => new PatchCell(p.Column.Code, p.Total))]))]);
+                    await patchCells.HandleAsync(patch, innerCt, first.Instance).ConfigureAwait(false);
+                }
+            }
+
             foreach (var plan in plans)
             {
                 var monthKey = (plan.Month.Year * 100) + plan.Month.Month;
