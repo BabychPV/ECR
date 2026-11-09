@@ -1,12 +1,15 @@
 import { lazy, Suspense, useEffect, useState, type JSX } from 'react';
 import { Button, Checkbox, Group, Modal, Progress, Stack, Text, UnstyledButton } from '@mantine/core';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, generatePath } from 'react-router-dom';
 import type { JobSummary } from '@/api/types';
 import { routes } from '@/app/routes';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { useCancelJob, useRecentJobs } from '@/features/jobs/api';
 import { useJobStatus } from '@/features/jobs/useJobStatus';
+import { projectsQuery } from '@/features/projects/allProjects';
+import { isProjectRecalculation, progressOf, projectRecalcTitle, recalcProgressText } from '@/features/recalc/recalcProgress';
+import { permissionLabel } from '@/features/security/permissionLabel';
 import { useJobsSummary } from '@/features/jobs/useJobsSummary';
 import { JobAttempt, JobResultLink, JobRetry, jobAuthor } from '@/features/jobs/JobFacts';
 import { badgeStateOf } from '@/features/workflow/jobFollow';
@@ -72,7 +75,7 @@ function stateOptions(): readonly FilterOption[] {
 /** Рядок, за яким шукає поле пошуку: назва, ідентифікатор, автор, документ, повідомлення. */
 function searchText(job: JobSummary): string {
   return [
-    jobKindLabel(job.jobCode),
+    projectRecalcTitle(job) ?? jobKindLabel(job.jobCode),
     humanizeJobId(job.jobId),
     job.jobId,
     jobAuthor(job.createdByDisplayName),
@@ -121,6 +124,11 @@ export function JobsPage(): JSX.Element {
   // N4-03: плитка «failed in 24 h» ставить `state=Failed` + `since=24h`, щоб перелік рахувався тим самим
   // предикатом, що й число на плитці. Випадаючий фільтр стану лишається «усі провалені».
   const [since] = useUrlState('since');
+  // ✎ UAT recalc-progress (a5): проєкт і батько розкладу — фільтри СЕРВЕРА (до стелі переліку), теж в адресі.
+  const [projectParam] = useUrlState('project');
+  const [parent] = useUrlState('parent');
+  const projectFilter = projectParam === null || Number.isNaN(Number(projectParam)) ? null : Number(projectParam);
+  const projects = useQuery({ ...projectsQuery });
 
   // ⚠ Старе посилання `?id=` — у `?panel=`, заміною історії: «Назад» не має
   // повертати на адресу, яка одразу ж переписується знову.
@@ -139,7 +147,7 @@ export function JobsPage(): JSX.Element {
   // несподіванкою. ✎ UI-28: прапорець — в адресі (`?mine=1`), як і решта
   // фільтрів рядка: «Назад» повертає ціле подання, а не половину.
   const mineOnly = mine === '1';
-  const jobs = useRecentJobs(mineOnly);
+  const jobs = useRecentJobs(mineOnly, { projectId: projectFilter, parentJobId: parent });
   const all = jobs.data;
 
   const [finding, setFinding] = useState(false);
@@ -236,14 +244,20 @@ export function JobsPage(): JSX.Element {
       // перекладене мовою читача, показується як є).
       key: 'jobCode',
       label: t('jobs.recentCode'),
-      sortValue: (job) => jobKindLabel(job.jobCode),
+      sortValue: (job) => projectRecalcTitle(job) ?? jobKindLabel(job.jobCode),
       minWidth: 200,
       render: (job) => {
         const target = [
+          job.projectCode ?? '',
           job.documentId === null || job.documentId === undefined
             ? ''
             : t('jobs.openDocument', { id: job.documentId }),
-          job.message ?? '',
+          // ✎ a5: дитина розкладу названа частиною перерахунку проєкту; батько — з лічильниками дітей.
+          job.fanOutParentJobId === null || job.fanOutParentJobId === undefined ? '' : t('jobs.partOfProjectRecalc'),
+          // ⚠ Лише батько РОЗКЛАДУ (є лічильники дітей); старий перерахунок без дітей лишає своє повідомлення.
+          isProjectRecalculation(job) && job.fanOut !== null && job.fanOut !== undefined
+            ? recalcProgressText(progressOf(job))
+            : (job.message ?? ''),
         ]
           .filter((part) => part !== '')
           .join(' · ');
@@ -261,7 +275,7 @@ export function JobsPage(): JSX.Element {
                   setPanel(job.jobId);
                 }}
               >
-                {jobKindLabel(job.jobCode)}
+                {projectRecalcTitle(job) ?? jobKindLabel(job.jobCode)}
               </UnstyledButton>
             }
             // ⛔ `X-22`: довге повідомлення (ключ експорту на 32 знаки)
@@ -322,7 +336,7 @@ export function JobsPage(): JSX.Element {
     },
   ];
 
-  const filtered = needle !== '' || type !== null || state !== null;
+  const filtered = needle !== '' || type !== null || state !== null || projectFilter !== null || parent !== null;
 
   return (
     <ListPage
@@ -343,6 +357,11 @@ export function JobsPage(): JSX.Element {
           filters={[
             { id: 'type', label: t('jobs.filterType'), options: typeOptions },
             { id: 'state', label: t('jobs.filterState'), options: stateOptions() },
+            {
+              id: 'project',
+              label: t('jobs.filterProject'),
+              options: (projects.data?.items ?? []).map((p) => ({ value: String(p.id), label: p.code })),
+            },
           ]}
           clearLabel={t('filters.clear')}
           right={
@@ -371,7 +390,8 @@ export function JobsPage(): JSX.Element {
           // Під рядом фільтрів (той має власний `mb="md"`): підтягнути підказку до прапорця.
           mt={-10}
         >
-          {t('jobs.mineOnlyHint')}
+          {/* ✎ Приймання 08.11, a5: людська назва права (`permission.System.ViewHealth`), а не сирий код. */}
+          {t('jobs.mineOnlyHint', { permission: permissionLabel('System.ViewHealth') })}
         </Text>
         </>
       }
@@ -387,7 +407,7 @@ export function JobsPage(): JSX.Element {
           emptyTitle={t('jobs.recentEmpty')}
           filtered={filtered}
           noMatchTitle={t('jobs.noMatch')}
-          onClearFilters={() => setParams({ q: null, type: null, state: null })}
+          onClearFilters={() => setParams({ q: null, type: null, state: null, project: null, parent: null })}
           clearFiltersLabel={t('filters.clear')}
           onRowClick={(job) => setPanel(job.jobId)}
           selectedKey={panel ?? undefined}
@@ -398,7 +418,10 @@ export function JobsPage(): JSX.Element {
           ? undefined
           : {
               panelId: panel,
-              title: summary === undefined ? humanizeJobId(panel) : jobKindLabel(summary.jobCode),
+              title:
+                summary === undefined
+                  ? humanizeJobId(panel)
+                  : (projectRecalcTitle(summary) ?? jobKindLabel(summary.jobCode)),
               subtitle: summary === undefined ? undefined : humanizeJobId(summary.jobId),
               badge: openBadge === undefined ? undefined : <StatusBadge kind="job" state={badgeStateOf(openBadge)} />,
               closeLabel: t('common.close'),

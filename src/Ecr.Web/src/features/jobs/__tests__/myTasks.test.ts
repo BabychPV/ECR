@@ -112,7 +112,7 @@ describe('P2-05: навантаження шапки', () => {
     ({ ...job(state), jobCode: 'Ecr.Application.Ports.IFormulaRecalculationJob' }) as JobSummary;
 
   it('адреса несе limit', () => {
-    expect(myTasksUrl()).toBe(`/api/v1/jobs?mine=true&hideRoutine=true&limit=${String(MyTasksLimit)}`);
+    expect(myTasksUrl()).toBe(`/api/v1/jobs?mine=true&hideRoutine=true&hideChildren=true&limit=${String(MyTasksLimit)}`);
     expect(MyTasksLimit).toBeLessThan(50);
   });
 

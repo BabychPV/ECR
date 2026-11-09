@@ -54,7 +54,7 @@ function show(): void {
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={[`/?periodKey=${String(Period)}&panel=11`]}>
         <QueryClientProvider client={client}>
-          <DocumentQuickLook panelId="11" periodKey={Period} document={listRow} listReady projectCode={() => 'ATR'} documentHref={(id) => `/documents/${String(id)}`} />
+          <DocumentQuickLook panelId="11" currentPeriodOf={() => Period} year={2026} document={listRow} listReady projectCode={() => 'ATR'} documentHref={(id) => `/documents/${String(id)}`} />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,

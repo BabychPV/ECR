@@ -70,7 +70,8 @@ test.describe('Period clarity', () => {
     await signIn(page);
     const { card, periodKey } = await partlySubmittedDocument(page);
 
-    await page.goto(`/admin/periods?projectId=${String(card.projectId)}`);
+    // ✎ Projects (08.11): Periods — вкладка проєкту.
+    await page.goto(`/projects/${String(card.projectId)}/periods`);
     const table = page.locator('[data-periods-table="months"]');
     await expect(table).toBeVisible({ timeout: 60_000 });
 
@@ -88,18 +89,16 @@ test.describe('Period clarity', () => {
     for (const name of [/^Recalculate$/, /^Archive$/, /^Clone/, /^Approval route/]) {
       await expect(page.getByRole('button', { name })).toHaveCount(0);
     }
-    await expect(page.locator('[data-periods-lock-note]')).toBeVisible();
-    await expect(page.locator('[data-project-settings-link]')).toHaveAttribute(
-      'href',
-      `/admin/projects?projectId=${String(card.projectId)}`,
-    );
+    await expect(page.locator('[data-note="periods-lock-only"]')).toBeVisible();
+    // Налаштування — сусідня вкладка проєкту, а не окрема сторінка.
+    await expect(page.locator('[data-project-tab="settings"]')).toHaveAttribute('href', `/projects/${String(card.projectId)}/settings`);
   });
 
   test('project settings pins the current month and goes back to automatic', async ({ page }) => {
     await signIn(page);
     const { card } = await partlySubmittedDocument(page);
 
-    await page.goto(`/admin/projects?projectId=${String(card.projectId)}`);
+    await page.goto(`/projects/${String(card.projectId)}/settings`);
     const section = page.locator('[data-project-section="current-period"]');
     await expect(section.locator('[data-current-period-mode="Auto"]')).toBeVisible({ timeout: 60_000 });
     await expect(section.locator('[data-current-period-badge]')).toHaveText(/Automatic by date/);
@@ -125,15 +124,16 @@ test.describe('Period clarity', () => {
     const year = Math.trunc(periodKey / 100);
 
     await page.goto(`/?projectId=${String(card.projectId)}&year=${String(year)}`);
-    await expect(page.locator('[data-documents-year-note]')).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator('[data-note="documents-year"]')).toBeVisible({ timeout: 60_000 });
     const row = page.locator(`[data-document-row="${card.businessKey}"]`);
     await expect(row).toBeVisible({ timeout: 60_000 });
 
     const cells = row.locator('[data-month]');
     await expect(cells).toHaveCount(12);
     const month = row.locator(`[data-month="${String(periodKey)}"]`);
-    await expect(month).toHaveAttribute('data-month-state', 'PartlySubmitted');
-    await expect(month).toHaveAttribute('aria-label', /: Partly submitted$/);
+    // ✎ g3: частково поданий місяць — клітинка «Submitted» легенди (заливка наполовину).
+    await expect(month).toHaveAttribute('data-cell', 'submitted');
+    await expect(month).toHaveAttribute('aria-label', /: Submitted$/);
 
     // Лічильники смуги — за рік.
     await expect(page.locator('[data-summary-counter="partlySubmitted"]')).toBeVisible({ timeout: 60_000 });
@@ -303,7 +303,7 @@ test.describe('Pass2 (людський прохід 07.11)', () => {
       'проєкт-чернетка',
     );
 
-    await page.goto(`/admin/periods?projectId=${String(created.projectId)}`);
+    await page.goto(`/projects/${String(created.projectId)}/periods`);
     const tiles = page.locator('[data-testid="periods-year"] [data-period-tile]');
     await expect(tiles.first()).toBeVisible({ timeout: 60_000 });
     const count = await tiles.count();
@@ -318,8 +318,8 @@ test.describe('Pass2 (людський прохід 07.11)', () => {
     }
     expect(scheduled, 'у чернетки немає жодного ще не відкритого місяця — перевіряти нічого').toBeGreaterThan(0);
 
-    // Смуга показників видимо каже, що рахує всі проєкти.
-    await expect(page.locator('[data-periods-stats-scope="all"]')).toContainText('All projects:');
+    // ✎ Projects (08.11): на вкладці проєкту смуги «всіх проєктів» немає — огляд усіх лише на /projects.
+    await expect(page.locator('[data-periods-stats-scope]')).toHaveCount(0);
   });
 
   test('Pass2: documents year view subtitle speaks about the selected year, not one period', async ({ page }) => {
@@ -328,6 +328,6 @@ test.describe('Pass2 (людський прохід 07.11)', () => {
     const subtitle = page.getByTestId('page-description');
     await expect(subtitle).toBeVisible({ timeout: 60_000 });
     await expect(subtitle).toHaveText('Reports of your projects for the selected year. Open a document to work in it.');
-    await expect(page.locator('[data-documents-year-note]')).toBeVisible();
+    await expect(page.locator('[data-note="documents-year"]')).toBeVisible();
   });
 });

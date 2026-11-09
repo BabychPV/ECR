@@ -209,6 +209,47 @@ public sealed class NegativePathSweepTests(SqlServerFixture sql)
         Assert.Equal((0, 15, 45, 45), (policy.OpenOffsetDays, policy.GraceOffsetDays, policy.HardCloseOffsetDays, policy.YearGraceOffsetDays));
     }
 
+    /// <summary>
+    /// UAT 08.11 (лінія f/g): «Save» на невідредагованому рядку діалогу політик слав PUT без тіла.
+    /// ⛔ Тіло без полів (`{}`) чи з частиною полів System.Text.Json зв'язував нулями — політика
+    /// мовчки обнулялась (200). Тепер кожне поле обов'язкове: 422 форми запиту, політика ціла.
+    /// </summary>
+    [Theory]
+    [InlineData("<none>")]
+    [InlineData("")]
+    [InlineData("{}")]
+    [InlineData("""{"openOffsetDays":5}""")]
+    [InlineData("""{"openOffsetDays":0,"graceOffsetDays":0,"hardCloseOffsetDays":0}""")]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "negative-path-sweep")]
+    public async Task Зміна_політики_без_тіла_чи_без_полів_дає_422_і_не_обнуляє_зсуви(string json)
+    {
+        var stand = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, stand.UserName).ConfigureAwait(true);
+
+        var uri = new Uri($"/api/v1/projects/period-policies/{stand.PeriodPolicyId}", UriKind.Relative);
+        if (json == "<none>")
+        {
+            // Саме це й слав клієнт: без тіла й без Content-Type. MVC відмовляє ще до дії — 415
+            // без `errorCode` (форма відмови — [debt]), але політику не чіпає.
+            using var bare = await client.PutAsync(uri, content: null).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.UnsupportedMediaType, bare.StatusCode);
+        }
+        else
+        {
+            using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            using var update = await client.PutAsync(uri, content).ConfigureAwait(true);
+            await AssertRefusalAsync(app, update, HttpStatusCode.UnprocessableEntity, "ECR-REQ-0422", "err.ECR-REQ-0422.malformedRequest")
+                .ConfigureAwait(true);
+        }
+
+        await using var db = Db();
+        var policy = await db.PeriodPolicies.AsNoTracking().SingleAsync(p => p.Id == stand.PeriodPolicyId).ConfigureAwait(true);
+        Assert.Equal((0, 15, 45, 45), (policy.OpenOffsetDays, policy.GraceOffsetDays, policy.HardCloseOffsetDays, policy.YearGraceOffsetDays));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

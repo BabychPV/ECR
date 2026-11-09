@@ -58,6 +58,19 @@ function mockFetch(): void {
         });
       }
 
+      // ✎ Projects/Documents 08.11: варіанти «Year» — лише роки з календарів проєктів (тут 2025 і 2026).
+      if (/\/api\/v1\/projects\/\d+\/periods/.test(url)) {
+        return new Response(
+          JSON.stringify({
+            periods: [
+              { periodKey: 202512, year: 2025, sequence: 12, state: 'Closed' },
+              { periodKey: 202601, year: 2026, sequence: 1, state: 'Open' },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+
       if (url.includes('/api/v1/projects')) {
         return new Response(JSON.stringify({ items: [project], nextCursor: null, totalCount: 1 }), {
           status: 200,
@@ -76,12 +89,12 @@ function LocationSpy() {
   return null;
 }
 
-function show(): void {
+function show(entry: string): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
     <MantineProvider>
-      <MemoryRouter initialEntries={['/?year=2026']}>
+      <MemoryRouter initialEntries={[entry]}>
         <LocationSpy />
         <QueryClientProvider client={client}>
           <DocumentsPage />
@@ -98,37 +111,44 @@ afterEach(() => {
 
 const SlowEnvTimeout = 400_000;
 
-describe('DocumentsPage: вибір місяця справді фільтрує (lane3; ✎ Period clarity — рік і місяць)', () => {
+// ✎ Projects/Documents 08.11: поля «Month» більше немає (перелік лише за рік) — та сама гарантія «одним переходом»
+// перевіряється на полі «Year»: рік, periodKey зі старої адреси й курсор міняються разом, і запит іде з новим роком.
+describe('DocumentsPage: вибір року справді фільтрує (lane3; ✎ Projects/Documents 08.11 — лише рік)', () => {
   it(
-    'місяць → адреса й запит з periodKey; «All months» → назад до року',
+    'стара адреса з periodKey дає рік; зміна року → одним переходом year без periodKey/cursor, запит з year',
     async () => {
       mockFetch();
-      show();
+      show('/?periodKey=202601&cursor=abc');
 
-      const month = await screen.findByLabelText('⟦documents.month⟧', {}, { timeout: SlowEnvTimeout });
-      // Типово — рік («All months»).
-      expect((month as HTMLSelectElement).value).toBe('');
-
-      fireEvent.change(month, { target: { value: '1' } });
-
-      // ⛔ Мутаційний доказ: два окремі сеттери адреси гублять зміну — `seenSearch` лишається з роком.
-      await waitFor(() => expect(seenSearch).toBe('?periodKey=202601'), { timeout: SlowEnvTimeout });
-
-      fireEvent.change(await screen.findByLabelText('⟦documents.month⟧'), { target: { value: '' } });
-      await waitFor(() => expect(new URLSearchParams(seenSearch).get('year')).toBe('2026'), { timeout: SlowEnvTimeout });
-      expect(new URLSearchParams(seenSearch).has('periodKey')).toBe(false);
-      fireEvent.change(await screen.findByLabelText('⟦documents.month⟧'), { target: { value: '1' } });
-
-      const fetchMock = vi.mocked(fetch);
+      const year = await screen.findByLabelText('⟦documents.year⟧', {}, { timeout: SlowEnvTimeout });
+      // Рік — з місяця старої адреси; поля місяця немає.
+      expect((year as HTMLSelectElement).value).toBe('2026');
+      expect(screen.queryByLabelText('⟦documents.month⟧')).toBeNull();
+      // Варіанти — лише роки з календарів проєктів.
       await waitFor(
-        () => {
-          const calledWithPeriod = fetchMock.mock.calls.some(([requestInput]) =>
-            String(requestInput).includes('periodKey=202601'),
-          );
-          expect(calledWithPeriod).toBe(true);
-        },
+        () =>
+          expect([...(year as HTMLSelectElement).options].map((option) => option.value)).toEqual(['2026', '2025']),
         { timeout: SlowEnvTimeout },
       );
+
+      fireEvent.change(year, { target: { value: '2025' } });
+
+      // ⛔ Мутаційний доказ: окремі сеттери адреси гублять зміну — `seenSearch` лишається зі старим periodKey.
+      await waitFor(() => expect(seenSearch).toBe('?year=2025'), { timeout: SlowEnvTimeout });
+
+      const fetchMock = vi.mocked(fetch);
+      const lists = (): URL[] =>
+        fetchMock.mock.calls
+          .map(([requestInput]) => String(requestInput))
+          .filter((url) => /\/api\/v1\/documents\?/.test(url))
+          .map((url) => new URL(url, 'http://x'));
+      await waitFor(
+        () => expect(lists().some((u) => u.searchParams.get('year') === '2025')).toBe(true),
+        { timeout: SlowEnvTimeout },
+      );
+      // Перелік ніколи не просить місяць: periodKey зі старої адреси дає лише рік.
+      expect(lists().every((u) => !u.searchParams.has('periodKey'))).toBe(true);
+      expect(lists().some((u) => u.searchParams.get('year') === '2026')).toBe(true);
     },
     SlowEnvTimeout,
   );

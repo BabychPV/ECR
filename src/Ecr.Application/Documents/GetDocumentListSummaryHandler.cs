@@ -66,7 +66,7 @@ public sealed class GetDocumentListSummaryHandler(
             var yearRestrictions = await RestrictionsAsync(profile, projectId, readable, null, ct).ConfigureAwait(false);
 
             return await summary
-                .SummarizeYearAsync(projectId, year!.Value, readable, yearRestrictions, ct)
+                .SummarizeYearAsync(projectId, year!.Value, readable, yearRestrictions, profile.UserId, ct)
                 .ConfigureAwait(false);
         }
 

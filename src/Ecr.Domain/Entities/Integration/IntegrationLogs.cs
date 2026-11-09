@@ -858,6 +858,31 @@ public sealed class JobProgress
     public void Heartbeat(DateTime utcNow) => HeartbeatAt = utcNow;
 
     /// <summary>
+    /// Позначає рядок-дзеркало Quartz дитиною розкладу <paramref name="parentJobId"/> (UAT recalc-progress, 08.11).
+    /// </summary>
+    /// <param name="parentJobId">Батьківська задача-розклад.</param>
+    /// <remarks>
+    /// ⛔ Стовпець <see cref="FanOutParentJobId"/> база обчислює з <see cref="Payload"/>. Рядок черги в базі несе
+    /// payload задачі; дзеркало Quartz не несло нічого, тож у типовому режимі (<c>Jobs:Queue:Mode = Quartz</c>)
+    /// батько перерахунку проєкту не мав жодної дитини, і стан «завершено» з'являвся за секунду після
+    /// розкладу, поки 92 документи ще рахувались. Тут — лише позначка батька, не тіло задачі: дзеркалу воно
+    /// не потрібне (його виконує Quartz із власного JobDataMap). Рядок черги (<see cref="Lane"/> задано) не
+    /// чіпається — його payload пише черга.
+    /// </remarks>
+    public void TagFanOutParent(string parentJobId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(parentJobId);
+
+        if (Lane is not null)
+        {
+            return;
+        }
+
+        Payload = System.Text.Json.JsonSerializer.Serialize(
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["fanOutParentJobId"] = parentJobId });
+    }
+
+    /// <summary>
     /// Ставить стан «у черзі».
     /// </summary>
     /// <param name="utcNow">Момент постановки в UTC.</param>

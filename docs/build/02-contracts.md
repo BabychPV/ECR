@@ -4533,6 +4533,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/projects/{id}/document-template` | `Document.Create` | 4 |
 | `POST` | `/api/v1/projects/{id}/activate` | `Project.Manage` | 1 |
 | `POST` | `/api/v1/projects/{id}/archive` | `Project.Manage` | 1 |
+| `DELETE` | `/api/v1/projects/{id}` | `Project.Manage` | 3 |
 | `POST` | `/api/v1/projects/{id}/clone` | `Project.Manage` | 3 |
 | `PUT` | `/api/v1/projects/{id}/current-period` | `Period.Configure` (✎ 2026-11-07: **застаріло** — `…/settings/current-period`) | 3 |
 | `GET` | `/api/v1/projects/{id}/settings/current-period` | `Document.View` | 3 |
@@ -5888,6 +5889,20 @@ public sealed record RowDto(
 
 ### Перерахунок (`POST /projects/{id}/recalculate`, `POST /documents/{id}/recalculate`)
 
+✎ 2026-11-08 (UAT recalc-progress): перерахунок проєкту ставиться злиттям з ціллю `project{id}-year` /
+`project{id}-p{periodKey}` і з автором-ініціатором (тепер видно в `mine=true`). Прогрес — `GET /jobs?mine=true&kind=projectRecalculation&projectId={id}`:
+рядок батька несе `projectId`, `projectCode`, `fanOut {total, queued, running, succeeded, failed, skippedSheets}` і
+`effectiveState` (`FannedOut` поки документи рахуються). Нові звуження `GET /jobs`: `projectId`, `parentJobId`,
+`hideChildren`, `kind` (`projectRecalculation` | `documentRecalculation`; інше — `422 err.ECR-REQ-0422.jobKind`);
+`JobSummary.fanOutParentJobId` — батько дочірньої задачі. Дзеркала Quartz дочірніх задач теж несуть батька.
+Дочірня задача, злита з уже поставленою на той самий документ, лишається за старим батьком (відома межа).
+
+`DELETE /api/v1/projects/{id}` (`Project.Manage` + грант Manage): лише `Draft` без документів і без історії
+(прогони, зрізи, архівації); пише `aud.StructureChange` (`Project`/`Delete`). Відмови `409 ECR-PRD-0409`:
+`deleteNotDraft` {status, documentCount}, `deleteHasDocuments` {documentCount}, `deleteHasHistory` {historyCount}.
+Збереження політики зсувів і зміна поточного періоду одразу доганяють стани місяців до ефективних (аудит
+`Period`/`AdvanceState`).
+
 - Відмови `ECR-CALC-4221 sheetsSubmitted` на цих маршрутах більше немає. Гранулярність — **аркуш × період**:
   - `Approved` — **пропускається** (комірки й результати методологій не змінюються; результати переносяться в новий прогін);
   - `Submitted`, `Draft`, `Rejected` (повернуто) — **перераховуються**. Поданий аркуш перераховується лише ручним
@@ -5950,9 +5965,17 @@ public sealed record RowDto(
   місяць: `draft + partlySubmitted + submitted + approved + rejected` = кількість видимих документів, і кожне число
   дорівнює кількості рядків переліку з відповідним фільтром `state` за рік. `withIssues` — документи, у яких хоч в одному
   розпочатому періоді року ОСТАННІЙ підсумок перевірки має помилки (звуження — як за місяць); `sheetsApproved`/`sheetsTotal`
-  — клітинки; `staleResultsCount`/`staleResultsMineCount` = 0 (застарілість належить місяцю, фільтр `resultsStale` без
-  `periodKey` — `422`). `periodKey` важить більше за `year`; без обох — `422 documentStateNeedsPeriod`; рік поза
-  `2000..2999` — `422 documentYearOutOfRange`.
+  — клітинки; ~~`staleResultsCount`/`staleResultsMineCount` = 0 (застарілість належить місяцю, фільтр `resultsStale` без
+  `periodKey` — `422`)~~ ✎ 08.11 (координатор, рядок приймання g4: «State filter, counters and the Needs recalculation
+  chip count for the selected year only»): `staleResultsCount`/`staleResultsMineCount` — видимі документи (проєкт має
+  період у році), застарілі **хоч в одному періоді року** (див. «Застарілі результати за рік» нижче). `periodKey` важить
+  більше за `year`; без обох — `422 documentStateNeedsPeriod`; рік поза `2000..2999` — `422 documentYearOutOfRange`.
+- **Застарілі результати за рік** (✎ 08.11, g4): з `year` і без `periodKey` фільтр `resultsStale=true|false` (і
+  `staleBy=me`) приймається; документ застарілий за рік, якщо застарілий хоч в одному періоді року (об'єднання місячних
+  карт застарілості, той самий предикат, що й за місяць; беруться періоди року з актуальним прогоном). Позначка рядка
+  `resultsStale` за рік — `true`/`false` (не `null`), `resultsStaleSince` — найраніший момент серед місяців; правила
+  невизначеності (`resultsStaleUndetermined`, проєкти зі звуженням поза фільтром в обох напрямках, D-446) — як за місяць.
+  Без `periodKey` і без `year` — як і раніше `422 resultsStaleNeedsPeriod`. Форма відповіді не змінена.
 
 ### Поточний період — у налаштуваннях проєкту (п. c)
 

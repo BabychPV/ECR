@@ -14,8 +14,8 @@ import { testTheme } from '@/test/render';
  *  - кожна плитка місяця писала «Not open yet · opens Jan 1, 2026» — дати в минулому, які не настануть (чернетку
  *    `PeriodStateJob` не веде); червоний банер пояснював, а плитки йому суперечили. Тепер плитка неактивного проєкту
  *    каже «not open — the project is a draft» і дат відкриття не обіцяє;
- *  - смуга «2 open · 1 in grace» рахує ВСІ проєкти, а під нею — календар одного обраного; тепер обсяг названо
- *    видимо («All projects:»).
+ *  - смуга «2 open · 1 in grace» рахувала ВСІ проєкти над календарем одного; ✎ Projects (08.11) — смуги на вкладці
+ *    проєкту немає зовсім (огляд усіх — перелік `/projects`).
  */
 
 const policy = { id: 1, code: 'STD', openOffsetDays: 0, graceOffsetDays: 15, hardCloseOffsetDays: 45, yearGraceOffsetDays: 0 };
@@ -103,7 +103,7 @@ function show(entry: string): void {
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={[entry]}>
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-          <PeriodsPage />
+          <PeriodsPage projectId={2} />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,
@@ -147,13 +147,12 @@ describe('Pass2 п. 6: Periods проєкту-чернетки', () => {
     expect(periodNote(scheduled, calendar, siteDate, Date.now(), 'Archived')).toBe('not open — the project is not active');
   });
 
-  it('Pass2: смуга показників над календарем обраного проєкту видимо названа «All projects:»', async () => {
-    show('/admin/periods?projectId=2');
+  // ✎ Projects (макет 08.11): смуги «All projects:» над календарем більше немає — вкладка показує ОДИН проєкт, а
+  // огляд усіх — перелік `/projects`; тож і змішування обсягів, яке стерегла ця перевірка, більше не виникає.
+  it('Projects 08.11: над календарем проєкту немає смуги показників усіх проєктів', async () => {
+    show('/projects/2/periods');
 
     await screen.findByTestId('periods-year');
-    const strip = await screen.findByRole('group', { name: 'Periods of all projects' });
-    const scope = strip.closest('[data-periods-stats-scope]');
-    expect(scope?.getAttribute('data-periods-stats-scope')).toBe('all');
-    expect(within(scope as HTMLElement).getByText('All projects:')).toBeDefined();
+    expect(document.querySelector('[data-periods-stats-scope]')).toBeNull();
   });
 });

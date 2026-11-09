@@ -30,6 +30,9 @@ public sealed class SetCurrentPeriodHandler(
     /// <summary>Право на налаштування періодів (`02-contracts.md` §9).</summary>
     public const string Permission = "Period.Configure";
 
+    /// <summary>Причина переходів стану в журналі (UAT 08.11, сценарій e).</summary>
+    public const string CatchUpReason = "Current period setting changed";
+
     /// <summary>Фіксує поточний період або повертає автоматичний режим.</summary>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="pinnedPeriodId">Період; <c>null</c> — режим <c>Auto</c>.</param>
@@ -78,6 +81,12 @@ public sealed class SetCurrentPeriodHandler(
 
         var now = clock.UtcNow;
         var before = project.CurrentPeriodId;
+
+        // ⛔ UAT 08.11 (e): поточний період обирають серед ЕФЕКТИВНИХ станів — збережені доганяють їх тут же, з
+        // аудитом (той самий шлях, що F-08 в архівації), а не наступним прогоном задачі станів.
+        await PeriodStateCatchUp
+            .ApplyAsync(project, now, audit, userId, CatchUpReason, currentUser.CorrelationId, ct)
+            .ConfigureAwait(false);
 
         if (pinnedPeriodId is { } periodId)
         {

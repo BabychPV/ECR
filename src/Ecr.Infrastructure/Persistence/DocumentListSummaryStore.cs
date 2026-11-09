@@ -133,7 +133,7 @@ public sealed class DocumentListSummaryStore(
         // ⛔ Проєкти зі звуженням не рахуються - як `WithIssues`.
         // ✎ D-446: документи-надання — лише видимі учасникові цілком (`ParticipantSummaryScope.WholeDocumentIds`).
         var (staleCount, staleMine) = await StaleCountsAsync(
-            projectId, periodKey, allowed?.ToArray(), restrictions, currentUserId, ct).ConfigureAwait(false);
+            projectId, periodKey, year: null, allowed?.ToArray(), restrictions, currentUserId, ct).ConfigureAwait(false);
 
         return new DocumentListSummaryResponse(
             row.Draft, row.Submitted, row.Approved, row.Rejected, row.WithIssues,
@@ -150,11 +150,26 @@ public sealed class DocumentListSummaryStore(
     /// ЧИСЛОМ (воно не кешується), створення, видалення й перенесення документа між проєктами видно одразу, а
     /// проєкти зі звуженням, як і раніше, не рахуються (<c>!narrowed.Contains</c>).
     /// Інвалідація карти й межі — у <see cref="StaleResultsMapCache"/>.
+    ///
+    /// ✎ g4 (координатор 08.11): за РІК (<paramref name="year"/>, <paramref name="periodKey"/> = <c>null</c>) — документи,
+    /// застарілі хоч в одному періоді року (об'єднання місячних карт, <see cref="StaleResultsYear"/>), серед видимих
+    /// документів проєктів із періодом у році (та сама межа, що й решта зведення року і перелік, <c>WhereProjectYear</c>).
     /// </remarks>
     private async Task<(int All, int Mine)> StaleCountsAsync(
-        int? projectId, int periodKey, int[]? scope, SummaryRestrictions? restrictions, int? currentUserId,
+        int? projectId, int? periodKey, int? year, int[]? scope, SummaryRestrictions? restrictions, int? currentUserId,
         CancellationToken ct)
     {
+        int[] yearKeys = [];
+        if (periodKey is null)
+        {
+            yearKeys = await StaleResultsYear.PeriodKeysAsync(db, year!.Value, projectId, ct).ConfigureAwait(false);
+            if (yearKeys.Length == 0)
+            {
+                // Жодного актуального прогону в році — застарілих немає, без подальших запитів.
+                return (0, 0);
+            }
+        }
+
         var narrowed = restrictions?.NarrowedProjects.ToArray() ?? [];
 
         var visible = db.Documents
@@ -175,20 +190,35 @@ public sealed class DocumentListSummaryStore(
                             && !narrowed.Contains(d.ProjectId));
         }
 
-        var maps = await new StaleResultsMapCache(db, cache, clock, epoch, log, StaleMapMaxDocuments, scopeFactory)
-            .GetAsync(periodKey, currentUserId is { } me ? [null, me] : [null], ct)
-            .ConfigureAwait(false);
+        if (periodKey is null)
+        {
+            var from = year!.Value * 100;
+            var to = (year.Value + 1) * 100;
+            visible = visible.Where(d => db.Periods.Any(p => p.ProjectId == d.ProjectId
+                                                             && p.PeriodKeyValue > from && p.PeriodKeyValue < to));
+        }
+
+        var mapCache = new StaleResultsMapCache(db, cache, clock, epoch, log, StaleMapMaxDocuments, scopeFactory);
+        IReadOnlyList<int?> authors = currentUserId is { } me ? [null, me] : [null];
+        var maps = periodKey is { } monthKey
+            ? await mapCache.GetAsync(monthKey, authors, ct).ConfigureAwait(false)
+            : await StaleResultsYear.GetAsync(mapCache, yearKeys, authors, ct).ConfigureAwait(false);
+
+        IQueryable<long> StaleIds(int? byUserId)
+            => periodKey is { } key
+                ? StaleResultsQuery.Documents(db, key, byUserId).Select(r => r.DocumentId)
+                : StaleResultsYear.Documents(db, yearKeys, byUserId);
 
         // Карта переповнена (понад стелю): прямий запит, як було (1885c2c77) - без кешу.
         if (maps.Any(m => m is null))
         {
-            var stale = StaleResultsQuery.Documents(db, periodKey).Select(r => r.DocumentId);
+            var stale = StaleIds(null);
             var directAll = await visible.CountAsync(d => stale.Contains(d.Id), ct).ConfigureAwait(false);
 
             var directMine = 0;
             if (currentUserId is { } user && directAll > 0)
             {
-                var mineIds = StaleResultsQuery.Documents(db, periodKey, user).Select(r => r.DocumentId);
+                var mineIds = StaleIds(user);
                 directMine = await visible.CountAsync(d => mineIds.Contains(d.Id), ct).ConfigureAwait(false);
             }
 
@@ -223,14 +253,16 @@ public sealed class DocumentListSummaryStore(
     ///
     /// «З зауваженнями» — документ, у якого хоч в одному розпочатому періоді року ОСТАННІЙ підсумок перевірки має
     /// помилки (та сама межа звуження, що за місяць). <c>SheetsApproved</c>/<c>SheetsTotal</c> — клітинки.
-    /// <c>StaleResultsCount</c>/<c>StaleResultsMineCount</c> — 0: застарілість належить місяцю, і фільтр
-    /// <c>resultsStale</c> без <c>periodKey</c> сервер відхиляє (<c>resultsStaleNeedsPeriod</c>).
+    /// ✎ g4 (координатор 08.11): <c>StaleResultsCount</c>/<c>StaleResultsMineCount</c> — видимі документи (проєкт має
+    /// період у році), застарілі хоч в одному періоді року: те саме число, що дає фільтр <c>resultsStale=true</c> переліку
+    /// за рік. Окремими запитами (<c>StaleCountsAsync</c>), як і за місяць; жодного актуального прогону в році — один
+    /// запит періодів і нулі.
     ///
     /// ⚠ Межі року стоять у предикаті <c>wf.ApprovalState</c> і <c>wf.ValidationResult</c> (партиції, урок <c>WR-05</c>).
     /// </remarks>
     public async Task<DocumentListSummaryResponse> SummarizeYearAsync(
         int? projectId, int year, IReadOnlyCollection<int>? visibleProjectIds,
-        SummaryRestrictions? restrictions, CancellationToken ct)
+        SummaryRestrictions? restrictions, int? currentUserId, CancellationToken ct)
     {
         var from = year * 100;
         var to = (year + 1) * 100;
@@ -315,20 +347,27 @@ public sealed class DocumentListSummaryStore(
                       ON a.DocumentId = s.DocumentId AND a.SheetDefId = s.SheetDefId AND a.PeriodKey = p.PeriodKey
                      AND a.PeriodKey > {from} AND a.PeriodKey < {to}
                      AND (a.SheetCopyId = s.Id OR (a.SheetCopyId IS NULL AND s.CopyOfId IS NULL))
-                    WHERE {restrict} = 0
+                    WHERE ({restrict} = 0
                        OR d.ProjectId IN (SELECT CAST(j.value AS int) FROM OPENJSON({projectsJson}) j)
                        OR (d.Id IN (SELECT CAST(pd.value AS bigint) FROM OPENJSON({participantDocsJson}) pd)
                            AND ({participantProject} = 0 OR d.ProjectId = {participantProject})
-                           AND d.ProjectId NOT IN (SELECT CAST(dn.value AS int) FROM OPENJSON({participantDeniedJson}) dn))
+                           AND d.ProjectId NOT IN (SELECT CAST(dn.value AS int) FROM OPENJSON({participantDeniedJson}) dn)))
+                      -- ✎ g2 (макет 08.11): рік — лише документи проєктів із періодом у цьому році (та сама межа, що
+                      -- в переліку, `DocumentStore.WhereProjectYear`); раніше рік без проєктів рахував чужі документи Draft.
+                      AND EXISTS (SELECT 1 FROM doc.Period py
+                                  WHERE py.ProjectId = d.ProjectId AND py.PeriodKey > {from} AND py.PeriodKey < {to})
                     GROUP BY d.Id, d.ProjectId
                 ) x
                 """)
             .SingleAsync(ct)
             .ConfigureAwait(false);
 
+        var (staleCount, staleMine) = await StaleCountsAsync(
+            projectId, periodKey: null, year, allowed?.ToArray(), restrictions, currentUserId, ct).ConfigureAwait(false);
+
         return new DocumentListSummaryResponse(
             row.Draft, row.Submitted, row.Approved, row.Rejected, row.WithIssues,
-            row.SheetsApproved, row.SheetsTotal, StaleResultsCount: 0, StaleResultsMineCount: 0, row.PartlySubmitted);
+            row.SheetsApproved, row.SheetsTotal, staleCount, staleMine, row.PartlySubmitted);
     }
 
     /// <inheritdoc />

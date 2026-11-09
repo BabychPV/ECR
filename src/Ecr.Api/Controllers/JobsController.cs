@@ -28,6 +28,14 @@ public sealed class JobsController(
     /// <param name="mine">Лише власні задачі; не вимагає <c>System.ViewHealth</c>.</param>
     /// <param name="limit">Скільки повернути, 1…50.</param>
     /// <param name="hideRoutine">Без успішних перерахунків формул — для шухляди «Мої задачі».</param>
+    /// <param name="projectId">
+    /// Лише задачі проєкту: документні — його документів, а також перерахунки всього проєкту.
+    /// </param>
+    /// <param name="parentJobId">Лише дочірні задачі цього розкладу (перерахунок проєкту → документи).</param>
+    /// <param name="hideChildren">Без дочірніх задач розкладу — перерахунок проєкту одним рядком.</param>
+    /// <param name="kind">
+    /// Вид задачі: <c>projectRecalculation</c> або <c>documentRecalculation</c>. Невідомий — <c>422</c>.
+    /// </param>
     /// <param name="ct">Скасування.</param>
     /// <remarks>
     /// ⛔ Без цього ендпоінта збій задачі був видимий лише тому, хто вже знає
@@ -56,8 +64,16 @@ public sealed class JobsController(
         [FromQuery] bool mine,
         [FromQuery] int? limit,
         [FromQuery] bool hideRoutine,
+        [FromQuery] int? projectId,
+        [FromQuery] string? parentJobId,
+        [FromQuery] bool hideChildren,
+        [FromQuery] string? kind,
         CancellationToken ct)
-        => Ok(await list.HandleAsync(state, code, mine, limit, hideRoutine, ct).ConfigureAwait(false));
+        => Ok(await list
+            .HandleAsync(
+                state, code, mine, limit, hideRoutine,
+                new JobListScope(projectId, parentJobId, hideChildren, kind), ct)
+            .ConfigureAwait(false));
 
     /// <summary>
     /// Стан задачі за її ідентифікатором. Право <c>System.ViewHealth</c>.

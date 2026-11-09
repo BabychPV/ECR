@@ -570,14 +570,17 @@ public sealed partial class EndpointCoverageTests
             StatusKeys("version"), "Статус версії виразу."),
         new("pages/admin/MethodologyVersionsPage.tsx", "statusKey('version', version.status)", 1,
             "shared/ui/StatusBadge.tsx", StatusKeys("version"), "Статус версії методології."),
-        new("pages/admin/PeriodsPage.tsx", "statusKey('project', p.status)", 1, "shared/ui/StatusBadge.tsx",
-            StatusKeys("project"), "Статус проєкту."),
-        new("pages/admin/ProjectSettingsPage.tsx", "statusKey('project', p.status)", 1, "shared/ui/StatusBadge.tsx",
-            StatusKeys("project"), "✎ Period clarity: статус проєкту у виборі налаштувань проєкту."),
-        new("features/projects/PeriodsOverview.tsx", "statusKey('period', period.state)", 1,
-            "shared/ui/StatusBadge.tsx", StatusKeys("period"), "UI-33: стан періоду в підписі плитки року."),
-        new("features/projects/PeriodsOverview.tsx", "statusKey('project', row.project.status)", 1,
-            "shared/ui/StatusBadge.tsx", StatusKeys("project"), "UI-33: стан проєкту в огляді «All projects»."),
+        new("features/projects/PeriodsOverview.tsx", "statusKey('period', shown)", 1,
+            "shared/ui/StatusBadge.tsx", StatusKeys("period"),
+            "UI-33: стан періоду в підписі плитки року (✎ UAT 08.11 e3: ефективний стан, `effectivePeriodState`)."),
+        // ✎ Projects (макет 08.11): вибір проєкту з Periods/Project settings і огляд «All projects» прибрано;
+        // статус проєкту — у причинах Lifecycle і в підказці порожнього року переліку документів.
+        new("pages/projects/ProjectLifecycleTab.tsx", "statusKey('project', block.status)", 1,
+            "shared/ui/StatusBadge.tsx", StatusKeys("project"), "c3: «лише активний проєкт (цей: {status})»."),
+        new("pages/projects/ProjectLifecycleTab.tsx", "statusKey('project', project.status)", 1,
+            "shared/ui/StatusBadge.tsx", StatusKeys("project"), "c2: «лише чернетка без документів (цей: {status}, …)»."),
+        new("pages/DocumentsPage.tsx", "statusKey('project', project.status)", 1,
+            "shared/ui/StatusBadge.tsx", StatusKeys("project"), "g2: проєкти порожнього року з їхнім статусом."),
         new("features/notifications/RulesMatrixPanel.tsx", "statusKey('severity', value)", 1,
             "shared/ui/StatusBadge.tsx", StatusKeys("severity"), "Серйозність правила сповіщення."),
         new("shared/ui/SegmentBar/SegmentBar.tsx", "statusKey(kind, segment.state)", 1, "shared/ui/StatusBadge.tsx",
@@ -720,14 +723,14 @@ public sealed partial class EndpointCoverageTests
     [
         "nav.documents", "password.title", "nav.templates", "version.title", "tables.relationsTitle",
         "nav.registries", "registries.constructor", "nav.methodologies", "methodologies.versionsTitle",
-        "nav.expressions", "nav.units", "nav.security", "nav.periods", "nav.sources", "nav.mapping", "nav.pipeline",
+        "nav.expressions", "nav.units", "nav.security", "nav.projects", "nav.sources", "nav.mapping", "nav.pipeline",
         "nav.jobs", "nav.snapshots", "nav.campaign", "nav.audit", "nav.consistency", "nav.uiStrings",
         "nav.notifications", "nav.health", "nav.myGroups", "documents.title",
         "registries.data.title",
         "nav.permits", "permits.types.title", "permits.typeEditor.title", "permits.lists.title",
         "permits.bindings.title", "permits.binding.title", "permits.detail.title",
         "nav.piData",
-        "nav.projectSettings",
+        "projects.tab.periods", "projects.tab.settings", "projects.tab.lifecycle",
     ];
 
     /// <summary>Підписи груп бічного меню (UI-12, <c>navGroups</c> у <c>routes.ts</c>).</summary>
@@ -739,8 +742,7 @@ public sealed partial class EndpointCoverageTests
     [
         "nav.documents.description", "nav.myGroups.description", "nav.templates.description",
         "nav.registries.description", "nav.methodologies.description", "nav.units.description",
-        "nav.sources.description", "nav.mapping.description", "nav.periods.description",
-        "nav.projectSettings.description",
+        "nav.sources.description", "nav.mapping.description", "nav.projects.description",
         "nav.jobs.description", "nav.snapshots.description", "nav.audit.description",
         "nav.consistency.description", "nav.uiStrings.description", "nav.health.description",
         "nav.permits.description", "permits.types.description", "permits.lists.description",

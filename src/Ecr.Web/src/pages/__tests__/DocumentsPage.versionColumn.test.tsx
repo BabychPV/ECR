@@ -9,8 +9,8 @@ import { DocumentsPage } from '@/pages/DocumentsPage';
 import { testTheme } from '@/test/render';
 
 /**
- * Колонка «Version» переліку документів: версія шаблону за обраний період
- * (`templateVersionByPeriod[період] ?? templateVersion`); сортування й фільтр - СЕРВЕРНІ (`sort`, `templateVersions`),
+ * Колонка «Version» переліку документів: ~~версія шаблону за обраний період
+ * (`templateVersionByPeriod[період] ?? templateVersion`)~~ ✎ 08.11: перелік лише за рік — типова `templateVersion`; сортування й фільтр - СЕРВЕРНІ (`sort`, `templateVersions`),
  * в адресі `vsort`/`versions`. Клієнт порядку не міняє: показує сторінку так, як її віддав сервер.
  */
 const SlowEnvTimeout = 400_000;
@@ -136,32 +136,19 @@ async function versionOptionLabels(): Promise<string[]> {
 
 describe('DocumentsPage: колонка «Version»', () => {
   it(
-    'показує версію ПЕРІОДУ (карта перекриває типову), а без версії — «—»',
+    // ✎ Projects/Documents 08.11: перелік лише за рік — версії «за місяць» (карта templateVersionByPeriod) у ньому немає; показується типова, без підказки «за період», навіть зі старої адреси з periodKey.
+    'показує типову версію документа (карта місяців не перекриває її в переліку року), а без версії — «—»',
     async () => {
       mockFetch();
       show('/?periodKey=202609');
 
       await screen.findByText('DOC-000001', {}, { timeout: SlowEnvTimeout });
       expect(versionOf('DOC-000001')).toBe('2.0');
-      expect(versionOf('DOC-000002')).toBe('3.0');
-      expect(versionOf('DOC-000003')).toBe('none');
-      // Підказка «за період» - лише там, де значення з карти.
-      const fromMap = document.querySelector('[data-document-row="DOC-000002"] [data-document-version]');
-      expect(fromMap?.getAttribute('data-version-source')).toBe('period');
-      expect(fromMap?.getAttribute('title')).toBe('⟦documents.versionForPeriod (period=September 2026)⟧');
-      expect(document.querySelector('[data-document-row="DOC-000001"] [data-document-version]')?.getAttribute('title')).toBeNull();
-    },
-    SlowEnvTimeout,
-  );
-
-  it(
-    'в іншому періоді та сама картка показує типову версію',
-    async () => {
-      mockFetch();
-      show('/?periodKey=202610');
-
-      await screen.findByText('DOC-000002', {}, { timeout: SlowEnvTimeout });
       expect(versionOf('DOC-000002')).toBe('1.0');
+      expect(versionOf('DOC-000003')).toBe('none');
+      const typical = document.querySelector('[data-document-row="DOC-000002"] [data-document-version]');
+      expect(typical?.getAttribute('data-version-source')).not.toBe('period');
+      expect(typical?.getAttribute('title')).toBeNull();
     },
     SlowEnvTimeout,
   );
@@ -287,7 +274,10 @@ describe('DocumentsPage: колонка «Version»', () => {
       expect(labels[3]).toContain('version=3.0');
       expect(optionRequests).toHaveLength(1);
       const params = new URL(optionRequests[0] ?? '/', 'http://localhost').searchParams;
-      expect(params.get('periodKey')).toBe('202609');
+      // ✎ Projects/Documents 08.11: перелік лише за рік — варіанти версій без місяця (periodKey зі старої адреси в запит не йде).
+      expect(params.has('periodKey')).toBe(false);
+      // Ні місяця, ні року: версія документа — чинна версія проєкту (як у колонці), тож варіанти не залежать від часу.
+      expect(params.has('year')).toBe(false);
       expect(params.has('templateVersions')).toBe(false);
       expect(params.has('sort')).toBe(false);
     },
@@ -318,7 +308,8 @@ describe('DocumentsPage: колонка «Version»', () => {
         await screen.findByText('DOC-000001', {}, { timeout: SlowEnvTimeout });
 
         const labels = await versionOptionLabels();
-        expect(labels.map((label) => /version=([\d.]+)/.exec(label)?.[1])).toEqual(['1.0', '2.0', '3.0']);
+        // ✎ Projects/Documents 08.11: без місяця — лише типові версії сторінки («3.0» була лише версією вересня з карти).
+        expect(labels.map((label) => /version=([\d.]+)/.exec(label)?.[1])).toEqual(['1.0', '2.0']);
       } finally {
         optionsAnswer = {
           items: [

@@ -40,7 +40,8 @@ function periodWith(state: string, n: number) {
     periodKey: 202600 + n,
     sequence: n,
     startsAt: '2026-01-01',
-    endsAt: '2026-02-01',
+    // ✎ lane A (ефективний стан): межа в майбутньому — інакше Open/Grace після минулої межі показуються як Closed.
+    endsAt: '2099-02-01',
     state,
     graceEndsAt: null,
     reopenedUntil: null,
@@ -120,7 +121,7 @@ function show(): void {
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={['/admin/periods?projectId=7']}>
         <QueryClientProvider client={client}>
-          <PeriodsPage />
+          <PeriodsPage projectId={7} />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,
@@ -146,40 +147,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('PeriodsPage: статус проєкту у списку — теж із каталогу', () => {
-  it(
-    'варіант списку називає статус мовою інтерфейсу, а не кодом сервера',
-    async () => {
-      /*
-       * ⛔ Тут стояло `label: `${p.code} · ${p.status}`` — тобто код сервера
-       * (`Active`, `Archived`) як видимий текст у випадному списку. Той самий
-       * дефект, що й `{period.state}` у таблиці нижче, лише у варіанті
-       * `Select`, куди компонент поставити не можна: потрібен РЯДОК.
-       *
-       * ⚠ Тому підпис береться тим самим ключем каталогу, яким малює
-       * `StatusBadge` — `statusKey('project', …)`. Без завантаженого каталогу
-       * `t()` чесно повертає позначений ключ, і саме з ним тут і звіряємося:
-       * `PRJ-7 · Active` на екрані означало б, що правку скасовано.
-       */
-      mockFetch();
-      show();
-      await ready();
-
-      /*
-       * ⚠ Підпис обраного варіанта живе у ЗНАЧЕННІ поля, а не в тексті
-       * сторінки: випадний блок Mantine змонтований лише поки відкритий
-       * (тема тестів знімає `keepMounted` — коментар у
-       * `expressions-page.render.test.tsx`). Тому дивимося на сам `input`.
-       */
-      const picker = await screen.findByLabelText(/periods\.project/, {}, {
-        timeout: SlowEnvTimeout,
-      });
-
-      expect((picker as HTMLInputElement).value).toBe('PRJ-7 · ⟦status.project.Active⟧');
-    },
-    SlowEnvTimeout,
-  );
-});
+// ✎ Projects (08.11): вибору проєкту на вкладці Periods більше немає — статус у переліку /projects малює
+// StatusBadge (ключ каталогу), див. pages/projects/__tests__/ProjectsPage.test.tsx.
 
 describe('PeriodsPage: тон стану періоду приходить із набору', () => {
   it(

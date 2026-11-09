@@ -394,9 +394,27 @@ public sealed class ListJobsHandler(
     /// </remarks>
     /// <exception cref="AccessDeniedException">Анонім, або чужі задачі без права.</exception>
     /// <exception cref="BusinessRuleException">Невідомий стан або розмір поза межами.</exception>
-    public async Task<IReadOnlyList<JobSummary>> HandleAsync(
+    public Task<IReadOnlyList<JobSummary>> HandleAsync(
         string? state, string? code, bool mine, int? limit, bool hideRoutine, CancellationToken ct)
+        => HandleAsync(state, code, mine, limit, hideRoutine, JobListScope.None, ct);
+
+    /// <summary>Останні задачі з додатковим звуженням (UAT recalc-progress, 08.11).</summary>
+    /// <param name="state">Стан із <see cref="KnownStates"/>; <c>null</c> — будь-який.</param>
+    /// <param name="code">Код (тип) задачі; <c>null</c> — будь-який.</param>
+    /// <param name="mine"><c>true</c> — лише власні задачі, без права <c>System.ViewHealth</c>.</param>
+    /// <param name="limit">Скільки повернути, 1…<see cref="MaxLimit"/>; <c>null</c> — стеля.</param>
+    /// <param name="hideRoutine"><c>true</c> — без успішних каскадних перерахунків формул.</param>
+    /// <param name="scope">Проєкт, батько розкладу, без дітей, вид.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ Звуження НЕ послаблює межу доступу: <c>projectId</c> чи <c>parentJobId</c> без <c>mine</c> вимагають
+    /// того самого <c>System.ViewHealth</c>, що й увесь журнал.
+    /// </remarks>
+    public async Task<IReadOnlyList<JobSummary>> HandleAsync(
+        string? state, string? code, bool mine, int? limit, bool hideRoutine, JobListScope scope, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         // ⚠ Анонім не має «своїх» задач за визначенням: `mine` для нього не
         // послаблення права, а порожнє поняття. Тому 401 стоїть ПЕРЕД
         // розгалуженням — інакше `?mine=true` без сеансу давав би 200 і
@@ -443,10 +461,25 @@ public sealed class ListJobsHandler(
                 });
         }
 
+        if (scope.Kind is { Length: > 0 } kind && !JobListKinds.All.Contains(kind, StringComparer.Ordinal))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Вид задачі «{kind}» не існує; відомі: {string.Join(", ", JobListKinds.All)}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.jobKind",
+                    ["kind"] = kind,
+                });
+        }
+
         // ⛔ `userId` — з `ICurrentUser`, і це єдине джерело автора в усьому
         // ланцюгу. Мутація «підставити сюди число з запиту» неможлива: такого
         // числа в сигнатурі немає.
-        var filter = new JobListFilter(state, code, mine ? userId : null, hideRoutine);
+        var filter = new JobListFilter(
+            state, code, mine ? userId : null, hideRoutine,
+            scope.ProjectId, scope.ParentJobId is { Length: > 0 } p ? p : null, scope.HideChildren,
+            scope.Kind is { Length: > 0 } k ? k : null);
 
         var items = await jobs.ListRecentAsync(filter, limit ?? MaxLimit, ct).ConfigureAwait(false);
 
@@ -461,7 +494,10 @@ public sealed class ListJobsHandler(
             .. items.Select((item, i) => item with
             {
                 Message = messages[i],
-                EffectiveState = JobCompletionWarning.EffectiveStateOf(item.State, item.Message),
+
+                // ⛔ P4: батько розкладу `Succeeded` = «розкладено», не «пораховано» — як у `GetJobStatusHandler`.
+                EffectiveState = item.FanOut?.EffectiveStateOf(item.State)
+                                 ?? JobCompletionWarning.EffectiveStateOf(item.State, item.Message),
                 ResultUrl = JobResultUrl.For(
                     profile, item.JobId, item.JobCode, item.State, item.Message, item.DocumentId),
             }),

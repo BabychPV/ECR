@@ -113,7 +113,7 @@ function show(): void {
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={['/admin/periods?projectId=7']}>
         <QueryClientProvider client={client}>
-          <PeriodsPage />
+          <PeriodsPage projectId={7} />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,

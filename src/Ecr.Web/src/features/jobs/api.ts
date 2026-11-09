@@ -26,8 +26,22 @@ const ListPollMs = 3000;
  * сервер бере його з сеансу. Параметр «чиї задачі» перетворив би звільнення
  * від права на спосіб читати чужу чергу.
  */
-export function recentJobsUrl(mine: boolean): string {
-  return mine ? '/api/v1/jobs?mine=true' : '/api/v1/jobs';
+export function recentJobsUrl(mine: boolean, scope: JobsScope = {}): string {
+  const query = new URLSearchParams();
+  if (mine) query.set('mine', 'true');
+  // ✎ UAT recalc-progress (a5): проєкт і батько розкладу фільтрує СЕРВЕР — до стелі в 50 рядків, а не після неї.
+  if (scope.projectId !== undefined && scope.projectId !== null) query.set('projectId', String(scope.projectId));
+  if (scope.parentJobId !== undefined && scope.parentJobId !== null) query.set('parentJobId', scope.parentJobId);
+
+  const text = query.toString();
+
+  return text === '' ? '/api/v1/jobs' : `/api/v1/jobs?${text}`;
+}
+
+/** Звуження переліку задач сервером (UAT recalc-progress, 08.11). */
+export interface JobsScope {
+  readonly projectId?: number | null;
+  readonly parentJobId?: string | null;
 }
 
 /**
@@ -50,7 +64,9 @@ export const MyTasksLimit = 20;
  * і далі бачить усе.
  */
 export function myTasksUrl(): string {
-  return `/api/v1/jobs?mine=true&hideRoutine=true&limit=${String(MyTasksLimit)}`;
+  // ✎ UAT recalc-progress (a4): `hideChildren=true` — перерахунок проєкту ОДНИМ записом із лічильниками, а не 92
+  // документними рядками, що витісняли б решту задач зі стелі.
+  return `/api/v1/jobs?mine=true&hideRoutine=true&hideChildren=true&limit=${String(MyTasksLimit)}`;
 }
 
 /**
@@ -60,12 +76,15 @@ export function myTasksUrl(): string {
  * нескінченне опитування завершених задач — це запит на три секунди від кожної
  * відкритої вкладки.
  */
-export function useRecentJobs(mine: boolean): UseQueryResult<JobSummary[]> {
+export function useRecentJobs(mine: boolean, scope: JobsScope = {}): UseQueryResult<JobSummary[]> {
+  const projectId = scope.projectId ?? null;
+  const parentJobId = scope.parentJobId ?? null;
+
   return useQuery({
     // ⚠ `mine` входить у ключ: інакше перемикання прапорця показувало б
     // кешовану відповідь на ІНШЕ питання — свої задачі під виглядом усіх.
-    queryKey: ['jobs', mine],
-    queryFn: () => apiFetch<JobSummary[]>(recentJobsUrl(mine)),
+    queryKey: projectId === null && parentJobId === null ? ['jobs', mine] : ['jobs', mine, projectId, parentJobId],
+    queryFn: () => apiFetch<JobSummary[]>(recentJobsUrl(mine, { projectId, parentJobId })),
     refetchInterval: (query) => {
       const list = query.state.data ?? [];
 

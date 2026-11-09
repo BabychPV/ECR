@@ -36,7 +36,11 @@ function stubFetch(mustChangePassword: boolean): ReturnType<typeof vi.fn> {
           ? { languageCode: 'en', revision: 1, strings: {} }
           : url.includes('/api/v1/jobs') || url.includes('/languages')
             ? []
-            : null;
+            : // Сторінкові відповіді «My tasks» (черга погоджень, повернуті аркуші): порожня сторінка, а не null —
+              // інакше `getNextPageParam` читав `nextCursor` у null і знімав каркас помилкою рендера.
+              url.includes('/api/v1/me/approval-queue') || url.includes('/api/v1/me/returned-sheets')
+              ? { items: [], nextCursor: null }
+              : null;
     return new Response(JSON.stringify(body), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

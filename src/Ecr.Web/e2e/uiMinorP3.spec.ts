@@ -7,7 +7,7 @@ import { chooseSubmitPeriod, submitAndConfirm } from './submitPeriod';
  * (`tools/e2e-stand.ps1`, workflow `e2e-stand`, `-Grep uiMinorP3`):
  *
  *  1. горизонтальна прокрутка СТОРІНКИ на ширині 500 px: `/documents/<id>` і `/admin/audit`, light/dark;
- *  2. CL-18 (WCAG 2.5.8): цілі < 24 px на `/admin/periods` - гамбургер і кнопки-коди проєктів ≥ 24x24,
+ *  2. CL-18 (WCAG 2.5.8): цілі < 24 px на `/projects` (✎ 08.11, колишній `/admin/periods`) - гамбургер і коди проєктів ≥ 24x24,
  *     axe `target-size` без порушень (500 і 1440 px);
  *  3. CL-22: після Esc у діалозі «Return for edits» фокус повертається на кнопку-відкривач, а не на `body` (N/5).
  *     (CL-13, фокус після «Так/Ні» в OverwriteOffer, - у `versionMigrationOverwrite.spec.ts`.)
@@ -182,10 +182,9 @@ async function openAudit(page: Page): Promise<void> {
 }
 
 async function openPeriods(page: Page): Promise<void> {
-  await page.goto('/admin/periods');
-  const overview = page.getByTestId('periods-overview');
-  await expect(overview, 'немає огляду «All projects»').toBeVisible({ timeout: 30_000 });
-  await expect(overview.getByRole('table')).toBeVisible({ timeout: 30_000 });
+  // ✎ Projects (08.11): огляд усіх проєктів — перелік `/projects`.
+  await page.goto('/projects');
+  await expect(page.locator('[data-project-open]').first(), 'немає переліку проєктів').toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(1_000);
 }
 
@@ -239,7 +238,7 @@ test.describe('uiMinorP3: дрібні пункти проходу C', () => {
     });
   }
 
-  test('uiMinorP3-assert: цілі ≥ 24 px на /admin/periods (CL-18, WCAG 2.5.8) - 500 і 1440', async ({ page }) => {
+  test('uiMinorP3-assert: цілі ≥ 24 px на /projects (CL-18, WCAG 2.5.8) - 500 і 1440', async ({ page }) => {
     await signIn(page);
 
     await page.setViewportSize(Narrow);
@@ -254,7 +253,7 @@ test.describe('uiMinorP3: дрібні пункти проходу C', () => {
       await page.setViewportSize(size);
       await openPeriods(page);
 
-      const picks = page.locator('[data-project-pick]');
+      const picks = page.locator('[data-project-open]');
       const count = await picks.count();
       expect(count, 'в огляді немає кнопок-кодів проєктів').toBeGreaterThan(0);
       for (let index = 0; index < count; index += 1) {
@@ -263,7 +262,7 @@ test.describe('uiMinorP3: дрібні пункти проходу C', () => {
         expect(box?.height ?? 0, `${String(size.width)} px: висота кнопки проєкту #${String(index)}`).toBeGreaterThanOrEqual(24);
       }
 
-      expect(await axeViolations(page, 'target-size'), `${String(size.width)} px: axe target-size на /admin/periods`).toEqual([]);
+      expect(await axeViolations(page, 'target-size'), `${String(size.width)} px: axe target-size на /projects`).toEqual([]);
     }
   });
 

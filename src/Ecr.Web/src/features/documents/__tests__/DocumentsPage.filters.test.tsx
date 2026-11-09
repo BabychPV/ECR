@@ -54,6 +54,9 @@ const listed: string[] = [];
 /** ✎ D-450: адреси запитів вибору власника (`GET /documents/owners`). */
 const ownerRequests: string[] = [];
 
+/** ✎ g4: адреси запитів зведення (`GET /documents/summary`). */
+const summaryRequests: string[] = [];
+
 /** ✎ D-450: люди, яких віддає вибір власника. */
 const Owners = {
   items: [
@@ -76,6 +79,7 @@ function mockFetch(reply: ListReply): void {
       }
 
       if (url.includes('/api/v1/documents/summary')) {
+        summaryRequests.push(url);
         return json({ draft: 1, submitted: 1, approved: 1, rejected: 0, withIssues: 0, staleResultsCount: 7, staleResultsMineCount: 2 });
       }
 
@@ -129,6 +133,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   listed.length = 0;
   ownerRequests.length = 0;
+  summaryRequests.length = 0;
   search = '';
   withProject = false;
 });
@@ -165,7 +170,9 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
       await screen.findByRole('table', {}, { timeout: Find });
 
       expect(listed.length).toBeGreaterThan(0);
-      expect(lastListed().get('periodKey')).toBe('202601');
+      // ✎ Projects/Documents 08.11: перелік лише за рік — стара адреса з periodKey дає year=2026, місяць у запит не йде.
+      expect(lastListed().get('year')).toBe('2026');
+      expect(lastListed().has('periodKey')).toBe(false);
       expect(lastListed().has('state')).toBe(false);
       expect(lastListed().has('mine')).toBe(false);
       expect(lastListed().has('hasLateEdits')).toBe(false);
@@ -182,7 +189,9 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
       fireEvent.change(await stateField(), { target: { value: 'Rejected' } });
 
       await waitFor(() => expect(lastListed().get('state')).toBe('Rejected'), { timeout: Find });
-      expect(lastListed().get('periodKey')).toBe('202601');
+      // ✎ Projects/Documents 08.11: стан діє за рік (year з місяця старої адреси), periodKey у запит не йде.
+      expect(lastListed().get('year')).toBe('2026');
+      expect(lastListed().has('periodKey')).toBe(false);
       expect(lastListed().has('cursor')).toBe(false);
       expect(new URLSearchParams(search).get('state')).toBe('Rejected');
     },
@@ -287,7 +296,8 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
       show('/?hasLateEdits=true');
 
       await screen.findByText('⟦documents.noMatch⟧', {}, { timeout: Find });
-      expect(screen.queryByText('⟦documents.empty⟧')).toBeNull();
+      // ✎ Projects/Documents 08.11: «документів немає» — тепер `documents.emptyYear (year=…)`.
+      expect(screen.queryByText(/documents\.emptyYear/)).toBeNull();
 
       fireEvent.click(screen.getByRole('button', { name: '⟦documents.resetFilters⟧' }));
 
@@ -320,14 +330,15 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
       show('/?periodKey=202601&state=Rejected&mine=true');
 
       await screen.findByText('⟦documents.noMatch⟧', {}, { timeout: Find });
-      expect(screen.queryByText('⟦documents.empty⟧')).toBeNull();
+      // ✎ Projects/Documents 08.11: «документів немає» — тепер `documents.emptyYear (year=…)`.
+      expect(screen.queryByText(/documents\.emptyYear/)).toBeNull();
 
       fireEvent.click(screen.getByRole('button', { name: '⟦documents.resetFilters⟧' }));
 
       await waitFor(() => expect(new URLSearchParams(search).has('state')).toBe(false), { timeout: Find });
       const params = new URLSearchParams(search);
       expect(params.has('mine')).toBe(false);
-      // Період належить екрану, а не фільтрам: скидання його не чіпає.
+      // Період (рік) належить екрану, а не фільтрам: скидання його не чіпає.
       expect(params.get('periodKey')).toBe('202601');
 
       await waitFor(() => expect(lastListed().has('state')).toBe(false), { timeout: Find });
@@ -345,7 +356,8 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
       mockFetch('empty');
       show('/?periodKey=202601');
 
-      await screen.findByText('⟦documents.empty⟧', {}, { timeout: Find });
+      // ✎ Projects/Documents 08.11: «документів немає» — тепер за рік (`documents.emptyYear`, рік з місяця старої адреси).
+      await screen.findByText('⟦documents.emptyYear (year=2026)⟧', {}, { timeout: Find });
       expect(screen.queryByText('⟦documents.noMatch⟧')).toBeNull();
       expect(screen.queryByRole('button', { name: '⟦documents.resetFilters⟧' })).toBeNull();
     },
@@ -362,7 +374,8 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
 
       expect(alert.textContent ?? '').toContain('ECR-AUTH-0403');
       expect(screen.queryByText('⟦documents.noMatch⟧')).toBeNull();
-      expect(screen.queryByText('⟦documents.empty⟧')).toBeNull();
+      // ✎ Projects/Documents 08.11: «документів немає» — тепер `documents.emptyYear (year=…)`.
+      expect(screen.queryByText(/documents\.emptyYear/)).toBeNull();
     },
     Slow,
   );
@@ -421,36 +434,55 @@ describe('DocumentsPage: пошук і фільтр проєкту (UI RC9, ма
     Slow,
   );
   it(
-    'застарілі результати: бейдж лише в рядку з resultsStale=true; чіп з лічильником ставить resultsStale=true в запит',
+    // ✎ g4 (координатор 08.11, «State filter, counters and the Needs recalculation chip count for the selected year
+    // only»): перелік лише за рік — чіп «Needs recalculation» УВІМКНЕНИЙ, рахує `staleResultsCount` зведення РОКУ, а
+    // `resultsStale=true` іде в запит разом із `year` (сервер: застарілий хоч в одному періоді року); бейдж у рядку лишається.
+    'застарілі результати за рік: бейдж у рядку, чіп увімкнений з числом зведення року, resultsStale іде в запит з year',
     async () => {
       mockFetch('rows');
-      show('/?periodKey=202601');
+      show('/?periodKey=202601&resultsStale=true');
 
       await screen.findByRole('table', {}, { timeout: Find });
       expect(document.querySelectorAll('[data-results-stale]')).toHaveLength(1);
-      expect(lastListed().has('resultsStale')).toBe(false);
+      expect(document.querySelector('[data-document-row="STALE-0003"] [data-results-stale]')).not.toBeNull();
 
-      const chip = await screen.findByRole('checkbox', { name: /documents.filterStale/ }, { timeout: Find });
+      const chip = await screen.findByRole('checkbox', { name: /documents\.filterStale(?!NoCount)/ }, { timeout: Find });
       expect((chip as HTMLInputElement).disabled).toBe(false);
+      expect((chip as HTMLInputElement).checked).toBe(true);
+      expect(lastListed().get('resultsStale')).toBe('true');
+      expect(lastListed().get('year')).toBe('2026');
+      expect(lastListed().has('periodKey')).toBe(false);
 
-      fireEvent.click(chip);
-
-      await waitFor(() => expect(lastListed().get('resultsStale')).toBe('true'), { timeout: Find });
-      expect(new URLSearchParams(search).get('resultsStale')).toBe('true');
+      // Число чіпа — зі зведення ЗА РІК (не за місяць): кожен запит зведення несе `year`, жоден — `periodKey`.
+      expect(summaryRequests.length).toBeGreaterThan(0);
+      for (const url of summaryRequests) {
+        const params = new URLSearchParams(url.split('?')[1] ?? '');
+        expect(params.get('year')).toBe('2026');
+        expect(params.has('periodKey')).toBe(false);
+      }
     },
     Slow,
   );
 
   it(
-    'застарілі результати: без періоду чіп вимкнений, а resultsStale з адреси в запит не йде (422 на сервері)',
+    'застарілі результати за рік: увімкнення чіпа додає resultsStale=true в адресу й у запит року, вимкнення — знімає',
     async () => {
       mockFetch('rows');
-      show('/?resultsStale=true');
+      show('/?year=2026');
 
       await screen.findByRole('table', {}, { timeout: Find });
-      const chip = await screen.findByRole('checkbox', { name: /documents.filterStaleNoCount/ }, { timeout: Find });
-      expect((chip as HTMLInputElement).disabled).toBe(true);
+      const chip = await screen.findByRole('checkbox', { name: /documents\.filterStale(?!NoCount)/ }, { timeout: Find });
+      expect((chip as HTMLInputElement).disabled).toBe(false);
       expect(lastListed().has('resultsStale')).toBe(false);
+
+      fireEvent.click(chip);
+      await waitFor(() => expect(lastListed().get('resultsStale')).toBe('true'), { timeout: Find });
+      expect(lastListed().get('year')).toBe('2026');
+      expect(search).toContain('resultsStale=true');
+
+      fireEvent.click(chip);
+      await waitFor(() => expect(lastListed().has('resultsStale')).toBe(false), { timeout: Find });
+      expect(search).not.toContain('resultsStale');
     },
     Slow,
   );
@@ -487,8 +519,8 @@ describe('DocumentsPage: власник документа (D-450)', () => {
       fireEvent.click(await ownersField());
 
       await waitFor(() => expect(ownerRequests.length).toBeGreaterThan(0), { timeout: Find });
-      // Той самий період, що в переліку: межі читача рахуються в ньому.
-      expect(new URLSearchParams(ownerRequests[0]?.split('?')[1] ?? '').get('periodKey')).toBe('202601');
+      // ✎ Projects/Documents 08.11: перелік лише за рік — люди теж без місяця (periodKey старої адреси в запит не йде).
+      expect(new URLSearchParams(ownerRequests[0]?.split('?')[1] ?? '').has('periodKey')).toBe(false);
     },
     Slow,
   );

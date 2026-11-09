@@ -14,6 +14,8 @@ import {
 import { SecurityPage } from '@/pages/admin/SecurityPage';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
 import { ProjectSettingsPage } from '@/pages/admin/ProjectSettingsPage';
+import { ProjectLifecycleTab } from '@/pages/projects/ProjectLifecycleTab';
+import { ProjectsPage } from '@/pages/projects/ProjectsPage';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
 import { MappingPreviewPage } from '@/pages/admin/MappingPreviewPage';
 import { PiDataPage } from '@/pages/admin/PiDataPage';
@@ -34,8 +36,11 @@ import { CampaignOverviewPage } from '@/pages/admin/CampaignOverviewPage';
  */
 const Pages: [string, () => JSX.Element][] = [
   ['/admin/security', SecurityPage],
-  ['/admin/periods', PeriodsPage],
-  ['/admin/projects', ProjectSettingsPage],
+  // ✎ Projects (макет 08.11): перелік і три вкладки проєкту замість «Periods» і «Project settings».
+  ['/projects', ProjectsPage],
+  ['/projects/1/periods', () => <PeriodsPage projectId={1} />],
+  ['/projects/1/settings', () => <ProjectSettingsPage projectId={1} />],
+  ['/projects/1/lifecycle', () => <ProjectLifecycleTab projectId={1} />],
   ['/admin/sources', SourcesPage],
   ['/admin/mapping', MappingPreviewPage],
 

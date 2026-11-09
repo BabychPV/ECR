@@ -32,6 +32,7 @@ public sealed partial class PrincipleTests
     public void Масове_видалення_проєктів_і_періодів_не_обходить_сторожа()
     {
         var offenders = new List<string>();
+        var allowed = new List<string>();
 
         foreach (var file in SourceTree.Production())
         {
@@ -41,13 +42,28 @@ public sealed partial class PrincipleTests
             {
                 foreach (Match match in regex.Matches(text))
                 {
-                    offenders.Add($"{file.Path}: {Compact(match.Value)}");
+                    var site = $"{file.Path}: {Compact(match.Value)}";
+                    (AllowedDeletionSites.Contains(site) ? allowed : offenders).Add(site);
                 }
             }
         }
 
         Assert.Empty(offenders);
+
+        // ⚠ Виняток не розростається мовчки: рівно перелічені місця, і кожне справді є.
+        Assert.Equal(AllowedDeletionSites.Order(StringComparer.Ordinal), allowed.Order(StringComparer.Ordinal));
     }
+
+    /// <summary>
+    /// Єдиний дозволений виняток ФВ-1.15 — видалення ПОРОЖНЬОЇ ЧЕРНЕТКИ проєкту (UAT 08.11, сценарій c; слово людини
+    /// «так додай цей функціонал»): <c>DeleteProjectHandler</c> пускає сюди лише <c>Draft</c> без документів і без
+    /// історії, з грантом Manage і записом у журналі. Активний чи архівний проєкт і далі не видаляється нічим.
+    /// </summary>
+    private static readonly HashSet<string> AllowedDeletionSites = new(StringComparer.Ordinal)
+    {
+        "src/Ecr.Infrastructure/Persistence/ProjectStore.cs: DELETE FROM doc.Period",
+        "src/Ecr.Infrastructure/Persistence/ProjectStore.cs: DELETE FROM doc.Project",
+    };
 
     /// <summary>
     /// Самі регулярки справді ловлять обхідні форми й не чіпають законне: інакше сторож вище лишався б

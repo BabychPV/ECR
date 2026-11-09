@@ -79,9 +79,10 @@ public sealed class DocumentYearStatesStoreTests(SqlServerFixture sql)
             Enumerable.Range(1, 12).Select(m => year * 100 + m),
             page.Items.Single(d => d.Id == a).PeriodStates!.Select(s => s.PeriodKey));
 
-        // Три документи × 12 місяців — смуга року додає рівно ОДИН запит на сторінку, а не по запиту на документ чи місяць.
+        // Три документи × 12 місяців — смуга року додає рівно ОДИН запит на сторінку, а не по запиту на документ чи місяць;
+        // ✎ g4: позначка застарілості за рік — ще ОДИН запит періодів року з актуальним прогоном (прогонів немає — і все).
         Assert.Equal(3, page.Items.Count);
-        Assert.True(counter.Tally.Snapshot().Total == withoutYear + 1, $"без року {withoutYear}; " + counter.Tally.Snapshot().Format());
+        Assert.True(counter.Tally.Snapshot().Total == withoutYear + 2, $"без року {withoutYear}; " + counter.Tally.Snapshot().Format());
 
         // Аркуш 2 схований від читача (S18): січень документа A — «подано», а не «частково».
         IReadOnlyCollection<(int, int)> hidden = [(chain.ProjectId, sheet2)];
@@ -181,14 +182,17 @@ public sealed class DocumentYearStatesStoreTests(SqlServerFixture sql)
             .Options);
 
         var summary = await new DocumentListSummaryStore(counted)
-            .SummarizeYearAsync(chain.ProjectId, year, visibleProjectIds: null, restrictions: null, CancellationToken.None);
+            .SummarizeYearAsync(chain.ProjectId, year, visibleProjectIds: null, restrictions: null, currentUserId: null, CancellationToken.None);
 
         // Документ ланцюга без складу — чернетка; решта — по одному в кожному стані.
         Assert.Equal(
             (1, 1, 1, 1, 1),
             (summary.Draft, summary.PartlySubmitted, summary.Submitted, summary.Approved, summary.Rejected));
         Assert.Equal(0, summary.StaleResultsCount);
-        Assert.True(counter.Tally.Snapshot().Total == 1, counter.Tally.Snapshot().Format());
+
+        // Агрегат станів — один запит; ✎ g4: плюс один запит періодів року з актуальним прогоном (лічильник застарілих
+        // за рік); прогонів немає — далі жодного запиту.
+        Assert.True(counter.Tally.Snapshot().Total == 2, counter.Tally.Snapshot().Format());
 
         // Та сама відповідь, що дає фільтр стану переліку за рік (одне правило — одне число).
         await using var read = builder.CreateContext();
@@ -207,13 +211,50 @@ public sealed class DocumentYearStatesStoreTests(SqlServerFixture sql)
         var code = (await read.SheetDefs.SingleAsync(s => s.Id == sheet2)).Code;
         var hidden = await new DocumentListSummaryStore(read).SummarizeYearAsync(
             chain.ProjectId, year, visibleProjectIds: null,
-            new SummaryRestrictions([(chain.ProjectId, code)], []), CancellationToken.None);
+            new SummaryRestrictions([(chain.ProjectId, code)], []), currentUserId: null, CancellationToken.None);
         Assert.Equal((0, 2), (hidden.PartlySubmitted, hidden.Submitted));
 
         // Межа грантів: проєкт поза видимими — нулі.
         var foreign = await new DocumentListSummaryStore(read).SummarizeYearAsync(
-            chain.ProjectId, year, visibleProjectIds: [chain.ProjectId + 100_000], restrictions: null, CancellationToken.None);
+            chain.ProjectId, year, visibleProjectIds: [chain.ProjectId + 100_000], restrictions: null, currentUserId: null, CancellationToken.None);
         Assert.Equal(0, foreign.Draft + foreign.PartlySubmitted + foreign.Submitted + foreign.Approved + foreign.Rejected);
+    }
+
+    /// <summary>
+    /// ✎ g2 (макет 08.11, людина: «Year 2024 — No documents for 2024»): рік, у якому в проєкту НЕМАЄ періодів, — ні
+    /// рядків переліку, ні лічильників. Корінь дефекту: рік звужував лише смугу й фільтр стану, тож 2024 показував
+    /// документи 2026 із порожньою смугою, а зведення рахувало їх як «чернетки».
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ (локально, після вікна W15l): без <c>WhereProjectYear</c> у <c>ListAsync</c> — у переліку за
+    /// чужий рік документ ланцюга, червоний; без <c>EXISTS … doc.Period py</c> у <c>SummarizeYearAsync</c> — Draft = 1.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Рік_без_періодів_проєкту_не_дає_ні_документів_ні_лічильників()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        var year = chain.PeriodKey.Year;
+        var empty = year - 2;
+
+        await using var read = builder.CreateContext();
+        var own = await new DocumentStore(read).ListAsync(
+            chain.ProjectId, new PeriodKeyFilter(null), new DocumentListFilter(null, null, Year: year),
+            new CursorRequest(Limit: 50), visibleProjectIds: null, CancellationToken.None);
+        Assert.Contains(own.Items, d => d.Id == chain.DocumentId);
+
+        var other = await new DocumentStore(read).ListAsync(
+            chain.ProjectId, new PeriodKeyFilter(null), new DocumentListFilter(null, null, Year: empty),
+            new CursorRequest(Limit: 50), visibleProjectIds: null, CancellationToken.None);
+        Assert.Empty(other.Items);
+
+        var summary = await new DocumentListSummaryStore(read)
+            .SummarizeYearAsync(chain.ProjectId, empty, visibleProjectIds: null, restrictions: null, currentUserId: null, CancellationToken.None);
+        Assert.Equal(
+            (0, 0, 0, 0, 0),
+            (summary.Draft, summary.PartlySubmitted, summary.Submitted, summary.Approved, summary.Rejected));
     }
 
     /// <summary>Добудовує 12 періодів року ланцюга; перші <paramref name="started"/> — <c>Open</c>. Повертає другий аркуш.</summary>

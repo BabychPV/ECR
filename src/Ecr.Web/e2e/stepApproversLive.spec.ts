@@ -5,7 +5,8 @@ import { expect, test, type APIRequestContext, type Browser, type BrowserContext
  * (`tools/e2e-stand.ps1`, workflow `e2e-stand`, `-Grep stepApproversLive`).
  *
  * Сценарій: `e2e-admin` подає аркуш; `GET /documents/{id}?periodKey=` віддає непорожній `stepApproverNames` (серед них
- * `E2E reviewer`, погоджувач стенда - див. `returnedToMeLive`); шторка `?panel=<id>` показує цей рядок з іменем.
+ * `E2E reviewer`, погоджувач стенда - див. `returnedToMeLive`); шторка `?panel=<id>` на переліку року показує цей рядок
+ * з іменем під підписом поточного місяця (✎ 08.11).
  * До подання (Draft) поле `null` і рядка немає.
  *
  * ⛔ Без стенда файл ПАДАЄ (`beforeAll`), а не пропускається (honesty-guard). `afterAll` повертає аркуш у `Draft`.
@@ -141,7 +142,12 @@ test.describe('stepApprovers: «Can approve now» у швидкому перег
       // ── 3. UI: шторка швидкого перегляду показує рядок з іменем ───────────────────────────
       const page = await admin.newPage();
       await page.setViewportSize({ width: 1440, height: 900 });
-      await page.goto(`/?periodKey=${PeriodKey}&panel=${DocumentId}`);
+      // ✎ 08.11: перелік — за рік; шторка показує блоки ПОТОЧНОГО періоду проєкту (D-77) з підписом місяця. Період стенда
+      // (`ECR_E2E_PERIOD`) — перший `Open` календаря (e2e-stand.ps1), тобто поточний у режимі `Auto`.
+      await page.goto(`/?year=${String(Math.trunc(Number(PeriodKey) / 100))}&panel=${DocumentId}`);
+      await expect(page.locator(`[data-quick-look-period="${PeriodKey}"]`), 'шторка не за поточним періодом стенда').toBeVisible({
+        timeout: 30_000,
+      });
       const row2 = page.locator('[data-quick-look-step-approvers]');
       await expect(row2, 'у шторці немає рядка «Can approve now»').toBeVisible({ timeout: 30_000 });
       await expect(row2).toContainText(first);

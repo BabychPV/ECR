@@ -76,15 +76,18 @@ public sealed class DocumentListSummaryHandlerTests
             .Permission(ListDocumentsHandler.Permission)
             .Grant(ResourceKind.Project, Mine, GrantLevel.Read));
         _store.SummarizeYearAsync(
-                Arg.Any<int?>(), Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<SummaryRestrictions?>(), Arg.Any<CancellationToken>())
+                Arg.Any<int?>(), Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<SummaryRestrictions?>(),
+                Arg.Any<int?>(), Arg.Any<CancellationToken>())
             .Returns(new DocumentListSummaryResponse(2, 0, 0, 0, 0));
 
         var year = await Handler().HandleAsync(projectId: Mine, periodKey: null, year: 2026, default);
 
         Assert.Equal(2, year.Draft);
+
+        // ✎ g4: користувач іде і в зведення року — для «моїх» застарілих за рік.
         await _store.Received(1).SummarizeYearAsync(
             Mine, 2026, Arg.Is<IReadOnlyCollection<int>?>(ids => ids != null && ids.Count == 1 && ids.Contains(Mine)),
-            null, Arg.Any<CancellationToken>());
+            null, 7, Arg.Any<CancellationToken>());
         await _store.DidNotReceiveWithAnyArgs().SummarizeAsync(default, default, default, default, default, default);
 
         // Місяць важить більше за рік.

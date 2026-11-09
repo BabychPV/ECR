@@ -144,7 +144,15 @@ export function DocumentListSummaryStrip({
   ];
 
   return (
-    <FilterInline gap="lg" role="group" aria-label={t('documents.summaryLabel')} data-summary-strip="">
+    // ✎ F13 fg5 (09.11): на вузькому екрані смуга переноситься (`documentsList.css`, `.ecr-docs-summary-strip`) —
+    // з Partly submitted і Rejected вона виходила на 109 px за 375 px.
+    <FilterInline
+      gap="lg"
+      role="group"
+      aria-label={t('documents.summaryLabel')}
+      data-summary-strip=""
+      className="ecr-docs-summary-strip"
+    >
       {/* ✎ UAT-p3 №3: за який період і які проєкти пораховано — інакше числа «суперечать» огляду кампанії. */}
       <Text span size="xs" c="dimmed" data-summary-scope="">
         {summaryScopeLabel(periodKey, year, filters.projectId ?? null)}

@@ -223,11 +223,88 @@ public interface IBackgroundJobScheduler
 /// <c>TOP</c>. Провалений чи незавершений перерахунок лишається: там є що сказати.
 /// </para>
 /// </param>
+/// <param name="ProjectId">
+/// ✎ UAT recalc-progress (08.11): лише задачі проєкту — документні задачі його документів і перерахунки
+/// всього проєкту (ціль <c>project{id}-…</c>); <c>null</c> — будь-який проєкт.
+/// </param>
+/// <param name="ParentJobId">Лише дочірні задачі розкладу цієї батьківської (<c>FanOutParentJobId</c>).</param>
+/// <param name="HideChildren">
+/// <c>true</c> — без дочірніх задач розкладу: «Мої задачі» показують перерахунок проєкту ОДНИМ записом
+/// з лічильниками, а не 92 рядками документів.
+/// </param>
+/// <param name="Kind">Вид задачі (<see cref="JobListKinds"/>); <c>null</c> — будь-який.</param>
 public sealed record JobListFilter(
-    string? State = null, string? JobCode = null, int? CreatedByUserId = null, bool HideRoutine = false)
+    string? State = null,
+    string? JobCode = null,
+    int? CreatedByUserId = null,
+    bool HideRoutine = false,
+    int? ProjectId = null,
+    string? ParentJobId = null,
+    bool HideChildren = false,
+    string? Kind = null)
 {
     /// <summary>Порожнє звуження: усі задачі всіх авторів.</summary>
     public static readonly JobListFilter None = new();
+}
+
+/// <summary>Звуження переліку задач із запиту (UAT recalc-progress, 08.11) — без автора, його бере обробник.</summary>
+/// <param name="ProjectId">Проєкт; <c>null</c> — будь-який.</param>
+/// <param name="ParentJobId">Батько розкладу; <c>null</c> — будь-який.</param>
+/// <param name="HideChildren">Без дочірніх задач розкладу.</param>
+/// <param name="Kind">Вид із <see cref="JobListKinds.All"/>; <c>null</c> — будь-який.</param>
+public sealed record JobListScope(
+    int? ProjectId = null, string? ParentJobId = null, bool HideChildren = false, string? Kind = null)
+{
+    /// <summary>Без звуження.</summary>
+    public static readonly JobListScope None = new();
+}
+
+/// <summary>Види задач для фільтра <c>GET /jobs?kind=</c> (UAT recalc-progress, 08.11).</summary>
+public static class JobListKinds
+{
+    /// <summary>Перерахунок УСЬОГО проєкту — батько розкладу (без документа).</summary>
+    public const string ProjectRecalculation = "projectRecalculation";
+
+    /// <summary>Перерахунок одного документа (зокрема дочірні задачі розкладу).</summary>
+    public const string DocumentRecalculation = "documentRecalculation";
+
+    /// <summary>Усі відомі види.</summary>
+    public static readonly string[] All = [ProjectRecalculation, DocumentRecalculation];
+
+    /// <summary>Повний код маркера перерахунку (<c>JobProgress.JobCode</c>).</summary>
+    public static readonly string RecalculationJobCode = typeof(IRecalculationJob).FullName!;
+
+    /// <summary>
+    /// Префікс цілі перерахунку проєкту: <c>IRecalculationJob~project{id}-</c>. Черга в базі пише його в
+    /// <c>TargetKey</c>, Quartz — на початок <c>JobId</c>.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    public static string ProjectTargetPrefix(int projectId)
+        => string.Create(
+            System.Globalization.CultureInfo.InvariantCulture, $"{nameof(IRecalculationJob)}~project{projectId}-");
+
+    /// <summary>Проєкт із ключа цілі чи ідентифікатора задачі перерахунку проєкту; <c>null</c> — не такий ключ.</summary>
+    /// <param name="key"><c>TargetKey</c> або <c>JobId</c>.</param>
+    public static int? ProjectIdOfTarget(string? key)
+    {
+        const string head = nameof(IRecalculationJob) + "~project";
+
+        if (key is null || !key.StartsWith(head, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var end = key.IndexOf('-', head.Length);
+
+        return end > head.Length
+               && int.TryParse(
+                   key.AsSpan(head.Length, end - head.Length),
+                   System.Globalization.NumberStyles.None,
+                   System.Globalization.CultureInfo.InvariantCulture,
+                   out var id)
+            ? id
+            : null;
+    }
 }
 
 /// <summary>Задача в переліку черги — легша за <see cref="JobStatus"/>.</summary>
@@ -264,6 +341,14 @@ public sealed record JobListFilter(
 /// Похідний стан для оператора (<c>SucceededWithErrors</c> — дайджест сповіщень без
 /// жодної відправки, <c>JobCompletionWarning</c>); <c>null</c> — як <c>State</c>.
 /// </param>
+/// <param name="ProjectId">
+/// Проєкт задачі: документної — проєкт її документа, перерахунку проєкту — з цілі; <c>null</c> — не відомо.
+/// </param>
+/// <param name="ProjectCode">Код того самого проєкту; <c>null</c> — не відомо.</param>
+/// <param name="FanOutParentJobId">Батько розкладу, якщо задача — дочірня (P4); інакше <c>null</c>.</param>
+/// <param name="FanOut">
+/// Підсумок дочірніх задач перерахунку проєкту (як <see cref="JobStatus.FanOut"/>); <c>null</c> — інша задача.
+/// </param>
 public sealed record JobSummary(
     string JobId,
     string JobCode,
@@ -281,7 +366,11 @@ public sealed record JobSummary(
     int? MaxAttempts = null,
     string? ResultUrl = null,
     int? CreatedByUserId = null,
-    string? EffectiveState = null);
+    string? EffectiveState = null,
+    int? ProjectId = null,
+    string? ProjectCode = null,
+    string? FanOutParentJobId = null,
+    FanOutStatus? FanOut = null);
 
 /// <summary>Лічильники черги фонових задач.</summary>
 /// <param name="Running">Скільки задач зараз виконується (усі, без вікна).</param>
@@ -390,12 +479,16 @@ public interface IJobIdentity
 /// <param name="Running">Виконуються.</param>
 /// <param name="Succeeded">Виконано.</param>
 /// <param name="Failed">Провалено або скасовано.</param>
+/// <param name="SkippedSheets">
+/// ✎ UAT recalc-progress: скільки затверджених аркушів дочірні задачі пропустили (сума <c>skipped</c> їхніх
+/// підсумків <c>jobs.recalcSheetLog</c>); числа цих аркушів не змінено.
+/// </param>
 /// <remarks>
 /// ⛔ Батьківська задача завершується, коли лише РОЗКЛАДЕНО дочірні, — це не
 /// «пораховано». Похідний стан рахується при читанні (схеми немає): батьківський
 /// збережений стан лишається <c>Succeeded</c> і не займає слот пулу.
 /// </remarks>
-public sealed record FanOutStatus(int Total, int Queued, int Running, int Succeeded, int Failed)
+public sealed record FanOutStatus(int Total, int Queued, int Running, int Succeeded, int Failed, int SkippedSheets = 0)
 {
     /// <summary>Розкладено, дочірні ще не завершились.</summary>
     public const string StateFannedOut = "FannedOut";

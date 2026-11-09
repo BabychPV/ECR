@@ -33,8 +33,8 @@ const calendar = {
   policy: { id: 1, code: 'ECR-Standard', openOffsetDays: 0, graceOffsetDays: 15, hardCloseOffsetDays: 45, yearGraceOffsetDays: 45 },
   periods: [
     { id: 1, periodKey: 202601, year: 2026, sequence: 1, startsAt: '2026-01-01T00:00:00+02:00', endsAt: '2026-03-17T00:00:00+02:00', state: 'Closed', graceEndsAt: '2026-02-15T00:00:00+02:00', reopenedUntil: null, isCurrent: false },
-    { id: 2, periodKey: 202602, year: 2026, sequence: 2, startsAt: '2026-02-01T00:00:00+02:00', endsAt: '2026-04-15T00:00:00+03:00', state: 'Grace', graceEndsAt: '2026-03-15T00:00:00+02:00', reopenedUntil: null, isCurrent: false },
-    { id: 3, periodKey: 202603, year: 2026, sequence: 3, startsAt: '2026-03-01T00:00:00+02:00', endsAt: '2026-05-15T00:00:00+03:00', state: 'Open', graceEndsAt: '2026-04-15T00:00:00+03:00', reopenedUntil: null, isCurrent: true },
+    { id: 2, periodKey: 202602, year: 2026, sequence: 2, startsAt: '2026-02-01T00:00:00+02:00', endsAt: '2099-04-15T00:00:00+03:00', state: 'Grace', graceEndsAt: '2026-03-15T00:00:00+02:00', reopenedUntil: null, isCurrent: false },
+    { id: 3, periodKey: 202603, year: 2026, sequence: 3, startsAt: '2026-03-01T00:00:00+02:00', endsAt: '2099-05-15T00:00:00+03:00', state: 'Open', graceEndsAt: '2026-04-15T00:00:00+03:00', reopenedUntil: null, isCurrent: true },
   ],
 };
 
@@ -82,7 +82,7 @@ function show(): void {
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={['/admin/periods?projectId=7']}>
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-          <PeriodsPage />
+          <PeriodsPage projectId={7} />
         </QueryClientProvider>
       </MemoryRouter>
     </MantineProvider>,
@@ -133,7 +133,7 @@ describe('PeriodsPage: рядок місяця — підпис, стан і о�
   );
 
   it(
-    'п. b: маршрут, політики, клон, пояс і архів — не тут; є посилання на налаштування проєкту',
+    'п. b: маршрут, політики, клон, пояс і архів — не тут (вони на вкладках Settings і Lifecycle проєкту)',
     async () => {
       mockFetch();
       show();
@@ -151,9 +151,6 @@ describe('PeriodsPage: рядок місяця — підпис, стан і о�
       ]) {
         expect(screen.queryByRole('button', { name })).toBeNull();
       }
-
-      const link = screen.getByRole('link', { name: '⟦projectSettings.title⟧' });
-      expect(link.getAttribute('href')).toBe('/admin/projects?projectId=7');
     },
     Slow,
   );
@@ -216,7 +213,7 @@ describe('PeriodsPage: рядок місяця — підпис, стан і о�
         expect(tr.querySelectorAll('time')).toHaveLength(1);
       }
 
-      expect(feb.querySelector('time')?.getAttribute('dateTime')).toBe('2026-04-15T00:00:00+03:00');
+      expect(feb.querySelector('time')?.getAttribute('dateTime')).toBe('2099-04-15T00:00:00+03:00');
 
       const header = within(screen.getByRole('columnheader', { name: /periods\.locksOn(?!Hint)/ })).getByText(
         '⟦periods.locksOn⟧',

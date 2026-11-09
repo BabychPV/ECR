@@ -21,6 +21,7 @@ public sealed class ProjectsController(
     CloneProjectHandler cloneProject,
     ActivateProjectHandler activate,
     ArchiveProjectHandler archive,
+    DeleteProjectHandler delete,
     ListPeriodPoliciesHandler policies,
     CreatePeriodPolicyHandler createPolicy,
     UpdatePeriodPolicyHandler updatePolicy,
@@ -257,6 +258,28 @@ public sealed class ProjectsController(
     public async Task<IActionResult> Archive(int id, CancellationToken ct)
     {
         await archive.HandleAsync(id, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Видаляє проєкт. Право <c>Project.Manage</c> і грант <c>Manage</c> на проєкт (UAT 08.11).
+    /// </summary>
+    /// <remarks>
+    /// Лише ЧЕРНЕТКА без документів і без історії (прогони розрахунків, зрізи, архівації); видалення пишеться в
+    /// журнал змін. Інакше — <c>409 ECR-PRD-0409</c> з ключем умови: <c>deleteNotDraft</c> (стан і кількість
+    /// документів у подробицях), <c>deleteHasDocuments</c>, <c>deleteHasHistory</c>. Невидимий проєкт — <c>404</c>.
+    /// </remarks>
+    /// <param name="id">Проєкт.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpDelete("{id:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    {
+        await delete.HandleAsync(id, ct).ConfigureAwait(false);
 
         return NoContent();
     }
@@ -513,11 +536,16 @@ public sealed record CreatePeriodPolicyRequest(
 /// <param name="GraceOffsetDays">Пільговий строк після кінця періоду.</param>
 /// <param name="HardCloseOffsetDays">Коли період закривається остаточно.</param>
 /// <param name="YearGraceOffsetDays">Пільговий строк після кінця року.</param>
+/// <remarks>
+/// ⛔ UAT 08.11 (лінія f/g): без <c>JsonRequired</c> тіло <c>{}</c> чи з частиною полів зв'язувалось
+/// нулями, і PUT мовчки обнуляв зсуви політики (200). Тепер відсутнє поле — 422
+/// <c>err.ECR-REQ-0422.malformedRequest</c> (<c>InvalidModelStateResponseFactory</c>, <c>Program.cs</c>).
+/// </remarks>
 public sealed record UpdatePeriodPolicyRequest(
-    int OpenOffsetDays,
-    int GraceOffsetDays,
-    int HardCloseOffsetDays,
-    int YearGraceOffsetDays);
+    [property: System.Text.Json.Serialization.JsonRequired] int OpenOffsetDays,
+    [property: System.Text.Json.Serialization.JsonRequired] int GraceOffsetDays,
+    [property: System.Text.Json.Serialization.JsonRequired] int HardCloseOffsetDays,
+    [property: System.Text.Json.Serialization.JsonRequired] int YearGraceOffsetDays);
 
 /// <summary>Запит на зміну поясу майданчика проєкту (T6/#52).</summary>
 /// <param name="TimeZoneId">Новий пояс — ідентифікатор IANA (<c>Asia/Atyrau</c>).</param>

@@ -141,6 +141,55 @@ public sealed class AuditReaderNamesTests(SqlServerFixture sql)
         Assert.Equal(LocalizedText.FromJson(rowLabelJson).Values, row.RowLabelL10n!.Values);
     }
 
+    /// <summary>
+    /// F13 c1 (09.11): рядок видалення проєкту називає КОД проєкту зі знімка (<c>OldJson.code</c>), а не номер
+    /// (чинного рядка <c>doc.Project</c> уже немає); чинний проєкт — свій чинний код.
+    /// </summary>
+    /// <remarks>Мутація: прибрати <c>SnapshotCode</c> у <c>AuditReader</c> — підпис видаленого null, червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "R-18")]
+    public async Task Журнал_структури_називає_код_видаленого_і_чинного_проєкту()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(ct: CancellationToken.None);
+        var at = new DateTime(2026, 3, 4, 9, 17, 31, DateTimeKind.Utc);
+        var deletedId = 2_000_000_000 + Random.Shared.Next(1, 100_000_000);
+
+        await using var db = builder.CreateContext();
+        var writer = new AuditWriter(db);
+        await writer.WriteStructureChangeAsync(
+            new StructureChangeRecord(
+                at, doc.TemplateVersionId, "Project", deletedId, ChangeClass.Guarded, "Delete",
+                """{"code":"Pavlo_TEST","status":"Draft"}""", null, null, 1, null),
+            CancellationToken.None);
+        await writer.WriteStructureChangeAsync(
+            new StructureChangeRecord(
+                at, doc.TemplateVersionId, "Project", doc.ProjectId, ChangeClass.Guarded, "Activate",
+                null, "{}", null, 1, null),
+            CancellationToken.None);
+
+        var journal = await new AuditReader(db).ReadStructureJournalAsync(
+            new StructureChangeFilter(at.AddMinutes(-1), at.AddMinutes(1), EntityType: "Project"),
+            new CursorRequest(500),
+            CancellationToken.None);
+
+        Assert.Equal("Pavlo_TEST", journal.Items.Single(i => i.EntityId == deletedId).EntityLabel);
+        Assert.Equal(await ProjectCodeAsync(doc.ProjectId), journal.Items.Single(i => i.EntityId == doc.ProjectId).EntityLabel);
+    }
+
+    private async Task<string> ProjectCodeAsync(int projectId)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync(CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Code FROM doc.Project WHERE Id = @id;";
+        command.Parameters.AddWithValue("@id", projectId);
+
+        return (string)(await command.ExecuteScalarAsync(CancellationToken.None))!;
+    }
+
     private async Task<(string SheetCode, string TableCode, string RowKey, string RowLabelJson)> StructureFactsAsync(TestDocument doc)
     {
         await using var connection = new SqlConnection(sql.ConnectionString);

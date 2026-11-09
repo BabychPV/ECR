@@ -8037,6 +8037,12 @@
             "format": "int32",
             "type": "integer"
           },
+          "skippedSheets": {
+            "default": 0,
+            "description": "✎ UAT recalc-progress: скільки затверджених аркушів дочірні задачі пропустили (сума `skipped` їхніх\nпідсумків `jobs.recalcSheetLog`); числа цих аркушів не змінено.",
+            "format": "int32",
+            "type": "integer"
+          },
           "succeeded": {
             "description": "Виконано.",
             "format": "int32",
@@ -9671,6 +9677,24 @@
               "string"
             ]
           },
+          "fanOut": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FanOutStatus",
+                "description": "Підсумок дочірніх задач перерахунку проєкту (як FanOutStatus? JobStatus.FanOut); `null` — інша задача."
+              }
+            ]
+          },
+          "fanOutParentJobId": {
+            "description": "Батько розкладу, якщо задача — дочірня (P4); інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "jobCode": {
             "description": "Код задачі (тип).",
             "type": "string"
@@ -9698,6 +9722,21 @@
             "description": "Прогрес у відсотках.",
             "format": "int32",
             "type": "integer"
+          },
+          "projectCode": {
+            "description": "Код того самого проєкту; `null` — не відомо.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "projectId": {
+            "description": "Проєкт задачі: документної — проєкт її документа, перерахунку проєкту — з цілі; `null` — не відомо.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "resultUrl": {
             "description": "Як string? JobStatus.ResultUrl (UX-09).",
@@ -17026,6 +17065,12 @@
               "null",
               "integer"
             ]
+          },
+          "documentCount": {
+            "default": 0,
+            "description": "✎ UAT 08.11 (P2 живого проходу): скільки документів у проєкті — діалог «Recalculate the whole project?» називає\nобласть числом («92 documents»), а не «Every document of every period». Перерахунок проєкту однаково йде по всіх\nдокументах проєкту, тож число — та сама область, яку запускає людина з цим проєктом у переліку.",
+            "format": "int32",
+            "type": "integer"
           },
           "id": {
             "description": "Ідентифікатор.",
@@ -41188,6 +41233,39 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "description": "Лише задачі проєкту: документні — його документів, а також перерахунки всього проєкту.",
+            "in": "query",
+            "name": "projectId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Лише дочірні задачі цього розкладу (перерахунок проєкту → документи).",
+            "in": "query",
+            "name": "parentJobId",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Без дочірніх задач розкладу — перерахунок проєкту одним рядком.",
+            "in": "query",
+            "name": "hideChildren",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Вид задачі: `projectRecalculation` або `documentRecalculation`. Невідомий — `422`.",
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -51287,6 +51365,93 @@
           }
         },
         "summary": "Змінює offsets наявної політики періодів. Право `Project.Manage`\n(T6/#37).",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}": {
+      "delete": {
+        "description": "Лише ЧЕРНЕТКА без документів і без історії (прогони розрахунків, зрізи, архівації); видалення пишеться в\nжурнал змін. Інакше — `409 ECR-PRD-0409` з ключем умови: `deleteNotDraft` (стан і кількість\nдокументів у подробицях), `deleteHasDocuments`, `deleteHasHistory`. Невидимий проєкт — `404`.",
+        "parameters": [
+          {
+            "description": "Проєкт.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Видаляє проєкт. Право `Project.Manage` і грант `Manage` на проєкт (UAT 08.11).",
         "tags": [
           "Projects"
         ]

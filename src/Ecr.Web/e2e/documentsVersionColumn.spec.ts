@@ -316,7 +316,10 @@ test.describe('Documents list: Version column', () => {
     });
     await openList(page, 'light');
 
-    const response = await page.request.get(`/api/v1/documents/template-versions?periodKey=${PeriodKey}`);
+    // ✎ g1 (08.11): перелік — лише за рік, а колонка «Version» показує чинну версію проєкту (помісячну гілку прибрано,
+    // dd47bd058). Тому сторінка питає варіанти БЕЗ місяця (`periodKey` сервер і трактує як «версія за період»);
+    // еталон — та сама відповідь без `periodKey`.
+    const response = await page.request.get('/api/v1/documents/template-versions');
     const body = await ok<{ items: { version: string; count: number }[]; withoutVersionCount: number }>(response, 'варіанти версій');
     const versions = body.items.map((item) => item.version);
     expect(versions, 'власна версія 2.7.0.0 відсутня у варіантах сервера').toContain(OwnVersion);
@@ -325,7 +328,7 @@ test.describe('Documents list: Version column', () => {
     }
 
     await expect.poll(() => requests.length, { message: 'сторінка не питала template-versions' }).toBeGreaterThan(0);
-    expect(requests[0]).toContain(`periodKey=${PeriodKey}`);
+    expect(new URL(requests[0] ?? '/', 'http://localhost').searchParams.has('periodKey'), 'варіанти версій запитано за місяць').toBe(false);
 
     await page.locator('[data-version-filter]').click();
     // Лише варіанти версій («v<версія>»): на сторінці є й інші списки (проєкт, власник) з власними пунктами.

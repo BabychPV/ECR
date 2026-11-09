@@ -134,7 +134,9 @@ describe('DocumentListSummaryStrip: лічильник — фільтр стан
       fireEvent.click(draft);
 
       await waitFor(() => expect(lastListed().get('state')).toBe('Draft'), { timeout: Find });
-      expect(lastListed().get('periodKey')).toBe('202601');
+      // ✎ Projects/Documents 08.11: перелік лише за рік — стара адреса з місяцем дає рік, а не periodKey.
+      expect(lastListed().get('year')).toBe('2026');
+      expect(lastListed().has('periodKey')).toBe(false);
       expect(lastListed().has('cursor')).toBe(false);
       expect(urlState()).toBe('Draft');
 

@@ -181,9 +181,18 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     /// <inheritdoc />
     public Task QueueAsync(
         string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int? createdByUserId = null,
-        string? correlationId = null, long? documentId = null)
+        string? correlationId = null, long? documentId = null, string? fanOutParentJobId = null)
         => UpsertAsync(
-            jobId, jobCode, utcNow, entry => entry.Queue(utcNow, correlationId, documentId, CurrentInstanceId),
+            jobId, jobCode, utcNow, entry =>
+            {
+                entry.Queue(utcNow, correlationId, documentId, CurrentInstanceId);
+
+                // ✎ UAT recalc-progress: дзеркало Quartz дитини розкладу — позначка батька (`GetFanOutAsync`).
+                if (fanOutParentJobId is { Length: > 0 } parent)
+                {
+                    entry.TagFanOutParent(parent);
+                }
+            },
             createdByUserId, ct);
 
     /// <inheritdoc />
@@ -290,9 +299,14 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     /// <inheritdoc />
     /// <remarks>
     /// ⚠ Схеми не змінено: дочірня задача несе <c>fanOutParentJobId</c> у Payload
-    /// (<c>RecalculationRequest.FanOutParentJobId</c>), звужується префіксом цілі
-    /// (<c>IRecalculationJob~doc…</c>) і лише рядками черги. Читання разове — за
-    /// опитуванням однієї задачі, не за переліком.
+    /// (<c>RecalculationRequest.FanOutParentJobId</c>; дзеркало Quartz — позначку
+    /// <c>JobProgress.TagFanOutParent</c>) і звужується документними перерахунками. Читання — за
+    /// опитуванням задачі або за кількома рядками переліку, не за всім журналом.
+    /// <para>
+    /// ⛔ UAT recalc-progress (08.11): тут стояло <c>Lane IS NOT NULL AND TargetKey LIKE …</c>, тобто лише рядки
+    /// черги в базі. У типовому режимі Quartz дітей не знаходилось жодної, <c>FanOut</c> був <c>null</c>, і
+    /// клієнт показував «перерахунок завершено» за секунду після розкладу 92 документів.
+    /// </para>
     /// </remarks>
     public async Task<FanOutStatus?> GetFanOutAsync(string parentJobId, CancellationToken ct)
     {
@@ -306,8 +320,8 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
                  SELECT State, COUNT(*) AS Cnt
                    FROM itg.JobProgress
                   WHERE FanOutParentJobId = {parentJobId}
-                    AND Lane IS NOT NULL
-                    AND TargetKey LIKE N'IRecalculationJob~doc%'
+                    AND (TargetKey LIKE N'IRecalculationJob~doc%'
+                         OR (Lane IS NULL AND JobId LIKE N'IRecalculationJob~doc%'))
                   GROUP BY State
                  """)
             .ToListAsync(ct)
@@ -322,8 +336,57 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
 
         int Of(string state) => rows.Where(r => r.State == state).Sum(r => r.Cnt);
 
+        var succeeded = Of("Succeeded");
+        var skipped = succeeded == 0 ? 0 : await SkippedSheetsAsync(parentJobId, ct).ConfigureAwait(false);
+
         return new FanOutStatus(
-            total, Of("Queued"), Of("Running"), Of("Succeeded"), Of("Failed") + Of("Cancelled"));
+            total, Of("Queued"), Of("Running"), succeeded, Of("Failed") + Of("Cancelled"), skipped);
+    }
+
+    /// <summary>Ключ підсумку журналу аркушів дочірньої задачі (<c>RecalculationJob</c>).</summary>
+    private const string SheetLogKey = "jobs.recalcSheetLog";
+
+    /// <summary>Ціль документної дитини: черга в базі — <c>TargetKey</c>, Quartz — початок <c>JobId</c>.</summary>
+    private const string ChildPrefix = "IRecalculationJob~doc";
+
+    /// <summary>
+    /// Сума пропущених затверджених аркушів за підсумками <c>jobs.recalcSheetLog</c> виконаних дітей.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Підсумок — ОСТАННЄ повідомлення дитини (<c>RecalculationJob</c>), а <c>Finish</c> повідомлення не
+    /// чіпає, тож він лежить у рядку до прибирання. Дитина без пропусків підсумку не пише — вона дає 0.
+    /// </remarks>
+    private async Task<int> SkippedSheetsAsync(string parentJobId, CancellationToken ct)
+    {
+        var quoted = "\"" + SheetLogKey + "\"";
+
+        var messages = await db.JobProgresses
+            .AsNoTracking()
+            .Where(p => p.FanOutParentJobId == parentJobId
+                        && ((p.TargetKey != null && p.TargetKey.StartsWith(ChildPrefix))
+                            || (p.Lane == null && p.JobId.StartsWith(ChildPrefix)))
+                        && p.State == SucceededState
+                        && p.Message != null
+                        && p.Message.Contains(quoted))
+            .Select(p => p.Message)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var skipped = 0;
+
+        foreach (var message in messages)
+        {
+            if (JobProgressMessageCodec.TryDecode(message, out var envelope)
+                && string.Equals(envelope.Key, SheetLogKey, StringComparison.Ordinal)
+                && envelope.Params is { } parameters
+                && parameters.TryGetValue("skipped", out var raw)
+                && int.TryParse(raw, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n))
+            {
+                skipped += n;
+            }
+        }
+
+        return skipped;
     }
 
     /// <inheritdoc />
@@ -395,17 +458,112 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
             query = query.Where(p => !(p.JobCode == FormulaRecalculationJobCode && p.State == SucceededState));
         }
 
+        // ✎ UAT recalc-progress (08.11): проєкт, батько розкладу, вид — теж КОН'ЮНКЦІЇ і теж ДО `Take`.
+        var recalcCode = JobListKinds.RecalculationJobCode;
+
+        if (filter.ProjectId is { } projectId)
+        {
+            // Документні задачі — за проєктом документа; перерахунок проєкту — за префіксом цілі (черга в базі пише
+            // її в `TargetKey`, Quartz — на початок `JobId`).
+            var prefix = JobListKinds.ProjectTargetPrefix(projectId);
+
+            query = query.Where(p =>
+                (p.DocumentId != null && db.Documents.Any(d => d.Id == p.DocumentId && d.ProjectId == projectId))
+                || (p.DocumentId == null
+                    && (p.JobId.StartsWith(prefix) || (p.TargetKey != null && p.TargetKey.StartsWith(prefix)))));
+        }
+
+        if (filter.ParentJobId is { Length: > 0 } parent)
+        {
+            query = query.Where(p => p.FanOutParentJobId == parent);
+        }
+
+        if (filter.HideChildren)
+        {
+            query = query.Where(p => p.FanOutParentJobId == null);
+        }
+
+        if (string.Equals(filter.Kind, JobListKinds.ProjectRecalculation, StringComparison.Ordinal))
+        {
+            query = query.Where(p => p.JobCode == recalcCode && p.DocumentId == null);
+        }
+        else if (string.Equals(filter.Kind, JobListKinds.DocumentRecalculation, StringComparison.Ordinal))
+        {
+            query = query.Where(p => p.JobCode == recalcCode && p.DocumentId != null);
+        }
+
         // ⚠ Лівий join: системна задача (автор null) чи видалений автор
         // лишаються в переліку з CreatedByDisplayName = null.
-        return await query
+        var rows = await query
             .OrderByDescending(p => p.UpdatedAt)
             .Take(limit)
-            .Select(p => new JobSummary(
-                p.JobId, p.JobCode, p.State, p.Percent, p.UpdatedAt, p.StartedAt, p.Attempt, p.CorrelationId,
-                db.Users.Where(u => u.Id == p.CreatedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
-                p.Message, p.CreatedAt, p.ErrorCode, p.DocumentId, MaxAttempts, null, p.CreatedByUserId))
+            .Select(p => new
+            {
+                Summary = new JobSummary(
+                    p.JobId, p.JobCode, p.State, p.Percent, p.UpdatedAt, p.StartedAt, p.Attempt, p.CorrelationId,
+                    db.Users.Where(u => u.Id == p.CreatedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
+                    p.Message, p.CreatedAt, p.ErrorCode, p.DocumentId, MaxAttempts, null, p.CreatedByUserId,
+                    null,
+                    db.Documents.Where(d => d.Id == p.DocumentId).Select(d => (int?)d.ProjectId).FirstOrDefault(),
+                    null,
+                    p.FanOutParentJobId,
+                    null),
+                p.TargetKey,
+            })
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        return await DecorateAsync(rows.Select(r => r.Summary.ProjectId is null
+            ? r.Summary with
+            {
+                ProjectId = JobListKinds.ProjectIdOfTarget(r.TargetKey) ?? JobListKinds.ProjectIdOfTarget(r.Summary.JobId),
+            }
+            : r.Summary).ToList(), recalcCode, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Скільки батьків перерахунку проєкту в одному переліку отримують підсумок дітей.</summary>
+    /// <remarks>⚠ Підсумок — окреме читання на батька; свіжі зверху, решта лишається без лічильників.</remarks>
+    private const int MaxFanOutsPerList = 10;
+
+    /// <summary>Код проєкту й підсумок дітей (перерахунок проєкту) для рядків переліку.</summary>
+    private async Task<IReadOnlyList<JobSummary>> DecorateAsync(
+        List<JobSummary> items, string recalcCode, CancellationToken ct)
+    {
+        var projectIds = items.Where(i => i.ProjectId is not null).Select(i => i.ProjectId!.Value).Distinct().ToList();
+
+        var codes = projectIds.Count == 0
+            ? new Dictionary<int, string>()
+            : await db.Projects
+                .AsNoTracking()
+                .Where(p => projectIds.Contains(p.Id))
+                .Select(p => new { p.Id, p.Code })
+                .ToDictionaryAsync(p => p.Id, p => p.Code, ct)
+                .ConfigureAwait(false);
+
+        var fanOuts = 0;
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+
+            if (item.ProjectId is { } pid && codes.TryGetValue(pid, out var code))
+            {
+                item = item with { ProjectCode = code };
+            }
+
+            if (fanOuts < MaxFanOutsPerList
+                && item.DocumentId is null
+                && string.Equals(item.JobCode, recalcCode, StringComparison.Ordinal)
+                && item.State is SucceededState or "Running")
+            {
+                fanOuts++;
+                item = item with { FanOut = await GetFanOutAsync(item.JobId, ct).ConfigureAwait(false) };
+            }
+
+            items[i] = item;
+        }
+
+        return items;
     }
 
     /// <inheritdoc />

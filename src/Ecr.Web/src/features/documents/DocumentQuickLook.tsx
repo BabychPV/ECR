@@ -7,6 +7,7 @@ import type { DocumentSummary } from '@/api/types';
 import { useTableStatus, type TableStatus } from '@/features/documents/api';
 import { documentState, hasSheetStates, sheetLabels, type SheetLabel } from '@/features/documents/documentSheets';
 import { useWorkflowHistory, type WorkflowEvent } from '@/features/workflow/api';
+import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { DetailDrawer, useDetailPanel } from '@/shared/ui/DetailDrawer';
@@ -22,8 +23,16 @@ interface DocumentQuickLookProps {
   /** Значення `?panel=` — ідентифікатор документа. */
   readonly panelId: string;
 
-  /** Обраний період; без нього станів і заповненості немає (`D-93`). */
-  readonly periodKey: number | null;
+  /**
+   * ✎ 08.11 (огляд координатора, P2 D-466): ПОТОЧНИЙ період проєкту документа (`isCurrent` календаря, `D-77`) — за ним
+   * шторка показує аркуші зі станом і заповненістю, «Can approve now» і «Latest changes» (перелік — лише за рік).
+   * Функція від проєкту: документ поза сторінкою переліку стає відомим (і з ним проєкт) лише після дочитування.
+   * `null` — у проєкту немає поточного періоду (напр. чернетка); `undefined` — календар ще в дорозі.
+   */
+  readonly currentPeriodOf: (projectId: number) => number | null | undefined;
+
+  /** Рік переліку — для пояснення «No open period in {year}». */
+  readonly year: number;
 
   /** Рядок уже завантаженої сторінки переліку, якщо документ на ній є. */
   readonly document?: DocumentSummary | undefined;
@@ -62,10 +71,14 @@ interface DocumentQuickLookProps {
  *
  * ⚠ Запити — лише відкритої шторки (компонент монтується за `?panel=`), і
  * лише з періодом: без нього аркуші не мають станів, а таблиці — екземплярів.
+ *
+ * ✎ 08.11: перелік — за рік, тож рядок переліку станів аркушів не несе; блоки місяця беруться з картки документа за
+ * поточний період (`GET /documents/{id}?periodKey=`), і над ними видимий підпис місяця («For October 2026»).
  */
 export function DocumentQuickLook({
   panelId,
-  periodKey,
+  currentPeriodOf,
+  year,
   document: fromList,
   listReady,
   projectCode,
@@ -79,20 +92,27 @@ export function DocumentQuickLook({
 
   // Посилання `?panel=` на документ поза завантаженою сторінкою — дочитати його.
   const fetched = useQuery({
-    queryKey: ['document', documentId, periodKey, 'quick-look'],
-    queryFn: () =>
-      apiFetch<DocumentSummary>(
-        `/api/v1/documents/${String(documentId)}` + (periodKey === null ? '' : `?periodKey=${String(periodKey)}`),
-      ),
-    // D-466: `stepApproverNames` віддає лише картка одного документа, перелік поля не несе - тож картку дочитуємо
-    // завжди (і коли рядок уже є на сторінці), а решта шторки лишається з рядка переліку.
-    enabled: valid && listReady,
+    queryKey: ['document', documentId, null, 'quick-look'],
+    queryFn: () => apiFetch<DocumentSummary>(`/api/v1/documents/${String(documentId)}`),
+    enabled: valid && listReady && fromList === undefined,
   });
 
   // ⚠ `?? undefined`: порожня відповідь (`null`) — це «документа немає», а не документ.
   const document = fromList ?? fetched.data ?? undefined;
-  // Поля кроку - лише з картки: рядок переліку їх не має, і «не прочиталось» ≠ «нікого немає».
-  const stepApprovers = fetched.data ?? undefined;
+
+  // Поточний період проєкту документа (`D-77`): `undefined` — документ чи календар ще в дорозі.
+  const periodKey = document === undefined ? undefined : currentPeriodOf(document.projectId);
+
+  // D-466: `stepApproverNames` і стани аркушів за місяць віддає лише картка одного документа за ПЕРІОД, перелік року
+  // їх не несе - тож за поточного періоду картку дочитуємо завжди (і коли рядок уже є на сторінці).
+  const month = useQuery({
+    queryKey: ['document', documentId, periodKey ?? null, 'quick-look'],
+    queryFn: () => apiFetch<DocumentSummary>(`/api/v1/documents/${String(documentId)}?periodKey=${String(periodKey)}`),
+    enabled: valid && typeof periodKey === 'number',
+  });
+
+  // Блоки місяця - лише з картки за поточний період: рядок переліку року їх не має, і «не прочиталось» ≠ «нікого немає».
+  const monthCard = typeof periodKey === 'number' ? (month.data ?? undefined) : undefined;
 
   if (!valid) return null;
 
@@ -137,7 +157,14 @@ export function DocumentQuickLook({
           <Skeleton height={120} radius="sm" />
         )
       ) : (
-        <QuickLookBody document={document} periodKey={periodKey} detail={stepApprovers} />
+        <QuickLookBody
+          document={document}
+          periodKey={periodKey}
+          year={year}
+          detail={monthCard}
+          detailError={typeof periodKey === 'number' ? month.error : null}
+          onRetry={() => void month.refetch()}
+        />
       )}
     </DetailDrawer>
   );
@@ -146,26 +173,45 @@ export function DocumentQuickLook({
 function QuickLookBody({
   document,
   periodKey,
+  year,
   detail,
+  detailError,
+  onRetry,
 }: {
   readonly document: DocumentSummary;
-  readonly periodKey: number | null;
-  /** Картка документа (`GET /documents/{id}`) - лише вона несе `stepApproverNames`. */
+  readonly periodKey: number | null | undefined;
+  readonly year: number;
+  /** Картка документа за поточний період (`GET /documents/{id}?periodKey=`) — стани аркушів і `stepApproverNames`. */
   readonly detail?: DocumentSummary | undefined;
+  readonly detailError: Error | null;
+  readonly onRetry: () => void;
 }): JSX.Element {
-  const withStates = periodKey !== null && hasSheetStates(document);
+  const month = typeof periodKey === 'number' ? periodKey : null;
+  const withStates = month !== null && detail !== undefined && hasSheetStates(detail);
 
   return (
     <Stack gap="lg" data-quick-look={document.id}>
-      {withStates ? (
-        <SheetsSection document={document} periodKey={periodKey} />
-      ) : (
+      {periodKey === undefined ? (
+        <Skeleton height={48} radius="sm" />
+      ) : month === null ? (
         <Text size="sm" c="dimmed" data-quick-look-no-period="">
-          {t('documents.quickLookNoPeriod')}
+          {t('documents.quickLookNoOpenPeriod', { year })}
+        </Text>
+      ) : (
+        <Text size="sm" fw={500} data-quick-look-period={month}>
+          {t('documents.quickLookForPeriod', {
+            period: formatPeriodKey(month, document.periodKind ?? undefined) || String(month),
+          })}
         </Text>
       )}
 
-      {withStates && <StepApprovers names={detail?.stepApproverNames} truncated={detail?.stepApproverNamesTruncated} />}
+      {month !== null && detail === undefined && (
+        detailError !== null ? <ErrorAlert error={detailError} onRetry={onRetry} /> : <Skeleton height={120} radius="sm" />
+      )}
+
+      {withStates && <SheetsSection document={detail} periodKey={month} />}
+
+      {withStates && <StepApprovers names={detail.stepApproverNames} truncated={detail.stepApproverNamesTruncated} />}
 
       <Section title={t('documents.quickLookResponsible')}>
         <KeyValue
@@ -181,7 +227,7 @@ function QuickLookBody({
         />
       </Section>
 
-      {withStates && <LatestChanges documentId={document.id} periodKey={periodKey} sheets={sheetLabels(document)} />}
+      {withStates && <LatestChanges documentId={document.id} periodKey={month} sheets={sheetLabels(detail)} />}
     </Stack>
   );
 }
