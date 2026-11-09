@@ -145,6 +145,10 @@ describe('RowPermitSection (j1)', () => {
     const alert = await screen.findByRole('alert');
     const move = within(alert).getByRole('button', { name: /permits\.history\.gapMove .*"date":"10\.02\.2026"/ });
     expect(within(alert).getByRole('button', { name: /permits\.history\.gapAdd/ })).toBeTruthy();
+
+    // Fresh eyes 09.11 (j4 at 1335): long fix labels wrap and the fixes stack — nothing runs past the narrow Inspector.
+    expect(move.style.whiteSpace).toBe('normal');
+    expect(alert.querySelector('[data-gap-actions]')?.className).toMatch(/Stack/);
     fireEvent.click(move);
 
     await waitFor(() => expect(addRowPermit).toHaveBeenLastCalledWith(3, expect.objectContaining({ validFrom: '2026-02-10' })));

@@ -228,9 +228,9 @@ async function addB(page: Page, world: World, row: number): Promise<void> {
   await form.getByLabel('Permit').click();
   await form.getByLabel('Permit').fill(world.bNumber);
   await page.getByRole('option', { name: new RegExp(`^${world.bNumber}`) }).click();
-  // ⚠ The date field shows `YYYY-MM-DD` and commits typed text on blur; `fill` of «15.10.2026» left the default 01.10
-  // (CI 42610809703: the add went out from 01.10 and was refused as a gap). Type the ISO date key by key, then blur, and
-  // check the explanation line took it before submitting.
+  // ⚠ App-wide date input (StrictDateInput, A1-02): shows `YYYY-MM-DD`; in English it takes ONLY `yyyy-MM-dd` (dd.MM is
+  // ambiguous there; ru/kz also take dd.MM.yyyy). Typed key by key, committed on blur, checked before submitting
+  // (CI 42610809703: an untaken date went out as the default 01.10).
   const date = form.getByLabel('Valid for this row from');
   await date.click();
   await date.press('ControlOrMeta+A');
