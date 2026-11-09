@@ -9,6 +9,7 @@ import { useCancelJob, useRecentJobs } from '@/features/jobs/api';
 import { useJobStatus } from '@/features/jobs/useJobStatus';
 import { projectsQuery } from '@/features/projects/allProjects';
 import { isProjectRecalculation, progressOf, projectRecalcTitle, recalcProgressText } from '@/features/recalc/recalcProgress';
+import { permissionLabel } from '@/features/security/permissionLabel';
 import { useJobsSummary } from '@/features/jobs/useJobsSummary';
 import { JobAttempt, JobResultLink, JobRetry, jobAuthor } from '@/features/jobs/JobFacts';
 import { badgeStateOf } from '@/features/workflow/jobFollow';
@@ -389,7 +390,8 @@ export function JobsPage(): JSX.Element {
           // Під рядом фільтрів (той має власний `mb="md"`): підтягнути підказку до прапорця.
           mt={-10}
         >
-          {t('jobs.mineOnlyHint')}
+          {/* ✎ Приймання 08.11, a5: людська назва права (`permission.System.ViewHealth`), а не сирий код. */}
+          {t('jobs.mineOnlyHint', { permission: permissionLabel('System.ViewHealth') })}
         </Text>
         </>
       }

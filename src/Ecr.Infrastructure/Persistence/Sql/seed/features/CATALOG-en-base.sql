@@ -1800,7 +1800,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     -- ⚠ Без «for this period»: без вибраного періоду ознака рахується за будь-який.
     (N'documents.lateEditsHint',         N'en', N'The document was edited after the submission deadline.', 1),
     (N'documents.noMatch',               N'en', N'No documents match the filters.', 1),
-    (N'documents.noMatchHint',           N'en', N'Change the state or turn off "Mine".', 1),
+    (N'documents.noMatchHint',           N'en', N'Change the state, set Owner to «Everyone’s documents», or reset the filters.', 1),
     (N'documents.resetFilters',          N'en', N'Reset filters', 1),
     (N'document.noSheetsHint',           N'en', N'The period may not be open yet: sheet instances are created when it opens.', 1),
     (N'templates.empty',                 N'en', N'No templates yet', 1),
@@ -1972,7 +1972,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     -- інакше знятий прапорець виглядає як «показати більше», а не як «показати
     -- чуже», і відмова 403 читається як збій.
     (N'jobs.mineOnly',                   N'en', N'Only my jobs', 1),
-    (N'jobs.mineOnlyHint',               N'en', N'Your own jobs are visible without the System.ViewHealth permission; the full queue is not.', 1),
+    (N'jobs.mineOnlyHint',               N'en', N'Your own jobs are visible without the «{permission}» permission; the full queue is not.', 1),
     (N'jobs.recentStarted',              N'en', N'Started', 1),
     (N'grid.emptyTable',                 N'en', N'This table has no columns for the selected period', 1),
     (N'grid.emptyTableHint',             N'en', N'The template version in force for this period defines no columns for the table.', 1),

@@ -157,7 +157,23 @@ SELECT v.[Key], v.Lang, v.Val
     (N'documents.quickLookForPeriod', N'ru', N'За {period}'),
     (N'documents.quickLookForPeriod', N'kz', N'{period} үшін'),
     (N'documents.quickLookNoOpenPeriod', N'ru', N'Нет открытого периода в {year}'),
-    (N'documents.quickLookNoOpenPeriod', N'kz', N'{year} жылы ашық кезең жоқ')
+    (N'documents.quickLookNoOpenPeriod', N'kz', N'{year} жылы ашық кезең жоқ'),
+    (N'periods.policyPreview.title', N'ru', N'Даты для {project} по политике {policy} — меняются по мере ввода:'),
+    (N'periods.policyPreview.newTitle', N'ru', N'Даты для {project}, если бы он использовал эту новую политику:'),
+    (N'periods.policyPreview.sample', N'ru', N'Даты политики {policy} на примере месяца:'),
+    (N'periods.policyPreview.sampleNew', N'ru', N'Даты этой новой политики на примере месяца:'),
+    (N'periods.policyPreview.period', N'ru', N'{period}: открывается {opens} · поздние правки помечаются с {late} · закрывается {locks}'),
+    (N'periods.policyPreview.year', N'ru', N'После конца года поздние правки принимаются до {date} включительно.'),
+    (N'periods.policyPreview.orderInvalid', N'ru', N'Поздние правки начались бы после закрытия месяца — так сохранить нельзя.'),
+    (N'periods.policyPreview.usedBy', N'ru', N'Использует {project}'),
+    (N'periods.policyPreview.title', N'kz', N'{project} үшін {policy} саясаты бойынша күндер — енгізген сайын жаңарады:'),
+    (N'periods.policyPreview.newTitle', N'kz', N'{project} осы жаңа саясатты қолданса, күндер:'),
+    (N'periods.policyPreview.sample', N'kz', N'{policy} саясатының күндері үлгі ай бойынша:'),
+    (N'periods.policyPreview.sampleNew', N'kz', N'Осы жаңа саясаттың күндері үлгі ай бойынша:'),
+    (N'periods.policyPreview.period', N'kz', N'{period}: ашылады {opens} · кешіккен түзетулер {late} бастап белгіленеді · жабылады {locks}'),
+    (N'periods.policyPreview.year', N'kz', N'Жыл аяқталғаннан кейін кешіккен түзетулер {date} қоса алғанда қабылданады.'),
+    (N'periods.policyPreview.orderInvalid', N'kz', N'Кешіккен түзетулер ай жабылғаннан кейін басталар еді — бұлай сақтауға болмайды.'),
+    (N'periods.policyPreview.usedBy', N'kz', N'{project} қолданады')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -243,7 +259,15 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'periods.reopenTitle', N'en', N'Reopen {period}?', 1),
     (N'documents.ownerHiddenNote', N'en', N'Owner hidden by your access: part of these documents is not open to you.', 1),
     (N'documents.quickLookForPeriod', N'en', N'For {period}', 1),
-    (N'documents.quickLookNoOpenPeriod', N'en', N'No open period in {year}', 1)
+    (N'documents.quickLookNoOpenPeriod', N'en', N'No open period in {year}', 1),
+    (N'periods.policyPreview.title', N'en', N'Dates for {project} with policy {policy} — updates as you type:', 1),
+    (N'periods.policyPreview.newTitle', N'en', N'Dates for {project} if it used this new policy:', 1),
+    (N'periods.policyPreview.sample', N'en', N'Dates for policy {policy} on a sample month:', 1),
+    (N'periods.policyPreview.sampleNew', N'en', N'Dates for this new policy on a sample month:', 1),
+    (N'periods.policyPreview.period', N'en', N'{period}: opens {opens} · late edits flagged from {late} · locks on {locks}', 1),
+    (N'periods.policyPreview.year', N'en', N'After the year ends, late edits are accepted until {date} inclusive.', 1),
+    (N'periods.policyPreview.orderInvalid', N'en', N'Late edits would start after the month locks — this cannot be saved.', 1),
+    (N'periods.policyPreview.usedBy', N'en', N'Used by {project}', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO
@@ -360,14 +384,22 @@ SELECT v.[Key], v.Lang, v.OldVal
 OPTION (RECOMPILE);
 GO
 -- PROJECTS:ui ── кінець секції ──
--- PROJECTS:ui ── змінені тексти: після збереження політики стани місяців оновлюються одразу (PeriodStateCatchUp), а не «при наступній перебудові календаря» (приймання e1, 09.11) ──
+-- PROJECTS:ui ── змінені тексти: після збереження політики стани місяців оновлюються одразу (PeriodStateCatchUp), а не «при наступній перебудові календаря» (приймання e1, 09.11); g4 — підказка порожнього фільтра; a5 — назва права в підказці Jobs ──
 -- Нове значення вже стоїть у MERGE (CATALOG-en-base.sql — en, 00-prelude.sql — ru/kz); епілог оновлює, лише поки в базі старе.
 INSERT INTO #UiChanged ([Key], Lang, OldVal, NewVal)
 SELECT v.[Key], v.Lang, v.OldVal, v.NewVal
   FROM (VALUES
     (N'periods.policyUpdated', N'en', N'The policy is updated. Projects pick up the new offsets on their next calendar rebuild.', N'Policy saved. Month states updated.'),
     (N'periods.policyUpdated', N'ru', N'Политика обновлена. Проекты получат новые смещения при следующем перестроении календаря.', N'Политика сохранена. Состояния месяцев обновлены.'),
-    (N'periods.policyUpdated', N'kz', N'Саясат жаңартылды. Жобалар жаңа ығысуларды күнтізбе келесі рет қайта құрылғанда алады.', N'Саясат сақталды. Айлардың күйлері жаңартылды.')
+    (N'periods.policyUpdated', N'kz', N'Саясат жаңартылды. Жобалар жаңа ығысуларды күнтізбе келесі рет қайта құрылғанда алады.', N'Саясат сақталды. Айлардың күйлері жаңартылды.'),
+    -- g4: порожній відфільтрований перелік називає справжній фільтр — «Owner» → «Everyone’s documents», а не «Mine».
+    (N'documents.noMatchHint', N'en', N'Change the state or turn off "Mine".', N'Change the state, set Owner to «Everyone’s documents», or reset the filters.'),
+    (N'documents.noMatchHint', N'ru', N'Измените состояние или отключите «Мои».', N'Измените состояние, в поле «Владелец» выберите «Документы всех» или сбросьте фильтры.'),
+    (N'documents.noMatchHint', N'kz', N'Күйді өзгертіңіз немесе «Менікі» сүзгісін өшіріңіз.', N'Күйді өзгертіңіз, «Иесі» өрісінде «Барлығының құжаттары» таңдаңыз немесе сүзгілерді тастаңыз.'),
+    -- a5: підказка Jobs — людська назва права ({permission} = permission.System.ViewHealth), а не код.
+    (N'jobs.mineOnlyHint', N'en', N'Your own jobs are visible without the System.ViewHealth permission; the full queue is not.', N'Your own jobs are visible without the «{permission}» permission; the full queue is not.'),
+    (N'jobs.mineOnlyHint', N'ru', N'Свои задачи видны без права System.ViewHealth, а вся очередь — нет.', N'Свои задачи видны без права «{permission}», а вся очередь — нет.'),
+    (N'jobs.mineOnlyHint', N'kz', N'Өз тапсырмаларыңыз System.ViewHealth құқығынсыз көрінеді, ал толық кезек — жоқ.', N'Өз тапсырмаларыңыз «{permission}» құқығынсыз көрінеді, ал толық кезек — жоқ.')
        ) AS v ([Key], Lang, OldVal, NewVal)
 OPTION (RECOMPILE);
 GO

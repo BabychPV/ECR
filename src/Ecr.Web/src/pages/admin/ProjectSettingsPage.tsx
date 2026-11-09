@@ -104,7 +104,13 @@ export function ProjectSettingsPage({ projectId }: { readonly projectId: number 
           <SettingsAction id="policies" description={t('projectSettings.policiesActionDesc')}>
             {(describedBy) => (
               <Suspense fallback={null}>
-                <PeriodPolicyManager openerLabel={t('projectSettings.policiesAction')} describedBy={describedBy} />
+                <PeriodPolicyManager
+                  openerLabel={t('projectSettings.policiesAction')}
+                  describedBy={describedBy}
+                  // ✎ f5: прев'ю дат — для цього проєкту (його календар уже прочитано вище).
+                  calendar={periods.data}
+                  projectCode={selected.code}
+                />
               </Suspense>
             )}
           </SettingsAction>
