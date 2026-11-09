@@ -276,6 +276,8 @@ describe('DocumentsPage: колонка «Version»', () => {
       const params = new URL(optionRequests[0] ?? '/', 'http://localhost').searchParams;
       // ✎ Projects/Documents 08.11: перелік лише за рік — варіанти версій без місяця (periodKey зі старої адреси в запит не йде).
       expect(params.has('periodKey')).toBe(false);
+      // Ні місяця, ні року: версія документа — чинна версія проєкту (як у колонці), тож варіанти не залежать від часу.
+      expect(params.has('year')).toBe(false);
       expect(params.has('templateVersions')).toBe(false);
       expect(params.has('sort')).toBe(false);
     },

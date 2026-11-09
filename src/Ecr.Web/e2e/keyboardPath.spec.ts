@@ -120,12 +120,14 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     // (роль `button`), тож роль однозначно відкидає обидві стрілки.
     // ✎ Period clarity (07.11): поля «Period» на переліку більше немає — рік і місяць, рідні `<select>`
     // (роль `combobox`), з клавіатури — так само, як і решта фільтрів. Типово — рік («All months»).
-    const yearField = page.getByRole('combobox', { name: /^(Year|Год|Жыл)$/ });
+    // ✎ g1 (макет 08.11): поля «Month» на переліку більше НЕМАЄ — перелік завжди за рік, місяць обирають у смузі
+    // або в документі. Єдина зупинка часу — «Year» (`[data-documents-year]`), і перевірка кільця тепер на ньому.
+    const yearField = page.locator('[data-documents-year]');
+    await expect(yearField, 'поле року — не `<select>` із підписом «Year»').toHaveAccessibleName(
+      /^(Year|Год|Жыл)$/,
+    );
     await expectFocusRing(page, yearField, 'поле року');
     await yearField.selectOption(PeriodKey.slice(0, 4));
-    const monthField = page.getByRole('combobox', { name: /^(Month|Месяц|Ай)$/ });
-    await expectFocusRing(page, monthField, 'поле місяця');
-    await monthField.selectOption(String(Number(PeriodKey.slice(4))));
 
     // ── 4. Документ ──────────────────────────────────────────────────────
     // Посилання на документ — звичайний `<a>`, і Enter на ньому має
@@ -139,7 +141,8 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     // «Element is not attached to the DOM» (2 з 4 прогонів «Аудиту», 07.10).
     // Спершу — адреса з набраним періодом, потім той самий DOM-вузол живий два
     // вікна поспіль (~0.8 с).
-    await expect(page).toHaveURL(new RegExp(`[?&]periodKey=${PeriodKey}(&|$)`), { timeout: 30_000 });
+    // ✎ g1: перелік за рік — в адресі `?year=`, а не `?periodKey=`.
+    await expect(page).toHaveURL(new RegExp(`[?&]year=${PeriodKey.slice(0, 4)}(&|$)`), { timeout: 30_000 });
     let alive = 0;
     await expect
       .poll(
