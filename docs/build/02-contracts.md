@@ -2842,6 +2842,27 @@ public interface IDocumentPeriodReopenStore
 }
 ```
 
+#### `IPermitHistoryStore`
+
+✎ 2026-11-09, фіча (j) («дозвіл змінився посеред місяця — користувач ділить місяць»), міграція `J01_PermitHistory`:
+`doc.PermitSegment` — пізніші дозволи «з дати» комірки дозволу рядка (логічна адреса: таблиця, копія аркуша, ключ рядка,
+колонка) або поля шапки; базовий дозвіл — значення комірки/шапки, сегмент діє до дня перед наступним. `doc.CellPermitPart`
+— частини місячного значення між дозволами (`ps_ByPeriodKey`, архівуються з періодом у `arc.CellPermitPart`); місячна
+комірка тримає суму частин.
+
+```csharp
+public interface IPermitHistoryStore
+{
+    public Task<IReadOnlyList<PermitSegmentRecord>> ListAsync(long documentId, CancellationToken ct);
+    public Task<IReadOnlyList<PermitSegment>> RowSegmentsAsync(long documentId, int tableDefId, long? sheetCopyId, string rowKey, int columnDefId, CancellationToken ct);
+    public Task<IReadOnlyList<PermitSegment>> HeaderSegmentsAsync(long documentId, int headerFieldDefId, CancellationToken ct);
+    public Task<IReadOnlyList<CellPermitPart>> PartsAsync(long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct);
+    public Task<bool> RowHasPartsOfAsync(long documentId, int tableDefId, long? sheetCopyId, string rowKey, long registryEntryId, CancellationToken ct);
+    public void Add(PermitSegment segment);
+    public void Remove(PermitSegment segment);
+}
+```
+
 #### `IPrincipalNameResolver`
 
 Переклад між іменем групи каталогу (`ДОМЕН\Група`, `BUILTIN\…`) і її SID. Обидва методи відповідають `null`, коли каталог недоступний або ОС — не Windows: зберігається завжди SID.

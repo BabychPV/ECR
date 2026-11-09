@@ -486,6 +486,21 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
                 .OrderBy(c => c.ValueRegistryEntryId)
                 .Take(HardReferenceCap).CountAsync(ct)).ConfigureAwait(false);
 
+        // Feature (j): permit history segments and month parts hold the entry too (FK_PermitSegment_Entry,
+        // FK_CellPermitPart_Entry) — a document's use, counted with the cells.
+        await AddAsync(
+            RegistryEntryHardReferences.Cells,
+            db.PermitSegments.AsNoTracking()
+                .Where(s => s.RegistryEntryId == id)
+                .OrderBy(s => s.Id)
+                .Take(HardReferenceCap).CountAsync(ct)).ConfigureAwait(false);
+        await AddAsync(
+            RegistryEntryHardReferences.Cells,
+            db.CellPermitParts.AsNoTracking()
+                .Where(p => p.RegistryEntryId == id)
+                .OrderBy(p => p.Id)
+                .Take(HardReferenceCap).CountAsync(ct)).ConfigureAwait(false);
+
         // ⚠ OrderBy у кожного запиту зі стелею — за колонкою рівності (порядок індексу, сортування немає): EF без нього
         // попереджає про Take без порядку (EfWarningGuard у тестах).
 

@@ -35,6 +35,7 @@ public sealed class DocumentPermitHistoryTests(SqlServerFixture sql)
 {
     private const string Password = "Api-Doc-PermitH-2026!";
     private const string HeaderCode = "PERMIT";
+    private static readonly string[] GrantReasons = ["NoGrant", "InsufficientGrantLevel"];
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
@@ -117,7 +118,11 @@ public sealed class DocumentPermitHistoryTests(SqlServerFixture sql)
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
 
         Assert.True(response.StatusCode == HttpStatusCode.Forbidden, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
-        Assert.Equal("ECR-ACCS-0403", JsonDocument.Parse(body).RootElement.GetProperty("errorCode").GetString());
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-ACCS-0403", problem.GetProperty("errorCode").GetString());
+
+        // The refusal is about the GRANT (the period is open), not about the period or the sheet state.
+        Assert.Contains(problem.GetProperty("reason").GetString(), GrantReasons);
         Assert.Equal(0, await SegmentCountAsync(s).ConfigureAwait(true));
     }
 
@@ -261,6 +266,9 @@ public sealed class DocumentPermitHistoryTests(SqlServerFixture sql)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var document = await builder.BuildAsync(columnCount: 2, rowCount: 1).ConfigureAwait(false);
+
+        // A Scheduled period is not editable (PeriodNotOpenYet) — open it, as for any cell write.
+        await builder.OpenPeriodAsync(document).ConfigureAwait(false);
         await using var db = builder.CreateContext();
 
         var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
