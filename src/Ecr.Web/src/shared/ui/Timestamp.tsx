@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
 import { formatDate, formatDateTime } from '@/shared/format';
+import { siteMomentText } from '@/shared/siteMoment';
 
 /**
  * Момент часу на екрані (`D15-09`).
@@ -58,6 +59,12 @@ interface TimestampProps {
    * читається як важливість і змушує вчитуватися в число, яке не має змісту.
    */
   readonly precise?: boolean | undefined;
+
+  /**
+   * ✎ debt-1109 F13 (P3 A): пояс МАЙДАНЧИКА (IANA), у якому показати момент, — коли запис сам його несе (журнал
+   * «Reopen»: стовпець часу й «до …» мусять бути в одному часі). `null`/порожньо — пояс читача, як і раніше.
+   */
+  readonly zone?: string | null | undefined;
 }
 
 /** Момент часу: читабельно на екрані, точно — в розмітці. */
@@ -66,14 +73,18 @@ export function Timestamp({
   dateOnly = false,
   fallback = '—',
   precise = false,
+  zone = null,
 }: TimestampProps): JSX.Element {
   if (value === null || value === undefined || value === '') {
     return <span data-timestamp="none">{fallback}</span>;
   }
 
-  const shown = dateOnly
-    ? formatDate(value)
-    : formatDateTime(value, precise ? { dateStyle: 'medium', timeStyle: 'medium' } : undefined);
+  const inSite = zone === null || zone === '' || precise ? null : siteMomentText(value, zone, dateOnly);
+  const shown =
+    inSite ??
+    (dateOnly
+      ? formatDate(value)
+      : formatDateTime(value, precise ? { dateStyle: 'medium', timeStyle: 'medium' } : undefined));
 
   /*
    * ⛔ Нерозібраний рядок показується ЯК Є, а не тире й не порожнеча.
