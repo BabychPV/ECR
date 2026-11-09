@@ -330,7 +330,7 @@
 .ecr-sec-impact-changes > li {
   display: flex;
   gap: 6px;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 /* ── Порівняння ролей: права — рядки, ролі — колонки ── */

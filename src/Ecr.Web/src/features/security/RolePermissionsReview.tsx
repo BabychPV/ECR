@@ -107,7 +107,7 @@ export function RolePermissionsReview({
                   {t('security.impactNoUsers')}
                 </Text>
               ) : (
-                <Table.ScrollContainer minWidth={520}>
+                <Table.ScrollContainer minWidth={0}>
                   <Table data-testid="role-impact-users">
                     <Table.Thead>
                       <Table.Tr>
