@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
 
 /**
- * (v) human 08.11 («чому я не можу редагувати роль?» → «так», D-469): custom role permissions are editable — impact
+ * (v) human 08.11 («чому я не можу редагувати роль?» → «так», D-470): custom role permissions are editable — impact
  * preview first, a separate confirmation for dangerous permissions, audit, 409 on a concurrent edit; built-in roles
  * stay locked.
  *
