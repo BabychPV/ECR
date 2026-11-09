@@ -73,7 +73,9 @@ describe('withPermitMarks', () => {
     const { template, properties } = cell(marked[1]!, 'R1', '12.4');
 
     expect((template as Node).props['data-split-cell']).toBe('needed');
-    expect(text(template)).toContain('permits.cell.splitNeeded');
+    // F13 p220 re-check P3: a narrow cell cut «Split n…» — the cell says «Split», the full «Split needed» is its label.
+    expect(text(template).trim()).toBe('permits.cell.splitShort');
+    expect((template as Node).props['aria-label']).toBe('permits.cell.splitNeeded');
     expect(properties['class']).toBe('ecr-cell-numeric ecr-cell-split-needed');
     expect(String(properties['title'])).toMatch(/^own\npermits\.cell\.splitHint/);
     expect(String(properties['title'])).toContain('permits.split.limitsOnTotal');

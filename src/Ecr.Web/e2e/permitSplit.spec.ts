@@ -287,7 +287,8 @@ test.describe('Permit split:', () => {
     expect(validate.messages.some((m) => m.ruleCode === 'PERMIT-SPLIT' && m.severity === 'Error'), 'PERMIT-SPLIT').toBe(true);
 
     await openDocument(page, world);
-    await expect(dataCell(page, 0, await gridColumn(page, MonthNames[world.month - 1]!))).toContainText('Split needed');
+    // The cell says «Split»; «Split needed» is its accessible name (F13 p220 re-check P3).
+    await expect(dataCell(page, 0, await gridColumn(page, MonthNames[world.month - 1]!)).locator('[data-split-cell="needed"]')).toHaveAttribute('aria-label', 'Split needed');
     await shot(page, 'j3');
   });
 
@@ -307,7 +308,7 @@ test.describe('Permit split:', () => {
     await shot(page, 'j2');
     await dialog.getByRole('button', { name: 'Save parts' }).click();
     await expect(dialog).toBeHidden({ timeout: 30_000 });
-    await expect(cell).not.toContainText('Split needed', { timeout: 30_000 });
+    await expect(cell.locator('[data-split-cell="needed"]')).toHaveCount(0, { timeout: 30_000 });
 
     const validate = await ok<{ messages: { ruleCode: string }[] }>(
       await page.request.post(`/api/v1/documents/${String(world.documentId)}/validate`, { data: { periodKey: world.periodKey } }),

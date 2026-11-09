@@ -60,9 +60,11 @@ export function withPermitMarks(
 
       const mark = isSplit ? marks.cells.get(cellKey(rowKey, code)) : undefined;
       if (mark?.needsSplit === true) {
-        return h('span', { class: 'ecr-cell-split ecr-cell-split--needed', 'data-split-cell': 'needed' }, [
+        // F13 p220 re-check P3: a narrow month column cut «Split n…» — the cell says «Split», the full «Split needed» is
+        // its accessible name and tooltip.
+        return h('span', { class: 'ecr-cell-split ecr-cell-split--needed', 'data-split-cell': 'needed', 'aria-label': t('permits.cell.splitNeeded') }, [
           h('span', { class: 'ecr-cell-split-glyph', 'aria-hidden': 'true' }),
-          h('span', { class: 'ecr-cell-split-label', title: t('permits.cell.splitNeeded') }, t('permits.cell.splitNeeded')),
+          h('span', { class: 'ecr-cell-split-label', title: t('permits.cell.splitNeeded'), 'aria-hidden': 'true' }, t('permits.cell.splitShort')),
         ]);
       }
       if (mark?.isSplit === true) {
