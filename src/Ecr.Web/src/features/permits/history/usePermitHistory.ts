@@ -46,7 +46,9 @@ export function useAddRowPermit(documentId: number) {
   return useMutation({
     meta: { handled: true },
     mutationFn: (body: AddRowPermitRequest) => addRowPermit(documentId, body),
-    onSuccess: () => refreshAfterPermitChange(queryClient, documentId),
+    onSuccess: () => {
+      void refreshAfterPermitChange(queryClient, documentId);
+    },
   });
 }
 
@@ -57,7 +59,9 @@ export function useUndoRowPermit(documentId: number) {
   return useMutation({
     meta: { handled: true },
     mutationFn: (body: UndoRowPermitRequest) => undoRowPermit(documentId, body),
-    onSuccess: () => refreshAfterPermitChange(queryClient, documentId),
+    onSuccess: () => {
+      void refreshAfterPermitChange(queryClient, documentId);
+    },
   });
 }
 
@@ -71,7 +75,7 @@ export function useSaveCellSplits(documentId: number) {
     onSuccess: (history, body) => {
       queryClient.setQueryData(permitHistoryKey(documentId, body.periodKey), history);
 
-      return refreshAfterPermitChange(queryClient, documentId);
+      void refreshAfterPermitChange(queryClient, documentId);
     },
   });
 }

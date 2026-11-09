@@ -222,3 +222,18 @@ button.ecr-insp-hist-open:focus-visible {
   color: var(--mantine-color-text);
   font-weight: 600;
 }
+
+/* ✎ (j): permit history of a row / parts of a split month in Info. */
+.ecr-insp-permit {
+  padding: 0 0 var(--mantine-spacing-sm);
+  display: grid;
+  gap: 4px;
+}
+
+.ecr-insp-permit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
