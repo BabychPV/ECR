@@ -330,6 +330,7 @@ public sealed partial class DocumentPermitHistoryTests(SqlServerFixture sql)
 
         db.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
         db.RolePermissions.Add(new RolePermission(role.Id, "Registry.View"));
+        db.RolePermissions.Add(new RolePermission(role.Id, "Document.Import"));
         db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
         db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, document.ProjectId, grant));
         await db.SaveChangesAsync().ConfigureAwait(false);
