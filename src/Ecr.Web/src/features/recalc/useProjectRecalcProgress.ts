@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type { JobSummary } from '@/api/types';
 import { markSlicesStale } from '@/features/grid/sliceCache';
 import { isProjectRecalculation, isRecalcActive, progressOf, type RecalcProgress } from './recalcProgress';
@@ -79,6 +80,17 @@ export function withExpectedTotal(progress: RecalcProgress): RecalcProgress {
   return expected === undefined ? progress : { ...progress, total: expected };
 }
 
+/** Стан із N за переліком проєктів (`documentCount`), коли ні сервер, ні вкладка N не знають. */
+export function withProjectTotal(
+  progress: RecalcProgress,
+  projects: readonly { readonly id: number; readonly documentCount?: number | null | undefined }[] | undefined,
+): RecalcProgress {
+  if (progress.total !== null || progress.projectId === null) return progress;
+  const count = projects?.find((project) => project.id === progress.projectId)?.documentCount;
+
+  return count === undefined || count === null ? progress : { ...progress, total: count };
+}
+
 /**
  * Перерахунки проєкту з СЕРВЕРА — щоб сторінка, на яку повернулись (перелік документів, Periods, документ), бачила
  * прогрес, а не лише «Мої задачі» (людина 08.11: «якщо я залишу сторінку з документами і повернуся я не бачу
@@ -106,7 +118,18 @@ export function useProjectRecalcProgress(projectId: number | null, enabled = tru
     retry: false,
   });
 
-  const items = rowsOf(query.data).filter(isProjectRecalculation).map(progressOf).map(withExpectedTotal);
+  const known = rowsOf(query.data).filter(isProjectRecalculation).map(progressOf).map(withExpectedTotal);
+
+  // ✎ debt-1109 x5: перезавантаження ще ДО відповіді на постановку (сховище вкладки порожнє) — N беремо з переліку
+  // проєктів (`documentCount`, те саме N, що рік розкладає), щойно він приїде. Запит — лише коли N справді бракує;
+  // `fetchAllProjects` — ледачим `import()`: статичний імпорт додав би ~1 КБ gzip до сторінки документа (D-132).
+  const needsTotal = known.some((item) => item.total === null && item.projectId !== null && isRecalcActive(item));
+  const projects = useQuery({
+    queryKey: queryKeys.projects.all(),
+    queryFn: async () => (await import('@/features/projects/allProjects')).fetchAllProjects(),
+    enabled: enabled && needsTotal,
+  });
+  const items = needsTotal ? known.map((item) => withProjectTotal(item, projects.data?.items)) : known;
 
   // Перехід «йде → завершено» по кожній задачі.
   const seenActive = useRef(new Set<string>());

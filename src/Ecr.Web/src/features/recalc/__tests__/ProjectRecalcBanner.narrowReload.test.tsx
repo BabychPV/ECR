@@ -59,7 +59,46 @@ afterEach(() => {
   globalThis.localStorage?.clear();
 });
 
+/** Перелік задач (рядок у черзі, без розкладу) і перелік проєктів із `documentCount`. */
+function serveWithProjects(): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const body = url.includes('/api/v1/projects')
+        ? { items: [{ id: 7, code: 'LANDUI2026', documentCount: 3 }], nextCursor: null, totalCount: 1 }
+        : [
+            {
+              jobId: 'P10',
+              jobCode: 'Ecr.Application.Ports.IRecalculationJob',
+              state: 'Queued',
+              percent: 0,
+              updatedAt: new Date().toISOString(),
+              startedAt: null,
+              documentId: null,
+              projectId: 7,
+              projectCode: 'LANDUI2026',
+              effectiveState: 'Queued',
+              fanOut: null,
+            },
+          ];
+
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }),
+  );
+}
+
 describe('ProjectRecalcBanner: вузький екран і раннє перезавантаження (debt-1109)', () => {
+  it('x5: перезавантаження ще до відповіді на постановку — N з переліку проєктів, щойно він приїхав', async () => {
+    vi.resetModules();
+    serveWithProjects();
+    await show();
+
+    expect(
+      await screen.findByText('⟦recalcProgress.queuedDocuments (project=LANDUI2026, total=3, documentCount=⟦recalcProgress.documentCount.other (count=3)⟧)⟧'),
+    ).toBeTruthy();
+  });
+
   it('x4: рядок банера й група дій переносяться, а не стоять у nowrap', async () => {
     serve('Succeeded');
     await show();
