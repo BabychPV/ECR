@@ -64,6 +64,23 @@ describe('groupBySheet: вкладки копій аркуша', () => {
     expect(groups[1]?.groupNameValues).toEqual({ en: 'Boiler' });
   });
 
+  /*
+   * ✎ debt-1109 SHEETNAME-P3 (F13 p218): сервер віддає показувану назву вже з номером («Raft 1», «Raft 2» —
+   * `SheetCopyNaming.Display`), а вкладка й відмова «Sheet Raft 1 1 is submitted…» повторювали номер.
+   * ⛔ Червоне без фіксу: ['Raft 1 1', 'Raft 2 2'].
+   */
+  it('назва сервера з номером («Raft 1») — номер не повторюється; без копій назву людини не чіпаємо', () => {
+    const groups = groupBySheet([
+      table(1, 'GEN', { sheetCopyId: null, copyOrdinal: 1, displayNameL10n: { values: { en: 'Raft 1' } } }),
+      table(2, 'GEN', { sheetCopyId: 77, copyOrdinal: 2, displayNameL10n: { values: { en: 'Raft 2' } } }),
+      table(3, 'AIR', { sheetCopyId: null, copyOrdinal: 1, displayNameL10n: { values: { en: 'Unit 1' } } }, 2),
+    ]);
+
+    expect(groups.map((g) => g.name)).toEqual(['Raft 1', 'Raft 2', 'Unit 1']);
+    expect(groups[1]?.groupNameValues).toEqual({ en: 'Raft' });
+    expect(groups[2]?.groupNameValues).toEqual({ en: 'Unit 1' });
+  });
+
   it('кілька таблиць однієї вкладки лишаються в ній; копії стоять після оригіналу, перед наступним аркушем', () => {
     const groups = groupBySheet([
       table(5, 'AIR', {}, 2),

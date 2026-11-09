@@ -232,10 +232,11 @@ public sealed class NegativePathSweepTests(SqlServerFixture sql)
         var uri = new Uri($"/api/v1/projects/period-policies/{stand.PeriodPolicyId}", UriKind.Relative);
         if (json == "<none>")
         {
-            // Саме це й слав клієнт: без тіла й без Content-Type. MVC відмовляє ще до дії — 415
-            // без `errorCode` (форма відмови — [debt]), але політику не чіпає.
+            // Саме це й слав клієнт: без тіла й без Content-Type. MVC відмовляє ще до дії — 415;
+            // ✎ debt-1109 x3: тепер із `errorCode` і `messageKey` (UnsupportedMediaTypeRefusalFilter).
             using var bare = await client.PutAsync(uri, content: null).ConfigureAwait(true);
-            Assert.Equal(HttpStatusCode.UnsupportedMediaType, bare.StatusCode);
+            await AssertRefusalAsync(app, bare, HttpStatusCode.UnsupportedMediaType, "ECR-REQ-0422", "err.ECR-REQ-0422.malformedRequest")
+                .ConfigureAwait(true);
         }
         else
         {
@@ -248,6 +249,54 @@ public sealed class NegativePathSweepTests(SqlServerFixture sql)
         await using var db = Db();
         var policy = await db.PeriodPolicies.AsNoTracking().SingleAsync(p => p.Id == stand.PeriodPolicyId).ConfigureAwait(true);
         Assert.Equal((0, 15, 45, 45), (policy.OpenOffsetDays, policy.GraceOffsetDays, policy.HardCloseOffsetDays, policy.YearGraceOffsetDays));
+    }
+
+    /// <summary>
+    /// ✎ debt-1109 x2: POST створення політики з частиною полів давав 201 і політику з нульовими зсувами —
+    /// так само, як PUT до 08.11. Тепер 422 форми запиту, політики з цим кодом немає.
+    /// </summary>
+    [Theory]
+    [InlineData("""{"code":"@CODE"}""")]
+    [InlineData("""{"code":"@CODE","openOffsetDays":5}""")]
+    [InlineData("""{"code":"@CODE","openOffsetDays":0,"graceOffsetDays":0,"hardCloseOffsetDays":0}""")]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "negative-path-sweep")]
+    public async Task Створення_політики_без_полів_дає_422_і_не_створює_політику(string template)
+    {
+        var stand = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, stand.UserName).ConfigureAwait(true);
+
+        var code = $"NZ{Guid.NewGuid():N}"[..16];
+        using var content = new StringContent(template.Replace("@CODE", code, StringComparison.Ordinal), System.Text.Encoding.UTF8, "application/json");
+        using var create = await client.PostAsync(new Uri("/api/v1/projects/period-policies", UriKind.Relative), content).ConfigureAwait(true);
+        await AssertRefusalAsync(app, create, HttpStatusCode.UnprocessableEntity, "ECR-REQ-0422", "err.ECR-REQ-0422.malformedRequest")
+            .ConfigureAwait(true);
+
+        await using var db = Db();
+        Assert.False(await db.PeriodPolicies.AsNoTracking().AnyAsync(p => p.Code == code).ConfigureAwait(true));
+    }
+
+    /// <summary>
+    /// ✎ debt-1109 x3: POST без тіла й без Content-Type на БУДЬ-ЯКИЙ ендпоінт із <c>[FromBody]</c> — 415 з
+    /// <c>errorCode</c>/<c>messageKey</c>, а не голий ProblemDetails. Два різні контролери — доказ, що точка одна.
+    /// </summary>
+    [Theory]
+    [InlineData("/api/v1/projects/period-policies")]
+    [InlineData("/api/v1/units/convert")]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "negative-path-sweep")]
+    public async Task Запит_без_тіла_дає_кодовану_415(string path)
+    {
+        var stand = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, stand.UserName).ConfigureAwait(true);
+
+        using var bare = await client.PostAsync(new Uri(path, UriKind.Relative), content: null).ConfigureAwait(true);
+        await AssertRefusalAsync(app, bare, HttpStatusCode.UnsupportedMediaType, "ECR-REQ-0422", "err.ECR-REQ-0422.malformedRequest")
+            .ConfigureAwait(true);
     }
 
     [Fact]

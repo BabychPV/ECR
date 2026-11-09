@@ -16,8 +16,12 @@ import { ProjectRecalcBannerSlot } from '@/features/recalc/ProjectRecalcBannerSl
 import { t } from '@/shared/i18n';
 import { projectsQuery } from '@/features/projects/allProjects';
 import { effectivePeriodState } from '@/features/projects/periodEffective';
-import { PeriodReopenedDocuments } from '@/features/projects/PeriodReopenedDocuments';
-import { getProjectDocumentReopens, projectDocumentReopensKey } from '@/features/documents/periodReopen/api';
+import { PeriodReopenedDocuments, reopenedSummaryText } from '@/features/projects/PeriodReopenedDocuments';
+import {
+  getProjectDocumentReopens,
+  projectDocumentReopensKey,
+  type ProjectDocumentReopenItem,
+} from '@/features/documents/periodReopen/api';
 
 // Правило поясу майданчика живе в `shared/siteMoment`; ім'я лишається доступним звідси.
 export { siteMomentText } from '@/shared/siteMoment';
@@ -195,6 +199,9 @@ export function PeriodsPage({ projectId }: { readonly projectId: number }): JSX.
     queryKey: projectDocumentReopensKey(projectId),
     queryFn: () => getProjectDocumentReopens(projectId),
   });
+  /** Діючі винятки одного місяця — для рядка календаря і плитки року (одне джерело). */
+  const reopensOf = (periodKey: number): ProjectDocumentReopenItem[] =>
+    (documentReopens.data?.items ?? []).filter((item) => item.periodKey === periodKey);
 
   // ✎ Projects (макет 08.11): проєкт — з адреси вкладки (`/projects/:id/periods`); вибору проєкту тут більше немає
   // (колишній автовибір єдиного проєкту `U-10` і огляд «All projects» — тепер перелік `/projects`).
@@ -342,6 +349,7 @@ export function PeriodsPage({ projectId }: { readonly projectId: number }): JSX.
             projectCode={selected?.code ?? ''}
             projectStatus={selected?.status}
             siteDate={siteDate}
+            reopenedNote={(periodKey) => reopenedSummaryText(reopensOf(periodKey), calendar.timeZoneId)}
             selectedKey={tileKey}
             onPick={(key) => {
               setTileKey(key);
@@ -444,8 +452,12 @@ export function PeriodsPage({ projectId }: { readonly projectId: number }): JSX.
                       заведено (той самий дефект уже ловили окремо для
                       `SnapshotsPage`). */}
                   {/* ✎ UAT 08.11 (e2/e3): ЕФЕКТИВНИЙ стан — той, що й у сітці: минула межа блокування = Locked. */}
+                  {/* ✎ debt-1109 i4-P3: закритий місяць із винятками — рядок «Locked · 1 document reopened until …» уже
+                      каже «Locked»; окремий бейдж над ним дублював слово. Атрибут стану лишається для сторожів і e2e. */}
                   <span data-period-state={effectivePeriodState(period, nowMs)}>
-                    <StatusBadge kind="period" state={effectivePeriodState(period, nowMs)} />
+                    {!(effectivePeriodState(period, nowMs) === 'Closed' && reopensOf(period.periodKey).length > 0) && (
+                      <StatusBadge kind="period" state={effectivePeriodState(period, nowMs)} />
+                    )}
                   </span>
                   {effectivePeriodState(period, nowMs) === 'Closed' && (
                     <PeriodReopenedDocuments
@@ -453,7 +465,7 @@ export function PeriodsPage({ projectId }: { readonly projectId: number }): JSX.
                       periodKey={period.periodKey}
                       periodCaption={periodCaption(period.year, period.sequence, calendar.periodKind)}
                       timeZoneId={calendar.timeZoneId}
-                      items={(documentReopens.data?.items ?? []).filter((item) => item.periodKey === period.periodKey)}
+                      items={reopensOf(period.periodKey)}
                       canClose={documentReopens.data?.canClose === true}
                     />
                   )}

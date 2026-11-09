@@ -107,3 +107,14 @@
   font-size: var(--mantine-font-size-xs);
   line-height: 20px;
 }
+
+/*
+ * ✎ debt-1109 b+ (F13 p212, P3): `subtle`-кнопка в `light`-банері (`Alert`) темної теми — тло наведення
+ * `brand-light-hover` лягало ПОВЕРХ тла банера (`brand-light`), і «Hide rows» мав 4.42:1 (#acaee2 на #42455c).
+ * Наведення тут — підкреслення без власного тла: текст лишається на тлі банера (≥ 4.5, `contrast.test.ts`).
+ * Сторож — `src/shared/theme/__tests__/alertSubtleHover.test.ts`.
+ */
+[data-mantine-color-scheme='dark'] .mantine-Alert-root .mantine-Button-root[data-variant='subtle']:not(:disabled, [data-disabled]):hover {
+  background: transparent;
+  text-decoration: underline;
+}

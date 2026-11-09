@@ -136,6 +136,18 @@ describe('PeriodsPage: Locked month reopened for documents (i4)', () => {
       // Відкритий місяць винятків не показує.
       const feb = await row(202602);
       expect(within(feb).queryByTestId('period-reopened-summary')).toBeNull();
+
+      // ✎ debt-1109 i4-P3: бейдж «Locked» над рядком не дублює «Locked · …»; у лютого бейдж лишається.
+      // ⛔ Червоне без фіксу: бейдж стояв у `[data-period-state]` і над рядком винятків.
+      expect(jan.querySelector('[data-period-state="Closed"]')?.textContent).toBe('');
+      expect(feb.querySelector('[data-period-state]')?.textContent).not.toBe('');
+
+      // ✎ debt-1109 i4-P3: плитка року — той самий рядок замість «Locked since …».
+      // ⛔ Червоне без фіксу: плитка показувала лише `periods.tile.lockedSince`.
+      const tile = await screen.findByText((_, el) => el?.getAttribute('data-period-tile') === '202601', {}, { timeout: 60_000 });
+      expect(tile.hasAttribute('data-tile-reopened')).toBe(true);
+      expect(tile.textContent).toContain(`⟦periods.reopenedDocs.summary.one (count=1, until=${String(until)})⟧`);
+      expect(tile.textContent).not.toContain('periods.tile.lockedSince');
     },
     Slow,
   );

@@ -524,12 +524,16 @@ public sealed record ProjectRecalculationRequest(int? PeriodKey);
 /// <param name="GraceOffsetDays">Пільговий строк після кінця періоду.</param>
 /// <param name="HardCloseOffsetDays">Коли період закривається остаточно.</param>
 /// <param name="YearGraceOffsetDays">Пільговий строк після кінця року.</param>
+/// <remarks>
+/// ✎ debt-1109 x2: як і <see cref="UpdatePeriodPolicyRequest"/> — без <c>JsonRequired</c> тіло лише з <c>code</c>
+/// створювало політику з нульовими зсувами (201). Відсутнє поле — 422 <c>err.ECR-REQ-0422.malformedRequest</c>.
+/// </remarks>
 public sealed record CreatePeriodPolicyRequest(
-    string Code,
-    int OpenOffsetDays,
-    int GraceOffsetDays,
-    int HardCloseOffsetDays,
-    int YearGraceOffsetDays);
+    [property: System.Text.Json.Serialization.JsonRequired] string Code,
+    [property: System.Text.Json.Serialization.JsonRequired] int OpenOffsetDays,
+    [property: System.Text.Json.Serialization.JsonRequired] int GraceOffsetDays,
+    [property: System.Text.Json.Serialization.JsonRequired] int HardCloseOffsetDays,
+    [property: System.Text.Json.Serialization.JsonRequired] int YearGraceOffsetDays);
 
 /// <summary>Запит на зміну offsets наявної політики періодів (T6/#37).</summary>
 /// <param name="OpenOffsetDays">Коли період відкривається від початку. Може бути від'ємним.</param>

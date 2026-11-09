@@ -34,6 +34,21 @@ function siteTime(value: string, zone: string): string {
 }
 
 /**
+ * «Locked · N document(s) reopened until …» для винятків ОДНОГО місяця (строк — найпізніший, у поясі майданчика);
+ * `null` — винятків немає. Той самий рядок — у календарі (нижче) і на плитці року (`PeriodYearTiles`, debt-1109 i4-P3).
+ */
+export function reopenedSummaryText(
+  items: readonly Pick<ProjectDocumentReopenItem, 'openUntil'>[],
+  timeZoneId: string,
+): string | null {
+  if (items.length === 0) return null;
+
+  const latest = items.reduce((max, item) => (Date.parse(item.openUntil) > Date.parse(max) ? item.openUntil : max), items[0]?.openUntil ?? '');
+
+  return formatCount(items.length, 'periods.reopenedDocs.summary', { until: siteTime(latest, timeZoneId) });
+}
+
+/**
  * Приймальна i4: закритий місяць, відкритий для окремих документів, — «Locked · 1 document reopened until …» з
  * номерами документів і дією «Close now» на вкладці Periods.
  *
@@ -71,14 +86,14 @@ export function PeriodReopenedDocuments({
     onError: showApiError,
   });
 
-  if (items.length === 0) return null;
-
-  const latest = items.reduce((max, item) => (Date.parse(item.openUntil) > Date.parse(max) ? item.openUntil : max), items[0]?.openUntil ?? '');
+  const summary = reopenedSummaryText(items, timeZoneId);
+  if (summary === null) return null;
 
   return (
-    <Stack gap="xs" mt="xs" data-period-reopened-docs={periodKey}>
+    // ✎ debt-1109 i4-P3: без верхнього відступу — бейдж «Locked» над рядком сторінка вже не малює (рядок сам каже «Locked»).
+    <Stack gap="xs" data-period-reopened-docs={periodKey}>
       <Text size="sm" fw={600} data-testid="period-reopened-summary">
-        {formatCount(items.length, 'periods.reopenedDocs.summary', { until: siteTime(latest, timeZoneId) })}
+        {summary}
       </Text>
       <List size="sm" spacing="xs" listStyleType="none" aria-label={t('periods.reopenedDocs.listLabel', { period: periodCaption })}>
         {items.map((item) => (

@@ -196,6 +196,14 @@ describe('RoleBrowser: правка прав власної ролі ((v) 08.11)
     );
     fireEvent.click(within(screen.getByTestId('role-dangerous-confirm')).getByRole('checkbox'));
     expect((within(impact).getByRole('button', { name: /security\.savePermissions/ }) as HTMLButtonElement).disabled).toBe(true);
+
+    // ✎ debt-1109 v-P3 (F13 p216): перелік — що змінив хтось інший (база → сервер), а не «застаріла чернетка проти
+    // новішого набору». ⛔ Червоне без фіксу: заголовок «impactChangesTitle (added=…, removed=…)» над чужою різницею.
+    const meanwhile = within(impact).getByTestId('role-changed-meanwhile');
+    expect(meanwhile.textContent).toContain('security.roleChangedMeanwhileTitle (added=1, removed=0)');
+    expect(meanwhile.querySelector('[data-change="added"]')?.getAttribute('data-permission')).toBe('Document.Reopen');
+    expect(meanwhile.querySelector('[data-change="removed"]')).toBeNull();
+    expect(within(impact).queryByTestId('role-impact-changes')).toBeNull();
   });
 
   it('409 permissionsStale — зрозуміле пояснення в діалозі й «Reload role», без 500', async () => {

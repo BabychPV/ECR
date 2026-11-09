@@ -38,9 +38,15 @@ public sealed class OutboxDispatcherErrorTextTests(SqlServerFixture sql)
 
         Assert.Contains("ECR-SYS-0500", error, StringComparison.Ordinal);
         Assert.Contains("correlation", error, StringComparison.Ordinal);
+
+        // ✎ debt-1109 x11: id кореляції — випадкові hex-цифри, і «db01» (теж hex) зрідка траплявся в ньому — флейк.
+        // Секрети шукаються в тексті БЕЗ самого id; що id там є і що він hex — перевірено окремо.
+        var correlation = System.Text.RegularExpressions.Regex.Match(error, @"correlation ([0-9a-f]{8,32})");
+        Assert.True(correlation.Success, error);
+        var text = error.Replace(correlation.Groups[1].Value, "<id>", StringComparison.Ordinal);
         foreach (var secret in Secrets)
         {
-            Assert.DoesNotContain(secret, error, StringComparison.Ordinal);
+            Assert.DoesNotContain(secret, text, StringComparison.Ordinal);
         }
     }
 

@@ -36,7 +36,7 @@ describe('scrollIntoUpperThird (fg6 F13: рядок — у верхній тре
     expect(win.scrollBy).not.toHaveBeenCalled();
   });
 
-  it('ScrollRestoration скинув прокрутку після фокуса - рядок повертається в наступних кадрах; колесо людини зупиняє', () => {
+  it('x7: рядок ставиться у верхню третину ОДИН раз, у наступному кадрі — без утримання 40 кадрів', () => {
     const queue: FrameRequestCallback[] = [];
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => queue.push(cb));
     vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
@@ -46,14 +46,28 @@ describe('scrollIntoUpperThird (fg6 F13: рядок — у верхній тре
       for (let i = 0; i < n; i++) queue.shift()?.(0);
     };
 
-    // Рядок «скинутий» на нижній край у КОЖНОМУ кадрі (як після scrollTo(0, 0)).
     keepInUpperThird(() => at(850));
-    flush(3);
-    expect(scrollBy).toHaveBeenCalledTimes(3);
-
-    window.dispatchEvent(new Event('wheel'));
+    expect(scrollBy).not.toHaveBeenCalled();
     flush(5);
-    expect(scrollBy).toHaveBeenCalledTimes(3);
+    expect(scrollBy).toHaveBeenCalledTimes(1);
+    expect(queue).toHaveLength(0);
+    vi.restoreAllMocks();
+  });
+
+  it('людина прокрутила до кадру — сторінку не смикаємо', () => {
+    const queue: FrameRequestCallback[] = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => queue.push(cb));
+    const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {
+      queue.length = 0;
+    });
+    const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => undefined);
+
+    keepInUpperThird(() => at(850));
+    window.dispatchEvent(new Event('wheel'));
+    queue.shift()?.(0);
+
+    expect(cancel).toHaveBeenCalled();
+    expect(scrollBy).not.toHaveBeenCalled();
     vi.restoreAllMocks();
   });
 

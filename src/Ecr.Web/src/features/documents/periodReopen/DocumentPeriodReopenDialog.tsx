@@ -54,9 +54,13 @@ export function DocumentPeriodReopenDialog({
       }),
     onSuccess: async (view) => {
       // Стан винятку, документ (його ключі — під тим самим префіксом) і зрізи: сітка стає редагованою.
+      // ✎ debt-1109 i4-P3: і вкладка Periods (календар і перелік винятків `projectDocumentReopensKey` — обидва під
+      // префіксом `['periods']`): без цього повернення на Periods показувало місяць просто «Locked» до перезавантаження.
+      // Проєкту документа діалог не знає, тож префікс без нього — перечитуються лише змонтовані календарі.
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.document.ofDocument(documentId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.slices.all() }),
+        queryClient.invalidateQueries({ queryKey: ['periods'] }),
       ]);
       showDone(t('document.reopen.done', { period, until: formatDateTime(view.openUntil) }));
       onClose();

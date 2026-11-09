@@ -26,7 +26,8 @@ import {
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import { NavbarDesktopBreakpoint, NavbarDesktopQuery } from '@/app/navbarBreakpoint';
 import { notifications } from '@mantine/notifications';
-import { Navigate, Outlet, ScrollRestoration, useLocation, useMatches } from 'react-router-dom';
+import { Navigate, Outlet, useLocation, useMatches } from 'react-router-dom';
+import { AppScrollRestoration } from './AppScrollRestoration';
 import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
 import { NavbarCollapseToggle } from './NavbarCollapseToggle';
 import { NavRouteLink } from './NavRouteLink';
@@ -56,6 +57,7 @@ import { UserMenu } from '@/shared/ui/UserMenu';
 
 import './routeTransition.css';
 import './narrowShell.css';
+import './navbarFooter.css';
 
 /**
  * Ідентифікатор основного вмісту — ціль для «Пропустити навігацію» нижче.
@@ -411,7 +413,7 @@ export function AppLayout(): JSX.Element {
        * розмонтовувався б разом із дочірнім деревом і саме в цю мить
        * пропускав би подію зміни локації, яку мав відновити.
        */}
-      <ScrollRestoration />
+      <AppScrollRestoration />
 
       {/*
        * Вихід із документа з незбереженими правками (`D14-12` крок 3,
@@ -587,7 +589,7 @@ export function AppLayout(): JSX.Element {
             ))}
           </AppShell.Section>
           {!me.mustChangePassword && desktop && (
-            <AppShell.Section pt="xs">
+            <AppShell.Section pt="xs" className="ecr-nav-footer" data-nav-footer="">
               <NavbarCollapseToggle collapsed={iconsOnly} controls={NavbarItemsId} />
             </AppShell.Section>
           )}

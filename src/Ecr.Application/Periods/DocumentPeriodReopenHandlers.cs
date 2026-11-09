@@ -195,7 +195,7 @@ public sealed class OpenDocumentPeriodReopenHandler(
                         periodKey,
                         openUntil = opened.OpenUntil,
                     }),
-                    ChangeReason: ReopenedReason(opened),
+                    ChangeReason: ReopenedReason(opened, facts.TimeZoneId),
                     ChangedByUserId: userId,
                     CorrelationId: currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
@@ -244,11 +244,17 @@ public sealed class OpenDocumentPeriodReopenHandler(
     /// Причина запису «Reopen» конвертом (F13-p213 i5): причина людини і строк ISO — клієнт показує строк у локалі
     /// читача (<c>structureChangeReason.ts</c>). Причина ≤ 400 символів + конверт уміщаються в <c>nvarchar(1000)</c>.
     /// </summary>
-    internal static string ReopenedReason(DocumentPeriodReopen exception)
+    /// <remarks>
+    /// ✎ debt-1109 i4-P3: ще й пояс майданчика (<c>zone</c>, IANA) — клієнт показує строк у часі САЙТУ, як рядок
+    /// вкладки Periods; у поясі читача (19:00Z) було «Nov 10 00:00» проти «Nov 9 21:00» на Periods. Старі записи без
+    /// <c>zone</c> — як раніше, у поясі читача.
+    /// </remarks>
+    internal static string ReopenedReason(DocumentPeriodReopen exception, string timeZoneId)
         => Sources.IntegrationAuditReason.Encode(
             "document.reopen.audit.reopened",
             ("reason", exception.Reason),
-            ("until", DateTime.SpecifyKind(exception.OpenUntil, DateTimeKind.Utc).ToString("O", CultureInfo.InvariantCulture)));
+            ("until", DateTime.SpecifyKind(exception.OpenUntil, DateTimeKind.Utc).ToString("O", CultureInfo.InvariantCulture)),
+            ("zone", timeZoneId));
 
     /// <summary>
     /// Причина запису «Close» конвертом: «строк минув» / «замінено новим» словами мовою читача, а не сире «Expired»

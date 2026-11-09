@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type { JobSummary } from '@/api/types';
 import { markSlicesStale } from '@/features/grid/sliceCache';
 import { isProjectRecalculation, isRecalcActive, progressOf, type RecalcProgress } from './recalcProgress';
@@ -46,16 +47,48 @@ export function projectRecalcKey(projectId: number | null): readonly unknown[] {
  */
 const expectedTotals = new Map<string, number>();
 
+/**
+ * ✎ debt-1109 x5: перезавантаження ДО розкладу губило N (карта жила лише в пам'яті) — банер знову казав «Queued
+ * recalculation of X…». Тепер N ще й у `sessionStorage` вкладки; кожне звернення в try/catch, без сховища — як раніше.
+ */
+const StoragePrefix = 'ecr.recalcTotal.';
+
 /** Запам'ятати очікуване N для задачі перерахунку проєкту (відповідь `POST /projects/{id}/recalculate`). */
 export function rememberRecalcTotal(jobId: string, total: number): void {
   expectedTotals.set(jobId, total);
+  try {
+    globalThis.sessionStorage?.setItem(`${StoragePrefix}${jobId}`, String(total));
+  } catch {
+    // Сховище недоступне — N живе до перезавантаження.
+  }
 }
 
-/** Стан із N: серверне `fanOut.total`, а до розкладу — запам'ятане при постановці. */
+function storedTotal(jobId: string): number | undefined {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(`${StoragePrefix}${jobId}`);
+    const value = raw === null || raw === undefined ? Number.NaN : Number(raw);
+    return Number.isInteger(value) && value >= 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Стан із N: серверне `fanOut.total`, а до розкладу — запам'ятане при постановці (і після перезавантаження). */
 export function withExpectedTotal(progress: RecalcProgress): RecalcProgress {
   if (progress.total !== null) return progress;
-  const expected = expectedTotals.get(progress.jobId);
+  const expected = expectedTotals.get(progress.jobId) ?? storedTotal(progress.jobId);
   return expected === undefined ? progress : { ...progress, total: expected };
+}
+
+/** Стан із N за переліком проєктів (`documentCount`), коли ні сервер, ні вкладка N не знають. */
+export function withProjectTotal(
+  progress: RecalcProgress,
+  projects: readonly { readonly id: number; readonly documentCount?: number | null | undefined }[] | undefined,
+): RecalcProgress {
+  if (progress.total !== null || progress.projectId === null) return progress;
+  const count = projects?.find((project) => project.id === progress.projectId)?.documentCount;
+
+  return count === undefined || count === null ? progress : { ...progress, total: count };
 }
 
 /**
@@ -85,7 +118,18 @@ export function useProjectRecalcProgress(projectId: number | null, enabled = tru
     retry: false,
   });
 
-  const items = rowsOf(query.data).filter(isProjectRecalculation).map(progressOf).map(withExpectedTotal);
+  const known = rowsOf(query.data).filter(isProjectRecalculation).map(progressOf).map(withExpectedTotal);
+
+  // ✎ debt-1109 x5: перезавантаження ще ДО відповіді на постановку (сховище вкладки порожнє) — N беремо з переліку
+  // проєктів (`documentCount`, те саме N, що рік розкладає), щойно він приїде. Запит — лише коли N справді бракує;
+  // `fetchAllProjects` — ледачим `import()`: статичний імпорт додав би ~1 КБ gzip до сторінки документа (D-132).
+  const needsTotal = known.some((item) => item.total === null && item.projectId !== null && isRecalcActive(item));
+  const projects = useQuery({
+    queryKey: queryKeys.projects.all(),
+    queryFn: async () => (await import('@/features/projects/allProjects')).fetchAllProjects(),
+    enabled: enabled && needsTotal,
+  });
+  const items = needsTotal ? known.map((item) => withProjectTotal(item, projects.data?.items)) : known;
 
   // Перехід «йде → завершено» по кожній задачі.
   const seenActive = useRef(new Set<string>());

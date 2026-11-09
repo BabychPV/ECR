@@ -5,7 +5,7 @@ import { apiFetch } from '@/api/client';
 import type { PeriodCalendarDto, ProjectRecalculationRequest } from '@/api/types';
 import { effectivePeriodState } from '@/features/projects/periodEffective';
 import { MountedLazyConfirmModal } from '@/features/projects/lazyPeriodsDialogs';
-import { isRecalcActive } from '@/features/recalc/recalcProgress';
+import { documentCountText, isRecalcActive } from '@/features/recalc/recalcProgress';
 import {
   projectRecalcKey,
   rememberRecalcTotal,
@@ -52,10 +52,11 @@ export function recalcScopeText(
   now: number = Date.now(),
 ): string {
   const documents = documentCount ?? '—';
+  const counted = documentCountText(documentCount);
 
   // ⚠ Календар ще не приїхав (або відповідь без періодів) — область без місяців, а не падіння діалогу.
   if (calendar === undefined || calendar === null || !Array.isArray(calendar.periods)) {
-    return t('recalcProgress.confirmScopeUnknown', { project: projectCode, documents });
+    return t('recalcProgress.confirmScopeUnknown', { project: projectCode, documents, documentCount: counted });
   }
 
   const open = calendar.periods.filter((period) => {
@@ -64,8 +65,8 @@ export function recalcScopeText(
   });
 
   return open.length === 0
-    ? t('recalcProgress.confirmScopeNoOpen', { documents })
-    : t('recalcProgress.confirmScope', { months: openMonthsText(open, calendar.periodKind), documents });
+    ? t('recalcProgress.confirmScopeNoOpen', { documents, documentCount: counted })
+    : t('recalcProgress.confirmScope', { months: openMonthsText(open, calendar.periodKind), documents, documentCount: counted });
 }
 
 /**
@@ -121,7 +122,7 @@ export function ProjectRecalculateAction({
         showDone(t('recalcProgress.queuedToast', { project: project.code }));
       } else {
         rememberRecalcTotal(job.jobId, total);
-        showDone(t('recalcProgress.queuedDocumentsToast', { project: project.code, total }));
+        showDone(t('recalcProgress.queuedDocumentsToast', { project: project.code, total, documentCount: documentCountText(total) }));
       }
       void queryClient.invalidateQueries({ queryKey: projectRecalcKey(project.id) });
       void queryClient.invalidateQueries({ queryKey: projectRecalcKey(null) });
