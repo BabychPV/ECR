@@ -142,3 +142,16 @@ export function isRecentlyFinished(progress: RecalcProgress, now: number): boole
 
   return !Number.isNaN(at) && now - at <= FinishedVisibleHours * 60 * 60 * 1000;
 }
+
+/**
+ * ✎ Приймання 08.11, g2: перерахунки лише перелічених проєктів; `undefined` — усі (сторінка документа, Periods).
+ *
+ * ⛔ Перелік документів без обраного проєкту читає останні власні перерахунки БУДЬ-ЯКОГО проєкту, і «Finished: …»
+ * проєкту 2026 стояв над переліком 2024 року, до якого не має стосунку. Перерахунок без проєкту (`projectId: null`)
+ * під фільтром не проходить: його нікуди віднести.
+ */
+export function inProjects(items: readonly RecalcProgress[], onlyProjects: readonly number[] | undefined): readonly RecalcProgress[] {
+  return onlyProjects === undefined
+    ? items
+    : items.filter((item) => item.projectId !== null && onlyProjects.includes(item.projectId));
+}
