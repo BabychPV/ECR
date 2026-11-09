@@ -213,6 +213,10 @@ import './frozenColumns.css';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
 import { isPermitTarget, lookupTargetsQuery } from '@/features/registries/lookupTargets';
+import { splitTargetOfEditStart, withPermitMarks } from '@/features/permits/history/gridPermitMarks';
+import { NoPermitMarks, permitGridMarksOf, splitRefusalOf, type SplitRefusal } from '@/features/permits/history/splitModel';
+import { requestCellSplit } from '@/features/permits/history/splitRequest';
+import { usePermitHistory } from '@/features/permits/history/usePermitHistory';
 import { localized } from '@/shared/i18n/localized';
 
 /** Властивості grid. */
@@ -836,6 +840,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // «Retry save» і позначка (`noteSaveFailed` у `holdRejectedEdits`).
           if (!isBusyRetryWaiting()) setSaveError(refusalText(error));
           setSaveErrorReasons([]);
+          setSplitRefusal(null);
         } else {
           // ⛔ Q-30x (High): ось сам фікс — реальний, локалізований текст
           // сервера («Колонка «C1» очікує число.» і подібні) показується як
@@ -849,6 +854,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // (мережа, `TypeError`): доти тут стояв `String(error)`.
           setSaveError(refusalText(error));
           setSaveErrorReasons(rejectedCellReasons(error));
+          setSplitRefusal(splitRefusalOf(error));
         }
 
         // ⚠ Рестрибок НЕ повторюється: жоден викликач (`onPaste`, кнопка
@@ -960,6 +966,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const [saveError, setSaveError] = useState<string | null>(null);
   // ✎ D2: причини з тіла 422 (`cells[].message`) — банер називає правило, а не лише кількість.
   const [saveErrorReasons, setSaveErrorReasons] = useState<readonly RejectedCellReason[]>([]);
+  // ✎ (j) j3: «not saved — the month is split between two permits»: the banner offers «Split <month>».
+  const [splitRefusal, setSplitRefusal] = useState<SplitRefusal | null>(null);
 
   // ⛔ `V-01`: комірки, які сервер відхилив, — зі СХОВИЩА документа, а не зі
   // стану сітки. Там їх бачить автозбереження (щоб не везти), там вони
@@ -1473,7 +1481,45 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // індекс у події RevoGrid відлічується від свого в'юпорту (`selection.ts: globalColumnOf`).
   const pinnedStartRef = useRef(0);
   pinnedStartRef.current = frozenCount;
-  const frozenColumns = useMemo(() => applyFrozenColumns(columns, frozenCount), [columns, frozenCount]);
+  // ✎ (j) permit changes mid-month: the permit history (only tables with a permit column ask for it) marks the permit
+  // cell of a row with history and the month cells shared by two permits (`withPermitMarks`).
+  const hasPermitColumn = useMemo(() => {
+    const permitRegistries = new Set(
+      (registriesList.data ?? []).filter((registry) => isPermitTarget(registry)).map((registry) => registry.id),
+    );
+
+    return (data?.columns ?? []).some(
+      (column) => column.dataType === 'Lookup' && column.lookupRegistryDefId !== null && permitRegistries.has(column.lookupRegistryDefId),
+    );
+  }, [data?.columns, registriesList.data]);
+  const permitHistory = usePermitHistory(documentId, periodKey, hasPermitColumn && tableDefId !== undefined);
+  const permitMarks = useMemo(
+    () => (tableDefId === undefined ? NoPermitMarks : permitGridMarksOf(permitHistory.data, tableDefId, sheetCopyId)),
+    [permitHistory.data, tableDefId, sheetCopyId],
+  );
+  const frozenColumns = useMemo(() => {
+    const frozen = applyFrozenColumns(columns, frozenCount);
+
+    return data === undefined ? frozen : withPermitMarks(frozen, data, permitMarks, rowKeyOf);
+  }, [columns, frozenCount, data, permitMarks]);
+
+  // ✎ (j) j2: Enter/F2/double-click/typing on a month cell shared by two permits opens the split dialog, not the editor.
+  const onBeforeEditStart = useCallback(
+    (event: CustomEvent<{ prop?: unknown; model?: unknown }>) => {
+      if (tableDefId === undefined) return;
+      const target = splitTargetOfEditStart(
+        permitMarks,
+        event.detail,
+        { documentId, periodKey, tableInstanceId, tableDefId, sheetCopyId },
+        rowKeyOf,
+      );
+      if (target === null) return;
+
+      event.preventDefault();
+      requestCellSplit(target);
+    },
+    [permitMarks, documentId, periodKey, tableInstanceId, tableDefId, sheetCopyId],
+  );
 
   const gridColumnData = useMemo(
     () => withHeaderGroups(frozenColumns, data?.headerGroups, data?.columns ?? []),
@@ -3029,6 +3075,25 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // позначка в рядку кнопок. Одна відмова — одне повідомлення.
         <Alert color="statusError" title={t('grid.saveError')} role="alert">
           <Text size="sm">{saveErrorText}</Text>
+          {saveError !== null && splitRefusal !== null && tableDefId !== undefined && (
+            // ✎ (j) j3: the refusal names the month cells; each opens its split.
+            <Group gap="xs" mt="xs" data-testid="save-error-split">
+              {splitRefusal.cells.map((cell) => (
+                <Button
+                  key={`${cell.rowKey}:${cell.columnCode}`}
+                  size="xs"
+                  variant="subtle"
+                  onClick={() =>
+                    requestCellSplit({ documentId, periodKey, tableInstanceId, tableDefId, sheetCopyId, rowKey: cell.rowKey, columnCode: cell.columnCode })
+                  }
+                >
+                  {t('permits.split.action', {
+                    column: data?.columns.find((column) => column.code === cell.columnCode)?.header ?? cell.columnCode,
+                  })}
+                </Button>
+              ))}
+            </Group>
+          )}
           {saveError !== null && saveErrorReasons.length > 0 && (
             // ✎ D2: правило, що відхилило запис, — з посиланням на комірку (колонка · рядок).
             <Stack gap="xs" mt="xs" data-testid="save-error-reasons">
@@ -3145,6 +3210,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // (`cancelChanges`); Enter/Tab фіксують, як і досі.
           applyOnClose
           plugins={GridPlugins}
+          onBeforeeditstart={onBeforeEditStart}
           onBeforeedit={onBeforeEdit}
           onBeforerangeedit={onBeforeRangeEdit}
           onAfteredit={onAfterEdit}
