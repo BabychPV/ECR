@@ -123,6 +123,8 @@ builder.Services
     {
         options.Filters.Add<Ecr.Api.Observability.BudgetMetricsFilter>();
         options.Filters.AddService<Ecr.Api.Startup.MigrationMarkerFilter>();
+        // ✎ debt-1109 x3: 415 MVC (немає тіла / чужий Content-Type) — кодована відмова, а не голий ProblemDetails.
+        options.Filters.Add(new Ecr.Api.Errors.UnsupportedMediaTypeRefusalFilter());
     })
     // ⚠ Перелік конвертерів — в `EcrJsonSerialization`, а не тут: ті самі
     // правила потрібні двом незалежним наборам опцій (нижче), і копія в
