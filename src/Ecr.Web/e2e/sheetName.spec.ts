@@ -7,12 +7,13 @@ import { signIn } from './multiSheet';
  * Сценарій: шаблон з копійованим аркушем і колонкою-формулою `SHEETNAME()` -> документ -> копія аркуша з рядком ->
  * перейменування групи «E2E vessel» -> на копії формула дає «E2E vessel 2» (оригінал «E2E vessel 1») ->
  * перейменування «E2E contract» -> «E2E contract 2». Значення пише фонова задача перерахунку, яку ставить
- * перейменування (`DocumentSheetCopyHandler`), тож тест чекає зрізу, а не відповіді PUT. Третій кадр — автодоповнення
- * `SHEETNAME` у редакторі виразів шаблону.
+ * перейменування (`DocumentSheetCopyHandler`), тож тест чекає зрізу (обох екземплярів), а не відповіді PUT: задачі
+ * документа йдуть по черзі під його блокуванням (по одній на період), і оригінал може дійти пізніше за копію.
+ * Третій кадр — автодоповнення `SHEETNAME` у редакторі виразів шаблону.
  *
  * ⛔ Без стенда файл ПАДАЄ (вхід/запити до API), а не пропускається (honesty-guard).
  */
-test.describe.configure({ timeout: 240_000 });
+test.describe.configure({ timeout: 600_000 });
 
 const SheetCode = 'VESSELS';
 const Shots = process.env['ECR_E2E_SHEETNAME_SHOTS'];
@@ -194,28 +195,32 @@ test('SHEETNAME: копія аркуша показує «<Назва> 2» і о
   // Перейменування ставить перерахунок формул аркуша — значення пише фонова задача.
   await rename(page, doc, 'E2E vessel');
   await expect
-    .poll(() => sheetValue(page, doc, copyTable?.tableInstanceId ?? 0), { timeout: 120_000, intervals: [1_000, 2_000, 5_000] })
+    .poll(() => sheetValue(page, doc, copyTable?.tableInstanceId ?? 0), { timeout: 180_000, intervals: [1_000, 2_000, 5_000] })
     .toBe('E2E vessel 2');
-  expect(await sheetValue(page, doc, original?.tableInstanceId ?? 0)).toBe('E2E vessel 1');
+  await expect
+    .poll(() => sheetValue(page, doc, original?.tableInstanceId ?? 0), { timeout: 180_000, intervals: [1_000, 2_000, 5_000] })
+    .toBe('E2E vessel 1');
 
   await page.goto(
     `/documents/${String(doc.documentId)}?periodKey=${String(doc.periodKey)}&sheet=${SheetCode}~${String(copy.sheetCopyId)}`,
   );
   const copyTab = page.getByRole('tab', { name: /E2E vessel 2/ });
   await expect(copyTab).toHaveAttribute('aria-selected', 'true', { timeout: 60_000 });
-  // Значення в сітці: та сама назва, що й на вкладці, — ще раз у тілі таблиці (не лише у вкладці).
-  await expect(page.locator('main').getByText('E2E vessel 2', { exact: true }).nth(1)).toBeVisible({ timeout: 60_000 });
+  // Значення в сітці (комірка-формула «ƒ …»), а не лише назва вкладки.
+  await expect(page.getByRole('gridcell', { name: /E2E vessel 2/ })).toBeVisible({ timeout: 60_000 });
   await shot(page, '01-copy-sheetname-vessel-2');
 
   await rename(page, doc, 'E2E contract');
   await expect
-    .poll(() => sheetValue(page, doc, copyTable?.tableInstanceId ?? 0), { timeout: 120_000, intervals: [1_000, 2_000, 5_000] })
+    .poll(() => sheetValue(page, doc, copyTable?.tableInstanceId ?? 0), { timeout: 180_000, intervals: [1_000, 2_000, 5_000] })
     .toBe('E2E contract 2');
-  expect(await sheetValue(page, doc, original?.tableInstanceId ?? 0)).toBe('E2E contract 1');
+  await expect
+    .poll(() => sheetValue(page, doc, original?.tableInstanceId ?? 0), { timeout: 180_000, intervals: [1_000, 2_000, 5_000] })
+    .toBe('E2E contract 1');
 
   await page.reload();
   await expect(page.getByRole('tab', { name: /E2E contract 2/ })).toHaveAttribute('aria-selected', 'true', { timeout: 60_000 });
-  await expect(page.locator('main').getByText('E2E contract 2', { exact: true }).nth(1)).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('gridcell', { name: /E2E contract 2/ })).toBeVisible({ timeout: 60_000 });
   await shot(page, '02-copy-sheetname-after-rename');
 });
 
