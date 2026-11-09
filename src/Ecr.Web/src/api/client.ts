@@ -1,4 +1,5 @@
 import type { paths } from './schema';
+import { announceIdleExpired } from '../shared/session/idleChannel';
 
 /**
  * Шляхи OpenAPI — основа типізованого клієнта.
@@ -153,25 +154,46 @@ export function newCorrelationId(): string {
  * відповів `401` з тілом `ECR-AUTH-0401`. Без причини — звичайний `401`
  * cookie-схеми без тіла: людина просто не входила.
  */
-export type LoginReason = 'session-invalidated';
+export type LoginReason = 'session-invalidated' | 'idle';
 
 /** Параметр адреси входу, що несе причину. */
 export const LOGIN_REASON_PARAM = 'reason';
 
+/** Параметр адреси входу з межею бездіяльності в хвилинах (лише для `reason=idle`, D-471). */
+export const LOGIN_IDLE_MINUTES_PARAM = 'minutes';
+
+/** Ключ відмови сервера «сеанс завершено через бездіяльність» (`IdleSession.IdleTimeoutMessageKey`). */
+export const IDLE_TIMEOUT_MESSAGE_KEY = 'err.ECR-AUTH-0401.idleTimeout';
+
 /** Адреса сторінки входу з поверненням і (необов'язковою) причиною. */
-export function loginUrl(from: string, reason?: LoginReason): string {
+export function loginUrl(from: string, reason?: LoginReason, idleMinutes?: number): string {
   const base = `${LOGIN_PATH}?from=${encodeURIComponent(from)}`;
-  return reason === undefined ? base : `${base}&${LOGIN_REASON_PARAM}=${reason}`;
+  if (reason === undefined) return base;
+  const minutes =
+    reason === 'idle' && idleMinutes !== undefined && Number.isSafeInteger(idleMinutes)
+      ? `&${LOGIN_IDLE_MINUTES_PARAM}=${String(idleMinutes)}`
+      : '';
+  return `${base}&${LOGIN_REASON_PARAM}=${reason}${minutes}`;
 }
 
 /** Куди перенаправляти при 401; підміняється в тестах. */
-let redirectToLogin: (from: string, reason?: LoginReason) => void = (from, reason) => {
+let redirectToLogin: (from: string, reason?: LoginReason, idleMinutes?: number) => void = (
+  from,
+  reason,
+  idleMinutes,
+) => {
   if (typeof window !== 'undefined') {
     // ⛔ AN-108 / S2-03: `replace`, не `assign` — сторінка з даними сеансу не лишається в історії (і в bfcache)
     // під кнопкою «Назад» на формі входу. Повернення після входу несе `?from=`.
-    window.location.replace(loginUrl(from, reason));
+    window.location.replace(loginUrl(from, reason, idleMinutes));
   }
 };
+
+/** Причина обриву сесії з тіла `401` і (для бездіяльності) межа в хвилинах. */
+interface LoginCause {
+  reason: LoginReason | undefined;
+  idleMinutes?: number;
+}
 
 /**
  * Чи це обрив чинної сесії, а не «не входив».
@@ -180,13 +202,26 @@ let redirectToLogin: (from: string, reason?: LoginReason) => void = (from, reaso
  * (`OnRedirectToLogin`), а штамп безпеки кидає `AccessDeniedException` з
  * `ECR-AUTH-0401`, і `ExceptionHandlingMiddleware` пише `problem+json`.
  * Читається `clone()` — оригінальне тіло лишається недоторканим.
+ *
+ * ✎ D-471: той самий код із ключем `idleTimeout` — вихід після бездіяльності, який помітив сервер
+ * (вкладка лише опитувала); тоді й межа (`idleMinutes`) для тексту на сторінці входу.
  */
-async function loginReasonOf(response: Response): Promise<LoginReason | undefined> {
+async function loginCauseOf(response: Response): Promise<LoginCause> {
   try {
-    const body = (await response.clone().json()) as { errorCode?: unknown };
-    return body.errorCode === 'ECR-AUTH-0401' ? 'session-invalidated' : undefined;
+    const body = (await response.clone().json()) as {
+      errorCode?: unknown;
+      messageKey?: unknown;
+      idleMinutes?: unknown;
+    };
+    if (body.errorCode !== 'ECR-AUTH-0401') return { reason: undefined };
+    if (body.messageKey === IDLE_TIMEOUT_MESSAGE_KEY) {
+      return typeof body.idleMinutes === 'number'
+        ? { reason: 'idle', idleMinutes: body.idleMinutes }
+        : { reason: 'idle' };
+    }
+    return { reason: 'session-invalidated' };
   } catch {
-    return undefined;
+    return { reason: undefined };
   }
 }
 
@@ -215,8 +250,54 @@ async function isFormAnswer401(path: string, response: Response): Promise<boolea
 }
 
 /** Підміняє поведінку при 401 — для тестів і для роутера. */
-export function setLoginRedirect(handler: (from: string, reason?: LoginReason) => void): void {
+export function setLoginRedirect(
+  handler: (from: string, reason?: LoginReason, idleMinutes?: number) => void,
+): void {
   redirectToLogin = handler;
+}
+
+/**
+ * Вихід цієї вкладки після бездіяльності (D-471): мережу закрито, слід незбережених правок лишено, перехід на
+ * вхід із причиною `idle` і межею. Викликає таймер вкладки (`IdleSignOut`) після `POST /api/v1/logout/idle`
+ * або сповіщення сусідньої вкладки.
+ */
+export function signOutForIdle(idleMinutes: number): void {
+  if (signedOut || sessionSwitched) return;
+  signedOut = true;
+  const from = typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search;
+  runBeforeLoginRedirect(from);
+  redirectToLogin(from, 'idle', idleMinutes);
+}
+
+/**
+ * Заголовок фонового запиту, що змінює стан, але не є дією людини (D-471, `IdleSession.BackgroundHeader`):
+ * сервер не продовжує ним сеанс і не рахує його активністю. GET не потребує позначки — він не рахується ніколи.
+ */
+export const BACKGROUND_HEADER = 'X-Ecr-Background';
+
+/** Адреса явного сигналу активності (D-471). */
+export const ACTIVITY_PATH = '/api/v1/session/activity';
+
+/** Адреса виходу через бездіяльність (D-471). */
+export const IDLE_LOGOUT_PATH = '/api/v1/logout/idle';
+
+/** Хто слухає дії людини, що пішли на сервер (мутації); `null` — ніхто. */
+let activityListener: (() => void) | null = null;
+
+/** Реєструє слухача дій людини, що пішли на сервер (D-471: годинник бездіяльності); `null` — зняти. */
+export function setUserActivityListener(listener: (() => void) | null): void {
+  activityListener = listener;
+}
+
+/** Чи запит — дія людини: змінює стан, не фоновий і не сам сигнал активності чи вихід. */
+function isUserAction(path: string, method: string | undefined, headers: Headers): boolean {
+  return (
+    isStateChanging(method) &&
+    !headers.has(BACKGROUND_HEADER) &&
+    path !== ACTIVITY_PATH &&
+    path !== IDLE_LOGOUT_PATH &&
+    path !== LOGOUT_PATH
+  );
 }
 
 /**
@@ -530,6 +611,9 @@ async function apiFetchRaw(
     headers.set('Content-Type', 'application/json');
   }
 
+  // D-471: дія людини, що пішла на сервер, — теж активність для годинника бездіяльності (сервер рахує її так само).
+  if (activityListener !== null && isUserAction(path, init?.method, headers)) activityListener();
+
   const response = await fetch(path, { ...init, headers, credentials: 'include' });
 
   // ⛔ Аудит-пас 5: невірний пароль на самій формі входу — теж `401`, і до
@@ -542,8 +626,11 @@ async function apiFetchRaw(
   // за власний `401` самі — тут перенаправляти нема куди й нема чого.
   if (response.status === 401 && !(await isFormAnswer401(path, response))) {
     const from = typeof window === 'undefined' ? path : window.location.pathname;
+    const cause = await loginCauseOf(response);
     runBeforeLoginRedirect(from);
-    redirectToLogin(from, await loginReasonOf(response));
+    // ✎ D-471: сервер завершив сеанс через бездіяльність — сусідні вкладки йдуть на вхід разом із цією.
+    if (cause.reason === 'idle') announceIdleExpired(cause.idleMinutes);
+    redirectToLogin(from, cause.reason, cause.idleMinutes);
     /*
      * ⛔ Заголовок — із КАТАЛОГУ, не літералом. Тут стояло «Потрібна
      * автентифікація» українською — мовою, якої в продукті немає (`D-95`:

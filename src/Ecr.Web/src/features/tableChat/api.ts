@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { apiFetch, apiFetchIfChanged, EcrApiError, type Conditional } from '@/api/client';
+import { apiFetch, apiFetchIfChanged, BACKGROUND_HEADER, EcrApiError, type Conditional } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import { chatKey, copyParam } from './chatKey';
 import type {
@@ -187,6 +187,8 @@ export function markRead(
   return apiFetch<void>(`/api/v1/documents/${String(documentId)}/tables/${encodeURIComponent(tableCode)}/read?${copyParam(sheetCopyId)}`, {
     method: 'PUT',
     body: JSON.stringify(body),
+    // D-471: позначка «прочитано» йде й тоді, коли нові повідомлення приїхали опитуванням — не дія людини.
+    headers: { [BACKGROUND_HEADER]: '1' },
   });
 }
 
