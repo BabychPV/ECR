@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Alert, Button, Group, Select, Stack, Text } from '@mantine/core';
+import { Alert, Anchor, Button, Group, Select, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
@@ -13,12 +13,6 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { problemText } from '@/shared/ui/problemText';
 import { dottedDate, permitGapOf } from './splitModel';
 import { useAddRowPermit } from './usePermitHistory';
-
-/** Long button labels (permit number + date) wrap instead of running past the narrow Inspector. */
-const WrapLabel = {
-  root: { height: 'auto', whiteSpace: 'normal' as const, paddingBlock: 4 },
-  label: { whiteSpace: 'normal' as const, textAlign: 'left' as const, overflowWrap: 'anywhere' as const },
-};
 
 /** Options shown at once (the registry may hold thousands; search goes over all of them). */
 const OptionsLimit = 50;
@@ -154,10 +148,11 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
             </Text>
             <Stack gap="xs" mt="xs" align="flex-start" data-gap-actions="">
               {gap.suggestedFrom !== null && (
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  styles={WrapLabel}
+                <Anchor
+                  component="button"
+                  type="button"
+                  size="sm"
+                  ta="left"
                   data-gap-move=""
                   onClick={() => {
                     const date = gap.suggestedFrom ?? from;
@@ -166,12 +161,13 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
                   }}
                 >
                   {t('permits.history.gapMove', { permit: gap.next, date: dottedDate(gap.suggestedFrom) })}
-                </Button>
+                </Anchor>
               )}
-              <Button
-                size="xs"
-                variant="subtle"
-                styles={WrapLabel}
+              <Anchor
+                component="button"
+                type="button"
+                size="sm"
+                ta="left"
                 data-gap-add=""
                 onClick={() => {
                   add.reset();
@@ -179,7 +175,7 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
                 }}
               >
                 {t('permits.history.gapAdd', { days: gap.days })}
-              </Button>
+              </Anchor>
             </Stack>
           </Alert>
         ) : (

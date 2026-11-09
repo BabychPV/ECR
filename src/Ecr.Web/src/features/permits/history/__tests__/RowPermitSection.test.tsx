@@ -146,8 +146,10 @@ describe('RowPermitSection (j1)', () => {
     const move = within(alert).getByRole('button', { name: /permits\.history\.gapMove .*"date":"10\.02\.2026"/ });
     expect(within(alert).getByRole('button', { name: /permits\.history\.gapAdd/ })).toBeTruthy();
 
-    // Fresh eyes 09.11 (j4 at 1335): long fix labels wrap and the fixes stack — nothing runs past the narrow Inspector.
-    expect(move.style.whiteSpace).toBe('normal');
+    // Fresh eyes 09.11 (j4 at 1335): the fixes are text links (wrap like text, no button nowrap) stacked in a column —
+    // nothing runs past the narrow Inspector.
+    expect(move.className).toMatch(/Anchor/);
+    expect(move.className).not.toMatch(/Button/);
     expect(alert.querySelector('[data-gap-actions]')?.className).toMatch(/Stack/);
     fireEvent.click(move);
 
