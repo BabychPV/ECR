@@ -112,3 +112,19 @@ export function orderedLines(
     .sort((a, b) => tableIndex(a.line) - tableIndex(b.line) || rowIndex(a.line) - rowIndex(b.line) || a.index - b.index)
     .map((entry) => entry.line);
 }
+
+/** The row key of a line (table, sheet copy, row) — rows, not cells, are what the banner and «Split all» count. */
+export function rowKeyOfLine(line: HeaderSplitLine): string {
+  return `${String(line.row.tableDefId)}#${String(line.row.sheetCopyId ?? '')}:${line.row.rowKey}`;
+}
+
+/** One line per row (the first), in the given order. */
+export function firstLinePerRow(lines: readonly HeaderSplitLine[]): readonly HeaderSplitLine[] {
+  const seen = new Set<string>();
+  return lines.filter((line) => {
+    const key = rowKeyOfLine(line);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}

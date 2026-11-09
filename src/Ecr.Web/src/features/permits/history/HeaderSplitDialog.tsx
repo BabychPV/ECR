@@ -11,7 +11,7 @@ import { formatMonthYear } from '@/shared/format/period';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
-import type { HeaderSplitLine } from './headerSplitModel';
+import { rowKeyOfLine, type HeaderSplitLine } from './headerSplitModel';
 import { rowDisplayName } from './rowName';
 import { dayMonth, dottedDate, monthOf, shortDecimal, totalOfParts, wireDecimal } from './splitModel';
 import { useSaveCellSplits } from './usePermitHistory';
@@ -68,7 +68,9 @@ export function HeaderSplitDialog({ documentId, periodKey, lines, slices, onClos
   const { year, month } = first === undefined ? { year: 0, month: 0 } : monthOf(first.month.month);
   const monthLabel = formatMonthYear(year, month);
   const changedOn = parts[1]?.dayFrom;
-  const rowCount = new Set(lines.map((line) => `${String(line.row.tableDefId)}:${line.row.rowKey}`)).size;
+  // F13 p223 (3): rows, as the banner counts them — a row is split when every one of its month cells holds all parts.
+  const rowKeys = [...new Set(lines.map(rowKeyOfLine))];
+  const rowCount = rowKeys.length;
 
   const valuesOf = (line: HeaderSplitLine): readonly string[] =>
     texts.get(lineKey(line)) ?? parts.map((_, index) => shortDecimal(wireDecimal(line.cell?.parts[index])) ?? '');
@@ -77,7 +79,9 @@ export function HeaderSplitDialog({ documentId, periodKey, lines, slices, onClos
   const invalidOf = (line: HeaderSplitLine): boolean =>
     valuesOf(line).some((text, index) => text.trim().length > 0 && parsedOf(line)[index] === null);
 
-  const done = lines.filter((line) => totalOfParts(parsedOf(line)) !== null).length;
+  const done = rowKeys.filter((key) =>
+    lines.filter((line) => rowKeyOfLine(line) === key).every((line) => totalOfParts(parsedOf(line)) !== null),
+  ).length;
   const anyInvalid = lines.some(invalidOf);
 
   const submit = (): void => {
@@ -186,7 +190,7 @@ export function HeaderSplitDialog({ documentId, periodKey, lines, slices, onClos
           <Group justify="space-between" wrap="nowrap" align="flex-start">
             <Text size="xs" c="dimmed" role="status" aria-live="polite" data-header-split-progress="">
               <Text span fw={600} c="var(--mantine-color-text)" size="xs">
-                {t('permits.header.progress', { done, count: lines.length })}
+                {t('permits.header.progress', { done, count: rowCount })}
               </Text>{' '}
               {t('permits.header.progressHint')}
             </Text>

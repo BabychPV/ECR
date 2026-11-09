@@ -5,7 +5,10 @@ import { formatMonthYear } from '@/shared/format/period';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { HeaderSplitDialog, lineKey, useLineSlices } from './HeaderSplitDialog';
-import { headerSplitLinesOf, orderedLines, pendingRowsByTable } from './headerSplitModel';
+import { firstLinePerRow, headerSplitLinesOf, orderedLines, pendingRowsByTable, type HeaderSplitLine } from './headerSplitModel';
+
+/** Rows shown while the banner is collapsed. */
+const CollapsedRows = 3;
 import { rowDisplayName } from './rowName';
 import { dayMonth, dottedDate, monthOf } from './splitModel';
 import { usePermitHistory } from './usePermitHistory';
@@ -31,18 +34,24 @@ export function HeaderSplitBanner({ documentId, periodKey, tables, readOnly, onR
   const slices = useLineSlices(documentId, periodKey, found.some((line) => line.needsSplit) ? found : []);
   const lines = orderedLines(found, tables, slices);
   const pending = lines.filter((line) => line.needsSplit);
-  const [showRows, setShowRows] = useState(false);
-  const [splitting, setSplitting] = useState(false);
+  // F13 p223 (2): compact by default (fg6 «≤ ~2 lines»): the summary, the first rows and «Show all N»; chips when expanded.
+  const [expanded, setExpanded] = useState(false);
+  // F13 p223 (3): «Split all» lists the rows still to split when it opens — the same rows the banner counts.
+  const [splitting, setSplitting] = useState<readonly HeaderSplitLine[] | null>(null);
 
-  const first = pending[0] ?? lines[0];
-  if (first === undefined || (pending.length === 0 && !splitting)) return null;
+  const first = pending[0];
+  if (first === undefined) {
+    return splitting === null ? null : (
+      <HeaderSplitDialog documentId={documentId} periodKey={periodKey} lines={splitting} slices={slices} onClose={() => setSplitting(null)} />
+    );
+  }
 
   const { year, month } = monthOf(first.month.month);
   const monthLabel = formatMonthYear(year, month);
   const [before, after] = first.month.parts;
-  const rowCount = new Set(
-    pending.map((line) => `${String(line.row.tableDefId)}#${String(line.row.sheetCopyId ?? '')}:${line.row.rowKey}`),
-  ).size;
+  const pendingRows = firstLinePerRow(pending);
+  const rowCount = pendingRows.length;
+  const shownRows = expanded ? pendingRows : pendingRows.slice(0, CollapsedRows);
   const byTable = pendingRowsByTable(lines);
   const tableName = (table: DocumentTableDto | null, code: string): string =>
     table === null ? code : localized(table.tableNameL10n) || table.tableCode;
@@ -71,58 +80,60 @@ export function HeaderSplitBanner({ documentId, periodKey, tables, readOnly, onR
                 })}
               </Text>
               <Group gap="xs">
-                <Button variant="default" size="xs" data-header-split-show="" onClick={() => setShowRows((value) => !value)}>
-                  {showRows ? t('permits.header.hideRows') : t('permits.header.showRows')}
-                </Button>
                 {!readOnly && (
-                  <Button size="xs" data-header-split-all="" onClick={() => setSplitting(true)}>
+                  <Button size="xs" data-header-split-all="" onClick={() => setSplitting(pending)}>
                     {t('permits.header.splitAll')}
                   </Button>
                 )}
               </Group>
             </Group>
-            <Group gap="xs">
-              {byTable.map((entry) => (
-                <Badge
-                  key={`${String(entry.tableDefId)}#${String(entry.sheetCopyId ?? '')}`}
-                  variant="outline"
-                  color="statusWarning"
-                  tt="none"
-                >
-                  {t('permits.header.bannerTable', { table: tableName(entry.table, String(entry.tableDefId)), count: entry.rows })}
-                </Badge>
-              ))}
-            </Group>
-            {showRows && (
-              <List size="sm" spacing="xs" data-header-split-rows="">
-                {pending.map((line) => {
-                  const slice = slices.get(line.table?.tableInstanceId ?? 0);
-                  const name = `${tableName(line.table, line.row.tableCode)} — ${rowDisplayName(slice, line.row.rowKey, line.row.permits[0]?.permit)}`;
+            {expanded && (
+              <Group gap="xs">
+                {byTable.map((entry) => (
+                  <Badge
+                    key={`${String(entry.tableDefId)}#${String(entry.sheetCopyId ?? '')}`}
+                    variant="outline"
+                    color="statusWarning"
+                    tt="none"
+                  >
+                    {t('permits.header.bannerTable', { table: tableName(entry.table, String(entry.tableDefId)), count: entry.rows })}
+                  </Badge>
+                ))}
+              </Group>
+            )}
+            <List size="sm" spacing="xs" data-header-split-rows="">
+              {shownRows.map((line) => {
+                const slice = slices.get(line.table?.tableInstanceId ?? 0);
+                const name = `${tableName(line.table, line.row.tableCode)} — ${rowDisplayName(slice, line.row.rowKey, line.row.permits[0]?.permit)}`;
 
-                  return (
-                    <List.Item key={lineKey(line)}>
-                      {onReveal === undefined || line.table === null ? (
-                        name
-                      ) : (
-                        <Anchor
-                          component="button"
-                          type="button"
-                          size="sm"
-                          onClick={() => onReveal(line.table?.tableInstanceId ?? 0, line.row.rowKey)}
-                        >
-                          {name}
-                        </Anchor>
-                      )}
-                    </List.Item>
-                  );
-                })}
-              </List>
+                return (
+                  <List.Item key={lineKey(line)}>
+                    {onReveal === undefined || line.table === null ? (
+                      name
+                    ) : (
+                      <Anchor
+                        component="button"
+                        type="button"
+                        size="sm"
+                        onClick={() => onReveal(line.table?.tableInstanceId ?? 0, line.row.rowKey)}
+                      >
+                        {name}
+                      </Anchor>
+                    )}
+                  </List.Item>
+                );
+              })}
+            </List>
+            {pendingRows.length > CollapsedRows && (
+              <Anchor component="button" type="button" size="sm" data-header-split-show="" onClick={() => setExpanded((value) => !value)}>
+                {expanded ? t('permits.header.showLess') : t('permits.header.showAll', { count: pendingRows.length })}
+              </Anchor>
             )}
           </Stack>
         </Alert>
       )}
-      {splitting && (
-        <HeaderSplitDialog documentId={documentId} periodKey={periodKey} lines={lines} slices={slices} onClose={() => setSplitting(false)} />
+      {splitting !== null && (
+        <HeaderSplitDialog documentId={documentId} periodKey={periodKey} lines={splitting} slices={slices} onClose={() => setSplitting(null)} />
       )}
     </>
   );

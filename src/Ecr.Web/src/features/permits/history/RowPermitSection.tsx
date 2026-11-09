@@ -156,7 +156,9 @@ export function RowPermitSection({ documentId, periodKey, tableDefId, sheetCopyI
 
       {added !== null && (
         <Text size="xs" role="status" data-permit-added="">
-          {t('permits.history.added', { date: dottedDate(added), row: rowName })}
+          {added.endsWith('-01')
+            ? t('permits.history.addedWhole', { date: dottedDate(added), row: rowName })
+            : t('permits.history.added', { date: dottedDate(added), row: rowName })}
         </Text>
       )}
       <ErrorAlert error={undo.error} />

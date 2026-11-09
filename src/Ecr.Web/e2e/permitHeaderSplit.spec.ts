@@ -264,8 +264,7 @@ test.describe('Permit header:', () => {
     const banner = page.locator('[data-header-split-banner]');
     await expect(banner).toBeVisible({ timeout: 30_000 });
     await expect(banner).toContainText('2 rows');
-    await expect(banner).toContainText('Air emissions');
-    await banner.getByRole('button', { name: 'Show rows' }).click();
+    // Compact banner (F13 p223): ≤ 3 rows are listed without «Show all».
     await expect(banner.locator('[data-header-split-rows] li')).toHaveCount(2);
     await shot(page, 'jh2');
   });
@@ -290,8 +289,10 @@ test.describe('Permit header:', () => {
     await page.locator('[data-header-split-banner]').getByRole('button', { name: 'Split all…' }).click();
     const again = page.getByRole('dialog');
     const rest = again.getByRole('textbox');
-    await rest.nth(2).fill('3.4');
-    await rest.nth(3).fill('3.9');
+    // «Split all» lists the rows still to split (F13 p223): only the second row now.
+    await expect(again.locator('[data-header-split-line]')).toHaveCount(1);
+    await rest.nth(0).fill('3.4');
+    await rest.nth(1).fill('3.9');
     await again.getByRole('button', { name: 'Save parts' }).click();
     await expect(again).toBeHidden({ timeout: 30_000 });
     await expect(page.locator('[data-header-split-banner]')).toBeHidden({ timeout: 30_000 });

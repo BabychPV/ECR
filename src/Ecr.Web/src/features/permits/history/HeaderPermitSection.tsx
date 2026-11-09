@@ -64,7 +64,10 @@ export function HeaderPermitSection(props: HeaderPermitSectionProps): JSX.Elemen
 
       {added !== null && (
         <Text size="xs" role="status" data-header-permit-added="">
-          {t('permits.header.added', { date: dottedDate(added) })}
+          {/* F13 p223 (4): a change on the 1st shares no month — nothing to split, no «split the month» note. */}
+          {added.endsWith('-01')
+            ? t('permits.header.addedWhole', { date: dottedDate(added) })
+            : t('permits.header.added', { date: dottedDate(added) })}
         </Text>
       )}
       <ErrorAlert error={undo.error} />

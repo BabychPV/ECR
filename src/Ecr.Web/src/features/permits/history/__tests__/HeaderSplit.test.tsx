@@ -107,7 +107,7 @@ describe('header split model', () => {
 });
 
 describe('HeaderSplitBanner (jh2/jh3)', () => {
-  it('jh2: names the month, 2 rows, the change date, both permits and the table; Show rows lists them', () => {
+  it('jh2: names the month, 2 rows, the change date, both permits and the table; the rows are listed (≤ 3: all)', () => {
     wrap(<HeaderSplitBanner documentId={3} periodKey={202602} tables={tables} readOnly={false} />);
     const banner = document.querySelector('[data-header-split-banner]') as HTMLElement;
 
@@ -115,11 +115,47 @@ describe('HeaderSplitBanner (jh2/jh3)', () => {
     expect(banner.textContent).toContain('"count":2');
     expect(banner.textContent).toContain('"date":"15.02.2026"');
     expect(banner.textContent).toContain('"old":"KZ29VCZ14622425"');
-    expect(banner.textContent).toContain('"table":"Air emissions","count":2');
-
-    fireEvent.click(within(banner).getByRole('button', { name: 'permits.header.showRows' }));
     const rows = [...banner.querySelectorAll('[data-header-split-rows] li')].map((item) => item.textContent);
     expect(rows).toEqual(['Air emissions — Nitrogen dioxide', 'Air emissions — Sulphur dioxide']);
+  });
+
+  it('F13 p223 (2): compact — collapsed shows the summary, the first 3 rows and «Show all N»; chips only when expanded', () => {
+    const queries = client();
+    const many = ['R1', 'R2', 'R3', 'R4', 'R5'].map((key) => airRow(key, '1'));
+    queries.setQueryData(permitHistoryKey(3, 202602), { ...history, rows: many });
+    wrap(<HeaderSplitBanner documentId={3} periodKey={202602} tables={tables} readOnly={false} />, queries);
+    const banner = document.querySelector('[data-header-split-banner]') as HTMLElement;
+
+    expect(banner.querySelectorAll('[data-header-split-rows] li')).toHaveLength(3);
+    expect(banner.textContent).not.toContain('permits.header.bannerTable');
+    fireEvent.click(within(banner).getByRole('button', { name: 'permits.header.showAll {"count":5}' }));
+    expect(banner.querySelectorAll('[data-header-split-rows] li')).toHaveLength(5);
+    expect(banner.textContent).toContain('"table":"Air emissions","count":5');
+  });
+
+  it('F13 p223 (3): the banner and «Split all» count the same rows (rows still to split), not cells', () => {
+    const queries = client();
+    const month = seaWaterRow().splitMonths[0]!;
+    // NO2 has two month cells to split, SO2 is already split: 1 row to split, not «2 cells» / «of 3».
+    queries.setQueryData(permitHistoryKey(3, 202602), {
+      ...history,
+      rows: [
+        airRow('NO2', '26.7', { splitMonths: [{ ...month, columnCodes: ['Feb', 'FebB'], cells: [
+          { columnCode: 'Feb', total: '26.7', parts: [null, null], isSplit: false },
+          { columnCode: 'FebB', total: '3', parts: [null, null], isSplit: false },
+        ] }] }),
+        airRow('SO2', null, { splitMonths: [{ ...month, columnCodes: [], cells: [{ columnCode: 'Feb', total: '7.3', parts: ['3', '4.3'], isSplit: true }] }] }),
+      ],
+    });
+    wrap(<HeaderSplitBanner documentId={3} periodKey={202602} tables={tables} readOnly={false} />, queries);
+    const banner = document.querySelector('[data-header-split-banner]') as HTMLElement;
+    expect(banner.textContent).toContain('"count":1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'permits.header.splitAll' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('permits.header.dialogTitle');
+    expect(dialog.textContent).toContain('"count":1}');
+    expect(dialog.textContent).toContain('permits.header.progress {"done":0,"count":1}');
   });
 
   it('nothing relying on the header to split — no banner', () => {
@@ -155,6 +191,34 @@ describe('HeaderSplitBanner (jh2/jh3)', () => {
 });
 
 describe('HeaderPermitSection (jh1)', () => {
+  it('F13 p223 (4): a change on the 1st — the note after saving does not ask to split anything', async () => {
+    const queries = client();
+    queries.setQueryData([...queryKeys.registries.entries('PRM_WATER'), 'document', 3], [
+      { id: 11, code: 'E1', display: 'KZ29VCZ14622425', validFrom: '2021-02-15', validTo: '2026-01-31' },
+      { id: 12, code: 'E2', display: 'KZ46VCZ14622410', validFrom: '2026-02-01', validTo: '2031-02-14' },
+    ]);
+    addHeaderPermit.mockResolvedValue({ fieldCode: 'PermitNo', permits: [] });
+    wrap(
+      <HeaderPermitSection documentId={3} periodKey={202602} fieldCode="PermitNo" registryCode="PRM_WATER" currentEntryId={11} canEdit />,
+      queries,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '+ permits.history.add' }));
+    const form = screen.getByRole('form', { name: 'permits.header.addTitle' });
+    fireEvent.click(within(form).getByRole('textbox', { name: 'permits.history.permit' }));
+    fireEvent.click(await screen.findByRole('option', { name: /KZ46VCZ14622410/ }));
+    expect(form.querySelector('[data-add-split-hint]')).toBeNull();
+    fireEvent.click(within(form).getByRole('button', { name: 'permits.history.addSubmit' }));
+
+    const note = await waitFor(() => {
+      const found = document.querySelector('[data-header-permit-added]');
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    expect(addHeaderPermit).toHaveBeenCalledWith(3, expect.objectContaining({ validFrom: '2026-02-01' }));
+    expect(note.textContent).toContain('permits.header.addedWhole');
+    expect(note.textContent).not.toContain('permits.header.added ');
+  });
+
   it('shows the header history and adds a permit from a date to the header with the period', async () => {
     const queries = client();
     queries.setQueryData([...queryKeys.registries.entries('PRM_WATER'), 'document', 3], [
