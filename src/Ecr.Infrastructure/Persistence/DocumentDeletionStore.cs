@@ -292,6 +292,10 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
 
         // Приймальна 08.11 (i): винятки «місяць відкрито для документа» — FK без каскаду; журнал лишається в аудиті.
         await db.DocumentPeriodReopens.Where(x => x.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
+        // Feature (j): permit history and month parts — FK to the document without cascade; the audit keeps the history.
+        await db.CellPermitParts.Where(x => x.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await db.PermitSegments.Where(x => x.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.DocumentSheets.Where(s => s.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.Documents.Where(d => d.Id == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
 
