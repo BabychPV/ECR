@@ -101,7 +101,28 @@ export function RolePermissionsReview({
       >
         {(data) => (
           <Stack gap="md" data-testid="role-impact">
-            <ChangeList added={data.added} removed={data.removed} dangerous={data.addedDangerous} />
+            {changedMeanwhile ? (
+              // ✎ debt-1109 v-P3 (F13 p216): застарілу чернетку порівнювати з НОВІШИМ серверним набором не можна —
+              // «1 added, 1 removed» читалось як «я прибрав Export». Тут — що змінив хтось інший (база → сервер).
+              <ChangeList
+                title={t('security.roleChangedMeanwhileTitle', {
+                  added: data.current.filter((code) => !base.includes(code)).length,
+                  removed: base.filter((code) => !data.current.includes(code)).length,
+                })}
+                added={data.current.filter((code) => !base.includes(code))}
+                removed={base.filter((code) => !data.current.includes(code))}
+                dangerous={[]}
+                testId="role-changed-meanwhile"
+              />
+            ) : (
+              <ChangeList
+                title={t('security.impactChangesTitle', { added: data.added.length, removed: data.removed.length })}
+                added={data.added}
+                removed={data.removed}
+                dangerous={data.addedDangerous}
+                testId="role-impact-changes"
+              />
+            )}
 
             <Stack gap="xs">
               <Text fw={600}>{t('security.impactUsersTitle', { count: data.users.length })}</Text>
@@ -240,17 +261,21 @@ export function RolePermissionsReview({
 }
 
 function ChangeList({
+  title,
   added,
   removed,
   dangerous,
+  testId,
 }: {
+  title: string;
   added: readonly string[];
   removed: readonly string[];
   dangerous: readonly string[];
+  testId: string;
 }): JSX.Element {
   return (
-    <Stack gap="xs" data-testid="role-impact-changes">
-      <Text fw={600}>{t('security.impactChangesTitle', { added: added.length, removed: removed.length })}</Text>
+    <Stack gap="xs" data-testid={testId}>
+      <Text fw={600}>{title}</Text>
       <ul className="ecr-sec-change-list">
         {added.map((code) => (
           <li key={`+${code}`} data-change="added" data-permission={code}>
