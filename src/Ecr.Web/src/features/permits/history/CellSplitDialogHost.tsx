@@ -27,7 +27,7 @@ export function CellSplitDialogHost({ target }: { readonly target: SplitTarget }
       key={cellKey(target.rowKey, target.columnCode)}
       target={target}
       mark={mark}
-      loading={history.isPending}
+      historyPending={history.isPending}
       rowLabel={row?.label ?? target.rowKey}
       unit={column?.unitSymbol ?? null}
       baseVersion={row?.rowVersion ?? null}
