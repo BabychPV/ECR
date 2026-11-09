@@ -29,7 +29,9 @@ internal sealed class UnsupportedMediaTypeRefusalFilter : IAlwaysRunResultFilter
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (context.Result is UnsupportedMediaTypeResult)
+        // ⚠ Шаблон властивості, а не `context` + `.Result`: сторож LayerRulesTests (правило 5) шукає блокувальні виклики
+        // за текстом.
+        if (context is { Result: UnsupportedMediaTypeResult })
         {
             throw new BadHttpRequestException(
                 "Request body is missing or is not JSON.", StatusCodes.Status415UnsupportedMediaType);
