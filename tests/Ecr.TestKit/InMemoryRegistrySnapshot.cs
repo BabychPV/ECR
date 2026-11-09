@@ -316,6 +316,8 @@ public sealed class InMemoryRegistrySnapshot : IRegistrySnapshot
 
         public string? CurrentSubstanceCode => inner.CurrentSubstanceCode;
 
+        public string? SheetName => inner.SheetName;
+
         public IReadOnlyList<ExpressionValue> Read(CellReferenceNode reference) => inner.Read(reference);
 
         public ExpressionValue GetCell(int tableDefId, string rowKey, int columnDefId, int periodOffset)
