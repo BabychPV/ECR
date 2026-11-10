@@ -120,6 +120,7 @@ if (-not $afFile) { $afFile = Join-Path $repo 'docs\delivery\reference-data\land
 . (Join-Path $here 'EcrApi.ps1')
 . (Join-Path $here 'Land-CfRules.ps1')
 . (Join-Path $here 'LandTemplateDiff.Lib.ps1')
+. (Join-Path $here 'LandMonthBands.Lib.ps1')
 Set-StrictMode -Off
 
 # Безпека стенда: лише локальні API і SQL (база з іменем EcrLand*); мутації лише з явним
@@ -562,6 +563,31 @@ function Fill-StructureSql([int]$vid) {
             }
         }
         if ($retype -gt 0) { Log "  колонок переведено в обчислюваний тип (чернетка-клон): $retype" }
+        # D-474: наявні таблиці й колонки чернетки-клону підтягуються до моделі там, де модель тепер інша, а `$have` нижче їх
+        # пропускає: (i) прив'язка місяця (лише додається, не знімається), (ii) LayoutKind, (iii) видимість МІСЯЧНИХ колонок,
+        # (iv) DefaultValue. Лише чернетка (Status=0) і лише при розбіжності: повтор - 0 змін.
+        $d474 = @{ month = 0; layout = 0; unhide = 0; default = 0 }
+        $draftGuard = 'JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId WHERE c.Id=@i AND v.Id=@v AND v.Status=0'
+        foreach ($sh in @($Mdl.sheets)) {
+            foreach ($tb in @($sh.tables)) {
+                $tidD = $tableIds["$($sh.code)/$($tb.code)"]
+                if ($null -eq $tidD) { continue }
+                $d474.layout += [int](Sql-Exec $cn ('UPDATE t SET LayoutKind=@l FROM cfg.TableDef t JOIN cfg.SheetDef s ON s.Id=t.SheetDefId JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId ' +
+                        'WHERE t.Id=@t AND v.Id=@v AND v.Status=0 AND t.LayoutKind<>@l') @{ l = [byte]$LayoutCode[[string]$tb.layout]; t = [int]$tidD; v = $vid })
+                foreach ($c in @($tb.columns)) {
+                    $hiD = $haveInfo["$tidD/$($c.code)"]
+                    if ($null -eq $hiD) { continue }
+                    if ($c.month) {
+                        $d474.month += [int](Sql-Exec $cn ("UPDATE c SET IsMonthColumn=1, MonthNumber=@m FROM cfg.ColumnDef c $draftGuard AND (c.IsMonthColumn=0 OR c.MonthNumber IS NULL OR c.MonthNumber<>@m)") @{ m = [byte][int]$c.month; i = $hiD.id; v = $vid })
+                        if (-not $c.hidden) { $d474.unhide += [int](Sql-Exec $cn "UPDATE c SET IsHidden=0 FROM cfg.ColumnDef c $draftGuard AND c.IsHidden=1" @{ i = $hiD.id; v = $vid }) }
+                    }
+                    if ($c.default) {
+                        $d474.default += [int](Sql-Exec $cn ("UPDATE c SET DefaultValue=@d FROM cfg.ColumnDef c $draftGuard AND (c.DefaultValue IS NULL OR c.DefaultValue<>@d)") @{ d = [string]$c.default; i = $hiD.id; v = $vid })
+                    }
+                }
+            }
+        }
+        Log ("  D-474 (чернетка-клон): прив'язок місяця {0}, LayoutKind {1}, відкрито місячних колонок {2}, DefaultValue {3}" -f $d474.month, $d474.layout, $d474.unhide, $d474.default)
         # D-423: Decimal -> String у чернетці-клоні (місячні OperatingTimeReleaseOnColdVentYesNo_Mnn у T9_04/T9_07) і скидання
         # Precision/Scale текстових мостів. API цього не вміє (ECR-TMPL-0422 columnDataTypeImmutable навіть у чернетці), тож лише SQL.
         # UnitId=NULL лише для ретайпнутих M-колонок (текст без одиниці); формульні мости (Formula, unit h) цим UPDATE не чіпаються.
@@ -1141,6 +1167,12 @@ function Stage-Template {
             }
         }
     }
+    # Місячні смуги (D-нове, 10.11): ті самі групи «January…December» + квартал/розділ, що й Add-LandMonthGroups.ps1 для
+    # опублікованої 1.0.14.0 — спільний LandMonthBands.Lib.ps1, джерело land-month-bands.json. Повтор на чернетці — 0 змін.
+    $bands = Invoke-LandMonthBands -VersionId $vid -Source (Read-LandMonthBandSource (Join-Path $here 'land-month-bands.json')) -Log { param($m) Log $m }
+    Log ("  місячні смуги: таблиць з місяцями {0}, місячних груп {1}, батьківських {2}, колонок у групах {3}; PUT {4}, PATCH {5}" -f `
+            $bands.TablesWithMonths, $bands.MonthGroups, $bands.ParentGroups, $bands.AssignedColumns, $bands.Puts, $bands.Patches)
+    if ($bands.TablesSkippedErrors -gt 0) { throw ('Місячні смуги: ' + ($bands.Errors -join '; ')) }
     # шапка Contract (13 полів) — офіційним скриптом на цій чернетці, з публікацією
     $pw = ConvertTo-SecureString $Acc['land-owner'] -AsPlainText -Force
     # -PermitLookup передається лише явно: без нього діє значення маніфесту (LAND_PERMIT), поведінка Land не змінюється.
