@@ -39229,6 +39229,10 @@ export interface components {
             detailsJson: null | string;
             /** @description Тип: `AccessDenied`, `RoleAssigned`, `SheetSubmitWarningsAcknowledged` тощо. */
             eventType: string;
+            /** @description ✎ debt-1110: пояс майданчика (IANA), у якому клієнт друкує час події — як журнал «Reopen» друкує свій час у поясі
+             *     з конверта причини. Подія безпеки не належить проєкту, тож «майданчик» — спільний пояс УСІХ проєктів установки;
+             *     проєктів немає або пояси різні — `null`, і клієнт лишає пояс читача (вгаданий пояс гірший за чесний). */
+            siteTimeZoneId?: null | string;
             /**
              * Format: int32
              * @description Роль, якої стосується подія; `null` — не стосується.
