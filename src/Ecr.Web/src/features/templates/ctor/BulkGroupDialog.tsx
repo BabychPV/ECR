@@ -30,22 +30,6 @@ export function bulkGroupChanges(
   }));
 }
 
-/** Шлях групи «Батько › Група» (до 3 рівнів) — і для колонки «Group» таблиці, і для підписів тут. */
-export function groupPath(groups: readonly TemplateHeaderGroupDto[] | undefined, id: number | null | undefined): string {
-  const byId = new Map((groups ?? []).map((group) => [group.id, group] as const));
-  const parts: string[] = [];
-  let current = id ?? null;
-
-  while (current !== null && parts.length < 3) {
-    const group = byId.get(current);
-    if (group === undefined) break;
-    parts.unshift(localized(group.labelL10n) || group.code);
-    current = group.parentId;
-  }
-
-  return parts.join(' › ');
-}
-
 function isStale(error: unknown): boolean {
   return error instanceof EcrApiError && error.problem.extensions2?.['messageKey'] === StaleRevisionMessageKey;
 }

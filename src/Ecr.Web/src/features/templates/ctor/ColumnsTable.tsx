@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { lazy, Suspense, useState, type JSX } from 'react';
 import { Badge, Button, Checkbox, Group, Paper, Table, Text } from '@mantine/core';
 import type { TemplateColumnDto } from '@/api/types';
 import { columnOffersFormula } from '@/features/templates/column';
@@ -6,8 +6,16 @@ import { ReorderCell, ReorderableRows } from '@/features/templates/ReorderContro
 import { dataTypeLabel } from '@/features/templates/enumLabels';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
-import { BulkGroupDialog, groupPath } from './BulkGroupDialog';
+import { groupPath } from './columnGroupPath';
 import type { TemplateTable } from './ctorModel';
+
+/**
+ * ⚠ Лінивий чанк (бюджет маршруту D-132, 250 КБ gzip): діалог потрібен лише після «Edit selected…», а статичний
+ * імпорт додавав його до графа `TemplateVersionPage` (251.5 КБ). Той самий прийом, що в редакторах сторінки.
+ */
+const BulkGroupDialog = lazy(async () => ({
+  default: (await import('./BulkGroupDialog')).BulkGroupDialog,
+}));
 
 /**
  * Колонки однієї таблиці версії шаблону (вкладка «Columns» конструктора, `UI-36`).
@@ -209,6 +217,7 @@ export function ColumnsTable({
       </Table>
 
       {bulkOpen && (
+        <Suspense fallback={null}>
         <BulkGroupDialog
           templateVersionId={templateVersionId}
           presentationRevision={presentationRevision}
@@ -218,6 +227,7 @@ export function ColumnsTable({
           onClose={() => setBulkOpen(false)}
           onApplied={clear}
         />
+        </Suspense>
       )}
     </>
   );
