@@ -34,7 +34,7 @@ export { hasFailedSave, noteSaveSucceeded, resetFailedSaves, useFailedSave } fro
 import { queryKeys } from '@/api/queryKeys';
 import type { TableSliceDto } from '@/api/types';
 import { withKnownVersions } from './knownVersions';
-import { rejectionMarksOf } from './saveErrors';
+import { computedEditsOf, rejectionMarksOf } from './saveErrors';
 import { beginInFlight, deferUntilInFlightSettles, hasInFlight, splitByInFlight } from './inFlightEdits';
 import {
   applyPatchLocally,
@@ -600,7 +600,19 @@ async function saveOrphanSlice(
   // кеші ще стара, і сховище відповіло б `409` на власну правку. Доти цей шлях
   // не мав навіть дедуплікації за значенням. Відкладене повторить автозбереження,
   // щойно звільниться запит у дорозі.
-  const { now: edits, deferred } = splitByInFlight(slice.tableInstanceId, slice.periodKey, slice.edits);
+  // ⛔ Живий прохід 10.11: правка обчислюваної комірки не надсилається (сервер відхилив би весь пакет) — лишається
+  // позначеною з причиною, як у сітці (`computedEditsOf`).
+  const cached = cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey);
+  const { send: guarded, blocked } = computedEditsOf(cached, slice.edits);
+  if (blocked.length > 0) {
+    markPendingRejected(
+      slice.tableInstanceId,
+      slice.periodKey,
+      blocked.map(({ edit, message }) => ({ edit, message, scope: 'cell' as const })),
+    );
+  }
+
+  const { now: edits, deferred } = splitByInFlight(slice.tableInstanceId, slice.periodKey, guarded);
 
   if (deferred.length > 0) deferUntilInFlightSettles(scheduleAutosave);
 
