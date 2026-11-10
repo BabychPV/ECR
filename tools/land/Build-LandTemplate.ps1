@@ -87,6 +87,12 @@ param(
     [string]$ModelPath,
     [string]$AfPackage,
     [string]$AccountsFile,
+    # Обліковий запис етапів збірки (вхід, Import-ContractDictionaries, Apply-ContractHeader); пароль - з -AccountsFile за
+    # цим ключем. Етап Accounts і далі створює саме land-owner і land-reviewer.
+    [string]$BuildUser = 'land-owner',
+    # Етап Template: типово - свіжий клон останньої опублікованої версії (наявна чернетка не чіпається); -ReuseDraft -
+    # явна згода продовжити в наявній чернетці (стара поведінка).
+    [switch]$ReuseDraft,
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
     [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
@@ -120,6 +126,8 @@ if (-not $afFile) { $afFile = Join-Path $repo 'docs\delivery\reference-data\land
 . (Join-Path $here 'EcrApi.ps1')
 . (Join-Path $here 'Land-CfRules.ps1')
 . (Join-Path $here 'LandTemplateDiff.Lib.ps1')
+. (Join-Path $here 'LandMonthBands.Lib.ps1')
+. (Join-Path $here 'LandTemplateDraft.Lib.ps1')
 Set-StrictMode -Off
 
 # Безпека стенда: лише локальні API і SQL (база з іменем EcrLand*); мутації лише з явним
@@ -288,7 +296,7 @@ function Stage-Accounts {
 # ==================== Units ====================
 function Stage-Units {
     Log '== Units =='
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $units = @((Api GET '/api/v1/units').Json)
     foreach ($u in $units) { $S.Units[[string]$u.code] = $u }
     foreach ($n in @($Mdl.units.new)) {
@@ -376,7 +384,7 @@ function Ensure-Registry($reg) {
 }
 function Stage-Registries {
     Log '== Registries =='
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $n = 0
     foreach ($reg in @($Mdl.registries)) { $c = Ensure-Registry $reg; $n += $c; if ($c) { Log ("  {0}: +{1}" -f $reg.code, $c) } }
     Log "  нових записів: $n"
@@ -407,8 +415,8 @@ function RegEntryId([string]$regCode, [string]$name) {
 # ==================== Contract dictionaries ====================
 function Stage-Contract {
     Log '== Contract (довідники вкладки 2. Contract) =='
-    $pw = ConvertTo-SecureString $Acc['land-owner'] -AsPlainText -Force
-    & (Join-Path $here 'Import-ContractDictionaries.ps1') -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $childStand
+    $pw = ConvertTo-SecureString $Acc[$BuildUser] -AsPlainText -Force
+    & (Join-Path $here 'Import-ContractDictionaries.ps1') -BaseUrl $BaseUrl -User $BuildUser -Password $pw -ConfirmStand $childStand
 }
 
 # ==================== Template ====================
@@ -594,6 +602,31 @@ function Fill-StructureSql([int]$vid) {
         Log ("  мостів з Precision/Scale скинуто в NULL: {0}" -f $txtBridges.Count)
         foreach ($k in $txtBridges) { Log "    міст precision=NULL: $k" }
         foreach ($k in $txtWarn) { Log "  WARN тип колонки: $k" }
+        # D-474: наявні таблиці й колонки чернетки-клону підтягуються до моделі там, де модель тепер інша, а `$have` нижче їх
+        # пропускає: (i) прив'язка місяця (лише додається, не знімається), (ii) LayoutKind, (iii) видимість МІСЯЧНИХ колонок,
+        # (iv) DefaultValue. Лише чернетка (Status=0) і лише при розбіжності: повтор - 0 змін.
+        $d474 = @{ month = 0; layout = 0; unhide = 0; default = 0 }
+        $draftGuard = 'JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId WHERE c.Id=@i AND v.Id=@v AND v.Status=0'
+        foreach ($sh in @($Mdl.sheets)) {
+            foreach ($tb in @($sh.tables)) {
+                $tidD = $tableIds["$($sh.code)/$($tb.code)"]
+                if ($null -eq $tidD) { continue }
+                $d474.layout += [int](Sql-Exec $cn ('UPDATE t SET LayoutKind=@l FROM cfg.TableDef t JOIN cfg.SheetDef s ON s.Id=t.SheetDefId JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId ' +
+                        'WHERE t.Id=@t AND v.Id=@v AND v.Status=0 AND t.LayoutKind<>@l') @{ l = [byte]$LayoutCode[[string]$tb.layout]; t = [int]$tidD; v = $vid })
+                foreach ($c in @($tb.columns)) {
+                    $hiD = $haveInfo["$tidD/$($c.code)"]
+                    if ($null -eq $hiD) { continue }
+                    if ($c.month) {
+                        $d474.month += [int](Sql-Exec $cn ("UPDATE c SET IsMonthColumn=1, MonthNumber=@m FROM cfg.ColumnDef c $draftGuard AND (c.IsMonthColumn=0 OR c.MonthNumber IS NULL OR c.MonthNumber<>@m)") @{ m = [byte][int]$c.month; i = $hiD.id; v = $vid })
+                        if (-not $c.hidden) { $d474.unhide += [int](Sql-Exec $cn "UPDATE c SET IsHidden=0 FROM cfg.ColumnDef c $draftGuard AND c.IsHidden=1" @{ i = $hiD.id; v = $vid }) }
+                    }
+                    if ($c.default) {
+                        $d474.default += [int](Sql-Exec $cn ("UPDATE c SET DefaultValue=@d FROM cfg.ColumnDef c $draftGuard AND (c.DefaultValue IS NULL OR c.DefaultValue<>@d)") @{ d = [string]$c.default; i = $hiD.id; v = $vid })
+                    }
+                }
+            }
+        }
+        Log ("  D-474 (чернетка-клон): прив'язок місяця {0}, LayoutKind {1}, відкрито місячних колонок {2}, DefaultValue {3}" -f $d474.month, $d474.layout, $d474.unhide, $d474.default)
         $dt = New-Object System.Data.DataTable
         foreach ($n in 'TableDefId:int', 'Code:string', 'HeaderL10n:string', 'Ordinal:int', 'DataType:byte', 'Precision:byte', 'Scale:byte', 'IsReadOnly:bool', 'IsRequired:bool',
             'IsHidden:bool', 'IsMonthColumn:bool', 'MonthNumber:byte', 'DefaultValue:string', 'LookupRegistryDefId:int', 'UnitId:int', 'IsBusinessKey:bool', 'IsScopeField:bool', 'IsIndexed:bool', 'IsDeleted:bool') {
@@ -1020,7 +1053,7 @@ function Set-TableHeaderStyles {
 
 function Stage-Template {
     Log '== Template =='
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     Load-Registries
     $S.Units = @{}
     foreach ($u in @((Api GET '/api/v1/units').Json)) { $S.Units[[string]$u.code] = [int]$u.id }
@@ -1034,21 +1067,28 @@ function Stage-Template {
     }
     $S.TemplateId = [int]$tpl.id
     $vers = @((Api GET "/api/v1/templates/$($tpl.id)/versions?limit=100").Json.items)
-    $pub = $vers | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Descending | Select-Object -First 1
-    $draft = $vers | Where-Object { $_.status -eq 'Draft' } | Sort-Object id -Descending | Select-Object -First 1
-    if ($null -ne $pub -and $null -eq $draft) {
-        $S.VersionId = [int]$pub.id
-        Log "  шаблон $TemplateCode вже опублікований (версія $($pub.version), id $($pub.id)); структуру не чіпаю."
-        return
+    # Рішення координатора 10.11: свіжий клон останньої опублікованої; наявна чернетка не чіпається (-ReuseDraft - стара поведінка).
+    $plan = Get-LandTemplateDraftPlan -Versions $vers -ReuseDraft:$ReuseDraft
+    switch ($plan.Action) {
+        'PublishedNoOp' {
+            $S.VersionId = $plan.PublishedId
+            Log "  шаблон $TemplateCode вже опублікований (версія $($plan.PublishedVersion), id $($plan.PublishedId)); -ReuseDraft без чернетки - структуру не чіпаю."
+            return
+        }
+        'UseDraft' { $vid = $plan.DraftId; Log "  -ReuseDraft: наявна чернетка $($plan.DraftVersion) (id $vid)" }
+        'Clone' {
+            foreach ($sk in $plan.SkippedDrafts) { Log "  наявну чернетку $sk пропущено (не змінюється й не видаляється)" }
+            $vid = New-LandTemplateCloneDraft -Plan $plan
+            Log "  свіжий клон опублікованої $($plan.SourceVersion) (id $($plan.SourceId)) -> чернетка $($plan.NewVersion) (id $vid)"
+        }
+        default {
+            $null = Api POST "/api/v1/templates/$($tpl.id)/versions" @{ versionNumber = [string]$Mdl.versionNumber; cloneFromVersionId = $null }
+            $vers = @((Api GET "/api/v1/templates/$($tpl.id)/versions?limit=100").Json.items)
+            $vid = [int]($vers | Where-Object { $_.status -eq 'Draft' } | Sort-Object id -Descending | Select-Object -First 1).id
+            Log "  порожня чернетка $($Mdl.versionNumber) (id $vid)"
+        }
     }
-    if ($null -eq $draft) {
-        $null = Api POST "/api/v1/templates/$($tpl.id)/versions" @{ versionNumber = [string]$Mdl.versionNumber; cloneFromVersionId = $null }
-        $vers = @((Api GET "/api/v1/templates/$($tpl.id)/versions?limit=100").Json.items)
-        $draft = $vers | Where-Object { $_.status -eq 'Draft' } | Sort-Object id -Descending | Select-Object -First 1
-    }
-    $vid = [int]$draft.id
     $S.VersionId = $vid
-    Log "  чернетка версії $($draft.version) (id $vid)"
     Ensure-Styles $vid
 
     $nCols = 0; $nRows = 0; $nRules = 0; $nF = 0
@@ -1141,11 +1181,17 @@ function Stage-Template {
             }
         }
     }
+    # Місячні смуги (D-нове, 10.11): ті самі групи «January…December» + квартал/розділ, що й Add-LandMonthGroups.ps1 для
+    # опублікованої 1.0.14.0 — спільний LandMonthBands.Lib.ps1, джерело land-month-bands.json. Повтор на чернетці — 0 змін.
+    $bands = Invoke-LandMonthBands -VersionId $vid -Source (Read-LandMonthBandSource (Join-Path $here 'land-month-bands.json')) -Log { param($bandLine) Log $bandLine }
+    Log ("  місячні смуги: таблиць з місяцями {0}, місячних груп {1}, батьківських {2}, колонок у групах {3}; PUT {4}, PATCH {5}" -f `
+            $bands.TablesWithMonths, $bands.MonthGroups, $bands.ParentGroups, $bands.AssignedColumns, $bands.Puts, $bands.Patches)
+    if ($bands.TablesSkippedErrors -gt 0) { throw ('Місячні смуги: ' + ($bands.Errors -join '; ')) }
     # шапка Contract (13 полів) — офіційним скриптом на цій чернетці, з публікацією
-    $pw = ConvertTo-SecureString $Acc['land-owner'] -AsPlainText -Force
+    $pw = ConvertTo-SecureString $Acc[$BuildUser] -AsPlainText -Force
     # -PermitLookup передається лише явно: без нього діє значення маніфесту (LAND_PERMIT), поведінка Land не змінюється.
     $permitArgs = if ($PermitLookup) { @{ PermitLookup = $PermitLookup } } else { @{} }
-    & (Join-Path $here 'Apply-ContractHeader.ps1') -TemplateCode $TemplateCode -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $childStand -UseExistingDraft @permitArgs
+    & (Join-Path $here 'Apply-ContractHeader.ps1') -TemplateCode $TemplateCode -BaseUrl $BaseUrl -User $BuildUser -Password $pw -ConfirmStand $childStand -UseExistingDraft @permitArgs
     $vers = @((Api GET "/api/v1/templates/$($S.TemplateId)/versions?limit=100").Json.items)
     $pub = $vers | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Descending | Select-Object -First 1
     if ($null -eq $pub) { throw 'Після Apply-ContractHeader немає опублікованої версії.' }
@@ -1186,7 +1232,7 @@ function Set-RoleGrants([string]$roleCode, [object[]]$wanted) {
 
 function Stage-Project {
     Log '== Project =='
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $pols = Items (Api GET '/api/v1/projects/period-policies').Json
     $pol = $pols | Where-Object { $_.code -eq 'LAND_OPEN' } | Select-Object -First 1
     if ($null -eq $pol) {
@@ -1216,7 +1262,7 @@ function Stage-Project {
     Set-RoleGrants 'LandApprover' @(@{ resourceKind = 'Project'; resourceId = $pid_; level = 'Manage'; isDeny = $false })
     Set-RoleGrants 'Viewer' @(@{ resourceKind = 'Project'; resourceId = $pid_; level = 'Read'; isDeny = $false })
     Set-RoleGrants 'LandRestricted' @(@{ resourceKind = 'Project'; resourceId = $pid_; level = 'Write'; isDeny = $false })
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     # маршрут погодження = роль LandApprover
     $roles = Items (Api GET '/api/v1/roles').Json
     $ar = $roles | Where-Object { $_.code -eq 'LandApprover' } | Select-Object -First 1
@@ -1234,7 +1280,7 @@ function Stage-Project {
     if ($S.SheetIds.ContainsKey('S07_WATER_REPORT')) {
         LoginAs 'bootstrap'
         Set-RoleGrants 'LandRestricted' @(@{ resourceKind = 'Sheet'; resourceId = [int]$S.SheetIds['S07_WATER_REPORT']; level = 'Read'; isDeny = $true })
-        LoginAs 'land-owner'
+        LoginAs $BuildUser
     }
 }
 
@@ -1272,7 +1318,7 @@ $PublishList = @('ECW_C05_01', 'ECW_C05_02', 'ECW_C05_03', 'ECW_C05_04', 'ECW_C0
 
 function Stage-Methodologies {
     Log '== Methodologies =='
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     Load-Structure
     Load-Registries
     $pr = Items (Api GET '/api/v1/projects').Json | Where-Object { $_.code -eq $ProjectCode } | Select-Object -First 1
@@ -1421,7 +1467,7 @@ function Stage-Methodologies {
         $res = 'OK'
         if ($p.Status -ne 200 -and $p.Status -ne 204) { $res = $tx.Substring(0, [Math]::Min(1200, $tx.Length)) }
         Log ("  {0}: рулів {1}, прив'язок {2}/{3}, {4}, публікація HTTP {5} {6}" -f $name, $k, $bn, $codes.Count, $pubStatus, $p.Status, $res)
-        LoginAs 'land-owner'
+        LoginAs $BuildUser
         if ($p.Status -ne 200 -and $p.Status -ne 204) {
             # неопублікована методологія з активною прив'язкою валить усі перерахунки документа: вимикаємо прив'язки
             foreach ($c in $codes) {
@@ -1484,7 +1530,7 @@ function Stage-LandParity {
     Log '== LandParity =='
     . (Join-Path $here 'LandParityRuleArgs.Lib.ps1')
     . (Join-Path $here 'LandSubstanceApplicability.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $rulesFile = Join-Path $repo 'docs\delivery\reference-data\land-template\af-land-category-rules.json'
     $rules = @((Get-Content -LiteralPath $rulesFile -Raw -Encoding UTF8 | ConvertFrom-Json).rules)
     $ms = Items (Api GET '/api/v1/methodologies').Json
@@ -1611,7 +1657,7 @@ function Stage-LandParity {
 function Stage-MassFraction {
     Log '== MassFraction =='
     . (Join-Path $here 'LandHse400Composition.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $mf = $Mdl.argumentBridges.massFraction
     if ($null -eq $mf) { throw 'У моделі немає argumentBridges.massFraction: перегенеруйте модель (model-gen).' }
     $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
@@ -1663,7 +1709,7 @@ function Stage-CompositionMass {
     . (Join-Path $here 'LandHse400Composition.Lib.ps1')
     . (Join-Path $here 'LandArgumentSuffix.Lib.ps1')
     $stringBridge = @(Get-LandStringBridgeSuffixMethodologies -Model $Mdl)
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $cm = $Mdl.argumentBridges.hse400.compositionMass
     if ($null -eq $cm) { throw 'У моделі немає argumentBridges.hse400.compositionMass: перегенеруйте модель (model-gen).' }
     $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
@@ -1732,7 +1778,7 @@ function Stage-SubstanceApplicability {
     Log '== SubstanceApplicability =='
     . (Join-Path $here 'LandSubstanceApplicability.Lib.ps1')
     . (Join-Path $here 'LandParityRuleArgs.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $sa = $Mdl.substanceApplicability
     if ($null -eq $sa) { throw 'У моделі немає substanceApplicability: перегенеруйте модель (model-gen).' }
     $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
@@ -1831,7 +1877,7 @@ function Stage-RowFilter {
 function Stage-OptionalArguments {
     Log '== OptionalArguments =='
     . (Join-Path $here 'LandOptionalArguments.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $plan = Get-LandOptionalArguments -Model $Mdl
     if ($plan.Count -eq 0) { throw 'У моделі немає argumentBridges.optionalArguments: перегенеруйте модель (model-gen).' }
     $ms = Items (Api GET '/api/v1/methodologies').Json
@@ -1873,7 +1919,7 @@ function Stage-OptionalArguments {
 function Stage-ArgumentSuffix {
     Log '== ArgumentSuffix =='
     . (Join-Path $here 'LandArgumentSuffix.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $plan = Get-LandArgumentSuffixes -Model $Mdl
     if ($plan.Count -eq 0) { throw 'У моделі немає argumentBridges.argumentSuffixes: перегенеруйте модель (model-gen).' }
     $ms = Items (Api GET '/api/v1/methodologies').Json
@@ -1927,7 +1973,7 @@ function Stage-ArgumentSuffix {
 function Stage-LookupCompare {
     Log '== LookupCompare =='
     . (Join-Path $here 'LandLookupCompare.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     Load-Registries
     $lcPlan = Get-LandLookupCompareArguments -Model $Mdl
     if ($lcPlan.Count -eq 0) { throw 'У моделі немає Lookup-колонок: перегенеруйте модель (model-gen).' }
@@ -1987,7 +2033,7 @@ function Stage-LookupCompare {
 function Stage-NaeType {
     Log '== NaeType =='
     . (Join-Path $here 'LandNaeType.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $ntPlan = Get-LandNaeTypeGroups
     $ntOut = Get-LandNaeOutputGroups   # D-435 (C11_13): перелік NAE за кодом виходу (EC перетин type), NULL-вираз для порожнього
     $ntMeth = Items (Api GET '/api/v1/methodologies').Json
@@ -2034,7 +2080,7 @@ function Stage-NaeType {
 function Stage-ParityBranch {
     Log '== ParityBranch =='
     . (Join-Path $here 'LandParityBranch.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $ms = Items (Api GET '/api/v1/methodologies').Json
     $mid = @{}
     foreach ($m in $ms) { $mid[[string]$m.code] = [int]$m.id }
@@ -2083,7 +2129,7 @@ function Stage-ParityBranch {
 }
 function Stage-Documents {
     Log '== Documents =='
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     Load-Structure
     $pr = Items (Api GET '/api/v1/projects').Json | Where-Object { $_.code -eq $ProjectCode } | Select-Object -First 1
     $S.ProjectId = [int]$pr.id
@@ -2103,7 +2149,7 @@ function Stage-Documents {
 
 function Stage-Data {
     Log '== Data (наповнення документів, стани, перерахунок) =='
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     Load-Structure
     Load-Registries
     $pr = Items (Api GET '/api/v1/projects').Json | Where-Object { $_.code -eq $ProjectCode } | Select-Object -First 1
@@ -2119,7 +2165,7 @@ function Stage-Data {
     foreach ($sc in 'S09B_SULFUR', 'S10A_OFF_UTILITY_AI', 'S11B_OFF_PROCESS_EPC2') {
         $null = Invoke-Ecr -Method POST -Path "/api/v1/documents/$($byName['LAND-FULL'])/reopen" -Body @{ periodKey = ($Year * 100 + 6); sheetDefId = [int]$S.SheetIds[$sc]; reason = 'Land UI base: refill' }
     }
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     Fill-GoldenDocument $byName['LAND-GOLDEN']
     Fill-FullDocument $byName['LAND-FULL']
     # перерахунок золотого документа по місяцях з даними
@@ -2146,7 +2192,7 @@ function Stage-Data {
             Log ("  {0} {1}: HTTP {2}" -f $w[1], $w[0], $a.Status)
         }
     }
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
 }
 
 # ---------- наповнення документів ----------

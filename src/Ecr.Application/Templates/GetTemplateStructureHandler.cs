@@ -178,7 +178,9 @@ public sealed class GetTemplateStructureHandler(
             formula?.Expression,
             formula?.Dialect,
             column.WidthPx,
-            column.HeaderGroupId)
+            column.HeaderGroupId,
+            column.IsMonthColumn,
+            column.MonthNumber)
         {
             FormulaId = formula?.Id,
             AllowManualOverride = formula?.AllowManualOverride == true,

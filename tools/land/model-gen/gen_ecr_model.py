@@ -336,6 +336,10 @@ def sheet_code(name):
 
 
 CALC_SHEETS = ('3.', '4.', '5.')
+# D-474 (i): аркуші з блоком «<Month> .RH during exceeding» + 4 забруднювачі (g/s) без прив'язки до місяця до 10.11
+RH_BLOCK_SHEETS = ('9. ', '10. ', '11. ')
+# D-474 (ii): таблиці PerPeriodInstance з місячними колонками, що в новій версії стають MonthsInColumns (помісячні замки)
+MONTHS_IN_COLUMNS_TABLES = ('T3_00', 'T4_01', 'T5_08', 'T5_09', 'T5_22', 'T5_26', 'T5_27')
 ROW_LABELS = {}
 
 AF = {  # (sheet prefix, table section) -> {normalized header: AF column code}
@@ -659,6 +663,7 @@ for sh in X['sheets']:
         used = set()
         by_logical = {}
         ctx_month = None
+        rh_month = None
         # ---- колонки
         for c in cols:
             en = one(c['en']); ru = one(c['ru'])
@@ -674,9 +679,17 @@ for sh in X['sheets']:
             if not (en or ru):
                 en = ''
             sub_en = en
-            mctx = re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December)\.\s', en)
+            # D-474 (i): аркуші 9/10/11 пишуть «January .RH during exceeding» (пробіл ПЕРЕД крапкою) — колишній `\.\s` їх не бачив.
+            mctx = re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December)\s*\.\s*', en)
             if mctx:
                 ctx_month = MONTHS.index(mctx.group(1)) + 1
+            # Блок «<Month> .RH during exceeding» + «0301 NO2 (g/s)»… на аркушах 9/10/11: місяць діє лише в межах блоку
+            # (будь-яка інша колонка, зокрема «N Quarter», його закриває) — інакше 0301 NO2 до блоку отримали б чужий місяць.
+            if sh['name'].startswith(RH_BLOCK_SHEETS):
+                if mctx and re.search(r'RH during exceeding', en, re.I):
+                    rh_month = ctx_month
+                elif not re.match(r'^\d{4}\s.*\(g/s\)\s*$', en):
+                    rh_month = None
             if (c.get('zoneLabel') or '').lower().startswith('to be filled in by erg') and c['index'] > 0 and ctx_month and c.get('zone') == 'ERG' \
                     and c['letter'] not in ('BB',):
                 pass
@@ -708,6 +721,11 @@ for sh in X['sheets']:
                         and sh['name'].startswith(('3.', '4.', '5.')) and not re.match(r'^(Quarter|[1-4]\s*Quarter)', sub_en):
                     base = '%s_%s' % (M_CODES[ctx_month - 1], slug(sub_en, 30))
                     col['month'] = ctx_month
+                if rh_month and c.get('month') is None and sh['name'].startswith(RH_BLOCK_SHEETS):
+                    # D-474 (i): прив'язка місяця БЕЗ зміни коду колонки (коди T9_04/T9_07/T9_08/T9_10/T10_03/T11_03 уже в
+                    # опублікованих версіях і в мостах методологій; змінюється лише IsMonthColumn/MonthNumber нової версії).
+                    # Ставиться після підрахунку стилю шапки таблиці (hdr_roles нижче), щоб він не змінився.
+                    col['_rhMonth'] = rh_month
             if c.get('zone') in ('Tags', 'Attributes') or n in ('xxxx', 'xxx') or (c.get('constants') and c['constants'][0]['v'] == '*' and c.get('distinctConstants') == 1):
                 col['hidden'] = True
                 col['readOnly'] = True
@@ -790,6 +808,9 @@ for sh in X['sheets']:
             hdr_roles = collections.Counter(x['headerStyleRole'] for x in t_out['columns'] if x.get('headerStyleRole'))
         if hdr_roles:
             t_out['headerStyleRole'] = hdr_roles.most_common(1)[0][0]
+        for x in t_out['columns']:
+            if '_rhMonth' in x:
+                x['month'] = x.pop('_rhMonth')
         # ---- розрахункові таблиці: «Ref»-колонки, мостові формули, виходи методологій
         if is_calc and tcode in CALC:
             if tcode == 'T4_01':
@@ -1401,6 +1422,23 @@ print('cf row-status:', len(out['conditionalFormatsRowStatus']), 'rules; unprove
 _st_reg = registries.get(STATUS_REGISTRY)
 if _st_reg is not None and not any(e['code'] == 'INACTIVE' for e in _st_reg['entries']):
     _st_reg['entries'].append({'code': 'INACTIVE', 'name': 'Inactive', 'en': 'Inactive', 'ru': ''})
+# ---- D-474 (рішення людини 10.11), останнім кроком — мости й прив'язки вище побудовані за попередньою розкладкою:
+# (ii) 7 таблиць PerPeriodInstance з місячними колонками -> MonthsInColumns; (iii) місячні колонки T9c_00 видимі;
+# (iv) DefaultValue NOTPASSEDOVERHAUL лише для Land_OverhauledEnginesRef (xlsm: «by default not overhaul»).
+_d474 = {'layout': [], 'unhidden': 0, 'default': []}
+for _s in out['sheets']:
+    for _t in _s['tables']:
+        if _t['code'] in MONTHS_IN_COLUMNS_TABLES and _t['layout'] != 'MonthsInColumns':
+            _t['layout'] = 'MonthsInColumns'
+            _d474['layout'].append(_t['code'])
+        for _c in _t['columns']:
+            if _t['code'] == 'T9c_00' and _c.get('month') and _c.get('hidden'):
+                _c['hidden'] = False
+                _d474['unhidden'] += 1
+            if _c['code'] == 'Land_OverhauledEnginesRef':
+                _c['default'] = 'NOTPASSEDOVERHAUL'
+                _d474['default'].append(_t['code'])
+print('D-474:', _d474)
 print('styles:', len(out['styles']), [(s['code'], s['columns'], s['headers'], s['tables']) for s in out['styles']])
 print('cf row-scoped:', len(out['conditionalFormatsRowScoped']))
 out['registries'] = list(registries.values())

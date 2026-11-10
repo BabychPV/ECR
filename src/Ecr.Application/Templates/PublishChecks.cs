@@ -1063,6 +1063,44 @@ public static class PublishChecks
             .Select(c => $"{c.First.TableCode}.{c.First.ColumnCode}: {ClusterSample(c.Cluster)}")];
     }
 
+    /// <summary>
+    /// Таблиці, де колонки, прив'язані до місяця (<c>IsMonthColumn</c> + <c>MonthNumber</c>), стоять без групи
+    /// заголовків — попередження в журнал, НЕ відмова публікації.
+    /// </summary>
+    /// <param name="version">Версія, що публікується.</param>
+    /// <returns>Рядки «Таблиця: N із M місячних колонок без групи (приклад)»; порожньо — усі в групах.</returns>
+    /// <remarks>
+    /// ⛔ Land 10.11 (<c>D-474</c>): усі версії LAND_UI публікувалися з НУЛЕМ груп, і 36 колонок T3_00 читалися як
+    /// «Running hours / Liquid fuel / Gas» дванадцять разів без слова про місяць — людина бачила це як «місяців немає».
+    /// Сітка малює смуги лише з груп заголовків (<c>MonthNumber</c> заголовків не читає). Попередження, а не відмова:
+    /// група — презентаційне поле (ФВ-7.2), її додають і на опублікованій версії.
+    /// </remarks>
+    public static IReadOnlyList<string> FindMonthColumnsWithoutMonthGroup(TemplateVersion version)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+
+        var result = new List<string>();
+        foreach (var table in LiveTables(version.Sheets))
+        {
+            var groups = table.HeaderGroups.Select(g => g.Id).ToHashSet();
+            var month = table.Columns
+                .Where(c => !c.IsDeleted && c.IsMonthColumn && c.MonthNumber is not null)
+                .OrderBy(c => c.Ordinal).ThenBy(c => c.Code, StringComparer.Ordinal)
+                .ToList();
+            var bare = month.Where(c => c.HeaderGroupId is not { } id || !groups.Contains(id)).ToList();
+            if (bare.Count == 0)
+            {
+                continue;
+            }
+
+            result.Add(
+                $"{table.Code}: {bare.Count} із {month.Count} місячних колонок без групи заголовків "
+                + $"({string.Join(", ", bare.Take(3).Select(c => c.Code))}{(bare.Count > 3 ? ", …" : string.Empty)})");
+        }
+
+        return result;
+    }
+
     private static string ClusterSample(List<ActiveColumnBinding> cluster)
         => string.Join(", ", cluster.Take(5).Select(b => $"{b.MethodologyCode}.{b.OutputCode}"));
 
