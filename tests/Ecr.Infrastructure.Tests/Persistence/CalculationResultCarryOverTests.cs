@@ -6,6 +6,7 @@ using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -43,26 +44,33 @@ public sealed class CalculationResultCarryOverTests(SqlServerFixture sql)
         var f = await ArrangeAsync(seedResult: false);
         await using var db = f.Builder.CreateContext();
 
-        // Одним set-based INSERT: 50 001 рядок через EF тут тривав би хвилини.
-        await InsertResultsAsync(db, f, f.SourceRunId, CalculationResultStore.CarryOverMaxResults + 1);
+        try
+        {
+            // Set-based INSERT порціями: 50 001 рядок через EF тут тривав би хвилини.
+            await InsertResultsAsync(db, f, f.SourceRunId, CalculationResultStore.CarryOverMaxResults + 1);
 
-        var target = await StartRunAsync(db, f, T3);
-        var store = new CalculationResultStore(db, new TestClock(T3));
+            var target = await StartRunAsync(db, f, T3);
+            var store = new CalculationResultStore(db, new TestClock(T3));
 
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => store.CarryOverResultsAsync(target.Id, f.Document.DocumentId, [f.MethodologyId], CancellationToken.None));
+            var error = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => store.CarryOverResultsAsync(target.Id, f.Document.DocumentId, [f.MethodologyId], CancellationToken.None));
 
-        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
-        Assert.Equal("err.ECR-CALC-0422.carryOverTooLarge", error.Details!["messageKey"]);
-        Assert.Equal(CalculationResultStore.CarryOverMaxResults + 1, error.Details["count"]);
-        Assert.Equal(CalculationResultStore.CarryOverMaxResults, error.Details["max"]);
+            Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+            Assert.Equal("err.ECR-CALC-0422.carryOverTooLarge", error.Details!["messageKey"]);
+            Assert.Equal(CalculationResultStore.CarryOverMaxResults + 1, error.Details["count"]);
+            Assert.Equal(CalculationResultStore.CarryOverMaxResults, error.Details["max"]);
 
-        // Нічого не перенесено — ні частини: прогін упаде цілком, а попередній лишиться актуальним.
-        await db.SaveChangesAsync();
-        Assert.Equal(0, await db.CalculationResults.AsNoTracking().CountAsync(r => r.CalculationRunId == target.Id));
-        Assert.Equal(
-            CalculationRun.CurrentStatus,
-            await db.CalculationRuns.AsNoTracking().Where(r => r.Id == f.SourceRunId).Select(r => r.Status).SingleAsync());
+            // Нічого не перенесено — ні частини: прогін упаде цілком, а попередній лишиться актуальним.
+            await db.SaveChangesAsync();
+            Assert.Equal(0, await db.CalculationResults.AsNoTracking().CountAsync(r => r.CalculationRunId == target.Id));
+            Assert.Equal(
+                CalculationRun.CurrentStatus,
+                await db.CalculationRuns.AsNoTracking().Where(r => r.Id == f.SourceRunId).Select(r => r.Status).SingleAsync());
+        }
+        finally
+        {
+            await DeleteResultsAsync(f.SourceRunId);
+        }
     }
 
     /// <remarks>
@@ -79,16 +87,23 @@ public sealed class CalculationResultCarryOverTests(SqlServerFixture sql)
         var f = await ArrangeAsync(seedResult: false);
         await using var db = f.Builder.CreateContext();
 
-        // Актуальний прогін-джерело з рядками понад стелю — одним set-based INSERT.
-        await InsertResultsAsync(db, f, f.SourceRunId, CalculationResultStore.MaxResults + 1);
+        try
+        {
+            // Актуальний прогін-джерело з рядками понад стелю — set-based INSERT порціями.
+            await InsertResultsAsync(db, f, f.SourceRunId, CalculationResultStore.MaxResults + 1);
 
-        var store = new CalculationResultStore(db, new TestClock(T3));
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => store.ReadCurrentAsync(f.Document.DocumentId, f.Document.PeriodKey.Value, CancellationToken.None));
+            var store = new CalculationResultStore(db, new TestClock(T3));
+            var error = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => store.ReadCurrentAsync(f.Document.DocumentId, f.Document.PeriodKey.Value, CancellationToken.None));
 
-        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
-        Assert.Equal("err.ECR-CALC-0422.resultsTooLarge", error.Details!["messageKey"]);
-        Assert.Equal(CalculationResultStore.MaxResults, error.Details["max"]);
+            Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+            Assert.Equal("err.ECR-CALC-0422.resultsTooLarge", error.Details!["messageKey"]);
+            Assert.Equal(CalculationResultStore.MaxResults, error.Details["max"]);
+        }
+        finally
+        {
+            await DeleteResultsAsync(f.SourceRunId);
+        }
     }
 
     /// <remarks>
@@ -245,26 +260,75 @@ public sealed class CalculationResultCarryOverTests(SqlServerFixture sql)
             .Select(r => r.InputsAsOfUtc)
             .SingleAsync();
 
+    /// <summary>
+    /// <paramref name="count"/> результатів прогону <paramref name="runId"/> — ті самі Id, ключі й значення, що одним
+    /// INSERT, але порціями по <see cref="Chunk"/> з CHECKPOINT між ними.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ D16: одним INSERT це ОДНА транзакція на весь журнал заливки, і посередині її не звільнить ні CHECKPOINT, ні
+    /// модель відновлення: у <c>server-part (core-persistence)</c> журнал спільної бази стрибав тут 40 → 88 → 104 МБ, а
+    /// <c>calc.CalculationResult</c> лишав 88 МБ у <c>Ecr_hot</c> — сторож <c>TestDatabaseSizeTests</c> (стеля 128 МБ)
+    /// бачив обидва. Тому порціями — і <see cref="DeleteResultsAsync"/> після тесту.
+    /// </remarks>
     private static async Task InsertResultsAsync(EcrDbContext db, Fixture f, long runId, int count)
     {
-        var period = f.Document.PeriodKey.Value;
-        var document = f.Document.DocumentId;
-
-        await db.Database.ExecuteSqlInterpolatedAsync($"""
+        await db.Database.ExecuteSqlRawAsync(
+            """
             DECLARE @first sql_variant;
             EXEC sys.sp_sequence_get_range
                 @sequence_name = N'calc.CalculationResultSeq',
-                @range_size = {count},
+                @range_size = @count,
                 @range_first_value = @first OUTPUT;
 
-            INSERT INTO calc.CalculationResult
-                (Id, PeriodKey, CalculationRunId, MethodologyVersionId, DocumentId, SourceRowKey, OutputCode, Value, UnitId, Kind)
-            SELECT CONVERT(bigint, @first) + n.Num - 1, {period}, {runId}, {f.VersionId}, {document},
-                   CONCAT(N'R-', n.Num), N'EMISSION', 1, {f.UnitId}, 0
-              FROM (SELECT TOP ({count}) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS Num
-                      FROM sys.all_objects AS a CROSS JOIN sys.all_objects AS b) AS n;
-            """);
+            DECLARE @base bigint = CONVERT(bigint, @first), @i int = 0, @n int;
+            WHILE @i < @count
+            BEGIN
+                SET @n = IIF(@count - @i < @chunk, @count - @i, @chunk);
+                INSERT INTO calc.CalculationResult
+                    (Id, PeriodKey, CalculationRunId, MethodologyVersionId, DocumentId, SourceRowKey, OutputCode, Value, UnitId, Kind)
+                SELECT @base + @i + n.Num - 1, @period, @run, @version, @document,
+                       CONCAT(N'R-', @i + n.Num), N'EMISSION', 1, @unit, 0
+                  FROM (SELECT TOP (@n) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS Num
+                          FROM sys.all_objects AS a CROSS JOIN sys.all_objects AS b) AS n
+                OPTION (RECOMPILE);
+                SET @i += @chunk;
+                CHECKPOINT;
+            END;
+            """,
+            [
+                new SqlParameter("@count", count),
+                new SqlParameter("@chunk", Chunk),
+                new SqlParameter("@period", f.Document.PeriodKey.Value),
+                new SqlParameter("@run", runId),
+                new SqlParameter("@version", f.VersionId),
+                new SqlParameter("@document", f.Document.DocumentId),
+                new SqlParameter("@unit", f.UnitId),
+            ],
+            CancellationToken.None);
     }
+
+    /// <summary>Прибирає результати прогону порціями з CHECKPOINT: місце в <c>Ecr_hot</c> бере наступний клас.</summary>
+    private async Task DeleteResultsAsync(long runId)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandTimeout = 120;
+        command.CommandText = """
+            WHILE 1 = 1
+            BEGIN
+                DELETE TOP (@chunk) FROM calc.CalculationResult WHERE CalculationRunId = @run;
+                IF @@ROWCOUNT = 0 BREAK;
+                CHECKPOINT;
+            END;
+            """;
+        command.Parameters.Add(new SqlParameter("@chunk", Chunk));
+        command.Parameters.Add(new SqlParameter("@run", runId));
+        await command.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>Порція заливки й прибирання: тримає журнал тестової бази малим (як у <c>CollectionStoreRawPointUpsertTests</c>).</summary>
+    private const int Chunk = 10_000;
 
     private static LocalizedText Name(string value)
         => new(new Dictionary<string, string> { ["en"] = value });

@@ -121,6 +121,46 @@ public sealed class DatabaseGrowthTracker(string connectionString)
     }
 
     /// <summary>
+    /// <c>CHECKPOINT</c>, коли журнал заповнений понад <paramref name="percent"/> %: повертає, чи він був.
+    /// Помилка SQL — тихо, як і <see cref="Sample"/>.
+    /// </summary>
+    /// <param name="percent">Поріг заповнення журналу, %.</param>
+    /// <remarks>
+    /// ⛔ D16: у CI-контейнері журнал спільної бази між тестами не звільнявся (<c>log_reuse_wait = OLDEST_PAGE</c>,
+    /// «використано 150 із 151 МБ»: непрямі контрольні точки не встигали), і кожен наступний клас із помітним записом
+    /// додавав приріст 16 МБ — 40 → 152 МБ за прогін <c>server-part (core-persistence)</c>, хоча жоден тест сам не
+    /// потребував і 64. Ручний CHECKPOINT скидає брудні сторінки й звільняє журнал (база без резервної копії). Порогом,
+    /// а не після кожного тесту: зайвий CHECKPOINT на ~1400 тестів — даремні секунди.
+    /// </remarks>
+    public bool CheckpointIfLogAbove(int percent)
+    {
+        try
+        {
+            using var connection = new SqlConnection(connectionString);
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                IF (SELECT used_log_space_in_percent FROM sys.dm_db_log_space_usage) > @percent
+                BEGIN
+                    CHECKPOINT;
+                    SELECT 1;
+                END
+                ELSE SELECT 0;
+                """;
+            command.Parameters.Add(new SqlParameter("@percent", percent));
+            return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
+        }
+        catch (SqlException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Звіт про вміст і ріст бази; <c>null</c>, коли жоден файл не перевищує <paramref name="reportAboveMb"/>.
     /// </summary>
     /// <param name="databaseName">Ім'я бази — для заголовка.</param>
@@ -288,6 +328,9 @@ public sealed class TrackDatabaseGrowthAttribute : BeforeAfterTestAttribute
 {
     private const string SharedCollection = "SqlServer";
 
+    /// <summary>Поріг заповнення журналу спільної бази, після якого тест закінчується CHECKPOINT-ом.</summary>
+    private const int LogCheckpointPercent = 50;
+
     /// <inheritdoc />
     public override void After(MethodInfo methodUnderTest)
     {
@@ -299,7 +342,11 @@ public sealed class TrackDatabaseGrowthAttribute : BeforeAfterTestAttribute
             return;
         }
 
-        SqlServerFixture.Shared?.Growth?.Sample($"{type.Name}.{methodUnderTest.Name}");
+        var growth = SqlServerFixture.Shared?.Growth;
+        growth?.Sample($"{type.Name}.{methodUnderTest.Name}");
+
+        // Після заміру: ріст файла належить тесту, а звільнений журнал — наступному (D16, див. CheckpointIfLogAbove).
+        growth?.CheckpointIfLogAbove(LogCheckpointPercent);
     }
 
     /// <summary>
