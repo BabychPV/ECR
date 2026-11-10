@@ -1,4 +1,5 @@
 import type { TableSliceDto } from '@/api/types';
+import { rowDisplayName } from '@/features/permits/history/rowName';
 import { cellText } from './cellValue';
 import { cellKey } from './permissions';
 import type { FocusedCell } from './selection';
@@ -24,7 +25,7 @@ import type { TotalsEdit } from './gridTotals';
 /** Комірка під курсором, як її показує рядок формули. */
 interface FormulaBarModel {
   readonly rowKey: string;
-  /** Підпис рядка з моделі сітки (`rowLabelOf`), або технічний ключ. */
+  /** Підпис рядка з моделі сітки (`rowLabelOf`); без підпису — «row N» (`rowDisplayName`), не технічний ключ. */
   readonly rowLabel: string;
   readonly columnCode: string;
   readonly columnHeader: string;
@@ -65,6 +66,13 @@ function isCalculatedColumn(dataType: string): boolean {
   return dataType === 'Formula' || dataType === 'Calculated';
 }
 
+/** Власний підпис рядка з моделі сітки; `null` — підпису немає (порожній або це сам технічний ключ). */
+function labelOf(value: unknown, rowKey: string): string | null {
+  if (typeof value !== 'string') return null;
+  const label = value.trim();
+  return label.length === 0 || label === rowKey ? null : label;
+}
+
 /**
  * Комірка під курсором; `null` — курсора немає, він поза межами зрізу або
  * стоїть у службовій колонці (підпис рядка), у якої коду в зрізі немає.
@@ -93,7 +101,9 @@ export function formulaBarModel(input: FormulaBarInput): FormulaBarModel | null 
 
   return {
     rowKey: row.rowKey,
-    rowLabel: String(model[labelProp] ?? row.rowKey),
+    // p3-1110: динамічний рядок підпису не має, і модель сітки несе замість нього ключ (hex GUID, `rowLabelOf`) —
+    // рядок під «Freeze columns» показував «cd2384a26a4b… · Mass Value». Тепер — те саме правило, що й j6 (`rowDisplayName`).
+    rowLabel: labelOf(model[labelProp], row.rowKey) ?? rowDisplayName(slice, row.rowKey),
     columnCode,
     columnHeader: column.header,
     unitSymbol: column.unitSymbol,

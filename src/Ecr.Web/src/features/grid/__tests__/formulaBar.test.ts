@@ -197,17 +197,23 @@ describe('formulaBarModel: комірка під курсором', () => {
     expect(model?.value).toBe('');
   });
 
-  it('рядок без підпису адресується технічним ключем, а не порожнечею', () => {
-    const unlabelled: TableSliceDto = { ...Slice, rows: [row('r1', { C1: '1' })] };
+  it('p3-1110: динамічний рядок без підпису — «row N» (як j6), а не технічний ключ і не порожнеча', () => {
+    // ⛔ Мутація: повернути `String(model[labelProp] ?? row.rowKey)` — під «Freeze columns» знову hex GUID, червоне.
+    const key = 'cd2384a26a4b4f0e9c1d2b3a4f5e6d7c';
+    const unlabelled: TableSliceDto = { ...Slice, rows: [row('r0', { C1: '2' }, 'Labelled'), row(key, { C1: '1' })] };
 
-    const model = formulaBarModel({
-      slice: unlabelled,
-      columns: [{ prop: 'C1' }],
-      rows: [{ __rowKey: 'r1', C1: '1' }],
-      labelProp: '__rowLabel',
-      focus: { rowIndex: 0, columnIndex: 0 },
-    });
+    for (const model of [{ __rowKey: key, C1: '1' }, { __rowKey: key, __rowLabel: key, C1: '1' }]) {
+      const bar = formulaBarModel({
+        slice: unlabelled,
+        columns: [{ prop: 'C1' }],
+        rows: [{ __rowKey: 'r0', __rowLabel: 'Labelled', C1: '2' }, model],
+        labelProp: '__rowLabel',
+        focus: { rowIndex: 1, columnIndex: 0 },
+      });
 
-    expect(model?.rowLabel).toBe('r1');
+      expect(bar?.rowLabel).not.toContain('cd2384');
+      expect(bar?.rowLabel).toContain('permits.history.rowPosition');
+      expect(bar?.rowLabel).toContain('n=2');
+    }
   });
 });
