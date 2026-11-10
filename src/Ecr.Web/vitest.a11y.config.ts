@@ -31,7 +31,9 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    setupFiles: ['./src/test/setup.ts'],
+    // ✎ AN-162: `settleDynamicImports` — файл не закривається, доки не осіли розпочаті `import()`
+    // (`EnvironmentTeardownError` на `DocumentActionBar` → `DocumentToolbar`, CI 42898560254).
+    setupFiles: ['./src/test/setup.ts', './src/test/settleDynamicImports.ts'],
     include: ['src/**/*.a11y.test.{ts,tsx}'],
     exclude: ['**/node_modules/**', '**/dist/**'],
 
