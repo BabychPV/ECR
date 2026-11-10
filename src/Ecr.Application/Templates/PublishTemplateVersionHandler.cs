@@ -231,6 +231,12 @@ public sealed partial class PublishTemplateVersionHandler(
             {
                 LogRuleSelectedBindingConflict(logger, templateVersionId, conflict);
             }
+
+            // D-474: місячні колонки без групи заголовків — попередження, не відмова (смугу додають і після публікації).
+            foreach (var bare in PublishChecks.FindMonthColumnsWithoutMonthGroup(version))
+            {
+                LogMonthColumnsWithoutGroup(logger, templateVersionId, bare);
+            }
         }
 
         if (diagnostics.Count > 0)
@@ -321,6 +327,12 @@ public sealed partial class PublishTemplateVersionHandler(
         Message = "Версія шаблону {TemplateVersionId}: кілька активних прив'язок на одну колонку з однаковим предикатом "
             + "({Conflict}); вибір методології робиться правилами (MethodologyRule/CategoryRule) — публікацію не заблоковано.")]
     private static partial void LogRuleSelectedBindingConflict(ILogger logger, int templateVersionId, string conflict);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Версія шаблону {TemplateVersionId}: місячні колонки без групи заголовків ({Detail}) — у сітці не видно, "
+            + "до якого місяця належить колонка; публікацію не заблоковано (група — презентаційне поле, tools/land/Add-LandMonthGroups.ps1).")]
+    private static partial void LogMonthColumnsWithoutGroup(ILogger logger, int templateVersionId, string detail);
 
     /// <summary>
     /// Виводить версію з обігу — відкат без видалення (<c>ФВ-7.8</c>).
