@@ -3,6 +3,7 @@ import { Alert, Button, Group, Modal, Select, Text } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import type { PresentationRevisionResponse, TemplateColumnDto, TemplateHeaderGroupDto } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -126,6 +127,8 @@ export function BulkGroupDialog({
     },
   });
 
+  // ФВ-14.26: спінер не з першого кадру — пороги `useDurationIndicator`.
+  const applyLoading = usePendingLoading(patch.isPending);
   const names = columns.map((column) => localized(column.headerL10n) || column.code).join(', ');
 
   return (
@@ -164,7 +167,7 @@ export function BulkGroupDialog({
         </Button>
         <Button
           disabled={value === null || unchanged || columns.length === 0}
-          loading={patch.isPending}
+          loading={applyLoading}
           onClick={() => {
             if (value !== null) patch.mutate(value);
           }}
