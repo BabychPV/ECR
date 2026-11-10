@@ -830,6 +830,71 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
                     entity.Id, entity.Code, "/admin/sources", null, entity.DisplayName)))
             .ConfigureAwait(false);
 
+        // ФВ-8.14: формули й правила, що ЧИТАЮТЬ довідник (ребра `cfg.RegistryUse`, які пише публікація джерела).
+        // ⚠ Одне джерело має по ребру на кожне прочитане поле — EXISTS дає один рядок на джерело, а не на ребро.
+        var uses = db.RegistryUses.AsNoTracking().Where(u => u.RegistryDefId == registryDefId);
+
+        await AddAsync(
+            UsageKinds.TemplateFormula,
+            from formula in db.FormulaDefs.AsNoTracking()
+            where uses.Any(u => u.SourceKind == RegistryUse.TemplateFormulaSource && u.SourceId == formula.Id)
+            join table in db.TableDefs.AsNoTracking() on formula.TableDefId equals table.Id
+            join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+            join version in db.TemplateVersions.AsNoTracking() on sheet.TemplateVersionId equals version.Id
+            orderby formula.Id
+            select new UsageHit(
+                formula.Id,
+                table.Code + "." + (db.ColumnDefs.Where(c => c.Id == formula.ColumnDefId).Select(c => c.Code).FirstOrDefault() ?? "*"),
+                "/admin/templates/" + version.TemplateId + "/versions/" + version.Id,
+                table.NameL10n,
+                null))
+            .ConfigureAwait(false);
+
+        await AddAsync(
+            UsageKinds.RegistryRule,
+            from rule in db.RegistryRuleDefs.AsNoTracking()
+            where uses.Any(u => u.SourceKind == RegistryUse.RegistryRuleSource && u.SourceId == rule.Id)
+            join owner in db.RegistryDefs.AsNoTracking() on rule.RegistryDefId equals owner.Id
+            orderby rule.Id
+            select new UsageHit(
+                rule.Id, owner.Code + "." + rule.Code, "/admin/registries/" + owner.Code + "/definition", owner.NameL10n, null))
+            .ConfigureAwait(false);
+
+        // Формула методики адресується парою (версія, код формули): Id рядка — «версія:код», як у
+        // FindFieldChainConsumersAsync, тому власний підрахунок, а не `AddAsync` з цілим Id.
+        var pairs = uses
+            .Where(use => use.SourceKind == RegistryUse.MethodologyVersionSource)
+            .Select(use => new { use.SourceId, use.FormulaCode })
+            .Distinct();
+        var methodologyFormulas =
+            from pair in pairs
+            join version in db.MethodologyVersions.AsNoTracking() on pair.SourceId equals version.Id
+            join methodology in db.Methodologies.AsNoTracking() on version.MethodologyId equals methodology.Id
+            select new
+            {
+                VersionId = version.Id,
+                pair.FormulaCode,
+                version.MethodologyId,
+                MethodologyCode = methodology.Code,
+                version.Version,
+                methodology.NameL10n,
+            };
+
+        total += await methodologyFormulas.CountAsync(ct).ConfigureAwait(false);
+        if (items.Count < take)
+        {
+            var page = await methodologyFormulas
+                .OrderBy(f => f.VersionId).ThenBy(f => f.FormulaCode)
+                .Take(take - items.Count)
+                .ToListAsync(ct).ConfigureAwait(false);
+            items.AddRange(page.Select(f => new UsageItemDto(
+                UsageKinds.MethodologyFormula,
+                f.VersionId.ToString(CultureInfo.InvariantCulture) + ":" + f.FormulaCode,
+                f.MethodologyCode + " v" + f.Version + (f.FormulaCode is null ? string.Empty : "." + f.FormulaCode),
+                "/admin/methodologies/" + f.MethodologyId.ToString(CultureInfo.InvariantCulture) + "/versions",
+                string.IsNullOrWhiteSpace(f.NameL10n.Get("uk")) ? null : f.NameL10n.Get("uk"))));
+        }
+
         // Дані: один рядок на таблицю, без підрахунку (див. порт).
         //
         // ⛔ R-05: запит іде ВІД записів довідника до комірок, а не навпаки, і

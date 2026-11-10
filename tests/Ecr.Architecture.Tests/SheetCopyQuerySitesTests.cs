@@ -63,6 +63,8 @@ public sealed partial class SheetCopyQuerySitesTests
 
         // ── байдужі до копії: адресація за Id екземпляра/рядка або агрегат без ключа таблиці ──
         ["src/Ecr.Infrastructure/Persistence/PermitStore.cs"] = "«де вжито» за Id екземпляра рядка",
+        ["src/Ecr.Infrastructure/Persistence/WhereUsedStore.cs"] =
+            "ФВ-8.14: «чи є значення колонки в документах» — навмисно в усіх копіях і оригіналі (будь-яке значення — використання)",
         ["src/Ecr.Infrastructure/Persistence/NormalizedCellStore.cs"] = "за Id екземпляра",
         ["src/Ecr.Infrastructure/Persistence/OrphanScanner.cs"] = "рядок → екземпляр за Id",
         ["src/Ecr.Infrastructure/Persistence/ConsistencyIssueReader.cs"] = "рядок → екземпляр за Id",

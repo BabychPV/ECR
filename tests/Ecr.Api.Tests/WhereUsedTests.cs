@@ -114,6 +114,43 @@ public sealed class WhereUsedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.14")]
+    public async Task Колонку_показують_правила_валідації_і_дані_документів()
+    {
+        var stand = await RuleStandAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Template.View").ConfigureAwait(true);
+
+        // Предмет: правило, прив'язане до колонки, правило, що читає її у виразі, і значення в документі.
+        var usage = await GetOkAsync(client, app, $"/api/v1/column-defs/{stand.Subject}/usage").ConfigureAwait(true);
+        Assert.Equal(3, usage.GetProperty("total").GetInt32());
+        var items = usage.GetProperty("items").EnumerateArray().ToList();
+        Assert.Equal(
+            [$"{stand.TableCode}.RULE_BOUND", $"{stand.TableCode}.RULE_EXPR"],
+            items.Where(i => i.GetProperty("kind").GetString() == "validationRule")
+                .Select(i => i.GetProperty("label").GetString()!)
+                .Order(StringComparer.Ordinal));
+        Assert.All(
+            items.Where(i => i.GetProperty("kind").GetString() == "validationRule"),
+            i => Assert.Equal(
+                $"/admin/templates/{stand.TemplateId}/versions/{stand.TemplateVersionId}", i.GetProperty("route").GetString()));
+        var data = Assert.Single(items, i => i.GetProperty("kind").GetString() == "data");
+        Assert.Equal("cells", data.GetProperty("id").GetString());
+
+        // ⛔ Пастка: код предмета лише в ТЕКСТОВОМУ літералі правила першої колонки — це посилання на першу, не на предмет.
+        var first = await GetOkAsync(client, app, $"/api/v1/column-defs/{stand.First}/usage").ConfigureAwait(true);
+        var trap = Assert.Single(first.GetProperty("items").EnumerateArray());
+        Assert.Equal("validationRule", trap.GetProperty("kind").GetString());
+        Assert.Equal($"{stand.TableCode}.RULE_TRAP", trap.GetProperty("label").GetString());
+
+        // Третя колонка: ні правил, ні даних — чесний нуль (дані рахуються по колонці, а не по таблиці).
+        var empty = await GetOkAsync(client, app, $"/api/v1/column-defs/{stand.Empty}/usage").ConfigureAwait(true);
+        Assert.Equal(0, empty.GetProperty("total").GetInt32());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Колонка_без_права_перегляду_шаблонів_403_невідома_404()
     {
         var stand = await ColumnStandAsync().ConfigureAwait(true);
@@ -133,6 +170,43 @@ public sealed class WhereUsedTests(SqlServerFixture sql)
     private sealed record ConstantStand(int MethodologyId, int VersionId);
 
     private sealed record ColumnStand(int Subject, int Neighbour, string FormulaLabel);
+
+    private sealed record RuleStand(
+        int Subject, int First, int Empty, string TableCode, int TemplateId, int TemplateVersionId);
+
+    /// <summary>
+    /// Три колонки: предмет (друга) має прив'язане правило, правило з посиланням у виразі й значення в документі;
+    /// перша — правило-пастку з кодом предмета лише в текстовому літералі; третя — нічого.
+    /// </summary>
+    private async Task<RuleStand> RuleStandAsync()
+    {
+        var document = await new TestDocumentBuilder(sql.ConnectionString)
+            .BuildAsync(columnCount: 3, rowCount: 1).ConfigureAwait(false);
+        var (first, subject, empty) = (document.ColumnDefIds[0], document.ColumnDefIds[1], document.ColumnDefIds[2]);
+
+        await using var db = Db();
+        var codes = await db.ColumnDefs.Where(c => c.TableDefId == document.TableDefId)
+            .ToDictionaryAsync(c => c.Id, c => c.Code).ConfigureAwait(false);
+        var table = await db.TableDefs.Where(t => t.Id == document.TableDefId).Select(t => t.Code).FirstAsync().ConfigureAwait(false);
+        var message = new LocalizedText(new Dictionary<string, string> { ["en"] = "FV-8.14" });
+
+        db.ValidationRules.Add(new ValidationRule(
+            document.TableDefId, EcrCode.Create("RULE_BOUND"), ValidationSeverity.Error, 0, "1 = 1", message, subject));
+        db.ValidationRules.Add(new ValidationRule(
+            document.TableDefId, EcrCode.Create("RULE_EXPR"), ValidationSeverity.Warning, 1,
+            $"[{codes[subject].ToLowerInvariant()}] > 0", message));
+        db.ValidationRules.Add(new ValidationRule(
+            document.TableDefId, EcrCode.Create("RULE_TRAP"), ValidationSeverity.Warning, 1,
+            $"[{codes[first]}] <> '{codes[subject]}'", message));
+
+        db.CellValues.Add(new Ecr.Domain.Entities.Documents.CellValue(
+            new CellAddress(document.PeriodKey, document.RowIds[0], subject),
+            document.TableDefId,
+            new CellValueData { ValueNumeric = 5m }));
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return new RuleStand(subject, first, empty, table, document.TemplateId, document.TemplateVersionId);
+    }
 
     private async Task<ConstantStand> ConstantStandAsync()
     {

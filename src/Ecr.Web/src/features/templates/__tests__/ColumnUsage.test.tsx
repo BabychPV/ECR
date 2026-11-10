@@ -104,6 +104,27 @@ describe('TemplateColumnUsage', () => {
     expect(screen.getByText('BIND.1')).toBeDefined();
   });
 
+  it('дані колонки в документах — речення про КОЛОНКУ, а не про довідник; правило валідації у переліку', async () => {
+    mockUsage({
+      total: 2,
+      items: [
+        { kind: 'data', id: 'cells', label: 'Values in document cells', route: null },
+        { kind: 'validationRule', id: '7', label: 'TBL.RULE', route: '/admin/templates/1/versions/2' },
+      ],
+    });
+    show();
+
+    const data = await waitFor(() => {
+      const el = document.querySelector('[data-registry-usage="data"]');
+      if (el === null) throw new Error('рядок даних ще не намальовано');
+      return el;
+    });
+
+    expect(data.textContent).toBe('⟦columns.usageDataInDocuments⟧');
+    expect(screen.getByText('⟦usageKind.validationRule⟧')).toBeDefined();
+    expect(screen.getByRole('link', { name: 'TBL.RULE' }).getAttribute('href')).toBe('/admin/templates/1/versions/2');
+  });
+
   it('відмова — причина з кодом, і НЕ «ніде не використано»', async () => {
     mockUsage('refuse');
     show();

@@ -70,6 +70,15 @@ public static class UsageKinds
     /// </summary>
     public const string RowWindowMap = "rowWindowMap";
 
+    /// <summary>
+    /// Правило валідації шаблону (<c>cfg.ValidationRule</c>), прив'язане до колонки або таке, що читає її у виразі
+    /// (ФВ-8.14).
+    /// </summary>
+    public const string ValidationRule = "validationRule";
+
+    /// <summary>Правило довідника, що читає довідник (ребро <c>cfg.RegistryUse</c>, ФВ-8.14).</summary>
+    public const string RegistryRule = "registryRule";
+
     /// <summary>Усі види — рефлексією, щоб новий член не треба було дописувати вдруге.</summary>
     public static IReadOnlyList<string> All { get; } =
         [.. typeof(UsageKinds)

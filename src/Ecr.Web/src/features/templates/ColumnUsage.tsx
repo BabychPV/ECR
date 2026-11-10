@@ -52,8 +52,11 @@ export function TemplateColumnUsage({
     return <Skeleton height={120} radius="sm" data-column-usage="pending" />;
   }
 
+  // ФВ-8.14: вид `data` тут — значення КОЛОНКИ в документах, а не довідника.
+  const dataText = t('columns.usageDataInDocuments');
+
   if (!isDraft) {
-    return <RegistryUsageList usage={usage.data} />;
+    return <RegistryUsageList usage={usage.data} dataText={dataText} />;
   }
 
   return (
@@ -61,7 +64,7 @@ export function TemplateColumnUsage({
       <Text size="sm" c="dimmed" data-column-usage="draft-note">
         {t('columns.usageDraftNote')}
       </Text>
-      <RegistryUsageList usage={usage.data} />
+      <RegistryUsageList usage={usage.data} dataText={dataText} />
     </Stack>
   );
 }

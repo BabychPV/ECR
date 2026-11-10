@@ -130,7 +130,72 @@ public sealed class WhereUsedStore(EcrDbContext db) : IWhereUsedStore
             UsageKinds.MethodologyRule,
             new Hit(c.Rule.Id, c.Rule.Code, "/admin/methodologies/" + c.MethodologyId + "/versions", null))));
 
+        // ФВ-8.14: значення колонки вже лежать у документах — один рядок, без підрахунку (як «дані» довідника).
+        // ⛔ Запит іде від екземплярів ТАБЛИЦІ колонки до рядків і комірок, а не скан doc.CellValue за ColumnDefId:
+        // індексу з ColumnDefId першим немає (PK починається з PeriodKey, TableRowId). Так кожна ланка — seek
+        // (IX_TableRow_Live, PK_CellValue), а вартість обмежена рядками однієї таблиці.
+        var tableDefId = await db.ColumnDefs.AsNoTracking()
+            .Where(c => c.Id == columnDefId)
+            .Select(c => c.TableDefId)
+            .FirstAsync(ct).ConfigureAwait(false);
+        var inCells = await db.TableInstances.AsNoTracking()
+            .AnyAsync(
+                instance => instance.TableDefId == tableDefId
+                            && db.TableRows.Any(row => row.PeriodKeyValue == instance.PeriodKeyValue
+                                                       && row.TableInstanceId == instance.Id
+                                                       && db.CellValues.Any(cell => cell.PeriodKeyValue == row.PeriodKeyValue
+                                                                                    && cell.TableRowId == row.Id
+                                                                                    && cell.ColumnDefId == columnDefId)),
+                ct)
+            .ConfigureAwait(false);
+        if (inCells)
+        {
+            total++;
+            if (hits.Count < take)
+            {
+                hits.Add(new UsageItemDto(UsageKinds.Data, "cells", "Values in document cells", null));
+            }
+        }
+
         return new UsageResponse(total, hits);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ColumnRuleCandidate>> ListColumnRuleCandidatesAsync(
+        int columnDefId, CancellationToken ct)
+    {
+        // Правило бачить лише свою таблицю (ФВ-5.9, RuleExpressionChecks), тож кандидати — правила таблиці колонки.
+        var rows = await (
+                from column in db.ColumnDefs.AsNoTracking()
+                where column.Id == columnDefId
+                join rule in db.ValidationRules.AsNoTracking() on column.TableDefId equals rule.TableDefId
+                join table in db.TableDefs.AsNoTracking() on rule.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                join version in db.TemplateVersions.AsNoTracking() on sheet.TemplateVersionId equals version.Id
+                orderby rule.Id
+                select new
+                {
+                    rule.Id,
+                    rule.Code,
+                    rule.Expression,
+                    rule.ColumnDefId,
+                    TableCode = table.Code,
+                    ColumnCode = column.Code,
+                    version.TemplateId,
+                    VersionId = version.Id,
+                })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        return [.. rows.Select(r => new ColumnRuleCandidate(
+            new UsageItemDto(
+                UsageKinds.ValidationRule,
+                r.Id.ToString(CultureInfo.InvariantCulture),
+                r.TableCode + "." + r.Code,
+                "/admin/templates/" + r.TemplateId.ToString(CultureInfo.InvariantCulture)
+                + "/versions/" + r.VersionId.ToString(CultureInfo.InvariantCulture)),
+            r.Expression,
+            r.ColumnDefId == columnDefId,
+            r.ColumnCode))];
     }
 
     /// <summary>Сама колонка і її відповідники за шляхом «аркуш → таблиця → колонка» в інших версіях її шаблону.</summary>
