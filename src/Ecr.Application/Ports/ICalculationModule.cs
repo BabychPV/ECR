@@ -150,6 +150,11 @@ public interface ICalculationModule
 /// ✎ LP-07 (форма B): <c>SubstanceEntryId</c> → код запису довідника речовини; категорія константи
 /// <c>{ключ}_{код}</c> має пріоритет над <c>{ключ}</c>. <c>null</c> — кодів немає, і поведінка та сама, що до форми B.
 /// </param>
+/// <param name="KnownCategories">
+/// ✎ F13 RC #806 (doc 95): категорії констант версії й її бібліотек (без <c>Common</c>, без пробілів) — ключ правила
+/// категорії, якого серед них немає (ні точно, ні префіксом <c>{ключ}_</c>), відхиляє рядок, а не дає мовчки
+/// порожній результат. <c>null</c> — правила немає або категорій лише <c>Common</c>: перевірки немає.
+/// </param>
 public sealed record CalculationBindingContext(
     MethodologyDescriptor Methodology,
     long DocumentId,
@@ -163,7 +168,8 @@ public sealed record CalculationBindingContext(
     Ecr.Expressions.Evaluation.IRegistrySnapshot? Registries = null,
     CalculationLibraries? Libraries = null,
     string? CategoryRule = null,
-    IReadOnlyDictionary<long, string>? SubstanceCodes = null);
+    IReadOnlyDictionary<long, string>? SubstanceCodes = null,
+    IReadOnlySet<string>? KnownCategories = null);
 
 /// <summary>
 /// Замикання бібліотечних формул версії (HSE301 L): що з імпортованих методологій

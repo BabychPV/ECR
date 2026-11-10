@@ -83,9 +83,13 @@ public sealed class LandCategoryShapesTests
             .WithSubstanceFormula("Total", "@X * CST.EF")
             .WithConstants(RuleStand.Number("EF", 1m, "A"), RuleStand.Number("EF", 2m, "B"));
 
-        var output = await stand.RunAsync(RuleStand.In("X", 10m), RuleStand.In("Cat", "C"));
+        // ✎ F13 RC #806 (doc 95): не лише «без заповнювача й без числа іншої категорії» — рядок із невідомим ключем
+        // ВІДХИЛЯЄТЬСЯ (categoryRuleFailed), щоб завершення записало проблему CategoryRuleRejected, а не мовчало.
+        var error = await Assert.ThrowsAsync<DomainException>(
+            () => stand.RunAsync(RuleStand.In("X", 10m), RuleStand.In("Cat", "C")));
 
-        Assert.DoesNotContain(output.Values, v => v.OutputCode == "Total");
+        Assert.Equal("err.ECR-CALC-0422.categoryRuleFailed", error.Details?["messageKey"]);
+        Assert.Equal("unknown category key C", error.Details?["reason"]);
     }
 
     [Fact]
