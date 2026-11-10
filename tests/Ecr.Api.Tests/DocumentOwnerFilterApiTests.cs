@@ -160,7 +160,107 @@ public sealed class DocumentOwnerFilterApiTests(SqlServerFixture sql)
         Assert.Contains(s.DocumentA, Ids(await ListAsync(app, client, s, $"&ownerUserId={Num(s.OwnerA.Id)}").ConfigureAwait(true)));
     }
 
+    /// <summary>
+    /// ✎ 10.11 (P2, live, роль LandRestricted: <c>Write</c> на проєкт + <c>Deny</c> аркуша): власник, якому закрито аркуш
+    /// власного документа, бачить СЕБЕ власником — у переліку і в картці; «Мої документи», фільтр і вибір власника
+    /// його документ знаходять; керування доступом і передача власності — працюють. Решта R-7 лишається схованою.
+    /// </summary>
+    /// <remarks>
+    /// Доказ (локально, не в коміті): повернути в <c>DocumentSheetVisibility.For</c> <c>narrowed</c> замість
+    /// <c>ownerHidden</c> → червоніють перелік і картка; прибрати <c>d.CreatedByUserId == reader</c> у
+    /// <c>DocumentStore.WhereOwnerDisclosed</c> → червоніють фільтр <c>ownerUserId</c> і вибір власників.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-450")]
+    public async Task Звужений_власник_бачить_себе_власником_і_керує_документом()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+
+        // Форма ролі LandRestricted: Write на проєкт A і Deny аркуша 2 документа A.
+        var owner = await NewUserAsync("ofr", withView: true, [(s.SheetIdA2, true)], (s.ProjectA, GrantLevel.Write)).ConfigureAwait(true);
+        await SetOwnerAsync(s.DocumentA, owner.Id).ConfigureAwait(true);
+        using var client = await SignedInAsync(app, owner.UserName).ConfigureAwait(true);
+
+        // Перелік: власне ім'я і Id є; решта R-7 — схована (документ справді звужений).
+        var row = Row(await ListAsync(app, client, s, string.Empty).ConfigureAwait(true), s.DocumentA);
+        Assert.Equal(owner.UserName, Field(row, "ownerDisplayName").GetString());
+        Assert.Equal(owner.Id, Field(row, "ownerUserId").GetInt32());
+        Assert.Equal(JsonValueKind.Null, Field(row, "modifiedAt").ValueKind);
+        Assert.Equal(JsonValueKind.Null, Field(row, "errorCount").ValueKind);
+
+        // Картка (шапка документа): те саме, і пункт «Доступ до редагування» дозволено.
+        var card = await JsonAsync(
+            await client.GetAsync(new Uri($"/api/v1/documents/{Num(s.DocumentA)}?periodKey={Num(s.PeriodKey)}", UriKind.Relative)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Equal(owner.UserName, Field(card, "ownerDisplayName").GetString());
+        Assert.Equal(owner.Id, Field(card, "ownerUserId").GetInt32());
+        Assert.Equal(JsonValueKind.Null, Field(card, "modifiedByDisplayName").ValueKind);
+        Assert.True(Field(card, "canManageEditAccess").GetBoolean());
+
+        // «Мої документи», фільтр за собою і вибір власника.
+        Assert.Contains(s.DocumentA, Ids(await ListAsync(app, client, s, "&mine=true").ConfigureAwait(true)));
+        Assert.Equal([s.DocumentA], Ids(await ListAsync(app, client, s, $"&ownerUserId={Num(owner.Id)}").ConfigureAwait(true)));
+        Assert.Contains(await OwnersAsync(app, client, s, string.Empty).ConfigureAwait(true), o => o.GetProperty("userId").GetInt32() == owner.Id);
+
+        // Шторка «Доступ до редагування» відкривається (200, canManage).
+        var drawer = await JsonAsync(
+            await client.GetAsync(new Uri($"/api/v1/documents/{Num(s.DocumentA)}/edit-assignments", UriKind.Relative)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.True(drawer.GetProperty("canManage").GetBoolean());
+
+        // Передача власності — до людини, що сама керуватиме документом.
+        var heir = await NewUserAsync("ofh", withView: true, (s.ProjectA, GrantLevel.Write)).ConfigureAwait(true);
+        var transferred = await JsonAsync(
+            await client.PostAsJsonAsync(
+                new Uri($"/api/v1/documents/{Num(s.DocumentA)}/owner", UriKind.Relative), new { newOwnerUserId = heir.Id }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Equal(heir.Id, transferred.GetProperty("ownerUserId").GetInt32());
+        Assert.Equal(owner.Id, transferred.GetProperty("previousOwnerUserId").GetInt32());
+
+        // Тепер він не власник — і звужений рядок знову без імені (виняток лише для себе).
+        var after = Row(await ListAsync(app, client, s, string.Empty).ConfigureAwait(true), s.DocumentA);
+        Assert.Equal(JsonValueKind.Null, Field(after, "ownerDisplayName").ValueKind);
+        Assert.Equal(JsonValueKind.Null, Field(after, "ownerUserId").ValueKind);
+    }
+
+    /// <summary>✎ 10.11: той самий звужений доступ БЕЗ власності — ім'я власника, як і раніше, не віддається (R-7).</summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-450")]
+    public async Task Звужений_не_власник_не_бачить_власника()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var reader = await NewUserAsync("ofx", withView: true, [(s.SheetIdA2, true)], (s.ProjectA, GrantLevel.Write)).ConfigureAwait(true);
+        using var client = await SignedInAsync(app, reader.UserName).ConfigureAwait(true);
+
+        var row = Row(await ListAsync(app, client, s, string.Empty).ConfigureAwait(true), s.DocumentA);
+        Assert.Equal(JsonValueKind.Null, Field(row, "ownerDisplayName").ValueKind);
+        Assert.Equal(JsonValueKind.Null, Field(row, "ownerUserId").ValueKind);
+
+        var card = await JsonAsync(
+            await client.GetAsync(new Uri($"/api/v1/documents/{Num(s.DocumentA)}?periodKey={Num(s.PeriodKey)}", UriKind.Relative)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Equal(JsonValueKind.Null, Field(card, "ownerDisplayName").ValueKind);
+        Assert.Equal(JsonValueKind.Null, Field(card, "ownerUserId").ValueKind);
+
+        Assert.Empty(await ListAsync(app, client, s, $"&ownerUserId={Num(s.OwnerA.Id)}").ConfigureAwait(true));
+        Assert.DoesNotContain(await OwnersAsync(app, client, s, string.Empty).ConfigureAwait(true), o => o.GetProperty("userId").GetInt32() == s.OwnerA.Id);
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
+
+    private async Task SetOwnerAsync(long documentId, int userId)
+    {
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE doc.Document SET CreatedByUserId = {userId} WHERE Id = {documentId}").ConfigureAwait(false);
+    }
+
+    private Task<Person> NewUserAsync(string prefix, bool withView, params (int ProjectId, GrantLevel Level)[] grants)
+        => NewUserAsync(prefix, withView, [], grants);
 
     private static string Num(long value) => value.ToString(CultureInfo.InvariantCulture);
 
@@ -231,7 +331,8 @@ public sealed class DocumentOwnerFilterApiTests(SqlServerFixture sql)
     }
 
     /// <summary>Користувач із власною роллю: гранти на перелічені проєкти (порожньо — жодного) і, за потреби, <c>Document.View</c>.</summary>
-    private async Task<Person> NewUserAsync(string prefix, bool withView, params (int ProjectId, GrantLevel Level)[] grants)
+    private async Task<Person> NewUserAsync(
+        string prefix, bool withView, (int SheetId, bool Deny)[] sheetDenies, params (int ProjectId, GrantLevel Level)[] grants)
     {
         await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
         var userName = $"{prefix}_{Guid.NewGuid():N}"[..20];
@@ -254,6 +355,11 @@ public sealed class DocumentOwnerFilterApiTests(SqlServerFixture sql)
         foreach (var (projectId, level) in grants)
         {
             db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, projectId, level));
+        }
+
+        foreach (var (sheetId, deny) in sheetDenies)
+        {
+            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Sheet, sheetId, GrantLevel.Read, isDeny: deny));
         }
 
         await db.SaveChangesAsync().ConfigureAwait(false);
@@ -307,7 +413,7 @@ public sealed class DocumentOwnerFilterApiTests(SqlServerFixture sql)
 
         return new Scenario(
             documentA.DocumentId, documentA.ProjectId, documentB.DocumentId, documentB.ProjectId, documentA.PeriodKey.Value,
-            documentA.SheetCode, tableCodeA1, ownerA, ownerB);
+            documentA.SheetCode, tableCodeA1, ownerA, ownerB, sheet2.Id);
     }
 
     private static LocalizedText Text(string value) => new(new Dictionary<string, string> { ["en"] = value });
@@ -316,5 +422,5 @@ public sealed class DocumentOwnerFilterApiTests(SqlServerFixture sql)
 
     private sealed record Scenario(
         long DocumentA, int ProjectA, long DocumentB, int ProjectB, int PeriodKey, string SheetCodeA1, string TableCodeA1,
-        Person OwnerA, Person OwnerB);
+        Person OwnerA, Person OwnerB, int SheetIdA2);
 }
