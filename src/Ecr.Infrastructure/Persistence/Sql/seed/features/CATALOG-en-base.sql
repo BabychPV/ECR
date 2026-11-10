@@ -206,11 +206,9 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     -- BE-09b: фільтр стану переліку документів. Невідомий стан — відмова, а не «усі».
     (N'err.ECR-REQ-0422.documentState',      N'en', N'There is no document state "{state}".', 1),
     (N'err.ECR-REQ-0422.documentStateNeedsPeriod', N'en', N'Filtering by document state needs a period: outside a period the state is not defined.', 1),
-    -- ⚠ Період у ТІЛІ запису комірок проти періоду екземпляра таблиці
-    -- (`DAT-04`). Без цієї відмови розбіжність доїжджала до порушення
-    -- зовнішнього ключа і виходила назовні голим `500` — тобто дефект даних
-    -- виглядав як збій сервера.
-    (N'err.ECR-REQ-0422.periodMismatch',     N'en', N'The period {periodKey} in the request does not match period {expectedPeriodKey} of table instance {tableInstanceId}.', 1),
+    -- D6/D-223: `err.ECR-REQ-0422.periodMismatch` прибрано — розбіжність періоду
+    -- на запису комірок (`DAT-04`) віддає `err.ECR-PRD-0422.periodMismatch`
+    -- (COLL-req-g2.sql); старий ключ — у «Прибрані ключі» прологу.
     -- B-05: походження правки з тіла `PATCH …/cells` — лише людське.
     (N'err.ECR-REQ-0422.cellOriginNotAllowed', N'en', N'Origin "{origin}" cannot be set by a client: an edit made here is recorded as {allowed}.', 1),
     -- WR-11: стеля комірок на один `PATCH …/cells` (`PatchCellsRequest.MaxCells`).
