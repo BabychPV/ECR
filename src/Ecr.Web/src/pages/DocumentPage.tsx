@@ -159,6 +159,11 @@ const PermitRefreshStrip = lazy(async () => ({
   default: (await import('@/features/permits/bindings/PermitRefreshStrip')).PermitRefreshStrip,
 }));
 
+// Feature (j) Ship 2 (jh2/jh3): rows to split after a mid-month header permit change — its own chunk.
+const HeaderSplitBanner = lazy(async () => ({
+  default: (await import('@/features/permits/history/HeaderSplitBanner')).HeaderSplitBanner,
+}));
+
 /**
  * Пропозиція повернути загублені правки — сьома лінива панель (`D-132`).
  *
@@ -381,7 +386,12 @@ export function DocumentPage(): JSX.Element {
    * Що показувати в панелі: свіже — **лише для своєї адреси** — інакше
    * прочитане, інакше нічого.
    */
-  const freshForScope = fresh?.scope === scope ? fresh.result : null;
+  // ✎ F13 p223 (1): a permit change re-runs the stored check on the server and refetches it — a stored result read AFTER
+  // this tab's own run is newer and wins (else Issues kept the undone change's PERMIT-SPLIT).
+  const freshForScope =
+    fresh?.scope === scope && !(lastValidation.data?.validated === true && lastValidation.dataUpdatedAt > fresh.at.getTime())
+      ? fresh.result
+      : null;
   const shownValidation =
     freshForScope ?? (lastValidation.data?.validated === false ? null : (lastValidation.data ?? null));
 
@@ -948,8 +958,19 @@ export function DocumentPage(): JSX.Element {
           проєкт, що й `PATCH …/cells` (`hasProjectWriteGrant`,
           `BusinessKeyChangeAction.tsx`), без окремого функціонального права. */}
       <Suspense fallback={null}>
+        <HeaderSplitBanner
+          documentId={documentId}
+          periodKey={periodKey}
+          tables={tables.data}
+          readOnly={readOnly}
+          onReveal={openUnmatchedRow}
+        />
+      </Suspense>
+
+      <Suspense fallback={null}>
         <DocumentHeaderPanel
           documentId={documentId}
+          periodKey={periodKey}
           businessKey={document.businessKey}
           templateVersion={document.templateVersion ?? undefined}
           showRequiredErrors={validatedSeq > 0}

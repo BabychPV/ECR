@@ -229,6 +229,36 @@ public sealed partial class DocumentPermitHistoryTests
                 },
             }).ConfigureAwait(false);
 
+    /// <summary>
+    /// F13 p223 (1): «Undo last» refreshes the stored Issues — the PERMIT-SPLIT of the undone change is gone from
+    /// <c>GET …/validation</c> without another Validate (the stored last check is re-run for the periods that had one).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "F13-p223-1")]
+    public async Task Undo_refreshes_the_stored_issues_without_another_validate()
+    {
+        var s = await ArrangeAsync(rowBase: "year").ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, (await AddRowAsync(client, s, s.MidJanId, "2026-01-15").ConfigureAwait(true)).StatusCode);
+        Assert.Contains((await FindingsAsync(client, s).ConfigureAwait(true)), f => f.Rule == "PERMIT-SPLIT");
+
+        var undo = await client.PostAsJsonAsync(
+            new Uri($"{Base(s)}/rows/undo", UriKind.Relative),
+            new { tableInstanceId = s.TableInstanceId, rowKey = s.RowKey, columnCode = s.PermitColumnCode }).ConfigureAwait(true);
+        Assert.True(undo.StatusCode == HttpStatusCode.OK, $"{undo.StatusCode}: {await undo.Content.ReadAsStringAsync().ConfigureAwait(true)}\n{app.ErrorsText}");
+
+        var stored = await client.GetAsync(
+            new Uri($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/validation?periodKey=202601", UriKind.Relative))
+            .ConfigureAwait(true);
+        var body = await stored.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(stored.StatusCode == HttpStatusCode.OK, $"{stored.StatusCode}: {body}");
+        Assert.DoesNotContain(
+            JsonDocument.Parse(body).RootElement.GetProperty("messages").EnumerateArray(),
+            f => f.GetProperty("ruleCode").GetString() == "PERMIT-SPLIT");
+    }
     private static async Task<List<(string Rule, string Severity, string? Column, string Message)>> FindingsAsync(
         HttpClient client, Scenario s)
     {

@@ -82,9 +82,11 @@ public sealed record CellSplitItem(
 /// <param name="ColumnCode">The permit column.</param>
 /// <param name="Permits">The history, base permit first.</param>
 /// <param name="SplitMonths">Months that still need a split.</param>
+/// <param name="PermitSource"><c>row</c> — the row's own permit column; <c>header</c> — the row relies on the header permit
+/// (Ship 2: <c>ColumnCode</c> is then the header field's code).</param>
 public sealed record RowPermitHistoryDto(
     int TableDefId, string TableCode, long? SheetCopyId, string RowKey, string ColumnCode,
-    IReadOnlyList<PermitHistoryItemDto> Permits, IReadOnlyList<SplitMonthDto> SplitMonths);
+    IReadOnlyList<PermitHistoryItemDto> Permits, IReadOnlyList<SplitMonthDto> SplitMonths, string PermitSource = "row");
 
 /// <summary>Permit history of one header field.</summary>
 /// <param name="FieldCode">Header field code.</param>

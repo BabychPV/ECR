@@ -81,6 +81,8 @@ export function RowPermitSection({ documentId, periodKey, tableDefId, sheetCopyI
 
   if (mark !== undefined) {
     const parts = mark.month.parts;
+    // Ship 2 (jh2): the row has no permit column of its own — its month is shared because the HEADER permit changed.
+    const fromHeader = row?.permitSource === 'header';
 
     return (
       <section className="ecr-insp-permit" aria-label={t('permits.history.splitSection')} data-permit-split-info="">
@@ -93,8 +95,15 @@ export function RowPermitSection({ documentId, periodKey, tableDefId, sheetCopyI
             {`${String.fromCharCode(64 + part.partNo)}: ${shown(mark.cell?.parts[index])} · ${part.permit} · ${dayMonth(part.dayFrom)}–${dayMonth(part.dayTo)}`}
           </Text>
         ))}
+        {fromHeader && (
+          <Text size="xs" data-permit-from-header="">
+            {t('permits.header.fromHeader', { permits: (row?.permits ?? []).map((item) => item.permit).join(' → ') })}
+          </Text>
+        )}
         <Text size="xs" c="dimmed">
-          {mark.needsSplit ? t('permits.history.splitNeeded') : t('permits.history.splitWhy')}
+          {mark.needsSplit
+            ? t(fromHeader ? 'permits.header.splitNeeded' : 'permits.history.splitNeeded')
+            : t('permits.history.splitWhy')}
         </Text>
         {!cell.isReadOnly && (
           <Button size="xs" variant="default" mt="xs" data-permit-split-open="" onClick={() => requestCellSplit(splitTarget)}>
@@ -147,7 +156,9 @@ export function RowPermitSection({ documentId, periodKey, tableDefId, sheetCopyI
 
       {added !== null && (
         <Text size="xs" role="status" data-permit-added="">
-          {t('permits.history.added', { date: dottedDate(added), row: rowName })}
+          {added.endsWith('-01')
+            ? t('permits.history.addedWhole', { date: dottedDate(added), row: rowName })
+            : t('permits.history.added', { date: dottedDate(added), row: rowName })}
         </Text>
       )}
       <ErrorAlert error={undo.error} />
@@ -157,10 +168,7 @@ export function RowPermitSection({ documentId, periodKey, tableDefId, sheetCopyI
           <AddRowPermitForm
             documentId={documentId}
             periodKey={periodKey}
-            tableInstanceId={cell.tableInstanceId}
-            rowKey={cell.rowKey}
-            rowLabel={rowName}
-            columnCode={cell.columnCode}
+            target={{ kind: 'row', tableInstanceId: cell.tableInstanceId, rowKey: cell.rowKey, columnCode: cell.columnCode }}
             registryCode={registry.code}
             currentEntryId={Number.isFinite(currentEntryId) ? currentEntryId : null}
             onDone={(date) => {

@@ -45,7 +45,9 @@ public sealed class AddRowPermitHandler(
     ICurrentUser currentUser,
     IClock clock,
     IPermitRegistryIndex? permitTargets = null,
-    Groups.ILookupTargetResolver? groups = null)
+    Groups.ILookupTargetResolver? groups = null,    // F13 p223 (1): the stored Issues of the change's year are re-run after the write. `null` (tests) — not re-run.
+    ValidateDocumentHandler? revalidate = null,
+    IValidationResultStore? validationResults = null)
 {
     /// <summary>Adds the permit and returns the row's history.</summary>
     public async Task<RowPermitHistoryDto> HandleAsync(long documentId, AddRowPermitRequest request, CancellationToken ct)
@@ -129,6 +131,7 @@ public sealed class AddRowPermitHandler(
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
+        await PermitHistoryRevalidation.RunAsync(revalidate, validationResults, documentId, request.ValidFrom.Year, ct).ConfigureAwait(false);
         return await PermitHistoryReader.RowAsync(store, registries, row, currentUser.Language, ct).ConfigureAwait(false);
     }
 }
@@ -148,7 +151,9 @@ public sealed class UndoRowPermitHandler(
     IAuditWriter audit,
     ICurrentUser currentUser,
     IClock clock,
-    IPermitRegistryIndex? permitTargets = null)
+    IPermitRegistryIndex? permitTargets = null,    // F13 p223 (1): the stored Issues of the change's year are re-run after the write. `null` (tests) — not re-run.
+    ValidateDocumentHandler? revalidate = null,
+    IValidationResultStore? validationResults = null)
 {
     /// <summary>Removes the latest permit and returns the row's history.</summary>
     public async Task<RowPermitHistoryDto> HandleAsync(long documentId, UndoRowPermitRequest request, CancellationToken ct)
@@ -190,6 +195,7 @@ public sealed class UndoRowPermitHandler(
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
+        await PermitHistoryRevalidation.RunAsync(revalidate, validationResults, documentId, last.ValidFrom.Year, ct).ConfigureAwait(false);
         return await PermitHistoryReader.RowAsync(store, registries, row, currentUser.Language, ct).ConfigureAwait(false);
     }
 }
@@ -206,8 +212,6 @@ public sealed class AddHeaderPermitHandler(
     IPermitHistoryStore store,
     IDocumentStore documents,
     IDocumentHeaderStore headers,
-    IRowStore rows,
-    ICellStore cells,
     IMetadataCache metadata,
     IPeriodStore periods,
     IRegistryStore registries,
@@ -217,9 +221,11 @@ public sealed class AddHeaderPermitHandler(
     ICurrentUser currentUser,
     IClock clock,
     IPermitRegistryIndex? permitTargets = null,
-    Groups.ILookupTargetResolver? groups = null)
+    Groups.ILookupTargetResolver? groups = null,    // F13 p223 (1): the stored Issues of the change's year are re-run after the write. `null` (tests) — not re-run.
+    ValidateDocumentHandler? revalidate = null,
+    IValidationResultStore? validationResults = null)
 {
-    /// <summary>How many rows a mid-month refusal names; the rest as a count.</summary>
+    /// <summary>How many rows a mid-month refusal named (Ship 1); kept for the client contract of earlier refusals.</summary>
     public const int NamedRowsLimit = 10;
 
     /// <summary>Adds the permit and returns the field's history.</summary>
@@ -234,26 +240,8 @@ public sealed class AddHeaderPermitHandler(
         var segments = await store.HeaderSegmentsAsync(documentId, header.Field.Id, ct).ConfigureAwait(false);
         PermitHistoryRules.EnsureDate(request.ValidFrom, window, segments);
 
-        if (request.ValidFrom.Day != 1)
-        {
-            var affected = await RowsRelyingOnHeaderAsync(documentId, header, request, ct).ConfigureAwait(false);
-            throw new BusinessRuleException(
-                ErrorCodes.HeaderEntryNotUsable,
-                $"Зміна дозволу шапки посеред місяця ({request.ValidFrom:dd.MM.yyyy}): додайте дозвіл у рядках.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-HDR-4223.permitChangeMidMonth",
-                    ["headerFieldCode"] = header.Field.Code,
-                    ["date"] = request.ValidFrom.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture),
-                    ["rows"] = affected.Count == 0
-                        ? "—"
-                        : string.Join(", ", affected.Take(NamedRowsLimit))
-                          + (affected.Count > NamedRowsLimit ? $" (+{affected.Count - NamedRowsLimit})" : string.Empty),
-                    ["rowCount"] = affected.Count.ToString(CultureInfo.InvariantCulture),
-                    ["affectedRows"] = affected,
-                });
-        }
-
+        // ✎ Ship 2 (jh1–jh3): a mid-month header change is allowed; the rows relying on the header permit with data in that
+        // month become «Split needed», exactly like a row's own permit change (PERMIT-SPLIT, 4225, the split dialog).
         var previousId = segments.Count > 0 ? segments[^1].RegistryEntryId : header.BaseEntryId;
         var entries = (await registries.FindEntriesByIdsAsync([previousId, request.RegistryEntryId], ct).ConfigureAwait(false))
             .ToDictionary(e => e.Id);
@@ -321,6 +309,7 @@ public sealed class AddHeaderPermitHandler(
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
+        await PermitHistoryRevalidation.RunAsync(revalidate, validationResults, documentId, request.ValidFrom.Year, ct).ConfigureAwait(false);
         return await PermitHistoryReader.HeaderAsync(store, registries, documentId, header.Field, header.BaseEntryId, currentUser.Language, ct)
             .ConfigureAwait(false);
     }
@@ -346,62 +335,6 @@ public sealed class AddHeaderPermitHandler(
                 },
                 ["headerFieldCode"] = fieldCode,
             });
-
-    /// <summary>
-    /// «Table · row» of the rows that rely on the header permit (tables WITHOUT their own permit column) and hold entered
-    /// data in the month of the change — only tables the author can READ (a hidden table is neither named nor counted).
-    /// </summary>
-    private async Task<List<string>> RowsRelyingOnHeaderAsync(
-        long documentId, PermitHistoryHeader header, AddHeaderPermitRequest request, CancellationToken ct)
-    {
-        var period = new PeriodKey(request.PeriodKey);
-        var readable = (await access.ReadScopeAsync(header.Profile, documentId, ct).ConfigureAwait(false)).InPeriod(period);
-        var isPermitTarget = permitTargets is null
-            ? (_ => false)
-            : await PermitTargets.LoadAsync(permitTargets, ct).ConfigureAwait(false);
-        var tables = header.Snapshot.Sheets.SelectMany(s => s.Tables)
-            .Where(t => readable.CanReadTable(t.Id)
-                        && !t.Columns.Any(c => !c.IsDeleted && c.DataType == CellDataType.Lookup
-                                               && c.LookupRegistryDefId is { } target && isPermitTarget(target)))
-            .ToDictionary(t => t.Id);
-
-        var instances = (await rows.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false))
-            .Where(i => tables.ContainsKey(i.TableDefId))
-            .ToList();
-        if (instances.Count == 0)
-        {
-            return [];
-        }
-
-        var ids = instances.ConvertAll(i => i.TableInstanceId);
-        var slices = await cells.ReadSlicesAsync(ids, period, ct).ConfigureAwait(false);
-        var keys = await rows.GetRowIdsBatchAsync(ids, period, ct).ConfigureAwait(false);
-        var month = new DateOnly(request.ValidFrom.Year, request.ValidFrom.Month, 1);
-        var found = new List<string>();
-
-        foreach (var instance in instances.OrderBy(i => tables[i.TableDefId].Code, StringComparer.Ordinal))
-        {
-            if (!slices.TryGetValue(instance.TableInstanceId, out var slice))
-            {
-                continue;
-            }
-
-            var table = tables[instance.TableDefId];
-            var keyOf = keys.TryGetValue(instance.TableInstanceId, out var map)
-                ? map.ToDictionary(p => p.Value, p => p.Key)
-                : [];
-            foreach (var rowCells in slice.GroupBy(c => c.Address.TableRowId).OrderBy(g => keyOf.GetValueOrDefault(g.Key), StringComparer.Ordinal))
-            {
-                var byColumn = rowCells.ToDictionary(c => c.Address.ColumnDefId, c => c.Value);
-                if (PermitHistoryReader.DataCellsInMonth(table, period, byColumn, new HashSet<int>(), month).Count > 0)
-                {
-                    found.Add($"{table.Code} · {keyOf.GetValueOrDefault(rowCells.Key) ?? rowCells.Key.ToString(CultureInfo.InvariantCulture)}");
-                }
-            }
-        }
-
-        return found;
-    }
 }
 
 /// <summary>Undoes the latest permit added to a header field.</summary>
@@ -417,7 +350,9 @@ public sealed class UndoHeaderPermitHandler(
     IAuditWriter audit,
     ICurrentUser currentUser,
     IClock clock,
-    IPermitRegistryIndex? permitTargets = null)
+    IPermitRegistryIndex? permitTargets = null,    // F13 p223 (1): the stored Issues of the change's year are re-run after the write. `null` (tests) — not re-run.
+    ValidateDocumentHandler? revalidate = null,
+    IValidationResultStore? validationResults = null)
 {
     /// <summary>Removes the latest permit and returns the field's history.</summary>
     public async Task<HeaderPermitHistoryDto> HandleAsync(long documentId, UndoHeaderPermitRequest request, CancellationToken ct)
@@ -451,6 +386,7 @@ public sealed class UndoHeaderPermitHandler(
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
+        await PermitHistoryRevalidation.RunAsync(revalidate, validationResults, documentId, last.ValidFrom.Year, ct).ConfigureAwait(false);
         return await PermitHistoryReader.HeaderAsync(store, registries, documentId, header.Field, header.BaseEntryId, currentUser.Language, ct)
             .ConfigureAwait(false);
     }
@@ -469,7 +405,8 @@ public sealed class GetPermitHistoryHandler(
     IMetadataCache metadata,
     IRegistryStore registries,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IPermitRegistryIndex? permitTargets = null)
 {
     /// <summary>The history.</summary>
     public async Task<DocumentPermitHistoryDto> HandleAsync(long documentId, int periodKey, CancellationToken ct)
@@ -543,6 +480,54 @@ public sealed class GetPermitHistoryHandler(
             rowTargets.Add(new PermitHistoryReader.RowTarget(
                 table, column, sheetCopyId, rowKey, period, baseId, rowCells, [.. group.Select(g => g.Segment)],
                 group.ToDictionary(g => g.Segment.Id, g => g.AddedBy)));
+        }
+
+        // ✎ Ship 2 (jh2): rows of tables WITHOUT their own permit column rely on the header permit — those with entered data
+        // in a month the header history shares are listed with the header's history (PermitSource «header»).
+        if (headerItems.FirstOrDefault() is { Field: not null } headerItem && permitTargets is not null)
+        {
+            var isPermitTarget = await PermitTargets.LoadAsync(permitTargets, ct).ConfigureAwait(false);
+            var headerSpans = PermitHistoryCoverage.SpansOf(headerItem.BaseId, headerItem.Segments.Select(s => s.Segment));
+            var shared = PermitTimeline.SharedMonths(headerSpans);
+            var relying = tables.Values
+                .Where(t => readable.CanReadTable(t.Id)
+                            && !t.Columns.Any(c => !c.IsDeleted && c.LookupRegistryDefId is { } target && isPermitTarget(target)))
+                .ToDictionary(t => t.Id);
+            if (shared.Count > 0 && relying.Count > 0)
+            {
+                var headerInstances = (await rows.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false))
+                    .Where(i => relying.ContainsKey(i.TableDefId))
+                    .ToList();
+                var headerIds = headerInstances.ConvertAll(i => i.TableInstanceId);
+                var headerSlices = headerIds.Count == 0
+                    ? new Dictionary<long, IReadOnlyList<CellRecord>>()
+                    : await cells.ReadSlicesAsync(headerIds, period, ct).ConfigureAwait(false);
+                var headerKeys = headerIds.Count == 0
+                    ? new Dictionary<long, IReadOnlyDictionary<string, long>>()
+                    : await rows.GetRowIdsBatchAsync(headerIds, period, ct).ConfigureAwait(false);
+                var segmentsOfHeader = headerItem.Segments.Select(s => s.Segment).ToList();
+                var addedBy = headerItem.Segments.ToDictionary(s => s.Segment.Id, s => s.AddedBy);
+                foreach (var instance in headerInstances)
+                {
+                    var table = relying[instance.TableDefId];
+                    var keyOf = headerKeys.TryGetValue(instance.TableInstanceId, out var map)
+                        ? map.ToDictionary(p => p.Value, p => p.Key)
+                        : [];
+                    foreach (var rowCells in (headerSlices.GetValueOrDefault(instance.TableInstanceId) ?? []).GroupBy(c => c.Address.TableRowId))
+                    {
+                        var byColumn = rowCells.ToDictionary(c => c.Address.ColumnDefId, c => c.Value);
+                        if (keyOf.GetValueOrDefault(rowCells.Key) is not { } rowKey
+                            || !shared.Any(m => PermitHistoryReader.DataCellsInMonth(table, period, byColumn, new HashSet<int>(), m).Count > 0))
+                        {
+                            continue;
+                        }
+
+                        rowTargets.Add(new PermitHistoryReader.RowTarget(
+                            table, null, instance.SheetCopyId, rowKey, period, headerItem.BaseId, byColumn, segmentsOfHeader, addedBy,
+                            headerItem.Field.Code));
+                    }
+                }
+            }
         }
 
         var entryIds = headerItems.SelectMany(h => h.Segments.Select(s => s.Segment.RegistryEntryId).Append(h.BaseId))
