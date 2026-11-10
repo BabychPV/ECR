@@ -9,6 +9,11 @@ $script:EcrBase = $null
 $script:EcrSession = $null
 $script:EcrClient = $null
 $script:EcrStandConfirmed = $false
+# Keepalive сеансу (D-471): момент останньої дії (після входу), інтервал і годинник (підмінний у тестах).
+$script:EcrLastActivity = $null
+$script:EcrKeepAliveSeconds = 45
+$script:EcrActivityPath = '/api/v1/session/activity'
+$script:EcrClock = { [DateTime]::UtcNow }
 
 function ConvertTo-PlainText {
     param([Parameter(Mandatory)][securestring]$Secure)
@@ -192,6 +197,7 @@ function Connect-Ecr {
         throw "Вхід не вдався: HTTP $($r.Status) $(Get-EcrErrorCode $r)."
     }
     Enable-LoopbackHttpCookies
+    $script:EcrLastActivity = & $script:EcrClock
 }
 
 function Invoke-Ecr {
@@ -211,6 +217,47 @@ function Invoke-Ecr {
     if ($Method.ToUpperInvariant() -notin @('GET', 'HEAD') -and -not ($Method -ieq 'POST' -and $Path -eq '/api/v1/login/local')) {
         Assert-EcrMutationAllowed "$Method $Path"
     }
+
+    # D-471: GET не продовжує сеанс, і довгий прогін самих GET (план -WhatIf, тисячі колонок) отримував 401 idleTimeout
+    # через IdleTimeoutMinutes (5 хв на стендах). Після входу, якщо від останньої дії минуло >= EcrKeepAliveSeconds, —
+    # POST /api/v1/session/activity (даних не змінює, тому без -ConfirmStand). Без Connect-Ecr нічого не шле.
+    if ($null -ne $script:EcrLastActivity -and $script:EcrKeepAliveSeconds -gt 0 -and $Path -ne $script:EcrActivityPath -and $Path -ne '/api/v1/login/local') {
+        $now = & $script:EcrClock
+        if (($now - $script:EcrLastActivity).TotalSeconds -ge $script:EcrKeepAliveSeconds) {
+            $ka = Send-EcrHttp -Method 'POST' -Path $script:EcrActivityPath -Body $null -Headers @{}
+            if ($ka.Status -ge 200 -and $ka.Status -lt 300) { $script:EcrLastActivity = $now }
+            Update-EcrSessionCookie $ka
+        }
+    }
+
+    $raw = Send-EcrHttp -Method $Method -Path $Path -Body $Body -Headers $Headers
+    Update-EcrSessionCookie $raw
+    if ($Method.ToUpperInvariant() -notin @('GET', 'HEAD') -and $raw.Status -ge 200 -and $raw.Status -lt 300 -and $null -ne $script:EcrLastActivity) {
+        $script:EcrLastActivity = & $script:EcrClock   # запис теж є дією людини для сервера
+    }
+
+    $json = $null
+    if (-not [string]::IsNullOrWhiteSpace($raw.Text)) {
+        try { $json = $raw.Text | ConvertFrom-Json } catch { $json = $null }
+    }
+    return [pscustomobject]@{ Status = $raw.Status; Json = $json; Text = $raw.Text; Headers = $raw.Headers }
+}
+
+function Update-EcrSessionCookie {
+    # Перевидана сервером cookie сесії (сигнал активності, оновлення) має прапор Secure: на loopback http її знову
+    # копіюємо без Secure, інакше наступний запит пішов би без cookie (401).
+    param($HttpResult)
+    if ($null -eq $script:EcrSession -or $null -eq $HttpResult -or $null -eq $HttpResult.Headers) { return }
+    if (@($HttpResult.Headers.Keys | Where-Object { [string]$_ -ieq 'Set-Cookie' }).Count -gt 0) { Enable-LoopbackHttpCookies }
+}
+
+function Send-EcrHttp {
+    <#
+    .SYNOPSIS
+        Сирий HTTP-виклик (без перевірок і без keepalive): @{ Status; Text; Headers }. Окремо від Invoke-Ecr, щоб тести
+        підставляли підроблений сервер.
+    #>
+    param([Parameter(Mandatory)][string]$Method, [Parameter(Mandatory)][string]$Path, $Body = $null, [hashtable]$Headers = @{})
 
     # HttpClient, а не Invoke-WebRequest: у Windows PowerShell 5.1 (HttpWebRequest) відповідь 422 problem+json
     # від API (publish шаблону) дає «The connection was closed unexpectedly» без коду і тіла, тож
@@ -244,12 +291,7 @@ function Invoke-Ecr {
         foreach ($h in $resp.Content.Headers) { $hdrs[$h.Key] = ($h.Value -join ', ') }
     }
     finally { $resp.Dispose(); $req.Dispose() }
-
-    $json = $null
-    if (-not [string]::IsNullOrWhiteSpace($text)) {
-        try { $json = $text | ConvertFrom-Json } catch { $json = $null }
-    }
-    return [pscustomobject]@{ Status = $status; Json = $json; Text = $text; Headers = $hdrs }
+    return [pscustomobject]@{ Status = $status; Text = $text; Headers = $hdrs }
 }
 
 function Get-EcrErrorCode {
