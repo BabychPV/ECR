@@ -224,7 +224,9 @@ describe('GroupAssignmentsPanel', () => {
       await renderPanel();
       const u = user();
       const assign = screen.getByRole('button', { name: 'Assign role to group' });
-      const validTo = screen.getByLabelText('Valid to');
+      // ⛔ `findBy`: поля дат — лінивий чанк (`lazy(DateInput)`). `getBy` бачив їх лише тоді, коли
+      // чанк уже прогрів сусідній тест, і під `--sequence.shuffle` першим у файлі червонів.
+      const validTo = await screen.findByLabelText('Valid to');
 
       await u.click(screen.getByLabelText('Role'));
       await u.click(await screen.findByRole('option', { name: 'Publishers' }));

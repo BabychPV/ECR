@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadCatalog, resetMissingReports, t } from '@/shared/i18n';
+
+type I18n = typeof import('@/shared/i18n');
+
+/**
+ * ⛔ Каталог — стан модуля, і скинути його нема чим. Тому кожен тест бере СВІЖИЙ
+ * модуль (`vi.resetModules` + `import()`): інакше під `--sequence.shuffle` тест
+ * «каталог ще їде» після сусіда, що каталог уже завантажив, бачив `Templates`.
+ */
+let loadCatalog: I18n['loadCatalog'];
+let resetMissingReports: I18n['resetMissingReports'];
+let t: I18n['t'];
 
 /**
  * UI-прохід, F11: попередження «Немає рядка інтерфейсу» було НЕПРАВДИВИМ.
@@ -41,7 +51,9 @@ function serve(strings: Record<string, string>): void {
 
 let complaints: ReturnType<typeof vi.spyOn>;
 
-beforeEach(() => {
+beforeEach(async () => {
+  vi.resetModules();
+  ({ loadCatalog, resetMissingReports, t } = await import('@/shared/i18n'));
   vi.useFakeTimers();
   resetMissingReports();
   complaints = vi.spyOn(console, 'error').mockImplementation(() => {});

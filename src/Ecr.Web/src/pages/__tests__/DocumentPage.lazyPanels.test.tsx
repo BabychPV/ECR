@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -10,7 +10,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
  * імпортом (`D-132`, перф-рефакторинг «bundle splitting»).
  *
  * ⚠ Чим це ловиться, так само як `features/search/__tests__/
- * SearchLauncher.lazy.test.tsx`: фабрика `vi.mock` виконується, коли модуль
+ * SearchLauncher.lazy.test.tsx`: фабрика `vi.doMock` виконується, коли модуль
  * ІМПОРТУЮТЬ уперше. Статичний `import { ImportPanel } from '...'` у
  * `DocumentPage.tsx` обчислив би модуль одразу при монтуванні сторінки, ще до
  * того, як права/стан документа взагалі відомі, — і перша перевірка нижче
@@ -23,27 +23,41 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
  */
 const probe = vi.hoisted(() => ({ importEvaluated: false, calcEvaluated: false }));
 
-vi.mock('@/features/grid/DocumentGrid', () => ({
-  DocumentGrid: (): JSX.Element => <div data-testid="grid-stub" />,
-}));
+let DocumentPage: typeof import('@/pages/DocumentPage').DocumentPage;
 
-vi.mock('@/features/import/ImportPanel', () => {
-  probe.importEvaluated = true;
+/*
+ * ⛔ Порядок тестів не значущий: `beforeEach` скидає реєстр модулів і прапорці, заново
+ * реєструє заглушки (`vi.doMock`) та імпортує `DocumentPage`. Раніше модулі панелей
+ * обчислювались один раз на файл, і під `--sequence.shuffle` перевірки «не обчислено»
+ * після тесту з правом червоніли.
+ */
+beforeEach(async () => {
+  vi.resetModules();
+  probe.importEvaluated = false;
+  probe.calcEvaluated = false;
 
-  return {
-    ImportPanel: (): JSX.Element => <div data-testid="import-stub" />,
-  };
-});
+  vi.doMock('@/features/grid/DocumentGrid', () => ({
+    DocumentGrid: (): JSX.Element => <div data-testid="grid-stub" />,
+  }));
 
-vi.mock('@/features/methodologies/CalculationResultsPanel', () => {
-  probe.calcEvaluated = true;
+  vi.doMock('@/features/import/ImportPanel', () => {
+    probe.importEvaluated = true;
 
-  return {
-    CalculationResultsPanel: (): JSX.Element => <div data-testid="calc-stub" />,
-  };
-});
+    return {
+      ImportPanel: (): JSX.Element => <div data-testid="import-stub" />,
+    };
+  });
 
-import { DocumentPage } from '@/pages/DocumentPage';
+  vi.doMock('@/features/methodologies/CalculationResultsPanel', () => {
+    probe.calcEvaluated = true;
+
+    return {
+      CalculationResultsPanel: (): JSX.Element => <div data-testid="calc-stub" />,
+    };
+  });
+
+  ({ DocumentPage } = await import('@/pages/DocumentPage'));
+}, 400_000);
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
