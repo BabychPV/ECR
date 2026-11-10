@@ -67,11 +67,39 @@ public sealed class CalculationRejectionReasonsTests
         Assert.Null(Assert.Single(result.Items).Columns);
     }
 
+    /// <summary>
+    /// ⚡ 10.11 (людина: «продуктивність на великих навантаженнях»): 450 відхилених рядків однієї таблиці — комірки
+    /// читаються пачками по <c>ReadChunkRows</c> рядків (3 звернення), а не по зверненню на рядок (450).
+    /// Мутація: читати комірки в циклі по проблемі (як було) — 450 викликів, тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Комірки_відхилених_рядків_читаються_пачками_а_не_по_рядку()
+    {
+        var world = new World { Rows = 450 };
+
+        var result = await world.Handler().HandleAsync(Document, Period, null, CancellationToken.None);
+
+        Assert.Equal(450, result.Items.Count);
+        Assert.All(result.Items, i => Assert.Equal("R_C05_01_01", i.RuleCode));
+        Assert.All(result.Items, i => Assert.Equal("Land_OverhauledEnginesRef", Assert.Single(i.Columns!).Code));
+        await world.Cells.Received(3).ReadCellsAsync(Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>());
+    }
+
     private sealed class World
     {
         public bool HideRef { get; init; }
 
         public bool RefFilled { get; init; }
+
+        /// <summary>Скільки відхилених рядків у таблиці (перший — <see cref="RowKey"/>/<see cref="RowId"/>).</summary>
+        public int Rows { get; init; } = 1;
+
+        public ICellStore Cells { get; } = Substitute.For<ICellStore>();
+
+        private string KeyOf(int i) => i == 0 ? RowKey : $"k{i}";
+
+        private long IdOf(int i) => RowId + i;
 
         public GetCalculationIssuesHandler Handler()
         {
@@ -103,9 +131,9 @@ public sealed class CalculationRejectionReasonsTests
 
             var issues = Substitute.For<ICalculationIssueStore>();
             issues.ListAsync(Document, Period, null, Arg.Any<CancellationToken>())
-                  .Returns([new CalculationIssueRow(
-                      table.Id, "T3_00", null, 1, RowKey, ICalculationIssueStore.CategoryRuleRejected, "ECW_C05_01", Now,
-                      MethodologyId)]);
+                  .Returns([.. Enumerable.Range(0, Rows).Select(i => new CalculationIssueRow(
+                      table.Id, "T3_00", null, i + 1, KeyOf(i), ICalculationIssueStore.CategoryRuleRejected, "ECW_C05_01", Now,
+                      MethodologyId))]);
 
             var user = Substitute.For<ICurrentUser>();
             user.UserId.Returns(9);
@@ -146,24 +174,26 @@ public sealed class CalculationRejectionReasonsTests
             rowStore.GetRowIdsBatchAsync(Arg.Any<IReadOnlyList<long>>(), new PeriodKey(Period), Arg.Any<CancellationToken>())
                     .Returns(new Dictionary<long, IReadOnlyDictionary<string, long>>
                     {
-                        [Instance] = new Dictionary<string, long> { [RowKey] = RowId },
+                        [Instance] = Enumerable.Range(0, Rows).ToDictionary(KeyOf, IdOf),
                     });
 
             var key = new PeriodKey(Period);
-            var values = new Dictionary<CellAddress, CellValueData>
+            var values = new Dictionary<CellAddress, CellValueData>();
+            for (var i = 0; i < Rows; i++)
             {
-                [new CellAddress(key, RowId, status.Id)] = new() { ValueString = "1" },
-                [new CellAddress(key, RowId, fuel.Id)] = new() { ValueString = "36" },
-                [new CellAddress(key, RowId, power.Id)] = new() { ValueNumeric = 22m },
-            };
-            if (RefFilled)
-            {
-                values[new CellAddress(key, RowId, overhauledRef.Id)] = new() { ValueString = "48" };
+                values[new CellAddress(key, IdOf(i), status.Id)] = new() { ValueString = "1" };
+                values[new CellAddress(key, IdOf(i), fuel.Id)] = new() { ValueString = "36" };
+                values[new CellAddress(key, IdOf(i), power.Id)] = new() { ValueNumeric = 22m };
+                if (RefFilled)
+                {
+                    values[new CellAddress(key, IdOf(i), overhauledRef.Id)] = new() { ValueString = "48" };
+                }
             }
 
-            var cells = Substitute.For<ICellStore>();
+            var cells = Cells;
             cells.ReadCellsAsync(Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
-                 .Returns(values);
+                 .Returns(call => (IReadOnlyDictionary<CellAddress, CellValueData>)call.Arg<IReadOnlyCollection<CellAddress>>()
+                     .Where(values.ContainsKey).ToDictionary(a => a, a => values[a]));
 
             var metadata = Substitute.For<IMetadataCache>();
             metadata.GetAsync(9, Arg.Any<CancellationToken>()).Returns(snapshot);

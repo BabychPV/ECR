@@ -48,6 +48,9 @@ internal sealed class CalculationRejectionReasons(
     IFormulaEngine formulaEngine,
     IColumnPathMapper? columnMapper)
 {
+    /// <summary>Скільки відхилених рядків читається одним зверненням до комірок (рядки × колонки таблиці).</summary>
+    internal const int ReadChunkRows = 200;
+
     /// <summary>Будує причини для відхилених рядків.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="period">Період.</param>
@@ -106,27 +109,69 @@ internal sealed class CalculationRejectionReasons(
         var argumentsOf = new Dictionary<int, IReadOnlySet<string>>();
         var rulesOf = new Dictionary<(int Version, int TemplateVersion), IReadOnlyList<CompiledMethodologyRule>>();
 
+        // ⚡ 10.11 (людина: «продуктивність на великих навантаженнях»): комірки відхилених рядків читаються ОДНИМ
+        // зверненням на таблицю (пачками по ReadChunkRows рядків), а не по зверненню на проблему — до MaxPerTable (1000)
+        // проблем на таблицю давали б 1000 запитів на одне відкриття панелі.
+        var resolved = new List<(CalculationIssueRow Issue, int VersionId, TableInstanceRef Instance, long RowId)>();
         foreach (var issue in rejected)
         {
-            if (issue.MethodologyId is not { } methodologyId
-                || !versionOf.TryGetValue(methodologyId, out var versionId)
-                || !instances.TryGetValue(issue.TableDefId, out var instance)
-                || !rowIds.TryGetValue(instance.TableInstanceId, out var keys)
-                || !keys.TryGetValue(issue.RowKey, out var rowId))
+            if (issue.MethodologyId is { } methodologyId
+                && versionOf.TryGetValue(methodologyId, out var versionId)
+                && instances.TryGetValue(issue.TableDefId, out var instance)
+                && rowIds.TryGetValue(instance.TableInstanceId, out var keys)
+                && keys.TryGetValue(issue.RowKey, out var rowId))
+            {
+                resolved.Add((issue, versionId, instance, rowId));
+            }
+        }
+
+        var tablesOf = new Dictionary<int, TableDef?>();
+        var cells = new Dictionary<CellAddress, CellValueData>();
+        foreach (var group in resolved.GroupBy(r => r.Instance.TableInstanceId))
+        {
+            var first = group.First();
+            var snapshot = await metadata.GetAsync(first.Instance.TemplateVersionId, ct).ConfigureAwait(false);
+            var groupTable = snapshot.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == first.Issue.TableDefId);
+            tablesOf[first.Issue.TableDefId] = groupTable;
+            if (groupTable is null)
             {
                 continue;
             }
 
-            var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
-            if (snapshot.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == issue.TableDefId) is not { } table)
+            var columnIds = groupTable.Columns.Where(c => !c.IsDeleted).Select(c => c.Id).ToList();
+            foreach (var chunk in group.Select(r => r.RowId).Distinct().Chunk(ReadChunkRows))
+            {
+                var read = await cellStore
+                    .ReadCellsAsync([.. chunk.SelectMany(row => columnIds.Select(c => new CellAddress(period, row, c)))], ct)
+                    .ConfigureAwait(false);
+                foreach (var (address, value) in read)
+                {
+                    cells[address] = value;
+                }
+            }
+        }
+
+        // ⚡ Структура таблиці й джерела формул обчислюваних колонок — раз на таблицю, не на кожну з ~1000 проблем.
+        var shapeOf = new Dictionary<int, (List<ColumnDef> Columns, Dictionary<string, ColumnDef> ByCode)>();
+        var sourcesOf = new Dictionary<(int Table, int Column), List<ColumnDef>>();
+
+        foreach (var (issue, versionId, instance, rowId) in resolved)
+        {
+            if (tablesOf.GetValueOrDefault(issue.TableDefId) is not { } table)
             {
                 continue;
             }
 
-            var columns = table.Columns.Where(c => !c.IsDeleted).ToList();
-            var cells = await cellStore
-                .ReadCellsAsync([.. columns.Select(c => new CellAddress(period, rowId, c.Id))], ct)
-                .ConfigureAwait(false);
+            if (!shapeOf.TryGetValue(table.Id, out var shape))
+            {
+                var all = table.Columns.Where(c => !c.IsDeleted).ToList();
+                shape = (all, all
+                    .GroupBy(c => c.Code, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase));
+                shapeOf[table.Id] = shape;
+            }
+
+            var (columns, byCode) = shape;
             string TextOf(ColumnDef column)
                 => cells.TryGetValue(new CellAddress(period, rowId, column.Id), out var value)
                     ? MethodologyRuleMatcher.Text(value)?.Trim() ?? string.Empty
@@ -159,9 +204,6 @@ internal sealed class CalculationRejectionReasons(
                 argumentsOf[versionId] = arguments;
             }
 
-            var byCode = columns
-                .GroupBy(c => c.Code, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
             var named = new List<ColumnDef>();
             foreach (var argument in arguments)
             {
@@ -172,7 +214,12 @@ internal sealed class CalculationRejectionReasons(
 
                 // Обчислювана колонка: людина заповнює джерела її формули. Джерела вже заповнені — колонка порахується
                 // наступним перерахунком, називати нічого (сама вона лише для читання).
-                var sources = TemplateSources(table, column, byCode).ToList();
+                if (!sourcesOf.TryGetValue((table.Id, column.Id), out var sources))
+                {
+                    sources = [.. TemplateSources(table, column, byCode)];
+                    sourcesOf[(table.Id, column.Id)] = sources;
+                }
+
                 named.AddRange(sources.Count > 0 ? sources.Where(s => TextOf(s).Length == 0) : [column]);
             }
 
