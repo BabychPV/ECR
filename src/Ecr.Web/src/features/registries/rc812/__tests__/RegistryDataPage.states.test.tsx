@@ -125,6 +125,12 @@ describe('RegistryDataPage — стани', () => {
 
     expect(await screen.findByRole('grid')).toBeTruthy();
     expect(definitionCalls).toBeGreaterThan(before);
+
+    // ⛔ Сторінка заздалегідь тягне чанк шухляди запису (`void loadEntryDrawer()`, щойно є рядки). Без цього
+    // очікування файл міг завершитись раніше за той `import()`, і vitest закривав модульний раннер посеред
+    // нього: «Vite module runner has been closed» (`KeyValue.tsx`) — необроблена відмова, що червонить job
+    // `shuffle` (seed 23107), коли цей тест випадає останнім у файлі.
+    await import('../EntryDrawer');
   });
 
   it('порожньо: «записів немає» і жодної сітки', async () => {

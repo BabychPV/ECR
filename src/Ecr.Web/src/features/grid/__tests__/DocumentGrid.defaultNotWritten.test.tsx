@@ -1,5 +1,5 @@
 import { type JSX } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ExplicitCommitEvent } from '../editorTouched';
 import { MantineProvider } from '@mantine/core';
@@ -164,6 +164,17 @@ function openEditor(): HTMLElement {
 function clickAway(): void {
   fireEvent.click(screen.getByRole('button', { name: 'edit-one' }));
 }
+
+/*
+ * ⛔ Знімок колонки — змінні модуля, і `show()` їх переписує. Без скидання тест `captureEdit`
+ * під `--sequence.shuffle` після сусіда з default `0`/`N/A` читав чужий default і червонів.
+ */
+beforeEach(() => {
+  edited = '5';
+  defaultValue = '5';
+  dataType = 'Int';
+  withConfirmation = true;
+});
 
 afterEach(() => {
   cancelAutosave();

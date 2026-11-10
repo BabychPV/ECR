@@ -110,5 +110,12 @@ describe('SourcesPage: доступна позначка неактивного 
     const activeRow = (await screen.findByText('Field weather feed')).closest('tr');
     expect(activeRow?.getAttribute('aria-label')).toBeNull();
     expect(activeRow?.textContent ?? '').not.toMatch(/inactive/i);
+
+    // ⛔ Таблиця з'єднань заздалегідь тягне чанк шухляди (`void loadDataSourceDrawer()`, щойно є перелік). Без цього
+    // очікування файл міг завершитись раніше за той `import()`, і vitest закривав модульний раннер посеред нього:
+    // «Vite module runner has been closed» (`DataSourceDrawer.tsx`) — необроблена відмова, що червонить job `shuffle`
+    // (seed 23107). Спершу — перелік з'єднань на екрані (передзавантаження вже запущене), потім — той самий модуль.
+    await screen.findByText('⟦sources.connectionsEmpty⟧');
+    await import('@/features/integration/DataSourceDrawer');
   });
 });

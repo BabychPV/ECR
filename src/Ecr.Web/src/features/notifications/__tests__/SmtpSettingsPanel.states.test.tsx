@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
-import { Notifications } from '@mantine/notifications';
+import { Notifications, notifications } from '@mantine/notifications';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SmtpSettingsPanel } from '@/features/notifications/SmtpSettingsPanel';
 import { testTheme } from '@/test/render';
@@ -117,6 +117,10 @@ const count = (calls: Call[], method: string, suffix: string): number =>
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // ⛔ Сховище сповіщень Mantine — одне на модуль: без цього «smtp.saved» сусіда (role=alert)
+  // під `--sequence.shuffle` діставалося тесту «відмова» замість його власної помилки.
+  notifications.cleanQueue();
+  notifications.clean();
 });
 
 describe('SmtpSettingsPanel — стани', () => {

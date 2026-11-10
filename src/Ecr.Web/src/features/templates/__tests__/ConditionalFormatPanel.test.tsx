@@ -79,18 +79,22 @@ function renderPanel(canEdit = true) {
 
 const saveButton = () => screen.getByRole('button', { name: /conditionalFormat\.save/ });
 
-describe('ConditionalFormatPanel', () => {
-  beforeEach(() => {
-    api.getConditionalFormats.mockReset();
-    api.saveConditionalFormats.mockReset();
-    notify.showApiError.mockReset();
-    notify.showDone.mockReset();
-    api.getConditionalFormats.mockResolvedValue(set([own, foreign], '"V1"'));
-    api.saveConditionalFormats.mockImplementation((_id: number, rules: ConditionalFormatRuleDto[]) =>
-      Promise.resolve(set(rules, '"V2"')),
-    );
-  });
+/*
+ * ⛔ На рівні файла, а не першого `describe`: блок «фокус» інакше успадковував заглушки від
+ * останнього тесту сусіднього блоку і під `--sequence.shuffle` бачив помилку замість правил.
+ */
+beforeEach(() => {
+  api.getConditionalFormats.mockReset();
+  api.saveConditionalFormats.mockReset();
+  notify.showApiError.mockReset();
+  notify.showDone.mockReset();
+  api.getConditionalFormats.mockResolvedValue(set([own, foreign], '"V1"'));
+  api.saveConditionalFormats.mockImplementation((_id: number, rules: ConditionalFormatRuleDto[]) =>
+    Promise.resolve(set(rules, '"V2"')),
+  );
+});
 
+describe('ConditionalFormatPanel', () => {
   it('показує правила своєї таблиці; чужі — ні', async () => {
     renderPanel();
 

@@ -96,6 +96,11 @@ describe('CollectionRunsPanel: рядок журналу', () => {
     // Роздільник розрядів — `formatNumber`, а не сире `2880`.
     expect(row?.textContent ?? '').toContain('2,880');
     expect(scoped.getByText('⟦collectionRuns.system⟧')).toBeTruthy();
+
+    // ⛔ Як у `CollectionRunsPanel.pagination`: панель заздалегідь тягне чанк шухляди (`void loadRunDetailDrawer()`,
+    // щойно є рядки). Без цього очікування файл міг завершитись раніше за той `import()` — «Vite module runner has
+    // been closed» (`collectionRunMessage.ts`), необроблена відмова, що червонить job `shuffle` (seed 23107).
+    await import('@/features/integration/CollectionRunDetailDrawer');
   });
 
   it('запуск людиною показує ідентифікатор користувача, а не "система"', async () => {
@@ -107,6 +112,9 @@ describe('CollectionRunsPanel: рядок журналу', () => {
     const row = document.querySelector<HTMLElement>('tr[data-row-key="502"]');
     expect(within(row as HTMLElement).getByText('9')).toBeTruthy();
     expect(within(row as HTMLElement).queryByText('⟦collectionRuns.system⟧')).toBeNull();
+
+    // ⛔ Те саме передзавантаження шухляди, що й у тесті вище: дочекатися його `import()`.
+    await import('@/features/integration/CollectionRunDetailDrawer');
   });
 
   it('L10: відмова переліку — не "журнал порожній"', async () => {

@@ -11,8 +11,8 @@ import { testTheme } from '@/test/render';
  *
  * ⛔ Сценарій: «More» → «Withdraw from use», а `import()` діалогу ще в дорозі. Пункт меню згасає разом із меню, фокус
  * падає на `BODY`, і лише ПОТІМ приїжджає чанк — `useRestoreFocus` усередині модалки запам'ятовує `BODY`, тобто нічого,
- * і після закриття фокус лишався на `BODY`. Чанк тримає `vi.mock` із воротами — модуль діалогу віддається лише після
- * кліку; кожен модуль вантажиться у файлі раз, тож на модуль — один тест.
+ * і після закриття фокус лишався на `BODY`. Чанк тримає `vi.mock` із воротами — діалог може змонтуватися лише після
+ * `open()`; ворота відчиняються у файлі раз, тож на модуль — один тест.
  *
  * Мутаційний доказ: прибрати `useRestoreFocus(deprecating)` з `TemplateVersionPage` — червоний перший тест. Другий
  * («Delete sheet», кнопка, що лишається у фокусі) — сторож хука самої модалки: прибрати
@@ -38,10 +38,21 @@ const chunks = vi.hoisted(() => {
   return { reason: gate(), confirm: gate() };
 });
 
+// ⚠ `ReasonModal` — теж воротами `use(promise)`, а не `await chunks.reason.ready` у фабриці. З фабрикою-чеканням тест
+// залежав від порядку (job `shuffle`, seed 23107): коли «Delete sheet» ішов першим, його сторінка вже запускала
+// `preloadDialogs`, і до кліку в «Withdraw» `import()` діалогу віддавав справжній модуль — діалог стояв на екрані ДО
+// `open()` (`expected <section …> to be null`, рядок «Діалогу ще немає»). Ворота в компоненті не залежать від того,
+// коли й котрим `import()` приїхав модуль.
 vi.mock('@/shared/ui/ReasonModal', async (importOriginal) => {
-  await chunks.reason.ready;
+  const { createElement, use } = await import('react');
+  const actual = await importOriginal<typeof import('@/shared/ui/ReasonModal')>();
+  function LateReason(props: Parameters<typeof actual.ReasonModal>[0]): ReturnType<typeof actual.ReasonModal> {
+    use(chunks.reason.ready);
 
-  return importOriginal();
+    return createElement(actual.ReasonModal, props);
+  }
+
+  return { ...actual, ReasonModal: LateReason };
 });
 // ⚠ `ConfirmModal` — воротами `use(promise)`, а не `await` у фабриці: див. примітку нижче.
 vi.mock('@/shared/ui/ConfirmModal', async (importOriginal) => {
