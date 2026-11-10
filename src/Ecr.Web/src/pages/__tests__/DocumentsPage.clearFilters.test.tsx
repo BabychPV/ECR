@@ -96,4 +96,39 @@ describe('DocumentsPage: «Clear filters» (UI-18)', () => {
     },
     SlowEnvTimeout,
   );
+
+  /**
+   * ✎ 10.11 «Reopened months»: перемикач поруч із «Late edits» пише `hasReopenedMonths=true` в адресу, іде в запит
+   * переліку і рахується в «Clear filters» (сам — достатньо, щоб кнопка з'явилась; скидається разом з усім).
+   * ⛔ Червоний без фіксу: перемикача немає / адреса не міняється / запит без параметра / кнопки немає.
+   */
+  it(
+    '«Reopened months»: перемикач → адреса й запит; лише він — кнопка є і скидає його',
+    async () => {
+      mockFetch();
+      show('/?periodKey=202609');
+      const user = userEvent.setup();
+
+      const toggle = await screen.findByRole('switch', { name: '⟦documents.filterReopenedMonths⟧' }, { timeout: SlowEnvTimeout });
+      await user.click(toggle);
+
+      await waitFor(() => expect(screen.getByTestId('location').textContent).toContain('hasReopenedMonths=true'), {
+        timeout: SlowEnvTimeout,
+      });
+      await waitFor(
+        () => {
+          const calls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+          expect(calls.some((url) => url.includes('/api/v1/documents?') && url.includes('hasReopenedMonths=true'))).toBe(true);
+        },
+        { timeout: SlowEnvTimeout },
+      );
+
+      const clear = await screen.findByRole('button', { name: '⟦documents.clearFilters⟧' }, { timeout: SlowEnvTimeout });
+      await user.click(clear);
+      await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('?periodKey=202609'), {
+        timeout: SlowEnvTimeout,
+      });
+    },
+    SlowEnvTimeout,
+  );
 });
