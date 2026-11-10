@@ -224,7 +224,8 @@ test.describe('Idle sign-out:', () => {
     await signIn(page);
     await page.goto(`/admin/audit?view=security&eventType=SignedOut&from=${today}&to=${today}`);
     // Тип події екран показує людською назвою («Signed out»), причина — у деталях.
-    await expect(page.getByRole('cell', { name: /"reason":"idle"/ }).first()).toBeVisible({ timeout: 30_000 });
+    // ✎ debt-1109 x10: деталі — читабельні пари «reason: idle», не сирий JSON.
+    await expect(page.getByRole('cell', { name: /reason: idle/ }).first()).toBeVisible({ timeout: 30_000 });
     await shot(page, 'id6-audit-row-light-1335');
   });
 });
