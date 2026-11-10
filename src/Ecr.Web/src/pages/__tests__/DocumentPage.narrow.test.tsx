@@ -168,7 +168,8 @@ describe('DocumentPage: вузький екран — лише читання (U
       const banner = await screen.findByTestId('docs-narrow-note', {}, { timeout: SlowEnvTimeout });
       expect(banner.textContent).toContain('document.narrow.title');
 
-      const row = screen.getByTestId('document-actions');
+      // ✎ debt-1110: панель дій — лінивий чанк (бюджет D-132), тож чекаємо її, а не беремо одразу.
+      const row = await screen.findByTestId('document-actions', {}, { timeout: SlowEnvTimeout });
       await within(row).findByRole('button', { name: /workflow\.submitPeriod/ }, { timeout: SlowEnvTimeout });
       expect(within(row).queryByRole('button', { name: /workflow\.recalculate/ })).toBeNull();
       expect(screen.queryByRole('button', { name: 'import-stub' })).toBeNull();

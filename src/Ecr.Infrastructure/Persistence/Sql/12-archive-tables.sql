@@ -105,6 +105,38 @@ CREATE TABLE arc.CellPermitPart
 ) ON [DATA_ARCHIVE];
 GO
 
+-- Debt «ar»: user cell styles (doc.CellStyle) and manual formula overrides (doc.CellFormulaOverride) are partitioned
+-- by PeriodKey like the cells. usp_ArchiveYear used to leave them in the hot schema (their partitions were never
+-- freed), so an archived year kept rows in DATA_HOT that no archived cell owned. They now move with their period.
+IF OBJECT_ID(N'arc.CellStyle', N'U') IS NULL
+CREATE TABLE arc.CellStyle
+(
+    PeriodKey       int          NOT NULL,
+    TableRowId      bigint       NOT NULL,
+    ColumnDefId     int          NOT NULL,
+    BackgroundHex   char(7)      NULL,
+    ForegroundHex   char(7)      NULL,
+    IsBold          bit          NOT NULL,
+    UpdatedAt       datetime2(3) NOT NULL,
+    UpdatedByUserId int          NOT NULL,
+    INDEX CCI_arc_CellStyle CLUSTERED COLUMNSTORE
+) ON [DATA_ARCHIVE];
+GO
+
+IF OBJECT_ID(N'arc.CellFormulaOverride', N'U') IS NULL
+CREATE TABLE arc.CellFormulaOverride
+(
+    PeriodKey       int            NOT NULL,
+    TableRowId      bigint         NOT NULL,
+    ColumnDefId     int            NOT NULL,
+    TableInstanceId bigint         NOT NULL,
+    Reason          nvarchar(1000) NOT NULL,
+    SetAt           datetime2(3)   NOT NULL,
+    SetByUserId     int            NOT NULL,
+    INDEX CCI_arc_CellFormulaOverride CLUSTERED COLUMNSTORE
+) ON [DATA_ARCHIVE];
+GO
+
 IF OBJECT_ID(N'arc.CellChange', N'U') IS NULL
 CREATE TABLE arc.CellChange
 (

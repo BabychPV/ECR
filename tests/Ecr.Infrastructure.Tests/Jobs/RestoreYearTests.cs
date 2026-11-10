@@ -281,6 +281,72 @@ public sealed class RestoreYearTests(SqlServerFixture sql)
             $"SELECT SUM(ValueNumeric) FROM doc.CellPermitPart WHERE PeriodKey = {period} AND DocumentId = {doc.DocumentId}"));
     }
 
+    /// <summary>
+    /// Debt «ar»: user cell styles (<c>doc.CellStyle</c>) and manual formula overrides (<c>doc.CellFormulaOverride</c>)
+    /// leave the hot schema with their period and come back identical on restore — before, <c>usp_ArchiveYear</c>
+    /// never touched them and their partitions stayed in <c>DATA_HOT</c> after the year was archived.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Period 202712 is shared with the permit-parts test above; every assertion is narrowed to this document's rows,
+    /// so the order of the two tests does not matter (the procedures move the whole partition either way).
+    /// Mutation proof (local): the procedures as they were before this change — the rows stay in <c>doc.*</c>, red.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "debt-1110-ar")]
+    public async Task Архівація_і_розархівація_переносять_стилі_комірок_і_ручні_значення_формул()
+    {
+        const int period = 202712;
+        var doc = await DocumentAsync(period);
+        await CellAsync(doc, 0, 1, 7m);
+        await CellAsync(doc, 1, 2, 8m);
+
+        var rows = string.Join(", ", doc.RowIds.Take(2));
+        await ExecuteAsync($"""
+            INSERT INTO doc.CellStyle
+                (PeriodKey, TableRowId, ColumnDefId, BackgroundHex, ForegroundHex, IsBold, UpdatedAt, UpdatedByUserId)
+            VALUES ({period}, {doc.RowIds[0]}, {doc.ColumnDefIds[1]}, '#FFEE00', NULL, 1, '2027-12-03T10:11:12.345', 1),
+                   ({period}, {doc.RowIds[1]}, {doc.ColumnDefIds[2]}, NULL, '#0000AA', 0, '2027-12-04T01:02:03.004', 2);
+            INSERT INTO doc.CellFormulaOverride
+                (PeriodKey, TableRowId, ColumnDefId, TableInstanceId, Reason, SetAt, SetByUserId)
+            VALUES ({period}, {doc.RowIds[1]}, {doc.ColumnDefIds[2]}, {doc.TableInstanceId}, N'Ручне значення з акту',
+                    '2027-12-05T06:07:08.009', 3);
+            """);
+
+        var styles = $"""
+            SELECT PeriodKey, TableRowId, ColumnDefId, BackgroundHex, ForegroundHex, IsBold, UpdatedAt, UpdatedByUserId
+              FROM SCHEMA.CellStyle WHERE PeriodKey = {period} AND TableRowId IN ({rows})
+             ORDER BY TableRowId, ColumnDefId FOR JSON PATH, INCLUDE_NULL_VALUES
+            """;
+        var overrides = $"""
+            SELECT PeriodKey, TableRowId, ColumnDefId, TableInstanceId, Reason, SetAt, SetByUserId
+              FROM SCHEMA.CellFormulaOverride WHERE PeriodKey = {period} AND TableRowId IN ({rows})
+             ORDER BY TableRowId, ColumnDefId FOR JSON PATH, INCLUDE_NULL_VALUES
+            """;
+        Task<string> Json(string query, string schema)
+            => ScalarAsync<string>(query.Replace("SCHEMA.", schema + ".", StringComparison.Ordinal));
+
+        var stylesBefore = await Json(styles, "doc");
+        var overridesBefore = await Json(overrides, "doc");
+        Assert.Contains("#FFEE00", stylesBefore, StringComparison.Ordinal);
+        Assert.Contains("Ручне значення з акту", overridesBefore, StringComparison.Ordinal);
+
+        await ArchiveAsync(doc.ProjectId, period, period);
+
+        Assert.Null(await Json(styles, "doc"));
+        Assert.Null(await Json(overrides, "doc"));
+        Assert.Equal(stylesBefore, await Json(styles, "arc"));
+        Assert.Equal(overridesBefore, await Json(overrides, "arc"));
+
+        await RestoreAsync(doc.ProjectId, period, period);
+
+        Assert.Equal(stylesBefore, await Json(styles, "doc"));
+        Assert.Equal(overridesBefore, await Json(overrides, "doc"));
+        Assert.Null(await Json(styles, "arc"));
+        Assert.Null(await Json(overrides, "arc"));
+    }
+
     private async Task<bool> OrphanAsync(int period, long rowId)
         => await ScalarAsync<int>(
             $"SELECT CAST(IsOrphaned AS int) FROM doc.TableRow WHERE PeriodKey = {period} AND Id = {rowId}")

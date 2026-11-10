@@ -16,6 +16,19 @@ describe('auditDetailsText', () => {
     expect(auditDetailsText('{"user":{"id":3,"name":"ann"},"reason":null}')).toBe('user.id: 3 · user.name: ann · reason: —');
   });
 
+  // ✎ debt-1110: зміна значень запису довідника (`RegistryValueChanged`) — масив об'єктів, і вкладене глибше.
+  // Мутація: повернути `JSON.stringify(item)` для об'єкта в `scalar` — червоне.
+  it('масив об’єктів і вкладене глибше — читабельно, без сирого JSON', () => {
+    const text = auditDetailsText(
+      '{"registryDefId":5,"entryId":9,"changes":[{"field":"NAME","oldValue":"A","newValue":"B"},{"field":"QTY","oldValue":null,"newValue":"3"}]}',
+    );
+    expect(text).toBe(
+      'registryDefId: 5 · entryId: 9 · changes: (field: NAME, oldValue: A, newValue: B); (field: QTY, oldValue: —, newValue: 3)',
+    );
+    expect(text).not.toMatch(/[{}"]/);
+    expect(auditDetailsText('{"a":[{"b":{"c":[1,2]},"d":[]}]}')).toBe('a: (b: (c: 1, 2), d: —)');
+  });
+
   it('не об’єкт або зіпсований JSON — як є; порожньо — тире', () => {
     expect(auditDetailsText('plain text')).toBe('plain text');
     expect(auditDetailsText('[1,2]')).toBe('[1,2]');

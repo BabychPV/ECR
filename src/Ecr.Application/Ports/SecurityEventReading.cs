@@ -9,6 +9,11 @@ namespace Ecr.Application.Ports;
 /// <param name="ChangedByUserId">Хто спричинив подію — <b>UserId</b>, не SID (R-A2, D-86).</param>
 /// <param name="ChangedByDisplayName">Ім'я (<c>R-18</c>); <c>null</c> — запису користувача вже немає.</param>
 /// <param name="CorrelationId">Ідентифікатор кореляції запиту — той самий, що в тілі відмови.</param>
+/// <param name="SiteTimeZoneId">
+/// ✎ debt-1110: пояс майданчика (IANA), у якому клієнт друкує час події — як журнал «Reopen» друкує свій час у поясі
+/// з конверта причини. Подія безпеки не належить проєкту, тож «майданчик» — спільний пояс УСІХ проєктів установки;
+/// проєктів немає або пояси різні — <c>null</c>, і клієнт лишає пояс читача (вгаданий пояс гірший за чесний).
+/// </param>
 public sealed record SecurityEventView(
     DateTime ChangedAt,
     string EventType,
@@ -17,7 +22,8 @@ public sealed record SecurityEventView(
     string? DetailsJson,
     int ChangedByUserId,
     string? ChangedByDisplayName = null,
-    string? CorrelationId = null);
+    string? CorrelationId = null,
+    string? SiteTimeZoneId = null);
 
 /// <summary>Фільтр журналу подій безпеки.</summary>
 /// <remarks>

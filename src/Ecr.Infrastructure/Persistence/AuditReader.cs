@@ -1063,12 +1063,43 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         var hasMore = rows.Count > page.Limit;
         var last = hasMore ? rows[page.Limit - 1] : default;
 
+        // ✎ debt-1110: пояс майданчика для стовпця часу (`SecurityEventView.SiteTimeZoneId`).
+        var siteZone = rows.Count == 0 ? null : SiteTimeZone(await ProjectZonesAsync(connection, ct).ConfigureAwait(false));
+
         return new PagedResult<SecurityEventView>(
-            rows.Take(page.Limit).Select(r => r.View).ToList(),
+            rows.Take(page.Limit).Select(r => r.View with { SiteTimeZoneId = siteZone }).ToList(),
             hasMore
                 ? AuditCursor.Encode(filter.Sort, last.View.ChangedAt, last.Id, last.View.ChangedByUserId, last.View.ChangedByDisplayName)
                 : null,
             TotalCount: null);
+    }
+
+    /// <summary>
+    /// Пояс майданчика для подій безпеки (✎ debt-1110): подія не належить проєкту, тож це пояс, спільний для всіх
+    /// проєктів установки. Різні пояси або жодного проєкту — <c>null</c> (клієнт лишає пояс читача).
+    /// </summary>
+    /// <param name="zones">Різні пояси проєктів (достатньо перших двох).</param>
+    public static string? SiteTimeZone(IReadOnlyCollection<string> zones)
+    {
+        ArgumentNullException.ThrowIfNull(zones);
+
+        return zones.Count == 1 ? zones.First() : null;
+    }
+
+    /// <summary>До двох різних поясів проєктів — більше для <see cref="SiteTimeZone"/> не потрібно.</summary>
+    private static async Task<IReadOnlyCollection<string>> ProjectZonesAsync(SqlConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT DISTINCT TOP (2) TimeZoneId FROM doc.Project;";
+
+        var zones = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            zones.Add(reader.GetString(0));
+        }
+
+        return zones;
     }
 
     /// <inheritdoc />

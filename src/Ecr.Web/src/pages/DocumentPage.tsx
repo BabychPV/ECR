@@ -25,7 +25,6 @@ import {
   DeleteDocumentPermission,
   useDeleteDocumentAction,
 } from '@/features/documents/DeleteDocumentAction';
-import { DocumentActionBar } from '@/features/documents/DocumentActionBar';
 import { DocumentSaveState } from '@/features/documents/DocumentSaveState';
 import { StaleResultsUndeterminedMark } from '@/features/documents/StaleResultsMark';
 import { useDocumentLogActions } from '@/features/documents/DocumentLogActions';
@@ -39,7 +38,7 @@ import { DocumentProgress } from '@/features/documents/DocumentProgress';
 import { useDocumentPending } from '@/features/grid/autosave';
 import { permitRowWarningsOf, publishRowFindings } from '@/features/grid/rowAttentionStore';
 import type { HeldEdit } from '@/features/grid/pendingStore';
-import { editsDeferToServer, isEditable } from '@/features/workflow/SheetActions';
+import { editsDeferToServer, isEditable } from '@/features/workflow/sheetEditability';
 import { useApproverEditAvailability } from '@/features/workflow/api';
 import { useUnmatchedRows } from '@/features/documents/useUnmatchedRows';
 import { can, useSession } from '@/shared/session/useSession';
@@ -137,6 +136,16 @@ const TableChatHost = lazy(async () => ({ default: (await loadTableChat()).Table
 const loadPeriodPicker = () => import('@/shared/ui/PeriodPicker');
 void loadPeriodPicker();
 const PeriodPicker = lazy(async () => ({ default: (await loadPeriodPicker()).PeriodPicker }));
+
+/**
+ * ✎ debt-1110: панель дій аркуша (`DocumentActionBar` + модель дій `SheetActions`, тулбар, вибір періоду подання) —
+ * за `import()` тим самим прийомом, що й поле періоду: маршрут стояв на 249.6 з 250 КБ (`D-132`), а ця панель —
+ * ~19 КБ сирого коду чанка сторінки. Чанк починає вантажитись разом із модулем сторінки, паралельно із запитом
+ * документа, до відповіді якого панелі однаково немає; поки він не прийшов, місце тримає `Skeleton` висоти панелі.
+ */
+const loadDocumentActionBar = () => import('@/features/documents/DocumentActionBar');
+void loadDocumentActionBar();
+const DocumentActionBar = lazy(async () => ({ default: (await loadDocumentActionBar()).DocumentActionBar }));
 
 // ✎ D-442 / AN-129: банер невідповідних рядків (D-14) — окремий чанк: він малюється лише за наявності таких
 // рядків, а маршрут після П.1 і П.3 стояв рівно на межі 250 КБ (`D-132`).
@@ -828,54 +837,56 @@ export function DocumentPage(): JSX.Element {
           Діалоги рідкісних дій — поза меню: меню розмонтовує вміст, щойно
           закривається, тобто саме тоді, коли діалог мав би відкритися. */}
       {active !== undefined && (
-        <DocumentActionBar
-          documentId={documentId}
-          periodKey={periodKey}
-          sheetDefId={active.sheetDefId}
-          sheetCode={active.code}
-          sheetCopyId={active.sheetCopyId}
-          sheetName={active.name}
-          state={state}
-          lock={lock}
-          readOnly={readOnly}
-          // ✎ UAT-recalc-ux, F13 p218 #788: позначка «перераховано після подання» — за ключем стану вкладки (копія — свій ключ).
-          recalculatedAfterSubmission={recalculatedAfterSubmissionOf(active, summary.data?.sheets ?? [])}
-          language={session.data?.language ?? 'en'}
-          // ⛔ Імпорт лише туди, куди можна писати (`ФВ-5.20a`). ✎ D-445: поданий аркуш імпортує погоджувач
-          // поточного кроку — як править його в сітці; хто саме — вирішує сервер (перегляд покаже відмову решті).
-          canImport={can(session.data, 'Document.Import')}
-          approverImport={approverEditable}
-          canExport={can(session.data, 'Document.Export')}
-          validate={{
-            loading: validateLoading || validateAction.settling,
-            run: () => validateAction.run(() => validate.mutateAsync({ scope, documentId, periodKey }), { readOnly: true }),
-          }}
-          calculationsStale={calculationsStale}
-          documentItems={[...documentLog.menuItems, businessKeyChange.menuItem, versionMigration.menuItem, editAssignments.menuItem, deletion.menuItem]}
-          resultsStale={document.resultsStale ?? null}
-          resultsStaleSince={document.resultsStaleSince ?? null}
-          staleReminderHost={staleReminderHost}
-          periodAction={periodReopen.lockAction}
-          status={
-            <>
-              {/* ✎ UI-15: чип стану аркуша і заповненість одним рядком
-                  (макет `renderState`/`renderProgress`). */}
-              <DocumentProgress
-                documentId={documentId}
-                periodKey={periodKey}
-                sheets={sheetItemsOf(sheets, document.sheetStates)}
-                activeCode={active.key}
-                // ✎ UI-25 (інспектор): «K issues» — кнопка інспектора нижче, лічильник
-                // за ВИДИМИМИ таблицями (`inspectorModel.ts`); тут другого немає.
-                issues={null}
-                onShowIssues={() => undefined}
-              />
-              <DocumentSaveState readOnly={gridReadOnly} periodKey={periodKey} />
-              {/* ✎ D-446: застарілість не визначена — частину документа читачеві закрито (те саме, що в рядку переліку). */}
-              {document.resultsStaleUndetermined === 'PartiallyHidden' && <StaleResultsUndeterminedMark />}
-            </>
-          }
-        />
+        <Suspense fallback={<Skeleton h={36} mb="sm" data-document-action-bar-pending="" />}>
+          <DocumentActionBar
+            documentId={documentId}
+            periodKey={periodKey}
+            sheetDefId={active.sheetDefId}
+            sheetCode={active.code}
+            sheetCopyId={active.sheetCopyId}
+            sheetName={active.name}
+            state={state}
+            lock={lock}
+            readOnly={readOnly}
+            // ✎ UAT-recalc-ux, F13 p218 #788: позначка «перераховано після подання» — за ключем стану вкладки (копія — свій ключ).
+            recalculatedAfterSubmission={recalculatedAfterSubmissionOf(active, summary.data?.sheets ?? [])}
+            language={session.data?.language ?? 'en'}
+            // ⛔ Імпорт лише туди, куди можна писати (`ФВ-5.20a`). ✎ D-445: поданий аркуш імпортує погоджувач
+            // поточного кроку — як править його в сітці; хто саме — вирішує сервер (перегляд покаже відмову решті).
+            canImport={can(session.data, 'Document.Import')}
+            approverImport={approverEditable}
+            canExport={can(session.data, 'Document.Export')}
+            validate={{
+              loading: validateLoading || validateAction.settling,
+              run: () => validateAction.run(() => validate.mutateAsync({ scope, documentId, periodKey }), { readOnly: true }),
+            }}
+            calculationsStale={calculationsStale}
+            documentItems={[...documentLog.menuItems, businessKeyChange.menuItem, versionMigration.menuItem, editAssignments.menuItem, deletion.menuItem]}
+            resultsStale={document.resultsStale ?? null}
+            resultsStaleSince={document.resultsStaleSince ?? null}
+            staleReminderHost={staleReminderHost}
+            periodAction={periodReopen.lockAction}
+            status={
+              <>
+                {/* ✎ UI-15: чип стану аркуша і заповненість одним рядком
+                    (макет `renderState`/`renderProgress`). */}
+                <DocumentProgress
+                  documentId={documentId}
+                  periodKey={periodKey}
+                  sheets={sheetItemsOf(sheets, document.sheetStates)}
+                  activeCode={active.key}
+                  // ✎ UI-25 (інспектор): «K issues» — кнопка інспектора нижче, лічильник
+                  // за ВИДИМИМИ таблицями (`inspectorModel.ts`); тут другого немає.
+                  issues={null}
+                  onShowIssues={() => undefined}
+                />
+                <DocumentSaveState readOnly={gridReadOnly} periodKey={periodKey} />
+                {/* ✎ D-446: застарілість не визначена — частину документа читачеві закрито (те саме, що в рядку переліку). */}
+                {document.resultsStaleUndetermined === 'PartiallyHidden' && <StaleResultsUndeterminedMark />}
+              </>
+            }
+          />
+        </Suspense>
       )}
 
       {unmatchedRows.issues.length > 0 && (
