@@ -3,6 +3,7 @@ import { Anchor, Badge, Button, Group, Modal, Select, Stack, Text, TextInput } f
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type { UnitRef } from '@/api/types';
 import { createUnit, deleteUnit, unitReferences, unitUsage } from '@/features/units/api';
 import { UnitEditModal } from '@/features/units/UnitEditModal';
@@ -106,7 +107,7 @@ export function UnitsPage(): JSX.Element {
   const queryClient = useQueryClient();
 
   const units = useQuery({
-    queryKey: ['units'],
+    queryKey: queryKeys.units.all(),
     queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
 
     // Довідник одиниць міняється раз на роки — новою розмірністю, не правкою.
@@ -159,7 +160,7 @@ export function UnitsPage(): JSX.Element {
         offsetToBase: newOffset.trim(),
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['units'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.units.all() });
       setCreating(false);
       setNewCode('');
       setNewSymbol('');
@@ -182,7 +183,7 @@ export function UnitsPage(): JSX.Element {
   const [editing, setEditing] = useState<UnitRef | null>(null);
 
   const usage = useQuery({
-    queryKey: ['units', deleting?.id, 'usage'],
+    queryKey: queryKeys.units.usage(deleting?.id),
     queryFn: () => unitUsage(deleting?.id ?? 0),
     enabled: deleting !== null,
     staleTime: 0,
@@ -193,7 +194,7 @@ export function UnitsPage(): JSX.Element {
     meta: { handled: true },
     mutationFn: (unitId: number) => deleteUnit(unitId),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['units'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.units.all() });
       setDeleting(null);
 
       // Шторка видаленої одиниці не має що показувати — і `?panel=` теж.

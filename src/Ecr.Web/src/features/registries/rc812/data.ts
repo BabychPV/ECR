@@ -36,7 +36,7 @@ export function useRegistryList() {
 /** Одиниці для полів типу `Unit`; ключ той самий, що в панелях методологій. */
 export function useUnits(enabled: boolean) {
   return useQuery({
-    queryKey: ['units'],
+    queryKey: queryKeys.units.all(),
     queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
     enabled,
   });

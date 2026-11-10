@@ -2,6 +2,7 @@ import type { JSX } from 'react';
 import { Anchor, Badge, Group, Stack, Text, Title } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { queryKeys } from '@/api/queryKeys';
 import type { UnitRef } from '@/api/types';
 import { UsageKindLabel } from '@/features/usage/UsageKindLabel';
 import { decimalEquals, formatDecimal } from '@/shared/format';
@@ -36,13 +37,13 @@ export default function UnitDetailBody({
   readonly canEdit: boolean;
 }): JSX.Element {
   const detail = useQuery({
-    queryKey: ['units', unit.id, 'detail'],
+    queryKey: queryKeys.units.detail(unit.id),
     queryFn: () => getUnit(unit.id),
     enabled: canEdit,
   });
 
   const usage = useQuery({
-    queryKey: ['units', unit.id, 'usage'],
+    queryKey: queryKeys.units.usage(unit.id),
     queryFn: () => unitUsage(unit.id),
     enabled: canEdit,
     staleTime: 0,

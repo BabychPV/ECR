@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type { UnitRef } from '@/api/types';
 import { toUnitOptions, type UnitOption } from './names';
 
@@ -16,7 +17,7 @@ export function useUnitOptions(enabled: boolean): {
   readonly isPending: boolean;
 } {
   const query = useQuery({
-    queryKey: ['units'],
+    queryKey: queryKeys.units.all(),
     queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
     enabled,
   });
