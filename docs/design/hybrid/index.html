@@ -312,6 +312,23 @@ table.data{width:100%;border-collapse:separate;border-spacing:0}
 .segbar .sg.returned{background:var(--warning);border-color:var(--warning)}
 .segbar button.sg{cursor:pointer}
 .segbar .sg-l{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap}
+/* ✎ 10.11 MonthStrip (Documents, смуга 12 місяців): УСІ стани — однаковий зовнішній розмір на одній лінії. Рамка завжди 1px;
+   «Late (flagged)» — друга лінія ВСЕРЕДИНІ (inset box-shadow), поточний період — outline з від'ємним outline-offset (теж усередині).
+   Ні товща рамка, ні зовнішня тінь/кільце не дозволені: вони роблять клітинку більшою або зсувають ряд. */
+.mstrip{display:inline-grid;grid-template-columns:repeat(12,18px);gap:2px;margin:0;padding:0;list-style:none;vertical-align:middle}
+.mstrip>li{display:block}
+.mbox{box-sizing:border-box;display:grid;place-items:center;width:18px;height:18px;border:1px solid var(--border-strong);border-radius:2px;background:transparent;color:var(--muted);font:500 10px/1 var(--mono,monospace)}
+.mbox.submitted{border-color:var(--accent);background:linear-gradient(0deg,var(--accent) 50%,transparent 50%)}
+.mbox.approved{border-color:var(--success);background:var(--success);color:var(--surface)}
+.mbox.late{border-color:var(--warning);box-shadow:inset 0 0 0 1px var(--warning);color:var(--text);font-weight:700}
+.mbox.locked{background:var(--sunken)}
+.mbox.notOpen{border-style:dashed;border-color:var(--faint)}
+.mbox.returned{border-color:var(--warning);background:var(--warning);color:var(--surface)}
+.mbox.cur{outline:2px solid var(--accent-text);outline-offset:-2px}
+.mbox.late.cur{box-shadow:inset 0 0 0 3px var(--warning)}
+.mlegend{display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px;color:var(--muted);font-size:var(--fs-xs);margin-bottom:var(--s2)}
+.mlegend>span{display:inline-flex;align-items:center;gap:4px}
+.mlegend .mbox{flex:none}
 .stepper{display:inline-flex;align-items:center;gap:var(--s1);color:var(--muted);font-size:var(--fs-xs);white-space:nowrap}
 .stepper .stp{display:inline-flex;align-items:center;gap:var(--s1)}
 .stepper .stp i{width:20px;height:3px;border-radius:2px;background:var(--border-strong);display:block}

@@ -332,6 +332,17 @@ E.StatusBadge(kind, state, { label?, quiet?: true /* без рамки, у щі�
 
 Не роби власних бейджів. Іншого стану немає в наборі — скажи про це у звіті, не вигадуй колір.
 
+**MonthStrip** (✎ 10.11; `screens-work.js` → `monthStrip(d)` / `monthLegend()`, стилі `.mstrip` / `.mbox` / `.mlegend` в `index.html`; у застосунку —
+`DocumentYearStrip.tsx` + `documentsList.css`). Смуга 12 місяців року в рядку документа і легенда над таблицею. Стани клітинки:
+`open` (порожня рамка) · `late` = Late (flagged), перевідкритий / Grace (рамка `--warning` + «!») · `submitted` (заливка наполовину
+`--accent`) · `approved` (`--success` + ✓) · `locked` (`--sunken` + замок) · `notOpen` (пунктир `--faint`) · `returned`
+(`--warning` + ✕) · `unknown` (пунктир); модифікатор `cur` — поточний період (кільце `--accent-text`: `--accent` у темній схемі < 3:1 до фону).
+⛔ **Усі стани і всі зразки легенди — ОДНАКОВИЙ зовнішній розмір (18×18; у легенді 14×14) на ОДНІЙ лінії.** Рамка завжди 1 px і
+`box-sizing: border-box`; друга лінія «late» — `box-shadow: inset 0 0 0 1px`, кільце «cur» — `outline: 2px` з `outline-offset: -2px`
+(обидва ВСЕРЕДИНІ). Товща рамка, зовнішня тінь чи кільце назовні заборонені: клітинка стає більшою або ряд зсувається
+(дефект людини 10.11: «не гарно виглядає і не рівно»). Клітинка-посилання — блочна (`display: grid`), не `inline-*`: інакше
+вирівнювання за базовою лінією тексту зсуває порожні клітинки відносно клітинок зі знаком.
+
 ```js
 E.SegmentBar({ segments: [{label:'Air emissions', state:'Draft', note?}], size?: 'lg', summary?: '…' | false, doneState?: 'Approved', onSelect?(seg, i) })
    // для документа: E.SegmentBar({ segments: doc.sheets.map(function (s) { return { label: s.name, state: s.state }; }) })

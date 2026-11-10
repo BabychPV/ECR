@@ -317,6 +317,26 @@
   function docIssues(d) { return d.sheets.reduce(function (n, s) { return n + s.issues; }, 0); }
   function docApproved(d) { return d.sheets.filter(function (s) { return s.state === 'Approved'; }).length; }
   function docHref(d, extra) { return E.href('/documents/' + d.id, Object.assign({ period: d.period }, extra)); }
+  /* ✎ 10.11 MonthStrip: смуга 12 місяців року документа (у застосунку — колонка «Months» переліку, `DocumentYearStrip.tsx`).
+     Стани: open · late (Late, flagged) · submitted · approved · locked · notOpen · returned · unknown, + «cur» — поточний період.
+     ⛔ Усі стани — ОДНАКОВИЙ зовнішній розмір 18×18 на одній лінії: «late» і «cur» малюються всередині (див. `.mbox` в index.html). */
+  var MS_LABEL = { open: 'Open', late: 'Late (flagged)', submitted: 'Submitted', approved: 'Approved', locked: 'Locked', notOpen: 'Not open yet', returned: 'Returned', unknown: 'Unknown' };
+  var MS_MARK = { approved: '✓', returned: '✕', late: '!' };
+  function msBox(cell, cur) { return h('span', { class: 'mbox ' + cell + (cur ? ' cur' : ''), 'aria-hidden': 'true' }, cell === 'locked' ? icon('lock', 9) : (MS_MARK[cell] || '')); }
+  function msCell(d, p, i) {
+    var st = p.state === 'Open' ? 'open' : p.state === 'NotOpened' ? 'notOpen' : 'locked';
+    if (p.id === d.period) { var ds = D.docState(d); st = ds === 'Approved' ? 'approved' : ds === 'Submitted' ? 'submitted' : ds === 'Returned' || ds === 'Rejected' ? 'returned' : st; }
+    if (d.late && i === D.periods.indexOf(D.period(D.currentPeriod)) - 1) st = 'late';   /* перевідкритий попередній місяць — Grace */
+    return st;
+  }
+  function monthStrip(d) {
+    return h('ul', { class: 'mstrip', 'aria-label': d.id + ' · months of 2026' }, D.periods.map(function (p, i) { var cell = msCell(d, p, i), cur = p.id === D.currentPeriod, label = F.period(p.id) + ': ' + MS_LABEL[cell];
+      return h('li', h('a', { href: docHref(d), title: label, 'aria-label': label, on: { click: function (e) { e.stopPropagation(); } } }, msBox(cell, cur))); }));
+  }
+  function monthLegend() {
+    return h('div', { class: 'mlegend', role: 'group', 'aria-label': 'Month boxes' }, h('b', 'Month boxes:'),
+      ['open', 'late', 'submitted', 'approved', 'locked', 'notOpen', 'returned'].map(function (c) { return h('span', msBox(c), MS_LABEL[c]); }), h('span', msBox('open', true), 'Ringed box = current period'));
+  }
   function segBar(d) { return E.SegmentBar({ segments: d.sheets.map(function (s) { return { label: s.name, state: s.state, note: s.issues ? F.plural(s.issues, { one: 'error', other: 'errors' }) : null }; }) }); }
 
   /* ---- майстер створення ---- */
@@ -460,10 +480,11 @@
       if (!data || !rows.length) bar.hidden = true; body.appendChild(bar);
       if (view === 'board' && data) { board = h('div', { class: 'work-board', id: 'docs-board' }); body.appendChild(board); }
       else if (view === 'board') { body.appendChild(E.StateSwitch(ctx.state, { loading: { kind: 'table', rows: 8, cols: 4 }, error: { code: 'ECR-DOC-0503', onRetry: retry }, empty: emptyPeriod() })); return; }
-      else { table = E.DataTable({ id: 'docs-tbl', rows: [], rowKey: 'id', state: ctx.state, memory: saved, tall: true, pageSize: 25, caption: 'Documents of ' + F.period(period), onRowClick: openDoc, rowLabel: function (d) { return 'Open ' + d.id + ' · ' + d.facility; }, onClearFilters: clearAll,
+      else { if (data && rows.length) body.appendChild(monthLegend());
+        table = E.DataTable({ id: 'docs-tbl', rows: [], rowKey: 'id', state: ctx.state, memory: saved, tall: true, pageSize: 25, caption: 'Documents of ' + F.period(period), onRowClick: openDoc, rowLabel: function (d) { return 'Open ' + d.id + ' · ' + d.facility; }, onClearFilters: clearAll,
           empty: emptyPeriod(), error: { title: 'The documents could not be loaded', code: 'ECR-DOC-0503', onRetry: retry },
           columns: [{ key: 'id', label: 'Document', render: function (d) { return E.twoLine(d.id, d.facility, { mono: true }); } },
-            { key: 'period', label: 'Period', hideSm: true, sortable: false, render: function (d) { return F.period(d.period); } },
+            { key: 'period', label: 'Months', hideSm: true, sortable: false, render: monthStrip },
             { key: 'sheets', label: 'Sheets', sortValue: docApproved, render: segBar },
             { key: 'issues', label: 'Issues', num: true, sortValue: docIssues, title: 'Open validation errors', render: function (d) { var n = docIssues(d); return n ? h('span', { class: 'count bad', title: F.plural(n, { one: 'open validation error', other: 'open validation errors' }) }, n) : null; } },
             { key: 'updated', label: 'Updated', hideSm: true, render: function (d) { return h('span', { class: 'two-line' }, h('span', d.owner), h('small', F.dateTime(d.updated), d.late ? ' · ' : null, d.late ? h('span', { class: 'work-late', title: 'Edited after submission' }, 'late edit') : null)); } },
