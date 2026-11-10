@@ -130,7 +130,7 @@ export function CalculationResultsPanel({
   });
 
   const units = useQuery({
-    queryKey: ['units'],
+    queryKey: queryKeys.units.all(),
     enabled: !collapsed,
     queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
     staleTime: 60 * 60 * 1000,

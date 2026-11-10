@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Button, Group, Loader, Modal, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import { normalizeDecimal } from '@/shared/format';
 import { language, t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -101,7 +102,7 @@ export function UnitEditModal({
 
 function UnitEditLoader({ unitId, onDone }: { readonly unitId: number; readonly onDone: () => void }): JSX.Element {
   const detail = useQuery({
-    queryKey: ['units', unitId, 'detail'],
+    queryKey: queryKeys.units.detail(unitId),
     queryFn: () => getUnit(unitId),
     staleTime: 0,
   });
@@ -144,7 +145,7 @@ function UnitEditForm({ unit, onDone }: { readonly unit: UnitDetail; readonly on
   const [serverInUse, setServerInUse] = useState<number | null>(null);
 
   const usage = useQuery({
-    queryKey: ['units', unit.id, 'usage'],
+    queryKey: queryKeys.units.usage(unit.id),
     queryFn: () => unitUsage(unit.id),
     enabled: !unit.isBase,
     staleTime: 0,
@@ -173,7 +174,7 @@ function UnitEditForm({ unit, onDone }: { readonly unit: UnitDetail; readonly on
         rowVersion,
       ),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['units'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.units.all() });
       showDone(t('units.saved'));
       onDone();
     },
@@ -191,7 +192,7 @@ function UnitEditForm({ unit, onDone }: { readonly unit: UnitDetail; readonly on
   const takeFresh = (version: string): void => {
     setRowVersion(version);
     save.reset();
-    void queryClient.invalidateQueries({ queryKey: ['units'] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.units.all() });
   };
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void => {

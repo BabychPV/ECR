@@ -236,7 +236,7 @@ export function MethodologyConstantsPanel({
   });
 
   const units = useQuery({
-    queryKey: ['units'],
+    queryKey: queryKeys.units.all(),
     queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
     staleTime: 60 * 60 * 1000,
   });
@@ -1123,7 +1123,7 @@ export function MethodologyOutputsPanel({
   });
 
   const units = useQuery({
-    queryKey: ['units'],
+    queryKey: queryKeys.units.all(),
     queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
     staleTime: 60 * 60 * 1000,
   });

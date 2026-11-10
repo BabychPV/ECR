@@ -1377,7 +1377,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    */
   const hasUnitColumns = (data?.columns ?? []).some((column) => column.dataType === 'Unit');
   const units = useQuery({
-    queryKey: ['units'],
+    queryKey: queryKeys.units.all(),
     queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
     enabled: hasUnitColumns,
     staleTime: 60 * 60 * 1000,
