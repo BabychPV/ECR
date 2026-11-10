@@ -1,6 +1,9 @@
 import { EcrApiError, type RequiredInputCell } from '@/api/client';
+import type { TableSliceDto } from '@/api/types';
 import type { PendingEdit } from './useCellPatch';
 import { problemText } from '@/shared/ui/problemText';
+import { decide, denyText } from './permissions';
+import { columnIndexOf } from './rowIndex';
 
 /**
  * Що з відмови збереження можна показати людині (`ФВ-14.9a`).
@@ -112,6 +115,84 @@ export function rejectedCellReasons(error: unknown): readonly RejectedCellReason
   }
 
   return result;
+}
+
+/**
+ * Причини відмови `403 ECR-ACCS-0403 deniedCells` по комірках (живий прохід 10.11).
+ *
+ * ⛔ Банер казав лише «Cells you may not edit in this batch: 1. Reason for the first: CalculatedCell» — без колонки й
+ * рядка, з технічною назвою причини. Сервер не перелічує комірки (лише `deniedCount` і `reason` першої), тож:
+ *  - комірки пакета, які сітка сама вважає забороненими (`decide`), — з текстом своєї причини (той самий, що в підказці
+ *    сірої комірки);
+ *  - інакше, якщо в пакеті рівно одна комірка, — вона, з текстом серверної причини (`denyText(reason)`);
+ *  - інакше нічого: краще без переліку, ніж назвати комірку, якої відмова могла не стосуватися.
+ */
+export function deniedCellReasons(
+  error: unknown,
+  attempted: readonly PendingEdit[],
+  slice: TableSliceDto | undefined,
+): readonly RejectedCellReason[] {
+  if (!(error instanceof EcrApiError) || error.problem.errorCode !== 'ECR-ACCS-0403') return [];
+
+  const reason = error.problem.extensions2?.['reason'];
+  // ⚠ `ConfirmationRequired` — не заборона, а прохання підтвердити (окремий діалог, `#43`).
+  if (typeof reason !== 'string' || reason === 'ConfirmationRequired') return [];
+
+  if (slice !== undefined) {
+    const columns = columnIndexOf(slice);
+    const local = attempted.flatMap((edit) => {
+      const column = columns.get(edit.columnCode);
+      if (column === undefined) return [];
+
+      const decision = decide(slice, edit.rowKey, column);
+
+      return decision.editable ? [] : [{ rowKey: edit.rowKey, columnCode: edit.columnCode, message: decision.hint }];
+    });
+    if (local.length > 0) return local;
+  }
+
+  const [only] = attempted;
+  if (attempted.length !== 1 || only === undefined) return [];
+
+  return [{ rowKey: only.rowKey, columnCode: only.columnCode, message: denyText(reason) ?? refusalText(error) }];
+}
+
+/** Скільки комірок відхилено (`deniedCount` відмови), інакше — скільки названо. */
+export function deniedCountOf(error: unknown, named: number): number {
+  const raw = error instanceof EcrApiError ? error.problem.extensions2?.['deniedCount'] : undefined;
+  const count = typeof raw === 'string' || typeof raw === 'number' ? Number(raw) : Number.NaN;
+
+  return Number.isInteger(count) && count > 0 ? count : named;
+}
+
+/**
+ * Правки обчислюваних комірок (`Formula`/`Calculated`), яких сітка не дає писати (`decide` → `CalculatedCell`).
+ *
+ * ⛔ Такий `PATCH` сервер відхиляє ЦІЛИМ пакетом (`403 deniedCells`) — разом із правильними правками поруч. Правка
+ * сюди могла потрапити повз редактор (відновлення з браузера, комірка свіжого динамічного рядка до приходу зрізу),
+ * тож перед надсиланням вона відділяється: лишається позначеною й незбереженою, з причиною, а на сервер не йде.
+ * ⚠ Ручне значення формули (`D-461`, `overridesFormula`) `decide` дозволяє — його це не зачіпає.
+ */
+export function computedEditsOf(
+  slice: TableSliceDto | undefined,
+  edits: readonly PendingEdit[],
+): { readonly send: PendingEdit[]; readonly blocked: { edit: PendingEdit; message: string }[] } {
+  if (slice === undefined) return { send: [...edits], blocked: [] };
+
+  const columns = columnIndexOf(slice);
+  const send: PendingEdit[] = [];
+  const blocked: { edit: PendingEdit; message: string }[] = [];
+
+  for (const edit of edits) {
+    const column = columns.get(edit.columnCode);
+    const computed = column !== undefined && (column.dataType === 'Formula' || column.dataType === 'Calculated');
+    const decision = computed ? decide(slice, edit.rowKey, column) : null;
+
+    if (decision !== null && decision.reason === 'CalculatedCell') blocked.push({ edit, message: decision.hint });
+    else send.push(edit);
+  }
+
+  return { send, blocked };
 }
 
 /**
