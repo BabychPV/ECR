@@ -149,9 +149,11 @@ import {
   pendingSlice,
   putPendingEdit,
   putPendingEdits,
+  markPendingRejected,
   usePendingRejections,
   usePendingSlice,
 } from './pendingStore';
+import { rowDisplayName } from '@/features/permits/history/rowName';
 import { installF2Edit } from './f2Edit';
 import { installEnterKeyCompat } from './keyboardCompat';
 import {
@@ -193,6 +195,9 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showWarning } from '@/shared/ui/notify';
 import {
+  computedEditsOf,
+  deniedCellReasons,
+  deniedCountOf,
   refusalText,
   rejectedCellReasons,
   SaveErrorReasonsLimit,
@@ -712,11 +717,26 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       // ⛔ `B-09`: версія рядка — у мить НАДСИЛАННЯ, а не введення. Правка, що
       // чекала повтору, інакше їхала б зі старою версією й діставала `409` на
       // власних змінах — при кожному повторі, вічно (`withKnownVersions`).
-      const allEdits = withKnownVersions(
-        requested,
-        queryClient.getQueryData<TableSliceDto>(queryKeys.slices.one(tableInstanceId, periodKey)),
-        versionOverrides,
-      );
+      const cached = queryClient.getQueryData<TableSliceDto>(queryKeys.slices.one(tableInstanceId, periodKey));
+
+      // ⛔ Живий прохід 10.11: правка обчислюваної комірки (формула, напр. `SHEETNAME()` свіжого динамічного рядка)
+      // НЕ надсилається — сервер відхилив би весь пакет `403 deniedCells`. Вона лишається незбереженою з причиною, а
+      // банер називає колонку, рядок і причину (`computedEditsOf`).
+      const { send: guarded, blocked } = computedEditsOf(cached, requested);
+      if (blocked.length > 0) {
+        markPendingRejected(
+          tableInstanceId,
+          periodKey,
+          blocked.map(({ edit, message }) => ({ edit, message, scope: 'cell' as const })),
+        );
+        setSaveError(t('grid.deniedCellsSummary', { count: blocked.length }));
+        setSaveErrorReasons(
+          blocked.map(({ edit, message }) => ({ rowKey: edit.rowKey, columnCode: edit.columnCode, message })),
+        );
+        setSplitRefusal(null);
+      }
+
+      const allEdits = withKnownVersions(guarded, cached, versionOverrides);
 
       // ⛔ AN-104 (`D1-01`): рядок, чий запит уже летить, — не шлемо вдруге зі
       // старою версією (див. коментар вище). Відкладені правки лишаються в
@@ -799,8 +819,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // сховищі (`V-01`) і знімаються там же, рівно з тими комірками, які
         // сервер щойно прийняв (`discardPendingRows` вище): відхилена комірка
         // того самого рядка, якої в пакеті не було, лишається позначеною.
-        setSaveError(null);
-        setSaveErrorReasons([]);
+        // ⚠ Обчислювані комірки, відділені перед надсиланням (`blocked`), не збережено — їх банер лишається.
+        if (blocked.length === 0) {
+          setSaveError(null);
+          setSaveErrorReasons([]);
+        }
         // ⚠ AN-123: збереження пройшло — стан «чекає, доки дані звільняться» знято.
         // ⛔ Y8-04: лише для ЦЬОГО зрізу — повтор іншого зрізу не скасовується.
         noteBusyRetryResolved(tableInstanceId, periodKey);
@@ -852,8 +875,13 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // `messageKey` написана українською, якої в продукті немає; замість
           // неї — назва проблеми з каталогу. Те саме для не нашої відмови
           // (мережа, `TypeError`): доти тут стояв `String(error)`.
-          setSaveError(refusalText(error));
-          setSaveErrorReasons(rejectedCellReasons(error));
+          // ✎ Живий прохід 10.11: `403 deniedCells` не перелічує комірок — їх і причину (не технічну назву) називає
+          // `deniedCellReasons`, а загальний текст — без «Reason for the first: CalculatedCell».
+          const denied = deniedCellReasons(error, edits, cached);
+          setSaveError(
+            denied.length > 0 ? t('grid.deniedCellsSummary', { count: deniedCountOf(error, denied.length) }) : refusalText(error),
+          );
+          setSaveErrorReasons(denied.length > 0 ? denied : rejectedCellReasons(error));
           setSplitRefusal(splitRefusalOf(error));
         }
 
@@ -1349,7 +1377,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    */
   const hasUnitColumns = (data?.columns ?? []).some((column) => column.dataType === 'Unit');
   const units = useQuery({
-    queryKey: ['units'],
+    queryKey: queryKeys.units.all(),
     queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
     enabled: hasUnitColumns,
     staleTime: 60 * 60 * 1000,
@@ -3100,8 +3128,9 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
               {saveErrorReasons.slice(0, SaveErrorReasonsLimit).map((reason) => {
                 const header =
                   data?.columns.find((column) => column.code === reason.columnCode)?.header ?? reason.columnCode;
-                const row = data?.rows.find((candidate) => candidate.rowKey === reason.rowKey);
-                const place = row === undefined ? header : `${header} · ${rowLabelOf(row)}`;
+                // ✎ Живий прохід 10.11: рядок без підпису (динамічний) — «row N», а не шістнадцятковий ключ.
+                const known = reason.rowKey.length > 0 && data?.rows.some((candidate) => candidate.rowKey === reason.rowKey);
+                const place = known ? `${header} · ${rowDisplayName(data, reason.rowKey)}` : header;
 
                 return (
                   <Text size="sm" key={`${reason.rowKey}:${reason.columnCode}:${reason.message}`}>

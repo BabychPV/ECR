@@ -19,7 +19,7 @@ export interface Units {
 
 export function useUnits(): Units {
   const query = useQuery({
-    queryKey: ['units'],
+    queryKey: queryKeys.units.all(),
     queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
     staleTime: HourMs,
   });

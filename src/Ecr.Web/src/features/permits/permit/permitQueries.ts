@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type { UnitRef } from '@/api/types';
 import { getPermit } from '../api/permitsApi';
 import { getPermitType } from '../api/typesApi';
@@ -54,7 +55,7 @@ export function usePermitTypeDefinition(code: string | undefined) {
 /** Одиниці виміру (кеш `['units']` спільний із редакторами). */
 export function useUnitLabels(enabled: boolean): ReadonlyMap<number, string> {
   const query = useQuery({
-    queryKey: ['units'],
+    queryKey: queryKeys.units.all(),
     queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
     enabled,
   });

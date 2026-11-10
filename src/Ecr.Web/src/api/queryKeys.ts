@@ -330,6 +330,24 @@ const tableChat = {
 };
 
 /**
+ * Домен `units`: каталог одиниць виміру (`GET /api/v1/units`, D13).
+ *
+ * ⛔ Форма `['units']` — префікс, за яким `UnitsPage`/`UnitEditModal` інвалідовують каталог
+ * і подробиці після збереження/видалення одиниці. Літерал `['units'…]` поза цим файлом
+ * заборонено сторожем `unitsQueryKey.guard.test.ts`: розійшлися б кеш і інвалідація.
+ */
+const units = {
+  /** `GET /api/v1/units` — увесь каталог; префікс `['units', id, …]` подробиць одиниці. */
+  all: () => ['units'] as const,
+
+  /** `GET /api/v1/units/{id}` — подробиці одиниці (редактор і панель на `/admin/units`). */
+  detail: (unitId: number) => ['units', unitId, 'detail'] as const,
+
+  /** `GET /api/v1/units/{id}/usage` — де вживається одиниця; `undefined` — поки діалог видалення закритий. */
+  usage: (unitId: number | undefined) => ['units', unitId, 'usage'] as const,
+};
+
+/**
  * Єдина точка правди для ключів TanStack Query.
  *
  * Охоплює домени, потрібні для першого зрізу навігаційної архітектури —
@@ -348,4 +366,5 @@ export const queryKeys = {
   document: documentKeys,
   projects,
   tableChat,
+  units,
 };
