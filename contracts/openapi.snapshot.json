@@ -64692,6 +64692,14 @@
               "pattern": "^-?(?:0|[1-9]\\d*)$",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "expectedPresentationRevision",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
           }
         ],
         "requestBody": {
@@ -64734,6 +64742,26 @@
               }
             },
             "description": "OK"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
           }
         },
         "summary": "Патч презентаційного шару опублікованої версії. Право `Template.Edit`.",
