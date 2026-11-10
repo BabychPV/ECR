@@ -95,22 +95,31 @@ public sealed partial class CiPersistenceStepTests
         var persistence = StepFilter(script, "Тести Infrastructure (Persistence)");
         var dotnet = StepFilter(script, "Тести .NET");
 
-        // Виняток (борг D16): TestDatabaseSizeTests лишається в кроці «Тести .NET» (core), а не в Persistence.
-        var sizeTests = $"{PersistenceNamespace}.TestDatabaseSizeTests";
+        // Крок Persistence бере РІВНО простір імен із крапкою наприкінці (щоб не зачепити сусідній `PersistenceX`) —
+        // і без винятків: D16 повернув сторож розміру `TestDatabaseSizeTests` у базу, яку він стереже.
+        Assert.Equal($"FullyQualifiedName~{PersistenceNamespace}.", persistence);
 
-        // Крок Persistence бере РІВНО простір імен із крапкою наприкінці (щоб не зачепити сусідній `PersistenceX`)
-        // за мінусом винятку.
-        Assert.Equal($"FullyQualifiedName~{PersistenceNamespace}.&FullyQualifiedName!~{sizeTests}", persistence);
+        // Крок «Тести .NET» = усе, крім Persistence: `!~X` проти `~X` того самого простору, інакше тест дублюється
+        // або випадає. Жодного `|`-винятку, що повертав би клас Persistence у core.
+        Assert.DoesNotContain('|', dotnet);
+        Assert.Contains($"FullyQualifiedName!~{PersistenceNamespace}.", dotnet.Split('&'));
+    }
 
-        // Крок «Тести .NET» = (усе, крім Persistence) | виняток. `!~X` проти `~X` того самого простору, інакше
-        // тест дублюється або випадає; виняток підключено через `|` поза дужками.
-        var orIndex = dotnet.LastIndexOf('|');
-        Assert.True(orIndex > 0, $"Фільтр кроку 'Тести .NET' має вигляд (…)|FullyQualifiedName~{sizeTests}: {dotnet}");
-        Assert.Equal($"FullyQualifiedName~{sizeTests}", dotnet[(orIndex + 1)..]);
+    /// <summary>
+    /// D16: сторож розміру тестової бази стоїть у просторі імен Persistence, тож іде кроком <c>core-persistence</c> —
+    /// тим, де живуть великі заливки. Мутація: повернути виняток <c>!~…TestDatabaseSizeTests</c> у фільтр → червоний
+    /// тест вище; перенести клас у інший простір імен → червоний цей.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Сторож_розміру_тестової_бази_в_просторі_імен_Persistence()
+    {
+        var text = File.ReadAllText(Path.Combine(
+            SourceTree.Root, "tests", "Ecr.Infrastructure.Tests", "Persistence", "TestDatabaseSizeTests.cs"));
 
-        var excluding = dotnet[..orIndex];
-        Assert.True(excluding.StartsWith('(') && excluding.EndsWith(')'), $"Виключення Persistence мають бути в дужках: {excluding}");
-        Assert.Contains($"FullyQualifiedName!~{PersistenceNamespace}.", excluding[1..^1].Split('&'));
+        Assert.Equal(PersistenceNamespace, NamespaceDecl().Match(text).Groups[1].Value);
+        Assert.Contains("class TestDatabaseSizeTests", text, StringComparison.Ordinal);
     }
 
     private static string StepFilter(string script, string stepName)

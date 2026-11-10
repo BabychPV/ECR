@@ -291,8 +291,10 @@ test.describe('anchorTextSubmitted: текст якоря поданого ро�
       const rejected = page.getByRole('dialog');
       await expect(rejected, 'вставка в замкнену комірку не показала повідомлення про замок').toBeVisible({ timeout: 15_000 });
       const rejectedText = (await rejected.innerText()).replace(/\s+/g, ' ');
-      expect(rejectedText).toContain(RowKey);
-      expect(rejectedText).toContain('NUM');
+      // ✎ F13-p229: рядок без підпису — «row N» (rowDisplayName), колонка — заголовком, не технічними ключами.
+      expect(rejectedText).toMatch(/row 1 · /);
+      expect(rejectedText).toContain(NumberHeader);
+      expect(rejectedText).not.toContain(RowKey);
       expect(rejectedText, 'у повідомленні про замок — ключ каталогу, а не текст').not.toMatch(/deny\.|err\./);
       expect(hint.length, 'підказка комірки порожня').toBeGreaterThan(0);
       console.log(`[anchorTextSubmitted] повідомлення про замок: ${rejectedText}`);

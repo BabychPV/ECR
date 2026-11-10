@@ -98,8 +98,10 @@ describe('DocumentPage: документа немає (D10)', () => {
         </MantineProvider>,
       );
 
-      const heading = await screen.findByRole('heading', { level: 2 }, { timeout: SlowEnvTimeout });
+      // F13-p229: службова сторінка «документа немає» — рівно один H1 (раніше H2 без H1).
+      const heading = await screen.findByRole('heading', { level: 1 }, { timeout: SlowEnvTimeout });
 
+      expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
       expect(heading.textContent ?? '').not.toBe('');
       expect(screen.getByText('ECR-DOC-0404')).not.toBeNull();
       expect(screen.getByText('cid-doc-404')).not.toBeNull();

@@ -147,6 +147,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
         ConnectionString = await CreateEmptyDatabaseAsync(serverConnection).ConfigureAwait(false);
         await BuildSchemaAsync().ConfigureAwait(false);
+        await NarrowDataFileGrowthAsync().ConfigureAwait(false);
 
         // Лише спільна база колекції; початкова точка — ПІСЛЯ розгортання схеми: її ріст не належить жодному тесту.
         if (_nameSuffix.Length == 0)
@@ -410,6 +411,26 @@ public sealed class SqlServerFixture : IAsyncLifetime
             connection,
             "EXEC sys.sp_addextendedproperty @name = N'Ecr_SmallFiles', @value = 1;")
             .ConfigureAwait(false);
+    }
+
+    /// <summary>Приріст кожного файла даних тестової бази — 16 МБ (як у журналу, див. <see cref="CreateEmptyDatabaseAsync"/>).</summary>
+    /// <remarks>
+    /// ⛔ D16: файл <c>PRIMARY</c> народжується на 72 МБ (розмір <c>model</c> + міграції), а приріст файла — 64 МБ, тож
+    /// ПЕРШИЙ же приріст давав 136 МБ і робив сторож <c>TestDatabaseSizeTests</c> (стеля 128) червоним від одного зайвого
+    /// мегабайта даних (<c>server-part (core-persistence)</c>: <c>PermitTypeListProjectionTests</c> 72 → 136 МБ). Розмір
+    /// файла тоді міряв крок приросту, а не дані. Продуктивні розміри (<c>01-filegroups.sql</c>) не змінюються.
+    /// </remarks>
+    private async Task NarrowDataFileGrowthAsync()
+    {
+        await using var connection = new SqlConnection(ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+        await ExecuteAsync(connection, $"""
+            DECLARE @sql nvarchar(max) = N'';
+            SELECT @sql += N'ALTER DATABASE [{DatabaseName}] MODIFY FILE (NAME = N''' + REPLACE(name, N'''', N'''''') + N''', FILEGROWTH = 16MB);'
+            FROM sys.database_files
+            WHERE type = 0 AND (is_percent_growth = 1 OR growth > 16 * 128);
+            EXEC (@sql);
+            """).ConfigureAwait(false);
     }
 
     /// <summary>Каталог файлів тестових баз, якщо він відрізняється від типового.</summary>

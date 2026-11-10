@@ -38,7 +38,7 @@ function column(code: string, dataType: string, ordinal: number): ColumnDto {
   };
 }
 
-function sliceOf(columns: ColumnDto[]): TableSliceDto {
+function sliceOf(columns: ColumnDto[], rowKey = 'r1'): TableSliceDto {
   return {
     cellConfirmations: {},
     cellPermissions: {},
@@ -51,7 +51,7 @@ function sliceOf(columns: ColumnDto[]): TableSliceDto {
         isOrphaned: false,
         label: null,
         ordinal: 0,
-        rowKey: 'r1',
+        rowKey,
         rowVersion: 'v0',
         rowKind: 'Item' as const,
       },
@@ -159,5 +159,20 @@ describe('DocumentGrid (en): неоднозначне число при вста
     await screen.findByText(/grid\.pasteAmbiguousNumber/);
     expect(screen.getByText(/grid\.rejectedAmbiguousHint/)).toBeTruthy();
     expect(screen.queryByText(/grid\.rejectedHint/)).toBeNull();
+  });
+
+  // F13-p229: динамічний рядок без підпису у вікні відмови вставки — «row N», а не шістнадцятковий ключ.
+  it('вікно відмови називає рядок без підпису через rowDisplayName, а не ключем', async () => {
+    const hexKey = '33732b706603476f8a1b';
+    mockServer(sliceOf([column('C1', 'Decimal', 0)], hexKey));
+    show();
+
+    const stub = await screen.findByTestId('revogrid-stub');
+    fireEvent.paste(stub, clipboard('1,234\n'));
+
+    const reason = await screen.findByText(/grid\.pasteAmbiguousNumber/);
+    expect(reason.textContent).not.toContain(hexKey);
+    expect(reason.textContent).toContain('permits.history.rowPosition');
+    expect(reason.textContent).toContain('C1');
   });
 });
