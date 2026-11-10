@@ -457,6 +457,18 @@
       onSubmit: function (reason) { var users = Object.keys(picks).filter(function (k) { return picks[k]; }); if (!users.length) return; doReturn(it, users, reason); afterChange(); setTimeout(function () { showResult({ title: t('editAssign.result.returned', { month: mon }), text: t('editAssign.result.returnedText') }); }, 0); } });
   }
   function $(id) { return document.getElementById(id); }
+  /* D-443 «Додати учасника»: рівні — вертикальний перелік радіо з ПОВНИМ підписом (KIT.md §6.3, ✎ 10.11: сегменти
+     обрізали «Заполнение, подача и согласование» до «Заполнение»). Тексти — сід D443:participants. */
+  var PART_LEVELS = [['Read', 'View', 'Просмотр', 'Қарау'], ['Write', 'Fill in', 'Заполнение', 'Толтыру'], ['Submit', 'Fill in and submit', 'Заполнение и подача', 'Толтыру және жіберу'],
+    ['Approve', 'Fill in, submit and approve', 'Заполнение, подача и согласование', 'Толтыру, жіберу және келісу']];
+  var PART_TEXT = { title: ['Add a document participant', 'Добавить участника документа', 'Құжат қатысушысын қосу'], level: ['Access level', 'Уровень доступа', 'Қолжетімділік деңгейі'], grant: ['Grant access', 'Предоставить доступ', 'Қолжетімділік беру'] };
+  function dlgParticipant() {
+    var li = LANG === 'ru' ? 1 : LANG === 'kz' ? 2 : 0, pt = function (k) { return PART_TEXT[k][li]; };
+    E.Dialog({ id: 'doc-ea-part', title: pt('title'), body: function (b) {
+      b.appendChild(h('fieldset', { class: 'stack gap-1', id: 'doc-ea-part-levels' }, h('legend', { class: 't-sb' }, pt('level')), PART_LEVELS.map(function (l, i) {
+        return h('label', { class: 'row gap-2', for: 'doc-ea-part-l' + i }, h('input', { type: 'radio', name: 'doc-ea-part-level', id: 'doc-ea-part-l' + i, value: l[0], checked: i === 0 }), h('span', l[li + 1])); })));
+    }, footer: [{ label: 'Cancel' }, { label: pt('grant'), variant: 'primary' }] });
+  }
   function dlgRemove(arg) {
     var it = target(arg); if (!it) return; var mon = monthName(it.period);
     E.ConfirmDialog({ id: 'doc-ea-remove', title: t('editAssign.remove.title', { month: mon }), consequences: [t('editAssign.remove.c1', { month: mon }), t('editAssign.remove.c2'), { text: t('editAssign.remove.c3'), note: true }], verb: t('editAssign.remove.verb'), icon: 'trash', danger: true,
@@ -515,7 +527,7 @@
       if (q.nv && pre.users) pre.users.push('G. Tulegenova', 'O. Kovalenko'); // демо: люди без видимості документа
       openWizard(pre, { startAt: q.step }); });
     c.dialog('assign-repeat', function () { var l = sortedItems(); if (!l.length) return; repeatNext(l[l.length - 1]); });
-    c.dialog('assign-validate', dlgValidate); c.dialog('assign-return', dlgReturn); c.dialog('assign-remove', dlgRemove); c.dialog('editor-set', dlgSets);
+    c.dialog('assign-validate', dlgValidate); c.dialog('assign-return', dlgReturn); c.dialog('assign-remove', dlgRemove); c.dialog('editor-set', dlgSets); c.dialog('participant-add', dlgParticipant);
     c.dialog('assign-fill-confirm', function () { setTimeout(function () { var b = $('doc-ea-mark-filled'); if (b) askFill(b); }, 0); });
     c.dialog('result-assigned', function () { showResult({ title: t('editAssign.result.assigned', { months: monthName(host.period()) }), text: t('editAssign.result.assignedText') }); });
     c.dialog('result-validated', function () { var it = target(); if (!it || status(it) !== 'Filled' && !it.validated) it = seedAwaiting(); doValidate(it); host.rerender(); showResult({ title: t('editAssign.result.validated', { month: monthName(it.period) }), text: t('editAssign.result.validatedText', { month: monthName(it.period) }) }); });
@@ -545,5 +557,6 @@
     { label: 'Executor sees the comment', href: D1 + '?as=DataEntry&ea=returned' }] });
   E.flow('ea-my-tasks', { group: G, title: 'My tasks: Assigned to me · Awaiting my validation', actor: 'Executor · owner', steps: [
     { label: 'Executor (with a returned month)', href: D1 + '?as=DataEntry&ea=returned&panel=tasks' }, { label: 'Owner (months wait for validation)', href: D1 + '?as=Approver&ea=awaiting&panel=tasks' }, { label: 'Executor sees the owner’s side as read-only', href: D1 + '?as=DataEntry&panel=edit-assignments' }] });
-  E.flow('ea-i18n', { group: G, title: 'Languages', actor: 'Any', steps: [{ label: 'Russian', href: D1 + '?as=Approver&lang=ru&panel=edit-assignments' }, { label: 'Kazakh', href: D1 + '?as=Approver&lang=kz&ea=awaiting' }, { label: 'Dark theme', href: D1 + '?as=Approver&ea=awaiting&panel=edit-assignments&theme=dark' }] });
+  E.flow('ea-i18n', { group: G, title: 'Languages', actor: 'Any', steps: [{ label: 'Russian', href: D1 + '?as=Approver&lang=ru&panel=edit-assignments' }, { label: 'Kazakh', href: D1 + '?as=Approver&lang=kz&ea=awaiting' }, { label: 'Dark theme', href: D1 + '?as=Approver&ea=awaiting&panel=edit-assignments&theme=dark' },
+    { label: 'Add participant · levels (ru)', href: D1 + '?as=Approver&lang=ru&dialog=participant-add' }, { label: 'Add participant · levels (kz)', href: D1 + '?as=Approver&lang=kz&dialog=participant-add' }] });
 })(window.ECR);
