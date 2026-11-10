@@ -825,9 +825,14 @@ public sealed class DocumentStore(
     /// ⛔ Без цього фільтр і вибір власників були б оракулом «чий документ», якого рядок переліку навмисно не каже.
     /// ⚠ Документ проєкту з роллю, де читач має ще й надання, звужується обома наборами пар — свідомо, як фільтр стану
     /// D-444: лише недолік (документ випадає з фільтра), не витік.
+    /// ✎ 10.11 (P2, live): власний документ читача (<see cref="DocumentListFilter.ReaderUserId"/>) проходить завжди —
+    /// <c>For</c> віддає власникові його ім'я і за звуженого доступу.
     /// </remarks>
     private IQueryable<Document> WhereOwnerDisclosed(IQueryable<Document> documents, DocumentListFilter filter)
     {
+        // 0 — жодного користувача (Id ≥ 1): без читача виняток не діє.
+        var reader = filter.ReaderUserId ?? 0;
+
         var projectWide = (filter.HiddenTableDefIds ?? []).Select(p => p.ProjectId)
             .Concat((filter.HiddenColumnDefIds ?? []).Select(p => p.ProjectId))
             .Distinct()
@@ -835,13 +840,14 @@ public sealed class DocumentStore(
             .ToArray();
         if (projectWide.Length > 0)
         {
-            documents = documents.Where(d => !projectWide.Contains(d.ProjectId));
+            documents = documents.Where(d => d.CreatedByUserId == reader || !projectWide.Contains(d.ProjectId));
         }
 
         if (filter.HiddenSheetDefIds is { Count: > 0 } hiddenSheets)
         {
             var hiddenRows = HiddenSheetRows(hiddenSheets);
-            documents = documents.Where(d => !db.DocumentSheets.Any(s => s.DocumentId == d.Id && s.IsIncluded && hiddenRows.Contains(s.Id)));
+            documents = documents.Where(d => d.CreatedByUserId == reader
+                                             || !db.DocumentSheets.Any(s => s.DocumentId == d.Id && s.IsIncluded && hiddenRows.Contains(s.Id)));
         }
 
         if (filter.Participation is { } participation)
@@ -853,13 +859,14 @@ public sealed class DocumentStore(
                 .ToArray();
             if (documentWide.Length > 0)
             {
-                documents = documents.Where(d => !documentWide.Contains(d.Id));
+                documents = documents.Where(d => d.CreatedByUserId == reader || !documentWide.Contains(d.Id));
             }
 
             if (participation.HiddenSheets is { Count: > 0 } participantSheets)
             {
                 var participantRows = HiddenParticipantSheetRows(participantSheets);
-                documents = documents.Where(d => !db.DocumentSheets.Any(s => s.DocumentId == d.Id && s.IsIncluded && participantRows.Contains(s.Id)));
+                documents = documents.Where(d => d.CreatedByUserId == reader
+                                                 || !db.DocumentSheets.Any(s => s.DocumentId == d.Id && s.IsIncluded && participantRows.Contains(s.Id)));
             }
         }
 

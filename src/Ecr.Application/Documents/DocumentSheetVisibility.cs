@@ -272,7 +272,11 @@ public static class DocumentSheetVisibility
     /// <summary>Залишає читачеві лише видимі аркуші; лічильники звуженого читача — <c>null</c>.</summary>
     /// <param name="document">Документ зі сховища.</param>
     /// <param name="scope">Межі читання його проєкту.</param>
-    public static DocumentSummary For(DocumentSummary document, DocumentReadScope scope)
+    /// <param name="readerUserId">
+    /// Хто читає. ✎ 10.11 (P2, live): власник документа бачить СЕБЕ власником і за звуженого доступу — власне ім'я
+    /// нічого не розкриває; решта, що ховає R-7 (хто правив, хто затвердив, лічильники, застарілість), — так само null.
+    /// </param>
+    public static DocumentSummary For(DocumentSummary document, DocumentReadScope scope, int readerUserId)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(scope);
@@ -284,6 +288,7 @@ public static class DocumentSheetVisibility
         var visibleCodes = included.Count(scope.CanReadSheetCode);
         var narrowed = IsNarrowed(scope, included);
         var staleHidden = narrowed || IsProjectNarrowed(scope);
+        var ownerHidden = narrowed && document.OwnerUserId != readerUserId;
 
         return document with
         {
@@ -297,8 +302,9 @@ public static class DocumentSheetVisibility
             // аркуша; для звуженого читача — null («—»), як і лічильники.
             ModifiedAt = narrowed ? null : document.ModifiedAt,
             ModifiedByDisplayName = narrowed ? null : document.ModifiedByDisplayName,
-            OwnerDisplayName = narrowed ? null : document.OwnerDisplayName,
-            OwnerUserId = narrowed ? null : document.OwnerUserId,
+            // ✎ 10.11: крім самого власника (ownerHidden) — своє ім'я йому не секрет.
+            OwnerDisplayName = ownerHidden ? null : document.OwnerDisplayName,
+            OwnerUserId = ownerHidden ? null : document.OwnerUserId,
             ApproverDisplayName = narrowed ? null : document.ApproverDisplayName,
 
             // ⛔ Застарілість рахується по ВСІХ входах документа, а видимий вихід може від схованого не залежати:
@@ -345,7 +351,7 @@ public static class DocumentSheetVisibility
                 own = own.ToDictionary(p => p.Key, p => p.Value.InPeriod(new PeriodKey(value)));
             }
 
-            return [.. documents.Where(d => own.ContainsKey(d.Id)).Select(d => For(d, own[d.Id]))];
+            return [.. documents.Where(d => own.ContainsKey(d.Id)).Select(d => For(d, own[d.Id], profile.UserId))];
         }
 
         var scopes = known is null
@@ -360,6 +366,6 @@ public static class DocumentSheetVisibility
             }
         }
 
-        return [.. documents.Select(d => For(d, scopes[d.ProjectId]))];
+        return [.. documents.Select(d => For(d, scopes[d.ProjectId], profile.UserId))];
     }
 }

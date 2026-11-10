@@ -258,6 +258,11 @@ public sealed record DocumentSheetState(
 /// фільтра. Діє ЗАПИТОМ до <c>Take</c>, поруч з межею видимості, а не постфільтром: видимість документів не змінює.
 /// </param>
 /// <param name="VersionSort">✎ Сортування за версією шаблону (за період); <c>null</c> — за <c>Id</c>. Другий ключ — завжди <c>Id</c>.</param>
+/// <param name="ReaderUserId">
+/// ✎ 10.11 (P2, live): хто читає. Власні документи читача (<c>CreatedByUserId</c> = він) проходять у фільтр
+/// <paramref name="OwnerUserId"/> і вибір власників і за звуженого доступу: власне ім'я йому віддається
+/// (<c>DocumentSheetVisibility.For</c>), тож оракулом це не є. <c>null</c> — винятку немає.
+/// </param>
 public readonly record struct DocumentListFilter(
     DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null,
     IReadOnlyCollection<(int ProjectId, int Id)>? HiddenSheetDefIds = null,
@@ -272,7 +277,8 @@ public readonly record struct DocumentListFilter(
     IReadOnlyCollection<string>? TemplateVersions = null,
     DocumentVersionSort? VersionSort = null,
     bool PartlySubmitted = false,
-    int? Year = null);
+    int? Year = null,
+    int? ReaderUserId = null);
 
 /// <summary>Напрямок сортування переліку документів за версією шаблону.</summary>
 public enum DocumentVersionSort

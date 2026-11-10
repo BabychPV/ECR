@@ -252,9 +252,22 @@ public sealed class DocumentListSummarySheetsScopeTests(SqlServerFixture sql)
                 .ConfigureAwait(false);
         }
 
-        // Автор документа — користувач сценарію: його ім'я бачить звичайна роль і не бачить звужена.
+        // Автор документа — користувач сценарію: його ім'я бачить звичайна роль. ✎ 10.11: звуженому читачеві власне ім'я
+        // віддається (виняток власника в `DocumentSheetVisibility.For`), тож у звужених сценаріях автор — ІНША людина,
+        // чиє ім'я звужений читач не отримує.
+        var authorId = user.Id;
+        if (how != "none")
+        {
+            var authorName = $"aut{Guid.NewGuid():N}"[..20];
+            var author = new User(authorName, authorName, AuthProvider.Local);
+            author.SetPassword(new PasswordHasher().Hash(Password));
+            db.Users.Add(author);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+            authorId = author.Id;
+        }
+
         await db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE doc.Document SET CreatedByUserId = {user.Id} WHERE Id = {b.DocumentId}")
+                $"UPDATE doc.Document SET CreatedByUserId = {authorId} WHERE Id = {b.DocumentId}")
             .ConfigureAwait(false);
 
         // Обидва аркуші затверджено.
