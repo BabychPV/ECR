@@ -4317,6 +4317,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-EXPR-0422` | 422 | дерево виразу надто глибоке для обходу на стеку потоку (L7-01): сторож стека рекурсивного обходу (`RuntimeHelpers.EnsureSufficientExecutionStack`, `TraversalStackGuard`) кинув `InsufficientExecutionStackException` замість переповнення стека, що валить процес; `messageKey` = `expr.tooComplex` («розбийте на кілька формул»). Фонова задача з цією причиною **не повторюється** (`JobRetryPolicy`) і падає один раз із цим кодом. Константа — `ErrorCodes.ExpressionTooComplex` |
 | `ECR-AUTH-0409` | 409 | небезпечний запит (`POST`/`PUT`/`PATCH`/`DELETE`) несе заголовок `X-Ecr-User` (id користувача з `/me`, якого бачила вкладка), а cookie сеансу належить іншому користувачу — у сусідній вкладці увійшов інший (AN-108 / S2-05, `sessionUserChanged`); відмова до обробника (`SessionUserMiddleware`), клієнт покидає сеанс вкладки, як після виходу. Без заголовка (скрипти, служби, старі клієнти) і на вході/виході — не перевіряється. Константа — `ErrorCodes.SessionUserMismatch` |
 | `ECR-REG-4094` | 409 | номер НАЕ вже зайнятий у своїй області (типи вузлів НАЕ, людина 03.11, Q3): `NaeCode` вузла SRC унікальний у межах (предок REGION, предок AREA), а де регіон без поділу On/Offshore — у межах REGION. Перевіряє upsert `POST /registries/{code}/entries` під блокуванням дерева; `messageKey` `naeCodeTaken` |
+| `ECR-REG-4222` | 422 | запис довідника без назви (D14 / AU-14, рішення координатора 19.10): ручний upsert `POST /registries/{code}/entries` створює запис без жодної непорожньої мови в `display` (немає мов, усі порожні чи з пробілів, або пласка мапа `{мова:текст}` замість `{"values":{…}}`) або правкою стирає всі мови наявної назви. Запис, що вже лежить без назви, правкою значень без назви в запиті не блокується. Константа — `ErrorCodes.RegistryEntryNameRequired`; `messageKey` `entryNameRequired` |
 
 ### 7.1 Суфікси `messageKey` (`err.<код>.<суфікс>`) нових випадків
 
@@ -4426,6 +4427,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-REG-0422.fieldLevelMismatch` | 422 | непорожнє значення поля, прив'язаного до іншого рівня, ніж рівень запису (`RegistryFieldDef.LevelId`); деталі `registryCode`, `fields` |
 | `err.ECR-REG-0409.levelHasFields` | 409 | збереження рівнів прибирає рівень, до якого прив'язані поля опису; деталі `levelCode`, `fields` |
 | `err.ECR-REG-0422.naeSourceLevelChange` | 422 | вузол SRC дерева НАЕ змінює тип на інший (move `levelCode` або upsert): джерело, на яке дивляться дозволи, не стає групою — його закривають і заводять групу; деталі `entryCode`, `levelCode`. Зміна типу В SRC: збережений номер обов'язковий (`requiredFieldsMissing`) і вільний (`ECR-REG-4094`), регіон/район — похідні |
+| `err.ECR-REG-4222.entryNameRequired` | 422 | D14: у назві запису довідника немає жодної непорожньої мови (створення або правка, що стирає всі мови); деталі `registryCode`, `code` |
 
 ---
 
