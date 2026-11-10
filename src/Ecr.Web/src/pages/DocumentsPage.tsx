@@ -157,6 +157,7 @@ export function DocumentsPage(): JSX.Element {
       filters.state,
       filters.mine,
       filters.hasLateEdits,
+      filters.hasReopenedMonths,
       filters.resultsStale,
       appliedQ,
       filters.projectId,
@@ -175,6 +176,7 @@ export function DocumentsPage(): JSX.Element {
         templateVersions: filters.versions,
         versionSort: filters.versionSort,
         hasLateEdits: filters.hasLateEdits,
+        hasReopenedMonths: filters.hasReopenedMonths,
         resultsStale: filters.resultsStale,
         q: appliedQ,
         projectId: filters.projectId,
@@ -605,6 +607,7 @@ export function DocumentsPage(): JSX.Element {
                               year={year}
                               periodStates={document.periodStates}
                               calendar={calendarOf(document.projectId)}
+                              reopenedPeriods={document.reopenedPeriods}
                             />
                           </Table.Td>
                           <Table.Td data-column="issues" data-document-errors={errors ?? 'none'}>
