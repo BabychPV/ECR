@@ -27,12 +27,20 @@ public sealed class GetCalculationIssuesHandler(
     IMetadataCache? metadata = null,
     IPeriodStore? periods = null,
     IMethodologyStore? methodologies = null,
-    IColumnPathMapper? columnMapper = null)
+    IColumnPathMapper? columnMapper = null,
+    IFormulaEngine? formulaEngine = null)
 {
     private readonly CalculationIssueHints? hints =
         rowStore is null || cellStore is null || metadata is null || periods is null || methodologies is null
             ? null
             : new CalculationIssueHints(rowStore, cellStore, metadata, periods, methodologies, columnMapper);
+
+    // ✎ 10.11 (doc 95): причина відхилення правилом категорії — правило й колонки, що їх треба заповнити.
+    private readonly CalculationRejectionReasons? reasons =
+        rowStore is null || cellStore is null || metadata is null || periods is null || methodologies is null
+        || formulaEngine is null
+            ? null
+            : new CalculationRejectionReasons(rowStore, cellStore, metadata, periods, methodologies, formulaEngine, columnMapper);
 
     /// <summary>Право на перегляд документа (`02-contracts.md` §9).</summary>
     public const string Permission = "Document.View";
@@ -65,22 +73,41 @@ public sealed class GetCalculationIssuesHandler(
 
         var visible = rows.Where(r => readable.CanReadTable(r.TableDefId)).ToList();
 
-        var built = hints is null || visible.Count == 0 || !key.IsValid
+        // Підказка «що приймають правила» — лише рядкам без правила: відхиленому рядку правило вже підійшло.
+        var unmatched = visible.Where(r => r.Kind != ICalculationIssueStore.CategoryRuleRejected).ToList();
+        var built = hints is null || unmatched.Count == 0 || !key.IsValid
             ? CalculationIssueHintSet.Empty
-            : await hints.BuildAsync(documentId, key, sheetCopyId, visible, readable.CanReadColumn, ct)
+            : await hints.BuildAsync(documentId, key, sheetCopyId, unmatched, readable.CanReadColumn, ct)
+                .ConfigureAwait(false);
+
+        var rejected = visible.Where(r => r.Kind == ICalculationIssueStore.CategoryRuleRejected).ToList();
+        var why = reasons is null || rejected.Count == 0 || !key.IsValid
+            ? new Dictionary<(int, string, int?), CalculationRejectionReason>()
+            : await reasons.BuildAsync(documentId, key, sheetCopyId, rejected, readable.CanReadColumn, ct)
                 .ConfigureAwait(false);
 
         return new CalculationIssuesDto(
             [
-                .. visible.Select(r => new CalculationIssueDto(
-                    r.TableCode,
-                    r.SheetCopyId,
-                    r.RowNumber,
-                    r.RowKey,
-                    r.Kind,
-                    r.MethodologyCode,
-                    r.DetectedAt,
-                    built.CurrentValues.GetValueOrDefault((r.TableDefId, r.RowKey)))),
+                .. visible.Select(r =>
+                {
+                    var reason = r.Kind == ICalculationIssueStore.CategoryRuleRejected
+                        ? why.GetValueOrDefault((r.TableDefId, r.RowKey, r.MethodologyId))
+                        : null;
+
+                    return new CalculationIssueDto(
+                        r.TableCode,
+                        r.SheetCopyId,
+                        r.RowNumber,
+                        r.RowKey,
+                        r.Kind,
+                        r.MethodologyCode,
+                        r.DetectedAt,
+                        reason is null ? built.CurrentValues.GetValueOrDefault((r.TableDefId, r.RowKey)) : null,
+                        reason?.RuleCode,
+                        reason is null || reason.Columns.Count == 0
+                            ? null
+                            : [.. reason.Columns.Select(c => new CalculationIssueColumnDto(c.Code, c.HeaderL10n))]);
+                }),
             ],
             built.Tables.Count == 0 ? null : built.Tables);
     }
