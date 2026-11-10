@@ -41,7 +41,21 @@ public sealed class PatchPresentationHandler(
     /// Серед змін є <c>Breaking</c>, а на версії вже є документи —
     /// <c>ECR-SCHM-0409</c> (ФВ-7.4).
     /// </exception>
-    public async Task<int> PatchAsync(int templateVersionId, string patchJson, int userId, CancellationToken ct)
+    public Task<int> PatchAsync(int templateVersionId, string patchJson, int userId, CancellationToken ct)
+        => PatchAsync(templateVersionId, patchJson, userId, expectedPresentationRevision: null, ct);
+
+    /// <summary>
+    /// Те саме з перевіркою ревізії: <paramref name="expectedPresentationRevision"/> — ревізія, яку бачив клієнт
+    /// (масова правка «Edit selected…» вкладки Columns, план PERMITES §3). Не збігається з поточною —
+    /// <c>409 ECR-TMPL-0409</c> (<c>presentationRevisionConflict</c>), нічого не змінено.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Рядкової версії в <c>ColumnDef</c> немає, тож вартовий паралельної правки — ревізія ВЕРСІЇ: будь-яка
+    /// презентаційна зміна (чужа вкладка, <c>PUT …/header-groups</c>) її піднімає. <c>null</c> — без перевірки
+    /// (наявні споживачі: інструменти <c>tools/land</c>, діалог однієї колонки).
+    /// </remarks>
+    public async Task<int> PatchAsync(
+        int templateVersionId, string patchJson, int userId, int? expectedPresentationRevision, CancellationToken ct)
     {
         // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
         // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
@@ -52,6 +66,13 @@ public sealed class PatchPresentationHandler(
         ArgumentException.ThrowIfNullOrWhiteSpace(patchJson);
 
         var version = await versions.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+
+        // Швидка відмова застарілій вкладці — до розбору й до бази. Остаточна перевірка — під блокуванням нижче.
+        if (expectedPresentationRevision is { } seen && seen != version.PresentationRevision)
+        {
+            throw StaleRevision(seen, version.PresentationRevision);
+        }
+
         var changes = Parse(patchJson);
 
         if (changes.Count == 0)
@@ -253,6 +274,15 @@ public sealed class PatchPresentationHandler(
             newRevision = await store
                 .IncrementPresentationRevisionAsync(templateVersionId, innerCt)
                 .ConfigureAwait(false);
+
+            // ⛔ Під блокуванням рядка версії: між швидкою перевіркою вище і цим місцем ревізію міг підняти
+            // інший запит. Інкремент тут — атомарний із OUTPUT, тож «нова = побачена + 1» доводить, що чужої
+            // правки між ними не було; інакше виняток відкочує транзакцію разом із уже застосованими змінами.
+            if (expectedPresentationRevision is { } expected && newRevision != expected + 1)
+            {
+                throw StaleRevision(expected, newRevision - 1);
+            }
+
             version.ApplyPresentationRevision(newRevision);
 
             var now = clock.UtcNow;
@@ -281,6 +311,22 @@ public sealed class PatchPresentationHandler(
 
         return newRevision;
     }
+
+    /// <summary>
+    /// Клієнт бачив іншу ревізію вигляду. Код і ключ — ті самі, що в <c>TemplateVersion.ApplyPresentationRevision</c>
+    /// (каталог en/ru/kz уже має <c>err.ECR-TMPL-0409.presentationRevisionConflict</c>); 409 — за типом винятку.
+    /// </summary>
+    private static ConcurrencyConflictException StaleRevision(int expected, int actual)
+        => new(
+            "ECR-TMPL-0409",
+            $"Очікувалася презентаційна ревізія {expected}, поточна {actual}: вигляд версії змінили після того, "
+            + "як клієнт його прочитав. Нічого не змінено — перечитайте структуру й повторіть.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-TMPL-0409.presentationRevisionConflict",
+                ["expectedRevision"] = expected.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["actualRevision"] = actual.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
 
     /// <summary>Поля-підписи: JSON-об'єкт «мова → текст», колонка NOT NULL.</summary>
     private static readonly HashSet<string> LocalizedFields = new(StringComparer.Ordinal) { "HeaderL10n", "LabelL10n", "NameL10n" };
