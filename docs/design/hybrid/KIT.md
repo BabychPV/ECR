@@ -305,6 +305,28 @@ E.Pagination({ id, shown, total, step, onMore })   // окремий «Show more
 ```
 Таблиця живе у власному `overflow:auto`; шапка закріплена; «Showing 25 of 112 · Show more» додається сам. `filtered:true` + порожньо → стан «Nothing matches these filters» з кнопкою скидання. ≤ 7 колонок (більше — попередження в консолі).
 
+#### 6.5.1 Bulk action bar (панель дій над вибраними рядками)
+
+✎ 10.11 (план PERMITES §3, рішення людини: масова правка — **все або нічого**). Зразок — вкладка Columns конструктора
+(`screens-templates.js`: `paintBulk`, діалог `?dialog=edit-selected`, сценарій `tpl-columns-bulk-group`); у застосунку —
+`features/templates/ctor/ColumnsTable.tsx` + `BulkGroupDialog.tsx`.
+
+```
+☐ Order  Column        Type        Unit  Group                …
+┌──────────────────────────────────────────────────────────────┐
+│ 3 selected   [✎ Edit selected…]   [✕ Clear selection]         │  ← лише коли вибрано ≥ 1; над таблицею
+└──────────────────────────────────────────────────────────────┘
+☑ 3     SO₂ · SO2     Decimal · 4  t     Pollutants › Gases
+```
+
+- **Коли видно:** лише при вибраних рядках (`DataTable({selectable:true, onSelect})`); вибір порожній → панель зникає (`hidden`), місце не резервується.
+- **Склад:** «N selected» (`role="status"`, `aria-live="polite"`) → ОДНА дія «Edit selected…» (відкриває діалог; без `primary` — головна дія екрана лишається своєю) → «Clear selection» (`ghost`). Більше дій — у «More» панелі, не рядом кнопок.
+- **Вигляд:** рамка `--border`, тло `--select` (колір виділення, не стану), радіус `--r2`, висота ≥ `--ctl`; на ≤ 640px переноситься (`flex-wrap`).
+- **Діалог «Edit selected…»:** заголовок «Edit N columns»; перелік того, до чого застосується; поле (тут — «Header group»: дерево груп із відступом «— », перша опція «— none — (remove from group)» знімає групу); Cancel / Apply. Колонки зараз у різних групах → поле порожнє + приглушений рядок «in different groups».
+- **Все або нічого:** один запит на всі вибрані рядки. Відмова — банер `danger` УГОРІ діалогу, діалог лишається відкритим, нічого не змінено. Два стани відмови: «колонки групи не підряд» (`ECR-TMPL-4229 notContiguous`) і «вигляд змінив хтось інший» (`409 ECR-TMPL-0409 presentationRevisionConflict`: таблицю перечитано, застосуйте ще раз).
+- **Успіх:** діалог закривається, вибір знімається, тост «3 columns moved to “Pollutants › Gases”».
+- Колонка «Group» у таблиці — шлях групи «Батько › Група» (`--muted`), без групи — «—».
+
 ### 6.6 Стани
 
 ```js
