@@ -4,7 +4,8 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { TemplateTable } from '../ctorModel';
 import { ColumnsTable } from '../ColumnsTable';
-import { bulkGroupChanges, groupPath, NoGroup } from '../BulkGroupDialog';
+import { bulkGroupChanges, NoGroup } from '../BulkGroupDialog';
+import { groupPath } from '../columnGroupPath';
 
 /**
  * PERMITES §3 (макет `?dialog=edit-selected`, KIT §6.5.1): вибір колонок, панель «N selected», «Edit selected…» —
