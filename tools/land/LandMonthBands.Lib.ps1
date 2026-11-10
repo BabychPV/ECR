@@ -13,17 +13,17 @@ function Read-LandMonthBandSource {
 
 function Compare-LandBandColumn {
     # Порядок колонок той самий, що в ColumnHeaderGroupRules.Validate: Ordinal, потім Code ordinal-порівнянням.
-    param($A, $B)
-    $x = ([int]$A.Ordinal).CompareTo([int]$B.Ordinal)
+    param($Left, $Right)
+    $x = ([int]$Left.Ordinal).CompareTo([int]$Right.Ordinal)
     if ($x -ne 0) { return $x }
-    return [string]::CompareOrdinal([string]$A.Code, [string]$B.Code)
+    return [string]::CompareOrdinal([string]$Left.Code, [string]$Right.Code)
 }
 
 function Get-LandBandOrderedColumns {
     param([object[]]$Columns)
     $list = New-Object 'System.Collections.Generic.List[object]'
     foreach ($c in @($Columns)) { $list.Add($c) }
-    $list.Sort([Comparison[object]] { param($a, $b) Compare-LandBandColumn $a $b })
+    $list.Sort([Comparison[object]] { param($first, $second) Compare-LandBandColumn $first $second })
     return , $list.ToArray()
 }
 
@@ -33,16 +33,16 @@ function Get-LandMonthBlocks {
         Суміжні блоки місячних колонок у порядку сервера: максимальний пробіг колонок з однаковим MonthNumber.
         Немісячна колонка або колонка іншого місяця розриває блок. Повертає @{ Month; Start; End; Columns } (позиції 0-based).
     #>
-    param([object[]]$Ordered)
+    param([object[]]$Sequence)
     $blocks = @()
     $cur = $null
-    for ($i = 0; $i -lt $Ordered.Count; $i++) {
-        $m = $Ordered[$i].MonthNumber
-        $m = if ($null -eq $m -or [string]$m -eq '') { 0 } else { [int]$m }
-        if ($m -ge 1 -and $m -le 12) {
-            if ($null -ne $cur -and $cur.Month -eq $m -and $cur.End -eq $i - 1) { $cur.End = $i; $cur.Columns += [string]$Ordered[$i].Code; continue }
+    for ($i = 0; $i -lt $Sequence.Count; $i++) {
+        $mn = $Sequence[$i].MonthNumber
+        $mn = if ($null -eq $mn -or [string]$mn -eq '') { 0 } else { [int]$mn }
+        if ($mn -ge 1 -and $mn -le 12) {
+            if ($null -ne $cur -and $cur.Month -eq $mn -and $cur.End -eq $i - 1) { $cur.End = $i; $cur.Columns += [string]$Sequence[$i].Code; continue }
             if ($null -ne $cur) { $blocks += [pscustomobject]$cur }
-            $cur = @{ Month = $m; Start = $i; End = $i; Columns = @([string]$Ordered[$i].Code) }
+            $cur = @{ Month = $mn; Start = $i; End = $i; Columns = @([string]$Sequence[$i].Code) }
         }
         elseif ($null -ne $cur) { $blocks += [pscustomobject]$cur; $cur = $null }
     }
@@ -110,7 +110,7 @@ function Get-LandMonthBandPlan {
             if ($null -eq $up -or $up.Start -gt $p.Start -or $up.End -lt $p.End) { $plan.Warnings += "смуга $($p.Code): батька $($p.Parent) немає або він не охоплює її — корінь"; $p.Parent = $null }
         }
     }
-    function Get-Depth($code) { $d = 0; $x = $pc[$code]; while ($null -ne $x) { $d++; $x = if ($x.Parent) { $pc[$x.Parent] } else { $null } }; return $d }
+    function Get-Depth($groupCode) { $d = 0; $x = $pc[$groupCode]; while ($null -ne $x) { $d++; $x = if ($x.Parent) { $pc[$x.Parent] } else { $null } }; return $d }
     function Get-Deepest([int]$i) {
         $best = $null; $bd = -1
         foreach ($p in $parents) { if ($i -ge $p.Start -and $i -le $p.End) { $d = Get-Depth $p.Code; if ($d -gt $bd) { $best = $p; $bd = $d } } }
@@ -169,7 +169,7 @@ function Get-LandMonthBandPlan {
     $plan.Groups = @($foreign + $desired)
 
     $mine = @($ExistingGroups | Where-Object { ([string]$_.Code).StartsWith($prefix) })
-    $sig = { param($code, $parent, $ord, $en, $ru) '{0}|{1}|{2}|{3}|{4}' -f $code, $parent, $ord, $en, $ru }
+    $sig = { param($sCode, $sParent, $sOrd, $sEn, $sRu) '{0}|{1}|{2}|{3}|{4}' -f $sCode, $sParent, $sOrd, $sEn, $sRu }
     $a = @($desired | ForEach-Object { & $sig $_.code $_.parentCode $_.ordinal $_.labelL10n.en $(if ($_.labelL10n.Contains('ru')) { $_.labelL10n.ru } else { '' }) }) | Sort-Object
     $b2 = @($mine | ForEach-Object { & $sig $_.Code $_.ParentCode ([int]$_.Ordinal) $_.En $(if ($_.Ru) { $_.Ru } else { '' }) }) | Sort-Object
     $plan.GroupsChanged = ((@($a) -join "`n") -cne (@($b2) -join "`n"))
@@ -228,7 +228,7 @@ function Invoke-LandMonthBands {
         і ОДИН PATCH …/presentation (лише змінені колонки). Повтор — 0 змін. Повертає підсумок.
     #>
     param([Parameter(Mandatory)][int]$VersionId, [Parameter(Mandatory)]$Source, [switch]$WhatIfOnly, [string[]]$OnlyTables,
-        [scriptblock]$Log = { param($m) Write-Host $m })
+        [scriptblock]$Log = { param($msg) Write-Host $msg })
     $sum = [ordered]@{ Tables = 0; TablesWithMonths = 0; TablesChanged = 0; TablesSkippedErrors = 0; MonthGroups = 0; ParentGroups = 0
         AssignedColumns = 0; ColumnChanges = 0; Puts = 0; Patches = 0; DuplicateOrdinals = @(); Errors = @() }
     foreach ($t in (Get-LandBandTables -VersionId $VersionId -OnlyTables $OnlyTables)) {

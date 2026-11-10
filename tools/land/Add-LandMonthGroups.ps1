@@ -35,8 +35,8 @@ $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvoca
 . (Join-Path $here 'EcrApi.ps1')
 . (Join-Path $here 'LandMonthBands.Lib.ps1')
 Set-StrictMode -Off
-if (-not $BandSource) { $BandSource = Join-Path $here 'land-month-bands.json' }
-$src = Read-LandMonthBandSource $BandSource
+$srcPath = if ($BandSource) { $BandSource } else { Join-Path $here 'land-month-bands.json' }
+$src = Read-LandMonthBandSource $srcPath
 function Log([string]$m) { Write-Host ('[{0}] {1}' -f (Get-Date -Format 'HH:mm:ss'), $m) }
 
 Assert-LocalBaseUrl $BaseUrl
