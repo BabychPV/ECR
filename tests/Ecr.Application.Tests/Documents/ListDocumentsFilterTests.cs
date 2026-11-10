@@ -47,7 +47,7 @@ public sealed class ListDocumentsFilterTests
 
         await _documents.Received(1).ListAsync(
             Arg.Any<int?>(), Arg.Any<PeriodKeyFilter>(),
-            new DocumentListFilter(expectedState, expectedUser),
+            new DocumentListFilter(expectedState, expectedUser, ReaderUserId: UserId),
             Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
     }
 
@@ -64,7 +64,7 @@ public sealed class ListDocumentsFilterTests
 
         await _documents.Received(1).ListAsync(
             Arg.Any<int?>(), Arg.Any<PeriodKeyFilter>(),
-            new DocumentListFilter(null, null, null, Query: expected),
+            new DocumentListFilter(null, null, null, Query: expected, ReaderUserId: UserId),
             Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
     }
 
@@ -78,7 +78,7 @@ public sealed class ListDocumentsFilterTests
 
         await _documents.Received(1).ListAsync(
             Arg.Any<int?>(), Arg.Any<PeriodKeyFilter>(),
-            new DocumentListFilter(null, null, null, Query: new string('a', ListDocumentsHandler.MaxQueryLength)),
+            new DocumentListFilter(null, null, null, Query: new string('a', ListDocumentsHandler.MaxQueryLength), ReaderUserId: UserId),
             Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
     }
 
@@ -93,7 +93,7 @@ public sealed class ListDocumentsFilterTests
 
         await _documents.Received(1).ListAsync(
             Arg.Any<int?>(), Arg.Any<PeriodKeyFilter>(),
-            new DocumentListFilter(null, null, hasLateEdits),
+            new DocumentListFilter(null, null, hasLateEdits, ReaderUserId: UserId),
             Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
     }
 
@@ -140,7 +140,7 @@ public sealed class ListDocumentsFilterTests
 
         await _documents.Received(1).ListAsync(
             Arg.Any<int?>(), Arg.Any<PeriodKeyFilter>(),
-            new DocumentListFilter(null, null, ResultsStale: resultsStale, StaleByUserId: expectedUser),
+            new DocumentListFilter(null, null, ResultsStale: resultsStale, StaleByUserId: expectedUser, ReaderUserId: UserId),
             Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
     }
 
@@ -176,7 +176,7 @@ public sealed class ListDocumentsFilterTests
 
         await _documents.Received(1).ListAsync(
             Arg.Any<int?>(), new PeriodKeyFilter(null),
-            new DocumentListFilter(null, null, ResultsStale: resultsStale, StaleByUserId: expectedUser, Year: 2026),
+            new DocumentListFilter(null, null, ResultsStale: resultsStale, StaleByUserId: expectedUser, Year: 2026, ReaderUserId: UserId),
             Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
     }
 
