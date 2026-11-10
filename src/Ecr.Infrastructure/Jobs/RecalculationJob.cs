@@ -974,7 +974,7 @@ public sealed partial class RecalculationJob(
     /// попередній період (<c>[Period:-1]</c>), і зворотний порядок порахував
     /// би лютий зі старого січня, а потім січень — правильно, але вже нікому.
     /// </remarks>
-    private async Task<IReadOnlyList<int>> ScopePeriodsAsync(
+    internal async Task<IReadOnlyList<int>> ScopePeriodsAsync(
         RecalculationRequest request, IReadOnlySet<int> refused, CancellationToken ct)
     {
         Task<List<int>> ScopesAsync(IQueryable<Ecr.Domain.Entities.Documents.TableInstance> instances)
@@ -1001,7 +1001,8 @@ public sealed partial class RecalculationJob(
 
         // ⚠ O3d: з ключем партиції (DocumentInstancesQuery). Порожньо — колишній пошук
         // без ключа: документ, чиї екземпляри лежать лише в періодах без рядка в
-        // doc.Period, дає той самий скоуп, що й до O3d.
+        // doc.Period, дає той самий скоуп, що й до O3d. Метод `internal` саме заради тесту
+        // цього шляху (AN-13 D4, RecalculationScopeFallbackTests).
         var scopes = await ScopesAsync(DocumentInstancesQuery(db, request.DocumentId)).ConfigureAwait(false);
         if (scopes.Count == 0)
         {
