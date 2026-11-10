@@ -148,10 +148,24 @@ public sealed class ListDocumentsHandler(
     /// `null` — без смуги; поза `2000..2999` — 422.
     /// </summary>
     /// <inheritdoc cref="HandleAsync(int?, int?, string?, bool, bool?, string?, bool?, string?, int?, string?, string?, CursorRequest, CancellationToken)"/>
-    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+    public Task<PagedResult<DocumentSummary>> HandleAsync(
         int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
         string? query, bool? resultsStale, string? staleBy, int? ownerUserId,
         string? sort, string? templateVersions, int? year, CursorRequest page, CancellationToken ct)
+        => HandleAsync(
+            projectId, periodKey, state, mine, hasLateEdits, query, resultsStale, staleBy, ownerUserId, sort, templateVersions,
+            year, hasReopenedMonths: null, page, ct);
+
+    /// <summary>
+    /// ✎ 10.11 (слово людини через координатора): те саме з фільтром «Reopened months» — <paramref name="hasReopenedMonths"/>
+    /// <c>true</c>/<c>false</c> лишає документи з / без діючого винятку «закритий місяць відкрито для документа» (за період,
+    /// за рік або за будь-який місяць); <c>null</c> — без фільтра. Рядки переліку завжди несуть `reopenedPeriods`.
+    /// </summary>
+    /// <inheritdoc cref="HandleAsync(int?, int?, string?, bool, bool?, string?, bool?, string?, int?, string?, string?, CursorRequest, CancellationToken)"/>
+    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+        int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
+        string? query, bool? resultsStale, string? staleBy, int? ownerUserId,
+        string? sort, string? templateVersions, int? year, bool? hasReopenedMonths, CursorRequest page, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
 
@@ -180,7 +194,8 @@ public sealed class ListDocumentsHandler(
         var filter = new DocumentListFilter(
             partly ? null : ParseState(state, stateScope), mine ? profile.UserId : null, hasLateEdits, Query: NormalizeQuery(query),
             ResultsStale: resultsStale, StaleByUserId: staleByMe ? profile.UserId : null, OwnerUserId: ownerUserId,
-            TemplateVersions: versions, VersionSort: versionSort, PartlySubmitted: partly, Year: year);
+            TemplateVersions: versions, VersionSort: versionSort, PartlySubmitted: partly, Year: year,
+            HasReopenedMonths: hasReopenedMonths);
 
         // ⛔ Родина REQ, а не CELL (`P-25`, рядок 1): хибний `limit` — це
         // помилка параметра запиту, і показувати її в обробнику помилок

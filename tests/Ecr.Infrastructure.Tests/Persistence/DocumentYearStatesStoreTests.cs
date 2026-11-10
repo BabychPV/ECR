@@ -80,9 +80,10 @@ public sealed class DocumentYearStatesStoreTests(SqlServerFixture sql)
             page.Items.Single(d => d.Id == a).PeriodStates!.Select(s => s.PeriodKey));
 
         // Три документи × 12 місяців — смуга року додає рівно ОДИН запит на сторінку, а не по запиту на документ чи місяць;
-        // ✎ g4: позначка застарілості за рік — ще ОДИН запит періодів року з актуальним прогоном (прогонів немає — і все).
+        // ✎ g4: позначка застарілості за рік — ще ОДИН запит періодів року з актуальним прогоном (прогонів немає — і все);
+        // ✎ 10.11: діючі винятки «місяць відкрито для документа» (`reopenedPeriods`) — ще ОДИН запит на сторінку.
         Assert.Equal(3, page.Items.Count);
-        Assert.True(counter.Tally.Snapshot().Total == withoutYear + 2, $"без року {withoutYear}; " + counter.Tally.Snapshot().Format());
+        Assert.True(counter.Tally.Snapshot().Total == withoutYear + 3, $"без року {withoutYear}; " + counter.Tally.Snapshot().Format());
 
         // Аркуш 2 схований від читача (S18): січень документа A — «подано», а не «частково».
         IReadOnlyCollection<(int, int)> hidden = [(chain.ProjectId, sheet2)];
