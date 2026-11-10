@@ -90,8 +90,10 @@ test.describe('Documents list reopened', () => {
       }
 
       // Фільтр «Reopened months» — лише A; адреса несе його, «Clear filters» знімає.
+      // ⚠ Вхід Mantine Switch візуально схований (поза областю) — клікаємо підпис, як людина.
       const toggle = page.getByRole('switch', { name: 'Reopened months' });
-      await toggle.click({ force: true });
+      await page.locator('label', { hasText: 'Reopened months' }).first().click();
+      await expect(toggle).toBeChecked();
       await expect(page).toHaveURL(/hasReopenedMonths=true/);
       await expect(rowA).toBeVisible({ timeout: 30_000 });
       await expect(rowB).toHaveCount(0, { timeout: 30_000 });
