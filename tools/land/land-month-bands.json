@@ -4,7 +4,7 @@
     "file": "RDS_xxx_Template_Land_2026_v1.0.5.1.xlsm",
     "how": "Read-only extraction (stdlib zip/xml, no macros) of merged header cells and band rows; the xlsm itself is not committed.",
     "months": "'3. Stationary Equipment' P1:R1 … AW1:AY1 (en, row 1) and P2 … AW2 (ru, row 2); the same Jan–Dec labels repeat on sheets 4, 5, 6, 9, 9a, 9b, 10, 10a, 11, 11a–d.",
-    "parents": "'3. Stationary Equipment' row 3 col 158 'Measurements' (band over cols 158–222, up to the next row-1 label 'Tags based on analysis…' at col 223); row 4 cols 158/174/190/206 '1 Quarter' … '4 Quarter' (quarter column followed by its three month blocks). No other sheet has a quarter or section band over month columns."
+    "parents": "'3. Stationary Equipment' row 3 col 158 'Measurements' (band over cols 158–222, up to the next row-1 label 'Tags based on analysis…' at col 223); row 4 cols 158/174/190/206 '1 Quarter' … '4 Quarter' (quarter column followed by its three month blocks). Sheets 9/10/11 (T9_04, T9_07, T9_08, T9_10, T10_03, T11_03) have the same quarter columns before their RH blocks (column letters from the 1.0.4.0 model); in 1.0.14.0 those blocks are not bound to a month, so these quarter bands apply only from the new Land version (a parent with no bound month block inside is skipped). No other sheet has a quarter or section band over month columns."
   },
   "rules": {
     "groupCodePrefix": "MB_",
@@ -31,6 +31,30 @@
     { "table": "T3_00", "code": "MB_Q1", "parent": "MB_S_MEAS", "en": "1 Quarter", "ru": null, "from": "C_1Quarter", "to": "Mar_0337CO", "xlsm": "3. Stationary Equipment!R4C158" },
     { "table": "T3_00", "code": "MB_Q2", "parent": "MB_S_MEAS", "en": "2 Quarter", "ru": null, "from": "C_2Quarter", "to": "Jun_0337CO", "xlsm": "3. Stationary Equipment!R4C174" },
     { "table": "T3_00", "code": "MB_Q3", "parent": "MB_S_MEAS", "en": "3 Quarter", "ru": null, "from": "C_3Quarter", "to": "Sep_0337CO", "xlsm": "3. Stationary Equipment!R4C190" },
-    { "table": "T3_00", "code": "MB_Q4", "parent": "MB_S_MEAS", "en": "4 Quarter", "ru": null, "from": "C_4Quarter", "to": "Dec_0337CO", "xlsm": "3. Stationary Equipment!R4C206" }
+    { "table": "T3_00", "code": "MB_Q4", "parent": "MB_S_MEAS", "en": "4 Quarter", "ru": null, "from": "C_4Quarter", "to": "Dec_0337CO", "xlsm": "3. Stationary Equipment!R4C206" },
+    { "table": "T9_04", "code": "MB_Q1", "parent": null, "en": "1 Quarter", "ru": null, "from": "C_1Quarter", "to": "C_0337CO_GL", "xlsm": "9. Utility!FW" },
+    { "table": "T9_04", "code": "MB_Q2", "parent": null, "en": "2 Quarter", "ru": null, "from": "C_2Quarter", "to": "C_0337CO_HB", "xlsm": "9. Utility!GM" },
+    { "table": "T9_04", "code": "MB_Q3", "parent": null, "en": "3 Quarter", "ru": null, "from": "C_3Quarter", "to": "C_0337CO_HR", "xlsm": "9. Utility!HC" },
+    { "table": "T9_04", "code": "MB_Q4", "parent": null, "en": "4 Quarter", "ru": null, "from": "C_4Quarter", "to": "C_0337CO_IH", "xlsm": "9. Utility!HS" },
+    { "table": "T9_07", "code": "MB_Q1", "parent": null, "en": "1 Quarter", "ru": null, "from": "C_1Quarter", "to": "C_0337CO_GL", "xlsm": "9. Utility!FW" },
+    { "table": "T9_07", "code": "MB_Q2", "parent": null, "en": "2 Quarter", "ru": null, "from": "C_2Quarter", "to": "C_0337CO_HB", "xlsm": "9. Utility!GM" },
+    { "table": "T9_07", "code": "MB_Q3", "parent": null, "en": "3 Quarter", "ru": null, "from": "C_3Quarter", "to": "C_0337CO_HR", "xlsm": "9. Utility!HC" },
+    { "table": "T9_07", "code": "MB_Q4", "parent": null, "en": "4 Quarter", "ru": null, "from": "C_4Quarter", "to": "C_0337CO_IH", "xlsm": "9. Utility!HS" },
+    { "table": "T9_08", "code": "MB_Q1", "parent": null, "en": "1 Quarter", "ru": null, "from": "C_1Quarter", "to": "C_0337CO_GL", "xlsm": "9. Utility!FW" },
+    { "table": "T9_08", "code": "MB_Q2", "parent": null, "en": "2 Quarter", "ru": null, "from": "C_2Quarter", "to": "C_0337CO_HB", "xlsm": "9. Utility!GM" },
+    { "table": "T9_08", "code": "MB_Q3", "parent": null, "en": "3 Quarter", "ru": null, "from": "C_3Quarter", "to": "C_0337CO_HR", "xlsm": "9. Utility!HC" },
+    { "table": "T9_08", "code": "MB_Q4", "parent": null, "en": "4 Quarter", "ru": null, "from": "C_4Quarter", "to": "C_0337CO_IH", "xlsm": "9. Utility!HS" },
+    { "table": "T9_10", "code": "MB_Q1", "parent": null, "en": "1 Quarter", "ru": null, "from": "C_1Quarter", "to": "C_0337CO_GL", "xlsm": "9. Utility!FW" },
+    { "table": "T9_10", "code": "MB_Q2", "parent": null, "en": "2 Quarter", "ru": null, "from": "C_2Quarter", "to": "C_0337CO_HB", "xlsm": "9. Utility!GM" },
+    { "table": "T9_10", "code": "MB_Q3", "parent": null, "en": "3 Quarter", "ru": null, "from": "C_3Quarter", "to": "C_0337CO_HR", "xlsm": "9. Utility!HC" },
+    { "table": "T9_10", "code": "MB_Q4", "parent": null, "en": "4 Quarter", "ru": null, "from": "C_4Quarter", "to": "C_0337CO_IH", "xlsm": "9. Utility!HS" },
+    { "table": "T10_03", "code": "MB_Q1", "parent": null, "en": "1 Quarter", "ru": null, "from": "C_1Quarter", "to": "C_0337CO_FN", "xlsm": "10. Off_Utility_DI!EY" },
+    { "table": "T10_03", "code": "MB_Q2", "parent": null, "en": "2 Quarter", "ru": null, "from": "C_2Quarter", "to": "C_0337CO_GD", "xlsm": "10. Off_Utility_DI!FO" },
+    { "table": "T10_03", "code": "MB_Q3", "parent": null, "en": "3 Quarter", "ru": null, "from": "C_3Quarter", "to": "C_0337CO_GT", "xlsm": "10. Off_Utility_DI!GE" },
+    { "table": "T10_03", "code": "MB_Q4", "parent": null, "en": "4 Quarter", "ru": null, "from": "C_4Quarter", "to": "C_0337CO_HJ", "xlsm": "10. Off_Utility_DI!GU" },
+    { "table": "T11_03", "code": "MB_Q1", "parent": null, "en": "1 Quarter", "ru": null, "from": "C_1Quarter", "to": "C_0337CO_FN", "xlsm": "11. Off_Process_DI!EY" },
+    { "table": "T11_03", "code": "MB_Q2", "parent": null, "en": "2 Quarter", "ru": null, "from": "C_2Quarter", "to": "C_0337CO_GD", "xlsm": "11. Off_Process_DI!FO" },
+    { "table": "T11_03", "code": "MB_Q3", "parent": null, "en": "3 Quarter", "ru": null, "from": "C_3Quarter", "to": "C_0337CO_GT", "xlsm": "11. Off_Process_DI!GE" },
+    { "table": "T11_03", "code": "MB_Q4", "parent": null, "en": "4 Quarter", "ru": null, "from": "C_4Quarter", "to": "C_0337CO_HJ", "xlsm": "11. Off_Process_DI!GU" }
   ]
 }

@@ -75,6 +75,15 @@ Describe 'LandMonthBands: план місячних груп заголовкі�
         if ($g['MB_M01_2'].parentCode -ne 'MB_Q1' -or $g['MB_Q1'].parentCode -ne 'MB_S_MEAS' -or $null -ne $g['MB_M01'].parentCode) { throw 'вкладеність S > Q > M' }
         $to = @{}; foreach ($c in $p.Changes) { $to[$c.Column] = $c.To }
         if ($to['C_1Quarter'] -ne 'MB_Q1' -or $to['C_4Quarter'] -ne 'MB_Q4' -or $to.ContainsKey('Other')) { throw 'колонки кварталів' }
+        # T9_04 у 1.0.14.0: блок RH без місяця — квартальна смуга не ставиться, колонки RH не групуються
+        $t9 = @(
+            [pscustomobject]@{ Code = 'Land_M01'; Ordinal = 1; MonthNumber = 1; GroupCode = $null }
+            [pscustomobject]@{ Code = 'C_1Quarter'; Ordinal = 2; MonthNumber = $null; GroupCode = $null }
+            [pscustomobject]@{ Code = 'JanuaryRHDuringExceeding'; Ordinal = 3; MonthNumber = $null; GroupCode = $null }
+            [pscustomobject]@{ Code = 'C_0337CO_GL'; Ordinal = 4; MonthNumber = $null; GroupCode = $null }
+        )
+        $p9 = Get-LandMonthBandPlan -TableCode 'T9_04' -Columns $t9 -ExistingGroups @() -Source $src
+        if ($p9.ParentGroups -ne 0 -or @($p9.Changes | Where-Object { $_.Column -in 'C_1Quarter', 'JanuaryRHDuringExceeding' }).Count) { throw 'квартал без прив''язаних місяців мусить пропускатися' }
         $none = Get-LandMonthBandPlan -TableCode 'T8_00' -Columns @([pscustomobject]@{ Code = 'A'; Ordinal = 1; MonthNumber = $null; GroupCode = $null }) -ExistingGroups @() -Source $src
         if (-not $none.Skip) { throw 'таблиця без місячних колонок мусить лишатися без змін' }
     }

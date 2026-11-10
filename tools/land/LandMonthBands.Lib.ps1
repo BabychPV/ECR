@@ -96,6 +96,9 @@ function Get-LandMonthBandPlan {
         if ($e -lt $s) { $plan.Warnings += "смугу $($p.code) пропущено: $to стоїть перед $from"; continue }
         $partial = @($blocks | Where-Object { ($_.Start -lt $s -and $_.End -ge $s) -or ($_.Start -le $e -and $_.End -gt $e) })
         if ($partial.Count -gt 0) { $plan.Warnings += "смугу $($p.code) пропущено: місячний блок перетинає її межу"; continue }
+        # Смуга без жодного прив'язаного місячного блоку не ставиться: у 1.0.14.0 блоки RH аркушів 9/10/11 ще без місяця,
+        # і квартал інакше згрупував би саме ті колонки (JanuaryRHDuringExceeding…), яких ця правка не чіпає.
+        if (@($blocks | Where-Object { $_.Start -ge $s -and $_.End -le $e }).Count -eq 0) { continue }
         $parents += [pscustomobject]@{ Code = [string]$p.code; Parent = $(if ($p.parent) { [string]$p.parent } else { $null }); En = [string]$p.en
             Ru = $(if ($p.ru) { [string]$p.ru } else { $null }); Start = $s; End = $e }
     }
