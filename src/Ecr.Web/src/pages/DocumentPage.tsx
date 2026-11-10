@@ -652,6 +652,7 @@ export function DocumentPage(): JSX.Element {
     documentId,
     periodKey,
     periodState: calendar.data?.periods?.find((period) => period.periodKey === periodKey)?.state,
+    timeZoneId: calendar.data?.timeZoneId,
   });
 
   const lock = documentLockOf({
