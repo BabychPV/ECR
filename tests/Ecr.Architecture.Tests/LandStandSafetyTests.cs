@@ -241,8 +241,9 @@ public sealed class LandStandSafetyTests
         }
 
         // Дочірні скрипти отримують підтвердження від Build (інакше їхні мутації відмовили б).
-        Assert.Contains("Import-ContractDictionaries.ps1') -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $childStand", build, StringComparison.Ordinal);
-        Assert.Contains("Apply-ContractHeader.ps1') -TemplateCode $TemplateCode -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $childStand", build, StringComparison.Ordinal);
+        // ✎ 2026-11-10: обліковий запис — параметр -BuildUser (типово land-owner), tools/tests/Land-BuildUser.Tests.ps1.
+        Assert.Contains("Import-ContractDictionaries.ps1') -BaseUrl $BaseUrl -User $BuildUser -Password $pw -ConfirmStand $childStand", build, StringComparison.Ordinal);
+        Assert.Contains("Apply-ContractHeader.ps1') -TemplateCode $TemplateCode -BaseUrl $BaseUrl -User $BuildUser -Password $pw -ConfirmStand $childStand", build, StringComparison.Ordinal);
 
         // SQL-запис: кожна точка входу сама перевіряє підтвердження (не лише верхній рівень).
         foreach (var fn in new[] { "function Sql-Exec", "function Bulk-Insert", "function Fill-StructureSql" })

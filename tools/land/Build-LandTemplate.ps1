@@ -87,6 +87,9 @@ param(
     [string]$ModelPath,
     [string]$AfPackage,
     [string]$AccountsFile,
+    # Обліковий запис етапів збірки (вхід, Import-ContractDictionaries, Apply-ContractHeader); пароль - з -AccountsFile за
+    # цим ключем. Етап Accounts і далі створює саме land-owner і land-reviewer.
+    [string]$BuildUser = 'land-owner',
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
     [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
@@ -289,7 +292,7 @@ function Stage-Accounts {
 # ==================== Units ====================
 function Stage-Units {
     Log '== Units =='
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $units = @((Api GET '/api/v1/units').Json)
     foreach ($u in $units) { $S.Units[[string]$u.code] = $u }
     foreach ($n in @($Mdl.units.new)) {
@@ -377,7 +380,7 @@ function Ensure-Registry($reg) {
 }
 function Stage-Registries {
     Log '== Registries =='
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $n = 0
     foreach ($reg in @($Mdl.registries)) { $c = Ensure-Registry $reg; $n += $c; if ($c) { Log ("  {0}: +{1}" -f $reg.code, $c) } }
     Log "  нових записів: $n"
@@ -408,8 +411,8 @@ function RegEntryId([string]$regCode, [string]$name) {
 # ==================== Contract dictionaries ====================
 function Stage-Contract {
     Log '== Contract (довідники вкладки 2. Contract) =='
-    $pw = ConvertTo-SecureString $Acc['land-owner'] -AsPlainText -Force
-    & (Join-Path $here 'Import-ContractDictionaries.ps1') -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $childStand
+    $pw = ConvertTo-SecureString $Acc[$BuildUser] -AsPlainText -Force
+    & (Join-Path $here 'Import-ContractDictionaries.ps1') -BaseUrl $BaseUrl -User $BuildUser -Password $pw -ConfirmStand $childStand
 }
 
 # ==================== Template ====================
@@ -1046,7 +1049,7 @@ function Set-TableHeaderStyles {
 
 function Stage-Template {
     Log '== Template =='
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     Load-Registries
     $S.Units = @{}
     foreach ($u in @((Api GET '/api/v1/units').Json)) { $S.Units[[string]$u.code] = [int]$u.id }
@@ -1174,10 +1177,10 @@ function Stage-Template {
             $bands.TablesWithMonths, $bands.MonthGroups, $bands.ParentGroups, $bands.AssignedColumns, $bands.Puts, $bands.Patches)
     if ($bands.TablesSkippedErrors -gt 0) { throw ('Місячні смуги: ' + ($bands.Errors -join '; ')) }
     # шапка Contract (13 полів) — офіційним скриптом на цій чернетці, з публікацією
-    $pw = ConvertTo-SecureString $Acc['land-owner'] -AsPlainText -Force
+    $pw = ConvertTo-SecureString $Acc[$BuildUser] -AsPlainText -Force
     # -PermitLookup передається лише явно: без нього діє значення маніфесту (LAND_PERMIT), поведінка Land не змінюється.
     $permitArgs = if ($PermitLookup) { @{ PermitLookup = $PermitLookup } } else { @{} }
-    & (Join-Path $here 'Apply-ContractHeader.ps1') -TemplateCode $TemplateCode -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $childStand -UseExistingDraft @permitArgs
+    & (Join-Path $here 'Apply-ContractHeader.ps1') -TemplateCode $TemplateCode -BaseUrl $BaseUrl -User $BuildUser -Password $pw -ConfirmStand $childStand -UseExistingDraft @permitArgs
     $vers = @((Api GET "/api/v1/templates/$($S.TemplateId)/versions?limit=100").Json.items)
     $pub = $vers | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Descending | Select-Object -First 1
     if ($null -eq $pub) { throw 'Після Apply-ContractHeader немає опублікованої версії.' }
@@ -1218,7 +1221,7 @@ function Set-RoleGrants([string]$roleCode, [object[]]$wanted) {
 
 function Stage-Project {
     Log '== Project =='
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $pols = Items (Api GET '/api/v1/projects/period-policies').Json
     $pol = $pols | Where-Object { $_.code -eq 'LAND_OPEN' } | Select-Object -First 1
     if ($null -eq $pol) {
@@ -1248,7 +1251,7 @@ function Stage-Project {
     Set-RoleGrants 'LandApprover' @(@{ resourceKind = 'Project'; resourceId = $pid_; level = 'Manage'; isDeny = $false })
     Set-RoleGrants 'Viewer' @(@{ resourceKind = 'Project'; resourceId = $pid_; level = 'Read'; isDeny = $false })
     Set-RoleGrants 'LandRestricted' @(@{ resourceKind = 'Project'; resourceId = $pid_; level = 'Write'; isDeny = $false })
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     # маршрут погодження = роль LandApprover
     $roles = Items (Api GET '/api/v1/roles').Json
     $ar = $roles | Where-Object { $_.code -eq 'LandApprover' } | Select-Object -First 1
@@ -1266,7 +1269,7 @@ function Stage-Project {
     if ($S.SheetIds.ContainsKey('S07_WATER_REPORT')) {
         LoginAs 'bootstrap'
         Set-RoleGrants 'LandRestricted' @(@{ resourceKind = 'Sheet'; resourceId = [int]$S.SheetIds['S07_WATER_REPORT']; level = 'Read'; isDeny = $true })
-        LoginAs 'land-owner'
+        LoginAs $BuildUser
     }
 }
 
@@ -1304,7 +1307,7 @@ $PublishList = @('ECW_C05_01', 'ECW_C05_02', 'ECW_C05_03', 'ECW_C05_04', 'ECW_C0
 
 function Stage-Methodologies {
     Log '== Methodologies =='
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     Load-Structure
     Load-Registries
     $pr = Items (Api GET '/api/v1/projects').Json | Where-Object { $_.code -eq $ProjectCode } | Select-Object -First 1
@@ -1453,7 +1456,7 @@ function Stage-Methodologies {
         $res = 'OK'
         if ($p.Status -ne 200 -and $p.Status -ne 204) { $res = $tx.Substring(0, [Math]::Min(1200, $tx.Length)) }
         Log ("  {0}: рулів {1}, прив'язок {2}/{3}, {4}, публікація HTTP {5} {6}" -f $name, $k, $bn, $codes.Count, $pubStatus, $p.Status, $res)
-        LoginAs 'land-owner'
+        LoginAs $BuildUser
         if ($p.Status -ne 200 -and $p.Status -ne 204) {
             # неопублікована методологія з активною прив'язкою валить усі перерахунки документа: вимикаємо прив'язки
             foreach ($c in $codes) {
@@ -1516,7 +1519,7 @@ function Stage-LandParity {
     Log '== LandParity =='
     . (Join-Path $here 'LandParityRuleArgs.Lib.ps1')
     . (Join-Path $here 'LandSubstanceApplicability.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $rulesFile = Join-Path $repo 'docs\delivery\reference-data\land-template\af-land-category-rules.json'
     $rules = @((Get-Content -LiteralPath $rulesFile -Raw -Encoding UTF8 | ConvertFrom-Json).rules)
     $ms = Items (Api GET '/api/v1/methodologies').Json
@@ -1643,7 +1646,7 @@ function Stage-LandParity {
 function Stage-MassFraction {
     Log '== MassFraction =='
     . (Join-Path $here 'LandHse400Composition.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $mf = $Mdl.argumentBridges.massFraction
     if ($null -eq $mf) { throw 'У моделі немає argumentBridges.massFraction: перегенеруйте модель (model-gen).' }
     $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
@@ -1695,7 +1698,7 @@ function Stage-CompositionMass {
     . (Join-Path $here 'LandHse400Composition.Lib.ps1')
     . (Join-Path $here 'LandArgumentSuffix.Lib.ps1')
     $stringBridge = @(Get-LandStringBridgeSuffixMethodologies -Model $Mdl)
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $cm = $Mdl.argumentBridges.hse400.compositionMass
     if ($null -eq $cm) { throw 'У моделі немає argumentBridges.hse400.compositionMass: перегенеруйте модель (model-gen).' }
     $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
@@ -1764,7 +1767,7 @@ function Stage-SubstanceApplicability {
     Log '== SubstanceApplicability =='
     . (Join-Path $here 'LandSubstanceApplicability.Lib.ps1')
     . (Join-Path $here 'LandParityRuleArgs.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $sa = $Mdl.substanceApplicability
     if ($null -eq $sa) { throw 'У моделі немає substanceApplicability: перегенеруйте модель (model-gen).' }
     $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
@@ -1863,7 +1866,7 @@ function Stage-RowFilter {
 function Stage-OptionalArguments {
     Log '== OptionalArguments =='
     . (Join-Path $here 'LandOptionalArguments.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $plan = Get-LandOptionalArguments -Model $Mdl
     if ($plan.Count -eq 0) { throw 'У моделі немає argumentBridges.optionalArguments: перегенеруйте модель (model-gen).' }
     $ms = Items (Api GET '/api/v1/methodologies').Json
@@ -1905,7 +1908,7 @@ function Stage-OptionalArguments {
 function Stage-ArgumentSuffix {
     Log '== ArgumentSuffix =='
     . (Join-Path $here 'LandArgumentSuffix.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $plan = Get-LandArgumentSuffixes -Model $Mdl
     if ($plan.Count -eq 0) { throw 'У моделі немає argumentBridges.argumentSuffixes: перегенеруйте модель (model-gen).' }
     $ms = Items (Api GET '/api/v1/methodologies').Json
@@ -1959,7 +1962,7 @@ function Stage-ArgumentSuffix {
 function Stage-LookupCompare {
     Log '== LookupCompare =='
     . (Join-Path $here 'LandLookupCompare.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     Load-Registries
     $lcPlan = Get-LandLookupCompareArguments -Model $Mdl
     if ($lcPlan.Count -eq 0) { throw 'У моделі немає Lookup-колонок: перегенеруйте модель (model-gen).' }
@@ -2019,7 +2022,7 @@ function Stage-LookupCompare {
 function Stage-NaeType {
     Log '== NaeType =='
     . (Join-Path $here 'LandNaeType.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $ntPlan = Get-LandNaeTypeGroups
     $ntOut = Get-LandNaeOutputGroups   # D-435 (C11_13): перелік NAE за кодом виходу (EC перетин type), NULL-вираз для порожнього
     $ntMeth = Items (Api GET '/api/v1/methodologies').Json
@@ -2066,7 +2069,7 @@ function Stage-NaeType {
 function Stage-ParityBranch {
     Log '== ParityBranch =='
     . (Join-Path $here 'LandParityBranch.Lib.ps1')
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     $ms = Items (Api GET '/api/v1/methodologies').Json
     $mid = @{}
     foreach ($m in $ms) { $mid[[string]$m.code] = [int]$m.id }
@@ -2115,7 +2118,7 @@ function Stage-ParityBranch {
 }
 function Stage-Documents {
     Log '== Documents =='
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     Load-Structure
     $pr = Items (Api GET '/api/v1/projects').Json | Where-Object { $_.code -eq $ProjectCode } | Select-Object -First 1
     $S.ProjectId = [int]$pr.id
@@ -2135,7 +2138,7 @@ function Stage-Documents {
 
 function Stage-Data {
     Log '== Data (наповнення документів, стани, перерахунок) =='
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     Load-Structure
     Load-Registries
     $pr = Items (Api GET '/api/v1/projects').Json | Where-Object { $_.code -eq $ProjectCode } | Select-Object -First 1
@@ -2151,7 +2154,7 @@ function Stage-Data {
     foreach ($sc in 'S09B_SULFUR', 'S10A_OFF_UTILITY_AI', 'S11B_OFF_PROCESS_EPC2') {
         $null = Invoke-Ecr -Method POST -Path "/api/v1/documents/$($byName['LAND-FULL'])/reopen" -Body @{ periodKey = ($Year * 100 + 6); sheetDefId = [int]$S.SheetIds[$sc]; reason = 'Land UI base: refill' }
     }
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
     Fill-GoldenDocument $byName['LAND-GOLDEN']
     Fill-FullDocument $byName['LAND-FULL']
     # перерахунок золотого документа по місяцях з даними
@@ -2178,7 +2181,7 @@ function Stage-Data {
             Log ("  {0} {1}: HTTP {2}" -f $w[1], $w[0], $a.Status)
         }
     }
-    LoginAs 'land-owner'
+    LoginAs $BuildUser
 }
 
 # ---------- наповнення документів ----------
