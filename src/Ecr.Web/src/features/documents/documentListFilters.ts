@@ -60,6 +60,12 @@ export interface DocumentListFilters {
   readonly hasLateEdits: boolean;
 
   /**
+   * ✎ 10.11 «Reopened months»: лише документи з діючим винятком «закритий місяць відкрито для цього документа»
+   * (`hasReopenedMonths=true` в адресі). Серверний: за рік переліку, за місяць або (без обох) за будь-який.
+   */
+  readonly hasReopenedMonths: boolean;
+
+  /**
    * Лише документи зі застарілими результатами методологій («Needs recalculation»).
    *
    * ⛔ Як і `state`, `false` без періоду й без року, хоч би що стояло в адресі: сервер відповів би `422`.
@@ -99,6 +105,7 @@ export interface DocumentListFilters {
   /** ✎ D-450: «Власник» одним переходом — усі / лише мої / конкретна людина (решта прибирається з адреси). */
   readonly setOwner: (owner: OwnerFilterValue) => void;
   readonly setHasLateEdits: (hasLateEdits: boolean) => void;
+  readonly setHasReopenedMonths: (hasReopenedMonths: boolean) => void;
   readonly setResultsStale: (resultsStale: boolean) => void;
   readonly setQ: (q: string) => void;
   readonly setProjectId: (projectId: number | null) => void;
@@ -121,6 +128,7 @@ export function useDocumentListFilters(periodKey: number | null, year: number | 
   const [rawMine] = useUrlState('mine');
   const [rawOwner] = useUrlState('owner');
   const [rawHasLateEdits] = useUrlState('hasLateEdits');
+  const [rawHasReopenedMonths] = useUrlState('hasReopenedMonths');
   const [rawResultsStale] = useUrlState('resultsStale');
   const [rawQ] = useUrlState('q');
   const [rawProjectId] = useUrlState('projectId');
@@ -133,6 +141,7 @@ export function useDocumentListFilters(periodKey: number | null, year: number | 
   const owner = parseOwnerFilter(rawOwner);
   const mine = owner === null && rawMine === 'true';
   const hasLateEdits = rawHasLateEdits === 'true';
+  const hasReopenedMonths = rawHasReopenedMonths === 'true';
   // ✎ g4 (координатор 08.11): застарілість визначена і за РІК (сервер: застарілий хоч в одному періоді року).
   const resultsStale = (periodKey !== null || year !== null) && rawResultsStale === 'true';
   const q = rawQ ?? '';
@@ -192,6 +201,13 @@ export function useDocumentListFilters(periodKey: number | null, year: number | 
     [setParams],
   );
 
+  const setHasReopenedMonths = useCallback(
+    (next: boolean) => {
+      setParams({ hasReopenedMonths: next ? 'true' : null, cursor: null });
+    },
+    [setParams],
+  );
+
   const setResultsStale = useCallback(
     (next: boolean) => {
       setParams({ resultsStale: next ? 'true' : null, cursor: null });
@@ -219,6 +235,7 @@ export function useDocumentListFilters(periodKey: number | null, year: number | 
       mine: null,
       owner: null,
       hasLateEdits: null,
+      hasReopenedMonths: null,
       resultsStale: null,
       q: null,
       projectId: null,
@@ -232,6 +249,7 @@ export function useDocumentListFilters(periodKey: number | null, year: number | 
     mine,
     owner,
     hasLateEdits,
+    hasReopenedMonths,
     resultsStale,
     q,
     projectId,
@@ -242,6 +260,7 @@ export function useDocumentListFilters(periodKey: number | null, year: number | 
       mine ||
       owner !== null ||
       hasLateEdits ||
+      hasReopenedMonths ||
       resultsStale ||
       q.trim() !== '' ||
       projectId !== null ||
@@ -250,6 +269,7 @@ export function useDocumentListFilters(periodKey: number | null, year: number | 
     setMine,
     setOwner,
     setHasLateEdits,
+    setHasReopenedMonths,
     setResultsStale,
     setQ,
     setProjectId,

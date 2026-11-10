@@ -131,6 +131,11 @@ interface DocumentListParams {
    */
   hasLateEdits?: boolean;
   /**
+   * ✎ 10.11 «Reopened months»: лише документи з діючим винятком «закритий місяць відкрито для документа»
+   * (`hasReopenedMonths=true`; за рік, місяць або будь-який). Іде в запит лише коли `true`.
+   */
+  hasReopenedMonths?: boolean;
+  /**
    * Лише документи зі застарілими результатами методологій (`resultsStale=true`).
    *
    * ⛔ Лише разом із `periodKey` або (✎ g4) `year` — тоді застарілий хоч в одному періоді року; без обох сервер
@@ -166,6 +171,7 @@ export function listDocuments(params: DocumentListParams): Promise<DocumentListP
   if (params.ownerUserId) query.set('ownerUserId', String(params.ownerUserId));
   else if (params.mine) query.set('mine', 'true');
   if (params.hasLateEdits) query.set('hasLateEdits', 'true');
+  if (params.hasReopenedMonths) query.set('hasReopenedMonths', 'true');
   if (params.resultsStale) query.set('resultsStale', 'true');
   if (params.q) query.set('q', params.q);
   if (params.projectId) query.set('projectId', String(params.projectId));

@@ -4,10 +4,22 @@ import { Link } from 'react-router-dom';
 import type { components } from '@/api/schema';
 import type { PeriodCalendarDto } from '@/api/types';
 import { formatMonthName } from '@/shared/format';
+import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
+import { siteMomentText } from '@/shared/siteMoment';
 import { StripLegend, stripCell, type StripCell } from './yearStripModel';
 
 type DocumentPeriodState = components['schemas']['DocumentPeriodState'];
+type DocumentReopenedPeriod = components['schemas']['DocumentReopenedPeriod'];
+
+/**
+ * ✎ 10.11: строк винятку «місяць відкрито для документа» — у поясі МАЙДАНЧИКА (той самий `siteMomentText`, що рядок
+ * місяця «Проєкти → Періоди» і банер документа); поки календар не прийшов — пояс браузера.
+ */
+function reopenedUntilText(value: string, zone: string | null | undefined): string {
+  if (zone === null || zone === undefined || zone === '') return formatDateTime(value);
+  return siteMomentText(value, zone) ?? formatDateTime(value);
+}
 
 /** Місяців у смузі року — завжди 12 (людина 07.11: «12-month strip»). */
 const Months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
@@ -29,6 +41,8 @@ export function stripCellLabel(cell: StripCell): string {
       return t('documents.strip.returned');
     case 'locked':
       return t('documents.strip.locked');
+    case 'reopened':
+      return t('documents.strip.reopened');
     case 'notOpen':
       return t('documents.strip.notOpen');
     default:
@@ -48,10 +62,26 @@ function LockMark(): JSX.Element {
   );
 }
 
+/** ✎ 10.11: відкритий замок — «Reopened for this document» (знак, не лише колір; дужка піднята й відведена вбік). */
+function OpenLockMark(): JSX.Element {
+  return (
+    <svg width="9" height="9" viewBox="0 0 12 12" aria-hidden="true" focusable="false" data-mark="open-lock">
+      <path d="M2 5.5h8V11H2z" fill="currentColor" />
+      <path d="M4 5.5V3.5a2 2 0 0 1 3.9-.6" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+function CellMark({ cell }: { readonly cell: StripCell }): JSX.Element | string {
+  if (cell === 'locked') return <LockMark />;
+  if (cell === 'reopened') return <OpenLockMark />;
+  return Marks[cell] ?? '';
+}
+
 function CellBox({ cell, current = false }: { readonly cell: StripCell; readonly current?: boolean }): JSX.Element {
   return (
     <span className="ecr-year-strip-box" data-cell={cell} data-current={current ? 'true' : undefined} aria-hidden="true">
-      {cell === 'locked' ? <LockMark /> : (Marks[cell] ?? '')}
+      <CellMark cell={cell} />
     </span>
   );
 }
@@ -67,6 +97,7 @@ export function DocumentYearStrip({
   year,
   periodStates,
   calendar,
+  reopenedPeriods,
 }: {
   readonly documentId: number;
   readonly businessKey: string;
@@ -74,17 +105,25 @@ export function DocumentYearStrip({
   readonly periodStates: readonly DocumentPeriodState[] | null | undefined;
   /** Календар проєкту документа; `undefined` — ще не приїхав (неподані місяці — «unknown»). */
   readonly calendar: PeriodCalendarDto | undefined;
+  /** ✎ 10.11: діючі винятки «місяць відкрито для ЦЬОГО документа» (`reopenedPeriods` рядка переліку). */
+  readonly reopenedPeriods?: readonly DocumentReopenedPeriod[] | null | undefined;
 }): JSX.Element {
   const byKey = new Map((periodStates ?? []).map((entry) => [entry.periodKey, entry.state]));
   const periodByKey = new Map((calendar?.periods ?? []).map((period) => [period.periodKey, period]));
+  const reopenedByKey = new Map((reopenedPeriods ?? []).map((entry) => [entry.periodKey, entry.openUntil]));
 
   return (
     <ul className="ecr-year-strip" aria-label={t('documents.yearStripLabel', { key: businessKey, year })}>
       {Months.map((month) => {
         const periodKey = year * 100 + month;
         const period = periodByKey.get(periodKey);
-        const cell = stripCell(byKey.get(periodKey) ?? null, period?.state ?? null);
-        const label = t('documents.monthState', { month: `${formatMonthName(month)} ${String(year)}`, state: stripCellLabel(cell) });
+        const reopenedUntil = reopenedByKey.get(periodKey);
+        const cell = stripCell(byKey.get(periodKey) ?? null, period?.state ?? null, reopenedUntil !== undefined);
+        const state =
+          cell === 'reopened' && reopenedUntil !== undefined
+            ? t('documents.strip.reopenedUntil', { until: reopenedUntilText(reopenedUntil, calendar?.timeZoneId) })
+            : stripCellLabel(cell);
+        const label = t('documents.monthState', { month: `${formatMonthName(month)} ${String(year)}`, state });
 
         return (
           <li key={month}>
