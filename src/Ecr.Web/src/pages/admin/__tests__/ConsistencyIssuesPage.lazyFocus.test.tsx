@@ -13,9 +13,15 @@ import { testTheme } from '@/test/render';
  * ⛔ Діалог монтується ВЖЕ відкритим посеред очікування. Фокус повертає власний `useRestoreFocus` `ReasonModal`: він
  * запам'ятовує відкривача на першому відкритому коміті, коли кнопка «Run now» досі у фокусі.
  *
- * ⚠ Ворота — `use(promise)` у підміненому компоненті, а НЕ `await` у фабриці `vi.mock`, і клік — лише після `loaded`
- * (той самий прийом, що `VersionDiffButton.lateChunk.test.tsx`): другий `import()` того самого модуля, поки async-фабрика
- * ще працює, vitest віддавав би справжнім модулем.
+ * ⚠ Ворота — внутрішній `lazy()` у підміненому компоненті, а НЕ `await` у фабриці `vi.mock`, і клік — лише після
+ * `loaded`: другий `import()` того самого модуля, поки async-фабрика ще працює, vitest віддавав би справжнім модулем.
+ *
+ * ⛔ x6 (10.11): НЕ `use(promise)`, як у `VersionDiffButton.lateChunk.test.tsx`. Тут обгортка змонтована ЗАВЖДИ, тож
+ * перше `use()` спрацьовувало вже в рендері-повторі після холодного `import()` чанка сторінки (лінь `ReasonModalChunk`).
+ * Після `open()` React у такому разі повтору НЕ планував: діалог не з'являвся ніколи (не таймаут — 15 с теж червоне,
+ * компонент більше не рендерився). Детерміновано червоне локально (Windows, холодний імпорт ~2.8 с), зелене на CI (там
+ * інший порядок холодного імпорту — припущення); прогрів `import()` перед `render` теж робив `use()` зеленим. `lazy()` — той самий механізм,
+ * що в продукті, і повтор межі за ним React планує завжди.
  *
  * Мутаційний доказ: прибрати `useRestoreFocus(opened, returnFocusTo)` з `ReasonModal` — тест червоний.
  *
@@ -31,12 +37,14 @@ const chunk = vi.hoisted(() => {
 });
 
 vi.mock('@/shared/ui/ReasonModal', async (importOriginal) => {
-  const { createElement, use } = await import('react');
+  const { createElement, lazy } = await import('react');
   const actual = await importOriginal<typeof import('@/shared/ui/ReasonModal')>();
+  const Late = lazy(async () => {
+    await chunk.ready;
+    return { default: actual.ReasonModal };
+  });
   function LateReasonModal(props: Parameters<typeof actual.ReasonModal>[0]): ReturnType<typeof actual.ReasonModal> {
-    use(chunk.ready);
-
-    return createElement(actual.ReasonModal, props);
+    return createElement(Late, props);
   }
 
   chunk.loaded = true;
