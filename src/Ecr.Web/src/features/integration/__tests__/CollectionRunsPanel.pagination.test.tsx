@@ -105,5 +105,10 @@ describe('CollectionRunsPanel: "показати ще" дочитує курсо
     expect(row1).not.toBeNull();
     expect(row2).not.toBeNull();
     expect(within(row1 as HTMLElement).getByText('PI-MAIN')).toBeTruthy();
+
+    // ⛔ Панель заздалегідь тягне чанк шухляди (`void loadRunDetailDrawer()`, щойно є рядки). Без цього
+    // очікування файл міг завершитись раніше за той `import()`, і vitest закривав модульний раннер посеред
+    // нього: «Vite module runner has been closed» — необроблена відмова, що червонила job `shuffle` (seed 6258).
+    await import('@/features/integration/CollectionRunDetailDrawer');
   });
 });
