@@ -1477,7 +1477,17 @@ DELETE t
     (N'recalcApprovals.statePending', N'ru', N'Ожидает подтверждения'),
     (N'recalcApprovals.title', N'en', N'Recalculation approvals for closed periods'),
     (N'recalcApprovals.title', N'kz', N'Жабық кезеңдерді қайта есептеу келісімдері'),
-    (N'recalcApprovals.title', N'ru', N'Согласования пересчёта закрытых периодов')
+    (N'recalcApprovals.title', N'ru', N'Согласования пересчёта закрытых периодов'),
+    -- p3-1110: «1 rows» — замінено ключами з кількістю узгодженою формою (permits.header.bannerSplitTitle/bannerTableRows/dialogSplitTitle + permits.headerRows.*).
+    (N'permits.header.bannerTitle', N'en', N'{month} must be split in {count} rows (header permit changed on {date})'),
+    (N'permits.header.bannerTitle', N'ru', N'{month} нужно разделить в {count} строках (разрешение шапки сменилось {date})'),
+    (N'permits.header.bannerTitle', N'kz', N'{month} айын {count} жолда бөлу керек (тақырып рұқсаты {date} ауысты)'),
+    (N'permits.header.bannerTable', N'en', N'{table} — {count} rows'),
+    (N'permits.header.bannerTable', N'ru', N'{table} — строк: {count}'),
+    (N'permits.header.bannerTable', N'kz', N'{table} — жолдар: {count}'),
+    (N'permits.header.dialogTitle', N'en', N'Split {month} — {count} rows'),
+    (N'permits.header.dialogTitle', N'ru', N'Разделить {month} — строк: {count}'),
+    (N'permits.header.dialogTitle', N'kz', N'{month} бөлу — жолдар: {count}')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;

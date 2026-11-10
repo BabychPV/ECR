@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 import { Badge, Button, Group, Table, Text } from '@mantine/core';
 import type { TemplateColumnDto } from '@/api/types';
+import { columnOffersFormula } from '@/features/templates/column';
 import { ReorderCell, ReorderableRows } from '@/features/templates/ReorderControls';
 import { dataTypeLabel } from '@/features/templates/enumLabels';
 import { localized } from '@/shared/i18n/localized';
@@ -116,9 +117,13 @@ export function ColumnsTable({
                       >
                         {t('columns.delete')}
                       </Button>
-                      <Button size="xs" variant="subtle" onClick={() => onFormula(column)}>
-                        {t('formulas.edit')}
-                      </Button>
+                      {/* p3-1110: формула колонки — лише на обчислюваній колонці (ColumnDef.IsComputed, сервер
+                          відмовляє ECR-TMPL-4227) або щоб прибрати вже наявну. */}
+                      {columnOffersFormula(column) && (
+                        <Button size="xs" variant="subtle" onClick={() => onFormula(column)} data-column-formula="trigger">
+                          {t('formulas.edit')}
+                        </Button>
+                      )}
                     </>
                   )}
                 </Group>

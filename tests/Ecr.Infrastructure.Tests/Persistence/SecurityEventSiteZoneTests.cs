@@ -1,5 +1,6 @@
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
+using Ecr.Domain.Enums;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
@@ -24,9 +25,28 @@ public sealed class SecurityEventSiteZoneTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Пояс_майданчика_лише_коли_він_один()
     {
-        Assert.Equal("Asia/Atyrau", AuditReader.SiteTimeZone(["Asia/Atyrau"]));
-        Assert.Null(AuditReader.SiteTimeZone(["Asia/Atyrau", "Europe/Kyiv"]));
+        Assert.Equal("Asia/Atyrau", AuditReader.SiteTimeZone([("Asia/Atyrau", ProjectStatus.Active)]));
+        Assert.Null(AuditReader.SiteTimeZone([("Asia/Atyrau", ProjectStatus.Active), ("Europe/Kyiv", ProjectStatus.Archived)]));
         Assert.Null(AuditReader.SiteTimeZone([]));
+    }
+
+    /// <summary>
+    /// ✎ p3-1110: чернетка в іншому поясі не скасовує пояс майданчика — на живій установці саме вона давала
+    /// <c>null</c>. Мутація (локально): правило не відкидає <see cref="ProjectStatus.Draft"/> — тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Чернетки_не_рахуються_в_поясі_майданчика()
+    {
+        Assert.Equal(
+            "Asia/Atyrau",
+            AuditReader.SiteTimeZone(
+            [
+                ("Asia/Atyrau", ProjectStatus.Active),
+                ("Asia/Atyrau", ProjectStatus.Archived),
+                ("Europe/Kyiv", ProjectStatus.Draft),
+            ]));
+        Assert.Null(AuditReader.SiteTimeZone([("Europe/Kyiv", ProjectStatus.Draft)]));
     }
 
     [Fact]
@@ -52,18 +72,18 @@ public sealed class SecurityEventSiteZoneTests(SqlServerFixture sql)
         Assert.Equal(AuditReader.SiteTimeZone(await ZonesAsync()), row.SiteTimeZoneId);
     }
 
-    private async Task<List<string>> ZonesAsync()
+    private async Task<List<(string, ProjectStatus)>> ZonesAsync()
     {
         await using var connection = new SqlConnection(sql.ConnectionString);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT DISTINCT TimeZoneId FROM doc.Project;";
+        command.CommandText = "SELECT DISTINCT TimeZoneId, Status FROM doc.Project;";
 
-        var zones = new List<string>();
+        var zones = new List<(string, ProjectStatus)>();
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
-            zones.Add(reader.GetString(0));
+            zones.Add((reader.GetString(0), (ProjectStatus)reader.GetByte(1)));
         }
 
         return zones;

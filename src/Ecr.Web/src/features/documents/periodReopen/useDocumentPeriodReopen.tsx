@@ -6,6 +6,7 @@ import type { components } from '@/api/schema';
 import { formatPeriodKey } from '@/shared/format';
 import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
+import { siteMomentText } from '@/shared/siteMoment';
 import { getDocumentPeriodReopen, periodReopenKey } from './api';
 
 type PeriodState = components['schemas']['PeriodState'];
@@ -22,6 +23,18 @@ interface DocumentPeriodReopenArgs {
   readonly periodKey: number;
   /** Стан місяця з календаря проєкту (той самий для всіх документів). */
   readonly periodState: PeriodState | undefined;
+  /**
+   * Пояс майданчика (IANA) з календаря проєкту: строк у банері — у ньому, як у рядку місяця «Проєкти → Періоди»
+   * (p3-1110: тут стояв пояс браузера, і той самий строк читався «Nov 10, 9:00 PM» проти «Nov 11, 12:00 AM»).
+   * Поки календар не прийшов — пояс браузера.
+   */
+  readonly timeZoneId?: string | null | undefined;
+}
+
+/** Строк у поясі майданчика тим самим форматом, що й рядок місяця в PeriodsPage; без поясу — пояс браузера. */
+function untilText(value: string, zone: string | null | undefined): string {
+  if (zone === null || zone === undefined || zone === '') return formatDateTime(value);
+  return siteMomentText(value, zone) ?? formatDateTime(value);
 }
 
 interface DocumentPeriodReopen {
@@ -45,7 +58,7 @@ interface DocumentPeriodReopen {
  * ⛔ Строк діє сам: щойно `openUntil` минає, сторінка перечитує стан, документ і зрізи — сітка знову замкнена без
  * перезавантаження.
  */
-export function useDocumentPeriodReopen({ documentId, periodKey, periodState }: DocumentPeriodReopenArgs): DocumentPeriodReopen {
+export function useDocumentPeriodReopen({ documentId, periodKey, periodState, timeZoneId }: DocumentPeriodReopenArgs): DocumentPeriodReopen {
   const closed = periodState === 'Closed';
   const queryClient = useQueryClient();
   const [opened, setOpened] = useState(false);
@@ -110,7 +123,7 @@ export function useDocumentPeriodReopen({ documentId, periodKey, periodState }: 
         color="brand"
         variant="light"
         role="status"
-        title={t('document.reopen.activeTitle', { until: formatDateTime(active.openUntil) })}
+        title={t('document.reopen.activeTitle', { until: untilText(active.openUntil, timeZoneId) })}
         data-testid="document-period-reopened"
       >
         {t('document.reopen.activeBody', {

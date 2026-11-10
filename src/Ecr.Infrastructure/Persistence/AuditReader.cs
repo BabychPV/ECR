@@ -1077,26 +1077,35 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
     /// <summary>
     /// Пояс майданчика для подій безпеки (✎ debt-1110): подія не належить проєкту, тож це пояс, спільний для всіх
     /// проєктів установки. Різні пояси або жодного проєкту — <c>null</c> (клієнт лишає пояс читача).
+    /// ✎ p3-1110: чернетки (<see cref="Ecr.Domain.Enums.ProjectStatus.Draft"/>) не рахуються — на живій установці
+    /// чернетка в іншому поясі давала <c>null</c>, і журнал падав у пояс браузера.
     /// </summary>
-    /// <param name="zones">Різні пояси проєктів (достатньо перших двох).</param>
-    public static string? SiteTimeZone(IReadOnlyCollection<string> zones)
+    /// <param name="projects">Різні пари «пояс, стан» проєктів.</param>
+    public static string? SiteTimeZone(IEnumerable<(string Zone, Ecr.Domain.Enums.ProjectStatus Status)> projects)
     {
-        ArgumentNullException.ThrowIfNull(zones);
+        ArgumentNullException.ThrowIfNull(projects);
 
-        return zones.Count == 1 ? zones.First() : null;
+        var zones = projects
+            .Where(p => p.Status != Ecr.Domain.Enums.ProjectStatus.Draft)
+            .Select(p => p.Zone)
+            .Distinct(StringComparer.Ordinal)
+            .Take(2)
+            .ToList();
+        return zones.Count == 1 ? zones[0] : null;
     }
 
-    /// <summary>До двох різних поясів проєктів — більше для <see cref="SiteTimeZone"/> не потрібно.</summary>
-    private static async Task<IReadOnlyCollection<string>> ProjectZonesAsync(SqlConnection connection, CancellationToken ct)
+    /// <summary>Різні пари «пояс, стан» проєктів — правило <see cref="SiteTimeZone"/> саме відкидає чернетки.</summary>
+    private static async Task<IReadOnlyCollection<(string Zone, Ecr.Domain.Enums.ProjectStatus Status)>> ProjectZonesAsync(
+        SqlConnection connection, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT DISTINCT TOP (2) TimeZoneId FROM doc.Project;";
+        command.CommandText = "SELECT DISTINCT TimeZoneId, Status FROM doc.Project;";
 
-        var zones = new List<string>();
+        var zones = new List<(string, Ecr.Domain.Enums.ProjectStatus)>();
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            zones.Add(reader.GetString(0));
+            zones.Add((reader.GetString(0), (Ecr.Domain.Enums.ProjectStatus)reader.GetByte(1)));
         }
 
         return zones;

@@ -9,6 +9,8 @@ import { documentLockOf } from '@/features/documents/documentLock';
 import { useDocumentPeriodReopen } from '@/features/documents/periodReopen/useDocumentPeriodReopen';
 import { testTheme } from '@/test/render';
 import { Catalog } from '@/test/__tests__/a11yFixtures';
+import { formatDateTime } from '@/shared/format/datetime';
+import { siteMomentText } from '@/shared/siteMoment';
 
 /**
  * Приймальна 08.11 (i): «Reopen January 2026 for this document…» у банері закритого періоду (i1), недоступна дія з
@@ -45,8 +47,8 @@ function stub(state: Record<string, unknown>): void {
   );
 }
 
-function Harness({ periodState }: { readonly periodState: PeriodState }): JSX.Element {
-  const reopen = useDocumentPeriodReopen({ documentId: 5, periodKey: 202601, periodState });
+function Harness({ periodState, zone }: { readonly periodState: PeriodState; readonly zone?: string | undefined }): JSX.Element {
+  const reopen = useDocumentPeriodReopen({ documentId: 5, periodKey: 202601, periodState, timeZoneId: zone });
   const lock = documentLockOf({ projectStatus: 'Active', periodState: reopen.periodState, sheetState: 'Draft' });
 
   return (
@@ -59,11 +61,11 @@ function Harness({ periodState }: { readonly periodState: PeriodState }): JSX.El
   );
 }
 
-function show(periodState: PeriodState): void {
+function show(periodState: PeriodState, zone?: string): void {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <Harness periodState={periodState} />
+        <Harness periodState={periodState} zone={zone} />
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -147,6 +149,24 @@ describe('useDocumentPeriodReopen', () => {
     expect(screen.getByTestId('effective-state').textContent).toBe('Grace');
     expect(document.querySelector('[data-document-lock="periodClosed"]')).toBeNull();
     expect(screen.queryByTestId('document-period-reopen')).toBeNull();
+  });
+
+  it('p3-1110: строк у банері — у поясі майданчика, тим самим форматом, що й рядок місяця «Проєкти → Періоди»', async () => {
+    // 19:00 UTC = 00:00 наступної доби в Атирау (+05:00): «Nov 11, 12:00 AM», а не час браузера.
+    const until = '2026-11-10T19:00:00Z';
+    stub(closedState({
+      active: { id: 9, periodKey: 202601, openUntil: until, reason: 'Fix', openedByUserId: 3, openedByName: 'A. Admin', openedAt: until },
+    }));
+    show('Closed', 'Asia/Atyrau');
+
+    const site = siteMomentText(until, 'Asia/Atyrau');
+    expect(site).not.toBeNull();
+    // Тест має сенс лише тоді, коли пояс браузера дає інший рядок.
+    expect(site).not.toBe(formatDateTime(until));
+
+    const banner = await screen.findByTestId('document-period-reopened');
+    // ⛔ Мутація: `formatDateTime` замість поясу майданчика — у банері час браузера, червоне.
+    expect(banner.textContent).toContain(`until=${String(site)}`);
   });
 
   it('закритий місяць, стан ще вантажиться: місце дії вже зайняте (без зсуву панелі листа нижче)', async () => {

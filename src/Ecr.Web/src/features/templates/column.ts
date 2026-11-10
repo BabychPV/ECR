@@ -207,6 +207,27 @@ export function columnTakesUnit(dataType: CellDataType): boolean {
 }
 
 /**
+ * Чи приймає колонка цього типу формулу КОЛОНКИ.
+ *
+ * ⚠ Дзеркалить ColumnDef.IsComputed, за яким сервер відмовляє формулі на колонці ручного вводу
+ * (FormulaDefHandlers.RequireComputedColumn, err.ECR-TMPL-4227.formulaOnManualColumn): обчислювані лише
+ * Formula (вираз шаблону) і Calculated (вихід методології). p3-1110: конструктор пропонував «Formula» на
+ * будь-якій колонці, і відмова приходила лише при збереженні.
+ */
+export function columnTakesFormula(dataType: string): boolean {
+  return dataType === 'Formula' || dataType === 'Calculated';
+}
+
+/**
+ * Чи показувати дію «Formula» на колонці конструктора: колонка обчислювана — або на ній УЖЕ є формула
+ * (успадкована на колонці ручного вводу): її сервер дозволяє прибрати (DeleteFormulaDefHandler без
+ * RequireComputedColumn), і сховати дію означало б зробити таку формулу невиправною.
+ */
+export function columnOffersFormula(column: { readonly dataType: string; readonly formulaExpression: string | null }): boolean {
+  return columnTakesFormula(column.dataType) || column.formulaExpression !== null;
+}
+
+/**
  * Що саме заважає зберегти чернетку.
  *
  * ⛔ Q-336 (`table.ts`) розділила той самий блокувальник на `CodeEmpty` і

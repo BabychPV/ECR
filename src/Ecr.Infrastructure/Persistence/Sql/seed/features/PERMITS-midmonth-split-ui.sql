@@ -114,12 +114,12 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.header.splitNeeded', N'kz', N'Құжат тақырыбының рұқсаты осы айда ауысты: әр рұқсат үшін бөлікті енгізіңіз. Оған дейін тапсыру бұғатталған.'),
     (N'permits.header.splitWhy', N'ru', N'Разрешение шапки документа сменилось {date}, поэтому {month} отчитывается двумя частями — по одной на разрешение. Введите обе части сами; ECR не делит значение по дням.'),
     (N'permits.header.splitWhy', N'kz', N'Құжат тақырыбының рұқсаты {date} ауысты, сондықтан {month} екі бөлікпен есептеледі — әр рұқсатқа біреуден. Екі бөлікті де өзіңіз енгізіңіз; ECR мәнді күндерге бөлмейді.'),
-    (N'permits.header.bannerTitle', N'ru', N'{month} нужно разделить в {count} строках (разрешение шапки сменилось {date})'),
-    (N'permits.header.bannerTitle', N'kz', N'{month} айын {count} жолда бөлу керек (тақырып рұқсаты {date} ауысты)'),
+    (N'permits.header.bannerSplitTitle', N'ru', N'{month}: нужно разделить — {rowCount} (разрешение шапки сменилось {date})'),
+    (N'permits.header.bannerSplitTitle', N'kz', N'{month} айын бөлу керек — {rowCount} (тақырып рұқсаты {date} ауысты)'),
     (N'permits.header.bannerText', N'ru', N'{old} до {until} → {next} с {from}. Строки со своей колонкой разрешения не затронуты.'),
     (N'permits.header.bannerText', N'kz', N'{old} {until} дейін → {next} {from} бастап. Өз рұқсат бағаны бар жолдарға әсер етпейді.'),
-    (N'permits.header.bannerTable', N'ru', N'{table} — строк: {count}'),
-    (N'permits.header.bannerTable', N'kz', N'{table} — жолдар: {count}'),
+    (N'permits.header.bannerTableRows', N'ru', N'Таблица {table} — {rowCount}'),
+    (N'permits.header.bannerTableRows', N'kz', N'{table} кестесі — {rowCount}'),
     (N'permits.header.showAll', N'ru', N'Показать все ({count})'),
     (N'permits.header.showAll', N'kz', N'Барлығын көрсету ({count})'),
     (N'permits.header.showLess', N'ru', N'Свернуть'),
@@ -130,8 +130,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.history.addedWhole', N'kz', N'Рұқсат {date} бастап қосылды: «{row}» бір жол болып қалады. Ауысу айдың 1-күнінен — бөлетін ештеңе жоқ.'),
     (N'permits.header.splitAll', N'ru', N'Разделить все…'),
     (N'permits.header.splitAll', N'kz', N'Барлығын бөлу…'),
-    (N'permits.header.dialogTitle', N'ru', N'Разделить {month} — строк: {count}'),
-    (N'permits.header.dialogTitle', N'kz', N'{month} бөлу — жолдар: {count}'),
+    (N'permits.header.dialogSplitTitle', N'ru', N'Разделить {month} — {rowCount}'),
+    (N'permits.header.dialogSplitTitle', N'kz', N'{month} бөлу — {rowCount}'),
     (N'permits.header.dialogWhy', N'ru', N'Разрешение шапки документа сменилось {date}. Введите значение каждой строки за {month} по каждому разрешению сами; ECR не делит по дням. Строки со своей колонкой разрешения здесь не показаны.'),
     (N'permits.header.dialogWhy', N'kz', N'Құжат тақырыбының рұқсаты {date} ауысты. Әр жолдың {month} мәнін әр рұқсат бойынша өзіңіз енгізіңіз; ECR күндерге бөлмейді. Өз рұқсат бағаны бар жолдар мұнда көрсетілмейді.'),
     (N'permits.header.table', N'ru', N'Таблица'),
@@ -212,15 +212,15 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'permits.header.fromHeader', N'en', N'From the document header permit: {permits}', 1),
     (N'permits.header.splitNeeded', N'en', N'The document header permit changed in this month: enter the part for each permit. Submit is blocked until then.', 1),
     (N'permits.header.splitWhy', N'en', N'The document header permit changed on {date}, so {month} is reported in two parts — one per permit. Enter both parts yourself; ECR does not divide the value by days.', 1),
-    (N'permits.header.bannerTitle', N'en', N'{month} must be split in {count} rows (header permit changed on {date})', 1),
+    (N'permits.header.bannerSplitTitle', N'en', N'{month} must be split in {rowCount} (header permit changed on {date})', 1),
     (N'permits.header.bannerText', N'en', N'{old} until {until} → {next} from {from}. Rows with their own permit column are not affected.', 1),
-    (N'permits.header.bannerTable', N'en', N'{table} — {count} rows', 1),
+    (N'permits.header.bannerTableRows', N'en', N'{table} — {rowCount}', 1),
     (N'permits.header.showAll', N'en', N'Show all ({count})', 1),
     (N'permits.header.showLess', N'en', N'Show less', 1),
     (N'permits.header.addedWhole', N'en', N'Header permit added from {date}. The change is on the 1st — no month is shared, nothing to split.', 1),
     (N'permits.history.addedWhole', N'en', N'Permit added from {date}: "{row}" stays one row. The change is on the 1st — nothing to split.', 1),
     (N'permits.header.splitAll', N'en', N'Split all…', 1),
-    (N'permits.header.dialogTitle', N'en', N'Split {month} — {count} rows', 1),
+    (N'permits.header.dialogSplitTitle', N'en', N'Split {month} — {rowCount}', 1),
     (N'permits.header.dialogWhy', N'en', N'The document header permit changed on {date}. Enter each row''s {month} value per permit yourself; ECR does not divide by days. Rows with their own permit column are not listed.', 1),
     (N'permits.header.table', N'en', N'Table', 1),
     (N'permits.header.row', N'en', N'Row', 1),
@@ -233,3 +233,29 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
 OPTION (RECOMPILE);
 GO
 -- PERMITS: midmonth-split-ui ── кінець секції ──
+-- PERMITS: header-split-rows ── p3-1110: «1 rows» → кількість рядків поділу за дозволом шапки узгодженою формою (permits.headerRows.*, formatCount) ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.headerRows.one', N'ru', N'{count} строка'),
+    (N'permits.headerRows.few', N'ru', N'{count} строки'),
+    (N'permits.headerRows.many', N'ru', N'{count} строк'),
+    (N'permits.headerRows.other', N'ru', N'{count} строки'),
+    (N'permits.headerRows.one', N'kz', N'{count} жол'),
+    (N'permits.headerRows.few', N'kz', N'{count} жол'),
+    (N'permits.headerRows.many', N'kz', N'{count} жол'),
+    (N'permits.headerRows.other', N'kz', N'{count} жол')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'permits.headerRows.one', N'en', N'{count} row', 1),
+    (N'permits.headerRows.few', N'en', N'{count} rows', 1),
+    (N'permits.headerRows.many', N'en', N'{count} rows', 1),
+    (N'permits.headerRows.other', N'en', N'{count} rows', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: header-split-rows ── кінець секції ──

@@ -9,6 +9,7 @@ import { decimalTextOf } from '@/features/grid/rounding';
 import { formatDecimal } from '@/shared/format/number';
 import { formatMonthYear } from '@/shared/format/period';
 import { localized } from '@/shared/i18n/localized';
+import { formatCount } from '@/shared/format/plural';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { rowKeyOfLine, type HeaderSplitLine } from './headerSplitModel';
@@ -105,7 +106,7 @@ export function HeaderSplitDialog({ documentId, periodKey, lines, slices, onClos
   };
 
   return (
-    <Modal opened onClose={onClose} size="xl" title={t('permits.header.dialogTitle', { month: monthLabel, count: rowCount })} data-header-split-dialog="">
+    <Modal opened onClose={onClose} size="xl" title={t('permits.header.dialogSplitTitle', { month: monthLabel, rowCount: formatCount(rowCount, 'permits.headerRows') })} data-header-split-dialog="">
       <form
         onSubmit={(event) => {
           event.preventDefault();

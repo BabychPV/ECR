@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Alert, Anchor, Badge, Button, Group, List, Stack, Text } from '@mantine/core';
 import type { DocumentTableDto } from '@/api/types';
 import { formatMonthYear } from '@/shared/format/period';
+import { formatCount } from '@/shared/format/plural';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { HeaderSplitDialog, lineKey, useLineSlices } from './HeaderSplitDialog';
@@ -63,9 +64,10 @@ export function HeaderSplitBanner({ documentId, periodKey, tables, readOnly, onR
           color="statusWarning"
           variant="light"
           data-header-split-banner=""
-          title={t('permits.header.bannerTitle', {
+          title={t('permits.header.bannerSplitTitle', {
             month: monthLabel,
-            count: rowCount,
+            // p3-1110: «1 rows» — кількість рядків узгодженою формою (`permits.headerRows.*`).
+            rowCount: formatCount(rowCount, 'permits.headerRows'),
             date: after === undefined ? '' : dottedDate(after.dayFrom),
           })}
         >
@@ -96,7 +98,10 @@ export function HeaderSplitBanner({ documentId, periodKey, tables, readOnly, onR
                     color="statusWarning"
                     tt="none"
                   >
-                    {t('permits.header.bannerTable', { table: tableName(entry.table, String(entry.tableDefId)), count: entry.rows })}
+                    {t('permits.header.bannerTableRows', {
+                      table: tableName(entry.table, String(entry.tableDefId)),
+                      rowCount: formatCount(entry.rows, 'permits.headerRows'),
+                    })}
                   </Badge>
                 ))}
               </Group>
