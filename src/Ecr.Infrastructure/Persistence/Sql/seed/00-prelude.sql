@@ -1487,7 +1487,11 @@ DELETE t
     (N'permits.header.bannerTable', N'kz', N'{table} — жолдар: {count}'),
     (N'permits.header.dialogTitle', N'en', N'Split {month} — {count} rows'),
     (N'permits.header.dialogTitle', N'ru', N'Разделить {month} — строк: {count}'),
-    (N'permits.header.dialogTitle', N'kz', N'{month} бөлу — жолдар: {count}')
+    (N'permits.header.dialogTitle', N'kz', N'{month} бөлу — жолдар: {count}'),
+    -- D6/D-223: розбіжність періоду на запису комірок віддає `err.ECR-PRD-0422.periodMismatch`; старий ключ ніхто не вживає.
+    (N'err.ECR-REQ-0422.periodMismatch', N'en', N'The period {periodKey} in the request does not match period {expectedPeriodKey} of table instance {tableInstanceId}.'),
+    (N'err.ECR-REQ-0422.periodMismatch', N'ru', N'Период {periodKey} в запросе не совпадает с периодом {expectedPeriodKey} экземпляра таблицы {tableInstanceId}.'),
+    (N'err.ECR-REQ-0422.periodMismatch', N'kz', N'Сұраудағы {periodKey} кезеңі {tableInstanceId} кесте данасының {expectedPeriodKey} кезеңіне сәйкес келмейді.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1637,7 +1641,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.auditCursorSortMismatch', N'ru', N'Позиция страницы относится к другому порядку сортировки: начните с первой страницы.'),
     (N'err.ECR-REQ-0422.documentState', N'ru', N'Состояния документа «{state}» не существует.'),
     (N'err.ECR-REQ-0422.documentStateNeedsPeriod', N'ru', N'Для фильтра по состоянию документа нужен период: вне периода состояние не определено.'),
-    (N'err.ECR-REQ-0422.periodMismatch', N'ru', N'Период {periodKey} в запросе не совпадает с периодом {expectedPeriodKey} экземпляра таблицы {tableInstanceId}.'),
     (N'err.ECR-REQ-0422.cellOriginNotAllowed', N'ru', N'Источник «{origin}» не может быть задан клиентом: правка, сделанная здесь, записывается как {allowed}.'),
     (N'err.ECR-REQ-0422.patchTooLarge', N'ru', N'Изменение затрагивает ячеек: {count}; ограничение — {max} на запрос. Сохраните изменения меньшими частями.'),
     (N'err.ECR-IMP-0422.notAWorkbook', N'ru', N'Файл невозможно прочитать как книгу .xlsx.'),
@@ -4654,7 +4657,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.auditCursorSortMismatch', N'kz', N'Бет орны басқа сұрыптау ретіне тиесілі: бірінші беттен бастаңыз.'),
     (N'err.ECR-REQ-0422.documentState', N'kz', N'«{state}» құжат күйі жоқ.'),
     (N'err.ECR-REQ-0422.documentStateNeedsPeriod', N'kz', N'Құжат күйі бойынша сүзу үшін кезең қажет: кезеңнен тыс күй анықталмаған.'),
-    (N'err.ECR-REQ-0422.periodMismatch', N'kz', N'Сұраудағы {periodKey} кезеңі {tableInstanceId} кесте данасының {expectedPeriodKey} кезеңіне сәйкес келмейді.'),
     (N'err.ECR-REQ-0422.cellOriginNotAllowed', N'kz', N'«{origin}» шығу көзін клиент орната алмайды: мұнда жасалған түзету {allowed} ретінде жазылады.'),
     (N'err.ECR-REQ-0422.patchTooLarge', N'kz', N'Өзгеріс {count} ұяшықты қамтиды; шек — бір сұрауға {max}. Өзгерістерді кішірек бөліктермен сақтаңыз.'),
     (N'err.ECR-IMP-0422.notAWorkbook', N'kz', N'Файлды .xlsx кітабы ретінде оқу мүмкін емес.'),
