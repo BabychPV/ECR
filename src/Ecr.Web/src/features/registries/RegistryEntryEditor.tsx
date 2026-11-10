@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState, type JSX } from 'react';
-import { Alert, Box, Button, Fieldset, Group, Modal, Skeleton, Stack, TextInput } from '@mantine/core';
+import { Alert, Box, Button, Fieldset, Group, Modal, Skeleton, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { components } from '@/api/schema';
 import type {
@@ -17,6 +17,7 @@ import { localized } from '@/shared/i18n/localized';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { problemText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
 import { RegistryExternalKeysPanel } from './RegistryExternalKeysPanel';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
@@ -39,6 +40,14 @@ function registryEntryKey(
   entryId: number,
 ): readonly ['registries', 'entries', string, 'detail', number] {
   return ['registries', 'entries', code, 'detail', entryId] as const;
+}
+
+/** D14: `422 ECR-REG-4222` — запис без назви жодною мовою. */
+export const EntryNameRequiredKey = 'err.ECR-REG-4222.entryNameRequired';
+
+/** Чи відмова сервера — «назва запису обов'язкова» (її показує поле назви, а не сповіщення). */
+export function isEntryNameRequired(error: unknown): boolean {
+  return error instanceof EcrApiError && error.problem.extensions2?.['messageKey'] === EntryNameRequiredKey;
 }
 
 /** Стан форми запису. */
@@ -221,11 +230,17 @@ function EntryForm({
       onClose();
       showDone(entry === null ? t('registries.entryCreated') : t('registries.entrySaved'));
     },
-    onError: showApiError,
+    // ⛔ D14: «назва обов'язкова» належить полю назви — показуємо під ним, без дубля сповіщенням.
+    onError: (error) => {
+      if (!isEntryNameRequired(error)) showApiError(error);
+    },
   });
 
   // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
   const upsertLoading = usePendingLoading(upsert.isPending);
+
+  // Текст із каталогу мовою користувача (`detail` за `messageKey`); без нього — назва проблеми.
+  const nameProblem = isEntryNameRequired(upsert.error) ? problemText(upsert.error) : null;
 
   return (
     <>
@@ -245,8 +260,21 @@ function EntryForm({
       />
 
       <Fieldset variant="unstyled" disabled={readOnly}>
-        <LocalizedInput label={t('registries.name')} value={display} onChange={setDisplay} />
+        <LocalizedInput
+          label={t('registries.name')}
+          value={display}
+          onChange={(next) => {
+            setDisplay(next);
+            // Відмова стосувалася попередньої назви — після правки поля вона вже неправда.
+            if (upsert.error !== null) upsert.reset();
+          }}
+        />
       </Fieldset>
+      {nameProblem !== null && (
+        <Text size="sm" c="statusError" role="alert" mt="xs" data-registry-entry="name-required">
+          {nameProblem.detail ?? nameProblem.title}
+        </Text>
+      )}
 
       {/* ⚠ Поля довідника описані в його схемі й у кожного свій тип. Поки
           редактор приймає їх текстом: сервер знає типи і відхилить невідповідне
