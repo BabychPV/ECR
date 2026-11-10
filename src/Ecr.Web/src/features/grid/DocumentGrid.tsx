@@ -3289,7 +3289,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         <List size="sm">
           {rejected.map((rejection) => (
             <List.Item key={cellKey(rejection.rowKey, rejection.columnCode)}>
-              {rejection.rowKey} · {rejection.columnCode} — {rejection.reason}
+              {/* ✎ F13-p229: рядок без підпису (динамічний) — «row N», а не шістнадцятковий ключ (як банер відмови). */}
+              {rowDisplayName(data, rejection.rowKey)} ·{' '}
+              {data?.columns.find((column) => column.code === rejection.columnCode)?.header ?? rejection.columnCode} —{' '}
+              {rejection.reason}
             </List.Item>
           ))}
         </List>
