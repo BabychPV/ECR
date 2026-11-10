@@ -79,6 +79,9 @@ public static class UsageKinds
     /// <summary>Правило довідника, що читає довідник (ребро <c>cfg.RegistryUse</c>, ФВ-8.14).</summary>
     public const string RegistryRule = "registryRule";
 
+    /// <summary>Документ, у комірках чи шапці якого стоїть запис довідника (ФВ-8.14).</summary>
+    public const string Document = "document";
+
     /// <summary>Усі види — рефлексією, щоб новий член не треба було дописувати вдруге.</summary>
     public static IReadOnlyList<string> All { get; } =
         [.. typeof(UsageKinds)

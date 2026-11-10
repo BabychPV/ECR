@@ -57,6 +57,8 @@ export function UsageKindLabel({ kind }: { kind: string }): JSX.Element {
       return <>{t('usageKind.validationRule')}</>;
     case 'registryRule':
       return <>{t('usageKind.registryRule')}</>;
+    case 'document':
+      return <>{t('usageKind.document')}</>;
     default:
       return <Code>{kind}</Code>;
   }

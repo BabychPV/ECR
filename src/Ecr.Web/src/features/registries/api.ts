@@ -53,6 +53,14 @@ export function registryUsage(code: string): Promise<UsageResponse> {
   return apiFetch<UsageResponse>(`/api/v1/registries/${encodeURIComponent(code)}/usage`);
 }
 
+/**
+ * Документи, у комірках чи шапці яких стоїть ОДИН запис довідника (ФВ-8.14), — лише видимі читачеві
+ * (`Document.View` у проєкті). Вид кожного рядка — `document`; `total` — усі такі документи.
+ */
+export function registryEntryUsage(code: string, entryId: number): Promise<UsageResponse> {
+  return apiFetch<UsageResponse>(`/api/v1/registries/${encodeURIComponent(code)}/entries/${entryId}/usage`);
+}
+
 /** Код відмови «на запис посилаються дані» (`ФВ-8.6`, `ФВ-8.7`). */
 const ENTRY_IN_USE = 'ECR-REG-0409';
 

@@ -39,7 +39,8 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Persistence/WorkflowStore.cs"] =
             "стан, зрізи, журнал — за копією; календар подання — оригінал (копія — коміт 8)",
         ["src/Ecr.Infrastructure/Persistence/RegistryStore.cs"] =
-            "NAE purge: «де вживається» id запису в зрізах подання — навмисно в усіх копіях і оригіналі (будь-який зріз блокує)",
+            "NAE purge: «де вживається» id запису в зрізах подання — навмисно в усіх копіях і оригіналі (будь-який зріз блокує); "
+            + "ФВ-8.14: документи із записом у комірках — так само в усіх копіях",
         ["src/Ecr.Infrastructure/Persistence/StepApproverStore.cs"] = "AN-59: подані стани оригіналів І копій документа за період — кожен несе SheetCopyId у SubmittedStepRef",
         ["src/Ecr.Infrastructure/Persistence/ApprovalQueueStore.cs"] = "кандидати несуть SheetCopyId; склад і журнал — своєї копії",
         ["src/Ecr.Infrastructure/Jobs/SubmissionSnapshotRetentionJob.cs"] = "ранжування й зрізи погодження — на (аркуш, копія)",

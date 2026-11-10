@@ -935,6 +935,57 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Один запит на сторінку і один на лічильник, без N+1: документи відбираються EXISTS-ами від запису —
+    /// комірки seek-ом по фільтрованому <c>IX_CellValue_RegistryEntry</c>, шапка — по запису. Логічно видалені
+    /// рядки таблиць не рахуються (як у <c>PermitStore.FindUsagesAsync</c>). Копії аркушів — навмисно разом з
+    /// оригіналами: будь-яке значення — використання.
+    /// </remarks>
+    public async Task<UsageResponse> FindEntryDocumentsAsync(
+        long registryEntryId, IReadOnlyCollection<int> projectIds, int take, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(projectIds);
+
+        var projects = projectIds.ToList();
+        if (projects.Count == 0)
+        {
+            return new UsageResponse(0, []);
+        }
+
+        var fromCells =
+            from cell in db.CellValues.AsNoTracking()
+            where cell.ValueRegistryEntryId != null && cell.ValueRegistryEntryId == registryEntryId
+            join row in db.TableRows.AsNoTracking()
+                on new { cell.PeriodKeyValue, Id = cell.TableRowId } equals new { row.PeriodKeyValue, row.Id }
+            where !row.IsDeleted
+            join instance in db.TableInstances.AsNoTracking()
+                on new { row.PeriodKeyValue, Id = row.TableInstanceId } equals new { instance.PeriodKeyValue, instance.Id }
+            select instance.DocumentId;
+
+        var fromHeader = db.DocumentHeaderValues.AsNoTracking()
+            .Where(v => v.ValueRegistryEntryId == registryEntryId)
+            .Select(v => v.DocumentId);
+
+        var documents =
+            from document in db.Documents.AsNoTracking()
+            where projects.Contains(document.ProjectId)
+                  && (fromCells.Contains(document.Id) || fromHeader.Contains(document.Id))
+            join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
+            orderby document.Id
+            select new { document.Id, document.BusinessKey, project.NameL10n };
+
+        var total = await documents.CountAsync(ct).ConfigureAwait(false);
+        var page = await documents.Take(take).ToListAsync(ct).ConfigureAwait(false);
+
+        return new UsageResponse(total, [.. page.Select(d => new UsageItemDto(
+            UsageKinds.Document,
+            d.Id.ToString(CultureInfo.InvariantCulture),
+            d.BusinessKey,
+            "/documents/" + d.Id.ToString(CultureInfo.InvariantCulture),
+            new UsageHit(0, string.Empty, null, d.NameL10n, null).DisplayName()))]);
+    }
+
+    /// <inheritdoc />
     public async Task<UsageResponse> FindFieldChainConsumersAsync(
         int registryDefId, IReadOnlyCollection<string> fieldCodes, int take, CancellationToken ct)
     {

@@ -17703,6 +17703,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/{code}/entries/{entryId}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Де використовується ОДИН запис довідника: документи, у комірках чи шапці яких він стоїть (ФВ-8.14).
+         *     Право `Registry.EditDefinition`; документи — лише проєктів, де читач має `Document.View`.
+         * @description Один рядок на документ (вид `document`), перші `20`; `total` — усі видимі документи.
+         *     Чужий або неіснуючий запис — `404 ECR-REG-0404`, а не «нуль документів».
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                    /** @description Запис цього довідника. */
+                    entryId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UsageResponse"];
+                        "text/json": components["schemas"]["UsageResponse"];
+                        "text/plain": components["schemas"]["UsageResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries/{code}/entries/{id}": {
         parameters: {
             query?: never;

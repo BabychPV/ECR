@@ -4858,6 +4858,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/definition/publish` | `Registry.Publish` | 8 |
 | `GET` | `/api/v1/registries/{code}/history` | `Registry.View` | 8 |
 | `GET` | `/api/v1/registries/{code}/usage` | `Registry.EditDefinition` | 8 |
+| `GET` | `/api/v1/registries/{code}/entries/{entryId}/usage` | `Registry.EditDefinition` (+ `Document.View` у проєкті документа: чужі документи не рахуються) | 8 |
 | `GET` | `/api/v1/registries/{code}/impact` | `Registry.View` + `Calculation.View` | 8 |
 | `POST` | `/api/v1/registries/{code}/recalculate-impacted` | `Calculation.Recalculate` | 8 |
 | `POST` | `/api/v1/registries/{code}/entries/import?dryRun=` | `Registry.EditData` | 8 |
@@ -5087,6 +5088,14 @@ public sealed class NotFoundException(string errorCode, string message)
 > ✎ 2026-10-02 (ФВ-8.14, B5.4): `UsageItemDto` дістала необов'язкове `name` (читабельна
 > назва: колонка шаблону, поле довідника, методика; `null` — назви немає, клієнт показує
 > `label`). `label` лишається кодом — семантику не змінено.
+
+> ✎ 2026-11-10 (ФВ-8.14): нові `kind` — `validationRule` (колонка: правило таблиці, прив'язане до
+> колонки або з посиланням у виразі), `registryRule` (довідник: правило з ребра `cfg.RegistryUse`),
+> `document`. Колонка дає ще `data`/`cells` (значення в документах), довідник — `templateFormula` і
+> `methodologyFormula` (`id` = `версія:код`) з ребер `cfg.RegistryUse`. Новий
+> `GET /registries/{code}/entries/{entryId}/usage` — `UsageResponse` з одним рядком `document` на
+> документ (комірки невидалених рядків або шапка; `label` — бізнес-ключ, `name` — назва проєкту,
+> `route` — `/documents/{id}`), перші 20, `total` — усі видимі; запис іншого довідника — `404 ECR-REG-0404`.
 
 > ✎ 2026-10-05 (AN-35, L5-02, **breaking для старих клієнтів**): `PUT /registries/{code}/definition/draft`
 > потребує заголовок `If-Match` = `definitionVersion` опису, з якого збудовано форму (як

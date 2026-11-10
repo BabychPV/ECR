@@ -17,9 +17,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'registries.entryUsage.substancesTitle', N'ru', N'Методики, объявившие её веществом'),
     (N'registries.entryUsage.substanceLink', N'ru', N'Версии методики'),
     (N'registries.entryUsage.columnsTitle', N'ru', N'Столбцы шаблонов, берущие значения из этого справочника'),
-    (N'registries.entryUsage.columnsHint', N'ru', N'Эти столбцы могут содержать эту запись; какие документы её действительно содержат, для отдельной записи не перечисляется.'),
+    (N'registries.entryUsage.columnsHint', N'ru', N'Эти столбцы могут содержать эту запись; документы, которые её действительно содержат, перечислены выше.'),
     (N'registries.entryUsage.truncated', N'ru', N'Список уровня справочника обрезан сервером: часть ссылающихся полей, колонок или веществ может здесь отсутствовать.'),
-    (N'registries.entryUsage.notListed', N'ru', N'Здесь для отдельной записи не перечисляются: ячейки и шапки документов, константы методик и связи каскада. Удаление записи сообщает, сколько их, по видам.'),
+    (N'registries.entryUsage.notListed', N'ru', N'Здесь для отдельной записи не перечисляются: константы методик и связи каскада. Удаление записи сообщает, сколько их, по видам.'),
     (N'registries.entryUsage.column', N'kz', N'Қолданылуы'),
     (N'registries.entryUsage.action', N'kz', N'Қайда қолданылады'),
     (N'registries.entryUsage.actionFor', N'kz', N'{code} жазбасы қайда қолданылады'),
@@ -35,9 +35,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'registries.entryUsage.substancesTitle', N'kz', N'Оны зат ретінде жариялаған әдістемелер'),
     (N'registries.entryUsage.substanceLink', N'kz', N'Әдістеме нұсқалары'),
     (N'registries.entryUsage.columnsTitle', N'kz', N'Осы анықтамалықтан мән алатын үлгі бағандары'),
-    (N'registries.entryUsage.columnsHint', N'kz', N'Бұл бағандарда осы жазба болуы мүмкін; оны нақты қай құжаттар қамтитыны жеке жазба үшін тізілмейді.'),
+    (N'registries.entryUsage.columnsHint', N'kz', N'Бұл бағандарда осы жазба болуы мүмкін; оны нақты қамтитын құжаттар жоғарыда тізілген.'),
     (N'registries.entryUsage.truncated', N'kz', N'Анықтамалық деңгейіндегі тізімді сервер қысқартты: сілтеме жасайтын өрістердің, бағандардың немесе заттардың бір бөлігі мұнда болмауы мүмкін.'),
-    (N'registries.entryUsage.notListed', N'kz', N'Мұнда жеке жазба үшін тізілмейді: құжат ұяшықтары мен тақырыптары, әдістеме константалары және каскад байланыстары. Жазбаны жою олардың қанша екенін түрлері бойынша хабарлайды.')
+    (N'registries.entryUsage.notListed', N'kz', N'Мұнда жеке жазба үшін тізілмейді: әдістеме константалары және каскад байланыстары. Жазбаны жою олардың қанша екенін түрлері бойынша хабарлайды.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -61,9 +61,9 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'registries.entryUsage.substancesTitle', N'en', N'Methodologies that declare it as a substance', 1),
     (N'registries.entryUsage.substanceLink', N'en', N'Methodology versions', 1),
     (N'registries.entryUsage.columnsTitle', N'en', N'Template columns that take values from this registry', 1),
-    (N'registries.entryUsage.columnsHint', N'en', N'These columns can hold this entry; which documents actually hold it is not listed per entry.', 1),
+    (N'registries.entryUsage.columnsHint', N'en', N'These columns can hold this entry; the documents that actually hold it are listed above.', 1),
     (N'registries.entryUsage.truncated', N'en', N'The registry-level list is cut short by the server: some referring fields, columns or substances may be missing here.', 1),
-    (N'registries.entryUsage.notListed', N'en', N'Not listed here per entry: document cells and headers, methodology constants and cascade links. Deleting the entry reports how many of them there are, by kind.', 1)
+    (N'registries.entryUsage.notListed', N'en', N'Not listed here per entry: methodology constants and cascade links. Deleting the entry reports how many of them there are, by kind.', 1)
     -- ru/kz — окремою порцією `REGCTOR814` у блоці I18N нижче.
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);

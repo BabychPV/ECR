@@ -43,6 +43,8 @@ const Empty: EntryUsageReport = {
   columns: [],
   dataInDocuments: false,
   truncated: false,
+  documents: [],
+  documentsTotal: 0,
 };
 
 afterEach(() => {
@@ -113,6 +115,38 @@ describe('EntryUsageReportView', () => {
     const group = document.querySelector('[data-entry-usage-field="HIDDEN.F"]');
     expect(group?.querySelector('[role="alert"]')).not.toBeNull();
     expect(group?.textContent).not.toContain('registries.entryUsage.none');
+  });
+
+  it('документи із записом — посилання на документ, назва проєкту і чесне «показано N із M»', () => {
+    render(
+      wrap(
+        <EntryUsageReportView
+          registryCode="SUBST"
+          asOf="2026-09-30"
+          report={{
+            ...Empty,
+            documents: [{ id: '7', label: 'DOC-7', name: 'Project A', route: '/documents/7' }],
+            documentsTotal: 3,
+          }}
+        />,
+      ),
+    );
+
+    const section = document.querySelector('[data-entry-usage="documents"]');
+    expect(section).not.toBeNull();
+    expect(screen.getByRole('link', { name: 'DOC-7' }).getAttribute('href')).toBe('/documents/7');
+    expect(section?.textContent).toContain('Project A');
+    expect(document.querySelector('[data-entry-usage="documents-truncated"]')?.textContent).toContain('shown=1');
+    // Поіменне посилання є — «поіменних посилань немає» не кажемо.
+    expect(document.querySelector('[data-entry-usage="none-named"]')).toBeNull();
+  });
+
+  it('документів немає — «не знайдено» в розділі, а не мовчанка', () => {
+    render(wrap(<EntryUsageReportView registryCode="SUBST" asOf="2026-09-30" report={Empty} />));
+
+    expect(document.querySelector('[data-entry-usage="documents-none"]')?.textContent).toContain(
+      'registries.entryUsage.none',
+    );
   });
 
   it('обрізаний перелік довідника позначений', () => {

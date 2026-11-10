@@ -1,5 +1,5 @@
 import type { RegistryEntryDto } from '@/api/types';
-import { registryUsage, type UsageResponse } from '@/features/registries/api';
+import { registryEntryUsage, registryUsage, type UsageResponse } from '@/features/registries/api';
 import {
   getRegistryRows,
   type RegistryRow,
@@ -8,12 +8,12 @@ import {
 } from '@/features/registries/rows/api';
 
 /**
- * «Де використовується» ОДИН запис довідника (ФВ-8.14) — зібране з наявних читань.
+ * «Де використовується» ОДИН запис довідника (ФВ-8.14) — зібране з трьох читань.
  *
- * ⛔ Окремого серверного звіту на запис немає: `GET /registries/{code}/usage` відповідає про
- * ДОВІДНИК (які поля, колонки й речовини можуть на нього посилатися), а відмова видалення
- * `ECR-REG-0409` — лише лічильник за видами. Тут з цих двох джерел і `GET …/rows` зібрано те,
- * що можна назвати ПОІМЕННО, а решту видів названо прямо як «сервер не перелічує» — не «нуль».
+ * ⛔ `GET /registries/{code}/usage` відповідає про ДОВІДНИК (які поля, колонки й речовини можуть на
+ * нього посилатися); `GET /registries/{code}/entries/{id}/usage` — про ЗАПИС: документи, у комірках чи
+ * шапці яких він стоїть (лише видимі читачеві); `GET …/rows` — записи інших довідників. Те, чого жоден
+ * з них не перелічує, названо прямо як «сервер не перелічує» — не «нуль».
  * Сказати «не використано» там, де ми просто не питали, — найдорожча з помилок (`L10`).
  */
 
@@ -48,8 +48,22 @@ export interface ColumnUse {
   readonly route: string | null;
 }
 
+/** Документ, у комірках чи шапці якого стоїть запис. */
+export interface DocumentUse {
+  readonly id: string;
+  /** Бізнес-ключ документа. */
+  readonly label: string;
+  /** Назва проєкту документа; `null` — немає. */
+  readonly name: string | null;
+  readonly route: string | null;
+}
+
 /** Зібраний звіт на запис. */
 export interface EntryUsageReport {
+  /** Перші документи із записом (видимі читачеві). */
+  readonly documents: readonly DocumentUse[];
+  /** Скільки таких документів усього (не лише показаних). */
+  readonly documentsTotal: number;
   /** Записи довідників, що посилаються на цей запис полем `Lookup`, по полях. */
   readonly fields: readonly FieldReferences[];
   /** Дочірні записи ієрархії (`parentEntryId`). */
@@ -71,9 +85,10 @@ export interface EntryUsageReport {
 export interface EntryUsageDeps {
   readonly usage: (code: string) => Promise<UsageResponse>;
   readonly rows: (code: string, query: RegistryRowsQuery) => Promise<RegistryRowsPage>;
+  readonly documents: (code: string, entryId: number) => Promise<UsageResponse>;
 }
 
-const NetworkDeps: EntryUsageDeps = { usage: registryUsage, rows: getRegistryRows };
+const NetworkDeps: EntryUsageDeps = { usage: registryUsage, rows: getRegistryRows, documents: registryEntryUsage };
 
 /**
  * Розбирає підпис `registryField` — `ВЛАСНИК.ПОЛЕ` (`RegistryStore.FindUsageAsync`).
@@ -108,7 +123,11 @@ export async function loadEntryUsage(
   asOf: string,
   deps: EntryUsageDeps = NetworkDeps,
 ): Promise<EntryUsageReport> {
-  const usage = await deps.usage(registryCode);
+  // ⛔ Відмова звіту документів теж валить звіт: «у документах не знайдено» на відмові — хибне «не використано».
+  const [usage, documents] = await Promise.all([
+    deps.usage(registryCode),
+    deps.documents(registryCode, entry.id),
+  ]);
 
   const referencing: ReferencingField[] = [];
   for (const item of usage.items) {
@@ -151,6 +170,13 @@ export async function loadEntryUsage(
     .map((item) => ({ id: item.id, label: item.label, route: item.route }));
 
   return {
+    documents: documents.items.map((item) => ({
+      id: item.id,
+      label: item.label,
+      name: item.name ?? null,
+      route: item.route ?? null,
+    })),
+    documentsTotal: documents.total,
     fields,
     children: siblings.filter((candidate) => candidate.parentEntryId === entry.id),
     substances,
@@ -163,6 +189,7 @@ export async function loadEntryUsage(
 /** Чи є хоч одне ПОІМЕННО знайдене посилання на запис (колонки довідника — не посилання на запис). */
 export function hasNamedReferences(report: EntryUsageReport): boolean {
   return (
+    report.documents.length > 0 ||
     report.children.length > 0 ||
     report.substances.length > 0 ||
     report.fields.some((group) => group.status === 'ok' && group.total > 0)

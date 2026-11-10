@@ -39,8 +39,14 @@ function page(ids: readonly number[], totalCount: number | null = ids.length): R
   } as RegistryRowsPage;
 }
 
-function deps(usage: UsageResponse, rows: EntryUsageDeps['rows']): EntryUsageDeps {
-  return { usage: vi.fn(async () => usage), rows };
+const NoDocuments: UsageResponse = { total: 0, items: [] };
+
+function deps(
+  usage: UsageResponse,
+  rows: EntryUsageDeps['rows'],
+  documents: UsageResponse = NoDocuments,
+): EntryUsageDeps {
+  return { usage: vi.fn(async () => usage), rows, documents: vi.fn(async () => documents) };
 }
 
 describe('parseFieldLabel', () => {
@@ -111,6 +117,7 @@ describe('loadEntryUsage', () => {
         throw new Error('403');
       }),
       rows: vi.fn(),
+      documents: vi.fn(async () => NoDocuments),
     };
 
     await expect(loadEntryUsage('SUBST', Entry, [], '2026-09-30', d)).rejects.toThrow('403');
@@ -162,6 +169,32 @@ describe('loadEntryUsage', () => {
     expect(report.columns).toEqual([{ id: '5', label: 'EMISSIONS.SUBSTANCE', route: '/admin/templates/1/versions/2' }]);
     expect(report.dataInDocuments).toBe(true);
     expect(report.truncated).toBe(false);
+  });
+
+  it('документи — з серверного звіту НА ЗАПИС: його код і Id, рядки й загальна кількість', async () => {
+    const d = deps({ total: 0, items: [] }, vi.fn(), {
+      total: 31,
+      items: [{ kind: 'document', id: '7', label: 'DOC-7', route: '/documents/7', name: 'Project A' }],
+    });
+
+    const report = await loadEntryUsage('SUBST', Entry, [], '2026-09-30', d);
+
+    expect(d.documents).toHaveBeenCalledWith('SUBST', 42);
+    expect(report.documents).toEqual([{ id: '7', label: 'DOC-7', name: 'Project A', route: '/documents/7' }]);
+    expect(report.documentsTotal).toBe(31);
+    expect(hasNamedReferences(report)).toBe(true);
+  });
+
+  it('відмова звіту документів валить увесь звіт — не «у документах немає»', async () => {
+    const d: EntryUsageDeps = {
+      usage: vi.fn(async () => ({ total: 0, items: [] })),
+      rows: vi.fn(),
+      documents: vi.fn(async () => {
+        throw new Error('500');
+      }),
+    };
+
+    await expect(loadEntryUsage('SUBST', Entry, [], '2026-09-30', d)).rejects.toThrow('500');
   });
 
   it('обрізаний сервером перелік довідника позначається, а колонки не вважаються посиланням на запис', async () => {
