@@ -1262,6 +1262,8 @@ function TemplateVersionEditor(): JSX.Element {
                       columns={
                         <ColumnsTable
                           table={table}
+                          templateVersionId={id}
+                          presentationRevision={version.presentationRevision}
                           canEditPresentation={can(session.data, 'Template.Edit')}
                           canEditStructure={canEditSheets}
                           reorderPending={reorderColumnsMutation.isPending}

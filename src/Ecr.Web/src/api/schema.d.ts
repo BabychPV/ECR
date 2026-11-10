@@ -24300,7 +24300,9 @@ export interface paths {
          */
         patch: {
             parameters: {
-                query?: never;
+                query?: {
+                    expectedPresentationRevision?: number;
+                };
                 header?: never;
                 path: {
                     id: number;
@@ -24324,6 +24326,17 @@ export interface paths {
                         "application/json": components["schemas"]["PresentationRevisionResponse"];
                         "text/json": components["schemas"]["PresentationRevisionResponse"];
                         "text/plain": components["schemas"]["PresentationRevisionResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
