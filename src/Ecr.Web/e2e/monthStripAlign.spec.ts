@@ -52,6 +52,8 @@ const PeriodStateOf: Readonly<Record<number, string | null>> = {
 /** Стан ПОГОДЖЕННЯ документа на місяць: Approved, Submitted, Rejected (повернуто) — решта чернетки. */
 const DocumentStateOf: Readonly<Record<number, string>> = { 1: 'Approved', 2: 'Submitted', 3: 'Rejected' };
 const CurrentMonth = 10;
+/** ✎ 10.11: закритий місяць, відкритий лише для цього документа (`reopenedPeriods`). */
+const ReopenedMonth = 4;
 
 async function measure(boxes: Locator): Promise<Measured[]> {
   return boxes.evaluateAll((nodes) =>
@@ -134,9 +136,14 @@ test.describe('Month strip 10.11', () => {
             periodKey: year * 100 + i + 1,
             state: DocumentStateOf[i + 1] ?? 'Draft',
           }));
+          // ✎ 10.11: закритий квітень відкрито для цього документа — «reopened» теж міряється тим самим 18×18.
+          const reopenedPeriods = [{ periodKey: year * 100 + ReopenedMonth, openUntil: '2099-01-01T12:00:00Z' }];
           await route.fulfill({
             response,
-            json: { ...body, items: body.items.map((item) => (item.id === documentId ? { ...item, periodStates } : item)) },
+            json: {
+              ...body,
+              items: body.items.map((item) => (item.id === documentId ? { ...item, periodStates, reopenedPeriods } : item)),
+            },
           });
         },
       );
@@ -150,7 +157,9 @@ test.describe('Month strip 10.11', () => {
       // Підстановка дійшла: смуга справді змішана — усі стани моделі разом із поточним.
       await expect(row.locator(`[data-month="${String(year * 100 + 9)}"]`)).toHaveAttribute('data-cell', 'late', { timeout: 60_000 });
       const states = await cells.evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-cell')));
-      expect(new Set(states), states.join(',')).toEqual(new Set(['approved', 'submitted', 'returned', 'locked', 'late', 'open', 'notOpen', 'unknown']));
+      expect(new Set(states), states.join(',')).toEqual(
+        new Set(['approved', 'submitted', 'returned', 'locked', 'reopened', 'late', 'open', 'notOpen', 'unknown']),
+      );
       await expect(row.locator(`[data-month="${String(year * 100 + CurrentMonth)}"]`)).toHaveAttribute('data-current', 'true');
       await page.waitForTimeout(500);
       const legend = page.locator('[data-year-strip-legend]');
@@ -162,7 +171,7 @@ test.describe('Month strip 10.11', () => {
       expectAligned(await measure(row.locator('[data-month] .ecr-year-strip-box')), `смуга (${scheme})`);
 
       const swatches = legend.locator('.ecr-year-strip-box');
-      await expect(swatches).toHaveCount(8);
+      await expect(swatches).toHaveCount(9);
       expectAligned(await measure(swatches), `легенда (${scheme})`);
     });
   }

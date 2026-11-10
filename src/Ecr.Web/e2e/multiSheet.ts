@@ -45,6 +45,22 @@ function column(ordinal: number, header: string): Record<string, unknown> {
 export interface MultiSheetDocument {
   readonly documentId: number;
   readonly periodKey: number;
+  /** ✎ 10.11: щоб завести ДРУГИЙ документ того самого проєкту (`addDocument`). */
+  readonly projectId: number;
+  readonly templateVersionId: number;
+  readonly sheetDefIds: readonly number[];
+}
+
+/** ✎ 10.11: ще один документ того самого проєкту й версії (для порівняння двох рядків переліку). */
+export async function addDocument(page: Page, from: MultiSheetDocument): Promise<number> {
+  const document = await ok<{ documentId: number }>(
+    await page.request.post('/api/v1/documents', {
+      data: { projectId: from.projectId, sheetDefIds: from.sheetDefIds, templateVersionId: from.templateVersionId },
+    }),
+    'другий документ',
+  );
+
+  return document.documentId;
 }
 
 /** Документ із `sheetCount` аркушами (довгі назви — вкладки не вміщуються); перший аркуш має `wideColumns` стовпців. */
@@ -122,5 +138,11 @@ export async function createMultiSheetDocument(
   const period = calendar.periods.find((item) => item.state === 'Open') ?? calendar.periods[0];
   expect(period, 'у проєкту немає періодів').toBeDefined();
 
-  return { documentId: document.documentId, periodKey: period?.periodKey ?? 0 };
+  return {
+    documentId: document.documentId,
+    periodKey: period?.periodKey ?? 0,
+    projectId: project.projectId,
+    templateVersionId: version.versionId,
+    sheetDefIds: structure.sheets.map((sheet) => sheet.id),
+  };
 }
