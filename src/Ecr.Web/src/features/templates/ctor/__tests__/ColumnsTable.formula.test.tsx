@@ -59,6 +59,8 @@ describe('ColumnsTable — «Formula» лише на обчислюваній к
     renderWithQuery(
       <ColumnsTable
         table={table}
+        templateVersionId={9}
+        presentationRevision={0}
         canEditPresentation={false}
         canEditStructure
         reorderPending={false}
