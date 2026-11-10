@@ -3,10 +3,12 @@ import { isPeriodOutsideProject, nearestPeriod } from '@/features/documents/peri
 import { formatPeriodKey } from '@/shared/format';
 import { isHeaderFinding } from '@/features/documents/inspector/headerFinding';
 import { validationCheckedAt } from '@/features/documents/inspector/validationCheckedAt';
-import { Alert, Button, Group, Skeleton, Stack, Tabs, Text } from '@mantine/core';
+import { Alert, Button, Code, Group, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
+import { ServiceStatePage } from '@/app/ServiceStatePage';
+import { problemText } from '@/shared/ui/problemText';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
@@ -772,6 +774,16 @@ export function DocumentPage(): JSX.Element {
       </Stack>
     ) : null;
 
+  /*
+   * D10 (a11y): документа немає (`404`, напр. `ECR-DOC-0404`) — службова сторінка з заголовком
+   * сторінки, як `/404` (`NotFoundPage`), а не голий `ErrorAlert` без жодного heading. «Повторити»
+   * тут не допоможе, тож замість нього — шлях назад до переліку документів.
+   */
+  const missingError = summary.data === undefined ? summary.error : null;
+  if (missingError instanceof EcrApiError && missingError.problem.status === 404) {
+    return <DocumentNotFound error={missingError} />;
+  }
+
   return recovery ?? (
     /*
      * ⛔ Обгортка навколо ВСЬОГО екрана: заголовок — це бізнес-ключ документа,
@@ -1277,4 +1289,29 @@ function currentPeriodKey(): number {
   const now = new Date();
 
   return now.getUTCFullYear() * 100 + (now.getUTCMonth() + 1);
+}
+
+/**
+ * Документа немає (D10, a11y): службова сторінка `ServiceStatePage` — той самий вигляд, фокус на
+ * заголовку й оголошення, що в `/404`. Назва — з каталогу за кодом відмови (`problemText`), код і
+ * кореляція — для підтримки (як в `ErrorAlert`), дія — назад до переліку документів.
+ */
+function DocumentNotFound({ error }: { readonly error: EcrApiError }): JSX.Element {
+  const shown = problemText(error);
+
+  return (
+    <ServiceStatePage icon="route" title={shown.title}>
+      {shown.detail !== null && (
+        <Text size="sm" c="dimmed" ta="center">
+          {shown.detail}
+        </Text>
+      )}
+      <Text size="xs">
+        <Code>{error.problem.errorCode}</Code> <Code>{error.problem.correlationId}</Code>
+      </Text>
+      <Button component={Link} to="/">
+        {t('nav.goToDocuments')}
+      </Button>
+    </ServiceStatePage>
+  );
 }
