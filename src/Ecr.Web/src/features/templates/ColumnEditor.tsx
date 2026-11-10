@@ -77,7 +77,7 @@ export function ColumnEditor({
   // `unitId` лише носився від сервера назад. Той самий ключ і строк
   // свіжості, що в `CalculationResultsPanel`: каталог одиниць міняється рідко.
   const units = useQuery({
-    queryKey: ['units'],
+    queryKey: queryKeys.units.all(),
     queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
     staleTime: 60 * 60 * 1000,
     enabled: takesUnit,

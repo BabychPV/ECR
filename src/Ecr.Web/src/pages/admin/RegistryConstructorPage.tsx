@@ -223,7 +223,7 @@ export function RegistryConstructorPage(): JSX.Element {
     newFields.some((field) => NumericFieldTypes.includes(field.dataType)) ||
     (definition.data?.fields ?? []).some((field) => field.unitId !== null);
   const units = useQuery({
-    queryKey: ['units'],
+    queryKey: queryKeys.units.all(),
     queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
     staleTime: 60 * 60 * 1000,
     enabled: needsUnits,
