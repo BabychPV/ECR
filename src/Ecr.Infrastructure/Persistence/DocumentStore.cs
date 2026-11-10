@@ -397,6 +397,28 @@ public sealed class DocumentStore(
                     : documents.Where(d => !lateIds.Contains(d.Id));
             }
 
+            // ✎ 10.11 «Reopened months»: той самий предикат, що дає `ReopenedPeriods` рядка (`ActiveReopens`), — підзапитом
+            // `IN` ДО `Take`, поруч із межею видимості вище; не друге визначення «діючого винятку».
+            if (filter.HasReopenedMonths is { } wantReopened)
+            {
+                var reopenedIds = ActiveReopens(filter);
+                if (period.Value is { } reopenedPeriod)
+                {
+                    reopenedIds = reopenedIds.Where(x => x.PeriodKeyValue == reopenedPeriod);
+                }
+                else if (filter.Year is { } reopenedYear)
+                {
+                    var fromKey = reopenedYear * 100;
+                    var toKey = (reopenedYear + 1) * 100;
+                    reopenedIds = reopenedIds.Where(x => x.PeriodKeyValue > fromKey && x.PeriodKeyValue < toKey);
+                }
+
+                var reopenedDocuments = reopenedIds.Select(x => x.DocumentId);
+                documents = wantReopened
+                    ? documents.Where(d => reopenedDocuments.Contains(d.Id))
+                    : documents.Where(d => !reopenedDocuments.Contains(d.Id));
+            }
+
             // resultsStale: той самий предикат, що дає позначку в рядку (`StaleResultsQuery`), - підзапитом ДО `Take`.
             // ⛔ Проєкти зі звуженням виключаються в обох напрямках (`false` теж): інакше «не застарілі» = решта,
             // тобто те саме знання навиворіт. Без періоду фільтр діє лише за роком (✎ g4: застарілий хоч в одному
@@ -537,6 +559,13 @@ public sealed class DocumentStore(
             ? await PeriodStatesBatchAsync([.. page1.Select(d => d.Id)], stripYear, filter, ct).ConfigureAwait(false)
             : null;
 
+        // ✎ 10.11: діючі винятки «місяць відкрито для документа» — теж ОДИН запит на сторінку (індекс
+        // `UQ_DocumentPeriodReopen_Active` (DocumentId, PeriodKey) INCLUDE OpenUntil, фільтр ClosedAt IS NULL).
+        // Як і смуга року, — лише з роком (`year`): поза смугою позначка нікому не потрібна, і запит не додається.
+        var reopenedByDocument = filter.Year is not null
+            ? await ReopenedPeriodsBatchAsync([.. page1.Select(d => d.Id)], filter, ct).ConfigureAwait(false)
+            : null;
+
         var multiProjects = page1.Where(d => d.MultiVersion).Select(d => d.ProjectId).ToList();
         var versionByPeriod = multiProjects.Count == 0
             ? []
@@ -563,7 +592,8 @@ public sealed class DocumentStore(
                 OwnerUserId: d.OwnerUserId,
                 TemplateVersion: d.TemplateVersion,
                 TemplateVersionByPeriod: versionByPeriod.GetValueOrDefault(d.ProjectId),
-                PeriodStates: periodStates is null ? null : periodStates.GetValueOrDefault(d.Id) ?? []));
+                PeriodStates: periodStates is null ? null : periodStates.GetValueOrDefault(d.Id) ?? [],
+                ReopenedPeriods: reopenedByDocument is null ? null : reopenedByDocument.GetValueOrDefault(d.Id) ?? []));
         }
 
         var next = !hasMore
@@ -1771,6 +1801,43 @@ public sealed class DocumentStore(
                 g => g.Key,
                 IReadOnlyList<DocumentPeriodState> (g) => [.. g.Select(r => new DocumentPeriodState(
                     r.PeriodKey, CellState(r.Total, r.Rejected, r.Submitted, r.Approved)))]);
+    }
+
+    /// <summary>
+    /// ✎ 10.11: діючі винятки «закритий місяць відкрито для документа» (<c>doc.DocumentPeriodReopen</c>) — не закриті й зі
+    /// строком після моменту запиту. ЄДИНЕ місце предиката для фільтра <c>HasReopenedMonths</c> і позначки
+    /// <see cref="DocumentSummary.ReopenedPeriods"/> (той самий, що <c>DocumentPeriodReopen.IsActiveAt</c>).
+    /// </summary>
+    private IQueryable<DocumentPeriodReopen> ActiveReopens(DocumentListFilter filter)
+    {
+        // Час — лише через `IClock` (`ForbiddenApiTests`); без підмінного годинника — системний.
+        var now = filter.AsOfUtc ?? (staleClock ?? new SystemClock()).UtcNow;
+        return db.DocumentPeriodReopens.AsNoTracking().Where(x => x.ClosedAt == null && x.OpenUntil > now);
+    }
+
+    /// <summary>✎ 10.11: діючі винятки документів сторінки ОДНИМ запитом (без N+1), за зростанням місяця.</summary>
+    private async Task<IReadOnlyDictionary<long, IReadOnlyList<DocumentReopenedPeriod>>> ReopenedPeriodsBatchAsync(
+        long[] documentIds, DocumentListFilter filter, CancellationToken ct)
+    {
+        if (documentIds.Length == 0)
+        {
+            return new Dictionary<long, IReadOnlyList<DocumentReopenedPeriod>>();
+        }
+
+        var rows = await ActiveReopens(filter)
+            .Where(x => documentIds.Contains(x.DocumentId))
+            .OrderBy(x => x.DocumentId)
+            .ThenBy(x => x.PeriodKeyValue)
+            .Select(x => new { x.DocumentId, x.PeriodKeyValue, x.OpenUntil })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .GroupBy(r => r.DocumentId)
+            .ToDictionary(
+                g => g.Key,
+                IReadOnlyList<DocumentReopenedPeriod> (g) => [.. g.Select(r => new DocumentReopenedPeriod(
+                    r.PeriodKeyValue, DateTime.SpecifyKind(r.OpenUntil, DateTimeKind.Utc)))]);
     }
 
     /// <summary>П'ять станів документа за лічильниками аркушів (те саме правило, що й <see cref="WhereState"/>).</summary>
