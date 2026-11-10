@@ -13,7 +13,9 @@
    ?dialog= (шаблон):      clone-version · archive-version · edit-template · archive-template · result-created
    ?dialog= (конструктор): publish-version (&step=changes|reason|review · &issues=clean · &changes=breaking) · result-published ·
                            migrate-documents · clone-version · delete-draft · delete-sheet · delete-table · delete-column · delete-row ·
-                           delete-formula · delete-rule · add-sheet · add-table · preview-version · result-presentation
+                           delete-formula · delete-rule · add-sheet · add-table · preview-version · result-presentation ·
+                           edit-selected (вкладка Columns; &bulk=gap — колонки з розривом, відмова «не підряд»;
+                           &bulk=stale — відповідь 409 «хтось змінив вигляд»)
    ?dialog= (relations):   delete-relation · result-cycle     ?dialog= (period-rules): delete-rule
    Демо-перемикачі адреси: issues=clean (усі проблеми публікації виправлено) · changes=breaking (у чернетці є Breaking-зміна)
    ===================================================================== */
@@ -142,6 +144,11 @@
     '.tpl-dg .hd.bad{fill:var(--danger)}',
     '.tpl-dg .el{fill:var(--muted);font:400 var(--fs-xs) var(--sans);paint-order:stroke;stroke:var(--surface);stroke-width:4}',
     '.tpl-dg .el.bad{fill:var(--danger)}',
+    /* bulk action bar (Columns: «N selected · Edit selected… · Clear selection»), KIT §6.5.1 */
+    '.tpl-bulk{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s2);min-height:var(--ctl);padding:var(--s1) var(--s3);margin-bottom:var(--s2);border:1px solid var(--border);border-radius:var(--r2);background:var(--select)}',
+    '.tpl-bulk[hidden]{display:none}',
+    '.tpl-bulk .n{font-weight:600;margin-right:var(--s2)}',
+    '.tpl-gpath{color:var(--muted)}',
     '@media (max-width:900px){.tpl-cmp{grid-template-columns:1fr;overflow:auto}.tpl-cmp>div{overflow:visible}}',
     '@media (max-width:640px){.tpl-bar .meta{display:none}.tpl-tl li{grid-template-columns:16px minmax(0,1fr)}.tpl-tl .ac{grid-column:2}.tpl-cmp .ws{grid-template-columns:1fr}.tpl-cmp .ws>svg{display:none}}'
   ].join('\n'));
@@ -222,6 +229,23 @@
   function tlabel(tb) { return tb.no + ' ' + tb.name.en; }
   function cname(c, lang) { return c.name[lang || 'en'] || c.name.en || c.code; }
   function addChange(S, c) { c.id = 'CH-' + (S.changes.length + 1) + '-' + c.kind.charAt(0); S.changes.push(c); return c; }
+
+  /* ---- header groups of a table (presentation, ≤ 3 levels); a column belongs to one group: c.hg ---- */
+  function hgroupsOf(tb) {
+    if (!tb.hgroups) tb.hgroups = [{ id: 'G1', label: 'Operating data', parent: null }, { id: 'G2', label: 'Pollutants', parent: null }, { id: 'G3', label: 'Gases', parent: 'G2' }, { id: 'G4', label: 'Particulates', parent: 'G2' }];
+    return tb.hgroups;
+  }
+  function hgOf(tb, id) { return hgroupsOf(tb).filter(function (g) { return g.id === id; })[0] || null; }
+  function hgPath(tb, id) { var out = [], g = hgOf(tb, id); while (g && out.length < 3) { out.unshift(g.label); g = g.parent ? hgOf(tb, g.parent) : null; } return out.join(' › '); }
+  function hgOptions(tb) { var out = []; (function walk(parent, depth) { hgroupsOf(tb).filter(function (g) { return g.parent === parent; }).forEach(function (g) { out.push({ value: g.id, label: new Array(depth).join('— ') + g.label }); walk(g.id, depth + 1); }); })(null, 1); return out; }
+  /* Перша група, чиї колонки після призначення не йдуть підряд (той самий інваріант, що ECR-TMPL-4229 notContiguous), або null. */
+  function hgBroken(tb, codes, gid) {
+    var next = tb.cols.map(function (c) { return codes.indexOf(c.code) >= 0 ? (gid || null) : (c.hg || null); }), ids = {};
+    next.forEach(function (id) { var g = id ? hgOf(tb, id) : null; while (g) { ids[g.id] = 1; g = g.parent ? hgOf(tb, g.parent) : null; } });
+    return Object.keys(ids).filter(function (id) {
+      var at = []; next.forEach(function (x, i) { var g = x ? hgOf(tb, x) : null; while (g) { if (g.id === id) { at.push(i); break; } g = g.parent ? hgOf(tb, g.parent) : null; } });
+      return at[at.length - 1] - at[0] + 1 !== at.length; })[0] || null;
+  }
 
   function seedDraft(S) {
     var a = ensure(S.sheets[0].tables[0]), b = ensure(S.sheets[0].tables[1]), c = ensure(S.sheets[0].tables[4]);
@@ -598,6 +622,7 @@
     }
 
     /* ---- centre: table ---- */
+    var colsApi = null; /* {dt, tb}: вкладка Columns, щоб діалог edit-selected оновив таблицю й зняв вибір */
     function tableView(tb, sh) {
       var errs = tb.formulas.filter(function (f) { return f.check === 'Error'; }).length, noName = tb.cols.filter(function (c) { return !c.name[S.props.lang]; }).length;
       main.appendChild(h('div', { class: 'tpl-bar' }, sideToggle(), h('span', { class: 'chip' }, tb.no), h('h2', { title: tb.name.en }, tb.name.en), h('span', { class: 'meta' }, sh.name.en), h('span', { class: 'sp' }),
@@ -611,7 +636,17 @@
       function rowMenu(label, items) { return E.Button({ label: label, icon: 'more', iconOnly: true, onClick: function (e, btn) { E.openMenu(btn, items); } }); }
       function colsTab(panel) {
         panel.appendChild(h('div', { class: 'tpl-tb' }, h('p', archived ? 'Columns in the order operators saw them.' : frozen ? 'Structure is locked. Click a column to change how it looks: width, alignment, number format.' : 'Columns in the order operators see them. Click a column to edit its names, type, unit and look.'), frozen ? null : E.Button({ label: 'Add column', icon: 'plus', id: 'tv-col-add', onClick: function () { ctx.openPanel('c:new'); } })));
+        /* Bulk action bar (KIT §6.5.1): з'являється лише при вибраних рядках; одна дія «Edit selected…» + «Clear selection». */
+        var bulk = h('div', { class: 'tpl-bulk', id: 'tv-cols-bulk', role: 'toolbar', 'aria-label': 'Selected columns', hidden: true });
+        function paintBulk(keys) {
+          bulk.textContent = ''; bulk.hidden = !keys.length; if (!keys.length) return;
+          bulk.appendChild(h('span', { class: 'n', role: 'status', 'aria-live': 'polite' }, keys.length + ' selected'));
+          bulk.appendChild(E.Button({ label: 'Edit selected…', icon: 'pencil', size: 'sm', id: 'tv-cols-bulk-edit', onClick: function () { ctx.openDialog('edit-selected', keys.slice()); } }));
+          bulk.appendChild(E.Button({ label: 'Clear selection', icon: 'x', size: 'sm', variant: 'ghost', id: 'tv-cols-bulk-clear', onClick: function () { dt.clearSelection(); } }));
+        }
+        panel.appendChild(bulk);
         var dt = E.DataTable({ id: 'tv-cols', rows: tb.cols, rowKey: 'code', tall: true, pageSize: 100, onRowClick: function (c) { ctx.openPanel('c:' + c.code); }, rowLabel: function (c) { return 'Edit column ' + cname(c); },
+          selectable: !archived, onSelect: paintBulk,
           columns: [
             { key: 'ord', label: 'Order', width: 96, sortable: false, render: function (c) { var i = tb.cols.indexOf(c); function mv(d) { tb.cols.splice(i, 1); tb.cols.splice(i + d, 0, c); if (!S.changes.some(function (x) { return x.code === 'order:' + tb.id; })) addChange(S, { kind: 'changed', cls: 'Safe', type: 'Table', code: 'order:' + tb.id, sheet: sh.name.en, table: tlabel(tb), title: 'Column order changed', was: 'Previous order', now: tb.cols.map(function (x) { return x.code; }).join(', '), effect: 'Only the on-screen and export order changes. Values stay with their columns.' }); markDirty(); dt.setRows(tb.cols); }
               if (frozen) return h('span', { class: 'tpl-ord' }, h('span', { class: 'ix' }, String(i + 1)));
@@ -619,11 +654,13 @@
             { key: 'name', label: 'Column', sortable: false, render: function (c) { return c.name[S.props.lang] ? E.twoLine(cname(c), c.code) : h('span', { class: 'two-line' }, h('span', { class: 'tpl-bad' }, icon('alertCircle', 14), 'No English name'), h('small', c.code)); } },
             { key: 'type', label: 'Type', sortable: false, render: function (c) { return c.type + (c.type === 'Decimal' ? ' · ' + c.scale : ''); } },
             { key: 'unit', label: 'Unit', sortable: false, mono: true, render: function (c) { return c.unit || null; } },
-            { key: 'required', label: 'Required', sortable: false, hideSm: true, render: function (c) { return c.required ? 'Required' : null; } },
+            /* «Group» — шлях групи заголовка (Pollutants › Gases); «Required» переїхав у шторку колонки (≤ 7 колонок). */
+            { key: 'group', label: 'Group', sortable: false, hideSm: true, render: function (c) { return c.hg ? h('span', { class: 'tpl-gpath', title: hgPath(tb, c.hg) }, hgPath(tb, c.hg)) : null; } },
             { key: 'src', label: 'Filled by', sortable: false, hideSm: true, render: function (c) { return c.src === 'calc' ? 'ƒ Formula' : c.src === 'lookup' ? 'Registry · ' + (c.registry || '—') : 'Operator'; } },
             { key: 'act', label: '', width: 44, sortable: false, render: function (c) { return rowMenu('Actions for ' + cname(c), [{ label: 'Edit…', icon: 'pencil', onClick: function () { ctx.openPanel('c:' + c.code); } }, { sep: true }, { label: 'Delete column…', icon: 'trash', danger: true, disabled: frozen, title: frozen ? FROZEN_TIP : null, onClick: function () { ctx.openDialog('delete-column', c); } }]); } }],
           empty: { icon: 'columns', title: 'This table has no columns', text: 'Add the first column: what operators enter, or what is calculated.', actions: frozen ? [] : [{ label: 'Add column', icon: 'plus', onClick: function () { ctx.openPanel('c:new'); } }] } });
         panel.appendChild(dt);
+        colsApi = { dt: dt, tb: tb };
       }
       function rowsTab(panel) {
         panel.textContent = ''; var r = tb.rows, shown = r._shown || 8;
@@ -815,6 +852,34 @@
       E.Dialog({ id: 'tv-pv', wide: true, title: 'Preview as a data-entry operator', body: function (b) { b.appendChild(h('p', 'Sheet “' + r.sh.name.en + '” with sample values. Unsaved changes are included, so you can check them before saving.')); b.appendChild(h('div', { class: 'tpl-pickrow' }, pick, E.Field({ id: 'tv-pv-lang2', label: 'Language', control: h('div', E.Segmented({ id: 'tv-pv-lang2', label: 'Language', value: lang, options: LANGS.map(function (l) { return { value: l[0], label: l[1] }; }), onChange: function (l) { lang = l; paint(); } })) }))); b.appendChild(slot); paint(); }, footer: [{ label: 'Close', variant: 'primary' }] });
     });
     ctx.dialog('result-presentation', function () { presResult(); });
+    /* «Edit selected…» (Columns): призначити або зняти групу заголовка кільком колонкам ОДНИМ записом — все або нічого.
+       Помилки: колонки групи не підряд (ECR-TMPL-4229 notContiguous) і застаріла вкладка (409, &bulk=stale). Обидві — банер у діалозі, нічого не змінено. */
+    ctx.dialog('edit-selected', function (codes) {
+      var r = curTable() || { tb: ensure(S.sheets[0].tables[0]), sh: S.sheets[0] }, tb = ensure(r.tb);
+      /* З адреси (без вибору): три сусідні колонки; &bulk=gap — три з розривом, щоб показати відмову «не підряд». */
+      codes = codes && codes.length ? codes : (ctx.query.bulk === 'gap' ? [tb.cols[2], tb.cols[3], tb.cols[6]] : tb.cols.slice(2, 5)).map(function (c) { return c.code; });
+      var cols = tb.cols.filter(function (c) { return codes.indexOf(c.code) >= 0; }), same = cols.every(function (c) { return (c.hg || '') === (cols[0].hg || ''); });
+      var gsel = E.Select({ id: 'tv-bulk-group', label: 'Header group', value: same ? (cols[0].hg || '') : '',
+        options: [{ value: '', label: '— none — (remove from group)' }].concat(hgOptions(tb)),
+        hint: 'Columns of one group must stand next to each other. Nested groups are shown with “—”.' });
+      var slot = h('div');
+      function fail(title, text) { slot.textContent = ''; slot.appendChild(E.Banner({ tone: 'danger', id: 'tv-bulk-error', title: title, text: text })); }
+      E.Dialog({ id: 'tv-bulk', title: 'Edit ' + F.plural(cols.length, { one: 'column', other: 'columns' }),
+        body: function (b) {
+          b.appendChild(h('p', 'Applies to: ' + cols.map(function (c) { return cname(c); }).join(', ') + '. All of them change together, or none does.'));
+          if (!same) b.appendChild(h('p', { class: 'muted t-xs' }, 'The selected columns are in different groups now.'));
+          b.appendChild(slot); b.appendChild(gsel);
+        },
+        footer: [{ label: 'Cancel' }, { label: 'Apply', variant: 'primary', id: 'tv-bulk-apply', keepOpen: true, onClick: function (ctl) {
+          var gid = gsel.value || null;
+          if (ctx.query.bulk === 'stale') { fail('Someone changed this table’s appearance a moment ago', 'Nothing was saved. The table has been reloaded — check the columns and apply again.'); return false; }
+          var broken = gid ? hgBroken(tb, codes, gid) : null;
+          if (broken) { fail('Columns of group “' + hgPath(tb, broken) + '” must be next to each other', 'Another column stands between them. Nothing was saved: reorder the columns or pick other ones.'); return false; }
+          cols.forEach(function (c) { c.hg = gid; }); v.presRev = (v.presRev || 0) + 1; ctl.close();
+          if (colsApi && colsApi.tb === tb) { colsApi.dt.clearSelection(); colsApi.dt.setRows(tb.cols); }
+          E.Toast(gid ? F.plural(cols.length, { one: 'column', other: 'columns' }) + ' moved to “' + hgPath(tb, gid) + '”' : F.plural(cols.length, { one: 'column', other: 'columns' }) + ' removed from their group', 'success');
+        } }] });
+    });
 
     function confirmDelete(o) { E.ConfirmDialog({ id: o.id, title: o.title, consequences: o.consequences.filter(Boolean).concat([{ text: draft ? 'You can undo right after deleting. Until you save, leaving the page also discards it.' : '', note: true }]).filter(function (c) { return typeof c === 'string' || c.text; }), verb: o.verb, icon: 'trash', onConfirm: function () { var before = snap(S), dirtyBefore = S.dirty, keep = node; o.run(); markDirty(); paintAll(); undoable(o.done, before, dirtyBefore, keep); } }); }
     var docsOnBase = base ? base.documents : 0, breakLine = docsOnBase ? 'Breaking change: ' + F.plural(docsOnBase, { one: 'document', other: 'documents' }) + ' on ' + vname(base) + ' hold data here. Publishing will be blocked until you revert it or plan a migration.' : null;
@@ -1139,6 +1204,10 @@
     { label: 'Way out: publish with a migration', href: HX + '?dialog=publish-version&issues=clean&changes=breaking&migrate=1&step=reason' }, { label: 'Result · migrate documents', href: HX + '?dialog=migrate-documents' }] });
   E.flow('tpl-presentation-after-publish', { group: 'Configuration', title: 'Change the look of a published version', actor: 'Template administrator', steps: [
     { label: 'Published v1.0.0 · structure frozen', href: HP }, { label: 'Column: structure locked, presentation editable', href: HP + '?' + N11 + '&panel=c:NOX' }, { label: 'Result: presentation revision saved', href: HP + '?dialog=result-presentation' }, { label: 'What “presentation revision” means', href: HP + '?node=root' }, { label: 'Need a structural change → clone', href: HP + '?dialog=clone-version' }] });
+  E.flow('tpl-columns-bulk-group', { group: 'Configuration', title: 'Put several columns under one header group (or take them out)', actor: 'Template administrator', steps: [
+    { label: 'Columns of table 1.1 · tick the columns', href: HP + '?' + N11 }, { label: 'Edit selected… · pick a group', href: HP + '?' + N11 + '&dialog=edit-selected' },
+    { label: 'Rejected: group columns not adjacent', href: HP + '?' + N11 + '&bulk=gap&dialog=edit-selected' }, { label: 'Rejected: the table changed meanwhile (reload)', href: HP + '?' + N11 + '&bulk=stale&dialog=edit-selected' },
+    { label: 'Clear: — none —', href: HP + '?' + N11 + '&dialog=edit-selected' }] });
   E.flow('tpl-compare', { group: 'Configuration', title: 'Compare two versions', actor: 'Template administrator', steps: [
     { label: 'Template · versions', href: T1 }, { label: 'Compare v1.0.0 → v1.1.0', href: HX + '/compare' }, { label: 'Detail of a guarded change', href: HX + '/compare?item=CH-3-c' }, { label: 'Only breaking', href: HX + '/compare?changes=breaking&only=breaking' }, { label: 'Two archived versions', href: '#' + BASE + '/GEN07131100/versions/v2/compare?with=v1' }] });
   E.flow('tpl-delete-with-undo', { group: 'Configuration', title: 'Delete with consequences and Undo', actor: 'Template administrator', steps: [
