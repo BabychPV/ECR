@@ -98,6 +98,11 @@ describe('DataSourcesTable — стани', () => {
     // Що робити без налаштованого PI й де це описано — у тому ж стані.
     expect(screen.queryByText(/⟦sources\.notConfiguredHint⟧/)).toBeTruthy();
     expect(screen.queryByRole('table')).toBeNull();
+
+    // ⛔ Перелік є (хай і порожній) — таблиця вже тягне чанк шухляди (`void loadDataSourceDrawer()`). Без цього
+    // очікування файл міг завершитись раніше за той `import()`: «Vite module runner has been closed»
+    // (`TestDataSourceModal.tsx`) — необроблена відмова, що червонить job `shuffle` (seed 23107).
+    await import('@/features/integration/DataSourceDrawer');
   });
 
   it('у дорозі: «завантаження», а не «з\'єднань немає»', async () => {
