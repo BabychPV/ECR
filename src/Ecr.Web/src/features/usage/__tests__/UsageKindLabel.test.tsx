@@ -34,6 +34,11 @@ const Kinds = [
   'methodologyRequiredInput',
   // HSE301 U2: прив'язка PI за вікном рядка — одиниця цілі або джерела.
   'rowWindowMap',
+  // ФВ-8.14: правило валідації (колонка) і правило довідника (довідник).
+  'validationRule',
+  'registryRule',
+  // ФВ-8.14: документ, де стоїть запис довідника.
+  'document',
 ] as const;
 
 function label(kind: string): HTMLElement {

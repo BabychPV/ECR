@@ -2,6 +2,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
@@ -77,6 +78,41 @@ public sealed class RegistryDefinitionUsageTests(SqlServerFixture sql)
         // `name` (назва заголовка колонки / назва поля зі сіду фікстури).
         Assert.Equal("Column", column.GetProperty("name").GetString());
         Assert.Equal("Ref field", field.GetProperty("name").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.14")]
+    public async Task Формули_шаблону_і_методики_та_правила_довідників_з_ребер_рахуються_по_одному()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.View", "Registry.EditDefinition")
+            .ConfigureAwait(true);
+
+        var fixture = await SeedEdgesAsync().ConfigureAwait(true);
+
+        var usage = await ReadUsageAsync(client, app, fixture.Code).ConfigureAwait(true);
+
+        // ⛔ Три джерела — по одному рядку, хоч ребер на кожне по два (різні поля довідника);
+        // ребра на ІНШИЙ довідник не рахуються.
+        Assert.Equal(3, usage.GetProperty("total").GetInt32());
+        var items = usage.GetProperty("items").EnumerateArray()
+            .ToDictionary(i => i.GetProperty("kind").GetString()!, i => i);
+        Assert.Equal(
+            ["methodologyFormula", "registryRule", "templateFormula"],
+            items.Keys.Order(StringComparer.Ordinal));
+
+        Assert.Equal(fixture.FormulaLabel, items["templateFormula"].GetProperty("label").GetString());
+        Assert.Equal("Table", items["templateFormula"].GetProperty("name").GetString());
+        Assert.Equal(fixture.TemplateRoute, items["templateFormula"].GetProperty("route").GetString());
+
+        Assert.Equal(fixture.MethodologyLabel, items["methodologyFormula"].GetProperty("label").GetString());
+        Assert.Equal("Methodology", items["methodologyFormula"].GetProperty("name").GetString());
+        Assert.Equal(fixture.MethodologyRoute, items["methodologyFormula"].GetProperty("route").GetString());
+
+        Assert.Equal(fixture.RuleLabel, items["registryRule"].GetProperty("label").GetString());
+        Assert.Equal(fixture.RuleRoute, items["registryRule"].GetProperty("route").GetString());
     }
 
     [Fact]
@@ -228,6 +264,87 @@ public sealed class RegistryDefinitionUsageTests(SqlServerFixture sql)
             subject.Code, other.Code, table.Code, column.Code, field.Code,
             template.Id, version.Id);
     }
+
+    /// <summary>
+    /// Довідник-предмет і три джерела ребер <c>cfg.RegistryUse</c> на нього (формула шаблону, формула
+    /// методики, правило сусіднього довідника) — кожне двома ребрами різних полів; плюс ребро-пастка на
+    /// сусідній довідник.
+    /// </summary>
+    private async Task<EdgeFixture> SeedEdgesAsync()
+    {
+        var tag = $"{Guid.NewGuid():N}"[..8].ToUpperInvariant();
+
+        await using var db = new EcrDbContext(Options());
+
+        var subject = new RegistryDef(EcrCode.Create($"REDG{tag}"), Name($"Subject {tag}"), isTemporal: false);
+        var other = new RegistryDef(EcrCode.Create($"ROTE{tag}"), Name($"Other {tag}"), isTemporal: false);
+        db.RegistryDefs.AddRange(subject, other);
+
+        var template = new Template(EcrCode.Create($"TEDG{tag}"), Name($"Edges {tag}"), createdByUserId: 1, Now);
+        db.Templates.Add(template);
+        var methodology = new Methodology(EcrCode.Create($"MEDG{tag}"), Name("Methodology"));
+        db.Methodologies.Add(methodology);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var version = new TemplateVersion(template.Id, "1.0.0.0", createdByUserId: 1, Now);
+        db.TemplateVersions.Add(version);
+        var methodologyVersion = new MethodologyVersion(
+            methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, Now);
+        db.MethodologyVersions.Add(methodologyVersion);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var sheet = new SheetDef(version.Id, EcrCode.Create($"SH{tag}"), Name("Sheet"), 1);
+        db.SheetDefs.Add(sheet);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var table = new TableDef(
+            sheet.Id, EcrCode.Create($"TB{tag}"), Name("Table"), 1,
+            TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+        db.TableDefs.Add(table);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var column = new ColumnDef(table.Id, EcrCode.Create($"CL{tag}"), Name("Column"), 1, CellDataType.Decimal);
+        db.ColumnDefs.Add(column);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var formula = new FormulaDef(table.Id, FormulaScope.Column, "1", ExpressionDialect.Template);
+        formula.AssignColumn(column.Id);
+        db.FormulaDefs.Add(formula);
+        var rule = new RegistryRuleDef(
+            other.Id, EcrCode.Create("RULE_REG"), RegistryRuleKind.RequiredWhen, "1 = 1",
+            ValidationSeverity.Warning, Name("Rule"));
+        db.RegistryRuleDefs.Add(rule);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        db.RegistryUses.AddRange(
+            RegistryUse.ForTemplateFormula(formula.Id, subject.Id, "A"),
+            RegistryUse.ForTemplateFormula(formula.Id, subject.Id, "B"),
+            RegistryUse.ForMethodologyFormula(methodologyVersion.Id, "F_REG", subject.Id, null),
+            RegistryUse.ForMethodologyFormula(methodologyVersion.Id, "F_REG", subject.Id, "A"),
+            RegistryUse.ForRegistryRule(rule.Id, subject.Id, null),
+            RegistryUse.ForRegistryRule(rule.Id, subject.Id, "A"),
+            // Пастка: те саме джерело, але чужий довідник.
+            RegistryUse.ForMethodologyFormula(methodologyVersion.Id, "F_OTHER", other.Id, null));
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return new EdgeFixture(
+            subject.Code,
+            $"{table.Code}.{column.Code}",
+            $"/admin/templates/{template.Id}/versions/{version.Id}",
+            $"{methodology.Code} v1.0.F_REG",
+            $"/admin/methodologies/{methodology.Id}/versions",
+            $"{other.Code}.RULE_REG",
+            $"/admin/registries/{other.Code}/definition");
+    }
+
+    private sealed record EdgeFixture(
+        string Code,
+        string FormulaLabel,
+        string TemplateRoute,
+        string MethodologyLabel,
+        string MethodologyRoute,
+        string RuleLabel,
+        string RuleRoute);
 
     private DbContextOptions<EcrDbContext> Options()
         => new DbContextOptionsBuilder<EcrDbContext>()

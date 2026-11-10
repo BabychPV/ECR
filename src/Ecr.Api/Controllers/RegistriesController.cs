@@ -23,6 +23,7 @@ public sealed class RegistriesController(
     DeleteRegistryEntryHandler deleteEntry,
     GetRegistryHistoryHandler getHistory,
     GetRegistryUsageHandler getUsage,
+    GetRegistryEntryUsageHandler getEntryUsage,
     GetRegistryDefinitionDraftHandler getDraft,
     SaveRegistryDefinitionDraftHandler saveDraft,
     PublishRegistryDefinitionHandler publish,
@@ -271,6 +272,23 @@ public sealed class RegistriesController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<UsageResponse>> Usage(string code, CancellationToken ct)
         => Ok(await getUsage.HandleAsync(code, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Де використовується ОДИН запис довідника: документи, у комірках чи шапці яких він стоїть (ФВ-8.14).
+    /// Право <c>Registry.EditDefinition</c>; документи — лише проєктів, де читач має <c>Document.View</c>.
+    /// </summary>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="entryId">Запис цього довідника.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// Один рядок на документ (вид <c>document</c>), перші <c>20</c>; <c>total</c> — усі видимі документи.
+    /// Чужий або неіснуючий запис — <c>404 ECR-REG-0404</c>, а не «нуль документів».
+    /// </remarks>
+    [HttpGet("{code}/entries/{entryId:long}/usage")]
+    [ProducesResponseType<UsageResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UsageResponse>> EntryUsage(string code, long entryId, CancellationToken ct)
+        => Ok(await getEntryUsage.HandleAsync(code, entryId, ct).ConfigureAwait(false));
 
     /// <summary>Створює або оновлює запис. Право <c>Registry.EditData</c>.</summary>
     /// <param name="code">Код довідника.</param>

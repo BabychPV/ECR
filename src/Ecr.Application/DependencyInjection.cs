@@ -348,6 +348,7 @@ public static class DependencyInjection
         services.AddScoped<Registries.DiscardRegistryDefinitionDraftHandler>();
         services.AddScoped<Registries.GetRegistryHistoryHandler>();
         services.AddScoped<Registries.GetRegistryUsageHandler>();
+        services.AddScoped<Registries.GetRegistryEntryUsageHandler>(); // ФВ-8.14
         services.AddScoped<Registries.Impact.GetRegistryImpactHandler>(); // RT-25
         services.AddScoped<Registries.Impact.RecalculateImpactedHandler>(); // RT-25
         services.AddScoped<Registries.ImportRegistryEntriesHandler>();

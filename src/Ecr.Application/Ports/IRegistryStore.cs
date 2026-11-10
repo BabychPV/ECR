@@ -284,6 +284,20 @@ public interface IRegistryStore
         int registryDefId, int take, CancellationToken ct);
 
     /// <summary>
+    /// Документи, у комірках або шапці яких стоїть запис <paramref name="registryEntryId"/> (ФВ-8.14), —
+    /// лише документи проєктів <paramref name="projectIds"/>.
+    /// </summary>
+    /// <param name="registryEntryId">Запис довідника.</param>
+    /// <param name="projectIds">Проєкти, документи яких читач бачить; порожньо — нічого.</param>
+    /// <param name="take">Скільки документів віддати переліком.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// Один рядок на документ (вид <c>document</c>); <c>Total</c> — усі такі документи, не лише показані.
+    /// </remarks>
+    public Task<Common.UsageResponse> FindEntryDocumentsAsync(
+        long registryEntryId, IReadOnlyCollection<int> projectIds, int take, CancellationToken ct);
+
+    /// <summary>
     /// Чи є хоч один період у стані <c>Open</c> або <c>Grace</c>.
     /// </summary>
     /// <remarks>

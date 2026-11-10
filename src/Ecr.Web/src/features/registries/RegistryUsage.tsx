@@ -58,7 +58,14 @@ export function RegistryUsagePanel({ code }: { code: string }): JSX.Element {
  * ⚠ `route === null` — окремого екрана в об'єкта немає, і адреса не
  * вигадується: елемент лишається текстом.
  */
-export function RegistryUsageList({ usage }: { usage: UsageResponse }): JSX.Element {
+export function RegistryUsageList({
+  usage,
+  dataText,
+}: {
+  usage: UsageResponse;
+  /** Речення для виду `data`; без нього — про довідник (ФВ-8.14: колонка передає своє). */
+  dataText?: string;
+}): JSX.Element {
   if (usage.total === 0 && usage.items.length === 0) {
     return (
       <Text size="sm" data-registry-usage="none">
@@ -94,7 +101,7 @@ export function RegistryUsageList({ usage }: { usage: UsageResponse }): JSX.Elem
                   doc.CellValue». Тепер — речення, без технічного id. */}
               {item.kind === 'data' ? (
                 <Text size="sm" data-registry-usage="data">
-                  {t('registries.usageDataInDocuments')}
+                  {dataText ?? t('registries.usageDataInDocuments')}
                 </Text>
               ) : item.route === null ? (
                 <Text size="sm">{item.name ?? item.label}</Text>

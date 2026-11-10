@@ -184,6 +184,49 @@ export function EntryUsageReportView({
         )}
       </Stack>
 
+      <Stack gap="xs">
+        <Title order={3} size="h5">
+          {t('registries.entryUsage.documentsTitle')}
+        </Title>
+        <Text size="xs" c="dimmed">
+          {t('registries.entryUsage.documentsHint')}
+        </Text>
+        {report.documents.length === 0 ? (
+          <Text size="sm" data-entry-usage="documents-none">
+            {t('registries.entryUsage.none')}
+          </Text>
+        ) : (
+          <List listStyleType="none" spacing="xs" data-entry-usage="documents">
+            {report.documents.map((use) => (
+              <List.Item key={use.id}>
+                {use.route === null ? (
+                  <Text span size="sm">
+                    {use.label}
+                  </Text>
+                ) : (
+                  <Anchor component={Link} to={use.route} size="sm">
+                    {use.label}
+                  </Anchor>
+                )}{' '}
+                {use.name !== null && (
+                  <Text span size="sm" c="dimmed">
+                    {use.name}
+                  </Text>
+                )}
+              </List.Item>
+            ))}
+          </List>
+        )}
+        {report.documentsTotal > report.documents.length && (
+          <Text size="xs" c="dimmed" data-entry-usage="documents-truncated">
+            {t('registries.entryUsage.fieldShown', {
+              shown: report.documents.length,
+              total: report.documentsTotal,
+            })}
+          </Text>
+        )}
+      </Stack>
+
       {(report.columns.length > 0 || report.dataInDocuments) && (
         <Stack gap="xs">
           <Title order={3} size="h5">
@@ -220,7 +263,8 @@ export function EntryUsageReportView({
       )}
 
       {/* ⛔ Прямо названа межа звіту: ці види посилань сервер рахує (відмова видалення), але
-          поіменно на запис не перелічує. Мовчанка тут читалася б як «їх немає». */}
+          поіменно на запис не перелічує. Мовчанка тут читалася б як «їх немає». Комірки й шапки
+          документів з ФВ-8.14 перелічено вище (розділ документів). */}
       <Text size="sm" c="dimmed" data-entry-usage="not-listed">
         {t('registries.entryUsage.notListed')}
       </Text>
