@@ -148,6 +148,11 @@ public sealed record TemplateCellFormulaDto(
 /// <param name="DisplayFormat">Формат показу; презентаційне поле.</param>
 /// <param name="WidthPx">Типова ширина колонки, px (D-234); <c>null</c> — типова за типом; презентаційне поле.</param>
 /// <param name="HeaderGroupId">Найглибша група заголовків колонки (<c>TableDto.HeaderGroups</c>); <c>null</c> — без групи; презентаційне поле.</param>
+/// <param name="IsMonthColumn">✎ D-474: колонка прив'язана до календарного місяця (структурне поле, лише для читання тут);
+/// обробник завжди заповнює <c>true</c>/<c>false</c>, <c>null</c> лише за замовчуванням конструктора (поле необов'язкове в контракті —
+/// наявні клієнтські об'єкти колонки лишаються сумісними).</param>
+/// <param name="MonthNumber">✎ D-474: місяць 1..12 місячної колонки; <c>null</c> — не місячна. Разом з <paramref name="IsMonthColumn"/>
+/// дає інструментам (tools/land/Add-LandMonthGroups.ps1) прив'язки всієї версії одним запитом замість запиту на колонку.</param>
 /// <param name="UnitSymbol">Позначення одиниці, якщо задана.</param>
 /// <param name="FormulaExpression">
 /// Текст наявної формули колонки, якщо вона є; <c>null</c> — формули ще
@@ -176,7 +181,9 @@ public sealed record TemplateColumnDto(
     string? FormulaExpression,
     ExpressionDialect? FormulaDialect,
     int? WidthPx = null,
-    int? HeaderGroupId = null)
+    int? HeaderGroupId = null,
+    bool? IsMonthColumn = null,
+    byte? MonthNumber = null)
 {
     /// <summary>✎ D-461: Id формули колонки (для <c>PUT …/formulas/{formulaId}/manual-override</c>); <c>null</c> — формули немає.</summary>
     public int? FormulaId { get; init; }

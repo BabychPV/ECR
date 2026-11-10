@@ -49,7 +49,26 @@ Describe 'EcrApi: keepalive сеансу під час довгих прогон
         if (@($script:Calls | Where-Object { $_ -like '*session/activity' }).Count -lt 2) { throw 'keepalive у режимі лише читання' }
     }
 
-    It 'Get-LandBandTables: структура читається ОДИН раз на версію, далі рівно одне читання на колонку' {
+    It 'Get-LandBandTables (сервер з isMonthColumn/monthNumber у структурі): рівно ОДИН запит на всю версію' {
+        $repo = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
+        . (Join-Path $repo 'tools/land/EcrApi.ps1')
+        . (Join-Path $repo 'tools/land/LandMonthBands.Lib.ps1')
+        Set-StrictMode -Off
+        $script:Calls = New-Object System.Collections.ArrayList
+        $structure = '{"sheets":[{"code":"S1","tables":[{"id":1,"code":"T1","headerGroups":[],"columns":[{"id":11,"code":"A","ordinal":1,"isMonthColumn":true,"monthNumber":1},{"id":12,"code":"B","ordinal":2,"isMonthColumn":false,"monthNumber":null}]},{"id":2,"code":"T2","headerGroups":[],"columns":[{"id":21,"code":"C","ordinal":1,"isMonthColumn":true,"monthNumber":12}]}]}]}'
+        function Send-EcrHttp {
+            param([string]$Method, [string]$Path, $Body = $null, [hashtable]$Headers = @{})
+            [void]$script:Calls.Add("$Method $Path")
+            if ($Path -like '*/structure') { return [pscustomobject]@{ Status = 200; Text = $structure; Headers = @{} } }
+            return [pscustomobject]@{ Status = 500; Text = ''; Headers = @{} }
+        }
+        $t = Get-LandBandTables -VersionId 7
+        if (@($script:Calls).Count -ne 1) { throw "запитів $(@($script:Calls).Count), очікувався 1: $($script:Calls -join '; ')" }
+        $mo = @{}; foreach ($x in $t) { foreach ($c in $x.Columns) { $mo[$c.Code] = $c.MonthNumber } }
+        if ($mo['A'] -ne 1 -or $null -ne $mo['B'] -or $mo['C'] -ne 12) { throw 'місяці зі структури' }
+    }
+
+    It 'Get-LandBandTables (старіший сервер без isMonthColumn у структурі): структура один раз, далі рівно одне читання на колонку' {
         $repo = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
         . (Join-Path $repo 'tools/land/EcrApi.ps1')
         . (Join-Path $repo 'tools/land/LandMonthBands.Lib.ps1')

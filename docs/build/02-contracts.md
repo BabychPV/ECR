@@ -2400,6 +2400,14 @@ public interface IDocumentStore
 `ValidateCompositionAsync` (лише `RequiresAll`/`RequiresOne` — `Excludes`
 сервер сьогодні не перевіряє, і клієнт навмисно цього не вигадує).
 
+✎ 2026-11-10 (`D-474`): `TemplateColumnDto` у `GET .../template-versions/{id}/structure`
+несе ще `IsMonthColumn` (bool, `false` за замовчуванням) і `MonthNumber` (1..12 або `null`) —
+лише читання, додано без зміни решти полів. Причина: `tools/land/Add-LandMonthGroups.ps1`
+читав прив'язку місяця запитом `GET …/tables/{tableId}/columns/{code}` на КОЖНУ колонку
+(~6 080 для Land 1.0.14.0, кожен вантажить усю версію) — понад година на прогін; тепер
+один запит на версію. Сервер без цих полів скрипт розпізнає за відсутністю властивості й
+читає по колонці, як раніше.
+
 #### `IDocumentDeletionStore`
 
 Видалення документа-чернетки (`DELETE /api/v1/documents/{id}`, право

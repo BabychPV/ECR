@@ -186,7 +186,8 @@ function Get-LandMonthBandPlan {
 function Get-LandBandTables {
     <#
     .SYNOPSIS
-        Читає версію через API: структуру (групи, коди, Ordinal) і MonthNumber кожної колонки (GET …/columns/{code}).
+        Читає версію через API одним GET …/structure (групи, коди, Ordinal, isMonthColumn/monthNumber); на старішому
+        сервері без цих полів — ще GET …/columns/{code} на колонку.
         Повертає список @{ Sheet; Table; TableId; Columns; Groups; ColumnIds }.
     #>
     param([Parameter(Mandatory)][int]$VersionId, [string[]]$OnlyTables)
@@ -208,9 +209,15 @@ function Get-LandBandTables {
             }
             $cols = @(); $ids = @{}
             foreach ($c in @($tb.columns)) {
-                $r = Invoke-Ecr -Method GET -Path ("/api/v1/template-versions/$VersionId/tables/$($tb.id)/columns/" + [uri]::EscapeDataString([string]$c.code))
-                if ($r.Status -ne 200) { throw "GET колонки $($tb.code)/$($c.code): HTTP $($r.Status)" }
-                $mn = $null; if ($r.Json.isMonthColumn -and $null -ne $r.Json.monthNumber) { $mn = [int]$r.Json.monthNumber }
+                # D-474: сервер з місячними полями у структурі — без окремих запитів; старіший (властивості isMonthColumn
+                # у відповіді немає взагалі) — запит на колонку, як раніше (keepalive EcrApi тримає сеанс).
+                $src = $c
+                if (-not $c.PSObject.Properties['isMonthColumn']) {
+                    $r = Invoke-Ecr -Method GET -Path ("/api/v1/template-versions/$VersionId/tables/$($tb.id)/columns/" + [uri]::EscapeDataString([string]$c.code))
+                    if ($r.Status -ne 200) { throw "GET колонки $($tb.code)/$($c.code): HTTP $($r.Status)" }
+                    $src = $r.Json
+                }
+                $mn = $null; if ($src.isMonthColumn -and $null -ne $src.monthNumber) { $mn = [int]$src.monthNumber }
                 $gc = $null; if ($null -ne $c.headerGroupId -and $gById.ContainsKey([int]$c.headerGroupId)) { $gc = [string]$gById[[int]$c.headerGroupId].code }
                 $cols += [pscustomobject]@{ Code = [string]$c.code; Ordinal = [int]$c.ordinal; MonthNumber = $mn; GroupCode = $gc; Hidden = [bool]$c.isHidden }
                 $ids[[string]$c.code] = [int]$c.id

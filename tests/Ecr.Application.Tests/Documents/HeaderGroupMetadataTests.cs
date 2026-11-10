@@ -132,6 +132,37 @@ public sealed class HeaderGroupMetadataTests
         Assert.DoesNotContain(slice.Columns, c => c.Code == "T2");
     }
 
+    /// <remarks>
+    /// ✎ D-474: прив'язка місяця колонки — у структурі (Add-LandMonthGroups.ps1 читає версію одним запитом).
+    /// Червоне до зміни (прогнано): поля в DTO без проєкції в обробнику — <c>MonthNumber</c> null.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task Структура_шаблону_віддає_прив_язку_місяця_колонки()
+    {
+        _sheet.Tables.Single().Columns.Single(c => c.Code == "MG").SetMonth(true, 2);
+        var versions = Substitute.For<IRepository<TemplateVersion, int>>();
+        versions.FindAsync(2, Arg.Any<CancellationToken>()).Returns(new TemplateVersion(1, "1.0.0.0", 1, DateTime.UtcNow));
+        var documents = Substitute.For<IDocumentStore>();
+        documents.GetGroupRulesAsync(2, Arg.Any<CancellationToken>()).Returns([]);
+        var access = Substitute.For<IAccessDecisionService>();
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(9);
+        access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Template.View").Build());
+
+        var dto = await new GetTemplateStructureHandler(_metadata, _units, versions, documents, access, user)
+            .HandleAsync(2, CancellationToken.None);
+
+        var columns = dto.Sheets.Single().Tables.Single().Columns;
+        var month = Assert.Single(columns, c => c.Code == "MG");
+        Assert.True(month.IsMonthColumn);
+        Assert.Equal((byte)2, month.MonthNumber);
+        var plain = Assert.Single(columns, c => c.Code == "Plain");
+        Assert.False(plain.IsMonthColumn);
+        Assert.Null(plain.MonthNumber);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Структура_шаблону_віддає_все_дерево_з_усіма_мовами_і_межу_глибини()

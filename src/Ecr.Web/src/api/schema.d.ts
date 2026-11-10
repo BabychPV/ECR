@@ -41074,10 +41074,20 @@ export interface components {
             id: number;
             /** @description Колонка прихована; презентаційне поле. */
             isHidden: boolean;
+            /** @description ✎ D-474: колонка прив'язана до календарного місяця (структурне поле, лише для читання тут);
+             *                 обробник завжди заповнює `true`/`false`, `null` лише за замовчуванням конструктора (поле необов'язкове в контракті —
+             *                 наявні клієнтські об'єкти колонки лишаються сумісними). */
+            isMonthColumn?: null | boolean;
             /** @description Колонка недоступна для введення. */
             isReadOnly: boolean;
             /** @description Колонка обов'язкова. */
             isRequired: boolean;
+            /**
+             * Format: uint8
+             * @description ✎ D-474: місяць 1..12 місячної колонки; `null` — не місячна. Разом з IsMonthColumn
+             *                 дає інструментам (tools/land/Add-LandMonthGroups.ps1) прив'язки всієї версії одним запитом замість запиту на колонку.
+             */
+            monthNumber?: null | number;
             /**
              * Format: int32
              * @description Порядок показу; презентаційне поле.
