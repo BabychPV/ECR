@@ -88,6 +88,15 @@ describe('NotFoundPage', () => {
 
     expect(document.activeElement?.textContent).toBe('Page not found');
   });
+
+  // F13-p229: на сторінці 404 був H2 без H1 — заголовок сторінки має бути рівно одним H1.
+  it('заголовок сторінки — рівно один H1', async () => {
+    await renderResolved();
+
+    const h1 = screen.getAllByRole('heading', { level: 1 });
+    expect(h1).toHaveLength(1);
+    expect(h1[0]?.textContent).toBe('Page not found');
+  });
 });
 
 /**

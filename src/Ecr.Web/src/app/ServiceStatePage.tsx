@@ -87,7 +87,8 @@ export function ServiceStatePage({
         </Box>
 
         {/* ✎ 2026-10-06, «текст в одну строку»: 15px/600 (`.work-state-h`), не 26px. */}
-        <Title order={2} fz="md" fw={600} ref={heading} tabIndex={-1} ta="center" className={RouteHeadingClass}>
+        {/* ✎ F13-p229: службова сторінка — єдиний заголовок маршруту, тож H1 (раніше H2 без H1 на сторінці). */}
+        <Title order={1} fz="md" fw={600} ref={heading} tabIndex={-1} ta="center" className={RouteHeadingClass}>
           {title}
         </Title>
 
