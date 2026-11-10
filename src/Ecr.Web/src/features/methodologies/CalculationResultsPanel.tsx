@@ -1,6 +1,6 @@
 import { useEffect, useState, type JSX } from 'react';
 import { notifications } from '@mantine/notifications';
-import { Alert, Code, Skeleton, Stack, Table, Text } from '@mantine/core';
+import { Alert, Anchor, Code, Skeleton, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import type { CalculationResultDto, RegistryDefDto, UnitRef } from '@/api/types';
 import { apiFetch } from '@/api/client';
@@ -11,6 +11,8 @@ import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import './calcResults.css';
+import { useCalculationIssues } from '@/features/calculationIssues/useCalculationIssues';
+import { UnmatchedRowsBannerSelector } from '@/features/documents/unmatchedRowsModel';
 import { calculationResults } from './api';
 import { RecalculateHintId, calculationResultsKey } from './calculationResultsKey';
 
@@ -129,6 +131,16 @@ export function CalculationResultsPanel({
     retry: false,
   });
 
+  // ✎ 10.11 (doc 95, «Calculation results · none» без причини): рядки, які розрахунок не взяв (без правила або
+  // відхилені правилом категорії), — той самий запит і ключ, що й у банера над сіткою (`useUnmatchedRows`), тож
+  // другого звернення немає. Рядок рахується раз, хоч би скільки методологій його відхилили.
+  const issues = useCalculationIssues(documentId, periodKey, null);
+  const notCalculated = new Set(
+    (issues.data?.items ?? [])
+      .filter((issue) => (issue.sheetCopyId ?? null) === null)
+      .map((issue) => `${issue.tableCode}\u001f${issue.rowKey}`),
+  ).size;
+
   const units = useQuery({
     queryKey: queryKeys.units.all(),
     enabled: !collapsed,
@@ -159,7 +171,32 @@ export function CalculationResultsPanel({
             {`· ${count === 0 ? t('documents.calculationResultsNone') : String(count)}`}
           </Text>
         )}
+        {notCalculated > 0 && (
+          <Text component="span" size="sm" c="dimmed" data-testid="calc-results-not-calculated-count">
+            {`· ${t('documents.calculationResultsNotCalculated', { count: String(notCalculated) })}`}
+          </Text>
+        )}
       </button>
+
+      {!collapsed && notCalculated > 0 && (
+        <Text size="sm" data-testid="calc-results-not-calculated">
+          {t('documents.calculationResultsNotCalculatedHint', { count: String(notCalculated) })}{' '}
+          <Anchor
+            component="button"
+            type="button"
+            size="sm"
+            data-testid="calc-results-not-calculated-link"
+            onClick={() => {
+              // Банер «рядки не взято в розрахунок» над сіткою: там кожен рядок — перехід до комірки, яку треба заповнити.
+              const banner = document.querySelector<HTMLElement>(UnmatchedRowsBannerSelector);
+              banner?.scrollIntoView({ block: 'nearest' });
+              banner?.querySelector<HTMLButtonElement>('[aria-controls]')?.focus();
+            }}
+          >
+            {t('documents.calculationResultsNotCalculatedShow')}
+          </Anchor>
+        </Text>
+      )}
 
       <div id={ResultsBodyId} hidden={collapsed} aria-busy={!collapsed && results.isPending ? true : undefined}>
       {!collapsed && (

@@ -4,12 +4,31 @@ import { copyFieldsOf } from '@/features/documents/sheetCopies/sheetCopyTypes';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 
-/** Один рядок без правила в групі таблиці. */
+/**
+ * Селектор банера над сіткою: панель «Calculation results» веде сюди посиланням «not calculated: N rows» (✎ 10.11).
+ * ⚠ Не `id` на `Alert`: Mantine сам дає тілу `<id>-body`, і це перекрило б `document-unmatched-rows-body` згортання.
+ */
+export const UnmatchedRowsBannerSelector = '[data-testid="document-unmatched-rows"]';
+
+/** Вид проблеми рядка, що його відхилило правило категорії (✎ 10.11, doc 95). */
+export const CategoryRuleRejectedKind = 'CategoryRuleRejected';
+
+/** Колонка, яку треба заповнити, щоб рядок порахувався. */
+export interface MissingColumnRef {
+  readonly code: string;
+  readonly name: string;
+}
+
+/** Один рядок без правила (або відхилений правилом категорії) в групі таблиці. */
 export interface UnmatchedRowRef {
   readonly rowKey: string;
   readonly rowNumber: number;
   /** Значення рядка в колонках підказки (порядок `hint.columns`, `''` — порожньо); `null` — підказки немає. */
   readonly currentValues: readonly string[] | null;
+  /** ✎ 10.11: правило методології, що закрило відхилений рядок; `null` — не відхилений або невідоме. */
+  readonly ruleCode: string | null;
+  /** ✎ 10.11: порожні колонки відхиленого рядка, які треба заповнити; порожньо — назвати нічого. */
+  readonly missingColumns: readonly MissingColumnRef[];
 }
 
 /** Що приймають правила методологій таблиці (UAT 08.11 b3). */
@@ -38,6 +57,8 @@ export interface UnmatchedTableGroup {
   readonly hint: UnmatchedTableHint | null;
   /** Рядки за зростанням номера, без повторів ключа. */
   readonly rows: readonly UnmatchedRowRef[];
+  /** ✎ 10.11: рядки ВІДХИЛЕНІ правилом категорії (правило підійшло, ключа категорії немає), а не «без правила». */
+  readonly rejected: boolean;
 }
 
 /**
@@ -64,13 +85,23 @@ export function groupUnmatchedRows(
 
   const byKey = new Map<
     string,
-    { table: DocumentTableDto | undefined; code: string; methodology: string | null; rows: Map<string, UnmatchedRowRef> }
+    {
+      table: DocumentTableDto | undefined;
+      code: string;
+      methodology: string | null;
+      rejected: boolean;
+      tableKey: string;
+      rows: Map<string, UnmatchedRowRef>;
+    }
   >();
   for (const issue of issues) {
-    const key = groupKey(issue.tableCode, issue.sheetCopyId ?? null);
+    const tableKey = groupKey(issue.tableCode, issue.sheetCopyId ?? null);
+    // ✎ 10.11: відхилені правилом категорії — окремою групою тієї ж таблиці: причина й дія інші, ніж у «без правила».
+    const rejected = issue.kind === CategoryRuleRejectedKind;
+    const key = rejected ? `${tableKey}!rejected` : tableKey;
     let group = byKey.get(key);
     if (group === undefined) {
-      group = { table: tableOf.get(key), code: issue.tableCode, methodology: null, rows: new Map() };
+      group = { table: tableOf.get(tableKey), code: issue.tableCode, methodology: null, rejected, tableKey, rows: new Map() };
       byKey.set(key, group);
     }
     group.methodology ??= issue.methodologyCode ?? null;
@@ -78,7 +109,11 @@ export function groupUnmatchedRows(
       group.rows.set(issue.rowKey, {
         rowKey: issue.rowKey,
         rowNumber: issue.rowNumber,
-        currentValues: issue.currentValues ?? null,
+        currentValues: rejected ? null : (issue.currentValues ?? null),
+        ruleCode: rejected ? (issue.ruleCode ?? null) : null,
+        missingColumns: rejected
+          ? (issue.columns ?? []).map((column) => ({ code: column.code, name: localized(column.nameL10n) || column.code }))
+          : [],
       });
     }
   }
@@ -96,7 +131,7 @@ export function groupUnmatchedRows(
       return sa - sb || ca - cb || ta - tb || keyA.localeCompare(keyB);
     })
     .map(([key, group]) => {
-      const hint = hintOf.get(key);
+      const hint = group.rejected ? undefined : hintOf.get(group.tableKey);
 
       return {
         key,
@@ -108,6 +143,7 @@ export function groupUnmatchedRows(
         rows: [...group.rows.values()]
           .map((row) => (hint === undefined ? { ...row, currentValues: null } : row))
           .sort((a, b) => a.rowNumber - b.rowNumber),
+        rejected: group.rejected,
       };
     });
 }

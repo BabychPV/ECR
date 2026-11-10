@@ -72,7 +72,39 @@ describe('UnmatchedRowsBanner', () => {
     expect(links).toHaveLength(4);
     await userEvent.click(links[3]!);
 
-    expect(onOpenRow).toHaveBeenCalledExactlyOnceWith(102, 'S02');
+    expect(onOpenRow).toHaveBeenCalledExactlyOnceWith(102, 'S02', null);
+  });
+
+  // ✎ 10.11 (doc 95): рядок, відхилений правилом категорії, раніше давав лише «Calculation results · none». Тепер окрема
+  // група з причиною — правило й колонка, яку треба заповнити, — і перехід одразу на цю комірку.
+  // Мутація: передавати `null` замість `missingColumns[0].code` — червоніє перехід; прибрати гілку `rejected` у
+  // `rowLabel` — червоніє підпис.
+  it('10.11: відхилений правилом категорії рядок називає правило й колонку і відкриває саме цю комірку', async () => {
+    const { onOpenRow } = show(
+      rows([
+        issue(1, 1, {
+          rowKey: 'R1',
+          kind: 'CategoryRuleRejected',
+          methodologyCode: 'ECW_C05_01',
+          ruleCode: 'R_C05_01_01',
+          columns: [{ code: 'Land_OverhauledEnginesRef', nameL10n: { values: { en: 'Overhauled engines' } } }],
+        }),
+      ]),
+    );
+    await userEvent.click(screen.getByTestId('document-unmatched-rows-toggle'));
+
+    expect(screen.getByTestId('document-unmatched-rows-group').textContent).toContain(
+      '⟦document.rejectedRows.group (table=Sheet · 9.01 Unit 400, rows=⟦document.unmatchedRows.rows.one (count=1)⟧)⟧',
+    );
+    expect(screen.getByTestId('document-rejected-rows-hint').textContent).toBe('⟦document.rejectedRows.hint⟧');
+    // Підказка «без правила» (змінити код) тут неправдива — її немає.
+    expect(screen.queryByTestId('document-unmatched-rows-hint')).toBeNull();
+
+    const link = screen.getByTestId('document-rejected-row-link');
+    expect(link.textContent).toBe('⟦document.rejectedRows.rowFill (row=1, rule=R_C05_01_01, columns=«Overhauled engines»)⟧');
+    await userEvent.click(link);
+
+    expect(onOpenRow).toHaveBeenCalledExactlyOnceWith(101, 'R1', 'Land_OverhauledEnginesRef');
   });
 
   it('b3: пояснення «чому і як» - один раз, тон інформації (status), не помилки', () => {
