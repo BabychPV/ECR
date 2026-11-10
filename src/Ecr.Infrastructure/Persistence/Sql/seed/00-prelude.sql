@@ -1316,7 +1316,17 @@ UPDATE t
     (N'recalcProgress.running', N'kz', N'{project} қайта есептелуде: {total} құжаттың {done}, өткізілді {skipped}, қате {failed}', N'{project} қайта есептелуде: өңделді {done}, барлығы {documentCount}, өткізілді {skipped}, қате {failed}'),
     (N'recalcProgress.confirmScope', N'kz', N'Ашық айлар {months} · құжаттар: {documents} · бекітілген парақтар мен бұғатталған айлар өткізіледі', N'Ашық айлар {months} · {documentCount} · бекітілген парақтар мен бұғатталған айлар өткізіледі'),
     (N'recalcProgress.confirmScopeNoOpen', N'kz', N'Ашық айлар жоқ · құжаттар: {documents} · бекітілген парақтар мен бұғатталған айлар өткізіледі', N'Ашық айлар жоқ · {documentCount} · бекітілген парақтар мен бұғатталған айлар өткізіледі'),
-    (N'recalcProgress.confirmScopeUnknown', N'kz', N'{project}: құжаттар {documents} · бекітілген парақтар мен бұғатталған айлар өткізіледі', N'{project}: {documentCount} · бекітілген парақтар мен бұғатталған айлар өткізіледі')
+    (N'recalcProgress.confirmScopeUnknown', N'kz', N'{project}: құжаттар {documents} · бекітілген парақтар мен бұғатталған айлар өткізіледі', N'{project}: {documentCount} · бекітілген парақтар мен бұғатталған айлар өткізіледі'),
+    -- p3-1110: «1 rows» у банері й діалозі поділу за дозволом шапки — кількість узгодженою формою (`permits.header.rowCount.*`).
+    (N'permits.header.bannerTitle', N'en', N'{month} must be split in {count} rows (header permit changed on {date})', N'{month} must be split in {rowCount} (header permit changed on {date})'),
+    (N'permits.header.bannerTable', N'en', N'{table} — {count} rows', N'{table} — {rowCount}'),
+    (N'permits.header.dialogTitle', N'en', N'Split {month} — {count} rows', N'Split {month} — {rowCount}'),
+    (N'permits.header.bannerTitle', N'ru', N'{month} нужно разделить в {count} строках (разрешение шапки сменилось {date})', N'{month}: нужно разделить — {rowCount} (разрешение шапки сменилось {date})'),
+    (N'permits.header.bannerTitle', N'kz', N'{month} айын {count} жолда бөлу керек (тақырып рұқсаты {date} ауысты)', N'{month} айын бөлу керек — {rowCount} (тақырып рұқсаты {date} ауысты)'),
+    (N'permits.header.bannerTable', N'ru', N'{table} — строк: {count}', N'{table} — {rowCount}'),
+    (N'permits.header.bannerTable', N'kz', N'{table} — жолдар: {count}', N'{table} — {rowCount}'),
+    (N'permits.header.dialogTitle', N'ru', N'Разделить {month} — строк: {count}', N'Разделить {month} — {rowCount}'),
+    (N'permits.header.dialogTitle', N'kz', N'{month} бөлу — жолдар: {count}', N'{month} бөлу — {rowCount}')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;

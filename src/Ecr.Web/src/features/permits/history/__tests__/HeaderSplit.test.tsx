@@ -158,6 +158,20 @@ describe('HeaderSplitBanner (jh2/jh3)', () => {
     expect(dialog.textContent).toContain('permits.header.progress {"done":0,"count":1}');
   });
 
+  it('p3-1110: one row — «1 row», not «1 rows»: the banner, the table chip and the dialog title take the plural form', () => {
+    const queries = client();
+    queries.setQueryData(permitHistoryKey(3, 202602), { ...history, rows: [airRow('NO2', '26.7')] });
+    wrap(<HeaderSplitBanner documentId={3} periodKey={202602} tables={tables} readOnly={false} />, queries);
+    const banner = document.querySelector('[data-header-split-banner]') as HTMLElement;
+
+    // ⛔ Mutation: drop `rowCount` (the bare `{count} rows` text) — red.
+    expect(banner.textContent).toContain('permits.header.rowCount.one');
+    expect(banner.textContent).not.toContain('permits.header.rowCount.other');
+
+    fireEvent.click(screen.getByRole('button', { name: 'permits.header.splitAll' }));
+    expect(screen.getByRole('dialog').textContent).toContain('permits.header.rowCount.one');
+  });
+
   it('nothing relying on the header to split — no banner', () => {
     const queries = client();
     queries.setQueryData(permitHistoryKey(3, 202602), { ...history, rows: [seaWaterRow()] });
