@@ -90,6 +90,9 @@ param(
     # Обліковий запис етапів збірки (вхід, Import-ContractDictionaries, Apply-ContractHeader); пароль - з -AccountsFile за
     # цим ключем. Етап Accounts і далі створює саме land-owner і land-reviewer.
     [string]$BuildUser = 'land-owner',
+    # Етап Template: типово - свіжий клон останньої опублікованої версії (наявна чернетка не чіпається); -ReuseDraft -
+    # явна згода продовжити в наявній чернетці (стара поведінка).
+    [switch]$ReuseDraft,
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
     [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
@@ -124,6 +127,7 @@ if (-not $afFile) { $afFile = Join-Path $repo 'docs\delivery\reference-data\land
 . (Join-Path $here 'Land-CfRules.ps1')
 . (Join-Path $here 'LandTemplateDiff.Lib.ps1')
 . (Join-Path $here 'LandMonthBands.Lib.ps1')
+. (Join-Path $here 'LandTemplateDraft.Lib.ps1')
 Set-StrictMode -Off
 
 # Безпека стенда: лише локальні API і SQL (база з іменем EcrLand*); мутації лише з явним
@@ -1063,21 +1067,28 @@ function Stage-Template {
     }
     $S.TemplateId = [int]$tpl.id
     $vers = @((Api GET "/api/v1/templates/$($tpl.id)/versions?limit=100").Json.items)
-    $pub = $vers | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Descending | Select-Object -First 1
-    $draft = $vers | Where-Object { $_.status -eq 'Draft' } | Sort-Object id -Descending | Select-Object -First 1
-    if ($null -ne $pub -and $null -eq $draft) {
-        $S.VersionId = [int]$pub.id
-        Log "  шаблон $TemplateCode вже опублікований (версія $($pub.version), id $($pub.id)); структуру не чіпаю."
-        return
+    # Рішення координатора 10.11: свіжий клон останньої опублікованої; наявна чернетка не чіпається (-ReuseDraft - стара поведінка).
+    $plan = Get-LandTemplateDraftPlan -Versions $vers -ReuseDraft:$ReuseDraft
+    switch ($plan.Action) {
+        'PublishedNoOp' {
+            $S.VersionId = $plan.PublishedId
+            Log "  шаблон $TemplateCode вже опублікований (версія $($plan.PublishedVersion), id $($plan.PublishedId)); -ReuseDraft без чернетки - структуру не чіпаю."
+            return
+        }
+        'UseDraft' { $vid = $plan.DraftId; Log "  -ReuseDraft: наявна чернетка $($plan.DraftVersion) (id $vid)" }
+        'Clone' {
+            foreach ($sk in $plan.SkippedDrafts) { Log "  наявну чернетку $sk пропущено (не змінюється й не видаляється)" }
+            $vid = New-LandTemplateCloneDraft -Plan $plan
+            Log "  свіжий клон опублікованої $($plan.SourceVersion) (id $($plan.SourceId)) -> чернетка $($plan.NewVersion) (id $vid)"
+        }
+        default {
+            $null = Api POST "/api/v1/templates/$($tpl.id)/versions" @{ versionNumber = [string]$Mdl.versionNumber; cloneFromVersionId = $null }
+            $vers = @((Api GET "/api/v1/templates/$($tpl.id)/versions?limit=100").Json.items)
+            $vid = [int]($vers | Where-Object { $_.status -eq 'Draft' } | Sort-Object id -Descending | Select-Object -First 1).id
+            Log "  порожня чернетка $($Mdl.versionNumber) (id $vid)"
+        }
     }
-    if ($null -eq $draft) {
-        $null = Api POST "/api/v1/templates/$($tpl.id)/versions" @{ versionNumber = [string]$Mdl.versionNumber; cloneFromVersionId = $null }
-        $vers = @((Api GET "/api/v1/templates/$($tpl.id)/versions?limit=100").Json.items)
-        $draft = $vers | Where-Object { $_.status -eq 'Draft' } | Sort-Object id -Descending | Select-Object -First 1
-    }
-    $vid = [int]$draft.id
     $S.VersionId = $vid
-    Log "  чернетка версії $($draft.version) (id $vid)"
     Ensure-Styles $vid
 
     $nCols = 0; $nRows = 0; $nRules = 0; $nF = 0
