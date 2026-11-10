@@ -28,7 +28,11 @@ public sealed class CreateRowHandler(
 
     // ✎ Журнал рядків (`aud.RowChange`): «додано рядок» у журналі аркуша — тією самою транзакцією, що й вставка.
     // Контейнер передає завжди; `null` — лише прямі конструктори тестів.
-    IRowChangeAudit? rowAudit = null)
+    IRowChangeAudit? rowAudit = null,
+
+    // ✎ SHEETNAME (борг 09.11): перерахунок колонок SHEETNAME нового рядка. Контейнер передає завжди; `null` — лише
+    // прямі конструктори тестів, і тоді задачі немає.
+    IBackgroundJobScheduler? jobs = null)
 {
     /// <summary>Походження запису журналу рядків для POST row — правка людини.</summary>
     public const string RowAuditOrigin = CellChangeOrigins.UserEdit;
@@ -40,6 +44,22 @@ public sealed class CreateRowHandler(
     /// </exception>
     public async Task<RowKey> HandleAsync(long documentId, long tableInstanceId, RowKey? requestedKey,
                                           AccessProfile profile, CancellationToken ct)
+        => (await CreateAsync(documentId, tableInstanceId, requestedKey, profile, ct).ConfigureAwait(false)).RowKey;
+
+    /// <summary>Створює рядок; разом із ключем — ідентифікатор поставленої задачі формул (або <c>null</c>).</summary>
+    /// <remarks>
+    /// ✎ SHEETNAME (борг 09.11): колонкова формула <c>SHEETNAME()</c> нового рядка не має насіння (рядок порожній), і
+    /// без окремої задачі комірка лишалась порожньою до ручного перерахунку. Задача — та сама, що після PATCH
+    /// (<see cref="IFormulaRecalculationJob"/>), насіння «рядок × колонка SHEETNAME»; клієнт стежить за нею
+    /// (<c>recalculationJobId</c>) і оновлює зріз, коли вона завершиться.
+    /// </remarks>
+    /// <param name="documentId">Документ із маршруту.</param>
+    /// <param name="tableInstanceId">Екземпляр таблиці.</param>
+    /// <param name="requestedKey">Бажаний ключ; <c>null</c> — згенерувати.</param>
+    /// <param name="profile">Профіль доступу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<CreateRowResult> CreateAsync(long documentId, long tableInstanceId, RowKey? requestedKey,
+                                                   AccessProfile profile, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
@@ -134,15 +154,48 @@ public sealed class CreateRowHandler(
         // у календарі (рішення несе `AnnualPeriods`) і є якір. Інакше — старий шлях.
         var mirror = await TryResolveMirrorAsync(instance, table, createDecision, ct).ConfigureAwait(false);
 
+        // SHEETNAME: насіння лише для звичайного шляху (дзеркальні рядки Q-17 — таблиці місяців, без копій аркушів).
+        IReadOnlyList<int> sheetNameColumns = jobs is null || mirror is not null
+            ? []
+            : SheetNameRecalculation.NewRowColumns(table, snapshot.ColumnsById);
+        var enlist = jobs?.EnlistsInCallerTransaction == true;
+        long rowId = 0;
+        string? jobId = null;
+
         await uow.ExecuteInTransactionAsync(
-            innerCt => mirror is null
-                ? CreateUnderLockAsync(
-                    instance, table, tableInstanceId, key, profile, createDecision.AssignmentsPresent, sheetCode, innerCt)
-                : CreateMirroredUnderLockAsync(
-                    instance, table, key, profile, createDecision.AssignmentsPresent, sheetCode, mirror, innerCt),
+            async innerCt =>
+            {
+                if (mirror is null)
+                {
+                    rowId = await CreateUnderLockAsync(
+                            instance, table, tableInstanceId, key, profile, createDecision.AssignmentsPresent, sheetCode, innerCt)
+                        .ConfigureAwait(false);
+
+                    // ⛔ MI-02 (в): черга в базі — постановка ВСЕРЕДИНІ транзакції останнім оператором; Quartz — після коміту.
+                    if (enlist && sheetNameColumns.Count > 0)
+                    {
+                        jobId = await SheetNameRecalculation
+                            .EnqueueNewRowAsync(jobs!, instance, rowId, sheetNameColumns, profile.UserId, innerCt)
+                            .ConfigureAwait(false);
+                    }
+                }
+                else
+                {
+                    await CreateMirroredUnderLockAsync(
+                            instance, table, key, profile, createDecision.AssignmentsPresent, sheetCode, mirror, innerCt)
+                        .ConfigureAwait(false);
+                }
+            },
             ct).ConfigureAwait(false);
 
-        return key;
+        if (!enlist && sheetNameColumns.Count > 0 && rowId != 0)
+        {
+            jobId = await SheetNameRecalculation
+                .EnqueueNewRowAsync(jobs!, instance, rowId, sheetNameColumns, profile.UserId, ct)
+                .ConfigureAwait(false);
+        }
+
+        return new CreateRowResult(key, jobId);
     }
 
     /// <summary>Параметри дзеркального створення рядка.</summary>
@@ -403,7 +456,7 @@ public sealed class CreateRowHandler(
     /// читає <c>EnterEditAsync</c> — той самий власник транзакції вже тримає
     /// виняткове, тож спільне видається одразу й лише читає стан після блокування.
     /// </remarks>
-    private async Task CreateUnderLockAsync(
+    private async Task<long> CreateUnderLockAsync(
         Ports.TableInstanceRef instance, TableDef table, long tableInstanceId, RowKey key,
         AccessProfile profile, bool assignmentsPresent, string? sheetCode, CancellationToken ct)
     {
@@ -500,6 +553,7 @@ public sealed class CreateRowHandler(
             .ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        return rowId;
     }
 
     /// <summary>Запис журналу рядків; без сховища (прямі конструктори тестів) — нічого.</summary>
@@ -578,3 +632,8 @@ public sealed class CreateRowHandler(
     private static Domain.ValueObjects.PeriodKey PeriodKeyOf(Ports.TableInstanceRef instance)
         => new(instance.PeriodKey);
 }
+
+/// <summary>Результат створення рядка.</summary>
+/// <param name="RowKey">Ключ нового рядка.</param>
+/// <param name="RecalculationJobId">Задача формул нового рядка (SHEETNAME); <c>null</c> — задачі немає.</param>
+public sealed record CreateRowResult(RowKey RowKey, string? RecalculationJobId);

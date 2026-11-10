@@ -14,6 +14,14 @@ namespace Ecr.Application.Calculations;
 /// <param name="SheetName">Назва аркуша мовами каталогу.</param>
 /// <param name="PeriodKey">Період (<c>yyyyMM</c>).</param>
 /// <param name="State"><c>Approved</c>.</param>
+/// <param name="SheetCopyId">
+/// ✎ Борг 09.11: копія аркуша (RS), яку пропущено; <c>null</c> — оригінал. Перерахунок пропускає аркуш × копію
+/// окремо, тож і перелік називає копію.
+/// </param>
+/// <param name="SheetDisplayName">
+/// Показувана назва аркуша в документі — «&lt;Назва&gt; N» за <see cref="SheetCopyNaming"/> (назва групи документа,
+/// номер, коли в групі є копії); <c>null</c> — як <paramref name="SheetName"/>.
+/// </param>
 public sealed record SkippedSheet(
     long DocumentId,
     string DocumentCode,
@@ -22,7 +30,9 @@ public sealed record SkippedSheet(
     string SheetCode,
     LocalizedText SheetName,
     int PeriodKey,
-    string State);
+    string State,
+    long? SheetCopyId = null,
+    LocalizedText? SheetDisplayName = null);
 
 /// <summary>
 /// UAT-recalc-ux: підсумок запиту на перерахунок — задача (якщо є що рахувати) і пропущені аркуші.

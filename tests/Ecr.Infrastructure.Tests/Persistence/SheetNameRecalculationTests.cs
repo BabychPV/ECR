@@ -57,6 +57,89 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         Assert.Equal("Vessel 2", await TextAsync(world.Doc, copyRow));
     }
 
+    /// <remarks>
+    /// Борг 09.11: новий рядок у копії показував порожній SHEETNAME() до ручного перерахунку — порожній рядок не
+    /// дає насіння каскаду, а перегляд рядка SHEETNAME пропускає. Мутація (локально): прибрати постановку з
+    /// <c>CreateRowHandler.CreateAsync</c> — задачі немає, тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "SHEETNAME-1109")]
+    public async Task Новий_рядок_у_копії_ставить_задачу_формул_і_SHEETNAME_дає_назву_копії()
+    {
+        var world = await ArrangeAsync(rowMode: TableRowMode.Dynamic);
+        var copy = await world.Run(h => h.AddAsync(world.Doc.DocumentId, world.Doc.SheetDefId, default));
+        await AddCopyInstanceAsync(world.Doc, copy.SheetCopyId);
+        var copyInstance = Assert.Single(await CopyInstanceIdsAsync(world.Doc, copy.SheetCopyId));
+        world.Jobs.ClearReceivedCalls();
+
+        var created = await world.CreateRowAsync(copyInstance);
+
+        var call = Assert.Single(world.Jobs.ReceivedCalls(), c => c.GetMethodInfo().Name == "EnqueueCoalescedAsync");
+        Assert.Equal(typeof(IFormulaRecalculationJob), call.GetMethodInfo().GetGenericArguments()[0]);
+        Assert.NotNull(created.RecalculationJobId);
+        var newRow = await RowIdAsync(world.Doc, copyInstance, created.RowKey.Value);
+        Assert.Null(await TextAsync(world.Doc, newRow));
+
+        // Що зробить задача: каскад формул від насіння «новий рядок × колонка SHEETNAME» у виді копії.
+        await world.RunFormulaJobAsync(call.GetArguments()[1]);
+
+        Assert.Equal("Vessel 2", await TextAsync(world.Doc, newRow));
+    }
+
+    /// <remarks>
+    /// Борг 09.11: перелік «пропущено затверджені» після перерахунку не називав затверджених копій
+    /// (<c>OriginalOnly()</c> у <c>WorkflowStore.ListApprovedSheetsAsync</c>), хоча прогін пропускає їх окремо.
+    /// Мутація (локально): повернути <c>OriginalOnly()</c> — копії в переліку немає, тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "SHEETNAME-1109")]
+    public async Task Перелік_пропущених_затверджених_називає_копію_з_номером()
+    {
+        var world = await ArrangeAsync();
+        var copy = await world.Run(h => h.AddAsync(world.Doc.DocumentId, world.Doc.SheetDefId, default));
+        await ApproveOriginalAsync(world.Doc);
+        await ApproveCopyAsync(world.Doc, copy.SheetCopyId);
+
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        var rows = await new WorkflowStore(db).ListApprovedSheetsAsync(
+            projectId: null, world.Doc.DocumentId, world.Doc.PeriodKey.Value, 10, CancellationToken.None);
+
+        // Назва аркуша в базі — від TestDocumentBuilder («Sheet <tag>»); знімок метаданих тут не читається.
+        var baseName = $"Sheet {world.Doc.SheetCode["SHEET".Length..]}";
+        Assert.Collection(
+            rows,
+            original =>
+            {
+                Assert.Null(original.SheetCopyId);
+                Assert.Equal($"{baseName} 1", original.SheetDisplayName!.Values["en"]);
+            },
+            copied =>
+            {
+                Assert.Equal(copy.SheetCopyId, copied.SheetCopyId);
+                Assert.Equal($"{baseName} 2", copied.SheetDisplayName!.Values["en"]);
+                Assert.Equal(world.Doc.SheetDefId, copied.SheetDefId);
+            });
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "SHEETNAME-1109")]
+    public async Task Новий_рядок_без_SHEETNAME_задачі_не_ставить()
+    {
+        var world = await ArrangeAsync(expression: "'fixed'", rowMode: TableRowMode.Dynamic);
+
+        var created = await world.CreateRowAsync(world.Doc.TableInstanceId);
+
+        Assert.Null(created.RecalculationJobId);
+        Assert.DoesNotContain(world.Jobs.ReceivedCalls(), c => c.GetMethodInfo().Name.StartsWith("Enqueue", StringComparison.Ordinal));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -367,6 +450,28 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         await db.SaveChangesAsync();
     }
 
+    private async Task ApproveCopyAsync(TestDocument doc, long sheetCopyId)
+    {
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        var state = new ApprovalState(doc.DocumentId, doc.SheetDefId, doc.PeriodKey.Value, sheetCopyId);
+        state.Submit(UserId, Now);
+        state.Approve(UserId, Now);
+        db.ApprovalStates.Add(state);
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<long> RowIdAsync(TestDocument doc, long tableInstanceId, string rowKey)
+    {
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        return await db.TableRows.AsNoTracking()
+            .Where(r => r.PeriodKeyValue == doc.PeriodKey.Value && r.TableInstanceId == tableInstanceId
+                        && r.RowKeyValue == rowKey)
+            .Select(r => r.Id)
+            .SingleAsync();
+    }
+
     private async Task<long> CopyRowAsync(TestDocument doc, long sheetCopyId)
     {
         await using var db = new EcrDbContext(
@@ -381,10 +486,11 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
             .SingleAsync();
     }
 
-    private async Task<World> ArrangeAsync(string expression = "SHEETNAME()")
+    private async Task<World> ArrangeAsync(string expression = "SHEETNAME()", TableRowMode rowMode = TableRowMode.Fixed)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var doc = await builder.BuildAsync(periodKey: 202603, columnCount: 1, rowCount: 1, ct: CancellationToken.None);
+        var doc = await builder.BuildAsync(
+            periodKey: 202603, columnCount: 1, rowCount: 1, rowMode: rowMode, ct: CancellationToken.None);
 
         await using (var db = builder.CreateContext())
         {
@@ -394,7 +500,7 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
             await db.SaveChangesAsync();
         }
 
-        var snapshot = Snapshot(doc, expression);
+        var snapshot = Snapshot(doc, expression, rowMode);
         var metadata = Substitute.For<IMetadataCache>();
         metadata.GetAsync(doc.TemplateVersionId, Arg.Any<CancellationToken>()).Returns(snapshot);
 
@@ -409,6 +515,12 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
             .Returns(EditDecision.Allow());
         access.ReadScopeAsync(Arg.Any<AccessProfile>(), doc.DocumentId, Arg.Any<CancellationToken>())
             .Returns(_ => DocumentReadScope.For(profile, doc.ProjectId, snapshot));
+        access.CanCreateRowsAsync(
+                Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyDictionary<string, NewRowAccess>)call.ArgAt<IReadOnlyCollection<string>>(2)
+                .ToDictionary(
+                    k => k, _ => new NewRowAccess(EditDecision.Allow(), new Dictionary<int, EditDecision>()),
+                    StringComparer.Ordinal));
 
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(UserId);
@@ -442,7 +554,7 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         return rowId;
     }
 
-    private static TemplateVersionSnapshot Snapshot(TestDocument doc, string expression)
+    private static TemplateVersionSnapshot Snapshot(TestDocument doc, string expression, TableRowMode rowMode)
     {
         var tag = doc.SheetCode["SHEET".Length..];
 
@@ -451,16 +563,21 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         sheet.SetCopyable(true);
 
         var table = new TableDef(doc.SheetDefId, EcrCode.Create($"TBL{tag}"), Name("Table"), 1,
-            TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+            TableLayoutKind.PerPeriodInstance, rowMode);
         SetId(table, doc.TableDefId);
 
-        var column = new ColumnDef(doc.TableDefId, EcrCode.Create($"C1_{tag}"), Name("Name"), 1, CellDataType.String);
+        var column = new ColumnDef(
+            doc.TableDefId, EcrCode.Create($"C1_{tag}"), Name("Name"), 1,
+            rowMode == TableRowMode.Fixed ? CellDataType.String : CellDataType.Formula);
         SetId(column, doc.ColumnDefIds[0]);
         table.AddColumn(column);
 
         var row = new RowDef(doc.TableDefId, RowKey.Create($"R1_{tag}"), 1, Name("Row 1"), RowKind.Item);
         SetId(row, doc.RowDefIds[0]);
-        table.AddRow(row);
+        if (rowMode == TableRowMode.Fixed)
+        {
+            table.AddRow(row);
+        }
 
         var formula = new FormulaDef(table.Id, FormulaScope.Column, expression, ExpressionDialect.Template);
         SetId(formula, FormulaId);
@@ -472,7 +589,9 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
 
         return new TemplateVersionSnapshot(
             doc.TemplateVersionId, 0, [sheet], new Dictionary<int, ColumnDef> { [column.Id] = column },
-            new Dictionary<(int, string), RowDef> { [(table.Id, row.RowKeyValue)] = row });
+            rowMode == TableRowMode.Fixed
+                ? new Dictionary<(int, string), RowDef> { [(table.Id, row.RowKeyValue)] = row }
+                : []);
     }
 
     private async Task<string?> TextAsync(TestDocument doc, long rowId)
@@ -523,6 +642,26 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
                 new RowStore(db, new BulkCellLoader(db.Database.GetConnectionString()!, 1000), clock),
                 Substitute.For<IPermitBindingStore>(), metadata, access, user, new DocumentSheetCopyStore(db), Jobs);
             await handler.HandleAsync(Doc.DocumentId, Doc.PeriodKey.Value, CancellationToken.None);
+        }
+
+        /// <summary>POST row (<c>CreateRowHandler</c>) у екземпляр; кожен виклик — новий контекст.</summary>
+        public async Task<CreateRowResult> CreateRowAsync(long tableInstanceId)
+        {
+            await using var db = builder.CreateContext();
+            var clock = new FixedClock();
+            var handler = new CreateRowHandler(
+                new RowStore(db, new BulkCellLoader(db.Database.GetConnectionString()!, 1000), clock), new DocumentStore(db),
+                metadata, access, new UnitOfWork(db), clock, new SheetEditGate(db), jobs: Jobs);
+            var profile = await access.BuildProfileAsync(UserId, CancellationToken.None);
+            return await handler.CreateAsync(Doc.DocumentId, tableInstanceId, null, profile, CancellationToken.None);
+        }
+
+        /// <summary>Справжній <c>FormulaRecalculationJob</c> з payload постановки.</summary>
+        public async Task RunFormulaJobAsync(object? payload)
+        {
+            await using var db = builder.CreateContext();
+            await new FormulaRecalculationJob(Service(db), db)
+                .ExecuteAsync(payload, Substitute.For<IJobProgress>(), CancellationToken.None);
         }
 
         /// <summary>Те, що робить <c>RecalculationJob</c> з payload постановки: повний прогін аркуша за період.</summary>

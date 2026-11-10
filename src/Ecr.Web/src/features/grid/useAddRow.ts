@@ -1,9 +1,10 @@
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
-import type { CreateRowRequest } from '@/api/types';
+import type { CreateRowRequest, RowKeyResponse } from '@/api/types';
 import { hasText, t } from '@/shared/i18n';
 import { showApiError, showErrorText } from '@/shared/ui/notify';
 import { denyText } from './permissions';
+import { followRecalculation } from './useCellPatch';
 
 /**
  * Текст відмови додавання рядка за правом (`403 ECR-ACCS-0403.addRowDenied`) — причина мовою
@@ -73,14 +74,29 @@ export function addRowRetryDelayMs(failureCount: number, error: unknown): number
  * користувача означало б віддати йому ідентичність рядка, на яку
  * посилаються формули й аудит.
  */
-export function useAddRow(documentId: number, tableInstanceId: number, onAdded: () => void) {
+export function useAddRow(
+  documentId: number,
+  tableInstanceId: number,
+  onAdded: () => void,
+  periodKey?: number,
+) {
+  const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: () =>
-      apiFetch(`/api/v1/documents/${documentId}/rows`, {
+      apiFetch<RowKeyResponse>(`/api/v1/documents/${documentId}/rows`, {
         method: 'POST',
         body: JSON.stringify({ tableInstanceId, rowKey: null } satisfies CreateRowRequest),
       }),
-    onSuccess: onAdded,
+    // ✎ SHEETNAME (борг 09.11): новий рядок з колонкою SHEETNAME() отримує задачу формул — сітка стежить за нею
+    // тим самим шляхом, що й після PATCH/видалення (`followRecalculation`), і оновлює зріз, коли назва порахована.
+    onSuccess: (response) => {
+      const jobId = response.recalculationJobId;
+      if (periodKey !== undefined && typeof jobId === 'string' && jobId.length > 0) {
+        followRecalculation(queryClient, jobId, documentId, periodKey);
+      }
+      onAdded();
+    },
     retry: shouldRetryAddRow,
     retryDelay: addRowRetryDelayMs,
 

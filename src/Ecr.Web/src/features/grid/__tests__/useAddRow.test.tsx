@@ -14,6 +14,8 @@ import { addRowRetryDelayMs, shouldRetryAddRow, useAddRow } from '../useAddRow';
  */
 const showApiError = vi.hoisted(() => vi.fn());
 vi.mock('@/shared/ui/notify', () => ({ showApiError, showWarning: vi.fn() }));
+const followRecalculation = vi.hoisted(() => vi.fn());
+vi.mock('@/features/grid/useCellPatch', () => ({ followRecalculation }));
 
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -68,6 +70,31 @@ describe('useAddRow', () => {
 
     await waitFor(() => expect(showApiError).toHaveBeenCalledTimes(1));
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  // ✎ SHEETNAME (борг 09.11). Мутація: прибери `followRecalculation` з `onSuccess` — падає.
+  it('стежить за задачею формул нового рядка (SHEETNAME) і оновлює зріз', async () => {
+    followRecalculation.mockReset();
+    fetchMock.mockResolvedValue(json({ rowKey: 'r1', recalculationJobId: 'job-7' }, 201));
+    const onAdded = vi.fn();
+    const { result } = renderHook(() => useAddRow(5, 9, onAdded, 202603), { wrapper });
+
+    act(() => result.current.mutate());
+
+    await waitFor(() => expect(onAdded).toHaveBeenCalledTimes(1));
+    expect(followRecalculation).toHaveBeenCalledWith(client, 'job-7', 5, 202603);
+  });
+
+  it('без задачі формул не стежить', async () => {
+    followRecalculation.mockReset();
+    fetchMock.mockResolvedValue(json({ rowKey: 'r1', recalculationJobId: null }, 201));
+    const onAdded = vi.fn();
+    const { result } = renderHook(() => useAddRow(5, 9, onAdded, 202603), { wrapper });
+
+    act(() => result.current.mutate());
+
+    await waitFor(() => expect(onAdded).toHaveBeenCalledTimes(1));
+    expect(followRecalculation).not.toHaveBeenCalled();
   });
 
   it('політика: ліміт спроб і Retry-After як нижня межа відступу', () => {

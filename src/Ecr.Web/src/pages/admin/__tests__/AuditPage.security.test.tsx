@@ -101,6 +101,10 @@ describe('AuditPage: вкладка подій безпеки', () => {
       await screen.findByText('corr-123', {}, { timeout: SlowEnvTimeout });
       expect(screen.getAllByText('Access denied').length).toBeGreaterThan(0);
       expect(screen.getByText('Intruder')).toBeTruthy();
+      // ✎ debt-1109 x10: «Details» — читабельні пари, не сирий JSON (мутація: показати `detailsJson` — червоне).
+      expect(document.querySelector('[data-audit-details]')?.textContent).toBe(
+        'code: ECR-AUTH-0403 · method: GET · route: api/v1/audit/security',
+      );
 
       // ⛔ Мутація: у `AuditPage` замінити `!other` на `!structure` в `useCellChanges(filter, !other)` —
       // з'явиться другий запит (по партиціях `aud.CellChange`) заради невидимої таблиці.

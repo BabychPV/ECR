@@ -22122,6 +22122,13 @@
       "RowKeyResponse": {
         "description": "Створений рядок динамічної таблиці.",
         "properties": {
+          "recalculationJobId": {
+            "description": "Задача формул нового рядка (колонки `SHEETNAME()`); `null` — задачі немає. Клієнт стежить за нею, як за\n`recalculationJobId` PATCH.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "rowKey": {
             "description": "Ключ рядка; на нього посилаються формули й аудит.",
             "type": "string"
@@ -24914,10 +24921,29 @@
             "description": "Код аркуша.",
             "type": "string"
           },
+          "sheetCopyId": {
+            "description": "✎ Борг 09.11: копія аркуша (RS), яку пропущено; `null` — оригінал. Перерахунок пропускає аркуш × копію\nокремо, тож і перелік називає копію.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "sheetDefId": {
             "description": "Аркуш.",
             "format": "int32",
             "type": "integer"
+          },
+          "sheetDisplayName": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Показувана назва аркуша в документі — «&lt;Назва&gt; N» за SheetCopyNaming (назва групи документа,\nномер, коли в групі є копії); `null` — як SheetName."
+              }
+            ]
           },
           "sheetName": {
             "$ref": "#/components/schemas/LocalizedText",

@@ -69,7 +69,11 @@ public sealed record UserIdResponse(int UserId);
 
 /// <summary>Створений рядок динамічної таблиці.</summary>
 /// <param name="RowKey">Ключ рядка; на нього посилаються формули й аудит.</param>
-public sealed record RowKeyResponse(string RowKey);
+/// <param name="RecalculationJobId">
+/// Задача формул нового рядка (колонки <c>SHEETNAME()</c>); <c>null</c> — задачі немає. Клієнт стежить за нею, як за
+/// <c>recalculationJobId</c> PATCH.
+/// </param>
+public sealed record RowKeyResponse(string RowKey, string? RecalculationJobId = null);
 
 /// <summary>Видалений рядок динамічної таблиці (D3).</summary>
 /// <param name="RecalculationJobId">Задача перерахунку, поставлена видаленням; <c>null</c> — таблиця без колонок.</param>

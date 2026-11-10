@@ -38319,6 +38319,9 @@ export interface components {
         };
         /** @description Створений рядок динамічної таблиці. */
         RowKeyResponse: {
+            /** @description Задача формул нового рядка (колонки `SHEETNAME()`); `null` — задачі немає. Клієнт стежить за нею, як за
+             *     `recalculationJobId` PATCH. */
+            recalculationJobId?: null | string;
             /** @description Ключ рядка; на нього посилаються формули й аудит. */
             rowKey: string;
         };
@@ -39594,10 +39597,17 @@ export interface components {
             /** @description Код аркуша. */
             sheetCode: string;
             /**
+             * Format: int64
+             * @description ✎ Борг 09.11: копія аркуша (RS), яку пропущено; `null` — оригінал. Перерахунок пропускає аркуш × копію
+             *     окремо, тож і перелік називає копію.
+             */
+            sheetCopyId?: null | number;
+            /**
              * Format: int32
              * @description Аркуш.
              */
             sheetDefId: number;
+            sheetDisplayName?: null | components["schemas"]["LocalizedText"];
             /** @description Назва аркуша мовами каталогу. */
             sheetName: components["schemas"]["LocalizedText"];
             /** @description `Approved`. */

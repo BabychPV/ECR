@@ -18,6 +18,7 @@ import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { securityEventLabel } from './auditLabels';
+import { auditDetailsText } from './auditDetails';
 import './auditTable.css';
 
 /**
@@ -116,8 +117,14 @@ export function SecurityEventsPanel({ from, to }: { from: string; to: string }):
                     <Table.Td title={`#${String(event.changedByUserId)}`}>{authorName(event)}</Table.Td>
                     <Table.Td title={event.eventType}>{securityEventLabel(event.eventType)}</Table.Td>
                     <Table.Td>
-                      <Text size="xs" ff="monospace" style={{ wordBreak: 'break-all' }}>
-                        {event.detailsJson ?? '—'}
+                      {/* ✎ debt-1109 x10: читабельні пари замість сирого JSON; точне значення — у підказці. */}
+                      <Text
+                        size="xs"
+                        style={{ overflowWrap: 'anywhere' }}
+                        title={event.detailsJson ?? undefined}
+                        data-audit-details=""
+                      >
+                        {auditDetailsText(event.detailsJson)}
                       </Text>
                     </Table.Td>
                     <Table.Td>
