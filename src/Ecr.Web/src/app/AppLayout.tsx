@@ -44,7 +44,8 @@ import { usePreferenceSync } from '@/features/preferences/usePreferenceSync';
 // ✎ debt-1109 x8: кнопка «My tasks» з лічильниками (черги завдань, передач, погоджень, повернень) — лінивим чанком,
 // як і 404 та годинник бездіяльності: спільний чанк оболонки довів DocumentPage/DocumentsPage до межі 250 КБ (D-132).
 const MyTasksLauncher = lazy(async () => ({ default: (await import('@/features/jobs/MyTasksLauncher')).MyTasksLauncher }));
-import { SearchLauncher } from '@/features/search/SearchLauncher';
+// ✎ debt-1109 x8: кнопка палітри (Ctrl+K) — теж лінивим чанком; після #792 DocumentPage знову вийшов за 250 КБ.
+const SearchLauncher = lazy(async () => ({ default: (await import('@/features/search/SearchLauncher')).SearchLauncher }));
 import { useSession } from '@/shared/session/useSession';
 import { isCatalogResolved, language, loadCatalog, loginChosenLanguage, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
@@ -542,7 +543,9 @@ export function AppLayout(): JSX.Element {
                 <>
                   {/* Командна палітра (UI-30) і пошук даних (BE-19): у статичному бандлі —
                       лише кнопка й Ctrl+K. Екрани — ті самі групи, що й меню. */}
-                  <SearchLauncher groups={navGroupsForMe} />
+                  <Suspense fallback={null}>
+                    <SearchLauncher groups={navGroupsForMe} />
+                  </Suspense>
 
                   {/* ⛔ «My tasks» (UI-07, UX-09) — БЕЗ перевірки права, навмисно:
                       директива №15, бекенд §BE-08 — «шухляда «My tasks» у шапці
