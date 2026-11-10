@@ -12,17 +12,22 @@ public sealed class CalculationInputBuilder(ICellStore cellStore, IMetadataCache
     /// <param name="periodKey">Період.</param>
     /// <param name="methodology">Версія методології, яку виконують.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="read">
+    /// Зріз і ключі рядків, уже прочитані зіставленням правил (<see cref="RowMatchOutcome.Read"/>, AN-13 D4);
+    /// беруться, лише якщо це той самий екземпляр і той самий період, інакше — власне читання.
+    /// </param>
     /// <remarks>
     /// ⚠ Пакетність принципова: читання по рядку не вкладається в бюджет
     /// 10 хвилин на річний перерахунок. Один <c>ReadSliceAsync</c> на таблицю,
-    /// один <c>GetRowIdsAsync</c> — і жодного запиту в циклі.
+    /// один <c>GetRowIdsAsync</c> — і жодного запиту в циклі; з <paramref name="read"/> — жодного.
     /// </remarks>
     public async Task<IReadOnlyList<CalculationInput>> BuildAsync(
         long tableInstanceId,
         IReadOnlyList<string> rowKeys,
         PeriodKey periodKey,
         MethodologyDescriptor methodology,
-        CancellationToken ct)
+        CancellationToken ct,
+        TableSliceRead? read = null)
     {
         ArgumentNullException.ThrowIfNull(rowKeys);
         ArgumentNullException.ThrowIfNull(methodology);
@@ -36,10 +41,14 @@ public sealed class CalculationInputBuilder(ICellStore cellStore, IMetadataCache
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
         // O3c: період САМОГО екземпляра (не параметр `periodKey`) — той самий
         // зріз, що без ключа, але з ключем партиції замість пошуку по всіх.
-        var slice = await cellStore
-            .ReadSliceAsync(tableInstanceId, new PeriodKey(instance.PeriodKey), ct)
-            .ConfigureAwait(false);
-        var rowIds = await rows.GetRowIdsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
+        var instancePeriod = new PeriodKey(instance.PeriodKey);
+        var reusable = read is not null && read.TableInstanceId == tableInstanceId && read.PeriodKey == instancePeriod;
+        var slice = reusable
+            ? read!.Cells
+            : await cellStore.ReadSliceAsync(tableInstanceId, instancePeriod, ct).ConfigureAwait(false);
+        var rowIds = reusable && read!.PeriodKey == periodKey
+            ? read.RowIds
+            : await rows.GetRowIdsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
 
         // ⚠ Ім'я аргументу — це КОД колонки, а не її ідентифікатор: формула
         // методології пише `@Jan`, і зіставлення за числом зробило б її

@@ -365,8 +365,9 @@ public sealed class CalculationOrchestrator(
             binding.TableInstanceId, rowKeys, outcome.AllRowKeys, outcome.Excluded, binding.Descriptor.MethodologyId));
 
         // 4. Входи ПАКЕТНО: один запит на методологію × період, не N на рядок.
+        //    AN-13 D4: зріз і ключі рядків — ті, що вже прочитало зіставлення правил, а не друге читання.
         var inputs = await scopedInputBuilder
-            .BuildAsync(binding.TableInstanceId, rowKeys, periodKey, binding.Descriptor, ct)
+            .BuildAsync(binding.TableInstanceId, rowKeys, periodKey, binding.Descriptor, ct, outcome.Read)
             .ConfigureAwait(false);
 
         // 4a. ⛔ Бюджет обсягу прив'язки (ФВ-9.8, D-205): ДО підготовки модуля і

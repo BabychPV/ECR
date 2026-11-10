@@ -287,9 +287,32 @@ public sealed class MethodologyResolver(
             matched,
             [.. rowIds.OrderBy(r => r.Value).Select(r => r.Key)],
             excluded,
-            FilterInert: activity is not null && statusColumns.Count == 0);
+            FilterInert: activity is not null && statusColumns.Count == 0)
+        {
+            // AN-13 D4: прочитане вже — збирачу входів (CalculationInputBuilder), щоб не читати вдруге.
+            Read = new TableSliceRead(tableInstanceId, period, slice, rowIds),
+        };
     }
 }
+
+/// <summary>
+/// Зріз екземпляра таблиці й ключі його рядків, уже прочитані зіставленням правил (AN-13 D4).
+/// </summary>
+/// <param name="TableInstanceId">Екземпляр таблиці.</param>
+/// <param name="PeriodKey">Період, за яким читали (період самого екземпляра).</param>
+/// <param name="Cells">Комірки зрізу.</param>
+/// <param name="RowIds">Ключ рядка → <c>TableRow.Id</c>.</param>
+/// <remarks>
+/// ⛔ Фаза методологій читала той самий зріз двічі на прив'язку: <see cref="MethodologyResolver.MatchRowsDetailedAsync"/>
+/// для правил і <see cref="CalculationInputBuilder.BuildAsync"/> для входів (I2-1: ≈450 викликів, 25 % ЦП SQL).
+/// Між двома читаннями прогін нічого в цю таблицю не пише (фаза формул уже завершилась, лок документа
+/// тримає задача), тож друге читання повертало те саме.
+/// </remarks>
+public sealed record TableSliceRead(
+    long TableInstanceId,
+    PeriodKey PeriodKey,
+    IReadOnlyList<CellRecord> Cells,
+    IReadOnlyDictionary<string, long> RowIds);
 
 /// <summary>Результат підбору версії методології для привʼязки (G14).</summary>
 /// <param name="Descriptor">Чинна на дату версія; <c>null</c> — немає (ще не діє або не опублікована).</param>
@@ -317,6 +340,9 @@ public sealed record RowMatchOutcome(
 {
     /// <summary>Відсіяні фільтром активності; ніколи не <c>null</c>.</summary>
     public IReadOnlyList<string> Excluded => ExcludedRowKeys ?? [];
+
+    /// <summary>Прочитаний зріз (AN-13 D4); <c>null</c> — у версії немає правил, зріз не читався.</summary>
+    public TableSliceRead? Read { get; init; }
 }
 
 /// <summary>Рядок і правило, яке його закрило.</summary>
