@@ -149,12 +149,19 @@ public sealed record CalculationIssueColumnDto(string Code, LocalizedText NameL1
 /// <param name="SheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
 /// <param name="RowNumber">Номер рядка, з 1, у порядку створення.</param>
 /// <param name="RowKey">Публічний ключ рядка.</param>
-/// <param name="Kind">Вид проблеми; нині <c>NoMatchingRule</c>.</param>
+/// <param name="Kind">Вид проблеми: <c>NoMatchingRule</c> або <c>CategoryRuleRejected</c> (✎ 10.11).</param>
 /// <param name="MethodologyCode">Методологія прив'язки таблиці; <c>null</c> — невідома.</param>
 /// <param name="DetectedAt">Коли виявлено (UTC).</param>
 /// <param name="CurrentValues">
 /// Значення рядка в колонках підказки таблиці (<c>tables[].columns</c>, той самий порядок);
 /// <c>null</c> — підказки для таблиці немає; порожній рядок у позиції — комірка порожня.
+/// </param>
+/// <param name="RuleCode">
+/// ✎ 10.11: лише для <c>CategoryRuleRejected</c> — правило методології, що закрило рядок; <c>null</c> — невідоме.
+/// </param>
+/// <param name="Columns">
+/// ✎ 10.11: лише для <c>CategoryRuleRejected</c> — порожні колонки рядка, які треба заповнити, щоб правило категорії дало
+/// ключ (у порядку колонок таблиці); <c>null</c> — назвати не вдалося або колонка прихована від читача.
 /// </param>
 public sealed record CalculationIssueDto(
     string TableCode,
@@ -164,4 +171,6 @@ public sealed record CalculationIssueDto(
     string Kind,
     string? MethodologyCode,
     DateTime DetectedAt,
-    IReadOnlyList<string>? CurrentValues = null);
+    IReadOnlyList<string>? CurrentValues = null,
+    string? RuleCode = null,
+    IReadOnlyList<CalculationIssueColumnDto>? Columns = null);

@@ -1714,6 +1714,16 @@
       "CalculationIssueDto": {
         "description": "Одна поточна проблема розрахунку: рядок, який правило методології не охопило (AN-69).",
         "properties": {
+          "columns": {
+            "description": "✎ 10.11: лише для `CategoryRuleRejected` — порожні колонки рядка, які треба заповнити, щоб правило категорії дало\nключ (у порядку колонок таблиці); `null` — назвати не вдалося або колонка прихована від читача.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationIssueColumnDto"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "currentValues": {
             "description": "Значення рядка в колонках підказки таблиці (`tables[].columns`, той самий порядок);\n`null` — підказки для таблиці немає; порожній рядок у позиції — комірка порожня.",
             "items": {
@@ -1730,7 +1740,7 @@
             "type": "string"
           },
           "kind": {
-            "description": "Вид проблеми; нині `NoMatchingRule`.",
+            "description": "Вид проблеми: `NoMatchingRule` або `CategoryRuleRejected` (✎ 10.11).",
             "type": "string"
           },
           "methodologyCode": {
@@ -1748,6 +1758,13 @@
             "description": "Номер рядка, з 1, у порядку створення.",
             "format": "int32",
             "type": "integer"
+          },
+          "ruleCode": {
+            "description": "✎ 10.11: лише для `CategoryRuleRejected` — правило методології, що закрило рядок; `null` — невідоме.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "sheetCopyId": {
             "description": "Копія аркуша; `null` — оригінал.",
