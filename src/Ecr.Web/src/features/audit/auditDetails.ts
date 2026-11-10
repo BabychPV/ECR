@@ -32,9 +32,21 @@ function flatten(value: Record<string, unknown>, prefix: string, parts: string[]
   }
 }
 
+/**
+ * ✎ debt-1110: масив ОБ'ЄКТІВ (подія `RegistryValueChanged`: `changes: [{field, oldValue, newValue}, …]`) давав сирий
+ * JSON кожного елемента. Тепер будь-яка глибина — тим самим читабельним видом: об'єкт у масиві — `(ключ: значення, …)`,
+ * такі елементи — через «; », прості значення — як і раніше через кому.
+ */
 function scalar(item: unknown): string {
   if (item === null || item === undefined) return '—';
-  if (Array.isArray(item)) return item.length === 0 ? '—' : item.map((x) => scalar(x)).join(', ');
-  if (typeof item === 'object') return JSON.stringify(item);
+  if (Array.isArray(item)) {
+    if (item.length === 0) return '—';
+    const hasObjects = item.some((x) => x !== null && typeof x === 'object');
+    return item.map((x) => scalar(x)).join(hasObjects ? '; ' : ', ');
+  }
+  if (typeof item === 'object') {
+    const entries = Object.entries(item as Record<string, unknown>);
+    return entries.length === 0 ? '—' : `(${entries.map(([key, value]) => `${key}: ${scalar(value)}`).join(', ')})`;
+  }
   return String(item);
 }
