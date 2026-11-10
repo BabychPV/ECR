@@ -320,7 +320,8 @@ public sealed partial class RegistryCompositionHttpTests(SqlServerFixture sql)
                 id = (long?)null,
                 registryDefId = registry.Id,
                 code,
-                display = new { values = new Dictionary<string, string> { ["en"] = code } },
+                // ✎ D14: назва обов'язкова (422 ECR-REG-4222) — автокодовий запис (код порожній) теж іменується.
+                display = new { values = new Dictionary<string, string> { ["en"] = code.Length == 0 ? "part" : code } },
                 parentEntryId = (long?)null,
                 values,
             });
