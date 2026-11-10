@@ -48,6 +48,38 @@ public sealed class CalculationIssueStoreTests(SqlServerFixture sql)
         Assert.Empty(await RowNumbersAsync(store, f, null));
     }
 
+    /// <remarks>
+    /// ✎ 10.11 (doc 95): відхилений правилом категорії рядок зберігається своїм видом і методологією — читання виводить з
+    /// них правило й колонки. Мутація: не передавати <c>issue.Kind</c> у конструктор — вид стає NoMatchingRule, тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Відхилений_правилом_категорії_рядок_зберігається_своїм_видом_і_методологією()
+    {
+        var f = await PurgeKit.ArrangeAsync(sql, 202704);
+        await using var db = f.Builder.CreateContext();
+        var run = await PurgeKit.AddRunAsync(db, f, "Running", T0);
+        var store = new CalculationIssueStore(db, new TestClock(T0));
+        var table = f.Document.TableInstanceId;
+
+        await store.ReplaceAsync(
+            run,
+            [table],
+            [
+                Issue(table, 1),
+                new CalculationIssueInput(table, 2, "R2", f.MethodologyId, ICalculationIssueStore.CategoryRuleRejected),
+            ],
+            CancellationToken.None);
+        await db.SaveChangesAsync();
+
+        var rows = await store.ListAsync(f.Document.DocumentId, f.Period, null, CancellationToken.None);
+        Assert.Equal(ICalculationIssueStore.NoMatchingRule, rows.Single(r => r.RowNumber == 1).Kind);
+        var rejected = rows.Single(r => r.RowNumber == 2);
+        Assert.Equal(ICalculationIssueStore.CategoryRuleRejected, rejected.Kind);
+        Assert.Equal(f.MethodologyId, rejected.MethodologyId);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

@@ -37,6 +37,33 @@ public sealed class RunCalculationIssuesWriteTests
             Arg.Any<CancellationToken>());
     }
 
+    /// <remarks>
+    /// ✎ 10.11 (doc 95): рядок, відхилений правилом категорії, раніше лишав лише повідомлення задачі — панель казала
+    /// «none» без причини. Мутація: прибрати додавання <c>profile.RejectedRows</c> у <c>SwitchAsync</c> — тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Відхилений_правилом_категорії_рядок_стає_проблемою_свого_виду_з_методологією()
+    {
+        var (handler, issues) = Arrange(supersededSelf: false);
+        var profile = new ModuleProfile();
+        profile.RecordEvaluatedTables([10]);
+        profile.RecordRejected([new RejectedRow(10, 1, "R1", 900, 2), new RejectedRow(10, 1, "R1", 900, 2)]);
+
+        await handler.CompleteAsync(RunId, profile, CancellationToken.None);
+
+        await issues.Received(1).ReplaceAsync(
+            RunId,
+            Arg.Any<IReadOnlyCollection<long>>(),
+            Arg.Is<IReadOnlyCollection<CalculationIssueInput>>(i =>
+                i.Count == 1
+                && i.Single().RowKey == "R1"
+                && i.Single().RowNumber == 1
+                && i.Single().MethodologyId == 2
+                && i.Single().Kind == ICalculationIssueStore.CategoryRuleRejected),
+            Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Відмовлений_як_старіший_прогін_не_замінює_проблеми()

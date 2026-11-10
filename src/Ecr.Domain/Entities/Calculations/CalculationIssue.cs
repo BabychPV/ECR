@@ -4,7 +4,8 @@ using Ecr.Domain.Abstractions;
 namespace Ecr.Domain.Entities.Calculations;
 
 /// <summary>
-/// Поточна проблема розрахунку (<c>calc.CalculationIssue</c>, AN-69): рядок таблиці, якому не підійшло жодне правило.
+/// Поточна проблема розрахунку (<c>calc.CalculationIssue</c>, AN-69): рядок таблиці, якому не підійшло жодне правило,
+/// або рядок, відхилений правилом категорії.
 /// </summary>
 /// <remarks>
 /// ⛔ Таблиця тримає ЛИШЕ поточні проблеми (рішення людини 28.10: лише останній результат): прохід
@@ -15,6 +16,12 @@ public sealed class CalculationIssue : Entity<long>
 {
     /// <summary>Вид: рядок без правила методології.</summary>
     public const string NoMatchingRuleKind = "NoMatchingRule";
+
+    /// <summary>
+    /// Вид: правило методології рядок закрило, але правило категорії версії не дало ключа (L2-6) — рядок відхилено.
+    /// Правило й порожні колонки виводить читання (<c>CalculationRejectionReasons</c>), у рядку їх немає (без міграції).
+    /// </summary>
+    public const string CategoryRuleRejectedKind = "CategoryRuleRejected";
 
     /// <summary>Стеля колонки <see cref="RowKey"/>.</summary>
     public const int MaxRowKeyLength = 100;
@@ -31,6 +38,7 @@ public sealed class CalculationIssue : Entity<long>
     /// <param name="methodologyId">Методологія прив'язки; <c>null</c> — невідома.</param>
     /// <param name="calculationRunId">Прогін, що виявив проблему.</param>
     /// <param name="detectedAt">Момент виявлення (UTC).</param>
+    /// <param name="kind">Вид; <c>null</c> — <see cref="NoMatchingRuleKind"/>.</param>
     public CalculationIssue(
         long documentId,
         int periodKey,
@@ -40,7 +48,8 @@ public sealed class CalculationIssue : Entity<long>
         int rowNumber,
         int? methodologyId,
         long calculationRunId,
-        DateTime detectedAt)
+        DateTime detectedAt,
+        string? kind = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(rowKey);
 
@@ -50,7 +59,7 @@ public sealed class CalculationIssue : Entity<long>
         SheetCopyId = sheetCopyId;
         RowKey = rowKey;
         RowNumber = rowNumber;
-        Kind = NoMatchingRuleKind;
+        Kind = string.IsNullOrEmpty(kind) ? NoMatchingRuleKind : kind;
         MethodologyId = methodologyId;
         CalculationRunId = calculationRunId;
         DetectedAt = detectedAt;
