@@ -150,6 +150,79 @@ public sealed class DatabaseGrowthTrackerTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// D16: після тесту журнал спільної бази звільняється CHECKPOINT-ом, коли заповнений понад поріг.
+    /// Мутація: прибрати <c>CHECKPOINT;</c> із <c>CheckpointIfLogAbove</c> → журнал після виклику не менший, червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Журнал_понад_поріг_звільняється_CHECKPOINT_ом_а_нижче_порогу_ні()
+    {
+        var name = $"EcrTest_LogProbe_{Guid.NewGuid():N}";
+        var master = new SqlConnectionStringBuilder(sql.ConnectionString) { InitialCatalog = "master" };
+        var probe = new SqlConnectionStringBuilder(sql.ConnectionString) { InitialCatalog = name, Pooling = false };
+
+        await using var admin = new SqlConnection(master.ConnectionString);
+        await admin.OpenAsync();
+        try
+        {
+            var sharedFile = await ScalarAsync(
+                admin,
+                $"SELECT physical_name FROM sys.master_files WHERE database_id = DB_ID(N'{sql.DatabaseName}') AND file_id = 1");
+            var dir = sharedFile[..(sharedFile.LastIndexOfAny(['\\', '/']) + 1)];
+            await ExecuteAsync(
+                admin,
+                $"""
+                CREATE DATABASE [{name}]
+                ON PRIMARY (NAME = N'{name}', FILENAME = N'{dir}{name}.mdf', SIZE = 8MB, FILEGROWTH = 8MB)
+                LOG ON (NAME = N'{name}_log', FILENAME = N'{dir}{name}_log.ldf', SIZE = 8MB, FILEGROWTH = 8MB);
+                """);
+
+            await using (var fill = new SqlConnection(probe.ConnectionString))
+            {
+                await fill.OpenAsync();
+                await ExecuteAsync(fill, "CREATE TABLE dbo.Filler (Id int IDENTITY PRIMARY KEY, Pad char(1000) NOT NULL);");
+                await ExecuteAsync(fill, "CHECKPOINT;");
+                await ExecuteAsync(
+                    fill,
+                    "INSERT dbo.Filler (Pad) SELECT TOP (2000) 'x' FROM sys.all_objects a CROSS JOIN sys.all_objects b;");
+            }
+
+            var tracker = new DatabaseGrowthTracker(probe.ConnectionString);
+            var before = await LogUsedPercentAsync(probe.ConnectionString);
+            Assert.True(before > 10, $"заливка мала заповнити журнал: {before:0.0} %");
+
+            Assert.False(tracker.CheckpointIfLogAbove(100), "журнал не буває заповнений понад 100 %");
+            Assert.True(tracker.CheckpointIfLogAbove(0));
+
+            var after = await LogUsedPercentAsync(probe.ConnectionString);
+            Assert.True(after < before / 2, $"після CHECKPOINT журнал {after:0.0} % — не звільнений (до {before:0.0} %)");
+        }
+        finally
+        {
+            await ExecuteAsync(
+                admin,
+                $"""
+                IF DB_ID(N'{name}') IS NOT NULL
+                BEGIN
+                    ALTER DATABASE [{name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+                    DROP DATABASE [{name}];
+                END
+                """);
+        }
+    }
+
+    private static async Task<double> LogUsedPercentAsync(string connectionString)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT CAST(used_log_space_in_percent AS float) FROM sys.dm_db_log_space_usage;";
+
+        return (double)(await command.ExecuteScalarAsync())!;
+    }
+
     private static async Task<string> ScalarAsync(SqlConnection connection, string sqlText)
     {
         await using var command = connection.CreateCommand();
