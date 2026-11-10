@@ -199,6 +199,33 @@ public sealed class JobLaneTests
         Assert.Equal(expected, limiter.ExcelMaxConcurrency);
     }
 
+    /// <summary>
+    /// AN-13 D4: стеля відкладень (<c>Jobs:Recalculation:MaxDeferralMinutes</c>) доходить до виконавця черги в
+    /// обох режимах (у Quartz її бере й <c>QuartzJobAdapter</c> з тих самих налаштувань). Раніше ключ був лише
+    /// в коментарі, а стеля — константою 30 хв.
+    /// </summary>
+    [Theory]
+    [InlineData("Database", null, 30)]
+    [InlineData("Database", "45", 45)]
+    [InlineData("Quartz", "45", 45)]
+    [InlineData("Quartz", "0", 30)]
+    [InlineData("Database", "abc", 30)]
+    public void Стеля_відкладень_з_конфігурації_доходить_до_виконавця_черги(string mode, string? value, int expectedMinutes)
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Ecr"] = "Server=.;Database=EcrJobLaneGuard;Integrated Security=true",
+            [DbBackgroundJobScheduler.ModeKey] = mode,
+            [JobDeferral.MaxDeferralMinutesKey] = value,
+        };
+
+        var services = new ServiceCollection();
+        services.AddEcrInfrastructure(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
+
+        var options = (JobWorkerOptions)services.Single(d => d.ServiceType == typeof(JobWorkerOptions)).ImplementationInstance!;
+        Assert.Equal(TimeSpan.FromMinutes(expectedMinutes), options.MaxDeferral);
+    }
+
     [Fact]
     public void Excel_експорт_і_імпорт_мають_свій_лейн_а_решта_ні()
     {

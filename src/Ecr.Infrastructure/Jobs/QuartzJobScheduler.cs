@@ -402,26 +402,56 @@ public sealed partial class QuartzJobScheduler(
     /// <param name="payloadJson">Тіло перепостановки (<see cref="JobDeferral.RequeuePayload"/>).</param>
     /// <param name="createdByUserId">Автор задачі, що впала.</param>
     /// <param name="ct">Скасування.</param>
+    /// <param name="jobCode">
+    /// Код задачі, що впала; <c>null</c> чи задача злиття формул — злиття масиву. ⛔ AN-13 D4: перерахунок
+    /// документа (<see cref="IRecalculationJob"/>) — злиття на ціль без витіснення (<see cref="CoalesceAsync{TJob}"/>),
+    /// де щойно провалена задача не рахується «виконуваною».
+    /// </param>
     /// <returns>Задача, що виконає комірки.</returns>
     internal async Task<string> RequeueDeferralExhaustedAsync(
-        IScheduler instance, string failedJobId, string payloadJson, int? createdByUserId, CancellationToken ct)
+        IScheduler instance, string failedJobId, string payloadJson, int? createdByUserId, CancellationToken ct,
+        string? jobCode = null)
     {
         ArgumentNullException.ThrowIfNull(instance);
         ArgumentException.ThrowIfNullOrWhiteSpace(payloadJson);
 
-        // Хвіст ідентифікатора задачі злиття — Guid "N" (MergeAsync).
-        const int GuidLength = 32;
-        if (failedJobId is not { Length: > GuidLength })
+        if (TargetPrefixOfJobId(failedJobId) is not { } prefix)
         {
-            throw new ArgumentException("Не ідентифікатор задачі злиття.", nameof(failedJobId));
+            throw new ArgumentException("Не ідентифікатор задачі з ціллю.", nameof(failedJobId));
         }
 
         using var payload = JsonDocument.Parse(payloadJson);
 
+        if (string.Equals(jobCode, JobListKinds.RecalculationJobCode, StringComparison.Ordinal))
+        {
+            return await CoalesceAsync<IRecalculationJob>(
+                    instance, prefix, payload.RootElement.Clone(), createdByUserId, finishedJobId: failedJobId, ct)
+                .ConfigureAwait(false);
+        }
+
         return await MergeAsync<IFormulaRecalculationJob>(
-                instance, failedJobId[..^GuidLength], FormulaRecalculationTarget.MergedArrayPath,
+                instance, prefix, FormulaRecalculationTarget.MergedArrayPath,
                 payload.RootElement.Clone(), createdByUserId, ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Префікс цілі в ключі задачі (<c>Тип~ціль~</c>), що його ставлять <c>EnqueueExclusive</c>/<c>EnqueueCoalesced</c>;
+    /// <c>null</c> — ключ без цілі.
+    /// </summary>
+    /// <param name="jobId">Ключ задачі Quartz.</param>
+    internal static string? TargetPrefixOfJobId(string? jobId)
+    {
+        // Хвіст ідентифікатора задачі з ціллю — Guid "N" (EnqueueExclusiveAsync, CoalesceAsync, MergeAsync).
+        const int GuidLength = 32;
+        if (jobId is not { Length: > GuidLength + 2 } || jobId[^(GuidLength + 1)] != TargetSeparator)
+        {
+            return null;
+        }
+
+        var prefix = jobId[..^GuidLength];
+
+        return prefix.IndexOf(TargetSeparator, StringComparison.Ordinal) < prefix.Length - 1 ? prefix : null;
     }
 
     /// <summary>Злиття на ціль; <paramref name="finishedJobId"/> — задача, що щойно завершилась (не рахується).</summary>

@@ -193,7 +193,23 @@ public sealed class ChildCompositionTests
         Assert.Equal("Database", Assert.IsType<RecalculationBudgetOptions>(budget.ImplementationInstance).Mode);
     }
 
-    private static ServiceCollection Compose(string mode, string? executor)
+    /// <summary>
+    /// AN-13 D4: дочірній воркер бере стелю відкладень із власної конфігурації (оточення служби
+    /// <c>ECR_Jobs__Recalculation__MaxDeferralMinutes</c>), а не константу 30 хв.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-9.8")]
+    public void Стеля_відкладень_дочірнього_з_конфігурації()
+    {
+        var services = Compose("Database", "Worker", maxDeferralMinutes: "45");
+
+        var options = Assert.Single(services, d => d.ServiceType == typeof(JobWorkerOptions));
+        Assert.Equal(TimeSpan.FromMinutes(45), ((JobWorkerOptions)options.ImplementationInstance!).MaxDeferral);
+        Assert.Equal([JobLanes.Recalc], ((JobWorkerOptions)options.ImplementationInstance!).Lanes);
+    }
+
+    private static ServiceCollection Compose(string mode, string? executor, string? maxDeferralMinutes = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -201,6 +217,7 @@ public sealed class ChildCompositionTests
                 ["ConnectionStrings:Ecr"] = "Server=.;Database=EcrChildCompositionProbe;Integrated Security=true",
                 [DbBackgroundJobScheduler.ModeKey] = mode,
                 [JobLaneMap.ExecutorKey] = executor,
+                [JobDeferral.MaxDeferralMinutesKey] = maxDeferralMinutes,
             })
             .Build();
 

@@ -85,6 +85,9 @@ public static partial class EcrConfigurationValidation
 
         // F1 (WW-02): нуль дочірніх задач розкладу перерахунку — не «без межі», а документи, яких не бере ніхто.
         (Infrastructure.Jobs.QuartzJobTypeLimiter.RecalcFanOutMaxConcurrencyKey, 1),
+
+        // AN-13 D4: нуль хвилин — не «без стелі», а Failed на першому ж повторному відкладенні.
+        (Infrastructure.Jobs.JobDeferral.MaxDeferralMinutesKey, 1),
         ("Audit:ExportMaxRows", 1),
         ("Localization:ImportMaxBytes", 1),
         ("Registries:ImportMaxBytes", 1),

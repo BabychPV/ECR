@@ -71,6 +71,29 @@ public sealed class MethodologyReadsPerBindingTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-9.8")]
+    public async Task Зріз_таблиці_і_ключі_рядків_читаються_раз_на_прив_язку_а_не_двічі()
+    {
+        // ⛔ AN-13 D4: зіставлення правил (MethodologyResolver) і збирач входів (CalculationInputBuilder)
+        // читали той самий зріз і ті самі ключі рядків кожен сам — друге важке читання фази методологій
+        // (I2-1: ≈450 викликів, 25 % ЦП SQL).
+        var store = Substitute.For<IMethodologyStore>();
+        var periods = Substitute.For<IPeriodStore>();
+        var cells = Substitute.For<ICellStore>();
+        var rows = Substitute.For<IRowStore>();
+        var provider = Arrange(store, periods, cells: cells, rows: rows);
+
+        var profile = await Run(provider, periods);
+
+        // Рядки справді пораховано — «одне читання» не через порожній прогін.
+        Assert.Equal(Rows, profile.Stats.Single().Rows);
+
+        await cells.Received(1).ReadSliceAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+        await rows.Received(1).GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Чужий_контекст_прив_язки_відхиляється_а_не_рахується()
     {
         // ⛔ Ціна відсутності цієї перевірки — не виняток, а ПРАВДОПОДІБНЕ
@@ -152,7 +175,7 @@ public sealed class MethodologyReadsPerBindingTests
     /// тим шляхом, яким іде прогін.
     /// </remarks>
     private static ServiceProvider Arrange(
-        IMethodologyStore store, IPeriodStore periods, int rowCount = Rows)
+        IMethodologyStore store, IPeriodStore periods, int rowCount = Rows, ICellStore? cells = null, IRowStore? rows = null)
     {
         var formula = new MethodologyFormula(VersionId, EcrCode.Create("Total"), "1 + 1");
         formula.SetEvaluationOrder(1);
@@ -169,13 +192,13 @@ public sealed class MethodologyReadsPerBindingTests
         periods.FindPeriodBoundsAsync(DocumentId, Period, Arg.Any<CancellationToken>())
                .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
 
-        var rows = Substitute.For<IRowStore>();
+        rows ??= Substitute.For<IRowStore>();
         rows.ResolveTableInstanceAsync(TableInstance, Arg.Any<CancellationToken>())
             .Returns(new TableInstanceRef(TableInstance, DocumentId, 3, TemplateVersion, Period));
         rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(Enumerable.Range(0, rowCount).ToDictionary(i => $"R{i:D3}", i => (long)(1000 + i)));
 
-        var cells = Substitute.For<ICellStore>();
+        cells ??= Substitute.For<ICellStore>();
         cells.ReadSliceAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns([]);
 
         var metadata = Substitute.For<IMetadataCache>();

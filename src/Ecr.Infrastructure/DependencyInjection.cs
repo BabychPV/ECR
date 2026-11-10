@@ -388,6 +388,9 @@ public static class DependencyInjection
                 // не займає ні спільних місць, ні резерву перерахунку формул.
                 SeparateLanes = Jobs.JobLaneMap.ApiSeparateLanes,
                 SeparateConcurrency = Jobs.JobLaneMap.ReadExcelMaxConcurrency(configuration),
+
+                // AN-13 D4: стеля відкладень — з конфігурації, не лише константа.
+                MaxDeferral = Jobs.JobDeferral.ReadMaxDeferral(configuration),
             });
             services.AddHostedService<Jobs.JobWorker>();
 
@@ -411,6 +414,9 @@ public static class DependencyInjection
             {
                 Lanes = JobLanes.All,
                 PollInterval = Jobs.JobWorkerOptions.QuartzModeDrainPollInterval,
+
+                // AN-13 D4: ту саму стелю бере й QuartzJobAdapter (з цих налаштувань).
+                MaxDeferral = Jobs.JobDeferral.ReadMaxDeferral(configuration),
             });
             services.AddHostedService<Jobs.JobWorker>();
         }

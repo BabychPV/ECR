@@ -149,6 +149,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Jobs:Excel:MaxConcurrency` | 2 | скільки задач експорту/імпорту Excel виконується одночасно (AN-116). `Database`: окремий лейн `excel` з власними місцями — не займає ні чотирьох спільних, ні резерву перерахунку формул; `Quartz`: задача понад межу відкладається на 5 с, не тримаючи потоку пулу. Мінімум 1 |
 | `Jobs:Quartz:ThreadCount` | 16 | потоків пулу Quartz (режим `Quartz`; вбудоване значення Quartz — 10). Мінімум 1 |
 | `Jobs:Recalculation:FanOutMaxConcurrency` | 4 | скільки ДОКУМЕНТНИХ задач розкладу перерахунку проєкту (після переносу версії, нічний, адмін-команда) виконується одночасно (F1). Режим `Quartz`: понад межу задача відкладається триґером (потік пулу вільний), FIFO. Ручний «Перерахувати» документа й перерахунок після правки комірок межі не мають. У `Database` межу задають чотири спільні місця воркера. Мінімум 1 |
+| `Jobs:Recalculation:MaxDeferralMinutes` | 30 | стеля сумарного очікування зайнятого ресурсу (лок документа перерахунку), хв від ПЕРШОГО відкладення задачі. Після неї задача — `Failed` із причиною «ресурс зайнятий» (`jobs.deferralExhausted`); перерахунок формул після правки й перерахунок документа з ціллю перепоставляються один раз злиттям (без витіснення виконуваного), друга стеля — вже без перепостановки (AN-13 D4). Діє в `EcrApi` і `EcrWorker`; воркер `appsettings.json` Api не читає — йому той самий ключ задається оточенням служби (`ECR_Jobs__Recalculation__MaxDeferralMinutes`). Мінімум 1 |
 | `Database:SheetLockTimeoutSeconds` | 30 | очікування блокування аркуша, с |
 | `Database:MaxPoolSize` | 200 | стеля пулу з'єднань SQL (`Max Pool Size`), якщо в рядку підключення її не задано; задане в рядку має перевагу (AN-106) |
 | `Health:RawDataPointWarnRows` | 20000000 | поріг перегляду R2 для картки `db` (п. 3.1); `0` — вимкнено. ⚠ Нечислове значення робить `db` Unhealthy «Database is unavailable» (перевірки на старті немає) |
@@ -316,6 +317,7 @@ ORDER BY [Ts];
 | `Jobs:QueueDepth:RefreshSeconds` | ні | `15` | Ціле число, не менше 5. |
 | `Jobs:Recalculation:Executor` | ні | `InProcess` | Одне з: InProcess, Worker. |
 | `Jobs:Recalculation:FanOutMaxConcurrency` | ні | — | Ціле число, не менше 1. |
+| `Jobs:Recalculation:MaxDeferralMinutes` | ні | `30` | Ціле число, не менше 1. |
 | `Jobs:ShutdownTimeoutSeconds` | ні | `120` | Ціле число, не менше 1. |
 | `Localization:ImportMaxBytes` | ні | `1048576` | Ціле число, не менше 1. |
 | `Logging:File:Directory` | ні | `%ProgramData%\ECR\logs` | Значення на старті не перевіряється. |
