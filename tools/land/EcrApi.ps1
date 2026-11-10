@@ -227,7 +227,9 @@ function Invoke-Ecr {
     foreach ($k in $Headers.Keys) { [void]$req.Headers.TryAddWithoutValidation([string]$k, [string]$Headers[$k]) }
     if ($null -ne $Body) {
         # Тіло — UTF-8 явно: кирилиця в підписах полів.
-        $json0 = $Body | ConvertTo-Json -Depth 12 -Compress
+        # -InputObject, а не конвеєр: конвеєр розгортає масив, і масив з ОДНОГО елемента (PATCH …/presentation з однією
+        # зміною) ішов би об'єктом, а не масивом.
+        $json0 = ConvertTo-Json -InputObject $Body -Depth 12 -Compress
         $req.Content = New-Object System.Net.Http.StringContent($json0, [System.Text.Encoding]::UTF8, 'application/json')
     }
 
