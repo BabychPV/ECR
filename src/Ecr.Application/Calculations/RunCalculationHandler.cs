@@ -373,8 +373,16 @@ public sealed class RunCalculationHandler(
                 .ReplaceAsync(
                     calculationRunId,
                     [.. profile.EvaluatedTables],
-                    [.. profile.UnmatchedRows.Select(r => new CalculationIssueInput(
-                        r.TableInstanceId, r.RowNumber, r.RowKey, r.MethodologyId))],
+                    [
+                        .. profile.UnmatchedRows.Select(r => new CalculationIssueInput(
+                            r.TableInstanceId, r.RowNumber, r.RowKey, r.MethodologyId)),
+                        // ✎ 10.11 (doc 95): відхилений правилом категорії рядок — теж проблема рядка, а не лише повідомлення задачі.
+                        .. profile.RejectedRows
+                            .DistinctBy(r => (r.TableInstanceId, r.RowKey, r.MethodologyId))
+                            .Select(r => new CalculationIssueInput(
+                                r.TableInstanceId, r.RowNumber, r.RowKey, r.MethodologyId,
+                                ICalculationIssueStore.CategoryRuleRejected)),
+                    ],
                     ct)
                 .ConfigureAwait(false);
         }

@@ -13,6 +13,9 @@ public interface ICalculationIssueStore
     /// <summary>Вид проблеми «рядок без правила методології».</summary>
     public const string NoMatchingRule = "NoMatchingRule";
 
+    /// <summary>Вид проблеми «рядок відхилено правилом категорії» (L2-6): правило закрило рядок, ключа категорії немає.</summary>
+    public const string CategoryRuleRejected = "CategoryRuleRejected";
+
     /// <summary>Скільки проблем на таблицю зберігає один прохід; решта відсікається.</summary>
     public const int MaxPerTable = 1000;
 
@@ -64,7 +67,9 @@ public interface ICalculationIssueStore
 /// <param name="RowNumber">Номер рядка, з 1.</param>
 /// <param name="RowKey">Ключ рядка.</param>
 /// <param name="MethodologyId">Методологія прив'язки; <c>null</c> — невідома.</param>
-public sealed record CalculationIssueInput(long TableInstanceId, int RowNumber, string RowKey, int? MethodologyId);
+/// <param name="Kind">Вид проблеми; <c>null</c> — <see cref="ICalculationIssueStore.NoMatchingRule"/>.</param>
+public sealed record CalculationIssueInput(
+    long TableInstanceId, int RowNumber, string RowKey, int? MethodologyId, string? Kind = null);
 
 /// <summary>Збережена проблема для читання.</summary>
 /// <param name="TableDefId">Таблиця шаблону (для видимості).</param>
@@ -75,6 +80,7 @@ public sealed record CalculationIssueInput(long TableInstanceId, int RowNumber, 
 /// <param name="Kind">Вид проблеми.</param>
 /// <param name="MethodologyCode">Код методології (з <c>cfg.Methodology</c>, не мітка версії); <c>null</c> — невідома.</param>
 /// <param name="DetectedAt">Коли виявлено (UTC).</param>
+/// <param name="MethodologyId">Методологія (не версія); <c>null</c> — невідома. Потрібна причині відхилення.</param>
 public sealed record CalculationIssueRow(
     int TableDefId,
     string TableCode,
@@ -83,4 +89,5 @@ public sealed record CalculationIssueRow(
     string RowKey,
     string Kind,
     string? MethodologyCode,
-    DateTime DetectedAt);
+    DateTime DetectedAt,
+    int? MethodologyId = null);

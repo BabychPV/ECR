@@ -280,9 +280,21 @@ public sealed class ModuleProfile
             })
             .ToList();
 
-        return unmatched.Count == 0
-            ? JsonSerializer.Serialize(new { modules })
-            : JsonSerializer.Serialize(new { modules, unmatched });
+        // ✎ 10.11 (doc 95): рядки, відхилені правилом категорії, рахуються в підсумку прогону — без них «rows: 0» не
+        // відрізнявся від «нічого рахувати». Лише кількість на документ; адреси й причини — у calc.CalculationIssue.
+        var rejected = _rejected
+            .GroupBy(r => r.DocumentId)
+            .OrderBy(g => g.Key)
+            .Select(g => new { documentId = g.Key, count = g.Count() })
+            .ToList();
+
+        return (unmatched.Count, rejected.Count) switch
+        {
+            (0, 0) => JsonSerializer.Serialize(new { modules }),
+            (_, 0) => JsonSerializer.Serialize(new { modules, unmatched }),
+            (0, _) => JsonSerializer.Serialize(new { modules, rejected }),
+            _ => JsonSerializer.Serialize(new { modules, unmatched, rejected }),
+        };
     }
 
     /// <summary>Читає з <c>ModulesProfileJson</c> рядки без правила ОДНОГО документа (D14).</summary>
@@ -373,4 +385,7 @@ public sealed record UnmatchedRow(
 /// <param name="TableInstanceId">Екземпляр таблиці.</param>
 /// <param name="RowNumber">Номер рядка, з 1, у порядку створення (за <c>TableRow.Id</c>).</param>
 /// <param name="RowKey">Публічний ключ рядка. Значень комірок і назв колонок тут немає навмисно.</param>
-public sealed record RejectedRow(long TableInstanceId, int RowNumber, string RowKey);
+/// <param name="DocumentId">Документ прогону; прогін проєкту зводить профілі багатьох документів в один.</param>
+/// <param name="MethodologyId">Методологія (не версія), чиє правило категорії відхилило рядок; <c>null</c> — невідома.</param>
+public sealed record RejectedRow(
+    long TableInstanceId, int RowNumber, string RowKey, long DocumentId = 0, int? MethodologyId = null);

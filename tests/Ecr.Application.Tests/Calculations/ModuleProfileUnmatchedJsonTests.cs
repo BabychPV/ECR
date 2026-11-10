@@ -77,4 +77,30 @@ public sealed class ModuleProfileUnmatchedJsonTests
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void Профіль_без_рядків_без_правила_не_має_ключа_unmatched()
         => Assert.DoesNotContain("unmatched", new ModuleProfile().ToJson(), StringComparison.Ordinal);
+
+    /// <remarks>
+    /// ✎ 10.11 (doc 95): «generic rows:0» не відрізняв «нема що рахувати» від «рядок відхилено правилом категорії».
+    /// Мутація: прибрати <c>rejected</c> з <c>ToJson</c> — тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Відхилені_правилом_категорії_рядки_рахуються_в_підсумку_прогону_по_документу()
+    {
+        var first = new ModuleProfile();
+        first.Record("generic", TimeSpan.FromMilliseconds(5), 0);
+        first.RecordRejected([new RejectedRow(500, 1, "A", 95, 2), new RejectedRow(500, 3, "C", 95, 2)]);
+        var second = new ModuleProfile();
+        second.RecordRejected([new RejectedRow(600, 1, "B", 96, 3)]);
+        first.Merge(second);
+
+        using var doc = JsonDocument.Parse(first.ToJson());
+
+        var rejected = doc.RootElement.GetProperty("rejected");
+        Assert.Equal(2, rejected.GetArrayLength());
+        Assert.Equal(95, rejected[0].GetProperty("documentId").GetInt64());
+        Assert.Equal(2, rejected[0].GetProperty("count").GetInt32());
+        Assert.Equal(1, rejected[1].GetProperty("count").GetInt32());
+        Assert.False(doc.RootElement.TryGetProperty("unmatched", out _));
+        Assert.DoesNotContain("rejected", new ModuleProfile().ToJson(), StringComparison.Ordinal);
+    }
 }

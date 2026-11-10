@@ -44,7 +44,8 @@ public sealed class CategoryRuleRowRejectionTests
         Assert.Empty(profile.UnmatchedRows);
 
         // Рядок 2 відхилено з номером і публічним ключем; значень комірок у діагностиці немає.
-        Assert.Equal([new RejectedRow(TableInstance, 2, "R001")], profile.RejectedRows);
+        // ✎ 10.11 (doc 95): з документом і методологією — завершення пише з них проблему рядка (calc.CalculationIssue).
+        Assert.Equal([new RejectedRow(TableInstance, 2, "R001", DocumentId, Methodology)], profile.RejectedRows);
     }
 
     [Fact]
@@ -65,7 +66,7 @@ public sealed class CategoryRuleRowRejectionTests
 
         Assert.Equal(1, profile.Stats.Single().Rows);
         Assert.Equal(
-            [new RejectedRow(TableInstance, 1, "R000"), new RejectedRow(TableInstance, 3, "R002")],
+            [new RejectedRow(TableInstance, 1, "R000", DocumentId, Methodology), new RejectedRow(TableInstance, 3, "R002", DocumentId, Methodology)],
             profile.RejectedRows);
     }
 
