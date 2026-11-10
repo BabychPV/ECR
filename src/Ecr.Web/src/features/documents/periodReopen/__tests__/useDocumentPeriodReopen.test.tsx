@@ -47,7 +47,7 @@ function stub(state: Record<string, unknown>): void {
   );
 }
 
-function Harness({ periodState, zone }: { readonly periodState: PeriodState; readonly zone?: string }): JSX.Element {
+function Harness({ periodState, zone }: { readonly periodState: PeriodState; readonly zone?: string | undefined }): JSX.Element {
   const reopen = useDocumentPeriodReopen({ documentId: 5, periodKey: 202601, periodState, timeZoneId: zone });
   const lock = documentLockOf({ projectStatus: 'Active', periodState: reopen.periodState, sheetState: 'Draft' });
 
