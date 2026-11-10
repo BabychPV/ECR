@@ -121,6 +121,17 @@ async function typeWhileUrlLags(input: HTMLElement, text: string): Promise<void>
 
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, LagMs * 4));
 
+/**
+ * Адреса наздогнала поле: `key` у ній — `expected`.
+ *
+ * ⛔ Не одним `expect` після `settle()`: на завантаженому ранері (job `shuffle`, seed 23107, 11 воркерів) останнє
+ * відлуння приїжджало пізніше за 160 мс, і в адресі ще стояло проміжне `R1234`. Відлуння йдуть по черзі з однаковим
+ * запізненням, тож коли адреса несе останнє значення, решта вже прилетіла — поле після цього перевіряється знову.
+ */
+async function urlCaughtUp(key: string, expected: string | null): Promise<void> {
+  await waitFor(() => expect(new URLSearchParams(search).get(key)).toBe(expected));
+}
+
 describe("поле, прив'язане до адреси, при запізнілій адресі", () => {
   it(
     '/admin/audit «Row key»: R12345 — у полі рівно R12345, адреса наздоганяє; «Reset» очищає поле',
@@ -139,12 +150,13 @@ describe("поле, прив'язане до адреси, при запізні
 
       await settle();
       expect(input.value).toBe('R12345');
-      expect(new URLSearchParams(search).get('rowKey')).toBe('R12345');
+      await urlCaughtUp('rowKey', 'R12345');
+      expect(input.value).toBe('R12345');
 
       // Зовнішня зміна (кнопка переносить фокус) — поле її приймає.
       await userEvent.setup().click(screen.getByRole('button', { name: '⟦audit.reset⟧' }));
       await waitFor(() => expect(input.value).toBe(''));
-      expect(new URLSearchParams(search).get('rowKey')).toBeNull();
+      await urlCaughtUp('rowKey', null);
     },
     SlowEnvTimeout,
   );
@@ -166,7 +178,8 @@ describe("поле, прив'язане до адреси, при запізні
 
       await settle();
       expect(input.value).toBe('CNS-0123');
-      expect(new URLSearchParams(search).get('ruleCode')).toBe('CNS-0123');
+      await urlCaughtUp('ruleCode', 'CNS-0123');
+      expect(input.value).toBe('CNS-0123');
     },
     SlowEnvTimeout,
   );
@@ -183,11 +196,12 @@ describe("поле, прив'язане до адреси, при запізні
 
       await settle();
       expect(input.value).toBe('documents');
-      expect(new URLSearchParams(search).get('q')).toBe('documents');
+      await urlCaughtUp('q', 'documents');
+      expect(input.value).toBe('documents');
 
       await userEvent.setup().click(screen.getByRole('button', { name: '×' }));
       await waitFor(() => expect(input.value).toBe(''));
-      expect(new URLSearchParams(search).get('q')).toBeNull();
+      await urlCaughtUp('q', null);
     },
     SlowEnvTimeout,
   );

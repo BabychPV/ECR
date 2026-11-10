@@ -24,6 +24,7 @@ const Strings: Record<string, string> = {
   'security.users': 'Users',
   'security.access': 'Access',
   'common.cancel': 'Cancel',
+  'groupRoles.validFrom': 'Valid from',
 };
 
 const Users = {
@@ -81,6 +82,22 @@ describe('SecurityPage: лінивий діалог доступу поверт�
     await loadCatalog('en', 'public');
     await loadCatalog('en', 'private');
 
+    // ⛔ job `shuffle` (run 42776777315, seed 23107): воркер vitest вісім хвилин крутився на цьому файлі й помер
+    // `Worker exited … exit code 1` без жодного впалого тесту. Причина — не продукт, а `act()`: Enter тут
+    // ішов, поки ліниві чанки СТОРІНКИ ще доїжджали (вкладка «Users» — `GroupAssignmentsPanel` з лінивим
+    // `DateInput`, обгортки «New role»/«New user»). Під навантаженням (CI; локально — 12 паралельних прогонів,
+    // 2–4 з 12 висли) React у синхронному `flushActQueue` нескінченно перезапускав рендери меж `Suspense`,
+    // чиї `import()` не можуть завершитися, доки цикл не віддасть керування; черга `act` росла мільйонами
+    // завдань до вичерпання купи. Тому чанки сторінки вантажимо ДО рендера, а нижче чекаємо, доки найглибший
+    // із них (`DateInput` у панелі груп) уже на екрані. Сам діалог доступу наперед НЕ вантажиться: його перше
+    // відкриття і далі монтує лінивий чанк уже відкритим — саме це тут і перевіряється.
+    await Promise.all([
+      import('@/features/security/GroupAssignmentsPanel'),
+      import('@/features/security/CreateRoleModal'),
+      import('@/features/security/CreateUserModal'),
+      import('@/shared/dates/DateInputWithStyles'),
+    ]);
+
     const user = userEvent.setup();
     render(
       <MantineProvider theme={withTestDefaults(theme)}>
@@ -93,6 +110,7 @@ describe('SecurityPage: лінивий діалог доступу поверт�
     );
 
     const opener = await screen.findByRole('button', { name: 'Access' });
+    await screen.findByLabelText('Valid from');
 
     for (const attempt of ['перше', 'друге']) {
       opener.focus();
