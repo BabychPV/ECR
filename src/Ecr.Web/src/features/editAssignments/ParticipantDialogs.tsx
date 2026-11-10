@@ -1,5 +1,5 @@
 import { useRef, useState, type JSX } from 'react';
-import { Button, Group, Modal, SegmentedControl, Select, Stack, Text, TextInput } from '@mantine/core';
+import { Button, Group, Modal, Radio, Select, Stack, Text, TextInput } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
@@ -140,17 +140,22 @@ export function ParticipantModal({
           onPick={setUser}
           nextFocus={() => levelBox.current?.querySelector<HTMLElement>('input:checked') ?? null}
         />
-        <Stack gap="xs" ref={levelBox}>
-          <Text size="sm" id="participant-level-label">
-            {t('editAssign.participant.level')}
-          </Text>
-          <SegmentedControl
-            aria-labelledby="participant-level-label"
-            value={level}
-            onChange={(value) => setLevel(value as AssignmentLevel)}
-            data={AssignmentLevels.map((value) => ({ value, label: levelLabel(value) }))}
-          />
-        </Stack>
+        {/* P2 10.11: рівні — вертикальний перелік радіо, не SegmentedControl. Сегменти ділять ширину діалогу на
+            чотири рівні частини й обрізають довгі підписи («Заполнение, подача и согласование» читалось як
+            «Заполнение» — дубль Write). Стрілки всередині групи й Tab — нативні радіо (KIT.md §6.3). */}
+        <Radio.Group
+          ref={levelBox}
+          label={t('editAssign.participant.level')}
+          value={level}
+          onChange={(value) => setLevel(value as AssignmentLevel)}
+          data-testid="participant-levels"
+        >
+          <Stack gap="xs" mt="xs">
+            {AssignmentLevels.map((value) => (
+              <Radio key={value} value={value} label={levelLabel(value)} data-testid={`participant-level-${value}`} />
+            ))}
+          </Stack>
+        </Radio.Group>
         <Select
           label={t('editAssign.participant.sheet')}
           placeholder={t('editAssign.participant.sheetAll')}
