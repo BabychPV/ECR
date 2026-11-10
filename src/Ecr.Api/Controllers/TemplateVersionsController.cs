@@ -169,13 +169,10 @@ public sealed class TemplateVersionsController(
     // побачить (`A7-16`, `A7-32`).
     [ProducesResponseType<PresentationRevisionResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    // `expectedPresentationRevision` — масова правка «Edit selected…» (PERMITES §3): ревізія, яку бачив клієнт;
+    // інша — 409 `ECR-TMPL-0409` `presentationRevisionConflict`, нічого не змінено. Без параметра — як раніше.
     public async Task<IActionResult> PatchPresentation(
-        int id,
-        [FromBody] JsonElement patch,
-        // Масова правка «Edit selected…» (PERMITES §3): ревізія, яку бачив клієнт; інша — 409
-        // `ECR-TMPL-0409` `presentationRevisionConflict`, нічого не змінено. Без параметра — як раніше.
-        [FromQuery] int? expectedPresentationRevision,
-        CancellationToken ct)
+        int id, [FromBody] JsonElement patch, [FromQuery] int? expectedPresentationRevision, CancellationToken ct)
     {
         var revision = await patchPresentation
             .PatchAsync(id, patch.GetRawText(), UserId, expectedPresentationRevision, ct)
