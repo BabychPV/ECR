@@ -64,11 +64,10 @@ export function HeaderSplitBanner({ documentId, periodKey, tables, readOnly, onR
           color="statusWarning"
           variant="light"
           data-header-split-banner=""
-          title={t('permits.header.bannerTitle', {
+          title={t('permits.header.bannerSplitTitle', {
             month: monthLabel,
-            count: rowCount,
-            // p3-1110: «1 rows» — кількість рядків узгодженою формою (`permits.header.rowCount.*`).
-            rowCount: formatCount(rowCount, 'permits.header.rowCount'),
+            // p3-1110: «1 rows» — кількість рядків узгодженою формою (`permits.headerRows.*`).
+            rowCount: formatCount(rowCount, 'permits.headerRows'),
             date: after === undefined ? '' : dottedDate(after.dayFrom),
           })}
         >
@@ -99,10 +98,9 @@ export function HeaderSplitBanner({ documentId, periodKey, tables, readOnly, onR
                     color="statusWarning"
                     tt="none"
                   >
-                    {t('permits.header.bannerTable', {
+                    {t('permits.header.bannerTableRows', {
                       table: tableName(entry.table, String(entry.tableDefId)),
-                      count: entry.rows,
-                      rowCount: formatCount(entry.rows, 'permits.header.rowCount'),
+                      rowCount: formatCount(entry.rows, 'permits.headerRows'),
                     })}
                   </Badge>
                 ))}

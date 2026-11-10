@@ -106,7 +106,7 @@ export function HeaderSplitDialog({ documentId, periodKey, lines, slices, onClos
   };
 
   return (
-    <Modal opened onClose={onClose} size="xl" title={t('permits.header.dialogTitle', { month: monthLabel, count: rowCount, rowCount: formatCount(rowCount, 'permits.header.rowCount') })} data-header-split-dialog="">
+    <Modal opened onClose={onClose} size="xl" title={t('permits.header.dialogSplitTitle', { month: monthLabel, rowCount: formatCount(rowCount, 'permits.headerRows') })} data-header-split-dialog="">
       <form
         onSubmit={(event) => {
           event.preventDefault();

@@ -111,8 +111,8 @@ describe('HeaderSplitBanner (jh2/jh3)', () => {
     wrap(<HeaderSplitBanner documentId={3} periodKey={202602} tables={tables} readOnly={false} />);
     const banner = document.querySelector('[data-header-split-banner]') as HTMLElement;
 
-    expect(banner.textContent).toContain('permits.header.bannerTitle');
-    expect(banner.textContent).toContain('"count":2');
+    expect(banner.textContent).toContain('permits.header.bannerSplitTitle');
+    expect(banner.textContent).toContain('permits.headerRows.other {\\"count\\":\\"2\\"}');
     expect(banner.textContent).toContain('"date":"15.02.2026"');
     expect(banner.textContent).toContain('"old":"KZ29VCZ14622425"');
     const rows = [...banner.querySelectorAll('[data-header-split-rows] li')].map((item) => item.textContent);
@@ -127,10 +127,10 @@ describe('HeaderSplitBanner (jh2/jh3)', () => {
     const banner = document.querySelector('[data-header-split-banner]') as HTMLElement;
 
     expect(banner.querySelectorAll('[data-header-split-rows] li')).toHaveLength(3);
-    expect(banner.textContent).not.toContain('permits.header.bannerTable');
+    expect(banner.textContent).not.toContain('permits.header.bannerTableRows');
     fireEvent.click(within(banner).getByRole('button', { name: 'permits.header.showAll {"count":5}' }));
     expect(banner.querySelectorAll('[data-header-split-rows] li')).toHaveLength(5);
-    expect(banner.textContent).toContain('"table":"Air emissions","count":5');
+    expect(banner.textContent).toContain('"table":"Air emissions","rowCount":"permits.headerRows.other {\\"count\\":\\"5\\"}');
   });
 
   it('F13 p223 (3): the banner and «Split all» count the same rows (rows still to split), not cells', () => {
@@ -149,12 +149,12 @@ describe('HeaderSplitBanner (jh2/jh3)', () => {
     });
     wrap(<HeaderSplitBanner documentId={3} periodKey={202602} tables={tables} readOnly={false} />, queries);
     const banner = document.querySelector('[data-header-split-banner]') as HTMLElement;
-    expect(banner.textContent).toContain('"count":1');
+    expect(banner.textContent).toContain('permits.headerRows.one {\\"count\\":\\"1\\"}');
 
     fireEvent.click(screen.getByRole('button', { name: 'permits.header.splitAll' }));
     const dialog = screen.getByRole('dialog');
-    expect(dialog.textContent).toContain('permits.header.dialogTitle');
-    expect(dialog.textContent).toContain('"count":1}');
+    expect(dialog.textContent).toContain('permits.header.dialogSplitTitle');
+    expect(dialog.textContent).toContain('permits.headerRows.one {\\"count\\":\\"1\\"}');
     expect(dialog.textContent).toContain('permits.header.progress {"done":0,"count":1}');
   });
 
@@ -165,11 +165,11 @@ describe('HeaderSplitBanner (jh2/jh3)', () => {
     const banner = document.querySelector('[data-header-split-banner]') as HTMLElement;
 
     // ⛔ Mutation: drop `rowCount` (the bare `{count} rows` text) — red.
-    expect(banner.textContent).toContain('permits.header.rowCount.one');
-    expect(banner.textContent).not.toContain('permits.header.rowCount.other');
+    expect(banner.textContent).toContain('permits.headerRows.one');
+    expect(banner.textContent).not.toContain('permits.headerRows.other');
 
     fireEvent.click(screen.getByRole('button', { name: 'permits.header.splitAll' }));
-    expect(screen.getByRole('dialog').textContent).toContain('permits.header.rowCount.one');
+    expect(screen.getByRole('dialog').textContent).toContain('permits.headerRows.one');
   });
 
   it('nothing relying on the header to split — no banner', () => {
