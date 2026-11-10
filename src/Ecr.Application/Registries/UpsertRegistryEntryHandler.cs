@@ -151,6 +151,13 @@ public sealed class UpsertRegistryEntryHandler(
         var auto = definition.CodeMode == RegistryCodeMode.Auto;
         EcrCode? code = auto ? null : EcrCode.Create(dto.Code);
 
+        // ⛔ D14 (AU-14): новий запис без жодної непорожньої мови назви — 422 ДО створення: без назви перелік показував
+        // `code`, і запис «без імені» приймався мовчки. До резервування автокоду, щоб відмова не з'їдала номер послідовності.
+        if (dto.Id is null && WithoutEmpty(dto.Display).Values.Count == 0)
+        {
+            throw NameRequired(definition, dto.Code);
+        }
+
         var entry = dto.Id is { } id
             ? await LoadAsync(id, definition, ct).ConfigureAwait(false)
             : await CreateAsync(
@@ -166,7 +173,16 @@ public sealed class UpsertRegistryEntryHandler(
         // запису мовчки стирало російський і казахський переклади. Мова, якої
         // в запиті немає, лишається як була; мова з порожнім текстом —
         // свідомо прибирається (так клієнт каже «цей переклад видалено»).
-        entry.Rename(dto.Id is null ? WithoutEmpty(dto.Display) : Merge(entry.DisplayL10n, dto.Display));
+        var name = dto.Id is null ? WithoutEmpty(dto.Display) : Merge(entry.DisplayL10n, dto.Display);
+
+        // ⛔ D14: правка, що стирає ВСІ мови наявної назви, — та сама відмова. Запис, що вже лежить без назви (давні дані),
+        // правкою значень без назви в запиті не блокується: назва лишається як була (X-03).
+        if (name.Values.Count == 0 && WithoutEmpty(entry.DisplayL10n).Values.Count > 0)
+        {
+            throw NameRequired(definition, entry.Code);
+        }
+
+        entry.Rename(name);
         (IReadOnlyList<RegistryLevelDef> Levels, RegistryLevelDef Level)? placement = null;
         var naeTree = nae is not null && Nae.NaeTreeNodePolicy.IsNaeTree(definition);
         if (definition.IsHierarchical)
@@ -326,6 +342,18 @@ public sealed class UpsertRegistryEntryHandler(
     /// <summary>Назва нового запису без порожніх мов.</summary>
     private static LocalizedText WithoutEmpty(LocalizedText? display)
         => Merge(new LocalizedText(), display);
+
+    /// <summary><c>422 ECR-REG-4222 entryNameRequired</c>: у назві запису немає жодної непорожньої мови (D14).</summary>
+    private static BusinessRuleException NameRequired(RegistryDef definition, string? code)
+        => new(
+            Domain.Errors.ErrorCodes.RegistryEntryNameRequired,
+            $"Запис довідника «{definition.Code}» потребує назви хоча б однією мовою.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-REG-4222.entryNameRequired",
+                ["registryCode"] = definition.Code,
+                ["code"] = code ?? string.Empty,
+            });
 
     /// <summary>Код нового запису довідника з <c>CodeMode = Auto</c> (<c>D-157</c>).</summary>
     /// <exception cref="BusinessRuleException"><c>ECR-REG-0422</c>, <c>entryCodeAutomatic</c>: запит назвав свій код.</exception>

@@ -1,6 +1,7 @@
 // tests/Ecr.Application.Tests/Registries/RegistryEntryDisplayTests.cs
 using System.Text.Json;
 using Ecr.Application.Common;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries;
 using Ecr.Application.Registries.Dto;
@@ -25,24 +26,34 @@ namespace Ecr.Application.Tests.Registries;
 /// знахідки — форма тіла запиту: <see cref="LocalizedText"/> у JSON — це <c>{"values":{"en":"Alpha"}}</c>,
 /// а пласке <c>{"en":"Alpha"}</c> System.Text.Json мовчки перетворює на ПОРОЖНІЙ текст. Обидві
 /// половини зафіксовано, щоб зміна будь-якої з них була свідомою.
+/// ✎ D14 (рішення координатора 19.10): запис без назви більше НЕ приймається мовчки — upsert без
+/// жодної непорожньої мови (зокрема пласка мапа) дає <c>422 ECR-REG-4222 entryNameRequired</c>.
 /// </remarks>
 public sealed class RegistryEntryDisplayTests
 {
     private const int RegistryDefId = 100;
     private const string Code = "DISPLAY_REG";
+    private const long EntryId = 501;
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
     private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
     private readonly IRegistryEntryCache _cache = Substitute.For<IRegistryEntryCache>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
+    private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
+    private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly RegistryDef _definition;
 
     public RegistryEntryDisplayTests()
     {
         _user.UserId.Returns(9);
         _user.Language.Returns("en");
+        _clock.UtcNow.Returns(new DateTime(2026, 11, 10, 10, 0, 0, DateTimeKind.Utc));
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(
             new AccessBuilder { UserId = 9 }
                 .Permission(GetRegistryEntriesHandler.Permission)
+                .Permission(UpsertRegistryEntryHandler.Permission)
                 .Build());
         _cache.GetOrAddAsync(
                 Arg.Any<string>(),
@@ -53,7 +64,104 @@ public sealed class RegistryEntryDisplayTests
 
         var definition = new RegistryDef(EcrCode.Create(Code), Text("Registry"), false);
         SetId(definition, RegistryDefId);
+        _definition = definition;
         _registries.FindDefinitionAsync(Code, Arg.Any<CancellationToken>()).Returns(definition);
+        _registries.FindDefinitionByIdAsync(RegistryDefId, Arg.Any<CancellationToken>()).Returns(definition);
+    }
+
+    public static TheoryData<string> NamelessDisplays => new()
+    {
+        """{}""",
+        """{"values":{}}""",
+        """{"values":{"en":""}}""",
+        """{"values":{"en":"   ","ru":"\t"}}""",
+        // Пласка мовна мапа (Ж-8 п. 2) — для LocalizedText це порожній текст.
+        """{"en":"Alpha"}""",
+    };
+
+    [Theory]
+    [MemberData(nameof(NamelessDisplays))]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "D14")]
+    public async Task Новий_запис_без_назви_жодною_мовою_відхиляється_422_ECR_REG_4222(string displayJson)
+    {
+        var display = JsonSerializer.Deserialize<LocalizedText>(displayJson, WebJson)!;
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Upsert().HandleAsync(
+            new RegistryEntryUpsertDto(null, RegistryDefId, "E1", display, null, new Dictionary<string, object?>()),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-REG-4222", error.ErrorCode);
+        Assert.Equal(Ecr.Domain.Errors.ErrorCodes.RegistryEntryNameRequired, error.ErrorCode);
+        Assert.Equal("err.ECR-REG-4222.entryNameRequired", error.Details!["messageKey"]);
+        Assert.Equal(Code, error.Details["registryCode"]);
+        Assert.Equal("E1", error.Details["code"]);
+        // Відмова ДО створення: код навіть не перевірявся на зайнятість, запис не додано.
+        await _registries.DidNotReceive().FindEntryByCodeAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "D14")]
+    public async Task Новий_запис_з_назвою_хоча_б_однією_мовою_створюється()
+    {
+        var id = await Upsert().HandleAsync(
+            new RegistryEntryUpsertDto(null, RegistryDefId, "E1", Text("Alpha"), null, new Dictionary<string, object?>()),
+            CancellationToken.None);
+
+        Assert.Equal(0L, id);
+        await _registries.Received(1).FindEntryByCodeAsync(RegistryDefId, "E1", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "D14")]
+    public async Task Правка_що_стирає_всі_мови_назви_відхиляється_і_назва_лишається()
+    {
+        var entry = Existing(new LocalizedText(new Dictionary<string, string> { ["en"] = "Alpha", ["ru"] = "Альфа" }));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Upsert().HandleAsync(
+            new RegistryEntryUpsertDto(
+                EntryId, RegistryDefId, "E1",
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "", ["ru"] = " " }),
+                null, new Dictionary<string, object?>()),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-REG-4222", error.ErrorCode);
+        Assert.Equal("err.ECR-REG-4222.entryNameRequired", error.Details!["messageKey"]);
+        Assert.Equal("Alpha", entry.DisplayL10n.Get("en"));
+        Assert.Equal("Альфа", entry.DisplayL10n.Get("ru"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "D14")]
+    public async Task Правка_без_назви_в_запиті_лишає_назву_і_не_відхиляється_навіть_у_давнього_запису_без_назви()
+    {
+        var named = Existing(Text("Alpha"));
+        await Upsert().HandleAsync(
+            new RegistryEntryUpsertDto(EntryId, RegistryDefId, "E1", new LocalizedText(), null, new Dictionary<string, object?>()),
+            CancellationToken.None);
+        Assert.Equal("Alpha", named.DisplayL10n.Get("en"));
+
+        // Давні дані без назви: правка значень не блокується відмовою про назву, якої запит не чіпав.
+        var legacy = Existing(new LocalizedText());
+        await Upsert().HandleAsync(
+            new RegistryEntryUpsertDto(EntryId, RegistryDefId, "E1", new LocalizedText(), null, new Dictionary<string, object?>()),
+            CancellationToken.None);
+        Assert.Empty(legacy.DisplayL10n.Values);
+    }
+
+    private UpsertRegistryEntryHandler Upsert()
+        => new(_registries, _access, _user, new RegistryEntryWriter(_registries, _uow, _audit, _user, _clock));
+
+    private RegistryEntry Existing(LocalizedText name)
+    {
+        var entry = new RegistryEntry(RegistryDefId, EcrCode.Create("E1"), name);
+        SetId(entry, EntryId);
+        _registries.FindEntryAsync(EntryId, Arg.Any<CancellationToken>()).Returns(entry);
+        _registries.ListValuesAsync(EntryId, Arg.Any<CancellationToken>()).Returns(new List<RegistryValue>());
+        return entry;
     }
 
     [Fact]
@@ -88,7 +196,7 @@ public sealed class RegistryEntryDisplayTests
         var flat = JsonSerializer.Deserialize<LocalizedText>("""{"en":"Alpha"}""", options)!;
 
         Assert.Equal("Alpha", wrapped.Get("en"));
-        // Саме це бачив тестувальник: запис створено, назви немає, перелік показує код.
+        // Саме це бачив тестувальник: назви немає. ✎ D14: такий upsert тепер 422 ECR-REG-4222 (тест вище).
         Assert.Null(flat.Get("en"));
         Assert.Empty(flat.Values);
 
