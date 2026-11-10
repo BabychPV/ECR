@@ -12,13 +12,13 @@ import { useAuditSort } from '@/features/audit/auditSort';
 import { SortableTh } from '@/features/audit/SortableTh';
 import { FilterHints, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
-import { Timestamp } from '@/shared/ui/Timestamp';
 import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
 import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { securityEventLabel } from './auditLabels';
 import { auditDetailsText } from './auditDetails';
+import { SiteChangedAt } from './SiteChangedAt';
 import './auditTable.css';
 
 /**
@@ -111,7 +111,8 @@ export function SecurityEventsPanel({ from, to }: { from: string; to: string }):
                 {page.items.map((event, index) => (
                   <Table.Tr key={`${event.changedAt}:${event.eventType}:${index}`}>
                     <Table.Td>
-                      <Timestamp value={event.changedAt} />
+                      {/* ✎ debt-1110: час у поясі майданчика (`siteTimeZoneId` з сервера), не браузера. */}
+                      <SiteChangedAt value={event.changedAt} zone={event.siteTimeZoneId} />
                     </Table.Td>
                     {/* `R-18`: ім'я з сервера; номер — у підказці. */}
                     <Table.Td title={`#${String(event.changedByUserId)}`}>{authorName(event)}</Table.Td>
