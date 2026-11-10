@@ -335,7 +335,10 @@ E.StatusBadge(kind, state, { label?, quiet?: true /* без рамки, у щі�
 **MonthStrip** (✎ 10.11; `screens-work.js` → `monthStrip(d)` / `monthLegend()`, стилі `.mstrip` / `.mbox` / `.mlegend` в `index.html`; у застосунку —
 `DocumentYearStrip.tsx` + `documentsList.css`). Смуга 12 місяців року в рядку документа і легенда над таблицею. Стани клітинки:
 `open` (порожня рамка) · `late` = Late (flagged), перевідкритий / Grace (рамка `--warning` + «!») · `submitted` (заливка наполовину
-`--accent`) · `approved` (`--success` + ✓) · `locked` (`--sunken` + замок) · `notOpen` (пунктир `--faint`) · `returned`
+`--accent`) · `approved` (`--success` + ✓) · `locked` (`--sunken` + замок) · `reopened` = Reopened for this document (✎ 10.11:
+закритий місяць, відкритий лише для цього документа; рамка `--accent-text` + ВІДКРИТИЙ замок; підказка й `aria-label` — «until <дата й
+час у поясі майданчика>»; у рядках інших документів той самий місяць лишається `locked`; є в легенді; фільтр «Reopened months» поруч
+із «Late edits») · `notOpen` (пунктир `--faint`) · `returned`
 (`--warning` + ✕) · `unknown` (пунктир); модифікатор `cur` — поточний період (кільце `--accent-text`: `--accent` у темній схемі < 3:1 до фону).
 ⛔ **Усі стани і всі зразки легенди — ОДНАКОВИЙ зовнішній розмір (18×18; у легенді 14×14) на ОДНІЙ лінії.** Рамка завжди 1 px і
 `box-sizing: border-box`; друга лінія «late» — `box-shadow: inset 0 0 0 1px`, кільце «cur» — `outline: 2px` з `outline-offset: -2px`
