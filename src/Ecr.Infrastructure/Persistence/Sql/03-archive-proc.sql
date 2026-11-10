@@ -326,11 +326,17 @@ BEGIN
                    WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
        OR EXISTS (SELECT 1 FROM arc.CellPermitPart
                    WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
+       OR EXISTS (SELECT 1 FROM arc.CellStyle
+                   WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
+       OR EXISTS (SELECT 1 FROM arc.CellFormulaOverride
+                   WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
     BEGIN
         DELETE FROM arc.CellValue     WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
         DELETE FROM arc.TableRow      WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
         DELETE FROM arc.TableInstance WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
         DELETE FROM arc.CellPermitPart WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+        DELETE FROM arc.CellStyle      WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+        DELETE FROM arc.CellFormulaOverride WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
     END;
 
     SET @k = @FromPeriodKey;
@@ -437,6 +443,20 @@ BEGIN
         SELECT PeriodKey, Id, DocumentId, TableDefId, SheetCopyId, RowKey, ColumnDefId, PartNo, RegistryEntryId,
                DayFrom, DayTo, ValueNumeric
         FROM doc.CellPermitPart
+        WHERE PeriodKey = @k;
+
+        -- Debt «ar»: user cell styles and manual formula overrides — sparse like the parts, one INSERT per period;
+        -- checked at the moment of the TRUNCATE (step 2) like the other tables.
+        INSERT INTO arc.CellStyle WITH (TABLOCK)
+            (PeriodKey, TableRowId, ColumnDefId, BackgroundHex, ForegroundHex, IsBold, UpdatedAt, UpdatedByUserId)
+        SELECT PeriodKey, TableRowId, ColumnDefId, BackgroundHex, ForegroundHex, IsBold, UpdatedAt, UpdatedByUserId
+        FROM doc.CellStyle
+        WHERE PeriodKey = @k;
+
+        INSERT INTO arc.CellFormulaOverride WITH (TABLOCK)
+            (PeriodKey, TableRowId, ColumnDefId, TableInstanceId, Reason, SetAt, SetByUserId)
+        SELECT PeriodKey, TableRowId, ColumnDefId, TableInstanceId, Reason, SetAt, SetByUserId
+        FROM doc.CellFormulaOverride
         WHERE PeriodKey = @k;
 
         SELECT @dstCount = COUNT_BIG(*),
@@ -556,9 +576,25 @@ BEGIN
         FROM arc.CellPermitPart
         WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
 
+        -- Debt «ar»: styles and overrides — the same check, under TABLOCKX.
+        DECLARE @gapSrcStyles bigint, @gapDstStyles bigint, @gapSrcOverrides bigint, @gapDstOverrides bigint;
+        SELECT @gapSrcStyles = COUNT_BIG(*)
+        FROM doc.CellStyle WITH (TABLOCKX)
+        WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+        SELECT @gapDstStyles = COUNT_BIG(*)
+        FROM arc.CellStyle
+        WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+        SELECT @gapSrcOverrides = COUNT_BIG(*)
+        FROM doc.CellFormulaOverride WITH (TABLOCKX)
+        WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+        SELECT @gapDstOverrides = COUNT_BIG(*)
+        FROM arc.CellFormulaOverride
+        WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+
         IF @gapSrcCells <> @gapDstCells OR @gapSrcSum <> @gapDstSum
            OR @gapSrcRows <> @gapDstRows OR @gapSrcInst <> @gapDstInst
            OR @gapSrcParts <> @gapDstParts
+           OR @gapSrcStyles <> @gapDstStyles OR @gapSrcOverrides <> @gapDstOverrides
         BEGIN
             -- ⛔ `THROW` усередині транзакції: `XACT_ABORT` відкочує і зняття
             --    ключів, і — головне — не дає дійти до `TRUNCATE`. Джерело
@@ -582,6 +618,10 @@ BEGIN
         SET @sql = N'TRUNCATE TABLE doc.TableInstance WITH (PARTITIONS (' + @range + N'));';
         EXEC sp_executesql @sql;
         SET @sql = N'TRUNCATE TABLE doc.CellPermitPart WITH (PARTITIONS (' + @range + N'));';
+        EXEC sp_executesql @sql;
+        SET @sql = N'TRUNCATE TABLE doc.CellStyle WITH (PARTITIONS (' + @range + N'));';
+        EXEC sp_executesql @sql;
+        SET @sql = N'TRUNCATE TABLE doc.CellFormulaOverride WITH (PARTITIONS (' + @range + N'));';
         EXEC sp_executesql @sql;
 
         ALTER TABLE doc.TableRow WITH CHECK
@@ -648,6 +688,7 @@ BEGIN
     DECLARE @k int, @moved bigint = 0;
     DECLARE @srcCells bigint, @srcSum decimal(38,16), @srcRows bigint, @srcInst bigint;
     DECLARE @dstCells bigint, @dstSum decimal(38,16), @dstRows bigint, @dstInst bigint;
+    DECLARE @srcStyles bigint, @dstStyles bigint, @srcOverrides bigint, @dstOverrides bigint;
     DECLARE @lastRow bigint, @lastCol int, @hiRow bigint, @hiCol int;
     DECLARE @lastId bigint, @hiId bigint;
 
@@ -856,6 +897,27 @@ BEGIN
                              AND (d.SheetCopyId = a.SheetCopyId OR (d.SheetCopyId IS NULL AND a.SheetCopyId IS NULL))
                              AND d.RowKey = a.RowKey AND d.ColumnDefId = a.ColumnDefId AND d.PartNo = a.PartNo);
 
+        -- Debt «ar»: styles and overrides back by their primary key (no FK to the rows — order is free; after the
+        -- cells only to keep «parents first» readable). Idempotent like the rest of step 1.
+        INSERT INTO doc.CellStyle (PeriodKey, TableRowId, ColumnDefId, BackgroundHex, ForegroundHex, IsBold,
+                                   UpdatedAt, UpdatedByUserId)
+        SELECT a.PeriodKey, a.TableRowId, a.ColumnDefId, a.BackgroundHex, a.ForegroundHex, a.IsBold,
+               a.UpdatedAt, a.UpdatedByUserId
+        FROM arc.CellStyle AS a
+        WHERE a.PeriodKey = @k
+          AND NOT EXISTS (SELECT 1 FROM doc.CellStyle AS d
+                           WHERE d.PeriodKey = a.PeriodKey AND d.TableRowId = a.TableRowId
+                             AND d.ColumnDefId = a.ColumnDefId);
+
+        INSERT INTO doc.CellFormulaOverride (PeriodKey, TableRowId, ColumnDefId, TableInstanceId, Reason, SetAt,
+                                             SetByUserId)
+        SELECT a.PeriodKey, a.TableRowId, a.ColumnDefId, a.TableInstanceId, a.Reason, a.SetAt, a.SetByUserId
+        FROM arc.CellFormulaOverride AS a
+        WHERE a.PeriodKey = @k
+          AND NOT EXISTS (SELECT 1 FROM doc.CellFormulaOverride AS d
+                           WHERE d.PeriodKey = a.PeriodKey AND d.TableRowId = a.TableRowId
+                             AND d.ColumnDefId = a.ColumnDefId);
+
         SET @k = @k + 1;
     END;
 
@@ -906,8 +968,23 @@ BEGIN
             JOIN doc.TableInstance AS d ON d.PeriodKey = a.PeriodKey AND d.Id = a.Id
             WHERE a.PeriodKey = @k;
 
+            -- Debt «ar»: styles and overrides — by the archive's keys, like the rows above.
+            SELECT @srcStyles = COUNT_BIG(*) FROM arc.CellStyle WHERE PeriodKey = @k;
+            SELECT @dstStyles = COUNT_BIG(*)
+            FROM arc.CellStyle AS a
+            JOIN doc.CellStyle AS d
+              ON d.PeriodKey = a.PeriodKey AND d.TableRowId = a.TableRowId AND d.ColumnDefId = a.ColumnDefId
+            WHERE a.PeriodKey = @k;
+            SELECT @srcOverrides = COUNT_BIG(*) FROM arc.CellFormulaOverride WHERE PeriodKey = @k;
+            SELECT @dstOverrides = COUNT_BIG(*)
+            FROM arc.CellFormulaOverride AS a
+            JOIN doc.CellFormulaOverride AS d
+              ON d.PeriodKey = a.PeriodKey AND d.TableRowId = a.TableRowId AND d.ColumnDefId = a.ColumnDefId
+            WHERE a.PeriodKey = @k;
+
             IF @srcCells <> @dstCells OR @srcSum <> @dstSum
                OR @srcRows <> @dstRows OR @srcInst <> @dstInst
+               OR @srcStyles <> @dstStyles OR @srcOverrides <> @dstOverrides
                 THROW 50011, N'Розбіжність кількості рядків або сум при розархівації.', 1;
 
             SET @moved = @moved + @srcCells + @srcRows + @srcInst;
@@ -925,6 +1002,8 @@ BEGIN
         DELETE FROM arc.TableRow      WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
         DELETE FROM arc.TableInstance WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
         DELETE FROM arc.CellPermitPart WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+        DELETE FROM arc.CellStyle      WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+        DELETE FROM arc.CellFormulaOverride WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
 
     COMMIT;
 
@@ -1019,6 +1098,33 @@ BEGIN
                 IF @uId IS NULL BREAK;
 
                 BEGIN TRAN;
+                    -- Debt «ar»: the instance's restored styles/overrides go too — only those with an identical
+                    -- twin in arc.* (the archive is whole here), so nothing is lost.
+                    DELETE s
+                    FROM doc.CellStyle AS s
+                    JOIN doc.TableRow AS r ON r.PeriodKey = s.PeriodKey AND r.Id = s.TableRowId
+                    WHERE s.PeriodKey = @uPk AND r.PeriodKey = @uPk AND r.TableInstanceId = @uId
+                      AND EXISTS (SELECT 1 FROM arc.CellStyle AS a
+                                   WHERE a.PeriodKey = s.PeriodKey AND a.TableRowId = s.TableRowId
+                                     AND a.ColumnDefId = s.ColumnDefId
+                                     AND EXISTS (SELECT a.BackgroundHex, a.ForegroundHex, a.IsBold, a.UpdatedAt,
+                                                        a.UpdatedByUserId
+                                                 INTERSECT
+                                                 SELECT s.BackgroundHex, s.ForegroundHex, s.IsBold, s.UpdatedAt,
+                                                        s.UpdatedByUserId));
+
+                    DELETE o
+                    FROM doc.CellFormulaOverride AS o
+                    WHERE o.PeriodKey = @uPk AND o.TableInstanceId = @uId
+                      AND EXISTS (SELECT 1 FROM arc.CellFormulaOverride AS a
+                                   WHERE a.PeriodKey = o.PeriodKey AND a.TableRowId = o.TableRowId
+                                     AND a.ColumnDefId = o.ColumnDefId
+                                     AND EXISTS (SELECT a.TableInstanceId, a.Reason COLLATE Latin1_General_BIN2,
+                                                        a.SetAt, a.SetByUserId
+                                                 INTERSECT
+                                                 SELECT o.TableInstanceId, o.Reason COLLATE Latin1_General_BIN2,
+                                                        o.SetAt, o.SetByUserId));
+
                     DELETE c
                     FROM doc.CellValue AS c
                     JOIN doc.TableRow AS r ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
