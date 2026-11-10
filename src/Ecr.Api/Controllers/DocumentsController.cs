@@ -80,6 +80,7 @@ public sealed class DocumentsController(
         [FromQuery] string? sort,
         [FromQuery] string? templateVersions,
         [FromQuery] int? year,
+        [FromQuery] bool? hasReopenedMonths,
         CancellationToken ct)
     {
         var page = new CursorRequest(limit == 0 ? 50 : limit, cursor);
@@ -106,7 +107,7 @@ public sealed class DocumentsController(
         return Ok(await listDocuments
             .HandleAsync(
                 projectId, periodKey, state, mine, hasLateEdits, q, resultsStale, staleBy, ownerUserId, sort, templateVersions,
-                year, page, ct)
+                year, hasReopenedMonths, page, ct)
             .ConfigureAwait(false));
     }
 

@@ -124,6 +124,12 @@ namespace Ecr.Application.Ports;
 /// `Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved` за аркушами складу, ВИДИМИМИ читачеві (S18).
 /// Рахується ОДНИМ запитом на сторінку (`DocumentStore.PeriodStatesBatchAsync`).
 /// </param>
+/// <param name="ReopenedPeriods">
+/// ✎ 10.11: діючі винятки «закритий місяць відкрито для цього документа» (<see cref="DocumentReopenedPeriod"/>), за
+/// зростанням місяця. Як і <paramref name="PeriodStates"/>, — лише з роком (`GET /documents?year=`): тоді масив (порожній,
+/// якщо немає), ОДНИМ запитом на сторінку і лише для документів сторінки, тобто вже відібраних межею видимості переліку;
+/// без року і в картці (<c>GET /documents/{id}</c>) — <c>null</c> (виняток місяця картка читає окремо).
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -152,7 +158,17 @@ public sealed record DocumentSummary(
     IReadOnlyDictionary<string, string>? TemplateVersionByPeriod = null,
     IReadOnlyList<string>? StepApproverNames = null,
     bool StepApproverNamesTruncated = false,
-    IReadOnlyList<DocumentPeriodState>? PeriodStates = null);
+    IReadOnlyList<DocumentPeriodState>? PeriodStates = null,
+    IReadOnlyList<DocumentReopenedPeriod>? ReopenedPeriods = null);
+
+/// <summary>
+/// ✎ 10.11 (слово людини через координатора): закритий місяць, відкритий для ЦЬОГО документа
+/// (<c>doc.DocumentPeriodReopen</c>), який діє зараз — не закритий і строк не минув. Перелік несе їх у
+/// <c>reopenedPeriods</c> рядка (смуга року показує «Reopened for this document» замість «Locked»).
+/// </summary>
+/// <param name="PeriodKey">Місяць; `Рік*100 + Номер`.</param>
+/// <param name="OpenUntil">До якого моменту (UTC) відкрито; клієнт показує його в поясі майданчика.</param>
+public sealed record DocumentReopenedPeriod(int PeriodKey, DateTime OpenUntil);
 
 /// <summary>Стан погодження документа за один період (смуга року, ✎ 2026-11-07 Period clarity).</summary>
 /// <param name="PeriodKey">Період; `Рік*100 + Номер`.</param>
@@ -258,6 +274,13 @@ public sealed record DocumentSheetState(
 /// фільтра. Діє ЗАПИТОМ до <c>Take</c>, поруч з межею видимості, а не постфільтром: видимість документів не змінює.
 /// </param>
 /// <param name="VersionSort">✎ Сортування за версією шаблону (за період); <c>null</c> — за <c>Id</c>. Другий ключ — завжди <c>Id</c>.</param>
+/// <param name="HasReopenedMonths">
+/// ✎ 10.11: лише документи з (<c>true</c>) або без (<c>false</c>) діючого винятку «місяць відкрито для документа»
+/// (<see cref="DocumentSummary.ReopenedPeriods"/>) — за період, за рік <paramref name="Year"/> без періоду, без обох — за
+/// будь-який місяць (як <paramref name="HasLateEdits"/>). <c>null</c> — без фільтра. Діє ЗАПИТОМ до <c>Take</c>, поруч із
+/// межею видимості (підзапит <c>IN</c>), а не постфільтром.
+/// </param>
+/// <param name="AsOfUtc">Момент, на який виняток «діє» (для тестів строку); <c>null</c> — годинник сховища.</param>
 public readonly record struct DocumentListFilter(
     DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null,
     IReadOnlyCollection<(int ProjectId, int Id)>? HiddenSheetDefIds = null,
@@ -272,7 +295,9 @@ public readonly record struct DocumentListFilter(
     IReadOnlyCollection<string>? TemplateVersions = null,
     DocumentVersionSort? VersionSort = null,
     bool PartlySubmitted = false,
-    int? Year = null);
+    int? Year = null,
+    bool? HasReopenedMonths = null,
+    DateTime? AsOfUtc = null);
 
 /// <summary>Напрямок сортування переліку документів за версією шаблону.</summary>
 public enum DocumentVersionSort

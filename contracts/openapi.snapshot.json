@@ -6422,6 +6422,26 @@
           null
         ]
       },
+      "DocumentReopenedPeriod": {
+        "description": "✎ 10.11 (слово людини через координатора): закритий місяць, відкритий для ЦЬОГО документа\n(`doc.DocumentPeriodReopen`), який діє зараз — не закритий і строк не минув. Перелік несе їх у\n`reopenedPeriods` рядка (смуга року показує «Reopened for this document» замість «Locked»).",
+        "properties": {
+          "openUntil": {
+            "description": "До якого моменту (UTC) відкрито; клієнт показує його в поясі майданчика.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "periodKey": {
+            "description": "Місяць; `Рік*100 + Номер`.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "periodKey",
+          "openUntil"
+        ],
+        "type": "object"
+      },
       "DocumentSheetState": {
         "description": "Аркуш складу документа в переліку: код, назва, стан за період.",
         "properties": {
@@ -6565,6 +6585,16 @@
             "description": "Проєкт.",
             "format": "int32",
             "type": "integer"
+          },
+          "reopenedPeriods": {
+            "description": "✎ 10.11: діючі винятки «закритий місяць відкрито для цього документа» (DocumentReopenedPeriod), за\nзростанням місяця. Як і PeriodStates, — лише з роком (`GET /documents?year=`): тоді масив (порожній,\nякщо немає), ОДНИМ запитом на сторінку і лише для документів сторінки, тобто вже відібраних межею видимості переліку;\nбез року і в картці (`GET /documents/{id}`) — `null` (виняток місяця картка читає окремо).",
+            "items": {
+              "$ref": "#/components/schemas/DocumentReopenedPeriod"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "resultsStale": {
             "description": "Чи застаріли результати методологій документа за період: після початку актуального прогону хтось правив\nвхідну комірку (або довідник, який читає методологія). ВИВОДИТЬСЯ запитом, не зберігається. Документ без\nрезультатів — `false`. ⛔ `null` — період не задано, або читач має обмеження нижче проєкту\n(`DocumentSheetVisibility.For`): «застаріло за видимими входами» не доводить, що застарів видимий вихід.\n✎ D-446: другий випадок називає ResultsStaleUndetermined.",
@@ -34653,6 +34683,13 @@
             "schema": {
               "format": "int32",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hasReopenedMonths",
+            "schema": {
+              "type": "boolean"
             }
           }
         ],

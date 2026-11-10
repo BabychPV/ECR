@@ -97,6 +97,27 @@ public sealed class ListDocumentsFilterTests
             Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// ✎ 10.11 «Reopened months»: фільтр доходить до сховища без змін — і без періоду, і без року (як «Late edits»).
+    /// Мутаційний доказ (локально): обробник не передає <c>HasReopenedMonths</c> у фільтр — червоний для <c>true</c>/<c>false</c>.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [InlineData(true, null)]
+    [InlineData(false, 2026)]
+    [InlineData(null, 2026)]
+    public async Task Фільтр_перевідкритих_місяців_доходить_до_сховища_без_змін(bool? hasReopenedMonths, int? year)
+    {
+        await Handler().HandleAsync(
+            null, periodKey: null, state: null, mine: false, hasLateEdits: null, query: null, resultsStale: null, staleBy: null,
+            ownerUserId: null, sort: null, templateVersions: null, year, hasReopenedMonths, new CursorRequest(50), default);
+
+        await _documents.Received(1).ListAsync(
+            Arg.Any<int?>(), Arg.Any<PeriodKeyFilter>(),
+            new DocumentListFilter(null, null, null, Year: year, HasReopenedMonths: hasReopenedMonths),
+            Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
+    }
+
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [InlineData("Closed")]
