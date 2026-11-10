@@ -43,5 +43,25 @@ describe('EditAssignmentsDrawer — доступність', { timeout: 120_000 
       const wizard = await findViolations(screen.getAllByRole('dialog').at(-1) as HTMLElement);
       expect(wizard, describeViolations(wizard)).toHaveLength(0);
     });
+
+    // P2 10.11: «Додати учасника» — рівні доступу перелік радіо (група з назвою, підпис кожного рівня).
+    it(`${colorScheme}: діалог «Додати учасника» з рівнями доступу — без блокуючих порушень`, async () => {
+      mockServer([] as Sent[]);
+      render(
+        <MantineProvider {...mantineProviderProps} forceColorScheme={colorScheme}>
+          <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+            <MemoryRouter initialEntries={['/?panel=edit-assignments']}>
+              <EditAssignmentsDrawer documentId={DocumentId} sheets={[{ code: 'AIR', name: 'Air emissions' }]} />
+            </MemoryRouter>
+          </QueryClientProvider>
+        </MantineProvider>,
+      );
+
+      fireEvent.click(await screen.findByTestId('add-participant'));
+      const modal = await screen.findByTestId('participant-modal');
+      expect(screen.getByRole('radiogroup', { name: '⟦editAssign.participant.level⟧' })).toBeTruthy();
+      const participant = await findViolations(modal.closest('[role="dialog"]') as HTMLElement);
+      expect(participant, describeViolations(participant)).toHaveLength(0);
+    });
   }
 });
