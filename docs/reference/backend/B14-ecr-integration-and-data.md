@@ -213,6 +213,14 @@ FLERT (`Data_Lifecycle` §2.1) — зовнішня БД: часові ряди 
 У БД ECR доступ реалізований синонімами (`Utility_RebindFlertSynonyms`) і
 окремим набором RTQP-об'єктів (`PI AF/FLERT_NV_0114_PISqlClientExportedObjects.sql`).
 
+> ✎ 2026-11-10 (D8): **«FLERT» — дві різні бази.** (1) **SQL-база FLERT** — звичайний SQL Server
+> (`dbo.Flert_GetAllStreamDataFlattened`: об'єми, gas composition); TO-BE — `ExternalTransport.Sql`,
+> `SqlDataSource` (`src/Ecr.Domain/Enums/Enums.cs:576-588`, `src/Ecr.Adapters.Sql/SqlDataSource.cs:18-23`).
+> (2) **AF-база FLERT** (`FLERT_NV_0114`) — PI AF з шаблонами EventFrame `FlareEventFull_*`/`FlareDailyReport`
+> і 6 RTQP-в'юхами; читається `PiSqlClient`, а не SQL-адаптером (`Enums.cs:578-580`:
+> «Це НЕ PI SQL DAS»). Файл `FLERT_NV_0114_PISqlClientExportedObjects.sql` і «6 FLERT» у таблиці
+> вище належать до (2); синоніми `Utility_RebindFlertSynonyms` — до (1).
+
 **TO-BE:** окремий `ext.DataSource(Transport = Sql, Code = 'Flert')`, свій адаптер за
 тим самим `IExternalDataSource`. Ніяких синонімів і linked server у схемі ядра.
 Це джерело **не зникає після переходу** — воно єдине постачає реальні виміри.

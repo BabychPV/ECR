@@ -84,7 +84,7 @@ arg_ref         = "@" dotted_name                           (* Methodology: по
                 | identifier ;                              (* ЛИШЕ при імпорті — див. §3.4 *)
 dotted_name     = identifier { "." identifier } ;           (* @GCV.HSE400_FG_Makat_Methane *)
 const_ref       = "CST" "." identifier ;                    (* Methodology: константа *)
-formula_ref     = "!" identifier ;                          (* Methodology: інша формула цієї версії *)
+formula_ref     = "!" identifier ;                          (* Methodology: формула цієї версії, інакше — оголошеного імпорту (§3.4) *)
 header_ref      = "HDR" "." identifier ;                    (* поле шапки документа *)
 period_ref      = "[" "Period" [ ":" [ "+" | "-" ] digit { digit } ] "]" ;
 

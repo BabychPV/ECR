@@ -98,7 +98,9 @@ ext.SourceEntity
 | Дані RDS | `EventFrame` | `HSE_Land_*` (63), `HSE_401*`, `HSE_400_*`, `HSE_Thermaloxidizer*` | `doc.*` (на перехід) |
 | Налаштування | `Element` | `Settings_General_V` (`Calculation_StartDateTime/EndDateTime/Offset`) | `Project.ExternalSettingsJson` |
 | Керування | `Element` | `Recalculate_Land_V`, `Settings_RecalculateManual_V` | зникає ([B15](B15-ecr-recalc-orchestration.md) §2.3) |
-| Потоки | `Stream` | FLERT: `FlareEventFull_*`, `FlareDailyReport_*` | `ext.RawDataPoint` — **лишається назавжди** |
+| Події факела | `EventFrame` | AF-база FLERT (`FLERT_NV_0114`): `FlareEventFull_*`, `FlareDailyReport_*` | `ext.RawDataPoint` / подія джерела — **лишається назавжди** |
+
+✎ 2026-11-10 (D8): раніше рядок стояв як `EntityKind = Stream`. `FlareEventFull_*` і `FlareDailyReport` — шаблони EventFrame у PI AF-базі FLERT, які читаються RTQP-в'юхами `[Category].FlareEventFull_{Auto,Manual}[_Day]_V` / `FlareDailyReport_V` (`docs/source/README-HSE-methodology-links-2026-10-13.md:73-74`, `docs/source/ECR Current Back end/SQL/DB.txt:17170-17178`); це **не** SQL-база FLERT з потоками (`ExternalTransport.Sql`, `src/Ecr.Domain/Enums/Enums.cs:576-588`, `B14` §7).
 
 Перелік узятий із фактичного експорту `PI AF/ECR_01_Air_PISqlClientExportedObjects.sql`
 (26 в'юх) і `FLERT_NV_0114_PISqlClientExportedObjects.sql` (6 в'юх).

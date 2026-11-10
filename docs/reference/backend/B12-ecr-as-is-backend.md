@@ -289,7 +289,8 @@ LatestGeneralData AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY Land_No ORDER BY
 | PI AF: `Methodology`/`Formula_El`/`Constant_El`/`Rules` | схема `calc.*` | **B13** |
 | PI AF: `Settings_General` (`CALCULATION_*`) | `doc.Project.ExternalSettingsJson` | B14 §6 |
 | PI AF: `Check_*` + `AFNotificationRule` | алерти системи | B15 §6 |
-| FLERT (потоки, gas composition) | `ext.DataSource(Kind = Sql)` — **лишається назавжди** | B14 §7 |
+| FLERT, SQL-база (потоки, gas composition) | `ext.DataSource(Transport = Sql)` — **лишається назавжди** | B14 §7 |
+| FLERT, AF-база (EventFrame `FlareEventFull_*`, `FlareDailyReport`; 6 RTQP-в'юх) | `ext.DataSource` PI-транспорту, `PiSqlClient` — ✎ 2026-11-10 (D8): це інша база, ніж рядок вище | B14 §7, B20 §3.1 |
 | 63 `AF_*_Sync` + 71 тригер + RTQP-в'юхи | `DataCollectionJob` + `ext.DataMappingDef` | B14 §4 |
 | `JobsQueue`/`JobsList`/`WatchdogStatus` + 100 джобів | `IJobScheduler` + worker-пул | **B15** |
 | CLR `DllProject` (148 файлів) | `Ecr.Calculations` (out-of-process) | **B13** §4 |
