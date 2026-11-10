@@ -50,10 +50,32 @@ public static class JobDeferral
     public const string RequeuedProperty = "ecrDeferralRequeued";
 
     /// <summary>
-    /// Найдовший сумарний час відкладень однієї задачі (<c>Jobs:Recalculation:MaxDeferral</c>,
-    /// типово 30 хв) — з запасом довший за найдовший законний повний перерахунок документа.
+    /// Найдовший сумарний час відкладень однієї задачі за замовчуванням (30 хв) — з запасом довший за
+    /// найдовший законний повний перерахунок документа. Чинне значення — <see cref="ReadMaxDeferral"/>
+    /// (<see cref="MaxDeferralMinutesKey"/>).
     /// </summary>
     public static readonly TimeSpan MaxDeferral = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Ключ стелі відкладень у хвилинах (AN-13 D4): до цього стеля була лише константою, і довгий
+    /// законний прогін на обладнанні замовника не було чим підняти без нової збірки.
+    /// </summary>
+    public const string MaxDeferralMinutesKey = "Jobs:Recalculation:MaxDeferralMinutes";
+
+    /// <summary>Стеля відкладень з конфігурації; не задано чи недійсне — <see cref="MaxDeferral"/>.</summary>
+    /// <param name="configuration">Конфігурація служби (Api або воркер пулу).</param>
+    /// <remarks>Недійсне значення старт Api зупиняє раніше (<c>EcrConfigurationValidation.Integers</c>).</remarks>
+    public static TimeSpan ReadMaxDeferral(Microsoft.Extensions.Configuration.IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        return int.TryParse(
+                   configuration[MaxDeferralMinutesKey], NumberStyles.Integer, CultureInfo.InvariantCulture,
+                   out var minutes)
+               && minutes >= 1
+            ? TimeSpan.FromMinutes(minutes)
+            : MaxDeferral;
+    }
 
     /// <summary>Чи вичерпано стелю: від першого відкладення минуло БІЛЬШЕ за <paramref name="max"/>.</summary>
     /// <param name="since">Перше відкладення; <c>null</c> — задача ще не відкладалась.</param>
@@ -115,6 +137,24 @@ public static class JobDeferral
             return null;
         }
     }
+
+    /// <summary>
+    /// Чи перепоставляти задачу, що вичерпала стелю (раз на серію, <see cref="RequeuePayload"/>).
+    /// </summary>
+    /// <param name="jobCode">Код задачі.</param>
+    /// <param name="targetKey">Ціль задачі (черга в базі — <c>TargetKey</c>; Quartz — ключ задачі з префіксом цілі).</param>
+    /// <remarks>
+    /// ⛔ AN-13 D4: окрім задачі злиття формул (Д-1 огляду O1) — перерахунок документа З ЦІЛЛЮ. Раніше він
+    /// після стелі лишався <c>Failed</c>, і документ, чий лок 30 хв тримав інший прогін, не перераховувався
+    /// до наступної ручної команди чи нічного прогону. Перепостановка — ЗЛИТТЯМ на ту саму ціль (без
+    /// витіснення виконуваного, як автотригери <c>EnqueueCoalesced</c>): <c>EnqueueExclusive</c> перервав би
+    /// саме той прогін, що тримає лок, і перепостановка стала б витісненням. Без цілі (поштучна задача)
+    /// злиття немає, тож і перепостановки немає — інакше дві такі задачі давали б дві копії.
+    /// </remarks>
+    public static bool RequeuesOnExhaustion(string? jobCode, string? targetKey)
+        => string.Equals(jobCode, JobPayloadMerge.MergeableJobCode, StringComparison.Ordinal)
+           || (string.Equals(jobCode, JobListKinds.RecalculationJobCode, StringComparison.Ordinal)
+               && !string.IsNullOrWhiteSpace(targetKey));
 
     /// <summary>Момент першого відкладення з payload черги в базі; <c>null</c> — немає або не читається.</summary>
     /// <param name="payloadJson">Payload задачі.</param>

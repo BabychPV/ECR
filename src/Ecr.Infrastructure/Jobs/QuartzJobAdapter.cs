@@ -233,7 +233,9 @@ public sealed partial class QuartzJobAdapter(
             var now = clock.UtcNow;
 
             // ⛔ Стеля (борг O1): лок, що не звільняється, — Failed, а не вічні триґери.
-            if (JobDeferral.IsExhausted(since, now, JobDeferral.MaxDeferral))
+            // AN-13 D4: стеля — з конфігурації (`JobWorkerOptions` реєструє й режим Quartz), а не константа.
+            var maxDeferral = provider.GetService<JobWorkerOptions>()?.MaxDeferral ?? JobDeferral.MaxDeferral;
+            if (JobDeferral.IsExhausted(since, now, maxDeferral))
             {
                 var waited = now - since!.Value;
                 LogDeferralExhausted(logger, jobId, typeName ?? "—", deferred.Resource ?? "—", JobDeferral.Format(waited));
@@ -566,7 +568,8 @@ public sealed partial class QuartzJobAdapter(
         IJobExecutionContext context, string jobId, string? typeName, string? payload, IJobProgressStore? progress,
         IClock clock)
     {
-        if (!string.Equals(typeName, JobPayloadMerge.MergeableJobCode, StringComparison.Ordinal)
+        // Ціль у Quartz — префікс ключа задачі (`IRecalculationJob~ціль~guid`); поштучна задача її не має.
+        if (!JobDeferral.RequeuesOnExhaustion(typeName, QuartzJobScheduler.TargetPrefixOfJobId(jobId))
             || JobDeferral.RequeuePayload(payload) is not { } again)
         {
             return;
@@ -578,7 +581,7 @@ public sealed partial class QuartzJobAdapter(
                 ? null
                 : (await progress.FindAsync(jobId, CancellationToken.None).ConfigureAwait(false))?.CreatedByUserId;
             var requeued = await new QuartzJobScheduler(progress: progress, clock: clock)
-                .RequeueDeferralExhaustedAsync(context.Scheduler, jobId, again, author, CancellationToken.None)
+                .RequeueDeferralExhaustedAsync(context.Scheduler, jobId, again, author, CancellationToken.None, typeName)
                 .ConfigureAwait(false);
             LogDeferralRequeued(logger, jobId, requeued);
         }

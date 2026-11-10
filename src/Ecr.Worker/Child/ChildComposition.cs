@@ -110,7 +110,8 @@ internal static class ChildComposition
 
         services.AddSingleton(RecalculationBudgetOptions.Read(configuration) with { Mode = BudgetMode });
 
-        services.AddSingleton(WorkerOptions(pool));
+        // AN-13 D4: стеля відкладень — та сама, що в Api (Jobs:Recalculation:MaxDeferralMinutes).
+        services.AddSingleton(WorkerOptions(pool) with { MaxDeferral = JobDeferral.ReadMaxDeferral(configuration) });
         services.AddHostedService<JobWorker>();
     }
 }

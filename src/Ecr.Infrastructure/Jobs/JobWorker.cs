@@ -749,8 +749,9 @@ public sealed partial class JobWorker(
     }
 
     /// <summary>
-    /// Стелю вичерпала задача злиття (Д-1 огляду O1): її комірки — нова задача на ту саму
-    /// ціль, раз (<see cref="JobDeferral.RequeuePayload"/>).
+    /// Стелю вичерпала задача злиття (Д-1 огляду O1) або перерахунок документа з ціллю (AN-13 D4):
+    /// нова задача на ту саму ціль злиттям, без витіснення, раз на серію
+    /// (<see cref="JobDeferral.RequeuesOnExhaustion"/>, <see cref="JobDeferral.RequeuePayload"/>).
     /// </summary>
     /// <remarks>
     /// ⚠ Поки ця задача <c>Running</c>, нова стоїть <c>Queued</c> позаду (claim не бере ціль
@@ -759,7 +760,7 @@ public sealed partial class JobWorker(
     /// </remarks>
     private async Task RequeueExhaustedAsync(ClaimedJob job)
     {
-        if (!string.Equals(job.JobCode, JobPayloadMerge.MergeableJobCode, StringComparison.Ordinal)
+        if (!JobDeferral.RequeuesOnExhaustion(job.JobCode, job.TargetKey)
             || JobDeferral.RequeuePayload(job.PayloadJson) is not { } again)
         {
             return;
