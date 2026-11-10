@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { JSX, ReactNode } from 'react';
 import { MantineProvider } from '@mantine/core';
@@ -9,18 +9,30 @@ import { testTheme } from '@/test/render';
 /**
  * Кнопка «My tasks» у шапці: бюджет, `L2`, межа доступу, позначка (`UI-07`).
  *
- * ⛔ Чим ловиться лінивість. Фабрика `vi.mock` виконується тоді, коли модуль
+ * ⛔ Чим ловиться лінивість. Фабрика `vi.doMock` виконується тоді, коли модуль
  * ІМПОРТУЮТЬ уперше. Статичний `import { MyTasksDrawer }` у
  * `MyTasksLauncher.tsx` обчислив би її разом із самим лаунчером — ще до
  * рендера, — і перша перевірка нижче почервоніла б. Той самий прийом і та
  * сама причина, що в `features/search/__tests__/SearchLauncher.lazy.test.tsx`.
  *
- * ⛔ Порядок тестів у файлі значущий: модуль обчислюється один раз на файл,
- * тож перевірки «ще не обчислено» стоять перед першим відкриттям.
+ * ⛔ Порядок тестів не значущий: `beforeEach` скидає реєстр модулів і прапорець,
+ * заново реєструє заглушку (`vi.doMock`) та імпортує `MyTasksLauncher`, тож
+ * кожен тест бачить «шухляду ще не обчислено». Раніше модуль обчислювався один
+ * раз на файл, і перемішаний прогін (`--sequence.shuffle`, job `shuffle`)
+ * червонів, коли тест відкриття йшов раніше за перевірки «ще не обчислено».
  */
 const probe = vi.hoisted(() => ({ evaluated: false }));
 
-vi.mock('@/features/jobs/MyTasksDrawer', () => {
+let MyTasksLauncher: typeof import('@/features/jobs/MyTasksLauncher').MyTasksLauncher;
+
+beforeEach(async () => {
+  vi.resetModules();
+  probe.evaluated = false;
+  vi.doMock('@/features/jobs/MyTasksDrawer', () => drawerStub());
+  ({ MyTasksLauncher } = await import('@/features/jobs/MyTasksLauncher'));
+});
+
+function drawerStub(): Record<string, unknown> {
   probe.evaluated = true;
 
   return {
@@ -55,9 +67,7 @@ vi.mock('@/features/jobs/MyTasksDrawer', () => {
       ) : null,
     myTaskDocumentHref: (id: number): string => `/documents/${String(id)}`,
   };
-});
-
-import { MyTasksLauncher } from '@/features/jobs/MyTasksLauncher';
+}
 
 /** Власна задача користувача — рівно те, що віддав би сервер на `mine=true`. */
 const mine = [
