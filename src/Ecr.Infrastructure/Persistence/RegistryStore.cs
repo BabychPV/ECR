@@ -936,10 +936,20 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
 
     /// <inheritdoc />
     /// <remarks>
-    /// ⛔ Один запит на сторінку і один на лічильник, без N+1: документи відбираються EXISTS-ами від запису —
-    /// комірки seek-ом по фільтрованому <c>IX_CellValue_RegistryEntry</c>, шапка — по запису. Логічно видалені
-    /// рядки таблиць не рахуються (як у <c>PermitStore.FindUsagesAsync</c>). Копії аркушів — навмисно разом з
-    /// оригіналами: будь-яке значення — використання.
+    /// <para>
+    /// ⛔ Два запити, і лише перший торкається комірок. Перший — множина Id документів ОДНИМ проходом:
+    /// <c>комірки живих рядків UNION шапка</c>, без Document; комірки — seek по фільтрованому
+    /// <c>IX_CellValue_RegistryEntry</c>. Документів одиниці-десятки (на копії Land їх 93 усього). Другий — по цій
+    /// множині (JSON-параметр) фільтр проєктів і підписи; лічильник — розмір результату, сторінка — його початок.
+    /// </para>
+    /// <para>
+    /// ⛔ F13 p227: доти стояло <c>Document WHERE … AND (Id IN (SELECT … CellValue …) OR Id IN (SELECT … шапка))</c>,
+    /// і двічі (лічильник + сторінка). OR над корельованими IN оптимізатор не розкладав на seek-и: HSE401_REGION/7525
+    /// (6270 комірок, 1 документ) — 13–15 с на тихому стенді й 503 під перерахунком. Сторож —
+    /// <c>RegistryEntryUsageTests.Комірки_проходяться_одним_запитом…</c>.
+    /// </para>
+    /// Логічно видалені рядки таблиць не рахуються (як у <c>PermitStore.FindUsagesAsync</c>). Копії аркушів —
+    /// навмисно разом з оригіналами: будь-яке значення — використання.
     /// </remarks>
     public async Task<UsageResponse> FindEntryDocumentsAsync(
         long registryEntryId, IReadOnlyCollection<int> projectIds, int take, CancellationToken ct)
@@ -966,18 +976,28 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             .Where(v => v.ValueRegistryEntryId == registryEntryId)
             .Select(v => v.DocumentId);
 
-        var documents =
-            from document in db.Documents.AsNoTracking()
-            where projects.Contains(document.ProjectId)
-                  && (fromCells.Contains(document.Id) || fromHeader.Contains(document.Id))
-            join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
-            orderby document.Id
-            select new { document.Id, document.BusinessKey, project.NameL10n };
+        // ⛔ Множина Id — ОКРЕМИМ запитом, без з'єднання з Document. Щойно Document (93 рядки на Land) стоїть у
+        // тому ж запиті, оптимізатор робить його зовнішнім і проштовхує з'єднання в обидві гілки UNION — знову
+        // корельований прохід по комірках на кожен документ: на копії Land 7525 — 8.7 с, 576 841 скан TableInstance.
+        // UNION (не Concat) — дедуплікація ще в SQL; документів, а не комірок, тож список малий.
+        var ids = await fromCells.Union(fromHeader).ToListAsync(ct).ConfigureAwait(false);
+        if (ids.Count == 0)
+        {
+            return new UsageResponse(0, []);
+        }
 
-        var total = await documents.CountAsync(ct).ConfigureAwait(false);
-        var page = await documents.Take(take).ToListAsync(ct).ConfigureAwait(false);
+        // Видимість і підписи — по малому набору одним JSON-параметром (OPENJSON): без стелі 2100 параметрів і
+        // без IN-списку з тисяч констант. Лічильник — розмір відібраного, сторінка — його початок.
+        var visible = await (
+                from document in db.Documents.AsNoTracking()
+                where EF.Parameter(ids).Contains(document.Id) && projects.Contains(document.ProjectId)
+                join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
+                orderby document.Id
+                select new { document.Id, document.BusinessKey, project.NameL10n })
+            .ToListAsync(ct).ConfigureAwait(false);
+        var page = visible.Take(take);
 
-        return new UsageResponse(total, [.. page.Select(d => new UsageItemDto(
+        return new UsageResponse(visible.Count, [.. page.Select(d => new UsageItemDto(
             UsageKinds.Document,
             d.Id.ToString(CultureInfo.InvariantCulture),
             d.BusinessKey,

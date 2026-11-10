@@ -76,6 +76,65 @@ public sealed class RegistryEntryUsageTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    /// <summary>
+    /// ⛔ F13 p227 (P2): на копії Land запис HSE401_REGION/7525 (6270 комірок) відповідав 13–15 с, під перерахунком — 503.
+    /// Причина — форма запиту: <c>Documents WHERE ProjectId IN … AND (Id IN (SELECT … CellValue …) OR Id IN (SELECT …
+    /// шапка))</c> — корельований IN з OR над з'єднанням у мільйони рядків, і так двічі (лічильник + сторінка).
+    /// Храповик: важкий прохід по комірках — РІВНО один, без OR перед підзапитом; сторінка — окремим дешевим запитом.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.14")]
+    public async Task Комірки_проходяться_одним_запитом_без_корельованого_OR_IN_а_Total_повний_при_обрізаній_сторінці()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var recorder = new SqlTextRecorder();
+        await using var db = sql.CreateContext(recorder);
+
+        var usage = await new Ecr.Infrastructure.Persistence.RegistryStore(db)
+            .FindEntryDocumentsAsync(s.Used, s.VisibleProjects, take: 1, CancellationToken.None).ConfigureAwait(true);
+
+        // Семантика: лічильник повний (2), сторінка обрізана до 1 і впорядкована за Id.
+        Assert.Equal(2, usage.Total);
+        Assert.Equal([s.CellsDocument.ToString(System.Globalization.CultureInfo.InvariantCulture)], usage.Items.Select(i => i.Id));
+
+        var commands = recorder.Commands.ToList();
+        var dump = string.Join("\n----\n", commands);
+        Assert.True(commands.Count <= 2, $"Звернень {commands.Count} (стеля 2):\n{dump}");
+        Assert.True(
+            commands.Count(c => c.Contains("[CellValue]", StringComparison.Ordinal)) == 1,
+            $"Прохід по doc.CellValue має бути рівно один:\n{dump}");
+        Assert.DoesNotMatch(
+            new System.Text.RegularExpressions.Regex(@"\bOR\b\s+(?:\w+\s+)?(?:\[[^\]]+\]\.\[[^\]]+\]\s+)?(?:IN|EXISTS)\s*\(\s*SELECT", System.Text.RegularExpressions.RegexOptions.IgnoreCase),
+            dump);
+    }
+
+    private sealed class SqlTextRecorder : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<string> Commands { get; } = new();
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Enqueue(command.CommandText);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<object>> ScalarExecutingAsync(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<object> result,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Enqueue(command.CommandText);
+            return base.ScalarExecutingAsync(command, eventData, result, cancellationToken);
+        }
+    }
+
     private static async Task<JsonElement> GetAsync(HttpClient client, EcrApiFactory app, string url)
     {
         var response = await client.GetAsync(new Uri(url, UriKind.Relative)).ConfigureAwait(false);
@@ -177,7 +236,7 @@ public sealed class RegistryEntryUsageTests(SqlServerFixture sql)
 
         return new Scenario(
             subject.Code, used.Id, unused.Id, foreign.Id, cells.DocumentId, cellsKey, header.DocumentId,
-            readerName, documentsOnlyName);
+            readerName, documentsOnlyName, [cells.ProjectId, header.ProjectId, deleted.ProjectId]);
     }
 
     private static User NewUser(Ecr.Infrastructure.Persistence.EcrDbContext db, string prefix, out string name)
@@ -191,5 +250,5 @@ public sealed class RegistryEntryUsageTests(SqlServerFixture sql)
 
     private sealed record Scenario(
         string Code, long Used, long Unused, long Foreign, long CellsDocument, string CellsDocumentKey,
-        long HeaderDocument, string Reader, string DocumentsOnly);
+        long HeaderDocument, string Reader, string DocumentsOnly, IReadOnlyCollection<int> VisibleProjects);
 }
