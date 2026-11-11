@@ -170,6 +170,9 @@ public sealed class Hse400CompositionSnapshotLoader(
         var instanceById = chosen.ToDictionary(i => i.Id);
         var found = new List<(int Year, int TableDefId, int Ordinal, Hse400DocumentCell Cell)>();
 
+        // Місяць таблиці, де введено хоч щось і ВСЕ введене — нуль: (рік, таблиця, місяць) → усі нулі?
+        var inputMonths = new Dictionary<(int Year, int TableDefId, int Month), bool>();
+
         int OrdinalOf(int tableDefId, string rowKey)
             => ordinals.TryGetValue(tableDefId, out var byKey) && byKey.TryGetValue(rowKey, out var ordinal)
                 ? ordinal
@@ -185,6 +188,8 @@ public sealed class Hse400CompositionSnapshotLoader(
 
             var instance = instanceById[row.TableInstanceId];
             var year = instance.PeriodKeyValue / 100;
+            var inputMonth = (year, instance.TableDefId, monthByColumn[cell.ColumnDefId]);
+            inputMonths[inputMonth] = (!inputMonths.TryGetValue(inputMonth, out var allZero) || allZero) && cell.Value == 0m;
             found.Add((year, instance.TableDefId, OrdinalOf(instance.TableDefId, row.RowKeyValue), new Hse400DocumentCell(
                 year, monthByColumn[cell.ColumnDefId], streamByTable[instance.TableDefId], row.RowKeyValue, cell.Value)));
         }
@@ -209,6 +214,35 @@ public sealed class Hse400CompositionSnapshotLoader(
                 var year = instance.PeriodKeyValue / 100;
                 found.Add((year, instance.TableDefId, OrdinalOf(instance.TableDefId, rowKey), new Hse400DocumentCell(
                     year, month, streamByTable[instance.TableDefId], rowKey, result.Value)));
+            }
+        }
+
+        // ⚠ Паритет зі старою системою: на місяці, де весь ввід таблиці — нулі, стара система рахувала й зберігала 0
+        // (довідник LAND_HSE400_COMPOSITION має там нулі), а модуль місячних колонок гасить ділення на 0 і не пише
+        // результат — Land отримував би #N/A замість 0 і губив результати (scratch 11.11: 84 результати Land за
+        // FG_HMB M09). Тому порожній F_ такого місяця — 0. Місяць із ненульовим вводом не чіпаємо: там порожній F_ —
+        // справжня відсутність (стара система: continue).
+        var calculatedFound = found
+            .Where(f => Hse400CompositionMapping.IsCalculated(f.Cell.RowKey))
+            .Select(f => (f.Year, f.TableDefId, f.Cell.Month, Key: f.Cell.RowKey.ToUpperInvariant()))
+            .ToHashSet();
+        foreach (var ((year, tableDefId, month), allZero) in inputMonths)
+        {
+            if (!allZero)
+            {
+                continue;
+            }
+
+            foreach (var rowKey in rowDefs
+                         .Where(r => r.TableDefId == tableDefId && Hse400CompositionMapping.IsCalculated(r.RowKeyValue))
+                         .Select(r => r.RowKeyValue)
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!calculatedFound.Contains((year, tableDefId, month, rowKey.ToUpperInvariant())))
+                {
+                    found.Add((year, tableDefId, OrdinalOf(tableDefId, rowKey),
+                        new Hse400DocumentCell(year, month, streamByTable[tableDefId], rowKey, 0m)));
+                }
             }
         }
 
