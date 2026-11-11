@@ -243,6 +243,12 @@ jobs:
           # archive.ubuntu.com і ще одна спроба. sqlcmd лишається ODBC-шним (P-17).
           if ! sudo ACCEPT_EULA=Y apt-get install -y -o Acquire::Retries=5 mssql-tools18 unixodbc-dev; then
             echo "::warning::apt install failed on the runner mirror; switching to archive.ubuntu.com"
+            # ubuntu-24.04 бере дзеркало з `mirror+file:/etc/apt/apt-mirrors.txt`,
+            # тож азурний рядок прибираємо ТАМ; sources — для старіших образів.
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+              grep -q 'archive.ubuntu.com' /etc/apt/apt-mirrors.txt || echo 'http://archive.ubuntu.com/ubuntu/' | sudo tee -a /etc/apt/apt-mirrors.txt > /dev/null
+            fi
             sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu#http://archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
             sudo apt-get update -o Acquire::Retries=5
             sudo ACCEPT_EULA=Y apt-get install -y -o Acquire::Retries=5 mssql-tools18 unixodbc-dev
