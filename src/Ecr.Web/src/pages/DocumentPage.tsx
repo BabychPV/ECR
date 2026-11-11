@@ -51,7 +51,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useProjectCurrentPeriodDefault } from '@/features/documents/useProjectCurrentPeriodDefault';
-import { isYearLayout, yearAnchorCalendar } from '@/features/documents/yearLayout';
+import { isYearLayout, yearAggregatePeriodState, yearAnchorCalendar } from '@/features/documents/yearLayout';
 import { SheetStrip } from '@/features/documents/SheetStrip';
 import { copyFieldsOf, sheetTabKey } from '@/features/documents/sheetCopies/sheetCopyTypes';
 import {
@@ -661,10 +661,14 @@ export function DocumentPage(): JSX.Element {
   const periodEnd = calendar.data?.periods?.find((period) => period.periodKey === periodKey)?.periodEnd ?? null;
 
   // Приймальна 08.11 (i): закритий місяць, відкритий лише для цього документа, — Grace для нього (як на сервері).
+  // ✎ D-474: розкладка «рік» — замок документа за річним агрегатом місяців (`AnnualPeriodRule`), а не за станом якоря;
+  // колонки закритих місяців замикає сервер у `cellPermissions` зрізу.
   const periodReopen = useDocumentPeriodReopen({
     documentId,
     periodKey,
-    periodState: calendar.data?.periods?.find((period) => period.periodKey === periodKey)?.state,
+    periodState: yearLayout
+      ? yearAggregatePeriodState(calendar.data?.periods, periodKey)
+      : calendar.data?.periods?.find((period) => period.periodKey === periodKey)?.state,
     timeZoneId: calendar.data?.timeZoneId,
   });
 
