@@ -114,6 +114,15 @@ export function siteUntilText(value: string, zone: string): string | null {
   return momentText(value, zone, false, isSiteMidnight(value, at, zone) ? MinuteMs : 0);
 }
 
+/**
+ * `siteUntilText`, коли пояс майданчика відомий; поки календар не приїхав (або рядок не розібрався) — пояс браузера.
+ * Одне правило для банера документа і тосту «місяць відкрито» (✎ AN-178).
+ */
+export function untilTextInZone(value: string, zone: string | null | undefined): string {
+  if (zone === null || zone === undefined || zone === '') return formatDateTime(value);
+  return siteUntilText(value, zone) ?? formatDateTime(value);
+}
+
 /** Чи момент — рівно 00:00:00 настінного часу майданчика (за зсувом у рядку, без нього — за поясом через `Intl`). */
 function isSiteMidnight(value: string, at: number, zone: string): boolean {
   const wall = WallClock.exec(value);
