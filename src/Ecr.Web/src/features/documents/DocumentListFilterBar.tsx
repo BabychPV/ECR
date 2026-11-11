@@ -203,6 +203,20 @@ export function DocumentListFilterBar({
           />
         </FilterInline>
 
+        {/* ✎ 10.11 (слово людини): «Reopened months» поруч із «Late edits» — серверний `hasReopenedMonths` (адреса),
+            документи з місяцем, відкритим лише для них; як і «Late edits», не вимкнений без періоду. */}
+        <FilterInline>
+          <Switch
+            size="sm"
+            label={t('documents.filterReopenedMonths')}
+            checked={filters.hasReopenedMonths}
+            onChange={(event) => {
+              filters.setHasReopenedMonths(event.currentTarget.checked);
+            }}
+            data-reopened-filter=""
+          />
+        </FilterInline>
+
         {/*
          * ✎ RC14-D: чіп «Needs recalculation (N)» — `resultsStale=true`. Лічильник — `staleResultsCount` зі
          * зведення (сервер вже виключив проєкти зі звуженим доступом читача). ✎ g4: за роком — зведення РОКУ і

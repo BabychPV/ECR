@@ -320,22 +320,30 @@
   /* ✎ 10.11 MonthStrip: смуга 12 місяців року документа (у застосунку — колонка «Months» переліку, `DocumentYearStrip.tsx`).
      Стани: open · late (Late, flagged) · submitted · approved · locked · notOpen · returned · unknown, + «cur» — поточний період.
      ⛔ Усі стани — ОДНАКОВИЙ зовнішній розмір 18×18 на одній лінії: «late» і «cur» малюються всередині (див. `.mbox` в index.html). */
-  var MS_LABEL = { open: 'Open', late: 'Late (flagged)', submitted: 'Submitted', approved: 'Approved', locked: 'Locked', notOpen: 'Not open yet', returned: 'Returned', unknown: 'Unknown' };
+  var MS_LABEL = { open: 'Open', late: 'Late (flagged)', submitted: 'Submitted', approved: 'Approved', locked: 'Locked', reopened: 'Reopened for this document', notOpen: 'Not open yet', returned: 'Returned', unknown: 'Unknown' };
   var MS_MARK = { approved: '✓', returned: '✕', late: '!' };
-  function msBox(cell, cur) { return h('span', { class: 'mbox ' + cell + (cur ? ' cur' : ''), 'aria-hidden': 'true' }, cell === 'locked' ? icon('lock', 9) : (MS_MARK[cell] || '')); }
+  function msBox(cell, cur) { return h('span', { class: 'mbox ' + cell + (cur ? ' cur' : ''), 'aria-hidden': 'true' }, cell === 'locked' ? icon('lock', 9) : cell === 'reopened' ? icon('unlock', 9) : (MS_MARK[cell] || '')); }
+  /* ✎ 10.11 «Reopened for this document»: закритий місяць, відкритий для ОДНОГО документа (doc.DocumentPeriodReopen). Період лишається
+     Closed для решти: у рядку цього документа клітинка — відкритий замок (не лише колір), підказка — «until <дата й час майданчика>»;
+     у рядках інших документів той самий місяць — Locked. Зразок макета: перший документ, останній закритий місяць. */
+  function reopenOf(d) {
+    var closed = D.periods.filter(function (p) { return p.state === 'Closed'; }), last = closed[closed.length - 1];
+    return last && D.documents[0] && d.id === D.documents[0].id ? { period: last.id, until: 'Nov 14, 2026, 6:00 PM (site time)' } : null;
+  }
   function msCell(d, p, i) {
     var st = p.state === 'Open' ? 'open' : p.state === 'NotOpened' ? 'notOpen' : 'locked';
     if (p.id === d.period) { var ds = D.docState(d); st = ds === 'Approved' ? 'approved' : ds === 'Submitted' ? 'submitted' : ds === 'Returned' || ds === 'Rejected' ? 'returned' : st; }
     if (d.late && i === D.periods.indexOf(D.period(D.currentPeriod)) - 1) st = 'late';   /* перевідкритий попередній місяць — Grace */
+    var ro = reopenOf(d); if (ro && ro.period === p.id && st === 'locked') st = 'reopened';   /* лише замість «Locked»: стан документа важливіший */
     return st;
   }
   function monthStrip(d) {
-    return h('ul', { class: 'mstrip', 'aria-label': d.id + ' · months of 2026' }, D.periods.map(function (p, i) { var cell = msCell(d, p, i), cur = p.id === D.currentPeriod, label = F.period(p.id) + ': ' + MS_LABEL[cell];
+    return h('ul', { class: 'mstrip', 'aria-label': d.id + ' · months of 2026' }, D.periods.map(function (p, i) { var cell = msCell(d, p, i), cur = p.id === D.currentPeriod, label = F.period(p.id) + ': ' + MS_LABEL[cell] + (cell === 'reopened' ? ' until ' + reopenOf(d).until : '');
       return h('li', h('a', { href: docHref(d), title: label, 'aria-label': label, on: { click: function (e) { e.stopPropagation(); } } }, msBox(cell, cur))); }));
   }
   function monthLegend() {
     return h('div', { class: 'mlegend', role: 'group', 'aria-label': 'Month boxes' }, h('b', 'Month boxes:'),
-      ['open', 'late', 'submitted', 'approved', 'locked', 'notOpen', 'returned'].map(function (c) { return h('span', msBox(c), MS_LABEL[c]); }), h('span', msBox('open', true), 'Ringed box = current period'));
+      ['open', 'late', 'submitted', 'approved', 'locked', 'reopened', 'notOpen', 'returned'].map(function (c) { return h('span', msBox(c), MS_LABEL[c]); }), h('span', msBox('open', true), 'Ringed box = current period'));
   }
   function segBar(d) { return E.SegmentBar({ segments: d.sheets.map(function (s) { return { label: s.name, state: s.state, note: s.issues ? F.plural(s.issues, { one: 'error', other: 'errors' }) : null }; }) }); }
 
@@ -444,7 +452,8 @@
       return rows.filter(function (d) {
         if (text && (d.id + ' ' + d.facility + ' ' + d.project + ' ' + d.owner + ' ' + d.template).toLowerCase().indexOf(text) < 0) return false;
         if (st && st.match && !st.match(d)) return false; if (v.project && d.project !== v.project) return false; if (v.status && D.docState(d) !== v.status) return false;
-        if (v.mine && d.owner !== me.name && !(d.approver === me.name && E.can('Document.Approve'))) return false; return true; });
+        if (v.mine && d.owner !== me.name && !(d.approver === me.name && E.can('Document.Approve'))) return false;
+        if (v.reopened && !reopenOf(d)) return false; return true; });
     }
     function clearAll() { statActive = saved.stat = null; if (strip) strip.setActive(null); bar.reset(); }
     function apply() { var list = filtered(); if (view === 'table') table.setRows(list, { filtered: list.length !== rows.length }); else paintBoard(list); }
@@ -475,7 +484,9 @@
       var data = ctx.state === 'data';
       if (data && rows.length) { strip = E.StatStrip({ id: 'docs-stat', label: 'Campaign summary', items: statItems(), active: statActive, onSelect: function (s) { statActive = saved.stat = s; apply(); } }); body.appendChild(strip); }
       bar = E.FilterBar({ id: 'docs-flt', memory: saved, search: { placeholder: 'Document, project or owner' }, onChange: apply,
-        filters: [{ id: 'project', label: 'Projects', options: D.projects.map(function (x) { return { value: x.id, label: x.name }; }) }, { id: 'status', label: 'States', options: ['Draft', 'Submitted', 'Returned', 'Rejected', 'Approved'] }, { id: 'mine', label: 'Owners', all: 'Everyone’s documents', options: [{ value: '1', label: 'Only mine' }] }],
+        filters: [{ id: 'project', label: 'Projects', options: D.projects.map(function (x) { return { value: x.id, label: x.name }; }) }, { id: 'status', label: 'States', options: ['Draft', 'Submitted', 'Returned', 'Rejected', 'Approved'] }, { id: 'mine', label: 'Owners', all: 'Everyone’s documents', options: [{ value: '1', label: 'Only mine' }] },
+          /* ✎ 10.11: «Reopened months» (у застосунку — перемикач поруч із «Late edits», серверний `hasReopenedMonths` в адресі; знімається «Clear filters») */
+          { id: 'reopened', label: 'Reopened months', all: 'Any months', options: [{ value: '1', label: 'Reopened months' }] }],
         right: E.Segmented({ id: 'docs-view', label: 'View', value: view, options: [{ value: 'table', label: 'Table', icon: 'rows4' }, { value: 'board', label: 'Board', icon: 'columns' }], onChange: function (v) { view = saved.view = v; ctx.setQuery({ view: v === 'board' ? 'board' : null }); paint(); } }) });
       if (!data || !rows.length) bar.hidden = true; body.appendChild(bar);
       if (view === 'board' && data) { board = h('div', { class: 'work-board', id: 'docs-board' }); body.appendChild(board); }

@@ -209,6 +209,21 @@ public sealed class ModuleProfile
     }
 
     /// <summary>
+    /// Прибирає діагностику рядків (без правила, відхилені) і позначку «таблицю зіставлено» для таблиць, які прохід бачив
+    /// не всіма прив'язаними методологіями (решта перенесена з попереднього прогону): їхні проблеми лишаються від
+    /// останнього повного проходу, а не замінюються неповними.
+    /// </summary>
+    /// <param name="tableInstanceIds">Екземпляри таблиць.</param>
+    public void ExcludeTables(IReadOnlySet<long> tableInstanceIds)
+    {
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+
+        _unmatched.RemoveAll(r => tableInstanceIds.Contains(r.TableInstanceId));
+        _rejected.RemoveAll(r => tableInstanceIds.Contains(r.TableInstanceId));
+        _evaluatedTables.ExceptWith(tableInstanceIds);
+    }
+
+    /// <summary>
     /// Методології, привʼязки яких пропущено, бо жодної версії не опубліковано (G14). Сортовано, без дублікатів.
     /// </summary>
     public IReadOnlyList<int> SkippedUnpublishedMethodologies => _skippedUnpublished;

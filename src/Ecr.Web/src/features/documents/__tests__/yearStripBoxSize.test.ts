@@ -65,9 +65,10 @@ function only(selector: string): string {
 }
 
 describe('смуга 12 місяців: стан не змінює розмір клітинки', () => {
-  it('є правила для всіх станів, що їх має модель (late, submitted, approved, locked, notOpen, returned, current)', () => {
+  it('є правила для всіх станів, що їх має модель (late, submitted, approved, locked, reopened, notOpen, returned, current)', () => {
     const selectors = StateRules.map((r) => r.selector).join('\n');
-    for (const state of ['late', 'submitted', 'approved', 'locked', 'notOpen', 'returned']) {
+    // ✎ 10.11: «reopened» (місяць відкрито для цього документа) — теж у переліку: правило того самого розміру.
+    for (const state of ['late', 'submitted', 'approved', 'locked', 'reopened', 'notOpen', 'returned']) {
       expect(selectors).toContain(`[data-cell='${state}']`);
     }
     expect(selectors).toContain("[data-current='true']");
@@ -110,14 +111,15 @@ describe('смуга 12 місяців: стан не змінює розмір 
     expect(declaration(only('.ecr-year-strip > li'), 'display')).toBe('block');
   });
 
-  it.each(['light', 'dark'] as const)('схема «%s»: кільце поточного і рамка «late» ≥ 3:1 до фону', (scheme) => {
+  it.each(['light', 'dark'] as const)('схема «%s»: кільце поточного і рамки «late»/«reopened» ≥ 3:1 до фону', (scheme) => {
     const out = cssVariablesResolver(mergeMantineTheme(DEFAULT_THEME, theme));
     const vars: Record<string, string> = { ...out.variables, ...out[scheme] };
     const token = (selector: string, property: string): string =>
       /var\((--ecr-[\w-]+)/.exec(declaration(only(selector), property) ?? '')?.[1] ?? '(немає токена)';
     const ring = token(".ecr-year-strip-box[data-current='true']", 'outline');
     const late = token(".ecr-year-strip-box[data-cell='late']", 'border-color');
-    for (const token of [ring, late]) {
+    const reopened = token(".ecr-year-strip-box[data-cell='reopened']", 'border-color');
+    for (const token of [ring, late, reopened]) {
       expect(contrast(vars[token] ?? '', vars['--ecr-surface'] ?? ''), `${scheme}: ${token} на --ecr-surface`).toBeGreaterThanOrEqual(3);
     }
   });

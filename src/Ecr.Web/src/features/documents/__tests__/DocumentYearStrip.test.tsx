@@ -56,6 +56,62 @@ describe('yearStripModel.stripCell', () => {
     expect(stripCell('Draft', 'Grace')).toBe('late');
     expect(stripCell('Draft', null)).toBe('unknown');
   });
+
+  it('✎ 10.11: виняток «місяць відкрито для документа» замінює стан ПЕРІОДУ, але не стан погодження', () => {
+    expect(stripCell('Draft', 'Closed', true)).toBe('reopened');
+    expect(stripCell(null, 'Closed', true)).toBe('reopened');
+    expect(stripCell('Draft', 'Closed', false)).toBe('locked');
+    expect(stripCell('Approved', 'Closed', true)).toBe('approved');
+    expect(stripCell('Submitted', 'Closed', true)).toBe('submitted');
+    expect(stripCell('Rejected', 'Closed', true)).toBe('returned');
+  });
+});
+
+describe('DocumentYearStrip: місяць, відкритий для одного документа (✎ 10.11)', () => {
+  /**
+   * Приймальна: січень закрито, відкрито лише для A — у рядку A січень «Reopened for this document until …» з
+   * відкритим замком, у рядку B той самий січень «Locked». Строк — у поясі МАЙДАНЧИКА (Asia/Atyrau, UTC+5), а не браузера.
+   * ⛔ Червоний без фіксу: `reopenedPeriods` не читається — січень A «locked».
+   */
+  const atyrau = { ...calendar, timeZoneId: 'Asia/Atyrau' } as PeriodCalendarDto;
+  const strip = (documentId: number, reopened: { periodKey: number; openUntil: string }[] | null) => (
+    <DocumentYearStrip
+      documentId={documentId}
+      businessKey={`DOC-${String(documentId)}`}
+      year={2026}
+      periodStates={[{ periodKey: 202601, state: 'Draft' }]}
+      calendar={atyrau}
+      reopenedPeriods={reopened}
+    />
+  );
+
+  it('A — «reopened» з відкритим замком і строком у поясі майданчика; B — «locked»', () => {
+    render(
+      <MantineProvider theme={testTheme}>
+        <MemoryRouter>
+          {strip(1, [{ periodKey: 202601, openUntil: '2026-11-14T13:00:00Z' }])}
+          {strip(2, [])}
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+
+    const [a, b] = screen.getAllByRole('list');
+    const janA = within(a!).getAllByRole('link')[0]!;
+    const janB = within(b!).getAllByRole('link')[0]!;
+
+    expect(janA.getAttribute('data-cell')).toBe('reopened');
+    expect(janA.querySelector('[data-mark="open-lock"]')).not.toBeNull();
+    const label = janA.getAttribute('aria-label') ?? '';
+    expect(label).toContain('documents.strip.reopenedUntil');
+    // 13:00Z у Атирау (UTC+5) — 6:00 PM, а не час браузера.
+    expect(label).toMatch(/6:00\s?PM|18:00/);
+    expect(janA.getAttribute('title')).toBe(label);
+
+    expect(janB.getAttribute('data-cell')).toBe('locked');
+    expect(janB.querySelector('[data-mark="open-lock"]')).toBeNull();
+    // Лютий A без винятку — «locked», як і був.
+    expect(within(a!).getAllByRole('link')[1]!.getAttribute('data-cell')).toBe('locked');
+  });
 });
 
 describe('DocumentYearStrip (g3)', () => {
@@ -102,8 +158,10 @@ describe('DocumentYearStrip (g3)', () => {
     );
 
     const legend = screen.getByRole('group');
-    for (const key of ['open', 'late', 'submitted', 'approved', 'locked', 'notOpen', 'returned', 'current']) {
+    for (const key of ['open', 'late', 'submitted', 'approved', 'locked', 'reopened', 'notOpen', 'returned', 'current']) {
       expect(legend.textContent).toContain(`documents.strip.${key}`);
     }
+    // ✎ 10.11: зразок «reopened» у легенді — та сама коробка з відкритим замком.
+    expect(legend.querySelector('.ecr-year-strip-box[data-cell="reopened"] [data-mark="open-lock"]')).not.toBeNull();
   });
 });

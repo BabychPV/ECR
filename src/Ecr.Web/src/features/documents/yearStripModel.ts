@@ -8,13 +8,30 @@
  * 12 клітинок рядка виглядали однаково й нічого не казали. Тепер неподаний місяць бере стан ПЕРІОДУ з календаря
  * проєкту (`GET /projects/{id}/periods`): відкритий, заблокований чи ще не відкритий.
  */
-export type StripCell = 'open' | 'late' | 'submitted' | 'approved' | 'returned' | 'locked' | 'notOpen' | 'unknown';
+export type StripCell =
+  | 'open'
+  | 'late'
+  | 'submitted'
+  | 'approved'
+  | 'returned'
+  | 'locked'
+  | 'reopened'
+  | 'notOpen'
+  | 'unknown';
 
-/** Стан клітинки з (стан погодження документа за місяць, стан періоду проєкту). */
-export function stripCell(documentState: string | null, periodState: string | null): StripCell {
+/**
+ * Стан клітинки з (стан погодження документа за місяць, стан періоду проєкту, чи діє виняток «місяць відкрито для
+ * ЦЬОГО документа»).
+ *
+ * ✎ 10.11 (слово людини): закритий місяць, відкритий для одного документа (`reopenedPeriods` рядка переліку), — стан
+ * «reopened» лише в рядку цього документа; решта документів місяця лишаються «locked». Стан погодження документа
+ * (подано / затверджено / повернуто) важливіший: виняток лише замінює стан ПЕРІОДУ.
+ */
+export function stripCell(documentState: string | null, periodState: string | null, reopened = false): StripCell {
   if (documentState === 'Approved') return 'approved';
   if (documentState === 'Submitted' || documentState === 'PartlySubmitted') return 'submitted';
   if (documentState === 'Rejected') return 'returned';
+  if (reopened) return 'reopened';
 
   switch (periodState) {
     case 'Open':
@@ -32,5 +49,17 @@ export function stripCell(documentState: string | null, periodState: string | nu
   }
 }
 
-/** Порядок легенди — як у макеті (O, S, A, L, N), «Late» одразу за «Open» і «Returned» наприкінці. */
-export const StripLegend: readonly StripCell[] = ['open', 'late', 'submitted', 'approved', 'locked', 'notOpen', 'returned'];
+/**
+ * Порядок легенди — як у макеті (O, S, A, L, N), «Late» одразу за «Open», ✎ 10.11 «Reopened for this document» одразу за
+ * «Locked» і «Returned» наприкінці.
+ */
+export const StripLegend: readonly StripCell[] = [
+  'open',
+  'late',
+  'submitted',
+  'approved',
+  'locked',
+  'reopened',
+  'notOpen',
+  'returned',
+];

@@ -2930,6 +2930,7 @@ export interface paths {
                     sort?: string;
                     templateVersions?: string;
                     year?: number;
+                    hasReopenedMonths?: boolean;
                 };
                 header?: never;
                 path?: never;
@@ -31126,6 +31127,21 @@ export interface components {
         };
         /** @enum {unknown} */
         DocumentReopenDenial: "NoPermission" | "PeriodNotClosed" | "ProjectArchived" | "PeriodMissing" | null;
+        /** @description ✎ 10.11 (слово людини через координатора): закритий місяць, відкритий для ЦЬОГО документа
+         *     (`doc.DocumentPeriodReopen`), який діє зараз — не закритий і строк не минув. Перелік несе їх у
+         *     `reopenedPeriods` рядка (смуга року показує «Reopened for this document» замість «Locked»). */
+        DocumentReopenedPeriod: {
+            /**
+             * Format: date-time
+             * @description До якого моменту (UTC) відкрито; клієнт показує його в поясі майданчика.
+             */
+            openUntil: string;
+            /**
+             * Format: int32
+             * @description Місяць; `Рік*100 + Номер`.
+             */
+            periodKey: number;
+        };
         /** @description Аркуш складу документа в переліку: код, назва, стан за період. */
         DocumentSheetState: {
             /** @description Код аркуша (`SheetDef.Code`); він же ключ у `DocumentSummary.SheetStates`. */
@@ -31219,6 +31235,11 @@ export interface components {
              * @description Проєкт.
              */
             projectId: number;
+            /** @description ✎ 10.11: діючі винятки «закритий місяць відкрито для цього документа» (DocumentReopenedPeriod), за
+             *     зростанням місяця. Як і PeriodStates, — лише з роком (`GET /documents?year=`): тоді масив (порожній,
+             *     якщо немає), ОДНИМ запитом на сторінку і лише для документів сторінки, тобто вже відібраних межею видимості переліку;
+             *     без року і в картці (`GET /documents/{id}`) — `null` (виняток місяця картка читає окремо). */
+            reopenedPeriods?: null | components["schemas"]["DocumentReopenedPeriod"][];
             /** @description Чи застаріли результати методологій документа за період: після початку актуального прогону хтось правив
              *     вхідну комірку (або довідник, який читає методологія). ВИВОДИТЬСЯ запитом, не зберігається. Документ без
              *     результатів — `false`. ⛔ `null` — період не задано, або читач має обмеження нижче проєкту
