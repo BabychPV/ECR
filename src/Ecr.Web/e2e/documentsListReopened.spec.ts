@@ -68,8 +68,15 @@ test.describe('Documents list reopened', () => {
       const cellB = rowB.locator(`[data-month="${String(month)}"]`);
       await expect(cellA).toHaveAttribute('data-cell', 'reopened', { timeout: 30_000 });
       await expect(cellA).toHaveAttribute('aria-label', /Reopened for this document until \S/);
+      // ✎ AN-169: `openUntil: null` — північ майданчика; підпис — кінець доби («11:59 PM»), не двозначне «12:00 AM».
+      await expect(cellA).toHaveAttribute('aria-label', /(11:59\s?PM|23:59)$/u);
+      await expect(cellA).not.toHaveAttribute('aria-label', /12:00\s?AM/u);
       await expect(cellA.locator('[data-mark="open-lock"]')).toBeVisible();
       await expect(cellB).toHaveAttribute('data-cell', 'locked');
+
+      // ✎ AN-170: reopened — залита плитка (`--ecr-accent-soft`), а не порожня рамка, як кільце поточного періоду.
+      const fill = await cellA.locator('.ecr-year-strip-box').evaluate((box) => getComputedStyle(box).backgroundColor);
+      expect(fill, `${scheme}: reopened без заливки зливається з кільцем поточного`).not.toMatch(/^(transparent|rgba\(0, 0, 0, 0\))$/u);
 
       const legend = page.locator('[data-year-strip-legend]');
       await expect(legend).toContainText('Reopened for this document');

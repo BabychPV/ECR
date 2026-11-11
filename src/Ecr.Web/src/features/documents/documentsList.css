@@ -24,7 +24,7 @@
  * ✎ Period clarity (п. e) + ✎ g3 (макет 08.11, `.ms`/`.m`): смуга 12 місяців у рядку документа. Клітинка —
  * посилання з `aria-label`; стан — заливкою й знаком, не лише кольором (`yearStripModel.ts`):
  * open — порожня суцільна рамка; submitted — заливка наполовину; approved — суцільна «успіх» + ✓;
- * locked — приглушена + замок; reopened — рамка accent-text + відкритий замок; notOpen — пунктир; returned — «увага» + ✕;
+ * locked — приглушена + замок; reopened — заливка accent-soft, рамка accent-text + відкритий замок; notOpen — пунктир; returned — «увага» + ✕;
  * поточний місяць — кільце.
  */
 .ecr-year-strip {
@@ -103,9 +103,13 @@
  * ✎ 10.11 «Reopened for this document» (слово людини, KIT.md «MonthStrip»): закритий місяць, відкритий лише для цього
  * документа, — рамка `--ecr-accent-text` і ВІДКРИТИЙ замок (знак, не лише колір). Рамка 1px, як в усіх станах: той самий
  * зовнішній розмір 18×18 (`yearStripBoxSize.test.ts`, `monthStripAlign.spec.ts`).
+ * ✎ AN-170: у темній схемі рамка `--ecr-accent-text` + світлий замок читалися як кільце поточного періоду (той самий
+ * колір, те саме «порожнє з рамкою»). Тепер reopened — ЗАЛИТА плитка `--ecr-accent-soft` (як вибраний місяць у
+ * `.months` макета), а поточний — порожнє кільце без заливки: різниця формою, не відтінком, в обох схемах.
  */
 .ecr-year-strip-box[data-cell='reopened'] {
   border-color: var(--ecr-accent-text, var(--mantine-primary-color-filled));
+  background: var(--ecr-accent-soft, var(--mantine-primary-color-light));
   color: var(--ecr-accent-text, var(--mantine-primary-color-filled));
 }
 

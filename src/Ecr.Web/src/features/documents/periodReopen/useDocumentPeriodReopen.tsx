@@ -4,9 +4,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
 import type { components } from '@/api/schema';
 import { formatPeriodKey } from '@/shared/format';
-import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
-import { siteMomentText } from '@/shared/siteMoment';
+import { untilTextInZone } from '@/shared/siteMoment';
 import { getDocumentPeriodReopen, periodReopenKey } from './api';
 
 type PeriodState = components['schemas']['PeriodState'];
@@ -32,10 +31,7 @@ interface DocumentPeriodReopenArgs {
 }
 
 /** Строк у поясі майданчика тим самим форматом, що й рядок місяця в PeriodsPage; без поясу — пояс браузера. */
-function untilText(value: string, zone: string | null | undefined): string {
-  if (zone === null || zone === undefined || zone === '') return formatDateTime(value);
-  return siteMomentText(value, zone) ?? formatDateTime(value);
-}
+const untilText = untilTextInZone;
 
 interface DocumentPeriodReopen {
   /** Стан місяця ДЛЯ ЦЬОГО документа: діючий виняток робить закритий місяць `Grace` (як сервер). */
@@ -141,6 +137,7 @@ export function useDocumentPeriodReopen({ documentId, periodKey, periodState, ti
           documentId={documentId}
           periodKey={periodKey}
           defaultOpenUntil={state.defaultOpenUntil}
+          timeZoneId={timeZoneId}
           onClose={() => setOpened(false)}
         />
       </Suspense>

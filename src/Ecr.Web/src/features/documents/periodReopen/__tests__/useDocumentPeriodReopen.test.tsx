@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { JSX } from 'react';
 import { MantineProvider } from '@mantine/core';
@@ -10,7 +10,13 @@ import { useDocumentPeriodReopen } from '@/features/documents/periodReopen/useDo
 import { testTheme } from '@/test/render';
 import { Catalog } from '@/test/__tests__/a11yFixtures';
 import { formatDateTime } from '@/shared/format/datetime';
-import { siteMomentText } from '@/shared/siteMoment';
+import { siteUntilText } from '@/shared/siteMoment';
+import { showDone } from '@/shared/ui/notify';
+
+vi.mock('@/shared/ui/notify', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/ui/notify')>()),
+  showDone: vi.fn(),
+}));
 
 /**
  * Приймальна 08.11 (i): «Reopen January 2026 for this document…» у банері закритого періоду (i1), недоступна дія з
@@ -85,6 +91,16 @@ function disabled(element: HTMLElement): boolean {
   return (element as HTMLButtonElement).disabled;
 }
 
+/*
+ * ✎ AN-179: прогрів лінивого чанка діалогу (той самий прийом, що `SourceEventsTab.lazy.test.tsx`,
+ * `SheetActions.sheetDenial.test.tsx`). Перший `import('./DocumentPeriodReopenDialog')` тягне `@mantine/dates` і його
+ * стилі; «i1» — перший тест, що відкриває діалог, тож цей імпорт ішов у його 5 с: окремо ~0.55 с, у пачці 43 файлів
+ * під навантаженням раз — таймаут ~6.6 с. Діалог — залежність хука, не предмет перевірки: прогрів нічого не приховує.
+ */
+beforeAll(async () => {
+  await import('../DocumentPeriodReopenDialog');
+}, 60_000);
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -120,6 +136,26 @@ describe('useDocumentPeriodReopen', () => {
     expect(post?.body).toEqual({ periodKey: 202601, reason: 'Лист №17', openUntil: new Date(Future).toISOString() });
   });
 
+  /*
+   * ✎ AN-178: хук передає діалогу пояс майданчика — тост «місяць відкрито до …» тим самим правилом, що банер.
+   * Future (19:00Z) — північ 1 лютого в Атирау (+05:00): «Jan 31, 2099, 11:59 PM»; у поясі браузера (UTC) — «7:00 PM».
+   * ⛔ Мутація: прибрати `timeZoneId={timeZoneId}` у `useDocumentPeriodReopen` — тост у поясі браузера, червоне.
+   */
+  it('AN-178: тост після відкриття — строк у поясі майданчика, переданому хуком у діалог', async () => {
+    vi.mocked(showDone).mockClear();
+    stub(closedState({}));
+    show('Closed', 'Asia/Atyrau');
+
+    fireEvent.click(await screen.findByTestId('document-period-reopen'));
+    fireEvent.change(await screen.findByTestId('document-period-reopen-reason'), { target: { value: 'Fix' } });
+    fireEvent.click(screen.getByTestId('document-period-reopen-confirm'));
+
+    await waitFor(() => expect(vi.mocked(showDone)).toHaveBeenCalled());
+    const toast = String(vi.mocked(showDone).mock.calls[0]?.[0] ?? '').replace(/[  ]/gu, ' ');
+    expect(toast).toContain('document.reopen.done');
+    expect(toast).toContain('until=Jan 31, 2099, 11:59 PM');
+  });
+
   it('i6: без права дія видима, але недоступна, і причина — видимим текстом', async () => {
     stub(closedState({ canOpen: false, denial: 'NoPermission' }));
     show('Closed');
@@ -152,14 +188,14 @@ describe('useDocumentPeriodReopen', () => {
   });
 
   it('p3-1110: строк у банері — у поясі майданчика, тим самим форматом, що й рядок місяця «Проєкти → Періоди»', async () => {
-    // 19:00 UTC = 00:00 наступної доби в Атирау (+05:00): «Nov 11, 12:00 AM», а не час браузера.
+    // 19:00 UTC = 00:00 наступної доби в Атирау (+05:00); ✎ AN-169: північ — «Nov 10, 11:59 PM» (кінець доби), а не час браузера.
     const until = '2026-11-10T19:00:00Z';
     stub(closedState({
       active: { id: 9, periodKey: 202601, openUntil: until, reason: 'Fix', openedByUserId: 3, openedByName: 'A. Admin', openedAt: until },
     }));
     show('Closed', 'Asia/Atyrau');
 
-    const site = siteMomentText(until, 'Asia/Atyrau');
+    const site = siteUntilText(until, 'Asia/Atyrau');
     expect(site).not.toBeNull();
     // Тест має сенс лише тоді, коли пояс браузера дає інший рядок.
     expect(site).not.toBe(formatDateTime(until));
@@ -167,6 +203,8 @@ describe('useDocumentPeriodReopen', () => {
     const banner = await screen.findByTestId('document-period-reopened');
     // ⛔ Мутація: `formatDateTime` замість поясу майданчика — у банері час браузера, червоне.
     expect(banner.textContent).toContain(`until=${String(site)}`);
+    // ✎ AN-169: ⛔ Мутація: `siteMomentText` замість `siteUntilText` — «until=Nov 11, 2026, 12:00 AM», червоне.
+    expect(banner.textContent?.replace(/[  ]/gu, ' ')).toContain('until=Nov 10, 2026, 11:59 PM');
   });
 
   it('закритий місяць, стан ще вантажиться: місце дії вже зайняте (без зсуву панелі листа нижче)', async () => {

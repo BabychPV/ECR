@@ -1,6 +1,6 @@
 import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
-import { siteMomentText } from '@/shared/siteMoment';
+import { siteUntilText } from '@/shared/siteMoment';
 
 /**
  * Причина структурної зміни (`StructureChange.ChangeReason`) мовою інтерфейсу.
@@ -110,7 +110,7 @@ function render(key: string, params: Record<string, string>): string | null {
         until:
           until === undefined
             ? ''
-            : (zone === undefined || zone.length === 0 ? null : siteMomentText(until, zone)) ?? formatDateTime(until),
+            : (zone === undefined || zone.length === 0 ? null : siteUntilText(until, zone)) ?? formatDateTime(until),
       });
     }
     case 'document.reopen.audit.closedExpired':

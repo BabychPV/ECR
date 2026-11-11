@@ -7,8 +7,8 @@ import { queryKeys } from '@/api/queryKeys';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { calendarLocale } from '@/shared/dates/calendarLocale';
 import { formatPeriodKey } from '@/shared/format';
-import { formatDateTime } from '@/shared/format/datetime';
 import { language, t } from '@/shared/i18n';
+import { untilTextInZone } from '@/shared/siteMoment';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { postDocumentPeriodReopen } from './api';
@@ -21,6 +21,8 @@ export interface DocumentPeriodReopenDialogProps {
   readonly periodKey: number;
   /** Строк за замовчуванням із сервера — кінець доби майданчика (UTC, ISO). */
   readonly defaultOpenUntil: string;
+  /** Пояс майданчика (IANA) для строку в тості; без нього — пояс браузера (✎ AN-178). */
+  readonly timeZoneId?: string | null | undefined;
   readonly onClose: () => void;
 }
 
@@ -36,6 +38,7 @@ export function DocumentPeriodReopenDialog({
   documentId,
   periodKey,
   defaultOpenUntil,
+  timeZoneId,
   onClose,
 }: DocumentPeriodReopenDialogProps): JSX.Element {
   const queryClient = useQueryClient();
@@ -62,7 +65,9 @@ export function DocumentPeriodReopenDialog({
         queryClient.invalidateQueries({ queryKey: queryKeys.slices.all() }),
         queryClient.invalidateQueries({ queryKey: ['periods'] }),
       ]);
-      showDone(t('document.reopen.done', { period, until: formatDateTime(view.openUntil) }));
+      // ✎ AN-178: строк — у поясі майданчика з правилом кінця доби (`untilTextInZone`), як банер і смуга місяців;
+      // доти — `formatDateTime` у поясі браузера: той самий строк у тості й банері читався по-різному.
+      showDone(t('document.reopen.done', { period, until: untilTextInZone(view.openUntil, timeZoneId) }));
       onClose();
     },
   });

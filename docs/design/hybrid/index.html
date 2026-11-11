@@ -323,7 +323,8 @@ table.data{width:100%;border-collapse:separate;border-spacing:0}
 .mbox.late{border-color:var(--warning);box-shadow:inset 0 0 0 1px var(--warning);color:var(--text);font-weight:700}
 .mbox.locked{background:var(--sunken)}
 /* ✎ 10.11 «Reopened for this document»: відкритий замок (знак, не лише колір), рамка 1px --accent-text — той самий 18×18 */
-.mbox.reopened{border-color:var(--accent-text);color:var(--accent-text)}
+/* ✎ AN-170: заливка --accent-soft — у темній схемі порожня рамка --accent-text читалася як кільце .cur */
+.mbox.reopened{border-color:var(--accent-text);background:var(--accent-soft);color:var(--accent-text)}
 .mbox.notOpen{border-style:dashed;border-color:var(--faint)}
 .mbox.returned{border-color:var(--warning);background:var(--warning);color:var(--surface)}
 .mbox.cur{outline:2px solid var(--accent-text);outline-offset:-2px}

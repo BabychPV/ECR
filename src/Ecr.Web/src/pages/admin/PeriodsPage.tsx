@@ -10,7 +10,7 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Hint } from '@/shared/ui/Hint';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { formatMonthYear, formatPeriodKey } from '@/shared/format';
-import { siteMomentText, zoneClock } from '@/shared/siteMoment';
+import { siteMomentText, siteUntilText, zoneClock } from '@/shared/siteMoment';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { ProjectRecalcBannerSlot } from '@/features/recalc/ProjectRecalcBannerSlot';
 import { t } from '@/shared/i18n';
@@ -482,7 +482,7 @@ export function PeriodsPage({ projectId }: { readonly projectId: number }): JSX.
                           відповідає на питання «чи встигну ще сьогодні». */}
                       {t('periods.reopenedUntil', {
                         until:
-                          siteMomentText(period.reopenedUntil, calendar.timeZoneId) ?? period.reopenedUntil,
+                          siteUntilText(period.reopenedUntil, calendar.timeZoneId) ?? period.reopenedUntil,
                       })}
                     </Badge>
                   )}

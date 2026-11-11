@@ -85,7 +85,9 @@ export function periodNote(
   }
 
   if (period.reopenedUntil !== null && (period.state === 'Open' || period.state === 'Grace')) {
-    return t('periods.tile.reopened', { date: siteDate(period.reopenedUntil, zone, false) ?? '' });
+    // ✎ AN-178: строк перевідкриття ВИКЛЮЧНИЙ (за замовчуванням — північ майданчика), тож дата — останній день, коли ще
+    // можна (`inclusiveEnd`), як «Nov 11, 11:59 PM» у смузі місяців (`siteUntilText`); доти північ 12-го — «until Nov 12».
+    return t('periods.tile.reopened', { date: siteDate(period.reopenedUntil, zone, true) ?? '' });
   }
 
   if (period.state === 'Grace') return t('periods.tile.grace', { date: end });
