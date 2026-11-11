@@ -18,7 +18,7 @@
 | P-4 | Висока (потребує заміру) | performance | Публікація шаблону: три квадратичні кроки (виробники формул, топологічне сортування, запис порядку) під блоком версії | M | середній | ні |
 | P-5 | Середня | performance | `ValidationEngine` розбирає вираз правила на кожен рядок/комірку | S | низький | ні |
 | P-6 | Середня | performance | `DocumentReadScope` перебудовує 7 структурних словників на кожне створення (і на `InPeriod`); знімок-обʼєднання багатоверсійного проєкту — на кожне звернення | M | середній | ні |
-| P-7 | Середня | performance | Кандидати згадок чату: до 200 користувачів × (профіль + видимість + межі) на одне натискання | S | низький | так |
+| P-7 | Середня | performance | Кандидати згадок чату: до 200 користувачів × (профіль + видимість + межі) на одне натискання. ✎ PO 11.11: варіант А (бюджет 80) | S | низький | так → **вирішено 11.11: А** |
 | P-8 | Низька | performance | Зріз: умовний формат за текстом Lookup-колонки читає ВЕСЬ довідник (до 50 000 записів) на кожен GET | S | низький | ні |
 
 ---
@@ -905,6 +905,8 @@ return current with { Sheets = sheets, ColumnsById = columns, RowsByKey = rows }
 
 ### P-7 — Середня — Кандидати згадок чату: до 200 користувачів × (профіль + видимість + межі) на одне натискання
 
+**✎ рішення PO 11.11:** варіант А — «перевіряти доступ лише для 80 найближчих збігів». Специфікація нижче не змінюється: кроки 1 і тест-доказ. Варіант Б (крок 2) не обрано, не впроваджувати. Знахідка йде разом із S-6 звіту 01: та сама точка `GET …/mention-candidates` отримує межу частоти `search` (30 за 10 с на користувача). Спільних продуктових файлів немає (S-6 — атрибут у `TableDiscussionsController.cs:89-90`, P-7 — цикл у `TableDiscussionQueries.cs:190`); порядок — S-6, потім P-7, одна лінія L15 (`00-PLAN.md` §3). Разом: ≤ 80 перевірок на відповідь × ≤ 30 відповідей за 10 с на користувача.
+
 **Категорія:** performance
 
 **Де:** `src/Ecr.Application/Documents/Discussions/TableDiscussionQueries.cs:190-213` (до 5 сторінок × 40 кандидатів), `src/Ecr.Application/Documents/Discussions/TableDiscussionAccess.cs:165-185` (`CanSeeAsync`: `TryBuildProfileAsync` + `RequireVisibleAsync` + `ReadScopeAsync` на КОЖНОГО кандидата); маршрут `GET /api/v1/documents/{id}/tables/{tableCode}/mention-candidates` (`docs/build/02-contracts.md:4648`).
@@ -931,21 +933,21 @@ for (var skip = 0; skip < 200 && result.Count < 20; skip += 40)
     internal const int MentionScanBudget = 80;
    ```
    Рядок 190 — було `for (var skip = 0; skip < 200 && result.Count < 20; skip += 40)` → стало `for (var skip = 0; skip < MentionScanBudget && result.Count < 20; skip += 40)`.
-2. Варіант Б (якщо PO хоче повну глибину 200): новий пакетний метод порту `IAccessDecisionService.UsersSeeingTableAsync(IReadOnlyCollection<int> userIds, long documentId, string tableCode, PeriodKey? period, CancellationToken ct)` з одним читанням документа/знімка і профілями пакетом — зусилля L, зачіпає `AccessDecisionService.cs` і `SimulationAwareAccessDecisionService.cs`; у цьому звіті не специфіковано.
+2. ~~Варіант Б~~ (PO 11.11 обрав А — НЕ впроваджувати; лишено для історії) (якщо PO хоче повну глибину 200): новий пакетний метод порту `IAccessDecisionService.UsersSeeingTableAsync(IReadOnlyCollection<int> userIds, long documentId, string tableCode, PeriodKey? period, CancellationToken ct)` з одним читанням документа/знімка і профілями пакетом — зусилля L, зачіпає `AccessDecisionService.cs` і `SimulationAwareAccessDecisionService.cs`; у цьому звіті не специфіковано.
 
 **Тест-доказ:** `Ecr.Api.Tests` / `MentionCandidatesQueryCountTests.cs` (за зразком `AdminListQueryCountTests`, `[Collection("SqlServer")]`, лічильник `Ecr.TestKit.DbCommandCounter`): сід — документ, автор чату з `Document.Discuss`, N активних користувачів з іменем `"Ан{i}"` БЕЗ жодної ролі. Твердження: число команд при N = 81 і при N = 200 ОДНАКОВЕ (бюджет вичерпується на 80), відповідь порожня в обох. Без фіксу числа відрізняються (сканування до 200) — падає. Додатково: один видимий кандидат на позиції ≤ 80 повертається.
 
 **Перевірка після впровадження:** `dotnet test tests/Ecr.Api.Tests --filter "FullyQualifiedName~MentionCandidates|FullyQualifiedName~TableDiscussion"`; e2e чату (`grep` специ чату таблиці) — підказка згадок працює.
 
-**Ризики і побічні ефекти:** при сотнях невидимих збігів раніше за видимого користувача підказка його не покаже, доки не уточнено введення (поведінка змінюється → рішення PO). Контракт API не змінюється.
+**Ризики і побічні ефекти:** при сотнях невидимих збігів раніше за видимого користувача підказка його не покаже, доки не уточнено введення. PO 11.11 цю зміну поведінки прийняв (варіант А). Контракт API не змінюється.
 
 **Обґрунтування:** найменша зміна з обмеженою ціною відповіді; повна альтернатива (Б) — пакетне рішення доступу — дорожча й зачіпає сервіс прав.
 
-**Рішення PO:** «Обмежити перевірку кандидатів згадок 80 найближчими за алфавітом збігами (варіант А, дефолт), чи лишити 200 і замовити пакетну перевірку доступу (варіант Б, L)?»
+**Рішення PO:** отримано 11.11 — «(А) перевіряти доступ лише для 80 найближчих збігів» (`00-PLAN.md` §4). Питання було: «Обмежити перевірку кандидатів згадок 80 найближчими за алфавітом збігами (варіант А, дефолт), чи лишити 200 і замовити пакетну перевірку доступу (варіант Б, L)?»
 
 **Впевненість:** кількість звернень на кандидата — за читанням коду; точне число — зафіксує тест.
 
-**Залежності:** незалежна.
+**Залежності:** за кодом незалежна. Разом із S-6 (звіт 01, межа частоти на той самий маршрут) — однією лінією L15, S-6 першою. Тест-доказ P-7 робить 2 запити `mention-candidates` на користувача — менше за межу `search` (30 за 10 с). Обмежувач на дозволеному запиті до БД не ходить (`LoginRateLimiting.RejectAsync` — лише на відмові, `LoginRateLimiting.cs:394-410`), тож лічильник команд `DbCommandCounter` від S-6 не залежить. Якщо P-7 іде раніше за S-6, нічого не змінюється.
 
 ---
 
@@ -1020,7 +1022,7 @@ codeByColumn[reference] = entries
 
 Усі знахідки мають неперетинні множини файлів продукту (крім названих lane-перетинів), тому:
 
-- **Група А (паралельно, одразу):** P-1 (`ReferenceResolver.cs` + новий тест Expressions), P-2 (`RecalculationPlanBuilder.cs`, `RecalculationService.cs`, `RecalculationPlanBuilderIndexTests.cs`), P-3 (`TableValidation.cs` + новий тест), P-5 (`ValidationEngine.cs` + новий тест), P-7 (`TableDiscussionQueries.cs` + новий тест; лише після відповіді PO).
+- **Група А (паралельно, одразу):** P-1 (`ReferenceResolver.cs` + новий тест Expressions), P-2 (`RecalculationPlanBuilder.cs`, `RecalculationService.cs`, `RecalculationPlanBuilderIndexTests.cs`), P-3 (`TableValidation.cs` + новий тест), P-5 (`ValidationEngine.cs` + новий тест), P-7 (`TableDiscussionQueries.cs` + новий тест; ✎ PO 11.11 — варіант А). P-7 іде лінією L15 разом із S-6 звіту 01: S-6 першою (`TableDiscussionsController.cs`, політики меж у `src/Ecr.Api/Security`, сід, конфіг, runbook, контракт), потім P-7. Спільних файлів між ними немає; спільна лише точка `GET …/mention-candidates`. Тест P-7 (2 запити на користувача) під межею `search` (30 за 10 с) лишається зеленим.
 - **Група Б (паралельно з А):** P-4 (`PublishChecks.cs`, `TopologicalSorter.cs`, `PublishChecksTests.cs`, `TopologicalSorterTests.cs`). Не перетинається з А за файлами; логічно підсилюється P-1.
 - **Група В (після злиття `origin/lane/analiz/perf-slice`):** P-6 (`DocumentReadScope.cs`, `AccessDecisionService.cs`, новий `ProjectReadSnapshots.cs`) і P-8 (`GetTableSliceHandler.cs`, тест) — між собою не перетинаються, паралельно.
 - Тести з бюджетом часу (P-4 (б), (г)) — правило «20/20 локально» з `CLAUDE.md`.
@@ -1063,7 +1065,7 @@ codeByColumn[reference] = entries
 - **P-4:** `PublishChecks.cs:112`, `:124`, `:134-142`, `:228-276` (цикл `:265-272`) — дослівно; `TopologicalSorter.cs:28-60` — дослівно; `FormulaEngine.cs:139`; `PublishTemplateVersionHandler.cs:82-84`, `:98`, `:127` — так. `ProducerIndex.Build(TableDef, Dictionary<int,(TableDef Table, FormulaDef Formula)>)` і `Candidates(string?, int?)` — сигнатури звірено (`RecalculationPlanBuilder.cs:282`, `:322`); `ProducerIndex` — `internal sealed`, вкладений у `public static class RecalculationPlanBuilder` того ж збирання. Порядок виходу сортувальника доведено еквівалентним (вставка в `remaining` без подальших додавань → перебір у порядку вставки) і стережеться диференційним тестом. Нюанс `formula?.SetEvaluationOrder(order++)` (аргумент не обчислюється для `null`) — збережено.
 - **P-5:** `ValidationEngine.cs:164`, `:200`, `:122-126`, `:74-87` — дослівно; scoped-реєстрація `Application/DependencyInjection.cs:164`; `ParseResult` — `Ecr.Expressions.Parsing` (повна кваліфікація в diff). `CountingFormulaEngine` — `public sealed`, `Ecr.Application.Tests.Recalculation`. Без фіксу `ParseCalls` = 501/300 ≠ 2/1.
 - **P-6:** `DocumentReadScope.cs:35-43`, `:45-75`, `:123-124` — дослівно; присвоєння структурних мап лише в конструкторі (`grep` присвоєнь — рядки 57-73), назовні списки не віддаються (`:358`, `:375` будують нові). `AccessDecisionService.cs:1050`, `:1067-1109` (цикл `:1093-1106`), `:1145`, `:2126`, `:3478-3494` — так. `ConditionalWeakTable.GetValue/AddOrUpdate/TryGetValue` — API .NET 10. Тести падають без фіксу (алокації; `Assert.Same`).
-- **P-7:** `TableDiscussionQueries.cs:176` (мін. 2 символи), `:190-213` — дослівно; `TableDiscussionAccess.cs:165-185` — так; `EditAssignmentManagementStore.cs:104-117` (`Contains` → `LIKE`) — так. Тест-рівність N=81 vs N=200 без фіксу розходиться.
+- **P-7:** ✎ 11.11 (рішення PO — варіант А) перевідкрито на `main` = `39aea41d9`: `TableDiscussionQueries.cs:167-219` (рядок `:190` `for (var skip = 0; skip < 200 && result.Count < 20; skip += 40)` — дослівно), між `f446e9b29` і `39aea41d9` код не змінювався. Сумісність із S-6 (01): S-6 змінює `TableDiscussionsController.cs:89-90` (атрибут), P-7 — лише `TableDiscussionQueries.cs`; спільних файлів немає. Тест P-7 не впирається в межу `search` (2 запити < 30 за 10 с). Обмежувач на дозволеному запиті команд БД не додає (`LoginRateLimiting.cs:394-410`, відмова — лише на 429). Початкова перевірка: `TableDiscussionQueries.cs:176` (мін. 2 символи), `:190-213` — дослівно; `TableDiscussionAccess.cs:165-185` — так; `EditAssignmentManagementStore.cs:104-117` (`Contains` → `LIKE`) — так. Тест-рівність N=81 vs N=200 без фіксу розходиться.
 - **P-8:** `GetTableSliceHandler.cs:702-713` — так (`registries`/`groups` — поля конструктора `:89`, `:91`); `IPermitGroupResolver.IsGroup/Accepts/EnsureFreshAsync` — існують (`IPermitGroupResolver.cs:49-…`); `IRegistryStore.FindEntriesByIdsAsync(IReadOnlyCollection<long>, CancellationToken)` — `IRegistryStore.cs:407`; `RegistryEntry.RegistryDefId` — використовується в `RegistryStore.cs:242`. Значення Lookup у `row.Cells` — `long` (`ConditionalFormatEvaluator.WithEntryCode`, `value is long id`).
 - **Дублі:** перевірено WORK-QUEUE (AN-13, AN-155a…f, AN-156), KNOWN-ISSUES/OPEN-ITEMS/TODO-REMAINING, `docs/build/perf/*`, `10-decisions.md` (D-240, D-395, D-443…D-465), диференції чотирьох `lane/analiz/perf-*` — жодна з P-1…P-8 не збігається.
 - **Вилучено/виправлено під час перевірки:** кандидат «кеш розбору за вузлом AST» для P-1 замінено на індекс знімка (вузли — `record` з рівністю за значенням → колізії); кандидат «поштучний запис матеріалізації» і «JobProgress LIKE» перенесено у «Відкинуто» (шлях помилки / обмежене вікно); кандидат «2100 параметрів у ReplaceFormulaDependenciesAsync» не включено як знахідку продуктивності (не встановлюється читанням); перелік дозволів і індекс `TableInstance` з чернетки — у «Відкинуто».
