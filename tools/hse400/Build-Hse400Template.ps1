@@ -286,6 +286,12 @@ if ($Stage -in 'Template', 'All') {
             Invoke-Hse400Ok -Method PUT -Path ("{0}/rules/{1}" -f $base, (Get-Hse400CatchAllRuleCode)) -Body (New-Hse400CatchAllRuleBody) | Out-Null
             foreach ($c in $plan.Constants) { Invoke-Hse400Ok -Method PUT -Path ("{0}/constants/{1}" -f $base, $c.code) -Body (New-Hse400ConstantBody -Constant $c -UnitIds $unitIds) | Out-Null }
             foreach ($f in $plan.Formulas) { Invoke-Hse400Ok -Method PUT -Path ("{0}/formulas/{1}" -f $base, $f.code) -Body (New-Hse400FormulaBody -Formula $f) | Out-Null }
+            # Виходи прив'язок і золотих тестів (Get-Hse400MethodologyPlan): після публікації їх уже не оголосити.
+            $outOrd = 0
+            foreach ($oc in @($plan.Outputs)) {
+                $outOrd++
+                Invoke-Hse400Ok -Method PUT -Path ("{0}/outputs/{1}" -f $base, $oc) -Body (New-Hse400OutputBody -UnitId $oneId -Ordinal $outOrd) | Out-Null
+            }
             if ($plan.Tests.Count) {
                 # Модуль читає комірки документа, тож золотий тест потребує документа з відомим вводом. Це окремий
                 # проєкт HSE400_GOLD: синтетичний ввід ніколи не потрапляє в робочий документ HSE400_<рік>.
@@ -293,7 +299,7 @@ if ($Stage -in 'Template', 'All') {
                 Write-Hse400GoldenInputs -Gold $gold -Tests $plan.Tests
                 foreach ($x in $plan.Tests) {
                     if (-not $gold.Instances.ContainsKey([string]$x.table)) { throw "У золотому документі немає таблиці $($x.table) (тест $($x.code))." }
-                    $tb = New-Hse400GoldenTestBody -Test $x -DocumentId $gold.DocumentId -TableInstanceId $gold.Instances[[string]$x.table] -PeriodKey $gold.PeriodKey
+                    $tb = New-Hse400GoldenTestBody -Test $x -DocumentId $gold.DocumentId -TableInstanceId $gold.Instances[[string]$x.table] -PeriodKey $gold.PeriodKey -Namespace $plan.Namespace
                     Invoke-Hse400Ok -Method PUT -Path ("{0}/tests/{1}" -f $base, $x.code) -Body $tb | Out-Null
                 }
                 $state['goldProjectId'] = $gold.ProjectId; $state['goldDocumentId'] = $gold.DocumentId
