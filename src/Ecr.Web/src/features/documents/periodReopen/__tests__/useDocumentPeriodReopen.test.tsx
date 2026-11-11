@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { JSX } from 'react';
 import { MantineProvider } from '@mantine/core';
@@ -90,6 +90,16 @@ const closedState = (overrides: Record<string, unknown>): Record<string, unknown
 function disabled(element: HTMLElement): boolean {
   return (element as HTMLButtonElement).disabled;
 }
+
+/*
+ * ✎ AN-179: прогрів лінивого чанка діалогу (той самий прийом, що `SourceEventsTab.lazy.test.tsx`,
+ * `SheetActions.sheetDenial.test.tsx`). Перший `import('./DocumentPeriodReopenDialog')` тягне `@mantine/dates` і його
+ * стилі; «i1» — перший тест, що відкриває діалог, тож цей імпорт ішов у його 5 с: окремо ~0.55 с, у пачці 43 файлів
+ * під навантаженням раз — таймаут ~6.6 с. Діалог — залежність хука, не предмет перевірки: прогрів нічого не приховує.
+ */
+beforeAll(async () => {
+  await import('../DocumentPeriodReopenDialog');
+}, 60_000);
 
 afterEach(() => {
   vi.unstubAllGlobals();
