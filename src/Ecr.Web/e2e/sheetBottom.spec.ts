@@ -111,18 +111,25 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
         .toBeGreaterThan(0);
       const metrics = await page.getByTestId('grid-hscroll').evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
       expect(metrics.scroll, `прогін ${String(i + 1)}: прокручувати нічого, хоч стовпців ${String(WideColumns)}`).toBeGreaterThan(metrics.client);
-      const rail = await page.getByTestId('grid-hscroll-rail').boundingBox();
-      const thumb = await page.getByTestId('grid-hscroll-thumb').boundingBox();
+      // Рядок міряємо ЗАНОВО разом із доріжкою: між першим заміром і цим (очікування ширини сітки, до 15 с)
+      // розкладка ще досідає, і низ доріжки звірявся зі старою рамкою рядка (флейк #809, shard 3/6: rail > bar + 1).
+      await settle(page);
+      const [rail, thumb, barNow] = await Promise.all([
+        page.getByTestId('grid-hscroll-rail').boundingBox(),
+        page.getByTestId('grid-hscroll-thumb').boundingBox(),
+        bar.boundingBox(),
+      ]);
       expect(rail, 'доріжка намальована').toBeTruthy();
       expect(thumb, 'повзунок намальований').toBeTruthy();
-      if (!rail || !thumb) return;
+      expect(barNow, 'нижній рядок має розмір').toBeTruthy();
+      if (!rail || !thumb || !barNow) return;
       expect(rail.height).toBeGreaterThanOrEqual(9);
       expect(thumb.width, 'повзунок має ненульову ширину').toBeGreaterThan(8);
       expect(thumb.width).toBeLessThan(rail.width);
       expect(thumb.x).toBeGreaterThanOrEqual(rail.x - 1);
       expect(thumb.x + thumb.width).toBeLessThanOrEqual(rail.x + rail.width + 1);
-      expect(rail.y).toBeGreaterThanOrEqual(barBox.y);
-      expect(rail.y + rail.height).toBeLessThanOrEqual(barBox.y + barBox.height + 1);
+      expect(rail.y).toBeGreaterThanOrEqual(barNow.y);
+      expect(rail.y + rail.height, `прогін ${String(i + 1)}: доріжка виходить за нижній рядок`).toBeLessThanOrEqual(barNow.y + barNow.height + 1);
       // Колір повзунка відрізняється від доріжки (видно на знімку).
       const colours = await page.evaluate(() => {
         const r = document.querySelector('[data-testid="grid-hscroll-rail"]') as HTMLElement;
