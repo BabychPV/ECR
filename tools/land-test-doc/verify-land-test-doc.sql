@@ -9,6 +9,7 @@
 --   MASKED      calc.CalculationStep rows with MaskedZero <> 0 per source row key
 --   NOSUBST     per-substance template results (OutputCode like '%XXX%') with no SubstanceEntryId: the emission
 --               is attributed to no pollutant (methodology version without a substance list)
+--   BRANCHES    (row, substance, metric) groups with more than one written _typeN branch (double counting)
 SET NOCOUNT ON;
 DECLARE @doc int = $(DocumentId);
 DECLARE @p int = $(PeriodKey);
@@ -53,3 +54,17 @@ JOIN calc.Methodology m ON m.Id = mv.MethodologyId
 WHERE res.PeriodKey = @p AND res.CalculationRunId = @run AND res.DocumentId = @doc
   AND res.OutputCode LIKE '%XXX%' AND res.SubstanceEntryId IS NULL
 GROUP BY res.SourceRowKey, m.Code;
+
+-- BRANCHES: legacy writes ONE branch (_type1/_type2/...) per row, substance and metric (tons / gsec); more than one
+-- written branch means the emission is counted twice (methodology version without branch gating, D-423/D-435).
+SELECT 'BRANCHES' AS section, b.SourceRowKey AS k, b.Code AS methodology, CAST(COUNT(*) AS nvarchar(30)) AS v
+FROM (
+    SELECT res.SourceRowKey, m.Code, res.SubstanceEntryId, LEFT(res.OutputCode, CHARINDEX('_type', res.OutputCode)) AS metric
+    FROM calc.CalculationResult res
+    JOIN calc.MethodologyVersion mv ON mv.Id = res.MethodologyVersionId
+    JOIN calc.Methodology m ON m.Id = mv.MethodologyId
+    WHERE res.PeriodKey = @p AND res.CalculationRunId = @run AND res.DocumentId = @doc AND res.OutputCode LIKE '%[_]type%'
+    GROUP BY res.SourceRowKey, m.Code, res.SubstanceEntryId, LEFT(res.OutputCode, CHARINDEX('_type', res.OutputCode))
+    HAVING COUNT(DISTINCT res.OutputCode) > 1
+) b
+GROUP BY b.SourceRowKey, b.Code;
