@@ -187,7 +187,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    setupFiles: ['./src/test/setup.ts'],
+    // ✎ AN-162: `settleDynamicImports` — той самий клас гонки `EnvironmentTeardownError`, що й у a11y.
+    setupFiles: ['./src/test/setup.ts', './src/test/settleDynamicImports.ts'],
 
     // ⚠ Межа тесту вища за межу очікувань `asyncUtilTimeout` (5 с, `src/test/setup.ts`):
     // інакше тест із одним повільним `findBy` упирався б у власну межу раніше.
