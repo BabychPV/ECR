@@ -7,8 +7,9 @@ using Xunit;
 namespace Ecr.Architecture.Tests;
 
 /// <summary>
-/// D-474, рішення людини 11.11 (шаблон Land 1.0.16.0): версія Land будується з розкладкою <c>YearWithMonthColumns</c> —
-/// у документі немає перемикача місяців. Це можливо лише тоді, коли КОЖНА таблиця моделі або з місяцями в колонках
+/// D-474 (шаблон Land 1.0.16.0): збірка вміє ставити версії розкладку <c>YearWithMonthColumns</c> (у документі немає
+/// перемикача місяців), але типово лишає <c>PerMonthCopies</c> — координатор 11.11, варіант E: результати Land місячні.
+/// Річна розкладка можлива лише тоді, коли КОЖНА таблиця моделі або з місяцями в колонках
 /// (<c>MonthsInColumns</c>), або без місяців (<c>Static</c>); розкладку ставить <c>Stage-Template</c> на чернетці до публікації
 /// (після публікації сервер відмовляє: <c>409 ECR-SCHM-0409</c>).
 /// </summary>
@@ -68,9 +69,10 @@ public sealed class LandYearLayoutTests
     {
         var build = File.ReadAllText(LandFile("Build-LandTemplate.ps1"));
 
-        // типово - рік із місяцями в колонках; PerMonthCopies лише явним параметром
+        // координатор 11.11 (варіант E): типово - копії на місяць, перемикач лишається (результати Land місячні);
+        // рік із місяцями в колонках - лише явним параметром
         Assert.Contains(
-            "[ValidateSet('YearWithMonthColumns', 'PerMonthCopies')][string]$Layout = 'YearWithMonthColumns'",
+            "[ValidateSet('YearWithMonthColumns', 'PerMonthCopies')][string]$Layout = 'PerMonthCopies'",
             build,
             StringComparison.Ordinal);
 

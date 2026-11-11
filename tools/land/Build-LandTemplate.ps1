@@ -127,9 +127,10 @@ param(
     [switch]$RequiredInputsCreateDrafts,
     # Методології «на утриманні» (Get-LandRequiredInputHeld, напр. ECW_C11_01 до версії AN-165) етап пропускає; прапор знімає це.
     [switch]$RequiredInputsIncludeHeld,
-    # Етап Template (D-474, рішення людини 11.11): розкладка версії, яку ставимо на чернетці ПЕРЕД публікацією. Land - рік із
-    # місяцями в колонках, тож перемикача місяців у документі немає. PerMonthCopies - лише явно (стара поведінка 1.0.15.0).
-    [ValidateSet('YearWithMonthColumns', 'PerMonthCopies')][string]$Layout = 'YearWithMonthColumns',
+    # Етап Template (D-474): розкладка версії, яку ставимо на чернетці ПЕРЕД публікацією. Координатор 11.11 (варіант E):
+    # 1.0.16.0 лишається PerMonthCopies - результати Land місячні (формули з [Period], методології за місяцем), річний аркуш
+    # без перемикача показав би січневі числа (docs/build/D474-year-layout-calculated-cells.md). YearWithMonthColumns - лише явно.
+    [ValidateSet('YearWithMonthColumns', 'PerMonthCopies')][string]$Layout = 'PerMonthCopies',
     [switch]$DryRun
 )
 
