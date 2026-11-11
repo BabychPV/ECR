@@ -73,9 +73,17 @@ function Get-Hse400MethodologyPlan {
     foreach ($f in $formulas) { $known[([string]$f.code).ToLowerInvariant()] = $true }
     $missing = @($targets | Where-Object { -not $known.ContainsKey($_.FormulaCode.ToLowerInvariant()) })
     $tests = @(Get-Hse400ModelList $Model 'tests')
+    # Виходи, які чернетка оголошує до публікації: прив'язка на неоголошений вихід - ECR-CALC-0422 bindingUnknownOutput,
+    # а Generic (ним публікація рахує золоті тести) пише лише оголошені виходи.
+    $outputs = New-Object System.Collections.Generic.List[string]
+    foreach ($b in $bindings) { if (-not $outputs.Contains($b.OutputCode)) { $outputs.Add($b.OutputCode) } }
+    foreach ($t in $tests) {
+        $oc = Get-Hse400FormulaCode -Namespace $ns -Table ([string]$t.table) -RowKey ([string]$t.row)
+        if (-not $outputs.Contains($oc)) { $outputs.Add($oc) }
+    }
     return [pscustomobject]@{
         Namespace = $ns; Version = [string]$Model.methodology.version
-        Arguments = $args_.ToArray(); Targets = $targets.ToArray(); Bindings = $bindings.ToArray()
+        Arguments = $args_.ToArray(); Targets = $targets.ToArray(); Bindings = $bindings.ToArray(); Outputs = $outputs.ToArray()
         Formulas = $formulas; Constants = @(Get-Hse400ModelList $Model 'constants'); Tests = $tests
         MissingFormulas = $missing
         Ready = ($formulas.Count -gt 0 -and $missing.Count -eq 0 -and $tests.Count -gt 0)
@@ -144,16 +152,22 @@ function New-Hse400FormulaBody {
 }
 
 function New-Hse400ConstantBody {
-    <# PUT …/versions/{vid}/constants/{code} (SaveMethodologyConstantRequest); одиниця - кодом каталогу. #>
+    <#
+    PUT …/versions/{vid}/constants/{code} (SaveMethodologyConstantRequest); одиниця - кодом каталогу.
+    Числова константа без одиниці в моделі (у вивантаженні AF одиниць немає) отримує безрозмірну 'one':
+    сервер числову константу без одиниці відхиляє (ECR-CALC-0422 constantNoUnit), а аргументи (місячні колонки) теж
+    без одиниці.
+    #>
     param([Parameter(Mandatory)]$Constant, [hashtable]$UnitIds = @{})
     $get = { param($n) if ($Constant.PSObject.Properties[$n]) { $Constant.$n } else { $null } }
+    $kind = & $get 'kind'; if (-not $kind) { $kind = 'Numeric' }
     $unitId = $null
     $uc = & $get 'unit'
+    if (-not $uc -and [string]$kind -eq 'Numeric') { $uc = $script:Hse400DimensionlessUnit }
     if ($uc) {
         if (-not $UnitIds.ContainsKey([string]$uc)) { throw "Константа $($Constant.code): одиниці '$uc' немає в каталозі." }
         $unitId = $UnitIds[[string]$uc]
     }
-    $kind = & $get 'kind'; if (-not $kind) { $kind = 'Numeric' }
     return @{ kind = [string]$kind; value = (& $get 'value'); unitId = $unitId; textValue = (& $get 'textValue')
         validFrom = (& $get 'validFrom'); validTo = (& $get 'validTo'); category = (& $get 'category'); substanceEntryId = $null
         source = (& $get 'source') }
@@ -171,16 +185,37 @@ function ConvertTo-Hse400Decimal {
 function New-Hse400GoldenTestBody {
     <#
     PUT …/versions/{vid}/tests/{code} (SaveMethodologyTestCaseRequest) для золотого тесту моделі.
-    Модуль місячних колонок аргументи з тесту не бере: він читає комірки документа. Тому вхід тесту - адреса
-    розрахункового рядка в ЗОЛОТОМУ документі (його створює будівник і сам пише туди ввід тесту), а очікуване -
-    значення рядка в колонці місяця: { "<код колонки місяця>": число } (GoldenSet.Judge звіряє за кодом виходу).
+    ⚠ Публікація проганяє тест одиничним ICalculationModule, а це GenericCalculationModule
+    (src/Ecr.Calculations/DependencyInjection.cs), не модуль місячних колонок: він бере input.Arguments і пише лише
+    ОГОЛОШЕНІ виходи (код = код формули). Тому вхід - ввід тесту аргументами в обох формах імені, які дає модуль
+    місячних колонок (GCV.<простір>_<таблиця>_<рядок> і GCV_…), очікуване - { "<код формули>": число }, а вихід
+    формули оголошує будівник (New-Hse400OutputBody). Адреса документа/періоду лишається: публікація вимагає
+    справжній період (RequireTestPeriods). Стенд 11.11: адреса F_ без аргументів і ключ "M01" давали actual = null
+    (ECR-CALC-0422 goldenSetDiverged).
     #>
-    param([Parameter(Mandatory)]$Test, [Parameter(Mandatory)][long]$DocumentId, [Parameter(Mandatory)][long]$TableInstanceId, [Parameter(Mandatory)][int]$PeriodKey)
+    param([Parameter(Mandatory)]$Test, [Parameter(Mandatory)][long]$DocumentId, [Parameter(Mandatory)][long]$TableInstanceId, [Parameter(Mandatory)][int]$PeriodKey,
+        [string]$Namespace = 'HSE400')
     $inv = [Globalization.CultureInfo]::InvariantCulture
+    $table = [string]$Test.table
+    $args_ = @()
+    foreach ($p in $Test.inputs.PSObject.Properties) {
+        $v = ConvertTo-Hse400Decimal $p.Value
+        $plain = Get-Hse400ArgumentName -Namespace $Namespace -Table $table -RowKey $p.Name
+        foreach ($n in @(('GCV.' + $plain.Substring(4)), $plain)) {
+            $args_ += , [ordered]@{ argumentCode = $n; value = $v; valueString = $null; unitId = $null }
+        }
+    }
     $input_ = [ordered]@{ documentId = $DocumentId; tableInstanceId = $TableInstanceId; periodKey = [ordered]@{ value = $PeriodKey }
-        sourceRowKey = [string]$Test.row; arguments = @() }
-    $expected = '{{"{0}":{1}}}' -f [string]$Test.month, (ConvertTo-Hse400Decimal $Test.expected).ToString($inv)
+        sourceRowKey = [string]$Test.row; arguments = $args_ }
+    $fc = Get-Hse400FormulaCode -Namespace $Namespace -Table $table -RowKey ([string]$Test.row)
+    $expected = '{{"{0}":{1}}}' -f $fc, (ConvertTo-Hse400Decimal $Test.expected).ToString($inv)
     return @{ inputJson = ($input_ | ConvertTo-Json -Depth 6 -Compress); expectedJson = $expected; tolerance = (ConvertTo-Hse400Decimal $Test.tolerance) }
+}
+
+function New-Hse400OutputBody {
+    <# PUT …/versions/{vid}/outputs/{код формули} (SaveMethodologyOutputRequest): вихід формули золотого тесту. #>
+    param([Parameter(Mandatory)][int]$UnitId, [Parameter(Mandatory)][int]$Ordinal)
+    return @{ unitId = $UnitId; ordinal = $Ordinal }
 }
 
 function Get-Hse400GoldenCellWrites {

@@ -86,19 +86,37 @@ Describe 'HSE400 methodology contract' {
         $p = Get-Hse400MethodologyPlan $m
         if ($p.Ready -or @($p.MissingFormulas).Count -ne 1 -or $p.MissingFormulas[0].FormulaCode -cne $fs[0].code) { throw 'прогалину не названо' }
     }
+    It 'оголошені виходи: вихід кожної прив''язки і кожного золотого тесту, без повторів' {
+        # Прив'язка на вихід, якого не оголошує жодна версія, - відмова ECR-CALC-0422 bindingUnknownOutput (стенд 11.11),
+        # а опубліковану версію вже не доповнити: виходи оголошуються в чернетці до публікації.
+        $p = Get-Hse400MethodologyPlan (Read-Hse400Model)
+        $o = @($p.Outputs)
+        foreach ($b in @($p.Bindings)) { if ($o -cnotcontains $b.OutputCode) { throw "немає виходу прив'язки $($b.OutputCode)" } }
+        if ($o -cnotcontains 'HSE400_FG_Makat_EMercaptan' -or $o -cnotcontains 'HSE400_FG_Makat_H2S') { throw 'немає виходу тесту' }
+        if (@($o | Select-Object -Unique).Count -ne $o.Count -or $o.Count -ne 7) { throw "виходів $($o.Count): $($o -join ',')" }
+    }
     It 'без тесту не готово навіть із усіма формулами' {
         $m = Get-Hse400MTestModel
         $m.methodology.tests = @()
         if ((Get-Hse400MethodologyPlan $m).Ready) { throw 'готово без тесту' }
     }
-    It 'золотий тест: вхід - адреса рядка F_ у золотому документі, очікуване - за кодом місячної колонки' {
+    It 'золотий тест: публікація рахує його GenericCalculationModule - аргументи з тесту, очікуване за кодом формули' {
+        # Публікація бере одиничний ICalculationModule = Generic (Ecr.Calculations/DependencyInjection.cs): він читає
+        # input.Arguments і пише лише оголошені виходи. Адреса рядка F_ і ключ "M01" давали actual = null
+        # (стенд 11.11: ECR-CALC-0422 goldenSetDiverged).
         $t = @((Read-Hse400Model).methodology.tests)[0]
-        $b = New-Hse400GoldenTestBody -Test $t -DocumentId 77 -TableInstanceId 501 -PeriodKey 202601
+        $b = New-Hse400GoldenTestBody -Test $t -DocumentId 77 -TableInstanceId 501 -PeriodKey 202601 -Namespace 'HSE400'
         $in = $b.inputJson | ConvertFrom-Json
         if ($in.documentId -ne 77 -or $in.tableInstanceId -ne 501 -or $in.periodKey.value -ne 202601 -or $in.sourceRowKey -cne 'F_H2S') { throw "вхід $($b.inputJson)" }
-        if ($b.inputJson -notlike '*"arguments":`[`]*') { throw "arguments не порожній масив: $($b.inputJson)" }
-        if ($b.expectedJson -cne '{"M01":1.315296778169}') { throw "очікуване $($b.expectedJson)" }
+        $a = @($in.arguments)
+        if ($a.Count -ne 30) { throw "аргументів $($a.Count) (очікувано 15 рядків вводу x 2 форми імені)" }
+        $w = @($a | Where-Object { $_.argumentCode -ceq 'GCV.HSE400_FG_Makat_WCHS' })
+        $w2 = @($a | Where-Object { $_.argumentCode -ceq 'GCV_HSE400_FG_Makat_WCHS' })
+        if ($w.Count -ne 1 -or $w[0].value -ne 20 -or $w2.Count -ne 1 -or $w2[0].value -ne 20) { throw 'аргумент WCHS' }
+        if ($b.expectedJson -cne '{"HSE400_FG_Makat_H2S":1.315296778169}') { throw "очікуване $($b.expectedJson)" }
         if ($b.tolerance -isnot [decimal] -or $b.tolerance -ne 0.000000001) { throw "допуск $($b.tolerance)" }
+        $o = New-Hse400OutputBody -UnitId 7 -Ordinal 2
+        if ($o.unitId -ne 7 -or $o.ordinal -ne 2) { throw 'тіло виходу' }
     }
     It 'золотий ввід: комірки за таблицею без повторів; різні значення однієї комірки - відмова' {
         $tests = @((Read-Hse400Model).methodology.tests)
@@ -188,6 +206,18 @@ Describe 'HSE400 methodology contract' {
         $cb = New-Hse400ConstantBody -Constant ([pscustomobject]@{ code = 'k1_HSE400_'; value = 22.4; unit = 'one' }) -UnitIds @{ one = 7 }
         if ($cb.kind -cne 'Numeric' -or $cb.value -ne 22.4 -or $cb.unitId -ne 7) { throw 'константа' }
         Assert-Hse400Throws { New-Hse400ConstantBody -Constant ([pscustomobject]@{ code = 'k2_HSE400_'; value = 1; unit = 'zz' }) -UnitIds @{ one = 7 } } 'zz'
+    }
+    It 'числова константа без одиниці -> одиниця one (сервер відхиляє без одиниці: ECR-CALC-0422 constantNoUnit)' {
+        $cb = New-Hse400ConstantBody -Constant ([pscustomobject]@{ code = 'LHV_GCV_COS'; value = 1.5 }) -UnitIds @{ one = 7 }
+        if ($cb.kind -cne 'Numeric' -or $cb.unitId -ne 7) { throw "unitId $($cb.unitId)" }
+        $tb = New-Hse400ConstantBody -Constant ([pscustomobject]@{ code = 'k3_HSE400_'; kind = 'Text'; textValue = 'x' }) -UnitIds @{ one = 7 }
+        if ($null -ne $tb.unitId) { throw 'текстова константа з одиницею' }
+        Assert-Hse400Throws { New-Hse400ConstantBody -Constant ([pscustomobject]@{ code = 'k4_HSE400_'; value = 1 }) -UnitIds @{} } "'one'"
+        $m = Get-Hse400MTestModel
+        foreach ($c in @($m.methodology.constants)) {
+            $b = New-Hse400ConstantBody -Constant $c -UnitIds @{ one = 7 }
+            if ($b.kind -ceq 'Numeric' -and $null -eq $b.unitId) { throw "константа $($c.code) без одиниці" }
+        }
     }
     It 'одиниця one: є - id, немає - зрозуміла відмова' {
         $id = Find-Hse400UnitId @([pscustomobject]@{ id = 3; code = 't' }, [pscustomobject]@{ id = 9; code = 'one' })
