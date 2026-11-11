@@ -36,7 +36,8 @@ Describe 'HSE400 methodology contract' {
         }
     }
 
-    It 'аргумент рядка вводу: GCV_<простір>_<таблиця>_<RowKey>' {
+    # Без кутових дужок у назвах: Pester 5 (CI, pwsh) розгортає <ім'я> як змінну.
+    It 'аргумент рядка вводу: GCV_ + простір + таблиця + RowKey' {
         $n = Get-Hse400ArgumentName -Namespace 'HSE400' -Table 'FG_Makat' -RowKey 'Methane'
         if ($n -cne 'GCV_HSE400_FG_Makat_Methane') { throw "ім'я $n" }
         $n = Get-Hse400ArgumentName -Namespace 'HSE400' -Table 'LPG_Internal' -RowKey 'IC4_1'
@@ -45,7 +46,7 @@ Describe 'HSE400 methodology contract' {
     It 'рядок F_ аргументом не буває' {
         Assert-Hse400Throws { Get-Hse400ArgumentName -Namespace 'HSE400' -Table 'FG_Makat' -RowKey 'F_Nitrogen' } 'розрахунковий'
     }
-    It 'формула рядка F_<X>: <простір>_<таблиця>_<X>; рядок вводу - виняток' {
+    It 'формула рядка F_X: простір + таблиця + X; рядок вводу - виняток' {
         $c = Get-Hse400FormulaCode -Namespace 'HSE400' -Table 'FG_Makat' -RowKey 'F_Nitrogen'
         if ($c -cne 'HSE400_FG_Makat_Nitrogen') { throw "код $c" }
         Assert-Hse400Throws { Get-Hse400FormulaCode -Namespace 'HSE400' -Table 'FG_Makat' -RowKey 'Nitrogen' } 'F_'
