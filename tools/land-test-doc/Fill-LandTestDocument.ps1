@@ -341,9 +341,10 @@ foreach ($tableCode in $tables) {
         }
         if ($null -eq $existing) { $totCreate++ }
         if ($changes.Count -gt 0 -or $null -eq $existing) {
-            $base = $null
-            if ($null -ne $existing) { $base = [string](Get-Prop $existing 'rowVersion') }
-            [void]$patchRows.Add(@{ rowKey = $rowKey; baseVersion = $base; cells = @($changes) })
+            # ⚠ Not $base: PowerShell names are case-insensitive, so $base would overwrite $script:Base (the API URL).
+            $rowBaseVer = $null
+            if ($null -ne $existing) { $rowBaseVer = [string](Get-Prop $existing 'rowVersion') }
+            [void]$patchRows.Add(@{ rowKey = $rowKey; baseVersion = $rowBaseVer; cells = @($changes) })
             $totCells += $changes.Count
             Write-Host ("  {0} {1} {2}: {3} cell(s) to write" -f $tableCode, $rowKey, $(if ($null -eq $existing) { 'NEW' } else { 'existing' }), $changes.Count)
         }
@@ -381,22 +382,53 @@ if (-not $exec) {
     exit 0
 }
 
-if ($Recalculate) {
-    $post = Invoke-Api POST "/api/v1/documents/$docId/recalculate" @{ periodKey = $PeriodKey }
-    Assert-Api $post 'POST recalculate'
-    $jobId = [string](Get-Prop $post.Json 'jobId')
-    Write-Host "Recalculation job $jobId started."
-    $deadline = (Get-Date).AddMinutes($JobTimeoutMinutes)
+function Wait-RecalcJob {
+    <# Waits for one recalculation job; returns its final state. #>
+    param([Parameter(Mandatory)][string]$JobId, [Parameter(Mandatory)][DateTime]$Deadline)
     $state = ''
-    while ((Get-Date) -lt $deadline) {
+    $job = $null
+    while ((Get-Date) -lt $Deadline) {
         Start-Sleep -Seconds 3
-        $job = Invoke-Api GET ('/api/v1/jobs/' + [Uri]::EscapeDataString($jobId))
-        Assert-Api $job "GET job $jobId"
+        $job = Invoke-Api GET ('/api/v1/jobs/' + [Uri]::EscapeDataString($JobId))
+        Assert-Api $job "GET job $JobId"
         $state = [string](Get-Prop $job.Json 'state')
         if ($state -in 'Succeeded', 'Failed', 'Cancelled') { break }
     }
-    Write-Host "Recalculation job $jobId`: $state $(Get-Prop $job.Json 'errorCode')"
-    if ($state -ne 'Succeeded') { exit 1 }
+    Write-Host "Recalculation job $JobId`: $state $(if ($null -ne $job) { Get-Prop $job.Json 'errorCode' })"
+    return $state
+}
+
+if ($Recalculate) {
+    $deadline = (Get-Date).AddMinutes($JobTimeoutMinutes)
+    $post = Invoke-Api POST "/api/v1/documents/$docId/recalculate" @{ periodKey = $PeriodKey }
+    if ($post.Status -eq 403) {
+        # The whole-document recalculation needs rights this login may lack; sheet scope (Q-331) needs only the
+        # sheet's. Sheets with data-file tables, one job at a time, at most 6 starts a minute (the endpoint quota).
+        $sheets = @($tables | ForEach-Object { [int](Get-Prop $instances[$_] 'sheetDefId') } | Select-Object -Unique)
+        Write-Host "Whole-document recalculation: HTTP 403. Falling back to $($sheets.Count) sheet(s), at most 6 a minute."
+        $failed = 0
+        $starts = New-Object System.Collections.Generic.List[DateTime]
+        foreach ($sheetId in $sheets) {
+            if ($starts.Count -ge 6) {
+                $wait = 61 - ((Get-Date) - $starts[$starts.Count - 6]).TotalSeconds
+                if ($wait -gt 0) { Start-Sleep -Seconds ([int][Math]::Ceiling($wait)) }
+            }
+            $starts.Add((Get-Date))
+            $sp = Invoke-Api POST "/api/v1/documents/$docId/recalculate" @{ periodKey = $PeriodKey; sheetDefId = $sheetId }
+            Assert-Api $sp "POST recalculate sheet $sheetId"
+            $sj = [string](Get-Prop $sp.Json 'jobId')
+            if ([string]::IsNullOrEmpty($sj)) { Write-Host "  sheet $sheetId`: nothing to recalculate."; continue }
+            Write-Host "  sheet $sheetId`: job $sj started."
+            if ((Wait-RecalcJob -JobId $sj -Deadline $deadline) -ne 'Succeeded') { $failed++ }
+        }
+        if ($failed -gt 0) { exit 1 }
+    }
+    else {
+        Assert-Api $post 'POST recalculate'
+        $jobId = [string](Get-Prop $post.Json 'jobId')
+        Write-Host "Recalculation job $jobId started."
+        if ((Wait-RecalcJob -JobId $jobId -Deadline $deadline) -ne 'Succeeded') { exit 1 }
+    }
 }
 Write-Host "DOCUMENT_ID=$docId PERIOD=$PeriodKey. Next: Verify-LandTestDocument.ps1 -DocumentId $docId -PeriodKey $PeriodKey."
 if ($validationErrors.Count -gt 0) { exit 1 }
