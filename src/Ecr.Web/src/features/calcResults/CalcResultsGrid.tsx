@@ -95,7 +95,10 @@ export function CalcResultsGrid({
   const start = Math.max(0, Math.floor(scrollTop / RowHeight) - Overscan);
   const end = Math.min(items.length, Math.ceil((scrollTop + height) / RowHeight) + Overscan);
   const visible = items.slice(start, end);
+  /** Колонки за смугою: місяці + сума за рік. */
   const span = view.months.length + 1;
+  /** Усі колонки рядка: вихід, одиниця, місяці, сума — розпірки займають їх цілком. */
+  const columnCount = span + 2;
 
   const band = (item: Extract<GridItem, { kind: 'band' }>, index: number): JSX.Element => {
     const equipment = view.equipment[item.row.equipment];
@@ -231,7 +234,7 @@ export function CalcResultsGrid({
         <tbody>
           {start > 0 && (
             <tr aria-hidden="true" style={{ height: start * RowHeight }}>
-              <td colSpan={span + 1} />
+              <td colSpan={columnCount} />
             </tr>
           )}
           {visible.map((item, offset) =>
@@ -248,7 +251,7 @@ export function CalcResultsGrid({
           )}
           {end < items.length && (
             <tr aria-hidden="true" style={{ height: (items.length - end) * RowHeight }}>
-              <td colSpan={span + 1} />
+              <td colSpan={columnCount} />
             </tr>
           )}
         </tbody>
