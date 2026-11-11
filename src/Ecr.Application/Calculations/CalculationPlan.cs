@@ -119,6 +119,7 @@ public sealed class ModuleProfile
     private readonly Dictionary<string, ModuleStat> _stats = new(StringComparer.Ordinal);
     private readonly List<UnmatchedRow> _unmatched = [];
     private readonly List<RejectedRow> _rejected = [];
+    private readonly List<RejectedRow> _missingInputs = [];
     private readonly List<int> _skippedUnpublished = [];
     private readonly HashSet<long> _evaluatedTables = [];
 
@@ -156,6 +157,7 @@ public sealed class ModuleProfile
 
         _unmatched.AddRange(other._unmatched);
         _rejected.AddRange(other._rejected);
+        _missingInputs.AddRange(other._missingInputs);
         _evaluatedTables.UnionWith(other._evaluatedTables);
         RecordSkippedUnpublished(other._skippedUnpublished);
 
@@ -220,6 +222,7 @@ public sealed class ModuleProfile
 
         _unmatched.RemoveAll(r => tableInstanceIds.Contains(r.TableInstanceId));
         _rejected.RemoveAll(r => tableInstanceIds.Contains(r.TableInstanceId));
+        _missingInputs.RemoveAll(r => tableInstanceIds.Contains(r.TableInstanceId));
         _evaluatedTables.ExceptWith(tableInstanceIds);
     }
 
@@ -255,6 +258,21 @@ public sealed class ModuleProfile
         ArgumentNullException.ThrowIfNull(rows);
 
         _rejected.AddRange(rows);
+    }
+
+    /// <summary>
+    /// AN-164: рядки, які правило методології закрило, але які не дали жодного значення, бо формулам бракує аргументів
+    /// (немає комірки чи вона порожня) — без них такий рядок був тихим нулем (Land doc 96, LTD-A41).
+    /// </summary>
+    public IReadOnlyList<RejectedRow> MissingInputRows => _missingInputs;
+
+    /// <summary>Записує рядки без жодного значення через відсутні аргументи формул (AN-164).</summary>
+    /// <param name="rows">Рядки.</param>
+    public void RecordMissingInputs(IEnumerable<RejectedRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        _missingInputs.AddRange(rows);
     }
 
     /// <summary>Скільки ключів рядків без правила зберігається на документ у профілі (D14).</summary>

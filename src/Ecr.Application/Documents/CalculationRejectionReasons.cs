@@ -106,7 +106,7 @@ internal sealed class CalculationRejectionReasons(
                 g => g.OrderByDescending(v => new MethodologyVersionKey(v.EffectiveFrom, v.Version, v.Id), MethodologyVersionKey.Currency)
                     .First().Id);
 
-        var argumentsOf = new Dictionary<int, IReadOnlySet<string>>();
+        var argumentsOf = new Dictionary<(int Version, bool AllFormulas), IReadOnlySet<string>>();
         var rulesOf = new Dictionary<(int Version, int TemplateVersion), IReadOnlyList<CompiledMethodologyRule>>();
 
         // ⚡ 10.11 (людина: «продуктивність на великих навантаженнях»): комірки відхилених рядків читаються ОДНИМ
@@ -197,11 +197,13 @@ internal sealed class CalculationRejectionReasons(
                 StringComparer.Ordinal);
             var ruleCode = MethodologyRuleMatcher.Classify(compiled, values).Winner?.Code;
 
-            // 2. Порожні колонки, які згадує правило категорії.
-            if (!argumentsOf.TryGetValue(versionId, out var arguments))
+            // 2. Порожні колонки, які згадує правило категорії. AN-164: рядок без входів (`MissingInputs`) — порожні
+            //    колонки, які читають формули версії (будь-яка з них могла б дати значення).
+            var allFormulas = issue.Kind == ICalculationIssueStore.MissingInputs;
+            if (!argumentsOf.TryGetValue((versionId, allFormulas), out var arguments))
             {
-                arguments = await CategoryRuleArgumentsAsync(versionId, bounds.PeriodEnd, ct).ConfigureAwait(false);
-                argumentsOf[versionId] = arguments;
+                arguments = await RuleArgumentsAsync(versionId, bounds.PeriodEnd, allFormulas, ct).ConfigureAwait(false);
+                argumentsOf[(versionId, allFormulas)] = arguments;
             }
 
             var named = new List<ColumnDef>();
@@ -233,18 +235,23 @@ internal sealed class CalculationRejectionReasons(
         return result;
     }
 
-    /// <summary>Аргументи <c>@Code</c> правила категорії версії разом із формулами, до яких воно веде.</summary>
-    private async Task<IReadOnlySet<string>> CategoryRuleArgumentsAsync(int versionId, DateOnly onDate, CancellationToken ct)
+    /// <summary>
+    /// Аргументи <c>@Code</c> правила категорії версії разом із формулами, до яких воно веде; з
+    /// <paramref name="allFormulas"/> (AN-164, <see cref="ICalculationIssueStore.MissingInputs"/>) — усіх формул версії.
+    /// </summary>
+    private async Task<IReadOnlySet<string>> RuleArgumentsAsync(
+        int versionId, DateOnly onDate, bool allFormulas, CancellationToken ct)
     {
         var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var rule = await methodologies.GetCategoryRuleAsync(versionId, ct).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(rule))
+        var rule = allFormulas ? null : await methodologies.GetCategoryRuleAsync(versionId, ct).ConfigureAwait(false);
+        if (!allFormulas && string.IsNullOrWhiteSpace(rule))
         {
             return found;
         }
 
+        var own = await methodologies.GetFormulasAsync(versionId, ct).ConfigureAwait(false);
         var formulas = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var formula in await methodologies.GetFormulasAsync(versionId, ct).ConfigureAwait(false))
+        foreach (var formula in own)
         {
             formulas.TryAdd(formula.Code, formula.Expression);
         }
@@ -260,7 +267,19 @@ internal sealed class CalculationRejectionReasons(
 
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pending = new Stack<string>();
-        pending.Push(rule);
+        if (allFormulas)
+        {
+            foreach (var formula in own)
+            {
+                visited.Add(formula.Code);
+                pending.Push(formula.Expression);
+            }
+        }
+        else
+        {
+            pending.Push(rule!);
+        }
+
         while (pending.Count > 0)
         {
             if (formulaEngine.Parse(pending.Pop(), ExpressionDialect.Methodology).Expression?.Root is not { } root)

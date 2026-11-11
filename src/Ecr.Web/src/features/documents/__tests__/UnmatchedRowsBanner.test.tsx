@@ -107,6 +107,37 @@ describe('UnmatchedRowsBanner', () => {
     expect(onOpenRow).toHaveBeenCalledExactlyOnceWith(101, 'R1', 'Land_OverhauledEnginesRef');
   });
 
+  // AN-164 (doc 96, LTD-A41): рядок закрито правилом, але формулам бракує входів — раніше тихий нуль без проблеми. Тепер
+  // своя група «бракує вихідних даних» з правилом і колонками, які треба заповнити, і перехід на першу з них.
+  // Мутація: не розпізнавати `MissingInputs` у `groupUnmatchedRows` — рядок іде як «без правила», тест червоний.
+  it('AN-164: рядок без входів формул — своя група з правилом і колонками до заповнення', async () => {
+    const { onOpenRow } = show(
+      rows([
+        issue(1, 2, {
+          rowKey: 'R2',
+          kind: 'MissingInputs',
+          methodologyCode: 'ECW_C12_02',
+          ruleCode: 'R_C12_02_01',
+          columns: [{ code: 'MaximumConsumption_M09', nameL10n: { values: { en: 'Max consumption' } } }],
+        }),
+      ]),
+    );
+    await userEvent.click(screen.getByTestId('document-unmatched-rows-toggle'));
+
+    expect(screen.getByTestId('document-unmatched-rows-group').textContent).toContain(
+      '⟦document.missingInputRows.group (table=Sheet · 9.01 Unit 400, rows=⟦document.unmatchedRows.rows.one (count=1)⟧)⟧',
+    );
+    expect(screen.getByTestId('document-missing-input-rows-hint').textContent).toBe('⟦document.missingInputRows.hint⟧');
+    expect(screen.queryByTestId('document-rejected-rows-hint')).toBeNull();
+    expect(screen.queryByTestId('document-unmatched-rows-hint')).toBeNull();
+
+    const link = screen.getByTestId('document-rejected-row-link');
+    expect(link.textContent).toBe('⟦document.rejectedRows.rowFill (row=2, rule=R_C12_02_01, columns=«Max consumption»)⟧');
+    await userEvent.click(link);
+
+    expect(onOpenRow).toHaveBeenCalledExactlyOnceWith(101, 'R2', 'MaximumConsumption_M09');
+  });
+
   it('b3: пояснення «чому і як» - один раз, тон інформації (status), не помилки', () => {
     show(sixty);
 

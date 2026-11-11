@@ -170,6 +170,9 @@ public sealed class CalculationOrchestrator(
         // L2-6: рядки, відхилені правилом категорії (відмова рядка, а не документа).
         var rejected = new ConcurrentBag<RejectedRow>();
 
+        // AN-164: рядки, закриті правилом, але без жодного значення через відсутні аргументи формул.
+        var missingInputs = new ConcurrentBag<RejectedRow>();
+
         foreach (var batch in batches)
         {
             // 3. ⚠ Усередині пакета — ПАРАЛЕЛЬНО. Послідовний прогін у 10
@@ -212,7 +215,7 @@ public sealed class CalculationOrchestrator(
                         var stat = await ExecuteAsync(
                             scopedResolver, scopedModules, scopedInputBuilder, scopedOutputWriter,
                             calculationRunId, documentId, periodKey, binding, registries,
-                            _limits.MaxInputCellsPerBinding, rowMatches, rejected, token).ConfigureAwait(false);
+                            _limits.MaxInputCellsPerBinding, rowMatches, rejected, missingInputs, token).ConfigureAwait(false);
 
                         measured.Add(stat);
                     }
@@ -245,6 +248,7 @@ public sealed class CalculationOrchestrator(
         profile.RecordEvaluatedTables(
             rowMatches.Where(s => s.AllRowKeys is not null).Select(s => s.TableInstanceId).Distinct());
         profile.RecordRejected(rejected.OrderBy(r => r.TableInstanceId).ThenBy(r => r.RowNumber));
+        profile.RecordMissingInputs(missingInputs.OrderBy(r => r.TableInstanceId).ThenBy(r => r.RowNumber));
 
         return profile;
     }
@@ -336,6 +340,7 @@ public sealed class CalculationOrchestrator(
         int maxInputCells,
         ConcurrentBag<RowMatchSummary> rowMatches,
         ConcurrentBag<RejectedRow> rejected,
+        ConcurrentBag<RejectedRow> missingInputs,
         CancellationToken ct)
     {
         var module = scopedModules.FirstOrDefault(m => m.CanHandle(binding.Descriptor));
@@ -430,13 +435,35 @@ public sealed class CalculationOrchestrator(
                 .PrepareAsync(binding.Descriptor, documentId, periodKey, registries, ct)
                 .ConfigureAwait(false);
 
+            // Рядок за номером (з 1, за `TableRow.Id`) і ключем — для проблеми рядка; значень комірок не несемо.
+            RejectedRow RowOf(CalculationInput input)
+            {
+                var rowKey = input.SourceRowKey ?? string.Empty;
+                var position = outcome.AllRowKeys is { } all ? IndexOfKey(all, rowKey) : -1;
+                if (position < 0)
+                {
+                    position = Math.Max(0, IndexOfKey(rowKeys, rowKey));
+                }
+
+                return new RejectedRow(
+                    binding.TableInstanceId, position + 1, rowKey, documentId, binding.Descriptor.MethodologyId);
+            }
+
             foreach (var input in inputs)
             {
                 // 6. Проміжні значення живуть у пам'яті воркера: модуль нічого
                 //    не пише і не читає з бази між рядками.
                 try
                 {
-                    outputs.Add(await module.ExecuteAsync(prepared, input, ct).ConfigureAwait(false));
+                    var output = await module.ExecuteAsync(prepared, input, ct).ConfigureAwait(false);
+                    outputs.Add(output);
+
+                    // AN-164: рядок закрито правилом, але жодного значення — бо формулам бракує аргументів. Без цього
+                    // сліду він був тихим нулем: 0 результатів, 0 невдалих кроків (`#NULL` — «немає значення»), 0 проблем.
+                    if (output.Values.Count == 0 && output.MissingArguments is { Count: > 0 })
+                    {
+                        missingInputs.Add(RowOf(input));
+                    }
                 }
                 catch (Domain.Abstractions.DomainException error)
                     when (GenericCalculationModule.IsCategoryRuleRowFailure(error))
@@ -444,17 +471,9 @@ public sealed class CalculationOrchestrator(
                     // L2-6: правило категорії не дало ключа ЦЬОМУ рядку — відхиляється лише він
                     // (дизайн §5); решта рядків прив'язки рахується. Слід — номер рядка; тексту
                     // правила, значень комірок і назв колонок у діагностику не несемо.
-                    var rowKey = input.SourceRowKey ?? string.Empty;
-                    var position = outcome.AllRowKeys is { } all ? IndexOfKey(all, rowKey) : -1;
-                    if (position < 0)
-                    {
-                        position = Math.Max(0, IndexOfKey(rowKeys, rowKey));
-                    }
-
                     // ✎ 10.11 (doc 95): документ і методологія — щоб завершення записало проблему рядка
                     // (`calc.CalculationIssue`, вид CategoryRuleRejected), а не лише повідомлення задачі.
-                    rejected.Add(new RejectedRow(
-                        binding.TableInstanceId, position + 1, rowKey, documentId, binding.Descriptor.MethodologyId));
+                    rejected.Add(RowOf(input));
                 }
             }
         }

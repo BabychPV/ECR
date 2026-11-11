@@ -9,6 +9,7 @@
       * rejected   calc.CalculationIssue Kind = CategoryRuleRejected for the methodology or its row = 0
                    (on a build without that kind a rejected row shows up as results = 0);
       * unmatched  calc.CalculationIssue Kind = NoMatchingRule on an LTD- row = 0;
+      * inputs     calc.CalculationIssue Kind = MissingInputs on the row = 0 (AN-164: rule matched, formula inputs absent);
       * errors     latest run not Failed; failed formula steps (calc.CalculationStep.Value IS NULL) on the row = 0,
                    except methodologies marked knownConstantGap = yes (missing constants in AF data, human's
                    decision 11.11: listed as KNOWN, they do not block acceptance); knownReason names another
@@ -93,6 +94,8 @@ foreach ($m in $plan) {
     foreach ($f in @($facts | Where-Object { $_.Section -eq 'RESULT' -and $_.Methodology -eq $m.methodology })) { $results += [int]$f.Value }
     $rejected = @($facts | Where-Object { $_.Section -eq 'ISSUE' -and $_.Value -eq 'CategoryRuleRejected' -and ($_.Methodology -eq $m.methodology -or $_.Key -eq $rowKey) }).Count
     $unmatched = @($facts | Where-Object { $_.Section -eq 'ISSUE' -and $_.Value -eq 'NoMatchingRule' -and $_.Key -eq $rowKey }).Count
+    # AN-164: rule matched, but the formulas lack inputs (no cell / empty) - no result; before AN-164 a silent zero.
+    $missingInputs = @($facts | Where-Object { $_.Section -eq 'ISSUE' -and $_.Value -eq 'MissingInputs' -and $_.Key -eq $rowKey }).Count
     $failed = 0
     foreach ($f in @($facts | Where-Object { $_.Section -eq 'FAILEDSTEP' -and $_.Key -eq $rowKey })) { $failed += [int]$f.Value }
     $noValue = 0
@@ -109,6 +112,7 @@ foreach ($m in $plan) {
     if ($results -lt 1) { $why += 'no results' }
     if ($rejected -gt 0) { $why += "rejected $rejected" }
     if ($unmatched -gt 0) { $why += "NoMatchingRule $unmatched" }
+    if ($missingInputs -gt 0) { $why += "MissingInputs $missingInputs" }
     if ($failed -gt 0 -and -not $isKnown) { $why += "failed steps $failed" }
     $noSubst = 0
     foreach ($f in @($facts | Where-Object { $_.Section -eq 'NOSUBST' -and $_.Key -eq $rowKey -and $_.Methodology -eq $m.methodology })) { $noSubst += [int]$f.Value }

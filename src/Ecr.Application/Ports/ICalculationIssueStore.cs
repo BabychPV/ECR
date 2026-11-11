@@ -16,6 +16,12 @@ public interface ICalculationIssueStore
     /// <summary>Вид проблеми «рядок відхилено правилом категорії» (L2-6): правило закрило рядок, ключа категорії немає.</summary>
     public const string CategoryRuleRejected = "CategoryRuleRejected";
 
+    /// <summary>
+    /// Вид проблеми «рядок без значення» (AN-164): правило закрило рядок, але формулам бракує аргументів (немає комірки
+    /// чи вона порожня) — жодного результату. Колонки, які треба заповнити, виводить читання.
+    /// </summary>
+    public const string MissingInputs = "MissingInputs";
+
     /// <summary>Скільки проблем на таблицю зберігає один прохід; решта відсікається.</summary>
     public const int MaxPerTable = 1000;
 
