@@ -51,6 +51,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useProjectCurrentPeriodDefault } from '@/features/documents/useProjectCurrentPeriodDefault';
+import { isYearLayout, yearAnchorCalendar } from '@/features/documents/yearLayout';
 import { SheetStrip } from '@/features/documents/SheetStrip';
 import { copyFieldsOf, sheetTabKey } from '@/features/documents/sheetCopies/sheetCopyTypes';
 import {
@@ -591,7 +592,15 @@ export function DocumentPage(): JSX.Element {
     enabled: projectId !== null,
   });
 
-  useProjectCurrentPeriodDefault(urlPeriod, calendar.data?.periods, setPeriodKey);
+  // ✎ D-474, п. 5: документ із розкладкою «рік, місяці в колонках» — одна копія на рік; без `?periodKey` він
+  // відкривається на якорі року поточного періоду, а не на поточному місяці. Явний `?periodKey` (смуга року в переліку,
+  // посилання) лишається як є: Submit/Reopen за місяцем працюють від нього.
+  const yearLayout = isYearLayout((summary.data ?? baseSummary.data)?.templateLayout);
+  useProjectCurrentPeriodDefault(
+    urlPeriod,
+    yearLayout ? yearAnchorCalendar(calendar.data?.periods) : calendar.data?.periods,
+    setPeriodKey,
+  );
 
   // PERIODNAV: допустимі періоди проєкту (за зростанням) - стрілки й сітка не виходять за них.
   const projectPeriods = useMemo(
@@ -834,7 +843,9 @@ export function DocumentPage(): JSX.Element {
               `value ?? periodKey` зберігає стару поведінку очищеного поля:
               воно НЕ звужувало документ до «без періоду» (тут період
               обов'язковий — `urlPeriod ?? currentPeriodKey()` нижче), а
-              просто лишало те, що вже було. */
+              просто лишало те, що вже було.
+              ✎ D-474, п. 5: розкладка «рік» — одна копія, перемикача місяця немає. */
+          yearLayout ? undefined : (
           <Suspense fallback={<Skeleton h={52} w={190} />}>
             <PeriodPicker
               size="xs"
@@ -844,6 +855,7 @@ export function DocumentPage(): JSX.Element {
               onChange={(value) => setPeriodKey(value ?? periodKey)}
             />
           </Suspense>
+          )
         }
       />
 
