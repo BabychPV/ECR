@@ -245,6 +245,7 @@ export function CalculationResultsPage(): JSX.Element {
                 onChange={(event) => setQuery(event.currentTarget.value === '' ? null : event.currentTarget.value)}
                 size="xs"
                 miw={220}
+                data-testid="cr-search"
               />
               <Select label={t('calcResults.sheets')} data={options.sheets} value={sheet} onChange={setSheet} clearable size="xs" miw={200} />
               <Select label={t('calcResults.methodologies')} data={options.methodologies} value={methodology} onChange={setMethodology} clearable size="xs" miw={220} />
