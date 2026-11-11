@@ -29,7 +29,7 @@ export function AllMonthsLink({
       component={Link}
       to={resultsHref(documentId, periodKey, yearLayout)}
       variant="subtle"
-      size="compact-xs"
+      size="xs"
       title={t('calcResults.allMonthsHint', { year: Math.floor(periodKey / 100) })}
       data-testid="doc-cr-all"
     >
@@ -61,7 +61,7 @@ export function YearLayoutChips({
       </Badge>
       <Menu position="bottom-end" withinPortal>
         <Menu.Target>
-          <Button variant="default" size="compact-xs" data-testid="doc-cr-month">
+          <Button variant="default" size="xs" data-testid="doc-cr-month">
             {t('calcResults.calculatedMonth', { month: formatPeriodKey(periodKey) })}
           </Button>
         </Menu.Target>

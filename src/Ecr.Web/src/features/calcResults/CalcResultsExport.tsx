@@ -4,6 +4,7 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { JobStatus } from '@/api/types';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
 import { language, t } from '@/shared/i18n';
 import { notificationCloseButtonProps, showApiError } from '@/shared/ui/notify';
@@ -55,6 +56,9 @@ export function CalcResultsExport({
     },
     onError: showApiError,
   });
+
+  // ФВ-14.26: спінер — лише коли постановка справді затяглася.
+  const startLoading = usePendingLoading(start.isPending);
 
   const job = useQuery({
     queryKey: ['job', jobId],
@@ -135,7 +139,7 @@ export function CalcResultsExport({
           <Button variant="default" onClick={onClose}>
             {t('calcResults.cancel')}
           </Button>
-          <Button onClick={() => start.mutate()} loading={start.isPending} data-testid="cr-export-go">
+          <Button onClick={() => start.mutate()} loading={startLoading} disabled={start.isPending} data-testid="cr-export-go">
             {t('calcResults.exportGo')}
           </Button>
         </Group>
