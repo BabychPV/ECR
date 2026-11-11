@@ -105,9 +105,15 @@ public sealed class Hse400CompositionSnapshotLoader(
 
         var tableIds = streamByTable.Keys.ToList();
 
-        var instances = await db.TableInstances.AsNoTracking()
-            .Where(i => tableIds.Contains(i.TableDefId) && i.SheetCopyId == null)
-            .Select(i => new { i.Id, i.DocumentId, i.TableDefId, i.PeriodKeyValue })
+        // ⛔ Документ проєкту золотих тестів (Hse400CompositionMapping.GoldProjectCode) — синтетичний ввід: без цього
+        // виключення «найбільший Id за рік» узяв би його, щойно робочий документ створено раніше за золотий.
+        var instances = await (
+                from i in db.TableInstances.AsNoTracking()
+                where tableIds.Contains(i.TableDefId) && i.SheetCopyId == null
+                join doc in db.Documents.AsNoTracking() on i.DocumentId equals doc.Id
+                join project in db.Projects.AsNoTracking() on doc.ProjectId equals project.Id
+                where project.Code != Hse400CompositionMapping.GoldProjectCode
+                select new { i.Id, i.DocumentId, i.TableDefId, i.PeriodKeyValue })
             .ToListAsync(ct).ConfigureAwait(false);
         if (instances.Count == 0)
         {
