@@ -136,6 +136,45 @@ public sealed partial class DocumentVersionMigrationTests
         Assert.Equal(before, await SnapshotAsync(s).ConfigureAwait(true));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    public async Task Річний_проєкт_не_переїжджає_на_версію_з_місячними_копіями_422_і_нічого_не_змінює()
+    {
+        // D-474 (4). OnlyLabels: без правила перенос пройшов би — тож 422 дає лише поєднання «річний + копія на місяць».
+        // Мутаційний доказ: прибрати перевірку в MigrateDocumentVersionHandler.ResolveAsync — 200 замість 422;
+        // друга половина (ціль з річною розкладкою) тримає правило від «відмовляти всім річним».
+        var s = await ArrangeAsync(Target.OnlyLabels).ConfigureAwait(true);
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var project = await db.Projects.FirstAsync(p => p.Id == s.Doc.ProjectId).ConfigureAwait(true);
+            db.Entry(project).Property(p => p.PeriodKind).CurrentValue = PeriodKind.Yearly;
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var before = await SnapshotAsync(s).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var refused = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
+
+        await AssertProblemAsync(refused, HttpStatusCode.UnprocessableEntity, "ECR-TMPL-0422", "err.ECR-TMPL-0422.yearlyProjectNeedsYearLayout").ConfigureAwait(true);
+        Assert.Equal(before, await SnapshotAsync(s).ConfigureAwait(true));
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var target = await db.TemplateVersions.FirstAsync(v => v.Id == s.TargetVersionId).ConfigureAwait(true);
+            db.Entry(target).Property(v => v.Layout).CurrentValue = TemplateLayout.YearWithMonthColumns;
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var accepted = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+    }
+
     private static Task<HttpResponseMessage> PostToAsync(HttpClient client, Scenario s, int targetVersionId)
         => client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{s.Doc.DocumentId.ToString(CultureInfo.InvariantCulture)}/migrate-version", UriKind.Relative),

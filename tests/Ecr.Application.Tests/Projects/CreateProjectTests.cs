@@ -409,6 +409,52 @@ public sealed class CreateProjectTests
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
     }
 
+    // ── D-474 (4): річний проєкт і розкладка версії ─────────────────────
+
+    [Fact]
+    [Trait("Requirement", "D-474")]
+    public async Task Річний_проєкт_на_версії_з_місячними_копіями_відхиляється_422()
+    {
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => CreateOn(PeriodKind.Yearly, TemplateLayout.PerMonthCopies));
+
+        Assert.Equal(ErrorCodes.TemplateInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.yearlyProjectNeedsYearLayout", error.Details!["messageKey"]);
+        await _periods.DidNotReceiveWithAnyArgs().AddProjectAsync(null!, default);
+    }
+
+    [Theory]
+    [InlineData(PeriodKind.Yearly, TemplateLayout.YearWithMonthColumns)]
+    [InlineData(PeriodKind.Monthly, TemplateLayout.PerMonthCopies)]
+    [InlineData(PeriodKind.Monthly, TemplateLayout.YearWithMonthColumns)]
+    [Trait("Requirement", "D-474")]
+    public async Task Решта_поєднань_періодичності_й_розкладки_дозволені(PeriodKind kind, TemplateLayout layout)
+    {
+        await CreateOn(kind, layout);
+
+        await _periods.Received(1).AddProjectAsync(Arg.Any<Project>(), Arg.Any<CancellationToken>());
+    }
+
+    private Task<int> CreateOn(PeriodKind kind, TemplateLayout layout)
+    {
+        var version = new Domain.Entities.Configuration.TemplateVersion(
+            templateId: 1, version: "1.0.0.0", createdByUserId: 9, utcNow: Now);
+        version.SetLayout(layout);
+        var versions = Substitute.For<IRepository<Domain.Entities.Configuration.TemplateVersion, int>>();
+        versions.FindAsync(42, Arg.Any<CancellationToken>()).Returns(version);
+
+        return new CreateProjectHandler(_periods, _access, _users, _audit, _uow, _user, _clock, versions)
+            .HandleAsync(
+                "KASH_2026",
+                new Dictionary<string, string> { ["en"] = "Kashagan" },
+                "Asia/Atyrau",
+                kind,
+                year: 2026,
+                templateVersionId: 42,
+                periodPolicyId: PolicyId,
+                CancellationToken.None);
+    }
+
     private Task<int> Create(string timeZoneId)
         => new CreateProjectHandler(_periods, _access, _users, _audit, _uow, _user, _clock)
             .HandleAsync(
