@@ -114,7 +114,7 @@ public sealed class ListDocumentsFilterTests
 
         await _documents.Received(1).ListAsync(
             Arg.Any<int?>(), Arg.Any<PeriodKeyFilter>(),
-            new DocumentListFilter(null, null, null, Year: year, HasReopenedMonths: hasReopenedMonths),
+            new DocumentListFilter(null, null, null, Year: year, ReaderUserId: UserId, HasReopenedMonths: hasReopenedMonths),
             Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
     }
 
