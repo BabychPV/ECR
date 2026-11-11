@@ -236,7 +236,17 @@ jobs:
           # залежність від чужого репозиторію фізично, а не толерантністю до
           # флакі.
           sudo apt-get update             -o Dir::Etc::sourcelist="sources.list.d/mssql-release.list"             -o Dir::Etc::sourceparts="-"             -o APT::Get::List-Cleanup="0"
-          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
+          # ⚠ 11.11: unixODBC приходить із дзеркала Ubuntu раннера
+          # (azure.archive.ubuntu.com), і понад 2 год його DNS не розв'язувався на
+          # раннерах GitHub — усі server-part падали тут (exit 100) до будь-якого
+          # тесту. Тому: повтори apt, а за невдачі — заміна дзеркала на
+          # archive.ubuntu.com і ще одна спроба. sqlcmd лишається ODBC-шним (P-17).
+          if ! sudo ACCEPT_EULA=Y apt-get install -y -o Acquire::Retries=5 mssql-tools18 unixodbc-dev; then
+            echo "::warning::apt install failed on the runner mirror; switching to archive.ubuntu.com"
+            sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu#http://archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+            sudo apt-get update -o Acquire::Retries=5
+            sudo ACCEPT_EULA=Y apt-get install -y -o Acquire::Retries=5 mssql-tools18 unixodbc-dev
+          fi
           echo "/opt/mssql-tools18/bin" >> "$GITHUB_PATH"
 
       # ⛔ Готовність контейнера чекається ЯВНО. `services` вважає службу
