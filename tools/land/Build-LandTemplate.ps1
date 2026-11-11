@@ -116,6 +116,9 @@ param(
     # -Stage BranchGate: перевести еталонні тести чернетки на наявний документ/період (старий документ 1 видалено 10.11).
     [long]$GoldenTestDocumentId = 0,
     [int]$GoldenTestPeriodKey = 0,
+    # Етап Template (D-474, рішення людини 11.11): розкладка версії, яку ставимо на чернетці ПЕРЕД публікацією. Land - рік із
+    # місяцями в колонках, тож перемикача місяців у документі немає. PerMonthCopies - лише явно (стара поведінка 1.0.15.0).
+    [ValidateSet('YearWithMonthColumns', 'PerMonthCopies')][string]$Layout = 'YearWithMonthColumns',
     [switch]$DryRun
 )
 
@@ -1229,6 +1232,17 @@ function Stage-Template {
     Log ("  місячні смуги: таблиць з місяцями {0}, місячних груп {1}, батьківських {2}, колонок у групах {3}; PUT {4}, PATCH {5}" -f `
             $bands.TablesWithMonths, $bands.MonthGroups, $bands.ParentGroups, $bands.AssignedColumns, $bands.Puts, $bands.Patches)
     if ($bands.TablesSkippedErrors -gt 0) { throw ('Місячні смуги: ' + ($bands.Errors -join '; ')) }
+    # Розкладка версії (D-474): на чернетці, ДО публікації - після неї сервер відмовляє (409 ECR-SCHM-0409). Клон успадковує
+    # розкладку джерела (1.0.15.0 - PerMonthCopies), тому ставимо явно. Спершу сторож: річна розкладка має сенс лише тоді, коли
+    # в моделі немає таблиць «копія на період» - інакше перемикач місяців зник би, а їхні місячні копії стали б недосяжні.
+    $perPeriod = @(Get-LandPerPeriodTables $Mdl)
+    if ($Layout -eq 'YearWithMonthColumns' -and $perPeriod.Count -gt 0) {
+        throw ("Розкладка YearWithMonthColumns неможлива: у моделі є таблиці не MonthsInColumns/Static: " + ($perPeriod -join ', '))
+    }
+    $lay = Invoke-Ecr -Method PUT -Path "/api/v1/template-versions/$vid/layout" -Body @{ layout = $Layout }
+    if ($lay.Status -in 404, 405) { throw "PUT /template-versions/$vid/layout: HTTP $($lay.Status) - сервер без D-474 (lane template-layout не розгорнуто); розкладку $Layout поставити неможливо." }
+    Assert-EcrOk $lay "layout $vid"
+    Log "  розкладка версії: $Layout (таблиць «копія на період» у моделі: 0)"
     # шапка Contract (13 полів) — офіційним скриптом на цій чернетці, з публікацією
     $pw = ConvertTo-SecureString $Acc[$BuildUser] -AsPlainText -Force
     # -PermitLookup передається лише явно: без нього діє значення маніфесту (LAND_PERMIT), поведінка Land не змінюється.
