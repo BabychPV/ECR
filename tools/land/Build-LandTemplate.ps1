@@ -57,6 +57,11 @@
                     замінюється суфіксованим (`@Land_Measure_OperatingTime__ECW_C11_01`), кінцевий `?` і чужі елементи
                     списку зберігаються; у PARITY_1 додається суфіксований аргумент з тим самим значенням. Публікації
                     не робить; повтор - 0 змін
+      RequiredInputs (лише явно, в All не входить) у ЧЕРНЕТКАХ методологій з LandRequiredInputs.Lib.ps1 реєструє
+                    обов'язкові входи (колонки, без яких методологія не рахує; чотири колонки T3_00 для C05_01..05 - людина
+                    10.11) з рівнем -RequiredInputSeverity (Warn типово, Block після репетиції). Чернетку V(n+1) створює лише
+                    з -RequiredInputsCreateDrafts і лише коли є що реєструвати; чернетку з іншою назвою не чіпає.
+                    Публікації не робить; повтор - 0 змін; без -RequiredInputsCreateDrafts - лише перелік
     ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє, окрім явного
     -PruneStaleTables (м'яке видалення таблиць чернетки, яких немає в моделі; без прапора - лише попередження).
     Формули колонок наявної чернетки-клону порівнюються з моделлю й оновлюються (D-YE-1). Прод-БД старої системи тут
@@ -95,7 +100,7 @@ param(
     [switch]$ReuseDraft,
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'BranchGate', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'BranchGate', 'RequiredInputs', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection,
@@ -116,6 +121,10 @@ param(
     # -Stage BranchGate: перевести еталонні тести чернетки на наявний документ/період (старий документ 1 видалено 10.11).
     [long]$GoldenTestDocumentId = 0,
     [int]$GoldenTestPeriodKey = 0,
+    # -Stage RequiredInputs: рівень вимоги (Warn - попередження, Block - відмова збереження людині) і дозвіл створити
+    # чернетку V(n+1) з останньої опублікованої версії, коли чернетки V<n> немає.
+    [ValidateSet('Warn', 'Block')][string]$RequiredInputSeverity = 'Warn',
+    [switch]$RequiredInputsCreateDrafts,
     # Етап Template (D-474, рішення людини 11.11): розкладка версії, яку ставимо на чернетці ПЕРЕД публікацією. Land - рік із
     # місяцями в колонках, тож перемикача місяців у документі немає. PerMonthCopies - лише явно (стара поведінка 1.0.15.0).
     [ValidateSet('YearWithMonthColumns', 'PerMonthCopies')][string]$Layout = 'YearWithMonthColumns',
@@ -2209,6 +2218,82 @@ function Stage-BranchGate {
     Log "  змінено: $bgChanged"
 }
 
+# ==================== RequiredInputs (обов'язкові входи методологій Land; людина 10.11, координатор 11.11) ====================
+# Лише явно: -Stage RequiredInputs. Реєструє в ЧЕРНЕТЦІ методологій з LandRequiredInputs.Lib.ps1 обов'язкові колонки
+# (PUT .../required-inputs/{columnDefId}) з рівнем -RequiredInputSeverity (типово Warn; Block - після репетиції).
+# Порівняння з уже зареєстрованим - за ШЛЯХОМ таблиця/колонка, а не за id: вимога зберігає id колонки тієї версії шаблону,
+# з якою її заводили, а сервер перекладає його за шляхом. Тому після публікації нової версії шаблону повтор - 0 змін.
+# Чернетку з назвою не V<n> (чужа робота, напр. «test») не чіпаємо. Нової чернетки без -RequiredInputsCreateDrafts не
+# створюємо (тоді етап лише друкує, що лишилось); коли змін немає - не створюємо взагалі. Публікації етап не робить.
+function Stage-RequiredInputs {
+    Log "== RequiredInputs ($RequiredInputSeverity) =="
+    . (Join-Path $here 'LandRequiredInputs.Lib.ps1')
+    LoginAs $BuildUser
+    Load-Structure
+    # id колонки -> "ТАБЛИЦЯ/КОЛОНКА": остання опублікована версія шаблону; старіші версії - лише коли трапився чужий id.
+    $riPath = @{}
+    foreach ($k in $S.Cols.Keys) { $short = ($k -split '/')[-1]; foreach ($c in $S.Cols[$k].Keys) { $riPath[[int]$S.Cols[$k][$c]] = "$short/$c" } }
+    $riOlderLoaded = $false
+    function RiLoadOlder {
+        $t = @(Items (Api GET ('/api/v1/templates?limit=50&q=' + $TemplateCode)).Json) | Where-Object { $_.code -eq $TemplateCode } | Select-Object -First 1
+        foreach ($v in @(Items (Api GET "/api/v1/templates/$($t.id)/versions?limit=100").Json)) {
+            if ([int]$v.id -eq $S.VersionId) { continue }
+            $st = Invoke-Ecr -Method GET -Path "/api/v1/template-versions/$($v.id)/structure"
+            if ($st.Status -ne 200) { continue }
+            foreach ($sh in @($st.Json.sheets)) { foreach ($tb in @($sh.tables)) { foreach ($c in @($tb.columns)) {
+                        if (-not $riPath.ContainsKey([int]$c.id)) { $riPath[[int]$c.id] = "$($tb.code)/$($c.code)" } } } }
+        }
+    }
+    $riMid = @{}
+    foreach ($m in @(Items (Api GET '/api/v1/methodologies').Json)) { $riMid[[string]$m.code] = [int]$m.id }
+    $riChanged = 0; $riPending = 0
+    foreach ($riCode in @(Get-LandRequiredInputMethodologies)) {
+        if ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains $riCode) { continue }
+        $riId = $riMid[$riCode]
+        if (-not $riId) { Log "  ${riCode}: методології на сервері немає - пропущено"; continue }
+        $wanted = @(); $bad = @()
+        foreach ($w in @(Get-LandRequiredInputs -Methodology $riCode)) {
+            $k = $S.ShortTable[$w.Table]
+            $cid = if ($k) { $S.Cols[$k][$w.Column] } else { $null }
+            if (-not $cid) { $bad += $w.Path; continue }
+            $wanted += [pscustomobject]@{ Path = $w.Path; ColumnDefId = [int]$cid; Kind = $w.Kind }
+        }
+        if ($bad.Count -gt 0) { Log "  ! ${riCode}: у версії шаблону $($S.VersionId) немає колонок: $($bad -join ', ') - методологію пропущено"; continue }
+        $target = Get-LandRequiredInputTarget -Versions @(Items (Api GET "/api/v1/methodologies/$riId/versions").Json)
+        foreach ($fd in @($target.Foreign)) { Log "  ${riCode}: чернетка «$($fd.versionNumber)» (id $($fd.id)) чужа - не чіпаю" }
+        $source = if ($target.Draft) { $target.Draft } else { $target.Base }
+        if (-not $source) { Log "  ! ${riCode}: немає ні чернетки V<n>, ні опублікованої версії - пропущено"; continue }
+        $current = @()
+        foreach ($r in @(Items (Api GET "/api/v1/methodologies/$riId/versions/$($source.id)/required-inputs").Json)) {
+            $cid = [int]$r.columnDefId
+            if (-not $riPath.ContainsKey($cid) -and -not $riOlderLoaded) { RiLoadOlder; $riOlderLoaded = $true }
+            $current += [pscustomobject]@{ Path = $riPath[$cid]; Severity = [string]$r.severity }
+        }
+        $todo = @(Get-LandRequiredInputDiff -Wanted $wanted -Current $current -Severity $RequiredInputSeverity)
+        if ($todo.Count -eq 0) { Log "  ${riCode}: вимог $($wanted.Count), змін немає (версія $($source.versionNumber), $($source.status))"; continue }
+        $draft = $target.Draft
+        if (-not $draft) {
+            if (-not $RequiredInputsCreateDrafts) {
+                $riPending += $todo.Count
+                Log "  ${riCode}: до реєстрації $($todo.Count) з $($wanted.Count): $(@($todo | ForEach-Object { $_.Path }) -join ', '); чернетки V<n> немає - не чіпаю (-RequiredInputsCreateDrafts)"
+                continue
+            }
+            $new = Invoke-Ecr -Method POST -Path "/api/v1/methodologies/$riId/versions" -Body @{ versionNumber = $target.Next; copyFromVersionId = [int]$target.Base.id; level = $target.Base.level }
+            if ($new.Status -ne 200) { $riPending += $todo.Count; Log "  ! ${riCode}: чернетка $($target.Next) - HTTP $($new.Status) $(Get-EcrErrorCode $new)"; continue }
+            $draft = $new.Json
+            Log "  ${riCode}: чернетка $($target.Next) (id $($draft.id)) з версії $($target.Base.id), дата дії при публікації - $(([datetime]$target.Base.effectiveFrom).AddDays(1).ToString('yyyy-MM-dd'))"
+        }
+        $n = 0
+        foreach ($w in $todo) {
+            $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$riId/versions/$($draft.id)/required-inputs/$($w.ColumnDefId)" -Body @{ severity = $RequiredInputSeverity; hintL10n = $null }
+            if ($put.Status -ge 200 -and $put.Status -lt 300) { $n++ } else { Log "  ! ${riCode}: $($w.Path) HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
+        }
+        $riChanged += $n
+        Log "  ${riCode}: зареєстровано $n з $($todo.Count) (чернетка id $($draft.id), $RequiredInputSeverity)"
+    }
+    Log "  змінено: $riChanged; лишилось: $riPending"
+}
+
 # ==================== ParityBranch (C12_02: вибір type1/type2 за наявністю компонента) ====================
 # Лише явно: -Stage ParityBranch. У ЧЕРНЕТЦІ методології з LandParityBranch.Lib.ps1 формули type2 компонентів
 # обгортаються `if(@Land_Measure_Component_<код> = NULL, <вираз>, NULL)`: старий код C12_02 рахує для компонента лише
@@ -2584,6 +2669,8 @@ if ($Stage -contains 'SubstanceApplicability') { Stage-SubstanceApplicability }
     # AN-171/AN-172: одна гілка _typeN за NAE/потоком/речовиною + склад речовин - лише явно (-Stage BranchGate); ПЕРЕД
     # OptionalArguments.
     if ($Stage -contains 'BranchGate') { Stage-BranchGate }
+    # Обов'язкові входи методологій - лише явно (-Stage RequiredInputs); формул не чіпає, тож порядок щодо сусідів довільний.
+    if ($Stage -contains 'RequiredInputs') { Stage-RequiredInputs }
     # D-397: маркер `?` необов'язкових аргументів - лише явно (-Stage OptionalArguments); ОСТАННІМ: попередні етапи
     # переписують списки аргументів і зберігають чужі елементи як є, тож маркер ставиться на готовий список.
     if ($Stage -contains 'OptionalArguments') { Stage-OptionalArguments }
