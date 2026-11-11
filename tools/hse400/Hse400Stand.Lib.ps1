@@ -115,6 +115,24 @@ function Get-Hse400Items {
     return @($Json)
 }
 
+function Get-Hse400AllItems {
+    <# Усі сторінки PagedResult {items, nextCursor} (CursorPagination: limit 1..500, параметр cursor). #>
+    param([Parameter(Mandatory)][string]$Path, [int]$Limit = 200, [int]$MaxPages = 50)
+    $all = New-Object System.Collections.Generic.List[object]
+    $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+    $cursor = $null
+    for ($i = 0; $i -lt $MaxPages; $i++) {
+        $p = '{0}{1}limit={2}' -f $Path, $sep, $Limit
+        if ($cursor) { $p += '&cursor=' + [Uri]::EscapeDataString([string]$cursor) }
+        $j = (Invoke-Hse400Ok -Method GET -Path $p).Json
+        foreach ($x in Get-Hse400Items $j) { $all.Add($x) }
+        $cursor = $null
+        if ($null -ne $j -and -not ($j -is [array]) -and $j.PSObject.Properties['nextCursor']) { $cursor = $j.nextCursor }
+        if (-not $cursor) { break }
+    }
+    return $all.ToArray()
+}
+
 function Read-Hse400State {
     <# Стан (id шаблону/проєкту/документа) прив'язаний до стенда, на якому його створено. #>
     $f = Get-Hse400StateFile

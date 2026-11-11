@@ -1,6 +1,7 @@
 {
   "template": { "code": "HSE400", "version": "1.0.1.0", "en": "HSE400 Gas composition", "ru": "HSE400 Компонентный состав газа" },
   "sheet": { "code": "GasComposition", "en": "Gas composition", "ru": "Компонентный состав газа" },
+  "methodology": { "code": "HSE400", "version": "1.0.0.0", "en": "HSE400 Gas composition", "ru": "HSE400 Компонентный состав газа", "effectiveFrom": "2024-01-01" },
   "tables": [
     { "code": "FG_Makat", "en": "Makat gas", "ru": "Макатский газ", "rows": [
       { "key": "Methane", "kind": "Input", "en": "Methane (CH4), vol%", "ru": "Метан (CH4), % об." },

@@ -36,6 +36,23 @@ function Assert-Hse400Model {
         if ($c -cnotmatch $script:Hse400CodePattern) { $bad.Add("код '$c' не відповідає EcrCode") }
     }
     if ([string]$Model.template.version -notmatch '^\d+\.\d+\.\d+\.\d+$') { $bad.Add("версія '$($Model.template.version)'") }
+    # методологія (модуль місячних колонок): код = простір імен аргументів і формул, версія <= 20 символів
+    if ($null -eq $Model.PSObject.Properties['methodology'] -or $null -eq $Model.methodology) { $bad.Add('немає розділу methodology') }
+    else {
+        $mm = $Model.methodology
+        $mc = if ($mm.PSObject.Properties['code']) { [string]$mm.code } else { '' }
+        $mv = if ($mm.PSObject.Properties['version']) { [string]$mm.version } else { '' }
+        if ($mc -cnotmatch $script:Hse400CodePattern) { $bad.Add("методологія: код '$mc' не відповідає EcrCode") }
+        if ($mv.Length -lt 1 -or $mv.Length -gt 20) { $bad.Add("методологія: версія '$mv'") }
+        foreach ($n in 'en', 'ru') { if (-not $mm.PSObject.Properties[$n] -or -not [string]$mm.$n) { $bad.Add("методологія: порожня назва $n") } }
+        if ($mm.PSObject.Properties['formulas'] -and $null -ne $mm.formulas) {
+            foreach ($f in @($mm.formulas)) {
+                $fc = if ($f.PSObject.Properties['code']) { [string]$f.code } else { '' }
+                if ($fc -cnotmatch $script:Hse400CodePattern) { $bad.Add("формула '$fc' не відповідає EcrCode") }
+                if (-not $f.PSObject.Properties['expression'] -or -not [string]$f.expression) { $bad.Add("формула ${fc}: порожній вираз") }
+            }
+        }
+    }
     $codes = @($Model.tables | ForEach-Object { [string]$_.code })
     if (($codes -join ',') -cne (@($script:Hse400Expected.Keys) -join ',')) { $bad.Add("таблиці: $($codes -join ',')") }
     foreach ($t in @($Model.tables)) {
