@@ -93,7 +93,8 @@ test('calc results year: months, filter, drawer and Open source cell', async ({ 
   await expect(grid.locator('[data-cr-row="r-boiler"]')).toContainText('2/12');
   await expect(grid.locator('[data-cr-cell="r-flare#1"]')).toHaveText('7.25');
 
-  await page.getByLabel('Search').fill('ES-002');
+  // ⚠ Не `getByLabel('Search')`: такий підпис має й глобальний пошук оболонки застосунку.
+  await page.getByTestId('cr-search').fill('ES-002');
   await expect(grid.locator('[data-cr-row="r-boiler"]')).toHaveCount(0);
 
   await grid.locator('[data-cr-cell="r-flare#1"]').click();
