@@ -7,20 +7,23 @@ using Xunit;
 namespace Ecr.Architecture.Tests;
 
 /// <summary>
-/// AN-173 (шаблон Land 1.0.16.0): T9a_19 <c>Benzene</c>/<c>Xylene</c>/<c>Toluene</c>/<c>SaturatedHydrocarbonsC1C5</c>/<c>C6C10</c> -
-/// джерела мостів <c>Land_MassFraction_0&lt;код&gt;</c> (<c>ECW_C11_11_04</c> type1) - у моделі Decimal(34,16) замість String
-/// (у Strict текст × число = <c>#VALUE</c>). API тип колонки не змінює (<c>ECR-TMPL-0422</c>), тому <c>Fill-StructureSql</c>
-/// ретайпить String→Decimal у чернетці-клоні SQL-ом за планом <c>Get-LandDecimalRetypePlan</c>. Тести виконують справжні
-/// функції з підробленими <c>Sql-Query</c>/<c>Sql-Exec</c> (БД немає; підроблений <c>Sql-Exec</c> відтворює предикати SQL лише
-/// тоді, коли вони є в тексті UPDATE: Status=0, DataType=0, IsMonthColumn=0, немає значень комірок).
+/// AN-173 (шаблон Land 1.0.16.0): колонки масових часток <c>Benzene</c>/<c>Xylene</c>/<c>Toluene</c>/
+/// <c>SaturatedHydrocarbonsC1C5</c>/<c>C6C10</c> у T9a_16/17/19/24–28 - Decimal(34,16) замість String (рішення людини Q4), а
+/// мости <c>Land_MassFraction_0&lt;код&gt;</c> T9a_19 (<c>ECW_C11_11_04</c> type1) - числові 34/16 (Q5): у Strict текст × число =
+/// <c>#VALUE</c>. API тип колонки не змінює (<c>ECR-TMPL-0422</c>), тому <c>Fill-StructureSql</c> ретайпить String→Decimal і ставить
+/// Precision/Scale мостів у чернетці-клоні SQL-ом за планом <c>Get-LandDecimalRetypePlan</c>. Тести виконують справжні функції з
+/// підробленими <c>Sql-Query</c>/<c>Sql-Exec</c> (БД немає; підроблений <c>Sql-Exec</c> відтворює предикати SQL лише тоді, коли
+/// вони є в тексті UPDATE: Status=0, DataType, IsMonthColumn=0, Precision IS NULL, немає значень комірок).
 /// </summary>
 /// <remarks>
-/// Мутаційний доказ (лише цей клас): у моделі повернути одну з п'яти колонок у String; у <c>Get-LandDecimalRetypePlan</c>
+/// Мутаційний доказ (лише цей клас): у моделі повернути одну з колонок у String; у <c>Get-LandDecimalRetypePlan</c>
 /// прибрати перевірку <c>$c.month</c>; у UPDATE Build прибрати <c>v.Status=0</c> - відповідні тести червоніють.
 /// </remarks>
 public sealed class LandDecimalRetypeTests
 {
     private static readonly string[] Sources = ["SaturatedHydrocarbonsC1C5", "SaturatedHydrocarbonsC6C10", "Benzene", "Xylene", "Toluene"];
+
+    private static readonly string[] SourceTables = ["T9a_16", "T9a_17", "T9a_19", "T9a_24", "T9a_25", "T9a_26", "T9a_27", "T9a_28"];
 
     private static readonly (string Bridge, string Source)[] Bridges =
     [
@@ -33,12 +36,14 @@ public sealed class LandDecimalRetypeTests
 
     private static string LandFile(string name) => Path.Combine(SourceTree.Root, "tools", "land", name);
 
-    private static Dictionary<string, JsonElement> Columns(JsonDocument model, string table)
+    // коди таблиць у моделі не унікальні між аркушами (T7_00) - список пар, а не словник
+    private static List<(string Code, Dictionary<string, JsonElement> Columns)> Tables(JsonDocument model)
         => model.RootElement.GetProperty("sheets").EnumerateArray()
             .SelectMany(s => s.GetProperty("tables").EnumerateArray())
-            .Single(t => t.GetProperty("code").GetString() == table)
-            .GetProperty("columns").EnumerateArray()
-            .ToDictionary(c => c.GetProperty("code").GetString()!, c => c);
+            .Select(t => (
+                t.GetProperty("code").GetString()!,
+                t.GetProperty("columns").EnumerateArray().ToDictionary(c => c.GetProperty("code").GetString()!, c => c)))
+            .ToList();
 
     private const string Harness = """
         $ErrorActionPreference = 'Stop'
@@ -59,7 +64,12 @@ public sealed class LandDecimalRetypeTests
             {"code":"TX","dataType":"String"},
             {"code":"IN","dataType":"Decimal","precision":34,"scale":16},
             {"code":"NP","dataType":"Decimal"},
-            {"code":"BRG","dataType":"Formula","readOnly":true,"precision":null,"scale":null,"expression":"[BZ]"}]}]}]}'
+            {"code":"BRG","dataType":"Formula","readOnly":true,"precision":34,"scale":16,"expression":"[BZ]"},
+            {"code":"BRD","dataType":"Formula","readOnly":true,"precision":34,"scale":16,"expression":"[DD]"},
+            {"code":"BRP","dataType":"Formula","readOnly":true,"precision":34,"scale":16,"expression":"[PC]"},
+            {"code":"BRX","dataType":"Formula","readOnly":true,"precision":34,"scale":16,"expression":"[TX]"},
+            {"code":"BRM","dataType":"Formula","readOnly":true,"precision":34,"scale":16,"expression":"[MD]"},
+            {"code":"BR0","dataType":"Formula","readOnly":true,"precision":null,"scale":null,"expression":"[BZ]"}]}]}]}'
         if ($mode -eq 'plan') {
             $mdl = $modelJson | ConvertFrom-Json
             $ex = @{
@@ -71,9 +81,15 @@ public sealed class LandDecimalRetypeTests
                 IN = @{ id = 6; type = 1; precision = $null; scale = $null }
                 NP = @{ id = 7; type = 0; precision = $null; scale = $null }
                 BRG = @{ id = 8; type = 6; precision = $null; scale = $null }
+                BRD = @{ id = 9; type = 6; precision = $null; scale = $null }
+                BRP = @{ id = 10; type = 6; precision = $null; scale = $null }
+                BRX = @{ id = 11; type = 6; precision = $null; scale = $null }
+                BRM = @{ id = 12; type = 6; precision = $null; scale = $null }
+                BR0 = @{ id = 13; type = 6; precision = $null; scale = $null }
             }
             $p = Get-LandDecimalRetypePlan @($mdl.sheets[0].tables[0].columns) $ex
             Write-Host ('RETYPE=' + (@($p.Retype | ForEach-Object { '{0}#{1}:{2}/{3}:{4}' -f $_.Code, $_.Id, $_.Precision, $_.Scale, $_.Unit }) -join ','))
+            Write-Host ('BRIDGES=' + (@($p.Bridges | ForEach-Object { '{0}#{1}:{2}/{3}' -f $_.Code, $_.Id, $_.Precision, $_.Scale }) -join ','))
             foreach ($w in @($p.Warn)) { Write-Host ('W=' + $w) }
             Write-Host ('SAME=' + $p.Same)
         }
@@ -92,6 +108,11 @@ public sealed class LandDecimalRetypeTests
                 6 = @{ code = 'IN'; type = 1; p = $null; s = $null; u = $null; m = $false; f = '@' }
                 7 = @{ code = 'NP'; type = 0; p = $null; s = $null; u = $null; m = $false; f = '@' }
                 8 = @{ code = 'BRG'; type = 6; p = $null; s = $null; u = $null; m = $false; f = '@' }
+                9 = @{ code = 'BRD'; type = 6; p = $null; s = $null; u = $null; m = $false; f = '@' }
+                10 = @{ code = 'BRP'; type = 6; p = $null; s = $null; u = $null; m = $false; f = '@' }
+                11 = @{ code = 'BRX'; type = 6; p = $null; s = $null; u = $null; m = $false; f = '@' }
+                12 = @{ code = 'BRM'; type = 6; p = $null; s = $null; u = $null; m = $false; f = '@' }
+                13 = @{ code = 'BR0'; type = 6; p = $null; s = $null; u = $null; m = $false; f = '@' }
             }
             $DataTypeCode = @{ String = 0; Int = 1; Decimal = 2; Bool = 3; Date = 4; Lookup = 5; Formula = 6; Unit = 7; Calculated = 8 }
             $effectiveSqlConnection = 'fake'
@@ -130,16 +151,26 @@ public sealed class LandDecimalRetypeTests
                 return , $dt
             }
             function Sql-Exec($cn, [string]$sql, [hashtable]$p = @{}) {
+                $noValues = '*NOT EXISTS (SELECT 1 FROM doc.CellValue cv WHERE cv.ColumnDefId=c.Id)*'
                 if ($sql -like 'UPDATE c SET DataType=2, Precision=@p*') {
                     $c = $script:State[[int]$p.i]
                     if ($sql -like '*v.Status=0*' -and $script:Status -ne 0) { return 0 }
                     if ($sql -like '*c.DataType=0*' -and $c.type -ne 0) { return 0 }
                     if ($sql -like '*c.IsMonthColumn=0*' -and $c.m) { return 0 }
-                    if ($sql -like '*NOT EXISTS (SELECT 1 FROM doc.CellValue cv WHERE cv.ColumnDefId=c.Id)*' -and $script:HasValues.ContainsKey([int]$p.i)) { return 0 }
+                    if ($sql -like $noValues -and $script:HasValues.ContainsKey([int]$p.i)) { return 0 }
                     $c.type = 2; $c.p = [int]$p.p; $c.s = [int]$p.s
                     $c.u = if ($p.u -is [DBNull]) { $null } else { [int]$p.u }
                     if ($sql -like '*DisplayFormat=NULL*') { $c.f = $null }
                     Write-Host ('RETYPED=' + $c.code); return 1
+                }
+                if ($sql -like 'UPDATE c SET Precision=@p, Scale=@s*') {
+                    $c = $script:State[[int]$p.i]
+                    if ($sql -like '*v.Status=0*' -and $script:Status -ne 0) { return 0 }
+                    if ($sql -like '*c.DataType IN (6,8)*' -and $c.type -notin 6, 8) { return 0 }
+                    if ($sql -like '*c.Precision IS NULL AND c.Scale IS NULL*' -and ($null -ne $c.p -or $null -ne $c.s)) { return 0 }
+                    if ($sql -like $noValues -and $script:HasValues.ContainsKey([int]$p.i)) { return 0 }
+                    $c.p = [int]$p.p; $c.s = [int]$p.s
+                    Write-Host ('BRIDGE=' + $c.code); return 1
                 }
                 if ($sql -like 'UPDATE c SET DataType=0*' -or $sql -like 'UPDATE c SET Precision=NULL*') { Write-Host ('TEXT=' + $script:State[[int]$p.i].code); return 1 }
                 if ($sql -like 'UPDATE cfg.ColumnDef SET Precision=@p*') { Write-Host ('WIDEN=' + $script:State[[int]$p.i].code); return 1 }
@@ -189,7 +220,7 @@ public sealed class LandDecimalRetypeTests
             }
 
             Assert.True(process.ExitCode == 0, stdout + stderr);
-            return stdout;
+            return stdout.Replace("\r", string.Empty);
         }
         finally
         {
@@ -202,56 +233,63 @@ public sealed class LandDecimalRetypeTests
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void Модель_T9a_19_джерела_MassFraction_Decimal_34_16_а_9a_16_і_мости_без_змін()
+    public void Модель_масові_частки_9a_Decimal_34_16_а_мости_MassFraction_числові()
     {
         using var model = JsonDocument.Parse(File.ReadAllText(Path.Combine(
             SourceTree.Root, "docs", "delivery", "reference-data", "land-template", "land-template.model.json")));
-        var t19 = Columns(model, "T9a_19");
-        var t16 = Columns(model, "T9a_16");
+        var tables = Tables(model);
 
-        foreach (var code in Sources)
+        // коди масових часток є рівно у восьми таблицях 9a (Q4) - і в кожній усі п'ять
+        Assert.Equal(
+            SourceTables,
+            tables.Where(t => Sources.Any(t.Columns.ContainsKey)).Select(t => t.Code).Order(StringComparer.Ordinal).ToArray());
+
+        foreach (var table in SourceTables)
         {
-            var c = t19[code];
-            Assert.True(c.GetProperty("dataType").GetString() == "Decimal", $"T9a_19.{code}: має бути Decimal (AN-173).");
-            Assert.Equal(34, c.GetProperty("precision").GetInt32());
-            Assert.Equal(16, c.GetProperty("scale").GetInt32());
-            Assert.True(!c.TryGetProperty("month", out var m) || m.ValueKind == JsonValueKind.Null, $"T9a_19.{code}: не місячна.");
-
-            // поза T9a_19 ті самі коди не чіпаються (AN-173 - лише 9a_19)
-            Assert.Equal("String", t16[code].GetProperty("dataType").GetString());
-            Assert.False(t16[code].TryGetProperty("precision", out _), $"T9a_16.{code}: precision не очікується.");
+            foreach (var code in Sources)
+            {
+                var c = tables.Single(t => t.Code == table).Columns[code];
+                Assert.True(c.GetProperty("dataType").GetString() == "Decimal", $"{table}.{code}: має бути Decimal (AN-173).");
+                Assert.Equal(34, c.GetProperty("precision").GetInt32());
+                Assert.Equal(16, c.GetProperty("scale").GetInt32());
+                Assert.True(!c.TryGetProperty("month", out var m) || m.ValueKind == JsonValueKind.Null, $"{table}.{code}: не місячна.");
+            }
         }
 
-        // мости лишаються як були (рішення щодо них окреме): Formula, лише читання, precision/scale null, вираз [джерело]
+        // мости (Q5): Formula, лише читання, 34/16 (число, не текст), вираз [джерело]
         foreach (var (bridge, source) in Bridges)
         {
-            var b = t19[bridge];
+            var b = tables.Single(t => t.Code == "T9a_19").Columns[bridge];
             Assert.Equal("Formula", b.GetProperty("dataType").GetString());
             Assert.True(b.GetProperty("readOnly").GetBoolean());
-            Assert.Equal(JsonValueKind.Null, b.GetProperty("precision").ValueKind);
-            Assert.Equal(JsonValueKind.Null, b.GetProperty("scale").ValueKind);
+            Assert.Equal(34, b.GetProperty("precision").GetInt32());
+            Assert.Equal(16, b.GetProperty("scale").GetInt32());
             Assert.Equal($"[{source}]", b.GetProperty("expression").GetString());
         }
     }
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void Генератор_ретайпить_джерело_MassFraction_після_створення_мосту()
+    public void Генератор_ретайпить_масові_частки_вісьмох_таблиць_до_створення_мостів()
     {
         var gen = File.ReadAllText(Path.Combine(SourceTree.Root, "tools", "land", "model-gen", "nae_group_bridges.py"));
+        Assert.Contains(
+            "MASSFRACTION_SOURCE_TABLES = ('T9a_16', 'T9a_17', 'T9a_19', 'T9a_24', 'T9a_25', 'T9a_26', 'T9a_27', 'T9a_28')",
+            gen,
+            StringComparison.Ordinal);
+        var retype = gen.IndexOf("    retype_mass_fraction_sources(by_code, codes)", StringComparison.Ordinal);
         var bridge = gen.IndexOf("% (arg, arg, code, MASSFRACTION_METHODOLOGY), src_col['dataType']))", StringComparison.Ordinal);
-        var retype = gen.IndexOf("_retype_decimal(src_col)", StringComparison.Ordinal);
-        Assert.True(bridge > 0, "міст MassFraction бере тип джерела");
-        Assert.True(retype > bridge, "ретайп джерела - ПІСЛЯ створення мосту (міст лишається текстовим, precision None)");
+        Assert.True(retype > 0 && bridge > retype, "ретайп джерел - ДО мостів: міст бере тип джерела (Decimal -> числовий міст)");
     }
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void План_String_в_Decimal_лише_для_немісячних_колонок_String_клону()
+    public void План_String_в_Decimal_лише_немісячних_і_числові_мости_лише_над_Decimal()
     {
-        var output = Run("plan").Replace("\r", string.Empty);
+        var output = Run("plan");
 
         Assert.Contains("RETYPE=BZ#1:34/16:,PC#2:34/16:pct\n", output, StringComparison.Ordinal);   // MD місячна, TX у моделі String, DD уже Decimal, IN - Int
+        Assert.Contains("BRIDGES=BRG#8:34/16,BRD#9:34/16,BRP#10:34/16\n", output, StringComparison.Ordinal);   // BRX над String, BRM над місячною, BR0 у моделі текстовий
         Assert.Single(Lines(output, "SAME="), "SAME=1");
         var warn = Lines(output, "W=");
         Assert.Equal(2, warn.Length);
@@ -261,48 +299,62 @@ public sealed class LandDecimalRetypeTests
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void Build_у_чернетці_ретайпить_String_в_Decimal_а_повтор_дає_нуль_змін()
+    public void Build_у_чернетці_ретайпить_String_в_Decimal_і_мости_а_повтор_дає_нуль_змін()
     {
         var output = Run("draft");
         var runs = output.Split("RUN=2", StringSplitOptions.None);
 
         Assert.Equal(["RETYPED=BZ", "RETYPED=PC"], Lines(runs[0], "RETYPED="));
+        Assert.Equal(["BRIDGE=BRG", "BRIDGE=BRD", "BRIDGE=BRP"], Lines(runs[0], "BRIDGE="));
         Assert.Contains("LOG=    String->Decimal: S/T/BZ", runs[0], StringComparison.Ordinal);
-        Assert.Matches(@"LOG=.*String->Decimal.*: 2\s", runs[0]);
+        Assert.Contains("LOG=    міст precision моделі: S/T/BRG", runs[0], StringComparison.Ordinal);
+        Assert.Matches(@"LOG=.*String->Decimal.*: 2\n", runs[0]);
         Assert.Contains("LOG=  WARN тип колонки: S/T/MD:", runs[0], StringComparison.Ordinal);
         Assert.Empty(Lines(output, "TEXT="));   // текстовий ретайп і скидання precision мостів не задіяні
+        Assert.Empty(Lines(output, "WIDEN="));
 
         Assert.Empty(Lines(runs[1], "RETYPED="));
-        Assert.Matches(@"LOG=.*String->Decimal.*: 0\s", runs[1]);
+        Assert.Empty(Lines(runs[1], "BRIDGE="));
+        Assert.Matches(@"LOG=.*String->Decimal.*: 0\n", runs[1]);
 
         // рядок - як у свіжої Decimal-колонки моделі: 34/16, одиниця моделі, DisplayFormat скинуто (його пише презентація)
-        Assert.Contains("STATE=BZ:2:34:16:u:f\n", output.Replace("\r", string.Empty), StringComparison.Ordinal);
-        Assert.Contains("STATE=PC:2:34:16:u42:f\n", output.Replace("\r", string.Empty), StringComparison.Ordinal);
+        Assert.Contains("STATE=BZ:2:34:16:u:f\n", output, StringComparison.Ordinal);
+        Assert.Contains("STATE=PC:2:34:16:u42:f\n", output, StringComparison.Ordinal);
         Assert.Contains("STATE=MD:0:::u:f@", output, StringComparison.Ordinal);
         Assert.Contains("STATE=TX:0:::u:f@", output, StringComparison.Ordinal);
         Assert.Contains("STATE=IN:1:::u:f@", output, StringComparison.Ordinal);
         Assert.Contains("STATE=NP:0:::u:f@", output, StringComparison.Ordinal);
-        Assert.Contains("STATE=BRG:6:::u:f@", output, StringComparison.Ordinal);   // міст не чіпається
+        Assert.Contains("STATE=BRG:6:34:16:u:f@", output, StringComparison.Ordinal);
+        Assert.Contains("STATE=BRD:6:34:16:u:f@", output, StringComparison.Ordinal);
+        Assert.Contains("STATE=BRX:6:::u:f@", output, StringComparison.Ordinal);
+        Assert.Contains("STATE=BRM:6:::u:f@", output, StringComparison.Ordinal);
+        Assert.Contains("STATE=BR0:6:::u:f@", output, StringComparison.Ordinal);
     }
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void Build_не_ретайпить_у_опублікованій_версії_і_колонку_зі_значеннями()
+    public void Build_не_чіпає_опубліковану_версію_колонку_зі_значеннями_і_міст_над_нею()
     {
         var published = Run("published");
         Assert.Empty(Lines(published, "RETYPED="));
+        Assert.Empty(Lines(published, "BRIDGE="));
         Assert.Contains("STATE=BZ:0:::u:f@", published, StringComparison.Ordinal);
+        Assert.Contains("STATE=BRG:6:::u:f@", published, StringComparison.Ordinal);
         Assert.Contains("S/T/BZ: UPDATE String->Decimal не застосовано", published, StringComparison.Ordinal);
 
         var withValues = Run("values");
-        Assert.Equal(["RETYPED=BZ"], Lines(withValues.Split("RUN=2", StringSplitOptions.None)[0], "RETYPED="));
-        Assert.Contains("STATE=PC:0:::u:f@", withValues, StringComparison.Ordinal);   // PC має значення комірок
+        var first = withValues.Split("RUN=2", StringSplitOptions.None)[0];
+        Assert.Equal(["RETYPED=BZ"], Lines(first, "RETYPED="));
+        Assert.Equal(["BRIDGE=BRG", "BRIDGE=BRD"], Lines(first, "BRIDGE="));   // BRP читає PC, який лишився String
+        Assert.Contains("STATE=PC:0:::u:f@", withValues, StringComparison.Ordinal);
+        Assert.Contains("STATE=BRP:6:::u:f@", withValues, StringComparison.Ordinal);
         Assert.Contains("S/T/PC: UPDATE String->Decimal не застосовано", withValues, StringComparison.Ordinal);
+        Assert.Contains("S/T/BRP: джерело лишилось String", withValues, StringComparison.Ordinal);
     }
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void SQL_гарди_String_в_Decimal_у_Fill_StructureSql()
+    public void SQL_гарди_String_в_Decimal_і_мостів_у_Fill_StructureSql()
     {
         var build = File.ReadAllText(LandFile("Build-LandTemplate.ps1"));
         var fill = build[build.IndexOf("function Fill-StructureSql", StringComparison.Ordinal)..];
@@ -315,6 +367,10 @@ public sealed class LandDecimalRetypeTests
             StringComparison.Ordinal);
         Assert.Contains(
             "v.Status=0 AND c.DataType=0 AND c.IsMonthColumn=0 AND NOT EXISTS (SELECT 1 FROM doc.CellValue cv WHERE cv.ColumnDefId=c.Id)",
+            fill,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "v.Status=0 AND c.DataType IN (6,8) AND c.Precision IS NULL AND c.Scale IS NULL AND NOT EXISTS (SELECT 1 FROM doc.CellValue cv WHERE cv.ColumnDefId=c.Id)",
             fill,
             StringComparison.Ordinal);
 
