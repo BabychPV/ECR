@@ -17,7 +17,7 @@ using Xunit;
 namespace Ecr.Application.Tests.Documents;
 
 /// <summary>Пакетна зміна комірок — найгарячіший шлях запису.</summary>
-public sealed class PatchCellsTests
+public sealed partial class PatchCellsTests
 {
     private const long TableInstance = 500;
     private const int Period = 202601;
@@ -709,12 +709,12 @@ public sealed class PatchCellsTests
     /// Id колонки <c>Category</c> у версії шаблону ДОКУМЕНТА. Правило/вхід методології ключуються Id <c>12</c> —
     /// колонкою версії-джерела (C1: документ на клон-версії має інший Id тієї самої колонки).
     /// </param>
+    /// <param name="matchJson">Предикат єдиного правила; типово <c>{}</c> («вся таблиця»).</param>
+    /// <param name="requiredColumnId">Колонка єдиної вимоги; типово <c>Category</c> (12).</param>
     private int WithMethodology(
         RequiredInputSeverity severity, CellDataType categoryType = CellDataType.String,
-        int documentCategoryColumnId = 12)
+        int documentCategoryColumnId = 12, string matchJson = "{}", int requiredColumnId = 12)
     {
-        const int CategoryColumnId = 12;
-
         var volume = new ColumnDef(
             tableDefId: 3, EcrCode.Create("Volume"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume" }), 1, CellDataType.Decimal);
@@ -748,8 +748,8 @@ public sealed class PatchCellsTests
         var methodology = new Methodology(EcrCode.Create("ECW_TEST"), new LocalizedText(
             new Dictionary<string, string> { ["en"] = "Test methodology" }));
         var version = new MethodologyVersion(MethodologyId, "1.0", CalculationLevel.Configuration, 1, Now);
-        var rule = version.AddRule(EcrCode.Create("all"), "{}", 100);
-        var requiredInput = version.AddRequiredInput(CategoryColumnId, severity, hint: null);
+        var rule = version.AddRule(EcrCode.Create("all"), matchJson, 100);
+        var requiredInput = version.AddRequiredInput(requiredColumnId, severity, hint: null);
         version.Publish(publishedByUserId: 2, "тестова публікація", new DateOnly(2026, 1, 1), testsPassed: true, Now);
 
         _methodologies.GetMethodologyIdsBoundToTableAsync(3, Arg.Any<CancellationToken>())
