@@ -528,12 +528,16 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
         -- у квартальних/річних ключ Year*100+Sequence означає не місяць.
         -- Q-17.slotmap: вʼюха з маршрутизованими колонками читає мапу слотів rpt.ViewSlot (pc, sc, fam); решта - як була.
         SET @useSlots = CASE WHEN @monthMask <> 0 OR @needAnchor = 1 THEN 1 ELSE 0 END;
+        -- AN-163 (Land T3_00 1.0.14.0, Аудит-2 10.11: 7-19,6 с при бюджеті 5 с): pc/sc читають комірки рядка ЛИШЕ seek-ом по ОБОХ
+        -- ключах (PeriodKey, TableRowId) кластерного індексу (id 1, ім'я не потрібне). Без підказки план, складений на іншому
+        -- документі (параметри sp_executesql/SSRS), seek-ав лише PeriodKey і на КОЖЕН рядок перечитував усю партицію періоду:
+        -- CellValue 588 виконань / 2,07 млн читань на 788 рядків (з підказкою - 788 / 3 688), CPU 55 с при DOP 12.
         IF @plainCnt > 0
         BEGIN
             SET @joins = @joins + CASE WHEN @useSlots = 1 THEN N'
-OUTER APPLY (SELECT ' + STUFF(@plainAggS, 1, 2, N'') + N' FROM doc.CellValue AS x INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
+OUTER APPLY (SELECT ' + STUFF(@plainAggS, 1, 2, N'') + N' FROM doc.CellValue AS x WITH (FORCESEEK (1 (PeriodKey, TableRowId))) INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
                 + N' AND m.ColumnDefId = x.ColumnDefId WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc' ELSE N'
-OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc' END;
+OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x WITH (FORCESEEK (1 (PeriodKey, TableRowId))) WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc' END;
             SET @extra = @extra + 1 - @plainCnt + @useSlots;   -- pc замість c<n> на кожну нероутовану колонку (+ мапа слотів)
         END
 
@@ -574,7 +578,7 @@ LEFT HASH JOIN (SELECT c.DocumentId, c.Yr, c.RowKey' + @famAgg + N'
             -- (Land T9_04: 3 448 обчислених комірок екземпляра x ~150 CASE, із них маршрутизованих - 0). Власна копія - у pc.
             SET @extra = @extra + 2;   -- sc + його мапа
             SET @ownerCells = N'
-OUTER APPLY (SELECT ' + STUFF(@scAggS, 1, 2, N'') + N' FROM doc.CellValue AS x INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
+OUTER APPLY (SELECT ' + STUFF(@scAggS, 1, 2, N'') + N' FROM doc.CellValue AS x WITH (FORCESEEK (1 (PeriodKey, TableRowId))) INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
                 + N' AND m.ColumnDefId = x.ColumnDefId AND m.Mo IS NOT NULL WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id AND x.IsCalculated = 1) AS sc';
 
             -- Порядок: приєднання власників-рядків ідуть ДО комірок власників; власні копії нероутованих колонок (c<n>) - між ними.
@@ -1192,12 +1196,18 @@ BEGIN
         END
 
         -- Q-17.slotmap: a group with month-routed columns reads the slot map rpt.ViewSlot (pc, sc, fam); the others are unchanged.
-        SET @useSlots = CASE WHEN @monthMask <> 0 OR @needAnchor = 1 THEN 1 ELSE 0 END;
+        -- AN-163: so does a group whose code maps to SEVERAL ColumnDefIds (several versions or aliases): with IN (<ids>) per
+        -- aggregate every cell paid ~N comparisons x ~260 aggregates (Land T3_00, 9 versions: pc 3,5 s CPU of 8 s for 5 518 rows);
+        -- by slot it is one seek of the map and one int comparison per aggregate. Values are the same (the map holds every id of
+        -- the code in its slot; a type-conflict code keeps its IN lists, they are inside @plainAggS too). Requires @MonthRouting
+        -- (the OFF text stays as it was).
+        SET @useSlots = CASE WHEN @monthMask <> 0 OR @needAnchor = 1 THEN 1
+                             WHEN @MonthRouting = 1 AND (SELECT COUNT(*) FROM @slot) > @n THEN 1 ELSE 0 END;
         IF @plainCnt > 0
             SET @joins = @joins + CASE WHEN @useSlots = 1 THEN N'
-OUTER APPLY (SELECT ' + STUFF(@plainAggS, 1, 2, N'') + N' FROM doc.CellValue AS x INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
+OUTER APPLY (SELECT ' + STUFF(@plainAggS, 1, 2, N'') + N' FROM doc.CellValue AS x WITH (FORCESEEK (1 (PeriodKey, TableRowId))) INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
                 + N' AND m.ColumnDefId = x.ColumnDefId WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc' ELSE N'
-OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc' END;
+OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x WITH (FORCESEEK (1 (PeriodKey, TableRowId))) WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc' END;
 
         IF @monthMask <> 0 OR @needAnchor = 1
         BEGIN
@@ -1224,13 +1234,16 @@ LEFT HASH JOIN (SELECT c.DocumentId, c.Yr, c.RowKey' + @famAgg + N'
        ON p.PeriodKind = 0 AND fam.DocumentId = ti.DocumentId AND fam.Yr = ti.PeriodKey / 100 AND fam.RowKey = r.RowKey' + @mixedGuard;
             -- Own computed cell (sc): only the computed cells of ROUTED columns (map rows with Mo) reach the aggregate.
             SET @ownerCells = N'
-OUTER APPLY (SELECT ' + STUFF(@scAggS, 1, 2, N'') + N' FROM doc.CellValue AS x INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
+OUTER APPLY (SELECT ' + STUFF(@scAggS, 1, 2, N'') + N' FROM doc.CellValue AS x WITH (FORCESEEK (1 (PeriodKey, TableRowId))) INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
                 + N' AND m.ColumnDefId = x.ColumnDefId AND m.Mo IS NOT NULL WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id AND x.IsCalculated = 1) AS sc';
             SET @joins = @ownerRows + @joins + @ownerCells;
         END
 
-        -- Methodology results for Calculated columns: same set-based read as _vN (Q-17.recalc / perf / rvshape), over the
-        -- bindings of ANY version of the table (the binding names the ColumnDef of its own version).
+        -- Methodology results for Calculated columns: same set-based read as _vN (Q-17.recalc / perf / rvshape).
+        -- AN-163: only the bindings of the ROW's own version (bb.TableDefId = ti.TableDefId), as the API slice
+        -- (CalculatedCellOverlay: b.TableDefId == table.TableDefId) and the row's _vN view do. Bindings of every version of the
+        -- group joined the same results once per version (Land T3_00, 9 versions: 88 032 results -> 704 256 rows, rv 4,5 s
+        -- CPU of 8 s) and let a binding of another version fill a row its own version does not bind.
         IF @rvIds <> N'' AND @rvPred = 0
         BEGIN
             SET @rowApply = N'
@@ -1254,7 +1267,7 @@ CROSS APPLY (SELECT r0.Id, r0.RowKey, r0.Ordinal, r0.PeriodKey' + @rvExprs + N'
                                           INNER HASH JOIN (SELECT bb.Id, bb.ColumnDefId, bb.OutputCode, mv.Id AS MvId
                                                              FROM cfg.CalculationBinding AS bb
                                                              JOIN calc.MethodologyVersion AS mv ON mv.MethodologyId = bb.MethodologyId
-                                                            WHERE bb.IsActive = 1 AND bb.TableDefId IN (' + @tids + N') AND bb.ColumnDefId IN (' + STUFF(@rvIds, 1, 2, N'') + N')
+                                                            WHERE bb.IsActive = 1 AND bb.TableDefId = ti.TableDefId AND bb.ColumnDefId IN (' + STUFF(@rvIds, 1, 2, N'') + N')
                                                               AND REPLACE(bb.MatchJson, CHAR(32), N'''') = N''{}'') AS b
                                                ON b.MvId = cr.MethodologyVersionId AND b.OutputCode = cr.OutputCode
                                           WHERE ru.ProjectId = d.ProjectId AND ru.Status = N''Current'' AND ru.PeriodKey = ti.PeriodKey
@@ -1295,7 +1308,7 @@ OUTER APPLY (SELECT ' + STUFF(@rvAgg, 1, 2, N'') + N'
                                                         WHERE ru2.ProjectId = d.ProjectId AND ru2.Status = N''Current''
                                                           AND ru2.DocumentId = d.Id AND ru2.PeriodKey = ti.PeriodKey)))) AS rr
                                           ON rr.Id = cr.CalculationRunId
-                                     WHERE b.IsActive = 1 AND b.TableDefId IN (' + @tids + N') AND b.ColumnDefId IN (' + STUFF(@rvIds, 1, 2, N'') + N')
+                                     WHERE b.IsActive = 1 AND b.TableDefId = ti.TableDefId AND b.ColumnDefId IN (' + STUFF(@rvIds, 1, 2, N'') + N')
                                        AND (cr.TableInstanceId = ti.Id OR cr.TableInstanceId IS NULL)';
             SET @rvApply = @rvApply + N'
                                        AND (REPLACE(b.MatchJson, CHAR(32), N'''') = N''{}''
