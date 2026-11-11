@@ -66,7 +66,8 @@ public sealed partial class RecalculationJob(
     ISheetEditGate? sheetGate = null,
     CrossPeriodFanOut? fanOut = null,
     IRecalcCommandTimeout? commandTimeout = null,
-    IAuditWriter? audit = null) : IRecalculationJob
+    IAuditWriter? audit = null,
+    IRecalculationCompletionHook? completionHook = null) : IRecalculationJob
 {
     [LoggerMessage(
         Level = LogLevel.Error,
@@ -710,6 +711,12 @@ public sealed partial class RecalculationJob(
                 .ObserveAsync(
                     projectId, request.DocumentId, fullYear: request.PeriodKey is null, clock.UtcNow - startedAt, progress, ct)
                 .ConfigureAwait(false);
+        }
+
+        // HSE400 3b: після УСПІШНОГО прогону — документи й періоди, які він рахував (провалений сюди не доходить).
+        if (completionHook is not null && scopeByDocument.Count > 0)
+        {
+            await completionHook.OnSucceededAsync(scopeByDocument, ct).ConfigureAwait(false);
         }
     }
 

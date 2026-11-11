@@ -428,6 +428,7 @@ public static class DependencyInjection
         services.AddSingleton(Jobs.RecalculationBudgetOptions.Read(configuration));
         services.AddSingleton<Jobs.RecalculationBudgetMonitor>();
         services.AddScoped<IRecalculationJob, Jobs.RecalculationJob>();
+        services.AddScoped<Jobs.IRecalculationCompletionHook>(sp => ActivatorUtilities.CreateInstance<Jobs.Hse400LandDependentsTrigger>(sp, Jobs.Hse400LandDependentsTrigger.IsEnabled(configuration))); // HSE400 3b
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
         // WW-03: постановка перерахунку в періоди-читачі (міжперіодні посилання).
         services.AddScoped<Jobs.CrossPeriodFanOut>();

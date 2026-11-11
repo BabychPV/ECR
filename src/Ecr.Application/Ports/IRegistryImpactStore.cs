@@ -59,6 +59,24 @@ public interface IRegistryImpactStore
     /// </remarks>
     public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedForDocumentsAsync(
         int registryDefId, IReadOnlyCollection<long> documentIds, CancellationToken ct);
+
+    /// <summary>
+    /// Ті самі рядки, що <see cref="ListImpactedAsync"/>, але за зміну джерела даних довідника, а не правку
+    /// <c>dic.*</c>: без умови «прогін до <c>DataChangedAt</c>» і лише періоди року <paramref name="year"/> (HSE400 3b).
+    /// </summary>
+    /// <param name="registryDefId">Довідник, який читають методології.</param>
+    /// <param name="year">Рік періодів результатів (<c>PeriodKey / 100</c>).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Рядки, впорядковані за документом і періодом; один рядок на методологію.</returns>
+    /// <remarks>
+    /// ⚠ Для довідника, чиї дані підміняє документ (<c>LAND_HSE400_COMPOSITION</c> за
+    /// <c>Calculations:Hse400CompositionFromDocument</c>): рядки <c>dic.*</c> не змінюються, тож
+    /// <c>DataChangedAt</c> мовчить. Застарілий — кожен актуальний прогін на момент ВИКОНАННЯ задачі: черга лишає
+    /// payload першої постановки, тож момент зміни з payload пропустив би документ, перерахований між двома змінами
+    /// джерела. Решта правил — ті самі: лише <c>Open</c>/<c>Grace</c>, методологія читає довідник. Без стелі —
+    /// задача в черзі, межа — рік.
+    /// </remarks>
+    public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedForYearAsync(int registryDefId, int year, CancellationToken ct);
 }
 
 /// <summary>Один зачеплений документ у періоді, через одну методологію.</summary>
