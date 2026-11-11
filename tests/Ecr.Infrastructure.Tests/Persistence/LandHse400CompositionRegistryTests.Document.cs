@@ -160,6 +160,37 @@ public sealed partial class LandHse400CompositionRegistryTests
         Assert.Equal(0.7m, Eval(f, snapshot, ModelDensity20(), FuelGasInternal, month: 1).AsNumber());
     }
 
+    /// <remarks>
+    /// Мутаційний доказ: у <see cref="Hse400CompositionSnapshotLoader"/> не додавати 0 для порожнього F_ місяця з
+    /// нульовим вводом — тест червоніє (#N/A замість 0 у січні).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE400")]
+    public async Task Порожній_F_місяця_з_нульовим_вводом_дає_0_як_стара_система_а_з_ненульовим_лишається_N_A()
+    {
+        var f = await ArrangeAsync();
+
+        // F_FuelLowerHeating_20 без результату прогону (модуль погасив ділення на 0) в обох місяцях;
+        // січень: увесь ввід - нулі; лютий: ввід ненульовий.
+        var template = await BuildDocumentAsync(
+            [("FG_Internal", "F_FuelLowerHeating_20")],
+            ("FG_Internal", "Density_20", 1, 0m),
+            ("FG_Internal", "Vddg", 1, 0m),
+            ("FG_Internal", "Density_20", 2, 0.8m),
+            ("FG_Internal", "Vddg", 2, 0m));
+
+        var snapshot = await LoadFromDocumentAsync(f, template);
+        var heating = ModelExpression("T9_08", "FuelLowerHeating");
+
+        Assert.Equal(0m, Eval(f, snapshot, heating, FuelGasInternal, month: 1).AsNumber());
+        Assert.Equal(ExpressionErrors.NotAvailable, Eval(f, snapshot, heating, FuelGasInternal, month: 2).ErrorCode);
+
+        // Вводу нуль - теж число, не «немає».
+        Assert.Equal(0m, Eval(f, snapshot, ModelDensity20(), FuelGasInternal, month: 1).AsNumber());
+    }
+
     private TestDocument? lastBuilt;
 
     private async Task<IRegistrySnapshot> LoadFromDocumentAsync(Fixture f, string templateCode, bool enabled = true)
@@ -194,7 +225,13 @@ public sealed partial class LandHse400CompositionRegistryTests
     /// на показник; значення рядка вводу — у <c>doc.CellValue</c>, розрахункового <c>F_&lt;X&gt;</c> — в актуальному прогоні.
     /// </summary>
     /// <returns>Код шаблону документа.</returns>
-    private async Task<string> BuildDocumentAsync(params (string Stream, string RowKey, int Month, decimal Value)[] cells)
+    private Task<string> BuildDocumentAsync(params (string Stream, string RowKey, int Month, decimal Value)[] cells)
+        => BuildDocumentAsync([], cells);
+
+    /// <param name="emptyRows">Рядки без жодного значення (потік, ключ): напр. розрахунковий F_ без результату прогону.</param>
+    /// <param name="cells">Значення.</param>
+    private async Task<string> BuildDocumentAsync(
+        (string Stream, string RowKey)[] emptyRows, params (string Stream, string RowKey, int Month, decimal Value)[] cells)
     {
         var doc = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: Year2026, ct: CancellationToken.None);
         lastBuilt = doc;
@@ -206,10 +243,12 @@ public sealed partial class LandHse400CompositionRegistryTests
         int? versionId = null;
         var ordinal = 10;
 
-        foreach (var stream in cells.GroupBy(c => c.Stream))
+        var streams = cells.Select(c => c.Stream).Concat(emptyRows.Select(e => e.Stream)).Distinct(StringComparer.Ordinal);
+        foreach (var streamCode in streams)
         {
+            var stream = cells.Where(c => c.Stream == streamCode).ToList();
             var table = new TableDef(
-                doc.SheetDefId, EcrCode.Create(stream.Key), Text(stream.Key), ++ordinal,
+                doc.SheetDefId, EcrCode.Create(streamCode), Text(streamCode), ++ordinal,
                 TableLayoutKind.MonthsInColumns, TableRowMode.Fixed);
             db.TableDefs.Add(table);
             await db.SaveChangesAsync();
@@ -223,7 +262,9 @@ public sealed partial class LandHse400CompositionRegistryTests
                 db.ColumnDefs.Add(column);
             }
 
-            var rowKeys = stream.Select(c => c.RowKey).Distinct(StringComparer.Ordinal).ToList();
+            var rowKeys = stream.Select(c => c.RowKey)
+                .Concat(emptyRows.Where(e => e.Stream == streamCode).Select(e => e.RowKey))
+                .Distinct(StringComparer.Ordinal).ToList();
             for (var i = 0; i < rowKeys.Count; i++)
             {
                 db.RowDefs.Add(new RowDef(table.Id, RowKey.Create(rowKeys[i]), i + 1, Text(rowKeys[i]), RowKind.Item));
