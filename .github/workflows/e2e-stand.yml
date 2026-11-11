@@ -212,7 +212,14 @@ jobs:
 
       - name: Браузер Playwright
         working-directory: src/Ecr.Web
-        run: npx playwright install --with-deps chromium
+        # ✎ 11.11: `--with-deps` ставить системні бібліотеки через apt, а DNS *.ubuntu.com на
+        # раннерах GitHub не розв'язувався. Образ ubuntu-24.04 уже має залежності Chrome, тож
+        # за невдачі apt беремо сам браузер без залежностей (тести покажуть, якщо чогось бракує).
+        run: |
+          if ! npx playwright install --with-deps chromium; then
+            echo "::warning::playwright --with-deps failed (apt); installing chromium without system deps"
+            npx playwright install chromium
+          fi
 
       # Склад шарда за секунди, ДО розгортання бази: помилка плану (порожній шард, зникла заявка)
       # падає тут, а не через 6 хвилин підйому стенда.
