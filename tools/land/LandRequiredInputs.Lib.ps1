@@ -17,7 +17,8 @@
 #   - cross-row inputs read through bridges (GTU components for ECW_C12_02, composition by stream): the value is on
 #     another row or table;
 #   - ECW_C11_11_04 mass fractions on T9a_19 (Benzene, Xylene, Toluene, SaturatedHydrocarbonsC1C5, C6C10): one fraction
-#     per substance, a row without a fraction legitimately gives no number for that substance - waits for AN's word;
+#     per substance. AN 11.11: all five are needed on every T9a_19 row, but as Warn only and never Block before the
+#     AN-173 parity run is green - so they stay unregistered until then;
 #   - methodologies without active rules (ECW_C11_15, ECW_C09_02_01) and without row inputs of their own.
 #
 # Column ids are stored as given and translated by sheet/table/column PATH when a document is checked
@@ -144,6 +145,17 @@ $script:LandRequiredInputs = [ordered]@{
 # Methodology codes that have required inputs, in the order of the list.
 function Get-LandRequiredInputMethodologies {
     return @($script:LandRequiredInputs.Keys)
+}
+
+# Methodologies the stage must not touch yet, with the reason. The list stays encoded above, the stage only skips them
+# (unless -RequiredInputsIncludeHeld). Remove an entry once its reason is gone.
+#   ECW_C11_01: AN-165 brings a NEW version (lane/integ-an165-contains-rb); a PE draft now would collide with it (AN 11.11).
+$script:LandRequiredInputsHeld = [ordered]@{
+    'ECW_C11_01' = 'AN-165: waits for the new methodology version to be published'
+}
+
+function Get-LandRequiredInputHeld {
+    return $script:LandRequiredInputsHeld
 }
 
 # Flat list for one methodology: Methodology, Table (short table code), Column, Kind, Path ("TABLE/COLUMN").
