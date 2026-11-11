@@ -11,7 +11,7 @@ import {
 } from '@/features/documents/periodReopen/api';
 import { formatCount } from '@/shared/format/plural';
 import { t } from '@/shared/i18n';
-import { siteMomentText } from '@/shared/siteMoment';
+import { siteUntilText } from '@/shared/siteMoment';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
 
@@ -30,7 +30,7 @@ interface PeriodReopenedDocumentsProps {
 
 /** Момент у поясі майданчика з годиною; нерозібраний — як є. */
 function siteTime(value: string, zone: string): string {
-  return siteMomentText(value, zone) ?? value;
+  return siteUntilText(value, zone) ?? value;
 }
 
 /**

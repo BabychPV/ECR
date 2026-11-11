@@ -112,6 +112,24 @@ describe('DocumentYearStrip: місяць, відкритий для одног�
     // Лютий A без винятку — «locked», як і був.
     expect(within(a!).getAllByRole('link')[1]!.getAttribute('data-cell')).toBe('locked');
   });
+
+  /*
+   * ✎ AN-169: строк за замовчуванням — північ майданчика (19:00Z = 00:00 12 листопада в Атирау). Підпис — кінець
+   * 11-го («Nov 11, 2026, 11:59 PM»), а не двозначне «Nov 12, 2026, 12:00 AM».
+   * ⛔ Червоне без фіксу: `siteMomentText` у `reopenedUntilText`.
+   */
+  it('строк на північ майданчика — кінець попередньої доби, не «12:00 AM»', () => {
+    render(
+      <MantineProvider theme={testTheme}>
+        <MemoryRouter>{strip(1, [{ periodKey: 202601, openUntil: '2026-11-11T19:00:00Z' }])}</MemoryRouter>
+      </MantineProvider>,
+    );
+
+    const jan = screen.getAllByRole('link')[0]!;
+    const label = (jan.getAttribute('aria-label') ?? '').replace(/[  ]/gu, ' ');
+    expect(label).toContain('Nov 11, 2026, 11:59 PM');
+    expect(label).not.toContain('12:00 AM');
+  });
 });
 
 describe('DocumentYearStrip (g3)', () => {

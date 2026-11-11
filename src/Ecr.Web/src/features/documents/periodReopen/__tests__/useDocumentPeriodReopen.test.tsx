@@ -10,7 +10,7 @@ import { useDocumentPeriodReopen } from '@/features/documents/periodReopen/useDo
 import { testTheme } from '@/test/render';
 import { Catalog } from '@/test/__tests__/a11yFixtures';
 import { formatDateTime } from '@/shared/format/datetime';
-import { siteMomentText } from '@/shared/siteMoment';
+import { siteUntilText } from '@/shared/siteMoment';
 
 /**
  * Приймальна 08.11 (i): «Reopen January 2026 for this document…» у банері закритого періоду (i1), недоступна дія з
@@ -152,14 +152,14 @@ describe('useDocumentPeriodReopen', () => {
   });
 
   it('p3-1110: строк у банері — у поясі майданчика, тим самим форматом, що й рядок місяця «Проєкти → Періоди»', async () => {
-    // 19:00 UTC = 00:00 наступної доби в Атирау (+05:00): «Nov 11, 12:00 AM», а не час браузера.
+    // 19:00 UTC = 00:00 наступної доби в Атирау (+05:00); ✎ AN-169: північ — «Nov 10, 11:59 PM» (кінець доби), а не час браузера.
     const until = '2026-11-10T19:00:00Z';
     stub(closedState({
       active: { id: 9, periodKey: 202601, openUntil: until, reason: 'Fix', openedByUserId: 3, openedByName: 'A. Admin', openedAt: until },
     }));
     show('Closed', 'Asia/Atyrau');
 
-    const site = siteMomentText(until, 'Asia/Atyrau');
+    const site = siteUntilText(until, 'Asia/Atyrau');
     expect(site).not.toBeNull();
     // Тест має сенс лише тоді, коли пояс браузера дає інший рядок.
     expect(site).not.toBe(formatDateTime(until));
@@ -167,6 +167,8 @@ describe('useDocumentPeriodReopen', () => {
     const banner = await screen.findByTestId('document-period-reopened');
     // ⛔ Мутація: `formatDateTime` замість поясу майданчика — у банері час браузера, червоне.
     expect(banner.textContent).toContain(`until=${String(site)}`);
+    // ✎ AN-169: ⛔ Мутація: `siteMomentText` замість `siteUntilText` — «until=Nov 11, 2026, 12:00 AM», червоне.
+    expect(banner.textContent?.replace(/[  ]/gu, ' ')).toContain('until=Nov 10, 2026, 11:59 PM');
   });
 
   it('закритий місяць, стан ще вантажиться: місце дії вже зайняте (без зсуву панелі листа нижче)', async () => {

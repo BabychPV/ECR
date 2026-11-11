@@ -6,7 +6,7 @@ import type { components } from '@/api/schema';
 import { formatPeriodKey } from '@/shared/format';
 import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
-import { siteMomentText } from '@/shared/siteMoment';
+import { siteUntilText } from '@/shared/siteMoment';
 import { getDocumentPeriodReopen, periodReopenKey } from './api';
 
 type PeriodState = components['schemas']['PeriodState'];
@@ -34,7 +34,7 @@ interface DocumentPeriodReopenArgs {
 /** Строк у поясі майданчика тим самим форматом, що й рядок місяця в PeriodsPage; без поясу — пояс браузера. */
 function untilText(value: string, zone: string | null | undefined): string {
   if (zone === null || zone === undefined || zone === '') return formatDateTime(value);
-  return siteMomentText(value, zone) ?? formatDateTime(value);
+  return siteUntilText(value, zone) ?? formatDateTime(value);
 }
 
 interface DocumentPeriodReopen {

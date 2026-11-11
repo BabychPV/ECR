@@ -6,19 +6,19 @@ import type { PeriodCalendarDto } from '@/api/types';
 import { formatMonthName } from '@/shared/format';
 import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
-import { siteMomentText } from '@/shared/siteMoment';
+import { siteUntilText } from '@/shared/siteMoment';
 import { StripLegend, stripCell, type StripCell } from './yearStripModel';
 
 type DocumentPeriodState = components['schemas']['DocumentPeriodState'];
 type DocumentReopenedPeriod = components['schemas']['DocumentReopenedPeriod'];
 
 /**
- * ✎ 10.11: строк винятку «місяць відкрито для документа» — у поясі МАЙДАНЧИКА (той самий `siteMomentText`, що рядок
+ * ✎ 10.11: строк винятку «місяць відкрито для документа» — у поясі МАЙДАНЧИКА (той самий `siteUntilText`, що рядок
  * місяця «Проєкти → Періоди» і банер документа); поки календар не прийшов — пояс браузера.
  */
 function reopenedUntilText(value: string, zone: string | null | undefined): string {
   if (zone === null || zone === undefined || zone === '') return formatDateTime(value);
-  return siteMomentText(value, zone) ?? formatDateTime(value);
+  return siteUntilText(value, zone) ?? formatDateTime(value);
 }
 
 /** Місяців у смузі року — завжди 12 (людина 07.11: «12-month strip»). */

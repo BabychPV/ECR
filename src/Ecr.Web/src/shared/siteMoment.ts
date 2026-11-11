@@ -92,6 +92,41 @@ const WallClock = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+
  * `null` — рядок не розібрався (показується як є).
  */
 export function siteMomentText(value: string, zone: string, dateOnly = false, inclusiveEnd = false): string | null {
+  return momentText(value, zone, dateOnly, inclusiveEnd ? 1 : 0);
+}
+
+/** Хвилина — на скільки зсувається північ майданчика в `siteUntilText`. */
+const MinuteMs = 60 * 1000;
+
+/**
+ * ✎ AN-169: ВИКЛЮЧНИЙ строк «до …» (перевідкриття місяця, вікно правок документа) — у поясі майданчика.
+ *
+ * ⛔ Строк за замовчуванням — північ майданчика (кінець доби, `endOfSiteDayUtc` / сервер при `openUntil = null`), і
+ * `siteMomentText` показував його як «until Nov 12, 12:00 AM»: читач бачить 12 листопада і «12:00», тобто
+ * полудень або весь день 12-го, хоча правки закриваються на ПОЧАТКУ 12-го. Тому північ показується останньою
+ * хвилиною попередньої доби — «until Nov 11, 11:59 PM» / «до 11 нояб. 2026 г., 23:59»: той самий формат дати й часу
+ * локалі, без нового ключа каталогу. Будь-який інший час (адміністратор задав 15:00) — як є.
+ */
+export function siteUntilText(value: string, zone: string): string | null {
+  const at = Date.parse(value);
+  if (Number.isNaN(at)) return null;
+
+  return momentText(value, zone, false, isSiteMidnight(value, at, zone) ? MinuteMs : 0);
+}
+
+/** Чи момент — рівно 00:00:00 настінного часу майданчика (за зсувом у рядку, без нього — за поясом через `Intl`). */
+function isSiteMidnight(value: string, at: number, zone: string): boolean {
+  const wall = WallClock.exec(value);
+  if (wall !== null) return wall[4] === '00' && wall[5] === '00' && (wall[6] ?? '00') === '00' && !/\.\d*[1-9]/.test(value);
+
+  if (new Date(at).getUTCMilliseconds() !== 0) return false;
+  const parts = zoneClock(zone).formatToParts(new Date(at));
+  const part = (type: Intl.DateTimeFormatPartTypes): string => parts.find((p) => p.type === type)?.value ?? '';
+  // `hour12: false` у старих рушіях дає північ як «24», а не «00».
+  return (part('hour') === '00' || part('hour') === '24') && part('minute') === '00' && part('second') === '00';
+}
+
+function momentText(value: string, zone: string, dateOnly: boolean, shiftMs: number): string | null {
   const at = Date.parse(value);
   if (Number.isNaN(at)) return null;
 
@@ -108,7 +143,7 @@ export function siteMomentText(value: string, zone: string, dateOnly = false, in
   const wallAt = wall === null
     ? null
     : Date.UTC(Number(wall[1]), Number(wall[2]) - 1, Number(wall[3]), Number(wall[4]), Number(wall[5]), Number(wall[6] ?? '0'));
-  const shown = new Date((wallAt ?? at) - (inclusiveEnd ? 1 : 0));
+  const shown = new Date((wallAt ?? at) - shiftMs);
   const timeZone = wallAt === null ? formattableZone(zone) : 'UTC';
   return dateOnly
     ? formatDate(shown, { dateStyle: 'medium', timeZone })
