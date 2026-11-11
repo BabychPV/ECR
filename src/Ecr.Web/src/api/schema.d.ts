@@ -29019,8 +29019,9 @@ export interface components {
         };
         /** @description Одна поточна проблема розрахунку: рядок, який правило методології не охопило (AN-69). */
         CalculationIssueDto: {
-            /** @description ✎ 10.11: лише для `CategoryRuleRejected` — порожні колонки рядка, які треба заповнити, щоб правило категорії дало
-             *     ключ (у порядку колонок таблиці); `null` — назвати не вдалося або колонка прихована від читача. */
+            /** @description ✎ 10.11: лише для `CategoryRuleRejected` і `MissingInputs` — порожні колонки рядка, які треба заповнити (для
+             *     `CategoryRuleRejected` — ті, що читає правило категорії; для `MissingInputs` — ті, що читають формули версії),
+             *     у порядку колонок таблиці; `null` — назвати не вдалося або колонка прихована від читача. */
             columns?: null | components["schemas"]["CalculationIssueColumnDto"][];
             /** @description Значення рядка в колонках підказки таблиці (`tables[].columns`, той самий порядок);
              *     `null` — підказки для таблиці немає; порожній рядок у позиції — комірка порожня. */
@@ -29030,7 +29031,8 @@ export interface components {
              * @description Коли виявлено (UTC).
              */
             detectedAt: string;
-            /** @description Вид проблеми: `NoMatchingRule` або `CategoryRuleRejected` (✎ 10.11). */
+            /** @description Вид проблеми: `NoMatchingRule`, `CategoryRuleRejected` (✎ 10.11) або `MissingInputs` (AN-164: правило
+             *     закрило рядок, але формулам бракує входів — жодного результату). */
             kind: string;
             /** @description Методологія прив'язки таблиці; `null` — невідома. */
             methodologyCode: null | string;
@@ -29041,7 +29043,8 @@ export interface components {
              * @description Номер рядка, з 1, у порядку створення.
              */
             rowNumber: number;
-            /** @description ✎ 10.11: лише для `CategoryRuleRejected` — правило методології, що закрило рядок; `null` — невідоме. */
+            /** @description ✎ 10.11: лише для `CategoryRuleRejected` і `MissingInputs` — правило методології, що закрило рядок;
+             *     `null` — невідоме. */
             ruleCode?: null | string;
             /**
              * Format: int64

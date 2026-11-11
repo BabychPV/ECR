@@ -149,7 +149,10 @@ public sealed record CalculationIssueColumnDto(string Code, LocalizedText NameL1
 /// <param name="SheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
 /// <param name="RowNumber">Номер рядка, з 1, у порядку створення.</param>
 /// <param name="RowKey">Публічний ключ рядка.</param>
-/// <param name="Kind">Вид проблеми: <c>NoMatchingRule</c> або <c>CategoryRuleRejected</c> (✎ 10.11).</param>
+/// <param name="Kind">
+/// Вид проблеми: <c>NoMatchingRule</c>, <c>CategoryRuleRejected</c> (✎ 10.11) або <c>MissingInputs</c> (AN-164: правило
+/// закрило рядок, але формулам бракує входів — жодного результату).
+/// </param>
 /// <param name="MethodologyCode">Методологія прив'язки таблиці; <c>null</c> — невідома.</param>
 /// <param name="DetectedAt">Коли виявлено (UTC).</param>
 /// <param name="CurrentValues">
@@ -157,11 +160,13 @@ public sealed record CalculationIssueColumnDto(string Code, LocalizedText NameL1
 /// <c>null</c> — підказки для таблиці немає; порожній рядок у позиції — комірка порожня.
 /// </param>
 /// <param name="RuleCode">
-/// ✎ 10.11: лише для <c>CategoryRuleRejected</c> — правило методології, що закрило рядок; <c>null</c> — невідоме.
+/// ✎ 10.11: лише для <c>CategoryRuleRejected</c> і <c>MissingInputs</c> — правило методології, що закрило рядок;
+/// <c>null</c> — невідоме.
 /// </param>
 /// <param name="Columns">
-/// ✎ 10.11: лише для <c>CategoryRuleRejected</c> — порожні колонки рядка, які треба заповнити, щоб правило категорії дало
-/// ключ (у порядку колонок таблиці); <c>null</c> — назвати не вдалося або колонка прихована від читача.
+/// ✎ 10.11: лише для <c>CategoryRuleRejected</c> і <c>MissingInputs</c> — порожні колонки рядка, які треба заповнити (для
+/// <c>CategoryRuleRejected</c> — ті, що читає правило категорії; для <c>MissingInputs</c> — ті, що читають формули версії),
+/// у порядку колонок таблиці; <c>null</c> — назвати не вдалося або колонка прихована від читача.
 /// </param>
 public sealed record CalculationIssueDto(
     string TableCode,
