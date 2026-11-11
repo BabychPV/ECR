@@ -302,6 +302,17 @@ const documentKeys = {
    */
   calculationYear: (documentId: number, year: number) =>
     ['document', documentId, 'calculation-year', year] as const,
+
+  /**
+   * Зведення огляду року за фільтрами (`filters` — рядок параметрів запиту, `filterParams(...).toString()`): ті самі
+   * фільтри — той самий ключ, інші — інший (лічильники інші). Під префіксом `calculationYear`.
+   */
+  calculationYearSummary: (documentId: number, year: number, filters: string) =>
+    ['document', documentId, 'calculation-year', year, 'summary', filters] as const,
+
+  /** Сторінка виходів таблиці огляду року: таблиця, фільтри й зсув — різні дані, різні ключі. */
+  calculationYearRows: (documentId: number, year: number, table: string, filters: string, offset: number) =>
+    ['document', documentId, 'calculation-year', year, 'rows', table, filters, offset] as const,
 };
 
 /**

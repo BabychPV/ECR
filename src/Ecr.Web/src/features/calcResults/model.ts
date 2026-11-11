@@ -1,129 +1,136 @@
-import type { CalculationYearRow, CalculationYearView } from './api';
+import type {
+  CalculationYearColumn,
+  CalculationYearEquipment,
+  CalculationYearMethodology,
+  CalculationYearMonth,
+  CalculationYearRows,
+  CalculationYearSubstance,
+  CalculationYearTable,
+  CalculationYearUnit,
+} from './api';
 
 /**
- * Модель екрана «Calculation results» (CALC-RESULTS.md): плаский перелік рядків для віртуалізованої сітки —
- * смуги «аркуш → таблиця → обладнання · методологія» і рядки виходів. Без React і без i18n: тестується чистими
- * функціями, а групи згортаються на клієнті без запиту.
+ * Модель екрана «Calculation results» (CALC-RESULTS.md): плаский перелік рядків для віртуалізованої сітки — смуги
+ * «аркуш → таблиця → обладнання · методологія», рядки виходів і рядок «ще» таблиці, сторінки якої завантажено не всі.
+ * Без React і без i18n: тестується чистими функціями.
+ *
+ * ⚠ Таблиці приходять зі зведення (лічильники), їхні рядки — сторінками лише для розгорнутих таблиць; фільтри застосовує
+ * сервер (одне правило для зведення, сторінок і експорту).
  */
 
-/** Фільтри екрана (клієнтські). */
-export interface ResultFilters {
-  readonly query: string;
-  /** `sheetDefId` (рядком) або порожньо. */
-  readonly sheet: string;
-  /** Код методології; `formula` — формули шаблону; порожньо — усі. */
-  readonly methodology: string;
-  /** Код речовини або порожньо. */
-  readonly substance: string;
-  readonly problemsOnly: boolean;
+/** Вихід сторінки з розв'язаними посиланнями на довідники СВОЄЇ сторінки. */
+export interface ResultRow {
+  readonly id: string;
+  readonly table: CalculationYearTable;
+  readonly equipment: CalculationYearEquipment;
+  readonly methodology: CalculationYearMethodology | null;
+  readonly substance: CalculationYearSubstance | null;
+  readonly unit: CalculationYearUnit | null;
+  readonly column: CalculationYearColumn | null;
+  readonly outputCode: string;
+  readonly values: readonly unknown[];
+  readonly states: string;
+  readonly yearTotal: unknown;
+  readonly monthsIncluded: number;
 }
-
-export const NoFilters: ResultFilters = { query: '', sheet: '', methodology: '', substance: '', problemsOnly: false };
-
-/** Код «методології» для формул шаблону у фільтрі. */
-export const FormulaMethodology = 'formula';
 
 /** Рядок плаского переліку. */
 export type GridItem =
-  | { readonly kind: 'band'; readonly level: 0 | 1 | 2; readonly key: string; readonly row: CalculationYearRow }
-  | { readonly kind: 'output'; readonly key: string; readonly row: CalculationYearRow };
+  | { readonly kind: 'sheet'; readonly key: string; readonly table: CalculationYearTable }
+  | { readonly kind: 'table'; readonly key: string; readonly table: CalculationYearTable }
+  | { readonly kind: 'group'; readonly key: string; readonly row: ResultRow }
+  | { readonly kind: 'output'; readonly key: string; readonly row: ResultRow }
+  | { readonly kind: 'more'; readonly key: string; readonly table: CalculationYearTable; readonly loaded: number; readonly total: number };
 
-/** Ключ смуги рівня для рядка (аркуш, таблиця, обладнання · методологія). */
-export function groupKeys(view: CalculationYearView, row: CalculationYearRow): [string, string, string] {
-  const equipment = view.equipment[row.equipment];
-  const table = view.tables[equipment?.table ?? 0];
-  const sheet = `s${String(table?.sheetDefId ?? 0)}~${String(table?.sheetCopyId ?? '')}`;
-  const tableKey = `${sheet}/t${String(equipment?.table ?? 0)}`;
-  return [sheet, tableKey, `${tableKey}/e${String(row.equipment)}:${row.methodology === null || row.methodology === undefined ? 'f' : String(row.methodology)}`];
+function at<T>(list: readonly T[], index: number | null | undefined): T | null {
+  return index === null || index === undefined ? null : (list[index] ?? null);
 }
 
-/** Індекси місяців (0…11), де вихід застарілий: є значення в місяці зі станом `outOfDate`. */
-function outOfDateMonths(view: CalculationYearView, row: CalculationYearRow): number[] {
-  return view.months.flatMap((month, i) => (month.runState === 'outOfDate' && row.states[i] === 'v' ? [i] : []));
-}
-
-/**
- * «Проблема» виходу: значення з застарілого місяця або пропуск усередині року (між першим і останнім місяцем зі
- * значенням є місяць із прогоном, але без числа). ⚠ Окремих станів «бракує входу» / «помилка розрахунку» сервер не
- * зберігає (у `calc.CalculationResult` лягають лише успішні числа), тож вони тут не вигадуються.
- */
-export function hasProblem(view: CalculationYearView, row: CalculationYearRow): boolean {
-  if (outOfDateMonths(view, row).length > 0) return true;
-  const first = row.states.indexOf('v');
-  const last = row.states.lastIndexOf('v');
-  return first >= 0 && row.states.slice(first, last + 1).includes('a');
-}
-
-/** Текст пошуку рядка: назва обладнання, IDCode, ключ рядка. */
-function searchText(view: CalculationYearView, row: CalculationYearRow, label: (row: CalculationYearRow) => string): string {
-  const equipment = view.equipment[row.equipment];
-  return `${label(row)} ${equipment?.idCode ?? ''} ${equipment?.rowKey ?? ''}`.toLowerCase();
-}
-
-/** Виходи, що проходять фільтри. */
-export function filterRows(
-  view: CalculationYearView,
-  filters: ResultFilters,
-  label: (row: CalculationYearRow) => string,
-): CalculationYearRow[] {
-  const query = filters.query.trim().toLowerCase();
-  return view.rows.filter((row) => {
-    const equipment = view.equipment[row.equipment];
-    const table = view.tables[equipment?.table ?? 0];
-    if (filters.sheet !== '' && String(table?.sheetDefId ?? '') !== filters.sheet) return false;
-    if (filters.methodology !== '') {
-      const code = row.methodology === null || row.methodology === undefined
-        ? FormulaMethodology
-        : view.methodologies[row.methodology]?.code;
-      if (code !== filters.methodology) return false;
-    }
-    if (filters.substance !== '') {
-      const code = row.substance === null || row.substance === undefined ? null : view.substances[row.substance]?.code;
-      if (code !== filters.substance) return false;
-    }
-    if (query !== '' && !searchText(view, row, label).includes(query)) return false;
-    return !filters.problemsOnly || hasProblem(view, row);
+/** Рядки сторінки з розв'язаними індексами. */
+export function resolvePage(table: CalculationYearTable, page: CalculationYearRows): ResultRow[] {
+  return page.rows.flatMap((row) => {
+    const equipment = page.equipment[row.equipment];
+    if (equipment === undefined) return [];
+    return [
+      {
+        id: row.id,
+        table,
+        equipment,
+        methodology: at(page.methodologies, row.methodology),
+        substance: at(page.substances, row.substance),
+        unit: at(page.units, row.unit),
+        column: at(page.columns, row.column),
+        outputCode: row.outputCode,
+        values: row.values,
+        states: row.states,
+        yearTotal: row.yearTotal,
+        monthsIncluded: row.monthsIncluded,
+      },
+    ];
   });
 }
 
-/** Плаский перелік зі смугами; згорнута смуга ховає все, що під нею. */
+/** Ключ смуги аркуша. */
+export function sheetKey(table: CalculationYearTable): string {
+  return `s${String(table.sheetDefId)}~${String(table.sheetCopyId ?? '')}`;
+}
+
+/** Ключ смуги «обладнання · методологія» (у межах таблиці). */
+export function groupKey(row: ResultRow): string {
+  return `${row.table.key}/e${row.equipment.rowKey ?? ''}:${row.methodology === null ? 'f' : String(row.methodology.methodologyId)}`;
+}
+
+/** Що вже завантажено для таблиці: рядки підряд від початку і скільки їх усього (з фільтрами). */
+export interface LoadedTable {
+  readonly rows: readonly ResultRow[];
+  readonly total: number;
+}
+
+/**
+ * Плаский перелік: аркуш → таблиця (згорнута, доки її не розгорнули) → обладнання · методологія → виходи → «ще».
+ * `collapsed` — згорнуті аркуші й групи обладнання; `open` — розгорнуті таблиці (лише їхні рядки читаються).
+ */
 export function gridItems(
-  view: CalculationYearView,
-  rows: readonly CalculationYearRow[],
+  tables: readonly CalculationYearTable[],
+  loaded: ReadonlyMap<string, LoadedTable>,
   collapsed: ReadonlySet<string>,
+  open: ReadonlySet<string>,
 ): GridItem[] {
   const items: GridItem[] = [];
-  let last: [string, string, string] = ['', '', ''];
-  for (const row of rows) {
-    const keys = groupKeys(view, row);
-    if (keys[0] !== last[0]) {
-      items.push({ kind: 'band', level: 0, key: keys[0], row });
-      last = [keys[0], '', ''];
+  let lastSheet = '';
+  for (const table of tables) {
+    const sheet = sheetKey(table);
+    if (sheet !== lastSheet) {
+      items.push({ kind: 'sheet', key: sheet, table });
+      lastSheet = sheet;
     }
-    if (collapsed.has(keys[0])) continue;
-    if (keys[1] !== last[1]) {
-      items.push({ kind: 'band', level: 1, key: keys[1], row });
-      last = [keys[0], keys[1], ''];
+    if (collapsed.has(sheet)) continue;
+    items.push({ kind: 'table', key: table.key, table });
+    if (!open.has(table.key)) continue;
+
+    const data = loaded.get(table.key);
+    let lastGroup = '';
+    for (const row of data?.rows ?? []) {
+      const group = groupKey(row);
+      if (group !== lastGroup) {
+        items.push({ kind: 'group', key: group, row });
+        lastGroup = group;
+      }
+      if (collapsed.has(group)) continue;
+      items.push({ kind: 'output', key: row.id, row });
     }
-    if (collapsed.has(keys[1])) continue;
-    if (keys[2] !== last[2]) {
-      items.push({ kind: 'band', level: 2, key: keys[2], row });
-      last = keys;
+    const count = data?.rows.length ?? 0;
+    const total = data?.total ?? table.matched;
+    if (data === undefined || count < total) {
+      items.push({ kind: 'more', key: `${table.key}/more`, table, loaded: count, total });
     }
-    if (collapsed.has(keys[2])) continue;
-    items.push({ kind: 'output', key: row.id, row });
   }
   return items;
 }
 
-/** Усі ключі смуг (для «Collapse all»). */
-export function allGroupKeys(view: CalculationYearView, rows: readonly CalculationYearRow[]): Set<string> {
-  return new Set(rows.flatMap((row) => groupKeys(view, row)));
-}
-
 /** Лічильники місяців для підвалу. */
-export function runCounts(view: CalculationYearView): { current: number; outOfDate: number; none: number } {
-  const states = view.months.map((m) => m.runState);
+export function runCounts(months: readonly CalculationYearMonth[]): { current: number; outOfDate: number; none: number } {
+  const states = months.map((m) => m.runState);
   return {
     current: states.filter((s) => s === 'current').length,
     outOfDate: states.filter((s) => s === 'outOfDate').length,
@@ -132,9 +139,9 @@ export function runCounts(view: CalculationYearView): { current: number; outOfDa
 }
 
 /** Місяць за замовчуванням для «місяця результатів» річної розкладки: останній із прогоном, інакше січень. */
-export function latestRunMonth(view: CalculationYearView): number {
+export function latestRunMonth(months: readonly CalculationYearMonth[]): number {
   let found = 1;
-  for (const month of view.months) {
+  for (const month of months) {
     if (month.runState === 'current' || month.runState === 'outOfDate') found = month.month;
   }
   return found;
@@ -144,19 +151,13 @@ export function latestRunMonth(view: CalculationYearView): number {
  * Адреса документа на аркуші/таблиці/місяці виходу (кнопка «Open source cell» і заголовок місяця). Параметри —
  * ті, що читає `DocumentPage` (`periodKey`, `sheet` = код аркуша або `код~копія`, `table` = код таблиці).
  */
-export function documentHref(
-  view: CalculationYearView,
-  periodKey: number,
-  row?: CalculationYearRow | undefined,
-): string {
+export function documentHref(documentId: number, periodKey: number, row?: ResultRow | undefined): string {
   const params = new URLSearchParams({ periodKey: String(periodKey) });
-  if (row !== undefined) {
-    const table = view.tables[view.equipment[row.equipment]?.table ?? 0];
-    if (table !== undefined && table.tableDefId !== 0) {
-      const copy = table.sheetCopyId;
-      params.set('sheet', copy === null || copy === undefined ? table.sheetCode : `${table.sheetCode}~${String(copy)}`);
-      params.set('table', table.tableCode);
-    }
+  const table = row?.table;
+  if (table !== undefined && table.tableDefId !== 0) {
+    const copy = table.sheetCopyId;
+    params.set('sheet', copy === null || copy === undefined ? table.sheetCode : `${table.sheetCode}~${String(copy)}`);
+    params.set('table', table.tableCode);
   }
-  return `/documents/${String(view.documentId)}?${params.toString()}`;
+  return `/documents/${String(documentId)}?${params.toString()}`;
 }
