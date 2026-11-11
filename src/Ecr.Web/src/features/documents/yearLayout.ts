@@ -1,3 +1,5 @@
+import type { components } from '@/api/schema';
+
 /**
  * ✎ D-474, п. 5: «вибір місяця в документі показується лише там, де документ має кілька копій».
  *
@@ -10,6 +12,8 @@
 export function isYearLayout(templateLayout: string | null | undefined): boolean {
   return templateLayout === 'YearWithMonthColumns';
 }
+
+type PeriodState = components['schemas']['PeriodState'];
 
 /** Лише потрібне з рядка календаря проєкту (`PeriodCalendarDto.periods`). */
 interface PeriodLike {
@@ -34,4 +38,30 @@ export function yearAnchorCalendar<T extends PeriodLike>(periods: readonly T[] |
   );
 
   return [{ periodKey: anchor, isCurrent: true }];
+}
+
+/**
+ * Стан періоду для замка ДОКУМЕНТА з розкладкою «рік» — агрегат за місяцями календаря року `periodKey` (дзеркало
+ * `AnnualPeriodRule.AggregateState` на сервері): є `Open`/`Scheduled` → `Open`; інакше є `Grace` → `Grace`; усі `Closed`
+ * → `Closed`.
+ *
+ * ⛔ D-474: документ року відкривається на якорі (найменший місяць року), і замок рахувався за станом ЯКОРЯ: закритий
+ * січень робив увесь річний аркуш лише для читання з банером «період закрито», хоча сервер приймає запис — місячна
+ * колонка m підлягає стану місяця m, не-місячний ввід — річному агрегату. Колонки закритих місяців замикає сам сервер
+ * (`cellPermissions` зрізу), тож документ замикається лише тоді, коли закрито весь рік.
+ *
+ * ⚠ Місяців року в календарі немає (або календар ще не прийшов) — `undefined`: невідоме не замикає (`documentLockOf`).
+ */
+export function yearAggregatePeriodState(
+  periods: readonly { periodKey: number; state?: PeriodState | null }[] | undefined,
+  periodKey: number,
+): PeriodState | undefined {
+  const year = Math.floor(periodKey / 100);
+  const states = (periods ?? [])
+    .filter((period) => Math.floor(period.periodKey / 100) === year)
+    .map((period) => period.state);
+  if (states.length === 0 || states.some((state) => state === undefined || state === null)) return undefined;
+  if (states.some((state) => state === 'Open' || state === 'Scheduled')) return 'Open';
+
+  return states.includes('Grace') ? 'Grace' : 'Closed';
 }

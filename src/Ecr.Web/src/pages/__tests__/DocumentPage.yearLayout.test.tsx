@@ -5,7 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DocumentPage } from '@/pages/DocumentPage';
-import { isYearLayout, yearAnchorCalendar } from '@/features/documents/yearLayout';
+import { isYearLayout, yearAggregatePeriodState, yearAnchorCalendar } from '@/features/documents/yearLayout';
 import { testTheme } from '@/test/render';
 
 /**
@@ -32,12 +32,12 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-function period(periodKey: number, isCurrent: boolean): Record<string, unknown> {
+function period(periodKey: number, isCurrent: boolean, state = 'Open'): Record<string, unknown> {
   const sequence = periodKey % 100;
   return {
     id: sequence,
     periodKey,
-    state: 'Open',
+    state,
     isCurrent,
     year: 2015,
     sequence,
@@ -49,7 +49,8 @@ function period(periodKey: number, isCurrent: boolean): Record<string, unknown> 
   };
 }
 
-function mockFetch(templateLayout: string | null): ReturnType<typeof vi.fn> {
+function mockFetch(templateLayout: string | null, states: Readonly<Record<number, string>> = {}): ReturnType<typeof vi.fn> {
+  const stateOf = (periodKey: number): string => states[periodKey] ?? 'Open';
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
 
@@ -76,8 +77,13 @@ function mockFetch(templateLayout: string | null): ReturnType<typeof vi.fn> {
         currentPeriodMode: 'Auto',
         timeZoneId: 'UTC',
         policy: {},
-        periods: [period(201412, false), period(Anchor, false), period(201502, false), period(ProjectCurrent, true)],
+        periods: [201412, Anchor, 201502, ProjectCurrent].map((key) => period(key, key === ProjectCurrent, stateOf(key))),
       });
+    }
+
+    // Закритий місяць питає про виняток «відкрито для документа» — тут його немає і відкрити не можна.
+    if (url.includes('/period-reopen')) {
+      return jsonResponse({ active: null, canOpen: false, defaultOpenUntil: '2015-12-31T00:00:00Z', denial: null, periodKey: Anchor });
     }
 
     if (url.includes('/validation')) return jsonResponse({ documentId: 1, periodKey: ProjectCurrent, messages: [], validated: false });
@@ -178,6 +184,21 @@ describe('yearLayout', () => {
     ).toEqual([{ periodKey: 201501, isCurrent: true }]);
   });
 
+  it('річний агрегат стану: є Open/Scheduled — Open; інакше Grace; усі Closed — Closed; лише місяці того ж року', () => {
+    const calendar = (states: string[]) =>
+      [{ periodKey: 201412, state: 'Open' as const }].concat(
+        states.map((state, index) => ({ periodKey: 201501 + index, state: state as 'Open' })),
+      );
+
+    expect(yearAggregatePeriodState(calendar(['Closed', 'Open', 'Closed']), Anchor)).toBe('Open');
+    expect(yearAggregatePeriodState(calendar(['Closed', 'Scheduled']), Anchor)).toBe('Open');
+    expect(yearAggregatePeriodState(calendar(['Closed', 'Grace']), Anchor)).toBe('Grace');
+    // 201412 (Open) — інший рік, рік 2015 закрито цілком.
+    expect(yearAggregatePeriodState(calendar(['Closed', 'Closed']), Anchor)).toBe('Closed');
+    expect(yearAggregatePeriodState(calendar([]), Anchor)).toBeUndefined();
+    expect(yearAggregatePeriodState(undefined, Anchor)).toBeUndefined();
+  });
+
   it('без позначки поточного — календар як є', () => {
     const periods = [{ periodKey: 201501 }, { periodKey: 201502 }];
     expect(yearAnchorCalendar(periods)).toBe(periods);
@@ -220,6 +241,49 @@ describe('DocumentPage: розкладка версії і вибір місяц
         { timeout: SlowEnvTimeout },
       );
       await waitFor(() => expect(periodPicker()).not.toBeNull(), { timeout: SlowEnvTimeout });
+    },
+    SlowEnvTimeout,
+  );
+});
+
+/**
+ * ✎ D-474: замок документа з розкладкою «рік» — за річним агрегатом місяців (`AnnualPeriodRule`), а не за станом якоря.
+ *
+ * ⛔ Мутаційний доказ: повернути в `DocumentPage` стан ПЕРЕГЛЯНУТОГО періоду замість `yearAggregatePeriodState` — тест
+ * «закритий якір, відкритий лютий» червоніє (банер `periodClosed`, Submit зникає).
+ */
+describe('DocumentPage: замок документа з розкладкою «рік» (D-474)', () => {
+  it(
+    'рік: закритий якір, відкритий пізніший місяць — замка документа немає, дії на місці',
+    async () => {
+      mockFetch('YearWithMonthColumns', { [Anchor]: 'Closed', 201502: 'Open', [ProjectCurrent]: 'Closed' });
+      show(`/documents/1?periodKey=${String(Anchor)}`);
+
+      const row = await screen.findByTestId('document-actions', {}, { timeout: SlowEnvTimeout });
+      await within(row).findByRole('button', { name: /workflow\.submitPeriod/ }, { timeout: SlowEnvTimeout });
+      expect(screen.queryByText(/document\.lock\./)).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'рік: усі місяці року закрито — замок «період закрито» (інший рік відкритий — не рахується)',
+    async () => {
+      mockFetch('YearWithMonthColumns', { 201412: 'Open', [Anchor]: 'Closed', 201502: 'Closed', [ProjectCurrent]: 'Closed' });
+      show(`/documents/1?periodKey=${String(Anchor)}`);
+
+      expect(await screen.findByText(/document\.lock\.periodClosed/, {}, { timeout: SlowEnvTimeout })).toBeTruthy();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'копія на місяць: закритий переглянутий місяць замикає документ, як і раніше (сусідні відкриті не рятують)',
+    async () => {
+      mockFetch('PerMonthCopies', { [Anchor]: 'Closed', 201502: 'Open', [ProjectCurrent]: 'Open' });
+      show(`/documents/1?periodKey=${String(Anchor)}`);
+
+      expect(await screen.findByText(/document\.lock\.periodClosed/, {}, { timeout: SlowEnvTimeout })).toBeTruthy();
     },
     SlowEnvTimeout,
   );
