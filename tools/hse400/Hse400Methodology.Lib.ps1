@@ -308,6 +308,23 @@ function Test-Hse400Structure {
     return $bad.ToArray()
 }
 
+function New-Hse400MigrateBody {
+    <# Тіло POST /documents/{id}/migrate-version: режим Safe (відмова, якщо зникло б чи змінило тлумачення введене
+       значення), увесь проєкт. #>
+    param([Parameter(Mandatory)][int]$TargetVersionId, [switch]$DryRun)
+    return @{ targetVersionId = $TargetVersionId; mode = 'Safe'; dryRun = [bool]$DryRun; range = 'WholeProject' }
+}
+
+function Assert-Hse400MigrationPlan {
+    <# Сухий прогін переносу: зупинка, якщо сервер не дає застосувати або втратилось би бодай одне значення. #>
+    param([Parameter(Mandatory)]$Plan, [Parameter(Mandatory)][string]$Code)
+    $refusals = @($Plan.refusals | Where-Object { $_ })
+    if (-not $Plan.canApply -or $refusals.Count -or [long]$Plan.lostValues -ne 0 -or [long]$Plan.guardedValues -ne 0) {
+        throw ("Перенос проєкту {0} на нову версію шаблону відхилено сухим прогоном: canApply={1}, втрачено {2}, під охороною {3}; {4}. Нічого не записано." -f
+            $Code, $Plan.canApply, $Plan.lostValues, $Plan.guardedValues, ($refusals -join '; '))
+    }
+}
+
 function Get-Hse400AnchorColumnIds {
     <# Таблиця -> Id колонки-якоря з GET /template-versions/{vid}/structure. #>
     param([Parameter(Mandatory)]$Structure, [Parameter(Mandatory)]$Model)

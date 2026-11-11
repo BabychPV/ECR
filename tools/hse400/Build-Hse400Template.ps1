@@ -123,12 +123,58 @@ function Get-Hse400ProjectDocument {
         Write-Hse400Log "Створено документ проєкту $Code."
     }
     $documentId = Get-Hse400Id $doc 'documentId', 'id'
+    Sync-Hse400DocumentVersion -DocumentId $documentId -VersionId $VersionId -Code $Code -PeriodKey $periodKey
 
     $inst = @{}
     foreach ($ti in Get-Hse400Items (Invoke-Hse400Ok -Method GET -Path ("/api/v1/documents/{0}/tables?periodKey={1}" -f $documentId, $periodKey)).Json) {
         $inst[[string]$ti.tableCode] = $ti.tableInstanceId
     }
     return @{ ProjectId = $projectId; DocumentId = $documentId; PeriodKey = $periodKey; Instances = $inst }
+}
+
+function Sync-Hse400DocumentVersion {
+    <# Наявний проєкт на старішій версії шаблону переноситься на поточну (ФВ-7.5, режим Safe; переносяться всі
+       документи проєкту). Спершу сухий прогін: відмова або втрата введених значень - зупинка, нічого не записано. #>
+    param([Parameter(Mandatory)]$DocumentId, [Parameter(Mandatory)]$VersionId, [Parameter(Mandatory)][string]$Code,
+        [Parameter(Mandatory)]$PeriodKey)
+    $targets = (Invoke-Hse400Ok -Method GET -Path ("/api/v1/documents/{0}/migrate-version" -f $DocumentId)).Json
+    if ([int]$targets.currentVersionId -eq [int]$VersionId) { return }
+    $path = "/api/v1/documents/{0}/migrate-version" -f $DocumentId
+    $dry = (Invoke-Hse400Ok -Method POST -Path $path -Body (New-Hse400MigrateBody -TargetVersionId $VersionId -DryRun)).Json
+    Assert-Hse400MigrationPlan -Plan $dry -Code $Code
+    $done = (Invoke-Hse400Ok -Method POST -Path $path -Body (New-Hse400MigrateBody -TargetVersionId $VersionId)).Json
+    if (-not $done.applied) { throw "Перенос проєкту $Code на версію шаблону $VersionId не застосовано." }
+    Write-Hse400Log ("Проєкт {0} перенесено з версії шаблону {1} на {2}: документів {3}, значень {4}." -f $Code, $targets.currentVersionId, $VersionId, $done.documentCount, $done.transferredValues)
+    # Після переносу документ ще якийсь час «переїжджає» (409 ECR-DOC-4091): чекаємо, а не падаємо.
+    $probe = "/api/v1/documents/{0}/tables?periodKey={1}" -f $DocumentId, $PeriodKey
+    for ($i = 0; $i -lt 90; $i++) {
+        $r = Invoke-Hse400 -Method GET -Path $probe
+        if ($r.Status -ne 409 -or (Get-EcrErrorCode $r) -ne 'ECR-DOC-4091') { return }
+        Start-Sleep -Seconds 2
+    }
+    throw "Документ $DocumentId після переносу на версію $VersionId досі зайнятий (ECR-DOC-4091)."
+}
+
+function Set-Hse400Bindings {
+    <# Активні прив'язки {} на якір кожної таблиці версії шаблону. Лише коли методологія має опубліковану версію
+       (інакше $false): прив'язка до неопублікованої валить увесь перерахунок документа. Перенос проєкту на нову версію
+       шаблону вимагає прив'язок на її якорях ДО переносу (відмова bindingsNotMapped). #>
+    param([Parameter(Mandatory)]$MethodologyId, [Parameter(Mandatory)]$VersionId)
+    $published = @(Get-Hse400MethodologyVersions $MethodologyId | Where-Object { [string]$_.status -eq 'Published' })
+    if (-not $published.Count) { return $false }
+    $anchors = Get-Hse400AnchorColumnIds -Structure (Get-Hse400Structure $VersionId) -Model $model
+    $existing = Get-Hse400Bindings $MethodologyId
+    $made = 0; $kept = 0
+    foreach ($b in $plan.Bindings) {
+        if (-not $anchors.ContainsKey($b.Table)) { throw "У версії шаблону $VersionId немає колонки $($b.ColumnCode) у таблиці $($b.Table)." }
+        $col = $anchors[$b.Table]
+        $same = @($existing | Where-Object { [int]$_.columnDefId -eq $col -and [string]$_.outputCode -eq $b.OutputCode -and $_.isActive -and ([string]$_.matchJson).Trim() -eq '{}' })
+        if ($same.Count) { $kept++; continue }
+        Invoke-Hse400Ok -Method PUT -Path ("/api/v1/methodologies/{0}/bindings/{1}/{2}" -f $MethodologyId, $col, $b.OutputCode) -Body (New-Hse400BindingBody -Active $true) | Out-Null
+        $made++
+    }
+    Write-Hse400Log ("Прив'язки {0}: створено/оновлено {1}, уже були {2} з {3}." -f $plan.Namespace, $made, $kept, $plan.Bindings.Count)
+    return $true
 }
 
 function Write-Hse400GoldenInputs {
@@ -295,7 +341,10 @@ if ($Stage -in 'Template', 'All') {
             if ($plan.Tests.Count) {
                 # Модуль читає комірки документа, тож золотий тест потребує документа з відомим вводом. Це окремий
                 # проєкт HSE400_GOLD: синтетичний ввід ніколи не потрапляє в робочий документ HSE400_<рік>.
-                $gold = Get-Hse400ProjectDocument -Code $goldCode -Title 'HSE400 golden test (do not edit)' -ProjectYear $Year -VersionId $vid -PolicyId (Get-Hse400PolicyId $policyCode)
+                # Наявний золотий проєкт на старішій версії шаблону переноситься, а перенос вимагає прив'язок на якорях
+                # нової версії - їх дає попередня опублікована версія методології (якщо є).
+                [void](Set-Hse400Bindings -MethodologyId $mid -VersionId $vid)
+                $gold =Get-Hse400ProjectDocument -Code $goldCode -Title 'HSE400 golden test (do not edit)' -ProjectYear $Year -VersionId $vid -PolicyId (Get-Hse400PolicyId $policyCode)
                 Write-Hse400GoldenInputs -Gold $gold -Tests $plan.Tests
                 foreach ($x in $plan.Tests) {
                     if (-not $gold.Instances.ContainsKey([string]$x.table)) { throw "У золотому документі немає таблиці $($x.table) (тест $($x.code))." }
@@ -320,23 +369,8 @@ if ($Stage -in 'Template', 'All') {
     Save-Hse400State $state
 
     # ---------- прив'язки: якір кожної таблиці -> HSE400, правило "{}" ----------
-    $published = @(Get-Hse400MethodologyVersions $mid | Where-Object { [string]$_.status -eq 'Published' })
-    if (-not $published.Count) {
+    if (-not (Set-Hse400Bindings -MethodologyId $mid -VersionId $vid)) {
         Add-Hse400Incomplete "Прив'язки не створено: методологія $($plan.Namespace) без опублікованої версії (активна прив'язка до неї валить увесь перерахунок документа, ECR-CALC-0422)."
-    }
-    else {
-        $anchors = Get-Hse400AnchorColumnIds -Structure (Get-Hse400Structure $vid) -Model $model
-        $existing = Get-Hse400Bindings $mid
-        $made = 0; $kept = 0
-        foreach ($b in $plan.Bindings) {
-            if (-not $anchors.ContainsKey($b.Table)) { throw "У версії шаблону $vid немає колонки $($b.ColumnCode) у таблиці $($b.Table)." }
-            $col = $anchors[$b.Table]
-            $same = @($existing | Where-Object { [int]$_.columnDefId -eq $col -and [string]$_.outputCode -eq $b.OutputCode -and $_.isActive -and ([string]$_.matchJson).Trim() -eq '{}' })
-            if ($same.Count) { $kept++; continue }
-            Invoke-Hse400Ok -Method PUT -Path ("/api/v1/methodologies/{0}/bindings/{1}/{2}" -f $mid, $col, $b.OutputCode) -Body (New-Hse400BindingBody -Active $true) | Out-Null
-            $made++
-        }
-        Write-Hse400Log ("Прив'язки {0}: створено/оновлено {1}, уже були {2} з {3}." -f $plan.Namespace, $made, $kept, $plan.Bindings.Count)
     }
 }
 
