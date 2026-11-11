@@ -37,8 +37,9 @@
 A14/A15/A18: `OperatingTimeReleaseOnColdVentYesNo_M09` (T9_04/T9_07) — `String` зі змішаним змістом «години АБО
 `Yes - Да`/`No - Нет`» (D-423); окремої колонки годин немає. Yes/No читає лише C11_10 для NAE зі своїх груп; для
 C11_02/C11_04/C11_05 це години (Legacy розбирає числовий рядок, LAND-POST-K3), тому там `600` (kind `text`).
-⚠ m27 `ECW_C11_11_04` (Strict): входи `Benzene`/`Xylene`/`SaturatedHydrocarbonsC1C5`/`C6C10` — String-колонки з
-числом; у Strict текст × число = `#VALUE` — ризик, видно лише після прогону.
+⚠ m27 `ECW_C11_11_04` (Strict): входи `Benzene`/`Xylene`/`SaturatedHydrocarbonsC1C5`/`C6C10` (і `Toluene`) до шаблону
+1.0.15.0 включно — String-колонки з числом; у Strict текст × число = `#VALUE` — ризик, видно лише після прогону. З 1.0.16.0
+(AN-173) вони Decimal(34,16) у T9a_19; мости `Land_MassFraction_0<код>` поки лишаються без precision — перевірити прогоном.
 Варіант B (реальні значення) змінить лише `value`/`source` у CSV — формат файла сталий.
 Порожнє `value` або `source` → `Fill-LandTestDocument.ps1 -Execute` відмовляє (код 2) з переліком.
 
