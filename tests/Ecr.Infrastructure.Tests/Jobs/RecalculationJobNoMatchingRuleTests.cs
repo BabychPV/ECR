@@ -88,6 +88,51 @@ public sealed class RecalculationJobNoMatchingRuleTests(SqlServerFixture sql)
             r => r.Message?.Contains("jobs.recalcNoMatchingRule", StringComparison.Ordinal) == true);
     }
 
+    /// <remarks>
+    /// AN-180: рядок, закритий правилом, але без входів формул (проблема <c>MissingInputs</c>, AN-164), — і в повідомленні
+    /// задачі: ключ <c>jobs.recalcMissingInputs</c>, кількість і номери, без ключів рядків. Мутація: прибрати блок звіту
+    /// <c>missingInputRows</c> у <c>RecalculationJob.ExecuteAsync</c> — тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.9")]
+    public async Task AN180_Рядки_без_входів_формул_потрапляють_у_повідомлення_без_ключів()
+    {
+        var (builder, document) = await ArrangeAsync();
+        var progress = new RecordingProgress();
+
+        await RunAsync(
+            builder, document, progress, [], missingInputs: [new RejectedRow(500, 4, "R003"), new RejectedRow(500, 7, "R006")]);
+
+        var (_, message) = progress.Reports.Last(
+            r => r.Message?.Contains("jobs.recalcMissingInputs", StringComparison.Ordinal) == true);
+        Assert.True(JobProgressMessageCodec.TryDecode(message, out var envelope));
+        Assert.Equal("jobs.recalcMissingInputs", envelope.Key);
+        Assert.Equal("2", envelope.Params!["count"]);
+        Assert.Equal("4, 7", envelope.Params["rows"]);
+        Assert.DoesNotContain("R003", message, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            progress.Reports,
+            r => r.Message?.Contains("jobs.recalcCategoryRuleRejected", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.9")]
+    public async Task AN180_Без_рядків_без_входів_повідомлення_немає()
+    {
+        var (builder, document) = await ArrangeAsync();
+        var progress = new RecordingProgress();
+
+        await RunAsync(builder, document, progress, []);
+
+        Assert.DoesNotContain(
+            progress.Reports,
+            r => r.Message?.Contains("jobs.recalcMissingInputs", StringComparison.Ordinal) == true);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -124,12 +169,13 @@ public sealed class RecalculationJobNoMatchingRuleTests(SqlServerFixture sql)
 
     private static async Task RunAsync(
         TestDocumentBuilder builder, TestDocument document, RecordingProgress progress, IReadOnlyList<UnmatchedRow> unmatched,
-        IReadOnlyList<RejectedRow>? rejected = null, IReadOnlyList<int>? skippedUnpublished = null)
+        IReadOnlyList<RejectedRow>? rejected = null, IReadOnlyList<int>? skippedUnpublished = null,
+        IReadOnlyList<RejectedRow>? missingInputs = null)
     {
         var clock = new TestClock(new DateTime(2026, 9, 30, 8, 0, 0, DateTimeKind.Utc));
         await using var db = builder.CreateContext();
         var job = new RecalculationJob(
-            db, new UnmatchedRunner(unmatched, rejected ?? [], skippedUnpublished ?? []),
+            db, new UnmatchedRunner(unmatched, rejected ?? [], skippedUnpublished ?? [], missingInputs ?? []),
             RunHandler(), FormulaService(), clock, jobs: null, budget: null);
 
         await job.ExecuteAsync(
@@ -193,7 +239,8 @@ public sealed class RecalculationJobNoMatchingRuleTests(SqlServerFixture sql)
 
     /// <summary>Оркестратор, що повертає профіль із заданими рядками без правила.</summary>
     private sealed class UnmatchedRunner(
-        IReadOnlyList<UnmatchedRow> unmatched, IReadOnlyList<RejectedRow> rejected, IReadOnlyList<int> skippedUnpublished)
+        IReadOnlyList<UnmatchedRow> unmatched, IReadOnlyList<RejectedRow> rejected, IReadOnlyList<int> skippedUnpublished,
+        IReadOnlyList<RejectedRow> missingInputs)
         : ICalculationRunner
     {
         public Task<ModuleProfile> RunAsync(
@@ -204,6 +251,7 @@ public sealed class RecalculationJobNoMatchingRuleTests(SqlServerFixture sql)
             profile.RecordUnmatched(unmatched);
             profile.RecordRejected(rejected);
             profile.RecordSkippedUnpublished(skippedUnpublished);
+            profile.RecordMissingInputs(missingInputs);
 
             return Task.FromResult(profile);
         }
