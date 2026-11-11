@@ -372,7 +372,11 @@ public sealed record TemplateVersionSummary(
     Domain.Enums.TemplateVersionStatus Status,
     int PresentationRevision,
     int? ClonedFromVersionId,
-    DateTime? PublishedAt);
+    DateTime? PublishedAt)
+{
+    /// <summary>D-474: розкладка версії (копія на місяць або рік із місяцями в колонках).</summary>
+    public Domain.Enums.TemplateLayout Layout { get; init; }
+}
 
 /// <summary>Шаблон у переліку.</summary>
 /// <param name="Id">Ідентифікатор.</param>

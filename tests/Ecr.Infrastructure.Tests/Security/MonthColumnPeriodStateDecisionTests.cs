@@ -78,8 +78,8 @@ public sealed class MonthColumnPeriodStateDecisionTests(SqlServerFixture sql) : 
 
     /// <summary>
     /// Документ у жовтні (Open); періоди: 03 Closed, 07 Open + Approved, 08 Grace, 09 Open + Submitted, 11 Open,
-    /// 12 Scheduled. <paramref name="monthsInColumns"/> = <c>false</c> — та сама схема, але таблиця НЕ
-    /// <c>MonthsInColumns</c> (колонка місяця там не є колонкою періоду).
+    /// 12 Scheduled. <paramref name="monthsInColumns"/> = <c>false</c> — та сама схема, але таблиця
+    /// <c>PerPeriodInstance</c> (D-474 (6): замок за місяцем колонки діє й там).
     /// </summary>
     private async Task<World> ArrangeAsync(bool monthsInColumns = true)
     {
@@ -254,16 +254,33 @@ public sealed class MonthColumnPeriodStateDecisionTests(SqlServerFixture sql) : 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Decision", "P2-A")]
-    public async Task Таблиця_не_MonthsInColumns_колонка_місяця_не_є_колонкою_періоду()
+    [Trait("Requirement", "D-474")]
+    public async Task Таблиця_не_MonthsInColumns_колонка_місяця_теж_підлягає_стану_свого_періоду()
     {
+        // D-474 (6): замок за місяцем — для ВСІХ таблиць, зокрема PerPeriodInstance. До D-474 тут усе було дозволено.
+        // Мутаційний доказ: повернути умову `isMonthsTable` у hasOtherMonthColumn (AccessDecisionService) — червоніє.
         var w = await ArrangeAsync(monthsInColumns: false);
 
         var decisions = await BatchAsync(w, Writer(w));
 
-        foreach (var address in w.All)
+        Assert.Equal(EditDenyReason.PeriodClosed, decisions[w.M3Closed].Reason);
+        Assert.Equal(EditDenyReason.DocumentSubmitted, decisions[w.M9Submitted].Reason);
+        Assert.Equal(EditDenyReason.DocumentApproved, decisions[w.M7Approved].Reason);
+        Assert.False(decisions[w.M3Closed].IsAllowed);
+        Assert.False(decisions[w.M9Submitted].IsAllowed);
+        Assert.False(decisions[w.M7Approved].IsAllowed);
+
+        foreach (var address in new[] { w.Plain, w.M8Grace, w.M10Own, w.M11Open, w.M12Scheduled })
         {
             Assert.True(decisions[address].IsAllowed, $"{address}: {decisions[address].Reason}");
+        }
+
+        // Сітка сіра рівно там, де запис відмовить, — і для цієї розкладки таблиці.
+        await using var db = w.Builder.CreateContext();
+        var slice = await Service(db).CanEditSliceAsync(Writer(w), w.Doc.TableInstanceId, CancellationToken.None);
+        foreach (var address in w.All)
+        {
+            Assert.Equal(decisions[address], slice[address]);
         }
     }
 }

@@ -91,7 +91,12 @@ public static class DependencyInjection
         // вимкнено) читає роутер — вимкнено, декоратор лише передає виклики в NormalizedCellStore.
         services.AddScoped<NormalizedCellStore>();
         // ⚠ Конфігурація — із замикання, а не з DI: граф задачі в Ecr.Worker.Tests збирається без `IConfiguration`.
-        services.AddScoped<IMonthColumnRouter>(sp => new MonthColumnRouter(sp.GetRequiredService<EcrDbContext>(), configuration));
+        // D-474: розкладка версії шаблону — реєстр у пам'яті процесу; оновлювач стартує з хостом (у Worker його
+        // повертає ChildComposition, бо та прибирає фонові служби складання Api).
+        services.AddSingleton<ITemplateLayoutRegistry, TemplateLayoutRegistry>();
+        services.AddHostedService<TemplateLayoutRegistryRefresher>();
+        services.AddScoped<IMonthColumnRouter>(sp => new MonthColumnRouter(
+            sp.GetRequiredService<EcrDbContext>(), configuration, sp.GetRequiredService<ITemplateLayoutRegistry>()));
         services.AddScoped<ICellStore>(sp => new MonthRoutedCellStore(
             sp.GetRequiredService<NormalizedCellStore>(),
             sp.GetRequiredService<IMonthColumnRouter>(),

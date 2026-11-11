@@ -109,7 +109,7 @@ IF OBJECT_ID(N'rpt.ViewSlot', N'U') IS NULL
 GO
 
 -- AN-155d: відбиток УСІХ входів, від яких залежить текст вʼюх rpt.v_*_vN та стабільних (обидві процедури нижче):
---   * @MonthRouting;
+--   * @MonthRouting і (D-474) cfg.TemplateVersion.Layout кожної опублікованої версії;
 --   * визначення самих процедур і цієї функції (правка 05-rpt-views.sql => інший відбиток => перегенерація);
 --   * остання застосована міграція EF (dbo.__EFMigrationsHistory) — зміна таблиць під вʼюхами => перегенерація;
 --   * опубліковані/застарілі версії (Status 1,2): cfg.Template(Code), cfg.TemplateVersion(Id, TemplateId, Version);
@@ -131,7 +131,8 @@ BEGIN
             COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'rpt.usp_GenerateTemplateViews')), N''), N'|',
             COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'rpt.usp_GenerateStableViews')), N''), N'|',
             COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'rpt.fn_ViewsFingerprint')), N''))), 2),
-        N';tpl=', CAST((SELECT t.Id AS i, t.Code AS c, tv.Id AS v, tv.[Version] AS n
+        -- D-474: розкладка версії (Layout = 1 - маршрутизація місяців лише для неї) входить у відбиток: зміна => перегенерація.
+        N';tpl=', CAST((SELECT t.Id AS i, t.Code AS c, tv.Id AS v, tv.[Version] AS n, tv.Layout AS l
                           FROM cfg.TemplateVersion AS tv JOIN cfg.Template AS t ON t.Id = tv.TemplateId
                          WHERE tv.Status IN (1, 2) ORDER BY tv.Id FOR XML RAW(N'r'), TYPE) AS nvarchar(max)),
         N';sh=', CAST((SELECT sd.Id AS i, sd.TemplateVersionId AS v, sd.Code AS c, JSON_VALUE(sd.NameL10n, N'$.en') AS e
@@ -190,6 +191,8 @@ GO
 -- Collection:MonthColumnRouting (застосунок передає його сам - ReportViewGenerator); за замовчуванням 0, і текст вʼюх
 -- БАЙТ-У-БАЙТ як до Q-17. DBA, що кличе процедуру руками на базі з увімкненим прапором, мусить передати @MonthRouting = 1:
 --     EXEC rpt.usp_GenerateTemplateViews @MonthRouting = 1;
+-- ✎ D-474: @MonthRouting - спадковий прапор «усі версії». Версія з cfg.TemplateVersion.Layout = 1 (YearWithMonthColumns)
+-- маршрутизується і при @MonthRouting = 0 - рівно тим самим текстом, що й при прапорі ON. Layout = 0 - як до D-474.
 -- AN-155d: @OnlyIfChanged = 1 (лише старт застосунку; публікація й DBA лишають 0 = завжди генерувати) пропускає ГЕНЕРАЦІЮ ВСІХ
 -- версій (@TemplateVersionId IS NULL), якщо відбиток входів (rpt.fn_ViewsFingerprint) збігається з відбитком останньої
 -- УСПІШНОЇ повної генерації (розширена властивість схеми rpt, без таблиці й міграції) і всі очікувані вʼюхи є в базі.
@@ -322,6 +325,8 @@ BEGIN
     -- Q-17.slotmap: агрегати за слотом (pc / sc), літерал імені вʼюхи, бажані рядки rpt.ViewSlot і чи їх треба переписати.
     DECLARE @plainAggS nvarchar(max), @scAggS nvarchar(max), @vnLit nvarchar(300), @useSlots bit, @mapDiff bit, @ddl bit;
     DECLARE @slot TABLE (ColumnDefId int NOT NULL, Slot int NOT NULL, Mo int NULL, PRIMARY KEY (ColumnDefId, Slot));
+    -- D-474: маршрутизація місяців версії поточної вʼюхи (@MonthRouting = 1 або cfg.TemplateVersion.Layout = 1).
+    DECLARE @mr bit;
 
     DECLARE cur_views CURSOR LOCAL FAST_FORWARD FOR
         SELECT TableDefId, SheetDefId, Header, ViewName FROM @tables ORDER BY TableDefId;
@@ -337,6 +342,11 @@ BEGIN
                @plainAggS = N'', @scAggS = N'', @vnLit = N'N''' + REPLACE(@view, N'''', N'''''') + N'''';
         DELETE FROM @slot;
         SET @layout = (SELECT LayoutKind FROM cfg.TableDef WHERE Id = @id);
+        -- D-474: маршрутизація місяців ДЛЯ ЦІЄЇ ВЕРСІЇ - прапор (усі версії) або розкладка версії YearWithMonthColumns (1).
+        -- Прапор ON або Layout = 0 - текст вʼюхи рівно той самий, що до D-474.
+        SET @mr = CASE WHEN @MonthRouting = 1
+                         OR EXISTS (SELECT 1 FROM cfg.SheetDef AS lsd JOIN cfg.TemplateVersion AS ltv ON ltv.Id = lsd.TemplateVersionId
+                                     WHERE lsd.Id = @sheet AND ltv.Layout = 1) THEN 1 ELSE 0 END;
         -- Q-17.perf: чи є в таблиці активна прив'язка з предикатом MatchJson (тоді rv - посередній apply на рядок, нижче).
         -- rv наборового варіанта стає колонками apply-джерела рядків r (alias r), посередній - окремим apply rv.
         SET @rvPred = CASE WHEN EXISTS (SELECT 1 FROM cfg.CalculationBinding
@@ -362,12 +372,12 @@ BEGIN
             -- Q-17.7: MonthsInColumns — ВВЕДЕНИЙ стовпець (не Formula/Calculated) читається з комірки власника;
             -- власна копія в рядку перегляду лишається запасним значенням (до консолідації даних і після неї
             -- до -PurgeCopies). Похідні (Formula/Calculated) і всі інші розкладки — як було.
-            SET @routed = CASE WHEN @MonthRouting = 1 AND @layout = 0 AND @colType NOT IN (6, 8)
+            SET @routed = CASE WHEN @mr = 1 AND @layout = 0 AND @colType NOT IN (6, 8)
                                     AND (@isMonth = 0 OR @monthNo BETWEEN 1 AND 12) THEN 1 ELSE 0 END;
 
             SET @numRef = @alias + N'.ValueNumeric';
             SET @strRef = @alias + N'.ValueString';
-            IF @routed = 0 AND @MonthRouting = 1
+            IF @routed = 0 AND @mr = 1
             BEGIN
                 -- Q-17.perf (T3_00 Land: 232 колонки = 232 LEFT JOIN doc.CellValue = 233 seek-ів на рядок, 5,4 млн виконань): при прапорі ON
                 -- усі НЕмаршрутизовані колонки (PerPeriodInstance/Static, а в MonthsInColumns - Formula/Calculated) читає ОДИН
@@ -865,9 +875,11 @@ BEGIN
     DECLARE @gt TABLE (
         TableDefId int NOT NULL PRIMARY KEY, SheetDefId int NOT NULL, TemplateVersionId int NOT NULL, TemplateId int NOT NULL,
         TemplateCode nvarchar(64) NOT NULL, SheetCode nvarchar(64) NOT NULL, TableCode nvarchar(64) NOT NULL,
-        VersionText nvarchar(20) NOT NULL, LayoutKind tinyint NOT NULL, GroupId int NULL);
-    INSERT INTO @gt (TableDefId, SheetDefId, TemplateVersionId, TemplateId, TemplateCode, SheetCode, TableCode, VersionText, LayoutKind)
-    SELECT td.Id, sd.Id, tv.Id, t.Id, t.Code, sd.Code, td.Code, tv.[Version], td.LayoutKind
+        VersionText nvarchar(20) NOT NULL, LayoutKind tinyint NOT NULL, GroupId int NULL, Routed bit NOT NULL);
+    -- D-474: Routed - маршрутизація місяців ВЕРСІЇ таблиці: прапор (усі версії) або розкладка версії YearWithMonthColumns (1).
+    INSERT INTO @gt (TableDefId, SheetDefId, TemplateVersionId, TemplateId, TemplateCode, SheetCode, TableCode, VersionText, LayoutKind, Routed)
+    SELECT td.Id, sd.Id, tv.Id, t.Id, t.Code, sd.Code, td.Code, tv.[Version], td.LayoutKind,
+           CASE WHEN @MonthRouting = 1 OR tv.Layout = 1 THEN 1 ELSE 0 END
       FROM cfg.TableDef AS td
       JOIN cfg.SheetDef AS sd ON sd.Id = td.SheetDefId
       JOIN cfg.TemplateVersion AS tv ON tv.Id = sd.TemplateVersionId
@@ -961,10 +973,14 @@ BEGIN
     -- Q-17.slotmap: як у rpt.usp_GenerateTemplateViews - агрегати за слотом і бажані рядки rpt.ViewSlot (усі Id коду й аліасів).
     DECLARE @plainAggS nvarchar(max), @scAggS nvarchar(max), @vnLit nvarchar(300), @useSlots bit, @mapDiff bit, @ddl bit, @slotAgg nvarchar(max);
     DECLARE @slot TABLE (ColumnDefId int NOT NULL, Slot int NOT NULL, Mo int NULL, PRIMARY KEY (ColumnDefId, Slot));
+    -- D-474: група з версіями різної маршрутизації (прапор OFF, Layout = 1 лише в частини версій) - @mixedGuard обмежує
+    -- значення власника (fam) рядками маршрутизованих версій (@routedTids); без змішування - порожній (текст як до D-474).
+    DECLARE @routedTids nvarchar(max), @mixedGuard nvarchar(max);
 
     -- Columns of one group: one row per ColumnDef (all versions), then one row per code.
+    -- D-474: Routed - версія колонки маршрутизується (Mo у мапі слотів - лише для Id маршрутизованих версій).
     DECLARE @ci TABLE (ColId int NOT NULL PRIMARY KEY, Code nvarchar(64) NOT NULL, DataType tinyint NOT NULL, Fam tinyint NOT NULL,
-                       IsMonth bit NOT NULL, MonthNo tinyint NULL, Ord bigint NOT NULL);
+                       IsMonth bit NOT NULL, MonthNo tinyint NULL, Ord bigint NOT NULL, Routed bit NOT NULL);
     DECLARE @cols TABLE (Seq int IDENTITY(1, 1) PRIMARY KEY, Code nvarchar(64) NOT NULL, FirstOrd bigint NOT NULL);
     -- RPT-STABLE Part B: code aliases of one group from the persisted rename map (cfg.ColumnRename): a renamed column is
     -- exposed under BOTH names, each reading the data of every id of the whole alias class (transitive closure).
@@ -992,16 +1008,25 @@ BEGIN
                            FROM @gt WHERE GroupId = @g ORDER BY TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END AS nvarchar(20))';
 
         -- Month routing needs the MonthsInColumns layout (0) in EVERY version of the table.
-        SET @routedGroup = CASE WHEN @MonthRouting = 1 AND NOT EXISTS (SELECT 1 FROM @gt WHERE GroupId = @g AND LayoutKind <> 0) THEN 1 ELSE 0 END;
+        -- D-474: and at least one routed version (flag ON = all versions; flag OFF = versions with Layout = 1). Flag ON or no
+        -- Layout = 1 version: exactly as before D-474.
+        SET @routedGroup = CASE WHEN EXISTS (SELECT 1 FROM @gt WHERE GroupId = @g AND Routed = 1)
+                                 AND NOT EXISTS (SELECT 1 FROM @gt WHERE GroupId = @g AND LayoutKind <> 0) THEN 1 ELSE 0 END;
+        -- D-474: mixed group (some versions not routed) - owner values (fam) only for the rows of the routed versions; a row of a
+        -- non-routed version keeps its own copy even when the same document has a routed-version instance in that year.
+        SET @routedTids = STUFF((SELECT N',' + CAST(TableDefId AS nvarchar(10)) FROM @gt WHERE GroupId = @g AND Routed = 1 ORDER BY TableDefId
+                                 FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
+        SET @mixedGuard = CASE WHEN @routedGroup = 1 AND EXISTS (SELECT 1 FROM @gt WHERE GroupId = @g AND Routed = 0)
+                               THEN N' AND ti.TableDefId IN (' + @routedTids + N')' ELSE N'' END;
         SET @rvPred = CASE WHEN EXISTS (SELECT 1 FROM cfg.CalculationBinding AS cb JOIN @gt AS x ON x.TableDefId = cb.TableDefId
                                          WHERE x.GroupId = @g AND cb.IsActive = 1 AND REPLACE(cb.MatchJson, CHAR(32), N'') <> N'{}') THEN 1 ELSE 0 END;
         SET @rvRef = CASE WHEN @rvPred = 0 THEN N'r' ELSE N'rv' END;
 
-        INSERT INTO @ci (ColId, Code, DataType, Fam, IsMonth, MonthNo, Ord)
+        INSERT INTO @ci (ColId, Code, DataType, Fam, IsMonth, MonthNo, Ord, Routed)
         SELECT cd.Id, cd.Code, cd.DataType,
                CASE cd.DataType WHEN 0 THEN 0 WHEN 3 THEN 3 WHEN 4 THEN 4 WHEN 5 THEN 5 WHEN 7 THEN 7 ELSE 1 END,
                cd.IsMonthColumn, cd.MonthNumber,
-               CAST(x.TemplateVersionId AS bigint) * 4294967296 + cd.Id
+               CAST(x.TemplateVersionId AS bigint) * 4294967296 + cd.Id, x.Routed
           FROM cfg.ColumnDef AS cd JOIN @gt AS x ON x.TableDefId = cd.TableDefId
          WHERE x.GroupId = @g AND cd.IsDeleted = 0;
         INSERT INTO @cols (Code, FirstOrd) SELECT Code, MIN(Ord) FROM @ci GROUP BY Code ORDER BY MIN(Ord);
@@ -1037,9 +1062,10 @@ BEGIN
             SET @strRef = N'pc.s' + CAST(@n AS nvarchar(10));
             SET @routed = CASE WHEN @routedGroup = 1 AND @conflict = 0 AND @colType NOT IN (6, 8)
                                     AND (@isMonth = 0 OR @monthNo BETWEEN 1 AND 12) THEN 1 ELSE 0 END;
-            -- Q-17.slotmap: кожен Id коду (з аліасами) - рядок мапи у слоті @n; Mo - лише для маршрутизованої колонки.
+            -- Q-17.slotmap: кожен Id коду (з аліасами) - рядок мапи у слоті @n; Mo - лише для маршрутизованої колонки
+            -- (D-474: і лише для Id маршрутизованої версії - Id немаршрутизованої читаються як власна копія, pc).
             INSERT INTO @slot (ColumnDefId, Slot, Mo)
-            SELECT ColId, @n, CASE WHEN @routed = 1 THEN CASE WHEN @isMonth = 1 THEN @monthNo ELSE 0 END END
+            SELECT ColId, @n, CASE WHEN @routed = 1 AND Routed = 1 THEN CASE WHEN @isMonth = 1 THEN @monthNo ELSE 0 END END
               FROM @ci WHERE Code = @colCode OR Code IN (SELECT Other FROM @alias WHERE Code = @colCode);
             SET @slotAgg = CASE WHEN @colType = 3
                                 THEN N'MAX(CAST(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
@@ -1195,7 +1221,7 @@ LEFT HASH JOIN (SELECT c.DocumentId, c.Yr, c.RowKey' + @famAgg + N'
                          AND ((fm.Mo > 0 AND c.PeriodKey % 100 = fm.Mo) OR (fm.Mo = 0 AND c.PeriodKey = c.AnchorKey))
                  WHERE fm.ViewName = ' + @vnLit + N' AND fm.Mo IS NOT NULL
                  GROUP BY c.DocumentId, c.Yr, c.RowKey) AS fam
-       ON p.PeriodKind = 0 AND fam.DocumentId = ti.DocumentId AND fam.Yr = ti.PeriodKey / 100 AND fam.RowKey = r.RowKey';
+       ON p.PeriodKind = 0 AND fam.DocumentId = ti.DocumentId AND fam.Yr = ti.PeriodKey / 100 AND fam.RowKey = r.RowKey' + @mixedGuard;
             -- Own computed cell (sc): only the computed cells of ROUTED columns (map rows with Mo) reach the aggregate.
             SET @ownerCells = N'
 OUTER APPLY (SELECT ' + STUFF(@scAggS, 1, 2, N'') + N' FROM doc.CellValue AS x INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit

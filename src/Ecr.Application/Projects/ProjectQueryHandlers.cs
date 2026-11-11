@@ -455,7 +455,10 @@ public sealed class CreateProjectHandler(
     IAuditWriter audit,
     IUnitOfWork uow,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+
+    // D-474 (4): розкладка версії шаблону. `null` (прямий конструктор у тестах) — перевірки розкладки немає.
+    IRepository<Domain.Entities.Configuration.TemplateVersion, int>? templateVersions = null)
 {
     /// <summary>Право керування проєктами.</summary>
     public const string Permission = "Project.Manage";
@@ -555,6 +558,24 @@ public sealed class CreateProjectHandler(
         // `FK_Project_Policy` під час `SaveChanges` (500 без коду й тексту),
         // а `GetPolicyAsync` віддає `ECR-PRD-0422` заздалегідь.
         var policy = await periods.GetPolicyAsync(periodPolicyId, ct).ConfigureAwait(false);
+
+        // ⛔ D-474 (4): річний проєкт має ОДИН період на рік, а розкладка «копія на місяць» вимагає дванадцяти —
+        // місячні копії не мали б куди лягти. Відмова тут, а не порожній документ потім.
+        if (periodKind == PeriodKind.Yearly && templateVersions is not null)
+        {
+            var version = await templateVersions.FindAsync(templateVersionId, ct).ConfigureAwait(false);
+            if (version is { Layout: TemplateLayout.PerMonthCopies })
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.TemplateInvalid,
+                    "Річний проєкт потребує версії шаблону з розкладкою «рік, місяці в колонках».",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0422.yearlyProjectNeedsYearLayout",
+                        ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
+            }
+        }
 
         // ⛔ T6/#36: перевіряється ТУТ, а не відкладається до першого
         // `GET …/periods`. `PeriodCalendar.CountFor` кидає `ECR-PRD-4224`, якщо

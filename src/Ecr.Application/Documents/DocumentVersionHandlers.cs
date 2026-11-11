@@ -163,7 +163,10 @@ public sealed class CompareDocumentVersionsHandler(
 
         // ⚠ Q-17: з прапором роль, звужена періодами, читає колонки В ПЕРІОДІ порівняння (D-214) — межі «без періоду»
         // для неї порожні. Прапор вимкнено — як було (поведінка не змінюється).
-        var columnScope = monthRouter is { Enabled: true } ? readable.InPeriod(key) : readable;
+        // ✎ D-474: маршрутизація — властивість версії шаблону документа, тож питаємо про ДОКУМЕНТ.
+        var routed = monthRouter is { Enabled: true }
+            && await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false) is not null;
+        var columnScope = routed ? readable.InPeriod(key) : readable;
 
         return await DiffAsync(
             documentId, key, from, toId, columnScope, ownerBlocked,

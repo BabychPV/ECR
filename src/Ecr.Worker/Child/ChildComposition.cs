@@ -92,6 +92,10 @@ internal static class ChildComposition
             services.Remove(descriptor);
         }
 
+        // D-474: реєстр розкладок версій потрібен і тут — без оновлювача задача перерахунку документа річної
+        // версії пішла б немаршрутизованим шляхом.
+        services.AddHostedService<Ecr.Infrastructure.Persistence.TemplateLayoutRegistryRefresher>();
+
         // Задача перерахунку може поставити наступну — лише в чергу в базі:
         // Quartz у пам'яті цього процесу ніхто б не виконав.
         services.AddScoped<IBackgroundJobScheduler, DbBackgroundJobScheduler>();

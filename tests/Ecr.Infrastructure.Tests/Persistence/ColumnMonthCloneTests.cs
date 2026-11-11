@@ -48,4 +48,39 @@ public sealed class ColumnMonthCloneTests(SqlServerFixture sql)
         Assert.Equal((byte)9, clonedColumn.MonthNumber);
         Assert.All(cloned.Where(c => c.Code != source.Code), c => { Assert.False(c.IsMonthColumn); Assert.Null(c.MonthNumber); });
     }
+
+    [Theory]
+    [InlineData(Ecr.Domain.Enums.TemplateLayout.YearWithMonthColumns)]
+    [InlineData(Ecr.Domain.Enums.TemplateLayout.PerMonthCopies)]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    public async Task Клон_версії_успадковує_розкладку(Ecr.Domain.Enums.TemplateLayout layout)
+    {
+        // D-474 (2): нова версія з клону має ту саму розкладку — інакше 1.0.16.0 з річної 1.0.15.0 мовчки стала б
+        // «копією на місяць» і її документи перестали б маршрутизуватись.
+        var ct = CancellationToken.None;
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(ct: ct);
+
+        await using (var setup = builder.CreateContext())
+        {
+            var version = await setup.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId, ct);
+            setup.Entry(version).Property(v => v.Layout).CurrentValue = layout;
+            await setup.SaveChangesAsync(ct);
+        }
+
+        int cloneId;
+        await using (var db = builder.CreateContext())
+        {
+            cloneId = await new TemplateVersionStore(db).CloneAsync(
+                doc.TemplateVersionId, "2.0.0.2", 1, new DateTime(2026, 11, 11, 0, 0, 0, DateTimeKind.Utc), ct);
+        }
+
+        await using var read = builder.CreateContext();
+        var clone = await read.TemplateVersions.AsNoTracking().SingleAsync(v => v.Id == cloneId, ct);
+
+        Assert.Equal(layout, clone.Layout);
+        Assert.Equal(Ecr.Domain.Enums.TemplateVersionStatus.Draft, clone.Status);
+    }
 }

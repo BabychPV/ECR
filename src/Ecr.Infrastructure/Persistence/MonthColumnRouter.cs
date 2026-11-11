@@ -30,6 +30,8 @@ public sealed class MonthColumnRouter : IMonthColumnRouter
     public const string EnabledKey = "Collection:MonthColumnRouting";
 
     private readonly EcrDbContext _db;
+    private readonly ITemplateLayoutRegistry? _registry;
+    private readonly bool _allVersions;
     private readonly Dictionary<long, MonthRoutingDocument?> _documents = [];
     private readonly Dictionary<long, MonthRoutingInstance?> _instances = [];
     private readonly Dictionary<(int ProjectId, int Year), YearCalendar> _calendars = [];
@@ -38,25 +40,50 @@ public sealed class MonthColumnRouter : IMonthColumnRouter
     /// <param name="db">Контекст.</param>
     /// <param name="configuration">Конфігурація (прапор <see cref="EnabledKey"/>).</param>
     public MonthColumnRouter(EcrDbContext db, IConfiguration configuration)
+        : this(db, configuration, registry: null)
+    {
+    }
+
+    /// <summary>Створює роутер із реєстром розкладок версій (D-474).</summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="configuration">Конфігурація (прапор <see cref="EnabledKey"/>).</param>
+    /// <param name="registry">
+    /// Версії з розкладкою <see cref="TemplateLayout.YearWithMonthColumns"/>; <c>null</c> — лише прапор (як до D-474).
+    /// </param>
+    public MonthColumnRouter(EcrDbContext db, IConfiguration configuration, ITemplateLayoutRegistry? registry)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(configuration);
 
         _db = db;
+        _registry = registry;
         // ⚠ Лише `true`/`True` вмикає; будь-що інше (порожньо, опечатка, підмінена конфігурація тестів) — вимкнено.
         // Формат ключа перевіряє `EcrConfigurationValidation.Booleans` на старті.
-        Enabled = bool.TryParse(configuration["Collection:MonthColumnRouting"], out var enabled) && enabled;
+        _allVersions = bool.TryParse(configuration["Collection:MonthColumnRouting"], out var enabled) && enabled;
     }
 
     /// <inheritdoc />
-    public bool Enabled { get; }
+    /// <remarks>
+    /// D-474: прапор маршрутизує ВСІ версії (спадковий режим); без прапора — лише версії з річною розкладкою, і
+    /// «увімкнено» означає «така версія є». Чи стосується це конкретного документа чи таблиці — відповідають
+    /// <see cref="GetDocumentAsync"/>, <see cref="ResolveInstancesAsync"/> і <see cref="AppliesToTable"/>.
+    /// </remarks>
+    public bool Enabled => _allVersions || _registry is { HasAny: true };
+
+    /// <inheritdoc />
+    public bool AllVersions => _allVersions;
 
     /// <inheritdoc />
     public bool AppliesToTable(TableDef table)
     {
         ArgumentNullException.ThrowIfNull(table);
-        return Enabled && !table.IsDeleted && table.LayoutKind == TableLayoutKind.MonthsInColumns;
+        return !table.IsDeleted
+               && table.LayoutKind == TableLayoutKind.MonthsInColumns
+               && (_allVersions || _registry?.IsYearSheet(table.SheetDefId) == true);
     }
+
+    private bool RoutesVersion(int templateVersionId)
+        => _allVersions || _registry?.IsYearVersion(templateVersionId) == true;
 
     /// <inheritdoc />
     public async Task<MonthRoutingDocument?> GetDocumentAsync(long documentId, CancellationToken ct)
@@ -79,6 +106,10 @@ public sealed class MonthColumnRouter : IMonthColumnRouter
                 select new MonthRoutingDocument(d.Id, p.Id, p.TemplateVersionId))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
+        if (found is not null && !RoutesVersion(found.TemplateVersionId))
+        {
+            found = null;
+        }
 
         _documents[documentId] = found;
         return found;
@@ -139,7 +170,7 @@ public sealed class MonthColumnRouter : IMonthColumnRouter
                 _instances[id] = null;
             }
 
-            foreach (var row in rows)
+            foreach (var row in rows.Where(r => RoutesVersion(r.TemplateVersionId)))
             {
                 var document = new MonthRoutingDocument(row.DocumentId, row.ProjectId, row.TemplateVersionId);
                 _documents.TryAdd(row.DocumentId, document);

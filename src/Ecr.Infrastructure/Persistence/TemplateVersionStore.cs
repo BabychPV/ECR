@@ -860,7 +860,10 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
             .OrderBy(v => v.Id)
             .Take(page.Limit + 1)
             .Select(v => new TemplateVersionSummary(
-                v.Id, v.Version, v.Status, v.PresentationRevision, v.ClonedFromVersionId, v.PublishedAt))
+                v.Id, v.Version, v.Status, v.PresentationRevision, v.ClonedFromVersionId, v.PublishedAt)
+            {
+                Layout = v.Layout,
+            })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -903,7 +906,10 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
             {
                 v.TemplateId,
                 Summary = new TemplateVersionSummary(
-                    v.Id, v.Version, v.Status, v.PresentationRevision, v.ClonedFromVersionId, v.PublishedAt),
+                    v.Id, v.Version, v.Status, v.PresentationRevision, v.ClonedFromVersionId, v.PublishedAt)
+                {
+                    Layout = v.Layout,
+                },
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);

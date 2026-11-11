@@ -799,6 +799,19 @@ public sealed class MigrateDocumentVersionHandler(
         var target = await RequireTargetAsync(project.TemplateVersionId, targetVersionId, tolerateSame, ct).ConfigureAwait(false);
         var archived = project.Status == ProjectStatus.Archived || project.IsArchiving;
 
+        // ⛔ D-474 (4): річний проєкт не переїжджає на версію з розкладкою «копія на місяць» — у нього один період на рік.
+        if (project.PeriodKind == PeriodKind.Yearly && target.Layout == TemplateLayout.PerMonthCopies)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.TemplateInvalid,
+                "Річний проєкт потребує версії шаблону з розкладкою «рік, місяці в колонках».",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.yearlyProjectNeedsYearLayout",
+                    ["versionId"] = targetVersionId.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+
         return new Resolved(profile, projectId, project.TemplateVersionId, target, archived);
     }
 

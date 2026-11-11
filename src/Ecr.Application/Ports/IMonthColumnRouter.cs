@@ -33,8 +33,18 @@ namespace Ecr.Application.Ports;
 /// </remarks>
 public interface IMonthColumnRouter
 {
-    /// <summary>Прапор <c>Collection:MonthColumnRouting</c>. Вимкнено — решта методів нічого не роблять.</summary>
+    /// <summary>
+    /// Маршрутизація можлива: прапор <c>Collection:MonthColumnRouting</c> або (D-474) є хоч одна версія шаблону з
+    /// розкладкою <c>YearWithMonthColumns</c>. Вимкнено — решта методів нічого не роблять.
+    /// </summary>
     public bool Enabled { get; }
+
+    /// <summary>
+    /// D-474: прапор <c>Collection:MonthColumnRouting</c> маршрутизує ВСІ версії (спадковий режим). <c>false</c> при
+    /// <see cref="Enabled"/> = <c>true</c> означає: маршрутизуються лише версії з розкладкою
+    /// <c>YearWithMonthColumns</c>.
+    /// </summary>
+    public bool AllVersions => Enabled;
 
     /// <summary>Таблиця підпадає під маршрутизацію: <c>LayoutKind = MonthsInColumns</c> і не видалена.</summary>
     /// <param name="table">Опис таблиці зі знімка метаданих.</param>

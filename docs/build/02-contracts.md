@@ -2408,6 +2408,15 @@ public interface IDocumentStore
 один запит на версію. Сервер без цих полів скрипт розпізнає за відсутністю властивості й
 читає по колонці, як раніше.
 
+✎ 2026-11-11 (`D-474`, розкладка версії): `TemplateStructureDto.Layout` і рядок переліку версій
+несуть `PerMonthCopies` | `YearWithMonthColumns`; `PUT .../template-versions/{id}/layout`
+(тіло `{ "layout": "…" }`, право `Template.Edit`) змінює її лише в чернетці без документів
+(`ECR-SCHM-0409`, `messageKey = err.ECR-SCHM-0409.templateLayoutBreaking` інакше). Клон успадковує
+розкладку джерела. `DocumentSummary.TemplateLayout` (рядок або `null`) — розкладка типової версії
+проєкту: за `YearWithMonthColumns` клієнт не показує вибір місяця. Річний проєкт
+(`PeriodKind = Yearly`) з версією `PerMonthCopies` відхиляється при створенні проєкту й міграції
+документа: `ECR-TMPL-0422`, `messageKey = err.ECR-TMPL-0422.yearlyProjectNeedsYearLayout`.
+
 #### `IDocumentDeletionStore`
 
 Видалення документа-чернетки (`DELETE /api/v1/documents/{id}`, право
@@ -3612,6 +3621,24 @@ public interface IMonthColumnRouter
 }
 ```
 
+#### `ITemplateLayoutRegistry`
+
+`D-474`: реєстр версій шаблону з розкладкою `YearWithMonthColumns` (`cfg.TemplateVersion.Layout = 1`)
+у пам'яті процесу. `IMonthColumnRouter` маршрутизує таблицю, якщо ввімкнено прапор
+`Collection:MonthColumnRouting` АБО аркуш таблиці належить версії з реєстру; порожній реєстр і
+вимкнений прапор — роутер до бази не ходить. Оновлення: на старті, кожні 10 с (інший процес
+дізнається про нову версію з цією затримкою) і негайно після `PUT …/layout` та клонування версії.
+
+```csharp
+public interface ITemplateLayoutRegistry
+{
+    public bool HasAny { get; }
+    public bool IsYearVersion(int templateVersionId);
+    public bool IsYearSheet(int sheetDefId);
+    public Task RefreshAsync(CancellationToken ct);
+}
+```
+
 #### `IOwnerReadSession`
 
 Q-17.4: сесія читання власників на ОДНУ задачу перерахунку. `RecalculationService`
@@ -4540,6 +4567,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/template-versions/{id}` | `Template.Publish` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/diff/{otherId}` | `Template.View` | 1 |
 | `PATCH` | `/api/v1/template-versions/{id}/presentation` | `Template.Edit` | 1 |
+| `PUT` | `/api/v1/template-versions/{id}/layout` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/template-versions/{id}/structure` | `Template.View` | 1 |
 | `GET` | `/api/v1/column-defs/search` | `Template.View` | 7 |
 | `GET` | `/api/v1/column-defs/{id}/usage` | `Template.View` | 7 |
