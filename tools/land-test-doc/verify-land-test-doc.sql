@@ -7,6 +7,8 @@
 --   ISSUE       calc.CalculationIssue rows of the Current run (kind, row key, methodology code)
 --   FAILEDSTEP  calc.CalculationStep rows with Value IS NULL (failed formula step) per source row key
 --   MASKED      calc.CalculationStep rows with MaskedZero <> 0 per source row key
+--   NOSUBST     per-substance template results (OutputCode like '%XXX%') with no SubstanceEntryId: the emission
+--               is attributed to no pollutant (methodology version without a substance list)
 SET NOCOUNT ON;
 DECLARE @doc int = $(DocumentId);
 DECLARE @p int = $(PeriodKey);
@@ -43,3 +45,11 @@ SELECT 'MASKED' AS section, ISNULL(s.SourceRowKey, '') AS k, '' AS methodology, 
 FROM calc.CalculationStep s
 WHERE s.PeriodKey = @p AND s.CalculationRunId = @run AND s.MaskedZero <> 0
 GROUP BY s.SourceRowKey;
+
+SELECT 'NOSUBST' AS section, res.SourceRowKey AS k, m.Code AS methodology, CAST(COUNT(*) AS nvarchar(30)) AS v
+FROM calc.CalculationResult res
+JOIN calc.MethodologyVersion mv ON mv.Id = res.MethodologyVersionId
+JOIN calc.Methodology m ON m.Id = mv.MethodologyId
+WHERE res.PeriodKey = @p AND res.CalculationRunId = @run AND res.DocumentId = @doc
+  AND res.OutputCode LIKE '%XXX%' AND res.SubstanceEntryId IS NULL
+GROUP BY res.SourceRowKey, m.Code;

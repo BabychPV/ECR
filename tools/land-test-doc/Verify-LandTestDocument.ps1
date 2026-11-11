@@ -13,6 +13,7 @@
                    except methodologies marked knownConstantGap = yes (missing constants in AF data, human's
                    decision 11.11: listed as KNOWN, they do not block acceptance); knownReason names another
                    known cause (default "missing constants");
+      * substance  no per-substance template result (OutputCode ...XXX...) without SubstanceEntryId.
     Note: failed steps are stored only for the run that computed the row (TraceLevel ErrorsOnly keeps no other steps,
     and carry-over copies results without steps). After a per-sheet recalculation the Current run computed one
     sheet only, so a row of another sheet shows 0 failed steps whatever happened to it. Then pass -Tables with the
@@ -66,7 +67,7 @@ if ($DocumentId -le 0) {
 
 $lines = @(& sqlcmd -S $Server -E -d $Database -b -f 65001 -W -h -1 -s "`t" -v DocumentId=$DocumentId PeriodKey=$PeriodKey -i $sqlFile)
 if ($LASTEXITCODE -ne 0) { throw "sqlcmd failed ($LASTEXITCODE): $($lines -join ' ')" }
-$facts = @($lines | Where-Object { $_ -match "^(RUN|CURRENT|RESULT|ISSUE|FAILEDSTEP|MASKED)`t" } | ForEach-Object {
+$facts = @($lines | Where-Object { $_ -match "^(RUN|CURRENT|RESULT|ISSUE|FAILEDSTEP|MASKED|NOSUBST)`t" } | ForEach-Object {
         $a = $_.Split("`t")
         [pscustomobject]@{ Section = $a[0]; Key = $a[1]; Methodology = $(if ($a.Count -gt 2) { $a[2] } else { '' }); Value = $(if ($a.Count -gt 3) { $a[3] } else { '' }) }
     })
@@ -104,6 +105,9 @@ foreach ($m in $plan) {
     if ($rejected -gt 0) { $why += "rejected $rejected" }
     if ($unmatched -gt 0) { $why += "NoMatchingRule $unmatched" }
     if ($failed -gt 0 -and -not $isKnown) { $why += "failed steps $failed" }
+    $noSubst = 0
+    foreach ($f in @($facts | Where-Object { $_.Section -eq 'NOSUBST' -and $_.Key -eq $rowKey -and $_.Methodology -eq $m.methodology })) { $noSubst += [int]$f.Value }
+    if ($noSubst -gt 0) { $why += "results without substance $noSubst" }
     if ($why.Count -gt 0) { $verdict = 'FAIL'; $fail++ }
     elseif ($failed -gt 0) { $verdict = 'KNOWN'; $known.Add("$($m.methodology) ($rowKey): $failed failed step(s) - $reason") }
     $report.Add([pscustomobject]@{ Methodology = $m.methodology; Row = $rowKey; Table = $m.table; Results = $results; Expected = $m.expectedResults; Rejected = $rejected; Unmatched = $unmatched; FailedSteps = $failed; Verdict = $verdict; Why = ($why -join '; ') })
