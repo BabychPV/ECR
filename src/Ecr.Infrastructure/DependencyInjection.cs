@@ -455,6 +455,9 @@ public static class DependencyInjection
         services.AddScoped<Jobs.ReportSnapshotFormatJob>();
         services.AddScoped<Jobs.SubmissionSnapshotRetentionJob>();
         services.AddScoped<Jobs.SupersededResultsSweepJob>();
+
+        // D-476: синк складу газу FLERT → дзеркало STREAM/STREAM_CASE/GAS_COMPOSITION (щодня о 02:00).
+        services.AddScoped<Jobs.FlertRegistryProvisioner>();
         services.AddScoped<Jobs.NotificationJob>();
 
         // ⚠ Розсилка черги — окремий компонент, бо відправників двоє: зведення
