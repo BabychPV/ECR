@@ -607,6 +607,31 @@ function Fill-StructureSql([int]$vid) {
         Log ("  мостів з Precision/Scale скинуто в NULL: {0}" -f $txtBridges.Count)
         foreach ($k in $txtBridges) { Log "    міст precision=NULL: $k" }
         foreach ($k in $txtWarn) { Log "  WARN тип колонки: $k" }
+        # AN-173: String -> Decimal у чернетці-клоні (T9a_19 джерела Land_MassFraction_0<код>, Get-LandDecimalRetypePlan), лише
+        # немісячні. Рядок стає таким, як свіжовставлена Decimal-колонка моделі: DataType/Precision/Scale/UnitId з моделі,
+        # DisplayFormat=NULL (його нижче пише презентація колонок за Resolve-LandDisplayFormat, як і для нової колонки).
+        # Гарди в самому UPDATE: версія Draft (Status=0), колонка ще String і не місячна (повтор = 0 змін), у doc.CellValue немає значень.
+        $decRetyped = @(); $decWarn = @()
+        foreach ($sh in @($Mdl.sheets)) {
+            foreach ($tb in @($sh.tables)) {
+                $tidN = $tableIds["$($sh.code)/$($tb.code)"]
+                $exN = @{}
+                foreach ($c in @($tb.columns)) { $hiN = $haveInfo["$tidN/$($c.code)"]; if ($null -ne $hiN) { $exN[[string]$c.code] = $hiN } }
+                $planN = Get-LandDecimalRetypePlan @($tb.columns) $exN
+                foreach ($w in @($planN.Warn)) { $decWarn += "$($sh.code)/$($tb.code)/$w" }
+                foreach ($u in @($planN.Retype)) {
+                    $unitN = [DBNull]::Value; $uid = $null; if ($u.Unit) { $uid = UnitId $u.Unit }; if ($null -ne $uid) { $unitN = [int]$uid }
+                    $n = [int](Sql-Exec $cn ('UPDATE c SET DataType=2, Precision=@p, Scale=@s, DisplayFormat=NULL, UnitId=@u FROM cfg.ColumnDef c ' +
+                            'JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId ' +
+                            'WHERE c.Id=@i AND v.Id=@v AND v.Status=0 AND c.DataType=0 AND c.IsMonthColumn=0 AND NOT EXISTS (SELECT 1 FROM doc.CellValue cv WHERE cv.ColumnDefId=c.Id)') @{ p = [byte]$u.Precision; s = [byte]$u.Scale; u = $unitN; i = [int]$u.Id; v = $vid })
+                    if ($n -gt 0) { $decRetyped += "$($sh.code)/$($tb.code)/$($u.Code)" }
+                    else { $decWarn += "$($sh.code)/$($tb.code)/$($u.Code): UPDATE String->Decimal не застосовано (не чернетка або є значення комірок)" }
+                }
+            }
+        }
+        Log ("  колонок String->Decimal (чернетка-клон): {0}" -f $decRetyped.Count)
+        foreach ($k in $decRetyped) { Log "    String->Decimal: $k" }
+        foreach ($k in $decWarn) { Log "  WARN тип колонки: $k" }
         # D-474: наявні таблиці й колонки чернетки-клону підтягуються до моделі там, де модель тепер інша, а `$have` нижче їх
         # пропускає: (i) прив'язка місяця (лише додається, не знімається), (ii) LayoutKind, (iii) видимість МІСЯЧНИХ колонок,
         # (iv) DefaultValue. Лише чернетка (Status=0) і лише при розбіжності: повтор - 0 змін.
