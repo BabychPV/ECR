@@ -1,19 +1,24 @@
 ﻿# tools/tests/Hse400-Model.Tests.ps1
 # Сторож моделі шаблону HSE400: договір рядків (ввід / F_<X>), ключі, кількості, місячні колонки.
-$root = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
-. (Join-Path $root 'tools\hse400\Hse400Model.Lib.ps1')
-$modelPath = Join-Path $root 'tools\hse400\hse400-model.json'
-
-function Get-Hse400TestModel { return ([IO.File]::ReadAllText($modelPath, [Text.Encoding]::UTF8) | ConvertFrom-Json) }
-function Assert-Hse400Rejected {
-    param($Model, [string]$Expect)
-    $msg = $null
-    try { Assert-Hse400Model $Model } catch { $msg = $_.Exception.Message }
-    if ($null -eq $msg) { throw "Зіпсовану модель прийнято (очікувалося: $Expect)." }
-    if ($msg -notlike "*$Expect*") { throw "Відмова не про те: $msg" }
-}
-
+# Підготовка - у BeforeAll: CI ганяє Pester 5 (pwsh, Linux), де код поза блоками виконується лише на виявленні;
+# локально працює й Pester 3.4. Шляхи - з прямою рискою (Linux).
 Describe 'HSE400 model' {
+    BeforeAll {
+        $root = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
+        . (Join-Path $root 'tools/hse400/Hse400Model.Lib.ps1')
+
+        function Get-Hse400TestModel {
+            $p = (Resolve-Path (Join-Path $PSScriptRoot '../hse400/hse400-model.json')).Path
+            return ([IO.File]::ReadAllText($p, [Text.Encoding]::UTF8) | ConvertFrom-Json)
+        }
+        function Assert-Hse400Rejected {
+            param($Model, [string]$Expect)
+            $msg = $null
+            try { Assert-Hse400Model $Model } catch { $msg = $_.Exception.Message }
+            if ($null -eq $msg) { throw "Зіпсовану модель прийнято (очікувалося: $Expect)." }
+            if ($msg -notlike "*$Expect*") { throw "Відмова не про те: $msg" }
+        }
+    }
     It 'чинна модель проходить перевірку' {
         $m = Read-Hse400Model
         if (@($m.tables).Count -ne 6) { throw "таблиць $(@($m.tables).Count)" }
