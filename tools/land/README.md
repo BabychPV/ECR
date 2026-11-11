@@ -558,6 +558,30 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 
 Сторожі: LandNaeGroupBridgesModelTests (Architecture), NaeGroupBridgesTests (Expressions, справжній рушій).
 
+### Джерела Land_MassFraction - Decimal: ретайп String -> Decimal у чернетці-клоні (AN-173, шаблон 1.0.16.0)
+
+П'ять джерел мостів у T9a_19 (`SaturatedHydrocarbonsC1C5`, `SaturatedHydrocarbonsC6C10`, `Benzene`, `Xylene`, `Toluene`)
+у моделі тепер Decimal(34,16), а не String: у Strict текст x число = `#VALUE`, і `ECW_C11_11_04` type1 не рахувалась.
+Правило генератора - `nae_group_bridges.py` (`_retype_decimal`): джерело ретайпиться ПІСЛЯ створення мосту, тож самі мости
+`Land_MassFraction_0<код>` лишаються як були (Formula, precision/scale null; рішення щодо них окреме). Ті самі коди в
+9a_16/9a_17/9a_24-28 лишаються String.
+
+Клон опублікованої версії (1.0.15.0) несе ці колонки як String, а API тип не змінює (`ECR-TMPL-0422`
+columnDataTypeImmutable навіть у чернетці). Тому `Fill-StructureSql` (Stage Template) після D-423 ретайпить їх SQL-ом за
+планом `Get-LandDecimalRetypePlan` (`LandTemplateDiff.Lib.ps1`): лише модель Decimal (з precision/scale) над String клону,
+лише НЕмісячні колонки (місячна - WARN). Рядок стає таким, як у свіжовставленої Decimal-колонки: `DataType=2`,
+`Precision`/`Scale` і `UnitId` з моделі, `DisplayFormat=NULL` (далі його пише презентація колонок за
+`Resolve-LandDisplayFormat`, `0.000000`). Гарди в самому UPDATE: версія Draft (`Status=0`), колонка ще String
+(`DataType=0`) і не місячна - повтор дає 0 змін; у `doc.CellValue` немає значень колонки. Не застосований UPDATE - рядок
+`WARN тип колонки: ... String->Decimal не застосовано`; інші розбіжності типів Build не чіпає (їх показує Verify).
+Публікація чернетки - пізніше (`Apply-ContractHeader` у Stage Template), тобто ретайп завжди до неї.
+
+⚠ Документи старих версій зі ЗНАЧЕННЯМИ в цих колонках migrate-version не переводить як Safe: String -> Decimal для колонки
+зі значеннями - `guardedWithData`. Такий документ мігрується лише після очищення цих комірок (або значення переносяться
+окремо); порожні колонки мігрують без відмови.
+
+Сторожі: LandDecimalRetypeTests (Architecture: модель, план, Build з підробленим SQL, тексти гардів).
+
 
 ## Формат відображення Decimal-колонок (LP-21)
 
