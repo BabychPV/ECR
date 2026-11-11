@@ -40,6 +40,8 @@ export type BottomBarRenderer = (scroll: ReactNode) => ReactNode;
 interface BottomBarProps {
   /** Малює нижній рядок під таблицею; scroll — горизонтальна прокрутка таблиці для його правої частини. */
   readonly bottomBar?: BottomBarRenderer | undefined;
+  /** Додаткові дії праворуч у смузі таблиці (CALC-RESULTS: «All months»). */
+  readonly tableBarEnd?: ReactNode | undefined;
 }
 
 /**
@@ -88,6 +90,7 @@ export function SheetWorkspace({
   sheetState,
   tables,
   bottomBar,
+  tableBarEnd,
 }: SheetWorkspaceProps): JSX.Element {
   const [view] = useUrlState('view');
   const [tableKey, setTableKey] = useUrlState('table');
@@ -389,6 +392,7 @@ export function SheetWorkspace({
                   </span>
                 )}
                 <GridKeyHint readOnly={readOnly} />
+                {full ? null : tableBarEnd}
                 {live.button}
                 {fullButton}
               </>
