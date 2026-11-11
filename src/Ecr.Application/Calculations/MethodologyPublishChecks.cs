@@ -45,9 +45,12 @@ public static class MethodologyPublishChecks
     /// ⚠ Перелік від протилежного — двох імен, а не двадцяти: нова числова
     /// функція інакше мовчки випала б із перевірки, а нова текстова помітна
     /// одразу, бо її треба сюди дописати.
+    /// ✎ 2026-11-11 (AN-165): <c>CONTAINS(text, fragment)</c> — обидва аргументи
+    /// текстові, результат булів; без запису тут текстова константа у фрагменті
+    /// (<c>CONTAINS(@S, CST.Marker)</c>) відхилялась би як «у арифметичній позиції».
     /// </remarks>
     private static readonly HashSet<string> NonNumericFunctions =
-        new(StringComparer.OrdinalIgnoreCase) { "if", "in" };
+        new(StringComparer.OrdinalIgnoreCase) { "if", "in", "CONTAINS" };
 
     /// <summary>
     /// Контекстні аргументи методології — ті, що збірка передає <b>кожній</b>

@@ -103,6 +103,13 @@ public static class MethodologyFunctions
             return CurrentSubstance(context);
         }
 
+        // ⛔ `CONTAINS` — теж ДО поширення null: порожній текст нічого не містить, це FALSE, а не
+        // «невідомо» (інакше незаповнений потік вимкнув би й гілку «інакше» вибору `if`).
+        if (string.Equals(name, "CONTAINS", StringComparison.Ordinal))
+        {
+            return Contains(args);
+        }
+
         if (Propagate(args) is { } propagated)
         {
             return propagated;
@@ -189,6 +196,54 @@ public static class MethodologyFunctions
         }
 
         return ExpressionValue.Boolean(false);
+    }
+
+    /// <summary>
+    /// <c>CONTAINS(text, fragment)</c> — чи містить текст фрагмент (AN-165).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Порівняння ПОРЯДКОВЕ, з урахуванням регістру і без культури — рівно як <c>string.Contains(string)</c>
+    /// у легасі (<c>ECW_C11_01.cs:109-117</c>: там окремо перевіряють <c>"gas"</c> і <c>"Gas"</c> саме тому, що
+    /// регістр значущий). Зведення регістру перевело б рядок в іншу гілку методології.
+    ///
+    /// Порядок відповідей: помилка аргументу → вона; текст <c>NULL</c> або порожній → <c>FALSE</c>
+    /// (незаповнений аргумент нічого не містить; у легасі відсутній аргумент — <c>string.Empty</c>);
+    /// нетекстовий текст чи фрагмент (число, булеве, <c>NULL</c>-фрагмент) → <c>#VALUE</c>, як у решти
+    /// функцій діалекту: число мовчки в текст не перетворюється.
+    ///
+    /// ⚠ Порожній ФРАГМЕНТ у непорожньому тексті — <c>TRUE</c>, як у <c>string.Contains("")</c>.
+    /// </remarks>
+    private static ExpressionValue Contains(IReadOnlyList<ExpressionValue> args)
+    {
+        if (args.Count != 2)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadValue);
+        }
+
+        foreach (var value in args)
+        {
+            if (value.IsError)
+            {
+                return value;
+            }
+        }
+
+        if (args[1].Value is not string fragment)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadValue);
+        }
+
+        if (args[0].IsNull)
+        {
+            return ExpressionValue.Boolean(false);
+        }
+
+        if (args[0].Value is not string text)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadValue);
+        }
+
+        return ExpressionValue.Boolean(text.Length > 0 && text.Contains(fragment, StringComparison.Ordinal));
     }
 
     /// <summary>Значення для конкретної речовини в контексті методології.</summary>
