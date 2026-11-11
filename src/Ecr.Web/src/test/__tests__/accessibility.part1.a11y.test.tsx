@@ -17,6 +17,7 @@ import { LoginPage } from '@/pages/LoginPage';
 import { ChangePasswordPage } from '@/pages/ChangePasswordPage';
 import { DocumentsPage } from '@/pages/DocumentsPage';
 import { DocumentPage } from '@/pages/DocumentPage';
+import { CalculationResultsPage } from '@/pages/CalculationResultsPage';
 import { TemplatesPage } from '@/pages/admin/TemplatesPage';
 import { ExpressionsPage } from '@/pages/admin/ExpressionsPage';
 
@@ -58,6 +59,15 @@ const Pages: [string, () => JSX.Element, ParamRoute?][] = [
       path: routes.documentDetail.path,
       entry: '/documents/1',
       content: () => screen.findByRole('heading', { name: /DOC-0001/ }, { timeout: 10_000 }),
+    },
+  ],
+  [
+    '/documents/1/results',
+    CalculationResultsPage,
+    {
+      path: routes.documentResults.path,
+      entry: '/documents/1/results?year=2026',
+      content: () => screen.findByTestId('calc-results-grid', undefined, { timeout: 10_000 }),
     },
   ],
   ['/admin/templates', TemplatesPage],

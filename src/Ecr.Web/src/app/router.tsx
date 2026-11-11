@@ -87,6 +87,14 @@ const TemplateCardPage = lazy(async () => ({
 }));
 
 /**
+ * «Calculation results» за рік (CALC-RESULTS.md) — лінивий чанк: сюди заходять із документа («All months»), не з
+ * навбару, тож реєстру прогріву він не потрібен (як картка шаблону вище).
+ */
+const CalculationResultsPage = lazy(async () => ({
+  default: (await import('@/pages/CalculationResultsPage')).CalculationResultsPage,
+}));
+
+/**
  * Редактор master-detail довідника (`ФВ-8.16`) — лінивий чанк, як і картка шаблону вище: сюди
  * заходять із конструктора довідника, а не з навбару, тож реєстру прогріву він не потрібен.
  */
@@ -300,6 +308,11 @@ export const router = createBrowserRouter([
         path: childPath(routes.documentDetail),
         element: guarded(routes.documentDetail.handle, <DocumentPage />),
         handle: routes.documentDetail.handle,
+      },
+      {
+        path: childPath(routes.documentResults),
+        element: guarded(routes.documentResults.handle, <CalculationResultsPage />),
+        handle: routes.documentResults.handle,
       },
 
       // ✎ Projects (макет 08.11): перелік проєктів і проєкт із вкладками Periods · Settings · Lifecycle.
