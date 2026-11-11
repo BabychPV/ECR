@@ -1159,7 +1159,7 @@ public static class PublishChecks
                 formulaCount++;
                 if (target is not null)
                 {
-                    formulaColumns.Add(target.Code.Value);
+                    formulaColumns.Add(target.Code);
                 }
             }
 
@@ -1176,7 +1176,7 @@ public static class PublishChecks
                     "err.ECR-TMPL-0422.yearLayoutPeriodFormula",
                     new Dictionary<string, string>
                     {
-                        ["tableCode"] = table.Code.Value,
+                        ["tableCode"] = table.Code,
                         ["count"] = formulaCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
                         ["columns"] = sample,
                     }));
@@ -1184,7 +1184,7 @@ public static class PublishChecks
 
             var bound = columns.Values
                 .Where(c => !c.IsMonthColumn && boundColumns.Contains(c.Id))
-                .Select(c => c.Code.Value)
+                .Select(c => c.Code)
                 .OrderBy(c => c, StringComparer.Ordinal)
                 .ToList();
             if (bound.Count > 0)
@@ -1200,7 +1200,7 @@ public static class PublishChecks
                     "err.ECR-TMPL-0422.yearLayoutNonMonthBinding",
                     new Dictionary<string, string>
                     {
-                        ["tableCode"] = table.Code.Value,
+                        ["tableCode"] = table.Code,
                         ["count"] = bound.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
                         ["columns"] = sample,
                     }));
