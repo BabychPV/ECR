@@ -95,7 +95,7 @@ param(
     [switch]$ReuseDraft,
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'BranchGate', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection,
@@ -111,6 +111,11 @@ param(
     [switch]$KeepNumericMode,
     [string[]]$KnownStaleTables = @(),
     [string[]]$OnlyMethodology = @(),
+    # -Stage BranchGate (AN-171/172): створити чернетку V(n+1) з опублікованої версії, якщо чернетки немає.
+    [switch]$BranchGateCreateDrafts,
+    # -Stage BranchGate: перевести еталонні тести чернетки на наявний документ/період (старий документ 1 видалено 10.11).
+    [long]$GoldenTestDocumentId = 0,
+    [int]$GoldenTestPeriodKey = 0,
     [switch]$DryRun
 )
 
@@ -2070,6 +2075,89 @@ function Stage-NaeType {
     Log "  змінено формул: $ntChanged"
 }
 
+# ==================== BranchGate (AN-171/AN-172: одна гілка _typeN; склад речовин) ====================
+# Лише явно: -Stage BranchGate. У ЧЕРНЕТЦІ методологій з LandBranchGate.Lib.ps1 (C11_02, C11_11_02, C11_11_03, C11_11_04,
+# C11_16, C12_01) вираз гілки обгортається `if(<умова гілки>, <вираз>, NULL)` за NAE / потоком / CURRENT_SUBSTANCE(): легасі
+# пише одну гілку на (рядок, речовину, tons|gsec), а в ECR кожна гілка - вихід (подвійний облік або невдалі кроки, doc 96).
+# Методологіям зі списку Get-LandBranchGateSubstances (C11_11_04, C11_12_03, C11_16, C11_17, C11_18) задається склад речовин
+# з плоского polCodeList легасі (довідник LAND_AIR_SUBSTANCE, код E<код>). Опубліковану версію не чіпаємо; нову версію чи
+# публікацію етап не робить; повтор - 0 змін. C11_01 (вибір за Contains по тексту) тут немає.
+function Stage-BranchGate {
+    Log '== BranchGate =='
+    . (Join-Path $here 'LandBranchGate.Lib.ps1')
+    LoginAs $BuildUser
+    $bgSubst = Get-LandBranchGateSubstances
+    $bgNames = @(@(Get-LandBranchGateMethodologies) + @($bgSubst.Keys) | Sort-Object -Unique)
+    $bgAir = @{}
+    $bgToday = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+    $bgAirResp = Invoke-Ecr -Method GET -Path "/api/v1/registries/LAND_AIR_SUBSTANCE/entries?asOf=$bgToday"
+    if ($bgAirResp.Status -eq 200) { foreach ($e in @($bgAirResp.Json)) { $bgAir[[string]$e.code] = [int64]$e.id } }
+    else { Log "  ! довідника LAND_AIR_SUBSTANCE немає: склад речовин не задається" }
+    $bgMid = @{}
+    foreach ($m in @(Items (Api GET '/api/v1/methodologies').Json)) { $bgMid[[string]$m.code] = [int]$m.id }
+    $bgChanged = 0
+    foreach ($bgCode in $bgNames) {
+        if ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains $bgCode) { continue }
+        $bgId = $bgMid[$bgCode]
+        if (-not $bgId) { Log "  ${bgCode}: методології на сервері немає - пропущено"; continue }
+        $bgLast = @(Items (Api GET "/api/v1/methodologies/$bgId/versions").Json) | Sort-Object id -Descending | Select-Object -First 1
+        if (-not $bgLast) { continue }
+        if ([string]$bgLast.status -eq 'Published') {
+            if (-not $BranchGateCreateDrafts) { Log "  ${bgCode}: остання версія опублікована - не чіпаю (спершу чернетка або -BranchGateCreateDrafts)"; continue }
+            $bgNext = 'V' + ([int](([string]$bgLast.versionNumber).TrimStart('V', 'v')) + 1)
+            $bgNew = Invoke-Ecr -Method POST -Path "/api/v1/methodologies/$bgId/versions" -Body @{ versionNumber = $bgNext; copyFromVersionId = [int]$bgLast.id; level = $bgLast.level }
+            if ($bgNew.Status -ne 200) { Log "  ! ${bgCode}: чернетка $bgNext - HTTP $($bgNew.Status) $(Get-EcrErrorCode $bgNew)"; continue }
+            Log "  ${bgCode}: чернетка $bgNext (id $($bgNew.Json.id)) з версії $($bgLast.id), дата дії при публікації - $(([datetime]$bgLast.effectiveFrom).AddDays(1).ToString('yyyy-MM-dd'))"
+            $bgLast = $bgNew.Json
+        }
+        $bgVid = [int]$bgLast.id
+
+        if ($GoldenTestDocumentId -gt 0 -and $GoldenTestPeriodKey -gt 0) {
+            $bgOv = Get-LandBranchGateTestOverrides
+            $ov = if ($bgOv.ContainsKey($bgCode)) { $bgOv[$bgCode] } else { @{} }
+            foreach ($t in @(Items (Api GET "/api/v1/methodologies/$bgId/versions/$bgVid/tests").Json)) {
+                $ti = Convert-LandBranchGateTestInput -InputJson ([string]$t.inputJson) -DocumentId $GoldenTestDocumentId -PeriodKey $GoldenTestPeriodKey -Overrides $ov
+                if (-not $ti.Changed) { continue }
+                $tp = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$bgId/versions/$bgVid/tests/$($t.code)" -Body @{ inputJson = $ti.InputJson; expectedJson = [string]$t.expectedJson; tolerance = [string]$t.tolerance }
+                if ($tp.Status -eq 200) { $bgChanged++; Log "  ${bgCode}: тест $($t.code) -> документ $GoldenTestDocumentId, період $GoldenTestPeriodKey" }
+                else { Log "  ! ${bgCode}: тест $($t.code) HTTP $($tp.Status) $(Get-EcrErrorCode $tp)" }
+            }
+        }
+
+        if ($bgSubst.Contains($bgCode) -and $bgAir.Count -gt 0) {
+            $ids = @(); $missing = @()
+            foreach ($c in $bgSubst[$bgCode]) { if ($bgAir.ContainsKey("E$c")) { $ids += $bgAir["E$c"] } else { $missing += $c } }
+            if ($missing.Count -gt 0) { Log "  ! ${bgCode}: у довіднику LAND_AIR_SUBSTANCE немає кодів: $($missing -join ',') - склад не змінено" }
+            else {
+                $cur = @((Api GET "/api/v1/methodologies/$bgId/versions/$bgVid/substances").Json.items | ForEach-Object { [int64]$_.substanceEntryId })
+                $same = ($cur.Count -eq $ids.Count) -and (@($ids | Where-Object { $cur -notcontains $_ }).Count -eq 0)
+                if (-not $same) {
+                    $null = Api PUT "/api/v1/methodologies/$bgId/versions/$bgVid/substances" @{ substanceEntryIds = @($ids) }
+                    $bgChanged++
+                    Log "  ${bgCode}: склад речовин = $($ids.Count) ($($bgSubst[$bgCode] -join ','))"
+                }
+            }
+        }
+
+        $selector = Get-LandBranchGateSelector -Methodology $bgCode
+        if ($null -eq $selector) { continue }
+        $n = 0
+        foreach ($f in @(Items (Api GET "/api/v1/methodologies/$bgId/versions/$bgVid/formulas").Json)) {
+            $gate = Get-LandBranchGateValues -Methodology $bgCode -FormulaCode ([string]$f.code)
+            if ($null -eq $gate) { continue }
+            $r = Convert-LandBranchGateFormula -Expression ([string]$f.expression) -ArgumentsCsv $f.argumentsCsv -Selector $selector -Values @($gate.Values)
+            if (-not $r.Changed) { continue }
+            $body = @{ expression = $r.Expression; resultType = $f.resultType; outputUnitId = $f.outputUnitId; argumentsCsv = $r.ArgumentsCsv }
+            if ($null -ne $f.scope) { $body.scope = $f.scope }
+            $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$bgId/versions/$bgVid/formulas/$($f.code)" -Body $body
+            if ($put.Status -eq 200) { $n++ } else { Log "  ! ${bgCode}/$($f.code): HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
+        }
+        $bgChanged += $n
+        Log "  ${bgCode}: формул з вибором гілки - $n"
+    }
+    Log "  змінено: $bgChanged"
+}
+
 # ==================== ParityBranch (C12_02: вибір type1/type2 за наявністю компонента) ====================
 # Лише явно: -Stage ParityBranch. У ЧЕРНЕТЦІ методології з LandParityBranch.Lib.ps1 формули type2 компонентів
 # обгортаються `if(@Land_Measure_Component_<код> = NULL, <вираз>, NULL)`: старий код C12_02 рахує для компонента лише
@@ -2442,6 +2530,9 @@ if ($Stage -contains 'SubstanceApplicability') { Stage-SubstanceApplicability }
     if ($Stage -contains 'LookupCompare') { Stage-LookupCompare }
     # D-423: вибір type1/type2/type3 за NAE (C11_10) - лише явно (-Stage NaeType); ПЕРЕД OptionalArguments.
     if ($Stage -contains 'NaeType') { Stage-NaeType }
+    # AN-171/AN-172: одна гілка _typeN за NAE/потоком/речовиною + склад речовин - лише явно (-Stage BranchGate); ПЕРЕД
+    # OptionalArguments.
+    if ($Stage -contains 'BranchGate') { Stage-BranchGate }
     # D-397: маркер `?` необов'язкових аргументів - лише явно (-Stage OptionalArguments); ОСТАННІМ: попередні етапи
     # переписують списки аргументів і зберігають чужі елементи як є, тож маркер ставиться на готовий список.
     if ($Stage -contains 'OptionalArguments') { Stage-OptionalArguments }

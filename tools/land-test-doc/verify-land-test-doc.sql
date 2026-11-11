@@ -5,8 +5,12 @@
 --   CURRENT     the Current run id that the checks below use
 --   RESULT      calc.CalculationResult rows of the Current run per source row key and methodology code
 --   ISSUE       calc.CalculationIssue rows of the Current run (kind, row key, methodology code)
---   FAILEDSTEP  calc.CalculationStep rows with Value IS NULL (failed formula step) per source row key
+--   FAILEDSTEP  calc.CalculationStep rows with Value IS NULL and an error other than #NULL, per source row key
+--   NOVALUE     steps with Value IS NULL and error #NULL (output without a value: unselected branch / no optional input)
 --   MASKED      calc.CalculationStep rows with MaskedZero <> 0 per source row key
+--   NOSUBST     per-substance template results (OutputCode like '%XXX%') with no SubstanceEntryId: the emission
+--               is attributed to no pollutant (methodology version without a substance list)
+--   BRANCHES    (row, substance, metric) groups with more than one written _typeN branch (double counting)
 SET NOCOUNT ON;
 DECLARE @doc int = $(DocumentId);
 DECLARE @p int = $(PeriodKey);
@@ -34,12 +38,43 @@ IF OBJECT_ID(N'calc.CalculationIssue') IS NOT NULL
         WHERE i.DocumentId = @doc AND i.PeriodKey = @p AND i.CalculationRunId = @run;',
         N'@doc int, @p int, @run bigint', @doc = @doc, @p = @p, @run = @run;
 
+-- A step without a number whose only cause is '#NULL' is an output with no value (a branch not selected, D-423/D-435/
+-- AN-172 `if(..., NULL)`, or an absent optional argument): NOVALUE, not a failure. Every other error code fails.
 SELECT 'FAILEDSTEP' AS section, ISNULL(s.SourceRowKey, '') AS k, '' AS methodology, CAST(COUNT(*) AS nvarchar(30)) AS v
 FROM calc.CalculationStep s
 WHERE s.PeriodKey = @p AND s.CalculationRunId = @run AND s.Value IS NULL
+  AND ISNULL(JSON_VALUE(s.TraceJson, '$.error'), '') <> '#NULL'
+GROUP BY s.SourceRowKey;
+
+SELECT 'NOVALUE' AS section, ISNULL(s.SourceRowKey, '') AS k, '' AS methodology, CAST(COUNT(*) AS nvarchar(30)) AS v
+FROM calc.CalculationStep s
+WHERE s.PeriodKey = @p AND s.CalculationRunId = @run AND s.Value IS NULL
+  AND JSON_VALUE(s.TraceJson, '$.error') = '#NULL'
 GROUP BY s.SourceRowKey;
 
 SELECT 'MASKED' AS section, ISNULL(s.SourceRowKey, '') AS k, '' AS methodology, CAST(COUNT(*) AS nvarchar(30)) AS v
 FROM calc.CalculationStep s
 WHERE s.PeriodKey = @p AND s.CalculationRunId = @run AND s.MaskedZero <> 0
 GROUP BY s.SourceRowKey;
+
+SELECT 'NOSUBST' AS section, res.SourceRowKey AS k, m.Code AS methodology, CAST(COUNT(*) AS nvarchar(30)) AS v
+FROM calc.CalculationResult res
+JOIN calc.MethodologyVersion mv ON mv.Id = res.MethodologyVersionId
+JOIN calc.Methodology m ON m.Id = mv.MethodologyId
+WHERE res.PeriodKey = @p AND res.CalculationRunId = @run AND res.DocumentId = @doc
+  AND res.OutputCode LIKE '%XXX%' AND res.SubstanceEntryId IS NULL
+GROUP BY res.SourceRowKey, m.Code;
+
+-- BRANCHES: legacy writes ONE branch (_type1/_type2/...) per row, substance and metric (tons / gsec); more than one
+-- written branch means the emission is counted twice (methodology version without branch gating, D-423/D-435).
+SELECT 'BRANCHES' AS section, b.SourceRowKey AS k, b.Code AS methodology, CAST(COUNT(*) AS nvarchar(30)) AS v
+FROM (
+    SELECT res.SourceRowKey, m.Code, res.SubstanceEntryId, LEFT(res.OutputCode, CHARINDEX('_type', res.OutputCode)) AS metric
+    FROM calc.CalculationResult res
+    JOIN calc.MethodologyVersion mv ON mv.Id = res.MethodologyVersionId
+    JOIN calc.Methodology m ON m.Id = mv.MethodologyId
+    WHERE res.PeriodKey = @p AND res.CalculationRunId = @run AND res.DocumentId = @doc AND res.OutputCode LIKE '%[_]type%'
+    GROUP BY res.SourceRowKey, m.Code, res.SubstanceEntryId, LEFT(res.OutputCode, CHARINDEX('_type', res.OutputCode))
+    HAVING COUNT(DISTINCT res.OutputCode) > 1
+) b
+GROUP BY b.SourceRowKey, b.Code;
