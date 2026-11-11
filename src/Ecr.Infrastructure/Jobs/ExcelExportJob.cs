@@ -22,7 +22,12 @@ namespace Ecr.Infrastructure.Jobs;
 /// </para>
 /// </remarks>
 public sealed class ExcelExportJob(
-    IExcelExporter exporter, DocumentDataExporter data, IExportStore exports, IAccessDecisionService access)
+    IExcelExporter exporter,
+    DocumentDataExporter data,
+    IExportStore exports,
+    IAccessDecisionService access,
+    Ecr.Application.Documents.CalculationYear.CalculationYearViewBuilder? calculationYear = null,
+    IRegistryWorkbookWriter? sheetWriter = null)
     : IExcelExportJob
 {
     /// <summary>Код задачі в черзі.</summary>
@@ -56,9 +61,16 @@ public sealed class ExcelExportJob(
 
         await progress.ReportKeyAsync(10, "jobs.exportReadingDocument", ct).ConfigureAwait(false);
 
+        byte[] content;
+        if (task.CalcResults is { } spec)
+        {
+            content = await CalculationYearAsync(task, spec, ownerUserId, ct).ConfigureAwait(false);
+            await SaveAsync(task, ownerUserId, content, progress, ct).ConfigureAwait(false);
+            return;
+        }
+
         var options = await WithReadScopeAsync(task, ownerUserId, ct).ConfigureAwait(false);
 
-        byte[] content;
         if (task.Format is null or DocumentExportFormat.Xlsx)
         {
             await using var book = await exporter
@@ -78,6 +90,37 @@ public sealed class ExcelExportJob(
                 .ConfigureAwait(false);
         }
 
+        await SaveAsync(task, ownerUserId, content, progress, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Книга огляду року: огляд будується для профілю ЗАМОВНИКА тим самим будівником, що й екран, — межі читання
+    /// ті самі, що він бачив.
+    /// </summary>
+    private async Task<byte[]> CalculationYearAsync(
+        ExcelExportTask task,
+        Ecr.Application.Documents.CalculationYear.CalculationYearExportSpec spec,
+        int ownerUserId,
+        CancellationToken ct)
+    {
+        if (calculationYear is null || sheetWriter is null)
+        {
+            throw new InvalidOperationException("Експорт огляду року не зареєстровано в контейнері.");
+        }
+
+        var profile = await access.BuildProfileAsync(ownerUserId, ct).ConfigureAwait(false);
+        var view = await calculationYear.BuildAsync(profile, task.DocumentId, spec.Year, ct).ConfigureAwait(false);
+        var sheets = Ecr.Application.Documents.CalculationYear.CalculationYearWorkbook.Sheets(view, spec, task.Options.Language);
+
+        await using var book = await sheetWriter.WriteAsync(sheets, ct).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        await book.CopyToAsync(buffer, ct).ConfigureAwait(false);
+        return buffer.ToArray();
+    }
+
+    private async Task SaveAsync(
+        ExcelExportTask task, int ownerUserId, byte[] content, IJobProgress progress, CancellationToken ct)
+    {
         await progress.ReportKeyAsync(80, "jobs.exportSavingWorkbook", ct).ConfigureAwait(false);
 
         await exports

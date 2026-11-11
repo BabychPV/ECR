@@ -32,6 +32,8 @@ public sealed class DocumentsController(
     GetDocumentTablesHandler tables,
     GetTableStatusHandler tableStatus,
     GetCalculationResultsHandler calculationResults,
+    Application.Documents.CalculationYear.GetCalculationYearHandler calculationYear,
+    Application.Documents.CalculationYear.ExportCalculationYearHandler exportCalculationYear,
     GetCalculationRunStatusHandler calculationRunStatus,
     GetCalculationIssuesHandler calculationIssues,
     ExportDocumentHandler export,
@@ -660,6 +662,42 @@ public sealed class DocumentsController(
         => Ok(await calculationResults.HandleAsync(id, periodKey, ct).ConfigureAwait(false));
 
     /// <summary>
+    /// Усі розраховані числа документа за рік, місяці поруч («Calculation results», CALC-RESULTS.md). Право
+    /// <c>Calculation.View</c>.
+    /// </summary>
+    /// <param name="id">Документ.</param>
+    /// <param name="year">Рік (2000…2100).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Окремий шлях <c>…/calculation-results/year</c>, а не <c>?year=</c> на сусідньому
+    /// <c>…/calculation-results?periodKey=</c>: форма відповіді інша (огляд року, а не перелік чисел періоду), і
+    /// одна адреса з двома формами зламала б типізований контракт клієнта. Один запит на документ × рік.
+    /// </remarks>
+    [HttpGet("{id:long}/calculation-results/year")]
+    [ProducesResponseType<Application.Documents.CalculationYear.CalculationYearViewDto>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> CalculationResultsYear(long id, [FromQuery] int year, CancellationToken ct)
+        => Ok(await calculationYear.HandleAsync(id, year, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Експорт огляду року в <c>.xlsx</c> (фоном, як експорт документа). Право <c>Document.Export</c> і
+    /// <c>Calculation.View</c>; книгу забирають через <c>GET …/export/{exportId}</c>.
+    /// </summary>
+    /// <param name="id">Документ.</param>
+    /// <param name="request">Рік, розкладка, виходи «як відфільтровано».</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpPost("{id:long}/calculation-results/year/export")]
+    [ProducesResponseType<Contracts.JobAcceptedResponse>(StatusCodes.Status202Accepted)]
+    public async Task<IActionResult> ExportCalculationResultsYear(
+        long id, [FromBody] CalculationYearExportRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var jobId = await exportCalculationYear
+            .HandleAsync(id, request.Year, request.Layout, request.RowIds, request.Language, ct)
+            .ConfigureAwait(false);
+        return Accepted(new Contracts.JobAcceptedResponse(jobId));
+    }
+
+    /// <summary>
     /// Стан актуального прогону документа за період: рядки без правила (D14). Право <c>Calculation.View</c>.
     /// </summary>
     /// <remarks>
@@ -949,6 +987,14 @@ public sealed record MigrateDocumentVersionRequest(
 /// </remarks>
 public sealed record ExportRequest(
     bool IncludeFormulas, bool IncludeStyles, string Language, int PeriodKey, string? Format = null);
+
+/// <summary>Запит на експорт огляду «Calculation results» за рік.</summary>
+/// <param name="Year">Рік.</param>
+/// <param name="Layout"><c>pivot</c> (місяці колонками, типово) або <c>long</c> (рядок на вихід × місяць).</param>
+/// <param name="RowIds">Виходи «як відфільтровано» (<c>rows[].id</c> огляду); відсутнє — увесь документ.</param>
+/// <param name="Language">Мова підписів (<c>en</c>, <c>ru</c>, <c>kz</c>).</param>
+public sealed record CalculationYearExportRequest(
+    int Year, string? Layout = null, IReadOnlyList<string>? RowIds = null, string? Language = null);
 
 /// <summary>Запит на застосування імпорту.</summary>
 /// <param name="PreviewToken">Токен раніше побудованого diff.</param>

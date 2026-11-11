@@ -958,28 +958,42 @@ public sealed partial class CalculationResultStore(
         long documentId, int periodKey, long? excludeRunId, CancellationToken ct)
     {
         // Q-17: проєкт документа і актуальні прогони - ОДИН запит (док. не існує - прогонів нема, порожньо).
-        var current = await (
-                from d in db.Documents.AsNoTracking()
-                where d.Id == documentId
-                join r in db.CalculationRuns.AsNoTracking() on d.ProjectId equals r.ProjectId
-                where r.Status == CalculationRun.CurrentStatus
-                      && (r.DocumentId == documentId || r.DocumentId == null)
-                select new { r.Id, r.DocumentId, r.PeriodKey })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        var current = await CurrentRunsOfDocumentAsync(documentId, ct).ConfigureAwait(false);
 
         if (excludeRunId is { } excluded)
         {
             current.RemoveAll(r => r.Id == excluded);
         }
 
-        var hasDedicatedCurrent = current.Exists(r => r.DocumentId == documentId && r.PeriodKey == periodKey);
-
-        return current
-            .Where(r => r.DocumentId == documentId || (!hasDedicatedCurrent && r.DocumentId == null))
-            .Select(r => r.Id)
-            .ToList();
+        return [.. EffectiveRuns(current, documentId, periodKey).Select(r => r.Id)];
     }
+
+    /// <summary>Актуальні прогони проєкту документа: власні документні та прогони всього проєкту (усіх періодів).</summary>
+    private async Task<List<CurrentRunRow>> CurrentRunsOfDocumentAsync(long documentId, CancellationToken ct)
+        => await (
+                from d in db.Documents.AsNoTracking()
+                where d.Id == documentId
+                join r in db.CalculationRuns.AsNoTracking() on d.ProjectId equals r.ProjectId
+                where r.Status == CalculationRun.CurrentStatus
+                      && (r.DocumentId == documentId || r.DocumentId == null)
+                select new CurrentRunRow(r.Id, r.DocumentId, r.PeriodKey, r.FinishedAt))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// Правило UX-PASS R4 для одного періоду: власний документний прогін ЦЬОГО періоду має перевагу; без нього —
+    /// прогони всього проєкту.
+    /// </summary>
+    private static IEnumerable<CurrentRunRow> EffectiveRuns(
+        IReadOnlyList<CurrentRunRow> current, long documentId, int periodKey)
+    {
+        var hasDedicatedCurrent = current.Any(r => r.DocumentId == documentId && r.PeriodKey == periodKey);
+
+        return current.Where(r => r.DocumentId == documentId || (!hasDedicatedCurrent && r.DocumentId == null));
+    }
+
+    /// <summary>Актуальний прогін (проєкція для вибору).</summary>
+    private sealed record CurrentRunRow(long Id, long? DocumentId, int? PeriodKey, DateTime? FinishedAt);
 
     /// <summary>
     /// Резервує безперервний діапазон ідентифікаторів кроків трейсу й
