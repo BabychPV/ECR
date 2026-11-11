@@ -52,6 +52,7 @@ import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useProjectCurrentPeriodDefault } from '@/features/documents/useProjectCurrentPeriodDefault';
 import { isYearLayout, yearAggregatePeriodState, yearAnchorCalendar } from '@/features/documents/yearLayout';
+import { AllMonthsLink, YearLayoutChips } from '@/features/calcResults/DocumentResultsLinks';
 import { SheetStrip } from '@/features/documents/SheetStrip';
 import { copyFieldsOf, sheetTabKey } from '@/features/documents/sheetCopies/sheetCopyTypes';
 import {
@@ -854,7 +855,10 @@ export function DocumentPage(): JSX.Element {
               обов'язковий — `urlPeriod ?? currentPeriodKey()` нижче), а
               просто лишало те, що вже було.
               ✎ D-474, п. 5: розкладка «рік» — одна копія, перемикача місяця немає. */
-          yearLayout ? undefined : (
+          yearLayout ? (
+            // CALC-RESULTS (макет, варіант A): «Year YYYY» і «Calculated: <місяць>» замість перемикача місяця.
+            <YearLayoutChips periodKey={periodKey} periods={projectPeriods} onPick={setPeriodKey} />
+          ) : (
           <Suspense fallback={<Skeleton h={52} w={190} />}>
             <PeriodPicker
               size="xs"
@@ -1239,6 +1243,11 @@ export function DocumentPage(): JSX.Element {
                   readOnly={gridReadOnly}
                   sheetState={state}
                   tables={active.tables}
+                  tableBarEnd={
+                    can(session.data, 'Calculation.View') ? (
+                      <AllMonthsLink documentId={documentId} periodKey={periodKey} yearLayout={yearLayout} />
+                    ) : undefined
+                  }
                   // ✎ ui-sheet-bottom: смуга аркушів — у нижньому рядку панелі таблиці, поруч із її прокруткою.
                   bottomBar={(scroll) => (
                     <SheetStrip sheets={sheetItemsOf(sheets, document.sheetStates)} activeCode={active.key} onSelect={setSheet}>

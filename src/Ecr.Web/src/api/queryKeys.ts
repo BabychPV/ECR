@@ -295,6 +295,13 @@ const documentKeys = {
   /** Зведення документа за періодом - ключ `useQuery` у `DocumentPage`. */
   summary: (documentId: number, periodKey: number | undefined) =>
     ['document', documentId, periodKey] as const,
+
+  /**
+   * «Calculation results» за рік (`/documents/:id/results`). Під префіксом `['document', id]`: перерахунок і
+   * робочий процес документа інвалідують і цей огляд. Третій елемент — рядок, тож із `summary` (число) не збігається.
+   */
+  calculationYear: (documentId: number, year: number) =>
+    ['document', documentId, 'calculation-year', year] as const,
 };
 
 /**
