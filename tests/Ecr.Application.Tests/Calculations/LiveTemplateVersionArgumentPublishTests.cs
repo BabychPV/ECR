@@ -25,6 +25,8 @@ namespace Ecr.Application.Tests.Calculations;
 /// <remarks>
 /// ⛔ Мутація: у <see cref="LiveBindingTables.ResolveAsync"/> повернути <c>all</c> замість <c>liveSet</c> —
 /// червоні всі тести, крім fallback-тесту «Без_прив_язок_на_живій_версії…» (перевірено 4 з 5).
+/// ⛔ Мутація AN-175: у <c>PublishMethodologyHandler</c> звіряти колонки й для рівня Module —
+/// <see cref="Рівень_Module_не_звіряє_аргументи_з_колонками_прив_язаної_таблиці"/> червоний (1 з 6, 11.11).
 /// </remarks>
 public sealed class LiveTemplateVersionArgumentPublishTests
 {
@@ -53,7 +55,7 @@ public sealed class LiveTemplateVersionArgumentPublishTests
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
 
-    private readonly MethodologyVersion _version;
+    private MethodologyVersion _version = null!;
 
     public LiveTemplateVersionArgumentPublishTests()
     {
@@ -61,15 +63,7 @@ public sealed class LiveTemplateVersionArgumentPublishTests
         _user.UserId.Returns(Reviewer);
         _access.BuildProfileAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(Profile());
 
-        var methodology = new Methodology(EcrCode.Create("ECW_C05_01"), Text("Land 5.1"));
-        SetId(methodology, OwnerId);
-
-        _version = new MethodologyVersion(OwnerId, "1.0.0", CalculationLevel.Configuration, Author, Now);
-        _version.SetModes(NumericMode.Strict, CalendarMode.Actual, TraceLevel.ErrorsOnly);
-        SetId(_version, VersionId);
-        methodology.AddVersion(_version);
-
-        _store.FindByVersionAsync(VersionId, Arg.Any<CancellationToken>()).Returns(methodology);
+        UseVersion(CalculationLevel.Configuration);
         _store.GetTestCasesAsync(VersionId, Arg.Any<CancellationToken>()).Returns(TestCases());
         _store.GetOutputsAsync(VersionId, Arg.Any<CancellationToken>()).Returns(new List<MethodologyOutput>());
         _store.GetRulesAsync(VersionId, Arg.Any<CancellationToken>()).Returns(new List<MethodologyRule>());
@@ -194,7 +188,37 @@ public sealed class LiveTemplateVersionArgumentPublishTests
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Рівень_Module_не_звіряє_аргументи_з_колонками_прив_язаної_таблиці()
+    {
+        // HSE400 (AN-175): модуль місячних колонок бере GCV_… з РЯДКІВ таблиці, колонок з такими кодами немає.
+        // Без винятку друга версія методології після першої прив'язки не публікувалась (0438 на кожен аргумент).
+        UseVersion(CalculationLevel.Module);
+        LiveIs(LiveTable);
+        Formulas("@GCV_HSE400_FG_HMB_Methane * 2");
+
+        await Publish();
+
+        Assert.True(_version.IsPublished);
+        await _bindings.DidNotReceive().ListColumnCodesAsync(
+            Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>());
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
+
+    private void UseVersion(CalculationLevel level)
+    {
+        var methodology = new Methodology(EcrCode.Create("ECW_C05_01"), Text("Land 5.1"));
+        SetId(methodology, OwnerId);
+
+        _version = new MethodologyVersion(OwnerId, "1.0.0", level, Author, Now);
+        _version.SetModes(NumericMode.Strict, CalendarMode.Actual, TraceLevel.ErrorsOnly);
+        SetId(_version, VersionId);
+        methodology.AddVersion(_version);
+
+        _store.FindByVersionAsync(VersionId, Arg.Any<CancellationToken>()).Returns(methodology);
+    }
 
     private void LiveIs(params int[] live)
         => _bindings.ListLiveTableDefIdsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
