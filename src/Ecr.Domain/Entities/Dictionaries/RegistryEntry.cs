@@ -45,6 +45,26 @@ public sealed class RegistryEntry : Entity<long>
         CreatedAt = createdAt ?? DateTime.UnixEpoch;
     }
 
+    /// <summary>
+    /// Рядок знімка довідника, якого НЕМАЄ в <c>dic.RegistryEntry</c>: його дає інше джерело
+    /// (документ HSE400 для <c>LAND_HSE400_COMPOSITION</c>).
+    /// </summary>
+    /// <param name="id">Ідентифікатор у межах знімка; від'ємний, щоб не збігтися зі справжнім.</param>
+    /// <param name="registryDefId">Довідник, у знімок якого лягає рядок.</param>
+    /// <param name="code">Код рядка.</param>
+    /// <param name="display">Назва для показу.</param>
+    /// <param name="ordinal">Порядок у знімку.</param>
+    /// <returns>Активний запис без вікна чинності.</returns>
+    /// <remarks>
+    /// ⛔ Лише для читання в пам'яті: такий запис не відстежується контекстом і не зберігається.
+    /// </remarks>
+    public static RegistryEntry ForSnapshot(long id, int registryDefId, EcrCode code, LocalizedText display, int ordinal)
+    {
+        var entry = new RegistryEntry(registryDefId, code, display) { Id = id };
+        entry.SetOrdinal(ordinal);
+        return entry;
+    }
+
     public int RegistryDefId { get; private set; }
     public string Code { get; private set; } = null!;
     public LocalizedText DisplayL10n { get; private set; } = null!;

@@ -594,7 +594,13 @@ public static class DependencyInjection
         services.AddScoped<IRegistryRowsQuery, RegistryRowsQuery>(); // RT-13
 
         // RT: expressions
-        services.AddScoped<IRegistrySnapshotLoader, RegistrySnapshotLoader>(); // RT-22
+        // RT-22; HSE400: склад газу LAND_HSE400_COMPOSITION за прапором читається з документа, а не з довідника.
+        services.AddScoped<RegistrySnapshotLoader>();
+        services.AddScoped<IRegistrySnapshotLoader>(sp => new Hse400CompositionSnapshotLoader(
+            sp.GetRequiredService<RegistrySnapshotLoader>(),
+            sp.GetRequiredService<EcrDbContext>(),
+            sp.GetRequiredService<ICalculationResultStore>(),
+            Hse400CompositionSnapshotLoader.IsEnabled(configuration)));
 
         // PERMITS: types — типи дозволів над реєстрами (PM-03)
         services.AddScoped<IPermitTypeStore, PermitTypeStore>();
