@@ -22,6 +22,18 @@ public sealed class RegistrySnapshotSource(
     /// <summary>Джерело без жодного довідника: кожен <see cref="Build"/> дає <see cref="RegistrySnapshot.Empty"/>.</summary>
     public static IRegistrySnapshotSource Empty { get; } = new EmptySource();
 
+    /// <summary>Довідники разом із полями.</summary>
+    public IReadOnlyList<RegistryDef> Registries => registries;
+
+    /// <summary>Активні первинні ключі.</summary>
+    public IReadOnlyList<RegistryKeyDef> PrimaryKeys => primaryKeys;
+
+    /// <summary>Записи без фільтра видимості.</summary>
+    public IReadOnlyList<RegistryEntry> Entries => entries;
+
+    /// <summary>Значення полів записів.</summary>
+    public IReadOnlyList<RegistrySnapshotValue> Values => values;
+
     /// <inheritdoc />
     public IRegistrySnapshot Build(DateOnly businessDate)
         => RegistrySnapshot.Create(registries, primaryKeys, entries, values, businessDate);

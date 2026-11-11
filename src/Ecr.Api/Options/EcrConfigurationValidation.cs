@@ -155,6 +155,9 @@ public static partial class EcrConfigurationValidation
         // Q-17: читається `GetValue<bool>` у DependencyInjection (Infrastructure).
         "Collection:MonthColumnRouting",
 
+        // HSE400: Land читає склад газу з документа HSE400, а не з довідника (типово вимкнено).
+        Ecr.Infrastructure.Persistence.Hse400CompositionSnapshotLoader.EnabledKey,
+
         // D-462: видалення сирих точок, яких PI більше не віддає (повністю перечитаний шматок вікна).
         Ecr.Adapters.PiAf.CollectionRunnerOptions.DeleteMissingPointsKey,
 

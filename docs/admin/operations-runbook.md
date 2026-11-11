@@ -274,6 +274,7 @@ ORDER BY [Ts];
 | `Cache:SchemaName` | ні | `dbo` | Значення на старті не перевіряється. |
 | `Cache:TableName` | ні | `Cache` | Значення на старті не перевіряється. |
 | `Calculations:FullYearWarnSeconds` | ні | `600` | Ціле число, не менше 1. |
+| `Calculations:Hse400CompositionFromDocument` | ні | `false` | `true` або `false`. |
 | `Calculations:MaxInputCellsPerBinding` | ні | `300000` | Ціле число, не менше 1. |
 | `Calculations:MaxParallelism` | ні | `4` | Ціле число, не менше 1. |
 | `Calculations:SupersededPurge:BatchSize` | ні | `500` | Ціле число, не менше 1. |
