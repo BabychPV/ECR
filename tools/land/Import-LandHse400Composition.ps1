@@ -29,6 +29,12 @@
 
     Стенд: лише локальний API (Assert-LocalBaseUrl); мутації - лише з -ConfirmStand; -DryRun лише читає.
 
+    ⛔ HSE400 3c: довідник застарів (джерело - документ HSE400). Без -AllowDeprecatedRegistry скрипт відмовляє
+    одразу, нічого не читаючи.
+
+.PARAMETER AllowDeprecatedRegistry
+    Свідомий імпорт у застарілий довідник - лише для стенда з Calculations:Hse400CompositionFromDocument = false.
+
 .PARAMETER SourceDatabase
     База локальної копії прода, з якої читаємо (сервер - -SourceServer, за замовчуванням localhost).
 
@@ -40,8 +46,8 @@
 
 .EXAMPLE
     $pw = Read-Host 'Пароль ECR' -AsSecureString
-    .\Import-LandHse400Composition.ps1 -SourceDatabase ECR -ConfirmSource ECR -BaseUrl http://localhost:5094 -User admin -Password $pw -DiscoverStreams -DryRun
-    .\Import-LandHse400Composition.ps1 -SourceDatabase ECR -ConfirmSource ECR -BaseUrl http://localhost:5094 -User admin -Password $pw -DiscoverStreams -ConfirmStand localhost:5094
+    .\Import-LandHse400Composition.ps1 -SourceDatabase ECR -ConfirmSource ECR -BaseUrl http://localhost:5094 -User admin -Password $pw -DiscoverStreams -AllowDeprecatedRegistry -DryRun
+    .\Import-LandHse400Composition.ps1 -SourceDatabase ECR -ConfirmSource ECR -BaseUrl http://localhost:5094 -User admin -Password $pw -DiscoverStreams -AllowDeprecatedRegistry -ConfirmStand localhost:5094
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -55,10 +61,20 @@ param(
     [switch]$DiscoverStreams,
     [switch]$RewriteAliased,
     [int]$BatchSize = 200,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$AllowDeprecatedRegistry
 )
 
 $ErrorActionPreference = 'Stop'
+
+# HSE400 3c: довідник LAND_HSE400_COMPOSITION застарів - склад газу для Land читається з документа HSE400
+# (Calculations:Hse400CompositionFromDocument). Імпорт у довідник - лише свідомо, для стенда з вимкненим прапорцем,
+# і перевіряється ДО будь-якого читання джерела чи виклику API.
+if (-not $AllowDeprecatedRegistry) {
+    throw ('Довідник LAND_HSE400_COMPOSITION застарів: склад газу HSE400 тепер вводиться в документ HSE400 ' +
+        '(tools/hse400/Build-Hse400Template.ps1), а Land читає його звідти (Calculations:Hse400CompositionFromDocument). ' +
+        'Імпорт у довідник - лише для стенда, де цей прапорець вимкнено: додайте -AllowDeprecatedRegistry. Відмова.')
+}
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 . (Join-Path $here 'EcrApi.ps1')
 . (Join-Path $here 'LandAirSubstances.Lib.ps1')   # Assert-LocalSourceDatabase
