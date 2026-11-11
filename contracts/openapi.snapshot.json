@@ -1715,7 +1715,7 @@
         "description": "Одна поточна проблема розрахунку: рядок, який правило методології не охопило (AN-69).",
         "properties": {
           "columns": {
-            "description": "✎ 10.11: лише для `CategoryRuleRejected` — порожні колонки рядка, які треба заповнити, щоб правило категорії дало\nключ (у порядку колонок таблиці); `null` — назвати не вдалося або колонка прихована від читача.",
+            "description": "✎ 10.11: лише для `CategoryRuleRejected` і `MissingInputs` — порожні колонки рядка, які треба заповнити (для\n`CategoryRuleRejected` — ті, що читає правило категорії; для `MissingInputs` — ті, що читають формули версії),\nу порядку колонок таблиці; `null` — назвати не вдалося або колонка прихована від читача.",
             "items": {
               "$ref": "#/components/schemas/CalculationIssueColumnDto"
             },
@@ -1740,7 +1740,7 @@
             "type": "string"
           },
           "kind": {
-            "description": "Вид проблеми: `NoMatchingRule` або `CategoryRuleRejected` (✎ 10.11).",
+            "description": "Вид проблеми: `NoMatchingRule`, `CategoryRuleRejected` (✎ 10.11) або `MissingInputs` (AN-164: правило\nзакрило рядок, але формулам бракує входів — жодного результату).",
             "type": "string"
           },
           "methodologyCode": {
@@ -1760,7 +1760,7 @@
             "type": "integer"
           },
           "ruleCode": {
-            "description": "✎ 10.11: лише для `CategoryRuleRejected` — правило методології, що закрило рядок; `null` — невідоме.",
+            "description": "✎ 10.11: лише для `CategoryRuleRejected` і `MissingInputs` — правило методології, що закрило рядок;\n`null` — невідоме.",
             "type": [
               "null",
               "string"
