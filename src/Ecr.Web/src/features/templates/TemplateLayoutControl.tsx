@@ -1,10 +1,11 @@
 import type { JSX } from 'react';
-import { Badge, Group, Select, Text, Tooltip } from '@mantine/core';
+import { Badge, Group, Select, Text } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { components } from '@/api/schema';
 import { t } from '@/shared/i18n';
+import { Hint } from '@/shared/ui/Hint';
 import { showApiError, showDone } from '@/shared/ui/notify';
 
 /** Розкладка версії шаблону (D-474): копія на місяць або рік із місяцями в колонках. */
@@ -82,11 +83,13 @@ export function TemplateLayoutControl({
         <Text size="sm" c="dimmed">
           {t('template.layout.label')}
         </Text>
-        <Tooltip label={t('template.layout.hint')} multiline maw={320} withArrow>
-          <Badge variant="light" color="gray" tabIndex={0} data-template-layout-value={layout}>
+        {/* ⛔ `Hint`, не `Tooltip` Mantine: той тягне `@floating-ui/react` у вхідний чанк (+4.5 КБ gzip на КОЖЕН
+            маршрут; CI 43021468537 — `DocumentsPage` 253.0 КБ при межі 250, D-132). */}
+        <Hint label={t('template.layout.hint')} focusable>
+          <Badge variant="light" color="gray" data-template-layout-value={layout}>
             {templateLayoutLabel(layout)}
           </Badge>
-        </Tooltip>
+        </Hint>
       </Group>
     );
   }

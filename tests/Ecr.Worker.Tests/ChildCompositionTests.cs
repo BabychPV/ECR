@@ -56,8 +56,11 @@ public sealed class ChildCompositionTests
 
         // ⛔ Quartz і воркер з лейнами Api (ApiLanes) тут означали б, що дочірній
         // бере default або вдруге крутить розклади — по разу на процес пулу.
-        var hosted = Assert.Single(services, d => d.ServiceType == typeof(IHostedService));
-        Assert.Equal(typeof(JobWorker), hosted.ImplementationType);
+        // ✎ D-474: друга (і остання) фонова служба — оновлювач реєстру розкладок версій: без нього перерахунок
+        // документа річної версії пішов би немаршрутизованим шляхом. Нічого з черг і розкладів він не бере.
+        Assert.Equal(
+            [typeof(TemplateLayoutRegistryRefresher), typeof(JobWorker)],
+            services.Where(d => d.ServiceType == typeof(IHostedService)).Select(d => d.ImplementationType).ToArray());
 
         var options = Assert.Single(services, d => d.ServiceType == typeof(JobWorkerOptions));
         Assert.Equal([JobLanes.Recalc], ((JobWorkerOptions)options.ImplementationInstance!).Lanes);
@@ -103,7 +106,10 @@ public sealed class ChildCompositionTests
         Assert.Null(user.UserId);
         Assert.Empty(user.GroupSids);
 
-        Assert.IsType<JobWorker>(Assert.Single(provider.GetServices<IHostedService>()));
+        // ✎ D-474: поруч із виконавцем — лише оновлювач реєстру розкладок версій.
+        Assert.Equal(
+            [typeof(TemplateLayoutRegistryRefresher), typeof(JobWorker)],
+            provider.GetServices<IHostedService>().Select(h => h.GetType()).ToArray());
     }
 
     [Fact]
