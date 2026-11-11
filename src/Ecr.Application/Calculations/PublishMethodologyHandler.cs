@@ -407,10 +407,16 @@ public sealed class PublishMethodologyHandler(
         // ⛔ HSE301 L: разом з аргументами формул бібліотеки із замикання — вони читають
         // рядок ВИКЛИКАЧА, і колонки там бракуватиме так само (у рантаймі — #ARG).
         // ✎ L-2: і `@`-аргументи правила категорії — воно читає той самий рядок.
+        // ⛔ Рівень Module (модуль місячних колонок, HSE400) бере аргументи з РЯДКІВ таблиць «місяці в колонках»
+        // (GCV_<простір>_<таблиця>_<RowKey>), а не з колонок прив'язаної таблиці: звірка з колонками для нього
+        // хибна і після першої прив'язки блокувала б публікацію кожної наступної версії (AN-175, 11.11).
         ParsedFormula[] ruleFormulas = categoryRule.Rule is { } rule ? [rule] : [];
-        await CheckArgumentColumnsAsync(
-                methodology.Id, [.. parsed, .. LibraryFormulas(libraries)], ruleFormulas, warnings, strings, ct)
-            .ConfigureAwait(false);
+        if (version.Level != CalculationLevel.Module)
+        {
+            await CheckArgumentColumnsAsync(
+                    methodology.Id, [.. parsed, .. LibraryFormulas(libraries)], ruleFormulas, warnings, strings, ct)
+                .ConfigureAwait(false);
+        }
 
         // ⛔ V-18: невідома константа — іменна відмова, а не рядок у «N проблем».
         MethodologyPublishChecks.CheckUnknownConstants(parsed, constants);
