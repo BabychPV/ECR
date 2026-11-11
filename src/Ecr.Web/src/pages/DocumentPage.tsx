@@ -507,7 +507,9 @@ export function DocumentPage(): JSX.Element {
     [revealRow],
   );
   const openUnmatchedRow = useCallback(
-    (tableInstanceId: number, rowKey: string): void => revealRow(tableInstanceId, rowKey, null),
+    // ✎ 10.11: відхилений правилом категорії рядок відкривається на колонці, яку треба заповнити.
+    (tableInstanceId: number, rowKey: string, columnCode: string | null = null): void =>
+      revealRow(tableInstanceId, rowKey, columnCode),
     [revealRow],
   );
 

@@ -4,7 +4,12 @@ import type { DocumentTableDto } from '@/api/types';
 import { formatDateTime } from '@/shared/format/datetime';
 import { language, t } from '@/shared/i18n';
 import type { UnmatchedRows } from './useUnmatchedRows';
-import { groupUnmatchedRows, unmatchedRowCount, type UnmatchedRowRef, type UnmatchedTableHint } from './unmatchedRowsModel';
+import {
+  groupUnmatchedRows,
+  unmatchedRowCount,
+  type UnmatchedRowRef,
+  type UnmatchedTableHint,
+} from './unmatchedRowsModel';
 
 /** Префікс пам'яті «банер згорнуто»; ключ — `префікс:userId` (правило людини fg6: стан — для кожного користувача). */
 export const UnmatchedCollapsedKey = 'ecr.unmatchedRows.collapsed';
@@ -49,8 +54,11 @@ interface UnmatchedRowsBannerProps {
   readonly rows: UnmatchedRows;
   /** Усі таблиці документа за період: назви таблиць і аркушів, екземпляр для переходу. */
   readonly tables: readonly DocumentTableDto[];
-  /** Відкрити рядок у сітці: аркуш, прокрутка, фокус і підсвітка (шлях зауважень, `ФВ-5.6`). */
-  readonly onOpenRow: (tableInstanceId: number, rowKey: string) => void;
+  /**
+   * Відкрити рядок у сітці: аркуш, прокрутка, фокус і підсвітка (шлях зауважень, `ФВ-5.6`). ✎ 10.11: для відхиленого
+   * рядка — одразу на колонці, яку треба заповнити (`columnCode`); `null` — перша колонка.
+   */
+  readonly onOpenRow: (tableInstanceId: number, rowKey: string, columnCode: string | null) => void;
   /** Вузький екран (документ лише для читання): дія підказки — відкрити документ ширше, а не F9 (UAT 08.11). */
   readonly narrow?: boolean;
 }
@@ -122,9 +130,16 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow, narrow = 
       </Group>
 
       <Collapse in={!collapsed} id={bodyId}>
-        <Text size="sm" mt="xs" data-testid="document-unmatched-rows-hint">
-          {t(narrow ? 'document.unmatchedRows.hintNarrow' : 'document.unmatchedRows.hint')}
-        </Text>
+        {groups.some((group) => !group.rejected) && (
+          <Text size="sm" mt="xs" data-testid="document-unmatched-rows-hint">
+            {t(narrow ? 'document.unmatchedRows.hintNarrow' : 'document.unmatchedRows.hint')}
+          </Text>
+        )}
+        {groups.some((group) => group.rejected) && (
+          <Text size="sm" mt="xs" data-testid="document-rejected-rows-hint">
+            {t('document.rejectedRows.hint')}
+          </Text>
+        )}
         <Stack
           role="list"
           gap="xs"
@@ -139,7 +154,9 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow, narrow = 
             return (
               <div role="listitem" key={group.key} data-testid="document-unmatched-rows-group">
                 <Text size="sm" span fw={500}>
-                  {t('document.unmatchedRows.group', { table, rows: plural('document.unmatchedRows.rows', group.rows.length) })}
+                  {group.rejected
+                    ? t('document.rejectedRows.group', { table, rows: plural('document.unmatchedRows.rows', group.rows.length) })
+                    : t('document.unmatchedRows.group', { table, rows: plural('document.unmatchedRows.rows', group.rows.length) })}
                 </Text>
                 {group.hint === null && group.methodologyCode !== null && (
                   <Text size="xs" span>
@@ -149,7 +166,7 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow, narrow = 
                 {group.hint !== null && <AllowedValues hint={group.hint} />}
                 <Group gap="xs" wrap="wrap">
                   {shown.map((row, index) => {
-                    const label = rowLabel(row);
+                    const label = rowLabel(row, group.rejected);
                     const tableInstanceId = group.tableInstanceId;
                     // ✎ Свіжий погляд 08.11: посилання розділені видимою « · », інакше «Row 2: «Coal» Row 3: «Oil»» читається однією фразою.
                     const separator =
@@ -173,10 +190,10 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow, narrow = 
                         component="button"
                         type="button"
                         size="sm"
-                        data-testid="document-unmatched-row-link"
+                        data-testid={group.rejected ? 'document-rejected-row-link' : 'document-unmatched-row-link'}
                         data-row-key={row.rowKey}
                         aria-label={`${table} · ${label}`}
-                        onClick={() => onOpenRow(tableInstanceId, row.rowKey)}
+                        onClick={() => onOpenRow(tableInstanceId, row.rowKey, row.missingColumns[0]?.code ?? null)}
                       >
                         {label}
                       </Anchor>
@@ -235,8 +252,21 @@ export function plural(key: 'document.unmatchedRows.rows' | 'document.unmatchedR
   return t('document.unmatchedRows.tables.other', params);
 }
 
-/** Підпис рядка: номер і (з підказкою) поточне значення в колонках правил — «Row 2: «Sample A-0»». */
-function rowLabel(row: UnmatchedRowRef): string {
+/**
+ * Підпис рядка: номер і (з підказкою) поточне значення в колонках правил — «Row 2: «Sample A-0»».
+ * ✎ 10.11: відхилений правилом категорії — правило й колонки, які треба заповнити: «Row 1 · rule R_C05_01_01: fill …».
+ */
+function rowLabel(row: UnmatchedRowRef, rejected: boolean): string {
+  if (rejected) {
+    const rule = row.ruleCode ?? t('document.rejectedRows.ruleUnknown');
+    if (row.missingColumns.length === 0) return t('document.rejectedRows.row', { row: String(row.rowNumber), rule });
+
+    return t('document.rejectedRows.rowFill', {
+      row: String(row.rowNumber),
+      rule,
+      columns: row.missingColumns.map((column) => `«${column.name}»`).join(', '),
+    });
+  }
   if (row.currentValues === null) return t('document.unmatchedRows.row', { row: String(row.rowNumber) });
 
   const value = row.currentValues.map((v) => (v === '' ? t('document.unmatchedRows.emptyValue') : v)).join(' / ');

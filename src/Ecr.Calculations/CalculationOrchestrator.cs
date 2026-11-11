@@ -451,7 +451,10 @@ public sealed class CalculationOrchestrator(
                         position = Math.Max(0, IndexOfKey(rowKeys, rowKey));
                     }
 
-                    rejected.Add(new RejectedRow(binding.TableInstanceId, position + 1, rowKey));
+                    // ✎ 10.11 (doc 95): документ і методологія — щоб завершення записало проблему рядка
+                    // (`calc.CalculationIssue`, вид CategoryRuleRejected), а не лише повідомлення задачі.
+                    rejected.Add(new RejectedRow(
+                        binding.TableInstanceId, position + 1, rowKey, documentId, binding.Descriptor.MethodologyId));
                 }
             }
         }

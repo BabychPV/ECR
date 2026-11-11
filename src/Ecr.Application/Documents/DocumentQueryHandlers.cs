@@ -276,6 +276,10 @@ public sealed class ListDocumentsHandler(
         // його межі не поширюються на інші документи проєкту (інакше фільтр за станом знаходив би їх за аркушем,
         // відкритим лише в документі-наданні).
         var roleProfile = profile.WithoutParticipations();
+
+        // ✎ 10.11 (P2, live): власні документи читача — у фільтрі й виборі власника і за звуженого доступу
+        // (дзеркало винятку власника в `DocumentSheetVisibility.For`).
+        filter = filter with { ReaderUserId = profile.UserId };
         (filter, var scopes) = await DocumentSheetVisibility
             .HiddenFilterAsync(samples, access, roleProfile, visibleProjects, projectId, periodKey, filter, ct)
             .ConfigureAwait(false);

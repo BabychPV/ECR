@@ -171,8 +171,42 @@ public sealed class GenericCalculationModule(
             methodology, documentId, periodKey, ordered, substances, outputs, period,
             scales ?? EmptyScales, constantsByCode, snapshot, libraries,
             string.IsNullOrWhiteSpace(categoryRule) ? null : categoryRule,
-            substanceCodes);
+            substanceCodes,
+            string.IsNullOrWhiteSpace(categoryRule) ? null : KnownCategoriesOf(constants, libraries));
     }
+
+    /// <summary>
+    /// ✎ F13 RC #806 (doc 95): категорії констант версії й бібліотек — без <c>Common</c> і пробілів; <c>null</c> — таких
+    /// немає (усі константи спільні, ключ на вибір не впливає). Із уже прочитаних констант — жодного запиту.
+    /// </summary>
+    private static HashSet<string>? KnownCategoriesOf(
+        IReadOnlyList<MethodologyConstant> constants, CalculationLibraries? libraries)
+    {
+        var known = constants
+            .Concat(libraries?.Versions.SelectMany(v => v.Constants.Values.SelectMany(c => c)) ?? [])
+            .Select(c => c.Category)
+            .Where(c => !string.IsNullOrWhiteSpace(c)
+                        && !string.Equals(c, MethodologyConstant.CommonCategory, StringComparison.Ordinal))
+            .Select(c => StripSpaces(c!))
+            .ToHashSet(StringComparer.Ordinal);
+
+        return known.Count == 0 ? null : known;
+    }
+
+    /// <summary>Чи веде ключ правила категорії хоч до однієї категорії констант (точно або як <c>{ключ}_{код}</c>).</summary>
+    private static bool IsKnownCategory(IReadOnlySet<string> known, string key)
+    {
+        var bare = StripSpaces(key);
+        if (known.Contains(bare))
+        {
+            return true;
+        }
+
+        var prefix = bare + "_";
+        return known.Any(c => c.StartsWith(prefix, StringComparison.Ordinal));
+    }
+
+    private static string StripSpaces(string value) => string.Concat(value.Where(ch => !char.IsWhiteSpace(ch)));
 
     /// <summary>Чи кличе якась із формул символ <c>CURRENT_SUBSTANCE()</c>.</summary>
     /// <param name="formulas">Формули версії й бібліотек.</param>
@@ -478,6 +512,24 @@ public sealed class GenericCalculationModule(
         var categoryKey = categoryRule is null
             ? null
             : EvaluateCategoryRule(categoryRule, ruleContext, numeric, trace);
+
+        // ✎ F13 RC #806 (doc 95): порожня «Overhauled engines» давала ключ «_A» — не помилку, а ключ, якого немає серед
+        // категорій версії; константи категорії ставали #REF, рядок давав 0 результатів без жодної проблеми. Тепер це
+        // відмова рядка того самого виду (categoryRuleFailed) — проблема CategoryRuleRejected з колонками, що її причина.
+        if (categoryKey is not null
+            && binding.KnownCategories is { } known
+            && !IsKnownCategory(known, categoryKey))
+        {
+            throw new Domain.Abstractions.DomainException(
+                "ECR-CALC-0422",
+                $"Правило категорії «{categoryRule!.Text}» дало ключ «{categoryKey}», якого немає серед категорій версії.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.categoryRuleFailed",
+                    ["expression"] = categoryRule.Text,
+                    ["reason"] = $"unknown category key {categoryKey}",
+                });
+        }
 
         library?.SetCategory(categoryKey);
 

@@ -44,7 +44,8 @@ public sealed class CategoryRuleRowRejectionTests
         Assert.Empty(profile.UnmatchedRows);
 
         // Рядок 2 відхилено з номером і публічним ключем; значень комірок у діагностиці немає.
-        Assert.Equal([new RejectedRow(TableInstance, 2, "R001")], profile.RejectedRows);
+        // ✎ 10.11 (doc 95): з документом і методологією — завершення пише з них проблему рядка (calc.CalculationIssue).
+        Assert.Equal([new RejectedRow(TableInstance, 2, "R001", DocumentId, Methodology)], profile.RejectedRows);
     }
 
     [Fact]
@@ -65,13 +66,39 @@ public sealed class CategoryRuleRowRejectionTests
 
         Assert.Equal(1, profile.Stats.Single().Rows);
         Assert.Equal(
-            [new RejectedRow(TableInstance, 1, "R000"), new RejectedRow(TableInstance, 3, "R002")],
+            [new RejectedRow(TableInstance, 1, "R000", DocumentId, Methodology), new RejectedRow(TableInstance, 3, "R002", DocumentId, Methodology)],
             profile.RejectedRows);
     }
 
-    private static async Task<ModuleProfile> RunAsync(string[] fuelByRow)
+    /// <remarks>
+    /// ✎ F13 RC #806 (doc 95): порожня колонка давала ключ («_A»), якого немає серед категорій констант версії, —
+    /// рядок рахувався з #REF і мовчки давав 0 результатів без проблеми. Мутація: прибрати перевірку
+    /// <c>IsKnownCategory</c> у <c>GenericCalculationModule.ExecuteAsync</c> — рядок 2 «пораховано», тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Ключ_якого_немає_серед_категорій_констант_відхиляє_рядок()
     {
-        using var provider = Arrange(fuelByRow);
+        var profile = await RunAsync(["Gas", "_A", "Coal 6803"], ["Gas", "Coal6803_2754", MethodologyConstant.CommonCategory]);
+
+        // «Coal 6803» — ключ форми B (`{ключ}_{код}`, без пробілів) — відомий; «_A» — ні.
+        Assert.Equal(2, profile.Stats.Single().Rows);
+        Assert.Equal([new RejectedRow(TableInstance, 2, "R001", DocumentId, Methodology)], profile.RejectedRows);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Лише_спільні_константи_ключ_не_перевіряється()
+    {
+        var profile = await RunAsync(["Gas", "_A"], [MethodologyConstant.CommonCategory]);
+
+        Assert.Equal(2, profile.Stats.Single().Rows);
+        Assert.Empty(profile.RejectedRows);
+    }
+
+    private static async Task<ModuleProfile> RunAsync(string[] fuelByRow, string[]? constantCategories = null)
+    {
+        using var provider = Arrange(fuelByRow, constantCategories ?? []);
         var orchestrator = new CalculationOrchestrator(
             provider.GetRequiredService<MethodologyResolver>(),
             provider.GetRequiredService<IPeriodStore>(),
@@ -86,7 +113,7 @@ public sealed class CategoryRuleRowRejectionTests
             CancellationToken.None);
     }
 
-    private static ServiceProvider Arrange(string[] fuelByRow)
+    private static ServiceProvider Arrange(string[] fuelByRow, string[] constantCategories)
     {
         var store = Substitute.For<IMethodologyStore>();
         var periods = Substitute.For<IPeriodStore>();
@@ -103,6 +130,18 @@ public sealed class CategoryRuleRowRejectionTests
         store.GetOutputsAsync(Version, Arg.Any<CancellationToken>())
              .Returns([new MethodologyOutput(Version, EcrCode.Create("Total"), unitId: 1)]);
         store.GetCategoryRuleAsync(Version, Arg.Any<CancellationToken>()).Returns("@Fuel");
+        if (constantCategories.Length > 0)
+        {
+            store.GetConstantsAsync(Version, Arg.Any<CancellationToken>()).Returns(
+            [
+                .. constantCategories.Select(category =>
+                {
+                    var constant = new MethodologyConstant(Version, EcrCode.Create("K"), 1m, unitId: 1);
+                    constant.SetScope(category, substanceEntryId: null);
+                    return constant;
+                }),
+            ]);
+        }
 
         periods.FindPeriodBoundsAsync(DocumentId, Period, Arg.Any<CancellationToken>())
                .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
