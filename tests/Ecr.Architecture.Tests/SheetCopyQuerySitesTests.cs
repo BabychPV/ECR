@@ -35,6 +35,8 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Persistence/ArchiveAwareCellReader.cs"] =
             "архівні екземпляри несуть SheetCopyId; решта — за Id екземпляра",
         ["src/Ecr.Infrastructure/Persistence/SheetEditGate.cs"] = "applock :c{copy}, стан своєї копії",
+        ["src/Ecr.Infrastructure/Persistence/CalculationResultStore.Year.cs"] =
+            "огляд року: екземпляри документа (усі копії) за Id з будівника; зведення групує за (TableDefId, SheetCopyId) — копія окремою таблицею",
         ["src/Ecr.Infrastructure/Security/AccessDecisionService.cs"] = "стан і крок маршруту — своєї копії (SheetKey)",
         ["src/Ecr.Infrastructure/Persistence/WorkflowStore.cs"] =
             "стан, зрізи, журнал — за копією; календар подання — оригінал (копія — коміт 8)",

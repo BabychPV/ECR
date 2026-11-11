@@ -2110,6 +2110,11 @@
       "CalculationYearExportRequest": {
         "description": "Запит на експорт огляду «Calculation results» за рік.",
         "properties": {
+          "filtered": {
+            "default": false,
+            "description": "`true` — «як відфільтровано» (поля нижче — ті самі фільтри, що й на екрані); інакше увесь документ.",
+            "type": "boolean"
+          },
           "language": {
             "description": "Мова підписів (`en`, `ru`, `kz`).",
             "type": [
@@ -2124,14 +2129,38 @@
               "string"
             ]
           },
-          "rowIds": {
-            "description": "Виходи «як відфільтровано» (`rows[].id` огляду); відсутнє — увесь документ.",
-            "items": {
-              "type": "string"
-            },
+          "methodology": {
+            "description": "Код методології або `formula`.",
             "type": [
               "null",
-              "array"
+              "string"
+            ]
+          },
+          "problemsOnly": {
+            "default": false,
+            "description": "Лише «проблемні».",
+            "type": "boolean"
+          },
+          "query": {
+            "description": "Пошук.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sheet": {
+            "description": "Аркуш (`sheetDefId`).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "substance": {
+            "description": "Код речовини.",
+            "type": [
+              "null",
+              "string"
             ]
           },
           "year": {
@@ -2206,6 +2235,22 @@
           "periodState",
           "runState",
           "calculatedAt"
+        ],
+        "type": "object"
+      },
+      "CalculationYearOptionDto": {
+        "description": "Варіант фільтра.",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText"
+          }
+        },
+        "required": [
+          "code",
+          "nameL10n"
         ],
         "type": "object"
       },
@@ -2294,6 +2339,79 @@
         ],
         "type": "object"
       },
+      "CalculationYearRowsDto": {
+        "description": "Сторінка виходів однієї таблиці (`GET …/calculation-results/year/rows`): довідники — лише ті, на які\nпосилаються рядки сторінки.",
+        "properties": {
+          "columns": {
+            "description": "Колонки формул сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearColumnDto"
+            },
+            "type": "array"
+          },
+          "equipment": {
+            "description": "Обладнання сторінки (`Table` = 0: таблиця одна).",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearEquipmentDto"
+            },
+            "type": "array"
+          },
+          "methodologies": {
+            "description": "Методології сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearMethodologyDto"
+            },
+            "type": "array"
+          },
+          "offset": {
+            "description": "Зсув першого рядка сторінки.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rows": {
+            "description": "Виходи сторінки в порядку показу; індекси — у переліки цієї сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearRowDto"
+            },
+            "type": "array"
+          },
+          "substances": {
+            "description": "Речовини сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearSubstanceDto"
+            },
+            "type": "array"
+          },
+          "table": {
+            "description": "Ключ таблиці (string CalculationYearTableSummaryDto.Key).",
+            "type": "string"
+          },
+          "total": {
+            "description": "Виходів таблиці, що проходять фільтри (усі сторінки).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "units": {
+            "description": "Одиниці сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearUnitDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "table",
+          "total",
+          "offset",
+          "equipment",
+          "methodologies",
+          "substances",
+          "units",
+          "columns",
+          "rows"
+        ],
+        "type": "object"
+      },
       "CalculationYearSubstanceDto": {
         "description": "Речовина (запис довідника).",
         "properties": {
@@ -2315,11 +2433,110 @@
         ],
         "type": "object"
       },
-      "CalculationYearTableDto": {
-        "description": "Таблиця документа разом з аркушем.",
+      "CalculationYearSummaryDto": {
+        "description": "Зведення огляду року (`GET …/calculation-results/year/summary`): місяці, таблиці з лічильниками, варіанти\nфільтрів — без жодного числа. Числа таблиці — окремими сторінками (CalculationYearRowsDto).",
         "properties": {
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "freshnessHidden": {
+            "description": "Див. bool CalculationYearViewDto.FreshnessHidden.",
+            "type": "boolean"
+          },
+          "hasFormulas": {
+            "description": "Чи є виходи формул шаблону (варіант «Template formula» у фільтрі методологій).",
+            "type": "boolean"
+          },
+          "matchedRows": {
+            "description": "Виходів, що проходять фільтри.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "methodologies": {
+            "description": "Методології для фільтра (код, назва).",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearOptionDto"
+            },
+            "type": "array"
+          },
+          "months": {
+            "description": "Рівно 12 місяців, січень першим.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearMonthDto"
+            },
+            "type": "array"
+          },
+          "problemRows": {
+            "description": "Із них — «проблемних» (bool CalculationYearFilter.IsProblem(IReadOnlyList&lt;CalculationYearMonthDto&gt; months, CalculationYearRowDto row)).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "substances": {
+            "description": "Речовини для фільтра (код, назва).",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearOptionDto"
+            },
+            "type": "array"
+          },
+          "tables": {
+            "description": "Таблиці в порядку показу (аркуш → копія → таблиця); без виходів — немає.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearTableSummaryDto"
+            },
+            "type": "array"
+          },
+          "totalRows": {
+            "description": "Усього виходів документа (без фільтрів).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "year": {
+            "description": "Рік.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "documentId",
+          "year",
+          "months",
+          "tables",
+          "methodologies",
+          "substances",
+          "hasFormulas",
+          "totalRows",
+          "matchedRows",
+          "problemRows",
+          "freshnessHidden"
+        ],
+        "type": "object"
+      },
+      "CalculationYearTableSummaryDto": {
+        "description": "Таблиця у зведенні.",
+        "properties": {
+          "key": {
+            "description": "Ключ таблиці для запиту рядків: `TableDefId`, `TableDefId~SheetCopyId`, `0` — числа без таблиці.",
+            "type": "string"
+          },
+          "matched": {
+            "description": "Виходів, що проходять фільтри.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "problems": {
+            "description": "«Проблемних» серед тих, що проходять фільтри.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rows": {
+            "description": "Виходів у таблиці (без фільтрів).",
+            "format": "int32",
+            "type": "integer"
+          },
           "sheetCode": {
-            "description": "Код аркуша (для посилання на документ).",
+            "description": "Код аркуша.",
             "type": "string"
           },
           "sheetCopyId": {
@@ -2340,11 +2557,11 @@
             "description": "Назва аркуша."
           },
           "tableCode": {
-            "description": "Код таблиці (для посилання на документ).",
+            "description": "Код таблиці.",
             "type": "string"
           },
           "tableDefId": {
-            "description": "`0` — числа без екземпляра таблиці (прогони до D-401), таблицю не встановлено.",
+            "description": "`0` — числа до D-401 без встановленої таблиці.",
             "format": "int32",
             "type": "integer"
           },
@@ -2354,13 +2571,17 @@
           }
         },
         "required": [
+          "key",
           "sheetDefId",
           "sheetCode",
           "sheetNameL10n",
           "sheetCopyId",
           "tableDefId",
           "tableCode",
-          "tableNameL10n"
+          "tableNameL10n",
+          "rows",
+          "matched",
+          "problems"
         ],
         "type": "object"
       },
@@ -2402,95 +2623,6 @@
           "symbolL10n",
           "dimension",
           "additive"
-        ],
-        "type": "object"
-      },
-      "CalculationYearViewDto": {
-        "description": "«Calculation results — усі місяці року»: кожне розраховане число документа за рік, місяці поруч\n(CALC-RESULTS.md). Один запит на документ × рік.",
-        "properties": {
-          "columns": {
-            "description": "Розраховані колонки шаблону (джерело — формула, а не методологія).",
-            "items": {
-              "$ref": "#/components/schemas/CalculationYearColumnDto"
-            },
-            "type": "array"
-          },
-          "documentId": {
-            "description": "Документ.",
-            "format": "int64",
-            "type": "integer"
-          },
-          "equipment": {
-            "description": "Рядки документа (обладнання), на які посилаються виходи.",
-            "items": {
-              "$ref": "#/components/schemas/CalculationYearEquipmentDto"
-            },
-            "type": "array"
-          },
-          "freshnessHidden": {
-            "description": "`true` — читач звужений (схований аркуш/колонка): «out of date» йому не віддається (Н-2, як у панелі\n        результатів), тож місяці з прогоном показуються як `current`.",
-            "type": "boolean"
-          },
-          "methodologies": {
-            "description": "Методології (версія — останнього місяця з числом).",
-            "items": {
-              "$ref": "#/components/schemas/CalculationYearMethodologyDto"
-            },
-            "type": "array"
-          },
-          "months": {
-            "description": "Рівно 12 місяців, січень першим.",
-            "items": {
-              "$ref": "#/components/schemas/CalculationYearMonthDto"
-            },
-            "type": "array"
-          },
-          "rows": {
-            "description": "Виходи в порядку показу: аркуш → таблиця → рядок → методологія → вихід.",
-            "items": {
-              "$ref": "#/components/schemas/CalculationYearRowDto"
-            },
-            "type": "array"
-          },
-          "substances": {
-            "description": "Речовини.",
-            "items": {
-              "$ref": "#/components/schemas/CalculationYearSubstanceDto"
-            },
-            "type": "array"
-          },
-          "tables": {
-            "description": "Таблиці (з аркушем), на які посилаються рядки.",
-            "items": {
-              "$ref": "#/components/schemas/CalculationYearTableDto"
-            },
-            "type": "array"
-          },
-          "units": {
-            "description": "Одиниці з ознакою адитивності.",
-            "items": {
-              "$ref": "#/components/schemas/CalculationYearUnitDto"
-            },
-            "type": "array"
-          },
-          "year": {
-            "description": "Рік.",
-            "format": "int32",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "documentId",
-          "year",
-          "months",
-          "tables",
-          "equipment",
-          "methodologies",
-          "substances",
-          "units",
-          "columns",
-          "rows",
-          "freshnessHidden"
         ],
         "type": "object"
       },
@@ -40189,59 +40321,6 @@
         ]
       }
     },
-    "/api/v1/documents/{id}/calculation-results/year": {
-      "get": {
-        "description": "⚠ Окремий шлях `…/calculation-results/year`, а не `?year=` на сусідньому\n`…/calculation-results?periodKey=`: форма відповіді інша (огляд року, а не перелік чисел періоду), і\nодна адреса з двома формами зламала б типізований контракт клієнта. Один запит на документ × рік.",
-        "parameters": [
-          {
-            "description": "Документ.",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "int64",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Рік (2000…2100).",
-            "in": "query",
-            "name": "year",
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CalculationYearViewDto"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CalculationYearViewDto"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/CalculationYearViewDto"
-                }
-              }
-            },
-            "description": "OK"
-          }
-        },
-        "summary": "Усі розраховані числа документа за рік, місяці поруч («Calculation results», CALC-RESULTS.md). Право\n`Calculation.View`.",
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
     "/api/v1/documents/{id}/calculation-results/year/export": {
       "post": {
         "parameters": [
@@ -40301,6 +40380,220 @@
           }
         },
         "summary": "Експорт огляду року в `.xlsx` (фоном, як експорт документа). Право `Document.Export` і\n`Calculation.View`; книгу забирають через `GET …/export/{exportId}`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/calculation-results/year/rows": {
+      "get": {
+        "description": "⛔ Таблиця, якої читач не бачить, — 200 із `total = 0`, як таблиця без виходів (без оракула існування).",
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Рік (2000…2100).",
+            "in": "query",
+            "name": "year",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Ключ таблиці зі зведення (`tables[].key`).",
+            "in": "query",
+            "name": "table",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Зсув (≥ 0).",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Розмір сторінки (1…1000, типово 200).",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Пошук.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Аркуш.",
+            "in": "query",
+            "name": "sheet",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код методології або `formula`.",
+            "in": "query",
+            "name": "methodology",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Код речовини.",
+            "in": "query",
+            "name": "substance",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише «проблемні».",
+            "in": "query",
+            "name": "problems",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationYearRowsDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationYearRowsDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationYearRowsDto"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Сторінка виходів однієї таблиці огляду року: 12 значень масивом, довідники — лише сторінки. Право\n`Calculation.View`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/calculation-results/year/summary": {
+      "get": {
+        "description": "⚠ Огляд року одним запитом (усі числа) важив 9 МБ на документі Land; тепер зведення — кілобайти, а числа —\nсторінками таблиці (`…/year/rows`). Лічильники рахуються з тими самими фільтрами, що й сторінки.",
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Рік (2000…2100).",
+            "in": "query",
+            "name": "year",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Пошук: обладнання, IDCode, ключ рядка (до 200 символів).",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Аркуш (`sheetDefId`).",
+            "in": "query",
+            "name": "sheet",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код методології; `formula` — формули шаблону.",
+            "in": "query",
+            "name": "methodology",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Код речовини.",
+            "in": "query",
+            "name": "substance",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "`true` — лише «проблемні» виходи.",
+            "in": "query",
+            "name": "problems",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationYearSummaryDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationYearSummaryDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationYearSummaryDto"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Зведення «Calculation results» за рік (CALC-RESULTS.md): місяці, таблиці з лічильниками виходів і «проблем»,\nваріанти фільтрів — без чисел. Право `Calculation.View`.",
         "tags": [
           "Documents"
         ]

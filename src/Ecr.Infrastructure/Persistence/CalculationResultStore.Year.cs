@@ -1,136 +1,119 @@
+using System.Globalization;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Enums;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>Читання фактів огляду «Calculation results — усі місяці року» (<see cref="ICalculationYearReader"/>).</summary>
 /// <remarks>
-/// ⛔ Набір запитів не залежить від числа рядків і місяців: прогони — один запит, числа — один на набір прогонів (seek
-/// <c>IX_CalculationResult_DocRun (PeriodKey, DocumentId, CalculationRunId)</c> по ≤ 12 партиціях), комірки формул,
-/// рядки й підписи — по одному на екземпляри таблиць (перелік ідентифікаторів одним JSON-параметром EF), довідники й
-/// версії — по одному. Жодного запиту на рядок чи на місяць.
+/// ⛔ Набір запитів не залежить від числа рядків і місяців: ключі чисел (агрегат на
+/// <c>IX_CalculationResult_DocRun (PeriodKey, DocumentId, CalculationRunId)</c> по ≤ 12 партиціях) — один на набір
+/// прогонів, числа — один на набір прогонів, комірки формул, рядки й підписи — по одному, довідники й версії — по
+/// одному. Кожен запит до партиційованих таблиць несе <c>PeriodKey IN (…)</c> на ведучій таблиці; вкладені пошуки
+/// (рядки екземпляра, комірки рядка) — рівністю PeriodKey з ведучим рядком.
+/// <para>
+/// ⚠ Заміри (CalculationYearPerfTests, 20 таблиць × 1 000 рядків × 12 місяців): матеріалізація ~840 тис. фактів (числа,
+/// формули, рядки, підписи) займала 4.4–4.6 с із ~5.8 с відповіді. Тому зведення (<see cref="CalculationYearReadRequest.Aggregate"/>)
+/// просить у SQL лише маску місяців на вихід, без рядків і підписів, а сторінка таблиці
+/// (<see cref="CalculationYearReadRequest.SliceResults"/>) читає лише свої екземпляри.
+/// </para>
 /// </remarks>
 public sealed partial class CalculationResultStore : ICalculationYearReader
 {
     /// <inheritdoc />
-    public async Task<CalculationYearFacts> ReadYearAsync(
-        long documentId,
-        IReadOnlyList<int> periodKeys,
-        IReadOnlyCollection<long> tableInstanceIds,
-        IReadOnlyCollection<int> labelColumnIds,
-        CancellationToken ct)
+    public async Task<CalculationYearFacts> ReadYearAsync(CalculationYearReadRequest request, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(periodKeys);
-        ArgumentNullException.ThrowIfNull(tableInstanceIds);
-        ArgumentNullException.ThrowIfNull(labelColumnIds);
-        if (periodKeys.Count == 0)
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.PeriodKeys.Count == 0)
         {
             return CalculationYearFacts.Empty;
         }
 
-        var keys = periodKeys.Distinct().ToList();
+        var documentId = request.DocumentId;
+        var keys = request.PeriodKeys.Distinct().Order().ToList();
         var current = await CurrentRunsOfDocumentAsync(documentId, ct).ConfigureAwait(false);
 
         // Прогін кожного періоду — тим самим правилом, що й ReadCurrentAsync; рядок числа належить періоду лише тоді,
         // коли його прогін у наборі саме цього періоду (проєктний прогін іншого періоду тут не рахується).
         var effective = keys.ToDictionary(k => k, k => EffectiveRuns(current, documentId, k).Select(r => r.Id).ToHashSet());
 
-        // ⛔ Стеля рахує лише рядки (період, прогін цього періоду): з об'єднанням прогонів по всіх місяцях рядки
-        // проєктного прогону, витісненого документним у своєму місяці, з'їдали б стелю. Місяці з однаковим набором
-        // прогонів — один запит (набори двох видів: документні прогони, або документні + проєктні), тож запитів ≤ 2
-        // на практиці і ніколи не на місяць понад число різних наборів.
+        // Місяці з однаковим набором прогонів — один запит (набори двох видів: документні прогони, або документні +
+        // проєктні), тож запитів ≤ 2 на практиці і ніколи не на місяць понад число різних наборів.
         var limit = Ceiling * keys.Count;
         var groups = effective
             .Where(kv => kv.Value.Count > 0)
             .GroupBy(kv => string.Join(',', kv.Value.Order()), StringComparer.Ordinal)
             .Select(g => (Keys: g.Select(kv => kv.Key).ToList(), Runs: g.First().Value.ToList()))
             .ToList();
-        var kept = new List<YearResultRow>();
+
+        // 1. Ключі чисел УСЬОГО документа (агрегат, без значень): прогін місяця, стеля і звуження для вузького читача
+        //    не залежать від того, яку таблицю читає запит.
+        var keyRows = new List<YearKeyRow>();
         foreach (var (groupKeys, groupRuns) in groups)
         {
-            var take = limit + 1 - kept.Count;
-            kept.AddRange(await db.CalculationResults
+            keyRows.AddRange(await db.CalculationResults
                 .AsNoTracking()
                 .Where(r => groupKeys.Contains(r.PeriodKey)
                             && r.DocumentId == documentId
                             && groupRuns.Contains(r.CalculationRunId)
                             && r.Kind == CalculationResultKind.Output)
-                .OrderBy(r => r.PeriodKey)
-                .ThenBy(r => r.Id)
-                .Take(take)
-                .Select(r => new YearResultRow(
-                    r.PeriodKey, r.CalculationRunId, r.MethodologyVersionId, r.TableInstanceId, r.SourceRowKey,
-                    r.OutputCode, r.SubstanceEntryId, r.UnitId, r.Value))
+                .GroupBy(r => new { r.PeriodKey, r.CalculationRunId, r.TableInstanceId, r.MethodologyVersionId, r.OutputCode })
+                .Select(g => new YearKeyRow(
+                    g.Key.PeriodKey, g.Key.CalculationRunId, g.Key.TableInstanceId, g.Key.MethodologyVersionId, g.Key.OutputCode, g.Count()))
                 .ToListAsync(ct)
                 .ConfigureAwait(false));
-            ThrowIfOverCeiling(kept.Count, limit, documentId, keys[0]);
         }
 
-        // Місяць цілком належить одній групі, тож стійке впорядкування за місяцем зберігає порядок Id усередині.
-        kept = [.. kept.OrderBy(r => r.PeriodKey)];
-
-        // Прогін місяця, що справді дав числа документа: документний перед проєктним, новіший перед старішим.
-        var runs = kept
-            .GroupBy(r => r.PeriodKey)
-            .Select(g =>
-            {
-                var ids = g.Select(r => r.CalculationRunId).ToHashSet();
-                var run = current.Where(c => ids.Contains(c.Id))
-                    .OrderByDescending(c => c.DocumentId is not null)
-                    .ThenByDescending(c => c.Id)
-                    .First();
-                return new YearRun(g.Key, run.Id, Utc(run.FinishedAt));
-            })
+        // ⛔ Стеля рахує лише рядки (період, прогін цього періоду) — як і раніше, до читання значень.
+        ThrowIfOverCeiling(keyRows.Sum(k => (long)k.Count), limit, documentId, keys[0]);
+        var runs = RunsOf(keyRows, current);
+        var resultKeys = keyRows
+            .Select(k => new YearResultKey(k.PeriodKey, k.TableInstanceId, k.MethodologyVersionId, k.OutputCode))
+            .Distinct()
             .ToList();
 
-        var instanceIds = tableInstanceIds.Distinct().ToList();
+        var instanceIds = request.TableInstanceIds.Distinct().ToList();
+        var results = request.Aggregate
+            ? await AggregateResultsAsync(documentId, groups, instanceIds, ct).ConfigureAwait(false)
+            : await ResultValuesAsync(documentId, groups, request.SliceResults ? instanceIds : null, ct).ConfigureAwait(false);
+
         var formulaCells = new List<YearFormulaCell>();
         var rows = new List<YearRow>();
         var labelCells = new List<YearLabelCell>();
         if (instanceIds.Count > 0)
         {
-            var cells = await (
-                    from row in db.TableRows.AsNoTracking()
-                    where keys.Contains(row.PeriodKeyValue) && instanceIds.Contains(row.TableInstanceId) && !row.IsDeleted
-                    join cell in db.CellValues.AsNoTracking()
-                        on new { P = row.PeriodKeyValue, R = row.Id } equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
-                    where cell.IsCalculated && !cell.IsEmpty && cell.ValueNumeric != null
-                    orderby row.PeriodKeyValue, row.Id, cell.ColumnDefId
-                    select new { row.PeriodKeyValue, row.TableInstanceId, row.RowKeyValue, cell.ColumnDefId, cell.ValueNumeric })
-                .Take(limit + 1)
-                .ToListAsync(ct)
-                .ConfigureAwait(false);
-            ThrowIfOverCeiling(cells.Count, limit, documentId, keys[0]);
-            formulaCells = cells.ConvertAll(c => new YearFormulaCell(
-                c.PeriodKeyValue, c.TableInstanceId, c.RowKeyValue, c.ColumnDefId, c.ValueNumeric!.Value));
+            formulaCells = request.Aggregate
+                ? await AggregateFormulaCellsAsync(documentId, keys, instanceIds, limit, ct).ConfigureAwait(false)
+                : await FormulaCellValuesAsync(documentId, keys, instanceIds, limit, ct).ConfigureAwait(false);
 
-            rows = await db.TableRows
-                .AsNoTracking()
-                .Where(r => keys.Contains(r.PeriodKeyValue) && instanceIds.Contains(r.TableInstanceId) && !r.IsDeleted)
-                .Select(r => new YearRow(r.TableInstanceId, r.RowKeyValue, r.RowDefId, r.Ordinal))
-                .ToListAsync(ct)
-                .ConfigureAwait(false);
-
-            if (labelColumnIds.Count > 0)
+            if (request.IncludeRows)
             {
-                var columns = labelColumnIds.Distinct().ToList();
-                labelCells = await (
-                        from row in db.TableRows.AsNoTracking()
-                        where keys.Contains(row.PeriodKeyValue) && instanceIds.Contains(row.TableInstanceId) && !row.IsDeleted
-                        join cell in db.CellValues.AsNoTracking()
-                            on new { P = row.PeriodKeyValue, R = row.Id } equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
-                        where columns.Contains(cell.ColumnDefId) && !cell.IsEmpty
-                        select new YearLabelCell(
-                            row.PeriodKeyValue, row.TableInstanceId, row.RowKeyValue, cell.ColumnDefId,
-                            cell.ValueString, cell.ValueRegistryEntryId, cell.ValueNumeric))
-                    .ToListAsync(ct)
-                    .ConfigureAwait(false);
+                rows = [.. await ReadRowsAsync(keys, instanceIds, ct).ConfigureAwait(false)];
+            }
+
+            if (request.LabelColumnIds.Count > 0)
+            {
+                // ⚠ «ColumnDefId + 0»: колонка — залишковий фільтр, а не частина пошуку. Інакше перелік колонок (по одній на
+                // таблицю) множив пошуки на рядок: DMV — 10.6 млн читань і 6.5 с на 240 тис. рядків огляду для експорту.
+                var sql = $"""
+                    SELECT row.PeriodKey, row.TableInstanceId, row.RowKey, c.ColumnDefId, c.ValueString,
+                           CAST(c.ValueRegistryEntryId AS bigint) AS EntryId, c.ValueNumeric
+                      FROM doc.TableRow AS row {RowSeek}
+                     INNER LOOP JOIN doc.CellValue AS c {CellSeek}
+                        ON c.PeriodKey = row.PeriodKey AND c.TableRowId = row.Id
+                     WHERE {RowsOf(keys, instanceIds)}
+                       AND c.ColumnDefId + 0 IN ({List(request.LabelColumnIds.Distinct())})
+                       AND c.IsEmpty = 0
+                    """;
+                labelCells = [.. (await db.Database.SqlQueryRaw<LabelCellRow>(sql).ToListAsync(ct).ConfigureAwait(false))
+                    .Select(c => new YearLabelCell(c.PeriodKey, c.TableInstanceId, c.RowKey, c.ColumnDefId, c.ValueString, c.EntryId, c.ValueNumeric))];
             }
         }
 
-        var entryIds = kept.Where(r => r.SubstanceEntryId is not null).Select(r => r.SubstanceEntryId!.Value)
+        var entryIds = results.Where(r => r.SubstanceEntryId is not null).Select(r => r.SubstanceEntryId!.Value)
             .Concat(labelCells.Where(c => c.EntryId is not null).Select(c => c.EntryId!.Value))
             .Distinct()
             .ToList();
@@ -143,7 +126,7 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 
-        var versionIds = kept.Select(r => r.MethodologyVersionId).Distinct().ToList();
+        var versionIds = results.Select(r => r.MethodologyVersionId).Distinct().ToList();
         var versions = versionIds.Count == 0
             ? []
             : await (
@@ -157,9 +140,8 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
 
         return new CalculationYearFacts(
             runs,
-            kept.ConvertAll(r => new YearResult(
-                r.PeriodKey, r.MethodologyVersionId, r.TableInstanceId, r.SourceRowKey, r.OutputCode,
-                r.SubstanceEntryId, r.UnitId, r.Value)),
+            resultKeys,
+            results,
             formulaCells,
             rows,
             labelCells,
@@ -167,16 +149,281 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
             versions);
     }
 
-    /// <summary>Рядок числа року (проєкція запиту).</summary>
-    private sealed record YearResultRow(
-        int PeriodKey, long CalculationRunId, int MethodologyVersionId, long? TableInstanceId, string? SourceRowKey,
-        string OutputCode, long? SubstanceEntryId, int UnitId, decimal Value);
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<YearRow>> ReadRowsAsync(
+        IReadOnlyList<int> periodKeys, IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodKeys);
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+        if (periodKeys.Count == 0 || tableInstanceIds.Count == 0)
+        {
+            return [];
+        }
+
+        var sql = $"""
+            SELECT row.TableInstanceId, row.RowKey, row.RowDefId, row.Ordinal
+              FROM doc.TableRow AS row {RowSeek}
+             WHERE {RowsOf(periodKeys.Distinct(), tableInstanceIds.Distinct())}
+            """;
+        return await db.Database.SqlQueryRaw<YearRow>(sql).ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Предикат рядків екземплярів: <c>PeriodKey IN (…)</c> (партиції) і <c>TableInstanceId IN (…)</c> — разом із
+    /// <see cref="RowSeek"/> це пошук по <c>UQ_TableRow_Key</c> (PeriodKey, TableInstanceId), а не перегляд рядків
+    /// УСІХ документів партиції.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Заміри (CalculationYearPerfTests, DMV): без підказки оптимізатор обирав перегляд кластерного індексу (рядкам
+    /// бракує <c>Ordinal</c>/значень у некластерному індексі), а з голим <c>FORCESEEK</c> — пошук лише за PeriodKey; в
+    /// обох випадках сторінка ОДНІЄЇ таблиці читала всі 240 тис. рядків документа (3 216 сторінок), на живій базі — ще й
+    /// рядки інших 95 документів. Перелік — цілі числа сервера (періоди, екземпляри з бази), тож він іде текстом.
+    /// </remarks>
+    /// <summary>Пошук рядків за (PeriodKey, TableInstanceId) — <c>UQ_TableRow_Key</c> (ім'я з міграції InitialCreate).</summary>
+    /// <remarks>
+    /// ⚠ Саме <c>FORCESEEK, INDEX(…)</c>, а не <c>FORCESEEK (індекс (колонки))</c>: друга форма на партиційованому
+    /// індексі з переліком у предикаті дає Msg 8622 «could not produce a query plan» (перевірено на тестовій базі).
+    /// </remarks>
+    private const string RowSeek = "WITH (FORCESEEK, INDEX(UQ_TableRow_Key))";
+
+    /// <summary>
+    /// Пошук комірок рядка за (PeriodKey, TableRowId) — <c>PK_CellValue</c>. ⚠ Без <c>c.PeriodKey IN (…)</c>: період
+    /// комірки задає рівність із рядком (зовнішній запит несе <c>IN</c>), а список у предикаті перетворював пошук на 12
+    /// пошуків на рядок (DMV: 10 млн читань на 240 тис. рядків).
+    /// </summary>
+    private const string CellSeek = "WITH (FORCESEEK, INDEX(PK_CellValue))";
+
+    /// <summary>Пошук екземплярів документа за (PeriodKey, DocumentId) — <c>UQ_TableInstance</c>.</summary>
+    private const string InstanceSeek = "WITH (FORCESEEK, INDEX(UQ_TableInstance))";
+
+    private static string RowsOf(IEnumerable<int> keys, IEnumerable<long> instanceIds)
+        => $"row.PeriodKey IN ({List(keys)}) AND row.TableInstanceId IN ({List(instanceIds)}) AND row.IsDeleted = 0";
+
+    /// <summary>Прогін місяця, що справді дав числа документа: документний перед проєктним, новіший перед старішим.</summary>
+    private static List<YearRun> RunsOf(List<YearKeyRow> keyRows, List<CurrentRunRow> current)
+        => [.. keyRows
+            .GroupBy(r => r.PeriodKey)
+            .OrderBy(g => g.Key)
+            .Select(g =>
+            {
+                var ids = g.Select(r => r.CalculationRunId).ToHashSet();
+                var run = current.Where(c => ids.Contains(c.Id))
+                    .OrderByDescending(c => c.DocumentId is not null)
+                    .ThenByDescending(c => c.Id)
+                    .First();
+                return new YearRun(g.Key, run.Id, Utc(run.FinishedAt));
+            })];
+
+    /// <summary>
+    /// Числа методологій зі значеннями (огляд для експорту або сторінка таблиці); <c>slice</c> — екземпляри таблиці
+    /// сторінки (плюс числа без екземпляра), <c>null</c> — увесь документ.
+    /// </summary>
+    private async Task<List<YearResult>> ResultValuesAsync(
+        long documentId, List<(List<int> Keys, List<long> Runs)> groups, List<long>? slice, CancellationToken ct)
+    {
+        var kept = new List<YearResult>();
+        foreach (var (groupKeys, groupRuns) in groups)
+        {
+            var query = db.CalculationResults
+                .AsNoTracking()
+                .Where(r => groupKeys.Contains(r.PeriodKey)
+                            && r.DocumentId == documentId
+                            && groupRuns.Contains(r.CalculationRunId)
+                            && r.Kind == CalculationResultKind.Output);
+            if (slice is not null)
+            {
+                query = query.Where(r => r.TableInstanceId == null || slice.Contains(r.TableInstanceId.Value));
+            }
+
+            kept.AddRange(await query
+                .OrderBy(r => r.PeriodKey)
+                .ThenBy(r => r.Id)
+                .Select(r => new YearResult(
+                    r.PeriodKey, r.MethodologyVersionId, r.TableInstanceId, r.SourceRowKey,
+                    r.OutputCode, r.SubstanceEntryId, r.UnitId, r.Value))
+                .ToListAsync(ct)
+                .ConfigureAwait(false));
+        }
+
+        // Місяць цілком належить одній групі, тож стійке впорядкування за місяцем зберігає порядок Id усередині.
+        return [.. kept.OrderBy(r => r.PeriodKey)];
+    }
+
+    /// <summary>
+    /// Зведення: числа методологій, згруповані в SQL до виходу таблиці (визначення + копія аркуша) з маскою місяців.
+    /// Факти розгортаються по місяцях маски зі значенням 0 і екземпляром-представником тієї ж таблиці (звуження доступу
+    /// залежить від таблиці, не від екземпляра). Числа без екземпляра (до D-401) — сирими: їхній господар залежить від
+    /// місяця.
+    /// </summary>
+    private async Task<List<YearResult>> AggregateResultsAsync(
+        long documentId, List<(List<int> Keys, List<long> Runs)> groups, List<long> instanceIds, CancellationToken ct)
+    {
+        var lines = new Dictionary<(long Instance, int Version, string? Row, string Output, long? Substance, int Unit), int>();
+        var legacy = new List<YearResult>();
+        foreach (var (groupKeys, groupRuns) in groups)
+        {
+            // ⚠ Лише цілі числа сервера (періоди, прогони) — у тексті запиту, щоб партиції відсікалися статично;
+            // документ і екземпляри — параметрами.
+            var sql = $"""
+                SELECT MIN(r.TableInstanceId) AS TableInstanceId, r.MethodologyVersionId, r.SourceRowKey, r.OutputCode,
+                       CAST(r.SubstanceEntryId AS bigint) AS SubstanceEntryId, r.UnitId,
+                       {MonthMask("r.PeriodKey")} AS Months
+                  FROM calc.CalculationResult AS r
+                  LEFT JOIN doc.TableInstance AS ti
+                    ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
+                   AND ti.PeriodKey IN ({List(groupKeys)})
+                 WHERE r.PeriodKey IN ({List(groupKeys)})
+                   AND r.DocumentId = @documentId
+                   AND r.CalculationRunId IN ({List(groupRuns)})
+                   AND r.Kind = {(int)CalculationResultKind.Output}
+                   AND r.TableInstanceId IS NOT NULL
+                 GROUP BY ti.TableDefId, ti.SheetCopyId, r.MethodologyVersionId, r.SourceRowKey, r.OutputCode,
+                          r.SubstanceEntryId, r.UnitId
+                """;
+            var rows = await db.Database
+                .SqlQueryRaw<AggregateResultRow>(sql, new SqlParameter("@documentId", documentId))
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            foreach (var row in rows)
+            {
+                var key = (row.TableInstanceId, row.MethodologyVersionId, row.SourceRowKey, row.OutputCode, row.SubstanceEntryId, row.UnitId);
+                lines[key] = lines.GetValueOrDefault(key) | row.Months;
+            }
+
+            legacy.AddRange(await db.CalculationResults
+                .AsNoTracking()
+                .Where(r => groupKeys.Contains(r.PeriodKey)
+                            && r.DocumentId == documentId
+                            && groupRuns.Contains(r.CalculationRunId)
+                            && r.Kind == CalculationResultKind.Output
+                            && r.TableInstanceId == null)
+                .Select(r => new YearResult(
+                    r.PeriodKey, r.MethodologyVersionId, r.TableInstanceId, r.SourceRowKey,
+                    r.OutputCode, r.SubstanceEntryId, r.UnitId, 0m))
+                .ToListAsync(ct)
+                .ConfigureAwait(false));
+        }
+
+        var year = groups.SelectMany(g => g.Keys).First() / 100;
+        var known = instanceIds.ToHashSet();
+        var expanded = new List<YearResult>(lines.Count * 4 + legacy.Count);
+        foreach (var ((instance, version, row, output, substance, unit), months) in lines)
+        {
+            for (var m = 1; m <= 12; m++)
+            {
+                if ((months & (1 << (m - 1))) != 0)
+                {
+                    // Екземпляр поза переліком документа (видалений) — як і в сирому читанні: таблиця не встановлюється.
+                    expanded.Add(new YearResult(year * 100 + m, version, known.Contains(instance) ? instance : -1, row, output, substance, unit, 0m));
+                }
+            }
+        }
+
+        expanded.AddRange(legacy);
+        return [.. expanded.OrderBy(r => r.PeriodKey)];
+    }
+
+    /// <summary>Розраховані комірки формул шаблону зі значеннями (екземпляри сторінки або увесь документ).</summary>
+    private async Task<List<YearFormulaCell>> FormulaCellValuesAsync(
+        long documentId, List<int> keys, List<long> instanceIds, int limit, CancellationToken ct)
+    {
+        // ⚠ Рядки — пошуком по екземплярах, комірки — пошуком по (PeriodKey, TableRowId) кожного рядка: ціна залежить від
+        // розміру таблиці (документа), а не від усієї партиції. IsCalculated у предикаті, але не в ключі індексу —
+        // рядок читає всі свої комірки (див. 02-contracts.md, «Calculation results за рік», про відфільтрований індекс).
+        var sql = $"""
+            SELECT TOP ({limit + 1}) row.PeriodKey, row.TableInstanceId, row.RowKey, c.ColumnDefId, c.ValueNumeric
+              FROM doc.TableRow AS row {RowSeek}
+             INNER LOOP JOIN doc.CellValue AS c {CellSeek}
+                ON c.PeriodKey = row.PeriodKey AND c.TableRowId = row.Id
+             WHERE {RowsOf(keys, instanceIds)}
+               AND c.IsCalculated = 1 AND c.IsEmpty = 0 AND c.ValueNumeric IS NOT NULL
+            """;
+        var cells = await db.Database.SqlQueryRaw<FormulaCellRow>(sql).ToListAsync(ct).ConfigureAwait(false);
+        ThrowIfOverCeiling(cells.Count, limit, documentId, keys[0]);
+        return cells.ConvertAll(c => new YearFormulaCell(c.PeriodKey, c.TableInstanceId, c.RowKey, c.ColumnDefId, c.ValueNumeric));
+    }
+
+    /// <summary>Зведення: комірки формул, згруповані в SQL до (таблиця, рядок, колонка) з маскою місяців.</summary>
+    private async Task<List<YearFormulaCell>> AggregateFormulaCellsAsync(
+        long documentId, List<int> keys, List<long> instanceIds, int limit, CancellationToken ct)
+    {
+        var sql = $"""
+            SELECT MIN(ti.Id) AS TableInstanceId, row.RowKey, c.ColumnDefId,
+                   {MonthMask("c.PeriodKey")} AS Months,
+                   COUNT_BIG(*) AS Cells
+              FROM doc.TableInstance AS ti {InstanceSeek}
+             INNER LOOP JOIN doc.TableRow AS row {RowSeek}
+                ON row.PeriodKey = ti.PeriodKey AND row.TableInstanceId = ti.Id
+             INNER LOOP JOIN doc.CellValue AS c {CellSeek}
+                ON c.PeriodKey = row.PeriodKey AND c.TableRowId = row.Id
+             WHERE ti.PeriodKey IN ({List(keys)})
+               AND ti.DocumentId = @documentId
+               AND row.IsDeleted = 0
+               AND c.IsCalculated = 1 AND c.IsEmpty = 0 AND c.ValueNumeric IS NOT NULL
+             GROUP BY ti.TableDefId, ti.SheetCopyId, row.RowKey, c.ColumnDefId
+            """;
+        // ⚠ Без переліку екземплярів у тексті запиту: OPENJSON у напівз'єднанні оптимізатор ставив ПІСЛЯ з'єднання з
+        // комірками (розбір JSON на кожну комірку — 1.8–2.0 с проти ~0.5 с). Екземпляри документа за рік — це й так усі
+        // його екземпляри цих періодів; групи поза переліком будівника (стеля екземплярів) відкидаються тут.
+        var rows = await db.Database
+            .SqlQueryRaw<AggregateFormulaRow>(sql, new SqlParameter("@documentId", documentId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        ThrowIfOverCeiling(rows.Sum(r => r.Cells), limit, documentId, keys[0]);
+
+        var known = instanceIds.ToHashSet();
+        var year = keys[0] / 100;
+        var cells = new List<YearFormulaCell>(rows.Count * 4);
+        foreach (var row in rows.Where(r => known.Contains(r.TableInstanceId)))
+        {
+            for (var m = 1; m <= 12; m++)
+            {
+                if ((row.Months & (1 << (m - 1))) != 0)
+                {
+                    cells.Add(new YearFormulaCell(year * 100 + m, row.TableInstanceId, row.RowKey, row.ColumnDefId, 0m));
+                }
+            }
+        }
+
+        return cells;
+    }
+
+    /// <summary>
+    /// Маска місяців групи: біт місяця — <c>MAX(CASE …)</c> на кожен із 12 місяців. Не <c>SUM(DISTINCT POWER(…))</c>:
+    /// DISTINCT-агрегат змушував SQL сортувати кожну групу (заміри: ~1 с CPU на 240 тис. чисел).
+    /// </summary>
+    private static string MonthMask(string periodKey)
+        => "(" + string.Join(" + ", Enumerable.Range(1, 12).Select(m =>
+            $"MAX(CASE WHEN {periodKey} % 100 = {m.ToString(CultureInfo.InvariantCulture)} THEN {(1 << (m - 1)).ToString(CultureInfo.InvariantCulture)} ELSE 0 END)")) + ")";
+
+    private static string List(IEnumerable<int> values) => string.Join(',', values.Select(v => v.ToString(CultureInfo.InvariantCulture)));
+
+    private static string List(IEnumerable<long> values) => string.Join(',', values.Select(v => v.ToString(CultureInfo.InvariantCulture)));
+
+    /// <summary>Ключ чисел (агрегат).</summary>
+    private sealed record YearKeyRow(
+        int PeriodKey, long CalculationRunId, long? TableInstanceId, int MethodologyVersionId, string OutputCode, int Count);
+
+    /// <summary>Вихід методології з маскою місяців (агрегат зведення).</summary>
+    private sealed record AggregateResultRow(
+        long TableInstanceId, int MethodologyVersionId, string? SourceRowKey, string OutputCode, long? SubstanceEntryId,
+        int UnitId, int Months);
+
+    /// <summary>Значення колонки-підпису (проєкція запиту).</summary>
+    private sealed record LabelCellRow(
+        int PeriodKey, long TableInstanceId, string RowKey, int ColumnDefId, string? ValueString, long? EntryId, decimal? ValueNumeric);
+
+    /// <summary>Розрахована комірка формули (проєкція запиту).</summary>
+    private sealed record FormulaCellRow(int PeriodKey, long TableInstanceId, string RowKey, int ColumnDefId, decimal ValueNumeric);
+
+    /// <summary>Комірка формули з маскою місяців (агрегат зведення).</summary>
+    private sealed record AggregateFormulaRow(long TableInstanceId, string RowKey, int ColumnDefId, int Months, long Cells);
 
     private static DateTime? Utc(DateTime? value)
         => value is { } v ? DateTime.SpecifyKind(v, DateTimeKind.Utc) : null;
 
     /// <summary>Понад стелю — відмова тим самим кодом, що й читання одного періоду (D2-05), а не обрізання.</summary>
-    private static void ThrowIfOverCeiling(int count, int limit, long documentId, int periodKey)
+    private static void ThrowIfOverCeiling(long count, int limit, long documentId, int periodKey)
     {
         if (count <= limit)
         {

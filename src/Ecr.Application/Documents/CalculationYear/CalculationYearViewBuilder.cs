@@ -34,15 +34,30 @@ public sealed class CalculationYearViewBuilder(
     public static readonly IReadOnlySet<string> AdditiveDimensions =
         new HashSet<string>(["Mass", "Energy", "Volume", "StdVolume", "Amount"], StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Будує огляд.</summary>
+    /// <summary>Будує огляд усього документа зі значеннями (експорт).</summary>
     /// <param name="profile">Профіль читача (права вже перевірено).</param>
     /// <param name="documentId">Документ (видимість уже перевірено).</param>
     /// <param name="year">Рік.</param>
     /// <param name="ct">Скасування.</param>
+    public Task<CalculationYearViewDto> BuildAsync(AccessProfile profile, long documentId, int year, CancellationToken ct)
+        => BuildAsync(profile, documentId, year, CalculationYearScope.Full, ct);
+
+    /// <summary>Будує огляд у межах <paramref name="extent"/> (увесь документ, зведення без значень або одна таблиця).</summary>
+    /// <param name="profile">Профіль читача (права вже перевірено).</param>
+    /// <param name="documentId">Документ (видимість уже перевірено).</param>
+    /// <param name="year">Рік.</param>
+    /// <param name="extent">Що читати.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ Межі читання однакові в усіх режимах: той самий будівник, ті самі звуження; режим змінює лише ОБСЯГ читання
+    /// (одна таблиця, без значень), а не правила. Стан прогону місяця для вузького читача рахується з ключів чисел
+    /// УСЬОГО документа (<see cref="CalculationYearFacts.ResultKeys"/>) — однаково для зведення і будь-якої сторінки.
+    /// </remarks>
     public async Task<CalculationYearViewDto> BuildAsync(
-        AccessProfile profile, long documentId, int year, CancellationToken ct)
+        AccessProfile profile, long documentId, int year, CalculationYearScope extent, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(extent);
 
         var keys = Enumerable.Range(1, 12).Select(m => PeriodKey.Create(year, m)).ToList();
         var projectId = await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false)
@@ -83,58 +98,100 @@ public sealed class CalculationYearViewBuilder(
             }
         }
 
-        var labelColumnIds = labels.Values.SelectMany(l => l.Ids).ToHashSet();
         var readableInstances = instances
             .Where(i => monthScopes.TryGetValue(i.PeriodKey, out var s) && s.CanReadTable(i.TableDefId))
             .Select(i => i.TableInstanceId)
             .ToHashSet();
 
+        // Екземпляри, з яких читаються рядки, підписи й комірки формул: таблиця сторінки або увесь документ.
+        var read = extent.Table is { } slice
+            ? instances.Where(i => i.TableDefId == slice.TableDefId && i.SheetCopyId == slice.SheetCopyId).ToList()
+            : [.. instances];
+        var readDefs = read.Select(i => i.TableDefId).ToHashSet();
+        var labelColumnIds = extent.Labels
+            ? labels.Where(kv => readDefs.Contains(kv.Key.TableDefId)).SelectMany(kv => kv.Value.Ids).ToHashSet()
+            : [];
+        var keyValues = keys.Select(k => k.Value).ToList();
+
         var facts = await reader
-            .ReadYearAsync(documentId, [.. keys.Select(k => k.Value)], [.. instances.Select(i => i.TableInstanceId)], labelColumnIds, ct)
+            .ReadYearAsync(
+                new CalculationYearReadRequest(
+                    documentId, keyValues, [.. read.Select(i => i.TableInstanceId)], labelColumnIds,
+                    IncludeRows: !extent.Aggregate, SliceResults: extent.Table is not null, Aggregate: extent.Aggregate),
+                ct)
             .ConfigureAwait(false);
 
-        var narrowed = DocumentSheetVisibility.HasRestrictions(profile);
-        var results = narrowed ? await NarrowAsync(facts.Results, instances, monthScopes, ct).ConfigureAwait(false) : facts.Results;
-        var formulaCells = facts.FormulaCells.Where(c => monthScopes[c.PeriodKey].CanReadColumn(c.ColumnDefId)).ToList();
+        // Числа до D-401 (без екземпляра) шукають господаря серед УСІХ читаних таблиць місяця — у режимі однієї таблиці
+        // чи зведення рядків інших таблиць у фактах немає, тож вони дочитуються (лише коли такі числа є).
+        IReadOnlyList<YearRow>? hostRows = null;
+        if ((extent.Aggregate || extent.Table is not null) && facts.Results.Any(r => r.TableInstanceId is null))
+        {
+            hostRows = await reader.ReadRowsAsync(keyValues, readableInstances, ct).ConfigureAwait(false);
+        }
 
-        // ⛔ Вузькому читачу стан прогону місяця віддається лише там, де він бачить бодай одне число методології
-        // (як панель одного місяця: усе сховане — порожньо, без часу прогону).
-        IReadOnlySet<int>? visibleRunMonths = narrowed ? results.Select(r => r.PeriodKey).ToHashSet() : null;
+        var narrowed = DocumentSheetVisibility.HasRestrictions(profile);
+        IReadOnlyList<YearResult> results = facts.Results;
+        IReadOnlySet<int>? visibleRunMonths = null;
+        if (narrowed)
+        {
+            var visible = await NarrowingAsync(instances, monthScopes, ct).ConfigureAwait(false);
+            results = [.. results.Where(r => visible(r.PeriodKey, r.TableInstanceId, r.MethodologyVersionId, r.OutputCode))];
+
+            // ⛔ Вузькому читачу стан прогону місяця віддається лише там, де він бачить бодай одне число методології
+            // (як панель одного місяця: усе сховане — порожньо, без часу прогону). Рахується по ключах УСЬОГО
+            // документа, а не по прочитаній таблиці — інакше сторінка й зведення розійшлися б у станах місяців.
+            visibleRunMonths = facts.ResultKeys
+                .Where(k => visible(k.PeriodKey, k.TableInstanceId, k.MethodologyVersionId, k.OutputCode))
+                .Select(k => k.PeriodKey)
+                .ToHashSet();
+        }
+
+        var formulaCells = facts.FormulaCells.Where(c => monthScopes[c.PeriodKey].CanReadColumn(c.ColumnDefId)).ToList();
         var months = await MonthsAsync(documentId, keys, states, facts.Runs, visibleRunMonths, ct).ConfigureAwait(false);
         var catalog = await units.GetAsync(ct).ConfigureAwait(false);
 
         var context = new Pivot(
-            documentId, year, keys, months, instances, readableInstances, snapshots, tableDefs, columns, labels, facts, catalog);
+            documentId, year, keys, months, instances, readableInstances, snapshots, tableDefs, columns, labels, facts,
+            hostRows ?? facts.Rows, catalog);
         return context.Build(results, formulaCells, narrowed);
     }
 
-    /// <summary>Правило звуження чисел методологій (те саме, що в <see cref="GetCalculationResultsHandler"/>), по місяцях.</summary>
-    private async Task<IReadOnlyList<YearResult>> NarrowAsync(
-        IReadOnlyList<YearResult> results,
+    /// <summary>
+    /// Правило звуження чисел методологій (те саме, що в <see cref="GetCalculationResultsHandler"/>), по місяцях: вихід
+    /// видно, лише коли читаються ВСІ колонки, до яких він прив'язаний у таблиці, що дала число; без прив'язки — ні.
+    /// </summary>
+    /// <remarks>
+    /// Рішення залежить лише від (період, таблиця екземпляра, версія, вихід) — тож рахується раз на такий ключ, а не на
+    /// кожне число (раніше — перебір прив'язок на кожне з сотень тисяч чисел).
+    /// </remarks>
+    private async Task<Func<int, long?, int, string, bool>> NarrowingAsync(
         IReadOnlyList<TableInstanceRef> instances,
         IReadOnlyDictionary<int, DocumentReadScope> monthScopes,
         CancellationToken ct)
     {
-        if (results.Count == 0)
-        {
-            return results;
-        }
-
         var tableIds = monthScopes.Values.SelectMany(s => s.TableIds()).Distinct().ToList();
         var bindings = await methodologies.GetColumnResultBindingsAsync(tableIds, ct).ConfigureAwait(false);
         var defByInstance = instances.ToDictionary(i => i.TableInstanceId, i => i.TableDefId);
+        var decided = new Dictionary<(int Period, int? TableDefId, int Version, string Output), bool>();
 
-        return [.. results.Where(r =>
+        return (period, instanceId, version, output) =>
         {
-            var scope = monthScopes[r.PeriodKey];
+            int? tableDefId = instanceId is { } id && defByInstance.TryGetValue(id, out var def) ? def : null;
+            var key = (period, tableDefId, version, output);
+            if (decided.TryGetValue(key, out var known))
+            {
+                return known;
+            }
+
+            var scope = monthScopes[period];
             var matching = bindings.Where(b =>
-                string.Equals(b.OutputCode, r.OutputCode, StringComparison.OrdinalIgnoreCase)
-                && b.VersionIds.Contains(r.MethodologyVersionId)
-                && (r.TableInstanceId is not { } instanceId
-                    || !defByInstance.TryGetValue(instanceId, out var tableDefId)
-                    || b.TableDefId == tableDefId)).ToList();
-            return matching.Count > 0 && matching.All(b => scope.CanReadColumn(b.ColumnDefId));
-        })];
+                string.Equals(b.OutputCode, output, StringComparison.OrdinalIgnoreCase)
+                && b.VersionIds.Contains(version)
+                && (tableDefId is not { } t || b.TableDefId == t)).ToList();
+            var visible = matching.Count > 0 && matching.All(b => scope.CanReadColumn(b.ColumnDefId));
+            decided.Add(key, visible);
+            return visible;
+        };
     }
 
     private async Task<IReadOnlyList<CalculationYearMonthDto>> MonthsAsync(
@@ -221,6 +278,7 @@ public sealed class CalculationYearViewBuilder(
         IReadOnlyDictionary<int, ColumnDef> columns,
         IReadOnlyDictionary<(int TableDefId, int PeriodKey), LabelColumns> labels,
         CalculationYearFacts facts,
+        IReadOnlyList<YearRow> hostRows,
         UnitCatalogSnapshot catalog)
     {
         private readonly Dictionary<long, TableInstanceRef> instanceById = instances.ToDictionary(i => i.TableInstanceId);
@@ -246,7 +304,9 @@ public sealed class CalculationYearViewBuilder(
         {
             var versions = facts.Versions.ToDictionary(v => v.MethodologyVersionId);
             var entries = facts.Entries.ToDictionary(e => e.Id);
-            var lines = new Dictionary<string, Line>(StringComparer.Ordinal);
+            // ⚠ Ключ виходу — кортеж, а рядок-ідентифікатор складається раз на вихід, а не на кожне число місяця (сотні
+            // тисяч рядків на документ Land).
+            var lines = new Dictionary<(int Table, string? Row, int Methodology, string Output, long? Substance, int Unit), Line>();
 
             // Версія методології рядка — останнього місяця з числом.
             foreach (var r in results.OrderBy(r => r.PeriodKey))
@@ -257,17 +317,18 @@ public sealed class CalculationYearViewBuilder(
                 }
 
                 var table = TableOf(r.TableInstanceId, r.PeriodKey, r.SourceRowKey);
-                var eq = EquipmentOf(table, r.SourceRowKey);
                 var meth = MethodologyOf(version);
-                int? substance = r.SubstanceEntryId is { } sid ? SubstanceOf(sid, entries) : null;
-                var unit = UnitOf(r.UnitId);
-                var id = string.Join('|', "m", TableKey(table), r.SourceRowKey ?? "", version.MethodologyId.ToString(CultureInfo.InvariantCulture),
-                    r.OutputCode, r.SubstanceEntryId?.ToString(CultureInfo.InvariantCulture) ?? "", r.UnitId.ToString(CultureInfo.InvariantCulture));
-                if (!lines.TryGetValue(id, out var line))
+                var key = (table, r.SourceRowKey, version.MethodologyId, r.OutputCode, r.SubstanceEntryId, r.UnitId);
+                if (!lines.TryGetValue(key, out var line))
                 {
+                    var eq = EquipmentOf(table, r.SourceRowKey);
+                    int? substance = r.SubstanceEntryId is { } sid ? SubstanceOf(sid, entries) : null;
+                    var unit = UnitOf(r.UnitId);
+                    var id = string.Join('|', "m", TableKey(table), r.SourceRowKey ?? "", version.MethodologyId.ToString(CultureInfo.InvariantCulture),
+                        r.OutputCode, r.SubstanceEntryId?.ToString(CultureInfo.InvariantCulture) ?? "", r.UnitId.ToString(CultureInfo.InvariantCulture));
                     line = new Line(id, eq, meth, r.OutputCode, null, substance, unit,
                         (version.MethodologyCode, 0, r.OutputCode, substance is { } s ? substances[s].Code : ""));
-                    lines.Add(id, line);
+                    lines.Add(key, line);
                 }
 
                 line.Add(monthOfKey[r.PeriodKey], r.Value);
@@ -281,15 +342,19 @@ public sealed class CalculationYearViewBuilder(
                 }
 
                 var table = TableOf(c.TableInstanceId, c.PeriodKey, c.RowKey);
-                var eq = EquipmentOf(table, c.RowKey);
-                var col = ColumnOf(column);
-                int? unit = column.UnitId is { } uid ? UnitOf(uid) : null;
-                var id = string.Join('|', "f", TableKey(table), c.RowKey, column.Id.ToString(CultureInfo.InvariantCulture));
-                if (!lines.TryGetValue(id, out var line))
+
+                // Ключ формули: «методологія» — мінус колонка (ідентифікатори методологій додатні), без одиниці в ключі.
+                var key = (table, (string?)c.RowKey, -column.Id, column.Code, (long?)null, -1);
+                if (!lines.TryGetValue(key, out var line))
                 {
+                    var eq = EquipmentOf(table, c.RowKey);
+                    var col = ColumnOf(column);
+                    int? unit = column.UnitId is { } uid ? UnitOf(uid) : null;
+                    var id = string.Join('|', "f", TableKey(table), c.RowKey, column.Id.ToString(CultureInfo.InvariantCulture));
+
                     // Формули шаблону — після методологій рядка, у порядку колонок.
                     line = new Line(id, eq, null, column.Code, col, null, unit, ("￿", column.Ordinal, column.Code, ""));
-                    lines.Add(id, line);
+                    lines.Add(key, line);
                 }
 
                 line.Add(monthOfKey[c.PeriodKey], c.Value);
@@ -315,7 +380,11 @@ public sealed class CalculationYearViewBuilder(
                 documentId, year, months, tables, equipment, methodologyList, substances, unitList, columnList, rows, narrowed);
         }
 
-        private static string TableKey(int table) => table.ToString(CultureInfo.InvariantCulture);
+        /// <summary>
+        /// Стійкий ключ таблиці в ідентифікаторі виходу (визначення + копія, а не індекс у переліку): ідентифікатор того
+        /// самого виходу однаковий у зведенні, на сторінці таблиці й в експорті.
+        /// </summary>
+        private string TableKey(int table) => CalculationYearPages.KeyOf(tables[table]);
 
         private int TableOf(long? instanceId, int periodKey, string? rowKey)
         {
@@ -367,7 +436,7 @@ public sealed class CalculationYearViewBuilder(
             }
 
             legacyHosts = [];
-            foreach (var row in facts.Rows)
+            foreach (var row in hostRows)
             {
                 if (!readableInstances.Contains(row.TableInstanceId)
                     || !instanceById.TryGetValue(row.TableInstanceId, out var instance))
@@ -585,8 +654,14 @@ public sealed class CalculationYearViewBuilder(
             }
 
             return new CalculationYearRowDto(
-                id, equipment, methodology, output, column, substance, unit, values, new string(states),
-                additive && included > 0 ? total : null, additive ? included : 0);
+                id, equipment, methodology, output, column, substance, unit, Array.ConvertAll(values, Trim), new string(states),
+                additive && included > 0 ? Trim(total) : null, additive ? included : 0);
         }
+
+        /// <summary>
+        /// Без хвостових нулів масштабу <c>decimal(34,16)</c>: «2.5», а не «2.5000000000000000» — значення те саме (D-30
+        /// рядком без втрати знаків), а відповідь у кілька разів менша.
+        /// </summary>
+        private static decimal? Trim(decimal? value) => value / 1.0000000000000000000000000000m;
     }
 }

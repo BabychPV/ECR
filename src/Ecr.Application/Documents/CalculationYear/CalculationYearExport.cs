@@ -11,8 +11,16 @@ namespace Ecr.Application.Documents.CalculationYear;
 /// <summary>Що вивантажити з огляду року (їде в завданні експорту).</summary>
 /// <param name="Year">Рік.</param>
 /// <param name="Layout"><c>pivot</c> — місяці колонками; <c>long</c> — рядок на вихід × місяць.</param>
-/// <param name="RowIds">Виходи «як відфільтровано» (<see cref="CalculationYearRowDto.Id"/>); <c>null</c> — увесь документ.</param>
-public sealed record CalculationYearExportSpec(int Year, string Layout, IReadOnlyList<string>? RowIds);
+/// <param name="RowIds">
+/// Застаріле (задачі, поставлені до сторінкового огляду): виходи переліком ідентифікаторів; <c>null</c> — без переліку.
+/// </param>
+/// <param name="Filter">
+/// «Як відфільтровано» — ті самі фільтри, що й на екрані (<see cref="CalculationYearFilter"/>), застосовані до огляду
+/// всього документа; <c>null</c> — увесь документ. Екран тримає лише завантажені сторінки, тож перелік ідентифікаторів
+/// він дати не може.
+/// </param>
+public sealed record CalculationYearExportSpec(
+    int Year, string Layout, IReadOnlyList<string>? RowIds, CalculationYearFilter? Filter = null);
 
 /// <summary>
 /// <c>POST /api/v1/documents/{id}/calculation-results/year/export</c>: ставить книгу огляду року в чергу тією самою
@@ -36,12 +44,15 @@ public sealed class ExportCalculationYearHandler(
     /// <summary>Розкладки книги.</summary>
     public const string Pivot = "pivot", Long = "long";
 
-    /// <summary>Стеля переліку «як відфільтровано».</summary>
-    public const int MaxRowIds = 200_000;
-
     /// <summary>Ставить експорт у чергу; повертає ідентифікатор задачі.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="year">Рік.</param>
+    /// <param name="layout"><see cref="Pivot"/> або <see cref="Long"/>.</param>
+    /// <param name="filter">«Як відфільтровано»; <c>null</c> — увесь документ.</param>
+    /// <param name="language">Мова підписів.</param>
+    /// <param name="ct">Скасування.</param>
     public async Task<string> HandleAsync(
-        long documentId, int year, string? layout, IReadOnlyList<string>? rowIds, string? language, CancellationToken ct)
+        long documentId, int year, string? layout, CalculationYearFilter? filter, string? language, CancellationToken ct)
     {
         var profile = await PermissionCheck
             .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
@@ -49,13 +60,17 @@ public sealed class ExportCalculationYearHandler(
         await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
         await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, GetCalculationYearHandler.Permission, ct).ConfigureAwait(false);
         GetCalculationYearHandler.RequireYear(year);
+        if (filter is not null)
+        {
+            GetCalculationYearHandler.RequireFilter(filter);
+        }
 
         var shape = string.IsNullOrWhiteSpace(layout) ? Pivot : layout.Trim().ToLowerInvariant();
-        if (shape is not (Pivot or Long) || rowIds is { Count: > MaxRowIds })
+        if (shape is not (Pivot or Long))
         {
             throw new Errors.BusinessRuleException(
                 Ecr.Domain.Errors.ErrorCodes.RequestInvalid,
-                $"Розкладка «{layout}» або перелік виходів ({rowIds?.Count}) не підходять для експорту.",
+                $"Розкладка «{layout}» не підходить для експорту.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-REQ-0422.calcResultsExportInvalid",
@@ -73,7 +88,7 @@ public sealed class ExportCalculationYearHandler(
             .EnqueueAsync<IExcelExportJob>(
                 new ExcelExportTask(documentId, options, exportId, DocumentExportFormat.Xlsx, requestedBy)
                 {
-                    CalcResults = new CalculationYearExportSpec(year, shape, rowIds),
+                    CalcResults = new CalculationYearExportSpec(year, shape, RowIds: null, filter),
                 },
                 ct,
                 currentUser.UserId)
@@ -91,7 +106,7 @@ public sealed class ExportCalculationYearHandler(
                     format = "calc-results-xlsx",
                     year,
                     layout = shape,
-                    rowCount = rowIds?.Count,
+                    filtered = filter is not null,
                     jobId,
                 }),
                 requestedBy,
@@ -118,7 +133,9 @@ public static class CalculationYearWorkbook
         ArgumentNullException.ThrowIfNull(spec);
 
         var keep = spec.RowIds is null ? null : new HashSet<string>(spec.RowIds, StringComparer.Ordinal);
-        var rows = view.Rows.Where(r => keep is null || keep.Contains(r.Id)).ToList();
+        var rows = view.Rows
+            .Where(r => (keep is null || keep.Contains(r.Id)) && (spec.Filter is null || spec.Filter.Matches(view, r)))
+            .ToList();
         string L(LocalizedText? text) => text?.Get(language) ?? "";
 
         string[] Describe(CalculationYearRowDto r)
