@@ -1,15 +1,21 @@
-import { useMemo, useState, type JSX } from 'react';
+import { useCallback, useMemo, useRef, useState, type JSX } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Badge, Button, Group, Select, Stack, Text, TextInput } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
+import { useDebouncedValue } from '@mantine/hooks';
+import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { DocumentSummary } from '@/api/types';
 import {
-  fetchCalculationYear,
+  fetchCalculationYearRows,
+  fetchCalculationYearSummary,
+  filterParams,
+  FormulaMethodology,
+  isFiltered,
+  PageSize,
   type CalculationYearMonth,
-  type CalculationYearRow,
-  type CalculationYearView,
+  type CalculationYearSummary,
+  type ResultFilters,
 } from '@/features/calcResults/api';
 import { CalcResultsExport } from '@/features/calcResults/CalcResultsExport';
 import {
@@ -20,14 +26,14 @@ import {
   type ResultLabels,
 } from '@/features/calcResults/CalcResultsGrid';
 import {
-  allGroupKeys,
   documentHref,
-  filterRows,
-  FormulaMethodology,
   gridItems,
-  hasProblem,
   latestRunMonth,
+  resolvePage,
   runCounts,
+  sheetKey,
+  type LoadedTable,
+  type ResultRow,
 } from '@/features/calcResults/model';
 import '@/features/calcResults/calcResults.css';
 import { isYearLayout } from '@/features/documents/yearLayout';
@@ -44,44 +50,39 @@ import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 /** Префікс `?panel=` шторки значення: `cell:<номер місяця>:<id виходу>`. */
 const CellPanel = 'cell:';
 
+/** Пауза пошуку перед запитом (мс): зведення й сторінки перераховуються сервером. */
+const SearchDelay = 300;
+
 /** Підписи рядків огляду мовою користувача. */
-function labelsOf(view: CalculationYearView): ResultLabels {
+function labelsOf(year: number): ResultLabels {
   const monthNames = new Map<number, string>();
   const month = (m: number): string => {
     let name = monthNames.get(m);
     if (name === undefined) {
-      name = formatDate(new Date(Date.UTC(view.year, m - 1, 15)), { month: 'short', timeZone: 'UTC' });
+      name = formatDate(new Date(Date.UTC(year, m - 1, 15)), { month: 'short', timeZone: 'UTC' });
       monthNames.set(m, name);
     }
     return name;
   };
-  const equipment = (row: CalculationYearRow): string => {
-    const e = view.equipment[row.equipment];
-    if (e === undefined) return '';
+  const equipment = (row: ResultRow): string => {
+    const e = row.equipment;
     if (e.name !== null && e.name !== undefined && e.name !== '') return e.name;
     const label = localized(e.labelL10n);
     if (label !== '') return label;
     return e.rowKey ?? t('calcResults.tableLevel');
   };
-  const substanceOf = (row: CalculationYearRow) =>
-    row.substance === null || row.substance === undefined ? undefined : view.substances[row.substance];
-  const outputText = (row: CalculationYearRow): string => {
-    if (row.column !== null && row.column !== undefined) {
-      const column = view.columns[row.column];
-      return localized(column?.headerL10n) || row.outputCode;
-    }
-    const substance = substanceOf(row);
-    return substance === undefined
-      ? row.outputCode
-      : `${substance.code} · ${localized(substance.nameL10n) || substance.code}`;
+  const outputText = (row: ResultRow): string => {
+    if (row.column !== null) return localized(row.column.headerL10n) || row.outputCode;
+    const substance = row.substance;
+    return substance === null ? row.outputCode : `${substance.code} · ${localized(substance.nameL10n) || substance.code}`;
   };
   return {
     month,
     equipment,
     outputText,
     output: (row) => {
-      const substance = substanceOf(row);
-      if ((row.column !== null && row.column !== undefined) || substance === undefined) {
+      const substance = row.substance;
+      if (row.column !== null || substance === null) {
         return (
           <>
             <span>{outputText(row)}</span> <span className="ecr-cr-muted">{row.outputCode}</span>
@@ -94,16 +95,23 @@ function labelsOf(view: CalculationYearView): ResultLabels {
         </>
       );
     },
-    unit: (row) => {
-      const unit = row.unit === null || row.unit === undefined ? undefined : view.units[row.unit];
-      return unit === undefined ? '' : localized(unit.symbolL10n) || unit.code;
-    },
+    unit: (row) => (row.unit === null ? '' : localized(row.unit.symbolL10n) || row.unit.code),
   };
+}
+
+/** Сторінки таблиць, запитані за поточних фільтрів (зміна фільтрів скидає дочитане). */
+interface PageState {
+  readonly filterKey: string;
+  readonly pages: ReadonlyMap<string, number>;
 }
 
 /**
  * «Calculation results» — усі розраховані числа документа за рік, місяці поруч (`/documents/:id/results`, макет
  * `docs/design/hybrid/calc-results/screen-calc-results.js`, CALC-RESULTS.md).
+ *
+ * ⚠ Зведення першим (місяці, таблиці з лічильниками — кілобайти), рядки — сторінками по 200 лише розгорнутих таблиць
+ * (за замовчуванням розгорнута перша); рядок «ще» в кінці таблиці дочитує наступну сторінку, щойно потрапляє у видиму
+ * область. Фільтри застосовує сервер — те саме правило для зведення, сторінок і експорту «як відфільтровано».
  *
  * ⚠ Розкладка шаблону (D-474): `PerMonthCopies` — «огляд року», заголовок місяця відкриває документ на ньому;
  * `YearWithMonthColumns` — заголовок місяця обирає «місяць результатів» (`?month=`), і «до документа» веде на
@@ -123,36 +131,102 @@ export function CalculationResultsPage(): JSX.Element {
   const [dialog, setDialog] = useUrlState('dialog');
   const [panel, setPanel] = useDetailPanel();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [openState, setOpenState] = useState<ReadonlySet<string> | null>(null);
+  const [debouncedQuery] = useDebouncedValue(query ?? '', SearchDelay);
 
-  const summary = useQuery({
-    queryKey: ['document', documentId, 'base'],
-    queryFn: () => apiFetch<DocumentSummary>(`/api/v1/documents/${String(documentId)}`),
-  });
-  const results = useQuery({
-    queryKey: queryKeys.document.calculationYear(documentId, year),
-    queryFn: () => fetchCalculationYear(documentId, year),
-  });
-
-  const yearLayout = isYearLayout(summary.data?.templateLayout);
-  const documentKey = summary.data?.businessKey ?? `#${String(documentId)}`;
-  const view = results.data;
-  const labels = useMemo(() => (view === undefined ? null : labelsOf(view)), [view]);
-  const filters = {
-    query: query ?? '',
+  const filters: ResultFilters = {
+    query: debouncedQuery,
     sheet: sheet ?? '',
     methodology: methodology ?? '',
     substance: substance ?? '',
     problemsOnly: problems === '1',
   };
-  // Фільтри — рядки адреси: ключ із них перераховує перелік лише тоді, коли вони справді змінилися.
-  const filterKey = JSON.stringify(filters);
-  const rows = useMemo(
-    () => (view === undefined || labels === null ? [] : filterRows(view, JSON.parse(filterKey) as typeof filters, labels.equipment)),
-    [view, labels, filterKey],
+  // Ключ кешу й скидання сторінок — з параметрів запиту: той самий набір фільтрів дає той самий ключ.
+  const filterKey = filterParams(filters).toString();
+  const filtered = isFiltered(filters);
+
+  const documentQuery = useQuery({
+    queryKey: ['document', documentId, 'base'],
+    queryFn: () => apiFetch<DocumentSummary>(`/api/v1/documents/${String(documentId)}`),
+  });
+  const summary = useQuery({
+    queryKey: queryKeys.document.calculationYearSummary(documentId, year, filterKey),
+    queryFn: () => fetchCalculationYearSummary(documentId, year, filters),
+    // Зміна фільтра не гасить сітку до відповіді: видно попереднє зведення.
+    placeholderData: keepPreviousData,
+  });
+
+  const data = summary.data;
+  const tables = useMemo(
+    () => (data === undefined ? [] : filtered ? data.tables.filter((table) => table.matched > 0) : data.tables),
+    [data, filtered],
   );
-  const items = useMemo(() => (view === undefined ? [] : gridItems(view, rows, collapsed)), [view, rows, collapsed]);
-  const pickedMonth = view === undefined || !yearLayout ? null : (picked ?? latestRunMonth(view));
-  const filteredAny = filters.query !== '' || filters.sheet !== '' || filters.methodology !== '' || filters.substance !== '' || filters.problemsOnly;
+  const open = useMemo<ReadonlySet<string>>(
+    () => openState ?? new Set(tables[0] === undefined ? [] : [tables[0].key]),
+    [openState, tables],
+  );
+
+  const [pageState, setPageState] = useState<PageState>({ filterKey, pages: new Map() });
+  const pages = pageState.filterKey === filterKey ? pageState.pages : new Map<string, number>();
+  const requests = tables
+    .filter((table) => open.has(table.key))
+    .flatMap((table) =>
+      Array.from({ length: pages.get(table.key) ?? 1 }, (_, i) => ({ table, offset: i * PageSize })),
+    );
+  const pageQueries = useQueries({
+    queries: requests.map(({ table, offset }) => ({
+      queryKey: queryKeys.document.calculationYearRows(documentId, year, table.key, filterKey, offset),
+      queryFn: () => fetchCalculationYearRows(documentId, year, table.key, filters, offset),
+      enabled: data !== undefined && !summary.isPlaceholderData,
+    })),
+  });
+
+  // Рядки таблиці — сторінки підряд від початку; на першій ще не прочитаній — зупинка (і «ще» в кінці таблиці).
+  const loaded = new Map<string, LoadedTable>();
+  const loading = new Set<string>();
+  const failed = new Map<string, () => void>();
+  const stopped = new Set<string>();
+  requests.forEach(({ table }, i) => {
+    const result = pageQueries[i];
+    if (result === undefined || stopped.has(table.key)) return;
+    if (result.data === undefined) {
+      stopped.add(table.key);
+      if (result.isError) failed.set(table.key, () => void result.refetch());
+      else loading.add(table.key);
+      return;
+    }
+    loaded.set(table.key, {
+      rows: [...(loaded.get(table.key)?.rows ?? []), ...resolvePage(table, result.data)],
+      total: result.data.total,
+    });
+  });
+  const failedRef = useRef(failed);
+  failedRef.current = failed;
+
+  const onMore = useCallback(
+    (table: string, count: number) => {
+      // Сторінка, що не прочиталася, — повтор цієї ж сторінки, а не наступна.
+      const retry = failedRef.current.get(table);
+      if (retry !== undefined) {
+        retry();
+        return;
+      }
+      setPageState((state) => {
+        const base = state.filterKey === filterKey ? state.pages : new Map<string, number>();
+        const want = Math.floor(count / PageSize) + 1;
+        if ((base.get(table) ?? 1) >= want) return state.filterKey === filterKey ? state : { filterKey, pages: base };
+        return { filterKey, pages: new Map(base).set(table, want) };
+      });
+    },
+    [filterKey],
+  );
+
+  const yearLayout = isYearLayout(documentQuery.data?.templateLayout);
+  const documentKey = documentQuery.data?.businessKey ?? `#${String(documentId)}`;
+  const labels = useMemo(() => labelsOf(year), [year]);
+  const items = gridItems(tables, loaded, collapsed, open);
+  const pickedMonth = data === undefined || !yearLayout ? null : (picked ?? latestRunMonth(data.months));
+  const allRows = [...loaded.values()].flatMap((table) => table.rows);
 
   const periodOf = (m: number): number => year * 100 + m;
   const backHref = `/documents/${String(documentId)}${pickedMonth === null ? '' : `?periodKey=${String(periodOf(pickedMonth))}`}`;
@@ -170,34 +244,40 @@ export function CalculationResultsPage(): JSX.Element {
     setProblems(null);
   };
 
+  const toggleIn = (set: ReadonlySet<string>, key: string): ReadonlySet<string> => {
+    const next = new Set(set);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    return next;
+  };
+
   const options = useMemo(() => {
-    if (view === undefined) return { sheets: [], methodologies: [], substances: [] };
+    if (data === undefined) return { sheets: [], methodologies: [], substances: [] };
     const sheets = new Map<string, string>();
-    for (const table of view.tables) {
+    for (const table of data.tables) {
       if (table.tableDefId !== 0) sheets.set(String(table.sheetDefId), localized(table.sheetNameL10n) || table.sheetCode);
     }
-    const methodologies = view.methodologies.map((m) => ({ value: m.code, label: localized(m.nameL10n) || m.code }));
-    if (view.rows.some((r) => r.column !== null && r.column !== undefined)) {
-      methodologies.push({ value: FormulaMethodology, label: t('calcResults.templateFormula') });
-    }
+    const methodologies = data.methodologies.map((m) => ({ value: m.code, label: localized(m.nameL10n) || m.code }));
+    if (data.hasFormulas) methodologies.push({ value: FormulaMethodology, label: t('calcResults.templateFormula') });
     return {
       sheets: [...sheets].map(([value, label]) => ({ value, label })),
       methodologies,
-      substances: view.substances.map((s) => ({ value: s.code, label: `${s.code} · ${localized(s.nameL10n) || s.code}` })),
+      substances: data.substances.map((s) => ({ value: s.code, label: `${s.code} · ${localized(s.nameL10n) || s.code}` })),
     };
-  }, [view]);
+  }, [data]);
 
-  const panelCell = useMemo(() => {
-    if (view === undefined || panel === null || !panel.startsWith(CellPanel)) return null;
+  // Шторка — лише для виходу із завантаженої сторінки (адреса з `?panel=` на незавантажений рядок шторки не відкриває).
+  const panelCell = ((): { row: ResultRow; month: number } | null => {
+    if (panel === null || !panel.startsWith(CellPanel)) return null;
     const rest = panel.slice(CellPanel.length);
     const colon = rest.indexOf(':');
     const month = Number(rest.slice(0, colon));
-    const row = view.rows.find((r) => r.id === rest.slice(colon + 1));
+    const id = rest.slice(colon + 1);
+    const row = allRows.find((r) => r.id === id);
     return row === undefined || !Number.isInteger(month) || month < 1 || month > 12 ? null : { row, month };
-  }, [view, panel]);
+  })();
 
-  const counts = view === undefined ? null : runCounts(view);
-  const problemCount = view === undefined ? 0 : rows.filter((r) => hasProblem(view, r)).length;
+  const counts = data === undefined ? null : runCounts(data.months);
 
   return (
     <Stack gap="sm">
@@ -205,14 +285,26 @@ export function CalculationResultsPage(): JSX.Element {
         back={{ label: documentKey, href: backHref }}
         title={t('calcResults.title')}
         description={t('calcResults.subtitle', { document: documentKey, year })}
-        primary={{ label: t('calcResults.export'), onClick: () => setDialog('export-results'), disabled: view === undefined }}
+        primary={{ label: t('calcResults.export'), onClick: () => setDialog('export-results'), disabled: data === undefined }}
         more={[
-          { label: t('calcResults.collapseAll'), onClick: () => setCollapsed(view === undefined ? new Set() : allGroupKeys(view, rows)) },
-          { label: t('calcResults.expandAll'), onClick: () => setCollapsed(new Set()) },
+          {
+            label: t('calcResults.collapseAll'),
+            onClick: () => {
+              setOpenState(new Set());
+              setCollapsed(new Set(tables.map(sheetKey)));
+            },
+          },
+          {
+            label: t('calcResults.expandAll'),
+            onClick: () => {
+              setCollapsed(new Set());
+              setOpenState(new Set(tables.map((table) => table.key)));
+            },
+          },
         ]}
       />
 
-      {yearLayout && pickedMonth !== null && labels !== null && (
+      {yearLayout && pickedMonth !== null && (
         <Banner
           title={t('calcResults.yearNoteTitle')}
           text={t('calcResults.yearNote', { month: `${labels.month(pickedMonth)} ${String(year)}` })}
@@ -220,11 +312,11 @@ export function CalculationResultsPage(): JSX.Element {
         />
       )}
 
-      <AsyncBoundary<CalculationYearView>
-        isPending={results.isPending}
-        error={results.error}
-        data={results.data}
-        isEmpty={(data) => data.rows.length === 0}
+      <AsyncBoundary<CalculationYearSummary>
+        isPending={summary.isPending}
+        error={summary.error}
+        data={data}
+        isEmpty={(view) => view.totalRows === 0}
         emptyTitle={t('calcResults.emptyTitle')}
         emptyHint={t('calcResults.emptyHint', { year })}
         emptyAction={
@@ -233,9 +325,9 @@ export function CalculationResultsPage(): JSX.Element {
           </Button>
         }
         skeleton="table"
-        onRetry={() => void results.refetch()}
+        onRetry={() => void summary.refetch()}
       >
-        {(data) => (
+        {(view) => (
           <Stack gap="xs">
             <Group gap="xs" align="flex-end" wrap="wrap">
               <TextInput
@@ -266,40 +358,36 @@ export function CalculationResultsPage(): JSX.Element {
               <span><i className="ecr-cr-sw ecr-cr-sw--none" />{t('calcResults.legend.noValue')}</span>
               {yearLayout && <span><i className="ecr-cr-sw ecr-cr-sw--pick" />{t('calcResults.legend.picked')}</span>}
               <span>{t('calcResults.legend.additive')}</span>
-              {data.freshnessHidden && <span>{t('calcResults.legend.freshnessHidden')}</span>}
+              {view.freshnessHidden && <span>{t('calcResults.legend.freshnessHidden')}</span>}
             </div>
 
-            {rows.length === 0 ? (
+            {view.matchedRows === 0 ? (
               <Stack align="flex-start" gap="xs" data-testid="cr-no-match">
                 <Text fw={600}>{t('calcResults.noMatchTitle')}</Text>
                 <Text size="sm" c="dimmed">{t('calcResults.noMatchHint')}</Text>
                 <Button size="xs" variant="default" onClick={clearFilters}>{t('calcResults.clearFilters')}</Button>
               </Stack>
             ) : (
-              labels !== null && (
-                <CalcResultsGrid
-                  view={data}
-                  items={items}
-                  collapsed={collapsed}
-                  labels={labels}
-                  pickedMonth={pickedMonth}
-                  onToggle={(key) =>
-                    setCollapsed((current) => {
-                      const next = new Set(current);
-                      if (next.has(key)) next.delete(key);
-                      else next.add(key);
-                      return next;
-                    })
-                  }
-                  onMonth={onMonth}
-                  onValue={(row, i) => setPanel(`${CellPanel}${String(i + 1)}:${row.id}`)}
-                />
-              )
+              <CalcResultsGrid
+                months={view.months}
+                year={view.year}
+                items={items}
+                collapsed={collapsed}
+                open={open}
+                loading={loading}
+                labels={labels}
+                pickedMonth={pickedMonth}
+                onToggle={(key) => setCollapsed((current) => toggleIn(current, key))}
+                onToggleTable={(key) => setOpenState(toggleIn(open, key))}
+                onMore={onMore}
+                onMonth={onMonth}
+                onValue={(row, i) => setPanel(`${CellPanel}${String(i + 1)}:${row.id}`)}
+              />
             )}
 
             <div className="ecr-cr-foot" data-testid="cr-foot">
-              <span>{t('calcResults.footShown', { shown: rows.length, total: data.rows.length })}</span>
-              <span>{t('calcResults.footProblems', { count: problemCount })}</span>
+              <span>{t('calcResults.footShown', { shown: view.matchedRows, total: view.totalRows })}</span>
+              <span>{t('calcResults.footProblems', { count: view.problemRows })}</span>
               <span className="ecr-cr-sp" />
               {counts !== null && (
                 <span>{t('calcResults.footRuns', { current: counts.current, outOfDate: counts.outOfDate, none: counts.none })}</span>
@@ -309,8 +397,16 @@ export function CalculationResultsPage(): JSX.Element {
         )}
       </AsyncBoundary>
 
-      {view !== undefined && labels !== null && panelCell !== null && (
-        <ValueDrawer view={view} labels={labels} row={panelCell.row} month={panelCell.month} onClose={() => setPanel(null)} />
+      {data !== undefined && panelCell !== null && (
+        <ValueDrawer
+          documentId={documentId}
+          months={data.months}
+          year={year}
+          labels={labels}
+          row={panelCell.row}
+          month={panelCell.month}
+          onClose={() => setPanel(null)}
+        />
       )}
 
       <CalcResultsExport
@@ -319,8 +415,8 @@ export function CalculationResultsPage(): JSX.Element {
         documentId={documentId}
         documentKey={documentKey}
         year={year}
-        filteredRowIds={rows.map((r) => r.id)}
-        filtered={filteredAny}
+        filters={filters}
+        filtered={filtered}
       />
     </Stack>
   );
@@ -328,36 +424,38 @@ export function CalculationResultsPage(): JSX.Element {
 
 /** Шторка значення: звідки число і перехід до документа на його аркуші/таблиці/місяці. */
 function ValueDrawer({
-  view,
+  documentId,
+  months,
+  year,
   labels,
   row,
   month,
   onClose,
 }: {
-  readonly view: CalculationYearView;
+  readonly documentId: number;
+  readonly months: readonly CalculationYearMonth[];
+  readonly year: number;
   readonly labels: ResultLabels;
-  readonly row: CalculationYearRow;
+  readonly row: ResultRow;
   readonly month: number;
   readonly onClose: () => void;
 }): JSX.Element {
-  const info = view.months[month - 1];
+  const info = months[month - 1];
   const value = valueText(row.values[month - 1]);
   const unit = labels.unit(row);
-  const methodology = row.methodology === null || row.methodology === undefined ? null : view.methodologies[row.methodology];
-  const unitDto = row.unit === null || row.unit === undefined ? undefined : view.units[row.unit];
+  const methodology = row.methodology;
   const total = totalText(row);
-  const monthText = `${labels.month(month)} ${String(view.year)}`;
-  const equipment = view.equipment[row.equipment];
+  const monthText = `${labels.month(month)} ${String(year)}`;
 
   return (
     <DetailDrawer
       panelId={`${CellPanel}${String(month)}:${row.id}`}
       title={`${labels.outputText(row)} · ${monthText}`}
-      subtitle={`${labels.equipment(row)}${equipment?.idCode ? ` · ${equipment.idCode}` : ''}`}
+      subtitle={`${labels.equipment(row)}${row.equipment.idCode ? ` · ${row.equipment.idCode}` : ''}`}
       closeLabel={t('calcResults.close')}
       onClose={onClose}
       footer={
-        <Button component={Link} to={documentHref(view, info?.periodKey ?? view.year * 100 + month, row)} data-testid="cr-open-source">
+        <Button component={Link} to={documentHref(documentId, info?.periodKey ?? year * 100 + month, row)} data-testid="cr-open-source">
           {t('calcResults.openSource')}
         </Button>
       }
@@ -376,8 +474,8 @@ function ValueDrawer({
             { label: t('calcResults.drawer.month'), value: <>{monthText} {info !== undefined && <Badge variant="light" size="sm">{monthStateText(info)}</Badge>}</> },
             {
               label: t('calcResults.drawer.methodology'),
-              value: methodology === null || methodology === undefined ? t('calcResults.templateFormula') : localized(methodology.nameL10n) || methodology.code,
-              hint: methodology === null || methodology === undefined ? undefined : t('calcResults.drawer.version', { version: methodology.version }),
+              value: methodology === null ? t('calcResults.templateFormula') : localized(methodology.nameL10n) || methodology.code,
+              hint: methodology === null ? undefined : t('calcResults.drawer.version', { version: methodology.version }),
             },
             { label: t('calcResults.drawer.output'), value: row.outputCode, mono: true },
             {
@@ -387,7 +485,7 @@ function ValueDrawer({
             {
               label: t('calcResults.drawer.yearTotal'),
               value:
-                unitDto?.additive === true && total !== null
+                row.unit?.additive === true && total !== null
                   ? t('calcResults.drawer.yearTotalValue', { value: `${total} ${unit}`.trim(), n: row.monthsIncluded })
                   : t('calcResults.drawer.notAdditive'),
             },

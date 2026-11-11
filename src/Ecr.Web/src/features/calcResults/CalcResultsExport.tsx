@@ -9,7 +9,7 @@ import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
 import { language, t } from '@/shared/i18n';
 import { notificationCloseButtonProps, showApiError } from '@/shared/ui/notify';
 import { errorCodeText } from '@/shared/ui/problemText';
-import { enqueueCalculationYearExport, exportDownloadHref, type ExportLayout } from './api';
+import { enqueueCalculationYearExport, exportDownloadHref, type ExportLayout, type ResultFilters } from './api';
 
 interface CalcResultsExportProps {
   readonly opened: boolean;
@@ -17,8 +17,8 @@ interface CalcResultsExportProps {
   readonly documentId: number;
   readonly documentKey: string;
   readonly year: number;
-  /** Виходи, що зараз проходять фільтри. */
-  readonly filteredRowIds: readonly string[];
+  /** Фільтри екрана: «As filtered» — сервер застосовує їх до всього документа (екран має лише завантажені сторінки). */
+  readonly filters: ResultFilters;
   /** Чи фільтри щось відсікають (інакше «As filtered» = «Whole document»). */
   readonly filtered: boolean;
 }
@@ -34,7 +34,7 @@ export function CalcResultsExport({
   documentId,
   documentKey,
   year,
-  filteredRowIds,
+  filters,
   filtered,
 }: CalcResultsExportProps): JSX.Element {
   const [scope, setScope] = useState<'filtered' | 'all'>('filtered');
@@ -43,12 +43,7 @@ export function CalcResultsExport({
 
   const start = useMutation({
     mutationFn: () =>
-      enqueueCalculationYearExport(documentId, {
-        year,
-        layout,
-        rowIds: scope === 'filtered' && filtered ? [...filteredRowIds] : null,
-        language: language(),
-      }),
+      enqueueCalculationYearExport(documentId, year, layout, language(), scope === 'filtered' && filtered ? filters : null),
     onSuccess: (job) => {
       setJobId(job.jobId);
       onClose();

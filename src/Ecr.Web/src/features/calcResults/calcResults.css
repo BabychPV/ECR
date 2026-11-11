@@ -126,6 +126,9 @@
 .ecr-cr-code { font-family: var(--mantine-font-family-monospace); font-size: 12px; padding: 0 4px; border: 1px solid var(--ecr-border); border-radius: 4px; }
 .ecr-cr-muted { color: var(--ecr-muted); }
 .ecr-cr-out th { padding-left: 48px !important; }
+/* Рядок «ще» таблиці, сторінки якої завантажено не всі: та сама висота, що й рядок виходу (віртуалізація). */
+.ecr-cr-more th { padding-left: 48px !important; max-width: none !important; overflow: visible !important; font-weight: 400; }
+.ecr-cr-more .ecr-cr-toggle { color: var(--ecr-link, var(--ecr-text)); text-decoration: underline; }
 
 .ecr-cr-v { padding: 0 !important; text-align: right; }
 .ecr-cr-vb {
