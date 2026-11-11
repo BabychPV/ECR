@@ -1480,6 +1480,24 @@ public sealed record SourceDataPoint(
 public sealed record TimeInterval(DateTime FromUtc, DateTime ToUtc);
 ```
 
+✎ 2026-11-11 (`D-476`, FLERT F2): знімок таблиці-довідника SQL-джерела цілком — лише читання (адаптер виконує
+налаштований запит у транзакції, яку завжди відкочує; типового тексту запиту немає).
+
+```csharp
+// src/Ecr.Application/Ports/IExternalTableSource.cs
+public interface IExternalTableSource
+{
+    public ExternalTransport Transport { get; }
+
+    public Task<ExternalTable> ReadTableAsync(int dataSourceId, string queryKey, int maxRows, CancellationToken ct);
+}
+
+public sealed record ExternalTable(
+    IReadOnlyList<string> Columns,
+    IReadOnlyList<IReadOnlyList<object?>> Rows,
+    bool Truncated);
+```
+
 ```csharp
 // src/Ecr.Application/Ports/IBackgroundJobScheduler.cs
 namespace Ecr.Application.Ports;
