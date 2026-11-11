@@ -13,6 +13,9 @@ export const UnmatchedRowsBannerSelector = '[data-testid="document-unmatched-row
 /** Вид проблеми рядка, що його відхилило правило категорії (✎ 10.11, doc 95). */
 export const CategoryRuleRejectedKind = 'CategoryRuleRejected';
 
+/** Вид проблеми рядка, який правило закрило, але формулам бракує входів — жодного результату (AN-164). */
+export const MissingInputsKind = 'MissingInputs';
+
 /** Колонка, яку треба заповнити, щоб рядок порахувався. */
 export interface MissingColumnRef {
   readonly code: string;
@@ -57,8 +60,13 @@ export interface UnmatchedTableGroup {
   readonly hint: UnmatchedTableHint | null;
   /** Рядки за зростанням номера, без повторів ключа. */
   readonly rows: readonly UnmatchedRowRef[];
-  /** ✎ 10.11: рядки ВІДХИЛЕНІ правилом категорії (правило підійшло, ключа категорії немає), а не «без правила». */
+  /**
+   * ✎ 10.11: рядкам правило підійшло, але їх не пораховано (відхилені правилом категорії або, з AN-164, без входів
+   * формул), а не «без правила»: причина — правило й колонки, які треба заповнити.
+   */
   readonly rejected: boolean;
+  /** AN-164: правило підійшло, але формулам бракує входів (`MissingInputs`); `rejected` теж `true`. */
+  readonly missingInputs: boolean;
 }
 
 /**
@@ -90,6 +98,7 @@ export function groupUnmatchedRows(
       code: string;
       methodology: string | null;
       rejected: boolean;
+      missingInputs: boolean;
       tableKey: string;
       rows: Map<string, UnmatchedRowRef>;
     }
@@ -97,11 +106,21 @@ export function groupUnmatchedRows(
   for (const issue of issues) {
     const tableKey = groupKey(issue.tableCode, issue.sheetCopyId ?? null);
     // ✎ 10.11: відхилені правилом категорії — окремою групою тієї ж таблиці: причина й дія інші, ніж у «без правила».
-    const rejected = issue.kind === CategoryRuleRejectedKind;
-    const key = rejected ? `${tableKey}!rejected` : tableKey;
+    // AN-164: рядки без входів формул — своєю групою з тією ж формою рядка (правило й колонки, які треба заповнити).
+    const missingInputs = issue.kind === MissingInputsKind;
+    const rejected = missingInputs || issue.kind === CategoryRuleRejectedKind;
+    const key = missingInputs ? `${tableKey}!inputs` : rejected ? `${tableKey}!rejected` : tableKey;
     let group = byKey.get(key);
     if (group === undefined) {
-      group = { table: tableOf.get(tableKey), code: issue.tableCode, methodology: null, rejected, tableKey, rows: new Map() };
+      group = {
+        table: tableOf.get(tableKey),
+        code: issue.tableCode,
+        methodology: null,
+        rejected,
+        missingInputs,
+        tableKey,
+        rows: new Map(),
+      };
       byKey.set(key, group);
     }
     group.methodology ??= issue.methodologyCode ?? null;
@@ -144,6 +163,7 @@ export function groupUnmatchedRows(
           .map((row) => (hint === undefined ? { ...row, currentValues: null } : row))
           .sort((a, b) => a.rowNumber - b.rowNumber),
         rejected: group.rejected,
+        missingInputs: group.missingInputs,
       };
     });
 }

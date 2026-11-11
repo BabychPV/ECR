@@ -73,14 +73,15 @@ public sealed class GetCalculationIssuesHandler(
 
         var visible = rows.Where(r => readable.CanReadTable(r.TableDefId)).ToList();
 
-        // Підказка «що приймають правила» — лише рядкам без правила: відхиленому рядку правило вже підійшло.
-        var unmatched = visible.Where(r => r.Kind != ICalculationIssueStore.CategoryRuleRejected).ToList();
+        // Підказка «що приймають правила» — лише рядкам без правила: відхиленому рядку (і рядку без входів, AN-164)
+        // правило вже підійшло.
+        var unmatched = visible.Where(r => !HasRuleReason(r.Kind)).ToList();
         var built = hints is null || unmatched.Count == 0 || !key.IsValid
             ? CalculationIssueHintSet.Empty
             : await hints.BuildAsync(documentId, key, sheetCopyId, unmatched, readable.CanReadColumn, ct)
                 .ConfigureAwait(false);
 
-        var rejected = visible.Where(r => r.Kind == ICalculationIssueStore.CategoryRuleRejected).ToList();
+        var rejected = visible.Where(r => HasRuleReason(r.Kind)).ToList();
         var why = reasons is null || rejected.Count == 0 || !key.IsValid
             ? new Dictionary<(int, string, int?), CalculationRejectionReason>()
             : await reasons.BuildAsync(documentId, key, sheetCopyId, rejected, readable.CanReadColumn, ct)
@@ -90,7 +91,7 @@ public sealed class GetCalculationIssuesHandler(
             [
                 .. visible.Select(r =>
                 {
-                    var reason = r.Kind == ICalculationIssueStore.CategoryRuleRejected
+                    var reason = HasRuleReason(r.Kind)
                         ? why.GetValueOrDefault((r.TableDefId, r.RowKey, r.MethodologyId))
                         : null;
 
@@ -111,4 +112,11 @@ public sealed class GetCalculationIssuesHandler(
             ],
             built.Tables.Count == 0 ? null : built.Tables);
     }
+
+    /// <summary>
+    /// Чи підійшло рядку правило методології — тоді причина йде правилом і колонками, які треба заповнити
+    /// (<see cref="CalculationRejectionReasons"/>), а не підказкою «що приймають правила».
+    /// </summary>
+    private static bool HasRuleReason(string kind)
+        => kind is ICalculationIssueStore.CategoryRuleRejected or ICalculationIssueStore.MissingInputs;
 }

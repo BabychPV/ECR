@@ -452,7 +452,19 @@ public sealed record CalculationOutput(
     IReadOnlyList<CalculationOutputValue> Values,
     IReadOnlyList<CalculationTraceStep> Trace,
     IReadOnlyList<CalculationArgument>? Inputs = null,
-    long? TableInstanceId = null);
+    long? TableInstanceId = null)
+{
+    /// <summary>
+    /// AN-164: аргументи <c>@Code</c> формул версії, яких у рядку немає (немає комірки або вона порожня), — лише коли рядок
+    /// не дав ЖОДНОГО значення. <c>null</c> чи порожньо — рядок дав значення або причина не в аргументах.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього рядок, закритий правилом, але без входів формул (Land doc 96, LTD-A41 C12_02: необов'язкові
+    /// аргументи → <c>null</c> → виходи <c>#NULL</c>), давав 0 результатів, 0 невдалих кроків і жодної проблеми —
+    /// тихий нуль. Оркестратор пише з цього проблему рядка <c>MissingInputs</c>.
+    /// </remarks>
+    public IReadOnlyList<string>? MissingArguments { get; init; }
+}
 
 /// <summary>Один обчислений вихід — рядок <c>calc.CalculationResult</c>.</summary>
 /// <param name="MethodologyVersionId">Версія, що дала число.</param>

@@ -64,6 +64,33 @@ public sealed class RunCalculationIssuesWriteTests
             Arg.Any<CancellationToken>());
     }
 
+    /// <remarks>
+    /// AN-164 (doc 96, LTD-A41): рядок, закритий правилом, але без жодного значення через відсутні аргументи формул, був
+    /// тихим нулем. Мутація: прибрати додавання <c>profile.MissingInputRows</c> у <c>SwitchAsync</c> — тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Рядок_без_входів_формул_стає_проблемою_MissingInputs()
+    {
+        var (handler, issues) = Arrange(supersededSelf: false);
+        var profile = new ModuleProfile();
+        profile.RecordEvaluatedTables([10]);
+        profile.RecordMissingInputs([new RejectedRow(10, 3, "R3", 900, 41), new RejectedRow(10, 3, "R3", 900, 41)]);
+
+        await handler.CompleteAsync(RunId, profile, CancellationToken.None);
+
+        await issues.Received(1).ReplaceAsync(
+            RunId,
+            Arg.Any<IReadOnlyCollection<long>>(),
+            Arg.Is<IReadOnlyCollection<CalculationIssueInput>>(i =>
+                i.Count == 1
+                && i.Single().RowKey == "R3"
+                && i.Single().RowNumber == 3
+                && i.Single().MethodologyId == 41
+                && i.Single().Kind == ICalculationIssueStore.MissingInputs),
+            Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Відмовлений_як_старіший_прогін_не_замінює_проблеми()

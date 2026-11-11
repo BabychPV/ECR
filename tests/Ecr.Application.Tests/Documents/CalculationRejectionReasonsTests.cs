@@ -86,8 +86,30 @@ public sealed class CalculationRejectionReasonsTests
         await world.Cells.Received(3).ReadCellsAsync(Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// AN-164 (doc 96, LTD-A41): рядок, закритий правилом, але без входів формул (<c>MissingInputs</c>), називає правило
+    /// й порожні колонки, які читають УСІ формули версії, — і ті, яких правило категорії не згадує (<c>Land_Consumption</c>).
+    /// Мутація: для <c>MissingInputs</c> брати аргументи лише правила категорії — <c>Land_Consumption</c> не названо, тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Рядок_без_входів_називає_правило_і_порожні_колонки_всіх_формул()
+    {
+        var result = await new World { Kind = ICalculationIssueStore.MissingInputs }.Handler()
+            .HandleAsync(Document, Period, null, CancellationToken.None);
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal(ICalculationIssueStore.MissingInputs, item.Kind);
+        Assert.Equal("R_C05_01_01", item.RuleCode);
+        Assert.Equal(["Land_OverhauledEnginesRef", "Land_Consumption"], item.Columns!.Select(c => c.Code));
+        Assert.Null(item.CurrentValues);
+        Assert.Null(result.Tables);
+    }
+
     private sealed class World
     {
+        public string Kind { get; init; } = ICalculationIssueStore.CategoryRuleRejected;
+
         public bool HideRef { get; init; }
 
         public bool RefFilled { get; init; }
@@ -112,6 +134,7 @@ public sealed class CalculationRejectionReasonsTests
             var overhauledRef = template.Column(table, "Land_OverhauledEnginesRef", CellDataType.String);
             var overhauled = template.Column(table, "Land_OverhauledEngines", CellDataType.String);
             template.Formula(table, "REGFIELD([Land_OverhauledEnginesRef], 'NAME')", column: overhauled);
+            _ = template.Column(table, "Land_Consumption");
             var snapshot = template.Build();
 
             var builder = new AccessBuilder { UserId = 9 }
@@ -132,7 +155,7 @@ public sealed class CalculationRejectionReasonsTests
             var issues = Substitute.For<ICalculationIssueStore>();
             issues.ListAsync(Document, Period, null, Arg.Any<CancellationToken>())
                   .Returns([.. Enumerable.Range(0, Rows).Select(i => new CalculationIssueRow(
-                      table.Id, "T3_00", null, i + 1, KeyOf(i), ICalculationIssueStore.CategoryRuleRejected, "ECW_C05_01", Now,
+                      table.Id, "T3_00", null, i + 1, KeyOf(i), Kind, "ECW_C05_01", Now,
                       MethodologyId))]);
 
             var user = Substitute.For<ICurrentUser>();
@@ -152,6 +175,7 @@ public sealed class CalculationRejectionReasonsTests
                     EcrCode.Create("ECW_RepairStatus"),
                     "if(@Land_OverhauledEngines = 'Not passed overhaul', 'Loc_BeforeMR', '')", FormulaResultType.Text, null),
                 version.AddFormula(EcrCode.Create("ECW_Category"), "if(@Land_Power < 73.6, 'A', 'B')", FormulaResultType.Text, null),
+                version.AddFormula(EcrCode.Create("ECW_Tons"), "@Land_Consumption? * CST.K", FormulaResultType.Number, null),
             };
             version.Publish(publishedByUserId: 2, "тест", new DateOnly(2024, 1, 1), testsPassed: true, Now);
 

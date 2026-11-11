@@ -659,7 +659,52 @@ public sealed class GenericCalculationModule(
             ReadArguments(input, trace),
 
             // D-401: екземпляр таблиці йде в результат; невалідний (0 — золоті набори без екземпляра) = невідомий.
-            input.TableInstanceId > 0 ? input.TableInstanceId : (long?)null);
+            input.TableInstanceId > 0 ? input.TableInstanceId : (long?)null)
+        {
+            // AN-164: рядок без жодного значення — назвати аргументи, яких бракує (інакше тихий нуль).
+            MissingArguments = values.Count == 0 && outputs.Count > 0
+                ? MissingArgumentsOf(ordered, binding.Libraries, arguments)
+                : null,
+        };
+    }
+
+    /// <summary>
+    /// AN-164: аргументи <c>@Code</c> формул версії й бібліотек, яких рядок не має (немає комірки, порожня або <c>#ARG</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Кличеться лише для рядка без жодного значення (рідкісний випадок): розбір усіх формул на кожен рядок коштував би
+    /// парсером мільйони разів за відповідь, яка потрібна тільки тут. Порядок — порядок формул, без повторів.
+    /// </remarks>
+    private List<string>? MissingArgumentsOf(
+        IReadOnlyList<MethodologyFormula> formulas,
+        CalculationLibraries? libraries,
+        Dictionary<string, ExpressionValue> arguments)
+    {
+        var missing = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var formula in formulas.Concat(libraries?.Versions.SelectMany(v => v.Formulas) ?? []))
+        {
+            var parsed = formulaEngine.Parse(formula.Expression, ExpressionDialect.Methodology);
+            if (!parsed.IsSuccess || parsed.Expression is null)
+            {
+                continue;
+            }
+
+            foreach (var reference in ReferenceCollector.Collect(parsed.Expression.Root))
+            {
+                if (reference.Kind == TraceInputKind.Argument
+                    && seen.Add(reference.Code)
+                    && (!arguments.TryGetValue(reference.Code, out var value) || value.IsNull
+                        || value.ErrorCode == Expressions.ExpressionErrors.ArgumentNotFound
+                        || (value.Type == Expressions.Ast.ExpressionValueType.Text
+                            && string.IsNullOrWhiteSpace(value.Value as string))))
+                {
+                    missing.Add(reference.Code);
+                }
+            }
+        }
+
+        return missing.Count == 0 ? null : missing;
     }
 
     /// <summary>
