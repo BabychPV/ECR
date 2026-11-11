@@ -49,6 +49,11 @@ async function idle(page: Page, ms: number): Promise<void> {
   await page.waitForTimeout(ms);
 }
 
+/** UTC-дата `YYYY-MM-DD` моменту `ms`. */
+function utcDay(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
 test.describe('Idle sign-out:', () => {
   test.describe.configure({ mode: 'serial', timeout: 240_000 });
 
@@ -98,9 +103,9 @@ test.describe('Idle sign-out:', () => {
     const me = (await (await api.get('/api/v1/me')).json()) as { idleTimeoutMinutes: number };
     expect(me.idleTimeoutMinutes).toBe(1);
 
-    const today = new Date().toISOString().slice(0, 10);
+    // Вікно — від дня старту набору до сьогодні: збереження могло статися до опівночі UTC.
     const audit = await api.get(
-      `/api/v1/audit/security?from=${today}T00:00:00Z&to=${today}T23:59:59Z&eventType=SessionSettingsUpdated&limit=20`,
+      `/api/v1/audit/security?from=${utcDay(pollerLoggedInAt)}T00:00:00Z&to=${utcDay(Date.now())}T23:59:59Z&eventType=SessionSettingsUpdated&limit=20`,
     );
     expect(audit.ok(), `журнал: ${String(audit.status())}`).toBe(true);
     expect(await audit.text()).toContain('idleTimeoutMinutes');
@@ -210,9 +215,13 @@ test.describe('Idle sign-out:', () => {
 
   test('Idle sign-out: id6 the audit row shows the reason «idle»', async ({ playwright, page }) => {
     const api = await newApi(playwright.request, baseURL);
-    const today = new Date().toISOString().slice(0, 10);
+    // ✎ 11.11: вікно — від дня СТАРТУ набору (id1 пише рядок `by:server` на ~2-й хв), а не від «сьогодні»
+    // на момент id6: набір триває ~7 хв і, перетнувши опівніч UTC, лишав рядок id1 у вчорашньому дні
+    // (rc/20261111-p239, run 42926317469 attempt 1: id1 о 23:57:46Z, id6 о 00:03:20Z → «by:server» не знайдено).
+    const fromDay = utcDay(pollerLoggedInAt);
+    const today = utcDay(Date.now());
     const response = await api.get(
-      `/api/v1/audit/security?from=${today}T00:00:00Z&to=${today}T23:59:59Z&eventType=SignedOut&limit=50`,
+      `/api/v1/audit/security?from=${fromDay}T00:00:00Z&to=${today}T23:59:59Z&eventType=SignedOut&limit=50`,
     );
     expect(response.ok()).toBe(true);
     const text = await response.text();
@@ -222,7 +231,7 @@ test.describe('Idle sign-out:', () => {
 
     await page.setViewportSize({ width: 1335, height: 860 });
     await signIn(page);
-    await page.goto(`/admin/audit?view=security&eventType=SignedOut&from=${today}&to=${today}`);
+    await page.goto(`/admin/audit?view=security&eventType=SignedOut&from=${fromDay}&to=${today}`);
     // Тип події екран показує людською назвою («Signed out»), причина — у деталях.
     // ✎ debt-1109 x10: деталі — читабельні пари «reason: idle», не сирий JSON.
     await expect(page.getByRole('cell', { name: /reason: idle/ }).first()).toBeVisible({ timeout: 30_000 });
