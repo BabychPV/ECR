@@ -101,8 +101,9 @@ $csv = Join-Path $out ("hse400-year-diffs.{0}.csv" -f $db)
 $cmp.Diffs | Select-Object Table, RowKey, SourceRow, Month, Expected, Actual, RelErr | Export-Csv -LiteralPath $csv -NoTypeInformation -Encoding UTF8
 Write-Hse400Log ("Звірено комірок: {0}; збіглося {1}; розбіжних {2} (деталі: {3})." -f $cmp.Compared, $cmp.Matched, @($cmp.Diffs).Count, $csv)
 foreach ($g in @($cmp.Diffs | Group-Object Table, RowKey)) {
-    $months = @($g.Group | ForEach-Object { $_.Month }) -join ','
-    Write-Host ("  {0}: {1}" -f $g.Name, $months)
+    # ⚠ Не $months: змінні PowerShell без регістру, а $Months - параметр [int] (прогін 11.11 падав на цьому).
+    $diffMonths = @($g.Group | ForEach-Object { $_.Month }) -join ','
+    Write-Host ("  {0}: {1}" -f $g.Name, $diffMonths)
 }
 if (@($cmp.Diffs).Count) { exit 1 }
 exit 0
