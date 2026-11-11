@@ -138,6 +138,7 @@ import {
 import { beginInFlight, deferUntilInFlightSettles, inFlightEdit, splitByInFlight } from './inFlightEdits';
 import { GridAriaPlugin } from './gridAria';
 import { attachStickyGroupLabels, withHeaderGroups } from './headerGroups';
+import { installTruncationTooltip } from './truncationTooltip';
 import { mergePatchNotices, PatchNoticesAlert, type PatchNotice } from './patchNotices';
 // ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
 // з `permissions.ts`, і хоч обидва дають `rowKey:columnCode`, ключем мапи
@@ -2700,6 +2701,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         installCopyDefer(node, () => writeDeferredCopyRef.current()),
         // Групові заголовки: мітка групи центрується над видимою частиною клітинки при прокрутці.
         attachStickyGroupLabels(node),
+        // Повний текст обрізаного заголовка, групи чи комірки: делеговані слухачі на корені, одна підказка.
+        installTruncationTooltip(node),
         (() => {
           const tracker = trackEditorTouched(node);
           editorTouched.current = tracker;
