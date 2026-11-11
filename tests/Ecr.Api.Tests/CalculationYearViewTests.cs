@@ -31,7 +31,6 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
     private static readonly DateTime Now = new(2026, 1, 15, 10, 0, 0, DateTimeKind.Utc);
     private static readonly string[] NoCalcPermissions = ["Document.View"];
     private static readonly string[] FullPermissions = ["Document.View", "Calculation.View", "Document.Export"];
-    private static readonly string[] OneRow = ["x"];
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -43,30 +42,36 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
-        var (status, body) = await YearAsync(client, s.DocumentId, 2026).ConfigureAwait(true);
-        Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
-        var view = JsonDocument.Parse(body).RootElement;
+        var year = await YearAsync(client, s.DocumentId, 2026).ConfigureAwait(true);
+        Assert.True(year.Status == HttpStatusCode.OK, $"{year.Status}: {year.Body}\n{app.ErrorsText}");
+        var summary = year.Summary;
 
-        var months = view.GetProperty("months").EnumerateArray().ToList();
+        var months = summary.GetProperty("months").EnumerateArray().ToList();
         Assert.Equal(12, months.Count);
         Assert.Equal("current", months[0].GetProperty("runState").GetString());
         Assert.Equal("outOfDate", months[1].GetProperty("runState").GetString());
         Assert.Equal("noRun", months[2].GetProperty("runState").GetString());
         Assert.Equal("open", months[2].GetProperty("periodState").GetString());
         Assert.Equal("notOpened", months[3].GetProperty("runState").GetString());
-        Assert.False(view.GetProperty("freshnessHidden").GetBoolean());
+        Assert.False(summary.GetProperty("freshnessHidden").GetBoolean());
+
+        // Зведення без жодного числа: значення — лише на сторінках таблиць.
+        Assert.DoesNotContain("\"states\"", year.SummaryBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"yearTotal\"", year.SummaryBody, StringComparison.Ordinal);
+        Assert.Equal(year.Pages.Sum(p => p.Page.GetProperty("rows").GetArrayLength()), summary.GetProperty("totalRows").GetInt32());
 
         // Контроль до тестів Deny: без Deny усе, що аркуш B дає (вихід методології, формула шаблону, назви аркуша й
         // таблиці, підпис рядка), видно — інакше «не бачить» нижче нічого не доводить.
         foreach (var secret in s.SheetBSecrets)
         {
-            Assert.Contains(secret, body, StringComparison.Ordinal);
+            Assert.Contains(secret, year.Body, StringComparison.Ordinal);
         }
 
+        Assert.Contains(TableKeys(summary), k => k == s.TableBKey);
+
         // Число до D-401 (без екземпляра) — у єдиній таблиці місяця з таким рядком.
-        var legacy = Row(view, s.DynKey, s.OutAdditive);
-        var legacyEq = view.GetProperty("equipment")[legacy.GetProperty("equipment").GetInt32()];
-        Assert.Equal(s.TableBCode, view.GetProperty("tables")[legacyEq.GetProperty("table").GetInt32()].GetProperty("tableCode").GetString());
+        var legacy = Row(year, s.DynKey, s.OutAdditive);
+        Assert.Equal(s.TableBCode, TableOf(summary, legacy.Table).GetProperty("tableCode").GetString());
 
         var export = await ExportTextAsync(app, s).ConfigureAwait(true);
         foreach (var secret in s.SheetBSecrets)
@@ -75,7 +80,7 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         }
 
         // R1 · E_A (t): січень 1.5, лютий 2.5 актуального прогону (100 неактуального — не потрапляє); сума 4 за 2/12.
-        var r1 = Row(view, s.RowKey1, s.OutAdditive);
+        var r1 = Row(year, s.RowKey1, s.OutAdditive).Row;
         Assert.Equal([1.5m, 2.5m], Values(r1).Take(2).Select(v => v!.Value));
         Assert.All(Values(r1).Skip(2), v => Assert.Null(v));
         Assert.Equal("vvnnnnnnnnnn", r1.GetProperty("states").GetString());
@@ -83,27 +88,70 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         Assert.Equal(2, r1.GetProperty("monthsIncluded").GetInt32());
         Assert.DoesNotContain("100", r1.GetProperty("values").GetRawText(), StringComparison.Ordinal);
 
+        // Значення без хвостових нулів масштабу decimal(34,16): «1.5», а не «1.5000000000000000».
+        Assert.Equal("1.5", r1.GetProperty("values")[0].GetString());
+
         // R2 · E_A: лише лютий; у січні прогін був, а числа немає — «a».
-        var r2 = Row(view, s.RowKey2, s.OutAdditive);
+        var r2 = Row(year, s.RowKey2, s.OutAdditive).Row;
         Assert.Equal("avnnnnnnnnnn", r2.GetProperty("states").GetString());
         Assert.Equal(4m, Dec(r2.GetProperty("yearTotal")));
         Assert.Equal(1, r2.GetProperty("monthsIncluded").GetInt32());
 
         // Неадитивна одиниця: числа є, суми немає.
-        var rate = Row(view, s.RowKey1, s.OutRate);
+        var (ratePage, rate, _) = Row(year, s.RowKey1, s.OutRate);
         Assert.Equal(7m, Values(rate)[0]);
         Assert.Equal(JsonValueKind.Null, rate.GetProperty("yearTotal").ValueKind);
-        var rateUnit = view.GetProperty("units")[rate.GetProperty("unit").GetInt32()];
+        var rateUnit = ratePage.GetProperty("units")[rate.GetProperty("unit").GetInt32()];
         Assert.False(rateUnit.GetProperty("additive").GetBoolean());
 
         // Формула шаблону (IsCalculated) — окремий вихід без методології, з підписом рядка шаблону.
-        var formula = view.GetProperty("rows").EnumerateArray()
-            .Single(r => r.GetProperty("column").ValueKind == JsonValueKind.Number
-                         && r.GetProperty("outputCode").GetString() != s.FormulaCode);
+        var (formulaPage, formula) = year.Pages
+            .SelectMany(p => p.Page.GetProperty("rows").EnumerateArray().Select(r => (p.Page, Row: r)))
+            .Single(x => x.Row.GetProperty("column").ValueKind == JsonValueKind.Number
+                         && x.Row.GetProperty("outputCode").GetString() != s.FormulaCode);
         Assert.Equal(JsonValueKind.Null, formula.GetProperty("methodology").ValueKind);
         Assert.Equal(9m, Values(formula)[1]);
-        var eq = view.GetProperty("equipment")[formula.GetProperty("equipment").GetInt32()];
+        var eq = formulaPage.GetProperty("equipment")[formula.GetProperty("equipment").GetInt32()];
         Assert.Equal("Row 1", eq.GetProperty("labelL10n").GetProperty("values").GetProperty("en").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "CALC-RESULTS")]
+    public async Task Фільтри_зведення_і_сторінок_одне_правило_сторінки_без_перекриття()
+    {
+        var s = await ArrangeAsync(how: "none").ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var root = $"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/calculation-results/year";
+
+        // Пошук за підписом рядка таблиці B (лише в ній): зведення рахує 2 виходи (OUTH і число до D-401) у таблиці B, 0 деінде.
+        var found = JsonDocument.Parse(await GetOkAsync(app, client, $"{root}/summary?year=2026&q={Uri.EscapeDataString(s.LabelName.ToLowerInvariant())}").ConfigureAwait(true)).RootElement;
+        var matched = found.GetProperty("tables").EnumerateArray().ToDictionary(t => t.GetProperty("key").GetString()!, t => t.GetProperty("matched").GetInt32());
+        Assert.Equal(matched.Values.Sum(), found.GetProperty("matchedRows").GetInt32());
+        Assert.True(matched[s.TableBKey] >= 2, string.Join(", ", matched));
+        Assert.All(matched.Where(kv => kv.Key != s.TableBKey), kv => Assert.Equal(0, kv.Value));
+        var rows = JsonDocument.Parse(await GetOkAsync(app, client, $"{root}/rows?year=2026&table={s.TableBKey}&q={Uri.EscapeDataString(s.LabelName)}").ConfigureAwait(true)).RootElement;
+        Assert.Equal(matched[s.TableBKey], rows.GetProperty("total").GetInt32());
+
+        // Методологія «formula» — лише формули шаблону.
+        var formulas = JsonDocument.Parse(await GetOkAsync(app, client, $"{root}/summary?year=2026&methodology=formula").ConfigureAwait(true)).RootElement;
+        Assert.Equal(2, formulas.GetProperty("matchedRows").GetInt32());
+
+        // Сторінки по 1: послідовні, без перекриття, разом — уся таблиця; ідентифікатори виходів ті самі, що й у повній сторінці.
+        var all = JsonDocument.Parse(await GetOkAsync(app, client, $"{root}/rows?year=2026&table={s.TableAKey}").ConfigureAwait(true)).RootElement;
+        var ids = all.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("id").GetString()).ToList();
+        var paged = new List<string?>();
+        for (var offset = 0; offset < ids.Count; offset++)
+        {
+            var one = JsonDocument.Parse(await GetOkAsync(app, client, $"{root}/rows?year=2026&table={s.TableAKey}&offset={offset}&limit=1").ConfigureAwait(true)).RootElement;
+            Assert.Equal(ids.Count, one.GetProperty("total").GetInt32());
+            paged.AddRange(one.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("id").GetString()));
+        }
+
+        Assert.Equal(ids, paged);
+        Assert.True(ids.Count >= 3, string.Join(", ", ids));
     }
 
     [Fact]
@@ -116,28 +164,47 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
-        var (status, body) = await YearAsync(client, s.DocumentId, 2026).ConfigureAwait(true);
-        Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
+        var year = await YearAsync(client, s.DocumentId, 2026).ConfigureAwait(true);
+        Assert.True(year.Status == HttpStatusCode.OK, $"{year.Status}: {year.Body}\n{app.ErrorsText}");
 
         // Той самий arrange, що й у тесті без Deny (там кожен із цих рядків є): вихід, формула, аркуш, таблиця, підпис.
         foreach (var secret in s.SheetBSecrets)
         {
-            Assert.DoesNotContain(secret, body, StringComparison.Ordinal);
+            Assert.DoesNotContain(secret, year.Body, StringComparison.Ordinal);
         }
 
-        Assert.Contains(s.OutAdditive, body, StringComparison.Ordinal);
-        var view = JsonDocument.Parse(body).RootElement;
-        Assert.True(view.GetProperty("freshnessHidden").GetBoolean());
+        Assert.Contains(s.OutAdditive, year.Body, StringComparison.Ordinal);
+        var summary = year.Summary;
+        Assert.True(summary.GetProperty("freshnessHidden").GetBoolean());
         Assert.DoesNotContain(
-            view.GetProperty("months").EnumerateArray(), m => m.GetProperty("runState").GetString() == "outOfDate");
+            summary.GetProperty("months").EnumerateArray(), m => m.GetProperty("runState").GetString() == "outOfDate");
         Assert.All(
-            view.GetProperty("months").EnumerateArray(),
+            summary.GetProperty("months").EnumerateArray(),
             m => Assert.Equal(JsonValueKind.Null, m.GetProperty("calculatedAt").ValueKind));
 
+        // ⛔ Таблиці схованого аркуша у зведенні немає, а її сторінка — 200 без жодного рядка (як таблиця без виходів),
+        // і в ній теж нічого з аркуша B — ні з фільтром, ні без.
+        Assert.DoesNotContain(TableKeys(summary), k => k == s.TableBKey);
+        var root = $"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/calculation-results/year";
+        foreach (var query in new[] { "", $"&q={Uri.EscapeDataString(s.LabelName)}", "&methodology=formula" })
+        {
+            var hidden = await GetOkAsync(app, client, $"{root}/rows?year=2026&table={s.TableBKey}{query}").ConfigureAwait(true);
+            var page = JsonDocument.Parse(hidden).RootElement;
+            Assert.Equal(0, page.GetProperty("total").GetInt32());
+            Assert.Equal(0, page.GetProperty("rows").GetArrayLength());
+            foreach (var secret in s.SheetBSecrets)
+            {
+                Assert.DoesNotContain(secret, hidden, StringComparison.Ordinal);
+            }
+        }
+
+        // Стан місяця на сторінці видимої таблиці — той самий, що у зведенні (рахується по всьому документу):
+        // у березні прогону немає — «n», у січні прогін є, а числа R2 немає — «a».
+        Assert.Equal("avnnnnnnnnnn", Row(year, s.RowKey2, s.OutAdditive).Row.GetProperty("states").GetString());
+
         // Число до D-401 з ключем рядка схованої таблиці лишається, але без таблиці (а не в схованій).
-        var legacy = Row(view, s.DynKey, s.OutAdditive);
-        var legacyEq = view.GetProperty("equipment")[legacy.GetProperty("equipment").GetInt32()];
-        Assert.Equal(0, view.GetProperty("tables")[legacyEq.GetProperty("table").GetInt32()].GetProperty("tableDefId").GetInt32());
+        var legacy = Row(year, s.DynKey, s.OutAdditive);
+        Assert.Equal(0, TableOf(summary, legacy.Table).GetProperty("tableDefId").GetInt32());
 
         // Книга експорту будується тим самим будівником для профілю замовника — і теж без аркуша B.
         var export = await ExportTextAsync(app, s).ConfigureAwait(true);
@@ -160,15 +227,15 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
-        var (status, body) = await YearAsync(client, s.DocumentId, 2026).ConfigureAwait(true);
-        Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
+        var year = await YearAsync(client, s.DocumentId, 2026).ConfigureAwait(true);
+        Assert.True(year.Status == HttpStatusCode.OK, $"{year.Status}: {year.Body}\n{app.ErrorsText}");
 
         // Таблиця B видима (інші її колонки читаються): її назва й підпис рядка лишаються.
-        Assert.Contains(s.TableBName, body, StringComparison.Ordinal);
-        Assert.Contains(s.LabelName, body, StringComparison.Ordinal);
+        Assert.Contains(s.TableBName, year.Body, StringComparison.Ordinal);
+        Assert.Contains(s.LabelName, year.Body, StringComparison.Ordinal);
         var (hidden, shown) = how == "denyColumn" ? (s.OutHidden, s.FormulaCode) : (s.FormulaCode, s.OutHidden);
-        Assert.DoesNotContain(hidden, body, StringComparison.Ordinal);
-        Assert.Contains(shown, body, StringComparison.Ordinal);
+        Assert.DoesNotContain(hidden, year.Body, StringComparison.Ordinal);
+        Assert.Contains(shown, year.Body, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -181,16 +248,20 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
-        var (status, body) = await YearAsync(client, s.DocumentId, 2026).ConfigureAwait(true);
-        Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
-        var view = JsonDocument.Parse(body).RootElement;
+        var year = await YearAsync(client, s.DocumentId, 2026).ConfigureAwait(true);
+        Assert.True(year.Status == HttpStatusCode.OK, $"{year.Status}: {year.Body}\n{app.ErrorsText}");
 
         // Лютий аркуша B видно, січень — ні (число й підпис рядка, що є лише в січні).
-        var outH = Row(view, s.DynKey, s.OutHidden);
+        var outH = Row(year, s.DynKey, s.OutHidden).Row;
         Assert.Null(Values(outH)[0]);
         Assert.Equal(5m, Values(outH)[1]);
-        Assert.DoesNotContain(s.LabelName, body, StringComparison.Ordinal);
-        Assert.DoesNotContain(s.FormulaCode, body, StringComparison.Ordinal);
+        Assert.DoesNotContain(s.LabelName, year.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain(s.FormulaCode, year.Body, StringComparison.Ordinal);
+
+        // Пошук за підписом, схованим у січні, не знаходить рядка (підпис не читається — і в зведенні, і на сторінці).
+        var root = $"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/calculation-results/year";
+        var found = await GetOkAsync(app, client, $"{root}/summary?year=2026&q={Uri.EscapeDataString(s.LabelName)}").ConfigureAwait(true);
+        Assert.Equal(0, JsonDocument.Parse(found).RootElement.GetProperty("matchedRows").GetInt32());
 
         var export = await ExportTextAsync(app, s).ConfigureAwait(true);
         Assert.Contains(s.OutHidden, export, StringComparison.Ordinal);
@@ -212,9 +283,22 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.Forbidden, (await YearAsync(noCalc, plain.DocumentId, 2026).ConfigureAwait(true)).Status);
         Assert.Equal((HttpStatusCode)422, (await YearAsync(client, s.DocumentId, 1999).ConfigureAwait(true)).Status);
 
+        // Сторінка: невідомий ключ таблиці чи розмір поза 1…1000 — 422, а не 500 і не порожньо.
+        var root = $"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/calculation-results/year";
+        foreach (var bad in new[] { "&table=abc", "&table=1~", $"&table={s.TableAKey}&limit=0", $"&table={s.TableAKey}&limit=1001", $"&table={s.TableAKey}&offset=-1" })
+        {
+            using var response = await client.GetAsync(new Uri($"{root}/rows?year=2026{bad}", UriKind.Relative)).ConfigureAwait(true);
+            Assert.True(response.StatusCode == (HttpStatusCode)422, $"{bad}: {response.StatusCode}");
+        }
+
+        using (var noCalcRows = await noCalc.GetAsync(new Uri($"/api/v1/documents/{plain.DocumentId.ToString(CultureInfo.InvariantCulture)}/calculation-results/year/rows?year=2026&table=1", UriKind.Relative)).ConfigureAwait(true))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, noCalcRows.StatusCode);
+        }
+
         using var export = await client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/calculation-results/year/export", UriKind.Relative),
-            new { year = 2026, layout = "long", rowIds = OneRow,language = "en" }).ConfigureAwait(true);
+            new { year = 2026, layout = "long", filtered = true, problemsOnly = true, language = "en" }).ConfigureAwait(true);
         var exportBody = await export.Content.ReadAsStringAsync().ConfigureAwait(true);
         Assert.True(export.StatusCode == HttpStatusCode.Accepted, $"{export.StatusCode}: {exportBody}\n{app.ErrorsText}");
         Assert.False(string.IsNullOrEmpty(JsonDocument.Parse(exportBody).RootElement.GetProperty("jobId").GetString()));
@@ -227,13 +311,36 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
 
     // ── допоміжне ────────────────────────────────────────────────────────────────────────
 
-    private static JsonElement Row(JsonElement view, string rowKey, string output)
+    /// <summary>Вихід за ключем рядка й кодом серед усіх сторінок: (сторінка, рядок, ключ таблиці).</summary>
+    private static (JsonElement Page, JsonElement Row, string Table) Row(YearResponse year, string rowKey, string output)
+        => year.Pages
+            .SelectMany(p =>
+            {
+                var equipment = p.Page.GetProperty("equipment").EnumerateArray().ToList();
+                return p.Page.GetProperty("rows").EnumerateArray()
+                    .Where(r => r.GetProperty("outputCode").GetString() == output
+                                && equipment[r.GetProperty("equipment").GetInt32()].GetProperty("rowKey").GetString() == rowKey)
+                    .Select(r => (p.Page, r, p.Table));
+            })
+            .Single();
+
+    private static IEnumerable<string?> TableKeys(JsonElement summary)
+        => summary.GetProperty("tables").EnumerateArray().Select(t => t.GetProperty("key").GetString());
+
+    private static JsonElement TableOf(JsonElement summary, string key)
+        => summary.GetProperty("tables").EnumerateArray().Single(t => t.GetProperty("key").GetString() == key);
+
+    private static async Task<string> GetOkAsync(EcrApiFactory app, HttpClient client, string url)
     {
-        var equipment = view.GetProperty("equipment").EnumerateArray().ToList();
-        return view.GetProperty("rows").EnumerateArray().Single(r =>
-            r.GetProperty("outputCode").GetString() == output
-            && equipment[r.GetProperty("equipment").GetInt32()].GetProperty("rowKey").GetString() == rowKey);
+        using var response = await client.GetAsync(new Uri(url, UriKind.Relative)).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{url}: {response.StatusCode}: {body}\n{app.ErrorsText}");
+        return body;
     }
+
+    /// <summary>Зведення і всі сторінки всіх його таблиць (по 1000) — те, що екран бачить, розгорнувши все.</summary>
+    private sealed record YearResponse(
+        HttpStatusCode Status, string SummaryBody, JsonElement Summary, IReadOnlyList<(string Table, JsonElement Page)> Pages, string Body);
 
     private static List<decimal?> Values(JsonElement row)
         => [.. row.GetProperty("values").EnumerateArray().Select(v => v.ValueKind == JsonValueKind.Null ? (decimal?)null : Dec(v))];
@@ -244,12 +351,30 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
             ? decimal.Parse(value.GetString()!, NumberStyles.Number, CultureInfo.InvariantCulture)
             : value.GetDecimal();
 
-    private static async Task<(HttpStatusCode Status, string Body)> YearAsync(HttpClient client, long documentId, int year)
+    private static async Task<YearResponse> YearAsync(HttpClient client, long documentId, int year)
     {
-        using var response = await client.GetAsync(new Uri(
-            $"/api/v1/documents/{documentId.ToString(CultureInfo.InvariantCulture)}/calculation-results/year?year={year.ToString(CultureInfo.InvariantCulture)}",
-            UriKind.Relative)).ConfigureAwait(false);
-        return (response.StatusCode, await response.Content.ReadAsStringAsync().ConfigureAwait(false));
+        var root = $"/api/v1/documents/{documentId.ToString(CultureInfo.InvariantCulture)}/calculation-results/year";
+        var y = year.ToString(CultureInfo.InvariantCulture);
+        using var response = await client.GetAsync(new Uri($"{root}/summary?year={y}", UriKind.Relative)).ConfigureAwait(false);
+        var summaryBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        if (response.StatusCode != HttpStatusCode.OK)
+        {
+            return new YearResponse(response.StatusCode, summaryBody, default, [], summaryBody);
+        }
+
+        var summary = JsonDocument.Parse(summaryBody).RootElement;
+        var pages = new List<(string, JsonElement)>();
+        var bodies = new List<string> { summaryBody };
+        foreach (var key in TableKeys(summary))
+        {
+            using var page = await client.GetAsync(new Uri($"{root}/rows?year={y}&table={key}&limit=1000", UriKind.Relative)).ConfigureAwait(false);
+            var body = await page.Content.ReadAsStringAsync().ConfigureAwait(false);
+            Assert.True(page.StatusCode == HttpStatusCode.OK, $"{key}: {page.StatusCode}: {body}");
+            bodies.Add(body);
+            pages.Add((key!, JsonDocument.Parse(body).RootElement));
+        }
+
+        return new YearResponse(response.StatusCode, summaryBody, summary, pages, string.Join('\n', bodies));
     }
 
     /// <summary>Книга експорту для профілю замовника — тим самим шляхом, що й задача експорту (без черги задач).</summary>
@@ -266,7 +391,8 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
 
     private sealed record Scenario(
         long DocumentId, int UserId, string UserName, string RowKey1, string RowKey2, string OutAdditive, string OutRate,
-        string OutHidden, string DynKey, string SheetBName, string TableBName, string TableBCode, string LabelName, string FormulaCode)
+        string OutHidden, string DynKey, string SheetBName, string TableBName, string TableBCode, string LabelName, string FormulaCode,
+        string TableAKey, string TableBKey)
     {
         /// <summary>Усе, що аркуш B дає в огляд: вихід методології, формула шаблону, аркуш, таблиця, підпис рядка.</summary>
         public string[] SheetBSecrets => [OutHidden, FormulaCode, SheetBName, TableBName, LabelName];
@@ -445,7 +571,8 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
 
         return new Scenario(
             b.DocumentId, user.Id, userName, rowKeys[0], rowKeys[1], outAdditive, outRate, outHidden, dynKey,
-            sheetBName, tableBName, tableBCode, labelName, formulaCode);
+            sheetBName, tableBName, tableBCode, labelName, formulaCode,
+            b.TableDefId.ToString(CultureInfo.InvariantCulture), tableB.Id.ToString(CultureInfo.InvariantCulture));
     }
 
     private static CalculationRun Run(int projectId, int period, bool current)

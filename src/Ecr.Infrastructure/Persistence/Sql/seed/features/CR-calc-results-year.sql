@@ -165,7 +165,15 @@ SELECT v.[Key], v.Lang, v.Val
     (N'calcResults.calculatedMonthHeading', N'ru', N'Рассчитанные столбцы показывают результаты за'),
     (N'calcResults.calculatedMonthHeading', N'kz', N'Есептелген бағандар нәтижелерін көрсетеді'),
     (N'err.ECR-REQ-0422.calcResultsExportInvalid', N'ru', N'Вид «{layout}» или список выходов не подходят для экспорта.'),
-    (N'err.ECR-REQ-0422.calcResultsExportInvalid', N'kz', N'«{layout}» пішіні немесе шығыстар тізімі экспортқа жарамайды.')
+    (N'err.ECR-REQ-0422.calcResultsExportInvalid', N'kz', N'«{layout}» пішіні немесе шығыстар тізімі экспортқа жарамайды.'),
+    (N'calcResults.moreRows', N'ru', N'Показать ещё ({shown} из {total})'),
+    (N'calcResults.moreRows', N'kz', N'Тағы көрсету ({total} ішінен {shown})'),
+    (N'calcResults.loadingRows', N'ru', N'Загрузка строк…'),
+    (N'calcResults.loadingRows', N'kz', N'Жолдар жүктелуде…'),
+    (N'err.ECR-REQ-0422.calcResultsPageInvalid', N'ru', N'Таблица «{table}» или размер страницы (1…{max}) не подходят.'),
+    (N'err.ECR-REQ-0422.calcResultsPageInvalid', N'kz', N'«{table}» кестесі немесе бет өлшемі (1…{max}) жарамайды.'),
+    (N'err.ECR-REQ-0422.calcResultsQueryTooLong', N'ru', N'Строка поиска длиннее {max} символов.'),
+    (N'err.ECR-REQ-0422.calcResultsQueryTooLong', N'kz', N'Іздеу жолы {max} таңбадан ұзын.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -255,7 +263,11 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'calcResults.yearChipHint', N'en', N'This template shows the whole year on one sheet: months are columns. There is no month switch.', 1),
     (N'calcResults.calculatedMonth', N'en', N'Calculated: {month}', 1),
     (N'calcResults.calculatedMonthHeading', N'en', N'Calculated columns show results of', 1),
-    (N'err.ECR-REQ-0422.calcResultsExportInvalid', N'en', N'The layout “{layout}” or the list of outputs cannot be exported.', 1)
+    (N'err.ECR-REQ-0422.calcResultsExportInvalid', N'en', N'The layout “{layout}” or the list of outputs cannot be exported.', 1),
+    (N'calcResults.moreRows', N'en', N'Show more ({shown} of {total})', 1),
+    (N'calcResults.loadingRows', N'en', N'Loading rows…', 1),
+    (N'err.ECR-REQ-0422.calcResultsPageInvalid', N'en', N'The table “{table}” or the page size (1…{max}) is not valid.', 1),
+    (N'err.ECR-REQ-0422.calcResultsQueryTooLong', N'en', N'The search text is longer than {max} characters.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

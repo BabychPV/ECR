@@ -1917,18 +1917,48 @@ public sealed record CurrentResultFilter(
 public interface ICalculationYearReader
 {
     /// <summary>Числа актуальних прогонів і розраховані комірки формул шаблону за періоди року одним набором запитів.</summary>
-    public Task<CalculationYearFacts> ReadYearAsync(
-        long documentId,
-        IReadOnlyList<int> periodKeys,
-        IReadOnlyCollection<long> tableInstanceIds,
-        IReadOnlyCollection<int> labelColumnIds,
-        CancellationToken ct);
+    public Task<CalculationYearFacts> ReadYearAsync(CalculationYearReadRequest request, CancellationToken ct);
+
+    /// <summary>Рядки екземплярів (господарі чисел до D-401 у режимі однієї таблиці чи зведення).</summary>
+    public Task<IReadOnlyList<YearRow>> ReadRowsAsync(
+        IReadOnlyList<int> periodKeys, IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct);
 }
+
+// CalculationYearReadRequest(DocumentId, PeriodKeys, TableInstanceIds, LabelColumnIds, IncludeRows, SliceResults, Aggregate)
 ```
 
 > CALC-RESULTS (2026-11-11): `CalculationResultStore` реалізує й цей порт — правило актуального прогону (власний
 > документний прогін періоду перед проєктним) одне на обидва читання (`EffectiveRuns`). Стеля — 50 000 × кількість
 > періодів, понад неї — `ECR-CALC-0422` `resultsTooLarge`, як і для одного періоду. Лише гаряча схема (архів — ні).
+>
+> ✎ 2026-11-11, сторінковий огляд (перф, CalculationYearPerfTests): факти читаються в одному з трьох обсягів —
+> **увесь документ зі значеннями** (експорт), **зведення** (`Aggregate`: SQL групує числа й комірки формул до виходу з
+> маскою місяців `MAX(CASE …)`, без значень, рядків і підписів; підписи — лише для пошуку) і **одна таблиця**
+> (`SliceResults`: числа лише її екземплярів і без екземпляра, рядки/підписи/формули — лише її). Ключі чисел усього
+> документа (`ResultKeys`, агрегат) читаються завжди: з них — прогін місяця, стеля і стан місяця для вузького читача,
+> однакові для зведення й будь-якої сторінки. Рядки, підписи й комірки формул — `FORCESEEK` по `UQ_TableRow_Key`
+> (PeriodKey, TableInstanceId), `PK_CellValue` (PeriodKey, TableRowId), `UQ_TableInstance` (PeriodKey, DocumentId) +
+> `LOOP JOIN`: ціна від розміру документа/таблиці, а не партиції (без підказки оптимізатор переглядав усі рядки
+> партиції). Ведуча таблиця кожного запиту несе `PeriodKey IN (…)`, вкладені пошуки — рівність PeriodKey.
+> Індексів не змінено. ⚠ Відкрите: `IsCalculated` не в ключі жодного індексу комірок — рядок читає всі свої комірки;
+> `IX_CalculationResult_DocRun` не має `Kind` і `TableInstanceId` у ключі — сторінка таблиці читає всі числа документа
+> (агрегат ~40 мс, значення ~250 мс на 240 тис. чисел). Обидва — кандидати на індекс за окремим рішенням (міграція).
+>
+> **API (замість одного `GET …/calculation-results/year`, що на документі Land важив 9.17 МБ):**
+> `GET …/year/summary?year=&q=&sheet=&methodology=&substance=&problems=` — місяці, таблиці (`key`, аркуш, `rows`,
+> `matched`, `problems`), варіанти фільтрів (`methodologies`, `substances`, `hasFormulas`), `totalRows`/`matchedRows`/
+> `problemRows`, `freshnessHidden`; жодного числа. `GET …/year/rows?year=&table=<key>&offset=&limit=` (+ ті самі
+> фільтри) — сторінка виходів однієї таблиці (типово 200, найбільше 1000): 12 значень масивом, стани рядком із 12
+> літер, сума за рік; обладнання, методології, речовини, одиниці й колонки — лише ті, на які посилаються рядки
+> сторінки. Ключ таблиці — `TableDefId`, `TableDefId~SheetCopyId` або `0` (числа без таблиці); інша форма, `offset < 0`,
+> `limit` поза 1…1000, `q` довший за 200 — `ECR-REQ-0422`. Фільтри — одне правило (`CalculationYearFilter`) для зведення,
+> сторінок і експорту; пошук — назва обладнання будь-якою мовою, IDCode, ключ рядка, без регістру. ⛔ Таблиця, якої
+> читач не бачить (Deny), у зведенні відсутня, а її сторінка — 200 із `total = 0` (як таблиця без виходів, без оракула
+> існування). Ідентифікатор виходу будується з ключа таблиці (не індексу), тож однаковий у зведенні, на сторінці й в
+> експорті. Значення — без хвостових нулів масштабу (`"2.5"`, не `"2.5000000000000000"`). Експорт «як відфільтровано»
+> передає фільтри (`filtered`, `query`, `sheet`, `methodology`, `substance`, `problemsOnly`), а не перелік
+> ідентифікаторів: екран тримає лише завантажені сторінки. Сума за рік рахується на сервері з тих самих значень, ПІСЛЯ
+> звуження доступу по місяцях (SQL-`SUM` додав би місяці, сховані від вузького читача).
 
 ```csharp
 // src/Ecr.Application/Ports/ICalculationBindingStore.cs
@@ -4777,7 +4807,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/methodologies/{id}/bindings/{columnDefId}/{outputCode}` | `Calculation.EditRule` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/publications` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-results` | `Calculation.View` | 7 |
-| `GET` | `/api/v1/documents/{id}/calculation-results/year` | `Calculation.View` | 7 |
+| `GET` | `/api/v1/documents/{id}/calculation-results/year/summary` | `Calculation.View` | 7 |
+| `GET` | `/api/v1/documents/{id}/calculation-results/year/rows` | `Calculation.View` | 7 |
 | `POST` | `/api/v1/documents/{id}/calculation-results/year/export` | `Document.Export` | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-run` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-issues` | `Document.View` | 7 |

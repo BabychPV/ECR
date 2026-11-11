@@ -662,21 +662,71 @@ public sealed class DocumentsController(
         => Ok(await calculationResults.HandleAsync(id, periodKey, ct).ConfigureAwait(false));
 
     /// <summary>
-    /// Усі розраховані числа документа за рік, місяці поруч («Calculation results», CALC-RESULTS.md). Право
+    /// Зведення «Calculation results» за рік (CALC-RESULTS.md): місяці, таблиці з лічильниками виходів і «проблем»,
+    /// варіанти фільтрів — без чисел. Право <c>Calculation.View</c>.
+    /// </summary>
+    /// <param name="id">Документ.</param>
+    /// <param name="year">Рік (2000…2100).</param>
+    /// <param name="q">Пошук: обладнання, IDCode, ключ рядка (до 200 символів).</param>
+    /// <param name="sheet">Аркуш (<c>sheetDefId</c>).</param>
+    /// <param name="methodology">Код методології; <c>formula</c> — формули шаблону.</param>
+    /// <param name="substance">Код речовини.</param>
+    /// <param name="problems"><c>true</c> — лише «проблемні» виходи.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Огляд року одним запитом (усі числа) важив 9 МБ на документі Land; тепер зведення — кілобайти, а числа —
+    /// сторінками таблиці (<c>…/year/rows</c>). Лічильники рахуються з тими самими фільтрами, що й сторінки.
+    /// </remarks>
+    [HttpGet("{id:long}/calculation-results/year/summary")]
+    [ProducesResponseType<Application.Documents.CalculationYear.CalculationYearSummaryDto>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> CalculationResultsYearSummary(
+        long id,
+        [FromQuery] int year,
+        [FromQuery] string? q,
+        [FromQuery] int? sheet,
+        [FromQuery] string? methodology,
+        [FromQuery] string? substance,
+        [FromQuery] bool? problems,
+        CancellationToken ct)
+        => Ok(await calculationYear
+            .SummaryAsync(id, year, new(q, sheet, methodology, substance, problems ?? false), ct)
+            .ConfigureAwait(false));
+
+    /// <summary>
+    /// Сторінка виходів однієї таблиці огляду року: 12 значень масивом, довідники — лише сторінки. Право
     /// <c>Calculation.View</c>.
     /// </summary>
     /// <param name="id">Документ.</param>
     /// <param name="year">Рік (2000…2100).</param>
+    /// <param name="table">Ключ таблиці зі зведення (<c>tables[].key</c>).</param>
+    /// <param name="offset">Зсув (≥ 0).</param>
+    /// <param name="limit">Розмір сторінки (1…1000, типово 200).</param>
+    /// <param name="q">Пошук.</param>
+    /// <param name="sheet">Аркуш.</param>
+    /// <param name="methodology">Код методології або <c>formula</c>.</param>
+    /// <param name="substance">Код речовини.</param>
+    /// <param name="problems">Лише «проблемні».</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
-    /// ⚠ Окремий шлях <c>…/calculation-results/year</c>, а не <c>?year=</c> на сусідньому
-    /// <c>…/calculation-results?periodKey=</c>: форма відповіді інша (огляд року, а не перелік чисел періоду), і
-    /// одна адреса з двома формами зламала б типізований контракт клієнта. Один запит на документ × рік.
+    /// ⛔ Таблиця, якої читач не бачить, — 200 із <c>total = 0</c>, як таблиця без виходів (без оракула існування).
     /// </remarks>
-    [HttpGet("{id:long}/calculation-results/year")]
-    [ProducesResponseType<Application.Documents.CalculationYear.CalculationYearViewDto>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> CalculationResultsYear(long id, [FromQuery] int year, CancellationToken ct)
-        => Ok(await calculationYear.HandleAsync(id, year, ct).ConfigureAwait(false));
+    [HttpGet("{id:long}/calculation-results/year/rows")]
+    [ProducesResponseType<Application.Documents.CalculationYear.CalculationYearRowsDto>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> CalculationResultsYearRows(
+        long id,
+        [FromQuery] int year,
+        [FromQuery] string? table,
+        [FromQuery] int? offset,
+        [FromQuery] int? limit,
+        [FromQuery] string? q,
+        [FromQuery] int? sheet,
+        [FromQuery] string? methodology,
+        [FromQuery] string? substance,
+        [FromQuery] bool? problems,
+        CancellationToken ct)
+        => Ok(await calculationYear
+            .RowsAsync(id, year, table, new(q, sheet, methodology, substance, problems ?? false), offset ?? 0, limit, ct)
+            .ConfigureAwait(false));
 
     /// <summary>
     /// Експорт огляду року в <c>.xlsx</c> (фоном, як експорт документа). Право <c>Document.Export</c> і
@@ -691,8 +741,12 @@ public sealed class DocumentsController(
         long id, [FromBody] CalculationYearExportRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var filter = request.Filtered
+            ? new Application.Documents.CalculationYear.CalculationYearFilter(
+                request.Query, request.Sheet, request.Methodology, request.Substance, request.ProblemsOnly)
+            : null;
         var jobId = await exportCalculationYear
-            .HandleAsync(id, request.Year, request.Layout, request.RowIds, request.Language, ct)
+            .HandleAsync(id, request.Year, request.Layout, filter, request.Language, ct)
             .ConfigureAwait(false);
         return Accepted(new Contracts.JobAcceptedResponse(jobId));
     }
@@ -991,10 +1045,23 @@ public sealed record ExportRequest(
 /// <summary>Запит на експорт огляду «Calculation results» за рік.</summary>
 /// <param name="Year">Рік.</param>
 /// <param name="Layout"><c>pivot</c> (місяці колонками, типово) або <c>long</c> (рядок на вихід × місяць).</param>
-/// <param name="RowIds">Виходи «як відфільтровано» (<c>rows[].id</c> огляду); відсутнє — увесь документ.</param>
 /// <param name="Language">Мова підписів (<c>en</c>, <c>ru</c>, <c>kz</c>).</param>
+/// <param name="Filtered"><c>true</c> — «як відфільтровано» (поля нижче — ті самі фільтри, що й на екрані); інакше увесь документ.</param>
+/// <param name="Query">Пошук.</param>
+/// <param name="Sheet">Аркуш (<c>sheetDefId</c>).</param>
+/// <param name="Methodology">Код методології або <c>formula</c>.</param>
+/// <param name="Substance">Код речовини.</param>
+/// <param name="ProblemsOnly">Лише «проблемні».</param>
 public sealed record CalculationYearExportRequest(
-    int Year, string? Layout = null, IReadOnlyList<string>? RowIds = null, string? Language = null);
+    int Year,
+    string? Layout = null,
+    string? Language = null,
+    bool Filtered = false,
+    string? Query = null,
+    int? Sheet = null,
+    string? Methodology = null,
+    string? Substance = null,
+    bool ProblemsOnly = false);
 
 /// <summary>Запит на застосування імпорту.</summary>
 /// <param name="PreviewToken">Токен раніше побудованого diff.</param>
