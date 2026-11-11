@@ -123,4 +123,26 @@ describe('смуга 12 місяців: стан не змінює розмір 
       expect(contrast(vars[token] ?? '', vars['--ecr-surface'] ?? ''), `${scheme}: ${token} на --ecr-surface`).toBeGreaterThanOrEqual(3);
     }
   });
+
+  /*
+   * ✎ AN-170 (Аудит, P3): у темній схемі «reopened» (рамка `--ecr-accent-text` + світлий замок на порожньому тлі)
+   * читалася як кільце поточного періоду — той самий колір і те саме «порожнє з рамкою». Різниця має бути ФОРМОЮ:
+   * reopened — залита плитка, поточний — порожнє кільце. ⛔ Червоне без фіксу: у «reopened» немає `background`.
+   */
+  it.each(['light', 'dark'] as const)('схема «%s»: «reopened» — залита плитка, відмінна від кільця поточного', (scheme) => {
+    const out = cssVariablesResolver(mergeMantineTheme(DEFAULT_THEME, theme));
+    const vars: Record<string, string> = { ...out.variables, ...out[scheme] };
+    const reopened = only(".ecr-year-strip-box[data-cell='reopened']");
+    const current = only(".ecr-year-strip-box[data-current='true']");
+    const fill = /var\((--ecr-[\w-]+)/.exec(declaration(reopened, 'background') ?? '')?.[1] ?? '(немає заливки)';
+
+    expect(fill).toBe('--ecr-accent-soft');
+    // Поточний — лише кільце: власної заливки немає, тож reopened поточного місяця лишається залитим.
+    expect(declaration(current, 'background')).toBeUndefined();
+    expect(declaration(current, 'background-color')).toBeUndefined();
+    // Заливка помітна на тлі рядка, а замок (`--ecr-accent-text`) на ній — ≥ 3:1 (нетекстовий знак).
+    expect(vars[fill]).not.toBe(vars['--ecr-surface']);
+    const ink = /var\((--ecr-[\w-]+)/.exec(declaration(reopened, 'color') ?? '')?.[1] ?? '';
+    expect(contrast(vars[ink] ?? '', vars[fill] ?? ''), `${scheme}: ${ink} на ${fill}`).toBeGreaterThanOrEqual(3);
+  });
 });
