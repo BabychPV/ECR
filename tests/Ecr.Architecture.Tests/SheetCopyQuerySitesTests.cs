@@ -64,6 +64,8 @@ public sealed partial class SheetCopyQuerySitesTests
 
         ["src/Ecr.Infrastructure/Persistence/Hse400CompositionSnapshotLoader.cs"] =
             "HSE400: склад газу для Land — лише екземпляри оригіналу (SheetCopyId == null); копії аркуша складу не дають",
+        ["src/Ecr.Infrastructure/Jobs/Hse400LandDependentsTrigger.cs"] =
+            "HSE400 3b: «чи документ HSE400» — за екземплярами оригіналу (SheetCopyId == null), як у завантажувачі складу",
 
         // ── байдужі до копії: адресація за Id екземпляра/рядка або агрегат без ключа таблиці ──
         ["src/Ecr.Infrastructure/Persistence/PermitStore.cs"] = "«де вжито» за Id екземпляра рядка",

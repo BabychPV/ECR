@@ -24,9 +24,21 @@ public interface IRegistryImpactRecalculationJob : IBackgroundJob;
 /// Документи, яких стосується запуск; вже розв'язаний і перевірений за правами перелік.
 /// </param>
 /// <param name="Reason">Причина від людини — для журналу задач.</param>
-public sealed record RegistryImpactRecalculationRequest(int RegistryDefId, IReadOnlyList<long> DocumentIds, string Reason)
+/// <param name="Year">
+/// HSE400 3b: змінився документ-джерело даних довідника — рік періодів, у яких шукати залежні документи; тоді
+/// <paramref name="DocumentIds"/> порожній — набір визначає задача під час виконання.
+/// </param>
+public sealed record RegistryImpactRecalculationRequest(
+    int RegistryDefId,
+    IReadOnlyList<long> DocumentIds,
+    string Reason,
+    int? Year = null)
 {
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+
+    /// <summary>Чи це постановка «залежні від документа-джерела за рік» (HSE400 3b), а не перелік людини.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsSourceChange => Year is > 0;
 
     /// <summary>Розбирає завдання черги: типізоване або JSON.</summary>
     /// <param name="payload">Завдання.</param>
@@ -46,9 +58,10 @@ public sealed record RegistryImpactRecalculationRequest(int RegistryDefId, IRead
         return Validate(request);
     }
 
-    // ⛔ Порожній перелік — не «усі зачеплені»: задача без адресатів мовчки не робила б нічого.
+    // ⛔ Порожній перелік — не «усі зачеплені»: задача без адресатів мовчки не робила б нічого. Виняток — зміна
+    // документа-джерела (HSE400 3b): там адресатів визначає рік, а не перелік.
     private static RegistryImpactRecalculationRequest Validate(RegistryImpactRecalculationRequest request)
-        => request.RegistryDefId > 0 && request.DocumentIds is { Count: > 0 }
+        => request.RegistryDefId > 0 && (request.DocumentIds is { Count: > 0 } || request.IsSourceChange)
             ? request
             : throw new InvalidOperationException(
                 "Завдання перерахунку зачеплених не називає довідника чи документів: рахувати нічого.");
@@ -75,4 +88,15 @@ public static class RegistryImpactRecalculationTarget
 
         return string.Create(CultureInfo.InvariantCulture, $"registry-impact-r{registryDefId}-{hash}");
     }
+
+    /// <summary>Ціль «довідник × рік» для зміни документа-джерела (HSE400 3b).</summary>
+    /// <param name="registryDefId">Довідник.</param>
+    /// <param name="year">Рік періодів.</param>
+    /// <returns>Ключ цілі.</returns>
+    /// <remarks>
+    /// ⚠ Набору документів у ключі немає: набір визначає задача під час ВИКОНАННЯ, тож payload однієї цілі однаковий,
+    /// і повторні перерахунки джерела, поки задача чекає, дають одну задачу.
+    /// </remarks>
+    public static string ForYear(int registryDefId, int year)
+        => string.Create(CultureInfo.InvariantCulture, $"registry-impact-r{registryDefId}-y{year}");
 }

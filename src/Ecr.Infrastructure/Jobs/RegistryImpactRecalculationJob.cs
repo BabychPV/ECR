@@ -51,9 +51,23 @@ public sealed partial class RegistryImpactRecalculationJob(
         // проєктах. Доти документ із більшим Id (пізніший проєкт) за спільним довідником не потрапляв у
         // `MaxRows` глобального переліку, рахувався «зниклим» (`gone`), і задача завершувалась
         // `Succeeded` з `queued = 0` — результати лишались на старому довіднику.
-        var rows = await impact
-            .ListImpactedForDocumentsAsync(request.RegistryDefId, [.. wanted], ct)
-            .ConfigureAwait(false);
+        //
+        // HSE400 3b: зміна документа-джерела — системна постановка без переліку людини; набір — усі залежні
+        // документи року, тим самим запитом сховища (відкриті періоди, методологія читає довідник).
+        IReadOnlyList<RegistryImpactRow> rows;
+        if (request.IsSourceChange)
+        {
+            rows = await impact
+                .ListImpactedForYearAsync(request.RegistryDefId, request.Year!.Value, ct)
+                .ConfigureAwait(false);
+            wanted = [.. rows.Select(r => r.DocumentId)];
+        }
+        else
+        {
+            rows = await impact
+                .ListImpactedForDocumentsAsync(request.RegistryDefId, [.. wanted], ct)
+                .ConfigureAwait(false);
+        }
 
         // Документ × період: одна методологія — один рядок, а перерахунок від неї не залежить.
         var targets = rows

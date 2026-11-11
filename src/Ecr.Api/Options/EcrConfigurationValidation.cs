@@ -158,6 +158,9 @@ public static partial class EcrConfigurationValidation
         // HSE400: Land читає склад газу з документа HSE400, а не з довідника (типово вимкнено).
         Ecr.Infrastructure.Persistence.Hse400CompositionSnapshotLoader.EnabledKey,
 
+        // HSE400 3b: після перерахунку документа HSE400 — злитий перерахунок залежних Land (типово вимкнено).
+        Ecr.Infrastructure.Jobs.Hse400LandDependentsTrigger.EnabledKey,
+
         // D-462: видалення сирих точок, яких PI більше не віддає (повністю перечитаний шматок вікна).
         Ecr.Adapters.PiAf.CollectionRunnerOptions.DeleteMissingPointsKey,
 
