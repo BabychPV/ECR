@@ -33,6 +33,14 @@ namespace Ecr.Calculations;
 /// <c>!Формула</c>, у результат НЕ потрапляє: порожня комірка з кроком-причиною, а не нуль.
 /// </para>
 /// <para>
+/// ⛔ Виняток — правило старої системи «нульова молекулярна вага»: якщо рядок <see cref="ZeroMolecularWeightRow"/>
+/// таблиці в місяці дорівнює рівно нулю, УСІ рядки <c>F_…</c> цієї таблиці в цьому місяці — нуль (і замасковані теж),
+/// без кроків-помилок. Стара система (<c>CalculationBaseAdv.Advanced</c>, CalculationBaseAdv.cs:292–301) так
+/// обриває розрахунок частини HSE400, щойно результат з <c>MolecularWeight</c> у ключі дорівнює «0», і звіт
+/// HSE400.Year показує нулі на весь місяць без вводу. Правило діє лише в цьому модулі (рівень <c>Module</c>), а не в
+/// семантиці виразів.
+/// </para>
+/// <para>
 /// У БД модуль не пише (D-69): результати повертаються оркестратору, запис робить
 /// <see cref="CalculationOutputWriter"/> у <c>calc.CalculationResult</c>.
 /// </para>
@@ -41,6 +49,11 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
 {
     /// <summary>Префікс ключа обчислюваного рядка (контракт шаблону HSE400).</summary>
     public const string CalculatedRowPrefix = "F_";
+
+    /// <summary>
+    /// Рядок, чий нуль обнуляє всю таблицю місяця (правило старої системи, див. зауваження до класу).
+    /// </summary>
+    public const string ZeroMolecularWeightRow = CalculatedRowPrefix + "MolecularWeight";
 
     /// <summary>Код безрозмірної одиниці — запасна одиниця результату.</summary>
     private const string DimensionlessUnitCode = "one";
@@ -277,7 +290,7 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
                     ct)
                 .ConfigureAwait(false);
 
-            Collect(result, targets, month, filled, noUnit, dependencies, silent, rows);
+            Collect(result, targets, month, filled, noUnit, dependencies, silent, outputs, rows);
         }
 
         return new SheetRun(
@@ -302,6 +315,7 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
         HashSet<string> noUnit,
         Dictionary<string, List<string>> dependencies,
         bool silent,
+        IReadOnlyList<MethodologyOutput> outputs,
         Dictionary<(long TableInstanceId, string RowKey), RowResult> rows)
     {
         var firstStep = new Dictionary<string, CalculationTraceStep>(StringComparer.OrdinalIgnoreCase);
@@ -329,6 +343,8 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
             }
         }
 
+        var zeroTables = ZeroMolecularWeightTables(result, targets, tainted);
+
         foreach (var target in targets)
         {
             if (!target.Table.MonthColumns.TryGetValue(month, out var column))
@@ -343,6 +359,20 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
             }
 
             var code = target.Formula.Code;
+
+            // ⛔ Нульова молекулярна вага: уся таблиця місяця — нуль, як у старій системі; кроків-помилок немає.
+            if (zeroTables.Contains(target.Table.Instance.TableInstanceId))
+            {
+                if (outputs.FirstOrDefault(o => string.Equals(o.Code, code, StringComparison.OrdinalIgnoreCase))
+                    is { } declared)
+                {
+                    row.Values.Add(new CalculationOutputValue(
+                        declared.MethodologyVersionId, null, column.Code, 0m, declared.UnitId));
+                }
+
+                continue;
+            }
+
             var broken = tainted.Contains(code) || noUnit.Contains(code);
             if (!broken)
             {
@@ -380,6 +410,33 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
                 row.Steps.Add(recorded with { StepCode = column.Code });
             }
         }
+    }
+
+    /// <summary>
+    /// Таблиці, у яких рядок <see cref="ZeroMolecularWeightRow"/> цього місяця пораховано рівно в нуль (не замаскований).
+    /// </summary>
+    private static HashSet<long> ZeroMolecularWeightTables(
+        CalculationOutput result, IReadOnlyList<FormulaTarget> targets, HashSet<string> tainted)
+    {
+        var zero = new HashSet<long>();
+        foreach (var target in targets)
+        {
+            if (!string.Equals(target.RowKey, ZeroMolecularWeightRow, StringComparison.OrdinalIgnoreCase)
+                || tainted.Contains(target.Formula.Code))
+            {
+                continue;
+            }
+
+            var values = result.Values
+                .Where(v => string.Equals(v.OutputCode, target.Formula.Code, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (values.Count > 0 && values.All(v => v.Value == 0m))
+            {
+                zero.Add(target.Table.Instance.TableInstanceId);
+            }
+        }
+
+        return zero;
     }
 
     private async Task<List<MonthTable>> LoadTablesAsync(
