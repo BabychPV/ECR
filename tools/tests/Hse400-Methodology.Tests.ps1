@@ -51,7 +51,7 @@ Describe 'HSE400 methodology contract' {
         if ($c -cne 'HSE400_FG_Makat_Nitrogen') { throw "код $c" }
         Assert-Hse400Throws { Get-Hse400FormulaCode -Namespace 'HSE400' -Table 'FG_Makat' -RowKey 'Nitrogen' } 'F_'
     }
-    It 'план чинної моделі: 175 аргументів, 325 цілей, 6 прив''язок на якір, 369 формул, 223 константи, 2 тести - готово' {
+    It 'план чинної моделі: 175 аргументів, 325 цілей, 6 прив''язок на якір, 369 формул, 224 константи, 2 тести - готово' {
         $p = Get-Hse400MethodologyPlan (Read-Hse400Model)
         if ($p.Namespace -cne 'HSE400') { throw "простір $($p.Namespace)" }
         if (@($p.Arguments).Count -ne 175) { throw "аргументів $(@($p.Arguments).Count)" }
@@ -64,7 +64,7 @@ Describe 'HSE400 methodology contract' {
         if ($b.ColumnCode -cne 'HSE400_Calc' -or $b.OutputCode -cne 'HSE400_FG_Makat_H2S') { throw "прив'язка FG_Makat $($b.ColumnCode)/$($b.OutputCode)" }
         if (@($p.MissingFormulas).Count -ne 0 -or -not $p.Ready) { throw "прогалин $(@($p.MissingFormulas).Count), ready $($p.Ready)" }
         $m = Read-Hse400Model
-        if (@($m.methodology.formulas).Count -ne 369 -or @($m.methodology.constants).Count -ne 223 -or @($p.Tests).Count -ne 2) {
+        if (@($m.methodology.formulas).Count -ne 369 -or @($m.methodology.constants).Count -ne 224 -or @($p.Tests).Count -ne 2) {
             throw "формул $(@($m.methodology.formulas).Count), констант $(@($m.methodology.constants).Count), тестів $(@($p.Tests).Count)"
         }
         # кожне посилання на формулу (!X) і константу (CST.X) має ціль у моделі - інакше чернетка не збереться
@@ -73,6 +73,39 @@ Describe 'HSE400 methodology contract' {
         foreach ($f in @($m.methodology.formulas)) {
             foreach ($x in [regex]::Matches([string]$f.expression, '!([A-Za-z_][A-Za-z0-9_]*)')) { if (-not $fcodes.ContainsKey($x.Groups[1].Value)) { throw "$($f.code): немає формули $($x.Groups[1].Value)" } }
             foreach ($x in [regex]::Matches([string]$f.expression, 'CST\.([A-Za-z_][A-Za-z0-9_]*)')) { if (-not $ccodes.ContainsKey($x.Groups[1].Value)) { throw "$($f.code): немає константи $($x.Groups[1].Value)" } }
+        }
+    }
+    It 'формули - версії AF, чинні з 2025: GHGEmissionFactor округлює до 3 знаків, CS2 у сірці HMB множиться на k23' {
+        # AF Methodologies\HSE400\V1\Formulas\X\V2 (FInfo_StartDate 2024-12-31T19:00Z, кінця немає) замінили V1
+        # (FInfo_EndDate 2024-12-31T07:59Z); стара система бере версію за датою розрахунку (StagesBase.cs:23).
+        $m = Read-Hse400Model
+        $f = @{}; foreach ($x in @($m.methodology.formulas)) { $f[[string]$x.code] = [string]$x.expression }
+        foreach ($t in 'FG_Makat', 'FG_HMB', 'LPG_HMB', 'FG_Export', 'FG_Internal', 'LPG_Internal') {
+            $e = $f["HSE400_$($t)_GHGEmissionFactor"]
+            if ($e -notmatch ',\s*3\s*\)\s*$') { throw "$t GHGEmissionFactor: не V2 (Round до 3 знаків)" }
+            if ($e -match 'Common_WtCi_') { throw "$t GHGEmissionFactor: формула V1 через Common_WtCi_" }
+            if ($t -ne 'FG_Makat' -and $e -notmatch "!HSE400_$($t)_GHG1" ) { throw "$t GHGEmissionFactor: без GHG1" }
+        }
+        foreach ($t in 'FG_HMB', 'LPG_HMB') {
+            foreach ($x in 'TotalSulphurContent', 'MercaptanSulphurContent') {
+                if ($f["HSE400_$($t)_$x"] -notmatch "@GCV\.HSE400_$($t)_CS2\s*\*\s*CST\.k23_HSE400_") { throw "$t $($x): CS2 без k23 (V2)" }
+            }
+        }
+        $k23 = @($m.methodology.constants | Where-Object { $_.code -ceq 'k23_HSE400_' })
+        if ($k23.Count -ne 1 -or [double]$k23[0].value -ne 2) { throw 'k23_HSE400_ = 2 (AF Constants\k23_HSE400_\Common\V1)' }
+    }
+    It 'рядок SUM у таблицях HMB - формула суми меркаптанів, а не одного етилмеркаптану' {
+        # Звіт HSE400.Year: рядок SUM - поле EMercaptan_mass (R_Air_HSE400_Output.cs:125), рядок етилмеркаптану
+        # % масс. - поле EMercaptanV2_mass (там же, :153). Ключ рядка визначає формулу (F_X - HSE400_таблиця_X).
+        $m = Read-Hse400Model
+        $f = @{}; foreach ($x in @($m.methodology.formulas)) { $f[[string]$x.code] = [string]$x.expression }
+        foreach ($t in @($m.tables | Where-Object { $_.code -in 'FG_HMB', 'LPG_HMB' })) {
+            $sum = @($t.rows | Where-Object { ([string]$_.en).StartsWith('SUM ') })
+            if ($sum.Count -ne 1) { throw "$($t.code): рядків SUM $($sum.Count)" }
+            $e = $f["HSE400_$($t.code)_$(([string]$sum[0].key).Substring(2))"]
+            if (@([regex]::Matches($e, '!HSE400_\w+_mass')).Count -ne 4) { throw "$($t.code): рядок SUM ($($sum[0].key)) - не сума чотирьох мас меркаптанів" }
+            $single = @($t.rows | Where-Object { [string]$_.en -like 'Ethyl mercaptan (C2H6S), wt%*' })
+            if ($single.Count -ne 1 -or $f["HSE400_$($t.code)_$(([string]$single[0].key).Substring(2))"] -notmatch '^\(CST\.MW_GCV_EMercaptan\*') { throw "$($t.code): рядок етилмеркаптану % масс." }
         }
     }
     It 'формули на всі F_ і тест - готово; бракує однієї - не готово й названо яку' {
@@ -199,7 +232,8 @@ Describe 'HSE400 methodology contract' {
         $bb = New-Hse400BindingBody -Active $true
         if ($bb.matchJson -cne '{}' -or -not $bb.isActive) { throw "прив'язка" }
         $pb = New-Hse400MethodologyPublishBody $m
-        if (-not $pb.changeReason -or $pb.effectiveFrom -cne '2024-01-01') { throw 'публікація' }
+        # 1.0.1.0 (формули V2 з AF) чинна з 2025-01-01; 1.0.0.0 (V1) лишається з 2024-01-01 (ECR-CALC-0409).
+        if (-not $pb.changeReason -or $pb.effectiveFrom -cne '2025-01-01') { throw 'публікація' }
     }
     It 'формула і константа з моделі -> тіла запитів' {
         $fb = New-Hse400FormulaBody -Formula ([pscustomobject]@{ code = 'HSE400_FG_Makat_H2S'; expression = '@GCV_HSE400_FG_Makat_WCHS*2'; arguments = 'GCV_HSE400_FG_Makat_WCHS' })
@@ -239,5 +273,15 @@ Describe 'HSE400 methodology contract' {
         $m = Read-Hse400Model
         $ids = Get-Hse400AnchorColumnIds -Structure (New-Hse400TestStructure $m) -Model $m
         if ($ids.Count -ne 6 -or $ids['FG_Makat'] -ne 1013) { throw "якорі $($ids.Count) / $($ids['FG_Makat'])" }
+    }
+    It 'перенос проєкту на нову версію шаблону: Safe, увесь проєкт; сухий прогін зупиняє відмову і втрату' {
+        $b = New-Hse400MigrateBody -TargetVersionId 19 -DryRun
+        if ($b.targetVersionId -ne 19 -or $b.mode -cne 'Safe' -or $b.dryRun -ne $true -or $b.range -cne 'WholeProject') { throw 'тіло сухого прогону' }
+        if ((New-Hse400MigrateBody -TargetVersionId 19).dryRun -ne $false) { throw 'тіло переносу' }
+        $ok = [pscustomobject]@{ canApply = $true; refusals = @(); lostValues = 0; guardedValues = 0 }
+        Assert-Hse400MigrationPlan -Plan $ok -Code 'HSE400_2026'
+        Assert-Hse400Throws { Assert-Hse400MigrationPlan -Plan ([pscustomobject]@{ canApply = $false; refusals = @('x'); lostValues = 0; guardedValues = 0 }) -Code 'P' } 'відхилено'
+        Assert-Hse400Throws { Assert-Hse400MigrationPlan -Plan ([pscustomobject]@{ canApply = $true; refusals = @(); lostValues = 3; guardedValues = 0 }) -Code 'P' } 'втрачено 3'
+        Assert-Hse400Throws { Assert-Hse400MigrationPlan -Plan ([pscustomobject]@{ canApply = $true; refusals = @(); lostValues = 0; guardedValues = 1 }) -Code 'P' } 'під охороною 1'
     }
 }
