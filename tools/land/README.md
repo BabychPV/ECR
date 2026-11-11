@@ -402,8 +402,12 @@ catTons[type]; `gsec_<k>` без суфікса type; порожній пере�
 ніколи - пропущено. Списки звірено тестом `LandBranchGateTests` з дослівним легасі і з харнесом паритету
 (`Get-LandParitySelectedBranch`). Склад речовин методологій без нього (`C11_11_04` 7 кодів, `C11_12_03` 333, `C11_16`,
 `C11_17`, `C11_18` 331) - з плоского `polCodeList` легасі. `C11_01` (вибір за `Contains` по тексту потоку) тут немає.
-Порядок вікна: чернетка з опублікованої версії → `-Stage BranchGate -OnlyMethodology …` → `-Stage OptionalArguments` →
-публікація; перевірка - `Verify-LandTestDocument.ps1` (`several branches per substance`, `results without substance`).
+Порядок вікна: `-Stage BranchGate -BranchGateCreateDrafts -GoldenTestDocumentId <док> -GoldenTestPeriodKey <період>
+-OnlyMethodology …` (чернетка V(n+1) з опублікованої версії, якщо чернетки немає; еталонні тести - на наявний документ:
+документ 1 видалено 10.11, без цього публікація відмовляє «тест не має періоду»; C11_02 PARITY_1 - потік паливного газу,
+інакше ключ `6640_sludge` поза категоріями) → публікація з датою дії «попередня + 1 день»; перевірка -
+`Verify-LandTestDocument.ps1` (`several branches per substance`, `results without substance`; `#NULL` невибраної гілки -
+колонка `NoValue`, не провал). ⚠ Кожна невибрана гілка лишає крок `#NULL` у трейсі (так само D-423/D-435).
 
 Порядок етапів: `ArgumentSuffix` -> `LookupCompare` -> `NaeType` -> `BranchGate` -> `OptionalArguments` (OptionalArguments лишається
 останнім: попередні етапи переписують вирази й списки, `?` ставиться на готовий список).

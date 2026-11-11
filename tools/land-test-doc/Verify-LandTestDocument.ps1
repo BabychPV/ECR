@@ -15,6 +15,8 @@
                    known cause (default "missing constants");
       * substance  no per-substance template result (OutputCode ...XXX...) without SubstanceEntryId;
       * branches   at most one _typeN branch per row, substance and metric (legacy writes one).
+      * no value   steps whose only cause is #NULL (unselected branch, absent optional input) are listed (NoValue),
+                   not failed; every other error code fails.
     Note: failed steps are stored only for the run that computed the row (TraceLevel ErrorsOnly keeps no other steps,
     and carry-over copies results without steps). After a per-sheet recalculation the Current run computed one
     sheet only, so a row of another sheet shows 0 failed steps whatever happened to it. Then pass -Tables with the
@@ -68,7 +70,7 @@ if ($DocumentId -le 0) {
 
 $lines = @(& sqlcmd -S $Server -E -d $Database -b -f 65001 -W -h -1 -s "`t" -v DocumentId=$DocumentId PeriodKey=$PeriodKey -i $sqlFile)
 if ($LASTEXITCODE -ne 0) { throw "sqlcmd failed ($LASTEXITCODE): $($lines -join ' ')" }
-$facts = @($lines | Where-Object { $_ -match "^(RUN|CURRENT|RESULT|ISSUE|FAILEDSTEP|MASKED|NOSUBST|BRANCHES)`t" } | ForEach-Object {
+$facts = @($lines | Where-Object { $_ -match "^(RUN|CURRENT|RESULT|ISSUE|FAILEDSTEP|NOVALUE|MASKED|NOSUBST|BRANCHES)`t" } | ForEach-Object {
         $a = $_.Split("`t")
         [pscustomobject]@{ Section = $a[0]; Key = $a[1]; Methodology = $(if ($a.Count -gt 2) { $a[2] } else { '' }); Value = $(if ($a.Count -gt 3) { $a[3] } else { '' }) }
     })
@@ -93,8 +95,10 @@ foreach ($m in $plan) {
     $unmatched = @($facts | Where-Object { $_.Section -eq 'ISSUE' -and $_.Value -eq 'NoMatchingRule' -and $_.Key -eq $rowKey }).Count
     $failed = 0
     foreach ($f in @($facts | Where-Object { $_.Section -eq 'FAILEDSTEP' -and $_.Key -eq $rowKey })) { $failed += [int]$f.Value }
+    $noValue = 0
+    foreach ($f in @($facts | Where-Object { $_.Section -eq 'NOVALUE' -and $_.Key -eq $rowKey })) { $noValue += [int]$f.Value }
     if ($Tables.Count -gt 0 -and $Tables -notcontains $m.table) {
-        $report.Add([pscustomobject]@{ Methodology = $m.methodology; Row = $rowKey; Table = $m.table; Results = $results; Expected = $m.expectedResults; Rejected = ''; Unmatched = ''; FailedSteps = ''; Verdict = 'NOT-CHECKED'; Why = 'table not in -Tables (results carried, failed steps not kept)' })
+        $report.Add([pscustomobject]@{ Methodology = $m.methodology; Row = $rowKey; Table = $m.table; Results = $results; Expected = $m.expectedResults; Rejected = ''; Unmatched = ''; FailedSteps = ''; NoValue = ''; Verdict = 'NOT-CHECKED'; Why = 'table not in -Tables (results carried, failed steps not kept)' })
         continue
     }
     $isKnown = ($m.knownConstantGap -eq 'yes')
@@ -114,7 +118,7 @@ foreach ($m in $plan) {
     if ($branches -gt 0) { $why += "several branches per substance $branches" }
     if ($why.Count -gt 0) { $verdict = 'FAIL'; $fail++ }
     elseif ($failed -gt 0) { $verdict = 'KNOWN'; $known.Add("$($m.methodology) ($rowKey): $failed failed step(s) - $reason") }
-    $report.Add([pscustomobject]@{ Methodology = $m.methodology; Row = $rowKey; Table = $m.table; Results = $results; Expected = $m.expectedResults; Rejected = $rejected; Unmatched = $unmatched; FailedSteps = $failed; Verdict = $verdict; Why = ($why -join '; ') })
+    $report.Add([pscustomobject]@{ Methodology = $m.methodology; Row = $rowKey; Table = $m.table; Results = $results; Expected = $m.expectedResults; Rejected = $rejected; Unmatched = $unmatched; FailedSteps = $failed; NoValue = $noValue; Verdict = $verdict; Why = ($why -join '; ') })
 }
 $otherUnmatched = @($facts | Where-Object { $_.Section -eq 'ISSUE' -and $_.Value -eq 'NoMatchingRule' -and $_.Key -like 'LTD-*' -and ($plan | ForEach-Object { 'LTD-' + $_.row }) -notcontains $_.Key })
 $report | Format-Table -AutoSize | Out-String -Width 220 | Write-Host

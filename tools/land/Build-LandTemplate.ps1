@@ -111,6 +111,11 @@ param(
     [switch]$KeepNumericMode,
     [string[]]$KnownStaleTables = @(),
     [string[]]$OnlyMethodology = @(),
+    # -Stage BranchGate (AN-171/172): створити чернетку V(n+1) з опублікованої версії, якщо чернетки немає.
+    [switch]$BranchGateCreateDrafts,
+    # -Stage BranchGate: перевести еталонні тести чернетки на наявний документ/період (старий документ 1 видалено 10.11).
+    [long]$GoldenTestDocumentId = 0,
+    [int]$GoldenTestPeriodKey = 0,
     [switch]$DryRun
 )
 
@@ -2097,8 +2102,27 @@ function Stage-BranchGate {
         if (-not $bgId) { Log "  ${bgCode}: методології на сервері немає - пропущено"; continue }
         $bgLast = @(Items (Api GET "/api/v1/methodologies/$bgId/versions").Json) | Sort-Object id -Descending | Select-Object -First 1
         if (-not $bgLast) { continue }
-        if ([string]$bgLast.status -eq 'Published') { Log "  ${bgCode}: остання версія опублікована - не чіпаю (спершу чернетка)"; continue }
+        if ([string]$bgLast.status -eq 'Published') {
+            if (-not $BranchGateCreateDrafts) { Log "  ${bgCode}: остання версія опублікована - не чіпаю (спершу чернетка або -BranchGateCreateDrafts)"; continue }
+            $bgNext = 'V' + ([int](([string]$bgLast.versionNumber).TrimStart('V', 'v')) + 1)
+            $bgNew = Invoke-Ecr -Method POST -Path "/api/v1/methodologies/$bgId/versions" -Body @{ versionNumber = $bgNext; copyFromVersionId = [int]$bgLast.id; level = $bgLast.level }
+            if ($bgNew.Status -ne 200) { Log "  ! ${bgCode}: чернетка $bgNext - HTTP $($bgNew.Status) $(Get-EcrErrorCode $bgNew)"; continue }
+            Log "  ${bgCode}: чернетка $bgNext (id $($bgNew.Json.id)) з версії $($bgLast.id), дата дії при публікації - $(([datetime]$bgLast.effectiveFrom).AddDays(1).ToString('yyyy-MM-dd'))"
+            $bgLast = $bgNew.Json
+        }
         $bgVid = [int]$bgLast.id
+
+        if ($GoldenTestDocumentId -gt 0 -and $GoldenTestPeriodKey -gt 0) {
+            $bgOv = Get-LandBranchGateTestOverrides
+            $ov = if ($bgOv.ContainsKey($bgCode)) { $bgOv[$bgCode] } else { @{} }
+            foreach ($t in @(Items (Api GET "/api/v1/methodologies/$bgId/versions/$bgVid/tests").Json)) {
+                $ti = Convert-LandBranchGateTestInput -InputJson ([string]$t.inputJson) -DocumentId $GoldenTestDocumentId -PeriodKey $GoldenTestPeriodKey -Overrides $ov
+                if (-not $ti.Changed) { continue }
+                $tp = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$bgId/versions/$bgVid/tests/$($t.code)" -Body @{ inputJson = $ti.InputJson; expectedJson = [string]$t.expectedJson; tolerance = [string]$t.tolerance }
+                if ($tp.Status -eq 200) { $bgChanged++; Log "  ${bgCode}: тест $($t.code) -> документ $GoldenTestDocumentId, період $GoldenTestPeriodKey" }
+                else { Log "  ! ${bgCode}: тест $($t.code) HTTP $($tp.Status) $(Get-EcrErrorCode $tp)" }
+            }
+        }
 
         if ($bgSubst.Contains($bgCode) -and $bgAir.Count -gt 0) {
             $ids = @(); $missing = @()

@@ -183,6 +183,30 @@ public sealed class LandBranchGateTests
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Golden_test_moves_to_an_existing_document_and_C11_02_gets_a_fuel_gas_stream()
+    {
+        var json = Run(
+            """
+            $in = '{"documentId":1,"periodKey":{"value":202606},"arguments":[{"argumentCode":"Land_NAE","value":null,"valueString":"6640"},{"argumentCode":"Land_TypeFuelOrStream","value":null,"valueString":"1-204 sludge"}]}'
+            $ov = (Get-LandBranchGateTestOverrides)['ECW_C11_02']
+            $a = Convert-LandBranchGateTestInput -InputJson $in -DocumentId 96 -PeriodKey 202609 -Overrides $ov
+            $b = Convert-LandBranchGateTestInput -InputJson $a.InputJson -DocumentId 96 -PeriodKey 202609 -Overrides $ov
+            [ordered]@{ changed = $a.Changed; again = $b.Changed; input = $a.InputJson } | ConvertTo-Json -Compress
+            """);
+        using var doc = JsonDocument.Parse(json);
+        var r = doc.RootElement;
+        Assert.True(r.GetProperty("changed").GetBoolean());
+        Assert.False(r.GetProperty("again").GetBoolean());
+        using var input = JsonDocument.Parse(r.GetProperty("input").GetString()!);
+        Assert.Equal(96, input.RootElement.GetProperty("documentId").GetInt64());
+        Assert.Equal(202609, input.RootElement.GetProperty("periodKey").GetProperty("value").GetInt32());
+        var stream = input.RootElement.GetProperty("arguments").EnumerateArray()
+            .Single(a => a.GetProperty("argumentCode").GetString() == "Land_TypeFuelOrStream").GetProperty("valueString").GetString();
+        Assert.Equal("Fuel Gas (Internal) - Топливный газ (Внутренний)", stream);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Wrapper_is_idempotent_adds_argument_and_gives_NULL_for_an_empty_branch()
     {
         var json = Run(

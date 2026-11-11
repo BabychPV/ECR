@@ -96,6 +96,45 @@ $script:LandBranchGateSubstances = [ordered]@{
 
 function Get-LandBranchGateMethodologies { return @($script:LandBranchGate.Keys) }
 
+function Get-LandBranchGateTestOverrides {
+    <#
+    .SYNOPSIS  Golden-test argument values to replace when the test input no longer resolves to a category of the version.
+    .DESCRIPTION
+        ECW_C11_02 PARITY_1: NAE 6640 with the stream '1-204 sludge' gives the category key '6640_sludge', which the version
+        does not have (publication fails, scratch EcrScratch_An171 11.11). With the fuel-gas stream the rule gives '6640'.
+        The Cyrillic part is built from code points: the lib is dot-sourced by Windows PowerShell 5 without a BOM.
+    #>
+    $ru = -join ([char[]]@(0x0422, 0x043E, 0x043F, 0x043B, 0x0438, 0x0432, 0x043D, 0x044B, 0x0439, 0x20, 0x0433, 0x0430, 0x0437, 0x20, 0x28,
+            0x0412, 0x043D, 0x0443, 0x0442, 0x0440, 0x0435, 0x043D, 0x043D, 0x0438, 0x0439, 0x29))
+    return @{ 'ECW_C11_02' = @{ 'Land_TypeFuelOrStream' = "Fuel Gas (Internal) - $ru" } }
+}
+
+function Convert-LandBranchGateTestInput {
+    <#
+    .SYNOPSIS  Golden-test input moved to an existing document/period (the old one may be deleted), with argument overrides.
+    .OUTPUTS   pscustomobject: Changed, InputJson.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$InputJson,
+        [Parameter(Mandatory)][long]$DocumentId,
+        [Parameter(Mandatory)][int]$PeriodKey,
+        [hashtable]$Overrides = @{}
+    )
+    $o = $InputJson | ConvertFrom-Json
+    $changed = $false
+    if ([long]$o.documentId -ne $DocumentId) { $o.documentId = $DocumentId; $changed = $true }
+    $pk = $o.periodKey
+    $cur = if ($null -eq $pk) { 0 } elseif ($pk.PSObject.Properties['value']) { [int]$pk.value } else { [int]$pk }
+    if ($cur -ne $PeriodKey) { $o.periodKey = [pscustomobject]@{ value = $PeriodKey }; $changed = $true }
+    foreach ($a in @($o.arguments)) {
+        $code = [string]$a.argumentCode
+        if ($Overrides.ContainsKey($code) -and [string]$a.valueString -cne [string]$Overrides[$code]) {
+            $a.valueString = [string]$Overrides[$code]; $a.value = $null; $changed = $true
+        }
+    }
+    return [pscustomobject]@{ Changed = $changed; InputJson = ($o | ConvertTo-Json -Depth 8 -Compress) }
+}
+
 function Get-LandBranchGateSubstances {
     <# Copy of «methodology -> pollutant codes» (legacy flat lists). #>
     $copy = [ordered]@{}
