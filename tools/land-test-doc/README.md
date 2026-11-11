@@ -7,6 +7,8 @@
 | Файл | Що це |
 |---|---|
 | `land-test-doc.cells.csv` | дані: одна комірка на рядок — `row, table, methodology, rule, column, kind (lookup/text/number), value, source` |
+| `land-test-doc.header.csv` | шапка «2. Contract»: одне поле на рядок — `code, kind (lookup/text/number/date), value, source` |
+| `LandTestDocHeader.Lib.ps1` | чисті функції шапки (перевірка, план, тіло PATCH); тести — `tools/tests/Land-TestDocHeader.Tests.ps1` |
 | `land-test-doc.methodologies.csv` | план приймання: методологія → рядок, правило, очікувана кількість результатів, `knownConstantGap` |
 | `Fill-LandTestDocument.ps1` | створення / доведення документа через публічний API |
 | `Verify-LandTestDocument.ps1` + `verify-land-test-doc.sql` | перевірка після перерахунку (лише SELECT) |
@@ -40,6 +42,27 @@ C11_02/C11_04/C11_05 це години (Legacy розбирає числовий
 Варіант B (реальні значення) змінить лише `value`/`source` у CSV — формат файла сталий.
 Порожнє `value` або `source` → `Fill-LandTestDocument.ps1 -Execute` відмовляє (код 2) з переліком.
 
+## Шапка контракту («2. Contract»)
+
+Людина 11.11: «не забудь заповнити контракт». Поля шапки — це не комірки таблиць, а значення шапки документа
+(`cfg.HeaderFieldDef` → `doc.DocumentHeaderValue`): `GET /api/v1/documents/{id}/header` дає поля (`code`, `dataType`,
+`value`, `lookupRegistryDefId`) і `version`; `PATCH …/header` бере `{fields:[{code,value,isEmpty:false}], baseVersion}`
+лише зі зміненими полями. Lookup-поле приймає **id запису** довідника: скрипт шукає його серед записів, придатних у вікні
+проєкту документа (`GET /api/v1/registries/{code}/entries?documentId=`), за `code`, інакше за `display` (у шапок
+дозволів `PRM_*` код генерований, номер дозволу — `display`). Довідник поля береться з шаблону документа, не з CSV.
+
+| Поле | kind | Довідник (маніфест `docs/delivery/reference-data/land-contract/header-fields.json`) |
+|---|---|---|
+| Area, Contractor, Region, Location, OnOffshore, TypeOfActivity | lookup | `LAND_AREA`, `LAND_CONTRACTOR`, `LAND_REGION`, `LAND_LOCATION`, `LAND_ONOFFSHORE`, `LAND_ACTIVITY` |
+| FilledBy, ContractHolder, ContractNumber, ProcessedOn | text | — (`ProcessedOn` у Land — `String`, не `Date`) |
+| Permit (обов'язкове) | lookup | `LAND_PERMIT` (або `PRM_AIR` після перемикання, `tools/land/README.md`) |
+
+Значення-заглушки `<PICK:реєстр>` і `<PERMIT>` — це «немає значення»: план їх перелічує, `-Execute` відмовляє (код 2).
+Номер дозволу не кладеться в git: `-PermitNumber <номер>` підставляє його замість `<PERMIT>` на час запуску. Сервер
+перевіряє: запис активний, не видалений і чинний бодай один день вікна проєкту (`entryNotValidInWindow`); для поля з
+ціллю — типом дозволу (`PRM_*`/групою) ще й покриття кожного місяця з даними (`permitNotCoveringMonths`). Тому шапка
+пишеться ПІСЛЯ комірок. Правка шапки сама ставить перерахунок документа в чергу. `-SkipHeader` — не чіпати шапку.
+
 ## Як запускати
 
 Автентифікація — **наявна сесія оператора**: значення cookie `ecr.auth` після звичайного входу в браузері
@@ -50,7 +73,8 @@ $c = Read-Host 'ecr.auth' -AsSecureString
 # план (лише читання): перевірка даних, сесії, пошук документа, які рядки/комірки змінилися б
 .\Fill-LandTestDocument.ps1 -BaseUrl http://localhost:5094 -ProjectId 1 -AuthCookie $c
 # запис + перерахунок 202609
-.\Fill-LandTestDocument.ps1 -BaseUrl http://localhost:5094 -ProjectId 1 -AuthCookie $c -ConfirmStand localhost:5094 -Execute -Recalculate
+.\Fill-LandTestDocument.ps1 -BaseUrl http://localhost:5094 -ProjectId 1 -AuthCookie $c -ConfirmStand localhost:5094 -Execute -Recalculate -PermitNumber <номер>
+# повторний запуск на доведеному документі: «cells to write: 0» і «Header fields to write: 0»
 # перевірка (Windows-автентифікація SQL, лише SELECT)
 .\Verify-LandTestDocument.ps1 -Database EcrScratch_MB -PeriodKey 202609
 ```

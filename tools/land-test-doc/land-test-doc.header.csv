@@ -1,0 +1,12 @@
+code,kind,value,source
+Area,lookup,<PICK:LAND_AREA>,"registry LAND_AREA (docs/delivery/reference-data/land-contract/area.csv); no counterpart in land-test-doc.cells.csv - coordinator picks"
+Contractor,lookup,<PICK:LAND_CONTRACTOR>,"registry LAND_CONTRACTOR (contractor.csv); no counterpart in land-test-doc.cells.csv - coordinator picks"
+Region,lookup,REG_002,"registry LAND_REGION entry REG_002 'Mangistau - Мангистау' (region.csv); same region as land-test-doc.cells.csv A11 T5_27.Con_Region"
+Location,lookup,<PICK:LAND_LOCATION>,"registry LAND_LOCATION (location.csv); no counterpart in land-test-doc.cells.csv - coordinator picks"
+OnOffshore,lookup,<PICK:LAND_ONOFFSHORE>,"registry LAND_ONOFFSHORE (onoffshore.csv); no counterpart in land-test-doc.cells.csv - coordinator picks"
+FilledBy,text,test – LAND-TEST-ALL-METHODOLOGIES,test value
+ContractHolder,text,test – contract holder LAND-TEST-ALL-METHODOLOGIES,test value
+ContractNumber,text,TEST-LTD-202609,test value
+TypeOfActivity,lookup,<PICK:LAND_ACTIVITY>,"registry LAND_ACTIVITY (activity.csv); no counterpart in land-test-doc.cells.csv - coordinator picks"
+ProcessedOn,text,2026-09-30,"test value (String field in header-fields.json, not Date)"
+Permit,lookup,<PERMIT>,"live permit, picked read-only by AN (or -PermitNumber)"

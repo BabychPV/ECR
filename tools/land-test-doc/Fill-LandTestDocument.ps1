@@ -18,6 +18,13 @@
       * writes (only with -Execute and a matching -ConfirmStand): POST /api/v1/documents (create),
         PATCH /api/v1/documents/{id}/cells, DELETE .../rows/{rowKey} (-Prune), POST .../recalculate (-Recalculate).
 
+    Contract header (tab "2. Contract"): land-test-doc.header.csv (one line per header field: code, kind, value,
+    source). Header fields are document header values, not table cells: GET/PATCH /api/v1/documents/{id}/header
+    (baseVersion = version of the GET); a lookup value is resolved to the entry id among the entries usable in the
+    document's project window (GET /api/v1/registries/{code}/entries?documentId=). Same rules as the cells: a value
+    that is empty or a placeholder (<PICK:...>, <PERMIT>) is MISSING -> listed, -Execute refuses (exit 2). Only changed
+    fields are sent; a converged header gets no PATCH. -SkipHeader leaves the header alone.
+
     Idempotent: the document is found by its fixed name (-Marker, en/ru/kz). Rows carry fixed keys LTD-<row id>
     (LTD-A01 ... LTD-A43). A re-run patches only cells whose value differs and creates only missing rows; a second
     run on a converged document writes nothing. Rows with the LTD- prefix that are not in the data file are reported
@@ -31,6 +38,10 @@
 .PARAMETER PeriodKey     Year*100+Month. Default 202609 (human's decision; composition data exists up to 2026-09).
 .PARAMETER Marker        Fixed document name used to find the document again. Default LAND-TEST-ALL-METHODOLOGIES.
 .PARAMETER DataFile      Cells CSV. Default: land-test-doc.cells.csv next to the script.
+.PARAMETER HeaderFile    Contract header CSV. Default: land-test-doc.header.csv next to the script.
+.PARAMETER SkipHeader    Do not read or write the contract header.
+.PARAMETER PermitNumber  Replaces the value <PERMIT> of the header file (the permit picked on the stand; keeps the real
+                         number out of git). Matched against the entry code, else its display (permit number).
 .PARAMETER AuthCookie    Value of the session cookie (SecureString). Default: env ECR_AUTH_COOKIE.
 .PARAMETER CookieName    Session cookie name. Default ecr.auth (Auth:CookieName).
 .PARAMETER ConfirmStand  Required for -Execute: the API authority (host:port) or full base URL of the target stand.
@@ -51,6 +62,9 @@ param(
     [int]$PeriodKey = 202609,
     [string]$Marker = 'LAND-TEST-ALL-METHODOLOGIES',
     [string]$DataFile,
+    [string]$HeaderFile,
+    [switch]$SkipHeader,
+    [string]$PermitNumber,
     [securestring]$AuthCookie,
     [string]$CookieName = 'ecr.auth',
     [string]$ConfirmStand,
@@ -64,6 +78,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 if ([string]::IsNullOrWhiteSpace($DataFile)) { $DataFile = Join-Path $here 'land-test-doc.cells.csv' }
+if ([string]::IsNullOrWhiteSpace($HeaderFile)) { $HeaderFile = Join-Path $here 'land-test-doc.header.csv' }
+. (Join-Path $here 'LandTestDocHeader.Lib.ps1')
 $RowKeyPrefix = 'LTD-'
 
 # ---------------------------------------------------------------- data file
@@ -207,8 +223,16 @@ $problems = Test-LandTestCells -Items $cells
 $rowIds = @($cells | Select-Object -ExpandProperty row -Unique)
 $tables = @($cells | Select-Object -ExpandProperty table -Unique)
 Write-Host "Data: $($cells.Count) cells, $($rowIds.Count) rows, $($tables.Count) tables, $(@($cells | Select-Object -ExpandProperty methodology -Unique).Count) methodologies; period $PeriodKey; marker '$Marker'."
+$headerItems = @()
+if (-not $SkipHeader) {
+    $headerItems = Set-LandTestHeaderPermit -Items (Read-LandTestHeader -Path $HeaderFile) -PermitNumber $PermitNumber
+    $headerProblems = Test-LandTestHeader -Items $headerItems
+    foreach ($p in @($headerProblems)) { $problems.Add($p) }
+    Write-Host "Header: $($headerItems.Count) contract header field(s) from $HeaderFile."
+}
+else { Write-Host 'Header: skipped (-SkipHeader).' }
 if ($problems.Count -gt 0) {
-    Write-Host "DATA INCOMPLETE: $($problems.Count) problem(s). No value is invented; supply each one with its source in $DataFile."
+    Write-Host "DATA INCOMPLETE: $($problems.Count) problem(s). No value is invented; supply each one with its source in $DataFile / $HeaderFile."
     $problems | ForEach-Object { Write-Host "  $_" }
 }
 
@@ -252,6 +276,7 @@ if ($docs.Count -eq 1) {
 }
 elseif (-not $exec) {
     Write-Host "PLAN: document '$Marker' does not exist yet: it would be created with all sheets of template $(Get-Prop $template.Json 'templateCode') $(Get-Prop $template.Json 'version') and $($rowIds.Count) rows."
+    if (-not $SkipHeader) { Write-Host "PLAN: then its contract header: $(@($headerItems).Count) field(s) ($((@($headerItems) | ForEach-Object { $_.code }) -join ', '))." }
     Write-Host 'Plan only (no -Execute).'
     if ($problems.Count -gt 0) { exit 2 }
     exit 0
@@ -363,6 +388,48 @@ foreach ($tableCode in $tables) {
 }
 
 Write-Host "Rows to create: $totCreate; cells to write: $totCells; cells already converged: $totUnchanged."
+
+# ---- contract header (after the cells: the permit check of the server looks at the months with data)
+if (-not $SkipHeader) {
+    $hdr = Invoke-Api GET "/api/v1/documents/$docId/header"
+    Assert-Api $hdr 'GET header'
+    $hdrEntries = @{}
+    $script:PermitRegsLoaded = $false
+    $resolveHeaderEntry = {
+        param($RegistryDefId, $Value)
+        $rd = [string]$RegistryDefId
+        if (-not $regCodeById.ContainsKey($rd) -and -not $script:PermitRegsLoaded) {
+            # Permit type headers (PRM_*) are hidden from the plain registry list.
+            $pl = Invoke-Api GET '/api/v1/registries?includePermitHeaders=true'
+            Assert-Api $pl 'GET registries (permit headers)'
+            $pli = Get-Prop $pl.Json 'items'
+            if ($null -eq $pli) { $pli = $pl.Json }
+            foreach ($r in @($pli)) { if ($null -ne $r) { $regCodeById[[string](Get-Prop $r 'id')] = [string](Get-Prop $r 'code') } }
+            $script:PermitRegsLoaded = $true
+        }
+        if (-not $regCodeById.ContainsKey($rd)) { throw "Header lookup registry def $rd is not visible to this session." }
+        $rc = $regCodeById[$rd]
+        if (-not $hdrEntries.ContainsKey($rc)) {
+            $e = Invoke-Api GET ("/api/v1/registries/" + [Uri]::EscapeDataString($rc) + "/entries?documentId=$docId")
+            Assert-Api $e "GET registries/$rc/entries?documentId=$docId"
+            $list = Get-Prop $e.Json 'items'
+            if ($null -eq $list) { $list = $e.Json }
+            $hdrEntries[$rc] = @($list)
+        }
+        return (Select-LandTestHeaderEntry -Entries $hdrEntries[$rc] -Value $Value -RegistryCode $rc)
+    }
+    $hplan = Get-LandTestHeaderPlan -Items $headerItems -Header $hdr.Json -ResolveEntry $resolveHeaderEntry
+    foreach ($ch in $hplan.Changes) {
+        $shown = if ($ch.Kind -eq 'lookup') { "entry $($ch.Value) of $($regCodeById[[string]$ch.Registry])" } else { "'$($ch.Value)'" }
+        Write-Host ("  header {0}: '{1}' -> {2}" -f $ch.Code, $ch.Current, $shown)
+    }
+    Write-Host "Header fields to write: $(@($hplan.Changes).Count); already converged: $($hplan.Unchanged)."
+    if ($exec -and @($hplan.Changes).Count -gt 0) {
+        $hp = Invoke-Api PATCH "/api/v1/documents/$docId/header" (New-LandTestHeaderPatchBody -Changes $hplan.Changes -BaseVersion ([string](Get-Prop $hdr.Json 'version')))
+        Assert-Api $hp 'PATCH header'
+        Write-Host "Header written: $(@($hplan.Changes).Count) field(s)."
+    }
+}
 if ($stale.Count -gt 0) {
     Write-Host "Rows with prefix $RowKeyPrefix not in the data file: $($stale -join ', ')"
     if ($exec -and $Prune) {
