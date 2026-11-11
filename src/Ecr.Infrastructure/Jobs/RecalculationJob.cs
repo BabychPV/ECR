@@ -477,6 +477,11 @@ public sealed partial class RecalculationJob(
                             ct)
                         .ConfigureAwait(false);
 
+                    if (bindingPlan.PartialTables.TryGetValue(period, out var partialTables))
+                    {
+                        profile.ExcludeTables(partialTables);
+                    }
+
                     runProfile.Merge(profile);
                     unmatchedRows.AddRange(profile.UnmatchedRows);
                     rejectedRows.AddRange(profile.RejectedRows);
@@ -1139,6 +1144,7 @@ public sealed partial class RecalculationJob(
                 g => g.SelectMany(i => methodologiesByTable.GetValueOrDefault(i.TableDefId) ?? []).ToHashSet());
 
         var carryByPeriod = new Dictionary<int, IReadOnlyCollection<int>>();
+        var partialByPeriod = new Dictionary<int, IReadOnlySet<long>>();
         foreach (var group in instances.GroupBy(i => i.PeriodKeyValue))
         {
             var touched = touchedByPeriod.GetValueOrDefault(group.Key) ?? [];
@@ -1151,6 +1157,17 @@ public sealed partial class RecalculationJob(
             if (carry.Count > 0)
             {
                 carryByPeriod[group.Key] = carry;
+
+                // Таблиця, де одна методологія рахується (спільна з активним аркушем), а інша переноситься: рядки,
+                // які закрила перенесена, цей прогін бачить «без правила».
+                var partial = group
+                    .Where(i => (methodologiesByTable.GetValueOrDefault(i.TableDefId) ?? []).Any(id => !touched.Contains(id)))
+                    .Select(i => i.Id)
+                    .ToHashSet();
+                if (partial.Count > 0)
+                {
+                    partialByPeriod[group.Key] = partial;
+                }
             }
         }
 
@@ -1189,7 +1206,7 @@ public sealed partial class RecalculationJob(
                 g => g.Key,
                 g => (IReadOnlyList<int>)[.. g.Select(i => i.SheetDefId).Distinct().Order()]);
 
-        return new BindingPlan(byPeriod, carryByPeriod, recomputedOnSubmitted, activeSheets);
+        return new BindingPlan(byPeriod, carryByPeriod, recomputedOnSubmitted, activeSheets, partialByPeriod);
     }
 
     /// <summary>Прив'язки методологій за періодами, що переносити з попереднього прогону, і лічильник для журналу.</summary>
@@ -1201,18 +1218,25 @@ public sealed partial class RecalculationJob(
     /// <param name="ActiveSheets">
     /// D2-03: аркуші, чиї таблиці прогін перераховує методологіями, за періодом (за зростанням Id).
     /// </param>
+    /// <param name="PartialTables">
+    /// Екземпляри таблиць періоду, де хоч одна прив'язана методологія переноситься, а не рахується. Їхні рядки прогін
+    /// бачить не всіма методологіями, тож діагностика рядків (без правила, відхилені) і заміна проблем таблиці для них
+    /// не робиться — лишаються проблеми попереднього повного проходу (live 11.11, doc 96: хибне NoMatchingRule).
+    /// </param>
     private sealed record BindingPlan(
         IReadOnlyDictionary<int, IReadOnlyList<CalculationBindingRef>> Bindings,
         IReadOnlyDictionary<int, IReadOnlyCollection<int>> CarryOver,
         int RecomputedOnInactive,
-        IReadOnlyDictionary<int, IReadOnlyList<int>> ActiveSheets)
+        IReadOnlyDictionary<int, IReadOnlyList<int>> ActiveSheets,
+        IReadOnlyDictionary<int, IReadOnlySet<long>> PartialTables)
     {
         /// <summary>Порожній план: нічого не рахується й не переноситься.</summary>
         public static readonly BindingPlan Empty = new(
             ReadOnlyDictionary<int, IReadOnlyList<CalculationBindingRef>>.Empty,
             ReadOnlyDictionary<int, IReadOnlyCollection<int>>.Empty,
             0,
-            ReadOnlyDictionary<int, IReadOnlyList<int>>.Empty);
+            ReadOnlyDictionary<int, IReadOnlyList<int>>.Empty,
+            ReadOnlyDictionary<int, IReadOnlySet<long>>.Empty);
     }
 
     /// <summary>Аркуші документа, які прогін періоду перерахував методологіями (D2-03).</summary>
