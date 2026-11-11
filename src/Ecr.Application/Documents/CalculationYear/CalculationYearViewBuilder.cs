@@ -70,23 +70,41 @@ public sealed class CalculationYearViewBuilder(
         var columns = snapshots.Values.SelectMany(s => s.ColumnsById.Values).GroupBy(c => c.Id).ToDictionary(g => g.Key, g => g.Last());
 
         var scope = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
-        var labels = tableDefs.Values.ToDictionary(x => x.Table.Id, x => LabelColumns.Of(x.Table, scope));
+
+        // ⛔ Межі читання — по МІСЯЦЯХ: область без періоду не бачить заборон, звужених періодами (AppliesTo без
+        // періоду їх пропускає), тож і колонки підпису, і читаність таблиць рахуються в межах місяця комірки.
+        var monthScopes = keys.ToDictionary(k => k.Value, scope.InPeriod);
+        var labels = new Dictionary<(int TableDefId, int PeriodKey), LabelColumns>();
+        foreach (var (tableId, def) in tableDefs)
+        {
+            foreach (var (periodKey, monthScope) in monthScopes)
+            {
+                labels[(tableId, periodKey)] = LabelColumns.Of(def.Table, monthScope);
+            }
+        }
+
         var labelColumnIds = labels.Values.SelectMany(l => l.Ids).ToHashSet();
+        var readableInstances = instances
+            .Where(i => monthScopes.TryGetValue(i.PeriodKey, out var s) && s.CanReadTable(i.TableDefId))
+            .Select(i => i.TableInstanceId)
+            .ToHashSet();
 
         var facts = await reader
             .ReadYearAsync(documentId, [.. keys.Select(k => k.Value)], [.. instances.Select(i => i.TableInstanceId)], labelColumnIds, ct)
             .ConfigureAwait(false);
 
         var narrowed = DocumentSheetVisibility.HasRestrictions(profile);
-        var monthScopes = keys.ToDictionary(k => k.Value, scope.InPeriod);
         var results = narrowed ? await NarrowAsync(facts.Results, instances, monthScopes, ct).ConfigureAwait(false) : facts.Results;
         var formulaCells = facts.FormulaCells.Where(c => monthScopes[c.PeriodKey].CanReadColumn(c.ColumnDefId)).ToList();
 
-        var months = await MonthsAsync(documentId, year, keys, states, facts.Runs, narrowed, ct).ConfigureAwait(false);
+        // ⛔ Вузькому читачу стан прогону місяця віддається лише там, де він бачить бодай одне число методології
+        // (як панель одного місяця: усе сховане — порожньо, без часу прогону).
+        IReadOnlySet<int>? visibleRunMonths = narrowed ? results.Select(r => r.PeriodKey).ToHashSet() : null;
+        var months = await MonthsAsync(documentId, keys, states, facts.Runs, visibleRunMonths, ct).ConfigureAwait(false);
         var catalog = await units.GetAsync(ct).ConfigureAwait(false);
 
         var context = new Pivot(
-            documentId, year, keys, months, instances, snapshots, tableDefs, columns, labels, facts, catalog);
+            documentId, year, keys, months, instances, readableInstances, snapshots, tableDefs, columns, labels, facts, catalog);
         return context.Build(results, formulaCells, narrowed);
     }
 
@@ -121,11 +139,10 @@ public sealed class CalculationYearViewBuilder(
 
     private async Task<IReadOnlyList<CalculationYearMonthDto>> MonthsAsync(
         long documentId,
-        int year,
         List<PeriodKey> keys,
         Dictionary<int, PeriodState> states,
         IReadOnlyList<YearRun> runs,
-        bool narrowed,
+        IReadOnlySet<int>? visibleRunMonths,
         CancellationToken ct)
     {
         var runOf = runs.ToDictionary(r => r.PeriodKey);
@@ -144,11 +161,13 @@ public sealed class CalculationYearViewBuilder(
 
             string runState;
             DateTime? calculatedAt = null;
-            if (runOf.TryGetValue(key, out var run))
+            // ⚠ «noRun» — і тоді, коли прогін був, але не дав документу жодного числа (прогін місяця береться з чисел).
+            if (runOf.TryGetValue(key, out var run) && (visibleRunMonths is null || visibleRunMonths.Contains(key)))
             {
-                calculatedAt = run.FinishedAt;
-
-                // ⛔ Н-2: свіжість рахується по ВСЬОМУ документу — вузькому читачу вона не віддається (як у панелі).
+                // ⛔ Н-2: свіжість і час прогону рахуються по ВСЬОМУ документу — вузькому читачу вони не віддаються
+                // (як у панелі одного місяця: CalculatedAt = null).
+                var narrowed = visibleRunMonths is not null;
+                calculatedAt = narrowed ? null : run.FinishedAt;
                 var stale = !narrowed && (await methodologies
                     .GetCalculationFreshnessAsync(documentId, key, tableDefIds: null, ct)
                     .ConfigureAwait(false)).IsStale;
@@ -162,7 +181,6 @@ public sealed class CalculationYearViewBuilder(
             months.Add(new CalculationYearMonthDto(m, key, periodState, runState, calculatedAt));
         }
 
-        _ = year;
         return months;
     }
 
@@ -197,14 +215,16 @@ public sealed class CalculationYearViewBuilder(
         IReadOnlyList<PeriodKey> keys,
         IReadOnlyList<CalculationYearMonthDto> months,
         IReadOnlyList<TableInstanceRef> instances,
+        IReadOnlySet<long> readableInstances,
         IReadOnlyDictionary<int, TemplateVersionSnapshot> snapshots,
         IReadOnlyDictionary<int, (SheetDef Sheet, TableDef Table)> tableDefs,
         IReadOnlyDictionary<int, ColumnDef> columns,
-        IReadOnlyDictionary<int, LabelColumns> labels,
+        IReadOnlyDictionary<(int TableDefId, int PeriodKey), LabelColumns> labels,
         CalculationYearFacts facts,
         UnitCatalogSnapshot catalog)
     {
         private readonly Dictionary<long, TableInstanceRef> instanceById = instances.ToDictionary(i => i.TableInstanceId);
+        private Dictionary<(int PeriodKey, string RowKey), TableInstanceRef?>? legacyHosts;
         private readonly Dictionary<int, int> monthOfKey = keys.Select((k, i) => (k.Value, i)).ToDictionary(x => x.Value, x => x.i);
         private readonly Dictionary<(int TableDefId, long? CopyId), int> tableIndex = [];
         private readonly List<CalculationYearTableDto> tables = [];
@@ -306,9 +326,10 @@ public sealed class CalculationYearViewBuilder(
             }
             else if (rowKey is not null)
             {
-                // Число до D-401 не знає свого екземпляра: таблиця — перша того ж місяця, де є такий рядок.
-                var hosts = facts.Rows.Where(r => r.RowKey == rowKey).Select(r => r.TableInstanceId).ToHashSet();
-                instance = instances.FirstOrDefault(i => i.PeriodKey == periodKey && hosts.Contains(i.TableInstanceId));
+                // Число до D-401 не знає свого екземпляра: таблиця — ЄДИНА читана того ж місяця, де є такий рядок.
+                // ⛔ Схована таблиця кандидатом не є (інакше її аркуш і назва потрапили б у відповідь); кілька
+                // кандидатів чи жодного — число без таблиці (рядок 0), а не здогад.
+                LegacyHosts().TryGetValue((periodKey, rowKey), out instance);
             }
 
             var key = instance is null ? (0, null) : (instance.TableDefId, instance.SheetCopyId);
@@ -334,6 +355,40 @@ public sealed class CalculationYearViewBuilder(
             return index;
         }
 
+        /// <summary>
+        /// Господар рядка за (місяць, ключ рядка) серед ЧИТАНИХ екземплярів; <c>null</c> — кілька кандидатів.
+        /// Один прохід по рядках замість пошуку на кожне число.
+        /// </summary>
+        private Dictionary<(int PeriodKey, string RowKey), TableInstanceRef?> LegacyHosts()
+        {
+            if (legacyHosts is not null)
+            {
+                return legacyHosts;
+            }
+
+            legacyHosts = [];
+            foreach (var row in facts.Rows)
+            {
+                if (!readableInstances.Contains(row.TableInstanceId)
+                    || !instanceById.TryGetValue(row.TableInstanceId, out var instance))
+                {
+                    continue;
+                }
+
+                var key = (instance.PeriodKey, row.RowKey);
+                if (!legacyHosts.TryGetValue(key, out var known))
+                {
+                    legacyHosts.Add(key, instance);
+                }
+                else if (known is not null && known.TableInstanceId != instance.TableInstanceId)
+                {
+                    legacyHosts[key] = null;
+                }
+            }
+
+            return legacyHosts;
+        }
+
         private int EquipmentOf(int table, string? rowKey)
         {
             if (equipmentIndex.TryGetValue((table, rowKey), out var index))
@@ -348,7 +403,10 @@ public sealed class CalculationYearViewBuilder(
             return index;
         }
 
-        /// <summary>Підписи рядків: фіксований — з шаблону, динамічний — з колонок назви й коду (останній місяць).</summary>
+        /// <summary>
+        /// Підписи рядків: фіксований — з шаблону, динамічний — з колонок назви й коду (останній місяць, де колонка
+        /// підпису читається в межах ЦЬОГО місяця).
+        /// </summary>
         private void FillLabels(Dictionary<long, YearEntry> entries)
         {
             var defOfTable = tables.Select(t => t.TableDefId).ToList();
@@ -357,11 +415,27 @@ public sealed class CalculationYearViewBuilder(
                 .Where(r => tableOfInstance.ContainsKey(r.TableInstanceId))
                 .GroupBy(r => (tableOfInstance[r.TableInstanceId], r.RowKey))
                 .ToDictionary(g => g.Key, g => g.Last());
+
+            // ⛔ Комірка підпису береться лише тоді, коли її колонка — колонка підпису (назви чи коду) в межах читання
+            // місяця комірки: заборона, звужена періодами, ховає підпис саме в тих місяцях.
+            char? RoleOf(YearLabelCell c)
+            {
+                var tableDefId = tableOfInstance[c.TableInstanceId].TableDefId;
+                if (!labels.TryGetValue((tableDefId, c.PeriodKey), out var label))
+                {
+                    return null;
+                }
+
+                return label.Name?.Id == c.ColumnDefId ? 'n' : label.Code?.Id == c.ColumnDefId ? 'c' : null;
+            }
+
             var cellsByKey = facts.LabelCells
                 .Where(c => tableOfInstance.ContainsKey(c.TableInstanceId))
-                .OrderBy(c => c.PeriodKey)
-                .GroupBy(c => (tableOfInstance[c.TableInstanceId], c.RowKey, c.ColumnDefId))
-                .ToDictionary(g => g.Key, g => g.Last());
+                .Select(c => (Cell: c, Role: RoleOf(c)))
+                .Where(x => x.Role is not null)
+                .OrderBy(x => x.Cell.PeriodKey)
+                .GroupBy(x => (tableOfInstance[x.Cell.TableInstanceId], x.Cell.RowKey, x.Role!.Value))
+                .ToDictionary(g => g.Key, g => g.Last().Cell);
             var copyOfTable = tableIndex.ToDictionary(kv => kv.Value, kv => kv.Key);
 
             for (var i = 0; i < equipment.Count; i++)
@@ -387,14 +461,9 @@ public sealed class CalculationYearViewBuilder(
                     continue;
                 }
 
-                if (!labels.TryGetValue(tableKey.TableDefId, out var label))
-                {
-                    continue;
-                }
-
                 string? name = null, code = null;
                 LocalizedText? nameL10n = null;
-                if (label.Name is { } nameColumn && cellsByKey.TryGetValue((tableKey, e.RowKey, nameColumn.Id), out var nameCell))
+                if (cellsByKey.TryGetValue((tableKey, e.RowKey, 'n'), out var nameCell))
                 {
                     name = nameCell.Text;
                     if (nameCell.EntryId is { } entryId && entries.TryGetValue(entryId, out var entry))
@@ -404,7 +473,7 @@ public sealed class CalculationYearViewBuilder(
                     }
                 }
 
-                if (label.Code is { } codeColumn && cellsByKey.TryGetValue((tableKey, e.RowKey, codeColumn.Id), out var codeCell))
+                if (cellsByKey.TryGetValue((tableKey, e.RowKey, 'c'), out var codeCell))
                 {
                     code = codeCell.Text
                            ?? (codeCell.EntryId is { } id && entries.TryGetValue(id, out var codeEntry) ? codeEntry.Code : null)
