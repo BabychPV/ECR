@@ -14,7 +14,10 @@ public sealed class CloneTemplateVersionHandler(
     Security.IAccessDecisionService access,
     Common.ICurrentUser currentUser,
     IAccessProfileInvalidator profileCache,
-    Microsoft.Extensions.Logging.ILogger<CloneTemplateVersionHandler> log)
+    Microsoft.Extensions.Logging.ILogger<CloneTemplateVersionHandler> log,
+
+    // D-474: клон успадковує розкладку джерела; реєстр оновлюється одразу. `null` (тести) — реєстру немає.
+    ITemplateLayoutRegistry? layouts = null)
 {
     /// <summary>Клонує версію.</summary>
     /// <param name="sourceVersionId">Версія-джерело.</param>
@@ -55,6 +58,13 @@ public sealed class CloneTemplateVersionHandler(
         // заборон на колонки клону до 60 хв. Клон рідкісний, тож скидається весь кеш (fail-closed).
         Documents.VersionMigration.GrantProfileInvalidation.Run(
             profileCache, log, new Ports.GrantedUsers([], Overflow: true));
+
+        // D-474: розкладка клону = розкладка джерела (клонер переносить сутність версії цілком); аркуші клону
+        // мають нові Id, тож маршрутизація місячних колонок мусить побачити їх до першого запису.
+        if (layouts is not null)
+        {
+            await layouts.RefreshAsync(ct).ConfigureAwait(false);
+        }
 
         return versionId;
     }

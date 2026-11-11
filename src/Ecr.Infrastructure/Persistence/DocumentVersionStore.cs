@@ -42,7 +42,9 @@ public sealed class DocumentVersionStore(
         // ⛔ Q-17.fix (B3): зріз подання читає МАРШРУТИЗОВАНИЙ ICellStore (значення власників), тож і «поточний стан»
         // у порівнянні мусить іти тим самим читачем — інакше кожна колонка з чужим власником виходить «зміною».
         // Прапор вимкнено → нижче лишається прямий запит, як було.
-        if (router is { Enabled: true } && cellStore is not null)
+        // ✎ D-474: маршрутизація — властивість версії шаблону документа, тож питаємо про ДОКУМЕНТ.
+        if (router is { Enabled: true } && cellStore is not null
+            && await router.GetDocumentAsync(documentId, ct).ConfigureAwait(false) is not null)
         {
             var instanceIds = await db.TableInstances.AsNoTracking()
                 .Where(i => i.DocumentId == documentId && i.PeriodKeyValue == p)

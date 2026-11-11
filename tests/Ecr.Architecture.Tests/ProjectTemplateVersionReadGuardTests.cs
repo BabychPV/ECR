@@ -49,7 +49,7 @@ public sealed partial class ProjectTemplateVersionReadGuardTests
         ["src/Ecr.Infrastructure/Jobs/ConsistencyCheckJob.cs"] = (1, Kind.Current),
         ["src/Ecr.Infrastructure/Startup/MetadataWarmup.cs"] = (1, Kind.Current),
         ["src/Ecr.Infrastructure/Persistence/TemplateVersionStore.cs"] = (5, Kind.Current),     // лічильники «проєкти на версії»
-        ["src/Ecr.Infrastructure/Persistence/DocumentStore.cs"] = (7, Kind.Current),         // «версія за замовчуванням» переліку/картки
+        ["src/Ecr.Infrastructure/Persistence/DocumentStore.cs"] = (9, Kind.Current),         // «версія за замовчуванням» переліку/картки; +2 (D-474): її розкладка тим самим підзапитом
         ["src/Ecr.Infrastructure/Persistence/SheetEditGate.cs"] = (1, Kind.Current),            // без періоду - чинна версія
         ["src/Ecr.Infrastructure/Persistence/CollectionStore.cs"] = (1, Kind.Current),          // збір пише в чинну версію
         ["src/Ecr.Infrastructure/Persistence/SourceEventMapStore.cs"] = (1, Kind.Current),

@@ -86,6 +86,9 @@ public static class DependencyInjection
         services.AddScoped<SaveSheetDefHandler>();
         services.AddScoped<DeleteSheetDefHandler>();
 
+        // D-474: розкладка версії (копія на місяць | рік із місяцями в колонках).
+        services.AddScoped<SetTemplateLayoutHandler>();
+
         // Другий вертикальний зріз — таблиця на аркуші (W5.1), той самий патерн.
         services.AddScoped<SaveTableDefHandler>();
         services.AddScoped<DeleteTableDefHandler>();

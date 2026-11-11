@@ -1,4 +1,5 @@
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -19,6 +20,9 @@ public sealed class TemplateVersionConfiguration : IEntityTypeConfiguration<Temp
 
         builder.Property(x => x.Version).HasMaxLength(20).IsRequired();
         builder.Property(x => x.Status).HasConversion<byte>();
+
+        // D-474: розкладка версії; наявні версії — PerMonthCopies (0) іменованим DEFAULT.
+        builder.Property(x => x.Layout).HasConversion<byte>().HasDefaultValue(TemplateLayout.PerMonthCopies, "DF_TV_Layout");
         builder.Property(x => x.SourceWorkbookHash).HasColumnType("varbinary(32)");
 
         // DEFAULT-и з іменами за 02a-db-schema.md: безіменне обмеження

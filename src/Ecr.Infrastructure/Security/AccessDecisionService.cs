@@ -2241,13 +2241,19 @@ public sealed class AccessDecisionService(
 
                 var monthShared = NoMonthShared;
                 (CellAccessContext Context, IReadOnlyList<int> Periods)? annual = null;
+                var instanceTable = snapshot.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == instance.TableDefId);
                 var isMonthsTable = !profile.IsIntegrationWriter
                     && !profile.IsSimulation
-                    && snapshot.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == instance.TableDefId)
-                        is { LayoutKind: TableLayoutKind.MonthsInColumns };
-                var hasOtherMonthColumn = isMonthsTable
+                    && instanceTable is { LayoutKind: TableLayoutKind.MonthsInColumns };
+                // ✎ D-474 (6): місячна колонка належить СВОЄМУ періоду в будь-якій таблиці, не лише MonthsInColumns —
+                // січнева колонка таблиці PerPeriodInstance так само замкнена, коли січень закрито.
+                var hasOtherMonthColumn = !profile.IsIntegrationWriter
+                    && !profile.IsSimulation
+                    && instanceTable is not null
                     && columns.Any(c => c.IsMonthColumn && c.MonthNumber is { } m && m != periodKey.Sequence);
-                var annualRouting = isMonthsTable && monthRouter is { Enabled: true };
+
+                // ✎ D-474: маршрутизація — властивість версії шаблону, тож питаємо про ТАБЛИЦЮ, а не про прапор.
+                var annualRouting = isMonthsTable && monthRouter?.AppliesToTable(instanceTable!) == true;
                 if (hasOtherMonthColumn || annualRouting)
                 {
                     if (!monthStatesBySheet.TryGetValue(sheetKey, out var monthStates))

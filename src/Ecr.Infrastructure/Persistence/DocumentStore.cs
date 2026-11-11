@@ -135,6 +135,10 @@ public sealed class DocumentStore(
                 TemplateVersion = db.Projects.Where(p => p.Id == d.ProjectId)
                     .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id, (p, v) => v.Version)
                     .FirstOrDefault(),
+                // D-474: розкладка тієї самої версії - у тому самому запиті.
+                TemplateLayout = db.Projects.Where(p => p.Id == d.ProjectId)
+                    .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id, (p, v) => (TemplateLayout?)v.Layout)
+                    .FirstOrDefault(),
                 // ✎ RPT-STABLE Part B: ознака «кілька версій за періодами» - у тому самому запиті (без зайвого звернення).
                 Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == d.ProjectId
                     && t.TemplateVersionId != db.Projects.Where(p => p.Id == d.ProjectId).Select(p => p.TemplateVersionId).FirstOrDefault()),
@@ -198,7 +202,8 @@ public sealed class DocumentStore(
                 : null,
             OwnerUserId: document.CreatedByUserId,
             ProjectIsReadOnly: document.ProjectReadOnly,
-            PeriodKind: document.ProjectPeriodKind?.ToString());
+            PeriodKind: document.ProjectPeriodKind?.ToString(),
+            TemplateLayout: document.TemplateLayout?.ToString());
     }
 
 
@@ -527,6 +532,10 @@ public sealed class DocumentStore(
                 db.Projects.Where(p => p.Id == d.ProjectId)
                     .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id, (p, v) => v.Version)
                     .FirstOrDefault(),
+                // D-474: розкладка тієї самої версії — скалярний підзапит у тому самому запиті сторінки.
+                db.Projects.Where(p => p.Id == d.ProjectId)
+                    .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id, (p, v) => (TemplateLayout?)v.Layout)
+                    .FirstOrDefault(),
                 // ✎ RPT-STABLE Part B: ознака «у проєкті кілька версій за періодами» - у тому самому запиті сторінки.
                 db.ProjectTemplateVersions.Any(t => t.ProjectId == d.ProjectId
                     && t.TemplateVersionId != db.Projects.Where(p => p.Id == d.ProjectId).Select(p => p.TemplateVersionId).FirstOrDefault())));
@@ -591,6 +600,7 @@ public sealed class DocumentStore(
                 PeriodKind: d.ProjectPeriodKind?.ToString(),
                 OwnerUserId: d.OwnerUserId,
                 TemplateVersion: d.TemplateVersion,
+                TemplateLayout: d.Layout?.ToString(),
                 TemplateVersionByPeriod: versionByPeriod.GetValueOrDefault(d.ProjectId),
                 PeriodStates: periodStates is null ? null : periodStates.GetValueOrDefault(d.Id) ?? [],
                 ReopenedPeriods: reopenedByDocument is null ? null : reopenedByDocument.GetValueOrDefault(d.Id) ?? []));
@@ -2183,7 +2193,7 @@ public sealed class DocumentStore(
         long Id, int ProjectId, string BusinessKey, DateTime CreatedAt, int SheetCount,
         Domain.ValueObjects.LocalizedText? NameL10n, DateTime ModifiedAt, string? ModifiedByDisplayName,
         string? OwnerDisplayName, string? ApproverDisplayName, PeriodKind? ProjectPeriodKind, int OwnerUserId,
-        string? TemplateVersion, bool MultiVersion = false);
+        string? TemplateVersion, TemplateLayout? Layout, bool MultiVersion = false);
 
     /// <summary>Стеля кількості правил складу в одній версії.</summary>
     private const int MaxRules = 500;
