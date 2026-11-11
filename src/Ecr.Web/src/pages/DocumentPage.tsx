@@ -686,7 +686,12 @@ export function DocumentPage(): JSX.Element {
    * погоджувач із телефона — саме той, кому вузький екран і потрібен.
    */
   const narrow = useNarrowScreen();
-  const readOnly = !isEditable(state) || locksDataActions(lock) || narrow;
+  // ✎ D-474: розкладка «рік» — статус аркуша ЯКОРЯ (місяця, на якому відкрито рік) не замикає річний аркуш: сервер
+  // судить місячну колонку m за статусом аркуша місяця m, а не-місячний ввід і рядки — за річним агрегатом статусів
+  // (`AnnualPeriodRule.AggregateStatus`). Ці рішення приходять у `cellPermissions` зрізу; дії зі зміни даних вирішує
+  // сервер так само. Копія на місяць — як було: стан переглянутого аркуша.
+  const sheetLocksEdits = !yearLayout && !isEditable(state);
+  const readOnly = sheetLocksEdits || locksDataActions(lock) || narrow;
   /*
    * ✎ D-442: значення ПОДАНОГО аркуша править погоджувач поточного кроку — це знає лише сервер, тож сітку
    * не замикаємо цілком: рішення зрізу дають погоджувачеві редаговні комірки, решті — `DocumentSubmitted`

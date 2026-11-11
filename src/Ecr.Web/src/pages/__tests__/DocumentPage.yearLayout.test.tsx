@@ -49,7 +49,11 @@ function period(periodKey: number, isCurrent: boolean, state = 'Open'): Record<s
   };
 }
 
-function mockFetch(templateLayout: string | null, states: Readonly<Record<number, string>> = {}): ReturnType<typeof vi.fn> {
+function mockFetch(
+  templateLayout: string | null,
+  states: Readonly<Record<number, string>> = {},
+  sheetState = 'Draft',
+): ReturnType<typeof vi.fn> {
   const stateOf = (periodKey: number): string => states[periodKey] ?? 'Open';
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -126,7 +130,7 @@ function mockFetch(templateLayout: string | null, states: Readonly<Record<number
         nameL10n: { values: {} },
         projectId: 1,
         sheetCount: 1,
-        sheetStates: { GEN: 'Draft' },
+        sheetStates: { GEN: sheetState },
         hasLateEdits: false,
         templateLayout,
       });
@@ -273,6 +277,29 @@ describe('DocumentPage: замок документа з розкладкою «
       show(`/documents/1?periodKey=${String(Anchor)}`);
 
       expect(await screen.findByText(/document\.lock\.periodClosed/, {}, { timeout: SlowEnvTimeout })).toBeTruthy();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'рік: аркуш ЯКОРЯ поданий — річний аркуш не стає «лише для читання» (права комірок вирішує сервер)',
+    async () => {
+      mockFetch('YearWithMonthColumns', {}, 'Submitted');
+      show(`/documents/1?periodKey=${String(Anchor)}`);
+
+      await screen.findByText(/document\.saveState\./, {}, { timeout: SlowEnvTimeout });
+      expect(screen.queryByText(/document\.saveState\.readOnly/)).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'копія на місяць: поданий аркуш переглянутого місяця — «лише для читання», як і раніше',
+    async () => {
+      mockFetch('PerMonthCopies', {}, 'Submitted');
+      show(`/documents/1?periodKey=${String(Anchor)}`);
+
+      expect(await screen.findByText(/document\.saveState\.readOnly/, {}, { timeout: SlowEnvTimeout })).toBeTruthy();
     },
     SlowEnvTimeout,
   );
