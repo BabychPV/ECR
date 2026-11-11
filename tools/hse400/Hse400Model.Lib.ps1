@@ -80,6 +80,33 @@ function Assert-Hse400Model {
             if ($nIn -ne $e[0] -or $nCalc -ne $e[1]) { $bad.Add("${tc}: ввід/розрахунок $nIn/$nCalc, очікується $($e[0])/$($e[1])") }
         }
     }
+    # золоті тести методології: адреса розрахункового рядка + ввід у рядки вводу тієї ж таблиці (один місяць)
+    if ($null -ne $Model.PSObject.Properties['methodology'] -and $null -ne $Model.methodology -and
+        $Model.methodology.PSObject.Properties['tests'] -and $null -ne $Model.methodology.tests) {
+        $kinds = @{}
+        foreach ($t in @($Model.tables)) { foreach ($r in @($t.rows)) { $kinds[("{0}/{1}" -f $t.code, $r.key)] = [string]$r.kind } }
+        $seenTests = @{}
+        $isNumber = { param($v) $null -ne $v -and ($v -is [double] -or $v -is [decimal] -or $v -is [int] -or $v -is [long]) }
+        foreach ($x in @($Model.methodology.tests)) {
+            $get = { param($n) if ($x.PSObject.Properties[$n]) { $x.$n } else { $null } }
+            $xc = [string](& $get 'code')
+            if ($xc -cnotmatch $script:Hse400CodePattern) { $bad.Add("тест '$xc' не відповідає EcrCode"); continue }
+            if ($seenTests.ContainsKey($xc.ToLowerInvariant())) { $bad.Add("тест ${xc}: повтор коду") }
+            $seenTests[$xc.ToLowerInvariant()] = $true
+            $xt = [string](& $get 'table'); $xr = [string](& $get 'row'); $xm = [string](& $get 'month')
+            if ($kinds["$xt/$xr"] -ne 'Calc') { $bad.Add("тест ${xc}: $xt/$xr не розрахунковий рядок моделі") }
+            if ($xm -cnotmatch '^M(0[1-9]|1[0-2])\z') { $bad.Add("тест ${xc}: місяць '$xm'") }
+            if (-not (& $isNumber (& $get 'expected'))) { $bad.Add("тест ${xc}: expected не число") }
+            $tol = & $get 'tolerance'
+            if (-not (& $isNumber $tol) -or [double]$tol -lt 0) { $bad.Add("тест ${xc}: tolerance") }
+            $inp = & $get 'inputs'
+            if ($null -eq $inp -or @($inp.PSObject.Properties).Count -eq 0) { $bad.Add("тест ${xc}: немає inputs"); continue }
+            foreach ($p in $inp.PSObject.Properties) {
+                if ($kinds["$xt/$($p.Name)"] -ne 'Input') { $bad.Add("тест ${xc}: $xt/$($p.Name) не рядок вводу моделі") }
+                if (-not (& $isNumber $p.Value)) { $bad.Add("тест ${xc}: ввід $($p.Name) не число") }
+            }
+        }
+    }
     if ($bad.Count) { throw ("hse400-model.json: " + ($bad -join '; ')) }
 }
 

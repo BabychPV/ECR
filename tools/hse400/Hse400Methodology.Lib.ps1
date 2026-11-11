@@ -159,10 +159,73 @@ function New-Hse400ConstantBody {
         source = (& $get 'source') }
 }
 
-function New-Hse400TestBody {
-    <# PUT …/versions/{vid}/tests/{code} (SaveMethodologyTestCaseRequest). #>
-    param([Parameter(Mandatory)]$Test)
-    return @{ inputJson = [string]$Test.inputJson; expectedJson = [string]$Test.expectedJson; tolerance = [decimal]$Test.tolerance }
+function ConvertTo-Hse400Decimal {
+    <# Число моделі -> decimal без втрати знаків (ConvertFrom-Json дає double або decimal залежно від запису). #>
+    param($Value)
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+    if ($Value -is [decimal]) { return $Value }
+    if ($Value -is [double] -or $Value -is [single]) { return [decimal]::Parse(([double]$Value).ToString('R', $inv), [Globalization.NumberStyles]::Float, $inv) }
+    return [decimal]::Parse(([string]$Value), [Globalization.NumberStyles]::Float, $inv)
+}
+
+function New-Hse400GoldenTestBody {
+    <#
+    PUT …/versions/{vid}/tests/{code} (SaveMethodologyTestCaseRequest) для золотого тесту моделі.
+    Модуль місячних колонок аргументи з тесту не бере: він читає комірки документа. Тому вхід тесту - адреса
+    розрахункового рядка в ЗОЛОТОМУ документі (його створює будівник і сам пише туди ввід тесту), а очікуване -
+    значення рядка в колонці місяця: { "<код колонки місяця>": число } (GoldenSet.Judge звіряє за кодом виходу).
+    #>
+    param([Parameter(Mandatory)]$Test, [Parameter(Mandatory)][long]$DocumentId, [Parameter(Mandatory)][long]$TableInstanceId, [Parameter(Mandatory)][int]$PeriodKey)
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+    $input_ = [ordered]@{ documentId = $DocumentId; tableInstanceId = $TableInstanceId; periodKey = [ordered]@{ value = $PeriodKey }
+        sourceRowKey = [string]$Test.row; arguments = @() }
+    $expected = '{{"{0}":{1}}}' -f [string]$Test.month, (ConvertTo-Hse400Decimal $Test.expected).ToString($inv)
+    return @{ inputJson = ($input_ | ConvertTo-Json -Depth 6 -Compress); expectedJson = $expected; tolerance = (ConvertTo-Hse400Decimal $Test.tolerance) }
+}
+
+function Get-Hse400GoldenCellWrites {
+    <#
+    Ввід золотих тестів, згрупований за таблицею: таблиця -> перелік рядків PATCH /documents/{id}/cells
+    (rowKey, cells = [{columnCode = місяць, isEmpty = false, value}]); baseVersion додає будівник із прочитаного зрізу.
+    Два тести на ту саму комірку мусять давати те саме значення - інакше один із них перевіряв би чужий ввід.
+    #>
+    param([Parameter(Mandatory)]$Tests)
+    $byCell = @{}
+    $order = New-Object System.Collections.Generic.List[object]
+    foreach ($t in @($Tests)) {
+        foreach ($p in $t.inputs.PSObject.Properties) {
+            $v = ConvertTo-Hse400Decimal $p.Value
+            $k = ('{0}|{1}|{2}' -f [string]$t.table, $p.Name, [string]$t.month).ToLowerInvariant()
+            if ($byCell.ContainsKey($k)) {
+                if ($byCell[$k].Value -ne $v) { throw "Золоті тести дають різний ввід у $($t.table)/$($p.Name)/$($t.month): $($byCell[$k].Value) і $v." }
+                continue
+            }
+            $cell = [pscustomobject]@{ Table = [string]$t.table; RowKey = $p.Name; Month = [string]$t.month; Value = $v }
+            $byCell[$k] = $cell; $order.Add($cell)
+        }
+    }
+    $result = [ordered]@{}
+    foreach ($g in @($order | Group-Object Table)) {
+        $rows = New-Object System.Collections.Generic.List[object]
+        foreach ($r in @($g.Group | Group-Object RowKey)) {
+            $cells = @($r.Group | ForEach-Object { @{ columnCode = $_.Month; isEmpty = $false; value = $_.Value } })
+            $rows.Add(@{ rowKey = [string]$r.Name; cells = $cells })
+        }
+        $result[[string]$g.Name] = $rows.ToArray()
+    }
+    return $result
+}
+
+function New-Hse400CellsPatchBody {
+    <# PATCH /api/v1/documents/{id}/cells: рядки одного екземпляра таблиці; baseVersion наявного рядка - його rowVersion. #>
+    param([Parameter(Mandatory)][int]$PeriodKey, [Parameter(Mandatory)][long]$TableInstanceId, [Parameter(Mandatory)]$Rows, [hashtable]$RowVersions = @{})
+    $prepared = @()
+    foreach ($r in @($Rows)) {
+        $bv = $null
+        if ($RowVersions.ContainsKey([string]$r.rowKey)) { $bv = $RowVersions[[string]$r.rowKey] }
+        $prepared += , @{ rowKey = [string]$r.rowKey; baseVersion = $bv; cells = @($r.cells) }
+    }
+    return @{ origin = 'UserEdit'; periodKey = $PeriodKey; tableInstanceId = $TableInstanceId; rows = $prepared }
 }
 
 function New-Hse400MethodologyPublishBody {
