@@ -128,11 +128,18 @@ function Get-LandBranchGateTestOverrides {
     .DESCRIPTION
         ECW_C11_02 PARITY_1: NAE 6640 with the stream '1-204 sludge' gives the category key '6640_sludge', which the version
         does not have (publication fails, scratch EcrScratch_An171 11.11). With the fuel-gas stream the rule gives '6640'.
+        ECW_C11_01 PARITY_1 (expected {}): NAE 0782(009) with the stream 'LPG (HMB)' gives '0782(009)_LPG', which the version
+        does not have - the only *_LPG keys are 6646..6657 (W15r rehearsal 12.11: publish of V4 -> ECR-CALC-0422
+        categoryRuleFailed). With NAE 6646 the rule gives '6646_LPG'; the test checks no outputs, so the branch it lands in
+        (type2 for 66xx) does not matter.
         The Cyrillic part is built from code points: the lib is dot-sourced by Windows PowerShell 5 without a BOM.
     #>
     $ru = -join ([char[]]@(0x0422, 0x043E, 0x043F, 0x043B, 0x0438, 0x0432, 0x043D, 0x044B, 0x0439, 0x20, 0x0433, 0x0430, 0x0437, 0x20, 0x28,
             0x0412, 0x043D, 0x0443, 0x0442, 0x0440, 0x0435, 0x043D, 0x043D, 0x0438, 0x0439, 0x29))
-    return @{ 'ECW_C11_02' = @{ 'Land_TypeFuelOrStream' = "Fuel Gas (Internal) - $ru" } }
+    return @{
+        'ECW_C11_02' = @{ 'Land_TypeFuelOrStream' = "Fuel Gas (Internal) - $ru" }
+        'ECW_C11_01' = @{ 'Land_NAE' = '6646' }
+    }
 }
 
 function Convert-LandBranchGateTestInput {
