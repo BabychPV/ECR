@@ -1913,6 +1913,24 @@ public sealed record CurrentResultFilter(
 > стеля 50 000 тепер діє на відфільтрований набір (документ з багатьма чужими числами більше не дає 422 на зрізі).
 
 ```csharp
+// src/Ecr.Application/Ports/ICalculationYearReader.cs  (CALC-RESULTS: «Calculation results» — усі місяці року)
+public interface ICalculationYearReader
+{
+    /// <summary>Числа актуальних прогонів і розраховані комірки формул шаблону за періоди року одним набором запитів.</summary>
+    public Task<CalculationYearFacts> ReadYearAsync(
+        long documentId,
+        IReadOnlyList<int> periodKeys,
+        IReadOnlyCollection<long> tableInstanceIds,
+        IReadOnlyCollection<int> labelColumnIds,
+        CancellationToken ct);
+}
+```
+
+> CALC-RESULTS (2026-11-11): `CalculationResultStore` реалізує й цей порт — правило актуального прогону (власний
+> документний прогін періоду перед проєктним) одне на обидва читання (`EffectiveRuns`). Стеля — 50 000 × кількість
+> періодів, понад неї — `ECR-CALC-0422` `resultsTooLarge`, як і для одного періоду. Лише гаряча схема (архів — ні).
+
+```csharp
 // src/Ecr.Application/Ports/ICalculationBindingStore.cs
 
 using Ecr.Domain.Entities.Configuration;
@@ -4759,6 +4777,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/methodologies/{id}/bindings/{columnDefId}/{outputCode}` | `Calculation.EditRule` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/publications` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-results` | `Calculation.View` | 7 |
+| `GET` | `/api/v1/documents/{id}/calculation-results/year` | `Calculation.View` | 7 |
+| `POST` | `/api/v1/documents/{id}/calculation-results/year/export` | `Document.Export` | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-run` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-issues` | `Document.View` | 7 |
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/publish` | `Calculation.Publish` | 4 |

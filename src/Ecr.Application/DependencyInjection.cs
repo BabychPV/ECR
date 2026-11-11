@@ -471,6 +471,9 @@ public static class DependencyInjection
         services.AddScoped<Calculations.RuleCoverageHandler>();
         services.AddScoped<Calculations.CompareMethodologyVersionsHandler>();
         services.AddScoped<Documents.GetCalculationResultsHandler>();
+        services.AddScoped<Documents.CalculationYear.CalculationYearViewBuilder>();
+        services.AddScoped<Documents.CalculationYear.GetCalculationYearHandler>();
+        services.AddScoped<Documents.CalculationYear.ExportCalculationYearHandler>();
         services.AddScoped<Documents.GetCalculationRunStatusHandler>();
         services.AddScoped<Documents.GetCalculationIssuesHandler>();
         services.AddScoped<Calculations.RunCalculationHandler>();
