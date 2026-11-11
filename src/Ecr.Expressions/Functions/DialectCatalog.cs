@@ -44,7 +44,9 @@ public enum FunctionTier : byte
 /// <c>CURRENT_SUBSTANCE</c>: наші, потрібні для одиниць і речовин;</description></item>
 /// <item><description><b>8 Extension</b> — <c>REGFIND</c>, <c>REGONE</c>,
 /// <c>REGFIELD</c> (RT-20a) і <c>REGSUM</c>, <c>REGAVG</c>, <c>REGMIN</c>,
-/// <c>REGMAX</c>, <c>REGCOUNT</c> (RT-20b): наші, функції довідників.</description></item>
+/// <c>REGMAX</c>, <c>REGCOUNT</c> (RT-20b): наші, функції довідників;</description></item>
+/// <item><description><b>2 Extension</b> — <c>SUBSTANCE_APPLICABLE</c> і <c>CONTAINS</c> (AN-165): наші,
+/// булеві умови вибору (застосовність речовини; підрядок тексту).</description></item>
 /// </list>
 ///
 /// ⚠ Наслідок, вартий уваги методолога: **натуральний логарифм у чинній
@@ -94,7 +96,7 @@ public static class DialectCatalog
     ];
 
     /// <summary>
-    /// Тринадцять функцій, яких чинний рушій не обчислює.
+    /// П'ятнадцять функцій, яких чинний рушій не обчислює.
     /// </summary>
     /// <remarks>
     /// ⛔ <c>Ln</c> і <c>ifs</c> потрапили сюди **за заміром**, а не за
@@ -123,6 +125,12 @@ public static class DialectCatalog
         // (scope, kind, value, код речовини проходу). Boolean; перший аргумент - літерал коду довідника (за ним рушій
         // підтягує знімок). Вживається у правилі категорії версії (02b «Застосовність речовини до рядка»).
         new("SUBSTANCE_APPLICABLE", 4, 4, false, ExpressionValueType.Boolean),
+
+        // ✎ 2026-11-11 (AN-165): чи містить текст фрагмент — порядково, з урахуванням регістру, як
+        // `string.Contains` у легасі (ECW_C11_01.cs: гілку обирають за підрядком потоку й NAE, і `in()` цього
+        // не виражає). Boolean; NULL/порожній текст - FALSE, нетекстовий аргумент - #VALUE. Дозволена і в Legacy:
+        // числа не рахує, лише обирає гілку `if`.
+        new("CONTAINS", 2, 2, false, ExpressionValueType.Boolean),
 
         // ⚠ Функції довідників (RT-20a, `D-159`): чинний рушій довідників не
         // бачив зовсім, тож у `Legacy`-версії їм нічого відтворювати —
@@ -318,5 +326,9 @@ public static class DialectCatalog
     {
         "REGFIND", "REGONE", "REGFIELD", "REGSUM", "REGAVG", "REGMIN", "REGMAX", "REGCOUNT",
         "CURRENT_SUBSTANCE", "SUBSTANCE_APPLICABLE",
+
+        // ✎ 2026-11-11 (AN-165): CONTAINS — текстова перевірка для вибору гілки легасі-методологій Land
+        // (C11_01 — Legacy); від decimal не залежить.
+        "CONTAINS",
     };
 }

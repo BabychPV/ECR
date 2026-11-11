@@ -111,7 +111,8 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
         // ⚠ 22 ядра + 14 розширень: Ln, ifs, CONVERT, SUBSTANCE, CURRENT_SUBSTANCE (2026-10-13),
         // SUBSTANCE_APPLICABLE (2026-10-13), з RT-20a REGFIND, REGONE, REGFIELD і з RT-20b REGSUM,
         // REGAVG, REGMIN, REGMAX, REGCOUNT (функції довідників, ярус Extension).
-        Assert.Equal(36, result.Functions.Count);
+        // ✎ 2026-11-11 (AN-165): +CONTAINS — 15 розширень.
+        Assert.Equal(37, result.Functions.Count);
         Assert.Equal(22, result.Functions.Count(f => f.Tier == "Core"));
 
         Assert.Contains(result.Functions, f => f.Name == "SUBSTANCE");
@@ -151,7 +152,9 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
             .HandleAsync(ExpressionDialect.Methodology, null, legacyVersion.VersionId, CancellationToken.None);
 
         // ✎ D-426: 22 ядра + 10 функцій довідників/речовини (REG*, CURRENT_SUBSTANCE, SUBSTANCE_APPLICABLE).
-        Assert.Equal(32, legacy.Functions.Count);
+        // ✎ 2026-11-11 (AN-165): +CONTAINS (гілка чинного ECW_C11_01) — 11.
+        Assert.Equal(33, legacy.Functions.Count);
+        Assert.Contains(legacy.Functions, f => f.Name == "CONTAINS");
         Assert.Equal(22, legacy.Functions.Count(f => f.Tier == "Core"));
         Assert.DoesNotContain(legacy.Functions, f => f.Name == "CONVERT");
         Assert.DoesNotContain(legacy.Functions, f => f.Name == "SUBSTANCE");
@@ -165,7 +168,7 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
         var strict = await Handler(db)
             .HandleAsync(ExpressionDialect.Methodology, null, strictVersion.VersionId, CancellationToken.None);
 
-        Assert.Equal(36, strict.Functions.Count);
+        Assert.Equal(37, strict.Functions.Count);
         Assert.Contains(legacy.Functions, f => f.Name == "REGFIND");
         Assert.Contains(legacy.Functions, f => f.Name == "REGSUM");
         Assert.Equal("Extension", Assert.Single(strict.Functions, f => f.Name == "Ln").Tier);

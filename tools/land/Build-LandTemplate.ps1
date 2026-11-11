@@ -2076,12 +2076,13 @@ function Stage-NaeType {
 }
 
 # ==================== BranchGate (AN-171/AN-172: одна гілка _typeN; склад речовин) ====================
-# Лише явно: -Stage BranchGate. У ЧЕРНЕТЦІ методологій з LandBranchGate.Lib.ps1 (C11_02, C11_11_02, C11_11_03, C11_11_04,
-# C11_16, C12_01) вираз гілки обгортається `if(<умова гілки>, <вираз>, NULL)` за NAE / потоком / CURRENT_SUBSTANCE(): легасі
+# Лише явно: -Stage BranchGate. У ЧЕРНЕТЦІ методологій з LandBranchGate.Lib.ps1 (C11_01, C11_02, C11_11_02, C11_11_03,
+# C11_11_04, C11_16, C12_01) вираз гілки обгортається `if(<умова гілки>, <вираз>, NULL)` за NAE / потоком / CURRENT_SUBSTANCE(): легасі
 # пише одну гілку на (рядок, речовину, tons|gsec), а в ECR кожна гілка - вихід (подвійний облік або невдалі кроки, doc 96).
 # Методологіям зі списку Get-LandBranchGateSubstances (C11_11_04, C11_12_03, C11_16, C11_17, C11_18) задається склад речовин
 # з плоского polCodeList легасі (довідник LAND_AIR_SUBSTANCE, код E<код>). Опубліковану версію не чіпаємо; нову версію чи
-# публікацію етап не робить; повтор - 0 змін. C11_01 (вибір за Contains по тексту) тут немає.
+# публікацію етап не робить; повтор - 0 змін. C11_01 (AN-165): легасі вибирає гілку через string.Contains по тексту NAE і
+# потоку - умова складається з функції діалекту CONTAINS(текст, фрагмент) над @Land_NAE і @Land_TypeFuelOrStream.
 function Stage-BranchGate {
     Log '== BranchGate =='
     . (Join-Path $here 'LandBranchGate.Lib.ps1')
@@ -2145,7 +2146,7 @@ function Stage-BranchGate {
         foreach ($f in @(Items (Api GET "/api/v1/methodologies/$bgId/versions/$bgVid/formulas").Json)) {
             $gate = Get-LandBranchGateValues -Methodology $bgCode -FormulaCode ([string]$f.code)
             if ($null -eq $gate) { continue }
-            $r = Convert-LandBranchGateFormula -Expression ([string]$f.expression) -ArgumentsCsv $f.argumentsCsv -Selector $selector -Values @($gate.Values)
+            $r = Convert-LandBranchGateFormula -Expression ([string]$f.expression) -ArgumentsCsv $f.argumentsCsv -Selector $selector -Values @($gate.Values) -Methodology $bgCode
             if (-not $r.Changed) { continue }
             $body = @{ expression = $r.Expression; resultType = $f.resultType; outputUnitId = $f.outputUnitId; argumentsCsv = $r.ArgumentsCsv }
             if ($null -ne $f.scope) { $body.scope = $f.scope }
