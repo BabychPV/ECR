@@ -35,6 +35,9 @@ public static class DependencyInjection
         services.AddScoped<CalculationOutputWriter>();
         services.AddSingleton<CalendarContext>();
 
+        // ⚠ Порядок: одиничний `ICalculationModule` (публікація, симуляція) — це ОСТАННЯ реєстрація, і нею
+        // має лишатися Generic; оркестратор обирає модуль за `CanHandle` з колекції.
+        services.AddScoped<ICalculationModule, MonthColumnArgumentsModule>();
         services.AddScoped<ICalculationModule, GenericCalculationModule>();
         services.AddScoped<CalculationOrchestrator>();
         services.AddScoped<ICalculationRunner>(p => p.GetRequiredService<CalculationOrchestrator>());
