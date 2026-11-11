@@ -159,7 +159,13 @@ public sealed class ExportDocumentHandler(
 /// </param>
 public sealed record ExcelExportTask(
     long DocumentId, ExcelExportOptions Options, string ExportId, string? Format = DocumentExportFormat.Xlsx,
-    int? RequestedByUserId = null);
+    int? RequestedByUserId = null)
+{
+    /// <summary>
+    /// Книга огляду «Calculation results — усі місяці року» замість книги документа; <c>null</c> — експорт документа.
+    /// </summary>
+    public CalculationYear.CalculationYearExportSpec? CalcResults { get; init; }
+}
 
 /// <summary>
 /// Попередній перегляд імпорту. Право <c>Document.Import</c>.

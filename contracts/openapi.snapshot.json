@@ -2036,6 +2036,464 @@
         ],
         "type": "object"
       },
+      "CalculationYearColumnDto": {
+        "description": "Розрахована колонка шаблону.",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "columnDefId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "headerL10n": {
+            "$ref": "#/components/schemas/LocalizedText"
+          }
+        },
+        "required": [
+          "columnDefId",
+          "code",
+          "headerL10n"
+        ],
+        "type": "object"
+      },
+      "CalculationYearEquipmentDto": {
+        "description": "Рядок документа (обладнання).",
+        "properties": {
+          "idCode": {
+            "description": "Значення колонки бізнес-ключа (IDCode) або код запису довідника.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "labelL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Підпис фіксованого рядка або назва запису довідника; `null` — немає."
+              }
+            ]
+          },
+          "name": {
+            "description": "Текст колонки-назви динамічного рядка; `null` — немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rowKey": {
+            "description": "Ключ рядка; `null` — число рівня таблиці.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "table": {
+            "description": "Індекс у IReadOnlyList&lt;CalculationYearTableDto&gt; CalculationYearViewDto.Tables.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "table",
+          "rowKey",
+          "labelL10n",
+          "name",
+          "idCode"
+        ],
+        "type": "object"
+      },
+      "CalculationYearExportRequest": {
+        "description": "Запит на експорт огляду «Calculation results» за рік.",
+        "properties": {
+          "language": {
+            "description": "Мова підписів (`en`, `ru`, `kz`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "layout": {
+            "description": "`pivot` (місяці колонками, типово) або `long` (рядок на вихід × місяць).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rowIds": {
+            "description": "Виходи «як відфільтровано» (`rows[].id` огляду); відсутнє — увесь документ.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "year": {
+            "description": "Рік.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "year"
+        ],
+        "type": "object"
+      },
+      "CalculationYearMethodologyDto": {
+        "description": "Методологія.",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "methodologyId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "methodologyId",
+          "code",
+          "nameL10n",
+          "version"
+        ],
+        "type": "object"
+      },
+      "CalculationYearMonthDto": {
+        "description": "Місяць року.",
+        "properties": {
+          "calculatedAt": {
+            "description": "Коли завершився прогін, що дав числа місяця (UTC).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "month": {
+            "description": "1…12.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "periodKey": {
+            "description": "Ключ періоду (`YYYYMM`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "periodState": {
+            "description": "`open` | `closed` | `notOpened`.",
+            "type": "string"
+          },
+          "runState": {
+            "description": "`current` | `outOfDate` (входи змінено після прогону) | `noRun` | `notOpened`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "month",
+          "periodKey",
+          "periodState",
+          "runState",
+          "calculatedAt"
+        ],
+        "type": "object"
+      },
+      "CalculationYearRowDto": {
+        "description": "Вихід: одне розраховане число рядка за 12 місяців.",
+        "properties": {
+          "column": {
+            "description": "Індекс колонки формули; `null` — вихід методології.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "equipment": {
+            "description": "Індекс у IReadOnlyList&lt;CalculationYearEquipmentDto&gt; CalculationYearViewDto.Equipment.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "description": "Стійкий ключ виходу (для експорту «як відфільтровано»).",
+            "type": "string"
+          },
+          "methodology": {
+            "description": "Індекс методології; `null` — формула шаблону (див. Column).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "monthsIncluded": {
+            "description": "Скільки місяців увійшло в суму (з 12).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "outputCode": {
+            "description": "Код виходу методології або код колонки формули.",
+            "type": "string"
+          },
+          "states": {
+            "description": "12 літер: `v` — значення є; `a` — у місяці є прогін, а цього числа немає (рядка не було, вхід\nпорожній або методологія не дала виходу); `n` — у місяці немає прогону або місяць не відкрито.",
+            "type": "string"
+          },
+          "substance": {
+            "description": "Індекс речовини; `null` — без речовини.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "unit": {
+            "description": "Індекс одиниці; `null` — одиниця невідома (сума не рахується).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "values": {
+            "description": "12 значень; `null` — числа немає.",
+            "type": "array"
+          },
+          "yearTotal": {
+            "description": "Сума за рік — лише для адитивної одиниці; інакше `null`.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "equipment",
+          "methodology",
+          "outputCode",
+          "column",
+          "substance",
+          "unit",
+          "values",
+          "states",
+          "yearTotal",
+          "monthsIncluded"
+        ],
+        "type": "object"
+      },
+      "CalculationYearSubstanceDto": {
+        "description": "Речовина (запис довідника).",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "nameL10n"
+        ],
+        "type": "object"
+      },
+      "CalculationYearTableDto": {
+        "description": "Таблиця документа разом з аркушем.",
+        "properties": {
+          "sheetCode": {
+            "description": "Код аркуша (для посилання на документ).",
+            "type": "string"
+          },
+          "sheetCopyId": {
+            "description": "Копія аркуша; `null` — оригінал.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sheetDefId": {
+            "description": "Аркуш.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetNameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва аркуша."
+          },
+          "tableCode": {
+            "description": "Код таблиці (для посилання на документ).",
+            "type": "string"
+          },
+          "tableDefId": {
+            "description": "`0` — числа без екземпляра таблиці (прогони до D-401), таблицю не встановлено.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "tableNameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва таблиці."
+          }
+        },
+        "required": [
+          "sheetDefId",
+          "sheetCode",
+          "sheetNameL10n",
+          "sheetCopyId",
+          "tableDefId",
+          "tableCode",
+          "tableNameL10n"
+        ],
+        "type": "object"
+      },
+      "CalculationYearUnitDto": {
+        "description": "Одиниця.",
+        "properties": {
+          "additive": {
+            "description": "Чи має сенс сума за рік: маса, енергія, об'єм, кількість речовини — так; швидкість, густина, частка, коефіцієнт,\nвідсоток і все невідоме — ні.",
+            "type": "boolean"
+          },
+          "code": {
+            "description": "Код (`t`, `kg_per_s`).",
+            "type": "string"
+          },
+          "dimension": {
+            "description": "Код розмірності (`Mass`, `MassFlow`…); порожньо — одиниці немає в довіднику.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Одиниця.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "symbolL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Позначення мовами каталогу; `null` — немає."
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "symbolL10n",
+          "dimension",
+          "additive"
+        ],
+        "type": "object"
+      },
+      "CalculationYearViewDto": {
+        "description": "«Calculation results — усі місяці року»: кожне розраховане число документа за рік, місяці поруч\n(CALC-RESULTS.md). Один запит на документ × рік.",
+        "properties": {
+          "columns": {
+            "description": "Розраховані колонки шаблону (джерело — формула, а не методологія).",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearColumnDto"
+            },
+            "type": "array"
+          },
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "equipment": {
+            "description": "Рядки документа (обладнання), на які посилаються виходи.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearEquipmentDto"
+            },
+            "type": "array"
+          },
+          "freshnessHidden": {
+            "description": "`true` — читач звужений (схований аркуш/колонка): «out of date» йому не віддається (Н-2, як у панелі\n        результатів), тож місяці з прогоном показуються як `current`.",
+            "type": "boolean"
+          },
+          "methodologies": {
+            "description": "Методології (версія — останнього місяця з числом).",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearMethodologyDto"
+            },
+            "type": "array"
+          },
+          "months": {
+            "description": "Рівно 12 місяців, січень першим.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearMonthDto"
+            },
+            "type": "array"
+          },
+          "rows": {
+            "description": "Виходи в порядку показу: аркуш → таблиця → рядок → методологія → вихід.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearRowDto"
+            },
+            "type": "array"
+          },
+          "substances": {
+            "description": "Речовини.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearSubstanceDto"
+            },
+            "type": "array"
+          },
+          "tables": {
+            "description": "Таблиці (з аркушем), на які посилаються рядки.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearTableDto"
+            },
+            "type": "array"
+          },
+          "units": {
+            "description": "Одиниці з ознакою адитивності.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationYearUnitDto"
+            },
+            "type": "array"
+          },
+          "year": {
+            "description": "Рік.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "documentId",
+          "year",
+          "months",
+          "tables",
+          "equipment",
+          "methodologies",
+          "substances",
+          "units",
+          "columns",
+          "rows",
+          "freshnessHidden"
+        ],
+        "type": "object"
+      },
       "CalendarMode": {
         "description": "Джерело календарних величин періоду (D-78). Різниця конвенцій змінює всі\nчисла при перерахунку в г/с і т/рік.",
         "enum": [
@@ -39726,6 +40184,123 @@
           }
         },
         "summary": "Числа, які дав розрахунок методологій. Право `Calculation.View`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/calculation-results/year": {
+      "get": {
+        "description": "⚠ Окремий шлях `…/calculation-results/year`, а не `?year=` на сусідньому\n`…/calculation-results?periodKey=`: форма відповіді інша (огляд року, а не перелік чисел періоду), і\nодна адреса з двома формами зламала б типізований контракт клієнта. Один запит на документ × рік.",
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Рік (2000…2100).",
+            "in": "query",
+            "name": "year",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationYearViewDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationYearViewDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationYearViewDto"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Усі розраховані числа документа за рік, місяці поруч («Calculation results», CALC-RESULTS.md). Право\n`Calculation.View`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/calculation-results/year/export": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalculationYearExportRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalculationYearExportRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalculationYearExportRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          }
+        },
+        "summary": "Експорт огляду року в `.xlsx` (фоном, як експорт документа). Право `Document.Export` і\n`Calculation.View`; книгу забирають через `GET …/export/{exportId}`.",
         "tags": [
           "Documents"
         ]

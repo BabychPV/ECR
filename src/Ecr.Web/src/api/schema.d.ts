@@ -6159,6 +6159,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/calculation-results/year": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Усі розраховані числа документа за рік, місяці поруч («Calculation results», CALC-RESULTS.md). Право
+         *     `Calculation.View`.
+         * @description ⚠ Окремий шлях `…/calculation-results/year`, а не `?year=` на сусідньому
+         *     `…/calculation-results?periodKey=`: форма відповіді інша (огляд року, а не перелік чисел періоду), і
+         *     одна адреса з двома формами зламала б типізований контракт клієнта. Один запит на документ × рік.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Рік (2000…2100). */
+                    year?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CalculationYearViewDto"];
+                        "text/json": components["schemas"]["CalculationYearViewDto"];
+                        "text/plain": components["schemas"]["CalculationYearViewDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/calculation-results/year/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Експорт огляду року в `.xlsx` (фоном, як експорт документа). Право `Document.Export` і
+         *     `Calculation.View`; книгу забирають через `GET …/export/{exportId}`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CalculationYearExportRequest"];
+                    "application/json": components["schemas"]["CalculationYearExportRequest"];
+                    "text/json": components["schemas"]["CalculationYearExportRequest"];
+                };
+            };
+            responses: {
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/plain": components["schemas"]["JobAcceptedResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/calculation-run": {
         parameters: {
             query?: never;
@@ -29261,6 +29360,201 @@ export interface components {
              */
             runId: null | number;
             unmatchedRows: null | components["schemas"]["UnmatchedRowsDto"];
+        };
+        /** @description Розрахована колонка шаблону. */
+        CalculationYearColumnDto: {
+            code: string;
+            /** Format: int32 */
+            columnDefId: number;
+            headerL10n: components["schemas"]["LocalizedText"];
+        };
+        /** @description Рядок документа (обладнання). */
+        CalculationYearEquipmentDto: {
+            /** @description Значення колонки бізнес-ключа (IDCode) або код запису довідника. */
+            idCode: null | string;
+            labelL10n: null | components["schemas"]["LocalizedText"];
+            /** @description Текст колонки-назви динамічного рядка; `null` — немає. */
+            name: null | string;
+            /** @description Ключ рядка; `null` — число рівня таблиці. */
+            rowKey: null | string;
+            /**
+             * Format: int32
+             * @description Індекс у IReadOnlyList&lt;CalculationYearTableDto&gt; CalculationYearViewDto.Tables.
+             */
+            table: number;
+        };
+        /** @description Запит на експорт огляду «Calculation results» за рік. */
+        CalculationYearExportRequest: {
+            /** @description Мова підписів (`en`, `ru`, `kz`). */
+            language?: null | string;
+            /** @description `pivot` (місяці колонками, типово) або `long` (рядок на вихід × місяць). */
+            layout?: null | string;
+            /** @description Виходи «як відфільтровано» (`rows[].id` огляду); відсутнє — увесь документ. */
+            rowIds?: null | string[];
+            /**
+             * Format: int32
+             * @description Рік.
+             */
+            year: number;
+        };
+        /** @description Методологія. */
+        CalculationYearMethodologyDto: {
+            code: string;
+            /** Format: int32 */
+            methodologyId: number;
+            nameL10n: components["schemas"]["LocalizedText"];
+            version: string;
+        };
+        /** @description Місяць року. */
+        CalculationYearMonthDto: {
+            /**
+             * Format: date-time
+             * @description Коли завершився прогін, що дав числа місяця (UTC).
+             */
+            calculatedAt: null | string;
+            /**
+             * Format: int32
+             * @description 1…12.
+             */
+            month: number;
+            /**
+             * Format: int32
+             * @description Ключ періоду (`YYYYMM`).
+             */
+            periodKey: number;
+            /** @description `open` | `closed` | `notOpened`. */
+            periodState: string;
+            /** @description `current` | `outOfDate` (входи змінено після прогону) | `noRun` | `notOpened`. */
+            runState: string;
+        };
+        /** @description Вихід: одне розраховане число рядка за 12 місяців. */
+        CalculationYearRowDto: {
+            /**
+             * Format: int32
+             * @description Індекс колонки формули; `null` — вихід методології.
+             */
+            column: null | number;
+            /**
+             * Format: int32
+             * @description Індекс у IReadOnlyList&lt;CalculationYearEquipmentDto&gt; CalculationYearViewDto.Equipment.
+             */
+            equipment: number;
+            /** @description Стійкий ключ виходу (для експорту «як відфільтровано»). */
+            id: string;
+            /**
+             * Format: int32
+             * @description Індекс методології; `null` — формула шаблону (див. Column).
+             */
+            methodology: null | number;
+            /**
+             * Format: int32
+             * @description Скільки місяців увійшло в суму (з 12).
+             */
+            monthsIncluded: number;
+            /** @description Код виходу методології або код колонки формули. */
+            outputCode: string;
+            /** @description 12 літер: `v` — значення є; `a` — у місяці є прогін, а цього числа немає (рядка не було, вхід
+             *     порожній або методологія не дала виходу); `n` — у місяці немає прогону або місяць не відкрито. */
+            states: string;
+            /**
+             * Format: int32
+             * @description Індекс речовини; `null` — без речовини.
+             */
+            substance: null | number;
+            /**
+             * Format: int32
+             * @description Індекс одиниці; `null` — одиниця невідома (сума не рахується).
+             */
+            unit: null | number;
+            /** @description 12 значень; `null` — числа немає. */
+            values: unknown[];
+            /**
+             * Format: decimal
+             * @description Сума за рік — лише для адитивної одиниці; інакше `null`.
+             */
+            yearTotal: null | string;
+        };
+        /** @description Речовина (запис довідника). */
+        CalculationYearSubstanceDto: {
+            code: string;
+            /** Format: int64 */
+            id: number;
+            nameL10n: components["schemas"]["LocalizedText"];
+        };
+        /** @description Таблиця документа разом з аркушем. */
+        CalculationYearTableDto: {
+            /** @description Код аркуша (для посилання на документ). */
+            sheetCode: string;
+            /**
+             * Format: int64
+             * @description Копія аркуша; `null` — оригінал.
+             */
+            sheetCopyId: null | number;
+            /**
+             * Format: int32
+             * @description Аркуш.
+             */
+            sheetDefId: number;
+            /** @description Назва аркуша. */
+            sheetNameL10n: components["schemas"]["LocalizedText"];
+            /** @description Код таблиці (для посилання на документ). */
+            tableCode: string;
+            /**
+             * Format: int32
+             * @description `0` — числа без екземпляра таблиці (прогони до D-401), таблицю не встановлено.
+             */
+            tableDefId: number;
+            /** @description Назва таблиці. */
+            tableNameL10n: components["schemas"]["LocalizedText"];
+        };
+        /** @description Одиниця. */
+        CalculationYearUnitDto: {
+            /** @description Чи має сенс сума за рік: маса, енергія, об'єм, кількість речовини — так; швидкість, густина, частка, коефіцієнт,
+             *     відсоток і все невідоме — ні. */
+            additive: boolean;
+            /** @description Код (`t`, `kg_per_s`). */
+            code: string;
+            /** @description Код розмірності (`Mass`, `MassFlow`…); порожньо — одиниці немає в довіднику. */
+            dimension: string;
+            /**
+             * Format: int32
+             * @description Одиниця.
+             */
+            id: number;
+            symbolL10n: null | components["schemas"]["LocalizedText"];
+        };
+        /** @description «Calculation results — усі місяці року»: кожне розраховане число документа за рік, місяці поруч
+         *     (CALC-RESULTS.md). Один запит на документ × рік. */
+        CalculationYearViewDto: {
+            /** @description Розраховані колонки шаблону (джерело — формула, а не методологія). */
+            columns: components["schemas"]["CalculationYearColumnDto"][];
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /** @description Рядки документа (обладнання), на які посилаються виходи. */
+            equipment: components["schemas"]["CalculationYearEquipmentDto"][];
+            /** @description `true` — читач звужений (схований аркуш/колонка): «out of date» йому не віддається (Н-2, як у панелі
+             *             результатів), тож місяці з прогоном показуються як `current`. */
+            freshnessHidden: boolean;
+            /** @description Методології (версія — останнього місяця з числом). */
+            methodologies: components["schemas"]["CalculationYearMethodologyDto"][];
+            /** @description Рівно 12 місяців, січень першим. */
+            months: components["schemas"]["CalculationYearMonthDto"][];
+            /** @description Виходи в порядку показу: аркуш → таблиця → рядок → методологія → вихід. */
+            rows: components["schemas"]["CalculationYearRowDto"][];
+            /** @description Речовини. */
+            substances: components["schemas"]["CalculationYearSubstanceDto"][];
+            /** @description Таблиці (з аркушем), на які посилаються рядки. */
+            tables: components["schemas"]["CalculationYearTableDto"][];
+            /** @description Одиниці з ознакою адитивності. */
+            units: components["schemas"]["CalculationYearUnitDto"][];
+            /**
+             * Format: int32
+             * @description Рік.
+             */
+            year: number;
         };
         /**
          * @description Джерело календарних величин періоду (D-78). Різниця конвенцій змінює всі

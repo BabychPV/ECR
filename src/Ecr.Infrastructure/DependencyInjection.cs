@@ -186,6 +186,9 @@ public static class DependencyInjection
         services.AddScoped<ITemplateVersionDiscardStore, TemplateVersionDiscardStore>();
         services.AddScoped<IConstantStore, ConstantStore>();
         services.AddScoped<ICalculationResultStore, CalculationResultStore>();
+
+        // CALC-RESULTS: огляд року читає той самий екземпляр сховища (правило актуального прогону — одне).
+        services.AddScoped<ICalculationYearReader>(sp => (CalculationResultStore)sp.GetRequiredService<ICalculationResultStore>());
         services.AddScoped<ICalculationIssueStore, CalculationIssueStore>();
         services.AddScoped<ICalculationBindingStore, CalculationBindingStore>();
         services.AddScoped<IOrphanScanner, OrphanScanner>();
