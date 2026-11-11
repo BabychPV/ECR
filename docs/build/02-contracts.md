@@ -2416,6 +2416,10 @@ public interface IDocumentStore
 проєкту: за `YearWithMonthColumns` клієнт не показує вибір місяця. Річний проєкт
 (`PeriodKind = Yearly`) з версією `PerMonthCopies` відхиляється при створенні проєкту й міграції
 документа: `ECR-TMPL-0422`, `messageKey = err.ECR-TMPL-0422.yearlyProjectNeedsYearLayout`.
+Публікація версії `YearWithMonthColumns` відхиляється (`ECR-TMPL-0422`, діагностика на таблицю
+`MonthsInColumns`), коли формула немісячної колонки читає `[Period]` (усе, крім `.Year`) —
+`messageKey = err.ECR-TMPL-0422.yearLayoutPeriodFormula`, або методологію прив'язано до немісячної
+колонки — `err.ECR-TMPL-0422.yearLayoutNonMonthBinding` (аргументи `tableCode`, `count`, `columns`).
 
 #### `IDocumentDeletionStore`
 
