@@ -1,4 +1,5 @@
 // tests/Ecr.Infrastructure.Tests/Persistence/LandHse400CompositionRegistryTests.Document.cs
+using Ecr.Application.Registries;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
@@ -127,6 +128,40 @@ public sealed partial class LandHse400CompositionRegistryTests
         }
     }
 
+    /// <remarks>
+    /// Мутаційний доказ: прибрати умову <c>project.Code != GoldProjectCode</c> у
+    /// <see cref="Hse400CompositionSnapshotLoader"/> — тест червоніє (0.81 золотого документа замість 0.7 довідника).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE400")]
+    public async Task Документ_проєкту_золотих_тестів_не_є_джерелом_складу()
+    {
+        var f = await ArrangeAsync();
+        var template = await BuildDocumentAsync(("FG_Internal", "Density_20", 1, 0.81m));
+        var gold = lastBuilt!;
+
+        // Документ стає документом проєкту HSE400_GOLD (код проєкту унікальний: попередній власник коду — під інше ім'я).
+        await using (var db = sql.CreateContext())
+        {
+            var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+            await db.Projects
+                .Where(p => p.Code == Hse400CompositionMapping.GoldProjectCode)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.Code, $"OLDGOLD{tag}"));
+            await db.Projects
+                .Where(p => p.Id == gold.ProjectId)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.Code, Hse400CompositionMapping.GoldProjectCode));
+        }
+
+        var snapshot = await LoadFromDocumentAsync(f, template);
+
+        // Синтетичний ввід золотого документа не перекриває довідник: 0.7 імпорту, не 0.81.
+        Assert.Equal(0.7m, Eval(f, snapshot, ModelDensity20(), FuelGasInternal, month: 1).AsNumber());
+    }
+
+    private TestDocument? lastBuilt;
+
     private async Task<IRegistrySnapshot> LoadFromDocumentAsync(Fixture f, string templateCode, bool enabled = true)
     {
         await using var db = sql.CreateContext();
@@ -162,6 +197,7 @@ public sealed partial class LandHse400CompositionRegistryTests
     private async Task<string> BuildDocumentAsync(params (string Stream, string RowKey, int Month, decimal Value)[] cells)
     {
         var doc = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: Year2026, ct: CancellationToken.None);
+        lastBuilt = doc;
         var key = new PeriodKey(Year2026);
         await using var db = sql.CreateContext();
         var templateCode = await db.Templates.Where(t => t.Id == doc.TemplateId).Select(t => t.Code).SingleAsync();

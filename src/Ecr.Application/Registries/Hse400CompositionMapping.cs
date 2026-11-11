@@ -42,6 +42,12 @@ public static partial class Hse400CompositionMapping
     /// <summary>Код шаблону HSE400.</summary>
     public const string TemplateCode = "HSE400";
 
+    /// <summary>
+    /// Код проєкту золотих тестів методології HSE400 (<c>tools/hse400/Build-Hse400Template.ps1</c>, <c>$goldCode</c>):
+    /// його документ має синтетичний ввід і НІКОЛИ не є джерелом складу для Land.
+    /// </summary>
+    public const string GoldProjectCode = TemplateCode + "_GOLD";
+
     /// <summary>Префікс ключа розрахункового рядка (<c>F_&lt;X&gt;</c> — формула <c>HSE400_&lt;таблиця&gt;_&lt;X&gt;</c>).</summary>
     public const string CalculatedPrefix = "F_";
 
