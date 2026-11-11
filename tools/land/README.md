@@ -566,13 +566,14 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 
 Сторожі: LandNaeGroupBridgesModelTests (Architecture), NaeGroupBridgesTests (Expressions, справжній рушій).
 
-### Джерела Land_MassFraction - Decimal: ретайп String -> Decimal у чернетці-клоні (AN-173, шаблон 1.0.16.0)
+### Масові частки - Decimal: ретайп String -> Decimal у чернетці-клоні (AN-173, шаблон 1.0.16.0)
 
-П'ять джерел мостів у T9a_19 (`SaturatedHydrocarbonsC1C5`, `SaturatedHydrocarbonsC6C10`, `Benzene`, `Xylene`, `Toluene`)
-у моделі тепер Decimal(34,16), а не String: у Strict текст x число = `#VALUE`, і `ECW_C11_11_04` type1 не рахувалась.
-Правило генератора - `nae_group_bridges.py` (`_retype_decimal`): джерело ретайпиться ПІСЛЯ створення мосту, тож самі мости
-`Land_MassFraction_0<код>` лишаються як були (Formula, precision/scale null; рішення щодо них окреме). Ті самі коди в
-9a_16/9a_17/9a_24-28 лишаються String.
+Колонки масових часток речовин type1 (`SaturatedHydrocarbonsC1C5` 415, `SaturatedHydrocarbonsC6C10` 416, `Benzene` 602,
+`Xylene` 616, `Toluene` 621) у T9a_16, T9a_17, T9a_19, T9a_24-T9a_28 (40 колонок, рішення людини Q4) у моделі тепер
+Decimal(34,16), а не String: у Strict текст x число = `#VALUE`, і `ECW_C11_11_04` type1 не рахувалась. Мости
+`Land_MassFraction_0<код>` T9a_19 - числові Formula 34/16 (рішення Q5). Правило генератора - `nae_group_bridges.py`
+(`retype_mass_fraction_sources`, `MASSFRACTION_SOURCE_TABLES`): колонка із заголовком «<код>: ...» (рівно одна на код у
+таблиці) ретайпиться ДО створення мостів, тож міст бере тип Decimal (28/12 -> 34/16 фінальним проходом масштабу).
 
 Клон опублікованої версії (1.0.15.0) несе ці колонки як String, а API тип не змінює (`ECR-TMPL-0422`
 columnDataTypeImmutable навіть у чернетці). Тому `Fill-StructureSql` (Stage Template) після D-423 ретайпить їх SQL-ом за
@@ -582,6 +583,10 @@ columnDataTypeImmutable навіть у чернетці). Тому `Fill-Struct
 `Resolve-LandDisplayFormat`, `0.000000`). Гарди в самому UPDATE: версія Draft (`Status=0`), колонка ще String
 (`DataType=0`) і не місячна - повтор дає 0 змін; у `doc.CellValue` немає значень колонки. Не застосований UPDATE - рядок
 `WARN тип колонки: ... String->Decimal не застосовано`; інші розбіжності типів Build не чіпає (їх показує Verify).
+Мости клону (Formula/Calculated без Precision/Scale), чиї ВСІ посилання `[Code]` - Decimal-колонки моделі, які в клоні
+Decimal або щойно ретайпнуті, отримують Precision/Scale моделі (LP-29 «було без межі» їх сам не розширює); гарди: Draft,
+`DataType IN (6,8)`, `Precision IS NULL AND Scale IS NULL`, немає значень у `doc.CellValue`. Міст над джерелом, чий ретайп
+не застосовано, не чіпається (WARN).
 Публікація чернетки - пізніше (`Apply-ContractHeader` у Stage Template), тобто ретайп завжди до неї.
 
 ⚠ Документи старих версій зі ЗНАЧЕННЯМИ в цих колонках migrate-version не переводить як Safe: String -> Decimal для колонки
