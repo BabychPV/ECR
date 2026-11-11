@@ -8,8 +8,9 @@
 # D-423 / D-435 (LandNaeType.Lib.ps1): the branch expression is wrapped
 #   `if(<condition of the branch>, <expression>, NULL)`
 # so a branch not selected for the row gives no number (an output without a number is not written,
-# GenericCalculationModule.Emit). The expression dialect has no string functions, so the condition is `in()` over the
-# exact values. Engine, contract and migrations do not change.
+# GenericCalculationModule.Emit). Where the legacy code compares exact values the condition is `in()` over them; where it
+# uses `string.Contains` (ECW_C11_01) the condition is built with `CONTAINS(text, fragment)` (AN-165: ordinal,
+# case-sensitive, NULL/empty text -> FALSE). Contract and migrations do not change.
 #
 # Selectors (sources: docs/source/.../R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/*.cs,
 # .../ECW_C12_OFFSHORE_OPERATIONAL/ECW_C12_01.cs; the same lists as the parity harness, LandParity.Lib.ps1
@@ -19,12 +20,37 @@
 #              itself contains a space never matches in the legacy code, so it is dropped.
 #   substance  `CURRENT_SUBSTANCE()` (legacy dictionaries by pollutant code, ECW_C11_11_04.cs:82-91).
 #   stream     `@Land_Streams` exact value (ECW_C12_01.cs:121-128 typeOfStreamsInRDS, :151 type2 only for FuelGas).
+#   streamContains  ECW_C11_01 (AN-165), ECW_C11_01.cs:105-117, :157-160, :176-208:
+#              - `Land_NAE` (Trim, spaces removed) Contains one of 6646..6657 -> type2;
+#              - otherwise by `streamfuel`, set from `Land_TypeFuelOrStream` by a chain of `Contains` checks where the LAST
+#                match wins (gas|Gas -> FG, LPG, sludge, caustic, water -> Wwater, 401, 14, 452, Diesel); no match ->
+#                streamfuel = the argument itself; FG/LPG -> type1_1, Diesel/452 -> type1_2, everything else -> type1_3.
+#              "Last match is in set A" = OR over markers k of A: CONTAINS(k) and not (any LATER marker outside A), plus
+#              `in(arg, code)` for a code of A that holds no marker fragment (only 'FG': the argument itself).
+#              The gate reads the raw `@Land_NAE`: unlike the legacy code it does not remove spaces, so it differs only for
+#              a NAE with a space INSIDE the four digits. The harness fallback to Land_TypeFuel is not legacy and is not here.
 # An empty value list means the legacy code never writes that branch: the expression becomes `NULL`.
-#
-# Not here: ECW_C11_01 (branch by `Contains` on NAE and on the stream text, ECW_C11_01.cs:109-119, :176-208) cannot be
-# written with `in()`; it needs a string function or a category-key argument (AN-165 / AN-172 follow-up).
 
 $script:LandBranchGate = [ordered]@{
+    # ECW_C11_01.cs:109-117 (marker -> streamfuel, in the legacy order), :183-208 (branches). Tons and gsec alike.
+    'ECW_C11_01'    = [ordered]@{
+        Selector       = 'streamContains'
+        NaeArgument    = 'Land_NAE'
+        NaeContains    = @('6646', '6647', '6648', '6649', '6650', '6651', '6652', '6653', '6654', '6655', '6656', '6657')
+        NaeBranch      = 'type2'
+        StreamArgument = 'Land_TypeFuelOrStream'
+        StreamMarkers  = @(
+            @('gas', 'FG'), @('Gas', 'FG'), @('LPG', 'LPG'), @('sludge', 'sludge'), @('caustic', 'caustic'), @('water', 'Wwater'),
+            @('401', '401'), @('14', '14'), @('452', '452'), @('Diesel', 'Diesel'))
+        RestBranch     = 'type1_3'
+        # Branch -> streamfuel codes (type2 and type1_3 are derived: NAE and "none of the others").
+        Tons           = [ordered]@{
+            'type2'   = @()
+            'type1_1' = @('FG', 'LPG')
+            'type1_2' = @('Diesel', '452')
+            'type1_3' = @()
+        }
+    }
     # ECW_C11_02.cs:143-146 typeCalculationGroup (same groups for tons and gsec). '6583 (002)' has a space: never matches.
     'ECW_C11_02'    = [ordered]@{
         Selector = 'nae'
@@ -143,9 +169,9 @@ function Get-LandBranchGateSubstances {
 }
 
 function Get-LandBranchOfFormula {
-    <# @{ Metric = 'tons'|'gsec'; Branch = 'type1'|... } for `ECW_EC_(tons|gsec)_<XXX|code>_typeN`; otherwise $null. #>
+    <# @{ Metric = 'tons'|'gsec'; Branch = 'type1'|'type1_2'|... } for `ECW_EC_(tons|gsec)_<XXX|code>_typeN[_M]`; otherwise $null. #>
     param([Parameter(Mandatory)][string]$FormulaCode)
-    $m = [regex]::Match($FormulaCode, '^ECW_EC_(?<metric>tons|gsec)_[A-Za-z0-9]+_(?<branch>type[0-9]+)$')
+    $m = [regex]::Match($FormulaCode, '^ECW_EC_(?<metric>tons|gsec)_[A-Za-z0-9]+_(?<branch>type[0-9]+(_[0-9]+)?)$')
     if (-not $m.Success) { return $null }
     return @{ Metric = $m.Groups['metric'].Value; Branch = $m.Groups['branch'].Value }
 }
@@ -154,6 +180,7 @@ function Get-LandBranchGateValues {
     <#
     .SYNOPSIS  Values that select the branch of this formula; $null = the formula is not gated by this library.
     .OUTPUTS   @{ Values = string[] } (empty Values = the legacy code never writes this branch) or $null.
+               Selector 'streamContains': Values = the branch name (the condition is built from the plan of the methodology).
     #>
     param([Parameter(Mandatory)][string]$Methodology, [Parameter(Mandatory)][string]$FormulaCode)
     if (-not $script:LandBranchGate.Contains($Methodology)) { return $null }
@@ -162,6 +189,13 @@ function Get-LandBranchGateValues {
     $plan = $script:LandBranchGate[$Methodology]
     $groups = $plan.Tons
     if ($b.Metric -eq 'gsec' -and $plan.Contains('Gsec')) { $groups = $plan.Gsec }
+    # A two-level branch (`typeN_M`) or any branch of a 'streamContains' plan is gated only when the plan names it: codes
+    # of that form in the other methodologies stay untouched, as before AN-165.
+    if ($plan.Selector -eq 'streamContains') {
+        if (-not $groups.Contains($b.Branch)) { return $null }
+        return @{ Values = [string[]]@($b.Branch) }
+    }
+    if ($b.Branch.Contains('_') -and -not $groups.Contains($b.Branch)) { return $null }
     $gateList = [string[]]@()
     if ($groups.Contains($b.Branch)) { $gateList = [string[]]@($groups[$b.Branch]) }
     return @{ Values = $gateList }
@@ -180,14 +214,128 @@ function Get-LandBranchNaeSpellings {
     return $out.ToArray()
 }
 
+# --- 'streamContains' (AN-165): one condition tree, one renderer (dialect text) and one evaluator (tests) -----------------
+# Node: @{ Op = 'contains'|'in'|'or'|'and'|'not'; Arg; Text; Items }.
+
+function Get-LandBranchLastMatchNode {
+    <# "The streamfuel the legacy chain ends with is one of $FuelCodes" (see the header: the last matching marker wins). #>
+    param([Parameter(Mandatory)]$GatePlan, [Parameter(Mandatory)][string[]]$FuelCodes)
+    $markers = @($GatePlan.StreamMarkers)
+    $arg = [string]$GatePlan.StreamArgument
+    $groups = [ordered]@{}
+    for ($k = 0; $k -lt $markers.Count; $k++) {
+        if (-not ($FuelCodes -ccontains [string]$markers[$k][1])) { continue }
+        $later = New-Object System.Collections.Generic.List[object]
+        for ($j = $k + 1; $j -lt $markers.Count; $j++) {
+            if (-not ($FuelCodes -ccontains [string]$markers[$j][1])) { $later.Add(@{ Op = 'contains'; Arg = $arg; Text = [string]$markers[$j][0] }) }
+        }
+        $key = 'k:' + (($later | ForEach-Object { $_.Text }) -join '|')
+        if (-not $groups.Contains($key)) { $groups[$key] = @{ Members = (New-Object System.Collections.Generic.List[object]); Later = $later } }
+        $groups[$key].Members.Add(@{ Op = 'contains'; Arg = $arg; Text = [string]$markers[$k][0] })
+    }
+    $alts = New-Object System.Collections.Generic.List[object]
+    foreach ($key in $groups.Keys) {
+        $g = $groups[$key]
+        $members = @{ Op = 'or'; Items = $g.Members.ToArray() }
+        if ($g.Later.Count -eq 0) { $alts.Add($members) }
+        else { $alts.Add(@{ Op = 'and'; Items = @($members, @{ Op = 'not'; Items = @(@{ Op = 'or'; Items = $g.Later.ToArray() }) }) }) }
+    }
+    # No marker matched: streamfuel = the argument itself. Only a code that holds no marker fragment can get here.
+    foreach ($code in $FuelCodes) {
+        $holdsMarker = $false
+        foreach ($mk in $markers) { if ($code.Contains([string]$mk[0])) { $holdsMarker = $true } }
+        if (-not $holdsMarker) { $alts.Add(@{ Op = 'in'; Arg = $arg; Text = $code }) }
+    }
+    return @{ Op = 'or'; Items = $alts.ToArray() }
+}
+
+function Get-LandBranchContainsTree {
+    <# Condition tree of a branch of a 'streamContains' methodology. #>
+    param([Parameter(Mandatory)][string]$Methodology, [Parameter(Mandatory)][string]$Branch)
+    $plan = $script:LandBranchGate[$Methodology]
+    if ($null -eq $plan -or $plan.Selector -ne 'streamContains') { throw "Branch gate: $Methodology is not a 'streamContains' methodology" }
+    $naeItems = @($plan.NaeContains | ForEach-Object { @{ Op = 'contains'; Arg = [string]$plan.NaeArgument; Text = [string]$_ } })
+    $nae = @{ Op = 'or'; Items = $naeItems }
+    if ($Branch -ceq $plan.NaeBranch) { return $nae }
+    $notNae = @{ Op = 'not'; Items = @($nae) }
+    $inner = [ordered]@{}
+    foreach ($name in $plan.Tons.Keys) {
+        $codes = [string[]]@($plan.Tons[$name])
+        if ($codes.Count -gt 0) { $inner[$name] = Get-LandBranchLastMatchNode -GatePlan $plan -FuelCodes $codes }
+    }
+    if ($inner.Contains($Branch)) { return @{ Op = 'and'; Items = @($notNae, $inner[$Branch]) } }
+    if ($Branch -ceq $plan.RestBranch) {
+        $items = New-Object System.Collections.Generic.List[object]
+        $items.Add($notNae)
+        foreach ($name in $inner.Keys) { $items.Add(@{ Op = 'not'; Items = @($inner[$name]) }) }
+        return @{ Op = 'and'; Items = $items.ToArray() }
+    }
+    throw "Branch gate of ${Methodology}: unknown branch '$Branch'"
+}
+
+function ConvertTo-LandBranchConditionText {
+    <# Dialect text of a condition tree. `not` is always written `not (...)`; a nested and/or is parenthesized. #>
+    param([Parameter(Mandatory)]$Node)
+    switch ($Node.Op) {
+        'contains' { return 'CONTAINS(@' + $Node.Arg + ", '" + ([string]$Node.Text).Replace("'", "''") + "')" }
+        'in' { return 'in(@' + $Node.Arg + ", '" + ([string]$Node.Text).Replace("'", "''") + "')" }
+        'not' { return 'not (' + (ConvertTo-LandBranchConditionText -Node $Node.Items[0]) + ')' }
+        default {
+            $items = @($Node.Items)
+            if ($items.Count -eq 1) { return (ConvertTo-LandBranchConditionText -Node $items[0]) }
+            $parts = foreach ($i in $items) {
+                # A one-item and/or is its item: unwrap before deciding on parentheses.
+                $inner = $i
+                while (($inner.Op -eq 'and' -or $inner.Op -eq 'or') -and @($inner.Items).Count -eq 1) { $inner = @($inner.Items)[0] }
+                $t = ConvertTo-LandBranchConditionText -Node $inner
+                if ($inner.Op -eq 'and' -or $inner.Op -eq 'or') { "($t)" } else { $t }
+            }
+            return ($parts -join " $($Node.Op) ")
+        }
+    }
+}
+
+function Test-LandBranchCondition {
+    <# The same tree evaluated in PowerShell with the semantics of CONTAINS / in(): ordinal, empty text -> false. #>
+    param([Parameter(Mandatory)]$Node, [Parameter(Mandatory)][hashtable]$ArgRow)
+    switch ($Node.Op) {
+        'contains' { $v = [string]$ArgRow[$Node.Arg]; return ($v.Length -gt 0 -and $v.Contains([string]$Node.Text)) }
+        'in' { return ([string]$ArgRow[$Node.Arg] -ceq [string]$Node.Text) }
+        'not' { return (-not (Test-LandBranchCondition -Node $Node.Items[0] -ArgRow $ArgRow)) }
+        'or' { foreach ($i in @($Node.Items)) { if (Test-LandBranchCondition -Node $i -ArgRow $ArgRow) { return $true } }; return $false }
+        'and' { foreach ($i in @($Node.Items)) { if (-not (Test-LandBranchCondition -Node $i -ArgRow $ArgRow)) { return $false } }; return $true }
+    }
+    throw "Branch gate: unknown node '$($Node.Op)'"
+}
+
+function Get-LandBranchGateArguments {
+    <# Arguments the condition of the selector reads (to be declared in the formula's argument list). #>
+    param([Parameter(Mandatory)][string]$Selector, [string]$Methodology = '')
+    switch ($Selector) {
+        'nae' { return @('Land_NAE') }
+        'stream' { return @('Land_Streams') }
+        'streamContains' {
+            $plan = $script:LandBranchGate[$Methodology]
+            return @([string]$plan.NaeArgument, [string]$plan.StreamArgument)
+        }
+        default { return @() }
+    }
+}
+
 function Get-LandBranchGateCondition {
-    <# The condition text for the branch (without `if(`); $null for an empty list (expression NULL). #>
+    <# The condition text for the branch (without `if(`); $null for an empty list (expression NULL).
+       'streamContains': -Methodology is required, Values = the branch name. #>
     param(
-        [Parameter(Mandatory)][ValidateSet('nae', 'substance', 'stream')][string]$Selector,
-        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Values
+        [Parameter(Mandatory)][ValidateSet('nae', 'substance', 'stream', 'streamContains')][string]$Selector,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Values,
+        [string]$Methodology = ''
     )
     if (@($Values).Count -eq 0) { return $null }
     switch ($Selector) {
+        'streamContains' {
+            if ($Values.Count -ne 1) { throw "Branch gate: 'streamContains' takes one branch name, got $($Values.Count)" }
+            return (ConvertTo-LandBranchConditionText -Node (Get-LandBranchContainsTree -Methodology $Methodology -Branch $Values[0]))
+        }
         'nae' {
             $items = @(Get-LandBranchNaeSpellings -Naes $Values)
             if ($items.Count -eq 0) { return $null }
@@ -208,18 +356,20 @@ function Convert-LandBranchGateFormula {
     <#
     .SYNOPSIS
         Wraps the branch expression: `if(<condition>, <expression>, NULL)`; an empty list -> `NULL`. The argument the condition
-        reads (`@Land_NAE` / `@Land_Streams`) is added to the formula's argument list. Repeating gives Changed = $false.
+        reads (`@Land_NAE` / `@Land_Streams`; both `@Land_NAE` and `@Land_TypeFuelOrStream` for 'streamContains') is added to
+        the formula's argument list. Repeating gives Changed = $false. 'streamContains' needs -Methodology.
     .OUTPUTS  pscustomobject: Changed, Expression, ArgumentsCsv.
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$Expression,
         [AllowNull()][AllowEmptyString()]$ArgumentsCsv = $null,
-        [Parameter(Mandatory)][ValidateSet('nae', 'substance', 'stream')][string]$Selector,
-        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Values
+        [Parameter(Mandatory)][ValidateSet('nae', 'substance', 'stream', 'streamContains')][string]$Selector,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Values,
+        [string]$Methodology = ''
     )
     $text = $Expression.Trim()
     if ($text.Length -eq 0) { return [pscustomobject]@{ Changed = $false; Expression = $Expression; ArgumentsCsv = $ArgumentsCsv } }
-    $condition = Get-LandBranchGateCondition -Selector $Selector -Values $Values
+    $condition = Get-LandBranchGateCondition -Selector $Selector -Values $Values -Methodology $Methodology
     if ($null -eq $condition) {
         $same = ($text -ceq 'NULL')
         return [pscustomobject]@{ Changed = (-not $same); Expression = $(if ($same) { $Expression } else { 'NULL' }); ArgumentsCsv = $ArgumentsCsv }
@@ -228,19 +378,22 @@ function Convert-LandBranchGateFormula {
     $wrapped = $text.StartsWith($head, [StringComparison]::Ordinal) -and $text.EndsWith(', NULL)', [StringComparison]::Ordinal)
     $newExpression = if ($wrapped) { $Expression } else { $head + $text + ', NULL)' }
 
-    $argument = switch ($Selector) { 'nae' { 'Land_NAE' } 'stream' { 'Land_Streams' } default { $null } }
+    $arguments = @(Get-LandBranchGateArguments -Selector $Selector -Methodology $Methodology)
     $newArguments = $ArgumentsCsv
     $argsChanged = $false
-    if ($null -ne $argument -and $null -ne $ArgumentsCsv) {
+    if ($arguments.Count -gt 0 -and $null -ne $ArgumentsCsv) {
         $tokens = New-Object System.Collections.Generic.List[string]
-        $present = $false
         foreach ($t in (([string]$ArgumentsCsv) -split ';')) {
             $x = $t.Trim()
             if ($x.Length -eq 0) { continue }
-            if (($x.TrimStart('@').TrimEnd('?').TrimEnd()) -ieq $argument) { $present = $true }
             $tokens.Add($x)
         }
-        if (-not $present) { $tokens.Add("@$argument"); $argsChanged = $true; $newArguments = (($tokens -join ';') + ';') }
+        foreach ($argument in $arguments) {
+            $present = $false
+            foreach ($x in $tokens) { if (($x.TrimStart('@').TrimEnd('?').TrimEnd()) -ieq $argument) { $present = $true } }
+            if (-not $present) { $tokens.Add("@$argument"); $argsChanged = $true }
+        }
+        if ($argsChanged) { $newArguments = (($tokens -join ';') + ';') }
     }
     return [pscustomobject]@{ Changed = ((-not $wrapped) -or $argsChanged); Expression = $newExpression; ArgumentsCsv = $newArguments }
 }
@@ -255,8 +408,10 @@ function Get-LandSelectedBranchByGate {
     <#
     .SYNOPSIS  Branch the gate lets through for a row value (NAE, substance code or stream), per metric; $null = none.
                Used by the tests to compare with the parity harness (Get-LandParitySelectedBranch).
+               'streamContains': -Value is the NAE, -Stream the stream text (Land_TypeFuelOrStream).
     #>
-    param([Parameter(Mandatory)][string]$Methodology, [Parameter(Mandatory)][ValidateSet('tons', 'gsec')][string]$Metric, [AllowEmptyString()][string]$Value)
+    param([Parameter(Mandatory)][string]$Methodology, [Parameter(Mandatory)][ValidateSet('tons', 'gsec')][string]$Metric, [AllowEmptyString()][string]$Value,
+        [AllowEmptyString()][string]$Stream = '')
     $plan = $script:LandBranchGate[$Methodology]
     $groups = $plan.Tons
     if ($Metric -eq 'gsec' -and $plan.Contains('Gsec')) { $groups = $plan.Gsec }
@@ -264,6 +419,12 @@ function Get-LandSelectedBranchByGate {
     foreach ($b in $groups.Keys) {
         $vals = @($groups[$b])
         switch ($plan.Selector) {
+            'streamContains' {
+                $row = @{}
+                $row[[string]$plan.NaeArgument] = $Value
+                $row[[string]$plan.StreamArgument] = $Stream
+                if (Test-LandBranchCondition -Node (Get-LandBranchContainsTree -Methodology $Methodology -Branch $b) -ArgRow $row) { $hits += $b }
+            }
             'nae' { if (@(Get-LandBranchNaeSpellings -Naes $vals) -ccontains $Value) { $hits += $b } }
             'substance' { if ($vals -ccontains $Value) { $hits += $b } }
             'stream' {

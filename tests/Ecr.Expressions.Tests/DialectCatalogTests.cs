@@ -135,6 +135,7 @@ public sealed class DialectCatalogTests
     [InlineData("REGCOUNT")]
     [InlineData("CURRENT_SUBSTANCE")]
     [InlineData("SUBSTANCE_APPLICABLE")]
+    [InlineData("CONTAINS")] // AN-165: вибір гілки чинного ECW_C11_01 (string.Contains) у Legacy-методиці
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Функції_довідників_дозволені_в_Legacy_D426(string name)
     {

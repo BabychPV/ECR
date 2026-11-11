@@ -67,6 +67,22 @@ public sealed class MethodologyPublishChecksTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void AN165_Текстова_константа_у_фрагменті_CONTAINS_не_є_арифметикою()
+    {
+        // Мутація: прибрати "CONTAINS" з NonNumericFunctions — константа стає «в арифметичній позиції».
+        var problems = Check(
+            [Formula(
+                "Total",
+                "if(CONTAINS(@Land_TypeFuelOrStream, CST.k1_Marker_), 1, NULL)",
+                FormulaResultType.Number)],
+            [Text("k1_Marker_", "gas")],
+            []);
+
+        Assert.Empty(problems);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-9.14")]
     public void Текстова_константа_в_арифметиці_відхиляється()
     {

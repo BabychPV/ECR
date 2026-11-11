@@ -952,7 +952,7 @@ ROUNDDOWN 5 · TEXT 3 · CHAR 3 · CONCATENATE 2 · TEXTBEFORE 2 · TEXTAFTER 2
 ### Ярус `Extension` — чого чинний рушій не вміє
 
 ⛔ Використання в версії з `NumericMode = Legacy` — помилка публікації
-`ECR-CALC-0433`. ✎ D-426 (14.10): виняток — `REGFIND`, `REGONE`, `REGFIELD`, `REGSUM`, `REGAVG`, `REGMIN`, `REGMAX`, `REGCOUNT`, `CURRENT_SUBSTANCE`, `SUBSTANCE_APPLICABLE`: у `Legacy` дозволені; відмова лишається для `Ln`/`ifs`/`CONVERT`/`SUBSTANCE`. Причина проста: `Legacy` існує, щоб відтворити числа чинного
+`ECR-CALC-0433`. ✎ D-426 (14.10): виняток — `REGFIND`, `REGONE`, `REGFIELD`, `REGSUM`, `REGAVG`, `REGMIN`, `REGMAX`, `REGCOUNT`, `CURRENT_SUBSTANCE`, `SUBSTANCE_APPLICABLE` і (✎ 2026-11-11, AN-165) `CONTAINS`: у `Legacy` дозволені; відмова лишається для `Ln`/`ifs`/`CONVERT`/`SUBSTANCE`. Причина проста: `Legacy` існує, щоб відтворити числа чинного
 рушія, а вираз, якого той обчислити не міг, за визначенням нічого не
 відтворює.
 
@@ -964,6 +964,7 @@ ROUNDDOWN 5 · TEXT 3 · CHAR 3 · CONCATENATE 2 · TEXTBEFORE 2 · TEXTAFTER 2
 | `SUBSTANCE(code)` | наша: інакше контекст речовини довелося б передавати аргументом у кожну формулу |
 | `CURRENT_SUBSTANCE()` | ✎ 2026-10-13, наша: код речовини ПОТОЧНОГО проходу рахунку (текст); див. «Поточна речовина» нижче |
 | `SUBSTANCE_APPLICABLE(registry, scope, kind, value)` | ✎ 2026-10-13, наша: чи застосовна речовина проходу до рядка за довідником застосовності (Boolean); див. «Застосовність речовини до рядка» нижче |
+| `CONTAINS(text, fragment)` | ✎ 2026-11-11 (AN-165), наша: чи містить текст фрагмент (Boolean). Семантика — чинного C# `string.Contains(string)`: **порядкове порівняння з урахуванням регістру**, без обрізання пробілів (чинний `ECW_C11_01.cs:109` перевіряє `"gas"` і `"Gas"` окремо). `text` = `NULL` або порожній → `FALSE` (умова вибору гілки має бути визначеною); `fragment` — обов'язковий текст; нетекстовий аргумент → `#VALUE`; помилка аргументу поширюється. Дозволена в `Legacy`: нею записано вибір гілки `_typeN` методики `ECW_C11_01` (`tools/land/LandBranchGate.Lib.ps1`), а арифметики вона не торкається. Інших текстових функцій у діалекті немає |
 | `REGFIND` `REGONE` `REGFIELD` | ✎ 2026-09-27 (`D-159`), **заплановано RT-20a**: наші — пошук запису довідника й читання поля (§7, [«Функції довідників»](#functions-registry)); чинний рушій довідників не бачив зовсім |
 | `REGSUM` `REGAVG` `REGMIN` `REGMAX` `REGCOUNT` | ✎ 2026-09-27 (`D-159`), **заплановано RT-20b**: наші — агрегати по рядках довідника; `Lookup`-аргумент методології стає `EntryRef` лише в `Strict` (`D-161`, RT-23a) |
 
@@ -1508,7 +1509,7 @@ public sealed record ExpressionDiagnostic(string Code, string Message, int Posit
 | 10 | Результат формули сумісний за розмірністю з `OutputUnitId` | `ECR-TMPL-4223` |
 | 11 | Предикат динамічного діапазону не містить заборонених конструкцій | `ECR-TMPL-0422` |
 | 12 | Конкретний `RowKey` не використовується для `RowMode = Dynamic` | `ECR-TMPL-4222` |
-| 13 | У версії з `NumericMode = Legacy` немає функцій ярусу `Extension`. ✎ D-426 (14.10): крім `REG*`, `CURRENT_SUBSTANCE`, `SUBSTANCE_APPLICABLE` | `ECR-CALC-0433` |
+| 13 | У версії з `NumericMode = Legacy` немає функцій ярусу `Extension`. ✎ D-426 (14.10): крім `REG*`, `CURRENT_SUBSTANCE`, `SUBSTANCE_APPLICABLE`; ✎ 2026-11-11 (AN-165): і `CONTAINS` | `ECR-CALC-0433` |
 | 14 | Кожен токен `@Arg` виразу є в оголошеному списку аргументів формули | `ECR-CALC-0432` |
 | 14а | Оголошений аргумент, якого у виразі немає, — **попередження**, не відмова | — |
 | 15 | Довідник функції довідника існує; його код — рядковий літерал. ✎ 2026-09-27, **заплановано RT-21** | `ECR-TMPL-4222` |
