@@ -7,7 +7,7 @@ namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>Читання фактів огляду «Calculation results — усі місяці року» (<see cref="ICalculationYearReader"/>).</summary>
 /// <remarks>
-/// ⛔ Набір запитів не залежить від числа рядків і місяців: прогони — один запит, числа — один (seek
+/// ⛔ Набір запитів не залежить від числа рядків і місяців: прогони — один запит, числа — один на набір прогонів (seek
 /// <c>IX_CalculationResult_DocRun (PeriodKey, DocumentId, CalculationRunId)</c> по ≤ 12 партиціях), комірки формул,
 /// рядки й підписи — по одному на екземпляри таблиць (перелік ідентифікаторів одним JSON-параметром EF), довідники й
 /// версії — по одному. Жодного запиту на рядок чи на місяць.
@@ -36,32 +36,40 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
         // Прогін кожного періоду — тим самим правилом, що й ReadCurrentAsync; рядок числа належить періоду лише тоді,
         // коли його прогін у наборі саме цього періоду (проєктний прогін іншого періоду тут не рахується).
         var effective = keys.ToDictionary(k => k, k => EffectiveRuns(current, documentId, k).Select(r => r.Id).ToHashSet());
-        var runIds = effective.Values.SelectMany(s => s).Distinct().ToList();
 
+        // ⛔ Стеля рахує лише рядки (період, прогін цього періоду): з об'єднанням прогонів по всіх місяцях рядки
+        // проєктного прогону, витісненого документним у своєму місяці, з'їдали б стелю. Місяці з однаковим набором
+        // прогонів — один запит (набори двох видів: документні прогони, або документні + проєктні), тож запитів ≤ 2
+        // на практиці і ніколи не на місяць понад число різних наборів.
         var limit = Ceiling * keys.Count;
-        var results = runIds.Count == 0
-            ? []
-            : await db.CalculationResults
+        var groups = effective
+            .Where(kv => kv.Value.Count > 0)
+            .GroupBy(kv => string.Join(',', kv.Value.Order()), StringComparer.Ordinal)
+            .Select(g => (Keys: g.Select(kv => kv.Key).ToList(), Runs: g.First().Value.ToList()))
+            .ToList();
+        var kept = new List<YearResultRow>();
+        foreach (var (groupKeys, groupRuns) in groups)
+        {
+            var take = limit + 1 - kept.Count;
+            kept.AddRange(await db.CalculationResults
                 .AsNoTracking()
-                .Where(r => keys.Contains(r.PeriodKey)
+                .Where(r => groupKeys.Contains(r.PeriodKey)
                             && r.DocumentId == documentId
-                            && runIds.Contains(r.CalculationRunId)
+                            && groupRuns.Contains(r.CalculationRunId)
                             && r.Kind == CalculationResultKind.Output)
                 .OrderBy(r => r.PeriodKey)
                 .ThenBy(r => r.Id)
-                .Take(limit + 1)
-                .Select(r => new
-                {
+                .Take(take)
+                .Select(r => new YearResultRow(
                     r.PeriodKey, r.CalculationRunId, r.MethodologyVersionId, r.TableInstanceId, r.SourceRowKey,
-                    r.OutputCode, r.SubstanceEntryId, r.UnitId, r.Value,
-                })
+                    r.OutputCode, r.SubstanceEntryId, r.UnitId, r.Value))
                 .ToListAsync(ct)
-                .ConfigureAwait(false);
-        ThrowIfOverCeiling(results.Count, limit, documentId, keys[0]);
+                .ConfigureAwait(false));
+            ThrowIfOverCeiling(kept.Count, limit, documentId, keys[0]);
+        }
 
-        var kept = results
-            .Where(r => effective.TryGetValue(r.PeriodKey, out var set) && set.Contains(r.CalculationRunId))
-            .ToList();
+        // Місяць цілком належить одній групі, тож стійке впорядкування за місяцем зберігає порядок Id усередині.
+        kept = [.. kept.OrderBy(r => r.PeriodKey)];
 
         // Прогін місяця, що справді дав числа документа: документний перед проєктним, новіший перед старішим.
         var runs = kept
@@ -158,6 +166,11 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
             [.. entries.Select(e => new YearEntry(e.Id, e.Code, e.DisplayL10n))],
             versions);
     }
+
+    /// <summary>Рядок числа року (проєкція запиту).</summary>
+    private sealed record YearResultRow(
+        int PeriodKey, long CalculationRunId, int MethodologyVersionId, long? TableInstanceId, string? SourceRowKey,
+        string OutputCode, long? SubstanceEntryId, int UnitId, decimal Value);
 
     private static DateTime? Utc(DateTime? value)
         => value is { } v ? DateTime.SpecifyKind(v, DateTimeKind.Utc) : null;
