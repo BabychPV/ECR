@@ -173,6 +173,9 @@ public static partial class EcrConfigurationValidation
         Ecr.Infrastructure.Persistence.SupersededPurgeOptions.DeleteEnabledKey,
         Ecr.Infrastructure.Persistence.SupersededPurgeOptions.IncludeTraceKey,
         Ecr.Infrastructure.Persistence.SupersededPurgeOptions.RebuildAfterKey,
+
+        // D-476: синк складу газу FLERT; «ture» інакше мовчки лишав би синк вимкненим.
+        Ecr.Infrastructure.Jobs.FlertCompositionSyncOptions.EnabledKey,
     ];
 
     /// <summary>Ключі з переліком допустимих значень (без урахування регістру).</summary>

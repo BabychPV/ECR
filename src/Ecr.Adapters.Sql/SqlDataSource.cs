@@ -40,6 +40,14 @@ namespace Ecr.Adapters.Sql;
 /// (<c>.currentValueNotSupported</c>). Довідники з SQL-джерела не
 /// синхронізуються — master там ECR (D-50, D-199), а FLERT дає часові ряди, не
 /// атрибути елементів.
+/// ✎ <c>D-476</c> (людина 11.11): виняток — склад газу FLERT. Його master — FLERT, ECR тримає копію лише
+/// для читання; читає її не цей метод, а <see cref="ReadTableAsync"/> (весь довідник одним запитом
+/// <see cref="CompositionQueryKey"/>), і пише копію задача синку, а не адаптер.
+/// </para>
+/// <para>
+/// ⛔ Лише читання (<c>D-44</c>): <see cref="ReadTableAsync"/> виконує налаштований запит у транзакції, яку
+/// ЗАВЖДИ відкочує, тож навіть запит із записом нічого в джерелі не лишить; доступ — окремий логін FLERT лише
+/// з <c>EXECUTE</c> на процедуру читання (інструкція встановлення). Сторож — <c>FlertReadOnlyAdapterTests</c>.
 /// </para>
 /// </remarks>
 /// <param name="store">Читання конфігурації джерела.</param>
@@ -49,7 +57,7 @@ namespace Ecr.Adapters.Sql;
 public sealed partial class SqlDataSource(
     ICollectionStore store, ISecretProvider secrets, ISecretProvider? settings = null,
     ILogger<SqlDataSource>? logger = null)
-    : IExternalDataSource
+    : IExternalDataSource, IExternalTableSource
 {
     private readonly ILogger log = (ILogger?)logger ?? NullLogger.Instance;
 
@@ -106,6 +114,15 @@ public sealed partial class SqlDataSource(
     /// </para>
     /// </remarks>
     public const string ValueQueryKey = "Sql:ValueQuery";
+
+    /// <summary>Ключ запиту складу газу FLERT (<c>D-476</c>) для <see cref="ReadTableAsync"/>.</summary>
+    /// <remarks>
+    /// Колонки результату — форма <c>FLERT.dbo.usp_GetAllStreamDataFlattened</c> (70 колонок: потік, кейс,
+    /// 52 значення, вікна дії; поточні й історичні версії). Типового тексту НЕМАЄ; еталонний текст —
+    /// <c>EXEC dbo.usp_GetAllStreamDataFlattened;</c> (інструкція встановлення). Власний ключ джерела
+    /// <c>Sql:&lt;код&gt;:CompositionQuery</c> перекриває спільний, як і для решти запитів.
+    /// </remarks>
+    public const string CompositionQueryKey = Application.Registries.Flert.FlertCompositionSchema.QueryKey;
 
     /// <inheritdoc />
     public ExternalTransport Transport => ExternalTransport.Sql;
@@ -272,6 +289,76 @@ public sealed partial class SqlDataSource(
             points,
             truncated ? [new TimeInterval(points[^1].Timestamp, request.ToUtc)] : [],
             null);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Лише читання: запит іде в транзакції, яка НІКОЛИ не фіксується — явний відкат після читання, а на
+    /// будь-якому винятку відкат робить звільнення транзакції. Запит із записом (помилка конфігурації чи
+    /// процедура, що раптом почала писати) у джерелі нічого не лишає (<c>D-44</c>, <c>D-476</c>).
+    /// <para>
+    /// ⚠ Без повтору виконання (лише відкриття з'єднання повторюється, <see cref="OpenAsync"/>): повтор
+    /// усередині транзакції після транзитивної відмови працював би на приреченій транзакції. Синк повториться
+    /// наступним прогоном, копія тим часом лишається попередньою.
+    /// </para>
+    /// <para>
+    /// ⚠ Без <c>SequentialAccess</c> і з читанням усіх колонок за іменем — порядок колонок задає текст запиту
+    /// замовника (як у <see cref="DiscoverAsync"/>).
+    /// </para>
+    /// </remarks>
+    public async Task<ExternalTable> ReadTableAsync(int dataSourceId, string queryKey, int maxRows, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(queryKey);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxRows);
+        if (!queryKey.StartsWith("Sql:", StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"Ключ запиту SQL-джерела має починатися з «Sql:»: {queryKey}.", nameof(queryKey));
+        }
+
+        var source = await store.FindDataSourceAsync(dataSourceId, ct).ConfigureAwait(false)
+                     ?? throw Unavailable(dataSourceId);
+
+        var query = Query(source.Code, queryKey);
+
+        await using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
+        await using var transaction = (SqlTransaction)await connection
+            .BeginTransactionAsync(IsolationLevel.ReadCommitted, ct)
+            .ConfigureAwait(false);
+
+        var columns = new List<string>();
+        var rows = new List<IReadOnlyList<object?>>();
+        var truncated = false;
+
+        await using (var command = new SqlCommand(query, connection, transaction))
+        await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
+        {
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                columns.Add(reader.GetName(i));
+            }
+
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                if (rows.Count >= maxRows)
+                {
+                    truncated = true;
+                    break;
+                }
+
+                var values = new object?[reader.FieldCount];
+                for (var i = 0; i < reader.FieldCount; i++)
+                {
+                    values[i] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                }
+
+                rows.Add(values);
+            }
+        }
+
+        // ⛔ Відкат, а не фіксація — завжди (див. remarks).
+        await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+
+        return new ExternalTable(columns, rows, truncated);
     }
 
     /// <summary>Текст запиту: спершу власний запит джерела, далі спільний.</summary>

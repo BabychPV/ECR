@@ -458,6 +458,7 @@ public static class DependencyInjection
 
         // D-476: синк складу газу FLERT → дзеркало STREAM/STREAM_CASE/GAS_COMPOSITION (щодня о 02:00).
         services.AddScoped<Jobs.FlertRegistryProvisioner>();
+        services.AddScoped<Jobs.FlertCompositionSyncJob>();
         services.AddScoped<Jobs.NotificationJob>();
 
         // ⚠ Розсилка черги — окремий компонент, бо відправників двоє: зведення

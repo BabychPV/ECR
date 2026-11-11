@@ -26,6 +26,9 @@ public static class DependencyInjection
 
         services.AddScoped<IExternalDataSource, SqlDataSource>();
 
+        // D-476: знімок довідника складу газу FLERT (лише читання, транзакція завжди відкочується).
+        services.AddScoped<IExternalTableSource, SqlDataSource>();
+
         return services;
     }
 }
