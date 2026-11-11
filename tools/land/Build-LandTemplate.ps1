@@ -125,6 +125,8 @@ param(
     # чернетку V(n+1) з останньої опублікованої версії, коли чернетки V<n> немає.
     [ValidateSet('Warn', 'Block')][string]$RequiredInputSeverity = 'Warn',
     [switch]$RequiredInputsCreateDrafts,
+    # Методології «на утриманні» (Get-LandRequiredInputHeld, напр. ECW_C11_01 до версії AN-165) етап пропускає; прапор знімає це.
+    [switch]$RequiredInputsIncludeHeld,
     # Етап Template (D-474, рішення людини 11.11): розкладка версії, яку ставимо на чернетці ПЕРЕД публікацією. Land - рік із
     # місяцями в колонках, тож перемикача місяців у документі немає. PerMonthCopies - лише явно (стара поведінка 1.0.15.0).
     [ValidateSet('YearWithMonthColumns', 'PerMonthCopies')][string]$Layout = 'YearWithMonthColumns',
@@ -2248,8 +2250,10 @@ function Stage-RequiredInputs {
     $riMid = @{}
     foreach ($m in @(Items (Api GET '/api/v1/methodologies').Json)) { $riMid[[string]$m.code] = [int]$m.id }
     $riChanged = 0; $riPending = 0
+    $riHeld = Get-LandRequiredInputHeld
     foreach ($riCode in @(Get-LandRequiredInputMethodologies)) {
         if ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains $riCode) { continue }
+        if (-not $RequiredInputsIncludeHeld -and $riHeld.Contains($riCode)) { Log "  ${riCode}: на утриманні - пропущено ($($riHeld[$riCode]))"; continue }
         $riId = $riMid[$riCode]
         if (-not $riId) { Log "  ${riCode}: методології на сервері немає - пропущено"; continue }
         $wanted = @(); $bad = @()

@@ -155,6 +155,32 @@ public sealed class LandRequiredInputsTests
         Assert.Contains("if (-not $RequiredInputsCreateDrafts) {", stage, StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Методологію_на_утриманні_етап_пропускає_а_перелік_її_зберігає()
+    {
+        // ECW_C11_01: AN-165 приносить нову версію методології, чернетка PE з нею зіткнулася б (AN 11.11)
+        const string harness = """
+            $ErrorActionPreference = 'Stop'
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+            . $args[0]
+            $h = Get-LandRequiredInputHeld
+            Write-Host ('HELD=' + (@($h.Keys) -join ','))
+            Write-Host ('KNOWN=' + @($h.Keys | Where-Object { (Get-LandRequiredInputMethodologies) -ccontains $_ }).Count)
+            Write-Host ('LIST=' + (@(Get-LandRequiredInputs -Methodology 'ECW_C11_01').Count -gt 0))
+            """;
+
+        var output = Run(harness, LandFile("LandRequiredInputs.Lib.ps1"));
+
+        Assert.Contains("HELD=ECW_C11_01\n", output, StringComparison.Ordinal);
+        Assert.Contains("KNOWN=1\n", output, StringComparison.Ordinal);
+        Assert.Contains("LIST=True\n", output, StringComparison.Ordinal);
+
+        var build = File.ReadAllText(LandFile("Build-LandTemplate.ps1"));
+        Assert.Contains(
+            "if (-not $RequiredInputsIncludeHeld -and $riHeld.Contains($riCode)) {", build, StringComparison.Ordinal);
+    }
+
     private static string Run(string harness, params string[] arguments)
     {
         var start = new ProcessStartInfo(DeployScriptHarness.FindPowerShell())
