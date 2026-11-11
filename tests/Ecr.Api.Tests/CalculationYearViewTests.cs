@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Ecr.Application.Documents.CalculationYear;
+using Ecr.Application.Security;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
@@ -12,6 +14,7 @@ using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -53,8 +56,23 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         Assert.Equal("notOpened", months[3].GetProperty("runState").GetString());
         Assert.False(view.GetProperty("freshnessHidden").GetBoolean());
 
-        // Контроль до тесту Deny: без Deny вихід схованого аркуша B видно — інакше «не бачить» нижче нічого не доводить.
-        Assert.Contains(s.OutHidden, body, StringComparison.Ordinal);
+        // Контроль до тестів Deny: без Deny усе, що аркуш B дає (вихід методології, формула шаблону, назви аркуша й
+        // таблиці, підпис рядка), видно — інакше «не бачить» нижче нічого не доводить.
+        foreach (var secret in s.SheetBSecrets)
+        {
+            Assert.Contains(secret, body, StringComparison.Ordinal);
+        }
+
+        // Число до D-401 (без екземпляра) — у єдиній таблиці місяця з таким рядком.
+        var legacy = Row(view, s.DynKey, s.OutAdditive);
+        var legacyEq = view.GetProperty("equipment")[legacy.GetProperty("equipment").GetInt32()];
+        Assert.Equal(s.TableBCode, view.GetProperty("tables")[legacyEq.GetProperty("table").GetInt32()].GetProperty("tableCode").GetString());
+
+        var export = await ExportTextAsync(app, s).ConfigureAwait(true);
+        foreach (var secret in s.SheetBSecrets)
+        {
+            Assert.Contains(secret, export, StringComparison.Ordinal);
+        }
 
         // R1 · E_A (t): січень 1.5, лютий 2.5 актуального прогону (100 неактуального — не потрапляє); сума 4 за 2/12.
         var r1 = Row(view, s.RowKey1, s.OutAdditive);
@@ -80,7 +98,8 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
 
         // Формула шаблону (IsCalculated) — окремий вихід без методології, з підписом рядка шаблону.
         var formula = view.GetProperty("rows").EnumerateArray()
-            .Single(r => r.GetProperty("column").ValueKind == JsonValueKind.Number);
+            .Single(r => r.GetProperty("column").ValueKind == JsonValueKind.Number
+                         && r.GetProperty("outputCode").GetString() != s.FormulaCode);
         Assert.Equal(JsonValueKind.Null, formula.GetProperty("methodology").ValueKind);
         Assert.Equal(9m, Values(formula)[1]);
         var eq = view.GetProperty("equipment")[formula.GetProperty("equipment").GetInt32()];
@@ -100,12 +119,82 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         var (status, body) = await YearAsync(client, s.DocumentId, 2026).ConfigureAwait(true);
         Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
 
-        Assert.DoesNotContain(s.OutHidden, body, StringComparison.Ordinal);
+        // Той самий arrange, що й у тесті без Deny (там кожен із цих рядків є): вихід, формула, аркуш, таблиця, підпис.
+        foreach (var secret in s.SheetBSecrets)
+        {
+            Assert.DoesNotContain(secret, body, StringComparison.Ordinal);
+        }
+
         Assert.Contains(s.OutAdditive, body, StringComparison.Ordinal);
         var view = JsonDocument.Parse(body).RootElement;
         Assert.True(view.GetProperty("freshnessHidden").GetBoolean());
         Assert.DoesNotContain(
             view.GetProperty("months").EnumerateArray(), m => m.GetProperty("runState").GetString() == "outOfDate");
+        Assert.All(
+            view.GetProperty("months").EnumerateArray(),
+            m => Assert.Equal(JsonValueKind.Null, m.GetProperty("calculatedAt").ValueKind));
+
+        // Число до D-401 з ключем рядка схованої таблиці лишається, але без таблиці (а не в схованій).
+        var legacy = Row(view, s.DynKey, s.OutAdditive);
+        var legacyEq = view.GetProperty("equipment")[legacy.GetProperty("equipment").GetInt32()];
+        Assert.Equal(0, view.GetProperty("tables")[legacyEq.GetProperty("table").GetInt32()].GetProperty("tableDefId").GetInt32());
+
+        // Книга експорту будується тим самим будівником для профілю замовника — і теж без аркуша B.
+        var export = await ExportTextAsync(app, s).ConfigureAwait(true);
+        Assert.Contains(s.OutAdditive, export, StringComparison.Ordinal);
+        foreach (var secret in s.SheetBSecrets)
+        {
+            Assert.DoesNotContain(secret, export, StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
+    [InlineData("denyColumn")]
+    [InlineData("denyFormula")]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task Deny_на_колонку_видимої_таблиці_ховає_лише_числа_цієї_колонки(string how)
+    {
+        var s = await ArrangeAsync(how).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var (status, body) = await YearAsync(client, s.DocumentId, 2026).ConfigureAwait(true);
+        Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
+
+        // Таблиця B видима (інші її колонки читаються): її назва й підпис рядка лишаються.
+        Assert.Contains(s.TableBName, body, StringComparison.Ordinal);
+        Assert.Contains(s.LabelName, body, StringComparison.Ordinal);
+        var (hidden, shown) = how == "denyColumn" ? (s.OutHidden, s.FormulaCode) : (s.FormulaCode, s.OutHidden);
+        Assert.DoesNotContain(hidden, body, StringComparison.Ordinal);
+        Assert.Contains(shown, body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task Deny_звужений_періодом_ховає_числа_й_підпис_рядка_лише_за_ці_місяці()
+    {
+        var s = await ArrangeAsync(how: "denyJan").ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var (status, body) = await YearAsync(client, s.DocumentId, 2026).ConfigureAwait(true);
+        Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
+        var view = JsonDocument.Parse(body).RootElement;
+
+        // Лютий аркуша B видно, січень — ні (число й підпис рядка, що є лише в січні).
+        var outH = Row(view, s.DynKey, s.OutHidden);
+        Assert.Null(Values(outH)[0]);
+        Assert.Equal(5m, Values(outH)[1]);
+        Assert.DoesNotContain(s.LabelName, body, StringComparison.Ordinal);
+        Assert.DoesNotContain(s.FormulaCode, body, StringComparison.Ordinal);
+
+        var export = await ExportTextAsync(app, s).ConfigureAwait(true);
+        Assert.Contains(s.OutHidden, export, StringComparison.Ordinal);
+        Assert.DoesNotContain(s.LabelName, export, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -163,15 +252,38 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         return (response.StatusCode, await response.Content.ReadAsStringAsync().ConfigureAwait(false));
     }
 
+    /// <summary>Книга експорту для профілю замовника — тим самим шляхом, що й задача експорту (без черги задач).</summary>
+    private static async Task<string> ExportTextAsync(EcrApiFactory app, Scenario s)
+    {
+        using var scope = app.Services.CreateScope();
+        var access = scope.ServiceProvider.GetRequiredService<IAccessDecisionService>();
+        var builder = scope.ServiceProvider.GetRequiredService<CalculationYearViewBuilder>();
+        var profile = await access.BuildProfileAsync(s.UserId, CancellationToken.None).ConfigureAwait(false);
+        var view = await builder.BuildAsync(profile, s.DocumentId, 2026, CancellationToken.None).ConfigureAwait(false);
+        var sheets = CalculationYearWorkbook.Sheets(view, new CalculationYearExportSpec(2026, ExportCalculationYearHandler.Long, null), "en");
+        return string.Join('\n', sheets.SelectMany(w => w.Rows).SelectMany(r => r).Select(v => v ?? ""));
+    }
+
     private sealed record Scenario(
-        long DocumentId, string UserName, string RowKey1, string RowKey2, string OutAdditive, string OutRate, string OutHidden);
+        long DocumentId, int UserId, string UserName, string RowKey1, string RowKey2, string OutAdditive, string OutRate,
+        string OutHidden, string DynKey, string SheetBName, string TableBName, string TableBCode, string LabelName, string FormulaCode)
+    {
+        /// <summary>Усе, що аркуш B дає в огляд: вихід методології, формула шаблону, аркуш, таблиця, підпис рядка.</summary>
+        public string[] SheetBSecrets => [OutHidden, FormulaCode, SheetBName, TableBName, LabelName];
+    }
 
     /// <summary>
     /// Документ на 2026: січень (відкритий, актуальний прогін проєкту), лютий (відкритий, неактуальний прогін зі
     /// 100 і актуальний — 2.5/4; вхід змінено після прогону → застарілий; формула шаблону 9), березень (відкритий,
-    /// без прогону), квітень (періоду немає). Схований аркуш B — вихід OUT_H, прив'язаний до його колонки.
+    /// без прогону), квітень (періоду немає). Аркуш B — таблиця B з динамічним рядком (екземпляри січня й лютого):
+    /// вихід OUTH, прив'язаний до колонки B (січень 3, лютий 5), формула шаблону в колонці F (січень), підпис рядка
+    /// в колонці назви (лише січень) і число до D-401 без екземпляра з ключем цього рядка (січень).
     /// </summary>
-    /// <param name="how"><c>none</c> — звичайна роль; <c>deny</c> — Deny на аркуш B; <c>noCalc</c> — без Calculation.View.</param>
+    /// <param name="how">
+    /// <c>none</c> — звичайна роль; <c>deny</c> — Deny на аркуш B; <c>denyColumn</c> — Deny на колонку B;
+    /// <c>denyFormula</c> — Deny на колонку F; <c>denyJan</c> — Deny на аркуш B у ролі, звуженій січнем;
+    /// <c>noCalc</c> — без Calculation.View.
+    /// </param>
     private async Task<Scenario> ArrangeAsync(string how)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
@@ -195,16 +307,45 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         }
 
         db.DocumentSheets.Add(new DocumentSheet(b.DocumentId, b.SheetDefId));
-        var sheetB = new SheetDef(b.TemplateVersionId, EcrCode.Create($"CYVB{tag}"), Name($"Hidden {tag}"), 2);
+        var sheetBName = $"Hidden {tag}";
+        var tableBName = $"Hidden table {tag}";
+        var tableBCode = $"CYTB{tag}";
+        var sheetB = new SheetDef(b.TemplateVersionId, EcrCode.Create($"CYVB{tag}"), Name(sheetBName), 2);
         db.SheetDefs.Add(sheetB);
         await db.SaveChangesAsync().ConfigureAwait(false);
         var tableB = new TableDef(
-            sheetB.Id, EcrCode.Create($"CYTB{tag}"), Name($"Hidden table {tag}"), 1, TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+            sheetB.Id, EcrCode.Create(tableBCode), Name(tableBName), 1, TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
         db.TableDefs.Add(tableB);
         db.DocumentSheets.Add(new DocumentSheet(b.DocumentId, sheetB.Id));
         await db.SaveChangesAsync().ConfigureAwait(false);
-        var columnB = new ColumnDef(tableB.Id, EcrCode.Create($"CYCB{tag}"), Name("Col B"), 1, CellDataType.Decimal);
-        db.ColumnDefs.Add(columnB);
+        var formulaCode = $"CYFB{tag}"; // і код, і заголовок колонки формули: книга експорту пише заголовок
+        var nameB = new ColumnDef(tableB.Id, EcrCode.Create($"CYNB{tag}"), Name("Name B"), 1, CellDataType.String);
+        var columnB = new ColumnDef(tableB.Id, EcrCode.Create($"CYCB{tag}"), Name("Col B"), 2, CellDataType.Decimal);
+        var formulaB = new ColumnDef(tableB.Id, EcrCode.Create(formulaCode), Name(formulaCode), 3, CellDataType.Decimal);
+        db.ColumnDefs.AddRange(nameB, columnB, formulaB);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        // Екземпляри таблиці B (січень, лютий) з одним динамічним рядком (без RowDef — підпис із колонки назви).
+        var dynKey = $"DYN_{tag}";
+        var labelName = $"Pump {tag}";
+        var loader = new BulkCellLoader(sql.ConnectionString, 1000);
+        var instB = new Dictionary<int, (long Instance, long Row)>();
+        foreach (var key in new[] { 202601, 202602 })
+        {
+            var instanceId = await loader.ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None).ConfigureAwait(false);
+            var rowId = await loader.ReserveIdsAsync("doc.TableRowSeq", 1, CancellationToken.None).ConfigureAwait(false);
+            db.TableInstances.Add(new TableInstance(new PeriodKey(key), instanceId, b.DocumentId, tableB.Id, Now));
+            db.TableRows.Add(new TableRow(new PeriodKey(key), rowId, instanceId, RowKey.Create(dynKey), 1, Now));
+            instB[key] = (instanceId, rowId);
+        }
+
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        db.CellValues.Add(new CellValue(
+            new CellAddress(PeriodKey.Create(2026, 1), instB[202601].Row, nameB.Id), tableB.Id,
+            new CellValueData { ValueString = labelName }));
+        db.CellValues.Add(new CellValue(
+            new CellAddress(PeriodKey.Create(2026, 1), instB[202601].Row, formulaB.Id), tableB.Id,
+            new CellValueData { ValueNumeric = 6.5m, IsCalculated = true }));
 
         var user = new User(userName, userName, AuthProvider.Local);
         user.SetPassword(new PasswordHasher().Hash(Password));
@@ -219,9 +360,28 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         }
 
         db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, b.ProjectId, GrantLevel.Write));
-        if (how == "deny")
+        switch (how)
         {
-            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Sheet, sheetB.Id, GrantLevel.Read, isDeny: true));
+            case "deny":
+                db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Sheet, sheetB.Id, GrantLevel.Read, isDeny: true));
+                break;
+            case "denyColumn":
+                db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Column, columnB.Id, GrantLevel.Read, isDeny: true));
+                break;
+            case "denyFormula":
+                db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Column, formulaB.Id, GrantLevel.Read, isDeny: true));
+                break;
+            case "denyJan":
+                // Друга роль, звужена січнем: Deny на аркуш B діє лише в січні (основна роль — без обмежень).
+                var janRole = new Role(EcrCode.Create($"R{Guid.NewGuid():N}"[..12]), Name("Calc year Jan deny"));
+                db.Roles.Add(janRole);
+                await db.SaveChangesAsync().ConfigureAwait(false);
+                db.ResourceGrants.Add(new ResourceGrant(janRole.Id, ResourceKind.Sheet, sheetB.Id, GrantLevel.Read, isDeny: true));
+                var janAssignment = new RoleAssignment(janRole.Id, user.Id, principalSid: null);
+                janAssignment.SetScope(RoleAssignmentScope.Create(
+                    [b.ProjectId], periodFrom: PeriodKey.Create(2026, 1), periodTo: PeriodKey.Create(2026, 1)));
+                db.RoleAssignments.Add(janAssignment);
+                break;
         }
 
         db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, principalSid: null));
@@ -252,7 +412,8 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         {
             (jan, 202601, b.TableInstanceId, rowKeys[0], outAdditive, 1.5m, tonne),
             (jan, 202601, b.TableInstanceId, rowKeys[0], outRate, 7m, rate),
-            (jan, 202601, b.TableInstanceId, rowKeys[0], outHidden, 3m, tonne),
+            (jan, 202601, instB[202601].Instance, dynKey, outHidden, 3m, tonne),
+            (febNew, 202602, instB[202602].Instance, dynKey, outHidden, 5m, tonne),
             (febOld, 202602, feb.TableInstanceId, rowKeys[0], outAdditive, 100m, tonne),
             (febNew, 202602, feb.TableInstanceId, rowKeys[0], outAdditive, 2.5m, tonne),
             (febNew, 202602, feb.TableInstanceId, rowKeys[1], outAdditive, 4m, tonne),
@@ -267,6 +428,14 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
                 """).ConfigureAwait(false);
         }
 
+        // Число до D-401: без екземпляра таблиці, ключ рядка — лише в таблиці B.
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO calc.CalculationResult
+                (Id, CalculationRunId, MethodologyVersionId, PeriodKey, DocumentId, SourceRowKey, OutputCode, Value, UnitId, TableInstanceId)
+            VALUES (NEXT VALUE FOR calc.CalculationResultSeq, {jan.Id}, {version.Id}, 202601, {b.DocumentId},
+                    {dynKey}, {outAdditive}, CAST(11 AS decimal(34,16)), {tonne}, NULL)
+            """).ConfigureAwait(false);
+
         // Лютий: вхід змінено після прогону.
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO aud.CellChange
@@ -274,7 +443,9 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
             VALUES ({Now.AddHours(1)}, 202602, {b.DocumentId}, {feb.RowIds[0]}, {rowKeys[0]}, {b.ColumnDefIds[1]}, N'1', N'2', {user.Id}, N'UserEdit', 0)
             """).ConfigureAwait(false);
 
-        return new Scenario(b.DocumentId, userName, rowKeys[0], rowKeys[1], outAdditive, outRate, outHidden);
+        return new Scenario(
+            b.DocumentId, user.Id, userName, rowKeys[0], rowKeys[1], outAdditive, outRate, outHidden, dynKey,
+            sheetBName, tableBName, tableBCode, labelName, formulaCode);
     }
 
     private static CalculationRun Run(int projectId, int period, bool current)
