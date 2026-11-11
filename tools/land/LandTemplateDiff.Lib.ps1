@@ -216,6 +216,31 @@ function Get-LandTextRetypePlan($Columns, [hashtable]$Existing, $CellFormulas = 
     return @{ Retype = $retype; Bridges = $bridges; Warn = $warn; Same = $same }
 }
 
+# AN-173: зворотний вузький ретайп String -> Decimal у чернетці-клоні. T9a_19 Benzene/Xylene/Toluene/SaturatedHydrocarbons*
+# (джерела мостів Land_MassFraction_0<код>, ECW_C11_11_04 type1) у моделі тепер Decimal(34,16), а в клоні 1.0.15.0 ще String:
+# у Strict текст x число = #VALUE. API тип не змінює (ECR-TMPL-0422), тож лише SQL у Fill-StructureSql. Правило вузьке:
+#   * лише модель Decimal (з precision і scale) над String клону; Decimal у клоні = Same;
+#   * МІСЯЧНІ колонки не чіпаються (WARN): напрям Decimal->String місячних - D-423, зворотний тут не робиться;
+#   * інші розбіжності типів (Int/Lookup/Formula...) - не цей план (їх показує Verify).
+# Columns - tb.columns моделі; Existing - hashtable "код колонки" -> @{ id; type; precision; scale } клону.
+# Повертає @{ Retype = @({ Id; Code; Precision; Scale; Unit }); Warn = @(рядки); Same = n }. Лише обчислення.
+function Get-LandDecimalRetypePlan($Columns, [hashtable]$Existing) {
+    $retype = @(); $warn = @(); $same = 0
+    $dt = $script:LandDataTypeCode
+    foreach ($c in @($Columns)) {
+        if ($null -eq $c -or [string]$c.dataType -ne 'Decimal') { continue }
+        $code = [string]$c.code
+        if (-not $Existing.ContainsKey($code)) { continue }
+        $e = $Existing[$code]
+        if ([int]$e.type -eq $dt.Decimal) { $same++; continue }
+        if ([int]$e.type -ne $dt.String) { continue }
+        if ($c.month) { $warn += "${code}: у клоні String, у моделі Decimal, але колонка місячна - не чіпаю (String->Decimal лише немісячних)"; continue }
+        if (-not $c.precision -or $null -eq $c.scale -or [string]$c.scale -eq '') { $warn += "${code}: у моделі Decimal без precision/scale - не чіпаю"; continue }
+        $retype += [pscustomobject]@{ Id = [int]$e.id; Code = $code; Precision = [int]$c.precision; Scale = [int]$c.scale; Unit = [string]$c.unit }
+    }
+    return @{ Retype = $retype; Warn = $warn; Same = $same }
+}
+
 # Кандидати Decimal->String, відомі лише з моделі (для DryRun, де клону немає): String-колонки, які читає текстовий міст
 # (Formula/Calculated без precision) і є місячною (month). Повертає рядки "SHEET/TABLE/COLUMN".
 function Get-LandTextBridgeSources($Mdl) {

@@ -141,6 +141,22 @@ def _new_column(code, expression, header, evidence, source_type):
     return col
 
 
+def _retype_decimal(col):
+    """AN-173: джерело мосту Land_MassFraction_0<код> (масова частка речовини, число) - Decimal, а не String: у Strict текст x
+    число = #VALUE, і C11_11_04 type1 не рахувалась. Ключі precision/scale стають одразу за dataType (порядок як у колонок
+    gen_ecr_model.py); 28/12 підніме до 34/16 фінальний прохід масштабу (DECIMAL_PRECISION/DECIMAL_SCALE). Лише таблиці
+    MassFraction (9a_19); ті самі коди в 9a_16/17/24-28 лишаються String."""
+    items = list(col.items())
+    col.clear()
+    for k, v in items:
+        if k == 'dataType':
+            col['dataType'] = 'Decimal'
+            col['precision'] = 28
+            col['scale'] = 12
+        elif k not in ('precision', 'scale'):
+            col[k] = v
+
+
 def apply(out, registries, af_attrs):
     """Додає довідник LAND_NAE_GROUP і мости; повертає кількість доданих колонок."""
     with open(GROUPS_FILE, encoding='utf-8') as fh:
@@ -222,10 +238,13 @@ def apply(out, registries, af_attrs):
             if arg in cols:
                 raise SystemExit('nae_group: %s: колонка %s уже є' % (tcode, arg))
             src_col = hits[0]
+            # AN-173: міст береться з типу джерела ДО ретайпу нижче - лишається текстовим (precision None), доки немає рішення щодо мостів.
             t_['columns'].append(_new_column(
                 arg, '[%s]' % src_col['code'], '%s (argument bridge: AF attribute %s)' % (arg, arg),
                 'bridge: methodology argument %s = AF attribute %s of the AF table, header code %s (%s)'
                 % (arg, arg, code, MASSFRACTION_METHODOLOGY), src_col['dataType']))
+            if src_col['dataType'] == 'String':
+                _retype_decimal(src_col)
             bridged[tcode] = sorted(set(bridged.get(tcode, [])) | {arg})
             added += 1
         unresolved[tcode][MASSFRACTION_TOKEN] = (
