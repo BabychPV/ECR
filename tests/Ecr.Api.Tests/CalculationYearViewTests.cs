@@ -53,6 +53,9 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         Assert.Equal("notOpened", months[3].GetProperty("runState").GetString());
         Assert.False(view.GetProperty("freshnessHidden").GetBoolean());
 
+        // Контроль до тесту Deny: без Deny вихід схованого аркуша B видно — інакше «не бачить» нижче нічого не доводить.
+        Assert.Contains(s.OutHidden, body, StringComparison.Ordinal);
+
         // R1 · E_A (t): січень 1.5, лютий 2.5 актуального прогону (100 неактуального — не потрапляє); сума 4 за 2/12.
         var r1 = Row(view, s.RowKey1, s.OutAdditive);
         Assert.Equal([1.5m, 2.5m], Values(r1).Take(2).Select(v => v!.Value));
