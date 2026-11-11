@@ -123,7 +123,18 @@ jobs:
             -o Dir::Etc::sourcelist="sources.list.d/mssql-release.list" \
             -o Dir::Etc::sourceparts="-" \
             -o APT::Get::List-Cleanup="0"
-          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
+          # ⚠ 11.11: дзеркало Ubuntu раннера (azure.archive.ubuntu.com) не розв'язувалось
+          # понад 2 год — повтори apt і запасне дзеркало, як у ci.yml (крок sqlcmd).
+          if ! sudo ACCEPT_EULA=Y apt-get install -y -o Acquire::Retries=5 mssql-tools18 unixodbc-dev; then
+            echo "::warning::apt install failed on the runner mirror; switching to archive.ubuntu.com"
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+              grep -q 'archive.ubuntu.com' /etc/apt/apt-mirrors.txt || echo 'http://archive.ubuntu.com/ubuntu/' | sudo tee -a /etc/apt/apt-mirrors.txt > /dev/null
+            fi
+            sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu#http://archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+            sudo apt-get update -o Acquire::Retries=5
+            sudo ACCEPT_EULA=Y apt-get install -y -o Acquire::Retries=5 mssql-tools18 unixodbc-dev
+          fi
           echo "/opt/mssql-tools18/bin" >> "$GITHUB_PATH"
 
       - name: SQL Server відповідає
