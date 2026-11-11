@@ -1,12 +1,12 @@
 code,kind,value,source
-Area,lookup,<PICK:LAND_AREA>,"registry LAND_AREA (docs/delivery/reference-data/land-contract/area.csv); no counterpart in land-test-doc.cells.csv - coordinator picks"
-Contractor,lookup,<PICK:LAND_CONTRACTOR>,"registry LAND_CONTRACTOR (contractor.csv); no counterpart in land-test-doc.cells.csv - coordinator picks"
+Area,lookup,AREA_015,"registry LAND_AREA entry AREA_015 'Island A' (docs/delivery/reference-data/land-contract/area.csv); same pick as test documents of tools/land/Build-LandTemplate.ps1"
+Contractor,lookup,CTR_007,"registry LAND_CONTRACTOR entry CTR_007 'AGS' (contractor.csv); same pick as test documents of tools/land/Build-LandTemplate.ps1"
 Region,lookup,REG_002,"registry LAND_REGION entry REG_002 'Mangistau - Мангистау' (region.csv); same region as land-test-doc.cells.csv A11 T5_27.Con_Region"
-Location,lookup,<PICK:LAND_LOCATION>,"registry LAND_LOCATION (location.csv); no counterpart in land-test-doc.cells.csv - coordinator picks"
-OnOffshore,lookup,<PICK:LAND_ONOFFSHORE>,"registry LAND_ONOFFSHORE (onoffshore.csv); no counterpart in land-test-doc.cells.csv - coordinator picks"
+Location,lookup,LOC_002,"registry LAND_LOCATION entry LOC_002 'LQB 5' (location.csv); same pick as test documents of tools/land/Build-LandTemplate.ps1"
+OnOffshore,lookup,ONOFF_002,"registry LAND_ONOFFSHORE entry ONOFF_002 'Onshore' (onoffshore.csv); same pick as test documents of tools/land/Build-LandTemplate.ps1"
 FilledBy,text,test – LAND-TEST-ALL-METHODOLOGIES,test value
 ContractHolder,text,test – contract holder LAND-TEST-ALL-METHODOLOGIES,test value
 ContractNumber,text,TEST-LTD-202609,test value
-TypeOfActivity,lookup,<PICK:LAND_ACTIVITY>,"registry LAND_ACTIVITY (activity.csv); no counterpart in land-test-doc.cells.csv - coordinator picks"
+TypeOfActivity,lookup,ACT_001,"registry LAND_ACTIVITY entry ACT_001 'Operation' (activity.csv); same pick as test documents of tools/land/Build-LandTemplate.ps1"
 ProcessedOn,text,2026-09-30,"test value (String field in header-fields.json, not Date)"
-Permit,lookup,<PERMIT>,"live permit, picked read-only by AN (or -PermitNumber)"
+Permit,lookup,<PERMIT>,"existing permit of the stand, passed with -PermitNumber (the real number stays out of git)"
