@@ -13,7 +13,7 @@
    ===================================================================== */
 /* EA-0: розширення набору й екран «Edit access» — окремі файли в edit-assignments/ (kit.js та index.html не змінюються, KIT.md:3);
    document.write підключає їх синхронно, до наступних скриптів і до ECR.start(). */
-document.write('<script src="edit-assignments/kit-ext.js"><\/script><script src="edit-assignments/screen-edit-assignments.js"><\/script>');
+document.write('<script src="edit-assignments/kit-ext.js"><\/script><script src="edit-assignments/screen-edit-assignments.js"><\/script><script src="calc-results/screen-calc-results.js"><\/script>');
 (function (E) {
   'use strict';
   var h = E.h, icon = E.icon, ic = E.iconHtml, esc = E.esc, rng = E.rng, F = E.fmt;
@@ -249,6 +249,7 @@ document.write('<script src="edit-assignments/kit-ext.js"><\/script><script src=
     var more = [{ label: 'Validate', icon: 'checkCircle', onClick: runValidate, smOnly: true, disabled: !edit }, { label: 'Import from Excel…', icon: 'upload', disabled: ro, onClick: function () { ctx.openDialog('import-file'); } }, { label: 'Export to Excel', icon: 'download', onClick: function () { ctx.openDialog('export-progress'); } },
       { label: 'Recalculate', icon: 'refresh', kbd: 'F9', disabled: ro, onClick: doRecalc }, { label: 'Rounded values…', icon: 'ruler', onClick: function () { ctx.openDialog('rounded-list'); } }, { label: 'Cell history', icon: 'history', onClick: function () { openInspector('history'); } }];
     if (E.ea) E.ea.moreItems().forEach(function (it) { more.push(it); });
+    if (E.cr) E.cr.moreItems(S.docId, ctx.query.layout).forEach(function (it) { more.push(it); });
     if (st === 'Submitted' && E.can('Document.Submit')) more.push({ sep: true }, { label: 'Recall submission', icon: 'return', onClick: function () { setSheetState('Draft'); E.Toast('Submission recalled — the sheet is a draft again', { action: { label: 'Undo', onClick: function () { setSheetState('Submitted'); } } }); } });
     more.push({ sep: true }, { label: 'Delete sheet…', icon: 'trash', danger: true, disabled: ro || !E.can('Document.Delete'), title: E.can('Document.Delete') ? null : 'Requires the permission “Delete documents and sheets”', onClick: function () { ctx.openDialog('delete-sheet'); } });
     if (edit && E.can('Document.Submit')) box.appendChild(E.Button({ label: 'Validate', icon: 'checkCircle', id: 'doc-validate', onClick: runValidate }));
@@ -449,6 +450,7 @@ document.write('<script src="edit-assignments/kit-ext.js"><\/script><script src=
     c.proto({ id: 'issues', label: 'Validation (demo)', buttons: [{ label: 'Fix errors, keep warnings', onClick: function () { fixAll('warnings'); renderDoc(); } }, { label: 'Fix everything', onClick: function () { fixAll('clean'); renderDoc(); } }] });
     c.hasUnsaved(function () { return dirtyCount() > 0; }, { count: dirtyCount, text: 'Changes are kept for the whole document while you move between sheets, but they are lost if you leave the document without saving.', onSave: finishSave, onDiscard: discardChanges });
     c.onLeave(function () { clearTimeout(save.timer); if (save.mode === 'dirty' || save.mode === 'saving') finishSave(); root = null; });
+    if (E.cr) E.cr.decorate(c, root, { docId: function () { return S.docId; } });
     if (E.ea) E.ea.register(c, { docId: function () { return S.docId; }, doc: function () { return S.doc; }, period: function () { return S.period; }, rerender: function () { if (root && document.contains(root)) renderDoc(); } });
     renderDoc(); if (!c.query.dialog && !c.query.panel) gridEl.focus({ preventScroll: true });
   } });
