@@ -50,7 +50,7 @@ Describe 'HSE400 methodology contract' {
         if ($c -cne 'HSE400_FG_Makat_Nitrogen') { throw "код $c" }
         Assert-Hse400Throws { Get-Hse400FormulaCode -Namespace 'HSE400' -Table 'FG_Makat' -RowKey 'Nitrogen' } 'F_'
     }
-    It 'план чинної моделі: 175 аргументів, 325 цілей, 6 прив''язок на якір, формул немає - не готово' {
+    It 'план чинної моделі: 175 аргументів, 325 цілей, 6 прив''язок на якір, 369 формул, 223 константи, 2 тести - готово' {
         $p = Get-Hse400MethodologyPlan (Read-Hse400Model)
         if ($p.Namespace -cne 'HSE400') { throw "простір $($p.Namespace)" }
         if (@($p.Arguments).Count -ne 175) { throw "аргументів $(@($p.Arguments).Count)" }
@@ -61,14 +61,24 @@ Describe 'HSE400 methodology contract' {
         if (@($p.Bindings).Count -ne 6) { throw "прив'язок $(@($p.Bindings).Count)" }
         $b = @($p.Bindings | Where-Object { $_.Table -eq 'FG_Makat' })[0]
         if ($b.ColumnCode -cne 'HSE400_Calc' -or $b.OutputCode -cne 'HSE400_FG_Makat_H2S') { throw "прив'язка FG_Makat $($b.ColumnCode)/$($b.OutputCode)" }
-        if (@($p.MissingFormulas).Count -ne 325 -or $p.Ready) { throw "прогалин $(@($p.MissingFormulas).Count), ready $($p.Ready)" }
+        if (@($p.MissingFormulas).Count -ne 0 -or -not $p.Ready) { throw "прогалин $(@($p.MissingFormulas).Count), ready $($p.Ready)" }
+        $m = Read-Hse400Model
+        if (@($m.methodology.formulas).Count -ne 369 -or @($m.methodology.constants).Count -ne 223 -or @($p.Tests).Count -ne 2) {
+            throw "формул $(@($m.methodology.formulas).Count), констант $(@($m.methodology.constants).Count), тестів $(@($p.Tests).Count)"
+        }
+        # кожне посилання на формулу (!X) і константу (CST.X) має ціль у моделі - інакше чернетка не збереться
+        $fcodes = @{}; foreach ($f in @($m.methodology.formulas)) { $fcodes[[string]$f.code] = $true }
+        $ccodes = @{}; foreach ($c in @($m.methodology.constants)) { $ccodes[[string]$c.code] = $true }
+        foreach ($f in @($m.methodology.formulas)) {
+            foreach ($x in [regex]::Matches([string]$f.expression, '!([A-Za-z_][A-Za-z0-9_]*)')) { if (-not $fcodes.ContainsKey($x.Groups[1].Value)) { throw "$($f.code): немає формули $($x.Groups[1].Value)" } }
+            foreach ($x in [regex]::Matches([string]$f.expression, 'CST\.([A-Za-z_][A-Za-z0-9_]*)')) { if (-not $ccodes.ContainsKey($x.Groups[1].Value)) { throw "$($f.code): немає константи $($x.Groups[1].Value)" } }
+        }
     }
     It 'формули на всі F_ і тест - готово; бракує однієї - не готово й названо яку' {
         $m = Get-Hse400MTestModel
         $p0 = Get-Hse400MethodologyPlan $m
         $fs = @($p0.Targets | ForEach-Object { [pscustomobject]@{ code = $_.FormulaCode; expression = '1' } })
-        $m.methodology | Add-Member -NotePropertyName formulas -NotePropertyValue $fs
-        $m.methodology | Add-Member -NotePropertyName tests -NotePropertyValue @([pscustomobject]@{ code = 'GOLD_1'; inputJson = '{}'; expectedJson = '{}'; tolerance = 0 })
+        $m.methodology.formulas = $fs
         Assert-Hse400Model $m
         $p = Get-Hse400MethodologyPlan $m
         if (-not $p.Ready -or @($p.MissingFormulas).Count -ne 0) { throw 'повна модель не готова' }
@@ -78,9 +88,53 @@ Describe 'HSE400 methodology contract' {
     }
     It 'без тесту не готово навіть із усіма формулами' {
         $m = Get-Hse400MTestModel
-        $p0 = Get-Hse400MethodologyPlan $m
-        $m.methodology | Add-Member -NotePropertyName formulas -NotePropertyValue @($p0.Targets | ForEach-Object { [pscustomobject]@{ code = $_.FormulaCode; expression = '1' } })
+        $m.methodology.tests = @()
         if ((Get-Hse400MethodologyPlan $m).Ready) { throw 'готово без тесту' }
+    }
+    It 'золотий тест: вхід - адреса рядка F_ у золотому документі, очікуване - за кодом місячної колонки' {
+        $t = @((Read-Hse400Model).methodology.tests)[0]
+        $b = New-Hse400GoldenTestBody -Test $t -DocumentId 77 -TableInstanceId 501 -PeriodKey 202601
+        $in = $b.inputJson | ConvertFrom-Json
+        if ($in.documentId -ne 77 -or $in.tableInstanceId -ne 501 -or $in.periodKey.value -ne 202601 -or $in.sourceRowKey -cne 'F_H2S') { throw "вхід $($b.inputJson)" }
+        if ($b.inputJson -notlike '*"arguments":`[`]*') { throw "arguments не порожній масив: $($b.inputJson)" }
+        if ($b.expectedJson -cne '{"M01":1.315296778169}') { throw "очікуване $($b.expectedJson)" }
+        if ($b.tolerance -isnot [decimal] -or $b.tolerance -ne 0.000000001) { throw "допуск $($b.tolerance)" }
+    }
+    It 'золотий ввід: комірки за таблицею без повторів; різні значення однієї комірки - відмова' {
+        $tests = @((Read-Hse400Model).methodology.tests)
+        $w = Get-Hse400GoldenCellWrites -Tests $tests
+        if (@($w.Keys).Count -ne 1 -or -not $w.Contains('FG_Makat')) { throw "таблиці $(@($w.Keys) -join ',')" }
+        $rows = @($w['FG_Makat'])
+        if ($rows.Count -ne 15) { throw "рядків $($rows.Count)" }
+        $r = @($rows | Where-Object { $_.rowKey -ceq 'WCHS' })[0]
+        $c = @($r.cells)
+        if ($c.Count -ne 1 -or $c[0].columnCode -cne 'M01' -or $c[0].isEmpty -or $c[0].value -ne 20) { throw 'комірка WCHS' }
+        foreach ($x in $rows) { if ($x.rowKey -like 'F_*') { throw "запис у розрахунковий рядок $($x.rowKey)" } }
+        $a = [pscustomobject]@{ table = 'FG_Makat'; month = 'M01'; inputs = [pscustomobject]@{ WCHS = 20 } }
+        $b = [pscustomobject]@{ table = 'FG_Makat'; month = 'M01'; inputs = [pscustomobject]@{ WCHS = 21 } }
+        Assert-Hse400Throws { Get-Hse400GoldenCellWrites -Tests @($a, $b) } 'різний ввід'
+    }
+    It 'тіло PATCH комірок: UserEdit, baseVersion із зрізу, без зрізу - null' {
+        $rows = @(@{ rowKey = 'WCHS'; cells = @(@{ columnCode = 'M01'; isEmpty = $false; value = [decimal]20 }) }, @{ rowKey = 'WCMS'; cells = @(@{ columnCode = 'M01'; isEmpty = $false; value = [decimal]16 }) })
+        $b = New-Hse400CellsPatchBody -PeriodKey 202601 -TableInstanceId 501 -Rows $rows -RowVersions @{ WCHS = 'AAAB' }
+        if ($b.origin -cne 'UserEdit' -or $b.periodKey -ne 202601 -or $b.tableInstanceId -ne 501 -or @($b.rows).Count -ne 2) { throw 'заголовок' }
+        if ($b.rows[0].baseVersion -cne 'AAAB' -or $null -ne $b.rows[1].baseVersion) { throw 'baseVersion' }
+        $json = $b | ConvertTo-Json -Depth 8 -Compress
+        if ($json -notlike '*"columnCode":"M01"*' -or $json -notlike '*"isEmpty":false*') { throw "json $json" }
+    }
+    It 'опис золотого тесту в моделі перевіряється: рядок, місяць, ввід' {
+        $m = Get-Hse400MTestModel
+        $m.methodology.tests[0].row = 'WCHS'
+        Assert-Hse400Throws { Assert-Hse400Model $m } 'не розрахунковий рядок'
+        $m = Get-Hse400MTestModel
+        $m.methodology.tests[0].month = 'M13'
+        Assert-Hse400Throws { Assert-Hse400Model $m } 'місяць'
+        $m = Get-Hse400MTestModel
+        $m.methodology.tests[0].inputs | Add-Member -NotePropertyName F_H2S -NotePropertyValue 1
+        Assert-Hse400Throws { Assert-Hse400Model $m } 'не рядок вводу'
+        $m = Get-Hse400MTestModel
+        $m.methodology.tests[1].code = $m.methodology.tests[0].code
+        Assert-Hse400Throws { Assert-Hse400Model $m } 'повтор коду'
     }
     It 'модель без розділу methodology або з поганим кодом відхиляється' {
         $m = Get-Hse400MTestModel
@@ -90,7 +144,7 @@ Describe 'HSE400 methodology contract' {
         $m.methodology.code = '1HSE'
         Assert-Hse400Throws { Assert-Hse400Model $m } 'EcrCode'
         $m = Get-Hse400MTestModel
-        $m.methodology | Add-Member -NotePropertyName formulas -NotePropertyValue @([pscustomobject]@{ code = 'HSE400_FG_Makat_H2S'; expression = '' })
+        $m.methodology.formulas = @([pscustomobject]@{ code = 'HSE400_FG_Makat_H2S'; expression = '' })
         Assert-Hse400Throws { Assert-Hse400Model $m } 'порожній вираз'
     }
     It 'таблиця - MonthsInColumns, Fixed' {

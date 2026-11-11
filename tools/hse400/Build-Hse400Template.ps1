@@ -5,9 +5,10 @@
 #   -Stage Template : перевірка одиниці 'one'; шаблон HSE400, версія з hse400-model.json, аркуш, 6 таблиць
 #                     MonthsInColumns, 12 місячних колонок + прихована колонка-якір HSE400_Calc (Calculated),
 #                     фіксовані рядки (ввід + розрахункові F_<X> лише для читання), публікація;
-#                     методологія HSE400: версія рівня Module, правило рядків "{}", формули/константи/тести з
-#                     моделі, публікація (лише коли модель покриває всі F_<X> і має тест), активні прив'язки
-#                     на якір кожної з 6 таблиць;
+#                     методологія HSE400: версія рівня Module, правило рядків "{}", формули/константи з моделі;
+#                     золоті тести: окремий проєкт HSE400_GOLD з одним документом, у який пишеться синтетичний
+#                     ввід тестів (модуль читає комірки документа, а не аргументи тесту); публікація (лише коли
+#                     модель покриває всі F_<X> і має тест), активні прив'язки на якір кожної з 6 таблиць;
 #   -Stage Project  : політика періодів, річний проєкт HSE400_<рік>, активація, один документ;
 #   -Stage All      : обидва.
 #
@@ -80,6 +81,72 @@ function Get-Hse400Bindings {
 
 function Add-Hse400Incomplete { param([string]$Message) $script:Incomplete.Add($Message); Write-Hse400Log "! $Message" }
 
+function Get-Hse400PolicyId {
+    <# Політика періодів (наявна за кодом або нова). #>
+    param([string]$Code)
+    $pol = Get-Hse400Items (Invoke-Hse400Ok -Method GET -Path '/api/v1/projects/period-policies').Json | Where-Object { [string]$_.code -eq $Code } | Select-Object -First 1
+    if ($null -eq $pol) {
+        $pol = (Invoke-Hse400Ok -Method POST -Path '/api/v1/projects/period-policies' -Body @{
+                code = $Code; openOffsetDays = 0; graceOffsetDays = 800; hardCloseOffsetDays = 900; yearGraceOffsetDays = 900 }).Json
+        Write-Hse400Log "Створено політику періодів $Code."
+    }
+    return (Get-Hse400Id $pol 'id', 'periodPolicyId')
+}
+
+function Get-Hse400ProjectDocument {
+    <# Річний проєкт з одним документом на версії шаблону: наявні не створюються вдруге. Повертає адреси документа. #>
+    param([Parameter(Mandatory)][string]$Code, [Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)][int]$ProjectYear,
+        [Parameter(Mandatory)]$VersionId, [Parameter(Mandatory)]$PolicyId)
+    $st = Get-Hse400Structure $VersionId
+    $sheetDef = @($st.sheets) | Where-Object { [string]$_.code -eq [string]$model.sheet.code } | Select-Object -First 1
+    if ($null -eq $sheetDef) { throw "У версії $VersionId немає аркуша $($model.sheet.code)." }
+
+    $proj = Get-Hse400AllItems -Path '/api/v1/projects' | Where-Object { [string]$_.code -eq $Code } | Select-Object -First 1
+    if ($null -eq $proj) {
+        $proj = (Invoke-Hse400Ok -Method POST -Path '/api/v1/projects' -Body @{
+                code = $Code; nameL10n = @{ en = $Title; ru = $Title }; timeZoneId = 'Asia/Atyrau'
+                periodKind = 'Yearly'; year = $ProjectYear; templateVersionId = $VersionId; periodPolicyId = $PolicyId; customPeriodCount = $null }).Json
+        $projectId = Get-Hse400Id $proj 'projectId', 'id'
+        Invoke-Hse400Ok -Method POST -Path ("/api/v1/projects/{0}/activate" -f $projectId) | Out-Null
+        Write-Hse400Log "Створено й активовано проєкт $Code (id $projectId)."
+    }
+    else { $projectId = Get-Hse400Id $proj 'id', 'projectId'; Write-Hse400Log "Проєкт $Code уже є (id $projectId)." }
+
+    $periods = @((Invoke-Hse400Ok -Method GET -Path ("/api/v1/projects/{0}/periods" -f $projectId)).Json.periods)
+    if (-not $periods.Count) { throw "Проєкт $Code не має періодів." }
+    $periodKey = $periods[0].periodKey
+
+    $doc = Get-Hse400Items (Invoke-Hse400Ok -Method GET -Path ("/api/v1/documents?limit=200&projectId={0}" -f $projectId)).Json | Select-Object -First 1
+    if ($null -eq $doc) {
+        $doc = (Invoke-Hse400Ok -Method POST -Path '/api/v1/documents' -Body @{
+                name = @{ en = $Title }; projectId = $projectId; sheetDefIds = @($sheetDef.id); templateVersionId = $VersionId }).Json
+        Write-Hse400Log "Створено документ проєкту $Code."
+    }
+    $documentId = Get-Hse400Id $doc 'documentId', 'id'
+
+    $inst = @{}
+    foreach ($ti in Get-Hse400Items (Invoke-Hse400Ok -Method GET -Path ("/api/v1/documents/{0}/tables?periodKey={1}" -f $documentId, $periodKey)).Json) {
+        $inst[[string]$ti.tableCode] = $ti.tableInstanceId
+    }
+    return @{ ProjectId = $projectId; DocumentId = $documentId; PeriodKey = $periodKey; Instances = $inst }
+}
+
+function Write-Hse400GoldenInputs {
+    <# Пише ввід золотих тестів у золотий документ (повтор - ті самі значення поверх наявних рядків). #>
+    param([Parameter(Mandatory)]$Gold, [Parameter(Mandatory)]$Tests)
+    $writes = Get-Hse400GoldenCellWrites -Tests $Tests
+    foreach ($table in $writes.Keys) {
+        if (-not $Gold.Instances.ContainsKey($table)) { throw "У золотому документі $($Gold.DocumentId) немає таблиці $table." }
+        $ti = $Gold.Instances[$table]
+        $slice = (Invoke-Hse400Ok -Method GET -Path ("/api/v1/documents/{0}/tables/{1}?periodKey={2}" -f $Gold.DocumentId, $ti, $Gold.PeriodKey)).Json
+        $rv = @{}
+        foreach ($r in @($slice.rows)) { if ($null -ne $r) { $rv[[string]$r.rowKey] = [string]$r.rowVersion } }
+        $body = New-Hse400CellsPatchBody -PeriodKey $Gold.PeriodKey -TableInstanceId $ti -Rows $writes[$table] -RowVersions $rv
+        Invoke-Hse400Ok -Method PATCH -Path ("/api/v1/documents/{0}/cells" -f $Gold.DocumentId) -Body $body | Out-Null
+        Write-Hse400Log ("  золотий ввід {0}: рядків {1}." -f $table, @($writes[$table]).Count)
+    }
+}
+
 Set-Hse400Target -BaseUrl $BaseUrl -Database $Database -ConfirmStand $ConfirmStand -CredentialFile $CredentialFile -PreviewOnly:$PreviewOnly
 $model = Read-Hse400Model
 $months = @(Get-Hse400MonthColumns)
@@ -88,6 +155,7 @@ $tplCode = [string]$model.template.code
 $tplVersion = [string]$model.template.version
 $projectCode = '{0}_{1}' -f $tplCode, $Year
 $policyCode = 'HSE400_OPEN'
+$goldCode = '{0}_GOLD' -f $tplCode
 $state = Read-Hse400State
 Connect-Hse400
 Write-Hse400Log ("Стенд {0}; шаблон {1} {2}; методологія {3} {4}; етап {5}{6}" -f (Get-Hse400StandName), $tplCode, $tplVersion, $plan.Namespace, $plan.Version, $Stage, $(if ($PreviewOnly) { ' (лише перегляд)' } else { '' }))
@@ -131,6 +199,11 @@ if ($PreviewOnly) {
     $p = Get-Hse400AllItems -Path '/api/v1/projects' | Where-Object { [string]$_.code -eq $projectCode } | Select-Object -First 1
     if ($null -eq $p) { Write-Hse400Log "Проєкту $projectCode немає - було б створено з одним документом." }
     else { Write-Hse400Log "Проєкт $projectCode уже є." }
+    if ($plan.Tests.Count) {
+        $g = Get-Hse400AllItems -Path '/api/v1/projects' | Where-Object { [string]$_.code -eq $goldCode } | Select-Object -First 1
+        if ($null -eq $g) { Write-Hse400Log "Золотого проєкту $goldCode немає - було б створено з одним документом і вводом $($plan.Tests.Count) тестів (лише поки методологія в чернетці)." }
+        else { Write-Hse400Log "Золотий проєкт $goldCode уже є." }
+    }
     foreach ($w in $script:Incomplete) { Write-Warning $w }
     if ($script:Incomplete.Count) { exit 2 }
     return
@@ -213,7 +286,18 @@ if ($Stage -in 'Template', 'All') {
             Invoke-Hse400Ok -Method PUT -Path ("{0}/rules/{1}" -f $base, (Get-Hse400CatchAllRuleCode)) -Body (New-Hse400CatchAllRuleBody) | Out-Null
             foreach ($c in $plan.Constants) { Invoke-Hse400Ok -Method PUT -Path ("{0}/constants/{1}" -f $base, $c.code) -Body (New-Hse400ConstantBody -Constant $c -UnitIds $unitIds) | Out-Null }
             foreach ($f in $plan.Formulas) { Invoke-Hse400Ok -Method PUT -Path ("{0}/formulas/{1}" -f $base, $f.code) -Body (New-Hse400FormulaBody -Formula $f) | Out-Null }
-            foreach ($x in $plan.Tests) { Invoke-Hse400Ok -Method PUT -Path ("{0}/tests/{1}" -f $base, $x.code) -Body (New-Hse400TestBody -Test $x) | Out-Null }
+            if ($plan.Tests.Count) {
+                # Модуль читає комірки документа, тож золотий тест потребує документа з відомим вводом. Це окремий
+                # проєкт HSE400_GOLD: синтетичний ввід ніколи не потрапляє в робочий документ HSE400_<рік>.
+                $gold = Get-Hse400ProjectDocument -Code $goldCode -Title 'HSE400 golden test (do not edit)' -ProjectYear $Year -VersionId $vid -PolicyId (Get-Hse400PolicyId $policyCode)
+                Write-Hse400GoldenInputs -Gold $gold -Tests $plan.Tests
+                foreach ($x in $plan.Tests) {
+                    if (-not $gold.Instances.ContainsKey([string]$x.table)) { throw "У золотому документі немає таблиці $($x.table) (тест $($x.code))." }
+                    $tb = New-Hse400GoldenTestBody -Test $x -DocumentId $gold.DocumentId -TableInstanceId $gold.Instances[[string]$x.table] -PeriodKey $gold.PeriodKey
+                    Invoke-Hse400Ok -Method PUT -Path ("{0}/tests/{1}" -f $base, $x.code) -Body $tb | Out-Null
+                }
+                $state['goldProjectId'] = $gold.ProjectId; $state['goldDocumentId'] = $gold.DocumentId
+            }
             Write-Hse400Log ("Чернетка методології: правило {0} = {{}}, констант {1}, формул {2}, тестів {3}." -f (Get-Hse400CatchAllRuleCode), $plan.Constants.Count, $plan.Formulas.Count, $plan.Tests.Count)
             if ($plan.Ready) {
                 Invoke-Hse400Ok -Method POST -Path ("{0}/publish" -f $base) -Body (New-Hse400MethodologyPublishBody $model) | Out-Null
@@ -254,48 +338,10 @@ if ($Stage -in 'Template', 'All') {
 if ($Stage -in 'Project', 'All') {
     if (-not $state.ContainsKey('templateVersionId')) { throw 'У стані немає templateVersionId: спершу -Stage Template на цьому стенді.' }
     $vid = $state['templateVersionId']
-    $st = Get-Hse400Structure $vid
-    $sheetDef = @($st.sheets) | Where-Object { [string]$_.code -eq [string]$model.sheet.code } | Select-Object -First 1
-    if ($null -eq $sheetDef) { throw "У версії $vid немає аркуша $($model.sheet.code)." }
-
-    $pol = Get-Hse400Items (Invoke-Hse400Ok -Method GET -Path '/api/v1/projects/period-policies').Json | Where-Object { [string]$_.code -eq $policyCode } | Select-Object -First 1
-    if ($null -eq $pol) {
-        $pol = (Invoke-Hse400Ok -Method POST -Path '/api/v1/projects/period-policies' -Body @{
-                code = $policyCode; openOffsetDays = 0; graceOffsetDays = 800; hardCloseOffsetDays = 900; yearGraceOffsetDays = 900 }).Json
-        Write-Hse400Log "Створено політику періодів $policyCode."
-    }
-    $policyId = Get-Hse400Id $pol 'id', 'periodPolicyId'
-
-    $proj = Get-Hse400AllItems -Path '/api/v1/projects' | Where-Object { [string]$_.code -eq $projectCode } | Select-Object -First 1
-    if ($null -eq $proj) {
-        $proj = (Invoke-Hse400Ok -Method POST -Path '/api/v1/projects' -Body @{
-                code = $projectCode; nameL10n = @{ en = "HSE400 $Year"; ru = "HSE400 $Year" }; timeZoneId = 'Asia/Atyrau'
-                periodKind = 'Yearly'; year = $Year; templateVersionId = $vid; periodPolicyId = $policyId; customPeriodCount = $null }).Json
-        $projectId = Get-Hse400Id $proj 'projectId', 'id'
-        Invoke-Hse400Ok -Method POST -Path ("/api/v1/projects/{0}/activate" -f $projectId) | Out-Null
-        Write-Hse400Log "Створено й активовано проєкт $projectCode (id $projectId)."
-    }
-    else { $projectId = Get-Hse400Id $proj 'id', 'projectId'; Write-Hse400Log "Проєкт $projectCode уже є (id $projectId)." }
-
-    $periods = @((Invoke-Hse400Ok -Method GET -Path ("/api/v1/projects/{0}/periods" -f $projectId)).Json.periods)
-    if (-not $periods.Count) { throw "Проєкт $projectCode не має періодів." }
-    $periodKey = $periods[0].periodKey
-
-    $doc = Get-Hse400Items (Invoke-Hse400Ok -Method GET -Path ("/api/v1/documents?limit=200&projectId={0}" -f $projectId)).Json | Select-Object -First 1
-    if ($null -eq $doc) {
-        $doc = (Invoke-Hse400Ok -Method POST -Path '/api/v1/documents' -Body @{
-                name = @{ en = "HSE400 $Year" }; projectId = $projectId; sheetDefIds = @($sheetDef.id); templateVersionId = $vid }).Json
-        Write-Hse400Log "Створено документ."
-    }
-    $documentId = Get-Hse400Id $doc 'documentId', 'id'
-
-    $inst = @{}
-    foreach ($ti in Get-Hse400Items (Invoke-Hse400Ok -Method GET -Path ("/api/v1/documents/{0}/tables?periodKey={1}" -f $documentId, $periodKey)).Json) {
-        $inst[[string]$ti.tableCode] = $ti.tableInstanceId
-    }
-    $state['projectId'] = $projectId; $state['documentId'] = $documentId; $state['periodKey'] = $periodKey; $state['tableInstances'] = $inst
+    $work = Get-Hse400ProjectDocument -Code $projectCode -Title "HSE400 $Year" -ProjectYear $Year -VersionId $vid -PolicyId (Get-Hse400PolicyId $policyCode)
+    $state['projectId'] = $work.ProjectId; $state['documentId'] = $work.DocumentId; $state['periodKey'] = $work.PeriodKey; $state['tableInstances'] = $work.Instances
     Save-Hse400State $state
-    Write-Hse400Log ("Документ {0}, період {1}, таблиць {2}. Стан: {3}" -f $documentId, $periodKey, $inst.Count, (Get-Hse400StateFile))
+    Write-Hse400Log ("Документ {0}, період {1}, таблиць {2}. Стан: {3}" -f $work.DocumentId, $work.PeriodKey, $work.Instances.Count, (Get-Hse400StateFile))
 }
 
 foreach ($w in $script:Incomplete) { Write-Warning $w }
