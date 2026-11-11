@@ -259,6 +259,7 @@ public sealed class ImportedFormulaReferencePublishTests
     {
         // Формула бібліотеки читає @Flow з рядка ВИКЛИКАЧА; колонки Flow у його таблиці немає —
         // у рантаймі це був би #ARG.
+        UseLevel(CalculationLevel.Configuration);
         Formulas([Formula(103, "Total", $"!{Shared} * 2")]);
         Library(Formula(301, Shared, "@Flow * 2", CommonVersionId));
 
@@ -296,6 +297,7 @@ public sealed class ImportedFormulaReferencePublishTests
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public async Task Версія_з_необовязковим_аргументом_публікується_а_без_маркера_лишається_0438()
     {
+        UseLevel(CalculationLevel.Configuration);
         BindTable(44, ["Volume"]);
 
         // Без маркера: колонки Flow немає — ECR-CALC-0438 (регресія другого рубежу).
@@ -440,6 +442,14 @@ public sealed class ImportedFormulaReferencePublishTests
 
     private static void SetId(Entity<int> entity, int id)
         => typeof(Entity<int>).GetProperty(nameof(Entity<int>.Id))!.SetValue(entity, id);
+
+    /// <summary>
+    /// Рівень версії для тестів звірки аргументів з колонками (ECR-CALC-0438): її роблять лише рівні
+    /// <c>Configuration</c>/<c>Row</c>. Рівень <c>Module</c> виконує модуль місячних колонок, що бере аргументи з РЯДКІВ,
+    /// тож публікація його не звіряє (AN-175; LiveTemplateVersionArgumentPublishTests).
+    /// </summary>
+    private void UseLevel(CalculationLevel level)
+        => typeof(MethodologyVersion).GetProperty(nameof(MethodologyVersion.Level))!.SetValue(_version, level);
 
     private static AccessProfile Profile() => new()
     {
