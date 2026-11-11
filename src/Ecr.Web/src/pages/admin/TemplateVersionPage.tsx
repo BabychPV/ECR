@@ -214,6 +214,14 @@ const PresentationEditor = lazy(async () => ({
 }));
 
 /**
+ * ✎ D-474: «Layout» версії — лінивий чанк, як і решта редакторів вище: `Select` тягне `Combobox`/`Popover`, а маршрут
+ * стоїть біля стелі `D-132`. Показується лише коли структура вже приїхала, тож заглушка — `null`.
+ */
+const TemplateLayoutControl = lazy(async () => ({
+  default: (await import('@/features/templates/TemplateLayoutControl')).TemplateLayoutControl,
+}));
+
+/**
  * Діалоги причини (публікація, виведення з обігу), підтвердження видалення і блок «версію не
  * опубліковано» — теж за `import()` (`D-132`: маршрут 244.9 КБ, тягнули `Textarea` з autosize, `List`,
  * `useRestoreFocus`). Кожен відкривається лише дією або відмовою сервера.
@@ -1054,6 +1062,19 @@ function TemplateVersionEditor(): JSX.Element {
         presentationRevision={structure.data?.presentationRevision}
         savedAt={savedAt}
       />
+
+      {/* ✎ D-474: розкладка версії. Чернетка з правом `Template.Edit` (`canEditSheets`: право + `isEditable` сервера) —
+          список; інакше — значок лише для читання. Сервер без поля `layout` — нічого не показуємо. */}
+      {structure.data?.layout !== undefined && (
+        <Suspense fallback={null}>
+          <TemplateLayoutControl
+            templateVersionId={id}
+            layout={structure.data.layout}
+            editable={canEditSheets}
+            onSaved={() => setSavedAt(new Date())}
+          />
+        </Suspense>
+      )}
 
       {/*
        * ⛔ Аудит-пас 8, lane7, п.11: опублікована версія коректно не дає
