@@ -261,6 +261,19 @@ function Get-LandDecimalRetypePlan($Columns, [hashtable]$Existing) {
     return @{ Retype = $retype; Bridges = $bridges; Warn = $warn; Same = $same }
 }
 
+# D-474: таблиці моделі, несумісні з розкладкою версії YearWithMonthColumns ("SHEET/TABLE=layout"). Річна розкладка ховає
+# перемикач місяців, тож кожна таблиця мусить бути або з місяцями в колонках (MonthsInColumns), або без місяців (Static);
+# «копія на період» (PerPeriodInstance) і «місяці в рядках» (MonthsInRows) лишились би з недосяжними місячними копіями.
+function Get-LandPerPeriodTables($Mdl) {
+    $out = @()
+    foreach ($sh in @($Mdl.sheets)) {
+        foreach ($tb in @($sh.tables)) {
+            if ([string]$tb.layout -cnotin 'MonthsInColumns', 'Static') { $out += "$($sh.code)/$($tb.code)=$($tb.layout)" }
+        }
+    }
+    return @($out)
+}
+
 # Кандидати Decimal->String, відомі лише з моделі (для DryRun, де клону немає): String-колонки, які читає текстовий міст
 # (Formula/Calculated без precision) і є місячною (month). Повертає рядки "SHEET/TABLE/COLUMN".
 function Get-LandTextBridgeSources($Mdl) {
