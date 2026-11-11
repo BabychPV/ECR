@@ -197,7 +197,7 @@ jobs:
           SA="$(openssl rand -hex 16)Aa1!"
           echo "::add-mask::$SA"
           echo "ECR_SQL_PASSWORD=$SA" >> "$GITHUB_ENV"
-          docker run -d --name ecr-mssql             -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=$SA"             -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
+          docker run -d --name ecr-mssql             -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=$SA"             -p 1433:1433 -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE:ro" mcr.microsoft.com/mssql/server:2019-latest
 
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
@@ -206,38 +206,49 @@ jobs:
       # ⚠ `sqlcmd` на розміщеному раннері не стоїть. Гейт розгортання існує
       # рівно тому, що DBA виконує скрипти НИМ, а не клієнтом .NET: підмінити
       # його на `SqlConnection` означало б перевіряти інший шлях (`P-17`).
+      # ✎ 11.11: БЕЗ apt. На раннерах GitHub не розв'язувався DNS *.ubuntu.com (і
+      # azure.archive, і archive), тож mssql-tools18 + unixODBC поставити неможливо, а
+      # packages.microsoft.com і mcr.microsoft.com працюють. ODBC-шний sqlcmd (P-17) уже є
+      # в образі SQL Server, який ми однаково тягнемо, — кличемо його через `docker exec`.
+      # `/usr/local/bin/sqlcmd` — тонка обгортка (стоїть у PATH раніше за /usr/bin).
+      # ⚠ Працює, бо: (1) workspace змонтовано в контейнер ТИМ САМИМ шляхом (ro), а скрипти
+      # й тести дають `-i` абсолютним шляхом у workspace; (2) `localhost,1433` усередині
+      # контейнера — це той самий SQL Server; (3) пароль іде оточенням SQLCMDPASSWORD
+      # (`-e ІМ'Я` без значення бере його з оточення виклику — в argv пароля немає);
+      # (4) `-u 0`: читання змонтованих файлів не залежить від uid 10001 і прав /home/runner;
+      # (5) LANG/LC_ALL — як у раннера: Sql/*.sql у UTF-8 без BOM і з кирилицею.
+      # ⛔ `command -v sqlcmd` як ознака «вже є» НЕ годиться: на образі раннера це може бути
+      # go-sqlcmd, а DBA виконує скрипти ODBC-шним (P-17).
       - name: sqlcmd
         run: |
           set -euo pipefail
-
-          # ⛔ `--batch --yes` і БЕЗ `sudo` на самому `gpg`. Перший варіант
-          # (`| sudo gpg --dearmor -o …`) упав на агенті з `cannot open
-          # '/dev/tty'`: під `sudo` gpg вважає себе інтерактивним і шукає
-          # термінал, якого в конвеєра немає. Ключ розбирається від імені
-          # користувача, і лише готовий файл кладеться під root.
-          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc             | gpg --dearmor --batch --yes -o microsoft-prod.gpg
-          sudo install -o root -g root -m 644 microsoft-prod.gpg /usr/share/keyrings/microsoft-prod.gpg
-          rm microsoft-prod.gpg
-
-          # ⛔ Випуск Ubuntu береться з `/etc/os-release`, а не зашитий. Тут
-          # стояло `22.04/prod jammy`, а `ubuntu-latest` уже 24.04: зашите
-          # число тихо старіє разом із образом агента, і наслідком буде не
-          # «конвеєр застарів», а «репозиторій пакетів не знайдено».
-          . /etc/os-release
-          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/${VERSION_ID}/prod ${VERSION_CODENAME} main"             | sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
-
-          # ⛔ Оновлюємо ЛИШЕ щойно доданий список mssql-release.list, а не
-          # весь apt. Звичайний `apt-get update` чіпає і чужі репозиторії,
-          # які раннер `ubuntu-latest` має заздалегідь (напр. Google Chrome
-          # для дій, що вимагають браузера) — ми Chrome не використовуємо
-          # ніде в цьому кроці, але тимчасове неспівпадіння хеша в НЬОГО вже
-          # одного разу провалило встановлення sqlcmd (exit 100), яке з ним
-          # не пов'язане ніяк. Прицільне оновлення одного джерела усуває цю
-          # залежність від чужого репозиторію фізично, а не толерантністю до
-          # флакі.
-          sudo apt-get update             -o Dir::Etc::sourcelist="sources.list.d/mssql-release.list"             -o Dir::Etc::sourceparts="-"             -o APT::Get::List-Cleanup="0"
-          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
-          echo "/opt/mssql-tools18/bin" >> "$GITHUB_PATH"
+          if [ -x /opt/mssql-tools18/bin/sqlcmd ]; then
+            echo "/opt/mssql-tools18/bin" >> "$GITHUB_PATH"
+            echo "sqlcmd: ODBC з образу раннера (/opt/mssql-tools18)"
+            exit 0
+          fi
+          bin=""
+          for p in /opt/mssql-tools18/bin/sqlcmd /opt/mssql-tools/bin/sqlcmd; do
+            if docker exec ecr-mssql test -x "$p"; then bin="$p"; break; fi
+          done
+          if [ -z "$bin" ]; then
+            echo "::error::У контейнері ecr-mssql немає ODBC sqlcmd (/opt/mssql-tools18, /opt/mssql-tools)."
+            exit 1
+          fi
+          cat > "$RUNNER_TEMP/sqlcmd" <<'EOF'
+          #!/usr/bin/env bash
+          # ECR CI: ODBC sqlcmd із контейнера ecr-mssql (без apt, 11.11).
+          ws='__WS__'
+          wd="$PWD"
+          case "$wd" in "$ws"|"$ws"/*) ;; *) wd="$ws" ;; esac
+          envs=(-e "LANG=${LANG:-C.UTF-8}" -e "LC_ALL=${LC_ALL:-${LANG:-C.UTF-8}}")
+          for v in $(compgen -e | grep '^SQLCMD' || true); do envs+=(-e "$v"); done
+          exec docker exec -i -u 0 -w "$wd" "${envs[@]}" ecr-mssql '__BIN__' "$@"
+          EOF
+          sed -i "s#__WS__#${GITHUB_WORKSPACE}#; s#__BIN__#${bin}#" "$RUNNER_TEMP/sqlcmd"
+          sudo install -m 755 "$RUNNER_TEMP/sqlcmd" /usr/local/bin/sqlcmd
+          echo "sqlcmd: ODBC з контейнера ecr-mssql ($bin)"
+          docker exec ecr-mssql "$bin" -? | head -3 || true
 
       # ⛔ Готовність контейнера чекається ЯВНО. `services` вважає службу
       # піднятою, щойно відповів порт, а SQL Server після цього ще хвилину
