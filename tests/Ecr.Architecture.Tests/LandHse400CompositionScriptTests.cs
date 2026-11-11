@@ -373,29 +373,53 @@ public sealed class LandHse400CompositionScriptTests
     {
         var import = LandFile("Import-LandHse400Composition.ps1");
 
+        // HSE400 3c: довідник застарів - без -AllowDeprecatedRegistry відмова ще до решти перевірок (навіть на
+        // локальному API з усіма підтвердженнями).
+        var (deprecatedExit, deprecated) = RunPowerShell(
+            "try { & $args[0] -BaseUrl 'http://localhost:5094' -SourceDatabase CopyDb -ConfirmSource CopyDb -ConfirmStand 'localhost:5094' -DryRun; exit 0 } catch { Write-Output $_.Exception.Message; exit 7 }",
+            import);
+        Assert.Equal(7, deprecatedExit);
+        Assert.Contains("-AllowDeprecatedRegistry", deprecated, StringComparison.Ordinal);
+        Assert.Contains("Hse400CompositionFromDocument", deprecated, StringComparison.Ordinal);
+
         var (remoteExit, remote) = RunPowerShell(
-            "try { & $args[0] -BaseUrl 'https://ecr.example.com' -SourceDatabase CopyDb -ConfirmSource CopyDb -ConfirmStand 'ecr.example.com' -DryRun; exit 0 } catch { Write-Output $_.Exception.Message; exit 7 }",
+            "try { & $args[0] -AllowDeprecatedRegistry -BaseUrl 'https://ecr.example.com' -SourceDatabase CopyDb -ConfirmSource CopyDb -ConfirmStand 'ecr.example.com' -DryRun; exit 0 } catch { Write-Output $_.Exception.Message; exit 7 }",
             import);
         Assert.Equal(7, remoteExit);
         Assert.Contains("localhost", remote, StringComparison.Ordinal);
 
         var (srvExit, srv) = RunPowerShell(
-            "try { & $args[0] -BaseUrl 'http://localhost:5094' -SourceServer 'sql01.corp.example.com' -SourceDatabase CopyDb -ConfirmSource CopyDb -DryRun; exit 0 } catch { Write-Output $_.Exception.Message; exit 7 }",
+            "try { & $args[0] -AllowDeprecatedRegistry -BaseUrl 'http://localhost:5094' -SourceServer 'sql01.corp.example.com' -SourceDatabase CopyDb -ConfirmSource CopyDb -DryRun; exit 0 } catch { Write-Output $_.Exception.Message; exit 7 }",
             import);
         Assert.Equal(7, srvExit);
         Assert.Contains("sql01.corp.example.com", srv, StringComparison.Ordinal);
 
         var (noConfirmExit, noConfirm) = RunPowerShell(
-            "try { & $args[0] -BaseUrl 'http://localhost:5094' -SourceDatabase CopyDb -DryRun; exit 0 } catch { Write-Output $_.Exception.Message; exit 7 }",
+            "try { & $args[0] -AllowDeprecatedRegistry -BaseUrl 'http://localhost:5094' -SourceDatabase CopyDb -DryRun; exit 0 } catch { Write-Output $_.Exception.Message; exit 7 }",
             import);
         Assert.Equal(7, noConfirmExit);
         Assert.Contains("-ConfirmSource", noConfirm, StringComparison.Ordinal);
 
         var (standExit, stand) = RunPowerShell(
-            "try { & $args[0] -BaseUrl 'http://localhost:5094' -SourceDatabase CopyDb -ConfirmSource CopyDb; exit 0 } catch { Write-Output $_.Exception.Message; exit 7 }",
+            "try { & $args[0] -AllowDeprecatedRegistry -BaseUrl 'http://localhost:5094' -SourceDatabase CopyDb -ConfirmSource CopyDb; exit 0 } catch { Write-Output $_.Exception.Message; exit 7 }",
             import);
         Assert.Equal(7, standExit);
         Assert.Contains("-ConfirmStand", stand, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Відмова_застарілого_довідника_стоїть_першою_до_будь_яких_перевірок_і_читання()
+    {
+        var text = File.ReadAllText(LandFile("Import-LandHse400Composition.ps1"));
+
+        var refusal = text.IndexOf("if (-not $AllowDeprecatedRegistry)", StringComparison.Ordinal);
+        Assert.True(refusal >= 0, "Немає відмови без -AllowDeprecatedRegistry (HSE400 3c).");
+        foreach (var later in new[] { "Assert-LocalBaseUrl $BaseUrl", "Assert-LocalSourceDatabase -Server", "$conn.Open()", "Connect-Ecr -BaseUrl" })
+        {
+            var at = text.IndexOf(later, StringComparison.Ordinal);
+            Assert.True(at > refusal, $"Відмова застарілого довідника має стояти до «{later}».");
+        }
     }
 
     [Fact]
