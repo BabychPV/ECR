@@ -11,6 +11,12 @@ import { testTheme } from '@/test/render';
 import { Catalog } from '@/test/__tests__/a11yFixtures';
 import { formatDateTime } from '@/shared/format/datetime';
 import { siteUntilText } from '@/shared/siteMoment';
+import { showDone } from '@/shared/ui/notify';
+
+vi.mock('@/shared/ui/notify', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/ui/notify')>()),
+  showDone: vi.fn(),
+}));
 
 /**
  * Приймальна 08.11 (i): «Reopen January 2026 for this document…» у банері закритого періоду (i1), недоступна дія з
@@ -118,6 +124,26 @@ describe('useDocumentPeriodReopen', () => {
     expect(post?.url).toBe('/api/v1/documents/5/period-reopen');
     // Строк за замовчуванням — із сервера (кінець доби майданчика); причина — без крайніх пробілів.
     expect(post?.body).toEqual({ periodKey: 202601, reason: 'Лист №17', openUntil: new Date(Future).toISOString() });
+  });
+
+  /*
+   * ✎ AN-178: хук передає діалогу пояс майданчика — тост «місяць відкрито до …» тим самим правилом, що банер.
+   * Future (19:00Z) — північ 1 лютого в Атирау (+05:00): «Jan 31, 2099, 11:59 PM»; у поясі браузера (UTC) — «7:00 PM».
+   * ⛔ Мутація: прибрати `timeZoneId={timeZoneId}` у `useDocumentPeriodReopen` — тост у поясі браузера, червоне.
+   */
+  it('AN-178: тост після відкриття — строк у поясі майданчика, переданому хуком у діалог', async () => {
+    vi.mocked(showDone).mockClear();
+    stub(closedState({}));
+    show('Closed', 'Asia/Atyrau');
+
+    fireEvent.click(await screen.findByTestId('document-period-reopen'));
+    fireEvent.change(await screen.findByTestId('document-period-reopen-reason'), { target: { value: 'Fix' } });
+    fireEvent.click(screen.getByTestId('document-period-reopen-confirm'));
+
+    await waitFor(() => expect(vi.mocked(showDone)).toHaveBeenCalled());
+    const toast = String(vi.mocked(showDone).mock.calls[0]?.[0] ?? '').replace(/[  ]/gu, ' ');
+    expect(toast).toContain('document.reopen.done');
+    expect(toast).toContain('until=Jan 31, 2099, 11:59 PM');
   });
 
   it('i6: без права дія видима, але недоступна, і причина — видимим текстом', async () => {
