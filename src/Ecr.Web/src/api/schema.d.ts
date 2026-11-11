@@ -23759,6 +23759,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/layout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * D-474: задає розкладку чернетки — копія документа на місяць або рік із місяцями в колонках.
+         *     Право `Template.Edit`.
+         * @description Опублікована версія відхиляє правку (`ECR-TMPL-0409`); версія з документами —
+         *     `ECR-SCHM-0409`: розкладка визначає, якому періоду належить комірка.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SetTemplateLayoutRequest"];
+                    "application/json": components["schemas"]["SetTemplateLayoutRequest"];
+                    "text/json": components["schemas"]["SetTemplateLayoutRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateLayoutDto"];
+                        "text/json": components["schemas"]["TemplateLayoutDto"];
+                        "text/plain": components["schemas"]["TemplateLayoutDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/period-access-rules": {
         parameters: {
             query?: never;
@@ -31281,6 +31367,10 @@ export interface components {
              * @default false
              */
             stepApproverNamesTruncated: boolean;
+            /** @description D-474: розкладка типової версії шаблону проєкту (`PerMonthCopies` | `YearWithMonthColumns`) — рядком, як
+             *     PeriodKind (nullable-enum ламає типи клієнта). `null` — проєкту або версії немає. За
+             *     `YearWithMonthColumns` клієнт не показує вибір місяця: документ має одне подання на рік. */
+            templateLayout?: null | string;
             /** @description RC15: версія шаблону проєкту документа (`TemplateVersion.Version`, рядок). Адитивне поле; метадані шаблону не секрет,
              *     тож звуження читача його не знімає. ~~Заповнює лише шлях картки (`FindAsync`); перелік віддає `null`.~~
              *     ✎ RPT-STABLE: заповнюють і картка, і перелік (колонка «Версія» переліку документів) — це ТИПОВА версія документа;
@@ -39427,6 +39517,11 @@ export interface components {
             /** @description `КОД_ДОВІДНИКА:КОД_ЗАПИСУ`, наприклад `LAND_GENERIC_EQUIPSTATUS:Running`; `null` — зняти. */
             filter: null | string;
         };
+        /** @description Розкладка версії-чернетки (D-474). */
+        SetTemplateLayoutRequest: {
+            /** @description Копія документа на місяць або рік із місяцями в колонках. */
+            layout: components["schemas"]["TemplateLayout"];
+        };
         /** @description Запит на зміну рядка каталогу. */
         SetUiStringRequest: {
             /** @description Область: 0 — публічна, 1 — приватна (`D-114`). */
@@ -41216,6 +41311,21 @@ export interface components {
              */
             templateId: number;
         };
+        /**
+         * @description D-474: розкладка ВЕРСІЇ шаблону — скільки «копій» документа бачить користувач у році.
+         * @enum {unknown}
+         */
+        TemplateLayout: "PerMonthCopies" | "YearWithMonthColumns";
+        /** @description Розкладка версії шаблону у відповіді `PUT …/layout`. */
+        TemplateLayoutDto: {
+            /** @description Чинна розкладка. */
+            layout: components["schemas"]["TemplateLayout"];
+            /**
+             * Format: int32
+             * @description Версія.
+             */
+            templateVersionId: number;
+        };
         /** @description Рядок у СТРУКТУРІ шаблону — опис, а не дані. */
         TemplateRowDto: {
             /** @description ✎ D-461: формула рядка дозволяє ручне значення. ⚠ Цілі формули рядка в колонках вводу редагуються й без
@@ -41266,6 +41376,9 @@ export interface components {
              *     клієнт, який виводив би його зі статусу самостійно, тримав би другу копію
              *     правила «опублікована незмінна». */
             isEditable: boolean;
+            /** @description D-474: розкладка версії. У чернетці (bool TemplateStructureDto.IsEditable) змінюється `PUT …/layout`; в опублікованій —
+             *     лише показ (значок у редакторі). */
+            layout?: components["schemas"]["TemplateLayout"];
             /**
              * Format: int32
              * @description Максимальна глибина дерева груп заголовків колонок (3 рівні).
@@ -41352,6 +41465,8 @@ export interface components {
              * @description Ідентифікатор.
              */
             id: number;
+            /** @description D-474: розкладка версії (копія на місяць або рік із місяцями в колонках). */
+            layout?: components["schemas"]["TemplateLayout"];
             /**
              * Format: int32
              * @description Ревізія презентаційного шару; частина ключа кешу.

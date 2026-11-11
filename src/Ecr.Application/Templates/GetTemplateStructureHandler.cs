@@ -90,7 +90,10 @@ public sealed class GetTemplateStructureHandler(
 
         return new TemplateStructureDto(
             snapshot.TemplateVersionId, snapshot.PresentationRevision, !version.IsStructurallyFrozen, sheets,
-            [.. groupRules.Select(r => new SheetGroupRuleDto(r.SheetGroup, r.RuleKind, r.TargetGroup))]);
+            [.. groupRules.Select(r => new SheetGroupRuleDto(r.SheetGroup, r.RuleKind, r.TargetGroup))])
+        {
+            Layout = version.Layout,
+        };
     }
 
     // ⚠ Сигнатура тримає крок за `TableDto` (W5.1: `NameL10n`/`Ordinal`

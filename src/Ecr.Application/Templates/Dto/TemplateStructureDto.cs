@@ -41,6 +41,12 @@ public sealed record TemplateStructureDto(
 {
     /// <summary>Максимальна глибина дерева груп заголовків колонок (3 рівні).</summary>
     public int MaxHeaderGroupDepth { get; init; } = Ecr.Domain.Entities.Configuration.ColumnHeaderGroupDef.MaxDepth;
+
+    /// <summary>
+    /// D-474: розкладка версії. У чернетці (<see cref="IsEditable"/>) змінюється <c>PUT …/layout</c>; в опублікованій —
+    /// лише показ (значок у редакторі).
+    /// </summary>
+    public Ecr.Domain.Enums.TemplateLayout Layout { get; init; }
 }
 
 /// <summary>Група заголовків колонок таблиці (плоский список; дерево — через <c>ParentId</c>).</summary>

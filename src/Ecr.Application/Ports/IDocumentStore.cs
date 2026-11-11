@@ -130,6 +130,11 @@ namespace Ecr.Application.Ports;
 /// якщо немає), ОДНИМ запитом на сторінку і лише для документів сторінки, тобто вже відібраних межею видимості переліку;
 /// без року і в картці (<c>GET /documents/{id}</c>) — <c>null</c> (виняток місяця картка читає окремо).
 /// </param>
+/// <param name="TemplateLayout">
+/// D-474: розкладка типової версії шаблону проєкту (<c>PerMonthCopies</c> | <c>YearWithMonthColumns</c>) — рядком, як
+/// <paramref name="PeriodKind"/> (nullable-enum ламає типи клієнта). <c>null</c> — проєкту або версії немає. За
+/// <c>YearWithMonthColumns</c> клієнт не показує вибір місяця: документ має одне подання на рік.
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -159,7 +164,8 @@ public sealed record DocumentSummary(
     IReadOnlyList<string>? StepApproverNames = null,
     bool StepApproverNamesTruncated = false,
     IReadOnlyList<DocumentPeriodState>? PeriodStates = null,
-    IReadOnlyList<DocumentReopenedPeriod>? ReopenedPeriods = null);
+    IReadOnlyList<DocumentReopenedPeriod>? ReopenedPeriods = null,
+    string? TemplateLayout = null);
 
 /// <summary>
 /// ✎ 10.11 (слово людини через координатора): закритий місяць, відкритий для ЦЬОГО документа

@@ -47,9 +47,12 @@ public sealed partial class ReportViewGenerator(
         // понад 60 с (41 с у тихій системі, 60 с — стеля команди за конкуренції) → SqlException, `reportviews` = Degraded.
         // Тому з прапором команда отримує окрему стелю; прапор вимкнено — таймаут контексту НЕ змінюється (поведінка як була).
         // Контекст scoped і може жити далі (публікація версії), тож попереднє значення повертається.
-        var routed = monthRouter is { Enabled: true };
+        // ✎ D-474: у процедуру йде лише спадковий прапор «усі версії»; версії з розкладкою YearWithMonthColumns
+        // процедура впізнає сама (cfg.TemplateVersion.Layout). Стеля команди — за будь-якої маршрутизації.
+        var routed = monthRouter is { AllVersions: true };
+        var anyRouting = monthRouter is { Enabled: true };
         var previousTimeout = db.Database.GetCommandTimeout();
-        if (routed)
+        if (anyRouting)
         {
             db.Database.SetCommandTimeout(RoutedGenerationTimeoutSeconds);
         }
@@ -118,7 +121,7 @@ public sealed partial class ReportViewGenerator(
         }
         finally
         {
-            if (routed)
+            if (anyRouting)
             {
                 db.Database.SetCommandTimeout(previousTimeout);
             }

@@ -6676,6 +6676,13 @@
             "description": "`true` — список обрізано (понад 20 імен або понад 100 кандидатів): справжніх погоджувачів може бути більше.",
             "type": "boolean"
           },
+          "templateLayout": {
+            "description": "D-474: розкладка типової версії шаблону проєкту (`PerMonthCopies` | `YearWithMonthColumns`) — рядком, як\nPeriodKind (nullable-enum ламає типи клієнта). `null` — проєкту або версії немає. За\n`YearWithMonthColumns` клієнт не показує вибір місяця: документ має одне подання на рік.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "templateVersion": {
             "description": "RC15: версія шаблону проєкту документа (`TemplateVersion.Version`, рядок). Адитивне поле; метадані шаблону не секрет,\nтож звуження читача його не знімає. ~~Заповнює лише шлях картки (`FindAsync`); перелік віддає `null`.~~\n✎ RPT-STABLE: заповнюють і картка, і перелік (колонка «Версія» переліку документів) — це ТИПОВА версія документа;\nперіоди, що відрізняються, називає TemplateVersionByPeriod.",
             "type": [
@@ -24370,6 +24377,19 @@
         ],
         "type": "object"
       },
+      "SetTemplateLayoutRequest": {
+        "description": "Розкладка версії-чернетки (D-474).",
+        "properties": {
+          "layout": {
+            "$ref": "#/components/schemas/TemplateLayout",
+            "description": "Копія документа на місяць або рік із місяцями в колонках."
+          }
+        },
+        "required": [
+          "layout"
+        ],
+        "type": "object"
+      },
       "SetUiStringRequest": {
         "description": "Запит на зміну рядка каталогу.",
         "properties": {
@@ -28180,6 +28200,32 @@
         ],
         "type": "object"
       },
+      "TemplateLayout": {
+        "description": "D-474: розкладка ВЕРСІЇ шаблону — скільки «копій» документа бачить користувач у році.",
+        "enum": [
+          "PerMonthCopies",
+          "YearWithMonthColumns"
+        ]
+      },
+      "TemplateLayoutDto": {
+        "description": "Розкладка версії шаблону у відповіді `PUT …/layout`.",
+        "properties": {
+          "layout": {
+            "$ref": "#/components/schemas/TemplateLayout",
+            "description": "Чинна розкладка."
+          },
+          "templateVersionId": {
+            "description": "Версія.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "templateVersionId",
+          "layout"
+        ],
+        "type": "object"
+      },
       "TemplateRowDto": {
         "description": "Рядок у СТРУКТУРІ шаблону — опис, а не дані.",
         "properties": {
@@ -28276,6 +28322,10 @@
           "isEditable": {
             "description": "Чи дозволяє стан версії структурну правку (`ФВ-7.1`). Рахує СЕРВЕР —\nтой самий прапорець, що й bool TableRelationsDto.IsEditable:\nклієнт, який виводив би його зі статусу самостійно, тримав би другу копію\nправила «опублікована незмінна».",
             "type": "boolean"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/TemplateLayout",
+            "description": "D-474: розкладка версії. У чернетці (bool TemplateStructureDto.IsEditable) змінюється `PUT …/layout`; в опублікованій —\nлише показ (значок у редакторі)."
           },
           "maxHeaderGroupDepth": {
             "description": "Максимальна глибина дерева груп заголовків колонок (3 рівні).",
@@ -28418,6 +28468,10 @@
             "description": "Ідентифікатор.",
             "format": "int32",
             "type": "integer"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/TemplateLayout",
+            "description": "D-474: розкладка версії (копія на місяць або рік із місяцями в колонках)."
           },
           "presentationRevision": {
             "description": "Ревізія презентаційного шару; частина ключа кешу.",
@@ -63934,6 +63988,131 @@
           }
         },
         "summary": "Створює або змінює поле шапки документа версії-чернетки. Право\n`Template.Edit`. Той самий draft→publish шлях, що `PUT …/columns/{code}`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/layout": {
+      "put": {
+        "description": "Опублікована версія відхиляє правку (`ECR-TMPL-0409`); версія з документами —\n`ECR-SCHM-0409`: розкладка визначає, якому періоду належить комірка.",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTemplateLayoutRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTemplateLayoutRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTemplateLayoutRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateLayoutDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateLayoutDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateLayoutDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "D-474: задає розкладку чернетки — копія документа на місяць або рік із місяцями в колонках.\nПраво `Template.Edit`.",
         "tags": [
           "TemplateVersions"
         ]

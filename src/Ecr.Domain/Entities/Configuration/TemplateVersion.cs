@@ -36,6 +36,34 @@ public sealed class TemplateVersion : Entity<int>
     public TemplateVersionStatus Status { get; private set; }
     public int? ClonedFromVersionId { get; private set; }
 
+    /// <summary>
+    /// D-474: розкладка версії. Нова версія — <see cref="TemplateLayout.PerMonthCopies"/>; клон успадковує розкладку
+    /// джерела (клонується той самий об'єкт).
+    /// </summary>
+    public TemplateLayout Layout { get; private set; }
+
+    /// <summary>Змінює розкладку версії — лише в чернетці (D-474 п.2).</summary>
+    /// <param name="layout">Нова розкладка.</param>
+    /// <returns><c>true</c>, якщо значення змінилося.</returns>
+    /// <exception cref="DomainException">Версія структурно заморожена.</exception>
+    public bool SetLayout(TemplateLayout layout)
+    {
+        EnsureStructurallyMutable();
+
+        if (!Enum.IsDefined(layout))
+        {
+            throw new ArgumentOutOfRangeException(nameof(layout), layout, "Невідома розкладка версії.");
+        }
+
+        if (Layout == layout)
+        {
+            return false;
+        }
+
+        Layout = layout;
+        return true;
+    }
+
     /// <summary>Ревізія презентаційного шару. Інкрементує застосунок одним statement (R-B7).</summary>
     public int PresentationRevision { get; private set; }
 

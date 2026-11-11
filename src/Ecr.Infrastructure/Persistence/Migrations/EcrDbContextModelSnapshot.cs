@@ -2649,6 +2649,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int?>("DeprecatedByUserId")
                         .HasColumnType("int");
 
+                    b.Property<byte>("Layout")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint")
+                        .HasDefaultValue((byte)0, "DF_TV_Layout");
+
                     b.Property<int>("PresentationRevision")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
