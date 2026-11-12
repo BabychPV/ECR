@@ -50,7 +50,15 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.formulaErrors.since', N'ru', N'с {when}'),
     (N'document.formulaErrors.since', N'kz', N'{when} бастап'),
     (N'document.formulaErrors.open', N'ru', N'Перейти к ячейке'),
-    (N'document.formulaErrors.open', N'kz', N'Ұяшыққа өту')
+    (N'document.formulaErrors.open', N'kz', N'Ұяшыққа өту'),
+    (N'document.formulaErrors.cellNamed', N'ru', N'{column}, {row}'),
+    (N'document.formulaErrors.cellNamed', N'kz', N'{column}, {row}'),
+    (N'document.formulaErrors.dependents', N'ru', N'зависимых ячеек не обновлено: {count}'),
+    (N'document.formulaErrors.dependents', N'kz', N'жаңартылмаған тәуелді ұяшықтар: {count}'),
+    (N'document.formulaErrors.blockedCells', N'ru', N'{cell} и другие ячейки, всего: {count}'),
+    (N'document.formulaErrors.blockedCells', N'kz', N'{cell} және басқа ұяшықтар, барлығы: {count}'),
+    (N'err.ECR-SUB-4221.formulaErrorsApprove', N'ru', N'Лист нельзя утвердить: есть ошибки формул (ячеек: {messageCount}). Верните лист на исправление или исправьте входные данные.'),
+    (N'err.ECR-SUB-4221.formulaErrorsApprove', N'kz', N'Парақты бекітуге болмайды: формула қателері бар ({messageCount} ұяшық). Парақты түзетуге қайтарыңыз немесе кіріс мәндерін түзетіңіз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -82,7 +90,11 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'document.formulaErrors.formula', N'en', N'Formula: {formula}', 1),
     (N'document.formulaErrors.inputs', N'en', N'Inputs: {inputs}', 1),
     (N'document.formulaErrors.since', N'en', N'since {when}', 1),
-    (N'document.formulaErrors.open', N'en', N'Go to cell', 1)
+    (N'document.formulaErrors.open', N'en', N'Go to cell', 1),
+    (N'document.formulaErrors.cellNamed', N'en', N'{column}, {row}', 1),
+    (N'document.formulaErrors.dependents', N'en', N'{count} dependent cell(s) not updated', 1),
+    (N'document.formulaErrors.blockedCells', N'en', N'{cell} and other cells, {count} in total', 1),
+    (N'err.ECR-SUB-4221.formulaErrorsApprove', N'en', N'The sheet cannot be approved: there are formula errors ({messageCount} cell(s)). Return the sheet for correction or fix the inputs.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

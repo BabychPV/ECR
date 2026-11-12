@@ -131,7 +131,7 @@ public sealed class ApproveSheetHandler(
                 // ⚠ D-440: правило чотирьох очей (F-25, заборона самопогодження) скасоване безумовно —
                 // той, хто подав, погоджує сам, якщо роль поточного кроку і грант це дають (рішення вище).
                 // Слід лишається в журналі: `GetWorkflowHistoryHandler` позначає таке погодження.
-                await ApproveCoreAsync(state, documentId, sheetDefId, periodKey, approved, reason, userId, sheetCopyId, innerCt)
+                await ApproveCoreAsync(state, documentId, sheetDefId, periodKey, approved, reason, userId, sheetCopyId, profile, innerCt)
                     .ConfigureAwait(false);
 
                 // ⛔ D-462: відхилення — аркуш знову редагований; черга в базі — постановка тут, останнім оператором.
@@ -160,6 +160,44 @@ public sealed class ApproveSheetHandler(
             await notifier.ReturnedAsync(documentId, sheetDefId, key, userId, clock.UtcNow, reason, ct)
                 .ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Повідомлення для тіла відмови затвердження через помилку формули.</summary>
+    public const string FormulaErrorsMessageKey = "err.ECR-SUB-4221.formulaErrorsApprove";
+
+    /// <summary>
+    /// ✎ C-1: відмова затвердження — 422 <c>ECR-SUB-4221</c>; комірки під забороною погоджувача не називаються
+    /// (S6, <c>HiddenValidationIssues</c>, як у поданні).
+    /// </summary>
+    private async Task ThrowFormulaErrorsAsync(
+        IReadOnlyList<Validation.ValidationMessage> errors, AccessProfile profile, long documentId, PeriodKey key,
+        CancellationToken ct)
+    {
+        var anyPeriod = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var readable = anyPeriod.InPeriod(key);
+        var shown = Validation.HiddenValidationIssues.ForViewer([.. errors], m => Validation.HiddenValidationIssues.CanSee(readable, m));
+        var onlyHidden = shown.Count == 1 && Validation.HiddenValidationIssues.IsPlaceholder(shown[0]);
+
+        throw new BusinessRuleException(
+            Domain.Errors.ErrorCodes.SubmitBlocked,
+            onlyHidden
+                ? "Затвердження неможливе: є зауваження поза вашою видимістю."
+                : $"Затвердження неможливе: помилок формул — {shown.Count}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = onlyHidden ? Validation.HiddenValidationIssues.MessageKey : FormulaErrorsMessageKey,
+                ["messages"] = shown
+                    .Select(m => (object)new
+                    {
+                        m.RuleCode,
+                        m.Message,
+                        m.RowKey,
+                        m.ColumnCode,
+                        MessageKey = Validation.HiddenValidationIssues.IsPlaceholder(m) ? Validation.HiddenValidationIssues.MessageKey : null,
+                    })
+                    .ToList(),
+                ["messageCount"] = onlyHidden ? null : shown.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
     }
 
     /// <summary>Рішення про затвердження (грант, стан, роль поточного кроку маршруту); відмова — 403.</summary>
@@ -193,6 +231,7 @@ public sealed class ApproveSheetHandler(
         string? reason,
         int userId,
         long? sheetCopyId,
+        AccessProfile profile,
         CancellationToken ct)
     {
         var key = new PeriodKey(periodKey);
@@ -220,6 +259,17 @@ public sealed class ApproveSheetHandler(
             if (snapshotRefresh is not null)
             {
                 await snapshotRefresh.RefreshAsync(documentId, sheetDefId, key, userId, now, ct, sheetCopyId).ConfigureAwait(false);
+
+                // ✎ C-1 (D-475; PO 12.11, дослівно: «якщо є помилки то затвердити теж не можна»): помилка формули
+                // блокує й затвердження — той самий код і форма тіла, що в поданні (`ECR-SUB-4221`), свій messageKey.
+                // Відхилення (approved = false) не блокується: повернути аркуш на виправлення можна завжди.
+                var errors = await snapshotRefresh
+                    .FormulaErrorMessagesAsync(sheetDefId, key, currentUser.Language, ct)
+                    .ConfigureAwait(false);
+                if (errors.Count > 0)
+                {
+                    await ThrowFormulaErrorsAsync(errors, profile, documentId, key, ct).ConfigureAwait(false);
+                }
             }
 
             state.ApproveStep(userId, now, step?.NextStepId);
