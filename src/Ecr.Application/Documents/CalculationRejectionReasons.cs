@@ -16,7 +16,16 @@ namespace Ecr.Application.Documents;
 /// Порожні колонки рядка, які згадує правило категорії (через формули й бібліотеки); обчислювана колонка шаблону
 /// замінена порожньою колонкою, з якої вона рахується. Порожньо — назвати нічого (або хоч одна прихована від читача).
 /// </param>
-internal sealed record CalculationRejectionReason(string? RuleCode, IReadOnlyList<ColumnDef> Columns);
+internal sealed record CalculationRejectionReason(string? RuleCode, IReadOnlyList<CalculationRejectionColumn> Columns);
+
+/// <summary>Що назвати людині: колонку цієї таблиці або вхід, якого серед колонок таблиці немає (AN-164b).</summary>
+/// <param name="Code">Код колонки (перехід на комірку) або код аргументу формули.</param>
+/// <param name="Name">
+/// Заголовок колонки мовами каталогу (місячна колонка — з назвою місяця періоду); ПОРОЖНІЙ (без жодної мови) — це не
+/// колонка таблиці, а вхід формули: підпис «вхідні дані «код»» будує клієнт ключем каталогу.
+/// </param>
+/// <param name="ColumnId">Колонка; <c>null</c> — не колонка таблиці.</param>
+internal sealed record CalculationRejectionColumn(string Code, LocalizedText Name, int? ColumnId);
 
 /// <summary>
 /// Чому рядок відхилено правилом категорії (<see cref="ICalculationIssueStore.CategoryRuleRejected"/>): виводиться під час
@@ -36,6 +45,12 @@ internal sealed record CalculationRejectionReason(string? RuleCode, IReadOnlyLis
 /// посилається її формула (doc 95, 10.11: <c>Land_OverhauledEngines</c> → <c>Land_OverhauledEnginesRef</c>).
 /// </para>
 /// <para>
+/// ✎ AN-164b (аудит RC #825, doc 96): для <c>MissingInputs</c> аргументи беруться з ПРОГОНУ (профіль актуального прогону,
+/// <see cref="ModuleProfile.ReadMissingArguments"/>), здогад за формулами — лише запасний шлях для старих прогонів.
+/// Аргумент, якого серед колонок таблиці немає, називається входом (порожній заголовок). Таблиця «місяці в колонках»
+/// читається логічним зрізом, як у прогоні, а з місячних колонок лишається тільки місяць періоду (з його назвою).
+/// </para>
+/// <para>
 /// ⛔ Безпека: хоч одна названа колонка прихована від читача — колонок немає зовсім (як у підказках).
 /// </para>
 /// </remarks>
@@ -46,7 +61,8 @@ internal sealed class CalculationRejectionReasons(
     IPeriodStore periods,
     IMethodologyStore methodologies,
     IFormulaEngine formulaEngine,
-    IColumnPathMapper? columnMapper)
+    IColumnPathMapper? columnMapper,
+    ICalculationResultStore? results = null)
 {
     /// <summary>Скільки відхилених рядків читається одним зверненням до комірок (рядки × колонки таблиці).</summary>
     internal const int ReadChunkRows = 200;
@@ -138,6 +154,24 @@ internal sealed class CalculationRejectionReasons(
                 continue;
             }
 
+            // AN-164b: «місяці в колонках» — ЛОГІЧНИЙ зріз (введені комірки з екземпляра-власника місяця), як читає прогін
+            // (`CalculationInputBuilder` → `ReadSliceAsync`). Фізичні комірки перегляду тут порожні, і правило, що закрило
+            // рядок у прогоні, класифікувалось би інакше («rule unknown», doc 96 @202610).
+            if (groupTable.LayoutKind == TableLayoutKind.MonthsInColumns)
+            {
+                var wanted = group.Select(r => r.RowId).ToHashSet();
+                foreach (var record in await cellStore.ReadSliceAsync(first.Instance.TableInstanceId, period, ct)
+                             .ConfigureAwait(false))
+                {
+                    if (wanted.Contains(record.Address.TableRowId))
+                    {
+                        cells[new CellAddress(period, record.Address.TableRowId, record.Address.ColumnDefId)] = record.Value;
+                    }
+                }
+
+                continue;
+            }
+
             var columnIds = groupTable.Columns.Where(c => !c.IsDeleted).Select(c => c.Id).ToList();
             foreach (var chunk in group.Select(r => r.RowId).Distinct().Chunk(ReadChunkRows))
             {
@@ -154,6 +188,23 @@ internal sealed class CalculationRejectionReasons(
         // ⚡ Структура таблиці й джерела формул обчислюваних колонок — раз на таблицю, не на кожну з ~1000 проблем.
         var shapeOf = new Dictionary<int, (List<ColumnDef> Columns, Dictionary<string, ColumnDef> ByCode)>();
         var sourcesOf = new Dictionary<(int Table, int Column), List<ColumnDef>>();
+        IReadOnlyDictionary<(long TableInstanceId, string RowKey, int? MethodologyId), IReadOnlyList<string>>? runArguments = null;
+
+        // AN-164b: місячна колонка іншого місяця, ніж період, людині не потрібна — прогін її не читав.
+        var month = period.Value % 100;
+        bool OtherMonth(ColumnDef column)
+            => column.IsMonthColumn && column.MonthNumber is { } number && month is >= 1 and <= 12 && number != month;
+
+        // ⚠ Колонка без заголовка — підпис кодом: порожній заголовок у відповіді означає «вхід поза колонками».
+        LocalizedText LabelOf(ColumnDef column)
+            => column.HeaderL10n.Values.Count == 0
+                ? new LocalizedText(new Dictionary<string, string> { ["en"] = column.Code })
+                : column.IsMonthColumn && month is >= 1 and <= 12
+                ? new LocalizedText(column.HeaderL10n.Values.ToDictionary(
+                    v => v.Key,
+                    v => $"{v.Value} · {Permits.Validity.PermitMonthCoverage.MonthName(month, v.Key)}",
+                    StringComparer.OrdinalIgnoreCase))
+                : column.HeaderL10n;
 
         foreach (var (issue, versionId, instance, rowId) in resolved)
         {
@@ -199,40 +250,94 @@ internal sealed class CalculationRejectionReasons(
 
             // 2. Порожні колонки, які згадує правило категорії. AN-164: рядок без входів (`MissingInputs`) — порожні
             //    колонки, які читають формули версії (будь-яка з них могла б дати значення).
+            //    AN-164b: для `MissingInputs` — САМЕ ті аргументи, яких бракувало рядку в прогоні (профіль прогону,
+            //    `ModuleProfile.ReadMissingArguments`); здогад за формулами — лише коли прогін їх не записав (старий прогін).
             var allFormulas = issue.Kind == ICalculationIssueStore.MissingInputs;
-            if (!argumentsOf.TryGetValue((versionId, allFormulas), out var arguments))
+            IReadOnlyList<string>? fromRun = null;
+            if (allFormulas)
             {
-                arguments = await RuleArgumentsAsync(versionId, bounds.PeriodEnd, allFormulas, ct).ConfigureAwait(false);
-                argumentsOf[(versionId, allFormulas)] = arguments;
+                runArguments ??= await RunArgumentsAsync(documentId, period, ct).ConfigureAwait(false);
+                fromRun = runArguments.GetValueOrDefault((instance.TableInstanceId, issue.RowKey, issue.MethodologyId));
+            }
+
+            IEnumerable<string> arguments;
+            if (fromRun is not null)
+            {
+                arguments = fromRun;
+            }
+            else
+            {
+                if (!argumentsOf.TryGetValue((versionId, allFormulas), out var guessed))
+                {
+                    guessed = await RuleArgumentsAsync(versionId, bounds.PeriodEnd, allFormulas, ct).ConfigureAwait(false);
+                    argumentsOf[(versionId, allFormulas)] = guessed;
+                }
+
+                arguments = guessed;
             }
 
             var named = new List<ColumnDef>();
+            var inputs = new List<string>();
             foreach (var argument in arguments)
             {
-                if (!byCode.TryGetValue(argument, out var column) || TextOf(column).Length > 0)
+                if (!byCode.TryGetValue(argument, out var column))
+                {
+                    // Аргумент прогону, якого серед колонок таблиці немає (не та таблиця, довідник, похідний) — вхід.
+                    if (fromRun is not null)
+                    {
+                        inputs.Add(argument);
+                    }
+
+                    continue;
+                }
+
+                if (OtherMonth(column) || TextOf(column).Length > 0)
                 {
                     continue;
                 }
 
                 // Обчислювана колонка: людина заповнює джерела її формули. Джерела вже заповнені — колонка порахується
-                // наступним перерахунком, називати нічого (сама вона лише для читання).
+                // наступним перерахунком, називати нічого (сама вона лише для читання). Місячні джерела — лише місяця
+                // періоду: формула шаблону бере один із 12 (doc 96 @202610: «Running hours per month» ×12).
                 if (!sourcesOf.TryGetValue((table.Id, column.Id), out var sources))
                 {
                     sources = [.. TemplateSources(table, column, byCode)];
                     sourcesOf[(table.Id, column.Id)] = sources;
                 }
 
-                named.AddRange(sources.Count > 0 ? sources.Where(s => TextOf(s).Length == 0) : [column]);
+                named.AddRange(sources.Count > 0 ? sources.Where(s => !OtherMonth(s) && TextOf(s).Length == 0) : [column]);
             }
 
             var distinct = named.DistinctBy(c => c.Id).OrderBy(c => c.Ordinal).ThenBy(c => c.Id).ToList();
 
-            // ⛔ Прихована колонка — жодної (див. remarks класу).
+            // ⛔ Прихована колонка — жодної (див. remarks класу), і входів теж: перелік або повний, або порожній.
             result[(issue.TableDefId, issue.RowKey, issue.MethodologyId)] = new CalculationRejectionReason(
-                ruleCode, distinct.All(c => canReadColumn(c.Id)) ? distinct : []);
+                ruleCode,
+                distinct.All(c => canReadColumn(c.Id))
+                    ?
+                    [
+                        .. distinct.Select(c => new CalculationRejectionColumn(c.Code, LabelOf(c), c.Id)),
+                        .. inputs.Distinct(StringComparer.OrdinalIgnoreCase)
+                            .Select(code => new CalculationRejectionColumn(code, new LocalizedText(), null)),
+                    ]
+                    : []);
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// AN-164b: аргументи, яких бракувало рядкам у прогоні, — з профілю актуального прогону документа за період (той
+    /// самий прогін, що записав проблеми). Немає сховища чи профілю — порожньо (читання візьме здогад за формулами).
+    /// </summary>
+    private async Task<IReadOnlyDictionary<(long TableInstanceId, string RowKey, int? MethodologyId), IReadOnlyList<string>>>
+        RunArgumentsAsync(long documentId, PeriodKey period, CancellationToken ct)
+    {
+        var run = results is null
+            ? null
+            : await results.ReadCurrentRunProfileAsync(documentId, period.Value, ct).ConfigureAwait(false);
+
+        return ModuleProfile.ReadMissingArguments(run?.ModulesProfileJson, documentId);
     }
 
     /// <summary>

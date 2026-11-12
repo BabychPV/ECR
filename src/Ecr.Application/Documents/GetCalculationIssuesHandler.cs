@@ -28,7 +28,8 @@ public sealed class GetCalculationIssuesHandler(
     IPeriodStore? periods = null,
     IMethodologyStore? methodologies = null,
     IColumnPathMapper? columnMapper = null,
-    IFormulaEngine? formulaEngine = null)
+    IFormulaEngine? formulaEngine = null,
+    ICalculationResultStore? results = null)
 {
     private readonly CalculationIssueHints? hints =
         rowStore is null || cellStore is null || metadata is null || periods is null || methodologies is null
@@ -40,7 +41,8 @@ public sealed class GetCalculationIssuesHandler(
         rowStore is null || cellStore is null || metadata is null || periods is null || methodologies is null
         || formulaEngine is null
             ? null
-            : new CalculationRejectionReasons(rowStore, cellStore, metadata, periods, methodologies, formulaEngine, columnMapper);
+            : new CalculationRejectionReasons(
+                rowStore, cellStore, metadata, periods, methodologies, formulaEngine, columnMapper, results);
 
     /// <summary>Право на перегляд документа (`02-contracts.md` §9).</summary>
     public const string Permission = "Document.View";
@@ -107,7 +109,7 @@ public sealed class GetCalculationIssuesHandler(
                         reason?.RuleCode,
                         reason is null || reason.Columns.Count == 0
                             ? null
-                            : [.. reason.Columns.Select(c => new CalculationIssueColumnDto(c.Code, c.HeaderL10n))]);
+                            : [.. reason.Columns.Select(c => new CalculationIssueColumnDto(c.Code, c.Name))]);
                 }),
             ],
             built.Tables.Count == 0 ? null : built.Tables);

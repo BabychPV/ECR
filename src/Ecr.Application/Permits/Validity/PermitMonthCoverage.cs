@@ -260,6 +260,17 @@ public static class PermitMonthCoverage
         return $"{from} – {to}";
     }
 
+    /// <summary>Short month name (<c>Sep</c>/…) in <c>en</c>/<c>ru</c>/<c>kz</c>; another language — English (AN-164b).</summary>
+    /// <param name="month">Month, 1–12.</param>
+    /// <param name="language">Language code.</param>
+    internal static string MonthName(int month, string? language)
+        => (language switch
+        {
+            "ru" => MonthNamesRu,
+            "kz" => MonthNamesKz,
+            _ => MonthNamesEn,
+        })[month - 1];
+
     /// <summary>
     /// Uncovered months for a refusal in the reader's language: a lone month by name (<c>Jan 2026</c>), a run of
     /// consecutive months by its date range (<c>01.01–28.02.2026</c>); at most <paramref name="limit"/> runs, the rest
