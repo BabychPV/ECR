@@ -290,6 +290,16 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             .ToDictionaryAsync(s => s.PeriodKey, s => s.Status, ct)
             .ConfigureAwait(false);
 
+        // ⛔ C-6: місяць, відкритий лише для ЦЬОГО документа (08.11 (i)), — Grace і в календарі подання, як у рішенні
+        // про подання (`AccessDecisionService`, `DocumentPeriodReopenRule`); інакше D-441 його не пропонує.
+        var reopened = (await db.DocumentPeriodReopens
+                .AsNoTracking()
+                .Where(x => x.DocumentId == documentId && x.ClosedAt == null && x.OpenUntil > utcNow)
+                .Select(x => x.PeriodKeyValue)
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .ToHashSet();
+
         // ⚠ Те саме правило, що й `EffectivePeriodStateAsync` вище та `AccessDecisionService.BuildContextAsync`:
         // за датами — лише для АКТИВНОГО проєкту (`A7-25`), інакше збережений стан.
         Domain.Services.YearGraceWindow? window = project.Status == Domain.Enums.ProjectStatus.Active
@@ -306,7 +316,9 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             [
                 .. periods.Select(p => new SubmissionCalendarPeriod(
                     p.PeriodKeyValue,
-                    window is null ? p.State : PeriodStates.Effective(p, utcNow, window),
+                    Domain.Services.DocumentPeriodReopenRule.Apply(
+                        window is null ? p.State : PeriodStates.Effective(p, utcNow, window),
+                        reopened.Contains(p.PeriodKeyValue)),
                     statuses.TryGetValue(p.PeriodKeyValue, out var status)
                         ? status
                         : Domain.Enums.DocumentStatus.Draft)),
