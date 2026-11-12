@@ -20,6 +20,26 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     /// </remarks>
     public const string BrokenRuleCode = "ECR-VAL-RULE";
 
+    /// <summary>Розібрані вирази правил — один розбір на вираз на екземпляр (scoped = запит).</summary>
+    /// <remarks>
+    /// ⛔ P-5 (аудит 2026-11-10): доти кожне застосування правила (кожен рядок «Перевірити»/подання, кожна комірка
+    /// PATCH) розбирало вираз наново. Ключ — сам текст: діалект тут завжди `Template`. Результат із помилкою теж
+    /// кешується (той самий `ECR-VAL-RULE` на кожному застосуванні). Екземпляр scoped і не ділиться між потоками;
+    /// AST — незмінні записи, обчислювач їх не змінює.
+    /// </remarks>
+    private readonly Dictionary<string, Ecr.Expressions.Parsing.ParseResult> _parsed = new(StringComparer.Ordinal);
+
+    private Ecr.Expressions.Parsing.ParseResult ParseRule(string expression)
+    {
+        if (!_parsed.TryGetValue(expression, out var result))
+        {
+            result = formulaEngine.Parse(expression, ExpressionDialect.Template);
+            _parsed[expression] = result;
+        }
+
+        return result;
+    }
+
     /// <summary>Перевіряє одну комірку — виконується синхронно на шляху запису.</summary>
     /// <param name="column">Колонка, до якої належить значення.</param>
     /// <param name="value">Значення комірки.</param>
@@ -161,7 +181,7 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
                 continue;
             }
 
-            var parsed = formulaEngine.Parse(rule.Expression, ExpressionDialect.Template);
+            var parsed = ParseRule(rule.Expression);
             if (!parsed.IsSuccess || parsed.Expression is null)
             {
                 // Зламане правило звітує `Evaluate` (ECR-VAL-RULE) — тут нема що читати.
@@ -197,7 +217,7 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
         List<ValidationMessage> messages,
         bool partialContext)
     {
-        var parsed = formulaEngine.Parse(rule.Expression, ExpressionDialect.Template);
+        var parsed = ParseRule(rule.Expression);
         if (!parsed.IsSuccess || parsed.Expression is null)
         {
             messages.Add(Broken(rule, tableDefId, rowKey, columnCode, language, ValidationMessageTemplates.RuleParseError,
