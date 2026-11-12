@@ -101,9 +101,8 @@ function Verdicts({ result }: { readonly result: SimulationResultDto }): JSX.Ele
             <Table.Tr key={verdict.code}>
               <Table.Td>{verdict.code}</Table.Td>
               <Table.Td colSpan={4}>
-                {/* ⛔ B21: без розбіжностей ще не означає «зелений» — тест без жодного
-                    очікування сервер вважає червоним (нічого не перевіряє). Колір — з
-                    вердикту, а не з довжини переліку розбіжностей. */}
+                {/* ⛔ B21: колір — з вердикту сервера, а не з довжини переліку
+                    розбіжностей: «розбіжностей немає» і «зелений» — різні твердження. */}
                 {verdict.isGreen ? (
                   <Badge color="statusSuccess">{t('expressions.testsGreen')}</Badge>
                 ) : (

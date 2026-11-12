@@ -70,17 +70,10 @@ public static class GoldenSet
         ArgumentNullException.ThrowIfNull(testCase);
         ArgumentNullException.ThrowIfNull(output);
 
-        // ⛔ B21: тест БЕЗ ЖОДНОГО очікування — НЕ зелений. Цикл нижче йде по очікуваннях, тож на
-        // `expectedJson = {}` він не звіряв нічого, і вердикт був зеленим за будь-якого виходу. Так
-        // live-регресія C11_01 V5 (doc 96, рядок A37: 0 результатів, 64 кроки #VALUE) пройшла
-        // золотий набір: PARITY_1 з імпорту AF має `{}`. Це та сама підміна, що й порожній набір
-        // (`IsGreen`), лише на рівні одного випадку: «нічого не очікували, отже зійшлося».
-        // Розбіжностей у такого вердикту немає — причину називає `Divergences`.
-        if (testCase.Expected.Count == 0)
-        {
-            return new TestCaseVerdict(testCase.Code, IsGreen: false, Mismatches: []);
-        }
-
+        // ⚠ B21: випадок БЕЗ ЖОДНОГО очікування (`expectedJson = {}`) тут нічого не звіряє і дає вердикт
+        // без розбіжностей. Це законна форма для випадку, що існує заради ВХОДУ (трейс прогону без запису,
+        // поведінка, яка законно різна в Legacy і Strict, — сценарій S-26), тож червоним його не зроблено.
+        // Але НАБІР, де жоден випадок нічого не очікує, зеленим не є — див. `IsGreen(verdicts, testCases)`.
         var mismatches = new List<TestCaseMismatch>();
 
         // Один прохід будує обидва покажчики: «всі рядки виходу» — для
@@ -149,6 +142,34 @@ public static class GoldenSet
         return verdicts.Count > 0 && verdicts.All(v => v.IsGreen);
     }
 
+    /// <summary>Чи зійшовся весь набір І чи він узагалі щось перевіряє (B21).</summary>
+    /// <param name="verdicts">Вердикти всіх тестів версії.</param>
+    /// <param name="testCases">Ті самі тести — щоб знати, чи хоч один щось очікує.</param>
+    /// <returns><c>true</c> — набір зелений, хоч один випадок має очікування, і версію можна публікувати.</returns>
+    /// <remarks>
+    /// ⛔ B21: набір, у якому ЖОДЕН випадок не має очікуваних чисел, — та сама підміна, що й порожній
+    /// набір: «нічого не очікували, отже зійшлося». Саме так live-регресія C11_01 V5 (doc 96, рядок A37:
+    /// 0 результатів, 64 кроки #VALUE) пройшла золоті ворота: єдиний випадок PARITY_1 з імпорту AF має
+    /// <c>expectedJson = {}</c>. Окремий випадок без очікувань поруч зі справжніми лишається законним
+    /// (S-26: вхід для трейсу, число якого законно різне в Legacy і Strict).
+    /// </remarks>
+    public static bool IsGreen(IReadOnlyList<TestCaseVerdict> verdicts, IReadOnlyList<MethodologyTestCase> testCases)
+    {
+        ArgumentNullException.ThrowIfNull(testCases);
+
+        return IsGreen(verdicts) && ChecksAnything(testCases);
+    }
+
+    /// <summary>Чи має хоч один випадок набору очікуване число (B21).</summary>
+    /// <param name="testCases">Тести версії.</param>
+    /// <returns><c>false</c> — набір нічого не перевіряє, хоч би що видав рушій.</returns>
+    public static bool ChecksAnything(IReadOnlyList<MethodologyTestCase> testCases)
+    {
+        ArgumentNullException.ThrowIfNull(testCases);
+
+        return testCases.Any(t => t.Expected.Count > 0);
+    }
+
     /// <summary>Перелік розбіжностей набору — по рядку на кожну.</summary>
     /// <param name="verdicts">Вердикти всіх тестів версії.</param>
     /// <returns>Рядки виду «випадок: вихід (речовина): очікували … отримали …».</returns>
@@ -165,21 +186,19 @@ public static class GoldenSet
         [
             .. verdicts
                 .Where(v => !v.IsGreen)
-                .SelectMany(v => v.Mismatches.Count == 0
-                    ? new[] { $"{v.Code}: {NoExpectationsReason}" }
-                    : v.Mismatches.Select(m => $"{v.Code}: {m.Describe()}")),
+                .SelectMany(v => v.Mismatches.Select(m => $"{v.Code}: {m.Describe()}")),
         ];
     }
 
     /// <summary>
-    /// Причина червоного вердикту без розбіжностей (B21): у тесті немає жодного очікуваного числа.
+    /// Причина відмови набору, що нічого не перевіряє (B21): жоден випадок не має очікуваного числа.
     /// </summary>
     /// <remarks>
-    /// ⚠ Червоний вердикт без розбіжностей буває лише так (<see cref="Judge"/>): інакше перелік
-    /// відмови був би порожнім, і автор бачив би «відхилено», не знаючи, що виправляти.
+    /// ⚠ Розбіжностей у такого набору немає — без цього тексту автор бачив би «відхилено», не знаючи,
+    /// що виправляти.
     /// </remarks>
     public const string NoExpectationsReason =
-        "очікуваних значень немає (expectedJson = {}) — тест нічого не перевіряє; "
+        "жоден випадок не має очікуваних значень (expectedJson = {}) — набір нічого не перевіряє; "
         + "задайте очікувані числа виходів (код виходу або код@речовина → число)";
 
     /// <summary>Додає значення до групи, створюючи її за потреби.</summary>

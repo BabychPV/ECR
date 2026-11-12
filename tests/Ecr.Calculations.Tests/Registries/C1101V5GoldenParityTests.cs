@@ -152,8 +152,10 @@ public sealed class C1101V5GoldenParityTests
         Assert.DoesNotContain(output.Trace, s => s.TraceJson is not null && s.TraceJson.Contains("#VALUE", StringComparison.Ordinal));
 
         // Той самий набір через ворота: з очікуваннями — зелений; з `{}` (як зараз на live) — уже НЕ зелений (B21).
-        Assert.True(GoldenSet.Judge(Case(expected), output).IsGreen);
-        Assert.False(GoldenSet.Judge(Case(new Dictionary<string, decimal>()), output).IsGreen);
+        var withExpectations = Case(expected);
+        var asOnLive = Case(new Dictionary<string, decimal>());
+        Assert.True(GoldenSet.IsGreen([GoldenSet.Judge(withExpectations, output)], [withExpectations]));
+        Assert.False(GoldenSet.IsGreen([GoldenSet.Judge(asOnLive, output)], [asOnLive]));
     }
 
     [Fact]

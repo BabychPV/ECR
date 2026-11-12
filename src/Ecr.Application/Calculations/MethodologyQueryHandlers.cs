@@ -275,7 +275,7 @@ public sealed class SimulateMethodologyHandler(
         // Інакше симуляція засмітила б історію прогонів, за якою відновлюють
         // числа, і питання «яким прогоном пораховано цей звіт» отримало б
         // відповіді, яких ніхто не запускав.
-        return new SimulationResultDto(outputs, diff, trace, verdicts, GoldenSet.IsGreen(verdicts));
+        return new SimulationResultDto(outputs, diff, trace, verdicts, GoldenSet.IsGreen(verdicts, testCases));
     }
 
     /// <summary>Крок трейсу рядком — разом із причиною, чому значення таке.</summary>

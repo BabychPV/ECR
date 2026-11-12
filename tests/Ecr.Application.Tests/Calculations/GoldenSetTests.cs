@@ -247,45 +247,42 @@ public sealed class GoldenSetTests
     }
 
     /// <remarks>
-    /// B21: цикл <c>Judge</c> іде по очікуваннях, тож тест з <c>expectedJson = {}</c> не звіряв нічого і був
-    /// зеленим за БУДЬ-ЯКОГО виходу — і за валідного числа, і за порожнього (0 результатів, усі кроки #VALUE, як
-    /// live C11_01 V5 PARITY_1). Мутація: прибрати гілку <c>Expected.Count == 0</c> у <c>Judge</c> — обидва
-    /// випадки зелені, тест червоний.
+    /// B21: цикл <c>Judge</c> іде по очікуваннях, тож набір, де жоден випадок нічого не очікує
+    /// (<c>expectedJson = {}</c>), був зеленим за БУДЬ-ЯКОГО виходу — і за валідного числа, і за порожнього
+    /// (0 результатів, усі кроки #VALUE, як live C11_01 V5 PARITY_1). Мутація: прибрати
+    /// <c>ChecksAnything</c> з <c>IsGreen(verdicts, testCases)</c> — обидва випадки зелені, тест червоний.
     /// </remarks>
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-9.12")]
     [InlineData(true)]
     [InlineData(false)]
-    public void B21_тест_без_жодного_очікування_не_зелений(bool engineProducedValues)
+    public void B21_набір_без_жодного_очікування_не_зелений(bool engineProducedValues)
     {
         var empty = TestCase(new Dictionary<string, decimal>(), 0m);
         var output = engineProducedValues ? Output(1m) : new CalculationOutput(1, null, [], []);
 
         var verdict = GoldenSet.Judge(empty, output);
 
-        Assert.False(verdict.IsGreen);
         Assert.Empty(verdict.Mismatches);
-        Assert.False(GoldenSet.IsGreen([verdict]));
+        Assert.False(GoldenSet.ChecksAnything([empty]));
+        Assert.False(GoldenSet.IsGreen([verdict], [empty]));
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-9.12")]
-    public void B21_перелік_відмови_називає_тест_без_очікувань_і_причину()
+    public void B21_випадок_без_очікувань_поруч_зі_справжнім_законний()
     {
-        // ⚠ Червоний вердикт без розбіжностей не сміє дати порожній перелік: автор бачив би «відхилено», не
-        // знаючи, що виправляти. Зелений сусід у перелік, як і раніше, не потрапляє.
-        var verdicts = new[]
-        {
-            GoldenSet.Judge(TestCase(expected: 1m, tolerance: 0m), Output(1m)),
-            GoldenSet.Judge(TestCase(new Dictionary<string, decimal>(), 0m), Output(1m)),
-        };
+        // ⚠ Друга половина правила (S-26): випадок без очікувань існує заради входу — трейс ділення на нуль,
+        // число якого законно різне в Legacy (0) і Strict (немає). Блокувати через нього весь набір означало б,
+        // що версію неможливо перевести в Strict. Набір зелений, бо справжній випадок щось перевіряє.
+        var real = TestCase(expected: 1m, tolerance: 0m);
+        var inputOnly = TestCase(new Dictionary<string, decimal>(), 0m);
+        var verdicts = new[] { GoldenSet.Judge(real, Output(1m)), GoldenSet.Judge(inputOnly, Output(1m)) };
 
-        var divergence = Assert.Single(GoldenSet.Divergences(verdicts));
-
-        Assert.Equal($"TC-1: {GoldenSet.NoExpectationsReason}", divergence);
-        Assert.Contains("expectedJson", divergence, StringComparison.Ordinal);
+        Assert.True(GoldenSet.IsGreen(verdicts, [real, inputOnly]));
+        Assert.Empty(GoldenSet.Divergences(verdicts));
     }
 
     private static MethodologyTestCase TestCase(decimal expected, decimal tolerance)
