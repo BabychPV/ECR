@@ -58,15 +58,18 @@ function Get-LandMonthBandPlan {
         Живі колонки: Code, Ordinal, MonthNumber ($null — не місячна), GroupCode (поточна група або $null).
     .PARAMETER ExistingGroups
         Поточні групи таблиці: Code, ParentCode, Ordinal, En, Ru.
+    .PARAMETER OutputGroups
+        LAND-YEAR (L4, рішення 12.11 п. 1): групи «вихід -> 12 місячних колонок» (Code з префіксом MB_O_, En, Ru, Columns).
+        Їхні колонки не утворюють місячних смуг; група стає під найглибшу батьківську смугу, що її охоплює.
     .OUTPUTS
         Skip (немає місячних колонок — таблицю не чіпати), Errors (таблицю пропущено), Warnings, Groups (повне дерево для PUT,
         чужі групи збережено), GroupsChanged, Changes (колонка: From -> To), MonthGroups, ParentGroups, AssignedColumns.
     #>
-    param([Parameter(Mandatory)][string]$TableCode, [object[]]$Columns, [object[]]$ExistingGroups, [Parameter(Mandatory)]$Source)
+    param([Parameter(Mandatory)][string]$TableCode, [object[]]$Columns, [object[]]$ExistingGroups, [Parameter(Mandatory)]$Source, [object[]]$OutputGroups = @())
 
     $prefix = 'MB_'
     $plan = [ordered]@{ Table = $TableCode; Skip = $false; Errors = @(); Warnings = @(); Groups = @(); GroupsChanged = $false
-        Changes = @(); MonthGroups = 0; ParentGroups = 0; AssignedColumns = 0; DuplicateOrdinals = @() }
+        Changes = @(); MonthGroups = 0; ParentGroups = 0; OutputGroups = 0; AssignedColumns = 0; DuplicateOrdinals = @() }
     $ordered = Get-LandBandOrderedColumns $Columns
 
     # дублікати Ordinal: сервер розв'язує їх за Code; звітуємо, нічого не переставляємо
@@ -78,8 +81,12 @@ function Get-LandMonthBandPlan {
         }
     }
 
-    $blocks = Get-LandMonthBlocks $ordered
-    if ($blocks.Count -eq 0) { $plan.Skip = $true; return [pscustomobject]$plan }
+    $outGroups = @($OutputGroups | Where-Object { $_ })
+    $inOut = @{}
+    foreach ($g in $outGroups) { foreach ($c in @($g.Columns)) { $inOut[[string]$c] = [string]$g.Code } }
+    $blockSeq = @($ordered | ForEach-Object { if ($inOut.ContainsKey([string]$_.Code)) { [pscustomobject]@{ Code = $_.Code; MonthNumber = $null } } else { $_ } })
+    $blocks = Get-LandMonthBlocks $blockSeq
+    if ($blocks.Count -eq 0 -and $outGroups.Count -eq 0) { $plan.Skip = $true; return [pscustomobject]$plan }
     foreach ($d in $plan.DuplicateOrdinals) { $plan.Warnings += "дубль Ordinal (сервер упорядковує за Code, не переставляю): $d" }
 
     $pos = @{}
@@ -135,6 +142,17 @@ function Get-LandMonthBandPlan {
         $label = $names[[int]$b.Month]
         $groups += [pscustomobject]@{ Code = $code; Parent = $(if ($par) { $par.Code } else { $null }); En = [string]$label.en; Ru = [string]$label.ru; First = $b.Start }
         foreach ($c in $b.Columns) { $want[$c] = $code }
+    }
+    foreach ($g in $outGroups) {
+        $gp = @(@($g.Columns) | Where-Object { $pos.ContainsKey([string]$_) } | ForEach-Object { [int]$pos[[string]$_] } | Sort-Object)
+        if ($gp.Count -eq 0) { $plan.Warnings += "групу $($g.Code) пропущено: колонок немає в таблиці"; continue }
+        if ($gp.Count -ne @($g.Columns).Count -or ($gp[-1] - $gp[0]) -ne ($gp.Count - 1)) { $plan.Errors += "група $($g.Code): колонки не суміжні або їх бракує"; continue }
+        if (-not ([string]$g.Code).StartsWith($prefix)) { $plan.Errors += "група $($g.Code): код без префікса $prefix"; continue }
+        $par = Get-Deepest $gp[0]
+        if ($par -and (Get-Depth $par.Code) -ge 3) { $plan.Errors += "група $($g.Code): глибше 3 рівнів"; continue }
+        $groups += [pscustomobject]@{ Code = [string]$g.Code; Parent = $(if ($par) { $par.Code } else { $null }); En = [string]$g.En; Ru = $(if ($g.Ru) { [string]$g.Ru } else { $null }); First = $gp[0] }
+        foreach ($c in @($g.Columns)) { $want[[string]$c] = [string]$g.Code }
+        $plan.OutputGroups++
     }
     for ($i = 0; $i -lt $ordered.Count; $i++) {
         $c = [string]$ordered[$i].Code
@@ -235,12 +253,12 @@ function Invoke-LandMonthBands {
         і ОДИН PATCH …/presentation (лише змінені колонки). Повтор — 0 змін. Повертає підсумок.
     #>
     param([Parameter(Mandatory)][int]$VersionId, [Parameter(Mandatory)]$Source, [switch]$WhatIfOnly, [string[]]$OnlyTables,
-        [scriptblock]$Log = { param($msg) Write-Host $msg })
+        [scriptblock]$Log = { param($msg) Write-Host $msg }, [hashtable]$OutputGroupsByTable = @{})
     $sum = [ordered]@{ Tables = 0; TablesWithMonths = 0; TablesChanged = 0; TablesSkippedErrors = 0; MonthGroups = 0; ParentGroups = 0
         AssignedColumns = 0; ColumnChanges = 0; Puts = 0; Patches = 0; DuplicateOrdinals = @(); Errors = @() }
     foreach ($t in (Get-LandBandTables -VersionId $VersionId -OnlyTables $OnlyTables)) {
         $sum.Tables++
-        $p = Get-LandMonthBandPlan -TableCode $t.Table -Columns $t.Columns -ExistingGroups $t.Groups -Source $Source
+        $p = Get-LandMonthBandPlan -TableCode $t.Table -Columns $t.Columns -ExistingGroups $t.Groups -Source $Source -OutputGroups @($OutputGroupsByTable[$t.Table])
         $sum.DuplicateOrdinals += @($p.DuplicateOrdinals | ForEach-Object { "$($t.Sheet)/$_" })
         if ($p.Skip) { continue }
         $sum.TablesWithMonths++
