@@ -7,14 +7,14 @@ using Xunit;
 namespace Ecr.Infrastructure.Tests.Persistence;
 
 /// <summary>
-/// D-401: <c>TableInstanceId bigint NULL</c> у <c>calc.CalculationResult/Input/Step</c> і в INCLUDE
-/// <c>IX_CalculationResult_DocRun</c>, що лежить на <c>ps_ByPeriodKey</c>; перебудова індексу на наявній базі
-/// ідемпотентна.
+/// D-401: <c>TableInstanceId bigint NULL</c> у <c>calc.CalculationResult/Input/Step</c>; CRY01: ключ
+/// <c>IX_CalculationResult_DocRun</c> — <c>(PeriodKey, DocumentId, CalculationRunId, Kind, TableInstanceId)</c> на
+/// <c>ps_ByPeriodKey</c>; перебудова індексу на наявній базі (і до D-401, і з INCLUDE D-401) ідемпотентна.
 /// </summary>
 /// <remarks>
-/// ⛔ Мутаційний доказ: прибрати <c>TableInstanceId</c> з INCLUDE в <c>07-partition-tables.sql</c> (обидва місця) —
-/// червоніє <see cref="DocRun_включає_TableInstanceId_на_схемі_партиціонування"/>; прибрати блок
-/// «D-401 … для наявних баз» — червоніє <see cref="Перебудова_індексу_старої_бази_додає_колонку_і_повтор_не_змінює_нічого"/>.
+/// ⛔ Мутаційний доказ: повернути <c>TableInstanceId</c> в INCLUDE у <c>07-partition-tables.sql</c> (обидва місця) —
+/// червоніє <see cref="DocRun_веде_Kind_і_TableInstanceId_у_ключі_на_схемі_партиціонування"/>; прибрати блок
+/// «CRY01 … для наявних баз» — червоніє <see cref="Перебудова_індексу_старої_бази_дає_ключ_CRY01_і_повтор_не_змінює_нічого"/>.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class CalculationResultTableColumnTests(SqlServerFixture sql)
@@ -40,36 +40,38 @@ public sealed class CalculationResultTableColumnTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task DocRun_включає_TableInstanceId_на_схемі_партиціонування()
+    public async Task DocRun_веде_Kind_і_TableInstanceId_у_ключі_на_схемі_партиціонування()
     {
-        Assert.Equal("1|ps_ByPeriodKey", await DocRunStateAsync());
+        Assert.Equal(CurrentShape, await DocRunStateAsync());
     }
 
-    [Fact]
+    [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Перебудова_індексу_старої_бази_додає_колонку_і_повтор_не_змінює_нічого()
+    [InlineData("SourceRowKey, Value, UnitId, SubstanceEntryId")]
+    [InlineData("SourceRowKey, Value, UnitId, SubstanceEntryId, TableInstanceId")]
+    public async Task Перебудова_індексу_старої_бази_дає_ключ_CRY01_і_повтор_не_змінює_нічого(string includeTail)
     {
         var block = ReadUpgradeBlock();
 
         try
         {
-            // Стара база: індекс без колонки в INCLUDE, на тій самій схемі партиціонування.
+            // Стара база: до D-401 (без TableInstanceId) або D-401 (TableInstanceId в INCLUDE), на тій самій схемі.
             await ExecuteAsync($"""
                 CREATE NONCLUSTERED INDEX {DocRun}
                     ON calc.CalculationResult (PeriodKey, DocumentId, CalculationRunId)
-                    INCLUDE (MethodologyVersionId, OutputCode, SourceRowKey, Value, UnitId, SubstanceEntryId)
+                    INCLUDE (MethodologyVersionId, OutputCode, {includeTail})
                     WITH (DROP_EXISTING = ON) ON ps_ByPeriodKey (PeriodKey);
                 """);
-            Assert.Equal("0|ps_ByPeriodKey", await DocRunStateAsync());
+            Assert.NotEqual(CurrentShape, await DocRunStateAsync());
 
             await ExecuteAsync(block);
-            Assert.Equal("1|ps_ByPeriodKey", await DocRunStateAsync());
+            Assert.Equal(CurrentShape, await DocRunStateAsync());
 
-            // Повторний прохід — умова відсутньої колонки хибна, індекс не перебудовується.
+            // Повторний прохід — ключ уже CRY01, індекс не перебудовується.
             var before = await ScalarAsync(IndexIdentityQuery);
             await ExecuteAsync(block);
-            Assert.Equal("1|ps_ByPeriodKey", await DocRunStateAsync());
+            Assert.Equal(CurrentShape, await DocRunStateAsync());
             Assert.Equal(before, await ScalarAsync(IndexIdentityQuery));
         }
         finally
@@ -77,6 +79,12 @@ public sealed class CalculationResultTableColumnTests(SqlServerFixture sql)
             await ExecuteAsync(block);
         }
     }
+
+    /// <summary>Форма CRY01: ключ за порядком | INCLUDE за порядком | схема розміщення.</summary>
+    private const string CurrentShape =
+        "PeriodKey,DocumentId,CalculationRunId,Kind,TableInstanceId"
+        + "|MethodologyVersionId,OutputCode,SourceRowKey,Value,UnitId,SubstanceEntryId"
+        + "|ps_ByPeriodKey";
 
     // Ідентичність індексу: кількість рядків sys.partitions і найбільший partition_id (перебудова створює нові).
     private const string IndexIdentityQuery = $"""
@@ -95,11 +103,17 @@ public sealed class CalculationResultTableColumnTests(SqlServerFixture sql)
 
     private Task<string> DocRunStateAsync() => ScalarAsync($"""
         SELECT CONCAT(
-            (SELECT COUNT(*) FROM sys.index_columns AS ic
+            (SELECT STRING_AGG(c.name, ',') WITHIN GROUP (ORDER BY ic.key_ordinal) FROM sys.index_columns AS ic
                JOIN sys.indexes AS i ON i.object_id = ic.object_id AND i.index_id = ic.index_id
                JOIN sys.columns AS c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
               WHERE i.object_id = OBJECT_ID(N'calc.CalculationResult') AND i.name = N'{DocRun}'
-                AND ic.is_included_column = 1 AND c.name = N'TableInstanceId'),
+                AND ic.is_included_column = 0),
+            '|',
+            (SELECT STRING_AGG(c.name, ',') WITHIN GROUP (ORDER BY ic.index_column_id) FROM sys.index_columns AS ic
+               JOIN sys.indexes AS i ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+               JOIN sys.columns AS c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+              WHERE i.object_id = OBJECT_ID(N'calc.CalculationResult') AND i.name = N'{DocRun}'
+                AND ic.is_included_column = 1),
             '|',
             (SELECT ds.name FROM sys.indexes AS i JOIN sys.data_spaces AS ds ON ds.data_space_id = i.data_space_id
               WHERE i.object_id = OBJECT_ID(N'calc.CalculationResult') AND i.name = N'{DocRun}'));

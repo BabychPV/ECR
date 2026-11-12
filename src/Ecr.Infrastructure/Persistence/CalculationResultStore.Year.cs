@@ -10,7 +10,8 @@ namespace Ecr.Infrastructure.Persistence;
 /// <summary>Читання фактів огляду «Calculation results — усі місяці року» (<see cref="ICalculationYearReader"/>).</summary>
 /// <remarks>
 /// ⛔ Набір запитів не залежить від числа рядків і місяців: ключі чисел (агрегат на
-/// <c>IX_CalculationResult_DocRun (PeriodKey, DocumentId, CalculationRunId)</c> по ≤ 12 партиціях) — один на набір
+/// <c>IX_CalculationResult_DocRun (PeriodKey, DocumentId, CalculationRunId, Kind, TableInstanceId)</c> по ≤ 12 партиціях;
+/// ключ CRY01) — один на набір
 /// прогонів, числа — один на набір прогонів, комірки формул, рядки й підписи — по одному, довідники й версії — по
 /// одному. Кожен запит до партиційованих таблиць несе <c>PeriodKey IN (…)</c> на ведучій таблиці; вкладені пошуки
 /// (рядки екземпляра, комірки рядка) — рівністю PeriodKey з ведучим рядком.
@@ -51,18 +52,20 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
 
         // 1. Ключі чисел УСЬОГО документа (агрегат, без значень): прогін місяця, стеля і звуження для вузького читача
         //    не залежать від того, яку таблицю читає запит.
+        // ⚠ Сирим SQL з переліками-літералами, а не LINQ: параметризовані `IN (@p…)` EF давали пошук лише за PeriodKey
+        //   по ВСІХ партиціях, а DocumentId — залишковим фільтром (CRY01, план): на базі з багатьма документами це
+        //   читання чисел усіх документів року. Літерали дають пошук (PeriodKey, DocumentId, CalculationRunId, Kind).
         var keyRows = new List<YearKeyRow>();
         foreach (var (groupKeys, groupRuns) in groups)
         {
-            keyRows.AddRange(await db.CalculationResults
-                .AsNoTracking()
-                .Where(r => groupKeys.Contains(r.PeriodKey)
-                            && r.DocumentId == documentId
-                            && groupRuns.Contains(r.CalculationRunId)
-                            && r.Kind == CalculationResultKind.Output)
-                .GroupBy(r => new { r.PeriodKey, r.CalculationRunId, r.TableInstanceId, r.MethodologyVersionId, r.OutputCode })
-                .Select(g => new YearKeyRow(
-                    g.Key.PeriodKey, g.Key.CalculationRunId, g.Key.TableInstanceId, g.Key.MethodologyVersionId, g.Key.OutputCode, g.Count()))
+            var sql = $"""
+                SELECT r.PeriodKey, r.CalculationRunId, r.TableInstanceId, r.MethodologyVersionId, r.OutputCode, COUNT(*) AS Count
+                  FROM calc.CalculationResult AS r
+                 WHERE {OutputsOf(groupKeys, groupRuns)}
+                 GROUP BY r.PeriodKey, r.CalculationRunId, r.TableInstanceId, r.MethodologyVersionId, r.OutputCode
+                """;
+            keyRows.AddRange(await db.Database
+                .SqlQueryRaw<YearKeyRow>(sql, new SqlParameter("@documentId", documentId))
                 .ToListAsync(ct)
                 .ConfigureAwait(false));
         }
@@ -101,7 +104,7 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
                 var sql = $"""
                     SELECT row.PeriodKey, row.TableInstanceId, row.RowKey, c.ColumnDefId, c.ValueString,
                            CAST(c.ValueRegistryEntryId AS bigint) AS EntryId, c.ValueNumeric
-                      FROM doc.TableRow AS row {RowSeek}
+                      FROM doc.TableRow AS row {LiveRowSeek}
                      INNER LOOP JOIN doc.CellValue AS c {CellSeek}
                         ON c.PeriodKey = row.PeriodKey AND c.TableRowId = row.Id
                      WHERE {RowsOf(keys, instanceIds)}
@@ -196,8 +199,39 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
     /// <summary>Пошук екземплярів документа за (PeriodKey, DocumentId) — <c>UQ_TableInstance</c>.</summary>
     private const string InstanceSeek = "WITH (FORCESEEK, INDEX(UQ_TableInstance))";
 
+    /// <summary>
+    /// Пошук ЖИВИХ рядків за (PeriodKey, TableInstanceId) — <c>IX_TableRow_Live</c> (B-18): <c>RowKey</c> в INCLUDE,
+    /// <c>Id</c> — ключ кластера, фільтр <c>IsDeleted = 0</c>. Запит мусить нести <c>row.IsDeleted = 0</c> літералом.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ CRY01, заміри: <see cref="RowSeek"/> (<c>UQ_TableRow_Key</c>) не має <c>IsDeleted</c>, і кожен рядок платив key
+    /// lookup — 498 тис. читань <c>doc.TableRow</c> у зведенні на 240 тис. рядків проти 2.7 тис. тут. Для читання з
+    /// <c>RowDefId</c>/<c>Ordinal</c> (<c>ReadRowsAsync</c> рядків екземплярів) лишається <see cref="RowSeek"/>: їх немає в жодному.
+    /// </remarks>
+    private const string LiveRowSeek = "WITH (FORCESEEK, INDEX(IX_TableRow_Live))";
+
+    /// <summary>
+    /// Пошук чисел за (PeriodKey, DocumentId, CalculationRunId, Kind, TableInstanceId) — <c>IX_CalculationResult_DocRun</c>
+    /// (ключ CRY01, <c>07-partition-tables.sql</c>).
+    /// </summary>
+    private const string ResultSeek = "WITH (FORCESEEK, INDEX(IX_CalculationResult_DocRun))";
+
     private static string RowsOf(IEnumerable<int> keys, IEnumerable<long> instanceIds)
         => $"row.PeriodKey IN ({List(keys)}) AND row.TableInstanceId IN ({List(instanceIds)}) AND row.IsDeleted = 0";
+
+    /// <summary>
+    /// Виходи документа в прогонах групи: періоди й прогони — літералами (цілі числа сервера), документ — параметром
+    /// <c>@documentId</c>. Пошук <c>IX_CalculationResult_DocRun</c> на кожну пару (період, прогін).
+    /// </summary>
+    private static string OutputsOf(List<int> keys, List<long> runs)
+        => $"r.PeriodKey IN ({List(keys)}) AND r.DocumentId = @documentId AND r.CalculationRunId IN ({List(runs)}) "
+           + $"AND r.Kind = {((int)CalculationResultKind.Output).ToString(CultureInfo.InvariantCulture)}";
+
+    /// <summary>Пари (період, прогін) групи як <c>VALUES</c> — ведуча множина пошуку чисел сторінки.</summary>
+    private static string RunPairs(List<int> keys, List<long> runs)
+        => "(VALUES " + string.Join(", ", keys.SelectMany(k => runs.Select(r =>
+               $"({k.ToString(CultureInfo.InvariantCulture)}, {r.ToString(CultureInfo.InvariantCulture)})")))
+           + ") AS k (PeriodKey, RunId)";
 
     /// <summary>Прогін місяця, що справді дав числа документа: документний перед проєктним, новіший перед старішим.</summary>
     private static List<YearRun> RunsOf(List<YearKeyRow> keyRows, List<CurrentRunRow> current)
@@ -221,26 +255,35 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
     private async Task<List<YearResult>> ResultValuesAsync(
         long documentId, List<(List<int> Keys, List<long> Runs)> groups, List<long>? slice, CancellationToken ct)
     {
+        // ⚠ CRY01: сирим SQL, а не LINQ — параметризовані переліки EF давали пошук лише за PeriodKey (див. ключі вище).
+        // Сторінка: пари (період, прогін) ведуть LOOP-пошук по ключу DocRun до Kind і TableInstanceId — читаються лише
+        // числа екземплярів сторінки (синтетика: 3 671 → 768 читань), а не всі числа документа за рік.
+        const string Projection = """
+            r.PeriodKey, r.MethodologyVersionId, r.TableInstanceId, r.SourceRowKey, r.OutputCode,
+                   CAST(r.SubstanceEntryId AS bigint) AS SubstanceEntryId, r.UnitId, r.Value
+            """;
         var kept = new List<YearResult>();
         foreach (var (groupKeys, groupRuns) in groups)
         {
-            var query = db.CalculationResults
-                .AsNoTracking()
-                .Where(r => groupKeys.Contains(r.PeriodKey)
-                            && r.DocumentId == documentId
-                            && groupRuns.Contains(r.CalculationRunId)
-                            && r.Kind == CalculationResultKind.Output);
-            if (slice is not null)
-            {
-                query = query.Where(r => r.TableInstanceId == null || slice.Contains(r.TableInstanceId.Value));
-            }
-
-            kept.AddRange(await query
-                .OrderBy(r => r.PeriodKey)
-                .ThenBy(r => r.Id)
-                .Select(r => new YearResult(
-                    r.PeriodKey, r.MethodologyVersionId, r.TableInstanceId, r.SourceRowKey,
-                    r.OutputCode, r.SubstanceEntryId, r.UnitId, r.Value))
+            var output = ((int)CalculationResultKind.Output).ToString(CultureInfo.InvariantCulture);
+            var sql = slice is null
+                ? $"""
+                    SELECT {Projection}
+                      FROM calc.CalculationResult AS r
+                     WHERE {OutputsOf(groupKeys, groupRuns)}
+                     ORDER BY r.PeriodKey, r.Id
+                    """
+                : $"""
+                    SELECT {Projection}
+                      FROM {RunPairs(groupKeys, groupRuns)}
+                     INNER LOOP JOIN calc.CalculationResult AS r {ResultSeek}
+                        ON r.PeriodKey = k.PeriodKey AND r.DocumentId = @documentId AND r.CalculationRunId = k.RunId
+                       AND r.Kind = {output}
+                       AND (r.TableInstanceId IS NULL{(slice.Count == 0 ? string.Empty : $" OR r.TableInstanceId IN ({List(slice)})")})
+                     ORDER BY r.PeriodKey, r.Id
+                    """;
+            kept.AddRange(await db.Database
+                .SqlQueryRaw<YearResult>(sql, new SqlParameter("@documentId", documentId))
                 .ToListAsync(ct)
                 .ConfigureAwait(false));
         }
@@ -290,16 +333,16 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
                 lines[key] = lines.GetValueOrDefault(key) | row.Months;
             }
 
-            legacy.AddRange(await db.CalculationResults
-                .AsNoTracking()
-                .Where(r => groupKeys.Contains(r.PeriodKey)
-                            && r.DocumentId == documentId
-                            && groupRuns.Contains(r.CalculationRunId)
-                            && r.Kind == CalculationResultKind.Output
-                            && r.TableInstanceId == null)
-                .Select(r => new YearResult(
-                    r.PeriodKey, r.MethodologyVersionId, r.TableInstanceId, r.SourceRowKey,
-                    r.OutputCode, r.SubstanceEntryId, r.UnitId, 0m))
+            // Числа без екземпляра: пошук по ключу DocRun до TableInstanceId IS NULL (CRY01) — літералами, як ключі вище.
+            var legacySql = $"""
+                SELECT r.PeriodKey, r.MethodologyVersionId, r.TableInstanceId, r.SourceRowKey, r.OutputCode,
+                       CAST(r.SubstanceEntryId AS bigint) AS SubstanceEntryId, r.UnitId, CAST(0 AS decimal(34,16)) AS Value
+                  FROM calc.CalculationResult AS r
+                 WHERE {OutputsOf(groupKeys, groupRuns)}
+                   AND r.TableInstanceId IS NULL
+                """;
+            legacy.AddRange(await db.Database
+                .SqlQueryRaw<YearResult>(legacySql, new SqlParameter("@documentId", documentId))
                 .ToListAsync(ct)
                 .ConfigureAwait(false));
         }
@@ -330,9 +373,10 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
         // ⚠ Рядки — пошуком по екземплярах, комірки — пошуком по (PeriodKey, TableRowId) кожного рядка: ціна залежить від
         // розміру таблиці (документа), а не від усієї партиції. IsCalculated у предикаті, але не в ключі індексу —
         // рядок читає всі свої комірки (див. 02-contracts.md, «Calculation results за рік», про відфільтрований індекс).
+        // Рядки — IX_TableRow_Live (CRY01): без key lookup за IsDeleted на кожен рядок.
         var sql = $"""
             SELECT TOP ({limit + 1}) row.PeriodKey, row.TableInstanceId, row.RowKey, c.ColumnDefId, c.ValueNumeric
-              FROM doc.TableRow AS row {RowSeek}
+              FROM doc.TableRow AS row {LiveRowSeek}
              INNER LOOP JOIN doc.CellValue AS c {CellSeek}
                 ON c.PeriodKey = row.PeriodKey AND c.TableRowId = row.Id
              WHERE {RowsOf(keys, instanceIds)}
@@ -347,12 +391,16 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
     private async Task<List<YearFormulaCell>> AggregateFormulaCellsAsync(
         long documentId, List<int> keys, List<long> instanceIds, int limit, CancellationToken ct)
     {
+        // ⚠ CRY01, заміри (синтетика 20 × 1 000 × 12): рядки — IX_TableRow_Live, а не UQ_TableRow_Key, бо в тому немає
+        // IsDeleted і кожен із 240 тис. рядків платив key lookup — читання doc.TableRow 498 тис. → 2.7 тис. Комірки й
+        // далі — пошук у PK_CellValue на рядок (513 тис. читань): відфільтрований індекс за IsCalculated — окреме рішення
+        // (ціна запису розрахованих комірок +21–25 %, заміри CRY01).
         var sql = $"""
             SELECT MIN(ti.Id) AS TableInstanceId, row.RowKey, c.ColumnDefId,
                    {MonthMask("c.PeriodKey")} AS Months,
                    COUNT_BIG(*) AS Cells
               FROM doc.TableInstance AS ti {InstanceSeek}
-             INNER LOOP JOIN doc.TableRow AS row {RowSeek}
+             INNER LOOP JOIN doc.TableRow AS row {LiveRowSeek}
                 ON row.PeriodKey = ti.PeriodKey AND row.TableInstanceId = ti.Id
              INNER LOOP JOIN doc.CellValue AS c {CellSeek}
                 ON c.PeriodKey = row.PeriodKey AND c.TableRowId = row.Id
