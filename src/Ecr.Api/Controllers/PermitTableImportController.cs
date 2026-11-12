@@ -78,6 +78,7 @@ public sealed class PermitTableImportController(
     /// </summary>
     /// <param name="code">Table registry code.</param>
     /// <param name="file">The workbook.</param>
+    /// <param name="parseGate">Shared limit of concurrent workbook parses (S-3).</param>
     /// <param name="sheet">Sheet name; empty — the first visible sheet.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("import/workbook")]
@@ -87,9 +88,13 @@ public sealed class PermitTableImportController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<PermitImportSheetDto>> ReadWorkbook(
-        string code, IFormFile file, [FromForm] string? sheet, CancellationToken ct)
+        string code, IFormFile file, [FromServices] Ecr.Api.Security.ImportPreviewGate parseGate, [FromForm] string? sheet, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(parseGate);
+
+        // S-3: workbook parse = full ClosedXML model in process memory; same limit as the document import preview (AN-123, P1-04).
+        using var parsePermit = await parseGate.EnterAsync(ct).ConfigureAwait(false);
         await using var stream = file.OpenReadStream();
         return Ok(await workbook.HandleAsync(code, stream, file.Length, sheet, ct).ConfigureAwait(false));
     }

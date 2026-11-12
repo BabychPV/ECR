@@ -117,6 +117,7 @@ public sealed class AirLimitsController(
     /// mapped and unmapped columns, counts and findings. Stateless: nothing is stored. Permission <c>Registry.EditData</c>.
     /// </summary>
     /// <param name="file">The <c>.xlsx</c> workbook.</param>
+    /// <param name="parseGate">Shared limit of concurrent workbook parses (S-3).</param>
     /// <param name="request">JSON <see cref="AirLimitsImportOptions"/> (profile or specification).</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("air-limits/import/analyse")]
@@ -125,9 +126,13 @@ public sealed class AirLimitsController(
     [ProducesResponseType<AirLimitsAnalysisDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<AirLimitsAnalysisDto>> Analyse(
-        IFormFile file, [FromForm] string? request, CancellationToken ct)
+        IFormFile file, [FromServices] Ecr.Api.Security.ImportPreviewGate parseGate, [FromForm] string? request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(parseGate);
+
+        // S-3: workbook parse = full ClosedXML model in process memory; same limit as the document import preview (AN-123, P1-04).
+        using var parsePermit = await parseGate.EnterAsync(ct).ConfigureAwait(false);
         var options = ParseOptions(request);
         await using var stream = file.OpenReadStream();
         return Ok(await import.AnalyseAsync(stream, options, ct).ConfigureAwait(false));
@@ -139,6 +144,7 @@ public sealed class AirLimitsController(
     /// </summary>
     /// <param name="permitId">Permit (header registry entry id).</param>
     /// <param name="file">The <c>.xlsx</c> workbook.</param>
+    /// <param name="parseGate">Shared limit of concurrent workbook parses (S-3).</param>
     /// <param name="request">JSON <see cref="AirLimitsImportOptions"/>: profile, region, area, decisions.</param>
     /// <param name="regionEntryId">REGION scope value when the column is a Registry: entry id (422 if not in the registry).</param>
     /// <param name="areaEntryId">AREA scope value when the column is a Registry: entry id; optional.</param>
@@ -158,6 +164,7 @@ public sealed class AirLimitsController(
     public async Task<ActionResult<AirLimitsPreviewDto>> Preview(
         long permitId,
         IFormFile file,
+        [FromServices] Ecr.Api.Security.ImportPreviewGate parseGate,
         [FromForm] string? request,
         [FromForm] long? regionEntryId,
         [FromForm] long? areaEntryId,
@@ -166,6 +173,10 @@ public sealed class AirLimitsController(
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(parseGate);
+
+        // S-3: workbook parse = full ClosedXML model in process memory; same limit as the document import preview (AN-123, P1-04).
+        using var parsePermit = await parseGate.EnterAsync(ct).ConfigureAwait(false);
         var options = WithScope(ParseOptions(request), regionEntryId, areaEntryId, region, area);
         await using var stream = file.OpenReadStream();
         return Ok(await import.PreviewAsync(permitId, stream, options, ct).ConfigureAwait(false));
@@ -177,6 +188,7 @@ public sealed class AirLimitsController(
     /// </summary>
     /// <param name="permitId">Permit (header registry entry id).</param>
     /// <param name="file">The same <c>.xlsx</c> workbook as in the preview.</param>
+    /// <param name="parseGate">Shared limit of concurrent workbook parses (S-3).</param>
     /// <param name="request">JSON <see cref="AirLimitsImportOptions"/> with <c>confirmedOtherOwners</c> and <c>expectedFingerprint</c>.</param>
     /// <param name="regionEntryId">REGION scope value (Registry column): entry id.</param>
     /// <param name="areaEntryId">AREA scope value (Registry column): entry id; optional.</param>
@@ -196,6 +208,7 @@ public sealed class AirLimitsController(
     public async Task<ActionResult<AirLimitsImportResultDto>> Apply(
         long permitId,
         IFormFile file,
+        [FromServices] Ecr.Api.Security.ImportPreviewGate parseGate,
         [FromForm] string? request,
         [FromForm] long? regionEntryId,
         [FromForm] long? areaEntryId,
@@ -204,6 +217,10 @@ public sealed class AirLimitsController(
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(parseGate);
+
+        // S-3: workbook parse = full ClosedXML model in process memory; same limit as the document import preview (AN-123, P1-04).
+        using var parsePermit = await parseGate.EnterAsync(ct).ConfigureAwait(false);
         var options = WithScope(ParseOptions(request), regionEntryId, areaEntryId, region, area);
         await using var stream = file.OpenReadStream();
         return Ok(await import.ApplyAsync(permitId, stream, options, ct).ConfigureAwait(false));
