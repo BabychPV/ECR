@@ -63,6 +63,8 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Validation/RelationCheckRunner.cs"] = "виробник: зв'язки Check (джерело — правило 1)",
         ["src/Ecr.Application/Validation/PermitCoverageIssues.cs"] =
             "виробник (rule h4): дозвіл рядка/шапки не покриває місяців з даними; адреса — таблиця/рядок/колонка дозволу, назовні лише через ValidateDocumentHandler (HiddenValidationIssues.ForViewer)",
+        ["src/Ecr.Application/Validation/FormulaErrorIssues.cs"] =
+            "виробник (C-1, D-475): помилка формули комірки; джерело «не оновлено» — SourceTableDefId/SourceColumnCode; назовні лише через SubmitSheetHandler і ValidateDocumentHandler (HiddenValidationIssues.ForViewer)",
         ["src/Ecr.Application/Calculations/CheckEvaluator.cs"] = "виробник: текст звірки, SourceTableDefId",
         ["src/Ecr.Application/Validation/ValidationMessageTemplates.cs"] =
             "шаблони й Localize: працює над УЖЕ відфільтрованим списком (GetValidationResultHandler маскує до Localize; доказ — T1_01_Check_з_ключем_…)",
