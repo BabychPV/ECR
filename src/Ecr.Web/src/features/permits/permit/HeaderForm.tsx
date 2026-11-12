@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Checkbox, Group, Stack, TextInput, Title } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
@@ -7,9 +7,11 @@ import { formatDate } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
 import { KeyValue } from '@/shared/ui/KeyValue';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import { updatePermit } from '../api/permitsApi';
 import type { Permit, PermitReportingFlags, UpdatePermitRequest } from '../api/types';
 import { DateField } from './DateField';
+import { localName, PermitLocationMax, PermitNumberMax } from './names';
 import { permitKeys } from './permitQueries';
 import './permit.css';
 
@@ -85,7 +87,8 @@ function ReadOnlyHeader({ permit }: { readonly permit: Permit }): JSX.Element {
     <KeyValue
       items={[
         { label: t('permits.page.header.number'), value: permit.number, mono: true },
-        { label: t('permits.page.header.type'), value: permit.typeCode },
+        // U-4 (аудит 2026-11): назва типу мовою інтерфейсу, код — запасом (як підзаголовок сторінки).
+        { label: t('permits.page.header.type'), value: localName(permit.typeNameL10n) || permit.typeCode },
         { label: t('permits.page.header.location'), value: permit.location ?? '' },
         { label: t('permits.page.header.issueDate'), value: day(permit.issueDate) },
         { label: t('permits.page.header.valid'), value: `${day(permit.validFrom)} – ${day(permit.validTo)}` },
@@ -122,6 +125,14 @@ function EditableHeader({ permit }: { readonly permit: Permit }): JSX.Element {
 
   const errors = shownErrors ? headerErrors(draft) : {};
   const dirty = !sameDraft(draft, original);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+
+  // U-1 (аудит 2026-11): незбережена шапка не губиться мовчки при виході зі сторінки чи закритті вкладки (UnsavedGuard).
+  useEffect(
+    () => registerUnsavedSource(`permit-header-${String(permit.id)}`, { hasUnsaved: () => dirtyRef.current }),
+    [permit.id],
+  );
 
   function set<K extends keyof HeaderDraft>(key: K, value: HeaderDraft[K]): void {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -167,12 +178,14 @@ function EditableHeader({ permit }: { readonly permit: Permit }): JSX.Element {
             <TextInput
               label={t('permits.page.header.number')}
               required
+              maxLength={PermitNumberMax}
               value={draft.number}
               error={errors.number}
               onChange={(event) => set('number', event.currentTarget.value)}
             />
             <TextInput
               label={t('permits.page.header.location')}
+              maxLength={PermitLocationMax}
               value={draft.location}
               onChange={(event) => set('location', event.currentTarget.value)}
             />

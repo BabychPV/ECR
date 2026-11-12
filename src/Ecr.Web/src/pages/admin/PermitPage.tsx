@@ -186,7 +186,8 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
             ))}
             <Tabs.Tab value={UsageTabId}>{t('permits.page.tabs.usage')}</Tabs.Tab>
           </Tabs.List>
-          <Tabs.Panel value={OverviewTabId}>
+          {/* U-1 (аудит 2026-11): чернетка шапки дозволу живе в OverviewTab — панель не розмонтовується при перемиканні вкладок. */}
+          <Tabs.Panel value={OverviewTabId} keepMounted>
             <OverviewTab permit={permit} caps={caps} onActivate={() => open('activate')} onRenew={() => open('renew')} />
           </Tabs.Panel>
           {hasAir && (

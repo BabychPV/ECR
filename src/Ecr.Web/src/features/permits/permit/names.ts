@@ -7,6 +7,13 @@ import { DefaultLanguage, language } from '@/shared/i18n';
  * `model.ts` реекспортує обидві функції — наявні імпорти не змінюються.
  */
 
+/**
+ * U-1 (аудит 2026-11): межі сервера (`PermitInput.MaxNumber` / `MaxLocation`, `src/Ecr.Application/Permits/PermitInput.cs`)
+ * — у полі, а не тостом 422 після «Save». Тут, а не в `model.ts`: шапку й майстер не обтяжує розбір вставки (D-132).
+ */
+export const PermitNumberMax = 200;
+export const PermitLocationMax = 500;
+
 /** Назва мовою користувача: його мова → англійська → перша наявна. */
 export function localName(names: Readonly<Record<string, string>>): string {
   const exact = names[language()];

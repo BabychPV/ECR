@@ -10,6 +10,7 @@ import { problemText } from '@/shared/ui/problemText';
 import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
 import { Wizard, type WizardStep } from '@/shared/ui/Wizard';
 import type { PermitTypeListItem } from '../api/types';
+import { PermitLocationMax, PermitNumberMax } from '../permit/names';
 import { typeName, tablesText } from '../types/typesListModel';
 import { useAllPermitTypes } from '../types/useTypes';
 import {
@@ -151,6 +152,7 @@ function WizardBody({
             name={NumberField}
             label={t('permits.list.wizard.number')}
             required
+            maxLength={PermitNumberMax}
             value={data.number}
             error={numberError}
             onChange={(event) => {
@@ -162,6 +164,7 @@ function WizardBody({
           <TextInput
             name="permit-location"
             label={t('permits.list.wizard.location')}
+            maxLength={PermitLocationMax}
             value={data.location}
             onChange={(event) => update({ location: event.currentTarget.value })}
           />

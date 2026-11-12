@@ -10,6 +10,7 @@ import * as rowsApi from '@/features/registries/rows/api';
 import type { RegistryBatchResult } from '@/features/registries/rows/api';
 import { Catalog } from '@/test/__tests__/a11yFixtures';
 import { TestProviders } from '@/test/render';
+import { hasUnsavedChanges } from '@/shared/ui/unsavedSources';
 import * as permitsApi from '../../api/permitsApi';
 import * as typesApi from '../../api/typesApi';
 import { PermitSheetBindingsFlag } from '../../permitFeatures';
@@ -213,12 +214,47 @@ describe('шапка-форма', () => {
     expect(screen.queryByRole('form')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
     expect(screen.getByText('KZ-100', { selector: 'dd' })).toBeTruthy();
+    // U-4 (аудит 2026-11): тип — назвою мовою інтерфейсу, як у підзаголовку, а не кодом `WaterDischarge`.
+    expect(screen.getByText('Water discharge', { selector: 'dd' })).toBeTruthy();
+    expect(screen.queryByText('WaterDischarge', { selector: 'dd' })).toBeNull();
     expect(screen.getByText('This permit has expired and is read-only here')).toBeTruthy();
     cleanup();
 
     session.permissions = Viewer;
     await open('/admin/permits/5', permit({ status: 'Active' }));
     expect(screen.queryByRole('form')).toBeNull();
+  });
+
+  // U-1 (аудит 2026-11): панель Overview розмонтовувалась при перемиканні вкладок — правка шапки зникала мовчки.
+  it('U-1: чернетка шапки переживає перемикання вкладок', async () => {
+    await open();
+    fireEvent.change(screen.getByRole('textbox', { name: /^Location/ }), { target: { value: 'X' } });
+
+    const tabs = within(screen.getByRole('tablist', { name: 'Permit sections' })).getAllByRole('tab');
+    fireEvent.click(tabs[1]!);
+    expect(await screen.findByText('Outfall A')).toBeTruthy();
+    fireEvent.click(tabs[0]!);
+
+    await waitFor(() => expect(screen.getByRole('textbox', { name: /^Location/ })).toHaveProperty('value', 'X'));
+  });
+
+  // U-1: вихід зі сторінки чи закриття вкладки браузера питає (UnsavedGuard читає `unsavedSources`).
+  it('U-1: змінена шапка — джерело незбережених змін', async () => {
+    await open();
+    expect(hasUnsavedChanges()).toBe(false);
+
+    fireEvent.change(screen.getByRole('textbox', { name: /^Number/ }), { target: { value: 'KZ-200' } });
+    expect(hasUnsavedChanges()).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(hasUnsavedChanges()).toBe(false);
+  });
+
+  // U-1: межі сервера (`PermitInput.MaxNumber` / `MaxLocation`) — у полі, а не тостом 422 після «Save».
+  it('U-1: поля номера й місця обмежені межами сервера', async () => {
+    await open();
+    expect(screen.getByRole('textbox', { name: /^Number/ }).getAttribute('maxlength')).toBe('200');
+    expect(screen.getByRole('textbox', { name: /^Location/ }).getAttribute('maxlength')).toBe('500');
   });
 });
 
@@ -337,6 +373,9 @@ describe('життєвий цикл за станом і правами', () => 
     await open();
     fireEvent.click(screen.getAllByRole('button', { name: 'Activate…' })[0]!);
     const dialog = await screen.findByRole('dialog', { name: 'Activate permit KZ-100?' });
+    // U-4 (аудит 2026-11): у реченні діалогу — назва типу, а не код.
+    expect(dialog.textContent).toContain('Water discharge');
+    expect(dialog.textContent).not.toContain('WaterDischarge');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Activate' }));
     await waitFor(() => expect(activatePermit).toHaveBeenCalledWith(5));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
