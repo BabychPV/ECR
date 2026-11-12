@@ -16,6 +16,9 @@ import { testTheme } from '@/test/render';
  * не пропонує дії, яка напевно впаде: створення, вікно чинності, видалення й
  * імпорт неактивні, форма запису — лише перегляд, і підказка каже чому.
  *
+ * «New entry» на External не показується зовсім (D-476, AU F13 #827) — прибрати `!externalReadOnly` з умови
+ * `primary` у `RegistriesPage.tsx` → червоний перший тест.
+ *
  * ⛔ Мутація: прибрати `disabled={externalReadOnly}` з будь-якої кнопки в
  * `RegistriesPage.tsx` або `readOnly` у `RegistryEntryEditor.tsx` — червоний
  * відповідний `expect`; контроль із `Local` тримає, що неактивність — саме
@@ -154,8 +157,9 @@ describe('D-211: довідник External — записи лише для пе
     showPage();
     const row = (await screen.findByText('Kilogram')).closest('tr')!;
 
-    expect(isDisabled(await screen.findByRole('button', { name: 'New entry' }))).toBe(true);
-    expect(isDisabled(screen.getByRole('button', { name: 'Import CSV' }))).toBe(true);
+    // D-476 (AU F13 #827): створення на External не пропонується зовсім — кнопки немає, а не вимкнена.
+    expect(isDisabled(await screen.findByRole('button', { name: 'Import CSV' }))).toBe(true);
+    expect(screen.queryByRole('button', { name: 'New entry' })).toBeNull();
     expect(isDisabled(within(row).getByRole('button', { name: 'Valid' }))).toBe(true);
     expect(isDisabled(within(row).getByRole('button', { name: 'Delete' }))).toBe(true);
 

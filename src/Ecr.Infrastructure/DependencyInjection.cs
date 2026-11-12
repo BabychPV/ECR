@@ -455,6 +455,10 @@ public static class DependencyInjection
         services.AddScoped<Jobs.ReportSnapshotFormatJob>();
         services.AddScoped<Jobs.SubmissionSnapshotRetentionJob>();
         services.AddScoped<Jobs.SupersededResultsSweepJob>();
+
+        // D-476: синк складу газу FLERT → дзеркало STREAM/STREAM_CASE/GAS_COMPOSITION (щодня о 02:00).
+        services.AddScoped<Jobs.FlertRegistryProvisioner>();
+        services.AddScoped<Jobs.FlertCompositionSyncJob>();
         services.AddScoped<Jobs.NotificationJob>();
 
         // ⚠ Розсилка черги — окремий компонент, бо відправників двоє: зведення
@@ -532,6 +536,8 @@ public static class DependencyInjection
 
         // D-464: стеля сторінок (`Collection:MaxEventPages`) і нарізка читання подій (`PiSqlClient:EventQueryChunk`).
         services.AddSingleton(Jobs.SourceEventSyncOptions.From(configuration));
+        services.AddScoped<IFlertCompositionSyncJob, Jobs.FlertCompositionSyncJob>(); // D-476 F3: «Синхронізувати зараз»
+        services.AddScoped<IFlertSyncStatusReader, Jobs.FlertSyncStatusReader>();
         services.AddScoped<IRegistryImpactRecalculationJob, Jobs.RegistryImpactRecalculationJob>(); // RT-25: батьківська задача перерахунку зачеплених
 
         // HSE301:A1 — підтягування значень PI за вікном рядка (§4.4). Задачу ставить хук запису комірок

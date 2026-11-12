@@ -188,6 +188,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Collection:MaxEventPages` | 10 | `D-464`: скільки сторінок по 2 000 подій дочитувати за одне читання шаблону (за шматок, якщо `EventQueryChunk = Month`); від 1. Понад стелю — подія журналу покриття `coverageEvents.eventsTruncatedCap` (стеля і як її підняти), пізніші події не синхронізуються, видалення зниклих вимкнено — підніміть ключ або ввімкніть `Month`. Вікно синку — від найранішого відкритого періоду, у якому документ мапінгу має таблицю; вікно понад 400 діб — попередження в журналі сервера (закрийте забутий період). Поданий/затверджений аркуш — одна зведена подія на період; після повернення / відкликання / перевідкриття аркуша й відкриття періоду синк подій ставиться одразу. Масове видалення понад ліміт підтверджується у вкладці «Події з PI» («Підтвердити видалення», журнал змін) |
 | `PiSqlClient:CommandTimeoutSeconds` | 60 | `D-462`: тайм-аут однієї команди ODBC (кожної спроби з трьох), с; від 1. З'єднання ODBC одне на задачу збору. `SecondaryEndpoint` джерела вмикається сам при відмові з'єднання з основною адресою (не при відмові облікових даних) — у журналі сервера попередження «до кінця прогону джерело обслуговує ЗАПАСНА адреса» |
 | `Sql:CatalogQuery` / `Sql:ValueQuery` | немає (вбудовані) | те саме для SQL-джерела |
+| `Sql:<код джерела>:CompositionQuery` | немає | `D-476`: запит знімка складу газу FLERT для `FlertCompositionSyncJob` (п. 4.3) — еталон `EXEC dbo.usp_GetAllStreamDataFlattened;`; канал секретів, тобто змінна `ECR_Secrets__Sql__FLERT__CompositionQuery`. Типового тексту немає |
 | `Integration:AfTimeZoneId` | (порожньо = UTC) | ✎ 2026-09-30, D-212 PR-7: пояс, у якому AF віддає дати дії записів довідника без поясу (Windows або IANA, напр. `Asia/Atyrau`). Діє лише для синку темпорального довідника з атрибутами дат у політиці. Невідомий пояс зупиняє старт з ім'ям ключа. ⚠ Пояс серверів AF замовника — відкрите питання PI-адміністратору |
 | `PiWebApi:AllowedHosts` | `[]` (порожньо) | ✎ 2026-10-01: перелік хостів PI Web API, до яких дозволено підключати джерела. Елемент — точне ім'я хоста або `*.domain` (лише піддомени; сам `domain` не збігається); без урахування регістра. **Порожньо = без обмеження, окрім блок-листа** (loopback, link-local і хмарний metadata 169.254.x, unspecified, multicast — діє завжди, для всіх режимів автентифікації; перевіряється по кожній розв'язаній A/AAAA-адресі, у момент підключення — отже DNS rebinding не обійде). Приватні IP-літерали (`10.x`, `172.16–31.x`, `192.168.x`, `fc00::/7`) заборонені лише для джерел з Negotiate (потрібне ім'я хоста для Kerberos SPN). Адресу Negotiate-джерела можна змінити лише з явним `confirmEndpointChange: true` у запиті (в інтерфейсі — діалог підтвердження). Відповідь PI понад 50 МБ відхиляється. Масив задається так: у `appsettings.Production.json` — `"PiWebApi": { "AllowedHosts": [ "<хост PI Web API>", "*.<домен замовника>" ] }`, або змінними служби `ECR_PiWebApi__AllowedHosts__0`, `ECR_PiWebApi__AllowedHosts__1`, … ⚠ Інсталятор і `deploy-ecr.ps1` цього ключа не пишуть — задає адміністратор замовника вручну; імена хостів PI — дані замовника, у продукті їх немає (дефолт порожній; сторож `PiWebApiAllowedHostsDefaultTests`). Для вашого середовища кандидати allowlist: `ncatdevv08`, `ncatuatv12`, `ncatappv0154`; задає адміністратор замовника через `appsettings.Production.json` / `ECR_PiWebApi__AllowedHosts__0`. ⚠ Negotiate-джерело без списку: Warning у журнал і картка `sources` Degraded (`health.sources.negotiateNoAllowlist`, п. 3.1) — заповніть список. Після зміни — перезапуск `EcrApi` |
 | `Bootstrap:Password` | немає | запасний пароль `bootstrap`. Основний шлях — файл `bootstrap.secret` |
@@ -305,6 +306,9 @@ ORDER BY [Ts];
 | `Documents:StaleMapWarm:IntervalSeconds` | ні | `60` | Ціле число, не менше 10. |
 | `Documents:StaleMapWarm:RingIntervalSeconds` | ні | `600` | Ціле число, не менше 60. |
 | `Documents:VersionMigration:FromMonthEnabled` | ні | `false` | `true` або `false`. |
+| `Flert:Sync:DataSourceCode` | ні | `FLERT` | Значення на старті не перевіряється. |
+| `Flert:Sync:Enabled` | ні | `false` | `true` або `false`. |
+| `Flert:Sync:MaxDeactivatePercent` | ні | `10` | Ціле число, не менше 0. |
 | `Health:RawDataPointWarnRows` | ні | `20000000` | Ціле число, не менше 0. |
 | `Health:WarmupOnStart` | ні | `true` | `true` або `false`. |
 | `Integration:AfTimeZoneId` | ні | — | Формат перевіряється на старті (див. текст відмови служби). |
@@ -523,6 +527,7 @@ Server Agent ідуть за локальним часом сервера SQL. �
 | кожні 10 хв, хх:02/12/… | `PeriodStateJob` (також один раз на старті) |
 | щогодини, хх:05 | `NotificationJob`, `RowWindowRefetchJob` (повторне підтягування вікон рядків за пізніми даними PI) |
 | щоночі 03:30 | нічний перерахунок, лише якщо `Jobs:NightlyRecalculation:Enabled=true` |
+| щоночі 02:00 | `FlertCompositionSyncJob` — синк складу газу FLERT у дзеркало ECR (`D-476`, п. 4.3); типово вимкнено `Flert:Sync:Enabled=false` — прогін лише пише «вимкнено» |
 | за cron розкладу сутності | збір даних (`ext.CollectionSchedule`, по одному розкладу на сутність джерела; формат і залежності — `admin-guide.md` §5.1–5.2) |
 | щохвилини / щогодини | прибирання покинутих задач і прогонів збору (`AbandonedWorkSweeper`) / видалення завершених записів `itg.JobProgress` (ретенція) — цикл `RecurringScheduleService`, не Quartz |
 
@@ -615,6 +620,54 @@ Server Agent немає — завдання обслуговування НЕ �
 
 ⚠ Гард `strictBackdated` (публікація Strict заднім числом) після прибирання бачить лише наявні рядки результатів і архів:
 версія, чиї єдині рядки були у замінених прогонах, більше не блокує — рішення людини (див. `ADR-Q17-READ-MODEL.md`).
+
+### 4.3. Синк складу газу FLERT (`FlertCompositionSyncJob`, `D-476`)
+
+Склад газу (потоки, кейси, мол.% компонентів) веде **FLERT**; ECR тримає копію лише для читання — довідники
+`STREAM` → `STREAM_CASE` → `GAS_COMPOSITION` (джерело `External`: ручна правка відхиляється) і `COMPONENT` (master — ECR:
+M, nC, nS вносить адміністратор). Задача щодня о 02:00 часу сервера (розклад у коді, як у решти нічних задач) читає
+FLERT одним запитом і застосовує різницю. Перший увімкнений прогін сам заводить ці чотири довідники (і правило
+`SUM_100` — «Σ мол.% = 100 ± 0.5», попередження), якщо їх немає; наявні не редагує.
+
+**Увімкнення** (після того, як DBA FLERT видав права — нижче):
+1. Інтеграція → Джерела: джерело з кодом `FLERT` (або іншим — тоді `Flert:Sync:DataSourceCode`), транспорт `Sql`,
+   адреса — рядок з'єднання з базою FLERT під логіном лише для читання (`Server=<сервер FLERT>;Database=FLERT;User ID=ecr_flert_reader;Encrypt=True`),
+   секрет — ім'я секрету з паролем (`ECR_Secrets__<ім'я>`). Linked server і синоніми НЕ потрібні (`D-268`).
+2. Текст запиту — змінна служби `ECR_Secrets__Sql__FLERT__CompositionQuery` = `EXEC dbo.usp_GetAllStreamDataFlattened;`
+   (форма результату — 70+ колонок `usp_GetAllStreamDataFlattened`: поточні й історичні версії, усі компоненти).
+   Типового тексту немає: без нього прогін падає з `err.ECR-INT-0503.queryNotConfigured`.
+3. `ECR_Flert__Sync__Enabled=true`, перезапуск `EcrApi`.
+
+**Права в базі FLERT** (DBA замовника; ECR у FLERT не пише нічого — запит виконується в транзакції, яку адаптер завжди
+відкочує):
+
+```sql
+USE [FLERT];
+CREATE USER [ecr_flert_reader] FOR LOGIN [ecr_flert_reader];
+GRANT EXECUTE ON OBJECT::[dbo].[usp_GetAllStreamDataFlattened] TO [ecr_flert_reader];
+```
+
+Цього досить: процедура і її шість таблиць (`FlaringStream`, `FlaringStreamType`, `FlaringStreamGasComposition` і три
+`…_History`) належать `dbo`, тож ланцюжок власності дає читання без `SELECT` на таблиці. Лише якщо замість процедури
+налаштовано власний `SELECT` по таблицях — тоді `GRANT SELECT` на ці шість таблиць (і більше нічого).
+
+**Результат** — `itg.MaintenanceRun` з кодом `flert-composition-sync`, `DetailsJson`: `added`/`updated`/`unchanged`/
+`deactivated`/`reactivated` по довідниках, `issues` (перші 50):
+
+| Статус | Коли | Копія |
+|---|---|---|
+| `Succeeded` | знімок застосовано; повтор того самого знімка — нуль змін і без нової ревізії довідників | оновлена |
+| `Succeeded`, `reason=disabled` | `Flert:Sync:Enabled=false` | без змін |
+| `Degraded`, `reason=emptyResult` | запит повернув 0 рядків — ознака збою, а не «FLERT порожній» | **без змін, нічого не видалено** |
+| `Degraded`, `reason=deactivationLimit` | знімок вимкнув би більше чинних кейсів, ніж `Flert:Sync:MaxDeactivatePercent` (типово 10 %) від чинних, і більше 5 (до 5 вимикається завжди) — ознака часткового результату FLERT; у `issues` — скільки вимкнулося б і скільки дозволено. Якщо FLERT справді прибрав стільки кейсів — тимчасово підніміть ключ (до 100) і перезапустіть `EcrApi` | **без змін: ні вимкнень, ні змін, ні нових записів** |
+| `Degraded` | частину рядків відхилено (зауваження `writerRejected`), відсутній компонент у `COMPONENT` (`componentMissing`), довідник дзеркала не `External` (`registrySource`) | решта оновлена |
+| `Failed` | FLERT недоступний / облікові дані (`ECR-INT-0503` / `0502`, як у збору), змінилася схема (`mappingErrors`: зникла колонка; нова колонка — лише попередження), знімок понад 100 000 рядків (`truncated`), наявний довідник із такою назвою несумісний (`registryIncompatible`) | **без змін** |
+
+Записи, яких більше немає у FLERT, **вимикаються** (не видаляються); повернення у FLERT вмикає їх знову. Кейс зі
+складом Σ = 0 («No composition») записується з позначкою `NO_COMPOSITION` і зауваженням `noComposition` — розрахунок
+на ньому дасть проблему, а не нульові викиди. Пари дублів `CO`/`Carbon_Monoxide`, `H2`/`Hydrogen`, `O2`/`Oxygen` — береться
+коротка назва; обидві заповнені різними значеннями — зауваження `aliasConflict`. Мітки FLERT — UTC; вікно дії версії
+кейсу — вікно складу (`GasComposition_ValidFrom/To`).
 ## 5. Типові збої
 
 | Симптом | Причина | Дія |

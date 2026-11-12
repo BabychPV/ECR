@@ -56,6 +56,8 @@ public sealed class ExternalRegistryManualEditGuardTests
     {
         ["Ecr.Infrastructure.Jobs.RegistrySyncJob"] =
             "Синк із зовнішнього джерела — і є шлях master-даних AF у External/Hybrid-довідник (D-49, S7).",
+        ["Ecr.Infrastructure.Jobs.FlertCompositionSyncJob"] =
+            "Синк складу газу FLERT — шлях master-даних FLERT у External-дзеркало STREAM/STREAM_CASE/GAS_COMPOSITION (D-476).",
     };
 
     /// <summary>Типи, що містять самі стоки (writer), — не писачі, а точка запису.</summary>
