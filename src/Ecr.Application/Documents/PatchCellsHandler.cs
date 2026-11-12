@@ -1722,9 +1722,13 @@ public sealed partial class PatchCellsHandler(
 
         var addresses = RequiredInputAddresses(context, changes, applicable);
 
-        var baseline = addresses.Count == 0
-            ? new Dictionary<CellAddress, CellValueData>()
-            : await cellStore.ReadCellsAsync(addresses, ct).ConfigureAwait(false);
+        // ✎ Q-17: таблиця «місяці в колонках» у не-власному періоді — базовий стан ЛОГІЧНИЙ (як у сітці); адреси
+        // власників читаються тим самим пакетним запитом. Маршрутизація вимкнена — план null, читання як було.
+        var ownerPlan = await PlanOwnerBaselineAsync(
+                [(context, changes, RequiredInputColumnIds(applicable))], ct)
+            .ConfigureAwait(false);
+
+        var baseline = await ReadRequiredInputBaselineAsync(addresses, ownerPlan, ct).ConfigureAwait(false);
 
         return EvaluateRequiredInputs(context, changes, applicable, baseline, origin);
     }

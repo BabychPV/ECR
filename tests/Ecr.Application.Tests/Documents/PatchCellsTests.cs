@@ -203,7 +203,8 @@ public sealed partial class PatchCellsTests
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock,
-               _gate, Units(), columnMapper: _columnMapper, rowActivity: _rowActivity, preview: _preview);
+               _gate, Units(), columnMapper: _columnMapper, rowActivity: _rowActivity, preview: _preview,
+               monthRouter: _monthRouter);
 
     /// <summary>HSE401: синхронний перегляд рядково-локальних формул; <c>null</c> - перегляду немає.</summary>
     private Ecr.Application.Recalculation.IRowLocalPreview? _preview;

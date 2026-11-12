@@ -64,6 +64,158 @@ public sealed partial class PatchCellsHandler
         IReadOnlyCollection<CellAddress> OutOfWindowPhysical,
         IReadOnlyList<RecalcGroup> Groups);
 
+    /// <summary>
+    /// План логічного базового стану gate-у обов'язкових входів: адреси введених комірок у екземплярах-власниках
+    /// (рядок власника з тим самим <c>RowKey</c>) → логічна адреса екземпляра запиту.
+    /// </summary>
+    /// <param name="OwnerToLogical">Фізична адреса у власника → адреса рядка запиту (той самий <c>ColumnDefId</c>).</param>
+    /// <param name="Shadowed">Логічні адреси колонок із чужим власником: їхнє фізичне значення в екземплярі запиту
+    /// «затінене» власником (як у <c>MonthRoutedCellStore</c>).</param>
+    private sealed record OwnerBaselinePlan(
+        Dictionary<CellAddress, CellAddress> OwnerToLogical, HashSet<CellAddress> Shadowed);
+
+    /// <summary>
+    /// Q-17: gate обов'язкових входів бачить ті самі ЛОГІЧНІ значення, що й користувач у сітці. Фізичне
+    /// <c>ICellStore.ReadCellsAsync</c> у не-власному періоді віддає лише місячні комірки рядка — статус і ключі правил
+    /// (власник — якір року) там порожні, і фільтр активності D-425 мовчки відсіював рядок (doc 96, T3_00, 202609).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Власник колонки — <see cref="IMonthColumnRouter.ForeignColumnsAsync"/>, той самий роутер, за яким
+    /// <see cref="RouteForeignOwnersAsync"/> пише правку чужої колонки в екземпляр власника за <c>RowKey</c>: тож
+    /// «збережене» береться звідти ж, куди ляже запис, а правка батчу (логічна адреса) накладається поверх, як і раніше.
+    /// Нові рядки батчу (тимчасові Id) теж отримують значення власника за <c>RowKey</c> — так їх покаже сітка після запису.
+    /// </para>
+    /// <para>
+    /// ⛔ Маршрутизація вимкнена / таблиця не «місяці в колонках» / копія аркуша / немає чужих потрібних колонок —
+    /// <c>null</c> БЕЗ жодного звернення до бази. Інакше на таблицю: 1 запит екземплярів року і по 1 запиту рядків на
+    /// період-власник (≤ 13); комірки власників читаються ТИМ САМИМ пакетним <c>ReadCellsAsync</c>, що й базовий стан.
+    /// </para>
+    /// </remarks>
+    private async Task<OwnerBaselinePlan?> PlanOwnerBaselineAsync(
+        IReadOnlyList<(RequestContext Context, CellChangeLists Changes, IReadOnlyCollection<int> ColumnIds)> items,
+        CancellationToken ct)
+    {
+        if (monthRouter is not { Enabled: true })
+        {
+            return null;
+        }
+
+        var plan = new OwnerBaselinePlan([], []);
+        foreach (var (context, changes, columnIds) in items)
+        {
+            if (changes.Touched.Count == 0 || context.Instance.SheetCopyId is not null
+                || !monthRouter.AppliesToTable(context.Table))
+            {
+                continue;
+            }
+
+            var document = await monthRouter.GetDocumentAsync(context.Instance.DocumentId, ct).ConfigureAwait(false);
+            if (document is null)
+            {
+                continue;
+            }
+
+            var wanted = columnIds.ToHashSet();
+            var foreign = (await monthRouter
+                    .ForeignColumnsAsync(document, context.Table, context.PeriodKey, ct)
+                    .ConfigureAwait(false))
+                .Where(f => wanted.Contains(f.Column.Id) && f.OwnerPeriod != context.PeriodKey)
+                .ToList();
+            if (foreign.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (var column in foreign)
+            {
+                foreach (var rowId in changes.Touched)
+                {
+                    plan.Shadowed.Add(new CellAddress(context.PeriodKey, rowId, column.Column.Id));
+                }
+            }
+
+            var instances = (await rowStore
+                    .GetTableInstancesOfTableInYearAsync(
+                        context.Instance.DocumentId, context.Instance.TableDefId, context.PeriodKey.Year, ct)
+                    .ConfigureAwait(false))
+                .ToDictionary(i => i.PeriodKey);
+
+            foreach (var byOwner in foreign.GroupBy(f => f.OwnerPeriod))
+            {
+                if (!instances.TryGetValue(byOwner.Key.Value, out var instance))
+                {
+                    continue; // екземпляра власника немає — у сітці ці колонки порожні
+                }
+
+                var ownerRows = await rowStore.GetRowIdsAsync(instance.TableInstanceId, byOwner.Key, ct).ConfigureAwait(false);
+                foreach (var rowId in changes.Touched)
+                {
+                    if (!changes.RowKeyById.TryGetValue(rowId, out var key) || !ownerRows.TryGetValue(key, out var ownerRowId))
+                    {
+                        continue;
+                    }
+
+                    foreach (var column in byOwner)
+                    {
+                        plan.OwnerToLogical[new CellAddress(byOwner.Key, ownerRowId, column.Column.Id)] =
+                            new CellAddress(context.PeriodKey, rowId, column.Column.Id);
+                    }
+                }
+            }
+        }
+
+        return plan.Shadowed.Count == 0 ? null : plan;
+    }
+
+    /// <summary>
+    /// Базовий стан gate-у ОДНИМ пакетним читанням: фізичні адреси запиту ∪ адреси власників (<paramref name="plan"/>),
+    /// далі — логічна розкладка (значення власника на адресі рядка запиту).
+    /// </summary>
+    /// <remarks>
+    /// Як <c>MonthRoutedCellStore</c>: введене фізичне значення колонки з чужим власником у екземплярі запиту
+    /// відкидається; обчислена комірка зі значенням лишається і приховує власника.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<CellAddress, CellValueData>> ReadRequiredInputBaselineAsync(
+        List<CellAddress> addresses, OwnerBaselinePlan? plan, CancellationToken ct)
+    {
+        if (plan is null)
+        {
+            return addresses.Count == 0
+                ? new Dictionary<CellAddress, CellValueData>()
+                : await cellStore.ReadCellsAsync(addresses, ct).ConfigureAwait(false);
+        }
+
+        var read = await cellStore
+            .ReadCellsAsync([.. addresses.Concat(plan.OwnerToLogical.Keys).Distinct()], ct)
+            .ConfigureAwait(false);
+
+        var requested = addresses.ToHashSet();
+        var result = new Dictionary<CellAddress, CellValueData>();
+        foreach (var (address, value) in read)
+        {
+            if (!requested.Contains(address))
+            {
+                continue; // адреса власника — нижче, на логічній адресі
+            }
+
+            if (!plan.Shadowed.Contains(address) || (value.IsCalculated && Text(value) is not null))
+            {
+                result[address] = value;
+            }
+        }
+
+        foreach (var (ownerAddress, logical) in plan.OwnerToLogical)
+        {
+            if (read.TryGetValue(ownerAddress, out var value))
+            {
+                result.TryAdd(logical, value);
+            }
+        }
+
+        return result;
+    }
+
     private async Task<RoutedWrite?> RouteForeignOwnersAsync(
         RequestContext context,
         CellChangeLists changes,

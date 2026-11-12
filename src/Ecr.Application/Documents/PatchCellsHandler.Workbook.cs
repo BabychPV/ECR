@@ -454,9 +454,12 @@ public sealed partial class PatchCellsHandler
 
         var gated = touched.Where(x => x.Applicable.Count > 0).ToList();
         var addresses = gated.SelectMany(x => RequiredInputAddresses(x.Context, x.Planned, x.Applicable)).ToList();
-        var baseline = addresses.Count == 0
-            ? new Dictionary<CellAddress, CellValueData>()
-            : await cellStore.ReadCellsAsync(addresses, ct).ConfigureAwait(false);
+
+        // ✎ Q-17: логічний базовий стан для таблиць «місяці в колонках» (див. PlanOwnerBaselineAsync).
+        var ownerPlan = await PlanOwnerBaselineAsync(
+                [.. gated.Select(x => (x.Context, x.Planned, (IReadOnlyCollection<int>)RequiredInputColumnIds(x.Applicable)))], ct)
+            .ConfigureAwait(false);
+        var baseline = await ReadRequiredInputBaselineAsync(addresses, ownerPlan, ct).ConfigureAwait(false);
 
         foreach (var item in gated)
         {
