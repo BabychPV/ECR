@@ -48,6 +48,7 @@ import {
   tableTitleOf,
   type InspectorIssueGroup,
 } from './inspectorModel';
+import { LockedRows } from './LockedRows';
 import { SheetLog, type InspectorSheet, type SheetLogTarget } from './SheetLog';
 import './inspector.css';
 
@@ -386,7 +387,13 @@ export function DocumentInspector({
             </Tabs.List>
 
             <Tabs.Panel value="issues" className="ecr-insp-body">
-              <AttentionSection attention={attention} tables={tables} count={attentionTotal} />
+              <AttentionSection
+                attention={attention}
+                tables={tables}
+                count={attentionTotal}
+                documentId={documentId}
+                onSelect={onSelectIssue}
+              />
               <IssuesTab
                 groups={groups}
                 rowLabels={rowLabels}
@@ -518,11 +525,16 @@ function AttentionSection({
   attention,
   tables,
   count,
+  documentId,
+  onSelect,
 }: {
   attention: readonly TableAttention[];
   tables: readonly DocumentTableDto[];
   /** Рядків, що потребують уваги, — як у рядку стану (з попередженнями перевірки). */
   count: number;
+  documentId: number;
+  /** Перехід у рядок — той самий, що й у пунктів перевірки. */
+  onSelect: (finding: ValidationFindingDto) => void;
 }): JSX.Element | null {
   if (attention.length === 0) return null;
 
@@ -559,7 +571,18 @@ function AttentionSection({
             </span>
           </div>
         )),
-        ...(table.lockedMonths === null
+        // ✎ 12.11 (людина): закриті місяці — по рядку, назвою рядка й місяців; клік веде в рядок; «Reopen …» — лише з правом.
+        ...(table.lockedRows !== undefined
+          ? [
+              <LockedRows
+                key={`${String(table.tableInstanceId)}:locked`}
+                documentId={documentId}
+                tableDefId={table.tableDefId ?? tables.find((candidate) => candidate.tableInstanceId === table.tableInstanceId)?.tableDefId}
+                rows={table.lockedRows}
+                onSelect={onSelect}
+              />,
+            ]
+          : table.lockedMonths === null
           ? []
           : [
               <div key={`${String(table.tableInstanceId)}:locked`} className="ecr-insp-issue" data-inspector-locked={table.tableInstanceId}>

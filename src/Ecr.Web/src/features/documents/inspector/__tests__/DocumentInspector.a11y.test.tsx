@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
+import { publishTableAttention, resetRowAttentionForTests } from '@/features/grid/rowAttentionStore';
 import { mantineProviderProps } from '@/shared/theme/provider';
 import { describe as describeViolations, findViolations } from '@/test/a11y';
 import { Themes } from '@/test/__tests__/a11yFixtures';
@@ -150,4 +151,57 @@ describe('DocumentInspector — axe', () => {
       expect(violations, describeViolations(violations)).toHaveLength(0);
     },
   );
+
+  // ✎ 12.11: пункт закритих місяців по рядку (кнопка + розгортання колонок) і дія «Reopen … for this document…».
+  it.each(Themes)('тема %s, закриті місяці по рядку з дією відкриття', async (scheme) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, enabled: false } } });
+    client.setQueryData(['document', 1, 'period-reopen', 202601], {
+      periodKey: 202601,
+      active: null,
+      canOpen: true,
+      denial: null,
+      defaultOpenUntil: '2026-11-12T21:00:00Z',
+    });
+    act(() =>
+      publishTableAttention(10, {
+        tableInstanceId: 10,
+        tableDefId: 1,
+        periodKey: 202609,
+        rows: [],
+        lockedMonths: 'Volume',
+        lockedRows: [
+          {
+            key: '10:R4:locked',
+            tableInstanceId: 10,
+            periodKey: 202609,
+            rowKey: 'R4',
+            rowName: 'Diesel',
+            months: [1],
+            periodKeys: [202601],
+            columns: 'Volume',
+            columnCode: 'C3',
+          },
+        ],
+      }),
+    );
+
+    const { container } = render(
+      <MantineProvider {...mantineProviderProps} forceColorScheme={scheme}>
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={['/documents/1?panel=issues']}>
+            <main>
+              <DocumentInspector documentId={1} periodKey={202609} tables={Tables} messages={[]} onSelectFinding={() => {}} />
+            </main>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+
+    expect(container.querySelector('[data-inspector-locked-row="10:R4:locked"]')).not.toBeNull();
+    expect(container.querySelector('[data-inspector-reopen="202601"]')).not.toBeNull();
+    const violations = await findViolations(container);
+
+    expect(violations, describeViolations(violations)).toHaveLength(0);
+    act(() => resetRowAttentionForTests());
+  });
 });

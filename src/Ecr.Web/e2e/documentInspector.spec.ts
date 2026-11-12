@@ -228,7 +228,8 @@ test.describe('Water lock (UAT 08.11)', () => {
     const item = aside.locator(`[data-inspector-attention="${key}"]`);
     await expect(item).toContainText(WaterRow);
     await expect(item).toBeFocused();
-    await expect(aside.locator('[data-inspector-locked]').first()).toContainText(/locked/i);
+    // ✎ 12.11 (людина): закриті місяці — одне речення на рядок (LockedRows), а не таблицею «… locked».
+    await expect(aside.locator('[data-inspector-locked-row]').first()).toContainText(/closed months?/i);
   });
 
   test('Water lock: шапка інспектора — період сторінки, комірка — назвою колонки', async ({ page }) => {

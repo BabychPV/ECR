@@ -2,12 +2,13 @@ import type { TableSliceDto } from '@/api/types';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
 import { cellKey } from './permissions';
-import type { PeriodRowFindings, RowAttentionItem, TableAttention } from './rowAttentionStore';
+import type { LockedRowItem, PeriodRowFindings, RowAttentionItem, TableAttention } from './rowAttentionStore';
 
 export {
   publishTableAttention,
   requestAttentionFocus,
   useRowFindings,
+  type LockedRowItem,
   type RowAttentionItem,
   type TableAttention,
 } from './rowAttentionStore';
@@ -58,6 +59,50 @@ export function lockedColumnsOf(slice: TableSliceDto, rowKey?: string): Set<stri
   }
 
   return codes;
+}
+
+/** Місяць колонки таблиці `MonthsInColumns` (D-441): номер 1..12 і період, якому вона відповідає. */
+export interface ColumnMonth {
+  readonly monthNumber: number;
+  readonly periodKey: number;
+}
+
+const NoColumnMonths: ReadonlyMap<string, ColumnMonth> = new Map();
+
+/**
+ * ✎ 12.11 (людина, doc 96 жовтень 2026, T3_00): закриті місяці — ПО РЯДКУ, назвою рядка й назвами місяців, а не
+ * одним реченням на таблицю з сирими заголовками колонок («Running hours per month (hour)–Gas consumption (Sm3),
+ * January. RH during exceeding–…»). Місяць колонки — з `monthOf` (стан місячних колонок аркуша, уже на клієнті);
+ * колонка не місячна — місяць самого зрізу. Рядки без закритих комірок — не пункт.
+ */
+export function lockedRowsOf(slice: TableSliceDto, monthOf: ReadonlyMap<string, ColumnMonth> = NoColumnMonths): LockedRowItem[] {
+  const own: ColumnMonth = { monthNumber: slice.periodKey % 100, periodKey: slice.periodKey };
+  const items: LockedRowItem[] = [];
+  for (const row of slice.rows) {
+    const codes = lockedColumnsOf(slice, row.rowKey);
+    if (codes.size === 0) continue;
+    const first = slice.columns.find((column) => codes.has(column.code));
+    const months = new Map<number, number>();
+    for (const code of codes) {
+      const month = monthOf.get(code) ?? own;
+      if (month.monthNumber >= 1 && month.monthNumber <= 12) months.set(month.periodKey, month.monthNumber);
+    }
+    const periodKeys = [...months.keys()].sort((a, b) => a - b);
+    const label = row.label?.trim() ?? '';
+    items.push({
+      key: `${String(slice.tableInstanceId)}:${row.rowKey}:locked`,
+      tableInstanceId: slice.tableInstanceId,
+      periodKey: slice.periodKey,
+      rowKey: row.rowKey,
+      rowName: label === '' || label === row.rowKey ? null : label,
+      months: [...new Set(periodKeys.map((key) => months.get(key) ?? 0))],
+      periodKeys,
+      columns: describeColumns(slice, codes) ?? '',
+      columnCode: first?.code ?? '',
+    });
+  }
+
+  return items;
 }
 
 /**
@@ -219,6 +264,7 @@ const bySlice = new WeakMap<
     problems: ReadonlyMap<string, RowLookupProblem>;
     warnings: ReadonlyMap<string, string>;
     tableDefId: number | undefined;
+    monthOf: ReadonlyMap<string, ColumnMonth>;
     value: TableAttention;
   }
 >();
@@ -233,9 +279,17 @@ export function tableAttentionOf(
   problems: ReadonlyMap<string, RowLookupProblem> = NoProblems,
   warnings: ReadonlyMap<string, string> = NoWarnings,
   tableDefId?: number,
+  monthOf: ReadonlyMap<string, ColumnMonth> = NoColumnMonths,
 ): TableAttention {
   const cached = bySlice.get(slice);
-  if (cached?.problems === problems && cached.warnings === warnings && cached.tableDefId === tableDefId) return cached.value;
+  if (
+    cached?.problems === problems &&
+    cached.warnings === warnings &&
+    cached.tableDefId === tableDefId &&
+    cached.monthOf === monthOf
+  ) {
+    return cached.value;
+  }
 
   const rows: RowAttentionItem[] = [];
   for (const row of slice.rows) {
@@ -267,8 +321,9 @@ export function tableAttentionOf(
     periodKey: slice.periodKey,
     rows,
     lockedMonths: describeColumns(slice, lockedColumnsOf(slice)),
+    lockedRows: lockedRowsOf(slice, monthOf),
   };
-  bySlice.set(slice, { problems, warnings, tableDefId, value });
+  bySlice.set(slice, { problems, warnings, tableDefId, monthOf, value });
 
   return value;
 }

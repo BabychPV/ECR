@@ -37,6 +37,49 @@ export function useMonthColumnStatuses(
   );
 }
 
+/** Місяць колонки: номер 1..12 і період, якому вона відповідає. */
+export interface MonthOfColumn {
+  readonly monthNumber: number;
+  readonly periodKey: number;
+}
+
+/**
+ * ✎ 12.11 (людина): місяць кожної місячної колонки ОДНІЄЇ таблиці — щоб Issues називав закриті місяці назвами
+ * («January, April and July»), а не заголовками колонок. Та сама відповідь, що й у `useMonthColumnStatuses`
+ * (`enabled: false`, нового запиту немає); відповіді ще немає — порожньо (колонка без місяця = місяць зрізу).
+ */
+export function useMonthColumnMonths(
+  documentId: number,
+  sheetDefId: number | undefined,
+  periodKey: number,
+  tableDefId: number,
+  sheetCopyId: number | null = null,
+): ReadonlyMap<string, MonthOfColumn> {
+  const { data } = useQuery({
+    queryKey: submissionTargetKey(documentId, sheetDefId ?? 0, periodKey, sheetCopyId),
+    queryFn: () => fetchSubmissionTarget(documentId, sheetDefId ?? 0, periodKey, sheetCopyId),
+    enabled: false,
+  });
+
+  return useMemo(
+    () => monthColumnsOf(Array.isArray(data?.monthColumns) ? data.monthColumns : undefined, tableDefId),
+    [data, tableDefId],
+  );
+}
+
+/** Код колонки → місяць для однієї таблиці. */
+export function monthColumnsOf(
+  months: readonly MonthColumnStatus[] | undefined,
+  tableDefId: number,
+): ReadonlyMap<string, MonthOfColumn> {
+  const result = new Map<string, MonthOfColumn>();
+  for (const month of months ?? []) {
+    if (month.tableDefId === tableDefId) result.set(month.columnCode, { monthNumber: month.monthNumber, periodKey: month.periodKey });
+  }
+
+  return result;
+}
+
 /** Код колонки → `Submitted`/`Approved` для однієї таблиці. */
 export function markedMonthColumns(
   months: readonly MonthColumnStatus[] | undefined,
