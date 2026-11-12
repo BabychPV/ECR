@@ -693,7 +693,11 @@ describe('форма рядка', () => {
 
   it('закінчений дозвіл: рядок відкривається лише для читання', async () => {
     await openLimits(permit({ status: 'Expired' }));
-    expect(screen.getByRole('button', { name: 'Add row' })).toHaveProperty('disabled', true);
+    // U-6 (аудит 2026-11): недоступна, але у фокусі й з причиною (`DisabledReason`), клік шторку не відкриває.
+    const add = screen.getByRole('button', { name: 'Add row' });
+    expect(add.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(add);
+    expect(screen.queryByRole('dialog', { name: 'New row' })).toBeNull();
     fireEvent.click(screen.getByText('Outfall A'));
     const dialog = await screen.findByRole('dialog', { name: 'Outfall A' });
     expect(within(dialog).queryByRole('button', { name: 'Save' })).toBeNull();
@@ -701,15 +705,20 @@ describe('форма рядка', () => {
     expect(within(dialog).getByRole('textbox', { name: /^Annual volume/ })).toHaveProperty('readOnly', true);
   });
 
-  it('глядач без права запису: кнопки таблиці вимкнені', async () => {
+  it('глядач без права запису: кнопки таблиці недоступні, у фокусі, з причиною; клік нічого не відкриває', async () => {
     session.permissions = Viewer;
     await openLimits(permit({ status: 'Active' }));
     for (const name of ['Add row', 'Paste from Excel…', 'Import file…']) {
-      expect(screen.getByRole('button', { name })).toHaveProperty('disabled', true);
-      // Причина читається скрінрідером: кнопка описана тим самим текстом, що й `title`.
-      const describedBy = screen.getByRole('button', { name }).getAttribute('aria-describedby');
-      expect(describedBy).toBeTruthy();
-      expect(document.getElementById(describedBy ?? '')?.textContent).toBe('This permit is read-only here');
+      const button = screen.getByRole('button', { name });
+      // U-6 (аудит 2026-11): не нативний `disabled` (поза табуляцією), а `aria-disabled` + опис причини (`DisabledReason`).
+      expect(button.getAttribute('aria-disabled')).toBe('true');
+      expect((button as HTMLButtonElement).disabled).toBe(false);
+      const ids = button.getAttribute('aria-describedby')?.split(' ') ?? [];
+      expect(ids.map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim()).toBe(
+        'This permit is read-only here',
+      );
+      fireEvent.click(button);
+      expect(screen.queryByRole('dialog')).toBeNull();
     }
   });
 
