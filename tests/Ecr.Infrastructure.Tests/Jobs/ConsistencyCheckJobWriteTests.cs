@@ -110,6 +110,58 @@ public sealed class ConsistencyCheckJobWriteTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Правило_обрізане_стелею_не_видаляє_своїх_знахідок()
+    {
+        // ⛔ Знімок замінює знахідки лише ПОВНІСТЮ перевіреного правила. Правило, що вперлося в стелю
+        // (`MaxIssues`/`MaxPeriods`), бачило не все: знахідку, яку воно не дочитало, видаляти не можна. Тут стеля
+        // `ARCHIVE_CHECKSUM` — 1000 найсвіжіших прогонів архівації: тисяча свіжих прогонів із рівними сумами витісняє
+        // зі звірки все старше, тож стара знахідка має лишитися. Мутація: `return (issues, true)` у
+        // `ArchiveChecksumsAsync` (обрізане правило вважається повністю перевіреним) — тест червоніє.
+        var run = FirstRun.AddDays(6);
+        var capped = await InsertIssueAsync("ARCHIVE_CHECKSUM", "itg.ArchiveRun", -770_005, "capped");
+
+        var ids = new List<long>(ConsistencyCheckJobCap);
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var runs = new List<Ecr.Domain.Entities.Integration.ArchiveRun>(ConsistencyCheckJobCap);
+            for (var i = 0; i < ConsistencyCheckJobCap; i++)
+            {
+                // ⚠ Свіжіші за будь-який прогін інших тестів колекції — саме вони займають усю стелю.
+                var at = run.AddYears(50).AddSeconds(i);
+                var archive = new Ecr.Domain.Entities.Integration.ArchiveRun(
+                    projectId: 1, Ecr.Domain.Entities.Integration.ArchiveRun.ToArchive, fromPeriodKey: 202601,
+                    toPeriodKey: 202601, triggeredByUserId: null, utcNow: at);
+                archive.RecordChecksums(sourceJson: """{"count":1}""", targetJson: """{"count":1}""");
+                archive.Complete("Succeeded", at.AddSeconds(1), errorMessage: null);
+                runs.Add(archive);
+            }
+
+            db.ArchiveRuns.AddRange(runs);
+            await db.SaveChangesAsync(CancellationToken.None);
+            ids.AddRange(runs.Select(r => r.Id));
+        }
+
+        try
+        {
+            await RunJobAsync(run);
+
+            Assert.True(await ExistsAsync(capped));
+        }
+        finally
+        {
+            // ⛔ Прибрати обов'язково: тисяча найсвіжіших прогонів лишала б стелю зайнятою для всіх наступних тестів
+            // колекції (`ConsistencyCheckJobDetectionTests.Звіряє_архів_із_джерелом_за_контрольними_сумами`).
+            await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+            await db.ArchiveRuns.Where(r => ids.Contains(r.Id)).ExecuteDeleteAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>Стеля одного правила в <see cref="ConsistencyCheckJob"/> (<c>MaxIssues</c>, private).</summary>
+    private const int ConsistencyCheckJobCap = 1_000;
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Знахідка_записана_після_старту_проходу_не_видаляється()
     {
         // ⛔ Межа гонитви: знахідку, виявлену ПІСЛЯ старту проходу, міг записати паралельний прохід (нічний і ручний),
