@@ -64,6 +64,11 @@
                     Публікації не робить; повтор - 0 змін; без -RequiredInputsCreateDrafts - лише перелік.
                     З -GoldenTestDocumentId/-GoldenTestPeriodKey golden-тести чернетки V<n> (і вже наявної) -> цей
                     документ/період (інакше публікація: ECR-CALC-0422 «Golden test … has no period»)
+      YearMonths    (лише явно, в All не входить; LAND-YEAR L4, Land 1.0.17.0) перебудова моделі під річний аркуш у пам'яті:
+                    немісячні Calculated і місячно-залежні Formula -> _M01.._M12 (по виходу, групи MB_O_<код>), селектори
+                    «(current period)» прибрано (псевдоніми місяця), річні підсумки - лише як у xlsm (land-year-totals.json).
+                    Потребує -Layout YearWithMonthColumns. Поки сервер без cfg.MonthInputAlias (L0) і маршрутизації обчислених
+                    (L1/L2) - лише план: разом з іншими етапами без -DryRun відмовляє; -YearMonthsPlanOut <файл поза репо> - план JSON
     ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє, окрім явного
     -PruneStaleTables (м'яке видалення таблиць чернетки, яких немає в моделі; без прапора - лише попередження).
     Формули колонок наявної чернетки-клону порівнюються з моделлю й оновлюються (D-YE-1). Прод-БД старої системи тут
@@ -102,7 +107,7 @@ param(
     [switch]$ReuseDraft,
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'BranchGate', 'RequiredInputs', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'BranchGate', 'RequiredInputs', 'YearMonths', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection,
@@ -133,6 +138,8 @@ param(
     # 1.0.16.0 лишається PerMonthCopies - результати Land місячні (формули з [Period], методології за місяцем), річний аркуш
     # без перемикача показав би січневі числа (docs/build/D474-year-layout-calculated-cells.md). YearWithMonthColumns - лише явно.
     [ValidateSet('YearWithMonthColumns', 'PerMonthCopies')][string]$Layout = 'PerMonthCopies',
+    # -Stage YearMonths (LAND-YEAR L4): куди записати план (модель 1.0.17.0, прив'язки, псевдоніми, групи) - лише поза репозиторієм.
+    [string]$YearMonthsPlanOut,
     [switch]$DryRun
 )
 
@@ -150,6 +157,7 @@ if (-not $afFile) { $afFile = Join-Path $repo 'docs\delivery\reference-data\land
 . (Join-Path $here 'LandTemplateDiff.Lib.ps1')
 . (Join-Path $here 'LandMonthBands.Lib.ps1')
 . (Join-Path $here 'LandTemplateDraft.Lib.ps1')
+. (Join-Path $here 'LandYearMonths.Lib.ps1')
 Set-StrictMode -Off
 
 # Безпека стенда: лише локальні API і SQL (база з іменем EcrLand*); мутації лише з явним
@@ -251,6 +259,40 @@ Log ("Аркушів {0}, таблиць {1}, колонок {2}, довідни
 $cellFormulaCount = 0
 foreach ($sh in @($Mdl.sheets)) { foreach ($tb in @($sh.tables)) { $cellFormulaCount += @($tb.cellFormulas | Where-Object { $_ }).Count } }
 Log ("Формул комірок (Cell, PUT formulas/cell): {0}" -f $cellFormulaCount)
+# LAND-YEAR L4 (рішення людини 12.11): перебудова моделі під рік - до будь-якого етапу, що її читає. Чиста логіка -
+# LandYearMonths.Lib.ps1; тут лише гейти, журнал і план. Нічого не пише на сервер і в SQL.
+function Stage-YearMonths {
+    Log '== YearMonths (LAND-YEAR L4) =='
+    if ($Layout -ne 'YearWithMonthColumns') { throw '-Stage YearMonths потребує -Layout YearWithMonthColumns: місячні колонки результатів мають сенс лише в річному аркуші.' }
+    $others = @($Stage | Where-Object { $_ -ne 'YearMonths' })
+    if ($others.Count -gt 0 -and -not $DryRun) {
+        # L0: cfg.MonthInputAlias (аргументи методологій за кодом селектора/формули); L1/L2: власник обчисленої місячної комірки
+        # і накладання результату прогону місяця m. Без них версія з цією моделлю дала б #ARG і порожні колонки результатів.
+        throw ("-Stage YearMonths разом з етапами ($($others -join ', ')) поки заборонено: сервер ще без cfg.MonthInputAlias (L0) " +
+            'і маршрутизації обчислених комірок (L1/L2). Запускайте YearMonths окремо (план) або з -DryRun.')
+    }
+    $months = (Read-LandMonthBandSource (Join-Path $here 'land-month-bands.json')).months
+    $totals = ([IO.File]::ReadAllText((Join-Path $here 'land-year-totals.json'), [Text.Encoding]::UTF8) | ConvertFrom-Json).totals
+    $ym = Convert-LandYearMonthsModel -Model $script:Mdl -MonthNames $months -Totals $totals
+    if (@($ym.Errors).Count -gt 0) { throw ('YearMonths: ' + (@($ym.Errors) -join '; ')) }
+    $r3 = Test-LandYearMonthsCodes -Model $ym.Model
+    if (@($r3).Count -gt 0) { throw ('YearMonths, R-3: ' + (@($r3) -join '; ')) }
+    $sum = { param($prop) [int](@($ym.Tables) | Measure-Object -Property $prop -Sum).Sum }
+    Log ("  таблиць {0}; колонок +{1} / -{2} (селекторів {3}, змінних формул {4}, результатів {5}); підсумків xlsm додано {6}; змін {7}" -f `
+            @($ym.Tables).Count, (& $sum 'Added'), (& $sum 'Removed'), (& $sum 'Selectors'), (& $sum 'Varying'), (& $sum 'Calculated'), (& $sum 'Totals'), $ym.Changes)
+    Log ("  місячних колонок результатів (прив'язки): {0}; псевдонімів місяця (L0): {1}; груп виходів: {2}; цільова версія {3}" -f `
+            @($ym.Bindings).Count, @($ym.Aliases).Count, @($ym.Groups).Count, $ym.Model.yearMonthsTargetVersion)
+    if ($YearMonthsPlanOut) {
+        $full = [IO.Path]::GetFullPath($YearMonthsPlanOut)
+        $repoFull = [IO.Path]::GetFullPath($repo).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        if ($full.StartsWith($repoFull, [StringComparison]::OrdinalIgnoreCase)) { throw "-YearMonthsPlanOut усередині репозиторію ($full): план пишеться лише поза ним." }
+        $plan = [ordered]@{ targetVersion = $ym.Model.yearMonthsTargetVersion; tables = $ym.Tables; bindings = $ym.Bindings; aliases = $ym.Aliases; groups = $ym.Groups }
+        [IO.File]::WriteAllText($full, ($plan | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding $false))
+        Log "  план: $full"
+    }
+    $script:Mdl = $ym.Model
+}
+if ($Stage -contains 'YearMonths') { Stage-YearMonths }
 if ($DryRun) {
     # D-423: перелік String-колонок моделі, що читаються текстовими мостами, - кандидати Decimal->String у клоні (сам клон
     # у DryRun не читається; точний перелік змін типу друкує Stage Template у звичайному прогоні).
@@ -1137,6 +1179,9 @@ function Stage-Template {
         'UseDraft' { $vid = $plan.DraftId; Log "  -ReuseDraft: наявна чернетка $($plan.DraftVersion) (id $vid)" }
         'Clone' {
             foreach ($sk in $plan.SkippedDrafts) { Log "  наявну чернетку $sk пропущено (не змінюється й не видаляється)" }
+            if ($Mdl.PSObject.Properties['yearMonthsTargetVersion'] -and $plan.NewVersion -ne [string]$Mdl.yearMonthsTargetVersion) {
+                throw "YearMonths будує версію $($Mdl.yearMonthsTargetVersion), а клон дав би $($plan.NewVersion) (опублікована $($plan.SourceVersion)). Відмова."
+            }
             $vid = New-LandTemplateCloneDraft -Plan $plan
             Log "  свіжий клон опублікованої $($plan.SourceVersion) (id $($plan.SourceId)) -> чернетка $($plan.NewVersion) (id $vid)"
         }
@@ -1242,7 +1287,8 @@ function Stage-Template {
     }
     # Місячні смуги (D-нове, 10.11): ті самі групи «January…December» + квартал/розділ, що й Add-LandMonthGroups.ps1 для
     # опублікованої 1.0.14.0 — спільний LandMonthBands.Lib.ps1, джерело land-month-bands.json. Повтор на чернетці — 0 змін.
-    $bands = Invoke-LandMonthBands -VersionId $vid -Source (Read-LandMonthBandSource (Join-Path $here 'land-month-bands.json')) -Log { param($bandLine) Log $bandLine }
+    $bands = Invoke-LandMonthBands -VersionId $vid -Source (Read-LandMonthBandSource (Join-Path $here 'land-month-bands.json')) -Log { param($bandLine) Log $bandLine } `
+        -OutputGroupsByTable (Get-LandYearMonthsOutputGroups $Mdl)
     Log ("  місячні смуги: таблиць з місяцями {0}, місячних груп {1}, батьківських {2}, колонок у групах {3}; PUT {4}, PATCH {5}" -f `
             $bands.TablesWithMonths, $bands.MonthGroups, $bands.ParentGroups, $bands.AssignedColumns, $bands.Puts, $bands.Patches)
     if ($bands.TablesSkippedErrors -gt 0) { throw ('Місячні смуги: ' + ($bands.Errors -join '; ')) }
@@ -1507,11 +1553,15 @@ function Stage-Methodologies {
             if ($r.Status -ne 200) { Log "  ! рул ${name}: HTTP $($r.Status) $(Get-EcrErrorCode $r)" }
         }
         $bn = 0
+        # LAND-YEAR L4: після -Stage YearMonths вихід $c прив'язується до 12 місячних колонок <вихід>_Mmm
+        $tbM = @($Mdl.sheets | ForEach-Object { $_.tables } | Where-Object { $_.code -eq $tbl }) | Select-Object -First 1
         foreach ($c in $codes) {
-            $cid = $S.Cols[$S.ShortTable[$tbl]][$c]
-            if (-not $cid) { Log "  ! немає колонки $tbl/$c"; continue }
-            $r = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/bindings/$cid/$c" -Body @{ isActive = $true; matchJson = '{}' }
-            if ($r.Status -eq 200) { $bn++ } else { Log "  ! прив'язка ${name}/${c}: HTTP $($r.Status) $(Get-EcrErrorCode $r)" }
+            foreach ($colCode in (Get-LandResultColumnCodes -Table $tbM -Output $c)) {
+                $cid = $S.Cols[$S.ShortTable[$tbl]][$colCode]
+                if (-not $cid) { Log "  ! немає колонки $tbl/$colCode"; continue }
+                $r = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/bindings/$cid/$c" -Body @{ isActive = $true; matchJson = '{}' }
+                if ($r.Status -eq 200) { $bn++ } else { Log "  ! прив'язка ${name}/${colCode}/${c}: HTTP $($r.Status) $(Get-EcrErrorCode $r)" }
+            }
         }
         if ($CAT.ContainsKey($name)) {
             $r = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/category-rule" -Body @{ expression = $CAT[$name] }
@@ -1541,8 +1591,10 @@ function Stage-Methodologies {
         if ($p.Status -ne 200 -and $p.Status -ne 204) {
             # неопублікована методологія з активною прив'язкою валить усі перерахунки документа: вимикаємо прив'язки
             foreach ($c in $codes) {
-                $cid = $S.Cols[$S.ShortTable[$tbl]][$c]
-                if ($cid) { $null = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/bindings/$cid/$c" -Body @{ isActive = $false; matchJson = '{}' } }
+                foreach ($colCode in (Get-LandResultColumnCodes -Table $tbM -Output $c)) {
+                    $cid = $S.Cols[$S.ShortTable[$tbl]][$colCode]
+                    if ($cid) { $null = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/bindings/$cid/$c" -Body @{ isActive = $false; matchJson = '{}' } }
+                }
             }
             Log "    прив'язки $name вимкнено (методологія лишилась чернеткою)"
         }
@@ -1574,11 +1626,14 @@ function Bind-ResultColumns($mid) {
                 $vi = $vinfo[$name]
                 foreach ($o in @($tb.calc.outputs)) {
                     if (-not $vi.codes.ContainsKey([string]$o)) { $noOut++; continue }   # вихід належить іншій методології таблиці
-                    $cid = $S.Cols[$S.ShortTable[[string]$tb.code]][[string]$o]
-                    if (-not $cid) { $noCol++; Log "  ! немає колонки $($tb.code)/$o"; continue }
-                    $r = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/bindings/$cid/$o" -Body @{ isActive = [bool]$vi.active; matchJson = '{}' }
-                    if ($r.Status -eq 200) { if ($vi.active) { $bound++ } else { $off++ } }
-                    else { Log "  ! прив'язка $name/$($tb.code)/${o}: HTTP $($r.Status) $(Get-EcrErrorCode $r)" }
+                    # LAND-YEAR L4: після -Stage YearMonths вихід прив'язується до 12 місячних колонок <вихід>_Mmm
+                    foreach ($colCode in (Get-LandResultColumnCodes -Table $tb -Output ([string]$o))) {
+                        $cid = $S.Cols[$S.ShortTable[[string]$tb.code]][$colCode]
+                        if (-not $cid) { $noCol++; Log "  ! немає колонки $($tb.code)/$colCode"; continue }
+                        $r = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/bindings/$cid/$o" -Body @{ isActive = [bool]$vi.active; matchJson = '{}' }
+                        if ($r.Status -eq 200) { if ($vi.active) { $bound++ } else { $off++ } }
+                        else { Log "  ! прив'язка $name/$($tb.code)/${colCode}/${o}: HTTP $($r.Status) $(Get-EcrErrorCode $r)" }
+                    }
                 }
             }
         }

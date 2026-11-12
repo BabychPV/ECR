@@ -20,7 +20,8 @@ param(
     [string[]]$KnownStaleTables = @(),
     [string[]]$KnownTypeMismatches = @(),   # "TABLE.COL": законні розбіжності типу, які Build не виправляє (Int/Decimal тощо)
     [int]$PrecisionChecksPerTable = 0,
-    [switch]$InactiveBindingsAsWarning   # P3: Published методологія без активної прив'язки - лише попередження
+    [switch]$InactiveBindingsAsWarning,  # P3: Published методологія без активної прив'язки - лише попередження
+    [switch]$YearMonths                  # LAND-YEAR L4: звіряти з моделлю 1.0.17.0 (та сама перебудова, що -Stage YearMonths)
 )
 $ErrorActionPreference = 'Stop'
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
@@ -30,10 +31,19 @@ if (-not $modelFile) { $modelFile = Join-Path $repo 'docs\delivery\reference-dat
 . (Join-Path $here 'EcrApi.ps1')
 . (Join-Path $here 'LandTemplateDiff.Lib.ps1')
 . (Join-Path $here 'LandArgumentSuffix.Lib.ps1')
+. (Join-Path $here 'LandMonthBands.Lib.ps1')
+. (Join-Path $here 'LandYearMonths.Lib.ps1')
 Set-StrictMode -Off
 Connect-Ecr -BaseUrl $BaseUrl -User $User -Password $Password
 
 $mdl = Get-Content -LiteralPath $modelFile -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($YearMonths) {
+    $ymv = Convert-LandYearMonthsModel -Model $mdl -MonthNames (Read-LandMonthBandSource (Join-Path $here 'land-month-bands.json')).months `
+        -Totals ([IO.File]::ReadAllText((Join-Path $here 'land-year-totals.json'), [Text.Encoding]::UTF8) | ConvertFrom-Json).totals
+    if (@($ymv.Errors).Count -gt 0) { throw ('YearMonths: ' + (@($ymv.Errors) -join '; ')) }
+    $mdl = $ymv.Model
+    Write-Host ("YearMonths: модель {0}, місячних колонок результатів {1}, псевдонімів {2}" -f $mdl.yearMonthsTargetVersion, @($ymv.Bindings).Count, @($ymv.Aliases).Count)
+}
 $t = (Invoke-Ecr -Method GET -Path ('/api/v1/templates?limit=50&q=' + $TemplateCode)).Json
 $tpl = @($t.items) | Where-Object { $_.code -eq $TemplateCode } | Select-Object -First 1
 $vers = @((Invoke-Ecr -Method GET -Path "/api/v1/templates/$($tpl.id)/versions?limit=100").Json.items)
