@@ -99,7 +99,26 @@ function describe(error: FormulaErrorIssue): string {
 
   parts.push(t('document.formulaErrors.since', { when: formatDateTime(error.since) }));
 
+  // ✎ Корінь показується один раз; залежні — лише кількістю (самі вони позначені в сітці).
+  if (error.kind !== 'Blocked' && error.dependentCount > 0) {
+    parts.push(t('document.formulaErrors.dependents', { count: String(error.dependentCount) }));
+  }
+
   return parts.join(' · ');
+}
+
+/** Підпис комірки: назва фіксованого рядка шаблону, інакше «рядок N»; для «не оновлено» — і кількість комірок. */
+function cellLabel(error: FormulaErrorIssue): string {
+  const column = localized(error.columnHeaderL10n) || error.columnCode;
+  const row = localized(error.rowLabelL10n ?? null);
+  const cell =
+    row.length > 0
+      ? t('document.formulaErrors.cellNamed', { column, row })
+      : t('document.formulaErrors.cell', { column, row: String(error.rowNumber) });
+
+  return error.kind === 'Blocked' && error.dependentCount > 1
+    ? t('document.formulaErrors.blockedCells', { cell, count: String(error.dependentCount) })
+    : cell;
 }
 
 interface FormulaErrorsBannerProps {
@@ -119,7 +138,8 @@ interface FormulaErrorsBannerProps {
  *
  * ⛔ Це ПОМИЛКА, що блокує подання (на відміну від «рядків без правила»): тон `red`, розгорнуто за замовчуванням.
  * Значення комірок не змінено — сітка показує останнє правильне; банер каже, яка комірка, що за формула, чому
- * (і з якими входами) і з якого часу; посилання відкриває комірку. Зникає сам після успішного перерахунку: ключ
+ * (і з якими входами) і з якого часу; посилання відкриває комірку. ✎ Один запис на КОРІНЬ помилки з «N залежних
+ * комірок не оновлено» — залежні позначає сітка, перелік їх по одній не показує. Зникає сам після успішного перерахунку: ключ
  * запиту лежить під `['document', id, period]`, який скидає завершений перерахунок.
  */
 export function FormulaErrorsBanner({
@@ -174,8 +194,7 @@ export function FormulaErrorsBanner({
                 {group.title}
               </Text>
               {group.errors.map((error) => {
-                const column = localized(error.columnHeaderL10n) || error.columnCode;
-                const cell = t('document.formulaErrors.cell', { column, row: String(error.rowNumber) });
+                const cell = cellLabel(error);
                 const tableInstanceId = group.tableInstanceId;
                 return (
                   <Text
