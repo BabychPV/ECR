@@ -4919,7 +4919,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/entries/{id}/retire` | `Registry.EditData` або грант `Write` на довідник | 8 |
 | `POST` | `/api/v1/registries/{code}/entries/{id}/unretire` | `Registry.EditData` або грант `Write` на довідник | 8 |
 | `DELETE` | `/api/v1/registries/{code}/entries/{id}/purge` | `Registry.EditData` або грант `Write` на довідник | 8 |
-| `GET` | `/api/v1/registries/{code}/entries/{id}/references` | `Registry.View` або грант `Read` на довідник | 8 |
+| `GET` | `/api/v1/registries/{code}/entries/{id}/references` | `Registry.View` або грант `Read` на довідник; дозволи — лише з реєстрів шапки, які читач бачить (S-5, C4) | 8 |
 | `POST` | `/api/v1/nae-tree/af-import` | `Registry.EditDefinition` + `Registry.EditData` | 8 |
 | `POST` | `/api/v1/nae-tree/roots` | `Registry.EditData`; +`Registry.EditDefinition` і `Registry.Publish`, коли довідник створюється | 8 |
 | `POST` | `/api/v1/nae-tree/seed-roots` | `Registry.EditData`; +`Registry.EditDefinition` і `Registry.Publish`, коли довідник створюється | 8 |
