@@ -18,7 +18,11 @@ public sealed class FlertSyncController(SyncFlertNowHandler syncNow, GetFlertSyn
     [ProducesResponseType<Contracts.JobAcceptedResponse>(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> SyncNow(CancellationToken ct)
-        => Accepted(new Contracts.JobAcceptedResponse(await syncNow.HandleAsync(ct).ConfigureAwait(false)));
+    {
+        var jobId = await syncNow.HandleAsync(ct).ConfigureAwait(false);
+
+        return Accepted(new Contracts.JobAcceptedResponse(jobId));
+    }
 
     /// <summary>
     /// Стан синку: чи увімкнено, де показувати (коди довідників-дзеркала) і останній прогін.
