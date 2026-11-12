@@ -309,6 +309,27 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         Assert.Equal((HttpStatusCode)422, badLayout.StatusCode);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "CALC-RESULTS")]
+    public async Task Рік_без_жодного_прогону_зведення_і_сторінка_200_а_не_500()
+    {
+        // Документ із таблицями й формулою, але без прогонів: зведення агрегує формули, числа — порожні (e2e 12.11).
+        var s = await ArrangeAsync(how: "noRuns").ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var root = $"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/calculation-results/year";
+
+        var summary = JsonDocument.Parse(await GetOkAsync(app, client, $"{root}/summary?year=2026").ConfigureAwait(true)).RootElement;
+        foreach (var key in TableKeys(summary))
+        {
+            await GetOkAsync(app, client, $"{root}/rows?year=2026&table={key}&limit=200").ConfigureAwait(true);
+        }
+
+        Assert.DoesNotContain(s.OutAdditive, summary.GetRawText(), StringComparison.Ordinal);
+    }
+
     // ── допоміжне ────────────────────────────────────────────────────────────────────────
 
     /// <summary>Вихід за ключем рядка й кодом серед усіх сторінок: (сторінка, рядок, ключ таблиці).</summary>
@@ -524,13 +545,25 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         var jan = Run(b.ProjectId, 202601, current: true);
         var febOld = Run(b.ProjectId, 202602, current: false);
         var febNew = Run(b.ProjectId, 202602, current: true);
-        db.CalculationRuns.AddRange(jan, febOld, febNew);
+        if (how != "noRuns")
+        {
+            db.CalculationRuns.AddRange(jan, febOld, febNew);
+        }
 
         // Формула шаблону: R1 · колонка 3, лютий.
         db.CellValues.Add(new CellValue(
             new CellAddress(PeriodKey.Create(2026, 2), feb.RowIds[0], b.ColumnDefIds[2]), b.TableDefId,
             new CellValueData { ValueNumeric = 9m, IsCalculated = true }));
         await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var scenario = new Scenario(
+            b.DocumentId, user.Id, userName, rowKeys[0], rowKeys[1], outAdditive, outRate, outHidden, dynKey,
+            sheetBName, tableBName, tableBCode, labelName, formulaCode,
+            b.TableDefId.ToString(CultureInfo.InvariantCulture), tableB.Id.ToString(CultureInfo.InvariantCulture));
+        if (how == "noRuns")
+        {
+            return scenario;
+        }
 
         var tonne = await UnitAsync(db, "Mass").ConfigureAwait(false);
         var rate = await UnitAsync(db, "MassFlow").ConfigureAwait(false);
@@ -569,10 +602,7 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
             VALUES ({Now.AddHours(1)}, 202602, {b.DocumentId}, {feb.RowIds[0]}, {rowKeys[0]}, {b.ColumnDefIds[1]}, N'1', N'2', {user.Id}, N'UserEdit', 0)
             """).ConfigureAwait(false);
 
-        return new Scenario(
-            b.DocumentId, user.Id, userName, rowKeys[0], rowKeys[1], outAdditive, outRate, outHidden, dynKey,
-            sheetBName, tableBName, tableBCode, labelName, formulaCode,
-            b.TableDefId.ToString(CultureInfo.InvariantCulture), tableB.Id.ToString(CultureInfo.InvariantCulture));
+        return scenario;
     }
 
     private static CalculationRun Run(int projectId, int period, bool current)
