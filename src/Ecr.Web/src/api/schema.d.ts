@@ -29183,12 +29183,13 @@ export interface components {
         CalculationIssuesDto: {
             /**
              * Format: int32
-             * @description ✎ C-1: скільки видимих комірок з помилкою всього; `null` — помилок немає.
+             * @description ✎ C-1: скільки видимих комірок з помилкою (корені й залежні) всього; `null` — помилок немає.
              */
             formulaErrorTotal?: null | number;
-            /** @description ✎ C-1 (D-475): група «Помилки формул» — власні помилки першими, далі «не оновлено»; не більше
-             *     int CalculationIssuesDto.MaxFormulaErrors (одна помилка в колонці, яку читає колонкова формула, дає «не оновлено» в кожному
-             *     рядку великої таблиці); `null` — помилок немає. */
+            /** @description ✎ C-1 (D-475): група «Помилки формул» — ОДИН запис на КОРІНЬ помилки (власна помилка комірки) з кількістю
+             *     залежних комірок, «не оновлених» через нього (самі залежні позначає сітка, не панель). Залежні, чий корінь у
+             *     переліку не показаний (закритий читачеві, інший період чи копія), — один запис на таке джерело. Не більше
+             *     int CalculationIssuesDto.MaxFormulaErrors записів; `null` — помилок немає. */
             formulaErrors?: null | components["schemas"]["FormulaErrorIssueDto"][];
             /** @description Проблеми видимих читачеві таблиць; порожньо — проблем немає. */
             items: components["schemas"]["CalculationIssueDto"][];
@@ -32415,22 +32416,30 @@ export interface components {
             /** @description Значення текстом (інваріантна культура); `null` — порожньо. */
             value: null | string;
         };
-        /** @description ✎ C-1 (D-475): рядок групи «Помилки формул». */
+        /** @description ✎ C-1 (D-475): запис групи «Помилки формул» — корінь помилки (або джерело «не оновлено», якого не видно). */
         FormulaErrorIssueDto: {
             /** @description Код колонки. */
             columnCode: string;
             /** @description Заголовок колонки. */
             columnHeaderL10n: components["schemas"]["LocalizedText"];
-            /** @description Код помилки. */
+            /**
+             * Format: int32
+             * @description Error — скільки видимих комірок не оновлено через цей корінь; Blocked — скільки видимих комірок не оновлено через
+             *     Source (включно з адресою запису).
+             */
+            dependentCount: number;
+            /** @description Код помилки (для Blocked — код кореня). */
             errorCode: string;
             /** @description Вираз формули; `null` — хоч один вхід читачеві закритий. */
             formula: null | string;
             /** @description Вхідні значення, що дали помилку (лише видимі колонки); `null` — для Blocked. */
             inputs: null | components["schemas"]["FormulaErrorInputDto"][];
-            /** @description `Error` — власна помилка; `Blocked` — не оновлено через помилку в Source. */
+            /** @description `Error` — власна помилка комірки (корінь); `Blocked` — комірки, не оновлені через помилку в
+             *             Source, корінь якої в переліку не показаний (адреса — перша з таких комірок). */
             kind: string;
             /** @description Ключ рядка. */
             rowKey: string;
+            rowLabelL10n: null | components["schemas"]["LocalizedText"];
             /**
              * Format: int32
              * @description Порядковий номер рядка (`doc.TableRow.Ordinal`) — для підпису «Рядок N».

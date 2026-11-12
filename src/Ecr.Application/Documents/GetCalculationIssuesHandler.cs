@@ -141,13 +141,36 @@ public sealed class GetCalculationIssuesHandler(
 
         bool CanSee(int tableDefId, int columnDefId) => readable.CanReadTable(tableDefId) && readable.CanReadColumn(columnDefId);
 
-        // ⚠ Payload: власні помилки (корені) — першими; «не оновлено» може бути в кожному рядку великої таблиці — стеля.
-        var shown = visible
-            .OrderBy(v => v.Row.Kind == Domain.Entities.Calculations.FormulaError.ErrorKind ? 0 : 1)
-            .Take(CalculationIssuesDto.MaxFormulaErrors);
+        // ✎ C-1 (координатор 12.11, зручність): ОДИН запис на корінь помилки з кількістю залежних — «не оновлено» може
+        // бути в кожному рядку великої таблиці, і перелік по комірці був би непридатним; залежні позначає сітка.
+        // Корінь — власна помилка (Error); ключ кореня — (період, таблиця, рядок, колонка), той самий, що в джерелі
+        // Blocked. Залежні, чий корінь у переліку не показаний (закритий, інший період чи копія), — один запис на джерело.
+        static (int, int, string, int) RootKey(FormulaErrorRow row)
+            => (row.PeriodKey, row.TableDefId, row.RowKey, row.ColumnDefId);
 
-        return ([.. shown.Select(v =>
+        static (int, int, string, int) SourceKey(FormulaErrorRow row)
+            => (row.SourcePeriodKey ?? row.PeriodKey, row.SourceTableDefId ?? 0, row.SourceRowKey ?? string.Empty,
+                row.SourceColumnDefId ?? 0);
+
+        var roots = visible.Where(v => v.Row.Kind == Domain.Entities.Calculations.FormulaError.ErrorKind).ToList();
+        var rootKeys = roots.Select(r => RootKey(r.Row)).ToHashSet();
+        var dependents = visible
+            .Where(v => v.Row.Kind != Domain.Entities.Calculations.FormulaError.ErrorKind)
+            .GroupBy(v => SourceKey(v.Row))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var entries = new List<(FormulaErrorView View, int Dependents)>();
+        entries.AddRange(roots.Select(r => (r, dependents.TryGetValue(RootKey(r.Row), out var list) ? list.Count : 0)));
+        entries.AddRange(dependents
+            .Where(pair => !rootKeys.Contains(pair.Key))
+            .Select(pair => (pair.Value[0], pair.Value.Count)));
+
+        // ⚠ Payload: стеля записів (коренів мало; записів «невидимих джерел» — не більше джерел).
+        var shown = entries.Take(CalculationIssuesDto.MaxFormulaErrors);
+
+        return ([.. shown.Select(entry =>
         {
+            var (v, dependentCount) = entry;
             var inputs = Recalculation.FormulaErrorInputs.Parse(v.Row.InputsJson);
             var hidden = inputs.Any(i => !CanSee(i.TableDefId, i.ColumnDefId));
             var source = v.Row.SourceTableDefId is { } st && v.Row.SourceColumnDefId is { } sc && CanSee(st, sc)
@@ -158,7 +181,7 @@ public sealed class GetCalculationIssuesHandler(
                 : null;
             var isError = v.Row.Kind == Domain.Entities.Calculations.FormulaError.ErrorKind;
             return new FormulaErrorIssueDto(
-                v.TableCode, v.Row.SheetCopyId, v.Row.RowKey, v.RowOrdinal, v.ColumnCode, v.ColumnHeaderL10n,
+                v.TableCode, v.Row.SheetCopyId, v.Row.RowKey, v.RowOrdinal, v.RowLabelL10n, v.ColumnCode, v.ColumnHeaderL10n,
                 v.Row.Kind, v.Row.ErrorCode,
                 hidden ? null : v.Formula,
                 isError
@@ -166,7 +189,7 @@ public sealed class GetCalculationIssuesHandler(
                         .Select(i => new FormulaErrorInputDto(
                             i.TableCode ?? string.Empty, i.RowKey, i.ColumnCode ?? string.Empty, i.PeriodOffset, i.Value))]
                     : null,
-                source, v.Row.Since);
+                source, v.Row.Since, dependentCount);
         })], visible.Count);
     }
 

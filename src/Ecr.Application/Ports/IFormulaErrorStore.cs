@@ -70,6 +70,8 @@ public sealed record FormulaErrorRow(
 /// <param name="Formula">Вираз формули; <c>null</c> — формули вже немає.</param>
 /// <param name="SourceTableCode">Код таблиці джерела (Blocked).</param>
 /// <param name="SourceColumnCode">Код колонки джерела (Blocked).</param>
+/// <param name="RowLabelL10n">Назва фіксованого рядка шаблону; <c>null</c> — динамічний рядок.</param>
 public sealed record FormulaErrorView(
     FormulaErrorRow Row, string TableCode, string ColumnCode, LocalizedText ColumnHeaderL10n,
-    int RowOrdinal, string? Formula, string? SourceTableCode, string? SourceColumnCode);
+    int RowOrdinal, string? Formula, string? SourceTableCode, string? SourceColumnCode,
+    LocalizedText? RowLabelL10n = null);

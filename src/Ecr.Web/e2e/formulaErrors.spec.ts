@@ -212,7 +212,7 @@ async function valuesOf(page: Page, arranged: Arranged): Promise<{ c: number; d:
   return { c: asNumber(row?.cells['C']), d: asNumber(row?.cells['D']), errors: slice.calcErrors ?? null };
 }
 
-test('C-1 formula errors (помилка формули): value kept, dependents not recalculated, marks, issues group, audit, submit blocked', async ({ page }) => {
+test('C-1 formula errors (помилка формули): value kept, dependents not recalculated, marks, issues group, audit, submit blocked', async ({ page }, testInfo) => {
   await signIn(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   const arranged = await arrange(page);
@@ -239,11 +239,18 @@ test('C-1 formula errors (помилка формули): value kept, dependents
   expect(broken.errors?.[`${arranged.rowKey}:D`]).toMatchObject({ kind: 'Blocked', source: { columnCode: 'C' } });
 
   const issuesUrl = `${documentUrl}/calculation-issues?periodKey=${String(arranged.periodKey)}`;
-  const issues = await ok<{ formulaErrors: { columnCode: string; kind: string; formula: string | null; inputs: { columnCode: string; value: string | null }[] | null }[] | null }>(
-    await page.request.get(issuesUrl),
-    'проблеми розрахунку',
-  );
+  const issues = await ok<{
+    formulaErrors:
+      | { columnCode: string; kind: string; formula: string | null; dependentCount: number; inputs: { columnCode: string; value: string | null }[] | null }[]
+      | null;
+    formulaErrorTotal: number | null;
+  }>(await page.request.get(issuesUrl), 'проблеми розрахунку');
+  // Один запис на КОРІНЬ (C) з кількістю залежних; D окремим записом не з'являється (її позначає сітка).
+  expect(issues.formulaErrors, 'запис кореня помилки').toHaveLength(1);
+  expect(issues.formulaErrorTotal).toBe(2);
   const own = issues.formulaErrors?.find((error) => error.columnCode === 'C');
+  expect(own?.kind).toBe('Error');
+  expect(own?.dependentCount).toBe(1);
   expect(own?.formula).toBe('[A] / [B]');
   expect(own?.inputs?.map((input) => `${input.columnCode}=${String(input.value)}`)).toEqual(
     expect.arrayContaining(['A=10', 'B=0']),
@@ -268,9 +275,12 @@ test('C-1 formula errors (помилка формули): value kept, dependents
   const banner = page.getByTestId('document-formula-errors');
   await expect(banner).toBeVisible({ timeout: 60_000 });
   await expect(banner).toContainText('Formula errors');
-  await expect(page.getByTestId('document-formula-error')).toHaveCount(2);
+  await expect(page.getByTestId('document-formula-error')).toHaveCount(1);
+  await expect(page.getByTestId('document-formula-error')).toContainText('1 dependent cell(s) not updated');
   await expect(page.locator('[data-calc-error="Error"]')).toHaveCount(1, { timeout: 60_000 });
   await expect(page.locator('[data-calc-error="Blocked"]')).toHaveCount(1);
+  // Знімок банера й сітки — вкладення звіту Playwright (артефакт CI e2e-stand) для огляду зручності.
+  await testInfo.attach('formula-errors-panel', { body: await page.screenshot(), contentType: 'image/png' });
   await page.getByTestId('document-formula-error-open').first().click();
   await expect(page.locator('.ecr-cell-nav-target'), 'підсвічена комірка').toHaveCount(1, { timeout: 30_000 });
 
