@@ -117,7 +117,7 @@ public sealed partial class SqlDataSource(
 
     /// <summary>Ключ запиту складу газу FLERT (<c>D-476</c>) для <see cref="ReadTableAsync"/>.</summary>
     /// <remarks>
-    /// Колонки результату — форма <c>FLERT.dbo.usp_GetAllStreamDataFlattened</c> (70 колонок: потік, кейс,
+    /// Колонки результату — форма <c>FLERT.dbo.usp_GetAllStreamDataFlattened</c> (72 колонки на локальній копії 11.11: потік, кейс,
     /// 52 значення, вікна дії; поточні й історичні версії). Типового тексту НЕМАЄ; еталонний текст —
     /// <c>EXEC dbo.usp_GetAllStreamDataFlattened;</c> (інструкція встановлення). Власний ключ джерела
     /// <c>Sql:&lt;код&gt;:CompositionQuery</c> перекриває спільний, як і для решти запитів.
