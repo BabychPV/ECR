@@ -20,6 +20,30 @@ export const MissingInputsKind = 'MissingInputs';
 export interface MissingColumnRef {
   readonly code: string;
   readonly name: string;
+  /**
+   * AN-164b: `false` — це не колонка таблиці, а вхід формули, якого серед колонок немає (сервер дає порожній заголовок);
+   * підпис — «вхідні дані «код»», переходу на комірку немає.
+   */
+  readonly column: boolean;
+}
+
+/** AN-164b: колонки до заповнення без повторів коду; вхід поза колонками — підписом каталогу, а не кодом. */
+function missingColumnsOf(columns: CalculationIssue['columns']): readonly MissingColumnRef[] {
+  const seen = new Set<string>();
+  const result: MissingColumnRef[] = [];
+  for (const column of columns ?? []) {
+    const key = column.code.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const name = localized(column.nameL10n);
+    result.push(
+      name === ''
+        ? { code: column.code, name: t('document.missingInputRows.argument', { code: column.code }), column: false }
+        : { code: column.code, name, column: true },
+    );
+  }
+
+  return result;
 }
 
 /** Один рядок без правила (або відхилений правилом категорії) в групі таблиці. */
@@ -130,9 +154,7 @@ export function groupUnmatchedRows(
         rowNumber: issue.rowNumber,
         currentValues: rejected ? null : (issue.currentValues ?? null),
         ruleCode: rejected ? (issue.ruleCode ?? null) : null,
-        missingColumns: rejected
-          ? (issue.columns ?? []).map((column) => ({ code: column.code, name: localized(column.nameL10n) || column.code }))
-          : [],
+        missingColumns: rejected ? missingColumnsOf(issue.columns) : [],
       });
     }
   }

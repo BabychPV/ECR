@@ -138,6 +138,37 @@ describe('UnmatchedRowsBanner', () => {
     expect(onOpenRow).toHaveBeenCalledExactlyOnceWith(101, 'R2', 'MaximumConsumption_M09');
   });
 
+  // AN-164b (аудит RC #825, doc 96 @202610): «Running hours per month (hour)» ×12 без місяця. Сервер дає колонку місяця
+  // періоду з назвою місяця; банер показує кожну колонку один раз, вхід поза колонками — підписом каталогу, а перехід
+  // веде на першу СПРАВЖНЮ колонку. Мутації: прибрати відсів повторів у `missingColumnsOf` — червоніє «один раз»;
+  // брати `missingColumns[0]` для переходу — червоніє перехід (вхід `Land_Density` не колонка).
+  it('AN-164b: кожна колонка один раз, місяць у назві, вхід поза колонками — підписом', async () => {
+    const { onOpenRow } = show(
+      rows([
+        issue(1, 6, {
+          rowKey: 'S1_6',
+          kind: 'MissingInputs',
+          methodologyCode: 'ECW_C09_02_01',
+          ruleCode: 'R_C09_02_01_01',
+          columns: [
+            { code: 'Land_Density', nameL10n: { values: {} } },
+            { code: 'Hours_M10', nameL10n: { values: { en: 'Running hours per month (hour) · Oct' } } },
+            { code: 'hours_m10', nameL10n: { values: { en: 'Running hours per month (hour) · Oct' } } },
+          ],
+        }),
+      ]),
+    );
+    await userEvent.click(screen.getByTestId('document-unmatched-rows-toggle'));
+
+    const link = screen.getByTestId('document-rejected-row-link');
+    expect(link.textContent).toBe(
+      '⟦document.rejectedRows.rowFill (row=6, rule=R_C09_02_01_01, columns=⟦document.missingInputRows.argument (code=Land_Density)⟧, «Running hours per month (hour) · Oct»)⟧',
+    );
+    await userEvent.click(link);
+
+    expect(onOpenRow).toHaveBeenCalledExactlyOnceWith(101, 'S1_6', 'Hours_M10');
+  });
+
   it('b3: пояснення «чому і як» - один раз, тон інформації (status), не помилки', () => {
     show(sixty);
 

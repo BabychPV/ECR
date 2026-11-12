@@ -200,7 +200,9 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow, narrow = 
                         data-testid={group.rejected ? 'document-rejected-row-link' : 'document-unmatched-row-link'}
                         data-row-key={row.rowKey}
                         aria-label={`${table} · ${label}`}
-                        onClick={() => onOpenRow(tableInstanceId, row.rowKey, row.missingColumns[0]?.code ?? null)}
+                        onClick={() =>
+                          onOpenRow(tableInstanceId, row.rowKey, row.missingColumns.find((c) => c.column)?.code ?? null)
+                        }
                       >
                         {label}
                       </Anchor>
@@ -271,7 +273,8 @@ function rowLabel(row: UnmatchedRowRef, rejected: boolean): string {
     return t('document.rejectedRows.rowFill', {
       row: String(row.rowNumber),
       rule,
-      columns: row.missingColumns.map((column) => `«${column.name}»`).join(', '),
+      // AN-164b: вхід поза колонками таблиці вже підписаний каталогом («input data «код»») — без других лапок.
+      columns: row.missingColumns.map((column) => (column.column ? `«${column.name}»` : column.name)).join(', '),
     });
   }
   if (row.currentValues === null) return t('document.unmatchedRows.row', { row: String(row.rowNumber) });

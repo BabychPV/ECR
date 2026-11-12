@@ -105,7 +105,7 @@ interface IssuesResponse {
     kind: string;
     methodologyCode: string | null;
     ruleCode?: string | null;
-    columns?: { code: string }[] | null;
+    columns?: { code: string; nameL10n?: { values?: Record<string, string> | null } }[] | null;
   }[];
 }
 
@@ -363,6 +363,8 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
     ruleCode: 'ONLY_GAS',
   });
   expect((issues.items[0]?.columns ?? []).map((c) => c.code)).toEqual(['A']);
+  // AN-164b: колонка таблиці приходить ІЗ заголовком (порожній заголовок означає «вхід поза колонками» — інший підпис).
+  expect(issues.items[0]?.columns?.[0]?.nameL10n?.values?.en).toBe('A');
 
   // 2. Клієнт: банер (згорнутий за замовчуванням — пам'ять згортання чиста) → розгорнути.
   await page.goto(`/documents/${String(arranged.documentId)}?periodKey=${String(arranged.periodKey)}`);
