@@ -152,20 +152,51 @@ public static class TestDatabaseFiles
             }
         }
 
+        return await DropEachAsync(candidates, async name =>
+        {
+            // A failed DROP can leave the connection closed/broken; without a reopen every later DROP would throw
+            // InvalidOperationException and the remaining stale databases would never go.
+            if (connection.State != System.Data.ConnectionState.Open)
+            {
+                await connection.CloseAsync().ConfigureAwait(false);
+                await connection.OpenAsync().ConfigureAwait(false);
+            }
+
+            await using var drop = connection.CreateCommand();
+            drop.CommandText = $"DROP DATABASE [{name.Replace("]", "]]", StringComparison.Ordinal)}];";
+            drop.CommandTimeout = 120;
+            await drop.ExecuteNonQueryAsync().ConfigureAwait(false);
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs <paramref name="drop"/> for every name; a failed drop is skipped, never thrown — the sweep is housekeeping and
+    /// must not fail the fixture (B12, 12.11: one failed DROP broke the connection, the next threw
+    /// <see cref="InvalidOperationException"/> and every test of the fixture failed at start-up). Returns the dropped names.
+    /// </summary>
+    /// <param name="names">Databases to drop, in order.</param>
+    /// <param name="drop">Drops one database.</param>
+    /// <remarks>
+    /// Only <see cref="SqlException"/> (in use now — 3702, already dropped by a parallel sweep — 3701, a broken connection)
+    /// and <see cref="InvalidOperationException"/> (the connection is closed/broken, a reopen failed) are swallowed: anything
+    /// else is a defect in the sweep itself and must stay visible.
+    /// </remarks>
+    public static async Task<IReadOnlyList<string>> DropEachAsync(IEnumerable<string> names, Func<string, Task> drop)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        ArgumentNullException.ThrowIfNull(drop);
+
         var dropped = new List<string>();
-        foreach (var name in candidates)
+        foreach (var name in names)
         {
             try
             {
-                await using var drop = connection.CreateCommand();
-                drop.CommandText = $"DROP DATABASE [{name.Replace("]", "]]", StringComparison.Ordinal)}];";
-                drop.CommandTimeout = 120;
-                await drop.ExecuteNonQueryAsync().ConfigureAwait(false);
+                await drop(name).ConfigureAwait(false);
                 dropped.Add(name);
             }
-            catch (SqlException)
+            catch (Exception e) when (e is SqlException or InvalidOperationException)
             {
-                // In use now (3702) or already dropped by a parallel sweep (3701): leave it.
+                // Leave it: the next run's sweep tries again.
             }
         }
 

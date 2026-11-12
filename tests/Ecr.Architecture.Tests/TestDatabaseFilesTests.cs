@@ -50,6 +50,38 @@ public sealed class TestDatabaseFilesTests
         Assert.False(TestDatabaseFiles.IsStandPath(@"C:\EcrTestData"));
     }
 
+    /// <summary>
+    /// B12 (12.11): a failed stale-database drop leaves the connection closed, the next DROP throws
+    /// <see cref="InvalidOperationException"/> — the sweep must skip it and go on, not fail every test of the fixture.
+    /// Mutation (run, red): <c>DropEachAsync</c> catching only <c>SqlException</c> — the exception escapes.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public async Task Невдале_видалення_старої_бази_пропускається_і_решта_видаляються()
+    {
+        var attempted = new List<string>();
+
+        var dropped = await TestDatabaseFiles.DropEachAsync(["EcrTest_a", "EcrTest_b", "EcrTest_c"], async name =>
+        {
+            attempted.Add(name);
+            if (name == "EcrTest_b")
+            {
+                // The real shape: a command on a closed (never opened, no server needed) SqlConnection.
+                await using var closed = new Microsoft.Data.SqlClient.SqlConnection("Server=unused;Integrated Security=true");
+                await using var command = closed.CreateCommand();
+                command.CommandText = "DROP DATABASE [EcrTest_b];";
+                await command.ExecuteNonQueryAsync();
+            }
+        });
+
+        Assert.Equal(["EcrTest_a", "EcrTest_b", "EcrTest_c"], attempted);
+        Assert.Equal(["EcrTest_a", "EcrTest_c"], dropped);
+
+        // Not a catch-all: a defect in the sweep itself stays visible.
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => TestDatabaseFiles.DropEachAsync(["EcrTest_x"], _ => throw new ArgumentException("defect")));
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Кожне_CREATE_DATABASE_у_тестах_бере_файли_через_TestDatabaseFiles()
