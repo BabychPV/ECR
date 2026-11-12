@@ -28,7 +28,10 @@ public sealed class GetCalculationIssuesHandler(
     IPeriodStore? periods = null,
     IMethodologyStore? methodologies = null,
     IColumnPathMapper? columnMapper = null,
-    IFormulaEngine? formulaEngine = null)
+    IFormulaEngine? formulaEngine = null,
+
+    // ✎ C-1 (D-475): група «Помилки формул»; `null` (старі тести) — групи немає.
+    IFormulaErrorStore? formulaErrors = null)
 {
     private readonly CalculationIssueHints? hints =
         rowStore is null || cellStore is null || metadata is null || periods is null || methodologies is null
@@ -61,7 +64,10 @@ public sealed class GetCalculationIssuesHandler(
         await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
         var rows = await issues.ListAsync(documentId, periodKey, sheetCopyId, ct).ConfigureAwait(false);
-        if (rows.Count == 0)
+        IReadOnlyList<FormulaErrorView> errorRows = formulaErrors is null
+            ? []
+            : await formulaErrors.ListAsync(documentId, periodKey, sheetCopyId, ct).ConfigureAwait(false);
+        if (rows.Count == 0 && errorRows.Count == 0)
         {
             return new CalculationIssuesDto([]);
         }
@@ -72,6 +78,7 @@ public sealed class GetCalculationIssuesHandler(
             : await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
 
         var visible = rows.Where(r => readable.CanReadTable(r.TableDefId)).ToList();
+        var (formulaErrorItems, visibleErrorCount) = FormulaErrorsOf(errorRows, readable);
 
         // Підказка «що приймають правила» — лише рядкам без правила: відхиленому рядку правило вже підійшло.
         var unmatched = visible.Where(r => r.Kind != ICalculationIssueStore.CategoryRuleRejected).ToList();
@@ -109,6 +116,54 @@ public sealed class GetCalculationIssuesHandler(
                             : [.. reason.Columns.Select(c => new CalculationIssueColumnDto(c.Code, c.HeaderL10n))]);
                 }),
             ],
-            built.Tables.Count == 0 ? null : built.Tables);
+            built.Tables.Count == 0 ? null : built.Tables,
+            formulaErrorItems,
+            formulaErrorItems is null ? null : visibleErrorCount);
+    }
+
+    /// <summary>
+    /// ✎ C-1 (D-475): група «Помилки формул» — лише видимі комірки; закриті входи, формула з закритим входом і закрите
+    /// джерело не віддаються (S6).
+    /// </summary>
+    private static (IReadOnlyList<FormulaErrorIssueDto>? Items, int Total) FormulaErrorsOf(
+        IReadOnlyList<FormulaErrorView> rows, DocumentReadScope readable)
+    {
+        var visible = rows
+            .Where(v => readable.CanReadTable(v.Row.TableDefId) && readable.CanReadColumn(v.Row.ColumnDefId))
+            .ToList();
+        if (visible.Count == 0)
+        {
+            return (null, 0);
+        }
+
+        bool CanSee(int tableDefId, int columnDefId) => readable.CanReadTable(tableDefId) && readable.CanReadColumn(columnDefId);
+
+        // ⚠ Payload: власні помилки (корені) — першими; «не оновлено» може бути в кожному рядку великої таблиці — стеля.
+        var shown = visible
+            .OrderBy(v => v.Row.Kind == Domain.Entities.Calculations.FormulaError.ErrorKind ? 0 : 1)
+            .Take(CalculationIssuesDto.MaxFormulaErrors);
+
+        return ([.. shown.Select(v =>
+        {
+            var inputs = Recalculation.FormulaErrorInputs.Parse(v.Row.InputsJson);
+            var hidden = inputs.Any(i => !CanSee(i.TableDefId, i.ColumnDefId));
+            var source = v.Row.SourceTableDefId is { } st && v.Row.SourceColumnDefId is { } sc && CanSee(st, sc)
+                         && v.SourceTableCode is { } stc && v.SourceColumnCode is { } scc
+                ? new Dto.FormulaErrorSourceDto(
+                    stc, v.Row.SourceRowKey ?? string.Empty, scc,
+                    v.Row.SourcePeriodKey == v.Row.PeriodKey ? null : v.Row.SourcePeriodKey)
+                : null;
+            var isError = v.Row.Kind == Domain.Entities.Calculations.FormulaError.ErrorKind;
+            return new FormulaErrorIssueDto(
+                v.TableCode, v.Row.SheetCopyId, v.Row.RowKey, v.RowOrdinal, v.ColumnCode, v.ColumnHeaderL10n,
+                v.Row.Kind, v.Row.ErrorCode,
+                hidden ? null : v.Formula,
+                isError
+                    ? [.. inputs.Where(i => CanSee(i.TableDefId, i.ColumnDefId))
+                        .Select(i => new FormulaErrorInputDto(
+                            i.TableCode ?? string.Empty, i.RowKey, i.ColumnCode ?? string.Empty, i.PeriodOffset, i.Value))]
+                    : null,
+                source, v.Row.Since);
+        })], visible.Count);
     }
 }

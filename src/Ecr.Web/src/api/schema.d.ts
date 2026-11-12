@@ -29076,6 +29076,15 @@ export interface components {
         };
         /** @description Поточні проблеми розрахунку документа за період (AN-69). */
         CalculationIssuesDto: {
+            /**
+             * Format: int32
+             * @description ✎ C-1: скільки видимих комірок з помилкою всього; `null` — помилок немає.
+             */
+            formulaErrorTotal?: null | number;
+            /** @description ✎ C-1 (D-475): група «Помилки формул» — власні помилки першими, далі «не оновлено»; не більше
+             *     int CalculationIssuesDto.MaxFormulaErrors (одна помилка в колонці, яку читає колонкова формула, дає «не оновлено» в кожному
+             *     рядку великої таблиці); `null` — помилок немає. */
+            formulaErrors?: null | components["schemas"]["FormulaErrorIssueDto"][];
             /** @description Проблеми видимих читачеві таблиць; порожньо — проблем немає. */
             items: components["schemas"]["CalculationIssueDto"][];
             /** @description Що приймають правила методологій кожної таблиці з проблемами (UAT 08.11 b3): колонки, які згадують правила, і
@@ -29321,6 +29330,19 @@ export interface components {
              * @description Сума `Submitted`.
              */
             submitted: null | number;
+        };
+        /** @description ✎ C-1 (D-475): стан помилки формули комірки зрізу. */
+        CellCalcErrorDto: {
+            /** @description Код (`#DIV/0`, `#REF`, `#VALUE`, `#UNIT`, `#BUDGET`, `#N/A`, `#MULTI`…). */
+            errorCode: string;
+            /** @description `Error` — власна помилка; `Blocked` — не оновлено через помилку в Source. */
+            kind: string;
+            /**
+             * Format: date-time
+             * @description Відколи (UTC).
+             */
+            since: string;
+            source: null | components["schemas"]["FormulaErrorSourceDto"];
         };
         /** @description Змінена комірка; значення — рядком (decimal без втрати знаків). Тип — як у зрізі подання
          *     (string? SubmissionPayloadCell.Type): `null` — число або текст, інакше
@@ -32214,6 +32236,71 @@ export interface components {
              * @description Таблиця, якій належить формула.
              */
             tableDefId: number;
+        };
+        /** @description ✎ C-1 (D-475): вхідне значення помилки формули. */
+        FormulaErrorInputDto: {
+            /** @description Код колонки. */
+            columnCode: string;
+            /**
+             * Format: int32
+             * @description 0 — поточний період; −1 — попередній тощо.
+             */
+            periodOffset: number;
+            /** @description Ключ рядка. */
+            rowKey: string;
+            /** @description Код таблиці. */
+            tableCode: string;
+            /** @description Значення текстом (інваріантна культура); `null` — порожньо. */
+            value: null | string;
+        };
+        /** @description ✎ C-1 (D-475): рядок групи «Помилки формул». */
+        FormulaErrorIssueDto: {
+            /** @description Код колонки. */
+            columnCode: string;
+            /** @description Заголовок колонки. */
+            columnHeaderL10n: components["schemas"]["LocalizedText"];
+            /** @description Код помилки. */
+            errorCode: string;
+            /** @description Вираз формули; `null` — хоч один вхід читачеві закритий. */
+            formula: null | string;
+            /** @description Вхідні значення, що дали помилку (лише видимі колонки); `null` — для Blocked. */
+            inputs: null | components["schemas"]["FormulaErrorInputDto"][];
+            /** @description `Error` — власна помилка; `Blocked` — не оновлено через помилку в Source. */
+            kind: string;
+            /** @description Ключ рядка. */
+            rowKey: string;
+            /**
+             * Format: int32
+             * @description Порядковий номер рядка (`doc.TableRow.Ordinal`) — для підпису «Рядок N».
+             */
+            rowNumber: number;
+            /**
+             * Format: int64
+             * @description Копія аркуша; `null` — оригінал.
+             */
+            sheetCopyId: null | number;
+            /**
+             * Format: date-time
+             * @description Відколи (UTC).
+             */
+            since: string;
+            source: null | components["schemas"]["FormulaErrorSourceDto"];
+            /** @description Код таблиці. */
+            tableCode: string;
+        };
+        /** @description ✎ C-1 (D-475): адреса комірки-причини помилки. */
+        FormulaErrorSourceDto: {
+            /** @description Код колонки. */
+            columnCode: string;
+            /**
+             * Format: int32
+             * @description Період; `null` — той самий період.
+             */
+            periodKey: null | number;
+            /** @description Ключ рядка. */
+            rowKey: string;
+            /** @description Код таблиці. */
+            tableCode: string;
         };
         /** @description ✎ D-461: ручне значення в комірці формули — для підказки «хто, коли, чому». */
         FormulaManualCellDto: {
@@ -41003,6 +41090,11 @@ export interface components {
          *     `DefaultValue` з опису колонки (ФВ-3.8).
          *     Бюджет усієї операції: p95 1.5 с на 500×60 (tz/08 §8.2). */
         TableSliceDto: {
+            /** @description ✎ C-1 (D-475): комірки зі станом помилки формули: ключ `"{rowKey}:{columnCode}"`; `null` — таких немає
+             *     (більшість зрізів, нуль байтів і нуль звернень). Лише видимі колонки. */
+            calcErrors?: null | {
+                [key: string]: components["schemas"]["CellCalcErrorDto"];
+            };
             /** @description Комірки, дозволені лише після ЯВНОГО підтвердження оператора
              *     (`ФВ-2.16`, `AllowWithConfirmation`, `#43`). Ключ — той
              *     самий формат, що й у IReadOnlyDictionary&lt;string, string&gt; TableSliceDto.CellPermissions

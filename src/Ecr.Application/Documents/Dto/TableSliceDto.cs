@@ -83,7 +83,27 @@ public sealed record TableSliceDto(
     /// (більшість таблиць, нуль байтів у відповіді).
     /// </summary>
     public FormulaOverrideSliceDto? FormulaOverride { get; init; }
+
+    /// <summary>
+    /// ✎ C-1 (D-475): комірки зі станом помилки формули: ключ <c>"{rowKey}:{columnCode}"</c>; <c>null</c> — таких немає
+    /// (більшість зрізів, нуль байтів і нуль звернень). Лише видимі колонки.
+    /// </summary>
+    public IReadOnlyDictionary<string, CellCalcErrorDto>? CalcErrors { get; init; }
 }
+
+/// <summary>✎ C-1 (D-475): стан помилки формули комірки зрізу.</summary>
+/// <param name="Kind"><c>Error</c> — власна помилка; <c>Blocked</c> — не оновлено через помилку в <paramref name="Source"/>.</param>
+/// <param name="ErrorCode">Код (<c>#DIV/0</c>, <c>#REF</c>, <c>#VALUE</c>, <c>#UNIT</c>, <c>#BUDGET</c>, <c>#N/A</c>, <c>#MULTI</c>…).</param>
+/// <param name="Since">Відколи (UTC).</param>
+/// <param name="Source">Комірка-причина для <c>Blocked</c>; <c>null</c> — для <c>Error</c> або джерело читачеві закрите.</param>
+public sealed record CellCalcErrorDto(string Kind, string ErrorCode, DateTime Since, FormulaErrorSourceDto? Source);
+
+/// <summary>✎ C-1 (D-475): адреса комірки-причини помилки.</summary>
+/// <param name="TableCode">Код таблиці.</param>
+/// <param name="RowKey">Ключ рядка.</param>
+/// <param name="ColumnCode">Код колонки.</param>
+/// <param name="PeriodKey">Період; <c>null</c> — той самий період.</param>
+public sealed record FormulaErrorSourceDto(string TableCode, string RowKey, string ColumnCode, int? PeriodKey);
 
 /// <summary>
 /// ✎ D-461: що клієнту треба знати, щоб замінити формулу ручним значенням (з причиною) і повернути формулу.
