@@ -443,8 +443,9 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         // На рядок doc.CellValue читають лише sc (власна обчислена) і pc (власна копія РАЗОМ з нероутованими колонками, Q-17.perf3:
         // окремого apply sv немає); власників у apply на рядок немає.
         // Q-17.slotmap: обидва - через мапу слотів rpt.ViewSlot (seek по (вʼюха, ColumnDefId)); sc - лише маршрутизовані (Mo IS NOT NULL).
-        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(definition, "FROM doc\\.CellValue AS x INNER LOOP JOIN rpt\\.ViewSlot AS m ON m\\.ViewName = N'[A-Za-z0-9_]+' AND m\\.ColumnDefId = x\\.ColumnDefId AND m\\.Mo IS NOT NULL WHERE x\\.PeriodKey = r\\.PeriodKey AND x\\.TableRowId = r\\.Id AND x\\.IsCalculated = 1\\) AS sc\\b"));
-        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(definition, "FROM doc\\.CellValue AS x INNER LOOP JOIN rpt\\.ViewSlot AS m ON m\\.ViewName = N'[A-Za-z0-9_]+' AND m\\.ColumnDefId = x\\.ColumnDefId WHERE x\\.PeriodKey = r\\.PeriodKey AND x\\.TableRowId = r\\.Id\\) AS pc\\b"));
+        // AN-163: обидва - seek по обох ключах кластерного індексу (FORCESEEK (1 (PeriodKey, TableRowId))).
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(definition, "FROM doc\\.CellValue AS x WITH \\(FORCESEEK \\(1 \\(PeriodKey, TableRowId\\)\\)\\) INNER LOOP JOIN rpt\\.ViewSlot AS m ON m\\.ViewName = N'[A-Za-z0-9_]+' AND m\\.ColumnDefId = x\\.ColumnDefId AND m\\.Mo IS NOT NULL WHERE x\\.PeriodKey = r\\.PeriodKey AND x\\.TableRowId = r\\.Id AND x\\.IsCalculated = 1\\) AS sc\\b"));
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(definition, "FROM doc\\.CellValue AS x WITH \\(FORCESEEK \\(1 \\(PeriodKey, TableRowId\\)\\)\\) INNER LOOP JOIN rpt\\.ViewSlot AS m ON m\\.ViewName = N'[A-Za-z0-9_]+' AND m\\.ColumnDefId = x\\.ColumnDefId WHERE x\\.PeriodKey = r\\.PeriodKey AND x\\.TableRowId = r\\.Id\\) AS pc\\b"));
         Assert.DoesNotContain(") AS sv", definition, StringComparison.Ordinal);
         for (var m = 1; m <= 12; m++)
         {
