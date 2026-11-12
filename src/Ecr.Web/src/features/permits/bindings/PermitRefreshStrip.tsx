@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Badge, Button, Group, Text } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { DocumentTableDto } from '@/api/types';
+import { DisabledReason } from '@/features/common/DisabledReason';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { localized } from '@/shared/i18n/localized';
@@ -73,16 +74,17 @@ export function PermitRefreshStrip({ documentId, periodKey, tables, readOnly }: 
           <Text size="sm" style={{ flex: 1 }}>
             {t('permits.sheetBinding.doc.tableLine', { name: tableName })}
           </Text>
-          <Button
-            size="xs"
-            variant="default"
-            disabled={readOnly}
-            title={readOnly ? t('permits.sheetBinding.doc.readOnly') : undefined}
-            loading={refreshLoading && refresh.variables?.code === code}
-            onClick={() => refresh.mutate({ code, tableName, sheetDefId: table.sheetDefId })}
-          >
-            {t('permits.sheetBinding.doc.refresh')}
-          </Button>
+          {/* ⛔ U-6 (аудит 2026-11): `DisabledReason` — кнопка у фокусі, причина в `aria-describedby`, клік гаситься. */}
+          <DisabledReason reason={readOnly ? t('permits.sheetBinding.doc.readOnly') : null}>
+            <Button
+              size="xs"
+              variant="default"
+              loading={refreshLoading && refresh.variables?.code === code}
+              onClick={() => refresh.mutate({ code, tableName, sheetDefId: table.sheetDefId })}
+            >
+              {t('permits.sheetBinding.doc.refresh')}
+            </Button>
+          </DisabledReason>
         </Group>
       ))}
 

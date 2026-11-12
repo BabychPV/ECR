@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -142,18 +142,28 @@ describe('право на запис (P2-2)', () => {
 });
 
 describe('право на публікацію (P2-1)', () => {
-  it('є лише право на правку: «Publish…» вимкнена, причина видна в title', async () => {
+  // U-6 (аудит 2026-11): не нативний `disabled` + `title` (поза табуляцією, причину не чути), а `DisabledReason`:
+  // кнопка у фокусі, `aria-disabled`, причина в `aria-describedby`, клік діалогу не відкриває.
+  it('є лише право на правку: «Publish…» недоступна, у фокусі, з причиною; клік нічого не відкриває', async () => {
     session.permissions = [Edit];
     await open(base);
     const publish = button('Publish…');
-    expect(publish?.disabled).toBe(true);
-    expect(publish?.getAttribute('title')).toBe(Catalog['permits.editor.actions.publishNoRight']);
+    expect(publish?.disabled).toBe(false);
+    expect(publish?.getAttribute('aria-disabled')).toBe('true');
+    const ids = publish?.getAttribute('aria-describedby')?.split(' ') ?? [];
+    expect(ids.map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim()).toBe(
+      Catalog['permits.editor.actions.publishNoRight'],
+    );
+    fireEvent.click(publish!);
+    expect(params().has('dialog')).toBe(false);
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(button('Check')).not.toBeNull();
   });
 
-  it('є обидва права: «Publish…» активна й без title', async () => {
+  it('є обидва права: «Publish…» активна, без aria-disabled і без title', async () => {
     await open(base);
     expect(button('Publish…')?.disabled).toBe(false);
+    expect(button('Publish…')?.hasAttribute('aria-disabled')).toBe(false);
     expect(button('Publish…')?.hasAttribute('title')).toBe(false);
   });
 });

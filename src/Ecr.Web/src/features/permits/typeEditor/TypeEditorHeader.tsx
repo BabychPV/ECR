@@ -1,5 +1,6 @@
 import { useState, type JSX } from 'react';
 import { Badge, Button, Group, Menu } from '@mantine/core';
+import { DisabledReason } from '@/features/common/DisabledReason';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import { badgeLook, statusTone } from '@/shared/ui/StatusBadge';
@@ -89,14 +90,11 @@ export function TypeEditorHeader(): JSX.Element {
                 {t('permits.editor.actions.check')}
               </Button>
             )}
+            {/* ⛔ U-6 (аудит 2026-11): `DisabledReason` — кнопка у фокусі, причина в `aria-describedby`, клік гаситься. */}
             {writable && (
-              <Button
-                onClick={actions.openPublish}
-                disabled={!mayPublish}
-                title={mayPublish ? undefined : t('permits.editor.actions.publishNoRight')}
-              >
-                {t('permits.editor.actions.publish')}
-              </Button>
+              <DisabledReason reason={mayPublish ? null : t('permits.editor.actions.publishNoRight')}>
+                <Button onClick={actions.openPublish}>{t('permits.editor.actions.publish')}</Button>
+              </DisabledReason>
             )}
             {!editable && mayEdit && <Button onClick={actions.openNewVersion}>{t('permits.editor.actions.newVersion')}</Button>}
             {deletable && (

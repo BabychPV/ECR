@@ -150,13 +150,16 @@ describe('PermitRefreshStrip — оновлення', () => {
     expect((await screen.findByTestId('permit-refresh-result')).textContent).toContain(kp('doc.unchanged', { name: 'Emission sources' }));
   });
 
-  it('документ лише для читання: кнопка вимкнена з поясненням, запит не йде', async () => {
+  // U-6 (аудит 2026-11): не нативний `disabled` + `title`, а `DisabledReason` — у фокусі, причина в `aria-describedby`.
+  it('документ лише для читання: кнопка недоступна, у фокусі, з поясненням, запит не йде', async () => {
     const user = userEvent.setup();
     mount({ readOnly: true });
 
     const button = screen.getByRole('button', { name: k('doc.refresh') });
-    expect((button as HTMLButtonElement).disabled).toBe(true);
-    expect(button.getAttribute('title')).toBe(k('doc.readOnly'));
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    const ids = button.getAttribute('aria-describedby')?.split(' ') ?? [];
+    expect(ids.map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim()).toBe(k('doc.readOnly'));
     await user.click(button);
     expect(runtimeApi.refreshPermitBinding).not.toHaveBeenCalled();
   });

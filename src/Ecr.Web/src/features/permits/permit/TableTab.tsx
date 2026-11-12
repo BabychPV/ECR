@@ -1,5 +1,6 @@
-import { lazy, Suspense, useId, useMemo, useState, type JSX } from 'react';
-import { Button, Skeleton, Stack, Text, VisuallyHidden } from '@mantine/core';
+import { lazy, Suspense, useMemo, useState, type JSX } from 'react';
+import { Button, Skeleton, Stack, Text } from '@mantine/core';
+import { DisabledReason } from '@/features/common/DisabledReason';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary, EmptyState } from '@/shared/ui/AsyncBoundary';
 import { useUrlState } from '@/shared/ui/useUrlState';
@@ -55,22 +56,25 @@ export function TableTab({ permit, table, type, units, caps }: TableTabProps): J
   const readOnlyReason = caps.editRows ? undefined : t('permits.page.table.readOnlyReason');
   const tableRows: PermitRow[] = rows?.map((loaded) => loaded.row) ?? [];
 
-  // Вимкнені кнопки пов'язані з причиною через aria-describedby (а не лише `title`, якого скрінрідер не читає).
-  const reasonId = useId();
-  const describedBy = readOnlyReason === undefined ? undefined : reasonId;
+  // ⛔ U-6 (аудит 2026-11): `DisabledReason`, а не нативний `disabled` + `title`: недоступна кнопка лишається в порядку
+  // табуляції, читач чує причину (`aria-describedby` від `Hint`), клік гаситься.
+  const reason = readOnlyReason ?? null;
 
   const tools = (
     <div className="pp-tools">
-      {readOnlyReason !== undefined && <VisuallyHidden id={reasonId}>{readOnlyReason}</VisuallyHidden>}
-      <Button disabled={!caps.editRows} title={readOnlyReason} aria-describedby={describedBy} onClick={() => openRow(NewRowId)}>
-        {t('permits.page.table.addRow')}
-      </Button>
-      <Button variant="default" disabled={!caps.editRows} title={readOnlyReason} aria-describedby={describedBy} onClick={() => setPaste('paste')}>
-        {t('permits.page.table.paste')}
-      </Button>
-      <Button variant="default" disabled={!caps.editRows} title={readOnlyReason} aria-describedby={describedBy} onClick={() => setPaste('file')}>
-        {t('permits.page.table.importFile')}
-      </Button>
+      <DisabledReason reason={reason}>
+        <Button onClick={() => openRow(NewRowId)}>{t('permits.page.table.addRow')}</Button>
+      </DisabledReason>
+      <DisabledReason reason={reason}>
+        <Button variant="default" onClick={() => setPaste('paste')}>
+          {t('permits.page.table.paste')}
+        </Button>
+      </DisabledReason>
+      <DisabledReason reason={reason}>
+        <Button variant="default" onClick={() => setPaste('file')}>
+          {t('permits.page.table.importFile')}
+        </Button>
+      </DisabledReason>
     </div>
   );
 

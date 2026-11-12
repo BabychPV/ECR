@@ -12,6 +12,7 @@ import { endDateOutOfRangeText, sentenceDate } from '../lib/lifecycleText';
 import { PermitsPaths } from '../shell/permitPaths';
 import { type LifecycleDialogId } from './lifecycleDialogIds';
 import { focusHeadingAfterNavigation, pageHeading } from './focusHeadingAfterNavigation';
+import { localName } from './names';
 import { permitKeys } from './usePermitData';
 
 /** Мінімальна довжина причини дострокового завершення: дзеркало сервера (`EndPermitRequest.reason`). */
@@ -119,7 +120,8 @@ export function LifecycleDialogs({ permit, dialog, onClose }: LifecycleDialogsPr
           danger={false}
           title={t('permits.page.activate.title', { number: permit.number })}
           consequences={[
-            t('permits.page.activate.reads', { type: permit.typeCode, from, to: toEnd }),
+            // U-4 (аудит 2026-11): назва типу мовою інтерфейсу (як діалог активації в переліку), код — запасом.
+            t('permits.page.activate.reads', { type: localName(permit.typeNameL10n) || permit.typeCode, from, to: toEnd }),
             { text: t('permits.page.activate.edits'), note: true },
             { text: t('permits.page.activate.overlap'), note: true },
           ]}

@@ -72,13 +72,14 @@ describe('PermitRefreshStrip - доступність', { timeout: 120_000 }, ()
       expect(found, describeViolations(found)).toHaveLength(0);
     });
 
-    it(`${colorScheme}: документ лише для читання - кнопка вимкнена`, async () => {
+    // U-6 (аудит 2026-11): недоступна через `DisabledReason` (`aria-disabled` + причина), а не нативний `disabled`.
+    it(`${colorScheme}: документ лише для читання - кнопка недоступна з причиною`, async () => {
       const { container } = render(
         <Shell colorScheme={colorScheme}>
           <PermitRefreshStrip documentId={55} periodKey={202607} tables={[table]} readOnly />
         </Shell>,
       );
-      expect((screen.getByRole('button', { name: /doc\.refresh/ }) as HTMLButtonElement).disabled).toBe(true);
+      expect(screen.getByRole('button', { name: /doc\.refresh/ }).getAttribute('aria-disabled')).toBe('true');
 
       const found = await findViolations(container);
       expect(found, describeViolations(found)).toHaveLength(0);

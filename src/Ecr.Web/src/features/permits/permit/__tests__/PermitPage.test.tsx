@@ -10,6 +10,7 @@ import * as rowsApi from '@/features/registries/rows/api';
 import type { RegistryBatchResult } from '@/features/registries/rows/api';
 import { Catalog } from '@/test/__tests__/a11yFixtures';
 import { TestProviders } from '@/test/render';
+import { hasUnsavedChanges } from '@/shared/ui/unsavedSources';
 import * as permitsApi from '../../api/permitsApi';
 import * as typesApi from '../../api/typesApi';
 import { PermitSheetBindingsFlag } from '../../permitFeatures';
@@ -213,12 +214,47 @@ describe('шапка-форма', () => {
     expect(screen.queryByRole('form')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
     expect(screen.getByText('KZ-100', { selector: 'dd' })).toBeTruthy();
+    // U-4 (аудит 2026-11): тип — назвою мовою інтерфейсу, як у підзаголовку, а не кодом `WaterDischarge`.
+    expect(screen.getByText('Water discharge', { selector: 'dd' })).toBeTruthy();
+    expect(screen.queryByText('WaterDischarge', { selector: 'dd' })).toBeNull();
     expect(screen.getByText('This permit has expired and is read-only here')).toBeTruthy();
     cleanup();
 
     session.permissions = Viewer;
     await open('/admin/permits/5', permit({ status: 'Active' }));
     expect(screen.queryByRole('form')).toBeNull();
+  });
+
+  // U-1 (аудит 2026-11): панель Overview розмонтовувалась при перемиканні вкладок — правка шапки зникала мовчки.
+  it('U-1: чернетка шапки переживає перемикання вкладок', async () => {
+    await open();
+    fireEvent.change(screen.getByRole('textbox', { name: /^Location/ }), { target: { value: 'X' } });
+
+    const tabs = within(screen.getByRole('tablist', { name: 'Permit sections' })).getAllByRole('tab');
+    fireEvent.click(tabs[1]!);
+    expect(await screen.findByText('Outfall A')).toBeTruthy();
+    fireEvent.click(tabs[0]!);
+
+    await waitFor(() => expect(screen.getByRole('textbox', { name: /^Location/ })).toHaveProperty('value', 'X'));
+  });
+
+  // U-1: вихід зі сторінки чи закриття вкладки браузера питає (UnsavedGuard читає `unsavedSources`).
+  it('U-1: змінена шапка — джерело незбережених змін', async () => {
+    await open();
+    expect(hasUnsavedChanges()).toBe(false);
+
+    fireEvent.change(screen.getByRole('textbox', { name: /^Number/ }), { target: { value: 'KZ-200' } });
+    expect(hasUnsavedChanges()).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(hasUnsavedChanges()).toBe(false);
+  });
+
+  // U-1: межі сервера (`PermitInput.MaxNumber` / `MaxLocation`) — у полі, а не тостом 422 після «Save».
+  it('U-1: поля номера й місця обмежені межами сервера', async () => {
+    await open();
+    expect(screen.getByRole('textbox', { name: /^Number/ }).getAttribute('maxlength')).toBe('200');
+    expect(screen.getByRole('textbox', { name: /^Location/ }).getAttribute('maxlength')).toBe('500');
   });
 });
 
@@ -337,6 +373,9 @@ describe('життєвий цикл за станом і правами', () => 
     await open();
     fireEvent.click(screen.getAllByRole('button', { name: 'Activate…' })[0]!);
     const dialog = await screen.findByRole('dialog', { name: 'Activate permit KZ-100?' });
+    // U-4 (аудит 2026-11): у реченні діалогу — назва типу, а не код.
+    expect(dialog.textContent).toContain('Water discharge');
+    expect(dialog.textContent).not.toContain('WaterDischarge');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Activate' }));
     await waitFor(() => expect(activatePermit).toHaveBeenCalledWith(5));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -654,7 +693,11 @@ describe('форма рядка', () => {
 
   it('закінчений дозвіл: рядок відкривається лише для читання', async () => {
     await openLimits(permit({ status: 'Expired' }));
-    expect(screen.getByRole('button', { name: 'Add row' })).toHaveProperty('disabled', true);
+    // U-6 (аудит 2026-11): недоступна, але у фокусі й з причиною (`DisabledReason`), клік шторку не відкриває.
+    const add = screen.getByRole('button', { name: 'Add row' });
+    expect(add.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(add);
+    expect(screen.queryByRole('dialog', { name: 'New row' })).toBeNull();
     fireEvent.click(screen.getByText('Outfall A'));
     const dialog = await screen.findByRole('dialog', { name: 'Outfall A' });
     expect(within(dialog).queryByRole('button', { name: 'Save' })).toBeNull();
@@ -662,15 +705,20 @@ describe('форма рядка', () => {
     expect(within(dialog).getByRole('textbox', { name: /^Annual volume/ })).toHaveProperty('readOnly', true);
   });
 
-  it('глядач без права запису: кнопки таблиці вимкнені', async () => {
+  it('глядач без права запису: кнопки таблиці недоступні, у фокусі, з причиною; клік нічого не відкриває', async () => {
     session.permissions = Viewer;
     await openLimits(permit({ status: 'Active' }));
     for (const name of ['Add row', 'Paste from Excel…', 'Import file…']) {
-      expect(screen.getByRole('button', { name })).toHaveProperty('disabled', true);
-      // Причина читається скрінрідером: кнопка описана тим самим текстом, що й `title`.
-      const describedBy = screen.getByRole('button', { name }).getAttribute('aria-describedby');
-      expect(describedBy).toBeTruthy();
-      expect(document.getElementById(describedBy ?? '')?.textContent).toBe('This permit is read-only here');
+      const button = screen.getByRole('button', { name });
+      // U-6 (аудит 2026-11): не нативний `disabled` (поза табуляцією), а `aria-disabled` + опис причини (`DisabledReason`).
+      expect(button.getAttribute('aria-disabled')).toBe('true');
+      expect((button as HTMLButtonElement).disabled).toBe(false);
+      const ids = button.getAttribute('aria-describedby')?.split(' ') ?? [];
+      expect(ids.map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim()).toBe(
+        'This permit is read-only here',
+      );
+      fireEvent.click(button);
+      expect(screen.queryByRole('dialog')).toBeNull();
     }
   });
 
