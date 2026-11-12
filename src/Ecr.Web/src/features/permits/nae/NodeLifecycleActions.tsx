@@ -101,7 +101,7 @@ export function NodeLifecycleActions({ registryCode, node, onPurged }: NodeLifec
         </Button>
         <Button
           size="xs"
-          variant="default"
+          variant="outline"
           color="statusError"
           onClick={() => {
             purge.reset();

@@ -340,19 +340,15 @@
   font-weight: 600;
 }
 
-/* Реальний axe: `red-text`/`orange-text` у цій темі дають #fa5252/#fd7e14 на сірому тлі таблиці - 3.06 і 2.39. Темніші відтінки. */
+/*
+ * U-8 (аудит 2026-11, ФВ-14.11): статус — токенами теми; `-text` сам перемикається між світлою й темною схемою, контраст —
+ * `contrast.test.ts`. (Раніше тут стояли сирі hex і палітра red/orange: голі `red-text`/`orange-text` давали на сірому тлі
+ * таблиці 3.06 і 2.39 — статусні токени темніші.)
+ */
 .pi-sev[data-severity='Error'] {
-  color: #a61e1e;
+  color: var(--mantine-color-statusError-text);
 }
 
 .pi-sev[data-severity='Warning'] {
-  color: #9c3a0a;
-}
-
-:root[data-mantine-color-scheme='dark'] .pi-sev[data-severity='Error'] {
-  color: var(--mantine-color-red-4);
-}
-
-:root[data-mantine-color-scheme='dark'] .pi-sev[data-severity='Warning'] {
-  color: var(--mantine-color-orange-4);
+  color: var(--mantine-color-statusWarning-text);
 }

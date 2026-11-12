@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { useId, useState, type JSX, type KeyboardEvent } from 'react';
 import {
   Alert,
   Box,
@@ -158,6 +158,12 @@ export function LoginPage(): JSX.Element {
   const idleMinutesKnown = Number.isInteger(idleMinutes) && idleMinutes >= 1 && idleMinutes <= 480;
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
+  // ✎ U-9 (аудит 2026-11, UX-16): підказка Caps Lock — лише поки фокус у полі пароля (кілька невдалих спроб блокують
+  // обліковий запис, а загальне «невірний логін або пароль» причини не називає).
+  const [capsLock, setCapsLock] = useState(false);
+  // ⚠ Mantine `PasswordInput` (7.15) не ставить `aria-describedby` на внутрішнє поле для `description` — зв'язок явний.
+  const passwordId = useId();
+  const trackCapsLock = (event: KeyboardEvent<HTMLInputElement>): void => setCapsLock(event.getModifierState('CapsLock'));
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [lost, setLost] = useState<{ userId: number; edits: LostEdits } | null>(null);
@@ -426,6 +432,12 @@ export function LoginPage(): JSX.Element {
                   label={t('login.password')}
                   value={password}
                   onChange={(event) => setPassword(event.currentTarget.value)}
+                  onKeyDown={trackCapsLock}
+                  onKeyUp={trackCapsLock}
+                  onBlur={() => setCapsLock(false)}
+                  id={passwordId}
+                  description={capsLock ? t('login.capsLockOn') : undefined}
+                  aria-describedby={capsLock ? `${passwordId}-description` : undefined}
                   autoComplete="current-password"
                   visibilityToggleButtonProps={passwordToggleProps()}
                 />

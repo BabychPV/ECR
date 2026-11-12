@@ -94,6 +94,44 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/**
+ * U-3 (аудит 2026-11): «Remove URL» стирає секретну адресу вебхука, яку сервер не віддає назад — незворотно, тож
+ * через підтвердження з назвою каналу (як видалення каналу, R-06/X-01).
+ */
+describe('ChannelsPanel: «Remove URL» вебхука', () => {
+  it('U-3: Remove URL питає підтвердження і лише після нього шле secret: null', async () => {
+    const secretCalls: { method: string; body: string | null }[] = [];
+    const teams = { ...channels[1]!, id: 3, name: 'Teams duty', hasSecret: true };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input).split('?')[0] ?? '';
+        if (path.endsWith('/api/v1/notifications/channels')) return json([teams]);
+        if (path.endsWith('/api/v1/notifications/channels/3/secret')) {
+          secretCalls.push({ method: String(init?.method ?? 'GET'), body: typeof init?.body === 'string' ? init.body : null });
+          return json(teams);
+        }
+        return json(null);
+      }),
+    );
+    show();
+
+    const row = await screen.findByRole('row', { name: /Teams duty/ });
+    fireEvent.click(within(row).getByText(/notifications\.setWebhook/));
+    const secretDialog = await screen.findByRole('dialog', { name: /notifications\.setWebhook/ });
+    fireEvent.click(within(secretDialog).getByRole('button', { name: /notifications\.clearWebhook/ }));
+
+    // Запиту ще немає: спершу — діалог підтвердження з назвою каналу.
+    const confirm = await screen.findByRole('dialog', { name: /notifications\.clearWebhookTitle/ });
+    expect(secretCalls).toEqual([]);
+
+    fireEvent.click(within(confirm).getByRole('button', { name: /notifications\.clearWebhook/ }));
+    await waitFor(() => {
+      expect(secretCalls).toEqual([{ method: 'PUT', body: JSON.stringify({ secret: null }) }]);
+    });
+  }, 30_000);
+});
+
 describe('ChannelsPanel: відмова переліку ≠ «каналів не заведено»', () => {
   it('канали не приїхали — причина з кодом, таблиці НЕМАЄ', async () => {
     mockServer('refuse');

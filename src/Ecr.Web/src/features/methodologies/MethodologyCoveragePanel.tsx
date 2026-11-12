@@ -1,12 +1,13 @@
 import type { JSX } from 'react';
 import { Badge, Code, Group, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
+import { queryKeys } from '@/api/queryKeys';
 import type { CalculationBindingDto } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Banner } from '@/shared/ui/Banner';
 import { toneFills } from '@/shared/ui/StatusBadge';
-import { methodologyCoverage, type MethodologyCoverageDto } from './api';
+import { calculationBindings, methodologyCoverage, type MethodologyCoverageDto } from './api';
 import { MethodologySection } from './MethodologySection';
 
 /**
@@ -33,16 +34,36 @@ function NowhereBadge(): JSX.Element {
   );
 }
 
+/** Коди таблиці й колонки прив'язок за id — з переліку прив'язок методології (F-21). */
+type BindingCodes = ReadonlyMap<number, { readonly table: string | null; readonly column: string | null }>;
+
+function codesOf(list: readonly CalculationBindingDto[] | undefined): BindingCodes {
+  return new Map((list ?? []).map((b) => [b.id, { table: b.tableCode ?? null, column: b.columnCode ?? null }]));
+}
+
+/**
+ * Підпис прив'язки `таблиця.колонка` кодами (F-21, аудит 2026-11 U-2); ідентифікатори — лише запасом, коли перелік
+ * прив'язок не прочитався.
+ */
+function bindingLabel(binding: CalculationBindingDto, codes: BindingCodes): string {
+  const known = codes.get(binding.id);
+  const table = binding.tableCode ?? known?.table ?? null;
+  const column = binding.columnCode ?? known?.column ?? null;
+  return table !== null && column !== null ? `${table}.${column}` : `${String(binding.tableDefId)}.${String(binding.columnDefId)}`;
+}
+
 /** Куди лягають активні прив'язки одного виходу — код `таблиця.колонка`. */
 function BindingList({
   bindings,
+  codes,
 }: {
   readonly bindings: readonly CalculationBindingDto[];
+  readonly codes: BindingCodes;
 }): JSX.Element {
   return (
     <Group gap="xs">
       {bindings.map((binding) => (
-        <Code key={binding.id}>{`${String(binding.tableDefId)}.${String(binding.columnDefId)}`}</Code>
+        <Code key={binding.id}>{bindingLabel(binding, codes)}</Code>
       ))}
     </Group>
   );
@@ -75,6 +96,13 @@ export function MethodologyCoveragePanel({
     queryKey: ['methodologies', 'coverage', methodologyId, versionId],
     queryFn: () => methodologyCoverage(methodologyId, versionId),
   });
+  // ⛔ U-2 (аудит 2026-11, F-21): коди таблиці й колонки — з переліку прив'язок методології (той самий ключ, що в панелі
+  // прив'язок цієї сторінки, тож запит іде з кешу); сервер покриття віддає лише id.
+  const bindingList = useQuery({
+    queryKey: queryKeys.methodologies.bindings(methodologyId),
+    queryFn: () => calculationBindings(methodologyId),
+  });
+  const codes = codesOf(bindingList.data);
 
   return (
     <MethodologySection sectionId="outputCoverage" title={t('methodologies.outputCoverage')}>
@@ -112,7 +140,7 @@ export function MethodologyCoveragePanel({
                         {output.bindings.length === 0 ? (
                           <NowhereBadge />
                         ) : (
-                          <BindingList bindings={output.bindings} />
+                          <BindingList bindings={output.bindings} codes={codes} />
                         )}
                       </Table.Td>
                     </Table.Tr>
@@ -148,8 +176,12 @@ export function MethodologyCoveragePanel({
                         <Table.Td>
                           <Code>{binding.outputCode}</Code>
                         </Table.Td>
-                        <Table.Td>{binding.tableDefId}</Table.Td>
-                        <Table.Td>{binding.columnDefId}</Table.Td>
+                        <Table.Td>
+                          {binding.tableCode ?? codes.get(binding.id)?.table ?? <Code>{binding.tableDefId}</Code>}
+                        </Table.Td>
+                        <Table.Td>
+                          {binding.columnCode ?? codes.get(binding.id)?.column ?? <Code>{binding.columnDefId}</Code>}
+                        </Table.Td>
                       </Table.Tr>
                     ))}
                   </Table.Tbody>
