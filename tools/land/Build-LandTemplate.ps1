@@ -61,7 +61,9 @@
                     обов'язкові входи (колонки, без яких методологія не рахує; чотири колонки T3_00 для C05_01..05 - людина
                     10.11) з рівнем -RequiredInputSeverity (Warn типово, Block після репетиції). Чернетку V(n+1) створює лише
                     з -RequiredInputsCreateDrafts і лише коли є що реєструвати; чернетку з іншою назвою не чіпає.
-                    Публікації не робить; повтор - 0 змін; без -RequiredInputsCreateDrafts - лише перелік
+                    Публікації не робить; повтор - 0 змін; без -RequiredInputsCreateDrafts - лише перелік.
+                    З -GoldenTestDocumentId/-GoldenTestPeriodKey golden-тести чернетки V<n> (і вже наявної) -> цей
+                    документ/період (інакше публікація: ECR-CALC-0422 «Golden test … has no period»)
     ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє, окрім явного
     -PruneStaleTables (м'яке видалення таблиць чернетки, яких немає в моделі; без прапора - лише попередження).
     Формули колонок наявної чернетки-клону порівнюються з моделлю й оновлюються (D-YE-1). Прод-БД старої системи тут
@@ -2176,17 +2178,7 @@ function Stage-BranchGate {
         }
         $bgVid = [int]$bgLast.id
 
-        if ($GoldenTestDocumentId -gt 0 -and $GoldenTestPeriodKey -gt 0) {
-            $bgOv = Get-LandBranchGateTestOverrides
-            $ov = if ($bgOv.ContainsKey($bgCode)) { $bgOv[$bgCode] } else { @{} }
-            foreach ($t in @(Items (Api GET "/api/v1/methodologies/$bgId/versions/$bgVid/tests").Json)) {
-                $ti = Convert-LandBranchGateTestInput -InputJson ([string]$t.inputJson) -DocumentId $GoldenTestDocumentId -PeriodKey $GoldenTestPeriodKey -Overrides $ov
-                if (-not $ti.Changed) { continue }
-                $tp = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$bgId/versions/$bgVid/tests/$($t.code)" -Body @{ inputJson = $ti.InputJson; expectedJson = [string]$t.expectedJson; tolerance = [string]$t.tolerance }
-                if ($tp.Status -eq 200) { $bgChanged++; Log "  ${bgCode}: тест $($t.code) -> документ $GoldenTestDocumentId, період $GoldenTestPeriodKey" }
-                else { Log "  ! ${bgCode}: тест $($t.code) HTTP $($tp.Status) $(Get-EcrErrorCode $tp)" }
-            }
-        }
+        $bgChanged += Set-LandDraftGoldenTests -Code $bgCode -MethodologyId $bgId -VersionId $bgVid
 
         if ($bgSubst.Contains($bgCode) -and $bgAir.Count -gt 0) {
             $ids = @(); $missing = @()
@@ -2229,9 +2221,29 @@ function Stage-BranchGate {
 # з якою її заводили, а сервер перекладає його за шляхом. Тому після публікації нової версії шаблону повтор - 0 змін.
 # Чернетку з назвою не V<n> (чужа робота, напр. «test») не чіпаємо. Нової чернетки без -RequiredInputsCreateDrafts не
 # створюємо (тоді етап лише друкує, що лишилось); коли змін немає - не створюємо взагалі. Публікації етап не робить.
+# Golden-тести ЧЕРНЕТКИ -> наявний документ/період (-GoldenTestDocumentId/-GoldenTestPeriodKey). Публікація відмовляє
+# (ECR-CALC-0422 «Golden test … has no period»), коли тест успадкував вхід без документа/періоду (тести V1 зі спеки P1..P5).
+# Без обох параметрів - нічого не робить. Повертає кількість змінених тестів; повтор - 0. Спільне для BranchGate і
+# RequiredInputs (W15r 12.11: 22 чернетки RI зупинились на першій публікації). Потребує LandBranchGate.Lib.ps1.
+function Set-LandDraftGoldenTests([string]$Code, [int]$MethodologyId, [int]$VersionId) {
+    if ($GoldenTestDocumentId -le 0 -or $GoldenTestPeriodKey -le 0) { return 0 }
+    $gtOv = Get-LandBranchGateTestOverrides
+    $ov = if ($gtOv.ContainsKey($Code)) { $gtOv[$Code] } else { @{} }
+    $n = 0
+    foreach ($t in @(Items (Api GET "/api/v1/methodologies/$MethodologyId/versions/$VersionId/tests").Json)) {
+        $ti = Convert-LandBranchGateTestInput -InputJson ([string]$t.inputJson) -DocumentId $GoldenTestDocumentId -PeriodKey $GoldenTestPeriodKey -Overrides $ov
+        if (-not $ti.Changed) { continue }
+        $tp = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$MethodologyId/versions/$VersionId/tests/$($t.code)" -Body @{ inputJson = $ti.InputJson; expectedJson = [string]$t.expectedJson; tolerance = [string]$t.tolerance }
+        if ($tp.Status -eq 200) { $n++; Log "  ${Code}: тест $($t.code) -> документ $GoldenTestDocumentId, період $GoldenTestPeriodKey" }
+        else { Log "  ! ${Code}: тест $($t.code) HTTP $($tp.Status) $(Get-EcrErrorCode $tp)" }
+    }
+    return $n
+}
+
 function Stage-RequiredInputs {
     Log "== RequiredInputs ($RequiredInputSeverity) =="
     . (Join-Path $here 'LandRequiredInputs.Lib.ps1')
+    . (Join-Path $here 'LandBranchGate.Lib.ps1')
     LoginAs $BuildUser
     Load-Structure
     # id колонки -> "ТАБЛИЦЯ/КОЛОНКА": остання опублікована версія шаблону; старіші версії - лише коли трапився чужий id.
@@ -2276,7 +2288,12 @@ function Stage-RequiredInputs {
             $current += [pscustomobject]@{ Path = $riPath[$cid]; Severity = [string]$r.severity }
         }
         $todo = @(Get-LandRequiredInputDiff -Wanted $wanted -Current $current -Severity $RequiredInputSeverity)
-        if ($todo.Count -eq 0) { Log "  ${riCode}: вимог $($wanted.Count), змін немає (версія $($source.versionNumber), $($source.status))"; continue }
+        if ($todo.Count -eq 0) {
+            Log "  ${riCode}: вимог $($wanted.Count), змін немає (версія $($source.versionNumber), $($source.status))"
+            # Наявна чернетка V<n> (напр. створена попереднім прогоном) - golden-тести все одно на документ/період.
+            if ($target.Draft) { $riChanged += Set-LandDraftGoldenTests -Code $riCode -MethodologyId $riId -VersionId ([int]$target.Draft.id) }
+            continue
+        }
         $draft = $target.Draft
         if (-not $draft) {
             if (-not $RequiredInputsCreateDrafts) {
@@ -2296,6 +2313,7 @@ function Stage-RequiredInputs {
         }
         $riChanged += $n
         Log "  ${riCode}: зареєстровано $n з $($todo.Count) (чернетка id $($draft.id), $RequiredInputSeverity)"
+        $riChanged += Set-LandDraftGoldenTests -Code $riCode -MethodologyId $riId -VersionId ([int]$draft.id)
     }
     Log "  змінено: $riChanged; лишилось: $riPending"
 }
