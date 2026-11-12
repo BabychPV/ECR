@@ -96,6 +96,16 @@ public sealed class ImportDiffBuilder
 
         var period = new PeriodKey(periodKey);
 
+        // ⛔ C-4 (аудит 2026-11): формула КОМІРКИ/РЯДКА (WW-02) стоїть у ВХІДНІЙ колонці, і експорт пише її в
+        // комірку (`ExcelExporter.WriteFormulas`) так само, як колонкову, — те саме правило `V-10` нижче. Доти
+        // Excel перераховував її кешоване значення після правки входу, і `Deny(CalculatedCell)` відхиляв усю
+        // книгу. Формули з ручним значенням (D-461) сюди не входять — їх веде гілка `replacesFormula`.
+        var formulaCells = table.Formulas
+            .Where(f => !f.IsDeleted && f.Scope != FormulaScope.Column && f.ColumnDefId is not null && !f.AllowManualOverride)
+            .Select(f => (RowKey: Ecr.Application.Recalculation.FormulaOutputs.RowKeyOf(table, f), ColumnDefId: f.ColumnDefId!.Value))
+            .Where(t => t.RowKey is not null)
+            .ToHashSet();
+
         // ⛔ Y5-01 (аудит 7): карта тримає ПОЗИЦІЇ рядків і колонок. Сортування,
         // вставка чи видалення рядка або колонки в Excel їх зсуває, і значення лягли б
         // у чужі рядки — зміною, що виглядає як звичайна правка. Розбіжність підпису
@@ -189,7 +199,8 @@ public sealed class ImportDiffBuilder
                 // щойно користувач змінить вхідну комірку поруч) означало б
                 // відхиляти кожну книгу, у якій змінили хоч одне вхідне число, —
                 // і з «усе або нічого» Apply не ставав доступним ніколи.
-                if (IsCalculated(definition) && cell.HasFormula)
+                if (cell.HasFormula
+                    && (IsCalculated(definition) || formulaCells.Contains((row.RowKey, column.ColumnDefId))))
                 {
                     continue;
                 }
