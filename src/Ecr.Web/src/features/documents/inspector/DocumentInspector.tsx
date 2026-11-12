@@ -832,53 +832,79 @@ function CellHistory({
     );
   }
 
-  // ⚠ Журнал адресує комірку ДОКУМЕНТА; звітний період — окрема вісь (`R-A6`). Основний відсів уже на сервері
-  // (`periodKey` у запиті); тут лишено страхувальний другий рубіж, як у `GetCellChangesHandler`.
-  const items = history.data.items.filter((change) => change.periodKey === periodKey);
+  const { items, ownerPeriod } = cellHistoryItems(history.data.items, periodKey);
 
   if (items.length === 0) {
     return <Empty title={t('inspector.noHistoryTitle')} hint={t('inspector.noHistoryHint')} />;
   }
 
   return (
-    <div role="list" data-inspector-history="">
-      {items.map((change) => (
-        <div key={`${change.changedAt}:${String(change.changedByUserId)}:${change.newValue ?? ''}`} role="listitem" className="ecr-insp-hist">
-          <Group justify="space-between" gap="xs" wrap="nowrap">
-            {/* AN-115: правка й імпорт — ім'я людини; перерахунок/інтеграція/міграція — «Система». */}
-            {/* ✎ D-461: та сама підказка, що й у журналі: для системної зміни — хто її запустив. */}
-            <Text size="sm" fw={500} data-inspector-author="" title={cellAuthorHint(change)}>
-              {cellAuthorName({
-                ...change,
-                changedByDisplayName:
-                  change.changedByDisplayName ?? t('inspector.unknownAuthor', { id: change.changedByUserId }),
-              })}
-            </Text>
-            <Text size="xs" c="dimmed">
-              <Timestamp value={change.changedAt} />
-            </Text>
-          </Group>
-          <div className="ecr-insp-diff">
-            {change.oldValue === null ? <Text span c="dimmed">—</Text> : <s>{change.oldValue}</s>}
-            <Glyph size={14} d="M5 12h14M13 6l6 6-6 6" />
-            <span>{change.newValue ?? '—'}</span>
-          </div>
-          <Group gap="xs">
-            <Badge size="xs" variant="default" radius="sm" tt="none">
-              {`${t('audit.origin')}: ${change.origin}`}
-            </Badge>
-            {change.isLateEdit && (
-              <Badge size="xs" variant="light" color="statusWarning" radius="sm" tt="none">
-                {t('inspector.lateEdit')}
+    <>
+      {/* Q-17: зміни прийшли з періоду-власника — назвати його, щоб «змінено в січні» не читалося як чужий місяць. */}
+      {ownerPeriod !== null && (
+        <Text size="xs" c="dimmed" px="sm" pt="xs" data-inspector-owner-period={ownerPeriod}>
+          {t('inspector.history.ownerPeriodNote', { period: formatPeriodKey(ownerPeriod) || String(ownerPeriod) })}
+        </Text>
+      )}
+      <div role="list" data-inspector-history="">
+        {items.map((change) => (
+          <div key={`${change.changedAt}:${String(change.changedByUserId)}:${change.newValue ?? ''}`} role="listitem" className="ecr-insp-hist">
+            <Group justify="space-between" gap="xs" wrap="nowrap">
+              {/* AN-115: правка й імпорт — ім'я людини; перерахунок/інтеграція/міграція — «Система». */}
+              {/* ✎ D-461: та сама підказка, що й у журналі: для системної зміни — хто її запустив. */}
+              <Text size="sm" fw={500} data-inspector-author="" title={cellAuthorHint(change)}>
+                {cellAuthorName({
+                  ...change,
+                  changedByDisplayName:
+                    change.changedByDisplayName ?? t('inspector.unknownAuthor', { id: change.changedByUserId }),
+                })}
+              </Text>
+              <Text size="xs" c="dimmed">
+                <Timestamp value={change.changedAt} />
+              </Text>
+            </Group>
+            <div className="ecr-insp-diff">
+              {change.oldValue === null ? <Text span c="dimmed">—</Text> : <s>{change.oldValue}</s>}
+              <Glyph size={14} d="M5 12h14M13 6l6 6-6 6" />
+              <span>{change.newValue ?? '—'}</span>
+            </div>
+            <Group gap="xs">
+              <Badge size="xs" variant="default" radius="sm" tt="none">
+                {`${t('audit.origin')}: ${change.origin}`}
               </Badge>
-            )}
-          </Group>
-          {/* ✎ D-461: причина ручного значення замість формули — словами під походженням. */}
-          <HistoryReason reason={change.reason} />
-        </div>
-      ))}
-    </div>
+              {change.isLateEdit && (
+                <Badge size="xs" variant="light" color="statusWarning" radius="sm" tt="none">
+                  {t('inspector.lateEdit')}
+                </Badge>
+              )}
+            </Group>
+            {/* ✎ D-461: причина ручного значення замість формули — словами під походженням. */}
+            <HistoryReason reason={change.reason} />
+          </div>
+        ))}
+      </div>
+    </>
   );
+}
+
+/**
+ * Зміни комірки, які показує History, і період-власник, якщо вони прийшли НЕ з періоду перегляду.
+ *
+ * ⚠ Журнал адресує комірку ДОКУМЕНТА; звітний період — окрема вісь (`R-A6`). Сервер фільтрує за `periodKey`, а для
+ * таблиці «місяці в колонках» (Q-17) читає період-ВЛАСНИК колонки (не-місячна — якір року): саме туди PATCH пише
+ * правку. Тоді вся сторінка — з одного чужого періоду, і її показано з приміткою. Змішана сторінка (сервер без
+ * маршрутизації) — страхувальний другий рубіж, як і раніше: лише період перегляду.
+ */
+function cellHistoryItems<T extends { readonly periodKey: number }>(
+  all: readonly T[],
+  periodKey: number,
+): { items: T[]; ownerPeriod: number | null } {
+  const periods = new Set(all.map((change) => change.periodKey));
+  const [only] = periods;
+  const ownerPeriod = periods.size === 1 && only !== undefined && only !== periodKey ? only : null;
+  const shown = ownerPeriod ?? periodKey;
+
+  return { items: all.filter((change) => change.periodKey === shown), ownerPeriod };
 }
 
 /** ✎ D-461: «Причина: …» рядка історії комірки; без причини — нічого (`cellChangeReasonText`). */
