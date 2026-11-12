@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { CollectionRunsPanel } from '@/features/integration/CollectionRunsPanel';
+import { setLanguage } from '@/shared/i18n';
 
 /**
  * Журнал прогонів збору (ФВ-5.23) — рядок таблиці.
@@ -101,6 +102,24 @@ describe('CollectionRunsPanel: рядок журналу', () => {
     // щойно є рядки). Без цього очікування файл міг завершитись раніше за той `import()` — «Vite module runner has
     // been closed» (`collectionRunMessage.ts`), необроблена відмова, що червонить job `shuffle` (seed 23107).
     await import('@/features/integration/CollectionRunDetailDrawer');
+  });
+
+  // U-7 (аудит 2026-11, UX-11/D15-09): тривалість — через `formatNumber` мовою інтерфейсу, а не `toFixed` (крапка в ru).
+  it('U-7: у ru тривалість прогону з десятковою комою', async () => {
+    setLanguage('ru');
+    try {
+      respond({ items: [Run], nextCursor: null, totalCount: null });
+      show();
+
+      await screen.findByText('Flow meter #1');
+      const row = document.querySelector<HTMLElement>('tr[data-row-key="501"]');
+      expect(row?.textContent ?? '').toContain('12,3');
+      expect(row?.textContent ?? '').not.toContain('12.3');
+
+      await import('@/features/integration/CollectionRunDetailDrawer');
+    } finally {
+      setLanguage('en');
+    }
   });
 
   it('запуск людиною показує ідентифікатор користувача, а не "система"', async () => {

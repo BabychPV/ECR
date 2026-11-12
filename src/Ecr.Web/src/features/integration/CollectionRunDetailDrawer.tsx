@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 import { Alert, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
+import { formatNumber } from '@/shared/format';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { CollectionRunStateBadge } from './CollectionRunStateBadge';
 import { DetailDrawer } from '@/shared/ui/DetailDrawer';
@@ -130,5 +131,8 @@ function RangeValue({ run }: { readonly run: CollectionRunView }): JSX.Element {
 function durationValue(durationMs: number | null): string | null {
   if (durationMs === null) return null;
 
-  return t('collectionRuns.durationSeconds', { value: (durationMs / 1000).toFixed(1) });
+  // ✎ U-7 (аудит 2026-11, UX-11/D15-09): число мовою інтерфейсу («12,3» у ru/kz), а не `toFixed` з крапкою.
+  return t('collectionRuns.durationSeconds', {
+    value: formatNumber(durationMs / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+  });
 }

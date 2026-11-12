@@ -4,7 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { CollectionRunsPanel } from '@/features/integration/CollectionRunsPanel';
-import { loadCatalog } from '@/shared/i18n';
+import { loadCatalog, setLanguage } from '@/shared/i18n';
 
 /**
  * Шухляда подробиць прогону (ФВ-5.23): помилка (якщо `hasError`) і покриті
@@ -136,6 +136,24 @@ describe('CollectionRunDetailDrawer', () => {
       await screen.findByText('ECR-INT-0503: the run exceeded the time limit of 15 min'),
     ).toBeTruthy();
     expect(screen.queryByText(/jobs\.collection/)).toBeNull();
+  });
+
+  // U-7 (аудит 2026-11, UX-11/D15-09): тривалість у шухляді — через `formatNumber`, а не `toFixed` (крапка в ru).
+  it('U-7: у ru тривалість прогону в шухляді з десятковою комою', async () => {
+    setLanguage('ru');
+    try {
+      // Тривалість шухляда бере з рядка переліку (`Run.durationMs` = 12000 → «12,0»).
+      respond({ run: Run, errorMessage: null, coverage: [], coverageTruncated: false });
+      show();
+
+      await openDrawer();
+
+      const dialog = screen.getByRole('dialog');
+      await waitFor(() => expect(dialog.textContent ?? '').toContain('12,0'));
+      expect(dialog.textContent ?? '').not.toContain('12.0');
+    } finally {
+      setLanguage('en');
+    }
   });
 
   it('coverageTruncated показує банер "показано не все"', async () => {
