@@ -275,6 +275,9 @@ public sealed class ImportDiffBuilder
                     && overrideDecision.ViaFormulaOverride
                     && (incoming is null || overridePolicy.Allows(row.RowKey, definition));
 
+                // ✎ P1 12.11 (рішення координатора): запис у перелік лишається (людина бачить, що значення з книги не
+                // ляже), але це ПОПЕРЕДЖЕННЯ — `ExcelImporter.EnsureAllOrNothing` і клієнт (`ImportPanel.isCalculatedSkip`)
+                // не рахують його відмовою, тож решта книги застосовується. Змін для цієї комірки в плані немає.
                 if (IsCalculated(definition) && !replacesFormula)
                 {
                     var stale = CalculatedCellFingerprint.Unchanged(row, block.Columns, column, cell);
@@ -1079,6 +1082,16 @@ public static class ImportMessageKeys
     /// експорту — книга застаріла (P3).
     /// </summary>
     public const string CalculatedStale = "err.ECR-CELL-4221.importCalculatedStale";
+
+    /// <summary>
+    /// ✎ P1 12.11: обчислювана комірка (<see cref="Calculated"/>, <see cref="CalculatedStale"/>) — попередження
+    /// перегляду: значення з книги не застосовується, але застосування решти книги не зупиняє.
+    /// </summary>
+    /// <param name="messageKey">Ключ відмови перегляду.</param>
+    /// <returns><c>true</c> — попередження обчислюваної комірки.</returns>
+    public static bool IsCalculatedSkip(string? messageKey)
+        => string.Equals(messageKey, Calculated, StringComparison.Ordinal)
+           || string.Equals(messageKey, CalculatedStale, StringComparison.Ordinal);
 
     /// <summary>
     /// Рядок змінено в базі після експорту книги, і людина в книзі задала в

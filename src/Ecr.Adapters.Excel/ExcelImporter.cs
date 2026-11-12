@@ -1130,8 +1130,13 @@ public sealed class ExcelImporter(
         // лише клієнт (блокував «Застосувати»), а прямий виклик застосовував валідні зміни інших рядків.
         // ⚠ Конфлікт «рядок змінено після експорту» - не відмова: людина вирішує його окремо (пропустити або
         // `overwriteRows`, AN-103/AN-114); клієнт теж не рахує його відхиленим (`ImportPanel.isRowConflict`).
+        // ✎ P1 12.11 (рішення координатора, Land doc 96): обчислювана комірка (`ECR-CELL-4221`: змінена в книзі або
+        // перерахована після експорту) - ПОПЕРЕДЖЕННЯ, не відмова: значення з файлу в неї не пишеться (у плані змін її
+        // немає), решта книги застосовується. Доти одна така комірка відхиляла весь пакет. Ручне значення замість
+        // формули (D-461, `ReplacesFormula`) іде звичайною зміною і цим не зачеплене.
         var rejectedCount = plan.Tables.Sum(t => t.Rejected.Count(
-                                r => !string.Equals(r.MessageKey, ImportMessageKeys.RowChangedSinceExport, StringComparison.Ordinal)))
+                                r => !string.Equals(r.MessageKey, ImportMessageKeys.RowChangedSinceExport, StringComparison.Ordinal)
+                                     && !ImportMessageKeys.IsCalculatedSkip(r.MessageKey)))
                             + (plan.RejectedOutsideTables ?? 0);
         if (rejectedCount > 0)
         {

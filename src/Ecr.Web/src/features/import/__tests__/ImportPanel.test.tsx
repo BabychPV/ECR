@@ -131,10 +131,11 @@ describe('ImportPanel: перелік змін і відмов', () => {
 
     await openPreview();
 
-    const table = screen.getByRole('table');
-    expect(within(table).getByText('⟦err.ECR-CELL-4221.importCalculated⟧')).toBeTruthy();
-    expect(within(table).getByText('⟦deny.RowReadOnly⟧')).toBeTruthy();
-    expect(within(table).queryByText(/Правило доступу|обчислюється системою/)).toBeNull();
+    // ✎ P1 12.11: обчислювана комірка — у переліку попереджень, відмова правами — у переліку відмов (дві таблиці).
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('⟦err.ECR-CELL-4221.importCalculated⟧')).toBeTruthy();
+    expect(within(dialog).getByText('⟦deny.RowReadOnly⟧')).toBeTruthy();
+    expect(within(dialog).queryByText(/Правило доступу|обчислюється системою/)).toBeNull();
   });
 
   it('V-10: значення поза рядками таблиці показано адресою комірки книги', async () => {
