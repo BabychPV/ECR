@@ -147,6 +147,14 @@ public sealed class FlertCompositionSyncJob(
 
         await using var gate = await AcquireGateAsync(ct).ConfigureAwait(false);
 
+        // ⛔ Запобіжник масового вимкнення: непорожній, але ЧАСТКОВИЙ результат FLERT (обірваний запит, фільтр у тексті
+        // запиту) мовчки вимкнув би кейси. Понад межу прогін не пише НІЧОГО — ні вимкнень, ні змін, ні нових записів:
+        // копія не змішує два стани FLERT. Межа — max(DeactivateFloor, MaxDeactivatePercent % чинних кейсів).
+        if (await DeactivationRefusalAsync(options, codes, mirror, ct).ConfigureAwait(false) is { } refusal)
+        {
+            return refusal;
+        }
+
         var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var attempt = 0; ; attempt++)
         {
@@ -161,6 +169,46 @@ public sealed class FlertCompositionSyncJob(
             // Відхилені рядки — одним повтором без них (і без складу відхилених кейсів).
             excluded.UnionWith(result.Rejected.Select(r => r.Subject));
         }
+    }
+
+    /// <summary>
+    /// Відмова за межею вимкнення: скільки чинних кейсів дзеркала знімок вимкнув би і скільки дозволено.
+    /// <c>null</c> — у межах (або дзеркала ще немає).
+    /// </summary>
+    private async Task<FlertSyncOutcome?> DeactivationRefusalAsync(
+        FlertCompositionSyncOptions options, FlertRegistryCodes codes, FlertCompositionMirror mirror, CancellationToken ct)
+    {
+        var caseRegistryId = await db.RegistryDefs
+            .AsNoTracking()
+            .Where(d => d.Code == codes.Case)
+            .Select(d => (int?)d.Id)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (caseRegistryId is not { } registryId)
+        {
+            return null;
+        }
+
+        var active = await db.RegistryEntries
+            .AsNoTracking()
+            .Where(e => e.RegistryDefId == registryId && !e.IsDeleted && e.IsActive)
+            .Select(e => e.Code)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var incoming = mirror.Cases.Select(c => c.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missing = active.Count(code => !incoming.Contains(code));
+        var limit = options.DeactivationLimit(active.Count);
+        if (missing <= limit)
+        {
+            return null;
+        }
+
+        var detail = string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"Знімок FLERT вимкнув би {missing} з {active.Count} чинних кейсів, дозволено {limit} ({FlertCompositionSyncOptions.MaxDeactivatePercentKey} = {options.MaxDeactivatePercent} %, не менше {FlertCompositionSyncOptions.DeactivateFloor}): знімок не застосовано, копія незмінна.");
+        return FlertSyncOutcome.Refused(Degraded, "deactivationLimit", mirror.SourceRows,
+            [.. mirror.Issues, new FlertMappingIssue(FlertIssueSeverity.Error, "deactivationLimit", codes.Case, detail)]);
     }
 
     /// <summary>Одна спроба: власний DI-scope від <c>svc-integration</c> і ОДНА транзакція на весь знімок.</summary>

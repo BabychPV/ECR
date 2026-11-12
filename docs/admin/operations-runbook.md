@@ -308,6 +308,7 @@ ORDER BY [Ts];
 | `Documents:VersionMigration:FromMonthEnabled` | ні | `false` | `true` або `false`. |
 | `Flert:Sync:DataSourceCode` | ні | `FLERT` | Значення на старті не перевіряється. |
 | `Flert:Sync:Enabled` | ні | `false` | `true` або `false`. |
+| `Flert:Sync:MaxDeactivatePercent` | ні | `10` | Ціле число, не менше 0. |
 | `Health:RawDataPointWarnRows` | ні | `20000000` | Ціле число, не менше 0. |
 | `Health:WarmupOnStart` | ні | `true` | `true` або `false`. |
 | `Integration:AfTimeZoneId` | ні | — | Формат перевіряється на старті (див. текст відмови служби). |
@@ -658,6 +659,7 @@ GRANT EXECUTE ON OBJECT::[dbo].[usp_GetAllStreamDataFlattened] TO [ecr_flert_rea
 | `Succeeded` | знімок застосовано; повтор того самого знімка — нуль змін і без нової ревізії довідників | оновлена |
 | `Succeeded`, `reason=disabled` | `Flert:Sync:Enabled=false` | без змін |
 | `Degraded`, `reason=emptyResult` | запит повернув 0 рядків — ознака збою, а не «FLERT порожній» | **без змін, нічого не видалено** |
+| `Degraded`, `reason=deactivationLimit` | знімок вимкнув би більше чинних кейсів, ніж `Flert:Sync:MaxDeactivatePercent` (типово 10 %) від чинних, і більше 5 (до 5 вимикається завжди) — ознака часткового результату FLERT; у `issues` — скільки вимкнулося б і скільки дозволено. Якщо FLERT справді прибрав стільки кейсів — тимчасово підніміть ключ (до 100) і перезапустіть `EcrApi` | **без змін: ні вимкнень, ні змін, ні нових записів** |
 | `Degraded` | частину рядків відхилено (зауваження `writerRejected`), відсутній компонент у `COMPONENT` (`componentMissing`), довідник дзеркала не `External` (`registrySource`) | решта оновлена |
 | `Failed` | FLERT недоступний / облікові дані (`ECR-INT-0503` / `0502`, як у збору), змінилася схема (`mappingErrors`: зникла колонка; нова колонка — лише попередження), знімок понад 100 000 рядків (`truncated`), наявний довідник із такою назвою несумісний (`registryIncompatible`) | **без змін** |
 
