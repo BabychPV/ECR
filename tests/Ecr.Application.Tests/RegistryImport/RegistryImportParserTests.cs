@@ -472,6 +472,23 @@ public sealed class RegistryImportParserTests
         Assert.Equal(1, parsed.Stats.SkippedRows);
     }
 
+    /// <summary>
+    /// B23: the workbook grid no longer evaluates formulas, so a key-cell formula without a saved result reads as empty. It is
+    /// still a totals row — not «substance values without a substance code». Mutation: back to <c>!cEmpty &amp;&amp; HasFormula</c> → red.
+    /// </summary>
+    [Fact]
+    public void A_formula_without_a_saved_result_in_a_key_cell_is_still_a_totals_row()
+    {
+        var era = new EraGrid().Source(3d, "S", "T", [Sub(333d, "x")]);
+        era.Grid.Set(era.NextRow, SubstanceCodeColumn, null, hasFormula: true).Set(era.NextRow, 27, 5d);
+
+        var parsed = Parse(era);
+
+        Assert.False(parsed.HasErrors, string.Join("; ", parsed.Issues.Select(i => $"{i.MessageKey} r{i.Row}")));
+        Assert.Single(parsed.Parents);
+        Assert.Equal(1, parsed.Stats.SkippedRows);
+    }
+
     [Fact]
     public void Fill_down_inside_a_vertical_merge_does_not_leak_into_substance_columns()
     {

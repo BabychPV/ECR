@@ -467,8 +467,9 @@ public static partial class RegistryImportParser
                 var pEmpty = ImportText.IsEmpty(pCell.Value);
                 var cEmpty = ImportText.IsEmpty(cCell.Value);
 
-                // A formula in a key cell is a totals row (sum of the block), never data.
-                if ((!pEmpty && pCell.HasFormula) || (!cEmpty && cCell.HasFormula))
+                // A formula in a key cell is a totals row (sum of the block), never data. ✎ B23: also when the formula has no saved
+                // result (the grid does not evaluate formulas, so its value reads as empty).
+                if (pCell.HasFormula || cCell.HasFormula)
                 {
                     _skipped++;
                     continue;
