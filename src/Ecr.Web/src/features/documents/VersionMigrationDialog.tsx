@@ -46,6 +46,8 @@ export function refusalText(reason: string): string {
       return t('documents.migrateRefusalMethodologyKeysNotMapped');
     case 'mappingsNotMapped':
       return t('documents.migrateRefusalMappingsNotMapped');
+    case 'sheetCopiesNotMapped':
+      return t('documents.migrateRefusalSheetCopiesNotMapped');
     default:
       return reason;
   }

@@ -173,6 +173,15 @@ public interface IDocumentVersionMigrationStore
         CancellationToken ct);
 
     /// <summary>
+    /// D-6: скільки копій аркушів (<c>doc.DocumentSheet.CopyOfId IS NOT NULL</c>) у документах проєкту мають аркуш
+    /// вихідної версії, якого цільова версія не має. Такий аркуш перенос не прибирає: копію спершу видаляють.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="sheetDefIds">Аркуші вихідної версії без відповідника в цільовій.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<int> CountSheetCopiesAsync(int projectId, IReadOnlyCollection<int> sheetDefIds, CancellationToken ct);
+
+    /// <summary>
     /// Скільки АКТИВНИХ прив'язок методологій до колонок вихідної версії не переїде: колонка не має
     /// відповідника в цільовій версії (<paramref name="columnMap"/>) або на відповідній колонці немає
     /// активної прив'язки тієї ж методології й виходу (D-13).

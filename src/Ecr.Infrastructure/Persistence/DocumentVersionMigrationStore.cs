@@ -1011,6 +1011,24 @@ public sealed partial class DocumentVersionMigrationStore(
     }
 
     /// <inheritdoc />
+    public async Task<int> CountSheetCopiesAsync(int projectId, IReadOnlyCollection<int> sheetDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(sheetDefIds);
+        if (sheetDefIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var ids = sheetDefIds.Distinct().ToList();
+        return await (from s in db.DocumentSheets.AsNoTracking()
+                      join d in db.Documents.AsNoTracking() on s.DocumentId equals d.Id
+                      where d.ProjectId == projectId && s.CopyOfId != null && ids.Contains(s.SheetDefId)
+                      select s.Id)
+            .CountAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<int> CountUnmappedBindingsAsync(
         int sourceVersionId, IReadOnlyDictionary<int, int> columnMap, CancellationToken ct)
     {

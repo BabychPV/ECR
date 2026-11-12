@@ -1474,6 +1474,17 @@ public sealed class MigrateDocumentVersionHandler(
             refusals.Add("grantsNotMapped");
         }
 
+        // ⛔ D-6 (+C-2): аркуш, якого цільова версія не має, з копіями (RS1). WorkflowSql видаляє і копію, а її екземпляри
+        // таблиць іще живі (FK_TableInstance_SheetCopy) — T2 падав би 547 ПІСЛЯ закомічених діапазонів і лишав маркер.
+        // Копія завжди має власні екземпляри, тож рахується будь-яка копія, а не лише з даними. У режимі «з місяця»
+        // (FromPeriodKey > 0) склад документа не видаляється — відмова не потрібна.
+        var removedSheets = from.Sheets.Where(s => !s.IsDeleted && !plan.Sheets.ContainsKey(s.Id)).Select(s => s.Id).ToList();
+        if (range.FromPeriodKey == 0
+            && await store.CountSheetCopiesAsync(projectId, removedSheets, ct).ConfigureAwait(false) > 0)
+        {
+            refusals.Add("sheetCopiesNotMapped");
+        }
+
         // ⛔ D-13: активна прив'язка методології до колонки вихідної версії, якої нема в цільовій, після
         // переносу не рахувала б нічого — колонка лишалася б порожньою без помилки. Блокуємо, доки
         // конфігуратор не перенесе прив'язку (клон версії тепер копіює їх сам) або не вимкне її.
@@ -1891,7 +1902,9 @@ public sealed class MigrateDocumentVersionHandler(
                                 ? "err.ECR-SCHM-0422.migrateMethodologyKeysNotMapped"
                                 : dto.Refusals.Contains("mappingsNotMapped") && dto.LostValues == 0 && guardedValues == 0
                                     ? "err.ECR-SCHM-0422.migrateMappingsNotMapped"
-                                    : "err.ECR-SCHM-0422.migrateDataLoss",
+                                    : dto.Refusals.Contains("sheetCopiesNotMapped")
+                                        ? "err.ECR-SCHM-0422.migrateSheetCopiesNotMapped"
+                                        : "err.ECR-SCHM-0422.migrateDataLoss",
                 ["lostValues"] = dto.LostValues.ToString(CultureInfo.InvariantCulture),
                 ["lockedDocumentCount"] = dto.LockedDocumentCount > 0
                     ? dto.LockedDocumentCount.Value.ToString(CultureInfo.InvariantCulture)
