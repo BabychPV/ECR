@@ -84,6 +84,33 @@ describe('ConsistencyIssuesPage: знахідки видно поіменно, �
     expect(screen.getByText(`${Finding.entityType} · ${String(Finding.entityId)}`)).toBeTruthy();
   });
 
+  it('конверт каталогу показується мовою інтерфейсу, без сирого JSON і без підпису «не перекладається»', async () => {
+    // ⛔ Аудит live 12.11: англійський інтерфейс показував українські службові речення задачі. Тепер
+    // `ConsistencyCheckJob` пише конверт `{"k":"consistency.finding.<RULE>","p":{…}}`. Каталог у тесті порожній,
+    // тож `t()` повертає позначку `⟦ключ (параметри)⟧` — по ній і видно, що конверт перекладено, а не показано сирим.
+    // RED до фіксу: екран показував `issue.message` як є — сирий JSON — і підпис мови під таблицею.
+    const message = JSON.stringify({
+      k: 'consistency.finding.BROKEN_FK',
+      p: { rowId: '4021', instanceId: '77', period: '202601' },
+    });
+    respondWith({ items: [{ ...Finding, message }], nextCursor: null, totalCount: null });
+    show();
+
+    expect(
+      await screen.findByText('⟦consistency.finding.BROKEN_FK (rowId=4021, instanceId=77, period=202601)⟧'),
+    ).toBeTruthy();
+    expect(screen.queryByText(message)).toBeNull();
+    expect(screen.queryByText('⟦consistency.messageLanguage⟧')).toBeNull();
+  });
+
+  it('стара знахідка (не конверт) — як є, з підписом про мову', async () => {
+    respondWith({ items: [Finding], nextCursor: null, totalCount: null });
+    show();
+
+    expect(await screen.findByText(Finding.message)).toBeTruthy();
+    expect(screen.getByText('⟦consistency.messageLanguage⟧')).toBeTruthy();
+  });
+
   it('порожній журнал показує пояснення, а не порожню таблицю', async () => {
     // ⚠ Зворотний бік: «знахідок немає» мусить читатися як стан системи, а не
     // як зламаний екран (`ФВ-14.23`). Без цього порожня таблиця без жодного
