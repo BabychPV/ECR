@@ -20,7 +20,7 @@ public sealed class DocumentVersionStore(
             orderby s.SubmittedAt descending, s.Id descending
             select new DocumentVersionRecord(
                 s.Id, s.SheetDefId, s.PeriodKey, s.SubmittedAt, s.SubmittedByUserId,
-                u == null ? null : u.DisplayName))
+                u == null ? null : u.DisplayName, s.TemplateVersionId))
             .Take(max)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -29,7 +29,7 @@ public sealed class DocumentVersionStore(
     public async Task<DocumentVersionPayload?> FindAsync(long documentId, long versionId, CancellationToken ct)
         => await db.SubmissionSnapshots.AsNoTracking()
             .Where(s => s.Id == versionId && s.DocumentId == documentId)
-            .Select(s => new DocumentVersionPayload(s.Id, s.PeriodKey, s.PayloadJson, s.SheetDefId))
+            .Select(s => new DocumentVersionPayload(s.Id, s.PeriodKey, s.PayloadJson, s.SheetDefId, s.TemplateVersionId))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
