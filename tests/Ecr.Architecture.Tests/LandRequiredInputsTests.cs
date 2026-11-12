@@ -181,6 +181,66 @@ public sealed class LandRequiredInputsTests
             "if (-not $RequiredInputsIncludeHeld -and $riHeld.Contains($riCode)) {", build, StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Golden_тести_чернетки_RI_переходять_на_документ_і_період_повтор_нуль()
+    {
+        // W15r 12.11: публікація 22 чернеток RI — 422 ECR-CALC-0422 «Golden test GOLD_P1 has no period»: тести V1 зі
+        // спеки без документа/періоду. Етап має прив'язати їх так само, як BranchGate, і на НАЯВНІЙ чернетці.
+        const string harness = """
+            $ErrorActionPreference = 'Stop'
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+            $build = [IO.File]::ReadAllText($args[0])
+            . $args[1]
+            $s = $build.IndexOf('function Set-LandDraftGoldenTests')
+            if ($s -lt 0) { Write-Host 'NOFUNC'; exit 0 }
+            $e = $build.IndexOf("`nfunction ", $s + 1)
+            . ([scriptblock]::Create($build.Substring($s, $e - $s)))
+            $script:tests = @(
+                [pscustomobject]@{ code = 'GOLD_P1'; inputJson = '{"documentId":0,"periodKey":null,"arguments":[]}'; expectedJson = '{}'; tolerance = '0' },
+                [pscustomobject]@{ code = 'GOLD_P2'; inputJson = '{"documentId":96,"periodKey":{"value":202609},"arguments":[]}'; expectedJson = '{}'; tolerance = '0' })
+            $script:puts = @()
+            function Log([string]$m) { }
+            function Get-EcrErrorCode($r) { '' }
+            function Items($j) { @($j) }
+            function Api([string]$Method, [string]$Path) { [pscustomobject]@{ Json = $script:tests } }
+            function Invoke-Ecr([string]$Method, [string]$Path, $Body) {
+                $script:puts += $Path
+                $code = ($Path -split '/')[-1]
+                foreach ($t in $script:tests) { if ($t.code -eq $code) { $t.inputJson = $Body.inputJson } }
+                [pscustomobject]@{ Status = 200 }
+            }
+            $GoldenTestDocumentId = 0; $GoldenTestPeriodKey = 0
+            Write-Host ('OFF=' + (Set-LandDraftGoldenTests -Code 'ECW_C05_01' -MethodologyId 2 -VersionId 70))
+            $GoldenTestDocumentId = 96; $GoldenTestPeriodKey = 202609
+            Write-Host ('FIRST=' + (Set-LandDraftGoldenTests -Code 'ECW_C05_01' -MethodologyId 2 -VersionId 70))
+            Write-Host ('PUT=' + ($script:puts -join ','))
+            $p1 = $script:tests[0].inputJson | ConvertFrom-Json
+            Write-Host ('P1=' + $p1.documentId + '/' + $p1.periodKey.value)
+            Write-Host ('AGAIN=' + (Set-LandDraftGoldenTests -Code 'ECW_C05_01' -MethodologyId 2 -VersionId 70))
+            """;
+
+        var output = Run(harness, LandFile("Build-LandTemplate.ps1"), LandFile("LandBranchGate.Lib.ps1"));
+
+        Assert.DoesNotContain("NOFUNC", output, StringComparison.Ordinal);
+        Assert.Contains("OFF=0\n", output, StringComparison.Ordinal);
+        Assert.Contains("FIRST=1\n", output, StringComparison.Ordinal);
+        Assert.Contains("PUT=/api/v1/methodologies/2/versions/70/tests/GOLD_P1\n", output, StringComparison.Ordinal);
+        Assert.Contains("P1=96/202609\n", output, StringComparison.Ordinal);
+        Assert.Contains("AGAIN=0\n", output, StringComparison.Ordinal);
+
+        // Етап RI кличе прив'язку і на наявній чернетці (змін RI немає), і на новій; BranchGate — та сама функція.
+        var build = File.ReadAllText(LandFile("Build-LandTemplate.ps1"));
+        var start = build.IndexOf("function Stage-RequiredInputs {", StringComparison.Ordinal);
+        var end = build.IndexOf("\nfunction ", start + 1, StringComparison.Ordinal);
+        var stage = build[start..end];
+        Assert.Contains("VersionId ([int]$target.Draft.id)", stage, StringComparison.Ordinal);
+        Assert.Contains("VersionId ([int]$draft.id)", stage, StringComparison.Ordinal);
+        Assert.Contains(". (Join-Path $here 'LandBranchGate.Lib.ps1')", stage, StringComparison.Ordinal);
+        Assert.Contains(
+            "$bgChanged += Set-LandDraftGoldenTests -Code $bgCode -MethodologyId $bgId -VersionId $bgVid", build, StringComparison.Ordinal);
+    }
+
     private static string Run(string harness, params string[] arguments)
     {
         var start = new ProcessStartInfo(DeployScriptHarness.FindPowerShell())
