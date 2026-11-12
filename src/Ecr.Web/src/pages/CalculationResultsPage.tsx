@@ -1,8 +1,8 @@
-import { useCallback, useMemo, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Badge, Button, Group, Select, Stack, Text, TextInput } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
-import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { DocumentSummary } from '@/api/types';
@@ -12,8 +12,10 @@ import {
   filterParams,
   FormulaMethodology,
   isFiltered,
+  isStaleCursor,
   PageSize,
   type CalculationYearMonth,
+  type CalculationYearRows,
   type CalculationYearSummary,
   type ResultFilters,
 } from '@/features/calcResults/api';
@@ -29,6 +31,7 @@ import {
   documentHref,
   gridItems,
   latestRunMonth,
+  pageCursors,
   resolvePage,
   runCounts,
   sheetKey,
@@ -168,15 +171,22 @@ export function CalculationResultsPage(): JSX.Element {
 
   const [pageState, setPageState] = useState<PageState>({ filterKey, pages: new Map() });
   const pages = pageState.filterKey === filterKey ? pageState.pages : new Map<string, number>();
+  // Ключ сторінки — її позиція (i × PageSize), а запит — за курсором попередньої: сторінка i з'являється в запитах,
+  // лише коли i − 1 прочитано й вона не остання (рендер після її відповіді бачить її в кеші).
+  const queryClient = useQueryClient();
+  const rowsKey = (table: string, index: number) =>
+    queryKeys.document.calculationYearRows(documentId, year, table, filterKey, index * PageSize);
   const requests = tables
     .filter((table) => open.has(table.key))
     .flatMap((table) =>
-      Array.from({ length: pages.get(table.key) ?? 1 }, (_, i) => ({ table, offset: i * PageSize })),
+      pageCursors(pages.get(table.key) ?? 1, (i) => queryClient.getQueryData<CalculationYearRows>(rowsKey(table.key, i))).map(
+        (cursor, index) => ({ table, index, cursor }),
+      ),
     );
   const pageQueries = useQueries({
-    queries: requests.map(({ table, offset }) => ({
-      queryKey: queryKeys.document.calculationYearRows(documentId, year, table.key, filterKey, offset),
-      queryFn: () => fetchCalculationYearRows(documentId, year, table.key, filters, offset),
+    queries: requests.map(({ table, index, cursor }) => ({
+      queryKey: rowsKey(table.key, index),
+      queryFn: () => fetchCalculationYearRows(documentId, year, table.key, filters, cursor),
       enabled: data !== undefined && !summary.isPlaceholderData,
     })),
   });
@@ -185,13 +195,18 @@ export function CalculationResultsPage(): JSX.Element {
   const loaded = new Map<string, LoadedTable>();
   const loading = new Set<string>();
   const failed = new Map<string, () => void>();
+  const stale: string[] = [];
   const stopped = new Set<string>();
-  requests.forEach(({ table }, i) => {
+  requests.forEach(({ table, cursor }, i) => {
     const result = pageQueries[i];
     if (result === undefined || stopped.has(table.key)) return;
     if (result.data === undefined) {
       stopped.add(table.key);
-      if (result.isError) failed.set(table.key, () => void result.refetch());
+      // Курсор, виданий до перерахунку, сервер відхилив — таблиця читається з початку (ефект нижче), а не «помилка».
+      if (result.isError && isStaleCursor(result.error, cursor)) {
+        stale.push(table.key);
+        loading.add(table.key);
+      } else if (result.isError) failed.set(table.key, () => void result.refetch());
       else loading.add(table.key);
       return;
     }
@@ -203,6 +218,28 @@ export function CalculationResultsPage(): JSX.Element {
   const failedRef = useRef(failed);
   failedRef.current = failed;
 
+  // Перезапуск таблиці із застарілим курсором: лишається одна сторінка, наступні сторінки прибираються з кешу (їхні
+  // курсори з того самого старого набору), перша читається заново, зведення (лічильники) — теж.
+  const staleKey = stale.join('\n');
+  useEffect(() => {
+    if (staleKey === '') return;
+    const restarted = staleKey.split('\n');
+    setPageState((state) => {
+      const next = new Map(state.filterKey === filterKey ? state.pages : []);
+      for (const table of restarted) next.set(table, 1);
+      return { filterKey, pages: next };
+    });
+    for (const table of restarted) {
+      const first = queryKeys.document.calculationYearRows(documentId, year, table, filterKey, 0);
+      queryClient.removeQueries({
+        queryKey: first.slice(0, -1),
+        predicate: (query) => query.queryKey[first.length - 1] !== 0,
+      });
+      void queryClient.resetQueries({ queryKey: first, exact: true });
+    }
+    void queryClient.invalidateQueries({ queryKey: queryKeys.document.calculationYearSummary(documentId, year, filterKey) });
+  }, [staleKey, filterKey, documentId, year, queryClient]);
+
   const onMore = useCallback(
     (table: string, count: number) => {
       // Сторінка, що не прочиталася, — повтор цієї ж сторінки, а не наступна.
@@ -213,7 +250,8 @@ export function CalculationResultsPage(): JSX.Element {
       }
       setPageState((state) => {
         const base = state.filterKey === filterKey ? state.pages : new Map<string, number>();
-        const want = Math.floor(count / PageSize) + 1;
+        // Ще одна сторінка за прочитаними (сервер віддає повні сторінки, крім останньої; коротша — теж «прочитана»).
+        const want = Math.ceil(count / PageSize) + 1;
         if ((base.get(table) ?? 1) >= want) return state.filterKey === filterKey ? state : { filterKey, pages: base };
         return { filterKey, pages: new Map(base).set(table, want) };
       });

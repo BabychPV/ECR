@@ -1,4 +1,4 @@
-import { apiEnqueue, apiFetch, type AcceptedJob } from '@/api/client';
+import { apiEnqueue, apiFetch, EcrApiError, type AcceptedJob } from '@/api/client';
 import type { components } from '@/api/schema';
 
 /** Зведення «Calculation results» за рік (`GET /documents/{id}/calculation-results/year/summary`). */
@@ -69,22 +69,31 @@ export function fetchCalculationYearSummary(
   );
 }
 
-/** Сторінка виходів таблиці `table` (ключ зі зведення). */
+/**
+ * Сторінка виходів таблиці `table` (ключ зі зведення) після курсора `cursor` (`nextCursor` попередньої сторінки;
+ * `null` — перша). ⚠ Курсор, виданий до перерахунку чи з іншими фільтрами, сервер відхиляє 422 — таблицю тоді читають
+ * з першої сторінки (`isStaleCursor`).
+ */
 export function fetchCalculationYearRows(
   documentId: number,
   year: number,
   table: string,
   filters: ResultFilters,
-  offset: number,
+  cursor: string | null,
 ): Promise<CalculationYearRows> {
   const params = filterParams(filters);
   params.set('year', String(year));
   params.set('table', table);
-  params.set('offset', String(offset));
+  if (cursor !== null) params.set('cursor', cursor);
   params.set('limit', String(PageSize));
   return apiFetch<CalculationYearRows>(
     `/api/v1/documents/${String(documentId)}/calculation-results/year/rows?${params.toString()}`,
   );
+}
+
+/** Чи відмова сторінки — курсор, виданий з іншого набору рядків (422 на запиті з курсором): читати таблицю з початку. */
+export function isStaleCursor(error: unknown, cursor: string | null): boolean {
+  return cursor !== null && error instanceof EcrApiError && error.problem.status === 422;
 }
 
 /**

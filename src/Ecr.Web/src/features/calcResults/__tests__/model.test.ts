@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { filterParams, isFiltered, NoFilters } from '../api';
-import { documentHref, gridItems, latestRunMonth, resolvePage, runCounts, type LoadedTable } from '../model';
+import { documentHref, gridItems, latestRunMonth, pageCursors, resolvePage, runCounts, type LoadedTable } from '../model';
 import { yearRowsFixture, yearSummaryFixture } from './fixture';
 
 const summary = yearSummaryFixture();
@@ -19,6 +19,18 @@ const kinds = (items: ReturnType<typeof gridItems>): string[] => items.map((i) =
  * Мутація (локально): у `gridItems` прибрати рядок «ще» для неповної таблиці — червоніє «неповна таблиця».
  */
 describe('calcResults model', () => {
+  it('курсори сторінок: перша без курсора, наступна — лише після прочитаної неостанньої', () => {
+    const read: Record<number, { nextCursor: string | null }> = { 0: { nextCursor: 'a' }, 1: { nextCursor: 'b' } };
+    expect(pageCursors(1, (i) => read[i])).toEqual([null]);
+    expect(pageCursors(3, (i) => read[i])).toEqual([null, 'a', 'b']);
+    // Сторінка 2 ще не прочитана — четверта не запитується.
+    expect(pageCursors(5, (i) => read[i])).toEqual([null, 'a', 'b']);
+    // Остання сторінка (nextCursor = null) — далі нічого.
+    expect(pageCursors(5, (i) => (i === 0 ? { nextCursor: null } : read[i]))).toEqual([null]);
+    // Перша ще читається — лише вона.
+    expect(pageCursors(3, () => undefined)).toEqual([null]);
+  });
+
   it('розгорнуті таблиці дають смуги обладнання й виходи; згорнута — лише свою смугу', () => {
     expect(kinds(gridItems(summary.tables, all, new Set(), new Set(['10', '20'])))).toEqual([
       'sheet', 'table', 'group', 'r-co2', 'r-rate', 'group', 'r-flare', 'sheet', 'table', 'group', 'r-ghg',

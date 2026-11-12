@@ -373,6 +373,9 @@ public sealed class CalculationYearViewBuilder(
                 .ThenBy(l => l.Sort.ColumnOrdinal)
                 .ThenBy(l => l.Sort.Output, StringComparer.Ordinal)
                 .ThenBy(l => l.Sort.Substance, StringComparer.Ordinal)
+                // Останній ключ — ідентифікатор виходу: порядок повний, незалежний від порядку фактів із бази, тож
+                // відбиток курсора сторінки (CalculationYearCursor) між запитами той самий.
+                .ThenBy(l => l.Id, StringComparer.Ordinal)
                 .Select(l => l.ToDto(noValue, l.Unit is { } u && unitList[u].Additive))
                 .ToList();
 
@@ -624,6 +627,8 @@ public sealed class CalculationYearViewBuilder(
         (string Methodology, int ColumnOrdinal, string Output, string Substance) sort)
     {
         private readonly decimal?[] values = new decimal?[12];
+
+        public string Id => id;
 
         public int Equipment => equipment;
 

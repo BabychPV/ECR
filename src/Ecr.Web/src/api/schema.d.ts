@@ -6227,8 +6227,9 @@ export interface paths {
                     year?: number;
                     /** @description Ключ таблиці зі зведення (`tables[].key`). */
                     table?: string;
-                    /** @description Зсув (≥ 0). */
-                    offset?: number;
+                    /** @description Курсор наступної сторінки (`nextCursor` попередньої); порожньо — перша. Зіпсований або виданий до
+                     *     перерахунку чи з іншими фільтрами — 422, клієнт читає таблицю з початку. */
+                    cursor?: string;
                     /** @description Розмір сторінки (1…1000, типово 200). */
                     limit?: number;
                     /** @description Пошук. */
@@ -29475,11 +29476,9 @@ export interface components {
             equipment: components["schemas"]["CalculationYearEquipmentDto"][];
             /** @description Методології сторінки. */
             methodologies: components["schemas"]["CalculationYearMethodologyDto"][];
-            /**
-             * Format: int32
-             * @description Зсув першого рядка сторінки.
-             */
-            offset: number;
+            /** @description Курсор наступної сторінки (CalculationYearCursor); `null` — сторінка остання. Курсор, виданий до
+             *     перерахунку чи зміни фільтра, сервер відхиляє 422 — клієнт читає таблицю з першої сторінки. */
+            nextCursor: null | string;
             /** @description Виходи сторінки в порядку показу; індекси — у переліки цієї сторінки. */
             rows: components["schemas"]["CalculationYearRowDto"][];
             /** @description Речовини сторінки. */

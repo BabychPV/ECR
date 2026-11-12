@@ -699,7 +699,10 @@ public sealed class DocumentsController(
     /// <param name="id">Документ.</param>
     /// <param name="year">Рік (2000…2100).</param>
     /// <param name="table">Ключ таблиці зі зведення (<c>tables[].key</c>).</param>
-    /// <param name="offset">Зсув (≥ 0).</param>
+    /// <param name="cursor">
+    /// Курсор наступної сторінки (<c>nextCursor</c> попередньої); порожньо — перша. Зіпсований або виданий до
+    /// перерахунку чи з іншими фільтрами — 422, клієнт читає таблицю з початку.
+    /// </param>
     /// <param name="limit">Розмір сторінки (1…1000, типово 200).</param>
     /// <param name="q">Пошук.</param>
     /// <param name="sheet">Аркуш.</param>
@@ -716,7 +719,7 @@ public sealed class DocumentsController(
         long id,
         [FromQuery] int year,
         [FromQuery] string? table,
-        [FromQuery] int? offset,
+        [FromQuery] string? cursor,
         [FromQuery] int? limit,
         [FromQuery] string? q,
         [FromQuery] int? sheet,
@@ -725,7 +728,7 @@ public sealed class DocumentsController(
         [FromQuery] bool? problems,
         CancellationToken ct)
         => Ok(await calculationYear
-            .RowsAsync(id, year, table, new(q, sheet, methodology, substance, problems ?? false), offset ?? 0, limit, ct)
+            .RowsAsync(id, year, table, new(q, sheet, methodology, substance, problems ?? false), cursor, limit, ct)
             .ConfigureAwait(false));
 
     /// <summary>

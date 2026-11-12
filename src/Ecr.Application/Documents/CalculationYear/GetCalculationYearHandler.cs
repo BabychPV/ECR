@@ -46,30 +46,50 @@ public sealed class GetCalculationYearHandler(
         return CalculationYearPages.Summary(view, filter);
     }
 
-    /// <summary>Сторінка виходів таблиці <paramref name="table"/>.</summary>
+    /// <summary>Сторінка виходів таблиці <paramref name="table"/> після курсора <paramref name="cursor"/>.</summary>
+    /// <remarks>
+    /// Зіпсований курсор — 422 (<c>reason = cursorInvalid</c>); курсор, виданий з іншого набору рядків (перерахунок,
+    /// інший фільтр чи таблиця), — 422 (<c>reason = cursorStale</c>): клієнт читає таблицю з першої сторінки
+    /// (<see cref="CalculationYearCursor"/>).
+    /// </remarks>
     public async Task<CalculationYearRowsDto> RowsAsync(
-        long documentId, int year, string? table, CalculationYearFilter filter, int offset, int? limit, CancellationToken ct)
+        long documentId, int year, string? table, CalculationYearFilter filter, string? cursor, int? limit, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(filter);
         var profile = await AuthorizeAsync(documentId, year, filter, ct).ConfigureAwait(false);
         var take = limit ?? CalculationYearPages.DefaultLimit;
-        if (!CalculationYearPages.TryParseKey(table, out var slice) || offset < 0 || take < 1 || take > CalculationYearPages.MaxLimit)
+        if (!CalculationYearPages.TryParseKey(table, out var slice) || take < 1 || take > CalculationYearPages.MaxLimit)
         {
-            throw new Errors.BusinessRuleException(
-                Ecr.Domain.Errors.ErrorCodes.RequestInvalid,
-                $"Сторінка огляду року: таблиця «{table}», зсув {offset}, розмір {take} не підходять.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REQ-0422.calcResultsPageInvalid",
-                    ["table"] = table ?? "",
-                    ["max"] = CalculationYearPages.MaxLimit.ToString(CultureInfo.InvariantCulture),
-                });
+            throw PageInvalid(table, $"таблиця «{table}» або розмір {take} не підходять", reason: null);
+        }
+
+        if (!CalculationYearCursor.TryDecode(cursor, out var after))
+        {
+            throw PageInvalid(table, "курсор зіпсований", "cursorInvalid");
         }
 
         var view = await builder
             .BuildAsync(profile, documentId, year, CalculationYearScope.Page(slice), ct)
             .ConfigureAwait(false);
-        return CalculationYearPages.Page(view, CalculationYearPages.KeyOf(slice), filter, offset, take);
+        return CalculationYearPages.Page(view, CalculationYearPages.KeyOf(slice), filter, after, take)
+               ?? throw PageInvalid(table, "курсор видано з іншого набору рядків", "cursorStale");
+    }
+
+    private static Errors.BusinessRuleException PageInvalid(string? table, string what, string? reason)
+    {
+        var details = new Dictionary<string, object?>
+        {
+            ["messageKey"] = "err.ECR-REQ-0422.calcResultsPageInvalid",
+            ["table"] = table ?? "",
+            ["max"] = CalculationYearPages.MaxLimit.ToString(CultureInfo.InvariantCulture),
+        };
+        if (reason is not null)
+        {
+            details["reason"] = reason;
+        }
+
+        return new Errors.BusinessRuleException(
+            Ecr.Domain.Errors.ErrorCodes.RequestInvalid, $"Сторінка огляду року: {what}.", details);
     }
 
     /// <summary>Рік у межах <see cref="MinYear"/>…<see cref="MaxYear"/>; інакше <c>ECR-REQ-0422</c>.</summary>

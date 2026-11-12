@@ -47,7 +47,7 @@ function yearRows(table: DocumentTable, q: string): unknown {
   return {
     table: String(table.tableDefId),
     total: rows.length,
-    offset: 0,
+    nextCursor: null,
     equipment,
     methodologies: [{ methodologyId: 1, code: 'M-01', nameL10n: en('Stationary combustion'), version: '2.0' }],
     substances: [{ id: 3, code: 'CO2', nameL10n: en('Carbon dioxide') }],

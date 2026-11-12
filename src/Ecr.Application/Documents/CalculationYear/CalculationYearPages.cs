@@ -70,7 +70,10 @@ public sealed record CalculationYearOptionDto(string Code, LocalizedText NameL10
 /// </summary>
 /// <param name="Table">Ключ таблиці (<see cref="CalculationYearTableSummaryDto.Key"/>).</param>
 /// <param name="Total">Виходів таблиці, що проходять фільтри (усі сторінки).</param>
-/// <param name="Offset">Зсув першого рядка сторінки.</param>
+/// <param name="NextCursor">
+/// Курсор наступної сторінки (<see cref="CalculationYearCursor"/>); <c>null</c> — сторінка остання. Курсор, виданий до
+/// перерахунку чи зміни фільтра, сервер відхиляє 422 — клієнт читає таблицю з першої сторінки.
+/// </param>
 /// <param name="Equipment">Обладнання сторінки (<c>Table</c> = 0: таблиця одна).</param>
 /// <param name="Methodologies">Методології сторінки.</param>
 /// <param name="Substances">Речовини сторінки.</param>
@@ -80,7 +83,7 @@ public sealed record CalculationYearOptionDto(string Code, LocalizedText NameL10
 public sealed record CalculationYearRowsDto(
     string Table,
     int Total,
-    int Offset,
+    string? NextCursor,
     IReadOnlyList<CalculationYearEquipmentDto> Equipment,
     IReadOnlyList<CalculationYearMethodologyDto> Methodologies,
     IReadOnlyList<CalculationYearSubstanceDto> Substances,
@@ -289,16 +292,32 @@ public static class CalculationYearPages
             view.FreshnessHidden);
     }
 
-    /// <summary>Сторінка виходів таблиці <paramref name="tableKey"/> з довідниками лише цієї сторінки.</summary>
-    public static CalculationYearRowsDto Page(
-        CalculationYearViewDto view, string tableKey, CalculationYearFilter filter, int offset, int limit)
+    /// <summary>
+    /// Сторінка виходів таблиці <paramref name="tableKey"/> з довідниками лише цієї сторінки; <see langword="null"/> —
+    /// курсор <paramref name="after"/> видано з іншого набору рядків (перерахунок, інший фільтр чи таблиця).
+    /// </summary>
+    /// <param name="view">Огляд.</param>
+    /// <param name="tableKey">Ключ таблиці.</param>
+    /// <param name="filter">Фільтри.</param>
+    /// <param name="after">Курсор попередньої сторінки; <see langword="null"/> — перша сторінка.</param>
+    /// <param name="limit">Розмір сторінки.</param>
+    public static CalculationYearRowsDto? Page(
+        CalculationYearViewDto view, string tableKey, CalculationYearFilter filter, CalculationYearCursor? after, int limit)
     {
         ArgumentNullException.ThrowIfNull(view);
         ArgumentNullException.ThrowIfNull(filter);
         var matched = view.Rows
             .Where(r => KeyOf(view.Tables[view.Equipment[r.Equipment].Table]) == tableKey && filter.Matches(view, r))
             .ToList();
-        var page = matched.Skip(offset).Take(limit).ToList();
+        if (after is not null && !after.Fits(matched))
+        {
+            return null;
+        }
+
+        var start = after?.Position ?? 0;
+        var page = matched.Skip(start).Take(limit).ToList();
+        var end = start + page.Count;
+        var next = end < matched.Count ? CalculationYearCursor.Encode(matched, end) : null;
 
         var equipment = new Remap<CalculationYearEquipmentDto>(i => view.Equipment[i] with { Table = 0 });
         var methodologies = new Remap<CalculationYearMethodologyDto>(i => view.Methodologies[i]);
@@ -315,7 +334,7 @@ public static class CalculationYearPages
         });
 
         return new CalculationYearRowsDto(
-            tableKey, matched.Count, offset, equipment.Items, methodologies.Items, substances.Items, units.Items, columns.Items, rows);
+            tableKey, matched.Count, next, equipment.Items, methodologies.Items, substances.Items, units.Items, columns.Items, rows);
     }
 
     /// <summary>Переіндексація довідника під сторінку: лише ті елементи, на які посилаються її рядки.</summary>

@@ -19,7 +19,7 @@ const pages: Record<string, CalculationYearRows> = {
   '10': {
     table: '10',
     total: 3,
-    offset: 0,
+    nextCursor: null,
     equipment: [
       { table: 0, rowKey: 'R1', labelL10n: null, name: 'Boiler B-1', idCode: 'ES-001' },
       { table: 0, rowKey: 'R2', labelL10n: null, name: 'Flare FS-101', idCode: 'ES-002' },
@@ -40,7 +40,7 @@ const pages: Record<string, CalculationYearRows> = {
   '20': {
     table: '20',
     total: 1,
-    offset: 0,
+    nextCursor: null,
     equipment: [{ table: 0, rowKey: 'R9', labelL10n: L('Total site'), name: null, idCode: null }],
     methodologies: [],
     substances: [],
@@ -59,10 +59,10 @@ function matches(page: CalculationYearRows, row: CalculationYearRows['rows'][num
   return [e?.name, e?.idCode, e?.rowKey].some((text) => (text ?? '').toLowerCase().includes(q.toLowerCase()));
 }
 
-/** Сторінка таблиці `table` з пошуком `q` (зсув і розмір фікстура ігнорує — рядків менше за сторінку). */
+/** Сторінка таблиці `table` з пошуком `q` (курсор і розмір фікстура ігнорує — рядків менше за сторінку, сторінка одна). */
 export function yearRowsFixture(table: string, q = ''): CalculationYearRows {
   const page = pages[table];
-  if (page === undefined) return { table, total: 0, offset: 0, equipment: [], methodologies: [], substances: [], units: [], columns: [], rows: [] } as unknown as CalculationYearRows;
+  if (page === undefined) return { table, total: 0, nextCursor: null, equipment: [], methodologies: [], substances: [], units: [], columns: [], rows: [] } as unknown as CalculationYearRows;
   const rows = page.rows.filter((row) => matches(page, row, q));
   return { ...page, total: rows.length, rows };
 }
