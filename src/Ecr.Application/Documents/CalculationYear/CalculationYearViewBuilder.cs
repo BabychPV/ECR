@@ -131,11 +131,15 @@ public sealed class CalculationYearViewBuilder(
 
         var narrowed = DocumentSheetVisibility.HasRestrictions(profile);
         IReadOnlyList<YearResult> results = facts.Results;
+        IReadOnlyList<YearResultMonths> resultMonths = facts.ResultMonths;
         IReadOnlySet<int>? visibleRunMonths = null;
         if (narrowed)
         {
             var visible = await NarrowingAsync(instances, monthScopes, ct).ConfigureAwait(false);
             results = [.. results.Where(r => visible(r.PeriodKey, r.TableInstanceId, r.MethodologyVersionId, r.OutputCode))];
+            resultMonths = [.. resultMonths
+                .Select(r => r with { Months = Narrow(r.Months, keys, p => visible(p, r.TableInstanceId, r.MethodologyVersionId, r.OutputCode)) })
+                .Where(r => r.Months != 0)];
 
             // ⛔ Вузькому читачу стан прогону місяця віддається лише там, де він бачить бодай одне число методології
             // (як панель одного місяця: усе сховане — порожньо, без часу прогону). Рахується по ключах УСЬОГО
@@ -147,13 +151,32 @@ public sealed class CalculationYearViewBuilder(
         }
 
         var formulaCells = facts.FormulaCells.Where(c => monthScopes[c.PeriodKey].CanReadColumn(c.ColumnDefId)).ToList();
+        var formulaMonths = facts.FormulaCellMonths
+            .Select(c => c with { Months = Narrow(c.Months, keys, p => monthScopes[p].CanReadColumn(c.ColumnDefId)) })
+            .Where(c => c.Months != 0)
+            .ToList();
         var months = await MonthsAsync(documentId, keys, states, facts.Runs, visibleRunMonths, ct).ConfigureAwait(false);
         var catalog = await units.GetAsync(ct).ConfigureAwait(false);
 
         var context = new Pivot(
             documentId, year, keys, months, instances, readableInstances, snapshots, tableDefs, columns, labels, facts,
             hostRows ?? facts.Rows, catalog);
-        return context.Build(results, formulaCells, narrowed);
+        return context.Build(results, resultMonths, formulaCells, formulaMonths, narrowed);
+    }
+
+    /// <summary>Маска місяців лише з тих місяців, де <paramref name="keep"/> (за ключем періоду) дозволяє.</summary>
+    private static int Narrow(int months, List<PeriodKey> keys, Func<int, bool> keep)
+    {
+        var kept = 0;
+        for (var m = 0; m < 12; m++)
+        {
+            if ((months & (1 << m)) != 0 && keep(keys[m].Value))
+            {
+                kept |= 1 << m;
+            }
+        }
+
+        return kept;
     }
 
     /// <summary>
@@ -290,6 +313,7 @@ public sealed class CalculationYearViewBuilder(
         private readonly Dictionary<(int Table, string? RowKey), int> equipmentIndex = [];
         private readonly List<CalculationYearEquipmentDto> equipment = [];
         private readonly List<int> equipmentOrder = [];
+        private readonly List<string?> tableKeys = [];
         private readonly Dictionary<int, int> methodologyIndex = [];
         private readonly List<CalculationYearMethodologyDto> methodologyList = [];
         private readonly Dictionary<long, int> substanceIndex = [];
@@ -300,7 +324,11 @@ public sealed class CalculationYearViewBuilder(
         private readonly List<CalculationYearColumnDto> columnList = [];
 
         public CalculationYearViewDto Build(
-            IReadOnlyList<YearResult> results, IReadOnlyList<YearFormulaCell> formulaCells, bool narrowed)
+            IReadOnlyList<YearResult> results,
+            IReadOnlyList<YearResultMonths> resultMonths,
+            IReadOnlyList<YearFormulaCell> formulaCells,
+            IReadOnlyList<YearFormulaCellMonths> formulaMonths,
+            bool narrowed)
         {
             var versions = facts.Versions.ToDictionary(v => v.MethodologyVersionId);
             var entries = facts.Entries.ToDictionary(e => e.Id);
@@ -308,76 +336,123 @@ public sealed class CalculationYearViewBuilder(
             // тисяч рядків на документ Land).
             var lines = new Dictionary<(int Table, string? Row, int Methodology, string Output, long? Substance, int Unit), Line>();
 
-            // Версія методології рядка — останнього місяця з числом.
-            foreach (var r in results.OrderBy(r => r.PeriodKey))
+            // Версія методології рядка — останнього місяця з числом. Порядок обробки — місяць за місяцем (у місяці — спершу
+            // виходи з маскою зведення, потім окремі числа), тож перша поява виходу, а з нею й порядок довідників, той самий,
+            // що й при читанні по місяцях.
+            Line ResultLine(YearMethodologyVersion version, int meth, long? instanceId, int periodKey, string? rowKey, string output, long? substanceId, int unitId)
             {
-                if (!versions.TryGetValue(r.MethodologyVersionId, out var version))
-                {
-                    continue;
-                }
-
-                var table = TableOf(r.TableInstanceId, r.PeriodKey, r.SourceRowKey);
-                var meth = MethodologyOf(version);
-                var key = (table, r.SourceRowKey, version.MethodologyId, r.OutputCode, r.SubstanceEntryId, r.UnitId);
+                var table = TableOf(instanceId, periodKey, rowKey);
+                var key = (table, rowKey, version.MethodologyId, output, substanceId, unitId);
                 if (!lines.TryGetValue(key, out var line))
                 {
-                    var eq = EquipmentOf(table, r.SourceRowKey);
-                    int? substance = r.SubstanceEntryId is { } sid ? SubstanceOf(sid, entries) : null;
-                    var unit = UnitOf(r.UnitId);
-                    var id = string.Join('|', "m", TableKey(table), r.SourceRowKey ?? "", version.MethodologyId.ToString(CultureInfo.InvariantCulture),
-                        r.OutputCode, r.SubstanceEntryId?.ToString(CultureInfo.InvariantCulture) ?? "", r.UnitId.ToString(CultureInfo.InvariantCulture));
-                    line = new Line(id, eq, meth, r.OutputCode, null, substance, unit,
-                        (version.MethodologyCode, 0, r.OutputCode, substance is { } s ? substances[s].Code : ""));
+                    var eq = EquipmentOf(table, rowKey);
+                    int? substance = substanceId is { } sid ? SubstanceOf(sid, entries) : null;
+                    var unit = UnitOf(unitId);
+                    var id = string.Join('|', "m", TableKey(table), rowKey ?? "", version.MethodologyId.ToString(CultureInfo.InvariantCulture),
+                        output, substanceId?.ToString(CultureInfo.InvariantCulture) ?? "", unitId.ToString(CultureInfo.InvariantCulture));
+                    line = new Line(id, eq, meth, output, null, substance, unit,
+                        (version.MethodologyCode, 0, output, substance is { } s ? substances[s].Code : ""));
                     lines.Add(key, line);
                 }
 
-                line.Add(monthOfKey[r.PeriodKey], r.Value);
+                return line;
             }
 
-            foreach (var c in formulaCells)
+            var singleByMonth = results.ToLookup(r => r.PeriodKey);
+            var resultLines = new Line?[resultMonths.Count];
+            for (var m = 0; m < keys.Count; m++)
             {
-                if (!columns.TryGetValue(c.ColumnDefId, out var column))
+                var periodKey = keys[m].Value;
+                for (var i = 0; i < resultMonths.Count; i++)
                 {
-                    continue;
+                    var r = resultMonths[i];
+                    if ((r.Months & (1 << m)) == 0 || !versions.TryGetValue(r.MethodologyVersionId, out var version))
+                    {
+                        continue;
+                    }
+
+                    // Вихід маски лише розгортається: його рядок однаковий у кожному місяці, тож шукається раз.
+                    var meth = MethodologyOf(version);
+                    var line = resultLines[i] ??= ResultLine(version, meth, r.TableInstanceId, periodKey, r.SourceRowKey, r.OutputCode, r.SubstanceEntryId, r.UnitId);
+                    line.Add(m, 0m);
                 }
 
-                var table = TableOf(c.TableInstanceId, c.PeriodKey, c.RowKey);
+                foreach (var r in singleByMonth[periodKey])
+                {
+                    if (!versions.TryGetValue(r.MethodologyVersionId, out var version))
+                    {
+                        continue;
+                    }
+
+                    var meth = MethodologyOf(version);
+                    ResultLine(version, meth, r.TableInstanceId, r.PeriodKey, r.SourceRowKey, r.OutputCode, r.SubstanceEntryId, r.UnitId)
+                        .Add(m, r.Value);
+                }
+            }
+
+            Line FormulaLine(ColumnDef column, long instanceId, int periodKey, string rowKey)
+            {
+                var table = TableOf(instanceId, periodKey, rowKey);
 
                 // Ключ формули: «методологія» — мінус колонка (ідентифікатори методологій додатні), без одиниці в ключі.
-                var key = (table, (string?)c.RowKey, -column.Id, column.Code, (long?)null, -1);
+                var key = (table, (string?)rowKey, -column.Id, column.Code, (long?)null, -1);
                 if (!lines.TryGetValue(key, out var line))
                 {
-                    var eq = EquipmentOf(table, c.RowKey);
+                    var eq = EquipmentOf(table, rowKey);
                     var col = ColumnOf(column);
                     int? unit = column.UnitId is { } uid ? UnitOf(uid) : null;
-                    var id = string.Join('|', "f", TableKey(table), c.RowKey, column.Id.ToString(CultureInfo.InvariantCulture));
+                    var id = string.Join('|', "f", TableKey(table), rowKey, column.Id.ToString(CultureInfo.InvariantCulture));
 
                     // Формули шаблону — після методологій рядка, у порядку колонок.
                     line = new Line(id, eq, null, column.Code, col, null, unit, ("￿", column.Ordinal, column.Code, ""));
                     lines.Add(key, line);
                 }
 
-                line.Add(monthOfKey[c.PeriodKey], c.Value);
+                return line;
+            }
+
+            foreach (var c in formulaCells)
+            {
+                if (columns.TryGetValue(c.ColumnDefId, out var column))
+                {
+                    FormulaLine(column, c.TableInstanceId, c.PeriodKey, c.RowKey).Add(monthOfKey[c.PeriodKey], c.Value);
+                }
+            }
+
+            foreach (var c in formulaMonths)
+            {
+                if (!columns.TryGetValue(c.ColumnDefId, out var column))
+                {
+                    continue;
+                }
+
+                Line? line = null;
+                for (var m = 0; m < keys.Count; m++)
+                {
+                    if ((c.Months & (1 << m)) != 0)
+                    {
+                        line ??= FormulaLine(column, c.TableInstanceId, keys[m].Value, c.RowKey);
+                        line.Add(m, 0m);
+                    }
+                }
             }
 
             FillLabels(entries);
 
             var noValue = months.Select(m => m.RunState is "noRun" or "notOpened" ? 'n' : 'a').ToArray();
-            var rows = lines.Values
-                .OrderBy(l => tableOrder[equipment[l.Equipment].Table].SheetOrdinal)
-                .ThenBy(l => tables[equipment[l.Equipment].Table].SheetCopyId ?? 0)
-                .ThenBy(l => tableOrder[equipment[l.Equipment].Table].TableOrdinal)
-                .ThenBy(l => equipmentOrder[l.Equipment])
-                .ThenBy(l => equipment[l.Equipment].RowKey, StringComparer.Ordinal)
-                .ThenBy(l => l.Sort.Methodology, StringComparer.Ordinal)
-                .ThenBy(l => l.Sort.ColumnOrdinal)
-                .ThenBy(l => l.Sort.Output, StringComparer.Ordinal)
-                .ThenBy(l => l.Sort.Substance, StringComparer.Ordinal)
-                // Останній ключ — ідентифікатор виходу: порядок повний, незалежний від порядку фактів із бази, тож
-                // відбиток курсора сторінки (CalculationYearCursor) між запитами той самий.
-                .ThenBy(l => l.Id, StringComparer.Ordinal)
-                .Select(l => l.ToDto(noValue, l.Unit is { } u && unitList[u].Additive))
-                .ToList();
+            // Порядок: аркуш → копія → таблиця → рядок (порядковий номер, ключ) → методологія → колонка → вихід →
+            // речовина → ідентифікатор виходу. Останній ключ — ідентифікатор: порядок повний, незалежний від порядку
+            // фактів із бази, тож відбиток курсора сторінки (CalculationYearCursor) між запитами той самий.
+            // ⚠ CRY04: ключі рахуються раз на вихід і порівнюються одним компаратором — ланцюжок OrderBy/ThenBy з
+            // десяти ключів займав до 0.4 с на 30 тис. виходів.
+            var sorted = Array.ConvertAll(lines.Values.ToArray(), l =>
+            {
+                var e = equipment[l.Equipment];
+                var (sheetOrdinal, tableOrdinal) = tableOrder[e.Table];
+                return new LineOrder(sheetOrdinal, tables[e.Table].SheetCopyId ?? 0, tableOrdinal, equipmentOrder[l.Equipment], e.RowKey, l);
+            });
+            Array.Sort(sorted, LineOrder.Compare);
+            var rows = Array.ConvertAll(sorted, o => o.Line.ToDto(noValue, o.Line.Unit is { } u && unitList[u].Additive)).ToList();
 
             return new CalculationYearViewDto(
                 documentId, year, months, tables, equipment, methodologyList, substances, unitList, columnList, rows, narrowed);
@@ -387,7 +462,16 @@ public sealed class CalculationYearViewBuilder(
         /// Стійкий ключ таблиці в ідентифікаторі виходу (визначення + копія, а не індекс у переліку): ідентифікатор того
         /// самого виходу однаковий у зведенні, на сторінці таблиці й в експорті.
         /// </summary>
-        private string TableKey(int table) => CalculationYearPages.KeyOf(tables[table]);
+        private string TableKey(int table)
+        {
+            // Ключ таблиці — раз на таблицю, а не новий рядок на кожен вихід.
+            while (tableKeys.Count <= table)
+            {
+                tableKeys.Add(null);
+            }
+
+            return tableKeys[table] ??= CalculationYearPages.KeyOf(tables[table]);
+        }
 
         private int TableOf(long? instanceId, int periodKey, string? rowKey)
         {
@@ -560,8 +644,12 @@ public sealed class CalculationYearViewBuilder(
         {
             if (methodologyIndex.TryGetValue(version.MethodologyId, out var index))
             {
-                // Перелік іде від раннього місяця до пізнього: версія — останнього.
-                methodologyList[index] = methodologyList[index] with { Version = version.Version };
+                // Перелік іде від раннього місяця до пізнього: версія — останнього. Новий запис — лише коли версія інша
+                // (раніше — на кожне число: сотні тисяч копій запису).
+                if (!string.Equals(methodologyList[index].Version, version.Version, StringComparison.Ordinal))
+                {
+                    methodologyList[index] = methodologyList[index] with { Version = version.Version };
+                }
                 return index;
             }
 
@@ -618,6 +706,61 @@ public sealed class CalculationYearViewBuilder(
             columnIndex.Add(column.Id, index);
             columnList.Add(new CalculationYearColumnDto(column.Id, column.Code, column.HeaderL10n));
             return index;
+        }
+    }
+
+    /// <summary>Ключі порядку виходу (рахуються раз) — див. сортування в <c>Pivot.Build</c>.</summary>
+    private readonly record struct LineOrder(int SheetOrdinal, long SheetCopyId, int TableOrdinal, int RowOrdinal, string? RowKey, Line Line)
+    {
+        public static int Compare(LineOrder a, LineOrder b)
+        {
+            int c;
+            if ((c = a.SheetOrdinal.CompareTo(b.SheetOrdinal)) != 0)
+            {
+                return c;
+            }
+
+            if ((c = a.SheetCopyId.CompareTo(b.SheetCopyId)) != 0)
+            {
+                return c;
+            }
+
+            if ((c = a.TableOrdinal.CompareTo(b.TableOrdinal)) != 0)
+            {
+                return c;
+            }
+
+            if ((c = a.RowOrdinal.CompareTo(b.RowOrdinal)) != 0)
+            {
+                return c;
+            }
+
+            if ((c = string.CompareOrdinal(a.RowKey, b.RowKey)) != 0)
+            {
+                return c;
+            }
+
+            if ((c = string.CompareOrdinal(a.Line.Sort.Methodology, b.Line.Sort.Methodology)) != 0)
+            {
+                return c;
+            }
+
+            if ((c = a.Line.Sort.ColumnOrdinal.CompareTo(b.Line.Sort.ColumnOrdinal)) != 0)
+            {
+                return c;
+            }
+
+            if ((c = string.CompareOrdinal(a.Line.Sort.Output, b.Line.Sort.Output)) != 0)
+            {
+                return c;
+            }
+
+            if ((c = string.CompareOrdinal(a.Line.Sort.Substance, b.Line.Sort.Substance)) != 0)
+            {
+                return c;
+            }
+
+            return string.CompareOrdinal(a.Line.Id, b.Line.Id);
         }
     }
 

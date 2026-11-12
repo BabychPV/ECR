@@ -79,7 +79,42 @@ public sealed record CalculationYearFacts(
 {
     /// <summary>Порожні факти.</summary>
     public static CalculationYearFacts Empty { get; } = new([], [], [], [], [], [], [], []);
+
+    /// <summary>
+    /// Лише зведення (<see cref="CalculationYearReadRequest.Aggregate"/>): виходи методологій з екземпляром — один рядок
+    /// на вихід із маскою місяців (біт 0 — січень), у порядку, у якому їх розгортало б читання по місяцях; значення 0.
+    /// <see cref="Results"/> тоді несе лише числа без екземпляра (до D-401).
+    /// </summary>
+    /// <remarks>
+    /// CRY04: розгортання маски в рядок на місяць (240 тис. фактів на синтетиці) і прохід будівника по них займали до
+    /// секунди; будівник розгортає маску сам, не створюючи фактів.
+    /// </remarks>
+    public IReadOnlyList<YearResultMonths> ResultMonths { get; init; } = [];
+
+    /// <summary>
+    /// Лише зведення: комірки формул — один рядок на (таблиця, рядок, колонка) з маскою місяців, значення 0.
+    /// <see cref="FormulaCells"/> тоді порожній.
+    /// </summary>
+    public IReadOnlyList<YearFormulaCellMonths> FormulaCellMonths { get; init; } = [];
 }
+
+/// <summary>Вихід методології зведення з маскою місяців (біт <c>m − 1</c> — місяць <c>m</c>).</summary>
+/// <param name="Months">Маска місяців.</param>
+/// <param name="MethodologyVersionId">Версія методології.</param>
+/// <param name="TableInstanceId">Екземпляр-представник таблиці; <c>-1</c> — екземпляр поза переліком запиту.</param>
+/// <param name="SourceRowKey">Ключ рядка.</param>
+/// <param name="OutputCode">Вихід.</param>
+/// <param name="SubstanceEntryId">Речовина.</param>
+/// <param name="UnitId">Одиниця.</param>
+public sealed record YearResultMonths(
+    int Months, int MethodologyVersionId, long TableInstanceId, string? SourceRowKey, string OutputCode, long? SubstanceEntryId, int UnitId);
+
+/// <summary>Комірка формули зведення з маскою місяців.</summary>
+/// <param name="Months">Маска місяців.</param>
+/// <param name="TableInstanceId">Екземпляр-представник таблиці.</param>
+/// <param name="RowKey">Ключ рядка.</param>
+/// <param name="ColumnDefId">Колонка.</param>
+public sealed record YearFormulaCellMonths(int Months, long TableInstanceId, string RowKey, int ColumnDefId);
 
 /// <summary>Актуальний прогін періоду.</summary>
 /// <param name="PeriodKey">Період.</param>

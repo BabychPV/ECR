@@ -84,18 +84,26 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
             .ToList();
 
         var instanceIds = request.TableInstanceIds.Distinct().ToList();
+        // CRY04: зведення — маски місяців без розгортання (будівник розгортає сам); Results — лише числа без екземпляра.
+        var resultMonths = request.Aggregate ? AggregateResultMonths(cached!, instanceIds) : [];
         var results = request.Aggregate
-            ? ExpandAggregateResults(cached!, keys[0] / 100, instanceIds)
+            ? [.. cached!.Legacy.OrderBy(r => r.PeriodKey)]
             : await ResultValuesAsync(documentId, groups, request.SliceResults ? instanceIds : null, ct).ConfigureAwait(false);
 
         var formulaCells = new List<YearFormulaCell>();
+        var formulaMonths = new List<YearFormulaCellMonths>();
         var rows = new List<YearRow>();
         var labelCells = new List<YearLabelCell>();
         if (instanceIds.Count > 0)
         {
-            formulaCells = request.Aggregate
-                ? await AggregateFormulaCellsAsync(documentId, keys, instanceIds, limit, ct).ConfigureAwait(false)
-                : await FormulaCellValuesAsync(documentId, keys, instanceIds, limit, ct).ConfigureAwait(false);
+            if (request.Aggregate)
+            {
+                formulaMonths = await AggregateFormulaCellsAsync(documentId, keys, instanceIds, limit, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                formulaCells = await FormulaCellValuesAsync(documentId, keys, instanceIds, limit, ct).ConfigureAwait(false);
+            }
 
             if (request.IncludeRows)
             {
@@ -122,6 +130,7 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
         }
 
         var entryIds = results.Where(r => r.SubstanceEntryId is not null).Select(r => r.SubstanceEntryId!.Value)
+            .Concat(resultMonths.Where(r => r.SubstanceEntryId is not null).Select(r => r.SubstanceEntryId!.Value))
             .Concat(labelCells.Where(c => c.EntryId is not null).Select(c => c.EntryId!.Value))
             .Distinct()
             .ToList();
@@ -134,7 +143,7 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 
-        var versionIds = results.Select(r => r.MethodologyVersionId).Distinct().ToList();
+        var versionIds = results.Select(r => r.MethodologyVersionId).Concat(resultMonths.Select(r => r.MethodologyVersionId)).Distinct().ToList();
         var versions = versionIds.Count == 0
             ? []
             : await (
@@ -154,7 +163,11 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
             rows,
             labelCells,
             [.. entries.Select(e => new YearEntry(e.Id, e.Code, e.DisplayL10n))],
-            versions);
+            versions)
+        {
+            ResultMonths = resultMonths,
+            FormulaCellMonths = formulaMonths,
+        };
     }
 
     /// <inheritdoc />
@@ -415,10 +428,11 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
     }
 
     /// <summary>
-    /// Розгортає агрегат зведення по місяцях маски зі значенням 0 і екземпляром-представником тієї ж таблиці (звуження
-    /// доступу залежить від таблиці, не від екземпляра). Живе, не кешується: залежить від переліку екземплярів запиту.
+    /// Агрегат зведення — виходи з маскою місяців, злиті за (екземпляр-представник, версія, рядок, вихід, речовина,
+    /// одиниця) у порядку першої появи; екземпляр поза переліком запиту (видалений) — <c>-1</c>, як і в сирому читанні:
+    /// таблиця не встановлюється. Живе, не кешується: залежить від переліку екземплярів запиту.
     /// </summary>
-    private static List<YearResult> ExpandAggregateResults(YearResultsEntry entry, int year, List<long> instanceIds)
+    private static List<YearResultMonths> AggregateResultMonths(YearResultsEntry entry, List<long> instanceIds)
     {
         var lines = new Dictionary<(long Instance, int Version, string? Row, string Output, long? Substance, int Unit), int>();
         foreach (var row in entry.Lines)
@@ -428,21 +442,9 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
         }
 
         var known = instanceIds.ToHashSet();
-        var expanded = new List<YearResult>(lines.Count * 4 + entry.Legacy.Count);
-        foreach (var ((instance, version, row, output, substance, unit), months) in lines)
-        {
-            for (var m = 1; m <= 12; m++)
-            {
-                if ((months & (1 << (m - 1))) != 0)
-                {
-                    // Екземпляр поза переліком документа (видалений) — як і в сирому читанні: таблиця не встановлюється.
-                    expanded.Add(new YearResult(year * 100 + m, version, known.Contains(instance) ? instance : -1, row, output, substance, unit, 0m));
-                }
-            }
-        }
-
-        expanded.AddRange(entry.Legacy);
-        return [.. expanded.OrderBy(r => r.PeriodKey)];
+        return [.. lines.Select(kv => new YearResultMonths(
+            kv.Value, kv.Key.Version, known.Contains(kv.Key.Instance) ? kv.Key.Instance : -1, kv.Key.Row, kv.Key.Output,
+            kv.Key.Substance, kv.Key.Unit))];
     }
 
     /// <summary>Розраховані комірки формул шаблону зі значеннями (екземпляри сторінки або увесь документ).</summary>
@@ -467,7 +469,7 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
     }
 
     /// <summary>Зведення: комірки формул, згруповані в SQL до (таблиця, рядок, колонка) з маскою місяців.</summary>
-    private async Task<List<YearFormulaCell>> AggregateFormulaCellsAsync(
+    private async Task<List<YearFormulaCellMonths>> AggregateFormulaCellsAsync(
         long documentId, List<int> keys, List<long> instanceIds, int limit, CancellationToken ct)
     {
         // ⚠ CRY01, заміри (синтетика 20 × 1 000 × 12): рядки — IX_TableRow_Live, а не UQ_TableRow_Key, бо в тому немає
@@ -499,20 +501,8 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
         ThrowIfOverCeiling(rows.Sum(r => r.Cells), limit, documentId, keys[0]);
 
         var known = instanceIds.ToHashSet();
-        var year = keys[0] / 100;
-        var cells = new List<YearFormulaCell>(rows.Count * 4);
-        foreach (var row in rows.Where(r => known.Contains(r.TableInstanceId)))
-        {
-            for (var m = 1; m <= 12; m++)
-            {
-                if ((row.Months & (1 << (m - 1))) != 0)
-                {
-                    cells.Add(new YearFormulaCell(year * 100 + m, row.TableInstanceId, row.RowKey, row.ColumnDefId, 0m));
-                }
-            }
-        }
-
-        return cells;
+        return [.. rows.Where(r => known.Contains(r.TableInstanceId))
+            .Select(r => new YearFormulaCellMonths(r.Months, r.TableInstanceId, r.RowKey, r.ColumnDefId))];
     }
 
     /// <summary>

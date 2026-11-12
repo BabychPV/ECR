@@ -279,6 +279,66 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         Assert.DoesNotContain(s.LabelName, export, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// CRY04: зведення (маски місяців, без розгортання фактів) — те саме, що зведення з повного огляду (числа по місяцях,
+    /// шлях експорту): лічильники, таблиці в порядку, варіанти фільтрів у порядку, стани місяців — для кожного читача й
+    /// фільтра. Мутація (локально): не обробляти числа без екземпляра в місячному проході — червоніє.
+    /// </summary>
+    [Theory]
+    [InlineData("none")]
+    [InlineData("deny")]
+    [InlineData("denyFormula")]
+    [InlineData("denyJan")]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "CALC-RESULTS")]
+    public async Task Зведення_з_масок_дорівнює_зведенню_з_повного_огляду(string how)
+    {
+        var s = await ArrangeAsync(how).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var root = $"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/calculation-results/year/summary?year=2026";
+
+        CalculationYearViewDto full;
+        using (var scope = app.Services.CreateScope())
+        {
+            var access = scope.ServiceProvider.GetRequiredService<IAccessDecisionService>();
+            var builder = scope.ServiceProvider.GetRequiredService<CalculationYearViewBuilder>();
+            var profile = await access.BuildProfileAsync(s.UserId, CancellationToken.None).ConfigureAwait(true);
+            full = await builder.BuildAsync(profile, s.DocumentId, 2026, CancellationToken.None).ConfigureAwait(true);
+        }
+
+        var filters = new (string Query, CalculationYearFilter Filter)[]
+        {
+            ("", CalculationYearFilter.None),
+            ("&problems=true", new CalculationYearFilter(ProblemsOnly: true)),
+            ("&methodology=formula", new CalculationYearFilter(Methodology: CalculationYearFilter.FormulaMethodology)),
+        };
+        foreach (var (query, filter) in filters)
+        {
+            var expected = CalculationYearPages.Summary(full, filter);
+            var actual = JsonDocument.Parse(await GetOkAsync(app, client, root + query).ConfigureAwait(true)).RootElement;
+
+            Assert.Equal(expected.TotalRows, actual.GetProperty("totalRows").GetInt32());
+            Assert.Equal(expected.MatchedRows, actual.GetProperty("matchedRows").GetInt32());
+            Assert.Equal(expected.ProblemRows, actual.GetProperty("problemRows").GetInt32());
+            Assert.Equal(expected.HasFormulas, actual.GetProperty("hasFormulas").GetBoolean());
+            Assert.Equal(
+                expected.Tables.Select(t => $"{t.Key}:{t.Rows}:{t.Matched}:{t.Problems}"),
+                actual.GetProperty("tables").EnumerateArray().Select(t =>
+                    $"{t.GetProperty("key").GetString()}:{t.GetProperty("rows").GetInt32()}:{t.GetProperty("matched").GetInt32()}:{t.GetProperty("problems").GetInt32()}"));
+            Assert.Equal(
+                expected.Methodologies.Select(m => m.Code),
+                actual.GetProperty("methodologies").EnumerateArray().Select(m => m.GetProperty("code").GetString()));
+            Assert.Equal(
+                expected.Substances.Select(m => m.Code),
+                actual.GetProperty("substances").EnumerateArray().Select(m => m.GetProperty("code").GetString()));
+            Assert.Equal(
+                expected.Months.Select(m => m.RunState),
+                actual.GetProperty("months").EnumerateArray().Select(m => m.GetProperty("runState").GetString()));
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
