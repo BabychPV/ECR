@@ -1,7 +1,9 @@
+using Ecr.Api.Security;
 using Ecr.Application.Documents.Discussions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Net.Http.Headers;
 
 namespace Ecr.Api.Controllers;
@@ -87,6 +89,7 @@ public sealed class TableDiscussionsController(
     /// <summary>Кандидати у згадки: лише користувачі, які самі бачать цю таблицю (і період <c>periodKey</c>, якщо задано) (≥ 2 символи, до 20).</summary>
     /// <remarks>Імена користувачів без доступу не повертаються ніколи. <c>404</c> — таблиця невидима.</remarks>
     [HttpGet("tables/{tableCode}/mention-candidates")]
+    [EnableRateLimiting(SearchRateLimitPolicy.PolicyName)] // S-6: межа на користувача, 429 — той самий кошик, що пошук і кандидати передач (T8)
     [ProducesResponseType<IReadOnlyList<TableDiscussionMentionCandidateDto>>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -104,6 +107,7 @@ public sealed class TableDiscussionsController(
     /// лише прийняті.
     /// </remarks>
     [HttpPost("tables/{tableCode}/messages")]
+    [EnableRateLimiting(TableDiscussionPostRateLimitPolicy.PolicyName)] // S-6: 20/хв на користувача — обіцяна в описі 429
     [ProducesResponseType<TableDiscussionMessageDto>(StatusCodes.Status201Created)]
     [ProducesResponseType<TableDiscussionMessageDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

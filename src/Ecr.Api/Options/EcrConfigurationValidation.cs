@@ -68,6 +68,7 @@ public static partial class EcrConfigurationValidation
         ("Security:RateLimit:RecalculateUserPermitPerMinute", 1),
         ("Security:RateLimit:VerifyPermitPerMinute", 1),
         ("Security:RateLimit:ValidatePermitPerMinute", 1),
+        (Ecr.Api.Security.TableDiscussionPostRateLimitPolicy.PermitKey, 1),
         ("Security:RateLimit:HealthReadyPermitPerMinute", 1),
         (Ecr.Api.Security.ImportPreviewRateLimitPolicy.PermitKey, 1),
         (Ecr.Api.Security.ImportPreviewRateLimitPolicy.QueueLimitKey, 0),
