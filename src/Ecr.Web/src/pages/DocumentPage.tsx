@@ -159,6 +159,10 @@ const ExecutorStrip = lazy(async () => ({
 const UnmatchedRowsBanner = lazy(async () => ({
   default: (await import('@/features/documents/UnmatchedRowsBanner')).UnmatchedRowsBanner,
 }));
+// ✎ C-1 (D-475): лінивий, як банер рядків без правила — бюджет маршруту 250 КБ (D-132).
+const FormulaErrorsBanner = lazy(async () => ({
+  default: (await import('@/features/documents/FormulaErrorsBanner')).FormulaErrorsBanner,
+}));
 
 // Місце банера перерахунку проєкту (lane A) — за `import()`, як на Documents: хук опитування задач і модель
 // прогресу не входять у граф маршруту (бюджет D-132: DocumentPage 250.5 КБ gzip після зведення з банерами #782).
@@ -921,6 +925,19 @@ export function DocumentPage(): JSX.Element {
                 {document.resultsStaleUndetermined === 'PartiallyHidden' && <StaleResultsUndeterminedMark />}
               </>
             }
+          />
+        </Suspense>
+      )}
+
+      {/* ✎ C-1 (D-475): помилки формул — ПЕРЕД рядками без правила: вони блокують подання. */}
+      {unmatchedRows.formulaErrors.length > 0 && (
+        <Suspense fallback={null}>
+          <FormulaErrorsBanner
+            userId={session.data?.userId}
+            errors={unmatchedRows.formulaErrors}
+            total={unmatchedRows.formulaErrorTotal}
+            tables={tables.data ?? []}
+            onOpenCell={openUnmatchedRow}
           />
         </Suspense>
       )}

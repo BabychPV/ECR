@@ -69,6 +69,7 @@ import {
   restorableCellsIn,
   splitOverrideEdits,
 } from './formulaOverride';
+import { calcErrorHint, calcErrorOf } from './calcError';
 import { markOverrideReason, overrideReasonOf, previousOverrideReasonOf } from './overrideReasons';
 import {
   publishTableAttention,
@@ -3710,6 +3711,13 @@ export function gridColumns(
         const manualClass = manual === null ? null : 'ecr-cell-formula-manual';
         const manualHint = manual === null ? null : manualCellHint(manual);
 
+        // ✎ C-1 (D-475): помилка формули / «не оновлено через помилку» — маркер ПОВЕРХ стану (ліва лінія,
+        // `cell-states.css`); причина й час — текстом у `title`, не лише формою.
+        const calcError = calcErrorOf(slice, rowKey, column.code);
+        const calcErrorClass =
+          calcError === null ? null : calcError.kind === 'Blocked' ? 'ecr-cell-calc-stale' : 'ecr-cell-calc-error';
+        const calcErrorHintText = calcError === null ? null : calcErrorHint(calcError);
+
         // ⛔ Директива registry-lookup / cell-style, PR B2: оформлення
         // автора шаблону — ШАР ПІД будь-яким станом (`cellStateOf` вище),
         // не заміна: рахується ЗАВЖДИ, незалежно від того, чи спрацював
@@ -3762,6 +3770,7 @@ export function gridColumns(
           navigationClass === null &&
           outOfWindowClass === null &&
           manualClass === null &&
+          calcErrorClass === null &&
           appearance === undefined
         ) {
           return numericClass === null
@@ -3794,6 +3803,7 @@ export function gridColumns(
         const orphanedHint = state === 'orphaned' ? t('grid.rowAttention.orphaned') : null;
 
         const hint = [
+          calcErrorHintText,
           orphanedHint,
           manualHint,
           decision.hint,
@@ -3817,6 +3827,7 @@ export function gridColumns(
             navigationClass,
             outOfWindowClass,
             manualClass,
+            calcErrorClass,
             numericClass,
             appearanceClass,
           ]
@@ -3828,6 +3839,7 @@ export function gridColumns(
           ...(state === null ? {} : { 'data-cell-state': state }),
           ...(isOutOfWindow ? { 'data-out-of-window': 'true' } : {}),
           ...(manual === null ? {} : { 'data-formula-manual': 'true' }),
+          ...(calcError === null ? {} : { 'data-calc-error': calcError.kind }),
 
           // ⚠ Що комірку пофарбувало правило — атрибутом, не лише кольором: тест
           // і людина з інструментами розробника бачать причину підсвітки.

@@ -425,6 +425,34 @@
 }
 
 /*
+ * ── ✎ C-1 (D-475): помилка формули і «не оновлено через помилку» ──────────
+ *
+ * ⚠ ДОДАТКОВИЙ маркер поверх будь-якого стану; кути, верхню й нижню лінії вже зайнято (збереження, обов'язковий вхід,
+ * ручне значення, поза вікном), а ліву межу тримають стани — тож носій — смуга 3 px біля лівого краю ФОНОМ
+ * (`background-image`), що не змагається з `box-shadow` інших маркерів: суцільна для власної помилки, переривчаста для
+ * «не оновлено». Форма, не лише колір (`D-128`); причина й час — у `title`. Розмірів комірки не змінює.
+ */
+.ecr-cell-calc-error {
+  background-image: linear-gradient(#b3170c, #b3170c);
+  background-size: 3px 100%;
+  background-repeat: no-repeat;
+}
+
+.ecr-cell-calc-stale {
+  background-image: repeating-linear-gradient(to bottom, #b3170c 0 4px, transparent 4px 7px);
+  background-size: 3px 100%;
+  background-repeat: no-repeat;
+}
+
+:root[data-mantine-color-scheme='dark'] .ecr-cell-calc-error {
+  background-image: linear-gradient(#f07369, #f07369);
+}
+
+:root[data-mantine-color-scheme='dark'] .ecr-cell-calc-stale {
+  background-image: repeating-linear-gradient(to bottom, #f07369 0 4px, transparent 4px 7px);
+}
+
+/*
  * ── RevoGrid: світлі значення пакета проти темної теми застосунку ─────────
  *
  * ⛔ Виміряно в браузері на живому документі, не припущено: у темній темі

@@ -2,7 +2,11 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { CalculationRunStatusDto } from '@/api/types';
 import { apiFetch } from '@/api/client';
-import type { CalculationIssue, CalculationIssueTableHint } from '@/features/calculationIssues/api';
+import type {
+  CalculationIssue,
+  CalculationIssueTableHint,
+  FormulaErrorIssue,
+} from '@/features/calculationIssues/api';
 import { useCalculationIssues } from '@/features/calculationIssues/useCalculationIssues';
 import { calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
 
@@ -14,10 +18,15 @@ export interface UnmatchedRows {
   readonly hints: readonly CalculationIssueTableHint[];
   /** Кінець актуального прогону (UTC); `null` — невідомо (немає права `Calculation.View` чи прогону). */
   readonly finishedAt: string | null;
+  /** ✎ C-1 (D-475): група «Помилки формул» — оригінали й (якщо відкрита) копія; порожньо — помилок немає. */
+  readonly formulaErrors: readonly FormulaErrorIssue[];
+  /** ✎ C-1: скільки комірок з помилкою всього (сервер віддає не більше 500 рядків групи); без — довжина переліку. */
+  readonly formulaErrorTotal?: number;
 }
 
 const Empty: readonly CalculationIssue[] = [];
 const NoHints: readonly CalculationIssueTableHint[] = [];
+const NoErrors: readonly FormulaErrorIssue[] = [];
 
 /**
  * Рядки документа, яким не підійшло жодне правило розрахунку (D14 + AN-69, UAT 08.11 b1).
@@ -64,5 +73,24 @@ export function useUnmatchedRows(
     return [...own, ...(copy.data?.tables ?? NoHints).filter((hint) => hint.sheetCopyId === activeCopyId)];
   }, [originals.data, copy.data, activeCopyId]);
 
-  return { issues, hints, finishedAt: run.data?.finishedAt ?? null };
+  const formulaErrors = useMemo(() => {
+    const own = (originals.data?.formulaErrors ?? NoErrors).filter((error) => (error.sheetCopyId ?? null) === null);
+    if (activeCopyId === null) return own;
+
+    return [
+      ...own,
+      ...(copy.data?.formulaErrors ?? NoErrors).filter((error) => error.sheetCopyId === activeCopyId),
+    ];
+  }, [originals.data, copy.data, activeCopyId]);
+
+  const formulaErrorTotal =
+    (originals.data?.formulaErrorTotal ?? 0) + (activeCopyId === null ? 0 : (copy.data?.formulaErrorTotal ?? 0));
+
+  return {
+    issues,
+    hints,
+    finishedAt: run.data?.finishedAt ?? null,
+    formulaErrors,
+    formulaErrorTotal: Math.max(formulaErrorTotal, formulaErrors.length),
+  };
 }
