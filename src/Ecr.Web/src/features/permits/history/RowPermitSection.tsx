@@ -64,7 +64,7 @@ export function RowPermitSection({ documentId, periodKey, tableDefId, sheetCopyI
   const rowName = rowDisplayName(slice, cell.rowKey, row?.permits[0]?.permit);
   const mark = marks.cells.get(cellKey(cell.rowKey, cell.columnCode));
 
-  const undo = useUndoRowPermit(documentId);
+  const undo = useUndoRowPermit(documentId, periodKey);
   const undoLoading = usePendingLoading(undo.isPending);
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState<string | null>(null);
