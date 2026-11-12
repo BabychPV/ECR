@@ -136,7 +136,7 @@ interface FormulaErrorsBannerProps {
 /**
  * ✎ C-1 (D-475): «Помилки формул» над сіткою — група панелі проблем розрахунку документа.
  *
- * ⛔ Це ПОМИЛКА, що блокує подання (на відміну від «рядків без правила»): тон `red`, розгорнуто за замовчуванням.
+ * ⛔ Це ПОМИЛКА, що блокує подання (на відміну від «рядків без правила»): тон `statusError`, розгорнуто за замовчуванням.
  * Значення комірок не змінено — сітка показує останнє правильне; банер каже, яка комірка, що за формула, чому
  * (і з якими входами) і з якого часу; посилання відкриває комірку. ✎ Один запис на КОРІНЬ помилки з «N залежних
  * комірок не оновлено» — залежні позначає сітка, перелік їх по одній не показує. Зникає сам після успішного перерахунку: ключ
@@ -163,7 +163,7 @@ export function FormulaErrorsBanner({
   const bodyId = 'document-formula-errors-body';
 
   return (
-    <Alert color="red" variant="light" py="xs" data-testid="document-formula-errors">
+    <Alert color="statusError" variant="light" py="xs" data-testid="document-formula-errors">
       <Group justify="space-between" wrap="nowrap" gap="sm" align="center" preventGrowOverflow={false}>
         <Text size="sm" flex={1} miw={0}>
           <Text span size="sm" fw={600}>
