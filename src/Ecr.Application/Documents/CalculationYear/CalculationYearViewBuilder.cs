@@ -23,7 +23,6 @@ namespace Ecr.Application.Documents.CalculationYear;
 /// </remarks>
 public sealed class CalculationYearViewBuilder(
     ICalculationYearReader reader,
-    IRowStore rows,
     IMetadataCache metadata,
     IMethodologyStore methodologies,
     IPeriodStore periods,
@@ -66,11 +65,11 @@ public sealed class CalculationYearViewBuilder(
             .Where(p => p.PeriodKey / 100 == year)
             .ToDictionary(p => p.PeriodKey, p => p.State);
 
-        var instances = new List<TableInstanceRef>();
-        foreach (var key in keys)
-        {
-            instances.AddRange(await rows.GetTableInstancesAsync(documentId, key, ct).ConfigureAwait(false));
-        }
+        // Екземпляри всіх 12 місяців — одним запитом (а не GetTableInstancesAsync на місяць: до 23 звернень разом з
+        // архівним фолбеком порожніх місяців); порядок і фолбек F-13 — ті самі.
+        var instances = await reader
+            .ReadTableInstancesAsync(documentId, [.. keys.Select(k => k.Value)], ct)
+            .ConfigureAwait(false);
 
         var snapshots = new Dictionary<int, TemplateVersionSnapshot>();
         foreach (var versionId in instances.Select(i => i.TemplateVersionId).Distinct())

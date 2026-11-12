@@ -30,6 +30,17 @@ public interface ICalculationYearReader
     /// <param name="ct">Скасування.</param>
     public Task<IReadOnlyList<YearRow>> ReadRowsAsync(
         IReadOnlyList<int> periodKeys, IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct);
+
+    /// <summary>
+    /// Екземпляри таблиць документа за всі <paramref name="periodKeys"/> одним запитом — те саме, що
+    /// <see cref="IRowStore.GetTableInstancesAsync"/> по кожному періоду (включно з архівним фолбеком F-13 для періоду
+    /// без гарячих екземплярів), у порядку періодів, усередині — оригінали перед копіями аркушів, далі за Id.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKeys">Періоди (відсікання партицій).</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<IReadOnlyList<TableInstanceRef>> ReadTableInstancesAsync(
+        long documentId, IReadOnlyList<int> periodKeys, CancellationToken ct);
 }
 
 /// <summary>Що читати.</summary>

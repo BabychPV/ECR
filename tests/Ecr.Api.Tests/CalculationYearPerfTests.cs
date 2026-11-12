@@ -190,6 +190,10 @@ public sealed class CalculationYearPerfTests(ITestOutputHelper output)
             public Task<IReadOnlyList<YearRow>> ReadRowsAsync(
                 IReadOnlyList<int> periodKeys, IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct)
                 => inner.ReadRowsAsync(periodKeys, tableInstanceIds, ct);
+
+            public Task<IReadOnlyList<TableInstanceRef>> ReadTableInstancesAsync(
+                long documentId, IReadOnlyList<int> periodKeys, CancellationToken ct)
+                => inner.ReadTableInstancesAsync(documentId, periodKeys, ct);
         }
     }
 

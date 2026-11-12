@@ -189,6 +189,51 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
         return await db.Database.SqlQueryRaw<YearRow>(sql).ToListAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>Стеля екземплярів на період — та сама, що в <c>RowStore.GetTableInstancesAsync</c>.</summary>
+    private const int MaxTableInstancesPerPeriod = 1000;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Доти будівник огляду кликав <c>IRowStore.GetTableInstancesAsync</c> на кожен із 12 місяців: 12 гарячих пошуків
+    /// і ще по одному <c>arc.TableInstance</c> на кожен місяць без екземплярів (майбутні місяці року) — до 23 звернень
+    /// на кожне зведення й сторінку. Тут — одне: гарячі екземпляри всіх періодів пошуком <c>UQ_TableInstance</c> і
+    /// архівні лише тих періодів, де гарячих немає (<c>NOT EXISTS</c>) — те саме правило F-13, що й у
+    /// <c>RowStore</c>, застосоване до кожного періоду окремо. Порядок і стеля на період — як у поштучному читанні.
+    /// </remarks>
+    public async Task<IReadOnlyList<TableInstanceRef>> ReadTableInstancesAsync(
+        long documentId, IReadOnlyList<int> periodKeys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodKeys);
+        if (periodKeys.Count == 0)
+        {
+            return [];
+        }
+
+        var keys = List(periodKeys.Distinct().Order());
+        var sql = $"""
+            SELECT x.TableInstanceId, x.DocumentId, x.TableDefId,
+                   doc.fn_VersionOf(d.ProjectId, x.PeriodKey) AS TemplateVersionId, x.PeriodKey, x.SheetCopyId
+              FROM (SELECT ti.Id AS TableInstanceId, ti.DocumentId, ti.TableDefId, ti.PeriodKey, ti.SheetCopyId
+                      FROM doc.TableInstance AS ti {InstanceSeek}
+                     WHERE ti.PeriodKey IN ({keys}) AND ti.DocumentId = @documentId
+                    UNION ALL
+                    SELECT a.Id, a.DocumentId, a.TableDefId, a.PeriodKey, a.SheetCopyId
+                      FROM arc.TableInstance AS a
+                     WHERE a.PeriodKey IN ({keys}) AND a.DocumentId = @documentId
+                       AND NOT EXISTS (SELECT 1
+                                         FROM doc.TableInstance AS h {InstanceSeek}
+                                        WHERE h.PeriodKey = a.PeriodKey AND h.DocumentId = @documentId)) AS x
+             INNER JOIN doc.Document AS d ON d.Id = x.DocumentId
+             ORDER BY x.PeriodKey, x.SheetCopyId, x.TableInstanceId
+            """;
+        var all = await db.Database
+            .SqlQueryRaw<TableInstanceRef>(sql, new SqlParameter("@documentId", documentId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. all.GroupBy(i => i.PeriodKey).SelectMany(g => g.Take(MaxTableInstancesPerPeriod))];
+    }
+
     /// <summary>
     /// Предикат рядків екземплярів: <c>PeriodKey IN (…)</c> (партиції) і <c>TableInstanceId IN (…)</c> — разом із
     /// <see cref="RowSeek"/> це пошук по <c>UQ_TableRow_Key</c> (PeriodKey, TableInstanceId), а не перегляд рядків
