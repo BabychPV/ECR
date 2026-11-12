@@ -53,7 +53,7 @@ describe('TestCaseRunner — тест без очікувань', () => {
 
     const row = await runAndGetRow('PARITY_1');
 
-    expect(within(row).getByText('expressions.testsRed')).toBeInTheDocument();
+    expect(within(row).getByText('expressions.testsRed')).toBeTruthy();
     expect(within(row).queryByText('expressions.testsGreen')).toBeNull();
   });
 
@@ -62,7 +62,7 @@ describe('TestCaseRunner — тест без очікувань', () => {
 
     const row = await runAndGetRow('GOLD_P1');
 
-    expect(within(row).getByText('expressions.testsGreen')).toBeInTheDocument();
+    expect(within(row).getByText('expressions.testsGreen')).toBeTruthy();
     expect(within(row).queryByText('expressions.testsRed')).toBeNull();
   });
 });
