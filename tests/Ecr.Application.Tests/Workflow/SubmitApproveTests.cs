@@ -544,6 +544,36 @@ public sealed class SubmitApproveTests
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// ✎ C-1 (D-475; PO 12.11, дослівно: «якщо є помилки то затвердити теж не можна»): помилка формули аркуша блокує
+    /// й ЗАТВЕРДЖЕННЯ — 422 <c>ECR-SUB-4221</c> з <c>FORMULA-ERROR</c>, аркуш лишається <c>Submitted</c>. Без перевірки
+    /// на шляху затвердження аркуш ставав <c>Approved</c>.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Помилка_формули_блокує_затвердження()
+    {
+        _sheets[Water].Submit(userId: 999, Now);
+        var recalculation = Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>();
+        recalculation
+            .RecalculateSheetForSubmitAsync(Document, Water, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>(), Arg.Any<long?>())
+            .Returns([
+                new Ecr.Application.Recalculation.FormulaErrorCell(
+                    3, null, "7001001", 11, "Error", "#DIV/0", null, null, null, null),
+            ]);
+        var refresh = new ApprovalSnapshotRefresh(
+            Substitute.For<ISheetEditGate>(), _cells, _rows, _documents, _metadata, _headers, _workflow, recalculation);
+        var handler = new ApproveSheetHandler(_workflow, _access, Reports(), _uow, _user, _clock, _audit, _documents, refresh);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => handler.HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None));
+
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+        Assert.Equal(ApproveSheetHandler.FormulaErrorsMessageKey, error.Details!["messageKey"]);
+        Assert.Contains("FORMULA-ERROR", System.Text.Json.JsonSerializer.Serialize(error.Details), StringComparison.Ordinal);
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Decision", "D-440")]
