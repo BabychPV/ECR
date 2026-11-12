@@ -15,6 +15,7 @@ import type {
 import { denyText } from '@/features/grid/permissions';
 import { useOpenerFocusReturn } from '@/features/projects/useOpenerFocusReturn';
 import { invalidateSlices } from '@/features/grid/sliceCache';
+import { followRecalculation } from '@/features/grid/useCellPatch';
 import { followImportJob } from './followImportJob';
 import { withSheetBusyRetry } from './applyBusyRetry';
 import { calculationResults } from '@/features/methodologies/api';
@@ -164,6 +165,14 @@ export function ImportPanel({
       // без жодного запиту — вони перечитаються, коли їх покажуть.
       await invalidateSlices(queryClient, { documentId, periodKey });
       await queryClient.invalidateQueries({ queryKey: ['document', documentId, periodKey] });
+
+      // ⛔ W-1 (аудит 2026-11): книга поставила задачу формул — обчислені колонки перечитуються, коли вона
+      // ЗАВЕРШИТЬСЯ (той самий слідкувач поза компонентом, що й після правки комірки, N-1; панель може вже
+      // розмонтуватися). Доти зрізи перечитувались лише ДО перерахунку й показували старі обчислені значення.
+      const recalcJobId = result.recalculationJobId;
+      if (typeof recalcJobId === 'string' && recalcJobId.length > 0) {
+        followRecalculation(queryClient, recalcJobId, documentId, periodKey);
+      }
 
       setPreview(null);
       showDone(t('import.applied'));

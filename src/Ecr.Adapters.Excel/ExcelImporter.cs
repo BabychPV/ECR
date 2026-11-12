@@ -163,7 +163,7 @@ public sealed class ExcelImporter(
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        var (lookups, unusableLookups, ambiguousLookups) = await LookupsAsync(snapshot, documentId, map.PeriodKey, profile, ct).ConfigureAwait(false);
+        var (lookups, unusableLookups, ambiguousLookups, hiddenLookups) = await LookupsAsync(snapshot, documentId, map.PeriodKey, profile, ct).ConfigureAwait(false);
 
         // ⛔ S6 (ФВ-6.6): межі читання того, хто імпортує. Перегляд порівнює
         // книгу з ПОТОЧНИМИ значеннями, і будь-яка відповідь, що залежить від
@@ -318,7 +318,8 @@ public sealed class ExcelImporter(
                 readable.CanReadColumn,
                 Ecr.Application.Localization.NumberCulture.ForLanguage(currentUser.Language),
                 unusableLookups,
-                ambiguousLookups);
+                ambiguousLookups,
+                hiddenLookups);
 
             if (permitLocked.TryGetValue(table.Id, out var lockedCodes))
             {
@@ -503,12 +504,18 @@ public sealed class ExcelImporter(
         // період — формула сусіднього аркуша має право читати цю. Тому
         // `TableInstanceId` тут — лише точка входу в документ, а насіння
         // (`seeds`) зібране з усіх таблиць книги.
+        // ⛔ W-1 (аудит 2026-11): id задачі формул КНИГИ — у відповідь (`PatchCellsResponse.RecalculationJobId`): без
+        // нього клієнт перечитував зрізи ДО перерахунку й показував обчислені колонки старими (той самий клас, що D-1/CL-01).
+        // Задачі власників (`ownerRecalcs`) — інший період; клієнт стежить за періодом документа, тож їх не повертаємо.
+        string? recalculationJobId = null;
+
         async Task EnqueueRecalculationAsync(CancellationToken token)
         {
+            recalculationJobId = null;
             if (seeds.Count > 0)
             {
                 // O1: злиття за документо-періодом (системна постановка — ціль без автора).
-                await jobs
+                recalculationJobId = await jobs
                     .EnqueueCoalescedAsync<IFormulaRecalculationJob>(
                         FormulaRecalculationTarget.Of(documentId, plan.PeriodKey, createdByUserId: null),
                         new
@@ -583,9 +590,12 @@ public sealed class ExcelImporter(
                 // подання тих аркушів, а за ними — автозбереження всіх, хто їх правив. Відмова
                 // (`409 ECR-DOC-4091 sheetBeingSubmitted`) відкочує транзакцію й звільняє все взяте:
                 // синхронний імпорт клієнт повторює як минущий, фоновий (`ExcelImportJob`) відкладає себе.
-                var statuses = new Dictionary<int, Ecr.Domain.Enums.DocumentStatus>();
+                // ⛔ C-3 (аудит 2026-11): копія аркуша (RS) має ВЛАСНИЙ замок і стан — ключ `(аркуш, копія)`, як у
+                // поштучного PATCH (`EnterEditOfAsync`). Доти книга брала замок і стан ОРИГІНАЛУ: імпорт у копію-чернетку
+                // відмовляв, щойно подано оригінал, а подання копії не конфліктувало з імпортом у неї.
+                var statuses = new Dictionary<(int SheetDefId, long? SheetCopyId), Ecr.Domain.Enums.DocumentStatus>();
                 var holdsAny = false;
-                foreach (var sheetDefId in sheets)
+                foreach (var (sheetDefId, sheetCopyId) in sheets)
                 {
                     // ⛔ Q-17: аркуш із таблицями «місяці в колонках» (прапор увімкнено) блокується на ВСІ місяці року
                     // одним набором за зростанням ключа періоду — обробник книги (власники й річні періоди) потім лише
@@ -597,14 +607,17 @@ public sealed class ExcelImporter(
 
                     foreach (var key in keys)
                     {
+                        // ⚠ Місяці-колонки ІНШИХ періодів обробник книги бере за аркушем без копії
+                        // (`EnsureColumnPeriodsEditableAsync`) — тут той самий ключ, щоб його взяття було повторним.
+                        var copy = key == period.Value ? sheetCopyId : null;
                         var status = holdsAny
-                            ? await sheetGate.EnterEditNoWaitAsync(documentId, sheetDefId, new PeriodKey(key), innerCt).ConfigureAwait(false)
-                            : await sheetGate.EnterEditAsync(documentId, sheetDefId, new PeriodKey(key), innerCt).ConfigureAwait(false);
+                            ? await sheetGate.EnterEditNoWaitOfAsync(documentId, sheetDefId, new PeriodKey(key), copy, innerCt).ConfigureAwait(false)
+                            : await sheetGate.EnterEditOfAsync(documentId, sheetDefId, new PeriodKey(key), copy, innerCt).ConfigureAwait(false);
                         holdsAny = true;
 
                         if (key == period.Value)
                         {
-                            statuses[sheetDefId] = status;
+                            statuses[(sheetDefId, sheetCopyId)] = status;
                         }
                     }
                 }
@@ -697,7 +710,7 @@ public sealed class ExcelImporter(
         // наново з файлу, якого може вже не бути під рукою.
         await previews.RemoveAsync(previewToken, ct).ConfigureAwait(false);
 
-        return new PatchCellsResponse(applied, versions, validation);
+        return new PatchCellsResponse(applied, versions, validation, recalculationJobId);
     }
 
     /// <summary>Версія рядка з перегляду для <c>baseVersion</c> застосування (L6-08).</summary>
@@ -820,7 +833,7 @@ public sealed class ExcelImporter(
     /// немає в документі, сюди не потрапляє — його відхилить сам
     /// <c>PatchCellsHandler</c> своєю відмовою.
     /// </remarks>
-    private async Task<(IReadOnlyList<int> Sheets, IReadOnlyList<int> TemplateVersions, IReadOnlySet<int> MonthSheets)>
+    private async Task<(IReadOnlyList<(int SheetDefId, long? SheetCopyId)> Sheets, IReadOnlyList<int> TemplateVersions, IReadOnlySet<int> MonthSheets)>
         SheetsInLockOrderAsync(long documentId, PeriodKey period, ImportPlan plan, CancellationToken ct)
     {
         var changed = plan.Tables.Where(t => t.Changes.Count > 0).Select(t => t.TableInstanceId).ToHashSet();
@@ -835,7 +848,8 @@ public sealed class ExcelImporter(
         var monthSheets = new HashSet<int>();
 
         var instances = await rowStore.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false);
-        var sheets = new SortedSet<int>();
+        // C-3: екземпляр копії (RS) — свій ключ; порядок `(SheetDefId, SheetCopyId ?? 0)`, як `RecalculationService.EnterSheetsAsync`.
+        var sheets = new HashSet<(int SheetDefId, long? SheetCopyId)>();
         var templateVersions = new List<int>();
 
         foreach (var group in instances.Where(i => changed.Contains(i.TableInstanceId)).GroupBy(i => i.TemplateVersionId))
@@ -850,7 +864,7 @@ public sealed class ExcelImporter(
             {
                 if (tables.TryGetValue(instance.TableDefId, out var table))
                 {
-                    sheets.Add(table.SheetDefId);
+                    sheets.Add((table.SheetDefId, instance.SheetCopyId));
                     if (routing && monthRouter!.AppliesToTable(table))
                     {
                         monthSheets.Add(table.SheetDefId);
@@ -859,7 +873,7 @@ public sealed class ExcelImporter(
             }
         }
 
-        return ([.. sheets], templateVersions, monthSheets);
+        return ([.. sheets.OrderBy(s => s.SheetDefId).ThenBy(s => s.SheetCopyId ?? 0)], templateVersions, monthSheets);
     }
 
     /// <summary>
@@ -1291,7 +1305,8 @@ public sealed class ExcelImporter(
     /// </remarks>
     private async Task<(IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> Codes,
         IReadOnlyDictionary<long, string> Unusable,
-        IReadOnlyDictionary<int, IReadOnlyDictionary<string, string>> Ambiguous)> LookupsAsync(
+        IReadOnlyDictionary<int, IReadOnlyDictionary<string, string>> Ambiguous,
+        IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> Hidden)> LookupsAsync(
         TemplateVersionSnapshot snapshot, long documentId, int periodKey, AccessProfile profile, CancellationToken ct)
     {
         var registryIds = snapshot.ColumnsById.Values
@@ -1303,10 +1318,11 @@ public sealed class ExcelImporter(
         var result = new Dictionary<int, IReadOnlyDictionary<string, long>>();
         var unusable = new Dictionary<long, string>();
         var ambiguousByTarget = new Dictionary<int, IReadOnlyDictionary<string, string>>();
+        var hiddenByTarget = new Dictionary<int, IReadOnlyDictionary<string, long>>();
 
         if (registryIds.Count == 0)
         {
-            return (result, unusable, ambiguousByTarget);
+            return (result, unusable, ambiguousByTarget, hiddenByTarget);
         }
 
         // Дата чинності — останній день періоду (D-158), як у пікері сітки й у C7.
@@ -1344,9 +1360,24 @@ public sealed class ExcelImporter(
                     unusable[entry.Id] = reason;
                 }
             }
+
+            // ⛔ C-12 (аудит 2026-11): експорт пише код з ПОВНОГО переліку, а коди вище — лише записи, які профіль
+            // може обрати. Код запису, якого профіль обрати не може, що вже стоїть у комірці, ставав «нерозпізнаним» і
+            // відхиляв усю книгу. Коди таких записів — окремо: `ImportDiffBuilder` впізнає їх ЛИШЕ як незмінене
+            // поточне значення (інакше — як неіснуючий код, без оракула існування, S18).
+            var allEntries = await Ecr.Application.Permits.Groups.LookupTargetEntries
+                .ListAsync(registries, groups, registryId, ct).ConfigureAwait(false);
+            var choosable = targetEntries.Select(e => e.Entry.Id).ToHashSet();
+            Ecr.Application.Permits.Groups.LookupTargetEntries.BuildImportCodes(allEntries, out var allCodes, out _);
+            var hidden = allCodes.Where(p => !choosable.Contains(p.Value))
+                .ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase);
+            if (hidden.Count > 0)
+            {
+                hiddenByTarget[registryId] = hidden;
+            }
         }
 
-        return (result, unusable, ambiguousByTarget);
+        return (result, unusable, ambiguousByTarget, hiddenByTarget);
     }
 }
 

@@ -512,10 +512,11 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
         await new UnitOfWork(db).ExecuteInTransactionAsync(
             async ct =>
             {
-                var held = new Dictionary<int, DocumentStatus>();
+                // C-3: ключ — (аркуш, копія); тут лише оригінали.
+                var held = new Dictionary<(int SheetDefId, long? SheetCopyId), DocumentStatus>();
                 foreach (var sheet in world.Tables.Select(t => t.SheetDefId).Distinct().Order())
                 {
-                    held[sheet] = await new SheetEditGate(db).EnterEditAsync(world.Doc.DocumentId, sheet, Period, ct);
+                    held[(sheet, null)] = await new SheetEditGate(db).EnterEditAsync(world.Doc.DocumentId, sheet, Period, ct);
                 }
 
                 seeds.Clear();

@@ -8,10 +8,16 @@ import type { ImportPreview } from '@/api/types';
 import { ImportPanel } from '../ImportPanel';
 import { testTheme } from '@/test/render';
 import { showDone } from '@/shared/ui/notify';
+import { followRecalculation } from '@/features/grid/useCellPatch';
 
 vi.mock('@/shared/ui/notify', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/ui/notify')>()),
   showDone: vi.fn(),
+}));
+
+vi.mock('@/features/grid/useCellPatch', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/features/grid/useCellPatch')>()),
+  followRecalculation: vi.fn(),
 }));
 
 /**
@@ -26,13 +32,17 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-function mockServer(preview: ImportPreview, results?: () => Response): ReturnType<typeof vi.fn> {
+function mockServer(
+  preview: ImportPreview,
+  results?: () => Response,
+  recalcJobId: string | null = null,
+): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
 
     if (url.includes('/import/preview')) return json(preview);
     if (url.includes('/import/apply')) {
-      return json({ appliedCells: 1, rowVersions: {}, validation: [], recalculationJobId: null });
+      return json({ appliedCells: 1, rowVersions: {}, validation: [], recalculationJobId: recalcJobId });
     }
     if (url.includes('/calculation-results') && results !== undefined) return results();
 
@@ -77,6 +87,30 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.mocked(showDone).mockClear();
+  vi.mocked(followRecalculation).mockClear();
+});
+
+describe('ImportPanel: стеження за задачею формул після Apply (W-1)', () => {
+  async function apply(recalcJobId: string | null): Promise<void> {
+    mockServer(oneChange, () => json([]), recalcJobId);
+
+    await openPreview();
+    await userEvent.click(screen.getByRole('button', { name: '⟦import.apply⟧' }));
+    await vi.waitFor(() => expect(vi.mocked(showDone)).toHaveBeenCalledWith('⟦import.applied⟧'));
+  }
+
+  it('W-1: Apply із задачею формул — стеження за нею (documentId/periodKey панелі)', async () => {
+    await apply('job-7');
+
+    // ⛔ Мутація: прибрати виклик `followRecalculation` в `onSuccess` — червоний.
+    expect(vi.mocked(followRecalculation)).toHaveBeenCalledWith(expect.anything(), 'job-7', 7, 202609);
+  });
+
+  it('W-1: Apply без задачі формул — стеження немає', async () => {
+    await apply(null);
+
+    expect(vi.mocked(followRecalculation)).not.toHaveBeenCalled();
+  });
 });
 
 describe('ImportPanel: відмови перегляду (P3)', () => {

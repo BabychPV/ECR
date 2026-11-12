@@ -55,8 +55,8 @@ public sealed partial class PatchCellsHandler
     /// </param>
     /// <param name="ct">Скасування.</param>
     /// <param name="heldSheetStatuses">
-    /// Стани аркушів (<c>SheetDefId</c> → стан), які викликач УЖЕ прочитав під
-    /// спільним блокуванням <see cref="ISheetEditGate.EnterEditAsync"/> у ЦІЙ САМІЙ
+    /// Стани аркушів (<c>(SheetDefId, SheetCopyId)</c> → стан; C-3: копія — свій ключ), які викликач УЖЕ прочитав під
+    /// спільним блокуванням <see cref="ISheetEditGate.EnterEditAsync"/> (копії — <c>EnterCopyEditAsync</c>) у ЦІЙ САМІЙ
     /// транзакції (<c>ExcelImporter</c>); <c>null</c> — взяти й прочитати тут.
     /// ⚠ Не <c>null</c> означає й те, що викликач уже тримає спільне блокування
     /// структури документа (<see cref="ISheetEditGate.EnterStructureAsync"/>, L6-02)
@@ -85,7 +85,7 @@ public sealed partial class PatchCellsHandler
         ICollection<RecalculationSeed> recalculationSeeds,
         ICollection<RowWindowChange> rowWindowChanges,
         CancellationToken ct,
-        IReadOnlyDictionary<int, Domain.Enums.DocumentStatus>? heldSheetStatuses = null,
+        IReadOnlyDictionary<(int SheetDefId, long? SheetCopyId), Domain.Enums.DocumentStatus>? heldSheetStatuses = null,
         IReadOnlyDictionary<long, IReadOnlySet<string>>? overwrittenRows = null,
         ICollection<WorkbookOwnerRecalc>? ownerRecalcs = null)
     {
@@ -260,7 +260,7 @@ public sealed partial class PatchCellsHandler
         long documentId,
         PeriodKey period,
         int userId,
-        IReadOnlyDictionary<int, Domain.Enums.DocumentStatus>? heldSheetStatuses,
+        IReadOnlyDictionary<(int SheetDefId, long? SheetCopyId), Domain.Enums.DocumentStatus>? heldSheetStatuses,
         CancellationToken ct)
     {
         foreach (var item in active)
@@ -577,7 +577,7 @@ public sealed partial class PatchCellsHandler
         DateTime now,
         bool isLateEdit,
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
-        IReadOnlyDictionary<int, Domain.Enums.DocumentStatus>? heldSheetStatuses,
+        IReadOnlyDictionary<(int SheetDefId, long? SheetCopyId), Domain.Enums.DocumentStatus>? heldSheetStatuses,
         CancellationToken ct)
     {
         // ⛔ L6-02: структура документа — до блокувань аркушів, той самий порядок,
@@ -599,8 +599,14 @@ public sealed partial class PatchCellsHandler
             }
         }
 
-        var statuses = new Dictionary<int, Domain.Enums.DocumentStatus>();
-        foreach (var sheet in active.GroupBy(x => x.Context.Table.SheetDefId).OrderBy(g => g.Key))
+        // ⛔ C-3 (аудит 2026-11): ключ — `(аркуш, копія)`: копія (RS) має власний замок і стан, як у поштучного PATCH
+        // (`EnterEditOfAsync`); порядок — `(SheetDefId, SheetCopyId ?? 0)`, як `RecalculationService.EnterSheetsAsync`.
+        // Періоди колонок/річні (нижче) — за аркушем без копії, як `EnsureColumnPeriodsEditableAsync`.
+        var statuses = new Dictionary<(int SheetDefId, long? SheetCopyId), Domain.Enums.DocumentStatus>();
+        foreach (var sheet in active
+                     .GroupBy(x => (x.Context.Table.SheetDefId, x.Context.Instance.SheetCopyId))
+                     .OrderBy(g => g.Key.SheetDefId)
+                     .ThenBy(g => g.Key.SheetCopyId ?? 0))
         {
             // ⛔ Q-17: періоди колонок/річні ЦЬОГО аркуша блокуються РАЗОМ з власним, за зростанням ключа
             // (інакше книга з перегляду 5 у колонку місяця 3 тримала 5 і чекала 3, а правка з перегляду 3 — навпаки).
@@ -614,14 +620,14 @@ public sealed partial class PatchCellsHandler
             {
                 foreach (var lower in otherPeriods.Where(p => p < period.Value))
                 {
-                    await sheetGate.EnterEditAsync(documentId, sheet.Key, new PeriodKey(lower), ct).ConfigureAwait(false);
+                    await sheetGate.EnterEditAsync(documentId, sheet.Key.SheetDefId, new PeriodKey(lower), ct).ConfigureAwait(false);
                 }
 
                 var ownStatus = await LockOwnWorkbookSheetAsync().ConfigureAwait(false);
 
                 foreach (var higher in otherPeriods.Where(p => p > period.Value))
                 {
-                    await sheetGate.EnterEditAsync(documentId, sheet.Key, new PeriodKey(higher), ct).ConfigureAwait(false);
+                    await sheetGate.EnterEditAsync(documentId, sheet.Key.SheetDefId, new PeriodKey(higher), ct).ConfigureAwait(false);
                 }
 
                 return ownStatus;
@@ -637,12 +643,13 @@ public sealed partial class PatchCellsHandler
                     if (heldSheetStatuses is not null)
                     {
                         throw new InvalidOperationException(
-                            $"Книга створює рядки в таблиці зі стелею на аркуші {sheet.Key}, а викликач уже тримає " +
+                            $"Книга створює рядки в таблиці зі стелею на аркуші {sheet.Key.SheetDefId}, а викликач уже тримає " +
                             "спільне блокування аркуша: виняткове поверх нього — прихований дедлок.");
                     }
 
                     // ⛔ Y7-03: відмова «зайнято» — про рядки, а не про подання (див. `RowWriteLock`).
-                    await RowWriteLock.EnterAsync(sheetGate, documentId, sheet.Key, period, ct).ConfigureAwait(false);
+                    await RowWriteLock.EnterAsync(sheetGate, documentId, sheet.Key.SheetDefId, period, ct, sheet.Key.SheetCopyId)
+                        .ConfigureAwait(false);
                 }
 
                 // ⚠ Стан, уже прочитаний викликачем під спільним блокуванням цієї
@@ -652,7 +659,8 @@ public sealed partial class PatchCellsHandler
                     return held;
                 }
 
-                return await sheetGate.EnterEditAsync(documentId, sheet.Key, period, ct).ConfigureAwait(false);
+                return await sheetGate.EnterEditOfAsync(documentId, sheet.Key.SheetDefId, period, sheet.Key.SheetCopyId, ct)
+                    .ConfigureAwait(false);
                 }
             }).ConfigureAwait(false);
         }
@@ -902,15 +910,16 @@ public sealed partial class PatchCellsHandler
     /// </remarks>
     private async Task EnsureWorkbookSheetsEditableAsync(
         List<WorkbookItem> active,
-        Dictionary<int, Domain.Enums.DocumentStatus> statuses,
+        Dictionary<(int SheetDefId, long? SheetCopyId), Domain.Enums.DocumentStatus> statuses,
         CancellationToken ct)
     {
-        var stillApprover = new Dictionary<int, bool>();
+        var stillApprover = new Dictionary<(int SheetDefId, long? SheetCopyId), bool>();
 
         foreach (var item in active)
         {
             var context = item.Context;
-            var sheetDefId = context.Table.SheetDefId;
+            // C-3: стан і «чия черга» — копії, коли екземпляр належить копії аркуша.
+            var sheetDefId = (context.Table.SheetDefId, context.Instance.SheetCopyId);
             var status = statuses[sheetDefId];
 
             context.ApproverEdit = false;
