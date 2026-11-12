@@ -718,6 +718,88 @@ public static class PublishChecks
     }
 
     /// <summary>
+    /// ✎ R-3 (D-478): родина типу зберігання — рівно як у <c>rpt.usp_GenerateStableViews</c>
+    /// (<c>05-rpt-views.sql</c>: <c>CASE cd.DataType WHEN 0 THEN 0 WHEN 3 THEN 3 WHEN 4 THEN 4 WHEN 5 THEN 5 WHEN 7 THEN 7 ELSE 1 END</c>).
+    /// Змінюєш одне — зміни й друге (сторож <c>StableViewTypeFamilyTests</c>).
+    /// </summary>
+    /// <param name="type">Тип даних колонки.</param>
+    /// <returns>Номер родини.</returns>
+    public static int StorageFamily(CellDataType type) => type switch
+    {
+        CellDataType.String => 0,
+        CellDataType.Bool => 3,
+        CellDataType.Date => 4,
+        CellDataType.Lookup => 5,
+        CellDataType.Unit => 7,
+        _ => 1, // Int, Decimal, Formula, Calculated — число
+    };
+
+    /// <summary>
+    /// ✎ R-3 (рішення PO 11.11, D-478): код колонки, що вже є в опублікованих/застарілих версіях того самого шаблону
+    /// (той самий аркуш і таблиця за кодом), не може перейти в ІНШУ родину типу зберігання — інакше стабільна вʼюха
+    /// SSRS зробила б колонку <c>nvarchar</c> і прибрала <c>&lt;Код&gt;_Id</c> (<c>ECR-TMPL-0422</c>,
+    /// <c>columnTypeFamilyChanged</c>). Наявний конфлікт (у минулих версіях уже кілька родин) нову версію не блокує,
+    /// якщо вона бере одну з наявних родин.
+    /// </summary>
+    /// <remarks>Коди порівнюються без урахування регістру: SQL групує за зіставленням бази (CI).</remarks>
+    /// <param name="version">Чернетка зі структурою.</param>
+    /// <param name="published">Типи колонок опублікованих/застарілих версій того самого шаблону.</param>
+    /// <returns>Зауваження публікації; порожньо — усе гаразд.</returns>
+    public static IReadOnlyList<ExpressionDiagnostic> CheckColumnTypeFamilies(
+        TemplateVersion version, IReadOnlyList<PublishedColumnType> published)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(published);
+
+        var diagnostics = new List<ExpressionDiagnostic>();
+        if (published.Count == 0)
+        {
+            return diagnostics;
+        }
+
+        var byCode = published
+            .GroupBy(p => (Sheet: p.SheetCode.ToUpperInvariant(), Table: p.TableCode.ToUpperInvariant(), Column: p.ColumnCode.ToUpperInvariant()))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        foreach (var sheet in version.Sheets.Where(s => !s.IsDeleted))
+        {
+            foreach (var table in sheet.Tables.Where(t => !t.IsDeleted))
+            {
+                foreach (var column in table.Columns.Where(c => !c.IsDeleted))
+                {
+                    var key = (sheet.Code.ToUpperInvariant(), table.Code.ToUpperInvariant(), column.Code.ToUpperInvariant());
+                    if (!byCode.TryGetValue(key, out var before)
+                        || before.Any(p => StorageFamily(p.DataType) == StorageFamily(column.DataType)))
+                    {
+                        continue;
+                    }
+
+                    var path = $"{sheet.Code}.{table.Code}.{column.Code}";
+                    var was = string.Join(", ", before
+                        .GroupBy(p => p.DataType)
+                        .OrderBy(g => g.Key)
+                        .Select(g => $"{g.Key} ({string.Join(", ", g.Select(p => p.Version).Distinct(StringComparer.Ordinal).Take(3))})"));
+                    diagnostics.Add(new ExpressionDiagnostic(
+                        "ECR-TMPL-0422",
+                        $"Колонка {path}: в опублікованих версіях шаблону — {was}, тут — {column.DataType}. Інша родина типу "
+                        + "зламала б стабільну вʼюху SSRS; залиште тип або додайте колонку з новим кодом.",
+                        0,
+                        1,
+                        "err.ECR-TMPL-0422.columnTypeFamilyChanged",
+                        new Dictionary<string, string>
+                        {
+                            ["columnPath"] = path,
+                            ["publishedTypes"] = was,
+                            ["newType"] = column.DataType.ToString(),
+                        }));
+                }
+            }
+        }
+
+        return diagnostics;
+    }
+
+    /// <summary>
     /// PRMG: вираз (формула таблиці або правило валідації таблиці) з формою <c>REG*</c> (<c>REGFIELD</c>, <c>REGFIND</c>,
     /// <c>REGONE</c>, <c>REGSUM</c>, <c>REGAVG</c>, <c>REGMIN</c>, <c>REGMAX</c>, <c>REGCOUNT</c>), у чиїх аргументах є
     /// посилання на колонку, що має ціллю ГРУПУ типів дозволів, не публікується (<c>ECR-TMPL-0422</c>,

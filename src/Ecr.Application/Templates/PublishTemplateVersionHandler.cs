@@ -211,6 +211,14 @@ public sealed partial class PublishTemplateVersionHandler(
 
         diagnostics = [.. diagnostics, .. PublishChecks.CheckLookupRegistries(version, usable)];
 
+        // ✎ R-3 (рішення PO 11.11, D-478): код колонки не міняє родину типу між опублікованими версіями шаблону -
+        // інакше стабільна вʼюха SSRS (rpt.usp_GenerateStableViews) зробила б її nvarchar. Один запит, у транзакції
+        // публікації (під блоком версії).
+        var publishedColumns = await versionStore
+            .ListPublishedColumnTypesAsync(version.TemplateId, ct)
+            .ConfigureAwait(false);
+        diagnostics = [.. diagnostics, .. PublishChecks.CheckColumnTypeFamilies(version, publishedColumns)];
+
         // PRMG: форми REG* над колонкою, що має ціллю групу типів дозволів, не підтримуються (v1). Публікація - рідка дія,
         // тож `EnsureFreshAsync` (≤ 1 запит на 5 с) тут не на гарячому шляху.
         // ⚠ ПОРЯДОК ВОРІТ: ця перевірка мовчки пропускає нерозібраний вираз - його відхиляють `PublishChecks.Run` і
