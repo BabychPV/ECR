@@ -121,6 +121,10 @@ public sealed class GetCellChangesHandler(
             return new PagedResult<CellChangeView>([], null, firstPage ? 0 : null);
         }
 
+        // Q-17 (LAND-YEAR G2): журнал документа за період (перелік і CSV-експорт) — разом зі змінами колонок, що лежать
+        // у періоді-власнику. Лише звужує: видимі колонки вище + межа D-214 власника.
+        filter = await AddOwnerPeriodColumnsAsync(filter, readable, ct).ConfigureAwait(false);
+
         var result = await audit.ReadCellChangesAsync(filter, page, ct).ConfigureAwait(false);
         int? total = null;
         if (firstPage)
@@ -167,6 +171,8 @@ public sealed class GetCellChangesHandler(
         {
             return new CellChangeSummaryView(0, 0, 0, 0);
         }
+
+        filter = await AddOwnerPeriodColumnsAsync(filter, readable, ct).ConfigureAwait(false);
 
         var counts = await audit.CountCellChangesByColumnAsync(filter, TodayStart(), ct).ConfigureAwait(false);
         var seen = counts.Where(c => readable is null || readable.CanReadColumn(c.ColumnDefId)).ToList();
@@ -263,6 +269,44 @@ public sealed class GetCellChangesHandler(
         }
 
         return (filter with { PeriodKey = owner.Value }, false);
+    }
+
+    /// <summary>
+    /// Q-17 (LAND-YEAR G2): журнал ДОКУМЕНТА за період перегляду (не одна комірка: перелік /audit і CSV-експорт) —
+    /// плюс зміни колонок таблиць «місяці в колонках», які PATCH пише в період-ВЛАСНИК.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ⛔ Дефект того ж класу, що History комірки (44b9f4ddc): експорт 202610 фільтрував <c>aud.CellChange.PeriodKey =
+    /// 202610</c>, а правка не-місячної колонки з жовтня лежить у якорі 202601 — у файлі її не було. Фільтр періоду
+    /// стає «202610 АБО (власник, колонка)» тим самим запитом (<see cref="CellChangeFilter.OwnerPeriodColumns"/>).
+    /// </para>
+    /// <para>
+    /// ⛔ Лише ЗВУЖУЄ: колонки — з уже застосованих видимих (<see cref="CellChangeFilter.VisibleColumnIds"/>), плюс межа
+    /// D-214 періоду-власника. Подія експорту пише ЗАПИТАНИЙ період: обробник експорту бере його з власного фільтра,
+    /// а не з цього, розширеного.
+    /// </para>
+    /// <para>
+    /// Одна комірка (її веде <see cref="RouteToOwnerPeriodAsync"/>), без документа, без періоду, маршрутизація вимкнена
+    /// або чужих колонок немає — фільтр без змін і без звернень до бази (за вимкненого роутера).
+    /// </para>
+    /// </remarks>
+    private async Task<CellChangeFilter> AddOwnerPeriodColumnsAsync(
+        CellChangeFilter filter, DocumentReadScope? readable, CancellationToken ct)
+    {
+        if (filter.IsSingleCell || readable is null || filter.PeriodKey is not { } viewedKey
+            || filter.DocumentId is not { } documentId || filter.VisibleColumnIds is not { } visible)
+        {
+            return filter;
+        }
+
+        var owners = await OwnerPeriodColumns
+            .CollectAsync(
+                monthRouter, metadata, readable, documentId, new PeriodKey(viewedKey), visible, ct,
+                onlyColumnId: filter.ColumnDefId)
+            .ConfigureAwait(false);
+
+        return owners is null ? filter : filter with { OwnerPeriodColumns = owners };
     }
 
     /// <summary>
