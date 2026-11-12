@@ -23,6 +23,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'flert.sync.reason.writerRejected', N'ru', N'Часть строк FLERT не принята — подробности в журнале обслуживания.'),
     (N'jobs.kind.flertCompositionSync', N'ru', N'Синхронизация состава газа из FLERT'),
     (N'err.ECR-REG-0409.externalSourceFlert', N'ru', N'Записи этого справочника — копия состава газа из FLERT. Изменяйте их во FLERT.'),
+    (N'flert.mirror.pending', N'ru', N'Справочник появится после первой синхронизации с FLERT.'),
     (N'flert.sync.title', N'kz', N'FLERT-тен газ құрамы'),
     (N'flert.sync.never', N'kz', N'Синхрондау әлі болған жоқ.'),
     (N'flert.sync.lastRun', N'kz', N'Соңғы синхрондау: {time} — {status}.'),
@@ -43,7 +44,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'flert.sync.reason.registryIncompatible', N'kz', N'Осындай кодты анықтамалық бар және FLERT көшірмесіне сай емес — ештеңе жазылмады.'),
     (N'flert.sync.reason.writerRejected', N'kz', N'FLERT жолдарының бір бөлігі қабылданбады — толығырақ қызмет көрсету журналында.'),
     (N'jobs.kind.flertCompositionSync', N'kz', N'FLERT-тен газ құрамын синхрондау'),
-    (N'err.ECR-REG-0409.externalSourceFlert', N'kz', N'Бұл анықтамалықтың жазбалары — FLERT-тен газ құрамының көшірмесі. Оларды FLERT ішінде өзгертіңіз.')
+    (N'err.ECR-REG-0409.externalSourceFlert', N'kz', N'Бұл анықтамалықтың жазбалары — FLERT-тен газ құрамының көшірмесі. Оларды FLERT ішінде өзгертіңіз.'),
+    (N'flert.mirror.pending', N'kz', N'Анықтамалық FLERT-пен алғашқы синхрондаудан кейін пайда болады.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -73,7 +75,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'flert.sync.reason.registryIncompatible', N'en', N'A registry with this code already exists and does not fit the FLERT copy — nothing was written.', 1),
     (N'flert.sync.reason.writerRejected', N'en', N'Some FLERT rows were not accepted — see the maintenance log.', 1),
     (N'jobs.kind.flertCompositionSync', N'en', N'Gas composition sync from FLERT', 1),
-    (N'err.ECR-REG-0409.externalSourceFlert', N'en', N'Entries of this registry are a copy of the FLERT gas composition. Change them in FLERT.', 1)
+    (N'err.ECR-REG-0409.externalSourceFlert', N'en', N'Entries of this registry are a copy of the FLERT gas composition. Change them in FLERT.', 1),
+    (N'flert.mirror.pending', N'en', N'The registry appears after the first FLERT sync.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

@@ -363,8 +363,10 @@ function RegistryOverview(): JSX.Element {
         back={{ label: t('registries.list.back'), href: '/admin/registries' }}
         moreLabel={t('registries.moreActions')}
         primary={
-          selected !== undefined && canEditData
-            ? { label: t('registries.newEntry'), disabled: externalReadOnly, onClick: () => setEditing(null) }
+          // D-476 (AU F13 #827): External — копія master-джерела, створення запису не пропонується взагалі (не
+          // вимкнена кнопка): сервер однаково відмовить `ECR-REG-0409` (`ExternalRegistryGuard`).
+          selected !== undefined && canEditData && !externalReadOnly
+            ? { label: t('registries.newEntry'), onClick: () => setEditing(null) }
             : undefined
         }
         secondary={[

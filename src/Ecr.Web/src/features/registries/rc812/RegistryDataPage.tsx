@@ -3,8 +3,9 @@ import { Button, Group, Stack, Text, TextInput, VisuallyHidden } from '@mantine/
 import { useDebouncedValue } from '@mantine/hooks';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
+import { EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import { isExternalRegistry } from '@/features/registries/externalRegistry';
+import { isExternalRegistry, isFlertMirrorCode } from '@/features/registries/externalRegistry';
 import { FlertSyncPanel } from '@/features/registries/flert/FlertSyncPanel';
 import { RegistryExportButton } from '@/features/registries/export/RegistryExportButton';
 import { saveBatch, type RegistryBatchResult, type RegistryRow } from '@/features/registries/rows/api';
@@ -108,7 +109,13 @@ export function RegistryDataPage(): JSX.Element {
   // бачить права цілі: без цієї умови сітка правилась би, а кожне збереження й жива перевірка
   // `dryRun` (теж POST) падали б 403 (L9-18; так само, як `SheetActions` у сітці документа).
   const simulation = session.data?.isSimulation === true;
-  const readOnly = simulation || !can(session.data, 'Registry.EditData') || isExternalRegistry(registry);
+  // D-476 (AU F13 #827): дзеркала FLERT (`STREAM`, `STREAM_CASE`, `GAS_COMPOSITION`) заводить перший увімкнений синк.
+  // До нього довідника немає — це очікуваний стан, а не помилка: нейтральний текст замість червоного «не знайдено»
+  // і жодного «New entry» (ECR тримає лише копію, master — FLERT).
+  const definitionMissing = definition.error instanceof EcrApiError && definition.error.problem.status === 404;
+  const mirrorNotSynced = isFlertMirrorCode(code) && ((list.isSuccess && registry === undefined) || definitionMissing);
+  const readOnly =
+    simulation || !can(session.data, 'Registry.EditData') || isExternalRegistry(registry) || mirrorNotSynced;
   const manualCode = definition.data?.codeMode !== 'Auto';
 
   const gridRows = useMemo<GridRow[]>(
@@ -375,91 +382,97 @@ export function RegistryDataPage(): JSX.Element {
         />
       )}
 
-      <Group gap="sm" align="end" justify="space-between">
-        <FilterRow gap="sm">
-          <TextInput
-            size="xs"
-            label={t('registries.search')}
-            placeholder={t('registries.searchPlaceholder')}
-            value={search ?? ''}
-            onChange={(event) => setSearch(event.currentTarget.value)}
-          />
-          {temporal && (
-            <Suspense fallback={null}>
-              <DateInput
+      {mirrorNotSynced ? (
+        <Banner tone="info" testId="flert-mirror-pending" text={t('flert.mirror.pending')} />
+      ) : (
+        <>
+          <Group gap="sm" align="end" justify="space-between">
+            <FilterRow gap="sm">
+              <TextInput
                 size="xs"
-                label={t('registries.data.asOf')}
-                value={parseDateOnly(asOf)}
-                onChange={(day) => setAsOf(formatDateOnly(day))}
+                label={t('registries.search')}
+                placeholder={t('registries.searchPlaceholder')}
+                value={search ?? ''}
+                onChange={(event) => setSearch(event.currentTarget.value)}
               />
-            </Suspense>
-          )}
-          {!readOnly && (
-            <Button variant="default" disabled={save.isPending} onClick={() => addRow()}>
-              {t('registries.newEntry')}
-            </Button>
-          )}
-          {/* RT-16: експорт — записи, чинні на ту саму дату, що й сітка. */}
-          <RegistryExportButton registryCode={code} asOf={asOf} />
-        </FilterRow>
-        <Text size="sm" c="dimmed" aria-live="polite" data-testid="registry-data-status">
-          {[status, checkSummary].filter((s) => s !== '').join(' · ')}
-        </Text>
-      </Group>
-
-      <AsyncBoundary
-        isPending={definition.isPending || rows.isPending}
-        error={definition.error ?? rows.error}
-        data={gridRows}
-        isEmpty={(data) => data.length === 0}
-        emptyTitle={debouncedSearch !== '' ? t('registries.searchNoMatches') : t('registries.data.emptyTitle')}
-        emptyHint={debouncedSearch !== '' ? undefined : t('registries.data.emptyText')}
-        emptyAction={
-          !readOnly && debouncedSearch === '' ? (
-            <Button onClick={() => addRow()}>
-              {t('registries.newEntry')}
-            </Button>
-          ) : undefined
-        }
-        skeleton="table"
-        // ⛔ Відмова опису: повторювати треба САМЕ опис — інакше «повторити» мертва.
-        onRetry={() => void (definition.error !== null ? definition.refetch() : rows.refetch())}
-      >
-        {() => (
-          <>
-            <RegistryDataGrid
-              caption={name}
-              fields={fields}
-              rows={gridRows}
-              totalCount={totalCount + newKeys.length}
-              readOnly={readOnly}
-              busy={save.isPending}
-              manualCode={manualCode}
-              problems={problems}
-              duplicates={duplicates}
-              lookupCodeOf={lookupCodeOf}
-              asOf={asOf}
-              onEdit={onEdit}
-              onEditCode={(rowKey, value) => update(rowKey, (draft) => ({ ...draft, code: value }))}
-              onToggleDelete={onToggleDelete}
-              onOpen={(rowKey) => {
-                const row = byKey.get(rowKey);
-                if (row !== undefined) setPanel(entryPanelId(row.id));
-              }}
-              onAddRow={() => void addRow()}
-              onPaste={(r, c, text) => void onPaste(r, c, text)}
-            />
-            {rows.hasNextPage && (
-              <Group justify="center">
-                <Button variant="default" loading={rows.isFetchingNextPage} onClick={() => void rows.fetchNextPage()}>
-                  {t('registries.data.loadMore', { shown: loaded.length, total: totalCount })}
+              {temporal && (
+                <Suspense fallback={null}>
+                  <DateInput
+                    size="xs"
+                    label={t('registries.data.asOf')}
+                    value={parseDateOnly(asOf)}
+                    onChange={(day) => setAsOf(formatDateOnly(day))}
+                  />
+                </Suspense>
+              )}
+              {!readOnly && (
+                <Button variant="default" disabled={save.isPending} onClick={() => addRow()}>
+                  {t('registries.newEntry')}
                 </Button>
-              </Group>
+              )}
+              {/* RT-16: експорт — записи, чинні на ту саму дату, що й сітка. */}
+              <RegistryExportButton registryCode={code} asOf={asOf} />
+            </FilterRow>
+            <Text size="sm" c="dimmed" aria-live="polite" data-testid="registry-data-status">
+              {[status, checkSummary].filter((s) => s !== '').join(' · ')}
+            </Text>
+          </Group>
+
+          <AsyncBoundary
+            isPending={definition.isPending || rows.isPending}
+            error={definition.error ?? rows.error}
+            data={gridRows}
+            isEmpty={(data) => data.length === 0}
+            emptyTitle={debouncedSearch !== '' ? t('registries.searchNoMatches') : t('registries.data.emptyTitle')}
+            emptyHint={debouncedSearch !== '' ? undefined : t('registries.data.emptyText')}
+            emptyAction={
+              !readOnly && debouncedSearch === '' ? (
+                <Button onClick={() => addRow()}>
+                  {t('registries.newEntry')}
+                </Button>
+              ) : undefined
+            }
+            skeleton="table"
+            // ⛔ Відмова опису: повторювати треба САМЕ опис — інакше «повторити» мертва.
+            onRetry={() => void (definition.error !== null ? definition.refetch() : rows.refetch())}
+          >
+            {() => (
+              <>
+                <RegistryDataGrid
+                  caption={name}
+                  fields={fields}
+                  rows={gridRows}
+                  totalCount={totalCount + newKeys.length}
+                  readOnly={readOnly}
+                  busy={save.isPending}
+                  manualCode={manualCode}
+                  problems={problems}
+                  duplicates={duplicates}
+                  lookupCodeOf={lookupCodeOf}
+                  asOf={asOf}
+                  onEdit={onEdit}
+                  onEditCode={(rowKey, value) => update(rowKey, (draft) => ({ ...draft, code: value }))}
+                  onToggleDelete={onToggleDelete}
+                  onOpen={(rowKey) => {
+                    const row = byKey.get(rowKey);
+                    if (row !== undefined) setPanel(entryPanelId(row.id));
+                  }}
+                  onAddRow={() => void addRow()}
+                  onPaste={(r, c, text) => void onPaste(r, c, text)}
+                />
+                {rows.hasNextPage && (
+                  <Group justify="center">
+                    <Button variant="default" loading={rows.isFetchingNextPage} onClick={() => void rows.fetchNextPage()}>
+                      {t('registries.data.loadMore', { shown: loaded.length, total: totalCount })}
+                    </Button>
+                  </Group>
+                )}
+                <VisuallyHidden>{t('registries.data.keyboardHint')}</VisuallyHidden>
+              </>
             )}
-            <VisuallyHidden>{t('registries.data.keyboardHint')}</VisuallyHidden>
-          </>
-        )}
-      </AsyncBoundary>
+          </AsyncBoundary>
+        </>
+      )}
 
       {openRow !== undefined && registry !== undefined && (
         <Suspense fallback={null}>
