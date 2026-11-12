@@ -37,4 +37,21 @@ public interface ISubmitRecalculation
     /// <returns>Скільки комірок записано.</returns>
     public Task<int> RecalculateSheetUnderSubmitLockAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct, long? sheetCopyId = null);
+
+    /// <summary>
+    /// ✎ C-1 (D-475): те саме, що <see cref="RecalculateSheetUnderSubmitLockAsync"/>, і повертає комірки аркуша з
+    /// помилкою формули чи «не оновлені через помилку» — вони блокують подання.
+    /// </summary>
+    /// <remarks>Реалізація за замовчуванням (підміни в тестах) помилок не повертає.</remarks>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш, який подається.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+    public async Task<IReadOnlyList<FormulaErrorCell>> RecalculateSheetForSubmitAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct, long? sheetCopyId = null)
+    {
+        await RecalculateSheetUnderSubmitLockAsync(documentId, sheetDefId, periodKey, ct, sheetCopyId).ConfigureAwait(false);
+        return [];
+    }
 }

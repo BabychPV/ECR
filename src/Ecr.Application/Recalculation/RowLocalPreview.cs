@@ -121,6 +121,10 @@ public sealed class RowLocalPreview(
             new Dictionary<int, IReadOnlyDictionary<string, long>> { [table.Id] = editedRows },
             registryFields);
 
+        // ✎ C-1 (D-475): комірки з помилкою формули в перегляді — недовірені для формул, що їх читають (як у фоновій задачі).
+        var blocked = new Dictionary<CellKey, FormulaErrorSource>();
+        context.Blocked = blocked;
+
         var result = new List<ComputedCellDto>();
 
         foreach (var (formula, parsed, column) in previewable)
@@ -133,7 +137,6 @@ public sealed class RowLocalPreview(
                 context.CurrentRowKey = rowKey;
                 context.CurrentColumnDefId = column.Id;
 
-                var evaluated = formulaEngine.Evaluate(parsed, context);
                 var key = new CellKey(0, table.Id, rowKey, column.Id);
                 var address = new CellAddress(period, rowId, column.Id);
 
@@ -143,13 +146,24 @@ public sealed class RowLocalPreview(
                     continue;
                 }
 
+                blocked.Remove(key);
+                context.BeginCell();
+                var evaluated = formulaEngine.Evaluate(parsed, context);
                 stored.TryGetValue(address, out var old);
+
+                // ✎ C-1 (D-475): як фонова задача — комірка з помилкою і ті, що її читають, у перегляді не змінюються
+                // (останнє збережене значення), позначку «помилка» покаже зріз після фонового перерахунку.
+                if (context.BlockedRead is { } source)
+                {
+                    blocked[key] = source;
+                    continue;
+                }
 
                 if (evaluated.Value.IsError)
                 {
-                    // Помилка не пишеться як значення; залежні формули прочитають порожнє - їхній перегляд може бути
-                    // неповним, але фонова задача все виправить.
-                    values.Remove(key);
+                    blocked[key] = new FormulaErrorSource(
+                        period.Value, table.Id, rowKey, rowId, column.Id,
+                        evaluated.Value.ErrorCode ?? Ecr.Expressions.ExpressionErrors.BadValue);
                     continue;
                 }
 
