@@ -114,7 +114,7 @@ public sealed partial class PublishTemplateVersionHandler(
     /// </remarks>
     private async Task QueueViewsAsync(int templateId, int templateVersionId, int userId, CancellationToken ct)
     {
-        viewStatus?.Pending(templateId);
+        var generation = viewStatus?.Pending(templateId) ?? 0;
         try
         {
             await jobs!
@@ -126,7 +126,8 @@ public sealed partial class PublishTemplateVersionHandler(
         catch (Exception ex) when (ex is not OperationCanceledException)
 #pragma warning restore CA1031
         {
-            viewStatus?.Settled(templateId);
+            // Лише власна позначка: новішу (паралельна публікація з поставленою задачею) не знімати.
+            viewStatus?.Settled(templateId, generation);
             viewStatus?.Failed(new ReportViewFailure(templateVersionId, 0, "Report view regeneration was not queued: " + ex.Message));
             if (logger is not null)
             {

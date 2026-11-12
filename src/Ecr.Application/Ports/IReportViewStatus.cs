@@ -33,17 +33,28 @@ public interface IReportViewStatus
     /// <c>reportviews</c> показує «оновлюються», доки задача не завершиться.
     /// </summary>
     /// <param name="templateId">Шаблон.</param>
+    /// <returns>Покоління позначки (зростає з кожним викликом; 0 — стан не ведеться).</returns>
     /// <remarks>
     /// ⚠ Члени P-4b мають порожню реалізацію за замовчуванням: реалізацій-записувачів у тестах кілька (лише збої), і
     /// стан «оновлюються» їм не потрібен; справжню дає <c>ReportViewStatus</c>.
     /// </remarks>
-    public void Pending(int templateId)
-    {
-    }
+    public long Pending(int templateId) => 0;
 
-    /// <summary>✎ P-4b: задача перегенерації вʼюх шаблону завершилась (успіхом чи збоєм — збій фіксує <see cref="Failed"/>).</summary>
+    /// <summary>
+    /// ✎ P-4b: поточне покоління позначки «оновлюються» шаблону (0 — позначки немає). Задача читає його на СТАРТІ.
+    /// </summary>
     /// <param name="templateId">Шаблон.</param>
-    public void Settled(int templateId)
+    /// <returns>Покоління.</returns>
+    public long PendingGeneration(int templateId) => 0;
+
+    /// <summary>
+    /// ✎ P-4b: задача перегенерації вʼюх шаблону завершилась (успіхом чи збоєм — збій фіксує <see cref="Failed"/>).
+    /// Позначка знімається, лише якщо після <paramref name="generation"/> не було нового <see cref="Pending"/> —
+    /// інакше в черзі чекає злитий повтор, і картка лишається «оновлюються» до його завершення.
+    /// </summary>
+    /// <param name="templateId">Шаблон.</param>
+    /// <param name="generation">Покоління, яке задача побачила на старті (<see cref="PendingGeneration"/>).</param>
+    public void Settled(int templateId, long generation)
     {
     }
 
