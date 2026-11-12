@@ -7,6 +7,11 @@ namespace Ecr.Application.Ports;
 /// <param name="TableRowId">Рядок (<c>doc.TableRow.Id</c>).</param>
 public sealed record SheetChangedRow(long TableInstanceId, int TableDefId, long TableRowId);
 
+/// <summary>Q-17: фізичний екземпляр для проби змін — таблиця в періоді (перегляду або власника колонок).</summary>
+/// <param name="PeriodKey">Період екземпляра.</param>
+/// <param name="TableDefId">Таблиця версії шаблону.</param>
+public sealed record SheetProbeTarget(int PeriodKey, int TableDefId);
+
 /// <summary>Результат проби: поточний маркер і рядки, змінені в напівінтервалі <c>[since, marker)</c>.</summary>
 /// <param name="Marker">Нова межа — <c>MIN_ACTIVE_ROWVERSION()</c>, прочитана ДО знімка рядків.</param>
 /// <param name="Rows">Змінені рядки (не більше стелі виклику).</param>
@@ -60,6 +65,20 @@ public interface ISheetChangeStore
     public Task<SheetChangeProbe> ProbeAsync(
         long documentId, int periodKey, IReadOnlyCollection<int> tableDefIds, ulong since, int cap, CancellationToken ct,
         long? sheetCopyId = null);
+
+    /// <summary>
+    /// Q-17 (LAND-YEAR G4): та сама проба, але по парах «період → таблиця» (<paramref name="targets"/>) — період перегляду
+    /// і періоди-ВЛАСНИКИ колонок таблиць «місяці в колонках» (туди PATCH пише чужу колонку). Одна команда, як
+    /// <see cref="ProbeAsync"/>; лише оригінал аркуша (копії Q-17 не маршрутизуються).
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SheetChangedRow.TableRowId"/> — фізичний рядок (у власника — його рядок, за ним шукається авторство), а
+    /// <see cref="SheetChangedRow.TableInstanceId"/> — екземпляр ПЕРЕГЛЯДУ тієї ж таблиці: його й перечитує клієнт.
+    /// Стеля <paramref name="cap"/> — на фізичний екземпляр.
+    /// </remarks>
+    public Task<SheetChangeProbe> ProbeOwnersAsync(
+        long documentId, int periodKey, IReadOnlyCollection<SheetProbeTarget> targets, ulong since, int cap,
+        CancellationToken ct);
 
     /// <summary>
     /// Хто змінив рядки <paramref name="rowIds"/> від <paramref name="fromUtc"/>: зміни читача
