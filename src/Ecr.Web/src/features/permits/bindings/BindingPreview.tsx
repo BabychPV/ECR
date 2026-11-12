@@ -3,6 +3,7 @@ import { Button, Select, Skeleton, Text, TextInput } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
+import { todayDateOnly } from '@/shared/format/dateOnly';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -28,7 +29,8 @@ export interface BindingPreviewProps {
   readonly binding: PermitBinding;
 }
 
-const today = (): string => new Date().toISOString().slice(0, 10);
+// ✎ W-7 (аудит 2026-11): календарний день людини, а не UTC (`dateOnly.ts`).
+const today = (): string => todayDateOnly();
 
 function roleLabel(role: string): string {
   switch (role) {
