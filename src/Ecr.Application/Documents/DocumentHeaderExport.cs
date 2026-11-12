@@ -9,13 +9,19 @@ namespace Ecr.Application.Documents;
 /// <summary>Одне поле шапки документа у вивантаженні (A2-12).</summary>
 /// <param name="Code">Код поля.</param>
 /// <param name="Label">Підпис поля мовою вивантаження; без підпису — код.</param>
-/// <param name="Text">Значення текстом в інваріантній культурі; <c>null</c> — поле порожнє.</param>
+/// <param name="Text">
+/// Значення текстом в інваріантній культурі (для CSV/JSON; у списку — КОД запису); <c>null</c> — поле порожнє.
+/// </param>
 /// <param name="Value">
 /// Типізоване значення для книги (<see cref="decimal"/>, <see cref="bool"/>, <see cref="DateTime"/>
-/// або <see cref="string"/>); <c>null</c> — поле порожнє.
+/// або <see cref="string"/>; у списку — НАЗВА запису мовою вивантаження, аудит 2026-11 X-3); <c>null</c> — поле порожнє.
 /// </param>
 /// <param name="IsNumeric">Чи число (CSV не знешкоджує його від формул — так само, як числові колонки).</param>
-public sealed record HeaderExportRow(string Code, string Label, string? Text, object? Value, bool IsNumeric);
+/// <param name="ContractKey">
+/// X-5 (D-477): ключ секції «Contract» (<see cref="HeaderSheetLayout"/>); <c>null</c> — поле поза секцією.
+/// </param>
+public sealed record HeaderExportRow(
+    string Code, string Label, string? Text, object? Value, bool IsNumeric, string? ContractKey = null);
 
 /// <summary>Підписи блоку шапки у книзі xlsx (ключі каталогу <c>export.header.*</c>).</summary>
 /// <param name="Sheet">Назва аркуша шапки.</param>
@@ -37,7 +43,8 @@ public sealed record HeaderExportLabels(string Sheet, string Field, string Value
     public const string CodeKey = "export.header.code";
 
     /// <summary>Запасні підписи, коли каталогу нема (тести, що збирають експортер вручну).</summary>
-    public static HeaderExportLabels Fallback { get; } = new("Header", "Field", "Value", "Code");
+    /// <remarks>✎ D-477 (X-5): назва вкладки — «Document header», як заголовок панелі шапки в UI.</remarks>
+    public static HeaderExportLabels Fallback { get; } = new("Document header", "Field", "Value", "Code");
 
     /// <summary>Підписи мовою запиту з каталогу; відсутній ключ — запасний підпис.</summary>
     public static async Task<HeaderExportLabels> ResolveAsync(
@@ -83,6 +90,10 @@ public static class DocumentHeaderExport
     /// <param name="language">Мова підписів; <c>null</c> — англійська.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <param name="groups">Резолвер груп пермітів: поле-група друкує «номер — тип» (PRMG); <c>null</c> - груп немає.</param>
+    /// <param name="contractLayout">
+    /// X-5 (D-477): для книги — підпис поля секції Contract «EN — RU» і ключ секції (<see cref="HeaderSheetLayout"/>);
+    /// CSV/JSON кличуть без нього й не змінюються.
+    /// </param>
     public static async Task<IReadOnlyList<HeaderExportRow>> ReadAsync(
         IDocumentHeaderStore? headers,
         IRegistryStore registries,
@@ -90,7 +101,8 @@ public static class DocumentHeaderExport
         long documentId,
         string? language,
         CancellationToken ct,
-        Permits.Groups.IPermitGroupResolver? groups = null)
+        Permits.Groups.IPermitGroupResolver? groups = null,
+        bool contractLayout = false)
     {
         ArgumentNullException.ThrowIfNull(registries);
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -105,6 +117,7 @@ public static class DocumentHeaderExport
         var lang = string.IsNullOrWhiteSpace(language) ? "en" : language;
 
         var codes = new Dictionary<int, IReadOnlyDictionary<long, string>>();
+        var names = new Dictionary<int, IReadOnlyDictionary<long, string>>();
         foreach (var registryId in fields
                      .Where(f => f.DataType == CellDataType.Lookup && f.LookupRegistryDefId is not null)
                      .Select(f => f.LookupRegistryDefId!.Value)
@@ -114,6 +127,10 @@ public static class DocumentHeaderExport
             var entries = await Permits.Groups.LookupTargetEntries.ListAsync(registries, groups, registryId, ct).ConfigureAwait(false);
             codes[registryId] = entries.GroupBy(e => e.Entry.Id)
                 .ToDictionary(g => g.Key, g => Permits.Groups.LookupTargetEntries.Label(g.First().Entry.Code, g.First().TypeCode));
+
+            // X-3: людині в книзі — НАЗВА запису (як у картці документа); група дозволів — «номер — тип», як і була.
+            names[registryId] = entries.GroupBy(e => e.Entry.Id)
+                .ToDictionary(g => g.Key, g => DisplayOf(g.First(), lang));
         }
 
         var rows = new List<HeaderExportRow>(fields.Count);
@@ -123,17 +140,41 @@ public static class DocumentHeaderExport
             var shown = string.IsNullOrWhiteSpace(label) ? field.Code : label;
             var value = values.GetValueOrDefault(field.Id);
 
-            rows.Add(value is null || value.IsEmpty
+            // X-5: для книги — підпис «EN — RU» і ключ секції Contract, як у картці документа. CSV/JSON — без змін.
+            string? contractKey = null;
+            if (contractLayout)
+            {
+                contractKey = HeaderSheetLayout.ContractKeyOf(field.Code, field.LabelL10n.Values.GetValueOrDefault("en"));
+                if (contractKey is not null)
+                {
+                    shown = HeaderSheetLayout.BilingualLabel(field.LabelL10n, shown);
+                }
+            }
+
+            rows.Add((value is null || value.IsEmpty
                 ? new HeaderExportRow(field.Code, shown, null, null, IsNumeric: false)
-                : Row(field, shown, value, codes));
+                : Row(field, shown, value, codes, names)) with { ContractKey = contractKey });
         }
 
         return rows;
     }
 
+    /// <summary>Назва запису мовою вивантаження; порожня — код. Член групи дозволів — «номер — тип» (X-3).</summary>
+    private static string DisplayOf(Permits.Groups.LookupTargetEntry entry, string language)
+    {
+        if (entry.TypeCode is not null)
+        {
+            return Permits.Groups.LookupTargetEntries.Label(entry.Entry.Code, entry.TypeCode);
+        }
+
+        var display = entry.Entry.DisplayL10n?.Get(language);
+        return string.IsNullOrWhiteSpace(display) ? entry.Entry.Code : display;
+    }
+
     private static HeaderExportRow Row(
         HeaderFieldDef field, string label, DocumentHeaderValueData value,
-        Dictionary<int, IReadOnlyDictionary<long, string>> codes)
+        Dictionary<int, IReadOnlyDictionary<long, string>> codes,
+        Dictionary<int, IReadOnlyDictionary<long, string>> names)
     {
         switch (field.DataType)
         {
@@ -156,7 +197,12 @@ public static class DocumentHeaderExport
                            && entries.TryGetValue(entryId, out var known)
                     ? known
                     : entryId.ToString(CultureInfo.InvariantCulture);
-                return new HeaderExportRow(field.Code, label, code, code, false);
+                var name = field.LookupRegistryDefId is { } named
+                           && names.TryGetValue(named, out var byId)
+                           && byId.TryGetValue(entryId, out var display)
+                    ? display
+                    : code;
+                return new HeaderExportRow(field.Code, label, code, name, false);
 
             case CellDataType.Unit when value.ValueUnitId is { } unitId:
                 var unit = unitId.ToString(CultureInfo.InvariantCulture);

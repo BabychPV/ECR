@@ -276,11 +276,12 @@ public sealed class ExcelExporter(
             WriteFormulas(workbook, snapshot, blocks, graph);
         }
 
-        // A2-12: поля шапки — окремим ВИДИМИМ аркушем ПІСЛЯ аркушів даних і ПЕРЕД
-        // прихованою мапою. Не блоком зверху аркуша даних: той зсунув би рядки
-        // таблиць, а з ними карту книги, заморожений рядок і стовпці зворотного
-        // імпорту. Аркуш поза картою імпорт не читає й не сканує
-        // (`StrayValueDetector` ходить лише по аркушах блоків карти).
+        // A2-12 / ✎ D-477 (аудит 2026-11 X-2): поля шапки — окремим ВИДИМИМ аркушем, ПЕРШОЮ й активною вкладкою
+        // (як «2. Contract» у Land). Пишеться ПІСЛЯ аркушів даних (їхні імена мають пріоритет у `usedNames`: аркуш
+        // даних «Document header» лишається собою), а на позицію 1 переноситься в `WriteHeaderSheetAsync`. Не блоком
+        // зверху аркуша даних: той зсунув би рядки таблиць, а з ними карту книги, заморожений рядок і стовпці
+        // зворотного імпорту. Аркуш поза картою імпорт не читає й не сканує (`StrayValueDetector` ходить лише по
+        // аркушах блоків карти), а аркуші карти шукає за ІМЕНЕМ (`ExcelImporter`), тож позиція на імпорт не впливає.
         await WriteHeaderSheetAsync(workbook, snapshot, documentId, options, usedNames, ct).ConfigureAwait(false);
 
         // ⚠ P3 імпорту: відбитки обчислюваних комірок — ПІСЛЯ формул, тобто
@@ -318,15 +319,24 @@ public sealed class ExcelExporter(
         return output;
     }
 
-    /// <summary>Аркуш з полями шапки: підпис, код, значення. Без полів шапки в шаблоні аркуша нема.</summary>
+    /// <summary>
+    /// Аркуш шапки як форма «2. Contract» Land (аудит 2026-11 X-5, D-477): стовпці «підпис | значення», код поля — у
+    /// прихованому стовпці C; порядок і підписи — як у картці документа (<see cref="Ecr.Application.Documents.HeaderSheetLayout"/>).
+    /// Перша й активна вкладка книги (X-2). Без полів шапки в шаблоні аркуша нема.
+    /// </summary>
+    /// <remarks>
+    /// Службові рядки File Number / Version / «Reporting period» (X-4) додадуться другим аргументом
+    /// <see cref="Ecr.Application.Documents.HeaderSheetLayout.Order"/> після X-1 — зараз їх немає.
+    /// </remarks>
     private async Task WriteHeaderSheetAsync(
         XLWorkbook workbook, TemplateVersionSnapshot snapshot, long documentId, ExcelExportOptions options,
         HashSet<string> usedNames, CancellationToken ct)
     {
-        var rows = await Ecr.Application.Documents.DocumentHeaderExport
-            .ReadAsync(headers, registries, snapshot, documentId, options.Language, ct, groups).ConfigureAwait(false);
+        var fields = await Ecr.Application.Documents.DocumentHeaderExport
+            .ReadAsync(headers, registries, snapshot, documentId, options.Language, ct, groups, contractLayout: true)
+            .ConfigureAwait(false);
 
-        if (rows.Count == 0)
+        if (fields.Count == 0)
         {
             return;
         }
@@ -334,24 +344,40 @@ public sealed class ExcelExporter(
         var labels = await Ecr.Application.Documents.HeaderExportLabels
             .ResolveAsync(catalog, options.Language, ct).ConfigureAwait(false);
 
-        var sheet = workbook.Worksheets.Add(UniqueName(CleanSheetName(labels.Sheet, "Header"), usedNames));
+        var rows = Ecr.Application.Documents.HeaderSheetLayout.Order(fields, []);
 
-        sheet.Cell(1, 1).Value = labels.Field;
-        sheet.Cell(1, 2).Value = labels.Code;
-        sheet.Cell(1, 3).Value = labels.Value;
+        var fallbackName = Ecr.Application.Documents.HeaderExportLabels.Fallback.Sheet;
+        var sheet = workbook.Worksheets.Add(UniqueName(CleanSheetName(labels.Sheet, fallbackName), usedNames));
+
+        // ✎ D-477 (X-2): перша вкладка, єдина вибрана й активна — Excel відкриває книгу на шапці. Інші вкладки явно
+        // знімаються з вибору: дві вибрані вкладки Excel відкриває групою («[Group]»), і правка однієї лягла б в обидві.
+        sheet.Position = 1;
+        foreach (var other in workbook.Worksheets)
+        {
+            other.TabSelected = false;
+        }
+
+        sheet.TabSelected = true;
+        sheet.SetTabActive();
+
+        // X-6: увесь текст — через WriteText, інакше ClosedXML відкидає початковий апостроф.
+        WriteText(sheet.Cell(1, 1), labels.Field);
+        WriteText(sheet.Cell(1, 2), labels.Value);
+        WriteText(sheet.Cell(1, 3), labels.Code);
         sheet.Range(1, 1, 1, 3).Style.Font.Bold = true;
 
-        var lengths = new[] { labels.Field.Length, labels.Code.Length, labels.Value.Length };
+        var labelWidth = labels.Field.Length;
+        var valueWidth = labels.Value.Length;
 
         for (var i = 0; i < rows.Count; i++)
         {
             var row = rows[i];
             var number = i + 2;
 
-            sheet.Cell(number, 1).Value = row.Label;
-            sheet.Cell(number, 2).Value = row.Code;
+            WriteText(sheet.Cell(number, 1), row.Label);
+            WriteText(sheet.Cell(number, 3), row.Code);
 
-            var cell = sheet.Cell(number, 3);
+            var cell = sheet.Cell(number, 2);
             switch (row.Value)
             {
                 case decimal numeric:
@@ -365,22 +391,30 @@ public sealed class ExcelExporter(
                     cell.Style.DateFormat.Format = date.TimeOfDay == TimeSpan.Zero ? "yyyy-mm-dd" : "yyyy-mm-dd hh:mm:ss";
                     break;
                 case string text:
-                    cell.Value = text;
+                    WriteText(cell, text);
                     break;
             }
 
-            lengths[0] = Math.Max(lengths[0], row.Label.Length);
-            lengths[1] = Math.Max(lengths[1], row.Code.Length);
-            lengths[2] = Math.Max(lengths[2], row.Text?.Length ?? 0);
+            labelWidth = Math.Max(labelWidth, row.Label.Length);
+
+            // X-3: ширина — за тим, що видно (назва запису списку), а не за кодом у Text.
+            valueWidth = Math.Max(valueWidth, (row.Value as string)?.Length ?? row.Text?.Length ?? 0);
         }
 
-        for (var c = 0; c < lengths.Length; c++)
-        {
-            sheet.Column(c + 1).Width = Math.Min(lengths[c] + ContentPadding, MaxContentWidth);
-        }
-
+        sheet.Column(1).Width = Math.Min(labelWidth + ContentPadding, MaxHeaderLabelWidth);
+        sheet.Column(2).Width = Math.Min(valueWidth + ContentPadding, MaxHeaderValueWidth);
+        sheet.Column(1).Style.Alignment.WrapText = true;
+        sheet.Column(2).Style.Alignment.WrapText = true;
+        sheet.Column(3).Hide();
         sheet.SheetView.FreezeRows(1);
+        sheet.PageSetup.FitToPages(1, 0);
     }
+
+    /// <summary>X-5: найбільша ширина стовпця підписів аркуша шапки, символів (далі — перенос).</summary>
+    private const double MaxHeaderLabelWidth = 60;
+
+    /// <summary>X-5: найбільша ширина стовпця значень аркуша шапки, символів (далі — перенос, а не обріз).</summary>
+    private const double MaxHeaderValueWidth = 80;
 
     /// <summary>Порожній файл, який видаляє сам себе при закритті потоку.</summary>
     private static FileStream TemporaryFile()
@@ -1282,6 +1316,10 @@ public sealed class ExcelExporter(
 
         foreach (var block in blocks)
         {
+            // ⛔ X-7 (аудит 2026-11): апостроф усередині назви аркуша в посиланні — подвоєний
+            // (синтаксис Excel: 'Operator''s site'!B3), інакше формула синтаксично зламана.
+            var quotedSheetName = block.SheetName.Replace("'", "''", StringComparison.Ordinal);
+
             foreach (var column in block.Columns)
             {
                 var letter = XLHelper.GetColumnLetterFromNumber(column.Number);
@@ -1292,7 +1330,7 @@ public sealed class ExcelExporter(
                     // бувають із пробілами, і без них Excel читає формулу до
                     // першого пробілу.
                     map[(block.TableCode, row.RowKey, column.Code)] =
-                        $"'{block.SheetName}'!{letter}{row.Number.ToString(CultureInfo.InvariantCulture)}";
+                        $"'{quotedSheetName}'!{letter}{row.Number.ToString(CultureInfo.InvariantCulture)}";
                 }
             }
         }
@@ -1445,14 +1483,32 @@ public sealed class ExcelExporter(
             name = name.Replace(symbol, ' ');
         }
 
-        name = name.Trim();
+        // ⛔ X-7 (аудит 2026-11): Excel забороняє апостроф на початку й у кінці назви і зарезервував «History».
+        name = TrimSheetName(name);
+        if (string.Equals(name, "History", StringComparison.OrdinalIgnoreCase))
+        {
+            name += " 1";
+        }
 
         if (name.Length == 0)
         {
             name = fallback;
         }
 
-        return name.Length > MaxSheetNameLength ? name[..MaxSheetNameLength] : name;
+        // Різ на межі Excel може знову лишити апостроф чи пробіл у кінці.
+        return name.Length > MaxSheetNameLength ? TrimSheetName(name[..MaxSheetNameLength]) : name;
+    }
+
+    /// <summary>Знімає пробіли й апострофи з країв назви аркуша (X-7).</summary>
+    private static string TrimSheetName(string name)
+    {
+        var trimmed = name.Trim();
+        while (trimmed.Length > 0 && (trimmed[0] == '\'' || trimmed[^1] == '\''))
+        {
+            trimmed = trimmed.Trim('\'').Trim();
+        }
+
+        return trimmed;
     }
 
     /// <summary>Розводить ім'я з уже зайнятими суфіксом <c>~n</c>.</summary>
