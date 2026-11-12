@@ -66,7 +66,8 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
               FROM aud.CellChange c
               LEFT JOIN OPENJSON(@hidden) WITH (value int '$') h ON h.value = c.ColumnDefId
              WHERE c.DocumentId = @doc AND c.ChangedAt >= @from
-               AND c.TableRowId IN (SELECT r.value FROM OPENJSON(@rows) WITH (value bigint '$') r)),
+               AND c.TableRowId IN (SELECT r.value FROM OPENJSON(@rows) WITH (value bigint '$') r)
+               AND c.Origin NOT IN (N'CalcError', N'CalcErrorResolved')),
         ranked AS (
             SELECT c.*,
                    ROW_NUMBER() OVER (PARTITION BY c.TableRowId ORDER BY c.IsRecalc, c.ChangedAt DESC, c.IsHidden, c.Id DESC) AS Rn,

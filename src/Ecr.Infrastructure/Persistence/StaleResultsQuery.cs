@@ -85,7 +85,7 @@ internal static class StaleResultsQuery
                             ON c.DocumentId = x.DocumentId
                            AND c.PeriodKey = {periodKey}
                            AND c.ChangedAt > r.StartedAt
-                           AND c.Origin <> N'Recalculation'
+                           AND c.Origin NOT IN (N'Recalculation', N'CalcError', N'CalcErrorResolved')
                            AND ({hasBy} = 0 OR c.ChangedByUserId = {by})
                         UNION ALL
                         SELECT x.DocumentId AS DocumentId, rd.DataChangedAt AS At
@@ -140,7 +140,7 @@ internal static class StaleResultsQuery
                     ON c.DocumentId = x.DocumentId
                    AND c.PeriodKey = {periodKey}
                    AND c.ChangedAt > r.StartedAt
-                   AND c.Origin <> N'Recalculation'
+                   AND c.Origin NOT IN (N'Recalculation', N'CalcError', N'CalcErrorResolved')
                  GROUP BY c.ChangedByUserId, x.DocumentId
                 """);
     }
