@@ -504,12 +504,18 @@ public sealed class ExcelImporter(
         // період — формула сусіднього аркуша має право читати цю. Тому
         // `TableInstanceId` тут — лише точка входу в документ, а насіння
         // (`seeds`) зібране з усіх таблиць книги.
+        // ⛔ W-1 (аудит 2026-11): id задачі формул КНИГИ — у відповідь (`PatchCellsResponse.RecalculationJobId`): без
+        // нього клієнт перечитував зрізи ДО перерахунку й показував обчислені колонки старими (той самий клас, що D-1/CL-01).
+        // Задачі власників (`ownerRecalcs`) — інший період; клієнт стежить за періодом документа, тож їх не повертаємо.
+        string? recalculationJobId = null;
+
         async Task EnqueueRecalculationAsync(CancellationToken token)
         {
+            recalculationJobId = null;
             if (seeds.Count > 0)
             {
                 // O1: злиття за документо-періодом (системна постановка — ціль без автора).
-                await jobs
+                recalculationJobId = await jobs
                     .EnqueueCoalescedAsync<IFormulaRecalculationJob>(
                         FormulaRecalculationTarget.Of(documentId, plan.PeriodKey, createdByUserId: null),
                         new
@@ -704,7 +710,7 @@ public sealed class ExcelImporter(
         // наново з файлу, якого може вже не бути під рукою.
         await previews.RemoveAsync(previewToken, ct).ConfigureAwait(false);
 
-        return new PatchCellsResponse(applied, versions, validation);
+        return new PatchCellsResponse(applied, versions, validation, recalculationJobId);
     }
 
     /// <summary>Версія рядка з перегляду для <c>baseVersion</c> застосування (L6-08).</summary>

@@ -254,6 +254,21 @@ public sealed class ExcelImporterAtomicApplyTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "W-1")]
+    public async Task W1_Зведена_відповідь_книги_несе_задачу_формул()
+    {
+        // ⛔ W-1 (аудит 2026-11): без id задачі клієнт перечитував зрізи ДО перерахунку. Мутація: прибрати
+        // `recalculationJobId` з відповіді `ExcelImporter.ApplyAsync` — `null`, червоний.
+        _jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>())
+             .Returns("formula-job-1");
+
+        var response = await Importer().ApplyAsync(DocumentId, Token, CancellationToken.None);
+
+        Assert.Equal("formula-job-1", response.RecalculationJobId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "DAT-05")]
     public async Task Уся_книга_іде_однією_транзакцією_і_однією_задачею_після_коміту()
     {
