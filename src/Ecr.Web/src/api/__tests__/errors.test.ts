@@ -94,6 +94,26 @@ describe('Обробка помилок API', () => {
     expect(attempts).toHaveBeenCalledTimes(1);
   });
 
+  // W-6 (аудит 2026-11): повернення після входу — на ту саму адресу з періодом/аркушем/фільтрами, як при виході через
+  // бездіяльність (`signOutForIdle`), а не на голий шлях.
+  it('W-6: 401 несе в from і рядок запиту сторінки', async () => {
+    window.history.replaceState(null, '', '/documents/7?periodKey=202603&sheet=GEN');
+    try {
+      const redirect = vi.fn();
+      setLoginRedirect(redirect);
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => Promise.resolve(new Response('', { status: 401 }))),
+      );
+
+      await apiFetch('/api/v1/documents/7').catch(() => undefined);
+
+      expect(redirect.mock.calls[0]?.[0]).toBe('/documents/7?periodKey=202603&sheet=GEN');
+    } finally {
+      window.history.replaceState(null, '', '/');
+    }
+  });
+
   it('Аудит-пас 5: 401 на самому вході НЕ веде на сторінку входу — форма вже там', async () => {
     // ⛔ До фіксу невірний пароль на формі входу (теж `401`) викликав
     // `redirectToLogin` так само, як 401 будь-де інде — сторінка входу
