@@ -34,6 +34,30 @@ export interface TableAttention {
   readonly rows: readonly RowAttentionItem[];
   /** Закриті колонки (відмова `PeriodClosed`) — «January–August»; `null` — немає. */
   readonly lockedMonths: string | null;
+  /**
+   * ✎ 12.11 (людина, doc 96 T3_00): закриті місяці — по рядку, а не одним реченням на таблицю з сирими заголовками
+   * колонок. Немає — старий видавець (лише `lockedMonths`), Issues показує речення таблиці.
+   */
+  readonly lockedRows?: readonly LockedRowItem[];
+}
+
+/** Рядок, у якому є комірки закритих місяців (відмова `PeriodClosed`). */
+export interface LockedRowItem {
+  /** `"{tableInstanceId}:{rowKey}:locked"` — адреса пункту в Issues. */
+  readonly key: string;
+  readonly tableInstanceId: number;
+  readonly periodKey: number;
+  readonly rowKey: string;
+  /** Назва рядка (`label`); `null` — немає або збігається з кодом. */
+  readonly rowName: string | null;
+  /** Місяці закритих колонок рядка, 1..12, без повторів і за порядком. */
+  readonly months: readonly number[];
+  /** Періоди цих місяців (`YYYYMM`), без повторів і за порядком, — для «Reopen … for this document…». */
+  readonly periodKeys: readonly number[];
+  /** Закриті колонки рядка назвами заголовків — лише в розгортанні. */
+  readonly columns: string;
+  /** Перша закрита колонка — куди веде клік (як у пункті перевірки). */
+  readonly columnCode: string;
 }
 
 const tables = new Map<number, TableAttention>();
@@ -75,7 +99,11 @@ export function requestAttentionFocus(key: string): void {
 
 /** Таблиці періоду з чимось, що потребує уваги (рядки або закриті місяці). */
 export function attentionForPeriod(all: readonly TableAttention[], periodKey: number): TableAttention[] {
-  return all.filter((table) => table.periodKey === periodKey && (table.rows.length > 0 || table.lockedMonths !== null));
+  return all.filter(
+    (table) =>
+      table.periodKey === periodKey &&
+      (table.rows.length > 0 || table.lockedMonths !== null || (table.lockedRows?.length ?? 0) > 0),
+  );
 }
 
 /** Скільки рядків періоду потребують уваги. */

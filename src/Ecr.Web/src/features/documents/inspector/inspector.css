@@ -152,6 +152,18 @@
   color: var(--mantine-color-statusWarning-text);
 }
 
+/* ✎ 12.11: закриті колонки рядка — лише в розгортанні під пунктом (сам пункт — одне речення). */
+.ecr-insp-details {
+  padding: 0 var(--mantine-spacing-sm) var(--mantine-spacing-xs) calc(16px + var(--mantine-spacing-xs) + var(--mantine-spacing-sm));
+  font-size: var(--mantine-font-size-xs);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.ecr-insp-details > summary {
+  cursor: pointer;
+  color: var(--mantine-color-anchor);
+}
+
 .ecr-insp-where {
   grid-column: 2;
   color: var(--mantine-color-dimmed);

@@ -207,7 +207,7 @@ import { useAddRow } from './useAddRow';
 import { DeleteRowControl } from './DeleteRowControl';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
-import { useMonthColumnStatuses, type MarkedMonthStatus } from '@/features/grid/monthColumnStatus';
+import { useMonthColumnMonths, useMonthColumnStatuses, type MarkedMonthStatus } from '@/features/grid/monthColumnStatus';
 // ⚠ Порядок стилів збережений: `cell-states.css` (раніше — у `App.tsx`) іде
 // РАНІШЕ за `cellEditors.css`, як і було в єдиному бандлі. Причина, чому файл
 // тут, а не у вхідному чанку, — бюджет маршруту (`D-132`).
@@ -1344,12 +1344,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [fullSlice, tableDefId, rowFindings],
   );
 
+  // ✎ 12.11 (людина): місяць кожної місячної колонки — Issues називає закриті місяці рядка назвами.
+  const columnMonths = useMonthColumnMonths(documentId, sheetDefId, periodKey, tableDefId, sheetCopyId);
+
   useEffect(() => {
     if (fullSlice === undefined) return undefined;
-    publishTableAttention(tableInstanceId, tableAttentionOf(fullSlice, rowLookupProblems, rowWarnings, tableDefId));
+    publishTableAttention(
+      tableInstanceId,
+      tableAttentionOf(fullSlice, rowLookupProblems, rowWarnings, tableDefId, columnMonths),
+    );
 
     return () => publishTableAttention(tableInstanceId, null);
-  }, [fullSlice, tableInstanceId, rowLookupProblems, rowWarnings, tableDefId]);
+  }, [fullSlice, tableInstanceId, rowLookupProblems, rowWarnings, tableDefId, columnMonths]);
 
   /*
    * ⚠ `X-13`: довідники, що ЩЕ ЇДУТЬ. Редактор такої колонки показує
