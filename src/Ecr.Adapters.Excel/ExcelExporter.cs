@@ -1316,6 +1316,10 @@ public sealed class ExcelExporter(
 
         foreach (var block in blocks)
         {
+            // ⛔ X-7 (аудит 2026-11): апостроф усередині назви аркуша в посиланні — подвоєний
+            // (синтаксис Excel: 'Operator''s site'!B3), інакше формула синтаксично зламана.
+            var quotedSheetName = block.SheetName.Replace("'", "''", StringComparison.Ordinal);
+
             foreach (var column in block.Columns)
             {
                 var letter = XLHelper.GetColumnLetterFromNumber(column.Number);
@@ -1326,7 +1330,7 @@ public sealed class ExcelExporter(
                     // бувають із пробілами, і без них Excel читає формулу до
                     // першого пробілу.
                     map[(block.TableCode, row.RowKey, column.Code)] =
-                        $"'{block.SheetName}'!{letter}{row.Number.ToString(CultureInfo.InvariantCulture)}";
+                        $"'{quotedSheetName}'!{letter}{row.Number.ToString(CultureInfo.InvariantCulture)}";
                 }
             }
         }
@@ -1479,14 +1483,32 @@ public sealed class ExcelExporter(
             name = name.Replace(symbol, ' ');
         }
 
-        name = name.Trim();
+        // ⛔ X-7 (аудит 2026-11): Excel забороняє апостроф на початку й у кінці назви і зарезервував «History».
+        name = TrimSheetName(name);
+        if (string.Equals(name, "History", StringComparison.OrdinalIgnoreCase))
+        {
+            name += " 1";
+        }
 
         if (name.Length == 0)
         {
             name = fallback;
         }
 
-        return name.Length > MaxSheetNameLength ? name[..MaxSheetNameLength] : name;
+        // Різ на межі Excel може знову лишити апостроф чи пробіл у кінці.
+        return name.Length > MaxSheetNameLength ? TrimSheetName(name[..MaxSheetNameLength]) : name;
+    }
+
+    /// <summary>Знімає пробіли й апострофи з країв назви аркуша (X-7).</summary>
+    private static string TrimSheetName(string name)
+    {
+        var trimmed = name.Trim();
+        while (trimmed.Length > 0 && (trimmed[0] == '\'' || trimmed[^1] == '\''))
+        {
+            trimmed = trimmed.Trim('\'').Trim();
+        }
+
+        return trimmed;
     }
 
     /// <summary>Розводить ім'я з уже зайнятими суфіксом <c>~n</c>.</summary>

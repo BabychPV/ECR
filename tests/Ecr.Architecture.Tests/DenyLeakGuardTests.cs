@@ -90,8 +90,8 @@ public sealed partial class DenyLeakGuardTests
             (1, "коди аркушів, які передавач САМ бачить (DocumentReadScope.CanReadSheetCode) і не може писати; схований аркуш не називається, а лише дає перевищення без імені"),
         ["src/Ecr.Application/Consistency/GetConsistencyIssuesHandler.cs | деталь severity | severity.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)"] =
             (1, "ехо числового параметра запиту (вага 1..3), не колонка і не значення; відмова ДО читання журналу"),
-        ["src/Ecr.Adapters.Excel/ExcelExporter.cs | текст | block.SheetName"] =
-            (1, "посилання між аркушами книги, куди йдуть лише видимі таблиці (HiddenTableDefIds)"),
+        ["src/Ecr.Adapters.Excel/ExcelExporter.cs | текст | quotedSheetName"] =
+            (1, "посилання між аркушами книги, куди йдуть лише видимі таблиці (HiddenTableDefIds); block.SheetName з подвоєним апострофом (аудит 2026-11 X-7)"),
         ["src/Ecr.Adapters.Excel/ImportDiffBuilder.cs | текст | table.Code"] =
             (1, "таблиця книги, яку ExcelImporter уже пропустив за CanReadTable"),
         ["src/Ecr.Adapters.Excel/ImportDiffBuilder.cs | деталь tableCode | table.Code"] =
