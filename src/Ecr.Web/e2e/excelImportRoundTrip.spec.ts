@@ -341,7 +341,9 @@ function columnIndex(slice: Slice, code: string): number {
   return index + offset;
 }
 
-const shows = (value: number): RegExp => new RegExp(`^\\s*${String(value)}([.,]0+)?\\s*$`);
+/** Число в комірці сітки: формат показу має роздільник тисяч («2,469.00», «2 469,00») — він допускається. */
+const shows = (value: number): RegExp =>
+  new RegExp(`^\\s*${String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '[,\\s\\u00a0\\u202f]?')}([.,]0+)?\\s*$`);
 
 test.describe('Excel import round trip', () => {
   test.skip(PeriodKey === '', 'ECR_E2E_OPTIONAL: стенда немає, перевіряти нічого. Стенд: tools/e2e-stand.ps1.');
