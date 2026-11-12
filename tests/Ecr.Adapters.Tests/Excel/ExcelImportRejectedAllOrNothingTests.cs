@@ -21,7 +21,9 @@ namespace Ecr.Adapters.Tests.Excel;
 /// AN-143 (слово людини p53: «все або нічого», відмова на СЕРВЕРІ): якщо перегляд має хоч одну відхилену комірку
 /// (<c>preview.rejected &gt; 0</c>), застосування відмовляє цілком - <c>ECR-IMP-0422</c> <c>importHasRejected</c>,
 /// у базу нічого не пишеться, навіть валідні зміни інших рядків. AN-144: незмінена книга з текстовим результатом
-/// обчислюваної колонки не дає <c>ECR-CELL-4221 importCalculatedStale</c>.
+/// обчислюваної колонки не дає <c>ECR-CELL-4221 importCalculatedStale</c>. ✎ P1 12.11 (рішення координатора):
+/// обчислювана комірка (<c>ECR-CELL-4221</c>, змінена чи перерахована) — попередження, а не відмова: «все або нічого»
+/// її не рахує, значення з книги в неї не пишеться, решта книги застосовується.
 /// </summary>
 /// <remarks>
 /// ⚠ Справжні <see cref="ExcelImporter"/> і <see cref="ExcelExporter"/>; сховища - заглушки.
@@ -144,16 +146,41 @@ public sealed class ExcelImportRejectedAllOrNothingTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Decision", "AN-144")]
-    public async Task Змінений_користувачем_текст_обчислюваної_колонки_лишається_відмовою()
+    public async Task Змінений_користувачем_текст_обчислюваної_колонки_лишається_у_переліку_як_попередження()
     {
         using var workbook = await ExportAsync();
         workbook.Worksheet("Sheet").Cell(3, 2).Value = "Yes - Да"; // R1.Calc: було «No - Нет»
 
         var (_, preview) = await ImportAsync(workbook);
 
+        // ✎ P1 12.11: у переліку перегляду (людина бачить, що значення не ляже), але ключ — попередження.
         var rejected = Assert.Single(preview.Rejected);
         Assert.Equal("ECR-CELL-4221", rejected.ReasonCode);
         Assert.NotEqual(ImportMessageKeys.CalculatedStale, rejected.MessageKey);
+        Assert.True(ImportMessageKeys.IsCalculatedSkip(rejected.MessageKey));
+        Assert.Empty(preview.Changes);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "P1-1211")]
+    public async Task Змінена_обчислювана_комірка_не_зупиняє_застосування_решти_книги()
+    {
+        // ✎ P1 12.11 (рішення координатора, Land doc 96): змінена обчислювана комірка — попередження: значення з книги
+        // в неї не пишеться, а валідна зміна іншого рядка застосовується. Доти AN-143 відхиляв увесь пакет (422).
+        // Мутація: прибрати `IsCalculatedSkip` з `EnsureAllOrNothing` — CountPendingChangesAsync кидає 422.
+        using var workbook = await ExportAsync();
+        workbook.Worksheet("Sheet").Cell(3, 2).Value = "Yes - Да"; // R1.Calc — попередження
+        workbook.Worksheet("Sheet").Cell(4, 1).Value = 6; // R2.A — валідна зміна
+
+        var (importer, preview) = await ImportAsync(workbook);
+
+        var change = Assert.Single(preview.Changes);
+        Assert.Equal(("R2", "A"), (change.RowKey, change.ColumnCode));
+        Assert.Equal("CALC", Assert.Single(preview.Rejected).ColumnCode);
+        Assert.Equal(
+            1,
+            await importer.CountPendingChangesAsync(DocumentId, preview.PreviewToken, null, CancellationToken.None));
     }
 
     private async Task<XLWorkbook> ExportAsync()

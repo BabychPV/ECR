@@ -227,7 +227,10 @@ export function ImportPanel({
   // розділом і Apply не блокують, щойно кожен вирішено (позначено або свідомо
   // лишено згодою «застосувати решту»). Сервер застосовує лише план перегляду:
   // конфліктні рядки без позначки в нього не входять, решта — так.
-  const rejected = preview?.rejected.filter((r) => !isRowConflict(r)) ?? [];
+  // ✎ P1 12.11 (рішення координатора): змінена в книзі обчислювана комірка — попередження, а не відмова: значення
+  // з файлу не застосовується, решта книги — так. Окремий перелік, Apply не блокує (сервер теж не рахує їх відмовами).
+  const rejected = preview?.rejected.filter((r) => !isRowConflict(r) && !isCalculatedSkip(r)) ?? [];
+  const skipped = preview?.rejected.filter(isCalculatedSkip) ?? [];
   const conflictRows = preview === null ? [] : rowConflicts(preview);
   const unresolved = conflictRows.filter((row) => !overwrite.has(row.key)).length;
   const overwriteRows: ImportOverwriteRow[] = conflictRows
@@ -394,6 +397,38 @@ export function ImportPanel({
               </Alert>
             )}
 
+            {skipped.length > 0 && (
+              <Alert color="statusWarning" title={t('import.calculatedSkippedTitle')} data-testid="import-calculated-skipped">
+                <Stack gap="xs">
+                  <Text size="sm">{t('import.calculatedSkippedHint')}</Text>
+                  <Table withTableBorder aria-label={t('import.calculatedSkippedTitle')}>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>{t('import.table')}</Table.Th>
+                        <Table.Th>{t('import.row')}</Table.Th>
+                        <Table.Th>{t('import.column')}</Table.Th>
+                        <Table.Th>{t('import.excelCell')}</Table.Th>
+                        <Table.Th>{t('import.reason')}</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {skipped.map((rejection) => (
+                        <Table.Tr
+                          key={`${rejection.tableCode ?? ''}:${rejection.excelCell ?? rejection.rowKey}:${rejection.columnCode}`}
+                        >
+                          <Table.Td>{tableOf(rejection)}</Table.Td>
+                          <Table.Td>{rejection.rowKey}</Table.Td>
+                          <Table.Td>{rejection.columnCode}</Table.Td>
+                          <Table.Td>{show(rejection.excelCell)}</Table.Td>
+                          <Table.Td>{rejectionText(rejection)}</Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </Stack>
+              </Alert>
+            )}
+
             {rounded.length > 0 && (
               // ⚠ ФВ-9.16b: імпорт округлює число до `Scale` колонки (від нуля) —
               // записано буде не те, що стоїть у книзі. Людина бачить це ДО
@@ -551,6 +586,17 @@ const RowChangedSinceExport = 'err.ECR-CELL-0409.importRowChangedSinceExport';
 /** Чи відмова — конфлікт «рядок змінено після експорту», який людина може перезаписати. */
 function isRowConflict(rejection: ImportRejection): boolean {
   return rejection.messageKey === RowChangedSinceExport;
+}
+
+/**
+ * ✎ P1 12.11: обчислювана комірка, яку книга змінила (`importCalculated`) або яку система перерахувала після експорту
+ * (`importCalculatedStale`), — попередження: значення з файлу не застосовується, Apply доступний.
+ */
+function isCalculatedSkip(rejection: ImportRejection): boolean {
+  return (
+    rejection.messageKey === 'err.ECR-CELL-4221.importCalculated' ||
+    rejection.messageKey === 'err.ECR-CELL-4221.importCalculatedStale'
+  );
 }
 
 /** Комірка конфліктного рядка: чинне (чуже) значення і значення з книги. */

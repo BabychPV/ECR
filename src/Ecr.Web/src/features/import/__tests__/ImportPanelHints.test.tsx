@@ -145,6 +145,31 @@ describe('ImportPanel: відмови перегляду (P3)', () => {
     expect(within(table).getByText('⟦err.ECR-CELL-4221.importCalculated⟧')).toBeTruthy();
   });
 
+  it('P1 12.11: змінена/перерахована обчислювана комірка — попередження, Apply доступний', async () => {
+    mockServer({
+      ...oneChange,
+      rejected: [
+        {
+          rowKey: 'LTD-A27',
+          columnCode: 'Category1',
+          reasonCode: 'ECR-CELL-4221',
+          message: 'diag',
+          messageKey: 'err.ECR-CELL-4221.importCalculated',
+          tableCode: 'T9a_19',
+          excelCell: 'H12',
+        },
+      ],
+    });
+
+    await openPreview();
+
+    // ⛔ Мутація: прибрати `isCalculatedSkip` з фільтра відмов — з'явиться «заблоковано», Apply вимкнено.
+    expect(screen.getByTestId('import-calculated-skipped')).toBeTruthy();
+    expect(screen.getByText('⟦import.calculatedSkippedHint⟧')).toBeTruthy();
+    expect(screen.queryByText('⟦import.blockedTitle⟧')).toBeNull();
+    expect(screen.getByRole('button', { name: '⟦import.apply⟧' }).hasAttribute('disabled')).toBe(false);
+  });
+
   it('D1-02: рядок, змінений після експорту, — власний текст конфлікту', async () => {
     mockServer({
       previewToken: 'tok',
