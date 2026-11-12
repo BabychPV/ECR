@@ -320,6 +320,28 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
     /// <summary>Колонка, яку підставляє плейсхолдер <c>{Month}</c>.</summary>
     public int? CurrentColumnDefId { get; set; }
 
+    /// <summary>✎ C-1: комірки, яким прогін не довіряє (помилка формули або «не оновлено через помилку»).</summary>
+    internal IReadOnlyDictionary<CellKey, FormulaErrorSource>? Blocked { get; set; }
+
+    /// <summary>✎ C-1: перше прочитане недовірене джерело поточного обчислення; скидається <see cref="BeginCell"/>.</summary>
+    internal FormulaErrorSource? BlockedRead { get; private set; }
+
+    private List<(CellKey Key, ExpressionValue Value)>? _trace;
+
+    /// <summary>✎ C-1: початок обчислення однієї цілі.</summary>
+    internal void BeginCell() => BlockedRead = null;
+
+    /// <summary>✎ C-1: записувати прочитані комірки (до <see cref="FormulaErrorTracker.MaxInputs"/>) — лише для повтору цілі з помилкою.</summary>
+    internal void BeginTrace() => _trace = [];
+
+    /// <summary>✎ C-1: прочитані комірки з <see cref="BeginTrace"/>; трасування вимикається.</summary>
+    internal IReadOnlyList<(CellKey Key, ExpressionValue Value)> EndTrace()
+    {
+        var trace = _trace ?? [];
+        _trace = null;
+        return trace;
+    }
+
     /// <inheritdoc />
     public IReadOnlyList<ExpressionValue> Read(CellReferenceNode reference)
     {
@@ -552,10 +574,23 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
 
         var key = new CellKey(periodOffset, tableDefId, rowKey, columnDefId);
 
+        // ✎ C-1 (D-475): читання комірки з помилкою формули чи «не оновленої через помилку» — ціль, що її читає, не
+        // перераховується (RecalculationService.Evaluate); запам'ятовується ПЕРШЕ таке джерело.
+        if (BlockedRead is null && Blocked is { Count: > 0 } blocked && blocked.TryGetValue(key, out var source))
+        {
+            BlockedRead = source;
+        }
+
         // ⚠ Комірки немає — `null`, а не помилка: незаповнена комірка це
         // нормальний стан (`ФВ-3.8`), і агрегат над нею має визначений
         // результат. Помилка тут перетворила б порожню таблицю на `#REF`.
-        return _values.TryGetValue(key, out var value) ? value : ExpressionValue.Null;
+        var value = _values.TryGetValue(key, out var found) ? found : ExpressionValue.Null;
+        if (_trace is { Count: < FormulaErrorTracker.MaxInputs } trace)
+        {
+            trace.Add((key, value));
+        }
+
+        return value;
     }
 }
 
