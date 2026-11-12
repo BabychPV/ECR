@@ -244,7 +244,12 @@ export function ImportPanel({
   const unresolved = conflictRows.filter((row) => !overwrite.has(row.key)).length;
   const overwriteRows: ImportOverwriteRow[] = conflictRows
     .filter((row) => overwrite.has(row.key))
-    .map((row) => ({ tableCode: row.tableCode, rowKey: row.rowKey }));
+    .map((row) =>
+      // ✎ B27: екземпляр — щоб сервер перезаписав лише позначений аркуш-копію.
+      row.tableInstanceId !== null
+        ? { tableCode: row.tableCode, rowKey: row.rowKey, tableInstanceId: row.tableInstanceId }
+        : { tableCode: row.tableCode, rowKey: row.rowKey },
+    );
 
   const periodColumns = periodRejectedColumns(rejected);
   const blocked = (preview?.conflicts.length ?? 0) > 0 || rejected.length > 0;
@@ -423,7 +428,7 @@ export function ImportPanel({
                     <Table.Tbody>
                       {skipped.map((rejection) => (
                         <Table.Tr
-                          key={`${rejection.tableCode ?? ''}:${rejection.excelCell ?? rejection.rowKey}:${rejection.columnCode}`}
+                          key={`${sheetOf(rejection)}:${rejection.tableCode ?? ''}:${rejection.excelCell ?? rejection.rowKey}:${rejection.columnCode}`}
                         >
                           <Table.Td>{tableOf(rejection)}</Table.Td>
                           <Table.Td>{rejection.rowKey}</Table.Td>
@@ -536,7 +541,7 @@ export function ImportPanel({
                 <Table.Tbody>
                   {rejected.map((rejection) => (
                     <Table.Tr
-                      key={`${rejection.tableCode ?? ''}:${rejection.excelCell ?? rejection.rowKey}:${rejection.columnCode}`}
+                      key={`${sheetOf(rejection)}:${rejection.tableCode ?? ''}:${rejection.excelCell ?? rejection.rowKey}:${rejection.columnCode}`}
                     >
                       <Table.Td>{tableOf(rejection)}</Table.Td>
                       <Table.Td>{rejection.rowKey}</Table.Td>
@@ -621,6 +626,8 @@ interface RowConflict {
   readonly key: string;
   readonly tableCode: string;
   readonly rowKey: string;
+  /** ✎ B27: екземпляр таблиці (аркуш-копія), який перезаписує позначка; `null` — план до B27. */
+  readonly tableInstanceId: number | null;
   readonly table: string;
   readonly cells: ConflictCell[];
 }
@@ -641,15 +648,18 @@ function rowConflicts(preview: ImportPreview): RowConflict[] {
   for (const rejection of preview.rejected) {
     if (!isRowConflict(rejection)) continue;
 
+    // ✎ B27: рядок перезапису — за таблицею, ключем І екземпляром: та сама таблиця з тим самим ключем стоїть на
+    // «Vessel 1» і «Vessel 2», і позначка одного має перезаписати лише його (`ImportOverwriteRow.tableInstanceId`).
     const tableCode = rejection.tableCode ?? '';
-    const key = `${tableCode}:${rejection.rowKey}`;
+    const tableInstanceId = rejection.tableInstanceId ?? null;
+    const key = `${tableCode}:${rejection.rowKey}:${tableInstanceId ?? ''}`;
     let row = rows.get(key);
     if (row === undefined) {
-      row = { key, tableCode, rowKey: rejection.rowKey, table: tableOf(rejection), cells: [] };
+      row = { key, tableCode, rowKey: rejection.rowKey, tableInstanceId, table: tableOf(rejection), cells: [] };
       rows.set(key, row);
     }
 
-    const value = values.get(`${tableCode}:${rejection.rowKey}:${rejection.columnCode}`);
+    const value = values.get(keyOf(rejection));
     row.cells.push({
       columnCode: rejection.columnCode,
       excelCell: rejection.excelCell,
@@ -661,9 +671,12 @@ function rowConflicts(preview: ImportPreview): RowConflict[] {
   return [...rows.values()];
 }
 
-/** Ключ рядка зміни: таблиця + рядок + колонка (`R1`/`C1` однакові в різних таблицях). */
-function keyOf(change: ImportChange): string {
-  return `${change.tableCode ?? ''}:${change.rowKey}:${change.columnCode}`;
+/**
+ * Ключ рядка зміни: аркуш-копія + таблиця + рядок + колонка (`R1`/`C1` однакові в різних таблицях, а таблиця —
+ * однакова на «Vessel 1» і «Vessel 2», B20).
+ */
+function keyOf(item: ImportChange | ImportRejection): string {
+  return `${sheetOf(item)}:${item.tableCode ?? ''}:${item.rowKey}:${item.columnCode}`;
 }
 
 /**
@@ -742,10 +755,29 @@ export function trimFractionZeros(text: string): string {
  * (`R1`/`C1`), тож «R1 · C1 · 5 → 6» без таблиці не каже, ДЕ зміниться число.
  * Прочерк — лише для плану, побудованого до цієї правки (поля ще не було).
  */
-function tableOf(item: ImportChange | ImportRejection): string {
+function tableNameOf(item: ImportChange | ImportRejection): string {
   const name = localized(item.tableNameL10n);
 
   return name !== '' ? name : (item.tableCode ?? '—');
+}
+
+/**
+ * Таблиця рядка переліку разом з аркушем-копією: «Vessel 2 · Vessel data».
+ *
+ * ✎ B20 (F13 #829, C-3): у групі аркуша з копіями та сама таблиця стоїть на кожній копії, і назва таблиці сама не
+ * казала, ЯКИЙ аркуш зміниться чи відхилено («Vessel 1» чи «Vessel 2»). Назву аркуша дає сервер за правилом
+ * `SheetCopyNaming`; немає її (аркуш без копій, план до цієї правки) — лише таблиця, як доти.
+ */
+function tableOf(item: ImportChange | ImportRejection): string {
+  const sheet = sheetOf(item);
+  const table = tableNameOf(item);
+
+  return sheet !== '' ? `${sheet} · ${table}` : table;
+}
+
+/** Назва аркуша-копії рядка переліку мовою інтерфейсу; порожньо — аркуш без копій. */
+function sheetOf(item: ImportChange | ImportRejection): string {
+  return localized(item.sheetNameL10n);
 }
 
 /**
