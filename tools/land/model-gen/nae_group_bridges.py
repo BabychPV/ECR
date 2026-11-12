@@ -44,6 +44,8 @@ POWER_METHODOLOGY = 'ECW_C11_03'
 CATEGORY1_METHODOLOGY = 'ECW_C11_11_02'
 MASSFRACTION_METHODOLOGY = 'ECW_C11_11_04'
 MASSFRACTION_TOKEN = 'Land_MassFraction'
+# AN-173: таблиці 9a з колонками масових часток речовин type1 (415/416/602/616/621) - усі вони Decimal.
+MASSFRACTION_SOURCE_TABLES = ('T9a_16', 'T9a_17', 'T9a_19', 'T9a_24', 'T9a_25', 'T9a_26', 'T9a_27', 'T9a_28')
 
 
 def _flatten(groups, what):
@@ -141,6 +143,36 @@ def _new_column(code, expression, header, evidence, source_type):
     return col
 
 
+def _retype_decimal(col):
+    """AN-173: колонка масової частки речовини (число) - Decimal, а не String: у Strict текст x число = #VALUE, і C11_11_04
+    type1 не рахувалась. Ключі precision/scale стають одразу за dataType (порядок як у колонок gen_ecr_model.py); 28/12
+    підніме до 34/16 фінальний прохід масштабу (DECIMAL_PRECISION/DECIMAL_SCALE)."""
+    items = list(col.items())
+    col.clear()
+    for k, v in items:
+        if k == 'dataType':
+            col['dataType'] = 'Decimal'
+            col['precision'] = 28
+            col['scale'] = 12
+        elif k not in ('precision', 'scale'):
+            col[k] = v
+
+
+def retype_mass_fraction_sources(by_code, codes):
+    """AN-173 (рішення людини Q4): у таблицях MASSFRACTION_SOURCE_TABLES колонка із заголовком «<код>: ...» (код речовини
+    type1, той самий збіг, що й для мостів) - Decimal. Рівно одна колонка на код у кожній таблиці, інакше генерація падає."""
+    for tcode in MASSFRACTION_SOURCE_TABLES:
+        t_ = by_code[tcode]
+        for code in codes:
+            hits = [c for c in t_['columns']
+                    if not c.get('ecrAdded') and not c.get('month') and c['dataType'] in ('String', 'Decimal')
+                    and re.match(r'^%s:' % code, c.get('headerEn') or '')]
+            if len(hits) != 1:
+                raise SystemExit('nae_group: %s: колонок із заголовком «%s:» - %d (очікується 1)' % (tcode, code, len(hits)))
+            if hits[0]['dataType'] == 'String':
+                _retype_decimal(hits[0])
+
+
 def apply(out, registries, af_attrs):
     """Додає довідник LAND_NAE_GROUP і мости; повертає кількість доданих колонок."""
     with open(GROUPS_FILE, encoding='utf-8') as fh:
@@ -201,6 +233,9 @@ def apply(out, registries, af_attrs):
                    'dictionary)' % (REGISTRY, CATEGORY1_METHODOLOGY))
             cat_tables.append(tcode)
 
+    # AN-173: колонки масових часток - Decimal у всіх таблицях 9a з ними (до мостів: міст бере тип джерела).
+    retype_mass_fraction_sources(by_code, codes)
+
     # Land_MassFraction: п'ять мостів Land_MassFraction_0<код> і фрагмент.
     mf_tables = []
     for tcode in sorted(unresolved):
@@ -222,6 +257,7 @@ def apply(out, registries, af_attrs):
             if arg in cols:
                 raise SystemExit('nae_group: %s: колонка %s уже є' % (tcode, arg))
             src_col = hits[0]
+            # AN-173: джерело вже Decimal (retype_mass_fraction_sources вище) - міст числовий (28/12 -> 34/16 фінальним проходом).
             t_['columns'].append(_new_column(
                 arg, '[%s]' % src_col['code'], '%s (argument bridge: AF attribute %s)' % (arg, arg),
                 'bridge: methodology argument %s = AF attribute %s of the AF table, header code %s (%s)'

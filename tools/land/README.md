@@ -566,6 +566,81 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 
 Сторожі: LandNaeGroupBridgesModelTests (Architecture), NaeGroupBridgesTests (Expressions, справжній рушій).
 
+### Масові частки - Decimal: ретайп String -> Decimal у чернетці-клоні (AN-173, шаблон 1.0.16.0)
+
+Колонки масових часток речовин type1 (`SaturatedHydrocarbonsC1C5` 415, `SaturatedHydrocarbonsC6C10` 416, `Benzene` 602,
+`Xylene` 616, `Toluene` 621) у T9a_16, T9a_17, T9a_19, T9a_24-T9a_28 (40 колонок, рішення людини Q4) у моделі тепер
+Decimal(34,16), а не String: у Strict текст x число = `#VALUE`, і `ECW_C11_11_04` type1 не рахувалась. Мости
+`Land_MassFraction_0<код>` T9a_19 - числові Formula 34/16 (рішення Q5). Правило генератора - `nae_group_bridges.py`
+(`retype_mass_fraction_sources`, `MASSFRACTION_SOURCE_TABLES`): колонка із заголовком «<код>: ...» (рівно одна на код у
+таблиці) ретайпиться ДО створення мостів, тож міст бере тип Decimal (28/12 -> 34/16 фінальним проходом масштабу).
+
+Клон опублікованої версії (1.0.15.0) несе ці колонки як String, а API тип не змінює (`ECR-TMPL-0422`
+columnDataTypeImmutable навіть у чернетці). Тому `Fill-StructureSql` (Stage Template) після D-423 ретайпить їх SQL-ом за
+планом `Get-LandDecimalRetypePlan` (`LandTemplateDiff.Lib.ps1`): лише модель Decimal (з precision/scale) над String клону,
+лише НЕмісячні колонки (місячна - WARN). Рядок стає таким, як у свіжовставленої Decimal-колонки: `DataType=2`,
+`Precision`/`Scale` і `UnitId` з моделі, `DisplayFormat=NULL` (далі його пише презентація колонок за
+`Resolve-LandDisplayFormat`, `0.000000`). Гарди в самому UPDATE: версія Draft (`Status=0`), колонка ще String
+(`DataType=0`) і не місячна - повтор дає 0 змін; у `doc.CellValue` немає значень колонки. Не застосований UPDATE - рядок
+`WARN тип колонки: ... String->Decimal не застосовано`; інші розбіжності типів Build не чіпає (їх показує Verify).
+Мости клону (Formula/Calculated без Precision/Scale), чиї ВСІ посилання `[Code]` - Decimal-колонки моделі, які в клоні
+Decimal або щойно ретайпнуті, отримують Precision/Scale моделі (LP-29 «було без межі» їх сам не розширює); гарди: Draft,
+`DataType IN (6,8)`, `Precision IS NULL AND Scale IS NULL`, немає значень у `doc.CellValue`. Міст над джерелом, чий ретайп
+не застосовано, не чіпається (WARN).
+Публікація чернетки - пізніше (`Apply-ContractHeader` у Stage Template), тобто ретайп завжди до неї.
+
+⚠ Документи старих версій зі ЗНАЧЕННЯМИ в цих колонках migrate-version не переводить як Safe: String -> Decimal для колонки
+зі значеннями - `guardedWithData`. Такий документ мігрується лише після очищення цих комірок (або значення переносяться
+окремо); порожні колонки мігрують без відмови.
+
+Сторожі: LandDecimalRetypeTests (Architecture: модель, план, Build з підробленим SQL, тексти гардів).
+
+### Розкладка версії - рік із місяцями в колонках (D-474, шаблон 1.0.16.0)
+
+`Stage-Template` ставить розкладку версії на чернетці ДО публікації: `PUT /api/v1/template-versions/{id}/layout`
+`{ layout }`, параметр `-Layout`. Клон успадковує розкладку джерела, тому PUT іде завжди; після публікації сервер
+відмовляє (`409 ECR-SCHM-0409`).
+
+⚠ Типово `PerMonthCopies` (координатор 11.11, варіант E): 1.0.16.0 виходить із перемикачем місяців, як 1.0.15.0.
+Причина: результати Land місячні - не-місячні колонки-формули вибирають місяць через `[Period].Sequence`, методології
+беруть `[Period].Year/.Sequence`; річний аркуш без перемикача показав би січневі числа. `YearWithMonthColumns` - лише
+явним `-Layout` і лише після рішення людини щодо обчислених комірок (`docs/build/D474-year-layout-calculated-cells.md`
+у lane `integ-year-layout-fixes`).
+
+- Передумова - сервер із D-474 (lane `integ-template-layout`): на старішому PUT дає 404/405, і збірка зупиняється з
+  назвою причини, версія не публікується.
+- Сторож `Get-LandPerPeriodTables` (`LandTemplateDiff.Lib.ps1`): річна розкладка відхиляється, якщо в моделі є таблиця не
+  `MonthsInColumns` і не `Static`. Зараз таких немає: 81 таблиця `MonthsInColumns`, 2 `Static` (T8_00, T8_01).
+- Приймання після migrate-version документа на версію з `YearWithMonthColumns`: на сторінці документа немає перемикача місяців; місячні
+  значення видно в колонках січень-грудень одного аркуша.
+
+Сторожі: LandYearLayoutTests (Architecture: модель, сторож таблиць, порядок «розкладка до публікації»).
+
+### Обов'язкові входи методологій (`-Stage RequiredInputs`, шаблон 1.0.16.0)
+
+Рішення людини 10.11 (Land_TypeEquipment, Land_RotationRef, Land_DescriptionEquipment, Land_TypeFuel для C05_01..05) і
+координатора 11.11 (вивести обов'язкові входи для ВСІХ методологій Land). Перелік - `LandRequiredInputs.Lib.ps1`:
+методологія -> таблиця -> колонки, з видом `Input` (аргумент розрахунку), `RuleKey` (ключ правила вибору методології;
+перевіряє сервер до зіставлення правил - lane `integ-required-rulekeys`) і `Human` (названо людиною).
+
+`-Stage RequiredInputs` (лише явно, в `All` не входить; запускати ПІСЛЯ публікації шаблону - ідентифікатори колонок
+беруться з поточної версії):
+
+- реєструє `PUT /api/v1/methodologies/{id}/versions/{vid}/required-inputs/{columnDefId}` з рівнем
+  `-RequiredInputSeverity` (`Warn` типово; `Block` - після репетиції на scratch, рішення координатора RI3);
+- пише лише в ЧЕРНЕТКУ з назвою `V<n>`. Немає такої - без `-RequiredInputsCreateDrafts` лише друкує, що лишилось; з
+  прапором створює `V(n+1)` від останньої опублікованої (вимоги копіюються). Чужі чернетки (напр. «test») не чіпає;
+- порівнює за шляхом `ТАБЛИЦЯ/КОЛОНКА`, а не за ідентифікатором: вимога, зареєстрована на колонку попередньої версії
+  шаблону, після оновлення шаблону реєструється заново на нову колонку; повтор - 0 змін;
+- не публікує: publish версій методологій - крок вікна (право рецензента, `effectiveFrom`).
+
+Відомі прогалини (чесно): місячні входи `*_M01..M12` вимогою не є (gate перевіряє рядок, а не місяць); входи з інших
+рядків/таблиць (ГТУ C12_02, склад газу HSE400) - не є; методологія без правила вибору не вимагає нічого, поки рядок її
+не обрав. Масові частки T9a_19 для C11_11_04 і колонки набору BranchGate узгоджуються з «Аналізом».
+
+Сторожі: LandRequiredInputsTests (Architecture: кожна колонка є в моделі, чотири колонки людини, чужа чернетка, номер
+нової чернетки, повтор/зміна рівня, етап не публікує).
+
 
 ## Формат відображення Decimal-колонок (LP-21)
 

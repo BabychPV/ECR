@@ -216,6 +216,64 @@ function Get-LandTextRetypePlan($Columns, [hashtable]$Existing, $CellFormulas = 
     return @{ Retype = $retype; Bridges = $bridges; Warn = $warn; Same = $same }
 }
 
+# AN-173: зворотний вузький ретайп String -> Decimal у чернетці-клоні. T9a_19 Benzene/Xylene/Toluene/SaturatedHydrocarbons*
+# (джерела мостів Land_MassFraction_0<код>, ECW_C11_11_04 type1) у моделі тепер Decimal(34,16), а в клоні 1.0.15.0 ще String:
+# у Strict текст x число = #VALUE. API тип не змінює (ECR-TMPL-0422), тож лише SQL у Fill-StructureSql. Правило вузьке:
+#   * лише модель Decimal (з precision і scale) над String клону; Decimal у клоні = Same;
+#   * МІСЯЧНІ колонки не чіпаються (WARN): напрям Decimal->String місячних - D-423, зворотний тут не робиться;
+#   * інші розбіжності типів (Int/Lookup/Formula...) - не цей план (їх показує Verify);
+#   * числові мости над ними (рішення людини Q5: Land_MassFraction_0<код> T9a_19): Formula/Calculated, у моделі з
+#     precision/scale, у клоні ще без меж (текстовий міст) і ВСІ посилання [Code] виразу - Decimal-колонки моделі, що в клоні
+#     Decimal або ретайпляться цим планом -> Precision/Scale з моделі (LP-29 «було без межі» сам їх не розширює).
+# Columns - tb.columns моделі; Existing - hashtable "код колонки" -> @{ id; type; precision; scale } клону.
+# Повертає @{ Retype = @({ Id; Code; Precision; Scale; Unit }); Bridges = @({ Id; Code; Precision; Scale; Sources });
+#             Warn = @(рядки); Same = n }. Лише обчислення.
+function Get-LandDecimalRetypePlan($Columns, [hashtable]$Existing) {
+    $retype = @(); $bridges = @(); $warn = @(); $same = 0
+    $dt = $script:LandDataTypeCode
+    foreach ($c in @($Columns)) {
+        if ($null -eq $c -or [string]$c.dataType -ne 'Decimal') { continue }
+        $code = [string]$c.code
+        if (-not $Existing.ContainsKey($code)) { continue }
+        $e = $Existing[$code]
+        if ([int]$e.type -eq $dt.Decimal) { $same++; continue }
+        if ([int]$e.type -ne $dt.String) { continue }
+        if ($c.month) { $warn += "${code}: у клоні String, у моделі Decimal, але колонка місячна - не чіпаю (String->Decimal лише немісячних)"; continue }
+        if (-not $c.precision -or $null -eq $c.scale -or [string]$c.scale -eq '') { $warn += "${code}: у моделі Decimal без precision/scale - не чіпаю"; continue }
+        $retype += [pscustomobject]@{ Id = [int]$e.id; Code = $code; Precision = [int]$c.precision; Scale = [int]$c.scale; Unit = [string]$c.unit }
+    }
+    $numeric = @{}   # Decimal-колонки моделі, які в клоні Decimal або стануть ним
+    foreach ($c in @($Columns)) {
+        if ($null -eq $c -or [string]$c.dataType -ne 'Decimal' -or -not $Existing.ContainsKey([string]$c.code)) { continue }
+        if ([int]$Existing[[string]$c.code].type -eq $dt.Decimal) { $numeric[[string]$c.code] = $true }
+    }
+    foreach ($r in $retype) { $numeric[$r.Code] = $true }
+    foreach ($c in @($Columns)) {
+        if ($null -eq $c -or [string]$c.dataType -notin 'Formula', 'Calculated' -or -not $c.precision -or $null -eq $c.scale -or [string]$c.scale -eq '') { continue }
+        $code = [string]$c.code
+        if (-not $Existing.ContainsKey($code)) { continue }
+        $e = $Existing[$code]
+        if ([int]$e.type -notin $dt.Formula, $dt.Calculated -or $null -ne $e.precision -or $null -ne $e.scale) { continue }
+        $refs = @(Get-LandExpressionColumnRefs ([string]$c.expression))
+        if ($refs.Count -eq 0 -or @($refs | Where-Object { -not $numeric.ContainsKey($_) }).Count -gt 0) { continue }
+        $bridges += [pscustomobject]@{ Id = [int]$e.id; Code = $code; Precision = [int]$c.precision; Scale = [int]$c.scale; Sources = $refs }
+    }
+    return @{ Retype = $retype; Bridges = $bridges; Warn = $warn; Same = $same }
+}
+
+# D-474: таблиці моделі, несумісні з розкладкою версії YearWithMonthColumns ("SHEET/TABLE=layout"). Річна розкладка ховає
+# перемикач місяців, тож кожна таблиця мусить бути або з місяцями в колонках (MonthsInColumns), або без місяців (Static);
+# «копія на період» (PerPeriodInstance) і «місяці в рядках» (MonthsInRows) лишились би з недосяжними місячними копіями.
+function Get-LandPerPeriodTables($Mdl) {
+    $out = @()
+    foreach ($sh in @($Mdl.sheets)) {
+        foreach ($tb in @($sh.tables)) {
+            if ([string]$tb.layout -cnotin 'MonthsInColumns', 'Static') { $out += "$($sh.code)/$($tb.code)=$($tb.layout)" }
+        }
+    }
+    return @($out)
+}
+
 # Кандидати Decimal->String, відомі лише з моделі (для DryRun, де клону немає): String-колонки, які читає текстовий міст
 # (Formula/Calculated без precision) і є місячною (month). Повертає рядки "SHEET/TABLE/COLUMN".
 function Get-LandTextBridgeSources($Mdl) {
