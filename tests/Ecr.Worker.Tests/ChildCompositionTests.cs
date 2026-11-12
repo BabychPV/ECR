@@ -59,7 +59,7 @@ public sealed class ChildCompositionTests
         // ✎ D-474: друга (і остання) фонова служба — оновлювач реєстру розкладок версій: без нього перерахунок
         // документа річної версії пішов би немаршрутизованим шляхом. Нічого з черг і розкладів він не бере.
         Assert.Equal(
-            [typeof(TemplateLayoutRegistryRefresher), typeof(JobWorker)],
+            [typeof(TemplateLayoutRegistryRefresher), typeof(EditPathWarmupService), typeof(JobWorker)],
             services.Where(d => d.ServiceType == typeof(IHostedService)).Select(d => d.ImplementationType).ToArray());
 
         var options = Assert.Single(services, d => d.ServiceType == typeof(JobWorkerOptions));
@@ -106,10 +106,11 @@ public sealed class ChildCompositionTests
         Assert.Null(user.UserId);
         Assert.Empty(user.GroupSids);
 
-        // ✎ D-474: поруч із виконавцем — лише оновлювач реєстру розкладок версій.
+        // ✎ D-474: поруч із виконавцем — оновлювач реєстру розкладок версій; AN-190: і прогрів шляху правки (без Quartz).
         Assert.Equal(
-            [typeof(TemplateLayoutRegistryRefresher), typeof(JobWorker)],
+            [typeof(TemplateLayoutRegistryRefresher), typeof(EditPathWarmupService), typeof(JobWorker)],
             provider.GetServices<IHostedService>().Select(h => h.GetType()).ToArray());
+        Assert.False(sp.GetRequiredService<EditPathWarmupOptions>().WarmQuartz);
     }
 
     [Fact]
@@ -230,6 +231,9 @@ public sealed class ChildCompositionTests
         var services = new ServiceCollection();
         services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+
+        // Хост дочірнього дає життєвий цикл сам; збірка без хоста — підставний (прогрів шляху правки його бере).
+        services.AddSingleton<IHostApplicationLifetime, Microsoft.Extensions.Hosting.Internal.ApplicationLifetime>();
         ChildComposition.AddChildWorker(services, configuration, new WorkerPoolOptions());
         return services;
     }

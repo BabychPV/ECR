@@ -168,6 +168,12 @@ builder.Services.ConfigureHttpJsonOptions(
 builder.Services.AddHostedService<Ecr.Api.Startup.RecurringScheduleService>();
 // Фоновий прогрів знімка /health/facts після старту (не блокує; Health:WarmupOnStart=false вимикає).
 builder.Services.AddHostedService<Ecr.Api.Startup.HealthFactsWarmupService>();
+// AN-190: фоновий прогрів шляху першої правки (метадані версій відкритих періодів, граф формул, перший прогін Quartz);
+// Startup:WarmEditPath=false вимикає. Quartz гріється лише тоді, коли разові задачі йдуть у нього (режим черги Quartz).
+Ecr.Infrastructure.Jobs.EditPathWarmupService.Register(
+    builder.Services, builder.Configuration,
+    warmQuartz: Ecr.Infrastructure.Jobs.DbBackgroundJobScheduler.ReadMode(builder.Configuration)
+                == Ecr.Infrastructure.Jobs.JobQueueMode.Quartz);
 // D-430 (LP-45): прогрів і фоновий рефреш карти застарілості гарячих періодів; Documents:StaleMapWarm:Enabled=false вимикає.
 builder.Services.AddScoped<Ecr.Infrastructure.Persistence.StaleMapWarmer>();
 builder.Services.AddHostedService<Ecr.Api.Startup.StaleMapWarmService>();

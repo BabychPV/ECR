@@ -96,6 +96,10 @@ internal static class ChildComposition
         // версії пішла б немаршрутизованим шляхом.
         services.AddHostedService<Ecr.Infrastructure.Persistence.TemplateLayoutRegistryRefresher>();
 
+        // AN-190: у режимі Executor = Worker першу задачу перерахунку після старту виконує саме цей процес — він і
+        // гріє метадані версій відкритих періодів і граф формул. Quartz тут не запущений: його не гріємо.
+        EditPathWarmupService.Register(services, configuration, warmQuartz: false);
+
         // Задача перерахунку може поставити наступну — лише в чергу в базі:
         // Quartz у пам'яті цього процесу ніхто б не виконав.
         services.AddScoped<IBackgroundJobScheduler, DbBackgroundJobScheduler>();

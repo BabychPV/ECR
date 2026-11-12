@@ -363,6 +363,8 @@ ORDER BY [Ts];
 | `Security:RateLimit:ValidatePermitPerMinute` | ні | `100` | Ціле число, не менше 1. |
 | `Security:RateLimit:VerifyPermitPerMinute` | ні | `100` | Ціле число, не менше 1. |
 | `Smtp:AllowedPorts` | ні | `[]` | Формат перевіряється на старті (див. текст відмови служби). |
+| `Startup:WarmEditPath` | ні | `true` | `true` або `false`. |
+| `Startup:WarmEditPathMaxVersions` | ні | `20` | Ціле число, не менше 1. |
 | `Telemetry:Enabled` | ні | `false` | `true` або `false`. |
 | `Telemetry:ExportIntervalSeconds` | ні | `60` | Ціле число, не менше 5. |
 | `Telemetry:OtlpEndpoint` | так, якщо `Telemetry:Enabled` = true | *порожньо* | Формат перевіряється на старті (див. текст відмови служби). |

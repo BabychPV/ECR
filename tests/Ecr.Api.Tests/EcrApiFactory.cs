@@ -154,6 +154,7 @@ public sealed class EcrApiFactory(
         builder.UseEnvironment("Development");
         builder.UseSetting("Health:WarmupOnStart", "false");
         builder.UseSetting("Documents:StaleMapWarm:Enabled", "false");
+        builder.UseSetting(Ecr.Infrastructure.Jobs.EditPathWarmer.EnabledKey, "false");
         builder.ConfigureLogging(logging =>
         {
             // ⛔ Типові постачальники прибираються ЦІЛКОМ, і головний тут —
