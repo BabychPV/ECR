@@ -307,20 +307,27 @@ function zip(parts: Map<string, Buffer>): Buffer {
   return Buffer.concat([...chunks, directory, end]);
 }
 
-/** Міняє число в комірках аркушів книги (рівно одна заміна). */
+/**
+ * Міняє число в комірках аркушів книги (рівно одна заміна). ⚠ OpenXML SDK пише елементи з префіксом простору імен
+ * (`<x:v>`), тож шукається `<v>` з будь-яким префіксом.
+ */
 function replaceNumber(book: Buffer, from: string, to: string): Buffer {
   const parts = unzip(book);
+  const pattern = /<((?:\w+:)?v)>([^<]*)<\/\1>/g;
   let replaced = 0;
   for (const [name, data] of parts) {
     if (!name.startsWith('xl/worksheets/')) continue;
     const xml = data.toString('utf8');
-    const next = xml.split(`<v>${from}</v>`).join(`<v>${to}</v>`);
-    if (next !== xml) {
-      replaced += xml.split(`<v>${from}</v>`).length - 1;
-      parts.set(name, Buffer.from(next, 'utf8'));
-    }
+    const next = xml.replace(pattern, (match, tag: string, value: string) => {
+      if (value.trim() === '' || Number(value) !== Number(from)) return match;
+      replaced += 1;
+      return `<${tag}>${to}</${tag}>`;
+    });
+    if (next !== xml) parts.set(name, Buffer.from(next, 'utf8'));
   }
-  expect(replaced, `число ${from} у книзі`).toBe(1);
+  const sheets = [...parts.keys()].filter((name) => name.startsWith('xl/worksheets/'));
+  const sample = sheets.map((name) => (parts.get(name)?.toString('utf8').match(/<(?:\w+:)?c [^>]*>.{0,120}/g) ?? []).slice(0, 6).join(' '));
+  expect(replaced, `число ${from} у книзі; аркуші ${sheets.join(', ')}; ${sample.join(' | ').slice(0, 1500)}`).toBe(1);
   return zip(parts);
 }
 
