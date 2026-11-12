@@ -1722,9 +1722,13 @@ public sealed partial class PatchCellsHandler(
 
         var addresses = RequiredInputAddresses(context, changes, applicable);
 
-        var baseline = addresses.Count == 0
-            ? new Dictionary<CellAddress, CellValueData>()
-            : await cellStore.ReadCellsAsync(addresses, ct).ConfigureAwait(false);
+        // ✎ Q-17: таблиця «місяці в колонках» у не-власному періоді — базовий стан ЛОГІЧНИЙ (як у сітці); адреси
+        // власників читаються тим самим пакетним запитом. Маршрутизація вимкнена — план null, читання як було.
+        var ownerPlan = await PlanOwnerBaselineAsync(
+                [(context, changes, RequiredInputColumnIds(applicable))], ct)
+            .ConfigureAwait(false);
+
+        var baseline = await ReadRequiredInputBaselineAsync(addresses, ownerPlan, ct).ConfigureAwait(false);
 
         return EvaluateRequiredInputs(context, changes, applicable, baseline, origin);
     }
@@ -1832,6 +1836,13 @@ public sealed partial class PatchCellsHandler(
 
                 if (winner is null)
                 {
+                    // Варіант B (рішення людини 11.11): порожній обов'язковий вхід, що сам є КЛЮЧЕМ правил, — причина,
+                    // чому правило не збіглося; без цієї гілки його вимога не спрацьовувала ніколи.
+                    foreach (var required in MissingRuleKeyInputs(applied, matchValues))
+                    {
+                        messages.Add(RequiredInputMessage(context, applied, required, rowKey, humanBatch));
+                    }
+
                     continue;
                 }
 
@@ -1859,28 +1870,104 @@ public sealed partial class PatchCellsHandler(
                         continue;
                     }
 
-                    var columnCode = context.Snapshot.ColumnsById.TryGetValue(required.ColumnDefId, out var column)
-                        ? column.Code
-                        : required.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-
-                    var defaultHint =
-                        $"Колонка «{columnCode}» обов'язкова для методології «{applied.MethodologyCode}».";
-
-                    var blocks = required.Severity == RequiredInputSeverity.Block && humanBatch;
-
-                    messages.Add(new Validation.ValidationMessage(
-                        blocks ? ValidationSeverity.Error : ValidationSeverity.Warning,
-                        "ECR-CALC-0437",
-                        required.HintL10n?.Get("en") ?? defaultHint,
-                        context.Instance.TableDefId,
-                        rowKey,
-                        columnCode,
-                        BlocksSave: blocks));
+                    messages.Add(RequiredInputMessage(context, applied, required, rowKey, humanBatch));
                 }
             }
         }
 
         return messages;
+    }
+
+    /// <summary>Повідомлення про незаповнений обов'язковий вхід — одне на обидві гілки (правило збіглося чи ні).</summary>
+    private static Validation.ValidationMessage RequiredInputMessage(
+        RequestContext context, ApplicableMethodology applied, LocalizedRequiredInput required, string rowKey, bool humanBatch)
+    {
+        var columnCode = context.Snapshot.ColumnsById.TryGetValue(required.ColumnDefId, out var column)
+            ? column.Code
+            : required.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        var defaultHint =
+            $"Колонка «{columnCode}» обов'язкова для методології «{applied.MethodologyCode}».";
+
+        var blocks = required.Severity == RequiredInputSeverity.Block && humanBatch;
+
+        return new Validation.ValidationMessage(
+            blocks ? ValidationSeverity.Error : ValidationSeverity.Warning,
+            "ECR-CALC-0437",
+            required.HintL10n?.Get("en") ?? defaultHint,
+            context.Instance.TableDefId,
+            rowKey,
+            columnCode,
+            BlocksSave: blocks);
+    }
+
+    /// <summary>
+    /// Обов'язкові входи-КЛЮЧІ правил, порожні в рядку, з яким жодне правило методології не збіглося (варіант B).
+    /// </summary>
+    /// <remarks>
+    /// Рядок вважається в межах методології, якщо є правило, для якого одночасно:
+    /// (1) кожен ЗАПОВНЕНИЙ ключ дорівнює очікуваному (розбіжність — рядок іншої методології/варіанта, тиша як і до
+    /// фіксу); (2) бодай один ключ порожній і він зареєстрований як вимога — саме його й названо;
+    /// (3) рядок «розпочато»: методологія має фільтр активності D-425 (рядок сюди дійшов, отже його пройшов), або
+    /// заповнено бодай один ключ правила, що сам НЕ є вимогою (напр. статус). Умова (3) — проти дедлоку поклітинного
+    /// введення: ключі-вимоги можна вводити в будь-якому порядку, поки рядок не віднесено до методології.
+    /// Звичайні (не-ключові) вимоги без збігу правила не перевіряються — як і до фіксу. Правило з ключем без
+    /// відповідника у версії документа (C1) пропускається: воно не збіжеться ніколи. Без звернень до бази: ключі
+    /// правил уже в <c>neededColumnIds</c> (пакетне читання базового стану).
+    /// </remarks>
+    private static IEnumerable<LocalizedRequiredInput> MissingRuleKeyInputs(
+        ApplicableMethodology applied, IReadOnlyDictionary<string, string?> matchValues)
+    {
+        var requiredByKey = new Dictionary<string, LocalizedRequiredInput>(StringComparer.Ordinal);
+        foreach (var required in applied.RequiredInputs.Where(r => r.IsMapped))
+        {
+            requiredByKey.TryAdd(
+                required.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture), required);
+        }
+
+        var reported = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var rule in applied.Rules)
+        {
+            if (rule.UnmappedColumnIds.Count > 0
+                || MethodologyRuleMatcher.CanonicalPairs(rule.MatchJson) is not { Count: > 0 } pairs)
+            {
+                continue;
+            }
+
+            var missing = new List<string>();
+            var started = applied.StatusColumnIds.Count > 0;
+            var mismatch = false;
+            foreach (var (key, expected) in pairs)
+            {
+                var actual = matchValues.GetValueOrDefault(key);
+                if (actual is null)
+                {
+                    missing.Add(key);
+                }
+                else if (!string.Equals(actual, expected, StringComparison.Ordinal))
+                {
+                    mismatch = true;
+                    break;
+                }
+                else if (!requiredByKey.ContainsKey(key))
+                {
+                    started = true;
+                }
+            }
+
+            if (mismatch || !started)
+            {
+                continue;
+            }
+
+            foreach (var key in missing)
+            {
+                if (requiredByKey.TryGetValue(key, out var required) && reported.Add(key))
+                {
+                    yield return required;
+                }
+            }
+        }
     }
 
     /// <summary>
