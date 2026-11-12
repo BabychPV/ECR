@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { queryKeys } from '@/api/queryKeys';
 import { isExternalRegistry } from '@/features/registries/externalRegistry';
+import { FlertSyncPanel } from '@/features/registries/flert/FlertSyncPanel';
 import { RegistryExportButton } from '@/features/registries/export/RegistryExportButton';
 import { saveBatch, type RegistryBatchResult, type RegistryRow } from '@/features/registries/rows/api';
 import { formatDateOnly, formatTime, parseDateOnly, todayDateOnly } from '@/shared/format';
@@ -350,6 +351,9 @@ export function RegistryDataPage(): JSX.Element {
               }
         }
       />
+
+      {/* D-476 F3: дзеркало FLERT — стан синку і «Синхронізувати зараз» (сам ховається на інших довідниках). */}
+      <FlertSyncPanel registryCode={code} />
 
       {readOnly && registry !== undefined && (
         <Banner

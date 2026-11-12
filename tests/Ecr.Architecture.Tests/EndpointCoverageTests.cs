@@ -429,7 +429,7 @@ public sealed partial class EndpointCoverageTests
                 "jobs.kind.excelImport", "jobs.kind.materializeCollectedData", "jobs.kind.reportSnapshot",
                 "jobs.kind.collection", "jobs.kind.sourceEventSync", "jobs.kind.rowWindowFetch",
                 "jobs.kind.consistencyCheck", "jobs.kind.orphanScan", "jobs.kind.registryImpactRecalculation",
-                "jobs.kind.migrateDocumentVersion", "jobs.kind.outboxFlush",
+                "jobs.kind.migrateDocumentVersion", "jobs.kind.outboxFlush", "jobs.kind.flertCompositionSync",
 
                 // FP-7: повторювані задачі конкретного класу (`typeof(TJob).FullName`).
                 "jobs.kind.archive", "jobs.kind.notification", "jobs.kind.partitionCheck",

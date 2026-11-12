@@ -45,7 +45,7 @@ public sealed class FlertCompositionSyncJob(
     IntegrationActor actor,
     IClock clock,
     IServiceScopeFactory scopes,
-    IConfiguration configuration) : IBackgroundJob
+    IConfiguration configuration) : IFlertCompositionSyncJob
 {
     /// <summary>Код задачі в журналі обслуговування (<c>itg.MaintenanceRun</c>).</summary>
     public static string Code => "flert-composition-sync";

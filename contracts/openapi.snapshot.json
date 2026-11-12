@@ -8340,6 +8340,119 @@
           "Blank"
         ]
       },
+      "FlertSyncRunDto": {
+        "description": "Один прогін синку FLERT (`itg.MaintenanceRun``flert-composition-sync`).",
+        "properties": {
+          "added": {
+            "description": "Створено записів (усі довідники дзеркала).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "deactivated": {
+            "description": "Вимкнено записів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "finishedAt": {
+            "description": "Кінець, UTC; `null` — ще виконується.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "issueCount": {
+            "description": "Зауважень прогону.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "message": {
+            "description": "Перше зауваження рівня «помилка» або текст збою; `null` — немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reactivated": {
+            "description": "Увімкнено знову.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Чому знімок не застосовано (`disabled`, `emptyResult`, `deactivationLimit`…); `null` — застосовано.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourceRows": {
+            "description": "Рядків прочитано з FLERT.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "startedAt": {
+            "description": "Початок, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "description": "`Running`, `Succeeded`, `Degraded` або `Failed`.",
+            "type": "string"
+          },
+          "updated": {
+            "description": "Змінено записів.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "startedAt",
+          "finishedAt",
+          "status",
+          "reason",
+          "sourceRows",
+          "added",
+          "updated",
+          "deactivated",
+          "reactivated",
+          "issueCount",
+          "message"
+        ],
+        "type": "object"
+      },
+      "FlertSyncStatusDto": {
+        "description": "Стан синку FLERT.",
+        "properties": {
+          "enabled": {
+            "description": "Синк увімкнено (`Flert:Sync:Enabled`); вимкнений прогін лише пише «вимкнено».",
+            "type": "boolean"
+          },
+          "lastRun": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FlertSyncRunDto",
+                "description": "Останній прогін; `null` — не було жодного."
+              }
+            ]
+          },
+          "registryCodes": {
+            "description": "Коди довідників-дзеркала (`STREAM`, `STREAM_CASE`, `GAS_COMPOSITION`) — де показувати стан.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "registryCodes",
+          "lastRun"
+        ],
+        "type": "object"
+      },
       "FormulaDto": {
         "description": "Формула для відповіді клієнту.",
         "properties": {
@@ -42860,6 +42973,107 @@
         ]
       }
     },
+    "/api/v1/integration/flert-sync": {
+      "post": {
+        "description": "⚠ 202 з `jobId`: синк ходить до FLERT. Поки попередній у черзі — той самий `jobId` (злиття).",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Ставить синк у чергу позачергово («Синхронізувати зараз»). Право `Integration.Manage`.",
+        "tags": [
+          "FlertSync"
+        ]
+      }
+    },
+    "/api/v1/integration/flert-sync/status": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlertSyncStatusDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlertSyncStatusDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlertSyncStatusDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Стан синку: чи увімкнено, де показувати (коди довідників-дзеркала) і останній прогін.\nПраво `Integration.View` або `Integration.Manage`.",
+        "tags": [
+          "FlertSync"
+        ]
+      }
+    },
     "/api/v1/jobs": {
       "get": {
         "description": "    ⛔ Без цього ендпоінта збій задачі був видимий лише тому, хто вже знає\n    її GUID: перелік — єдиний спосіб дізнатися, ЩО впало, а не лише\n    перевірити те, про що вже здогадався (`ФВ-12.4`).\n    ⛔ Автора задачі НЕ МОЖНА назвати з запиту. Дія не має і не\nматиме параметра з ідентифікатором користувача: mine=true —\nмежа доступу (власні задачі видно без System.ViewHealth, Q-156),\nі параметр «чиї задачі» перетворив би це звільнення на спосіб читати\nчужу чергу. Власник береться лише з ICurrentUser в обробнику.\n    ⛔ Без mine і без права — 403, а не порожній перелік:\n«задач немає» і «вам їх не показують» — різні відповіді, і перша з них\nтут була б неправдою.",
@@ -70272,6 +70486,9 @@
     },
     {
       "name": "Expressions"
+    },
+    {
+      "name": "FlertSync"
     },
     {
       "name": "FormulaManualOverride"

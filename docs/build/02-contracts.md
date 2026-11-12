@@ -1498,6 +1498,21 @@ public sealed record ExternalTable(
     bool Truncated);
 ```
 
+✎ 2026-11-12 (`D-476`, FLERT F3): «Синхронізувати зараз» і стан синку складу газу FLERT.
+`POST /api/v1/integration/flert-sync` (право `Integration.Manage`) → `202 JobAcceptedResponse` (злита постановка
+`IFlertCompositionSyncJob`); `GET /api/v1/integration/flert-sync/status` (`Integration.View` або `Integration.Manage`) →
+`200 FlertSyncStatusDto` (чи увімкнено, коди довідників-дзеркала, останній прогін із `itg.MaintenanceRun`).
+
+```csharp
+// src/Ecr.Application/Ports/IFlertSyncStatusReader.cs
+public interface IFlertCompositionSyncJob : IBackgroundJob;
+
+public interface IFlertSyncStatusReader
+{
+    public Task<FlertSyncStatusDto> ReadAsync(CancellationToken ct);
+}
+```
+
 ```csharp
 // src/Ecr.Application/Ports/IBackgroundJobScheduler.cs
 namespace Ecr.Application.Ports;
@@ -4824,6 +4839,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/sources/{id}/registry/policy` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/sources/{id}/collect` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/sources/{id}/mapping/preview` | `Integration.Manage` | 5 |
+| `POST` | `/api/v1/integration/flert-sync` | `Integration.Manage` (D-476 F3: «Синхронізувати зараз» — злита постановка синку складу газу FLERT; `202 JobAcceptedResponse`) | 8 |
+| `GET` | `/api/v1/integration/flert-sync/status` | `Integration.View` (або `Integration.Manage`; D-476 F3: чи увімкнено, коди довідників-дзеркала, останній прогін `itg.MaintenanceRun` `flert-composition-sync` — < 1 КБ) | 8 |
 | `GET` | `/api/v1/sources/{id}/raw-data/tags` | `Integration.View` (або `Integration.Manage`; D-463: теги сутності — поля мапінгів, без мапінгів — шлях сутності) | 5 |
 | `GET` | `/api/v1/sources/{id}/raw-data/points` | `Integration.View` (або `Integration.Manage`; D-463: `path` 1..400, вікно `fromUtc`/`toUtc` ≤ 400 діб, типово 7 діб; keyset за міткою часу, новіші першими; `limit` 1..500, типово 100) | 5 |
 | `GET` | `/api/v1/sources/{id}/raw-data/series` | `Integration.View` (або `Integration.Manage`; D-463: ≤ `buckets` (1..2000, типово 500) кошиків мін/макс/середнє на все вікно, згортка в SQL) | 5 |

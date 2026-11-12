@@ -29,6 +29,16 @@ public static class ExternalRegistryGuard
     /// <summary>Ключ каталогу відмови.</summary>
     public const string MessageKey = "err.ECR-REG-0409.externalSource";
 
+    /// <summary>Ключ каталогу відмови для дзеркала FLERT (<c>D-476</c>): «змінюйте у FLERT».</summary>
+    public const string FlertMessageKey = "err.ECR-REG-0409.externalSourceFlert";
+
+    /// <summary>Чи довідник — дзеркало складу газу FLERT (<c>STREAM</c>, <c>STREAM_CASE</c>, <c>GAS_COMPOSITION</c>).</summary>
+    /// <param name="registryCode">Код довідника.</param>
+    public static bool IsFlertMirror(string registryCode)
+        => string.Equals(registryCode, Flert.FlertCompositionSchema.StreamRegistry, StringComparison.OrdinalIgnoreCase)
+           || string.Equals(registryCode, Flert.FlertCompositionSchema.CaseRegistry, StringComparison.OrdinalIgnoreCase)
+           || string.Equals(registryCode, Flert.FlertCompositionSchema.CompositionRegistry, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Відмовляє, якщо записи довідника синхронізуються з AF.</summary>
     /// <param name="definition">Довідник, записи якого змінює запит.</param>
     /// <exception cref="BusinessRuleException"><c>ECR-REG-0409</c>, <see cref="MessageKey"/>.</exception>
@@ -43,6 +53,19 @@ public static class ExternalRegistryGuard
         if (definition.SourceKind != RegistrySourceKind.External)
         {
             return;
+        }
+
+        // D-476: дзеркало складу газу FLERT — master FLERT, а не AF; порада «змінюйте в AF» послала б людину не туди.
+        if (IsFlertMirror(definition.Code))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RegistryEntryInUse,
+                $"Записи довідника «{definition.Code}» — копія складу газу FLERT: змінюйте їх у FLERT (D-476).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = FlertMessageKey,
+                    ["registryCode"] = definition.Code,
+                });
         }
 
         throw new BusinessRuleException(

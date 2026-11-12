@@ -35,6 +35,8 @@ const KindKeys: Record<string, string> = {
   IRegistryImpactRecalculationJob: 'jobs.kind.registryImpactRecalculation',
   // ✎ D-451: разове «відправити зараз» листів аркуша (подано/повернуто).
   IOutboxFlushJob: 'jobs.kind.outboxFlush',
+  // D-476: синк складу газу FLERT — «Синхронізувати зараз» (маркер) і щоденний (конкретний клас).
+  IFlertCompositionSyncJob: 'jobs.kind.flertCompositionSync',
   // ⛔ FP-7 (прохід «від першого обличчя» 2026-10-11): повторювані задачі реєструються КОНКРЕТНИМ
   // класом, а не маркером-інтерфейсом (`typeof(TJob).FullName`), тож у переліку `/admin/jobs`
   // стояли `NotificationJob`, `PeriodStateJob`, `RowWindowRefetchJob` поряд з «Recalculation».
@@ -42,6 +44,7 @@ const KindKeys: Record<string, string> = {
   // CL-25 (B-11): перевірка узгодженості теж повторювана й реєструється конкретним класом
   // `ConsistencyCheckJob` — без цього рядка в ru/kz лишалося англійське запасне «Consistency check».
   ConsistencyCheckJob: 'jobs.kind.consistencyCheck',
+  FlertCompositionSyncJob: 'jobs.kind.flertCompositionSync',
   // `RecurringScheduleService` планує КОНКРЕТНИЙ `OrphanScanJob` (а не `IOrphanScanJob`).
   OrphanScanJob: 'jobs.kind.orphanScan',
   NotificationJob: 'jobs.kind.notification',

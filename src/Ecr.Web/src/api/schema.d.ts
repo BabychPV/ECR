@@ -8535,6 +8535,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/integration/flert-sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ставить синк у чергу позачергово («Синхронізувати зараз»). Право `Integration.Manage`.
+         * @description ⚠ 202 з `jobId`: синк ходить до FLERT. Поки попередній у черзі — той самий `jobId` (злиття).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/plain": components["schemas"]["JobAcceptedResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/integration/flert-sync/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Стан синку: чи увімкнено, де показувати (коди довідників-дзеркала) і останній прогін.
+         *     Право `Integration.View` або `Integration.Manage`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FlertSyncStatusDto"];
+                        "text/json": components["schemas"]["FlertSyncStatusDto"];
+                        "text/plain": components["schemas"]["FlertSyncStatusDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs": {
         parameters: {
             query?: never;
@@ -32184,6 +32286,63 @@ export interface components {
          * @enum {unknown}
          */
         FillDown: "None" | "Merge" | "Blank";
+        /** @description Один прогін синку FLERT (`itg.MaintenanceRun``flert-composition-sync`). */
+        FlertSyncRunDto: {
+            /**
+             * Format: int32
+             * @description Створено записів (усі довідники дзеркала).
+             */
+            added: number;
+            /**
+             * Format: int32
+             * @description Вимкнено записів.
+             */
+            deactivated: number;
+            /**
+             * Format: date-time
+             * @description Кінець, UTC; `null` — ще виконується.
+             */
+            finishedAt: null | string;
+            /**
+             * Format: int32
+             * @description Зауважень прогону.
+             */
+            issueCount: number;
+            /** @description Перше зауваження рівня «помилка» або текст збою; `null` — немає. */
+            message: null | string;
+            /**
+             * Format: int32
+             * @description Увімкнено знову.
+             */
+            reactivated: number;
+            /** @description Чому знімок не застосовано (`disabled`, `emptyResult`, `deactivationLimit`…); `null` — застосовано. */
+            reason: null | string;
+            /**
+             * Format: int32
+             * @description Рядків прочитано з FLERT.
+             */
+            sourceRows: number;
+            /**
+             * Format: date-time
+             * @description Початок, UTC.
+             */
+            startedAt: string;
+            /** @description `Running`, `Succeeded`, `Degraded` або `Failed`. */
+            status: string;
+            /**
+             * Format: int32
+             * @description Змінено записів.
+             */
+            updated: number;
+        };
+        /** @description Стан синку FLERT. */
+        FlertSyncStatusDto: {
+            /** @description Синк увімкнено (`Flert:Sync:Enabled`); вимкнений прогін лише пише «вимкнено». */
+            enabled: boolean;
+            lastRun: null | components["schemas"]["FlertSyncRunDto"];
+            /** @description Коди довідників-дзеркала (`STREAM`, `STREAM_CASE`, `GAS_COMPOSITION`) — де показувати стан. */
+            registryCodes: string[];
+        };
         /** @description Формула для відповіді клієнту. */
         FormulaDto: {
             /** @description ✎ D-461: «Дозволити ручне значення» (змінює `PUT …/formulas/{formulaId}/manual-override`). */

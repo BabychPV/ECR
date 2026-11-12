@@ -37,6 +37,8 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 public sealed class FlertCompositionSyncJobTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 11, 11, 23, 0, 0, DateTimeKind.Utc);
+    private static readonly string[] MirrorCodes = ["STREAM", "STREAM_CASE", "GAS_COMPOSITION"];
+
     private static readonly string[] StreamValidity = ["Stream_ValidFrom", "Stream_ValidTo"];
 
     private static readonly string[] TypeValidity = ["StreamType_ValidFrom", "StreamType_ValidTo"];
@@ -133,6 +135,18 @@ public sealed class FlertCompositionSyncJobTests(SqlServerFixture sql)
         var run = await db.MaintenanceRuns.AsNoTracking().SingleAsync(r => r.Id == runId);
         Assert.Equal(FlertCompositionSyncJob.Degraded, run.Status);
         Assert.Contains("\"reason\":\"emptyResult\"", run.DetailsJson, StringComparison.Ordinal);
+
+        // F3: стан синку для сторінки довідника — той самий прогін, розібраний із журналу.
+        var configuration = Substitute.For<IConfiguration>();
+        configuration[Arg.Any<string>()].Returns((string?)null);
+        var status = await new FlertSyncStatusReader(db, configuration).ReadAsync(CancellationToken.None);
+        Assert.False(status.Enabled);
+        Assert.Equal(MirrorCodes, status.RegistryCodes);
+        Assert.NotNull(status.LastRun);
+        Assert.Equal(FlertCompositionSyncJob.Degraded, status.LastRun.Status);
+        Assert.Equal("emptyResult", status.LastRun.Reason);
+        Assert.NotNull(status.LastRun.FinishedAt);
+
         Assert.Equal(before, await ActiveCountsAsync());
         Assert.Equal(revisions, await RevisionsAsync());
     }
