@@ -141,7 +141,7 @@ internal static class FormulaErrorInputs
                     r.Key.PeriodOffset,
                     r.Value.IsNull ? null
                     : r.Value.IsError ? r.Value.ErrorCode
-                    : Convert.ToString(r.Value.Value, CultureInfo.InvariantCulture));
+                    : Text(r.Value.Value));
             })
             .ToList();
 
@@ -154,6 +154,16 @@ internal static class FormulaErrorInputs
 
         return json.Length <= FormulaError.MaxInputsLength ? json : null;
     }
+
+    /// <summary>
+    /// Значення входу текстом (інваріантна культура). ⚠ Число зі сховища має масштаб 16 (<c>decimal(34,16)</c>) —
+    /// без хвостових нулів («10», а не «10.0000000000000000»): так його бачить людина в сітці.
+    /// </summary>
+    /// <param name="value">Значення виразу.</param>
+    internal static string? Text(object? value)
+        => value is decimal number
+            ? number.ToString("G29", CultureInfo.InvariantCulture)
+            : Convert.ToString(value, CultureInfo.InvariantCulture);
 
     /// <summary>JSON → записи; <c>null</c> чи битий JSON — порожньо.</summary>
     public static IReadOnlyList<FormulaErrorInputRecord> Parse(string? json)
