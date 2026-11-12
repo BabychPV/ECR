@@ -46,6 +46,25 @@ public sealed class MissingInputsRowIssueTests
         Assert.Empty(profile.UnmatchedRows);
     }
 
+    /// <summary>
+    /// AN-164b: прогін записує, ЯКИХ аргументів бракувало рядку, і вони доживають до <c>ModulesProfileJson</c> — звідти їх
+    /// називає читання проблем (а не здогад за формулами). Мутація: не передати <c>MissingArguments</c> у профіль —
+    /// червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Аргументи_яких_бракувало_доживають_до_профілю_прогону()
+    {
+        var profile = await RunAsync("@Qty? * 2 + @Density? * 0", [null]);
+
+        var row = Assert.Single(profile.MissingInputRows);
+        Assert.Equal(["Qty", "Density"], profile.MissingArgumentsOf(row));
+        Assert.Equal(
+            ["Qty", "Density"],
+            ModuleProfile.ReadMissingArguments(profile.ToJson(), DocumentId)[(TableInstance, "R000", Methodology)]);
+        Assert.Empty(ModuleProfile.ReadMissingArguments(profile.ToJson(), DocumentId + 1));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Рядок_без_обовязкового_аргументу_ARG_теж_лишає_слід()

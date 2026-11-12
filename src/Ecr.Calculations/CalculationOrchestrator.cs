@@ -171,7 +171,7 @@ public sealed class CalculationOrchestrator(
         var rejected = new ConcurrentBag<RejectedRow>();
 
         // AN-164: рядки, закриті правилом, але без жодного значення через відсутні аргументи формул.
-        var missingInputs = new ConcurrentBag<RejectedRow>();
+        var missingInputs = new ConcurrentBag<(RejectedRow Row, IReadOnlyList<string> Arguments)>();
 
         foreach (var batch in batches)
         {
@@ -248,7 +248,14 @@ public sealed class CalculationOrchestrator(
         profile.RecordEvaluatedTables(
             rowMatches.Where(s => s.AllRowKeys is not null).Select(s => s.TableInstanceId).Distinct());
         profile.RecordRejected(rejected.OrderBy(r => r.TableInstanceId).ThenBy(r => r.RowNumber));
-        profile.RecordMissingInputs(missingInputs.OrderBy(r => r.TableInstanceId).ThenBy(r => r.RowNumber));
+        var missing = missingInputs.OrderBy(m => m.Row.TableInstanceId).ThenBy(m => m.Row.RowNumber).ToList();
+        profile.RecordMissingInputs(missing.Select(m => m.Row));
+
+        // AN-164b: які саме аргументи бракували — назве їх читання проблем (не здогад за формулами).
+        foreach (var (row, arguments) in missing)
+        {
+            profile.RecordMissingArguments(row, arguments);
+        }
 
         return profile;
     }
@@ -340,7 +347,7 @@ public sealed class CalculationOrchestrator(
         int maxInputCells,
         ConcurrentBag<RowMatchSummary> rowMatches,
         ConcurrentBag<RejectedRow> rejected,
-        ConcurrentBag<RejectedRow> missingInputs,
+        ConcurrentBag<(RejectedRow Row, IReadOnlyList<string> Arguments)> missingInputs,
         CancellationToken ct)
     {
         var module = scopedModules.FirstOrDefault(m => m.CanHandle(binding.Descriptor));
@@ -460,9 +467,9 @@ public sealed class CalculationOrchestrator(
 
                     // AN-164: рядок закрито правилом, але жодного значення — бо формулам бракує аргументів. Без цього
                     // сліду він був тихим нулем: 0 результатів, 0 невдалих кроків (`#NULL` — «немає значення»), 0 проблем.
-                    if (output.Values.Count == 0 && output.MissingArguments is { Count: > 0 })
+                    if (output.Values.Count == 0 && output.MissingArguments is { Count: > 0 } missingArguments)
                     {
-                        missingInputs.Add(RowOf(input));
+                        missingInputs.Add((RowOf(input), missingArguments));
                     }
                 }
                 catch (Domain.Abstractions.DomainException error)

@@ -1,6 +1,7 @@
 // src/Ecr.Application/Calculations/CalculationPlan.cs
 using System.Globalization;
 using System.Text.Json;
+using Ecr.Application.Ports;
 
 namespace Ecr.Application.Calculations;
 
@@ -120,6 +121,7 @@ public sealed class ModuleProfile
     private readonly List<UnmatchedRow> _unmatched = [];
     private readonly List<RejectedRow> _rejected = [];
     private readonly List<RejectedRow> _missingInputs = [];
+    private readonly Dictionary<RejectedRow, IReadOnlyList<string>> _missingArguments = [];
     private readonly List<int> _skippedUnpublished = [];
     private readonly HashSet<long> _evaluatedTables = [];
 
@@ -158,6 +160,11 @@ public sealed class ModuleProfile
         _unmatched.AddRange(other._unmatched);
         _rejected.AddRange(other._rejected);
         _missingInputs.AddRange(other._missingInputs);
+        foreach (var (row, arguments) in other._missingArguments)
+        {
+            _missingArguments.TryAdd(row, arguments);
+        }
+
         _evaluatedTables.UnionWith(other._evaluatedTables);
         RecordSkippedUnpublished(other._skippedUnpublished);
 
@@ -223,6 +230,11 @@ public sealed class ModuleProfile
         _unmatched.RemoveAll(r => tableInstanceIds.Contains(r.TableInstanceId));
         _rejected.RemoveAll(r => tableInstanceIds.Contains(r.TableInstanceId));
         _missingInputs.RemoveAll(r => tableInstanceIds.Contains(r.TableInstanceId));
+        foreach (var row in _missingArguments.Keys.Where(r => tableInstanceIds.Contains(r.TableInstanceId)).ToList())
+        {
+            _missingArguments.Remove(row);
+        }
+
         _evaluatedTables.ExceptWith(tableInstanceIds);
     }
 
@@ -275,6 +287,31 @@ public sealed class ModuleProfile
         _missingInputs.AddRange(rows);
     }
 
+    /// <summary>
+    /// AN-164b: аргументи формул, яких бракувало рядку в ЦЬОМУ прогоні (<c>CalculationOutput.MissingArguments</c>), — їх
+    /// читання проблем називає людині замість здогаду за формулами (у <c>calc.CalculationIssue</c> для них колонки немає,
+    /// міграція заборонена — тож вони йдуть у <c>ModulesProfileJson</c>, ключ <c>missingInputs</c>).
+    /// </summary>
+    /// <param name="row">Рядок (той самий, що в <see cref="RecordMissingInputs"/>).</param>
+    /// <param name="arguments">Коди аргументів <c>@Code</c> у порядку формул.</param>
+    public void RecordMissingArguments(RejectedRow row, IReadOnlyList<string> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(arguments);
+
+        if (arguments.Count > 0)
+        {
+            _missingArguments.TryAdd(row, arguments);
+        }
+    }
+
+    /// <summary>Аргументи, яких бракувало рядку (AN-164b); <c>null</c> — не записано.</summary>
+    /// <param name="row">Рядок.</param>
+    public IReadOnlyList<string>? MissingArgumentsOf(RejectedRow row) => _missingArguments.GetValueOrDefault(row);
+
+    /// <summary>Скільки аргументів одного рядка без входів зберігається в профілі (AN-164b).</summary>
+    public const int MissingArgumentsKept = 24;
+
     /// <summary>Скільки ключів рядків без правила зберігається на документ у профілі (D14).</summary>
     public const int UnmatchedKeysKept = 10;
 
@@ -321,13 +358,104 @@ public sealed class ModuleProfile
             .Select(g => new { documentId = g.Key, count = g.Count() })
             .ToList();
 
-        return (unmatched.Count, rejected.Count) switch
+        // AN-164b: аргументи, яких бракувало рядкам без входів, — з прогону, а не здогадом при читанні. Лише коди
+        // аргументів (не значення комірок); до MaxPerTable рядків на таблицю, як і самі проблеми.
+        var missingInputs = _missingInputs
+            .Where(_missingArguments.ContainsKey)
+            .DistinctBy(r => (r.DocumentId, r.TableInstanceId, r.RowKey, r.MethodologyId))
+            .GroupBy(r => r.DocumentId)
+            .OrderBy(g => g.Key)
+            .Select(g => new
+            {
+                documentId = g.Key,
+                rows = g.GroupBy(r => r.TableInstanceId)
+                    .SelectMany(t => t.OrderBy(r => r.RowNumber).Take(ICalculationIssueStore.MaxPerTable))
+                    .Select(r => new
+                    {
+                        tableInstanceId = r.TableInstanceId,
+                        rowKey = r.RowKey,
+                        methodologyId = r.MethodologyId,
+                        arguments = _missingArguments[r].Take(MissingArgumentsKept).ToList(),
+                    })
+                    .ToList(),
+            })
+            .ToList();
+
+        var root = new Dictionary<string, object> { ["modules"] = modules };
+        if (unmatched.Count > 0)
         {
-            (0, 0) => JsonSerializer.Serialize(new { modules }),
-            (_, 0) => JsonSerializer.Serialize(new { modules, unmatched }),
-            (0, _) => JsonSerializer.Serialize(new { modules, rejected }),
-            _ => JsonSerializer.Serialize(new { modules, unmatched, rejected }),
-        };
+            root["unmatched"] = unmatched;
+        }
+
+        if (rejected.Count > 0)
+        {
+            root["rejected"] = rejected;
+        }
+
+        if (missingInputs.Count > 0)
+        {
+            root["missingInputs"] = missingInputs;
+        }
+
+        return JsonSerializer.Serialize(root);
+    }
+
+    /// <summary>
+    /// AN-164b: аргументи, яких бракувало рядкам без входів документа в прогоні (<see cref="RecordMissingArguments"/>).
+    /// </summary>
+    /// <param name="profileJson">Збережений профіль; <c>null</c>, старий формат чи зіпсований JSON — порожньо.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <returns>(TableInstanceId, RowKey, MethodologyId) → коди аргументів.</returns>
+    public static IReadOnlyDictionary<(long TableInstanceId, string RowKey, int? MethodologyId), IReadOnlyList<string>>
+        ReadMissingArguments(string? profileJson, long documentId)
+    {
+        var result = new Dictionary<(long, string, int?), IReadOnlyList<string>>();
+        if (string.IsNullOrWhiteSpace(profileJson))
+        {
+            return result;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(profileJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("missingInputs", out var list)
+                || list.ValueKind != JsonValueKind.Array)
+            {
+                return result;
+            }
+
+            foreach (var item in list.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object
+                    || !item.TryGetProperty("documentId", out var id)
+                    || id.GetInt64() != documentId
+                    || !item.TryGetProperty("rows", out var rows)
+                    || rows.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var row in rows.EnumerateArray())
+                {
+                    var methodology = row.GetProperty("methodologyId");
+                    result.TryAdd(
+                        (row.GetProperty("tableInstanceId").GetInt64(),
+                         row.GetProperty("rowKey").GetString() ?? string.Empty,
+                         methodology.ValueKind == JsonValueKind.Number ? methodology.GetInt32() : null),
+                        [.. row.GetProperty("arguments").EnumerateArray().Select(a => a.GetString() ?? string.Empty)
+                            .Where(a => a.Length > 0)]);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException
+                                       or FormatException)
+        {
+            // Профіль — діагностика: зіпсований запис дає «аргументів не записано» (читання візьме здогад за формулами).
+            result.Clear();
+        }
+
+        return result;
     }
 
     /// <summary>Читає з <c>ModulesProfileJson</c> рядки без правила ОДНОГО документа (D14).</summary>
