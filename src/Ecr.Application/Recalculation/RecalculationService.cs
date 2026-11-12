@@ -2301,6 +2301,9 @@ public sealed class RecalculationPlan
         list.Add(formulaDefId);
     }
 
+    /// <summary>Кількість ребер «комірка → формула» (діагностика розміру плану; тест P-2).</summary>
+    internal int CellEdgeCount => _byCell.Values.Sum(list => list.Count);
+
     /// <summary>Формула залежить від результату іншої формули.</summary>
     public void DependsOnFormula(int formulaDefId, int dependsOnFormulaDefId)
     {
