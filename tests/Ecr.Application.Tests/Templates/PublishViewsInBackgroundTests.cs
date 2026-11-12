@@ -97,6 +97,10 @@ public sealed class PublishViewsInBackgroundTests(SqlServerFixture sql, ITestOut
         await PublishAsync(second, Substitute.For<IReportViewGenerator>(), status, jobs);
         Assert.Empty(await ViewsLikeAsync(code));
 
+        // v1 стала Deprecated ДО старту задачі (як після наступної публікації) — вʼюхи вона однаково отримує
+        // (процедура: Status IN (1, 2)). Мутація: задача бере лише Published — твердження про _v1 червоне.
+        await DeprecateAsync(first);
+
         await RunJobAsync(templateId, status);
 
         var views = await ViewsLikeAsync(code);
@@ -131,7 +135,9 @@ public sealed class PublishViewsInBackgroundTests(SqlServerFixture sql, ITestOut
     /// <summary>
     /// Конкурентність: задача вʼюх, що виконується, не тримає ні блоку версії, ні транзакції публікації — друга публікація
     /// того самого шаблону проходить, поки задача стоїть; дві одночасні публікації двох версій ставлять задачу на ту саму
-    /// ціль (злиття — справа черги).
+    /// ціль (злиття — справа черги). Картка «оновлюються» не знімається, доки не відпрацює повтор: Pending → задача
+    /// стартує → Pending знову → перша задача завершилась (ще «оновлюються») → повтор завершився (знято).
+    /// Мутація: <c>Settled</c> знімає позначку без звірки покоління — твердження «ще оновлюються» червоне.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -177,6 +183,14 @@ public sealed class PublishViewsInBackgroundTests(SqlServerFixture sql, ITestOut
         Assert.Equal((byte)TemplateVersionStatus.Published, await VersionStatusAsync(third));
         await jobs.Received(3).EnqueueCoalescedAsync<IReportViewsJob>(
             ReportViewsTarget.Of(templateId), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Actor);
+
+        // Перша задача стартувала ДО публікацій 2 і 3 — їхні версії збудує злитий повтор, тож картка ще «оновлюються».
+        Assert.Equal([templateId], status.PendingTemplates());
+
+        // Злитий повтор (той, що поставили публікації 2 і 3) відпрацював — тепер знято.
+        await RunJobAsync(templateId, status);
+        Assert.Empty(status.PendingTemplates());
+        Assert.Empty(status.Snapshot());
     }
 
     /// <summary>
@@ -309,6 +323,16 @@ public sealed class PublishViewsInBackgroundTests(SqlServerFixture sql, ITestOut
         command.CommandText = "SELECT Status FROM cfg.TemplateVersion WHERE Id = @id";
         command.Parameters.AddWithValue("@id", versionId);
         return (byte)(await command.ExecuteScalarAsync())!;
+    }
+
+    private async Task DeprecateAsync(int versionId)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE cfg.TemplateVersion SET Status = 2 WHERE Id = @id AND Status = 1";
+        command.Parameters.AddWithValue("@id", versionId);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
     }
 
     /// <summary>Вʼюхи з версією (<c>_vN</c>) шаблону <paramref name="templateCode"/>.</summary>

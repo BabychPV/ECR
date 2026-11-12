@@ -8,23 +8,40 @@ public sealed class ReportViewStatus : IReportViewStatus
 {
     private readonly object _gate = new();
     private readonly Dictionary<int, ReportViewFailure> _failures = [];
-    private readonly HashSet<int> _pending = [];
+    // ✎ P-4b: шаблон → покоління останньої позначки «оновлюються»; лічильник наскрізний (монотонний).
+    private readonly Dictionary<int, long> _pending = [];
+    private long _sequence;
 
     /// <inheritdoc />
-    public void Pending(int templateId)
+    public long Pending(int templateId)
     {
         lock (_gate)
         {
-            _pending.Add(templateId);
+            var generation = ++_sequence;
+            _pending[templateId] = generation;
+            return generation;
         }
     }
 
     /// <inheritdoc />
-    public void Settled(int templateId)
+    public long PendingGeneration(int templateId)
     {
         lock (_gate)
         {
-            _pending.Remove(templateId);
+            return _pending.TryGetValue(templateId, out var generation) ? generation : 0;
+        }
+    }
+
+    /// <inheritdoc />
+    public void Settled(int templateId, long generation)
+    {
+        lock (_gate)
+        {
+            // ⛔ Новіша позначка (публікація під час прогону) — злитий повтор ще в черзі: не знімати.
+            if (_pending.TryGetValue(templateId, out var current) && current <= generation)
+            {
+                _pending.Remove(templateId);
+            }
         }
     }
 
@@ -33,7 +50,7 @@ public sealed class ReportViewStatus : IReportViewStatus
     {
         lock (_gate)
         {
-            return [.. _pending.Order()];
+            return [.. _pending.Keys.Order()];
         }
     }
 
