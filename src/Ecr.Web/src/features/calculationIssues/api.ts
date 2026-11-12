@@ -10,6 +10,9 @@ export type CalculationIssues = components['schemas']['CalculationIssuesDto'];
 /** Що приймають правила методологій таблиці з проблемами (UAT 08.11 b3). */
 export type CalculationIssueTableHint = components['schemas']['CalculationIssueTableHintDto'];
 
+/** ✎ C-1 (D-475): рядок групи «Помилки формул» (комірка, формула, причина, входи, джерело). */
+export type FormulaErrorIssue = components['schemas']['FormulaErrorIssueDto'];
+
 /**
  * Ключ кешу проблем розрахунку.
  *
