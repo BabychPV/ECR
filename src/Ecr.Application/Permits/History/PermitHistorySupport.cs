@@ -189,6 +189,21 @@ internal static class PermitHistoryRules
             "Немає доданого дозволу, який можна скасувати (або його місяці вже поділено).",
             new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.permitHistoryNothingToUndo" });
 
+    /// <summary>
+    /// D-1: шкала, на якій перевіряли (поза транзакцією), мусить збігтися з шкалою під замком. Інакше між перевіркою й
+    /// записом шкалу змінив хтось інший — 409, клієнт перечитує історію.
+    /// </summary>
+    public static void EnsureUnchanged(IEnumerable<int> checkedOn, IReadOnlyList<PermitSegment> locked)
+    {
+        if (!checkedOn.SequenceEqual(locked.Select(s => s.Id)))
+        {
+            throw new ConcurrencyConflictException(
+                ErrorCodes.CellConflict,
+                "Історію дозволу щойно змінив хтось інший: оновіть її й повторіть.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CELL-0409.concurrentChange" });
+        }
+    }
+
     /// <summary>j4 refusal parameters: both permits, the uncovered days, the date that would close the first gap.</summary>
     public static GapText Gap(
         RegistryEntry? previous, RegistryEntry next, IReadOnlyList<DayRange> gaps, DateOnly changeFrom, DateOnly horizon, string? language)

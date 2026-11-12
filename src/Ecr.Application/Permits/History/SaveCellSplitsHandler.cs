@@ -106,6 +106,19 @@ public sealed class SaveCellSplitsHandler(
                 }
             }
 
+            // ⛔ D-1: шкала кожного плану — під UPDLOCK+HOLDLOCK і та сама, на якій план рахувався; undo/add чекають на нас
+            // або ми на них. Порядок — за ключем, щоб два поділи з різним порядком комірок не взяли замки навхрест.
+            foreach (var plan in plans
+                         .OrderBy(p => p.Table.Id).ThenBy(p => p.Instance.SheetCopyId ?? 0)
+                         .ThenBy(p => p.RowKey, StringComparer.Ordinal).ThenBy(p => p.PermitColumnId ?? p.HeaderFieldId))
+            {
+                var locked = plan.PermitColumnId is { } permitColumn
+                    ? await store.LockRowSegmentsAsync(
+                        documentId, plan.Table.Id, plan.Instance.SheetCopyId, plan.RowKey, permitColumn, innerCt).ConfigureAwait(false)
+                    : await store.LockHeaderSegmentsAsync(documentId, plan.HeaderFieldId!.Value, innerCt).ConfigureAwait(false);
+                PermitHistoryRules.EnsureUnchanged(plan.SegmentIds, locked);
+            }
+
             foreach (var plan in plans)
             {
                 var monthKey = (plan.Month.Year * 100) + plan.Month.Month;
@@ -212,8 +225,14 @@ public sealed class SaveCellSplitsHandler(
             .Where(g => table.Columns.Any(c => c.Id == g.Key && c.LookupRegistryDefId is { } t && isPermitTarget(t)))
             .ToList();
         IReadOnlyList<PermitSpan> spans;
+        IReadOnlyList<int> segmentIds;
+        int? permitColumnId = null;
+        int? headerFieldId = null;
         if (rowSegments.Count == 1)
         {
+            var used = rowSegments[0];
+            segmentIds = [.. used.OrderBy(s => s.ValidFrom).Select(s => s.Id)];
+            permitColumnId = used.Key;
             var slice = await cells.ReadSliceAsync(instance.TableInstanceId, period, ct).ConfigureAwait(false);
             var baseId = slice.FirstOrDefault(c => c.Address.TableRowId == rowId && c.Address.ColumnDefId == rowSegments[0].Key)
                 ?.Value.ValueRegistryEntryId ?? throw PartsInvalid("У рядку ще не обрано дозвіл.");
@@ -230,6 +249,8 @@ public sealed class SaveCellSplitsHandler(
                 ? id
                 : throw PartsInvalid("У шапці ще не обрано дозвіл.");
             spans = PermitHistoryCoverage.SpansOf(baseId, header);
+            segmentIds = [.. header.OrderBy(s => s.ValidFrom).Select(s => s.Id)];
+            headerFieldId = header.Key;
         }
         else
         {
@@ -262,7 +283,9 @@ public sealed class SaveCellSplitsHandler(
 
         // No pro rata, ever: the total exists only when the user typed every part.
         decimal? total = item.Parts.All(p => p is not null) ? item.Parts.Sum(p => p!.Value) : null;
-        return new Plan(instance, table, column, item.RowKey, item.BaseVersion, month, parts, item.Parts, total);
+        return new Plan(
+            instance, table, column, item.RowKey, item.BaseVersion, month, parts, item.Parts, total,
+            segmentIds, permitColumnId, headerFieldId);
     }
 
     private static BusinessRuleException PartsInvalid(string why)
@@ -276,5 +299,5 @@ public sealed class SaveCellSplitsHandler(
     private sealed record Plan(
         TableInstanceRef Instance, Domain.Entities.Configuration.TableDef Table, Domain.Entities.Configuration.ColumnDef Column,
         string RowKey, string BaseVersion, DateOnly Month, IReadOnlyList<PartSpan> Spans, IReadOnlyList<decimal?> Parts,
-        decimal? Total);
+        decimal? Total, IReadOnlyList<int> SegmentIds, int? PermitColumnId, int? HeaderFieldId);
 }
