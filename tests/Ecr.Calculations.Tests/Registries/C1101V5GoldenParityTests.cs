@@ -186,14 +186,23 @@ public sealed class C1101V5GoldenParityTests
             var gsec = Assert.Single(output.Values, v => v.OutputCode == GsecType2 && v.SubstanceEntryId == entry);
             var tons = Assert.Single(output.Values, v => v.OutputCode == TonsType2 && v.SubstanceEntryId == entry);
 
-            Assert.Equal(0.00468036m / 3.6m * (x / 100m), gsec.Value, 15);
-            Assert.Equal(0.00468036m / 1000m * (x / 100m) * 2m, tons.Value, 15);
+            Near(0.00468036m / 3.6m * (x / 100m), gsec.Value);
+            Near(0.00468036m / 1000m * (x / 100m) * 2m, tons.Value);
         }
 
         // Закріплено числом (C1–C5, речовина 415): 0.0013001 · 0.999578994881403130 і 0.00000936072 · 0.999578994881403130.
-        Assert.Equal(0.001299552651245312m, Assert.Single(output.Values, v => v.OutputCode == GsecType2 && v.SubstanceEntryId == 6051).Value, 15);
-        Assert.Equal(0.000009356779088966m, Assert.Single(output.Values, v => v.OutputCode == TonsType2 && v.SubstanceEntryId == 6051).Value, 15);
+        Near(0.001299552651245312m, Assert.Single(output.Values, v => v.OutputCode == GsecType2 && v.SubstanceEntryId == 6051).Value);
+        Near(0.000009356779088966m, Assert.Single(output.Values, v => v.OutputCode == TonsType2 && v.SubstanceEntryId == 6051).Value);
     }
+
+    /// <summary>
+    /// Рушій віддає результат із 16 знаками після коми (CI, 12.11: EBenzene tons 1.45109049376e-14 → 0.0000000000000145),
+    /// тож межа — 1e-16: це похибка округлення, а не допуск на хибну формулу.
+    /// </summary>
+    private static void Near(decimal expected, decimal actual)
+        => Assert.True(
+            Math.Abs(expected - actual) <= 0.0000000000000001m,
+            $"очікували {expected}, отримали {actual}");
 
     private static MethodologyTestCase Case(Dictionary<string, decimal> expected)
         => new("PARITY_1", Input(202609), expected, Tolerance: 0.000001m);
