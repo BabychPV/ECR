@@ -412,6 +412,31 @@ public sealed class LandBranchGateTests
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Golden_test_of_C11_01_gets_a_NAE_with_an_LPG_category()
+    {
+        // W15r 12.11: PARITY_1 (NAE 0782(009) + LPG (HMB)) -> '0782(009)_LPG', якого у версії немає (лише 6646..6657_LPG):
+        // публікація V4 - ECR-CALC-0422 categoryRuleFailed. Підміна NAE -> 6646 дає '6646_LPG'; потік не змінюється.
+        var json = Run(
+            """
+            $in = '{"documentId":1,"periodKey":{"value":202606},"arguments":[{"argumentCode":"Land_NAE","value":null,"valueString":"0782(009)"},{"argumentCode":"Land_TypeFuelOrStream","value":null,"valueString":"LPG (HMB)"}]}'
+            $ov = (Get-LandBranchGateTestOverrides)['ECW_C11_01']
+            $a = Convert-LandBranchGateTestInput -InputJson $in -DocumentId 96 -PeriodKey 202609 -Overrides $ov
+            $b = Convert-LandBranchGateTestInput -InputJson $a.InputJson -DocumentId 96 -PeriodKey 202609 -Overrides $ov
+            [ordered]@{ changed = $a.Changed; again = $b.Changed; input = $a.InputJson } | ConvertTo-Json -Compress
+            """);
+        using var doc = JsonDocument.Parse(json);
+        var r = doc.RootElement;
+        Assert.True(r.GetProperty("changed").GetBoolean());
+        Assert.False(r.GetProperty("again").GetBoolean());
+        using var input = JsonDocument.Parse(r.GetProperty("input").GetString()!);
+        string Arg(string code) => input.RootElement.GetProperty("arguments").EnumerateArray()
+            .Single(a => a.GetProperty("argumentCode").GetString() == code).GetProperty("valueString").GetString()!;
+        Assert.Equal("6646", Arg("Land_NAE"));
+        Assert.Equal("LPG (HMB)", Arg("Land_TypeFuelOrStream"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Wrapper_is_idempotent_adds_argument_and_gives_NULL_for_an_empty_branch()
     {
         var json = Run(
