@@ -53,6 +53,9 @@ public sealed class ExcelImporterDirectTargetDenyPreviewTests
     private TemplateVersionSnapshot _snapshot = null!;
     private bool _denyTarget;
 
+    // C-12: поточне значення Lookup-комірки (Id запису); `null` — порожня.
+    private long? _currentEntry;
+
     // P3 (рішення людини 25.10 «вимагати Registry.View»): права профілю тесту.
     private string[] _permissions = ["Registry.View"];
     private int? _scopedViewProject;
@@ -80,7 +83,7 @@ public sealed class ExcelImporterDirectTargetDenyPreviewTests
         SetId(definition, Target);
         _registries.FindDefinitionByIdAsync(Target, Arg.Any<CancellationToken>()).Returns(definition);
         _registries.ListEntriesAsync(Target, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<RegistryEntry>>([Entry(Target, 2001, "N100")]));
+            .Returns(Task.FromResult<IReadOnlyList<RegistryEntry>>([Entry(Target, 2001, "N100"), Entry(Target, 2002, "N200")]));
         _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
             .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0).Select(id => new RegistryEntryStanding(
                 id, Target, true, false, null, null)).ToList());
@@ -98,7 +101,12 @@ public sealed class ExcelImporterDirectTargetDenyPreviewTests
                 [InstanceId] = new Dictionary<string, string> { ["R1"] = "0xAA" },
             });
         _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Period, Arg.Any<CancellationToken>())
-            .Returns(new Dictionary<long, IReadOnlyList<CellRecord>> { [InstanceId] = [] });
+            .Returns(_ => new Dictionary<long, IReadOnlyList<CellRecord>>
+            {
+                [InstanceId] = _currentEntry is { } current
+                    ? [new CellRecord(new CellAddress(Period, RowId, ColumnId), TableId, new CellValueData { ValueRegistryEntryId = current })]
+                    : [],
+            });
         _metadata.GetAsync(TemplateVersionId, Arg.Any<CancellationToken>()).Returns(_snapshot);
 
         _user.UserId.Returns(9);
@@ -176,6 +184,53 @@ public sealed class ExcelImporterDirectTargetDenyPreviewTests
         var missingRejection = Assert.Single(missing.Rejected);
         Assert.Equal(ImportMessageKeys.ExpectsIdentifier, missingRejection.MessageKey);
         Assert.Equal(missingRejection.MessageKey, existingRejection.MessageKey);
+    }
+
+    // ── C-12 (аудит 2026-11): незмінений код запису, якого профіль не може обрати, — не новий вибір.
+    // Мутація: прибрати пропуск `hiddenLookups` у ImportDiffBuilder.Build — червоніє перший тест (ExpectsIdentifier).
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "C-12")]
+    public async Task Незмінений_код_недоступного_запису_не_відхиляє_книгу(bool deny, bool withoutView)
+    {
+        _denyTarget = deny;
+        if (withoutView)
+        {
+            _permissions = [];
+        }
+
+        _currentEntry = 2001;
+
+        using (var exported = await ExportAsync())
+        {
+            Assert.Equal("N100", exported.Worksheet("Sheet").Cell(3, 1).GetString());
+        }
+
+        var preview = await PreviewAsync(null);
+
+        Assert.Empty(preview.Rejected);
+        Assert.Empty(preview.Changes);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "C-12")]
+    public async Task Інший_код_недоступного_реєстру_відповідає_як_неіснуючий_без_оракула()
+    {
+        // ⛔ S18: впізнається ЛИШЕ поточне значення комірки; новий код закритого реєстру — як неіснуючий.
+        _denyTarget = true;
+        _currentEntry = 2001;
+
+        var existing = await PreviewAsync("N200");
+        var missing = await PreviewAsync("N999");
+
+        Assert.Empty(existing.Changes);
+        Assert.Empty(missing.Changes);
+        Assert.Equal(ImportMessageKeys.ExpectsIdentifier, existing.Rejected.Single().MessageKey);
+        Assert.Equal(missing.Rejected.Single().MessageKey, existing.Rejected.Single().MessageKey);
     }
 
     // ── Рішення людини 25.10: вибір запису потребує Registry.View (глобально, scoped на проєкт документа або грант Read).
@@ -269,10 +324,13 @@ public sealed class ExcelImporterDirectTargetDenyPreviewTests
         await _periods.DidNotReceiveWithAnyArgs().FindPeriodBoundsAsync(default, default, default);
     }
 
-    private async Task<ImportPreview> PreviewAsync(string typed)
+    private async Task<ImportPreview> PreviewAsync(string? typed)
     {
         using var workbook = await ExportAsync();
-        workbook.Worksheet("Sheet").Cell(3, 1).Value = typed;
+        if (typed is not null)
+        {
+            workbook.Worksheet("Sheet").Cell(3, 1).Value = typed;
+        }
 
         var stream = new MemoryStream();
         workbook.SaveAs(stream);

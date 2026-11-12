@@ -163,7 +163,7 @@ public sealed class ExcelImporter(
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        var (lookups, unusableLookups, ambiguousLookups) = await LookupsAsync(snapshot, documentId, map.PeriodKey, profile, ct).ConfigureAwait(false);
+        var (lookups, unusableLookups, ambiguousLookups, hiddenLookups) = await LookupsAsync(snapshot, documentId, map.PeriodKey, profile, ct).ConfigureAwait(false);
 
         // ⛔ S6 (ФВ-6.6): межі читання того, хто імпортує. Перегляд порівнює
         // книгу з ПОТОЧНИМИ значеннями, і будь-яка відповідь, що залежить від
@@ -318,7 +318,8 @@ public sealed class ExcelImporter(
                 readable.CanReadColumn,
                 Ecr.Application.Localization.NumberCulture.ForLanguage(currentUser.Language),
                 unusableLookups,
-                ambiguousLookups);
+                ambiguousLookups,
+                hiddenLookups);
 
             if (permitLocked.TryGetValue(table.Id, out var lockedCodes))
             {
@@ -1286,7 +1287,8 @@ public sealed class ExcelImporter(
     /// </remarks>
     private async Task<(IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> Codes,
         IReadOnlyDictionary<long, string> Unusable,
-        IReadOnlyDictionary<int, IReadOnlyDictionary<string, string>> Ambiguous)> LookupsAsync(
+        IReadOnlyDictionary<int, IReadOnlyDictionary<string, string>> Ambiguous,
+        IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> Hidden)> LookupsAsync(
         TemplateVersionSnapshot snapshot, long documentId, int periodKey, AccessProfile profile, CancellationToken ct)
     {
         var registryIds = snapshot.ColumnsById.Values
@@ -1298,10 +1300,11 @@ public sealed class ExcelImporter(
         var result = new Dictionary<int, IReadOnlyDictionary<string, long>>();
         var unusable = new Dictionary<long, string>();
         var ambiguousByTarget = new Dictionary<int, IReadOnlyDictionary<string, string>>();
+        var hiddenByTarget = new Dictionary<int, IReadOnlyDictionary<string, long>>();
 
         if (registryIds.Count == 0)
         {
-            return (result, unusable, ambiguousByTarget);
+            return (result, unusable, ambiguousByTarget, hiddenByTarget);
         }
 
         // Дата чинності — останній день періоду (D-158), як у пікері сітки й у C7.
@@ -1339,9 +1342,24 @@ public sealed class ExcelImporter(
                     unusable[entry.Id] = reason;
                 }
             }
+
+            // ⛔ C-12 (аудит 2026-11): експорт пише код з ПОВНОГО переліку, а коди вище — лише записи, які профіль
+            // може обрати. Код запису, якого профіль обрати не може, що вже стоїть у комірці, ставав «нерозпізнаним» і
+            // відхиляв усю книгу. Коди таких записів — окремо: `ImportDiffBuilder` впізнає їх ЛИШЕ як незмінене
+            // поточне значення (інакше — як неіснуючий код, без оракула існування, S18).
+            var allEntries = await Ecr.Application.Permits.Groups.LookupTargetEntries
+                .ListAsync(registries, groups, registryId, ct).ConfigureAwait(false);
+            var choosable = targetEntries.Select(e => e.Entry.Id).ToHashSet();
+            Ecr.Application.Permits.Groups.LookupTargetEntries.BuildImportCodes(allEntries, out var allCodes, out _);
+            var hidden = allCodes.Where(p => !choosable.Contains(p.Value))
+                .ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase);
+            if (hidden.Count > 0)
+            {
+                hiddenByTarget[registryId] = hidden;
+            }
         }
 
-        return (result, unusable, ambiguousByTarget);
+        return (result, unusable, ambiguousByTarget, hiddenByTarget);
     }
 }
 

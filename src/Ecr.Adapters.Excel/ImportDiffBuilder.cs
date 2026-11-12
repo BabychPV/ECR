@@ -64,6 +64,10 @@ public sealed class ImportDiffBuilder
     /// Permits PRMG: ціль-група, голий номер дозволу якої збігається в кількох типах: ціль → номер → кандидати
     /// («номер — тип; …»). Такий код ВІДМОВЛЯЄТЬСЯ з переліком кандидатів, без пріоритету типу; `null` - немає.
     /// </param>
+    /// <param name="hiddenLookups">
+    /// C-12: коди записів, яких профіль НЕ може обрати (ціль → код → <c>Id</c>). Розпізнаються лише як
+    /// НЕЗМІНЕНЕ поточне значення комірки; `null` — немає.
+    /// </param>
     /// <remarks>
     /// ⛔ Q-168 (аудит фази 2, продуктивність). Метод БІЛЬШЕ НЕ ходить у базу
     /// сам — <paramref name="rowIds"/>, <paramref name="versions"/> і
@@ -85,7 +89,8 @@ public sealed class ImportDiffBuilder
         Func<int, bool>? canReadColumn = null,
         CultureInfo? culture = null,
         IReadOnlyDictionary<long, string>? unusableLookups = null,
-        IReadOnlyDictionary<int, IReadOnlyDictionary<string, string>>? ambiguousLookups = null)
+        IReadOnlyDictionary<int, IReadOnlyDictionary<string, string>>? ambiguousLookups = null,
+        IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>>? hiddenLookups = null)
     {
         ArgumentNullException.ThrowIfNull(worksheet);
 
@@ -207,6 +212,21 @@ public sealed class ImportDiffBuilder
 
                 var incoming = Read(cell, definition, lookups, culture);
                 var existing = values.GetValueOrDefault((row.RowKey, column.ColumnDefId))?.Value;
+
+                // ⛔ C-12 (аудит 2026-11): код запису, якого профіль НЕ може обрати (Deny D-312, без `Registry.View`),
+                // що збігається з ПОТОЧНИМ значенням комірки, — не новий вибір, а те, що експорт сам туди поклав.
+                // Доти він ставав «нерозпізнаним кодом» і відхиляв усю книгу. Будь-який інший такий код — далі
+                // звичайним шляхом (`ExpectsIdentifier`, як неіснуючий): оракула існування запису немає (S18).
+                if (incoming is string hiddenCode
+                    && definition.DataType == CellDataType.Lookup
+                    && hiddenLookups is not null
+                    && definition.LookupRegistryDefId is { } hiddenTarget
+                    && hiddenLookups.TryGetValue(hiddenTarget, out var hiddenCodes)
+                    && hiddenCodes.TryGetValue(hiddenCode, out var hiddenId)
+                    && existing?.ValueRegistryEntryId == hiddenId)
+                {
+                    continue;
+                }
 
                 // ⛔ `V-10`. Обчислювані й read-only комірки порівнюються з
                 // поточним значенням ТАК САМО, як вхідні, і відхиляються
