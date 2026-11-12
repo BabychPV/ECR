@@ -562,8 +562,11 @@ public sealed class RecalculationService(
         // власник (прогін його екземпляра рахує її формули сам); цей прогін її не перезаписує — див. `Evaluate`.
         // Прапор вимкнено / проєкт не Monthly / таблиця поза маршрутизацією — порожньо, поведінка попередня.
         // RS: копії Q-17 не підтримують (їхні введені значення лежать у власних екземплярах, а не в «власника» року).
-        var foreignByTable = copyScope is not null
-            ? null
+        // ✎ LAND-YEAR L1: `ownedElsewhere` — ОБЧИСЛЮВАНІ колонки з чужим власником (лише версія YearWithMonthColumns,
+        // `IMonthColumnRouter.RoutesComputedVersion`): прогін періоду m пише лише те, чим володіє (C_Mm — період m,
+        // не-місячне — якір); решту рахує й пише прогін власника, а цей читає її значення з власника (зріз сховища).
+        var (foreignByTable, ownedElsewhere) = copyScope is not null
+            ? (null, null)
             : await ForeignColumnsByTableAsync(instance.DocumentId, instances, tables, periodKey, ct)
                 .ConfigureAwait(false);
 
@@ -610,6 +613,18 @@ public sealed class RecalculationService(
 
             // RS: каскад від копії лишається всередині копії (формули інших аркушів читали б її як «оригінал»).
             targets = [.. affected.Where(InScope), .. rollups.Where(InScope)];
+        }
+
+        // ✎ LAND-YEAR L1: формули колонки/комірки, чия колонка має ЧУЖОГО власника, тут не цілі — інакше 11 періодів-читачів
+        // кожної правки читали б увесь зріз заради формул, які нічого не запишуть. Рядкові формули (кілька колонок)
+        // лишаються: їхні чужі комірки пропускає `Evaluate`. Поза річною розкладкою `ownedElsewhere` = null.
+        if (ownedElsewhere is not null)
+        {
+            targets = [.. targets.Where(id => !formulas.TryGetValue(id, out var target)
+                                              || target.Formula.Scope == Domain.Enums.FormulaScope.Row
+                                              || target.Formula.ColumnDefId is not { } targetColumn
+                                              || !ownedElsewhere.TryGetValue(target.Table.Id, out var elsewhere)
+                                              || !elsewhere.Contains(targetColumn))];
         }
 
         // D-230: версія з активним Rollup/Check не виходить тут, навіть коли формул немає: джерело Rollup
@@ -841,7 +856,8 @@ public sealed class RecalculationService(
                 Evaluate(
                     owner.Table, owner.Formula, expression, rows, rowFilter,
                     periodKey, context, values, stored, sink,
-                    foreignByTable?.GetValueOrDefault(owner.Table.Id), overridden);
+                    foreignByTable?.GetValueOrDefault(owner.Table.Id), overridden,
+                    ownedElsewhere?.GetValueOrDefault(owner.Table.Id));
             }
         }
 
@@ -1349,13 +1365,21 @@ public sealed class RecalculationService(
         Dictionary<CellKey, CellValueData> stored,
         Dictionary<CellAddress, CellRecord> upserts,
         HashSet<int>? foreignColumns = null,
-        IReadOnlySet<CellAddress>? overridden = null)
+        IReadOnlySet<CellAddress>? overridden = null,
+        HashSet<int>? ownedElsewhere = null)
     {
         // ФВ-0.2: діапазони цієї формули — за ключами, зафіксованими при публікації.
         context.UseFormula(formula, parsed.Root);
 
         foreach (var (rowKey, columnDefId) in Targets(table, formula, rowIds, rowFilter))
         {
+            // ✎ LAND-YEAR L1: обчислювана колонка з чужим власником (лише YearWithMonthColumns) — її пише прогін
+            // власника; тут ні обчислення, ні запису (контекст тримає значення власника зі зрізу).
+            if (ownedElsewhere is not null && ownedElsewhere.Contains(columnDefId))
+            {
+                continue;
+            }
+
             if (!rowIds.TryGetValue(rowKey, out var rowId))
             {
                 continue;
@@ -1629,20 +1653,26 @@ public sealed class RecalculationService(
     /// Q-17.3: колонки таблиць прогону, чиї введені комірки належать екземпляру ІНШОГО періоду. <c>null</c> — немає
     /// жодної (прапор вимкнено, проєкт не місячний, таблиці поза маршрутизацією, період поза календарем).
     /// </summary>
-    private async Task<Dictionary<int, HashSet<int>>?> ForeignColumnsByTableAsync(
-        long documentId,
-        IReadOnlyList<TableInstanceRef> instances,
-        Dictionary<int, Domain.Entities.Configuration.TableDef> tables,
-        PeriodKey periodKey,
-        CancellationToken ct)
+    /// <returns>
+    /// Усі колонки з чужим власником і (✎ LAND-YEAR L1) їхня підмножина ОБЧИСЛЮВАНИХ — лише у версії YearWithMonthColumns;
+    /// для решти версій друга мапа <c>null</c>.
+    /// </returns>
+    private async Task<(Dictionary<int, HashSet<int>>? Foreign, Dictionary<int, HashSet<int>>? OwnedElsewhere)>
+        ForeignColumnsByTableAsync(
+            long documentId,
+            IReadOnlyList<TableInstanceRef> instances,
+            Dictionary<int, Domain.Entities.Configuration.TableDef> tables,
+            PeriodKey periodKey,
+            CancellationToken ct)
     {
         if (monthRouter is not { Enabled: true }
             || await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false) is not { } routed)
         {
-            return null;
+            return (null, null);
         }
 
         Dictionary<int, HashSet<int>>? result = null;
+        Dictionary<int, HashSet<int>>? computed = null;
         foreach (var instance in instances)
         {
             if (!tables.TryGetValue(instance.TableDefId, out var table) || !monthRouter.AppliesToTable(table))
@@ -1655,9 +1685,14 @@ public sealed class RecalculationService(
             {
                 (result ??= [])[table.Id] = [.. foreign.Select(f => f.Column.Id)];
             }
+
+            if (foreign.Any(f => f.Column.IsComputed))
+            {
+                (computed ??= [])[table.Id] = [.. foreign.Where(f => f.Column.IsComputed).Select(f => f.Column.Id)];
+            }
         }
 
-        return result;
+        return (result, computed);
     }
 
     /// <summary>Комірки, які обчислює формула.</summary>

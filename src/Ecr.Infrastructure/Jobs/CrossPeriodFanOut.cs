@@ -150,7 +150,7 @@ public sealed class CrossPeriodFanOut(
             var relevant = CrossPeriodReaders.ReadAcrossPeriods(dependencies, changed);
             var routed = CrossPeriodReaders.ReadsRoutedInput(
                 dependencies,
-                await RoutedInputsAsync(documentId, versionId, inputChanged, ct).ConfigureAwait(false));
+                await RoutedInputsAsync(documentId, versionId, inputChanged, changed, ct).ConfigureAwait(false));
             if (relevant.Count == 0 && routed.Count == 0)
             {
                 continue;
@@ -266,14 +266,23 @@ public sealed class CrossPeriodFanOut(
     /// значення живуть в екземплярі-власнику й читаються з усіх екземплярів року. Прапор вимкнено, проєкт не
     /// <c>Monthly</c> або таблиця поза маршрутизацією — порожньо (поведінка не змінюється).
     /// </summary>
+    /// <remarks>
+    /// ✎ LAND-YEAR L1: у версії YearWithMonthColumns (<see cref="IMonthColumnRouter.RoutesComputedVersion"/>) обчислювані
+    /// стовпці теж мають власника (C_Mm — період m, не-місячні — якір), і їхні значення читаються з усіх екземплярів
+    /// року. Тому ЗМІНЕНІ обчислювані стовпці (<paramref name="changed"/>, похідні прогону) — такий самий «вхід
+    /// власника»: формула іншого періоду, що читає C_M09 (наприклад, підсумок року в якорі), перераховується. Поза
+    /// річною розкладкою — без змін і без нових звернень до бази (перевірка — реєстр у пам'яті).
+    /// </remarks>
     private async Task<List<(int TableDefId, int ColumnDefId, int? MonthNumber)>> RoutedInputsAsync(
         long documentId,
         int templateVersionId,
         IReadOnlyCollection<ValueTuple<int, int>>? inputChanged,
+        IReadOnlyCollection<ValueTuple<int, int>> changed,
         CancellationToken ct)
     {
         var result = new List<(int TableDefId, int ColumnDefId, int? MonthNumber)>();
-        if (inputChanged is not { Count: > 0 } || router is not { Enabled: true } || metadata is null
+        var computedRouted = router is not null && router.RoutesComputedVersion(templateVersionId) && changed.Count > 0;
+        if ((inputChanged is not { Count: > 0 } && !computedRouted) || router is not { Enabled: true } || metadata is null
             || await router.GetDocumentAsync(documentId, ct).ConfigureAwait(false) is null)
         {
             return result;
@@ -286,7 +295,7 @@ public sealed class CrossPeriodFanOut(
             .GroupBy(t => t.Id)
             .ToDictionary(g => g.Key, g => g.First());
 
-        foreach (var (tableDefId, columnDefId) in inputChanged)
+        foreach (var (tableDefId, columnDefId) in inputChanged ?? [])
         {
             if (!tables.TryGetValue(tableDefId, out var table) || !router.AppliesToTable(table))
             {
@@ -300,6 +309,23 @@ public sealed class CrossPeriodFanOut(
             }
 
             result.Add((tableDefId, columnDefId, column.IsMonthColumn ? column.MonthNumber : null));
+        }
+
+        if (computedRouted)
+        {
+            foreach (var (tableDefId, columnDefId) in changed)
+            {
+                if (!tables.TryGetValue(tableDefId, out var table) || !router.AppliesToTable(table))
+                {
+                    continue;
+                }
+
+                var column = table.Columns.FirstOrDefault(c => c.Id == columnDefId);
+                if (column is { IsDeleted: false, IsComputed: true })
+                {
+                    result.Add((tableDefId, columnDefId, column.IsMonthColumn ? column.MonthNumber : null));
+                }
+            }
         }
 
         return result;
