@@ -1,18 +1,18 @@
 import { useEffect, useState, type JSX } from 'react';
+import { Link, useInRouterContext } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
-import { Alert, Anchor, Code, Skeleton, Stack, Table, Text } from '@mantine/core';
+import { Alert, Anchor, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import type { CalculationResultDto, RegistryDefDto, UnitRef } from '@/api/types';
+import type { CalculationResultDto, RegistryDefDto } from '@/api/types';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import { formatDecimal } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
-import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import './calcResults.css';
 import { useCalculationIssues } from '@/features/calculationIssues/useCalculationIssues';
 import { UnmatchedRowsBannerSelector } from '@/features/documents/unmatchedRowsModel';
+import { resultsHref } from '@/features/calcResults/DocumentResultsLinks';
 import { calculationResults } from './api';
 import { RecalculateHintId, calculationResultsKey } from './calculationResultsKey';
 
@@ -66,21 +66,18 @@ export function registryDisplayName(code: string, registries: readonly RegistryD
 }
 
 /**
- * Числа, які дав розрахунок методологій на цьому документі за цей період.
+ * Стан чисел методологій документа за цей період під аркушами: скільки їх, чи застаріли, які рядки розрахунок не взяв, —
+ * і перехід до огляду «Calculation results — усі місяці».
  *
- * ⛔ Окрема панель, а не колонка в сітці, і це `D-69`: результат методології
- * **не** потрапляє в `doc.CellValue` — інакше нічний перерахунок писав би
- * десятки мільйонів рядків у партиції документів і роздував журнал змін
- * комірок. У документ він приходить посиланням через `cfg.CalculationBinding`.
+ * ⛔ Окрема панель, а не колонка в сітці, і це `D-69`: результат методології **не** потрапляє в `doc.CellValue`.
  *
- * ⛔ Доти побачити це число не було де ВЗАГАЛІ. Перерахунок завершувався
- * успіхом, значення лягало в `calc.CalculationResult` — і жоден екран його не
- * показував: єдиним способом переконатися, що методологія порахувала саме те,
- * лишався `SELECT` у базі.
+ * ✎ 12.11 (живий прохід координатора): тут стояв перелік чисел місяця з ГОЛИМ ідентифікатором екземпляра таблиці
+ * (56724…) у колонці «Table» і числами всіх аркушів упереміш. Огляд «усі місяці» (`/documents/:id/results`) показує
+ * ті самі числа з назвами аркушів і таблиць, по таблицях, з місяцем цього документа серед дванадцяти, — тож перелік-дубль
+ * прибрано. Лишилося те, чого огляд не дає тут, біля сітки: лічильник, банер застарілості з назвами довідників (RT-25),
+ * рядки без розрахунку з переходом до банера над сіткою.
  *
- * ⚠ Показуються числа АКТУАЛЬНОГО прогону, не останнього за часом: прогін, що
- * впав, лишає по собі частину рядків, і суміш двох версій методології на
- * екрані виглядала б цілком правдоподібно.
+ * ⚠ Стан — по числах АКТУАЛЬНОГО прогону, не останнього за часом.
  */
 export function CalculationResultsPanel({
   documentId,
@@ -97,14 +94,11 @@ export function CalculationResultsPanel({
   // без числа (навіть якщо дані вже є в кеші, наприклад після перерахунку чи імпорту).
   const [opened, setOpened] = useState(!collapsed);
 
-  // ⛔ F-02 (четвертий раунд UX): ключ — ПІД префіксом `['document', id,
-  // period]`. Саме його інвалідує завершений перерахунок (`SheetActions`) і
-  // кожна зміна робочого процесу; доти панель жила під окремим ключем, і після
-  // перерахунку показувала старі числа до перезавантаження сторінки.
+  // ⛔ F-02 (четвертий раунд UX): ключ — ПІД префіксом `['document', id, period]`. Саме його інвалідує завершений
+  // перерахунок (`SheetActions`) і кожна зміна робочого процесу.
   //
   // ✎ ui-sheet-bottom: запит ЛІНИВИЙ — лише після розгортання. На Land до 174 тис. результатів на (документ,
-  // період), і вантажити їх при відкритті документа заради лічильника не можна; prefetch немає. Лічильник у
-  // заголовку з'являється з першої відповіді (після першого розгортання).
+  // період), і вантажити їх при відкритті документа заради лічильника не можна; prefetch немає.
   const results = useQuery({
     queryKey: calculationResultsKey(documentId, periodKey),
     queryFn: () => calculationResults(documentId, periodKey),
@@ -141,12 +135,10 @@ export function CalculationResultsPanel({
       .map((issue) => `${issue.tableCode}\u001f${issue.rowKey}`),
   ).size;
 
-  const units = useQuery({
-    queryKey: queryKeys.units.all(),
-    enabled: !collapsed,
-    queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
-    staleTime: 60 * 60 * 1000,
-  });
+  // Огляд року з місяцем цього документа (`?month=`). ⚠ Поза роутером (ізольовані тести панелі) — звичайне посилання.
+  const href = resultsHref(documentId, periodKey, true);
+  const inRouter = useInRouterContext();
+  const linkTitle = t('calcResults.allMonthsHint', { year: Math.floor(periodKey / 100) });
 
   return (
     <Stack gap="xs">
@@ -213,24 +205,8 @@ export function CalculationResultsPanel({
         {(list) => (
           <Stack gap="xs">
             {/*
-              ⛔ Директива D15 §0, правило L10. Одиниця бралася як
-              `(units.data ?? []).find(…)?.code ?? result.unitId`, тож при
-              відмові `GET /api/v1/units` у колонці одиниці друкувалося ГОЛЕ
-              ЧИСЛО — ідентифікатор поруч із порахованим значенням. Це гірше
-              за порожню колонку: число читається як одиниця («7»), і звірка
-              показника йде не в тій розмірності. Для екрана, який існує саме
-              щоб ДОВЕСТИ, що методологія порахувала те саме, двозначність тут
-              коштує найдорожче.
-            */}
-            {/*
-              ⛔ F-05: входи змінилися після прогону — числа вже не відповідають
-              даним. Доти панель показувала їх як чинні, і документ подавали з
-              результатами, що рахували інші входи.
-            */}
-            {/*
-              ⛔ RT-25: причиною застарілості буває не лише введення, а й правка довідника,
-              який читає методологія (`changedRegistries`). Без назви довідника людина шукала
-              б зміну в документі, якої там немає.
+              ⛔ F-05 / RT-25: входи або довідник, який читає методологія, змінилися після прогону — числа вже не
+              відповідають даним. Без назви довідника людина шукала б зміну в документі, якої там немає.
             */}
             {(list.some((result) => result.isStale) || changedRegistriesOf(list).length > 0) && (
               <Alert color="statusWarning" data-results-stale="" title={t('documents.calculationResultsStale')}>
@@ -243,60 +219,17 @@ export function CalculationResultsPanel({
               </Alert>
             )}
 
-            {units.error !== null && (
-              <ErrorAlert error={units.error} onRetry={() => void units.refetch()} />
-            )}
-
-            <Table striped withTableBorder>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>{t('documents.resultTable')}</Table.Th>
-                  <Table.Th>{t('documents.rowKey')}</Table.Th>
-                  <Table.Th>{t('documents.outputCode')}</Table.Th>
-                  <Table.Th>{t('documents.value')}</Table.Th>
-                  <Table.Th>{t('methodologies.outputUnit')}</Table.Th>
-                  <Table.Th>{t('methodologies.version')}</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {list.map((result) => (
-                  <Table.Tr
-                    key={`${String(result.tableInstanceId)}:${String(result.sourceRowKey)}:${result.outputCode}:${String(result.substanceEntryId)}`}
-                  >
-                    {/* ⚠ D-401: екземпляр таблиці; NULL — результат, записаний до D-401. */}
-                    <Table.Td data-result-table={result.tableInstanceId ?? ''}>{result.tableInstanceId ?? '—'}</Table.Td>
-                    <Table.Td>{result.sourceRowKey ?? '—'}</Table.Td>
-                    <Table.Td>{result.outputCode}</Table.Td>
-                    {/* ⚠ F-21: без 16 хвостових нулів сховища (`2.5000000000000000`). */}
-                    <Table.Td>{formatDecimal(result.value) ?? String(result.value)}</Table.Td>
-                    <Table.Td>
-                      {/*
-                        ⚠ Три різні стани, а не один: довідник ще їде (місце
-                        тримає скелет), довідник є і код знайшовся (код), і
-                        довідник є, але такого `unitId` у ньому немає — тоді
-                        ідентифікатор показано ЯК ІДЕНТИФІКАТОР (`<Code>`), а
-                        не текстом, який можна сплутати з позначкою одиниці.
-                      */}
-                      {units.isPending ? (
-                        <Skeleton height={12} width={40} radius="sm" data-units="pending" />
-                      ) : (
-                        (units.data?.find((u) => u.id === result.unitId)?.code ?? (
-                          <Code>{result.unitId}</Code>
-                        ))
-                      )}
-                    </Table.Td>
-                    {/* ⚠ Версія методології поруч із числом обов'язкова: без
-                        неї результат неможливо ані пояснити, ані відтворити. */}
-                    {/* ⚠ F-21: номер версії й код методології, а не ідентифікатор. */}
-                    <Table.Td>
-                      {result.methodologyVersion === null || result.methodologyVersion === undefined
-                        ? String(result.methodologyVersionId)
-                        : `${result.methodologyCode ?? ''} ${result.methodologyVersion}`.trim()}
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
+            <Text size="sm">
+              {inRouter ? (
+                <Anchor component={Link} to={href} size="sm" title={linkTitle} data-testid="calc-results-open-year">
+                  {t('calcResults.allMonths')}
+                </Anchor>
+              ) : (
+                <Anchor href={href} size="sm" title={linkTitle} data-testid="calc-results-open-year">
+                  {t('calcResults.allMonths')}
+                </Anchor>
+              )}
+            </Text>
           </Stack>
         )}
       </AsyncBoundary>

@@ -87,27 +87,19 @@ describe('CalculationResultsPanel: четвертий раунд UX', () => {
    * документа не зачіпає панель, другого запиту немає.
    */
   it('інвалідація документа й періоду (завершений перерахунок) перечитує панель', async () => {
-    let value = '20.0000000000000000';
-    const server = mockServer(() => [row(value)]);
+    // ✎ 12.11: чисел панель більше не друкує (перелік — в огляді «усі місяці»), тож свіжість видно з лічильника.
+    let list = [row('20')];
+    const server = mockServer(() => list);
     const client = show();
 
-    await screen.findByText('20');
+    await waitFor(() => expect(screen.getByTestId('calc-results-count').textContent).toBe('· 1'));
     expect(server.resultCalls()).toBe(1);
 
-    value = '25.0000000000000000';
+    list = [row('20'), row('25')];
     await client.invalidateQueries({ queryKey: ['document', 19, 202609] });
 
-    await screen.findByText('25');
+    await waitFor(() => expect(screen.getByTestId('calc-results-count').textContent).toBe('· 2'));
     expect(server.resultCalls()).toBe(2);
-  });
-
-  it('число без хвостових нулів, версія — кодом і номером, а не ідентифікатором (F-21)', async () => {
-    mockServer(() => [row('2.5000000000000000')]);
-    show();
-
-    await screen.findByText('2.5');
-    expect(screen.getByText('R4F_M1 1.1.0')).toBeTruthy();
-    expect(screen.queryByText('2.5000000000000000')).toBeNull();
   });
 
   /** Мутація: прибрати банер `isStale` — застарілі числа показуються як чинні. */
@@ -122,7 +114,7 @@ describe('CalculationResultsPanel: четвертий раунд UX', () => {
     mockServer(() => [row('20', false)]);
     show();
 
-    await screen.findByText('20');
+    await screen.findByTestId('calc-results-open-year');
     expect(document.querySelector('[data-results-stale]')).toBeNull();
   });
 });

@@ -98,6 +98,38 @@ test('calc results year: All months from the document — real endpoint, empty y
   await expect(page.getByText('Nothing has been calculated yet')).toBeVisible();
 });
 
+test('calc results year: block under the sheets has no table-id list, only a link to All months', async ({ page }) => {
+  await signIn(page);
+  const doc = await createMultiSheetDocument(page, 1, 3);
+  // Підмінено лише перелік місяця (сід стенда без прогонів): числа трьох аркушів з ідентифікаторами екземплярів.
+  await page.route('**/calculation-results?**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(
+        [56724, 56725, 56726].map((id, i) => ({
+          sourceRowKey: `R${String(i)}`, outputCode: 'E_CO2', value: '1.5', unitId: 1, substanceEntryId: null,
+          methodologyVersionId: 1, methodologyCode: 'M-01', methodologyVersion: '2.0', isStale: false,
+          calculatedAt: '2026-02-14T09:12:00Z', inputsChangedAt: null, tableInstanceId: id,
+        })),
+      ),
+    }),
+  );
+
+  await page.goto(`/documents/${String(doc.documentId)}?periodKey=${String(doc.periodKey)}`);
+  const toggle = page.getByTestId('calc-results-toggle');
+  await expect(toggle).toBeVisible({ timeout: 60_000 });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+
+  await expect(page.getByTestId('calc-results-count')).toHaveText('· 3', { timeout: 30_000 });
+  const body = page.locator('#ecr-calc-results-body');
+  await expect(body).not.toContainText('56724');
+  await expect(body.locator('table')).toHaveCount(0);
+
+  await page.getByTestId('calc-results-open-year').click();
+  await expect(page).toHaveURL(new RegExp(`/documents/${String(doc.documentId)}/results\\?year=\\d{4}&month=\\d{1,2}`));
+});
+
 test('calc results year: months, filter, drawer and Open source cell', async ({ page }) => {
   await signIn(page);
   const doc = await createMultiSheetDocument(page, 1, 3);
