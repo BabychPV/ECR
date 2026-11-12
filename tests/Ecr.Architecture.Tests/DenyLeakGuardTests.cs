@@ -139,7 +139,7 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Workflow/SubmitSheetHandler.cs | текст | emptyCodes.Count"] =
             (1, "D-PS: число порожніх обов'язкових полів шапки, не колонка і не значення"),
         ["src/Ecr.Application/Documents/GetTableSliceHandler.cs | текст | code"] =
-            (3, "ключ «рядок:колонка» лише для колонок, що пройшли CanReadColumn (причини/підтвердження — у SlicePermissionMaps); CELL-STYLE L3b — оформлення комірок лише видимих колонок відповіді; D-461 — ручні значення лише видимих колонок відповіді"),
+            (4, "ключ «рядок:колонка» лише для колонок, що пройшли CanReadColumn (причини/підтвердження — у SlicePermissionMaps); CELL-STYLE L3b — оформлення комірок лише видимих колонок відповіді; D-461 — ручні значення лише видимих колонок відповіді; ✎ C-1 (D-475) — стан помилок формул лише видимих колонок відповіді, джерело — лише видиме (CanReadTable/CanReadColumn)"),
         ["src/Ecr.Application/Documents/SlicePermissionMaps.cs | текст | code"] =
             (2, "перф зрізу: ключ «рядок:колонка» причин/підтверджень, винесений з GetTableSliceHandler; лише колонки, що пройшли CanReadColumn (S6)"),
         ["src/Ecr.Application/Documents/CellStyleAccessPolicy.cs | текст | cell.ColumnCode"] =

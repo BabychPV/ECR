@@ -110,9 +110,47 @@ public sealed record CalculationRunStatusDto(long? RunId, DateTime? FinishedAt, 
 /// допустимі комбінації значень. Таблиці немає — підказки немає (правил з колонками цієї таблиці немає, чинної версії
 /// немає або хоч одна колонка прихована від читача).
 /// </param>
+/// <param name="FormulaErrors">
+/// ✎ C-1 (D-475): група «Помилки формул» — власні помилки першими, далі «не оновлено»; не більше
+/// <see cref="MaxFormulaErrors"/> (одна помилка в колонці, яку читає колонкова формула, дає «не оновлено» в кожному
+/// рядку великої таблиці); <c>null</c> — помилок немає.
+/// </param>
+/// <param name="FormulaErrorTotal">✎ C-1: скільки видимих комірок з помилкою всього; <c>null</c> — помилок немає.</param>
 public sealed record CalculationIssuesDto(
     IReadOnlyList<CalculationIssueDto> Items,
-    IReadOnlyList<CalculationIssueTableHintDto>? Tables = null);
+    IReadOnlyList<CalculationIssueTableHintDto>? Tables = null,
+    IReadOnlyList<FormulaErrorIssueDto>? FormulaErrors = null,
+    int? FormulaErrorTotal = null)
+{
+    /// <summary>✎ C-1: стеля групи «Помилки формул» у відповіді (~150 КБ на найгірший рядок).</summary>
+    public const int MaxFormulaErrors = 500;
+}
+
+/// <summary>✎ C-1 (D-475): рядок групи «Помилки формул».</summary>
+/// <param name="TableCode">Код таблиці.</param>
+/// <param name="SheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+/// <param name="RowKey">Ключ рядка.</param>
+/// <param name="RowNumber">Порядковий номер рядка (<c>doc.TableRow.Ordinal</c>) — для підпису «Рядок N».</param>
+/// <param name="ColumnCode">Код колонки.</param>
+/// <param name="ColumnHeaderL10n">Заголовок колонки.</param>
+/// <param name="Kind"><c>Error</c> — власна помилка; <c>Blocked</c> — не оновлено через помилку в <paramref name="Source"/>.</param>
+/// <param name="ErrorCode">Код помилки.</param>
+/// <param name="Formula">Вираз формули; <c>null</c> — хоч один вхід читачеві закритий.</param>
+/// <param name="Inputs">Вхідні значення, що дали помилку (лише видимі колонки); <c>null</c> — для Blocked.</param>
+/// <param name="Source">Комірка-причина для Blocked; <c>null</c> — для Error або джерело закрите.</param>
+/// <param name="Since">Відколи (UTC).</param>
+public sealed record FormulaErrorIssueDto(
+    string TableCode, long? SheetCopyId, string RowKey, int RowNumber,
+    string ColumnCode, LocalizedText ColumnHeaderL10n, string Kind, string ErrorCode, string? Formula,
+    IReadOnlyList<FormulaErrorInputDto>? Inputs, Documents.Dto.FormulaErrorSourceDto? Source, DateTime Since);
+
+/// <summary>✎ C-1 (D-475): вхідне значення помилки формули.</summary>
+/// <param name="TableCode">Код таблиці.</param>
+/// <param name="RowKey">Ключ рядка.</param>
+/// <param name="ColumnCode">Код колонки.</param>
+/// <param name="PeriodOffset">0 — поточний період; −1 — попередній тощо.</param>
+/// <param name="Value">Значення текстом (інваріантна культура); <c>null</c> — порожньо.</param>
+public sealed record FormulaErrorInputDto(string TableCode, string RowKey, string ColumnCode, int PeriodOffset, string? Value);
 
 /// <summary>Що приймають правила методологій таблиці (UAT 08.11 b3).</summary>
 /// <param name="TableCode">Код таблиці шаблону.</param>
