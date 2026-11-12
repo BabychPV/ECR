@@ -616,7 +616,7 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
                          WHERE c.DocumentId = {documentId}
                            AND c.PeriodKey = {periodKey}
                            AND c.ChangedAt > r.StartedAt
-                           AND c.Origin <> N'Recalculation'
+                           AND c.Origin NOT IN (N'Recalculation', N'CalcError', N'CalcErrorResolved')
                            AND ({filterTables} = CAST(0 AS bit)
                                 OR EXISTS (SELECT 1
                                              FROM cfg.ColumnDef AS cd

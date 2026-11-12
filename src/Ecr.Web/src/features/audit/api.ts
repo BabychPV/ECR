@@ -30,6 +30,9 @@ export const cellChangeOrigins = [
   'FormulaOverride',
   'FormulaRestored',
   'Recalculation',
+  // ✎ C-1 (D-475): подія помилки розрахунку й її усунення — значення не змінюють (системні, не людські).
+  'CalcError',
+  'CalcErrorResolved',
   'Migration',
 ] as const;
 

@@ -432,7 +432,7 @@ public sealed class RowStore(
                             FROM arc.AuditCellChange a
                             WHERE a.DocumentId = {documentId} AND a.TableRowId = {rowId} AND a.PeriodKey = {periodKey.Value}
                         ) u
-                        WHERE u.Origin <> {CellChangeOrigins.Recalculation}
+                        WHERE u.Origin NOT IN ({CellChangeOrigins.Recalculation}, {CellChangeOrigins.CalcError}, {CellChangeOrigins.CalcErrorResolved})
                     ) x
                     WHERE x.Rn = 1 AND x.Origin IN ({CellChangeOrigins.Integration}, {CellChangeOrigins.Permit})
                     """)
@@ -444,7 +444,7 @@ public sealed class RowStore(
                                ROW_NUMBER() OVER (PARTITION BY c.ColumnDefId ORDER BY c.ChangedAt DESC, c.Id DESC) AS Rn
                         FROM aud.CellChange c
                         WHERE c.DocumentId = {documentId} AND c.TableRowId = {rowId} AND c.PeriodKey = {periodKey.Value}
-                          AND c.Origin <> {CellChangeOrigins.Recalculation}
+                          AND c.Origin NOT IN ({CellChangeOrigins.Recalculation}, {CellChangeOrigins.CalcError}, {CellChangeOrigins.CalcErrorResolved})
                     ) x
                     WHERE x.Rn = 1 AND x.Origin IN ({CellChangeOrigins.Integration}, {CellChangeOrigins.Permit})
                     """);
