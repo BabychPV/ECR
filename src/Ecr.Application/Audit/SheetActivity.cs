@@ -99,9 +99,15 @@ public static class SheetActivityKinds
 /// Таблиці аркуша, які читач бачить (<c>DocumentReadScope.VisibleTableIdsOfSheet</c>) — межі журналу рядків
 /// (<c>aud.RowChange</c>); <c>null</c> або порожньо — рядків «додано/видалено» немає (закрито за замовчуванням).
 /// </param>
+/// <param name="OwnerPeriodColumns">
+/// Q-17 (LAND-YEAR G1): колонки аркуша, правки яких лежать у періоді-власнику (якір року / місяць M{m}), — уже звужені
+/// межами читання логічної адреси й періоду-власника (<c>OwnerPeriodColumns.CollectAsync</c>); <c>null</c> — лише період перегляду.
+/// Рядок такої правки несе період-власник (<see cref="SheetActivityItem.PeriodKey"/>).
+/// </param>
 public sealed record SheetActivityScope(
     long DocumentId, int PeriodKey, string SheetCode, IReadOnlyList<int> VisibleColumnIds, int? ByUserId = null,
-    bool IncludeSystem = false, IReadOnlyList<int>? VisibleTableIds = null);
+    bool IncludeSystem = false, IReadOnlyList<int>? VisibleTableIds = null,
+    IReadOnlyList<CellChangeOwnerColumns>? OwnerPeriodColumns = null);
 
 /// <summary>
 /// Спільний шар читання журналу дій на аркуші: злиття трьох джерел в один потік, найновіші перші.
@@ -193,7 +199,8 @@ public sealed class SheetActivityQuery(
             VisibleColumnIds: scope.VisibleColumnIds,
             PeriodKey: scope.PeriodKey,
             HumanOnly: !scope.IncludeSystem,
-            Sort: AuditSort.ChangedAtDesc);
+            Sort: AuditSort.ChangedAtDesc,
+            OwnerPeriodColumns: scope.OwnerPeriodColumns);
 
         // Курсор читача журналу правок — пара (At, Id) «строго після» в порядку DESC. Після рядка процесу (тег 1)
         // правки того ж At вже видано (тег 0 раніше за тег 1), тож Id = 0 дає «At строго менший».

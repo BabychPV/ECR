@@ -18,12 +18,20 @@ namespace Ecr.Application.Audit;
 /// аркуш, який читач не бачить, відповідає тією ж <c>404</c>, а колонки закритих таблиць не потрапляють у SQL-фільтр
 /// до <c>TOP</c> - їхніх правок немає ні на сторінці, ні в курсорі, ні в підрахунках (підрахунків у відповіді
 /// немає навмисно). Це НЕ загальний журнал аудиту: його поріг лишається <c>Security.ViewAudit</c>.
+///
+/// ⛔ Q-17 (LAND-YEAR G1): правку колонки таблиці «місяці в колонках», якою володіє інший період (не-місячна — якір
+/// року; M{m} — період m), PATCH пише в період-власник, тож журнал періоду перегляду її не бачив. Тепер журнал аркуша
+/// показує й такі правки (рядок несе період-власник) — для колонок, які читач бачить на логічній адресі І в
+/// періоді-власнику (D-214); пари йдуть у ТОЙ САМИЙ запит журналу (<see cref="Ports.CellChangeFilter.OwnerPeriodColumns"/>).
+/// Маршрутизація вимкнена чи таблиці поза Q-17 — запит і кількість звернень як були.
 /// </remarks>
 public sealed class GetSheetActivityHandler(
     GetDocumentHandler getDocument,
     SheetActivityQuery query,
     Security.IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    Ports.IMonthColumnRouter? monthRouter = null,
+    Ports.IMetadataCache? metadata = null)
 {
     /// <summary>Право читання журналу аркуша - те саме, що й читання документа.</summary>
     /// <remarks>Названо тут, бо статичний сторож читає тіло класу й за впровадженим обробником не ходить.</remarks>
@@ -69,7 +77,8 @@ public sealed class GetSheetActivityHandler(
         await DocumentVisibility
             .RequireInDocumentAsync(access, profile, documentId, document.ProjectId, Permission, ct).ConfigureAwait(false);
 
-        var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(key);
+        var anyPeriod = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var readable = anyPeriod.InPeriod(key);
 
         // Аркуш невідомий знімку або закритий читачеві - така сама відповідь, як на неіснуючий документ.
         var sheetCode = readable.SheetCodeOf(sheetDefId);
@@ -82,9 +91,14 @@ public sealed class GetSheetActivityHandler(
         // ⛔ Журнал рядків — лише таблиці, які читач бачить у цьому періоді (схована таблиця «не існує», D-6).
         var tables = readable.VisibleTableIdsOfSheet(sheetDefId) ?? [];
 
+        // Q-17 (G1): правки колонок з іншим власником — з періоду-власника; лише звужує (логічна адреса + D-214 власника).
+        var owners = await OwnerPeriodColumns
+            .CollectAsync(monthRouter, metadata, anyPeriod, documentId, key, columns, ct, sheetDefId: sheetDefId)
+            .ConfigureAwait(false);
+
         return await query
             .ReadAsync(
-                new SheetActivityScope(documentId, periodKey, sheetCode, columns, byUserId, includeSystem, tables),
+                new SheetActivityScope(documentId, periodKey, sheetCode, columns, byUserId, includeSystem, tables, owners),
                 size, cursor, ct)
             .ConfigureAwait(false);
     }
