@@ -584,9 +584,12 @@ public sealed class ExcelImporter(
                 // подання тих аркушів, а за ними — автозбереження всіх, хто їх правив. Відмова
                 // (`409 ECR-DOC-4091 sheetBeingSubmitted`) відкочує транзакцію й звільняє все взяте:
                 // синхронний імпорт клієнт повторює як минущий, фоновий (`ExcelImportJob`) відкладає себе.
-                var statuses = new Dictionary<int, Ecr.Domain.Enums.DocumentStatus>();
+                // ⛔ C-3 (аудит 2026-11): копія аркуша (RS) має ВЛАСНИЙ замок і стан — ключ `(аркуш, копія)`, як у
+                // поштучного PATCH (`EnterEditOfAsync`). Доти книга брала замок і стан ОРИГІНАЛУ: імпорт у копію-чернетку
+                // відмовляв, щойно подано оригінал, а подання копії не конфліктувало з імпортом у неї.
+                var statuses = new Dictionary<(int SheetDefId, long? SheetCopyId), Ecr.Domain.Enums.DocumentStatus>();
                 var holdsAny = false;
-                foreach (var sheetDefId in sheets)
+                foreach (var (sheetDefId, sheetCopyId) in sheets)
                 {
                     // ⛔ Q-17: аркуш із таблицями «місяці в колонках» (прапор увімкнено) блокується на ВСІ місяці року
                     // одним набором за зростанням ключа періоду — обробник книги (власники й річні періоди) потім лише
@@ -598,14 +601,17 @@ public sealed class ExcelImporter(
 
                     foreach (var key in keys)
                     {
+                        // ⚠ Місяці-колонки ІНШИХ періодів обробник книги бере за аркушем без копії
+                        // (`EnsureColumnPeriodsEditableAsync`) — тут той самий ключ, щоб його взяття було повторним.
+                        var copy = key == period.Value ? sheetCopyId : null;
                         var status = holdsAny
-                            ? await sheetGate.EnterEditNoWaitAsync(documentId, sheetDefId, new PeriodKey(key), innerCt).ConfigureAwait(false)
-                            : await sheetGate.EnterEditAsync(documentId, sheetDefId, new PeriodKey(key), innerCt).ConfigureAwait(false);
+                            ? await sheetGate.EnterEditNoWaitOfAsync(documentId, sheetDefId, new PeriodKey(key), copy, innerCt).ConfigureAwait(false)
+                            : await sheetGate.EnterEditOfAsync(documentId, sheetDefId, new PeriodKey(key), copy, innerCt).ConfigureAwait(false);
                         holdsAny = true;
 
                         if (key == period.Value)
                         {
-                            statuses[sheetDefId] = status;
+                            statuses[(sheetDefId, sheetCopyId)] = status;
                         }
                     }
                 }
@@ -821,7 +827,7 @@ public sealed class ExcelImporter(
     /// немає в документі, сюди не потрапляє — його відхилить сам
     /// <c>PatchCellsHandler</c> своєю відмовою.
     /// </remarks>
-    private async Task<(IReadOnlyList<int> Sheets, IReadOnlyList<int> TemplateVersions, IReadOnlySet<int> MonthSheets)>
+    private async Task<(IReadOnlyList<(int SheetDefId, long? SheetCopyId)> Sheets, IReadOnlyList<int> TemplateVersions, IReadOnlySet<int> MonthSheets)>
         SheetsInLockOrderAsync(long documentId, PeriodKey period, ImportPlan plan, CancellationToken ct)
     {
         var changed = plan.Tables.Where(t => t.Changes.Count > 0).Select(t => t.TableInstanceId).ToHashSet();
@@ -836,7 +842,8 @@ public sealed class ExcelImporter(
         var monthSheets = new HashSet<int>();
 
         var instances = await rowStore.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false);
-        var sheets = new SortedSet<int>();
+        // C-3: екземпляр копії (RS) — свій ключ; порядок `(SheetDefId, SheetCopyId ?? 0)`, як `RecalculationService.EnterSheetsAsync`.
+        var sheets = new HashSet<(int SheetDefId, long? SheetCopyId)>();
         var templateVersions = new List<int>();
 
         foreach (var group in instances.Where(i => changed.Contains(i.TableInstanceId)).GroupBy(i => i.TemplateVersionId))
@@ -851,7 +858,7 @@ public sealed class ExcelImporter(
             {
                 if (tables.TryGetValue(instance.TableDefId, out var table))
                 {
-                    sheets.Add(table.SheetDefId);
+                    sheets.Add((table.SheetDefId, instance.SheetCopyId));
                     if (routing && monthRouter!.AppliesToTable(table))
                     {
                         monthSheets.Add(table.SheetDefId);
@@ -860,7 +867,7 @@ public sealed class ExcelImporter(
             }
         }
 
-        return ([.. sheets], templateVersions, monthSheets);
+        return ([.. sheets.OrderBy(s => s.SheetDefId).ThenBy(s => s.SheetCopyId ?? 0)], templateVersions, monthSheets);
     }
 
     /// <summary>
