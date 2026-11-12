@@ -2451,3 +2451,133 @@ JOIN sys.database_principals m ON m.principal_id = rm.member_principal_id;
 **Що робити, поки PI відсутній**
 
 Без PI дані вводяться вручну (у клітинки аркушів). Збір почнеться, коли з'єднання додано, воно активне й проба проходить. Не вимикайте перевірки (`PiWebApi:AllowedHosts`, політику адрес) заради швидкого підключення — це захист від SSRF.
+
+## 16. Перенос версії шаблону: застряглий проєкт і історія дозволів (✎ 2026-11-12, аудит 2026-11 D-6/D-7)
+
+### 16.1. Проєкт застряг «у переносі» після збою
+
+**Як це виглядає.** Після невдалого переносу проєкту на нову версію шаблону (`POST …/migrate-version` або фонова
+задача `migrate-project{id}` упала) будь-яке читання чи запис документів проєкту дає `409 ECR-DOC-4091`
+(`err.ECR-DOC-4091.structureChanging`), повтор переносу на ту саму версію падає так само, а на іншу — відмова
+`MigrationInProgress` (`ECR-JOB-0409`).
+
+**Що це.** Маркер «перенос у процесі» — НЕ окрема колонка, а JSON-властивість `migratingTo` у
+`doc.Project.ExternalSettingsJson` (разом із `planHash`, `startedAt`, `startedBy`, оренда `owner`/`leaseUntil` і
+watermark діапазонів `wmCellsPeriod`/`wmCellsHi`/`wmIndexHi`). Ставить його перша транзакція переносу
+(`DocumentVersionMigrationStore.BeginMigrationAsync`), знімає — ЛИШЕ фінальна транзакція (`FinishSql`) тим самим
+оператором, що перемикає `doc.Project.TemplateVersionId`. Між ними важка частина (комірки, індекс пошуку) комітить
+діапазонами: якщо збій стався ПІСЛЯ першого діапазону, частина комірок уже стоїть на колонках цільової версії, а
+проєкт — на старій.
+
+**1. Знайти застряглі проєкти:**
+
+```sql
+SELECT p.Id, p.Code, p.TemplateVersionId AS CurrentVersion,
+       TRY_CAST(JSON_VALUE(p.ExternalSettingsJson, '$.migratingTo') AS int) AS MigratingTo,
+       JSON_VALUE(p.ExternalSettingsJson, '$.startedAt')     AS StartedAt,
+       JSON_VALUE(p.ExternalSettingsJson, '$.startedBy')     AS StartedBy,
+       JSON_VALUE(p.ExternalSettingsJson, '$.leaseUntil')    AS LeaseUntil,
+       JSON_VALUE(p.ExternalSettingsJson, '$.wmCellsPeriod') AS WmCellsPeriod,
+       JSON_VALUE(p.ExternalSettingsJson, '$.wmCellsHi')     AS WmCellsHi,
+       JSON_VALUE(p.ExternalSettingsJson, '$.wmIndexHi')     AS WmIndexHi
+FROM   doc.Project AS p
+WHERE  ISJSON(p.ExternalSettingsJson) = 1
+  AND  JSON_VALUE(p.ExternalSettingsJson, '$.migratingTo') IS NOT NULL;
+```
+
+**2. Спершу — штатний шлях.** Причину збою дивись у журналі застосунку за `jobId`/`correlationId`. Якщо вона
+минуща (таймаут, обрив з'єднання, перезапуск служби), повтори перенос ТІЄЮ САМОЮ людиною на ТУ САМУ версію з ТІЄЮ
+САМОЮ мапою: перенос відновлюється з watermark, доводить важку частину і знімає маркер сам. Маркер руками не чіпати.
+
+⛔ **Правило:** маркер знімається вручну ЛИШЕ тоді, коли watermark `wmCellsPeriod`, `wmCellsHi`, `wmIndexHi` — усі
+`NULL`. Інакше — відновлення переносу (крок 2) або RESTORE з бекапу за словом людини.
+
+**3. Ручне зняття маркера — лише коли виконано ВСІ передумови:**
+
+- задача переносу проєкту не виконується: на сторінці задач (або `GET /api/v1/jobs/{jobId}`) вона не в стані
+  виконання, і оренда спливла — `LeaseUntil` із кроку 1 порожній або в минулому (оренда — 10 хв, `LeaseMinutes`);
+- важка частина НІЧОГО не зафіксувала: `WmCellsPeriod`, `WmCellsHi`, `WmIndexHi` — усі `NULL`, і запит нижче дає `0`
+  (комірки, вже перенесені на таблицю цільової версії, коли екземпляр таблиці ще на старій);
+- є свіжий бекап бази (розділ 6).
+
+```sql
+DECLARE @projectId int = <Id проєкту>;
+SELECT COUNT_BIG(*) AS MovedCells
+FROM   doc.CellValue AS cv
+JOIN   doc.TableRow AS r       ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
+JOIN   doc.TableInstance AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
+JOIN   doc.Document AS d       ON d.Id = ti.DocumentId
+WHERE  d.ProjectId = @projectId
+  AND  cv.TableDefId <> ti.TableDefId;
+```
+
+Якщо хоч одна передумова не виконана (watermark не `NULL` або `MovedCells > 0`) — **маркер НЕ знімати**: проєкт
+опинився б на старій версії з частиною комірок на колонках нової (дані «зникнуть» з екрана). Вихід тоді — або
+відновлення переносу після усунення причини (крок 2), або RESTORE бази з бекапу перед переносом (розділ 6.3) лише
+за словом людини.
+
+Зняття маркера (той самий набір властивостей, що знімає `FinishSql`, версія проєкту НЕ змінюється):
+
+```sql
+DECLARE @projectId int = <Id проєкту>;
+BEGIN TRAN;
+UPDATE doc.Project
+SET    ExternalSettingsJson = NULLIF(
+           JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(
+               ExternalSettingsJson,
+               '$.migratingTo', NULL), '$.planHash', NULL), '$.startedAt', NULL), '$.startedBy', NULL),
+               '$.owner', NULL), '$.leaseUntil', NULL), '$.wmCellsPeriod', NULL),
+               '$.wmCellsHi', NULL), '$.wmIndexHi', NULL),
+           CONCAT(CHAR(123), CHAR(125)))
+WHERE  Id = @projectId
+  AND  ISJSON(ExternalSettingsJson) = 1
+  AND  JSON_VALUE(ExternalSettingsJson, '$.migratingTo') IS NOT NULL
+  AND  JSON_VALUE(ExternalSettingsJson, '$.wmCellsPeriod') IS NULL
+  AND  JSON_VALUE(ExternalSettingsJson, '$.wmCellsHi') IS NULL
+  AND  JSON_VALUE(ExternalSettingsJson, '$.wmIndexHi') IS NULL
+  AND  (JSON_VALUE(ExternalSettingsJson, '$.leaseUntil') IS NULL
+        OR TRY_CAST(JSON_VALUE(ExternalSettingsJson, '$.leaseUntil') AS datetime2) < SYSUTCDATETIME());
+-- Очікується рівно 1 рядок. Інакше — ROLLBACK і повернутися до передумов.
+SELECT @@ROWCOUNT AS Cleared;
+COMMIT;   -- або ROLLBACK, якщо Cleared <> 1
+```
+
+**4. Після зняття перевірити:**
+
+- запит кроку 1 проєкт більше не показує, `doc.Project.TemplateVersionId` — стара версія (не змінилась);
+- за кілька секунд (кеш маркерів оновлюється раз на 2 с) документи проєкту відкриваються без `409 ECR-DOC-4091`;
+- сухий прогін переносу (діалог «Перенести на версію» → «Перевірити») показує причину, через яку перенос упав,
+  як відмову. Приклад — `sheetCopiesNotMapped` (D-6): у новій версії немає аркуша, який має копії в документах
+  проєкту; спершу видалити ці копії аркуша, потім переносити.
+
+⛔ Автоматичного зняття маркера немає навмисно: лише людина може перевірити, що важка частина нічого не встигла
+перенести.
+
+### 16.2. Історія дозволів після переносу (D-7)
+
+До фіксу D-7 перенос версії лишав історію дозволів (`doc.PermitSegment` — «дозвіл від дати»; `doc.CellPermitPart` —
+частини поділеного місяця) на Id таблиці/колонки/поля шапки СТАРОЇ версії, і діалог історії дозволів після переносу
+був порожній. Виправлення наявних даних — секція `MIGR:permit-history-repair` у `seed/99-epilogue.sql`: виконується на
+кожному старті застосунку, переносить такі рядки на відповідники за кодами (аркуш + таблиця + колонка; поле шапки) у
+версії проєкту (для частин місяця — у версії, що діє для їхнього періоду) і пише в журнал старту рядок
+`permit-history-repair: N rows; left unmatched: M`. Повторний старт дає `0 rows`.
+
+`left unmatched` > 0 — рядки, яких скрипт НЕ чіпав і не видаляв: колонку/таблицю/поле в новій версії прибрано або
+перейменовано мапою, місце вже зайняте історією, доданою після переносу, або документ під маркером переносу.
+Кожен такий рядок — відкрита знахідка `PERMIT_HISTORY_STALE_VERSION` у журналі узгодженості (`aud.ConsistencyIssue`,
+екран «Узгодженість» / `GET /api/v1/consistency/issues?ruleCode=PERMIT_HISTORY_STALE_VERSION`): `EntityType`
+`doc.PermitSegment` або `doc.CellPermitPart` (+ `PeriodKey`), `EntityId` — Id рядка, `DetailsJson` — документ, стара
+таблиця/колонка/поле й версії. Повторний старт знахідку не дублює, доки вона відкрита. Переглянути напряму:
+
+```sql
+SELECT g.Id, g.DocumentId, g.TableDefId, g.ColumnDefId, g.HeaderFieldDefId, g.RowKey, g.ValidFrom
+FROM   doc.PermitSegment AS g
+JOIN   doc.Document AS d ON d.Id = g.DocumentId
+JOIN   doc.Project AS pr ON pr.Id = d.ProjectId
+LEFT JOIN cfg.TableDef AS t ON t.Id = g.TableDefId
+LEFT JOIN cfg.SheetDef AS s ON s.Id = t.SheetDefId
+LEFT JOIN cfg.HeaderFieldDef AS h ON h.Id = g.HeaderFieldDefId
+WHERE  COALESCE(s.TemplateVersionId, h.TemplateVersionId) <> pr.TemplateVersionId;
+```
+
+Що з ними робити (додати заново в діалозі історії дозволів чи видалити) — рішення людини; скрипт їх не видаляє.
