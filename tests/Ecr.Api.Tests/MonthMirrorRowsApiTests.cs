@@ -173,6 +173,37 @@ public sealed class MonthMirrorRowsApiTests(SqlServerFixture sql)
         Assert.Equal("DocumentSubmitted", ReasonOf(body));
     }
 
+    // ── D-474 (ii): новий рядок у PATCH — за річним агрегатом, а не за статусом аркуша якоря ──
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-474")]
+    public async Task Новий_рядок_у_PATCH_з_якоря_поданий_лише_якір_проходить_а_подано_всі_місяці_403()
+    {
+        // Якір (січень) поданий, решта місяців — чернетки: агрегат Draft, як і для рішення доступу на рядок
+        // (`NewRowDecisions`) і для `POST …/rows` (`CreateRowHandler`). Доти PATCH-створення бралося за статус ЯКОРЯ.
+        var some = await ArrangeAsync(instanceMonths: [1, 10], submitted: [1], view: 1).ConfigureAwait(true);
+        var (app, client) = await BootAsync(some, flag: true).ConfigureAwait(true);
+        using var _ = app;
+        using var __ = client;
+
+        await ExpectAsync(app, HttpStatusCode.OK, PatchNewRowAsync(client, some, 202601, "NEWANNUAL", ("PLAIN", 4m)))
+            .ConfigureAwait(true);
+        Assert.NotEmpty(await LiveRowsAsync(some, "NEWANNUAL").ConfigureAwait(true));
+
+        // Подано всі місяці — агрегат Submitted: створення відхиляється, як і правка не-місячного стовпця.
+        var all = await ArrangeAsync(instanceMonths: [1, 10], submitted: [.. Enumerable.Range(1, 12)], view: 1).ConfigureAwait(true);
+        var (app2, client2) = await BootAsync(all, flag: true).ConfigureAwait(true);
+        using var ___ = app2;
+        using var ____ = client2;
+
+        var body = await ExpectAsync(app2, HttpStatusCode.Forbidden, PatchNewRowAsync(client2, all, 202601, "NOPE", ("PLAIN", 4m)))
+            .ConfigureAwait(true);
+        Assert.Equal("DocumentSubmitted", ReasonOf(body));
+        Assert.Empty(await LiveRowsAsync(all, "NOPE").ConfigureAwait(true));
+    }
+
     // ── (17) документ створено посеред року: GET порожньо, якір не створюється ──
 
     [Fact]
@@ -485,6 +516,34 @@ public sealed class MonthMirrorRowsApiTests(SqlServerFixture sql)
         return client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{s.Doc.DocumentId}/rows", UriKind.Relative),
             new { tableInstanceId = instanceId, rowKey });
+    }
+
+    /// <summary>PATCH, що СТВОРЮЄ рядок (<c>baseVersion = null</c>, R-B2) з числовими комірками.</summary>
+    private static Task<HttpResponseMessage> PatchNewRowAsync(
+        HttpClient client, Scenario s, int period, string rowKey, params (string Alias, decimal Value)[] cells)
+    {
+        var instanceId = period == s.ViewPeriod ? s.Doc.TableInstanceId : s.Others[period].TableInstanceId;
+        return client.PatchAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.Doc.DocumentId}/cells", UriKind.Relative),
+            new
+            {
+                tableInstanceId = instanceId,
+                periodKey = period,
+                origin = "UserEdit",
+                rows = new[]
+                {
+                    new
+                    {
+                        rowKey,
+                        baseVersion = (string?)null,
+                        cells = cells.Select(c => new
+                        {
+                            columnCode = s.ColumnCodes[c.Alias],
+                            value = (object)c.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        }).ToArray(),
+                    },
+                },
+            });
     }
 
     private static Task<HttpResponseMessage> DeleteRowAsync(HttpClient client, Scenario s, int period, string rowKey)

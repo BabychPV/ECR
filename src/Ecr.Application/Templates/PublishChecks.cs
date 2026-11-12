@@ -1101,6 +1101,167 @@ public static class PublishChecks
         return result;
     }
 
+    /// <summary>
+    /// Розкладка «рік, місяці колонками» (<c>D-474</c>) несумісна з розрахунками, що залежать від місяця, у НЕмісячних
+    /// колонках: відмова публікації.
+    /// </summary>
+    /// <param name="version">Версія, що публікується.</param>
+    /// <param name="formulaEngine">Рушій формул (розбір виразів).</param>
+    /// <param name="active">Активні прив'язки колонок цієї версії до методологій.</param>
+    /// <returns>По одній діагностиці на таблицю й вид порушення; порожньо — розкладка сумісна.</returns>
+    /// <remarks>
+    /// ⛔ У річній розкладці немісячна комірка зберігається ОДИН раз на рік (якір — січень). Формула з
+    /// <c>[Period].Days</c> чи методологія в такій колонці дають число одного місяця, показане як річне — Land
+    /// (669 розрахованих колонок, усі немісячні) так перемкнути не можна
+    /// (<c>docs/build/D474-year-layout-calculated-cells.md</c>, варіант A).
+    /// Перевіряються лише таблиці <see cref="TableLayoutKind.MonthsInColumns"/>: таблиця «екземпляр на період»
+    /// (HSE401) місяць має власний. <c>[Period].Year</c> у межах року стала — дозволена. Посилання на інший період
+    /// (<c>[Period:-1]</c> у комірці) не ловиться: перенесення з минулого року законне. Транзитивна залежність
+    /// (формула від формули) окремо не шукається: корінь такого ланцюга завжди спіймано тут.
+    /// Вираз, що не розбирається, пропускається — його відхиляє <see cref="Run"/>.
+    /// </remarks>
+    public static IReadOnlyList<ExpressionDiagnostic> CheckYearLayoutPeriodDependence(
+        TemplateVersion version,
+        IFormulaEngine formulaEngine,
+        IReadOnlyList<ActiveColumnBinding> active)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(formulaEngine);
+        ArgumentNullException.ThrowIfNull(active);
+
+        if (version.Layout != TemplateLayout.YearWithMonthColumns)
+        {
+            return [];
+        }
+
+        var boundColumns = active.Select(b => b.ColumnDefId).ToHashSet();
+        var result = new List<ExpressionDiagnostic>();
+        foreach (var table in LiveTables(version.Sheets).Where(t => t.LayoutKind == TableLayoutKind.MonthsInColumns))
+        {
+            var columns = table.Columns.Where(c => !c.IsDeleted).ToDictionary(c => c.Id);
+
+            var formulaColumns = new SortedSet<string>(StringComparer.Ordinal);
+            var formulaCount = 0;
+            foreach (var formula in table.Formulas.Where(f => !f.IsDeleted))
+            {
+                ColumnDef? target = null;
+                if (formula.ColumnDefId is { } columnId && columns.TryGetValue(columnId, out target) && target.IsMonthColumn)
+                {
+                    continue;
+                }
+
+                var root = formulaEngine.Parse(formula.Expression, formula.Dialect).Expression?.Root;
+                if (root is null || !DependsOnMonth(root))
+                {
+                    continue;
+                }
+
+                formulaCount++;
+                if (target is not null)
+                {
+                    formulaColumns.Add(target.Code);
+                }
+            }
+
+            if (formulaCount > 0)
+            {
+                var sample = Sample(formulaColumns);
+                result.Add(new ExpressionDiagnostic(
+                    "ECR-TMPL-0422",
+                    $"Розкладка «рік, місяці колонками»: у таблиці {table.Code} {formulaCount} формул немісячних колонок "
+                    + $"залежать від місяця ([Period]): {sample}. Залиште розкладку «копія на місяць» або перенесіть "
+                    + "розрахунок у місячні колонки.",
+                    0,
+                    1,
+                    "err.ECR-TMPL-0422.yearLayoutPeriodFormula",
+                    new Dictionary<string, string>
+                    {
+                        ["tableCode"] = table.Code,
+                        ["count"] = formulaCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["columns"] = sample,
+                    }));
+            }
+
+            var bound = columns.Values
+                .Where(c => !c.IsMonthColumn && boundColumns.Contains(c.Id))
+                .Select(c => c.Code)
+                .OrderBy(c => c, StringComparer.Ordinal)
+                .ToList();
+            if (bound.Count > 0)
+            {
+                var sample = Sample(bound);
+                result.Add(new ExpressionDiagnostic(
+                    "ECR-TMPL-0422",
+                    $"Розкладка «рік, місяці колонками»: у таблиці {table.Code} {bound.Count} немісячних колонок "
+                    + $"прив'язано до методологій: {sample}. Результат методології — місячний; залиште розкладку "
+                    + "«копія на місяць» або прив'яжіть методологію до місячних колонок.",
+                    0,
+                    1,
+                    "err.ECR-TMPL-0422.yearLayoutNonMonthBinding",
+                    new Dictionary<string, string>
+                    {
+                        ["tableCode"] = table.Code,
+                        ["count"] = bound.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["columns"] = sample,
+                    }));
+            }
+        }
+
+        return result;
+
+        static string Sample(IReadOnlyCollection<string> codes)
+            => codes.Count == 0
+                ? "—"
+                : string.Join(", ", codes.Take(3)) + (codes.Count > 3 ? ", …" : string.Empty);
+    }
+
+    /// <summary>Чи читає вираз властивість періоду, що змінюється від місяця до місяця (усе, крім <c>Year</c>).</summary>
+    private static bool DependsOnMonth(AstNode root)
+    {
+        var pending = new Stack<AstNode>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var node = pending.Pop();
+            switch (node)
+            {
+                case PeriodPropertyNode period:
+                    if (!string.Equals(period.Property, "YEAR", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+
+                    break;
+                case UnaryNode unary:
+                    pending.Push(unary.Operand);
+                    break;
+                case BinaryNode binary:
+                    pending.Push(binary.Left);
+                    pending.Push(binary.Right);
+                    break;
+                case ConditionalNode conditional:
+                    pending.Push(conditional.Condition);
+                    pending.Push(conditional.WhenTrue);
+                    pending.Push(conditional.WhenFalse);
+                    break;
+                case FunctionNode function:
+                    foreach (var argument in function.Arguments)
+                    {
+                        pending.Push(argument);
+                    }
+
+                    break;
+                case CellReferenceNode { Row: RowSelector.Predicate predicate }:
+                    pending.Push(predicate.Condition);
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        return false;
+    }
+
     private static string ClusterSample(List<ActiveColumnBinding> cluster)
         => string.Join(", ", cluster.Take(5).Select(b => $"{b.MethodologyCode}.{b.OutputCode}"));
 

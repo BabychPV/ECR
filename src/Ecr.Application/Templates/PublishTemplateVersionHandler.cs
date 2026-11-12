@@ -189,6 +189,9 @@ public sealed partial class PublishTemplateVersionHandler(
 
         diagnostics = [.. diagnostics, .. PublishChecks.CheckDuplicateColumnBindings(activeBindings)];
 
+        // ⛔ D-474: річна розкладка з місячно-залежним розрахунком у немісячній колонці показала б число одного місяця як річне.
+        diagnostics = [.. diagnostics, .. PublishChecks.CheckYearLayoutPeriodDependence(version, formulaEngine, activeBindings)];
+
         // ✎ RC16-2: ціль Lookup-колонок і Lookup-полів шапки - живий активний довідник.
         // Без сховища довідників (збирання без нього) існування цілі не перевіряється, як і в `PublishMethodologyHandler`;
         // Lookup без довідника (R16-1) відсівається завжди.

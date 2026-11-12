@@ -1344,7 +1344,19 @@ public sealed partial class PatchCellsHandler(
                 }
 
                 // P2-A: сам новий рядок належить періоду екземпляра.
-                context.OwnPeriodWritten = true;
+                // ✎ D-474: у маршрутизованій таблиці («місяці в колонках», Q-17) склад рядків спільний на рік — рішення на
+                // рядок несе `AnnualPeriods` (`AccessDecisionService.NewRowDecisions`), і під блокуванням створенням керує
+                // річний агрегат статусів аркуша, як у `CreateRowHandler`, а не статус аркуша ЯКОРЯ. Створення не є
+                // «текстом якоря» (AN-142): поданий агрегат його не пропускає.
+                if (allowed.Row.AnnualPeriods is { Count: > 0 } rowAnnual)
+                {
+                    context.AnnualPeriods.UnionWith(rowAnnual);
+                    context.AnnualNumericWritten = true;
+                }
+                else
+                {
+                    context.OwnPeriodWritten = true;
+                }
 
                 // ⚠ Колонки перевіряються ОКРЕМО від рядка: грант оголошується
                 // в тому числі на колонку (`ResourceKind.Column`), тож «писати
