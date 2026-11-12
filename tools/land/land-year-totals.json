@@ -1,0 +1,34 @@
+{
+  "formatVersion": 1,
+  "decision": "Рішення людини 12.11 (LAND-YEAR, п. 2): річний підсумок — рівно там, де він є в xlsm замовника, тим самим виразом і на тому самому місці; ніде більше.",
+  "source": "RDS_xxx_Template_Land_2026_v1.0.4.0.xlsm (Back end і Front end — однакові підсумки); прочитано копію поза репозиторієм, усі формули SUM/+ усіх аркушів.",
+  "notTotals": [
+    "7.0 Water consolidation!P2:S19 =SUM(D:F)…=SUM(M:O) — квартали Q1..Q4 (не річні), у моделі вже є (T7_00.Q1..Q4).",
+    "7. Water Report!H6:S6, H55:S55, H69:S69, H90:S90 — суми рядків за місяць (вертикальні), не річні.",
+    "9b. Sulfur!E9:P9, E16:P16, E23:P23, E30:P30, E37:P37, E44:P44, E51:P51 і Q16, Q23, Q30, Q37, Q44, Q51 — вертикальні суми груп.",
+    "9. Utility!L63…BD213 =SUM(L57) — копія однієї комірки, не сума місяців.",
+    "8. Waste Report!AQ:AT — суми колонок статичної таблиці T8_00 (без місяців).",
+    "3. Stationary Equipment!FB/FT/GL/HD (C_1Quarter..C_4Quarter) — введення без формули.",
+    "Аркуші 3-6, 9a, 10-11d і колонки результатів методологій (ECW_EC_*): у xlsm річних підсумків немає — підсумків не додаємо."
+  ],
+  "totals": [
+    {
+      "sheet": "S07_0_WATER_CONSOLIDATION",
+      "table": "T7_00",
+      "code": "Annual",
+      "after": "Q4",
+      "headerEn": "Annual",
+      "expression": "SUM([January], [February], [March], [April], [May], [June], [July], [August], [September], [October], [November], [December])",
+      "xlsm": { "sheet": "7.0 Water consolidation", "cell": "T2:T19", "formula": "=SUM(D2:O2)" }
+    },
+    {
+      "sheet": "S09B_SULFUR",
+      "table": "T9b_00",
+      "code": "TOTAL",
+      "after": "December",
+      "headerEn": "TOTAL - ИТОГО:",
+      "expression": "SUM([January], [February], [March], [April], [May], [June], [July], [August], [September], [October], [November], [December])",
+      "xlsm": { "sheet": "9b. Sulfur", "cell": "Q10:Q15, Q24:Q29, Q31:Q36, Q38:Q43, Q45:Q50", "formula": "=SUM(E10:P10)" }
+    }
+  ]
+}
