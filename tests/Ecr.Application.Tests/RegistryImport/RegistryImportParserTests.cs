@@ -480,7 +480,8 @@ public sealed class RegistryImportParserTests
     public void A_formula_without_a_saved_result_in_a_key_cell_is_still_a_totals_row()
     {
         var era = new EraGrid().Source(3d, "S", "T", [Sub(333d, "x")]);
-        era.Grid.Set(era.NextRow, SubstanceCodeColumn, null, hasFormula: true).Set(era.NextRow, 27, 5d);
+        // "" = the formula's empty saved result (InMemoryImportGrid.Set clears the cell on null, losing the formula flag).
+        era.Grid.Set(era.NextRow, SubstanceCodeColumn, "", hasFormula: true).Set(era.NextRow, 27, 5d);
 
         var parsed = Parse(era);
 
