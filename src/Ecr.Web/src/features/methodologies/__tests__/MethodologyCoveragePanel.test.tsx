@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
@@ -55,7 +55,13 @@ function coverage(overrides: Partial<MethodologyCoverageDto>): MethodologyCovera
   };
 }
 
-function mockApi(body: MethodologyCoverageDto): void {
+/** U-2: перелік прив'язок методології — звідти панель бере коди таблиці й колонки (F-21). */
+const BindingList = [
+  { id: 1, methodologyId: 1, tableDefId: 7, columnDefId: 101, tableCode: 'EMIS', columnCode: 'NOX_T', outputCode: 'NOX', matchJson: '{}', isActive: true },
+  { id: 9, methodologyId: 1, tableDefId: 3, columnDefId: 55, tableCode: 'EMIS', columnCode: 'OLD_T', outputCode: 'RETIRED', matchJson: '{}', isActive: true },
+];
+
+function mockApi(body: MethodologyCoverageDto, bindings: 'ok' | 'fail' = 'ok'): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -76,6 +82,15 @@ function mockApi(body: MethodologyCoverageDto): void {
       // в a11y-фікстурах — `/rule-coverage` теж закінчується на «coverage».
       if (/\/versions\/\d+\/coverage$/.test(url)) {
         return json(body);
+      }
+
+      if (/\/methodologies\/\d+\/bindings$/.test(url)) {
+        return bindings === 'ok'
+          ? json(BindingList)
+          : new Response(JSON.stringify({ title: 'Internal Server Error', status: 500 }), {
+              status: 500,
+              headers: { 'Content-Type': 'application/problem+json' },
+            });
       }
 
       throw new Error(`Немає мока для GET ${url}`);
@@ -143,7 +158,30 @@ describe('Покриття «виходи → колонки»: вихід бе�
     // позначку «нікуди не пише» малюють УСІМ виходам поспіль.
     const boundRow = outputRow('NOX');
     expect(boundRow?.querySelector('[data-coverage-gap]')).toBeNull();
-    expect(boundRow?.textContent).toContain('7.101');
+    // U-2 (аудит 2026-11, F-21): прив'язка — кодами таблиці й колонки, а не внутрішніми id «7.101».
+    await waitFor(() => expect(boundRow?.textContent).toContain('EMIS.NOX_T'));
+    expect(boundRow?.textContent).not.toContain('7.101');
+  });
+
+  it('U-2: перелік прив\'язок не прочитався — ідентифікатор лишається, у <code>', async () => {
+    mockApi(
+      coverage({
+        outputs: [
+          {
+            code: 'NOX',
+            bindings: [
+              { id: 1, methodologyId: 1, tableDefId: 7, columnDefId: 101, outputCode: 'NOX', matchJson: '{}', isActive: true },
+            ],
+          },
+        ],
+      }),
+      'fail',
+    );
+    await show();
+
+    await screen.findByText('NOX');
+    const codes = [...(outputRow('NOX')?.querySelectorAll('code') ?? [])].map((element) => element.textContent);
+    expect(codes).toContain('7.101');
   });
 });
 
@@ -172,8 +210,10 @@ describe('Покриття «виходи → колонки»: очікують
     // ⛔ Мутація «waitingBindings не показано» валить саме це.
     const waiting = screen.getByTestId('coverage-waiting');
     expect(waiting.textContent).toContain('RETIRED');
-    expect(waiting.textContent).toContain('3');
-    expect(waiting.textContent).toContain('55');
+    // U-2 (аудит 2026-11, F-21): коди таблиці й колонки, а не id «3 | 55».
+    await waitFor(() => expect(waiting.textContent).toContain('OLD_T'));
+    expect(waiting.textContent).toContain('EMIS');
+    expect(waiting.textContent).not.toContain('55');
     expect(waiting.textContent).toContain('Waiting bindings');
   });
 
