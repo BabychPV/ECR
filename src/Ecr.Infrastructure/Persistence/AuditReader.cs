@@ -447,8 +447,30 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
 
         if (filter.PeriodKey is { } periodKey)
         {
-            // AN-98: період — окрема вісь від вікна `ChangedAt`; відсів на сервері, ДО `TOP` і курсора.
-            And("PeriodKey = @periodKey", "@periodKey", periodKey, SqlDbType.Int);
+            if (filter.OwnerPeriodColumns is { Count: > 0 } owners)
+            {
+                // ⛔ Q-17 (LAND-YEAR G1/G2): зміни колонок, якими володіє інший період (якір року / місяць M{m}), лежать
+                // у періоді-власнику. Пари (період, колонка) — ОДНИМ JSON-параметром у тому самому запиті (без N+1),
+                // до `TOP` і курсора; решта звужень (видимі колонки, документ, автор) діє на обидві гілки. Перелік уже
+                // звужений обробником межами читання — тут він нічого не відкриває понад себе.
+                And(
+                    "(PeriodKey = @periodKey OR EXISTS (SELECT 1 FROM OPENJSON(@ownerColumns) WITH (p int '$.p', c int '$.c') AS o"
+                    + " WHERE o.p = PeriodKey AND o.c = ColumnDefId))",
+                    "@periodKey",
+                    periodKey,
+                    SqlDbType.Int);
+                command.Parameters.Add("@ownerColumns", SqlDbType.NVarChar, -1).Value =
+                    "[" + string.Join(
+                        ",",
+                        owners.SelectMany(o => o.ColumnDefIds.Select(c =>
+                            "{\"p\":" + o.PeriodKey.ToString(CultureInfo.InvariantCulture)
+                            + ",\"c\":" + c.ToString(CultureInfo.InvariantCulture) + "}"))) + "]";
+            }
+            else
+            {
+                // AN-98: період — окрема вісь від вікна `ChangedAt`; відсів на сервері, ДО `TOP` і курсора.
+                And("PeriodKey = @periodKey", "@periodKey", periodKey, SqlDbType.Int);
+            }
         }
 
         if (filter.Origin is { } origin)

@@ -172,6 +172,14 @@ public sealed record StructureChangeView(
 /// фільтр — <c>IN</c> по цьому переліку, бо журнал до переносу проєкту лишається на Id старої версії. <c>null</c> або
 /// один елемент — звичайна рівність.
 /// </param>
+/// <param name="OwnerPeriodColumns">
+/// Q-17 (LAND-YEAR G1/G2): пари «період-власник → колонки», зміни яких для періоду перегляду <paramref name="PeriodKey"/>
+/// лежать В ІНШОМУ періоді (не-місячна колонка таблиці «місяці в колонках» — якір року, місячна M{m} — період m; туди їх
+/// пише PATCH). Діє лише разом із <paramref name="PeriodKey"/>: умова періоду стає «<c>PeriodKey</c> перегляду АБО пара
+/// (період, колонка) з переліку». Решта звужень (<paramref name="VisibleColumnIds"/>, документ, автор…) діють на обидві
+/// гілки. <c>null</c> або порожньо — умова періоду дослівно як була. Перелік складає обробник ПІСЛЯ меж читання (логічна
+/// адреса + межа D-214 періоду-власника), порт його не розширює.
+/// </param>
 public sealed record CellChangeFilter(
     DateTime From,
     DateTime To,
@@ -186,7 +194,8 @@ public sealed record CellChangeFilter(
     int? PeriodKey = null,
     bool HumanOnly = false,
     AuditSort Sort = AuditSort.ChangedAtDesc,
-    IReadOnlyList<int>? ColumnLineage = null)
+    IReadOnlyList<int>? ColumnLineage = null,
+    IReadOnlyList<CellChangeOwnerColumns>? OwnerPeriodColumns = null)
 {
     /// <summary>Фільтр адресує РІВНО ОДНУ комірку — документ, рядок і колонку.</summary>
     /// <remarks>
@@ -209,6 +218,11 @@ public sealed record CellChangeFilter(
         => DocumentId is null && (RowKey is not null || ColumnDefId is not null);
 
 }
+
+/// <summary>Q-17: колонки, зміни яких для періоду перегляду лежать у періоді-власнику (<see cref="CellChangeFilter.OwnerPeriodColumns"/>).</summary>
+/// <param name="PeriodKey">Період-власник (ключ <c>aud.CellChange.PeriodKey</c>).</param>
+/// <param name="ColumnDefIds">Колонки цього власника.</param>
+public sealed record CellChangeOwnerColumns(int PeriodKey, IReadOnlyList<int> ColumnDefIds);
 
 /// <summary>Фільтр загального журналу структурних змін (<c>BE-16</c>).</summary>
 /// <remarks>
