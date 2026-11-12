@@ -70,6 +70,17 @@ public static class GoldenSet
         ArgumentNullException.ThrowIfNull(testCase);
         ArgumentNullException.ThrowIfNull(output);
 
+        // ⛔ B21: тест БЕЗ ЖОДНОГО очікування — НЕ зелений. Цикл нижче йде по очікуваннях, тож на
+        // `expectedJson = {}` він не звіряв нічого, і вердикт був зеленим за будь-якого виходу. Так
+        // live-регресія C11_01 V5 (doc 96, рядок A37: 0 результатів, 64 кроки #VALUE) пройшла
+        // золотий набір: PARITY_1 з імпорту AF має `{}`. Це та сама підміна, що й порожній набір
+        // (`IsGreen`), лише на рівні одного випадку: «нічого не очікували, отже зійшлося».
+        // Розбіжностей у такого вердикту немає — причину називає `Divergences`.
+        if (testCase.Expected.Count == 0)
+        {
+            return new TestCaseVerdict(testCase.Code, IsGreen: false, Mismatches: []);
+        }
+
         var mismatches = new List<TestCaseMismatch>();
 
         // Один прохід будує обидва покажчики: «всі рядки виходу» — для
@@ -154,9 +165,22 @@ public static class GoldenSet
         [
             .. verdicts
                 .Where(v => !v.IsGreen)
-                .SelectMany(v => v.Mismatches.Select(m => $"{v.Code}: {m.Describe()}")),
+                .SelectMany(v => v.Mismatches.Count == 0
+                    ? new[] { $"{v.Code}: {NoExpectationsReason}" }
+                    : v.Mismatches.Select(m => $"{v.Code}: {m.Describe()}")),
         ];
     }
+
+    /// <summary>
+    /// Причина червоного вердикту без розбіжностей (B21): у тесті немає жодного очікуваного числа.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Червоний вердикт без розбіжностей буває лише так (<see cref="Judge"/>): інакше перелік
+    /// відмови був би порожнім, і автор бачив би «відхилено», не знаючи, що виправляти.
+    /// </remarks>
+    public const string NoExpectationsReason =
+        "очікуваних значень немає (expectedJson = {}) — тест нічого не перевіряє; "
+        + "задайте очікувані числа виходів (код виходу або код@речовина → число)";
 
     /// <summary>Додає значення до групи, створюючи її за потреби.</summary>
     private static void Add<TKey>(

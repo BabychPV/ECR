@@ -675,6 +675,33 @@ public sealed class MethodologyPublishTests
         Assert.True(_version.IsPublished);
     }
 
+    /// <remarks>
+    /// B21: тест золотого набору з <c>expectedJson = {}</c> нічого не звіряв, і версія публікувалася «зеленою» за
+    /// будь-якого виходу — так live C11_01 V5 (PARITY_1 з імпорту AF, 0 результатів і 64 кроки #VALUE) пройшла
+    /// ворота. Тепер публікація відмовляє й називає тест і причину. Модуль тут видає ВАЛІДНЕ число — відмова
+    /// саме через відсутність очікувань, а не через розбіжність. Мутація: прибрати гілку
+    /// <c>Expected.Count == 0</c> у <c>GoldenSet.Judge</c> — версія публікується, тест червоний.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.12")]
+    public async Task B21_тест_без_очікувань_не_пропускає_публікацію_і_названий()
+    {
+        var empty = TestCases()[0] with { Code = "PARITY_1", Expected = new Dictionary<string, decimal>() };
+        _store.GetTestCasesAsync(VersionId, Arg.Any<CancellationToken>()).Returns([empty]);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.goldenSetDiverged", error.Details!["messageKey"]);
+        Assert.Equal("PARITY_1", error.Details!["tests"]);
+        Assert.Contains("PARITY_1", error.Message, StringComparison.Ordinal);
+        Assert.Contains(GoldenSet.NoExpectationsReason, error.Message, StringComparison.Ordinal);
+
+        Assert.False(_version.IsPublished);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
     /// <summary>Профіль автора версії з названим правом (D-440: розподіляють лише ролі).</summary>
     private static AccessProfile AuthorProfile(string permission) => new()
     {

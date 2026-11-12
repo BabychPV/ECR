@@ -246,6 +246,48 @@ public sealed class GoldenSetTests
         Assert.Equal($"$.{key}", error.Details!["reason"]);
     }
 
+    /// <remarks>
+    /// B21: цикл <c>Judge</c> іде по очікуваннях, тож тест з <c>expectedJson = {}</c> не звіряв нічого і був
+    /// зеленим за БУДЬ-ЯКОГО виходу — і за валідного числа, і за порожнього (0 результатів, усі кроки #VALUE, як
+    /// live C11_01 V5 PARITY_1). Мутація: прибрати гілку <c>Expected.Count == 0</c> у <c>Judge</c> — обидва
+    /// випадки зелені, тест червоний.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.12")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void B21_тест_без_жодного_очікування_не_зелений(bool engineProducedValues)
+    {
+        var empty = TestCase(new Dictionary<string, decimal>(), 0m);
+        var output = engineProducedValues ? Output(1m) : new CalculationOutput(1, null, [], []);
+
+        var verdict = GoldenSet.Judge(empty, output);
+
+        Assert.False(verdict.IsGreen);
+        Assert.Empty(verdict.Mismatches);
+        Assert.False(GoldenSet.IsGreen([verdict]));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.12")]
+    public void B21_перелік_відмови_називає_тест_без_очікувань_і_причину()
+    {
+        // ⚠ Червоний вердикт без розбіжностей не сміє дати порожній перелік: автор бачив би «відхилено», не
+        // знаючи, що виправляти. Зелений сусід у перелік, як і раніше, не потрапляє.
+        var verdicts = new[]
+        {
+            GoldenSet.Judge(TestCase(expected: 1m, tolerance: 0m), Output(1m)),
+            GoldenSet.Judge(TestCase(new Dictionary<string, decimal>(), 0m), Output(1m)),
+        };
+
+        var divergence = Assert.Single(GoldenSet.Divergences(verdicts));
+
+        Assert.Equal($"TC-1: {GoldenSet.NoExpectationsReason}", divergence);
+        Assert.Contains("expectedJson", divergence, StringComparison.Ordinal);
+    }
+
     private static MethodologyTestCase TestCase(decimal expected, decimal tolerance)
         => TestCase(new Dictionary<string, decimal> { ["gsec"] = expected }, tolerance);
 
