@@ -96,6 +96,15 @@ jobs:
               identical|behind) skip=true ;;
             esac
           fi
+          # ✎ 2026-11-12 (human: «оптимізувати CI без витрат»): push у main, що є merge-комітом PR
+          # (2 батьки), уже пройшов повний набір на голові PR (rc/*, `--match-head-commit`), тож
+          # ~25 завдань на кожен мерж не мають споживача й лише стоять у черзі з 20 раннерів.
+          # Інші push у main (не merge, напр. ручний) — повний прогін. Помилка API → skip=false.
+          if [ "$EVENT_NAME" = "push" ] && [ "$REF" = "refs/heads/main" ]; then
+            parents="$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA" --jq '.parents | length' || true)"
+            echo "main $SHA parents: ${parents:-<порожньо>}"
+            if [ "$parents" = "2" ]; then skip=true; fi
+          fi
           echo "skip=$skip" >> "$GITHUB_OUTPUT"
 
   # ⛔ Контейнер піднімається КРОКОМ, а не через `services:`, і секрету

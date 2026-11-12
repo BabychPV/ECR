@@ -73,7 +73,24 @@ public sealed class CiPushGateTests
         Assert.Contains("identical|behind) skip=true ;;", gate, StringComparison.Ordinal);
         // помилка API не пропускає прогін (відкрито)
         Assert.Contains("|| true", gate, StringComparison.Ordinal);
-        Assert.Single(Regex.Matches(gate, @"skip=true"));
+
+        // ✎ 2026-11-12 (людина: «оптимізувати CI без витрат»): у ci.yml — ще один пропуск, лише для
+        // push у main, що є merge-комітом PR (2 батьки; голова PR уже пройшла повний набір).
+        // Інші workflow — як і раніше, рівно один пропуск.
+        if (file == "ci.yml")
+        {
+            Assert.Contains(
+                "if [ \"$EVENT_NAME\" = \"push\" ] && [ \"$REF\" = \"refs/heads/main\" ]; then",
+                gate,
+                StringComparison.Ordinal);
+            Assert.Contains("--jq '.parents | length' || true", gate, StringComparison.Ordinal);
+            Assert.Contains("if [ \"$parents\" = \"2\" ]; then skip=true; fi", gate, StringComparison.Ordinal);
+            Assert.Equal(2, Regex.Count(gate, @"skip=true"));
+        }
+        else
+        {
+            Assert.Single(Regex.Matches(gate, @"skip=true"));
+        }
     }
 
     [Theory]
