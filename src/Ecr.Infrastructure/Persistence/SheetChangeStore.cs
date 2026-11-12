@@ -49,6 +49,31 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
         """;
 
     /// <summary>
+    /// Q-17 (LAND-YEAR G4): проба по парах «період → таблиця» — період перегляду і періоди-власники колонок таблиць
+    /// «місяці в колонках». Той самий шлях доступу, що й <see cref="ProbeSql"/> (<c>UQ_TableInstance</c> → <c>FORCESEEK</c>
+    /// по <c>UQ_TableRow_Key</c>), на кожен фізичний екземпляр; екземпляр ПЕРЕГЛЯДУ (<c>v</c>) тієї ж таблиці — у
+    /// відповіді замість фізичного (його перечитує клієнт). Лише оригінал аркуша.
+    /// </summary>
+    internal const string ProbeOwnersSql = """
+        SET NOCOUNT ON;
+        DECLARE @upto binary(8) = MIN_ACTIVE_ROWVERSION();
+        SELECT @upto;
+        SELECT x.ViewInstanceId, x.TableDefId, x.Id, x.Cnt
+          FROM (SELECT v.Id AS ViewInstanceId, i.TableDefId, r.Id,
+                       ROW_NUMBER() OVER (PARTITION BY i.Id ORDER BY r.RowVersion DESC) AS Rn,
+                       COUNT(*) OVER (PARTITION BY i.Id) AS Cnt
+                  FROM OPENJSON(@targets) WITH (p int '$.p', t int '$.t') g
+                  JOIN doc.TableInstance i
+                    ON i.PeriodKey = g.p AND i.DocumentId = @doc AND i.TableDefId = g.t AND i.SheetCopyId IS NULL
+                  JOIN doc.TableInstance v
+                    ON v.PeriodKey = @period AND v.DocumentId = @doc AND v.TableDefId = i.TableDefId AND v.SheetCopyId IS NULL
+                  JOIN doc.TableRow r WITH (FORCESEEK (UQ_TableRow_Key (PeriodKey, TableInstanceId)))
+                    ON r.PeriodKey = i.PeriodKey AND r.TableInstanceId = i.Id
+                 WHERE r.RowVersion >= @since AND r.RowVersion < @upto) x
+         WHERE x.Rn <= @sample;
+        """;
+
+    /// <summary>
     /// Авторство: ОСТАННЯ не-перерахункова зміна кожного зміненого рядка у вікні журналу (саме вона й підняла версію
     /// рядка), плюс ознака «видима колонка перерахована». Рядок без жодного запису — відсутній у відповіді.
     /// </summary>
@@ -135,23 +160,47 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
                 parameters.Add("@sample", SqlDbType.Int).Value = cap;
                 parameters.Add("@copy", SqlDbType.BigInt).Value = (object?)sheetCopyId ?? DBNull.Value;
             },
-            async (reader, token) =>
-            {
-                await reader.ReadAsync(token).ConfigureAwait(false);
-                var marker = ToVersion((byte[])reader.GetValue(0));
-
-                await reader.NextResultAsync(token).ConfigureAwait(false);
-                var rows = new List<SheetChangedRow>();
-                var hasMore = false;
-                while (await reader.ReadAsync(token).ConfigureAwait(false))
-                {
-                    rows.Add(new SheetChangedRow(reader.GetInt64(0), reader.GetInt32(1), reader.GetInt64(2)));
-                    hasMore |= reader.GetInt32(3) > cap;
-                }
-
-                return new SheetChangeProbe(marker, rows, hasMore);
-            },
+            (reader, token) => ReadProbeAsync(reader, cap, token),
             ct);
+    }
+
+    /// <inheritdoc />
+    public Task<SheetChangeProbe> ProbeOwnersAsync(
+        long documentId, int periodKey, IReadOnlyCollection<SheetProbeTarget> targets, ulong since, int cap,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(targets);
+
+        return RunAsync(
+            ProbeOwnersSql,
+            parameters =>
+            {
+                parameters.Add("@period", SqlDbType.Int).Value = periodKey;
+                parameters.Add("@doc", SqlDbType.BigInt).Value = documentId;
+                parameters.Add("@targets", SqlDbType.NVarChar, -1).Value =
+                    JsonSerializer.Serialize(targets.Select(x => new { p = x.PeriodKey, t = x.TableDefId }));
+                parameters.Add("@since", SqlDbType.Binary, 8).Value = FromVersion(since);
+                parameters.Add("@sample", SqlDbType.Int).Value = cap;
+            },
+            (reader, token) => ReadProbeAsync(reader, cap, token),
+            ct);
+    }
+
+    private static async Task<SheetChangeProbe> ReadProbeAsync(SqlDataReader reader, int cap, CancellationToken token)
+    {
+        await reader.ReadAsync(token).ConfigureAwait(false);
+        var marker = ToVersion((byte[])reader.GetValue(0));
+
+        await reader.NextResultAsync(token).ConfigureAwait(false);
+        var rows = new List<SheetChangedRow>();
+        var hasMore = false;
+        while (await reader.ReadAsync(token).ConfigureAwait(false))
+        {
+            rows.Add(new SheetChangedRow(reader.GetInt64(0), reader.GetInt32(1), reader.GetInt64(2)));
+            hasMore |= reader.GetInt32(3) > cap;
+        }
+
+        return new SheetChangeProbe(marker, rows, hasMore);
     }
 
     /// <inheritdoc />
