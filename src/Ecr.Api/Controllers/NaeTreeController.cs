@@ -97,6 +97,7 @@ public sealed class NaeTreeController(
     /// consulted and nothing is written. Permission <c>Registry.EditData</c>.
     /// </summary>
     /// <param name="file">The <c>.xlsx</c> workbook.</param>
+    /// <param name="parseGate">Shared limit of concurrent workbook parses (S-3).</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("nae-tree/import/analyse")]
     [RequestSizeLimit(MaxImportBodyBytes)]
@@ -104,9 +105,13 @@ public sealed class NaeTreeController(
     [ProducesResponseType<NaeTreeImportReportDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public async Task<ActionResult<NaeTreeImportReportDto>> AnalyseImport(IFormFile file, CancellationToken ct)
+    public async Task<ActionResult<NaeTreeImportReportDto>> AnalyseImport(IFormFile file, [FromServices] Ecr.Api.Security.ImportPreviewGate parseGate, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(parseGate);
+
+        // S-3: workbook parse = full ClosedXML model in process memory; same limit as the document import preview (AN-123, P1-04).
+        using var parsePermit = await parseGate.EnterAsync(ct).ConfigureAwait(false);
         await using var stream = file.OpenReadStream();
         return Ok(await manual.AnalyseAsync(stream, ct).ConfigureAwait(false));
     }
@@ -117,6 +122,7 @@ public sealed class NaeTreeController(
     /// <c>Registry.EditData</c>.
     /// </summary>
     /// <param name="file">The <c>.xlsx</c> workbook.</param>
+    /// <param name="parseGate">Shared limit of concurrent workbook parses (S-3).</param>
     /// <param name="request">JSON <see cref="NaeTreeImportOptions"/> (the preview ignores the fingerprint).</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("nae-tree/import/preview")]
@@ -126,9 +132,13 @@ public sealed class NaeTreeController(
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<NaeTreeImportReportDto>> PreviewImport(
-        IFormFile file, [FromForm] string? request, CancellationToken ct)
+        IFormFile file, [FromServices] Ecr.Api.Security.ImportPreviewGate parseGate, [FromForm] string? request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(parseGate);
+
+        // S-3: workbook parse = full ClosedXML model in process memory; same limit as the document import preview (AN-123, P1-04).
+        using var parsePermit = await parseGate.EnterAsync(ct).ConfigureAwait(false);
         var options = ParseOptions(request);
         await using var stream = file.OpenReadStream();
         return Ok(await manual.PreviewAsync(stream, options, ct).ConfigureAwait(false));
@@ -139,6 +149,7 @@ public sealed class NaeTreeController(
     /// <c>Registry.EditDefinition</c> when the registry does not exist yet).
     /// </summary>
     /// <param name="file">The same <c>.xlsx</c> workbook as in the preview.</param>
+    /// <param name="parseGate">Shared limit of concurrent workbook parses (S-3).</param>
     /// <param name="request">JSON <see cref="NaeTreeImportOptions"/> with <c>expectedFingerprint</c>.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <remarks>
@@ -152,9 +163,13 @@ public sealed class NaeTreeController(
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<NaeTreeImportReportDto>> ApplyImport(
-        IFormFile file, [FromForm] string? request, CancellationToken ct)
+        IFormFile file, [FromServices] Ecr.Api.Security.ImportPreviewGate parseGate, [FromForm] string? request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(parseGate);
+
+        // S-3: workbook parse = full ClosedXML model in process memory; same limit as the document import preview (AN-123, P1-04).
+        using var parsePermit = await parseGate.EnterAsync(ct).ConfigureAwait(false);
         var options = ParseOptions(request);
         await using var stream = file.OpenReadStream();
         return Ok(await manual.ApplyAsync(stream, options, ct).ConfigureAwait(false));
