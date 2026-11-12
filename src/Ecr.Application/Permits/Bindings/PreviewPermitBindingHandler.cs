@@ -37,7 +37,7 @@ public sealed record PermitPreviewQuery(
 /// <para>
 /// ⚠ Рядки будує той самий <see cref="PermitRowPlanner"/> над тим самим знімком довідників, що й рантайм (PM-10), тож
 /// перегляд не розійдеться з тим, що створить документ. Фактичні комірки існуючого екземпляра накладаються лише на
-/// незіставлені колонки.
+/// незіставлені колонки і лише ті, що в межах читання користувача (як зріз).
 /// </para>
 /// <para>
 /// ⛔ Окрім <c>Template.View</c> потрібне право читати реєстри дозволу (<see cref="PermitRegistryReadGuard"/>): інакше
@@ -228,11 +228,23 @@ public sealed class PreviewPermitBindingHandler(
             return result;
         }
 
+        // ⛔ S-1 (аудит 2026-11-10): фактичні комірки — те саме читання, що й зріз (GetTableSliceHandler) і перегляд
+        // формул у відповіді PATCH: схована таблиця, колонка під забороною чи поза періодом ролі (D-214) і прихована
+        // колонка не накладаються. Інакше перегляд прив'язки ставав оракулом значень повз межі читання.
+        var reader = await access.BuildProfileAsync(currentUser.UserId!.Value, ct).ConfigureAwait(false);
+        var readable = (await access.ReadScopeAsync(reader, documentId, ct).ConfigureAwait(false)).InPeriod(periodKey);
+        if (!readable.CanReadTable(sheetTable.Id))
+        {
+            return result;
+        }
+
         var rowIds = (await rows.GetRowsAsync(instance.TableInstanceId, periodKey, ct).ConfigureAwait(false))
             .ToDictionary(r => r.RowKey, r => r.Id, StringComparer.Ordinal);
         var slice = (await cells.ReadSliceAsync(instance.TableInstanceId, periodKey, ct).ConfigureAwait(false))
             .ToLookup(c => c.Address.TableRowId);
-        var columnsById = sheetTable.Columns.Where(c => !c.IsDeleted).ToDictionary(c => c.Id);
+        var columnsById = sheetTable.Columns
+            .Where(c => !c.IsDeleted && !c.IsHidden && readable.CanReadColumn(c.Id))
+            .ToDictionary(c => c.Id);
 
         foreach (var row in result)
         {

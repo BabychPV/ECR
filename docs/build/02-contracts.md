@@ -4967,7 +4967,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/template-versions/{id}/permit-bindings/{code}` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/permit-bindings/{code}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/permit-bindings/{code}` | `Template.Edit` | 7 |
-| `GET` | `/api/v1/template-versions/{id}/permit-bindings/{code}/preview?documentId=&periodKey=&facilityName=&periodEnd=&permitEntryId=` | `Template.View` (+ `Document.View` з `documentId`) | 7 |
+| `GET` | `/api/v1/template-versions/{id}/permit-bindings/{code}/preview?documentId=&periodKey=&facilityName=&periodEnd=&permitEntryId=` | `Template.View` (+ `Document.View` з `documentId`); фактичні комірки — лише таблиці/колонки в межах читання (S6, D-214), приховані колонки не накладаються (S-1) | 7 |
 | `POST` | `/api/v1/documents/{documentId}/permit-bindings/{code}/refresh?periodKey=` | — (через `IAccessDecisionService`, як `POST …/rows`) | 7 |
 | `GET` | `/api/v1/permits?type=&status=&q=&asOf=&limit=&cursor=` | `Registry.View` | 8 |
 | `POST` | `/api/v1/permits` | `Registry.EditData` | 8 |
