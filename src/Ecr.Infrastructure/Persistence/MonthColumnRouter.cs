@@ -86,6 +86,10 @@ public sealed class MonthColumnRouter : IMonthColumnRouter
         => _allVersions || _registry?.IsYearVersion(templateVersionId) == true;
 
     /// <inheritdoc />
+    /// <remarks>⛔ Лише реєстр розкладок; прапор «усі версії» тут не діє (див. <see cref="IMonthColumnRouter"/>).</remarks>
+    public bool RoutesComputedVersion(int templateVersionId) => _registry?.IsYearVersion(templateVersionId) == true;
+
+    /// <inheritdoc />
     public async Task<MonthRoutingDocument?> GetDocumentAsync(long documentId, CancellationToken ct)
     {
         if (!Enabled)
@@ -215,7 +219,7 @@ public sealed class MonthColumnRouter : IMonthColumnRouter
         }
 
         var calendar = await CalendarAsync(document.ProjectId, viewPeriod.Year, ct).ConfigureAwait(false);
-        return OwnerOf(column, viewPeriod, calendar);
+        return OwnerOf(column, viewPeriod, calendar, RoutesComputedVersion(document.TemplateVersionId));
     }
 
     /// <inheritdoc />
@@ -242,6 +246,7 @@ public sealed class MonthColumnRouter : IMonthColumnRouter
             return [];
         }
 
+        var computed = RoutesComputedVersion(document.TemplateVersionId);
         var foreign = new List<ForeignColumn>();
         foreach (var column in table.Columns)
         {
@@ -250,7 +255,7 @@ public sealed class MonthColumnRouter : IMonthColumnRouter
                 continue;
             }
 
-            var owner = OwnerOf(column, viewPeriod, calendar);
+            var owner = OwnerOf(column, viewPeriod, calendar, computed);
             if (owner != viewPeriod)
             {
                 foreign.Add(new ForeignColumn(column, owner));
@@ -261,11 +266,18 @@ public sealed class MonthColumnRouter : IMonthColumnRouter
     }
 
     /// <summary>
-    /// Власник введених комірок колонки для перегляду: чиста функція від календаря (див. <see cref="IMonthColumnRouter"/>).
+    /// Власник комірок колонки для перегляду: чиста функція від календаря (див. <see cref="IMonthColumnRouter"/>).
     /// </summary>
-    private static PeriodKey OwnerOf(ColumnDef column, PeriodKey viewPeriod, YearCalendar calendar)
+    /// <param name="column">Колонка.</param>
+    /// <param name="viewPeriod">Період перегляду.</param>
+    /// <param name="calendar">Календар року.</param>
+    /// <param name="routesComputed">
+    /// ✎ LAND-YEAR L1: версія з розкладкою <c>YearWithMonthColumns</c> — обчислюваний стовпець має власника за тим самим
+    /// правилом, що й введений (місячний <c>m</c> → період <c>m</c>, не-місячний → якір). Інакше — перегляд, як до L1.
+    /// </param>
+    private static PeriodKey OwnerOf(ColumnDef column, PeriodKey viewPeriod, YearCalendar calendar, bool routesComputed)
     {
-        if (column.IsDeleted || column.IsComputed || !calendar.Keys.Contains(viewPeriod.Value))
+        if (column.IsDeleted || (column.IsComputed && !routesComputed) || !calendar.Keys.Contains(viewPeriod.Value))
         {
             return viewPeriod;
         }

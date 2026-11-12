@@ -16,8 +16,10 @@ namespace Ecr.Infrastructure.Persistence;
 /// Що саме змінюється: <c>ReadSliceAsync</c>/<c>ReadSlicesAsync</c> (усі чотири форми). Для екземпляра перегляду
 /// та колонок, чий власник — інший період (<see cref="IMonthColumnRouter.ForeignColumnsAsync"/>), введені комірки
 /// фізичного зрізу відкидаються, а замість них ідуть введені комірки власника, перенесені на <c>TableRow.Id</c>
-/// екземпляра перегляду за <c>RowKey</c>. Обчислені комірки (<c>IsCalculated = 1</c>) завжди беруться з екземпляра
-/// перегляду.
+/// екземпляра перегляду за <c>RowKey</c>. Обчислені комірки (<c>IsCalculated = 1</c>) беруться з екземпляра
+/// перегляду — ✎ LAND-YEAR L1: крім обчислюваних колонок версій <c>YearWithMonthColumns</c>: там власник колонки
+/// той самий, що й для введеної (місячна <c>C_Mm</c> — період <c>m</c>, не-місячна — якір), копія перегляду затінена,
+/// а значення (обчислене чи ручне D-461) береться з власника тим самим перенесенням за <c>RowKey</c>.
 /// </para>
 /// <para>
 /// ⛔ <c>ReadCellsAsync</c>, <c>ApplyAsync</c>, <c>ApplyBatchAsync</c>, <c>LimitLockWaitAsync</c> — ФІЗИЧНІ: адреса в
@@ -61,6 +63,9 @@ public sealed class MonthRoutedCellStore(
 
     /// <summary>Скільки разів сесія ходила до бази за комірками власників (для тестів/діагностики).</summary>
     public int OwnerQueryCount { get; private set; }
+
+    /// <summary>✎ LAND-YEAR L1: скільки разів читалися обчислені комірки власників (поза річною розкладкою — 0).</summary>
+    public int OwnerComputedQueryCount { get; private set; }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<CellRecord>> ReadSliceAsync(long tableInstanceId, CancellationToken ct)
@@ -264,7 +269,13 @@ public sealed class MonthRoutedCellStore(
                     .ConfigureAwait(false);
                 if (foreign.Count > 0)
                 {
-                    plan.Add(new Entry(instance, [.. foreign.Select(f => f.Column.Id)], foreign.ToDictionary(f => f.Column.Id)));
+                    // ✎ LAND-YEAR L1: обчислювані колонки бувають чужими лише у версії YearWithMonthColumns
+                    // (`IMonthColumnRouter.RoutesComputedVersion`); для решти версій `ForeignComputed` порожній.
+                    plan.Add(new Entry(
+                        instance,
+                        foreign.ToDictionary(f => f.Column.Id),
+                        foreign.Where(f => !f.Column.IsComputed).ToDictionary(f => f.Column.Id),
+                        foreign.Where(f => f.Column.IsComputed).ToDictionary(f => f.Column.Id)));
                 }
             }
         }
@@ -280,9 +291,12 @@ public sealed class MonthRoutedCellStore(
             var cells = physical.TryGetValue(entry.Instance.TableInstanceId, out var own) ? own : [];
 
             // Введені комірки колонок з чужим власником у екземплярі перегляду «затінені» власником.
+            // ✎ LAND-YEAR L1: у чужій ОБЧИСЛЮВАНІЙ колонці (лише YearWithMonthColumns) затінено ВСЕ — і обчислену
+            // копію перегляду (старий результат «по періодах» лишається в базі, D-67, але не видно).
             result[entry.Instance.TableInstanceId] =
             [
-                .. cells.Where(c => c.Value.IsCalculated || !entry.ForeignColumns.ContainsKey(c.Address.ColumnDefId)),
+                .. cells.Where(c => !entry.ForeignColumns.TryGetValue(c.Address.ColumnDefId, out var foreign)
+                                    || (c.Value.IsCalculated && !foreign.Column.IsComputed)),
             ];
         }
 
@@ -329,14 +343,22 @@ public sealed class MonthRoutedCellStore(
             }
         }
 
-        var ownerCells = await LoadOwnerCellsAsync(documentId, entries, ct).ConfigureAwait(false);
+        // ✎ LAND-YEAR L1: записи без чужих ВВЕДЕНИХ колонок у запит введених комірок не йдуть (у спадковому режимі
+        // таких записів немає — набір і запит ті самі, що до L1).
+        var inputEntries = entries.Where(e => e.ForeignInputs.Count > 0).ToList();
+        var ownerCells = inputEntries.Count == 0
+            ? []
+            : await LoadOwnerCellsAsync(documentId, inputEntries, ct).ConfigureAwait(false);
+
+        await OverlayComputedAsync(documentId, entries, viewRows, result, ct).ConfigureAwait(false);
+
         if (ownerCells.Count == 0)
         {
             return;
         }
 
         var byTable = ownerCells.ToLookup(c => c.TableDefId);
-        foreach (var entry in entries)
+        foreach (var entry in inputEntries)
         {
             if (!viewRows.TryGetValue(entry.Instance.TableInstanceId, out var rowIds))
             {
@@ -356,7 +378,7 @@ public sealed class MonthRoutedCellStore(
 
             foreach (var cell in byTable[entry.Instance.TableDefId])
             {
-                if (!entry.ForeignColumns.TryGetValue(cell.ColumnDefId, out var foreign)
+                if (!entry.ForeignInputs.TryGetValue(cell.ColumnDefId, out var foreign)
                     || foreign.OwnerPeriod.Value != cell.OwnerPeriodKey
                     || !rowIds.TryGetValue(cell.RowKey, out var viewRowId))
                 {
@@ -392,6 +414,134 @@ public sealed class MonthRoutedCellStore(
         }
     }
 
+    /// <summary>
+    /// ✎ LAND-YEAR L1: комірки чужих ОБЧИСЛЮВАНИХ колонок (лише версії YearWithMonthColumns) — з екземпляра-власника,
+    /// за <c>RowKey</c>, з тим самим <c>IsCalculated</c>, що у власника (ручне значення D-461 лишається ручним).
+    /// </summary>
+    /// <remarks>
+    /// Немає жодної такої колонки (усі версії, крім річної) — НУЛЬ запитів. Є — ОДИН запит на документ, без кешу сесії:
+    /// прохід перерахунку пише ці комірки сам (період <c>m</c> — <c>C_Mm</c>), і наступний період-читач мусить бачити
+    /// щойно записане. Видимість власної копії перегляду (затінення) — у <see cref="RouteAsync"/>.
+    /// </remarks>
+    private async Task OverlayComputedAsync(
+        long documentId,
+        List<Entry> entries,
+        Dictionary<long, Dictionary<string, long>> viewRows,
+        Dictionary<long, List<CellRecord>> result,
+        CancellationToken ct)
+    {
+        var computedEntries = entries.Where(e => e.ForeignComputed.Count > 0).ToList();
+        if (computedEntries.Count == 0)
+        {
+            return;
+        }
+
+        OwnerComputedQueryCount++;
+        var rows = await OwnerComputedCellsQuery(
+                db,
+                documentId,
+                computedEntries.SelectMany(e => e.ForeignComputed.Values.Select(f => f.OwnerPeriod.Value)).Distinct().ToList(),
+                computedEntries.Select(e => e.Instance.TableDefId).Distinct().ToList(),
+                computedEntries.SelectMany(e => e.ForeignComputed.Values.Where(f => !f.Column.IsMonthColumn)
+                    .Select(f => f.OwnerPeriod.Value)).Distinct().ToList())
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var byTable = rows.ToLookup(c => c.TableDefId);
+        foreach (var entry in computedEntries)
+        {
+            if (!viewRows.TryGetValue(entry.Instance.TableInstanceId, out var rowIds))
+            {
+                continue;
+            }
+
+            var target = result[entry.Instance.TableInstanceId];
+            foreach (var cell in byTable[entry.Instance.TableDefId])
+            {
+                if (!entry.ForeignComputed.TryGetValue(cell.ColumnDefId, out var foreign)
+                    || foreign.OwnerPeriod.Value != cell.OwnerPeriodKey
+                    || !rowIds.TryGetValue(cell.RowKey, out var viewRowId))
+                {
+                    continue;
+                }
+
+                target.Add(new CellRecord(
+                    new CellAddress(entry.Instance.PeriodKey, viewRowId, cell.ColumnDefId),
+                    cell.TableDefId,
+                    new CellValueData
+                    {
+                        ValueString = cell.ValueString,
+                        ValueNumeric = cell.ValueNumeric,
+                        ValueDate = cell.ValueDate,
+                        ValueBool = cell.ValueBool,
+                        ValueRegistryEntryId = cell.ValueRegistryEntryId,
+                        ValueUnitId = cell.ValueUnitId,
+                        IsCalculated = cell.IsCalculated,
+                        IsEmpty = cell.IsEmpty,
+                    }));
+            }
+        }
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR L1: комірки ОБЧИСЛЮВАНИХ колонок (<c>Formula</c>/<c>Calculated</c>) у їхніх власниках — ОДИН запит на
+    /// документ: місячна колонка — лише в періоді свого місяця, не-місячна — лише в якорі.
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="documentId">Документ власників.</param>
+    /// <param name="ownerPeriods">Періоди-власники (≤ 13 партицій).</param>
+    /// <param name="tableDefIds">Таблиці, що читаються.</param>
+    /// <param name="anchorPeriods">Підмножина <paramref name="ownerPeriods"/> — якорі року (власники не-місячних).</param>
+    /// <returns>Незавершений запит без відстеження.</returns>
+    /// <remarks>
+    /// ⛔ Ключ партиції — у предикаті кожної з трьох таблиць документа (як <see cref="OwnerCellsQuery"/>). Власника
+    /// колонки визначає з'єднання за PK <c>cfg.ColumnDef</c>, а не список колонок (див. перф-примітку там). Надмножина
+    /// (календар може зробити власником сам перегляд) — остаточний відбір у пам'яті за <see cref="ForeignColumn.OwnerPeriod"/>.
+    /// </remarks>
+    public static IQueryable<MonthOwnerCellRow> OwnerComputedCellsQuery(
+        EcrDbContext db,
+        long documentId,
+        IReadOnlyCollection<int> ownerPeriods,
+        IReadOnlyCollection<int> tableDefIds,
+        IReadOnlyCollection<int> anchorPeriods)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(ownerPeriods);
+        ArgumentNullException.ThrowIfNull(tableDefIds);
+        ArgumentNullException.ThrowIfNull(anchorPeriods);
+
+        return from instance in db.TableInstances.AsNoTracking().OriginalOnly()
+               where instance.DocumentId == documentId
+                     && ownerPeriods.Contains(instance.PeriodKeyValue)
+                     && tableDefIds.Contains(instance.TableDefId)
+               join row in db.TableRows.AsNoTracking().Where(r => ownerPeriods.Contains(r.PeriodKeyValue) && !r.IsDeleted)
+                   on new { P = instance.PeriodKeyValue, I = instance.Id }
+                   equals new { P = row.PeriodKeyValue, I = row.TableInstanceId }
+               join cell in db.CellValues.AsNoTracking().Where(c => ownerPeriods.Contains(c.PeriodKeyValue))
+                   on new { P = row.PeriodKeyValue, R = row.Id }
+                   equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
+               join column in db.ColumnDefs.AsNoTracking()
+                   on cell.ColumnDefId equals column.Id
+               where (column.DataType == CellDataType.Formula || column.DataType == CellDataType.Calculated)
+                     && ((column.IsMonthColumn && column.MonthNumber == cell.PeriodKeyValue % 100)
+                         || (!column.IsMonthColumn && anchorPeriods.Contains(cell.PeriodKeyValue)))
+               select new MonthOwnerCellRow
+               {
+                   OwnerPeriodKey = cell.PeriodKeyValue,
+                   RowKey = row.RowKeyValue,
+                   ColumnDefId = cell.ColumnDefId,
+                   TableDefId = cell.TableDefId,
+                   ValueString = cell.ValueString,
+                   ValueNumeric = cell.ValueNumeric,
+                   ValueDate = cell.ValueDate,
+                   ValueBool = cell.ValueBool,
+                   ValueRegistryEntryId = cell.ValueRegistryEntryId,
+                   ValueUnitId = cell.ValueUnitId,
+                   IsEmpty = cell.IsEmpty,
+                   IsCalculated = cell.IsCalculated,
+               };
+    }
+
     /// <summary>Чи несе обчислена комірка значення у слоті типу колонки (так само, як COALESCE у вʼюсі).</summary>
     private static bool CarriesValue(CellValueData v, CellDataType type) => type switch
     {
@@ -416,9 +566,9 @@ public sealed class MonthRoutedCellStore(
             return await OwnerCellsQuery(
                     db,
                     documentId,
-                    entries.SelectMany(e => e.ForeignColumns.Values.Select(f => f.OwnerPeriod.Value)).Distinct().ToList(),
+                    entries.SelectMany(e => e.ForeignInputs.Values.Select(f => f.OwnerPeriod.Value)).Distinct().ToList(),
                     entries.Select(e => e.Instance.TableDefId).Distinct().ToList(),
-                    entries.SelectMany(e => e.ForeignColumns.Values.Where(f => !f.Column.IsMonthColumn).Select(f => f.OwnerPeriod.Value))
+                    entries.SelectMany(e => e.ForeignInputs.Values.Where(f => !f.Column.IsMonthColumn).Select(f => f.OwnerPeriod.Value))
                         .Distinct().ToList())
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
@@ -428,7 +578,7 @@ public sealed class MonthRoutedCellStore(
         var needs = new Dictionary<(int OwnerPeriod, int TableDefId), HashSet<int>>();
         foreach (var entry in entries)
         {
-            foreach (var foreign in entry.ForeignColumns.Values)
+            foreach (var foreign in entry.ForeignInputs.Values)
             {
                 if (!foreign.Column.IsMonthColumn)
                 {
@@ -531,8 +681,18 @@ public sealed class MonthRoutedCellStore(
                 return index;
             });
 
+    /// <param name="Instance">Екземпляр перегляду.</param>
+    /// <param name="ForeignColumns">Усі колонки з чужим власником (затінення).</param>
+    /// <param name="ForeignInputs">З них введені — значення з введених комірок власника (кешуються сесією).</param>
+    /// <param name="ForeignComputed">
+    /// ✎ LAND-YEAR L1: з них обчислювані (лише YearWithMonthColumns) — значення з комірок власника будь-якого виду
+    /// (<see cref="OwnerComputedCellsQuery"/>), НЕ кешуються: перерахунок пише їх у тому самому проході.
+    /// </param>
     private sealed record Entry(
-        MonthRoutingInstance Instance, IReadOnlyList<int> ColumnIds, Dictionary<int, ForeignColumn> ForeignColumns);
+        MonthRoutingInstance Instance,
+        Dictionary<int, ForeignColumn> ForeignColumns,
+        Dictionary<int, ForeignColumn> ForeignInputs,
+        Dictionary<int, ForeignColumn> ForeignComputed);
 }
 
 /// <summary>Введена комірка екземпляра-власника — рядок результату <see cref="MonthRoutedCellStore.OwnerCellsQuery"/>.</summary>
@@ -570,4 +730,10 @@ public sealed class MonthOwnerCellRow
 
     /// <summary>Явна порожнеча.</summary>
     public bool IsEmpty { get; init; }
+
+    /// <summary>
+    /// ✎ LAND-YEAR L1: обчислена комірка власника (лише <see cref="MonthRoutedCellStore.OwnerComputedCellsQuery"/>;
+    /// запит введених комірок читає тільки <c>IsCalculated = 0</c> і поле не заповнює).
+    /// </summary>
+    public bool IsCalculated { get; init; }
 }
