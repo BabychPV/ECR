@@ -604,6 +604,10 @@ public static class VersionMigrationPlanner
             Guarded(items, path, values, nameof(ColumnDef.UnitId), column.UnitId, other.UnitId);
             Guarded(items, path, values, nameof(ColumnDef.LookupRegistryDefId), column.LookupRegistryDefId, other.LookupRegistryDefId);
 
+            // ⛔ V-6: місце колонки в році визначає період-власник введеного значення (MonthColumnRouter.OwnerOf,
+            // стабільні вʼюхи); перенос періодів не міняє — інша позиція = значення в іншому місяці.
+            Guarded(items, path, values, "MonthPlacement", MonthPlacement(column), MonthPlacement(other));
+
             // Обов'язковість лише ЗНЯТА нічого не ламає; додана — робить
             // порожні комірки наявних документів помилкою валідації.
             if (!column.IsRequired && other.IsRequired)
@@ -976,6 +980,12 @@ public static class VersionMigrationPlanner
 
         items.Add(new(path, "Modified", ChangeClass.Guarded, values, field, Text(from), Text(to)));
     }
+
+    /// <summary>V-6: місце колонки в році для порівняння: <c>none</c> або номер місяця.</summary>
+    private static string MonthPlacement(ColumnDef column)
+        => column.IsMonthColumn
+            ? (column.MonthNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "?")
+            : "none";
 
     private static void PresentationDiff<T>(List<VersionMigrationItem> items, string path, string field, T from, T to)
     {
