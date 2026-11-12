@@ -78,6 +78,9 @@ public static partial class EcrConfigurationValidation
         (Ecr.Api.Startup.StaleMapWarmService.IntervalKey, Ecr.Api.Startup.StaleMapWarmService.MinIntervalSeconds),
         (Ecr.Api.Startup.StaleMapWarmService.RingIntervalKey, Ecr.Api.Startup.StaleMapWarmService.MinRingIntervalSeconds),
         (Ecr.Api.Startup.StaleMapWarmService.HotPeriodLimitKey, 1),
+
+        // AN-190: нуль версій — не «вимкнути прогрів» (для цього Startup:WarmEditPath), а прогрів, що нічого не гріє.
+        (Infrastructure.Jobs.EditPathWarmer.MaxVersionsKey, 1),
         ("Jobs:QueueDepth:RefreshSeconds", 5),
 
         // AN-116: нуль задач Excel одночасно — не «без межі», а книги, яких не бере ніхто.
@@ -155,6 +158,7 @@ public static partial class EcrConfigurationValidation
         "Security:Csp:ReportOnly",
         "Security:Csp:Enforce",
         "Health:WarmupOnStart",
+        Infrastructure.Jobs.EditPathWarmer.EnabledKey,
 
         // Q-17: читається `GetValue<bool>` у DependencyInjection (Infrastructure).
         "Collection:MonthColumnRouting",

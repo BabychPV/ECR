@@ -218,6 +218,9 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
     [InlineData("Documents:StaleMapWarm:RingIntervalSeconds", "10m")]
     [InlineData("Documents:StaleMapWarm:HotPeriodLimit", "0")]
     [InlineData("Documents:StaleMapWarm:HotPeriodLimit", "two")]
+    [InlineData("Startup:WarmEditPath", "yes")]                 // AN-190
+    [InlineData("Startup:WarmEditPathMaxVersions", "0")]        // AN-190
+    [InlineData("Startup:WarmEditPathMaxVersions", "20 версій")] // AN-190
     public void Недійсний_ключ_прогріву_карти_називає_ключ(string key, string value)
     {
         var problem = Assert.Single(EcrConfigurationValidation.Validate(Config((key, value))));
