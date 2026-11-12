@@ -51,6 +51,11 @@ internal sealed record CalculationRejectionColumn(string Code, LocalizedText Nam
 /// читається логічним зрізом, як у прогоні, а з місячних колонок лишається тільки місяць періоду (з його назвою).
 /// </para>
 /// <para>
+/// ✎ AN-164c (приймання F13 #834, T7b_00): місячна колонка — і та, чий код є назвою місяця (<c>January…December</c>).
+/// Проблема <c>MissingInputs</c> не лишається без переліку: без аргументів прогону — входи поза колонками зі здогаду,
+/// далі колонки, які читає методологія за місяць періоду (навіть заповнені), далі колонки введення місяця періоду.
+/// </para>
+/// <para>
 /// ⛔ Безпека: хоч одна названа колонка прихована від читача — колонок немає зовсім (як у підказках).
 /// </para>
 /// </remarks>
@@ -191,15 +196,17 @@ internal sealed class CalculationRejectionReasons(
         IReadOnlyDictionary<(long TableInstanceId, string RowKey, int? MethodologyId), IReadOnlyList<string>>? runArguments = null;
 
         // AN-164b: місячна колонка іншого місяця, ніж період, людині не потрібна — прогін її не читав.
+        // AN-164c: місяць колонки — прив'язка (IsMonthColumn) або сам код-назва місяця (T7b_00: January…December).
         var month = period.Value % 100;
         bool OtherMonth(ColumnDef column)
-            => column.IsMonthColumn && column.MonthNumber is { } number && month is >= 1 and <= 12 && number != month;
+            => MonthOf(column) is { } number && month is >= 1 and <= 12 && number != month;
 
         // ⚠ Колонка без заголовка — підпис кодом: порожній заголовок у відповіді означає «вхід поза колонками».
+        // Колонка, чий код — назва місяця, уже називає місяць заголовком: без другої назви місяця.
         LocalizedText LabelOf(ColumnDef column)
             => column.HeaderL10n.Values.Count == 0
                 ? new LocalizedText(new Dictionary<string, string> { ["en"] = column.Code })
-                : column.IsMonthColumn && month is >= 1 and <= 12
+                : column.IsMonthColumn && MonthByName(column.Code) is null && month is >= 1 and <= 12
                 ? new LocalizedText(column.HeaderL10n.Values.ToDictionary(
                     v => v.Key,
                     v => $"{v.Value} · {Permits.Validity.PermitMonthCoverage.MonthName(month, v.Key)}",
@@ -276,36 +283,72 @@ internal sealed class CalculationRejectionReasons(
                 arguments = guessed;
             }
 
+            var argumentList = arguments.ToList();
             var named = new List<ColumnDef>();
             var inputs = new List<string>();
-            foreach (var argument in arguments)
+            Collect(onlyEmpty: true, nonColumnInputs: fromRun is not null);
+
+            // AN-164c (приймання F13 #834, doc 96 T7b_00 S1_6/S2_7/S3_9 → columns = null): рядок, закритий правилом без
+            // жодного значення, мусить назвати, що заповнити. Прогону з аргументами може не бути (аркушний перерахунок
+            // іншого аркуша лишив проблеми таблиці від попереднього прогону, а профіль актуального прогону їх не має), а
+            // здогад за формулами для T7b_00 не дає жодної колонки таблиці (аргументи формули — не колонки; місяці названо
+            // January…December). Тоді — по черзі, доки є що назвати:
+            //   1) аргументи, яких серед колонок таблиці немає, — входами (рядок їх не має за побудовою: аргумент = код
+            //      колонки, CalculationInputBuilder);
+            //   2) колонки, які читає методологія за місяць періоду, навіть заповнені (що перевірити);
+            //   3) колонки введення місяця періоду (місячні або названі місяцем), спершу порожні.
+            if (allFormulas && named.Count == 0 && inputs.Count == 0)
             {
-                if (!byCode.TryGetValue(argument, out var column))
+                Collect(onlyEmpty: true, nonColumnInputs: true);
+            }
+
+            if (allFormulas && named.Count == 0 && inputs.Count == 0)
+            {
+                Collect(onlyEmpty: false, nonColumnInputs: true);
+            }
+
+            if (allFormulas && named.Count == 0 && inputs.Count == 0)
+            {
+                var monthInputs = columns
+                    .Where(c => month is >= 1 and <= 12 && MonthOf(c) == month && !c.IsComputed && !c.IsReadOnly)
+                    .ToList();
+                var empty = monthInputs.Where(c => TextOf(c).Length == 0).ToList();
+                named.AddRange(empty.Count > 0 ? empty : monthInputs);
+            }
+
+            void Collect(bool onlyEmpty, bool nonColumnInputs)
+            {
+                foreach (var argument in argumentList)
                 {
-                    // Аргумент прогону, якого серед колонок таблиці немає (не та таблиця, довідник, похідний) — вхід.
-                    if (fromRun is not null)
+                    if (!byCode.TryGetValue(argument, out var column))
                     {
-                        inputs.Add(argument);
+                        // Аргумент, якого серед колонок таблиці немає (не та таблиця, довідник, похідний) — вхід.
+                        if (nonColumnInputs)
+                        {
+                            inputs.Add(argument);
+                        }
+
+                        continue;
                     }
 
-                    continue;
-                }
+                    if (OtherMonth(column) || (onlyEmpty && TextOf(column).Length > 0))
+                    {
+                        continue;
+                    }
 
-                if (OtherMonth(column) || TextOf(column).Length > 0)
-                {
-                    continue;
-                }
+                    // Обчислювана колонка: людина заповнює джерела її формули. Джерела вже заповнені — колонка
+                    // порахується наступним перерахунком, називати нічого (сама вона лише для читання). Місячні джерела —
+                    // лише місяця періоду: формула шаблону бере один із 12 (doc 96 @202610: «Running hours per month» ×12).
+                    if (!sourcesOf.TryGetValue((table.Id, column.Id), out var sources))
+                    {
+                        sources = [.. TemplateSources(table, column, byCode)];
+                        sourcesOf[(table.Id, column.Id)] = sources;
+                    }
 
-                // Обчислювана колонка: людина заповнює джерела її формули. Джерела вже заповнені — колонка порахується
-                // наступним перерахунком, називати нічого (сама вона лише для читання). Місячні джерела — лише місяця
-                // періоду: формула шаблону бере один із 12 (doc 96 @202610: «Running hours per month» ×12).
-                if (!sourcesOf.TryGetValue((table.Id, column.Id), out var sources))
-                {
-                    sources = [.. TemplateSources(table, column, byCode)];
-                    sourcesOf[(table.Id, column.Id)] = sources;
+                    named.AddRange(sources.Count > 0
+                        ? sources.Where(s => !OtherMonth(s) && (!onlyEmpty || TextOf(s).Length == 0))
+                        : [column]);
                 }
-
-                named.AddRange(sources.Count > 0 ? sources.Where(s => !OtherMonth(s) && TextOf(s).Length == 0) : [column]);
             }
 
             var distinct = named.DistinctBy(c => c.Id).OrderBy(c => c.Ordinal).ThenBy(c => c.Id).ToList();
@@ -324,6 +367,31 @@ internal sealed class CalculationRejectionReasons(
         }
 
         return result;
+    }
+
+    private static readonly string[] MonthNames =
+    [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+    ];
+
+    /// <summary>Місяць колонки: прив'язка <see cref="ColumnDef.MonthNumber"/>, інакше код — назва місяця (AN-164c).</summary>
+    private static int? MonthOf(ColumnDef column)
+        => column.IsMonthColumn && column.MonthNumber is { } number ? number : MonthByName(column.Code);
+
+    /// <summary>Номер місяця за кодом колонки — повна англійська назва або перші три літери; інакше <c>null</c>.</summary>
+    private static int? MonthByName(string code)
+    {
+        for (var i = 0; i < MonthNames.Length; i++)
+        {
+            if (string.Equals(code, MonthNames[i], StringComparison.OrdinalIgnoreCase)
+                || string.Equals(code, MonthNames[i][..3], StringComparison.OrdinalIgnoreCase))
+            {
+                return i + 1;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
