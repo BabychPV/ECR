@@ -38,6 +38,17 @@ internal sealed record CalculationRejectionReason(string? RuleCode, IReadOnlyLis
 /// <para>
 /// ⛔ Безпека: хоч одна названа колонка прихована від читача — колонок немає зовсім (як у підказках).
 /// </para>
+/// <para>
+/// ⛔ Q-17 (LAND-YEAR G5): значення рядка — ЛОГІЧНІ, як у сітці. У таблиці «місяці в колонках» колонка з іншим власником
+/// (не-місячна — якір року, M{m} — період m) лежить в екземплярі ВЛАСНИКА; фізичне читання екземпляра перегляду давало
+/// порожні статус і ключі правил у не-власних місяцях — правило «не збігалося», а заповнена колонка називалась порожньою.
+/// Тепер, як <c>PatchCellsHandler.PlanOwnerBaselineAsync</c>: власник — <see cref="IMonthColumnRouter.ForeignColumnsAsync"/>,
+/// рядок власника — той самий <c>RowKey</c>, комірки власників — у ТОМУ САМОМУ пакетному <c>ReadCellsAsync</c>; фізичне
+/// введене значення чужої колонки в екземплярі перегляду «затінене», обчислене зі значенням — лишається. Значення
+/// власника береться ЛИШЕ для колонки, яку читач бачить на логічній адресі І в періоді-власнику (D-214); інакше колонка
+/// для правила порожня (лише звужує). Маршрутизація вимкнена, копія аркуша, таблиця поза Q-17 — читання як було, без
+/// звернень до бази; інакше на таблицю +1 запит екземплярів року і по 1 запиту рядків на період-власник (≤ 13).
+/// </para>
 /// </remarks>
 internal sealed class CalculationRejectionReasons(
     IRowStore rowStore,
@@ -46,7 +57,8 @@ internal sealed class CalculationRejectionReasons(
     IPeriodStore periods,
     IMethodologyStore methodologies,
     IFormulaEngine formulaEngine,
-    IColumnPathMapper? columnMapper)
+    IColumnPathMapper? columnMapper,
+    IMonthColumnRouter? monthRouter = null)
 {
     /// <summary>Скільки відхилених рядків читається одним зверненням до комірок (рядки × колонки таблиці).</summary>
     internal const int ReadChunkRows = 200;
@@ -57,6 +69,10 @@ internal sealed class CalculationRejectionReasons(
     /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
     /// <param name="rejected">Видимі проблеми виду <see cref="ICalculationIssueStore.CategoryRuleRejected"/>.</param>
     /// <param name="canReadColumn">Чи бачить читач колонку.</param>
+    /// <param name="canReadColumnInOwner">
+    /// Q-17: чи бачить читач колонку в періоді-власнику (межа D-214, <c>InPeriod(owner)</c>); <c>false</c> — значення
+    /// власника не береться.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>(TableDefId, RowKey, MethodologyId) → причина; немає ключа — причину не виведено.</returns>
     public async Task<IReadOnlyDictionary<(int TableDefId, string RowKey, int? MethodologyId), CalculationRejectionReason>>
@@ -66,6 +82,7 @@ internal sealed class CalculationRejectionReasons(
             long? sheetCopyId,
             IReadOnlyList<CalculationIssueRow> rejected,
             Func<int, bool> canReadColumn,
+            Func<PeriodKey, int, bool> canReadColumnInOwner,
             CancellationToken ct)
     {
         var result = new Dictionary<(int, string, int?), CalculationRejectionReason>();
@@ -139,14 +156,51 @@ internal sealed class CalculationRejectionReasons(
             }
 
             var columnIds = groupTable.Columns.Where(c => !c.IsDeleted).Select(c => c.Id).ToList();
+            var owners = await PlanOwnerReadAsync(
+                    documentId, period, sheetCopyId, groupTable,
+                    [.. group.Select(r => (r.RowId, r.Issue.RowKey)).Distinct()],
+                    canReadColumn, canReadColumnInOwner, ct)
+                .ConfigureAwait(false);
+
             foreach (var chunk in group.Select(r => r.RowId).Distinct().Chunk(ReadChunkRows))
             {
+                var addresses = chunk.SelectMany(row => columnIds.Select(c => new CellAddress(period, row, c))).ToList();
+                List<(CellAddress Owner, CellAddress Logical)> ownerPairs = owners is null
+                    ? []
+                    : [.. chunk.SelectMany(row => owners.ByRow.TryGetValue(row, out var pairs) ? pairs : [])];
+
                 var read = await cellStore
-                    .ReadCellsAsync([.. chunk.SelectMany(row => columnIds.Select(c => new CellAddress(period, row, c)))], ct)
+                    .ReadCellsAsync([.. addresses, .. ownerPairs.Select(p => p.Owner)], ct)
                     .ConfigureAwait(false);
-                foreach (var (address, value) in read)
+
+                if (owners is null)
                 {
-                    cells[address] = value;
+                    foreach (var (address, value) in read)
+                    {
+                        cells[address] = value;
+                    }
+
+                    continue;
+                }
+
+                // Логічна розкладка, як MonthRoutedCellStore: фізичне введене значення чужої колонки затінене власником,
+                // обчислене зі значенням — лишається й приховує власника.
+                foreach (var address in addresses)
+                {
+                    if (read.TryGetValue(address, out var value)
+                        && (!owners.Shadowed.Contains(address.ColumnDefId)
+                            || (value.IsCalculated && MethodologyRuleMatcher.Text(value) is not null)))
+                    {
+                        cells[address] = value;
+                    }
+                }
+
+                foreach (var (owner, logical) in ownerPairs)
+                {
+                    if (read.TryGetValue(owner, out var value))
+                    {
+                        cells.TryAdd(logical, value);
+                    }
                 }
             }
         }
@@ -231,6 +285,93 @@ internal sealed class CalculationRejectionReasons(
         }
 
         return result;
+    }
+
+    /// <summary>Q-17: як читати логічні значення рядків однієї таблиці.</summary>
+    /// <param name="Shadowed">Колонки з іншим власником: їхнє введене фізичне значення в екземплярі перегляду затінене.</param>
+    /// <param name="ByRow">Рядок перегляду → пари (адреса у власника, логічна адреса) — лише видимих читачеві колонок.</param>
+    private sealed record OwnerReadPlan(
+        IReadOnlySet<int> Shadowed, IReadOnlyDictionary<long, List<(CellAddress Owner, CellAddress Logical)>> ByRow);
+
+    /// <summary>
+    /// Q-17 (G5): план логічного читання таблиці «місяці в колонках» у періоді, що не володіє частиною колонок
+    /// (див. remarks класу). <c>null</c> — читання фізичне, як було (без звернень до бази за вимкненого роутера).
+    /// </summary>
+    private async Task<OwnerReadPlan?> PlanOwnerReadAsync(
+        long documentId,
+        PeriodKey period,
+        long? sheetCopyId,
+        TableDef table,
+        IReadOnlyList<(long RowId, string RowKey)> rows,
+        Func<int, bool> canReadColumn,
+        Func<PeriodKey, int, bool> canReadColumnInOwner,
+        CancellationToken ct)
+    {
+        // RS: копії аркушів Q-17 не маршрутизуються — їхні значення в їхніх комірках.
+        if (monthRouter is not { Enabled: true } || sheetCopyId is not null || !monthRouter.AppliesToTable(table))
+        {
+            return null;
+        }
+
+        var document = await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false);
+        if (document is null)
+        {
+            return null;
+        }
+
+        var foreign = (await monthRouter.ForeignColumnsAsync(document, table, period, ct).ConfigureAwait(false))
+            .Where(f => f.OwnerPeriod != period)
+            .ToList();
+        if (foreign.Count == 0)
+        {
+            return null;
+        }
+
+        var byRow = new Dictionary<long, List<(CellAddress Owner, CellAddress Logical)>>();
+
+        // ⛔ Лише звужує: значення власника — тільки колонкам, видимим на логічній адресі І в періоді-власнику.
+        var readable = foreign
+            .Where(f => canReadColumn(f.Column.Id) && canReadColumnInOwner(f.OwnerPeriod, f.Column.Id))
+            .ToList();
+        if (readable.Count > 0)
+        {
+            var instances = (await rowStore
+                    .GetTableInstancesOfTableInYearAsync(documentId, table.Id, period.Year, ct)
+                    .ConfigureAwait(false))
+                .Where(i => i.SheetCopyId is null)
+                .GroupBy(i => i.PeriodKey)
+                .ToDictionary(g => g.Key, g => g.First());
+
+            foreach (var byOwner in readable.GroupBy(f => f.OwnerPeriod).OrderBy(g => g.Key.Value))
+            {
+                if (!instances.TryGetValue(byOwner.Key.Value, out var instance))
+                {
+                    continue; // екземпляра власника немає — у сітці ці колонки порожні
+                }
+
+                var ownerRows = await rowStore.GetRowIdsAsync(instance.TableInstanceId, byOwner.Key, ct).ConfigureAwait(false);
+                foreach (var (rowId, rowKey) in rows)
+                {
+                    if (!ownerRows.TryGetValue(rowKey, out var ownerRowId))
+                    {
+                        continue;
+                    }
+
+                    if (!byRow.TryGetValue(rowId, out var pairs))
+                    {
+                        byRow[rowId] = pairs = [];
+                    }
+
+                    foreach (var column in byOwner)
+                    {
+                        pairs.Add((new CellAddress(byOwner.Key, ownerRowId, column.Column.Id),
+                            new CellAddress(period, rowId, column.Column.Id)));
+                    }
+                }
+            }
+        }
+
+        return new OwnerReadPlan(foreign.Select(f => f.Column.Id).ToHashSet(), byRow);
     }
 
     /// <summary>Аргументи <c>@Code</c> правила категорії версії разом із формулами, до яких воно веде.</summary>

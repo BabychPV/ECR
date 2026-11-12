@@ -28,7 +28,8 @@ public sealed class GetCalculationIssuesHandler(
     IPeriodStore? periods = null,
     IMethodologyStore? methodologies = null,
     IColumnPathMapper? columnMapper = null,
-    IFormulaEngine? formulaEngine = null)
+    IFormulaEngine? formulaEngine = null,
+    IMonthColumnRouter? monthRouter = null)
 {
     private readonly CalculationIssueHints? hints =
         rowStore is null || cellStore is null || metadata is null || periods is null || methodologies is null
@@ -40,7 +41,8 @@ public sealed class GetCalculationIssuesHandler(
         rowStore is null || cellStore is null || metadata is null || periods is null || methodologies is null
         || formulaEngine is null
             ? null
-            : new CalculationRejectionReasons(rowStore, cellStore, metadata, periods, methodologies, formulaEngine, columnMapper);
+            : new CalculationRejectionReasons(
+                rowStore, cellStore, metadata, periods, methodologies, formulaEngine, columnMapper, monthRouter);
 
     /// <summary>Право на перегляд документа (`02-contracts.md` §9).</summary>
     public const string Permission = "Document.View";
@@ -67,9 +69,20 @@ public sealed class GetCalculationIssuesHandler(
         }
 
         var key = new PeriodKey(periodKey);
-        var readable = key.IsValid
-            ? (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(key)
-            : await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var anyPeriod = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var readable = key.IsValid ? anyPeriod.InPeriod(key) : anyPeriod;
+
+        // Q-17 (G5): межа D-214 періоду-власника колонки — одна область на власника (їх ≤ 13), як OwnerScopeMask.
+        var ownerScopes = new Dictionary<PeriodKey, DocumentReadScope>();
+        bool CanReadInOwner(PeriodKey owner, int columnId)
+        {
+            if (!ownerScopes.TryGetValue(owner, out var scope))
+            {
+                ownerScopes[owner] = scope = anyPeriod.InPeriod(owner);
+            }
+
+            return scope.CanReadColumn(columnId);
+        }
 
         var visible = rows.Where(r => readable.CanReadTable(r.TableDefId)).ToList();
 
@@ -83,7 +96,7 @@ public sealed class GetCalculationIssuesHandler(
         var rejected = visible.Where(r => r.Kind == ICalculationIssueStore.CategoryRuleRejected).ToList();
         var why = reasons is null || rejected.Count == 0 || !key.IsValid
             ? new Dictionary<(int, string, int?), CalculationRejectionReason>()
-            : await reasons.BuildAsync(documentId, key, sheetCopyId, rejected, readable.CanReadColumn, ct)
+            : await reasons.BuildAsync(documentId, key, sheetCopyId, rejected, readable.CanReadColumn, CanReadInOwner, ct)
                 .ConfigureAwait(false);
 
         return new CalculationIssuesDto(
