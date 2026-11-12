@@ -342,7 +342,25 @@ public interface ITemplateVersionStore
     /// <exception cref="Errors.BusinessRuleException">Дерево порушує правила — <c>ECR-TMPL-4229</c>.</exception>
     public Task<IReadOnlyList<HeaderGroupRow>> ReplaceHeaderGroupsAsync(
         int templateVersionId, int tableDefId, IReadOnlyList<HeaderGroupInput> groups, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ R-3 (рішення PO 11.11, D-478): типи живих колонок ОПУБЛІКОВАНИХ і ЗАСТАРІЛИХ версій шаблону — ті самі версії
+    /// й сутності, які обʼєднує стабільна вʼюха <c>rpt.usp_GenerateStableViews</c> (живі аркуш, таблиця, колонка).
+    /// </summary>
+    /// <param name="templateId">Шаблон.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Рядок на кожну живу колонку кожної такої версії.</returns>
+    public Task<IReadOnlyList<PublishedColumnType>> ListPublishedColumnTypesAsync(int templateId, CancellationToken ct);
 }
+
+/// <summary>✎ R-3: тип колонки опублікованої/застарілої версії шаблону (вхід перевірки родини типу при публікації).</summary>
+/// <param name="SheetCode">Код аркуша.</param>
+/// <param name="TableCode">Код таблиці.</param>
+/// <param name="ColumnCode">Код колонки.</param>
+/// <param name="DataType">Тип даних колонки в цій версії.</param>
+/// <param name="Version">Номер версії шаблону.</param>
+public sealed record PublishedColumnType(
+    string SheetCode, string TableCode, string ColumnCode, Domain.Enums.CellDataType DataType, string Version);
 
 /// <summary>Група у вході заміни дерева: батько — кодом, порядок — серед сусідів.</summary>
 public sealed record HeaderGroupInput(

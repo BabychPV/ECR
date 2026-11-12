@@ -1340,6 +1340,20 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<PublishedColumnType>> ListPublishedColumnTypesAsync(int templateId, CancellationToken ct)
+        => await (
+                from c in db.ColumnDefs.AsNoTracking()
+                join t in db.TableDefs.AsNoTracking() on c.TableDefId equals t.Id
+                join s in db.SheetDefs.AsNoTracking() on t.SheetDefId equals s.Id
+                join v in db.TemplateVersions.AsNoTracking() on s.TemplateVersionId equals v.Id
+                where v.TemplateId == templateId
+                      && (v.Status == TemplateVersionStatus.Published || v.Status == TemplateVersionStatus.Deprecated)
+                      && !c.IsDeleted && !t.IsDeleted && !s.IsDeleted
+                select new PublishedColumnType(s.Code, t.Code, c.Code, c.DataType, v.Version))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<int> ApplyPresentationAsync(
         int templateVersionId, IReadOnlyList<PresentationChange> changes, CancellationToken ct)
     {
