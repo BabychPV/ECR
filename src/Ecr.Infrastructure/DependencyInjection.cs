@@ -574,6 +574,10 @@ public static class DependencyInjection
         services.AddScoped<IReportSnapshotBuilder, Reporting.ReportSnapshotBuilder>();
         services.AddSingleton<IReportViewStatus, Reporting.ReportViewStatus>();
         services.AddScoped<IReportViewGenerator, Reporting.ReportViewGenerator>();
+
+        // ✎ P-4b (D-479): вʼюхи SSRS після публікації — фоновою задачею злиття на шаблон (лейн Default, процес Api:
+        // стан картки `reportviews` — singleton у тому самому процесі).
+        services.AddScoped<IReportViewsJob, Jobs.ReportViewsJob>();
         services.AddSingleton<ISecretProvider, ConfigurationSecretProvider>();
         services.AddSingleton<Ecr.Application.Ports.IEndpointNetwork, Integration.EndpointNetwork>();
 

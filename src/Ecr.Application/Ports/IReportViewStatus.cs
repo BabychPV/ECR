@@ -27,4 +27,27 @@ public interface IReportViewStatus
     /// <summary>Поточні незакриті збої.</summary>
     /// <returns>Знімок.</returns>
     public IReadOnlyList<ReportViewFailure> Snapshot();
+
+    /// <summary>
+    /// ✎ P-4b (D-479): вʼюхи шаблону поставлено на перегенерацію у фоні (<see cref="IReportViewsJob"/>) — картка
+    /// <c>reportviews</c> показує «оновлюються», доки задача не завершиться.
+    /// </summary>
+    /// <param name="templateId">Шаблон.</param>
+    /// <remarks>
+    /// ⚠ Члени P-4b мають порожню реалізацію за замовчуванням: реалізацій-записувачів у тестах кілька (лише збої), і
+    /// стан «оновлюються» їм не потрібен; справжню дає <c>ReportViewStatus</c>.
+    /// </remarks>
+    public void Pending(int templateId)
+    {
+    }
+
+    /// <summary>✎ P-4b: задача перегенерації вʼюх шаблону завершилась (успіхом чи збоєм — збій фіксує <see cref="Failed"/>).</summary>
+    /// <param name="templateId">Шаблон.</param>
+    public void Settled(int templateId)
+    {
+    }
+
+    /// <summary>✎ P-4b: шаблони, чиї вʼюхи зараз чекають перегенерації у фоні.</summary>
+    /// <returns>Знімок.</returns>
+    public IReadOnlyList<int> PendingTemplates() => [];
 }

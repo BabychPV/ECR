@@ -30,7 +30,10 @@ public sealed partial class PublishTemplateVersionHandler(
     ILogger<PublishTemplateVersionHandler>? logger = null,
     IReportViewStatus? viewStatus = null,
     IRegistryStore? registries = null,
-    Permits.Groups.IPermitGroupResolver? permitGroups = null)
+    Permits.Groups.IPermitGroupResolver? permitGroups = null,
+    // ✎ P-4b (D-479): вʼюхи SSRS — фоновою задачею злиття на шаблон. `null` — збирання без черги (тести, інструменти):
+    // тоді вʼюхи будуються синхронно після коміту, як до D-479.
+    IBackgroundJobScheduler? jobs = null)
 {
     /// <summary>Право на публікацію версії шаблону (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Publish";
@@ -79,18 +82,61 @@ public sealed partial class PublishTemplateVersionHandler(
         // пізніше, чекає коміту публікації й бачить `Published` (див.
         // `DraftVersionLock`). Порядок блокувань — версія першою, як у всіх
         // структурних обробниках.
+        var templateId = 0;
         await uow.ExecuteInTransactionAsync(
-            token => PublishLockedAsync(templateVersionId, userId, reason, token),
+            async token => templateId = await PublishLockedAsync(templateVersionId, userId, reason, token).ConfigureAwait(false),
             ct).ConfigureAwait(false);
 
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
 
         // ⛔ ПІСЛЯ коміту й поза транзакцією: збій вʼюх публікацію не відкочує.
-        await GenerateViewsBestEffortAsync(templateVersionId, ct).ConfigureAwait(false);
+        // ⛔ P-4b (D-479): і НЕ в цьому HTTP-запиті — на реальному шаблоні Land генерація вʼюх займала ~131 с із ~135 с
+        // публікації. Фоновою задачею злиття на шаблон; публікація не звітує про вʼюхи, яких не будувала: стан — на
+        // картці `reportviews` («оновлюються» → готово або збій), задача — у черзі /admin/jobs (повтор — «Restart»).
+        if (jobs is null)
+        {
+            await GenerateViewsBestEffortAsync(templateVersionId, ct).ConfigureAwait(false);
+            return;
+        }
+
+        await QueueViewsAsync(templateId, templateVersionId, userId, ct).ConfigureAwait(false);
     }
 
-    /// <summary>Публікація під блоком рядка версії, усередині транзакції.</summary>
-    private async Task PublishLockedAsync(int templateVersionId, int userId, string reason, CancellationToken ct)
+    /// <summary>
+    /// ✎ P-4b (D-479): ставить перегенерацію вʼюх шаблону у фон — ЗЛИТТЯМ на шаблон (<see cref="ReportViewsTarget"/>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Злиття, а не витіснення (<c>EnqueueExclusiveAsync</c>): автоматична постановка не перериває прогін, що вже йде, —
+    /// друга публікація того самого шаблону ставить ще один прогін ПІСЛЯ нього (черга в базі) або зливається з тим, що
+    /// чекає. Задача бере всі опубліковані версії шаблону, тож злиття не губить жодної.
+    /// ⚠ Збій ПОСТАНОВКИ не відкочує вже закомічену публікацію: він — на картці <c>reportviews</c> і в журналі;
+    /// відновлення — старт застосунку (перегенерує вʼюхи, чиї входи змінилися) або <c>EXEC rpt.usp_GenerateTemplateViews</c>.
+    /// </remarks>
+    private async Task QueueViewsAsync(int templateId, int templateVersionId, int userId, CancellationToken ct)
+    {
+        viewStatus?.Pending(templateId);
+        try
+        {
+            await jobs!
+                .EnqueueCoalescedAsync<IReportViewsJob>(
+                    ReportViewsTarget.Of(templateId), new ReportViewsTask(templateId), ct, userId)
+                .ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Найкраще зусилля: збій постановки не має ламати вже закомічену публікацію.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            viewStatus?.Settled(templateId);
+            viewStatus?.Failed(new ReportViewFailure(templateVersionId, 0, "Report view regeneration was not queued: " + ex.Message));
+            if (logger is not null)
+            {
+                LogViewsFailed(logger, templateVersionId, null, ex.Message);
+            }
+        }
+    }
+
+    /// <summary>Публікація під блоком рядка версії, усередині транзакції; повертає шаблон версії.</summary>
+    private async Task<int> PublishLockedAsync(int templateVersionId, int userId, string reason, CancellationToken ct)
     {
         // ⚠ Стан, повернений блоком, тут не перевіряється окремо: відмову
         // для вже опублікованої версії дає `version.Publish` нижче тим самим
@@ -287,6 +333,7 @@ public sealed partial class PublishTemplateVersionHandler(
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
+        return version.TemplateId;
     }
 
     /// <summary>

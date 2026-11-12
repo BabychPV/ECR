@@ -8,6 +8,34 @@ public sealed class ReportViewStatus : IReportViewStatus
 {
     private readonly object _gate = new();
     private readonly Dictionary<int, ReportViewFailure> _failures = [];
+    private readonly HashSet<int> _pending = [];
+
+    /// <inheritdoc />
+    public void Pending(int templateId)
+    {
+        lock (_gate)
+        {
+            _pending.Add(templateId);
+        }
+    }
+
+    /// <inheritdoc />
+    public void Settled(int templateId)
+    {
+        lock (_gate)
+        {
+            _pending.Remove(templateId);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<int> PendingTemplates()
+    {
+        lock (_gate)
+        {
+            return [.. _pending.Order()];
+        }
+    }
 
     /// <inheritdoc />
     public void Failed(ReportViewFailure failure)
