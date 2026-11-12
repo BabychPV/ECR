@@ -84,6 +84,19 @@ public static class PublishChecks
 
         var nodes = new List<FormulaNode>();
 
+        // ⛔ P-4 (аудит 2026-11-10): виробники комірок — той самий індекс, що й у рантаймі (L2b,
+        // `RecalculationPlanBuilder.ProducerIndex`), а не перебір формул таблиці на кожну залежність.
+        var live = new Dictionary<int, (TableDef Table, FormulaDef Formula)>();
+        foreach (var liveTable in tables.Values)
+        {
+            foreach (var liveFormula in liveTable.Formulas.Where(f => !f.IsDeleted))
+            {
+                live.TryAdd(liveFormula.Id, (liveTable, liveFormula));
+            }
+        }
+
+        var producers = new Dictionary<int, Recalculation.RecalculationPlanBuilder.ProducerIndex>();
+
         foreach (var table in tables.Values)
         {
             foreach (var formula in table.Formulas.Where(f => !f.IsDeleted))
@@ -109,7 +122,7 @@ public static class PublishChecks
 
                 nodes.Add(new FormulaNode(
                     formula.Id, table.Id, formula.Scope, formula.ColumnDefId, formula.RowDefId,
-                    DependsOn(formula, dependencies, tables)));
+                    DependsOn(formula, dependencies, tables, live, producers)));
             }
         }
 
@@ -131,14 +144,22 @@ public static class PublishChecks
             // Порядок фіксується ПРИ ПУБЛІКАЦІЇ, а не будується щоразу в
             // рантаймі: сортувати граф на кожен запит — витрата, якої бюджет
             // не передбачає (ФВ-9.4).
+            //
+            // ⛔ P-4: словник замість `SelectMany(...).FirstOrDefault` на кожен id (O(формул²)). Перша формула з id —
+            // як і було (`TryAdd`, видалені теж); лічильник росте лише для знайдених.
+            var byId = new Dictionary<int, FormulaDef>();
+            foreach (var candidate in tables.Values.SelectMany(t => t.Formulas))
+            {
+                byId.TryAdd(candidate.Id, candidate);
+            }
+
             var order = 0;
             foreach (var id in ordering.Order)
             {
-                var formula = tables.Values
-                    .SelectMany(t => t.Formulas)
-                    .FirstOrDefault(f => f.Id == id);
-
-                formula?.SetEvaluationOrder(order++);
+                if (byId.TryGetValue(id, out var formula))
+                {
+                    formula.SetEvaluationOrder(order++);
+                }
             }
         }
 
@@ -228,7 +249,9 @@ public static class PublishChecks
     private static List<int> DependsOn(
         FormulaDef formula,
         IReadOnlyList<FormulaDependencyRef> dependencies,
-        Dictionary<int, TableDef> tables)
+        Dictionary<int, TableDef> tables,
+        Dictionary<int, (TableDef Table, FormulaDef Formula)> live,
+        Dictionary<int, Recalculation.RecalculationPlanBuilder.ProducerIndex> producers)
     {
         var result = new List<int>();
 
@@ -262,13 +285,19 @@ public static class PublishChecks
             // пише — це цикл) і випадково рятував законне міжперіодне
             // посилання на власну колонку. Друге тепер закриває перевірка
             // зсуву вище, а перше має бути видним (ФВ-9.4).
-            foreach (var candidate in table.Formulas.Where(f => !f.IsDeleted))
+            //
+            // ⛔ P-4 (аудит 2026-11-10): кандидати — з індексу виробників таблиці (будується раз на таблицю), а не
+            // перебір усіх формул таблиці з лінійним пошуком рядка на кожну залежність. `Candidates` віддає їх у
+            // порядку `TableDef.Formulas` і з остаточною перевіркою `FormulaOutputs.Produces`; саму формулу НЕ
+            // виключає (самопосилання лишається циклом, ФВ-9.4).
+            if (!producers.TryGetValue(table.Id, out var index))
             {
-                if (Recalculation.FormulaOutputs.Produces(
-                        candidate, table, dependency.RowKey, dependency.ColumnDefId))
-                {
-                    result.Add(candidate.Id);
-                }
+                producers[table.Id] = index = Recalculation.RecalculationPlanBuilder.ProducerIndex.Build(table, live);
+            }
+
+            foreach (var candidate in index.Candidates(dependency.RowKey, dependency.ColumnDefId))
+            {
+                result.Add(candidate.Id);
             }
         }
 

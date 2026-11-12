@@ -25,14 +25,36 @@ public sealed class TopologicalSorter
             }
         }
 
-        var remaining = nodes.ToDictionary(
-            node => node,
-            node => new HashSet<int>(graph.DependenciesOf(node).Where(nodes.Contains)));
+        // ⛔ P-4 (аудит 2026-11-10): зворотні ребра замість повного проходу по `remaining` на кожен вузол (O(V²):
+        // ~800 млн ітерацій на 40 000 формул під блоком версії при публікації). Порядок виходу ТОЙ САМИЙ — він
+        // фіксується в `EvaluationOrder` і зберігається: звільнені вузли ставляться в чергу в порядку перебору `nodes`
+        // (= порядок вставки колишнього словника `remaining`, у який після побудови нічого не додавалось).
+        // Сторож — `TopologicalSorterTests.Порядок_збігається_з_еталонним_алгоритмом`.
+        var position = new Dictionary<int, int>(nodes.Count);
+        var remaining = new Dictionary<int, HashSet<int>>(nodes.Count);
+        var dependents = new Dictionary<int, List<int>>();
+        var next = 0;
+        foreach (var node in nodes)
+        {
+            position[node] = next++;
+            var dependencies = new HashSet<int>(graph.DependenciesOf(node).Where(nodes.Contains));
+            remaining[node] = dependencies;
+            foreach (var dependency in dependencies)
+            {
+                if (!dependents.TryGetValue(dependency, out var list))
+                {
+                    dependents[dependency] = list = [];
+                }
+
+                list.Add(node);
+            }
+        }
 
         var order = new List<int>(nodes.Count);
         var ready = new Queue<int>(remaining.Where(p => p.Value.Count == 0)
                                             .Select(p => p.Key)
                                             .OrderBy(id => id));
+        var released = new List<int>();
 
         while (ready.Count > 0)
         {
@@ -40,12 +62,25 @@ public sealed class TopologicalSorter
             order.Add(node);
             remaining.Remove(node);
 
-            foreach (var (dependent, dependencies) in remaining)
+            if (!dependents.TryGetValue(node, out var waiting))
             {
-                if (dependencies.Remove(node) && dependencies.Count == 0)
+                continue;
+            }
+
+            released.Clear();
+            foreach (var dependent in waiting)
+            {
+                if (remaining.TryGetValue(dependent, out var dependencies)
+                    && dependencies.Remove(node) && dependencies.Count == 0)
                 {
-                    ready.Enqueue(dependent);
+                    released.Add(dependent);
                 }
+            }
+
+            released.Sort((a, b) => position[a].CompareTo(position[b]));
+            foreach (var dependent in released)
+            {
+                ready.Enqueue(dependent);
             }
         }
 
