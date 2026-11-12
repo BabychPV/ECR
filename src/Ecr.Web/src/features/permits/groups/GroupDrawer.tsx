@@ -271,7 +271,7 @@ export function GroupDrawer({ group, canEdit, onDirtyChange, switchRequested = f
         canEdit ? (
           <Group justify="space-between" gap="xs" w="100%" wrap="nowrap">
             {!isNew && !used ? (
-              <Button variant="default" color="statusError" data-group-delete="" onClick={() => setConfirmingDelete(true)}>
+              <Button variant="outline" color="statusError" data-group-delete="" onClick={() => setConfirmingDelete(true)}>
                 {t('permits.groups.drawer.delete')}
               </Button>
             ) : (

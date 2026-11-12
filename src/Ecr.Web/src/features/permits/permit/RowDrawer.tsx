@@ -251,7 +251,7 @@ export function RowDrawer({
         )}
         <Group justify="space-between" gap="xs">
           {loaded !== null && !readOnly ? (
-            <Button variant="default" color="statusError" disabled={remove.isPending} onClick={() => remove.mutate(loaded)}>
+            <Button variant="outline" color="statusError" disabled={remove.isPending} onClick={() => remove.mutate(loaded)}>
               {t('permits.page.row.delete')}
             </Button>
           ) : (

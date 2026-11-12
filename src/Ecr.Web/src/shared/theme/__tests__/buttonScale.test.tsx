@@ -160,6 +160,12 @@ function violations(tag: Tag): string[] {
     found.push(`${where}: style задає розмір/відступ/шрифт — розмір задає шкала`);
   }
 
+  // U-5 (аудит 2026-11): `variant="default"` ігнорує `color` (Mantine defaultVariantColorsResolver) — руйнівна кнопка
+  // малювалася б нейтральною, як «Cancel» поруч.
+  if (tag.component === 'Button' && props.get('variant') === '"default"' && props.get('color') === '"statusError"') {
+    found.push(`${where}: variant="default" гасить color="statusError" — руйнівна дія: variant="outline" (ui-conventions.md)`);
+  }
+
   return found;
 }
 
@@ -189,6 +195,8 @@ describe('правило кнопок: одна шкала розмірів', ()
     ['style={{ flexShrink: 0 }}', false],
     ['variant="default" onClick={() => go({ px: 1 })}', false],
     ['leftSection={<Icon size={14} h={2} />} fullWidth', false],
+    ['variant="default" color="statusError"', true],
+    ['variant="outline" color="statusError"', false],
   ])('розбір тегу: %s → порушення %s', (attrs, bad) => {
     // ⛔ Сам розбір — частина гейта: без цих рядків «чисто» могло б означати
     // «регулярка не дочитала тег».

@@ -145,7 +145,7 @@ export function SheetCopyBar({ documentId, target, canAdd, onSelect }: SheetCopy
         {isCopy && (
           <Button
             size="xs"
-            variant="default"
+            variant="outline"
             color="statusError"
             data-testid="sheet-copy-delete"
             onClick={() => {
