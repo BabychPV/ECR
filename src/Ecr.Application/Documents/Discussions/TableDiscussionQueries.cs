@@ -24,6 +24,9 @@ public sealed class TableDiscussionQueries(
     IEditAssignmentManagementStore candidateSource,
     IClock clock)
 {
+    /// <summary>Скільки кандидатів перевіряється на одну відповідь (P-7, аудит 2026-11-10).</summary>
+    /// <remarks>Кожна перевірка — профіль + видимість + межі (4–10 звернень); 80 = дві сторінки пошуку.</remarks>
+    public const int MentionScanBudget = 80;
 
     /// <summary>Підсумок чатів усіх таблиць документа: ОДНА команда до таблиць чату.</summary>
     public async Task<TableDiscussionSummaryDto> GetSummaryAsync(long documentId, CancellationToken ct)
@@ -187,7 +190,8 @@ public sealed class TableDiscussionQueries(
         var result = new List<TableDiscussionMentionCandidateDto>();
 
         // Страничний перебір: кандидатів без доступу відсіює CanSee, тож береться більше, ніж потрібно.
-        for (var skip = 0; skip < 200 && result.Count < 20; skip += 40)
+        // P-7 (рішення PO 11.11, варіант А): доступ перевіряється лише для MentionScanBudget найближчих збігів.
+        for (var skip = 0; skip < MentionScanBudget && result.Count < 20; skip += 40)
         {
             var page = await candidateSource.SearchCandidatesAsync(query, skip, 40, ct).ConfigureAwait(false);
             if (page.Count == 0)
