@@ -58,6 +58,9 @@ export function ChannelsPanel(): JSX.Element {
   // відгуку. Видалений канал — це сповіщення, які перестають доходити, і
   // людина дізнається про це не з екрана, а з тиші.
   const [removing, setRemoving] = useState<NotificationChannel | null>(null);
+  // ⛔ U-3 (аудит 2026-11): стерти адресу вебхука — незворотно (сервер її не віддає), тож через підтвердження з назвою
+  // каналу, як і видалення каналу.
+  const [clearingSecret, setClearingSecret] = useState(false);
 
   const channels = useQuery({
     queryKey: NotificationChannelsKey,
@@ -117,6 +120,7 @@ export function ChannelsPanel(): JSX.Element {
       await invalidate();
       setSecretFor(null);
       setSecret('');
+      setClearingSecret(false);
       showDone(t('notifications.secretSaved'));
     },
     onError: showApiError,
@@ -439,14 +443,10 @@ export function ChannelsPanel(): JSX.Element {
 
             <Group justify="flex-end">
               <Button
-                variant="default"
+                variant="outline"
                 color="statusError"
-                loading={saveSecretLoading}
                 disabled={!secretFor.hasSecret}
-                onClick={() => {
-                  if (saveSecret.isPending) return;
-                  saveSecret.mutate({ id: secretFor.id, secret: null });
-                }}
+                onClick={() => setClearingSecret(true)}
               >
                 {t('notifications.clearWebhook')}
               </Button>
@@ -464,6 +464,18 @@ export function ChannelsPanel(): JSX.Element {
           </Stack>
         )}
       </Modal>
+
+      <ConfirmModal
+        opened={clearingSecret && secretFor !== null}
+        title={t('notifications.clearWebhookTitle', { name: secretFor?.name ?? '' })}
+        text={t('notifications.clearWebhookText')}
+        verb={t('notifications.clearWebhook')}
+        isPending={saveSecret.isPending}
+        onConfirm={() => {
+          if (secretFor !== null && !saveSecret.isPending) saveSecret.mutate({ id: secretFor.id, secret: null });
+        }}
+        onClose={() => setClearingSecret(false)}
+      />
 
       <ConfirmModal
         opened={removing !== null}
