@@ -29,6 +29,25 @@ public sealed class ReportViewsHealthCheck(
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
         var failures = status.Snapshot();
+        var pending = status.PendingTemplates();
+
+        // ✎ P-4b (D-479): після публікації вʼюхи будуються у фоні — «оновлюються», а не «готово». Не Degraded: це нормальний
+        // перехідний стан, і SSRS лише ще не бачить нової версії. Збій (нижче) важливіший за «оновлюються».
+        if (failures.Count == 0 && pending.Count > 0)
+        {
+            var updating = await Text(
+                "health.reportviews.pending",
+                "Report views (rpt.v_*) are being updated in the background after a template publication "
+                + "(templates: {templates}); SSRS sees the new version once this finishes.",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["templates"] = string.Join(", ", pending.Select(id => id.ToString(CultureInfo.InvariantCulture))),
+                },
+                cancellationToken).ConfigureAwait(false);
+            return HealthCheckResult.Healthy(
+                updating,
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["pendingTemplates"] = string.Join(", ", pending) });
+        }
 
         if (failures.Count == 0)
         {
