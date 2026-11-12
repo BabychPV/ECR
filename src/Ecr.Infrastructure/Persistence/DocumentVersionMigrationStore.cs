@@ -327,6 +327,94 @@ public sealed partial class DocumentVersionMigrationStore(
                 ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
             });
 
+    /// <summary>
+    /// D-10: код таблиці <c>X → Y</c> (пункти <c>Renamed</c> плану — мапа перейменування) у чаті таблиці
+    /// (<c>doc.TableDiscussion*</c>) і в передачах зрізу (<c>doc.EditAssignment</c>). Без мапи — жодного звернення.
+    /// </summary>
+    /// <remarks>
+    /// Та сама транзакція переносу; повтор (відновлення) нічого не знаходить на <c>X</c> — ідемпотентно. Чат ключується
+    /// документом × кодом (без аркуша й періоду) — переїжджає цілим. Передача з ЯВНИМ періодом до «з місяця» лишається
+    /// на <c>X</c>: ці періоди лишились на старій версії (та сама межа, що в <c>WorkflowSql</c>). Код, який мапа веде в
+    /// РІЗНІ цілі на різних аркушах, у чаті не перейменовується (чат аркуша не знає). Ключ зрізу рахує лише домен
+    /// (<see cref="Domain.Entities.Documents.EditAssignment.RenameTable"/>). Колізія з наявною передачею під <c>Y</c> —
+    /// 2601 на <c>UQ_EditAssignment</c>, відкат усього переносу (явна відмова, не тиха втрата ексклюзивності).
+    /// </remarks>
+    private async Task RenameTableCodesAsync(int projectId, VersionMigrationPlan plan, DateTime now, CancellationToken ct)
+    {
+        var renames = plan.Items
+            .Where(i => i.Kind == "Renamed" && i.Field == "Code" && i.OldValue is not null && i.NewValue is not null
+                        && i.Path.Count(c => c == '.') == 1)
+            .Select(i => (Sheet: i.Path[..i.Path.IndexOf('.', StringComparison.Ordinal)], From: i.OldValue!, To: i.NewValue!))
+            .Distinct()
+            .ToList();
+        if (renames.Count == 0)
+        {
+            return;
+        }
+
+        var chatRenames = renames
+            .GroupBy(r => r.From, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Select(r => r.To).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1)
+            .Select(g => new { f = g.Key, t = g.First().To })
+            .ToList();
+        if (chatRenames.Count > 0)
+        {
+            var json = JsonSerializer.Serialize(chatRenames);
+            await db.Database.ExecuteSqlAsync($"""
+                DECLARE @r TABLE (f nvarchar(64) PRIMARY KEY, t nvarchar(64) NOT NULL);
+                INSERT @r (f, t) SELECT f, t FROM OPENJSON({json}) WITH (f nvarchar(64), t nvarchar(64));
+                DECLARE @d TABLE (Id bigint PRIMARY KEY);
+                INSERT @d (Id) SELECT Id FROM doc.Document WHERE ProjectId = {projectId};
+
+                UPDATE m SET m.TableDefCode = r.t
+                  FROM doc.TableDiscussionMessage m JOIN @r r ON r.f = m.TableDefCode JOIN @d d ON d.Id = m.DocumentId;
+                UPDATE x SET x.TableDefCode = r.t
+                  FROM doc.TableDiscussionMention x JOIN @r r ON r.f = x.TableDefCode JOIN @d d ON d.Id = x.DocumentId;
+                -- Підсумок і «прочитано» мають код у ключі: рядок під Y міг лишитися від старішої версії — тоді рядок X
+                -- знімається (повідомлення вже переїхали вище), інакше перейменовується.
+                DELETE t FROM doc.TableDiscussion t JOIN @r r ON r.f = t.TableDefCode JOIN @d d ON d.Id = t.DocumentId
+                 WHERE EXISTS (SELECT 1 FROM doc.TableDiscussion y WHERE y.DocumentId = t.DocumentId
+                                 AND y.TableDefCode = r.t AND y.SheetCopyKey = t.SheetCopyKey);
+                UPDATE t SET t.TableDefCode = r.t
+                  FROM doc.TableDiscussion t JOIN @r r ON r.f = t.TableDefCode JOIN @d d ON d.Id = t.DocumentId;
+                DELETE t FROM doc.TableDiscussionRead t JOIN @r r ON r.f = t.TableDefCode JOIN @d d ON d.Id = t.DocumentId
+                 WHERE EXISTS (SELECT 1 FROM doc.TableDiscussionRead y WHERE y.UserId = t.UserId AND y.DocumentId = t.DocumentId
+                                 AND y.TableDefCode = r.t AND y.SheetCopyKey = t.SheetCopyKey);
+                UPDATE t SET t.TableDefCode = r.t
+                  FROM doc.TableDiscussionRead t JOIN @r r ON r.f = t.TableDefCode JOIN @d d ON d.Id = t.DocumentId;
+                """, ct).ConfigureAwait(false);
+        }
+
+        // Передачі: один запит на всі пари мапи (без N+1), точна пара «аркуш + таблиця» — у пам'яті.
+        var sheetCodes = renames.Select(r => r.Sheet).Distinct().ToList();
+        var fromCodes = renames.Select(r => r.From).Distinct().ToList();
+        var fromPeriod = plan.FromPeriodKey;
+        var candidates = await db.EditAssignments
+            .Where(a => a.SheetCode != null && sheetCodes.Contains(a.SheetCode)
+                        && a.TableCode != null && fromCodes.Contains(a.TableCode)
+                        && (a.PeriodKeyValue == null || a.PeriodKeyValue >= fromPeriod)
+                        && db.Documents.Any(d => d.Id == a.DocumentId && d.ProjectId == projectId))
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var changed = false;
+        foreach (var assignment in candidates)
+        {
+            var target = renames.FirstOrDefault(r =>
+                string.Equals(r.Sheet, assignment.SheetCode, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(r.From, assignment.TableCode, StringComparison.OrdinalIgnoreCase));
+            if (target.To is not null)
+            {
+                assignment.RenameTable(target.To, now);
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+    }
+
     /// <summary>Відбиток мапи переносу (колонки, рядки, таблиці, аркуші, шапка, нові рядки, Lookup) - для звірки при відновленні.</summary>
     private static string PlanHash(VersionMigrationPlan plan)
     {
@@ -609,6 +697,9 @@ public sealed partial class DocumentVersionMigrationStore(
             }
 
             await SingleAsync(VersionMigrationStages.Workflow, WorkflowSql).ConfigureAwait(false);
+
+            // ⛔ D-10: дані, що ключуються КОДОМ таблиці (чат, передачі зрізу), — за мапою перейменування цього плану.
+            await RenameTableCodesAsync(projectId, plan, now, ct).ConfigureAwait(false);
 
             // Усе, що може відмовити й мусить відкотитися разом із переносом (журнал, мапінги збору), — ДО важкої частини.
             if (beforeCells is not null)
