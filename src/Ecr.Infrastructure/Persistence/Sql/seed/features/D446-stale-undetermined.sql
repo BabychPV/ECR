@@ -3,10 +3,10 @@
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'documents.staleUndetermined', N'ru', N'Актуальность не определена'),
-    (N'documents.staleUndetermined', N'kz', N'Өзектілігі анықталмайды'),
-    (N'documents.staleUndeterminedHint', N'ru', N'Часть данных вам не открыта — актуальность результатов не определяется'),
-    (N'documents.staleUndeterminedHint', N'kz', N'Деректердің бір бөлігі сізге ашық емес — нәтижелердің өзектілігі анықталмайды')
+    (N'documents.staleUndetermined', N'ru', N'Статус результатов скрыт'),
+    (N'documents.staleUndetermined', N'kz', N'Нәтижелер күйі жасырын'),
+    (N'documents.staleUndeterminedHint', N'ru', N'Часть документа вам не открыта, поэтому нельзя показать, актуальны ли рассчитанные результаты. Проверить это и при необходимости пересчитать может тот, кому открыт весь документ.'),
+    (N'documents.staleUndeterminedHint', N'kz', N'Құжаттың бір бөлігі сізге ашық емес, сондықтан есептелген нәтижелердің өзектілігін көрсету мүмкін емес. Мұны бүкіл құжатқа қолжетімділігі бар адам тексеріп, қажет болса қайта есептей алады.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -15,8 +15,8 @@ GO
 INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
-    (N'documents.staleUndetermined', N'en', N'Freshness unknown', 1),
-    (N'documents.staleUndeterminedHint', N'en', N'Some of the data is hidden from you, so result freshness can''t be determined', 1)
+    (N'documents.staleUndetermined', N'en', N'Results status hidden', 1),
+    (N'documents.staleUndeterminedHint', N'en', N'Part of this document is hidden from you, so we can''t show whether its calculated results are up to date. Someone who can see the whole document can check this and recalculate if needed.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

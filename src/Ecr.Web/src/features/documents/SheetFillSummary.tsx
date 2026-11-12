@@ -2,6 +2,7 @@ import type { JSX } from 'react';
 import { Badge, Group, Text } from '@mantine/core';
 import { summarize, useTableStatus } from '@/features/documents/api';
 import { t } from '@/shared/i18n';
+import { Hint } from '@/shared/ui/Hint';
 
 /** Який документ і за який період підсумовувати. */
 interface SheetFillSummaryProps {
@@ -50,9 +51,17 @@ export function SheetFillSummary({ documentId, periodKey }: SheetFillSummaryProp
     <Group gap="xs" data-testid="sheet-fill-summary">
       {summary.total > 0 && (
         // ✎ UI-15: дрібний підпис у рядку прогресу шапки (макет `.dp-l`), не заголовок.
-        <Text size="xs" c="dimmed" data-testid="sheet-fill-count">
-          {t('document.tablesFilledInDocument', { filled: summary.filled, total: summary.total })}
-        </Text>
+        // ✎ 12.11 (U3): поруч із «повністю» — скільки таблиць мають дані, і підказка, що означає «повністю»
+        // (кожна вхідна комірка, необовʼязкові теж): «0 of 49» на документі з даними читалося як «нічого не введено».
+        <Hint label={t('document.tablesFilledHint')} focusable>
+          <Text size="xs" c="dimmed" data-testid="sheet-fill-count">
+            {t('document.tablesFilledInDocument', {
+              withData: summary.withData,
+              filled: summary.filled,
+              total: summary.total,
+            })}
+          </Text>
+        </Hint>
       )}
 
       {summary.hasErrors === true && (

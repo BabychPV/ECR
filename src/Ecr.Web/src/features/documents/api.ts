@@ -54,6 +54,13 @@ interface FillSummary {
   total: number;
 
   /**
+   * ✎ 12.11 (U3, живий прохід W15r: «0 of 49» на документі з даними в багатьох таблицях): таблиці з хоча б одним
+   * введеним значенням. «Повністю» вимагає КОЖНУ вхідну комірку, необовʼязкові теж, тож на живих даних воно майже
+   * завжди 0 — і без цього числа підпис читався як «нічого не введено».
+   */
+  withData: number;
+
+  /**
    * Чи є хоч одне порушення рівня `Error`.
    *
    * ⛔ `null` — документ за цей період НЕ ПЕРЕВІРЯЛИ, і це не те саме, що
@@ -82,6 +89,7 @@ export function summarize(tables: readonly TableStatus[]): FillSummary {
   return {
     filled: toFill.filter((table) => table.filledCells >= table.inputCells).length,
     total: toFill.length,
+    withData: toFill.filter((table) => table.filledCells > 0).length,
     hasErrors: validated ? tables.some((table) => (table.errorCount ?? 0) > 0) : null,
   };
 }

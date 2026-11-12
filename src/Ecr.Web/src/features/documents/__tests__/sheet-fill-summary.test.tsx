@@ -103,6 +103,31 @@ describe('SheetFillSummary', () => {
     expect(screen.getByTestId('sheet-fill-count').textContent?.trim()).not.toBe('1 / 2');
   });
 
+  /**
+   * ✎ 12.11 (U3, живий прохід W15r): «Tables filled completely in the whole document: 0 of 49» на документі з даними в
+   * багатьох таблицях. Число правильне (повністю = КОЖНА вхідна комірка, необовʼязкові теж), але без числа таблиць із
+   * даними читалося як «нічого не введено». ⛔ Червоне без фіксу: немає `withData` і параметра підпису.
+   */
+  it('U3: поруч із «повністю» — скільки таблиць мають дані; підказка пояснює «повністю»', async () => {
+    respond([
+      table({ tableDefId: 1, filledCells: 3, inputCells: 4 }),
+      table({ tableDefId: 2, filledCells: 1, inputCells: 40 }),
+      table({ tableDefId: 3, filledCells: 0, inputCells: 4 }),
+    ]);
+
+    show();
+
+    await waitFor(() => {
+      const text = screen.getByTestId('sheet-fill-count').textContent ?? '';
+
+      expect(text).toContain('withData=2');
+      expect(text).toContain('filled=0');
+      expect(text).toContain('total=3');
+    });
+    expect(screen.getAllByText('⟦document.tablesFilledHint⟧', { selector: '[data-hint-text]' })).toHaveLength(1);
+    expect(summarize([table({ filledCells: 2, inputCells: 4 }), table({ tableDefId: 2, filledCells: 0, inputCells: 0 })]).withData).toBe(1);
+  });
+
   it('рахує заповненими лише таблиці, у яких закриті всі вхідні комірки', async () => {
     respond([
       table({ tableDefId: 1, filledCells: 4, inputCells: 4 }),

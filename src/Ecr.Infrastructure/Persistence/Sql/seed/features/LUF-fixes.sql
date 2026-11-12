@@ -6,8 +6,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'deny.approve.NoRight', N'kz', N'қазір бұл парақты бекіте немесе қайтара алмайсыз: бекіту құқығы жоқ немесе кезек басқа рөлге тиесілі'),
     (N'grid.tree.tablesFilledSheet', N'ru', N'Заполнено таблиц на этом листе: {filled} из {total}'),
     (N'grid.tree.tablesFilledSheet', N'kz', N'Осы парақта толтырылған кестелер: {filled} / {total}'),
-    (N'document.tablesFilledInDocument', N'ru', N'Полностью заполнено таблиц во всём документе: {filled} из {total}'),
-    (N'document.tablesFilledInDocument', N'kz', N'Бүкіл құжатта толық толтырылған кестелер: {filled} / {total}')
+    (N'document.tablesFilledInDocument', N'ru', N'Таблиц с данными во всём документе: {withData} из {total} · полностью заполнено: {filled}'),
+    (N'document.tablesFilledInDocument', N'kz', N'Бүкіл құжатта деректері бар кестелер: {withData} / {total} · толық толтырылғаны: {filled}')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -18,7 +18,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
     (N'deny.approve.NoRight', N'en', N'you cannot approve or reject this sheet right now: you lack the approval right, or the current workflow step is for another role', 1),
     (N'grid.tree.tablesFilledSheet', N'en', N'{filled} of {total} tables filled on this sheet', 1),
-    (N'document.tablesFilledInDocument', N'en', N'Tables filled completely in the whole document: {filled} of {total}', 1)
+    (N'document.tablesFilledInDocument', N'en', N'Tables with data in the whole document: {withData} of {total} · fully filled: {filled}', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

@@ -65,6 +65,14 @@ export function StaleResultsUndeterminedMark(): JSX.Element {
         c={fill.text}
         styles={{ root: { textTransform: 'none', letterSpacing: 'normal', fontWeight: 400, paddingInline: 0 } }}
         data-results-stale-undetermined="PartiallyHidden"
+        /* ✎ 12.11 (U2, живий прохід W15r): без знака бейдж не підказував, що в нього є пояснення, — «Freshness
+           unknown» лишався загадкою. Знак «?» — лише ознака підказки (aria-hidden): пояснення читалці дає Hint. */
+        rightSection={
+          <svg width={12} height={12} viewBox="0 0 24 24" aria-hidden="true" data-hint-affordance="" fill="none" stroke="currentColor" strokeWidth={2}>
+            <circle cx={12} cy={12} r={9} />
+            <path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7M12 17v.5" />
+          </svg>
+        }
       >
         {t('documents.staleUndetermined')}
       </Badge>

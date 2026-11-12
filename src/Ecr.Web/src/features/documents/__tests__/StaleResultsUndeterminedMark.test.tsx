@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { StaleResultsUndeterminedMark } from '@/features/documents/StaleResultsMark';
 import { testTheme } from '@/test/render';
+import { readSeedEnCatalog } from '@/test/seedSql';
 
 /**
  * ✎ D-446: позначка «актуальність результатів не визначається» (`resultsStaleUndetermined === 'PartiallyHidden'`)
@@ -36,5 +37,35 @@ describe('StaleResultsUndeterminedMark: пояснення доступне з �
 
     expect((await screen.findByRole('tooltip')).textContent).toBe(hint);
     expect(screen.getAllByRole('generic', { description: hint })).toContain(badge);
+  });
+
+  /**
+   * ✎ 12.11 (U2, живий прохід W15r): «Freshness unknown» не казав ні що це, ні що робити, і нічого не підказувало, що в
+   * бейджа є пояснення. ⛔ Червоне без фіксу: знака підказки немає; тексти в сіді — старі.
+   */
+  it('U2: бейдж має видимий знак підказки (лише ознака, aria-hidden)', () => {
+    render(
+      <MantineProvider theme={testTheme}>
+        <StaleResultsUndeterminedMark />
+      </MantineProvider>,
+    );
+
+    const badge = document.querySelector('[data-results-stale-undetermined]');
+    const sign = badge?.querySelector('[data-hint-affordance]');
+    expect(sign).not.toBeNull();
+    expect(sign?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('U2: у сіді підпис каже, що статус сховано, а підказка — чому і що робити', () => {
+    const catalog = readSeedEnCatalog();
+    const label = /\(N'documents\.staleUndetermined',\s*N'en',\s*N'((?:[^']|'')*)'/.exec(catalog)?.[1] ?? '';
+    const hint = /\(N'documents\.staleUndeterminedHint',\s*N'en',\s*N'((?:[^']|'')*)'/.exec(catalog)?.[1] ?? '';
+
+    expect(label).not.toBe('Freshness unknown');
+    expect(label.toLowerCase()).toContain('hidden');
+    // Чому: частину документа сховано; що робити: той, хто бачить увесь документ, перевіряє й перераховує.
+    expect(hint.toLowerCase()).toContain('hidden from you');
+    expect(hint.toLowerCase()).toContain('whole document');
+    expect(hint.toLowerCase()).toContain('recalculate');
   });
 });

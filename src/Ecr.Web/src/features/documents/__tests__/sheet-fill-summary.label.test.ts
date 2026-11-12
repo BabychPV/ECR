@@ -48,6 +48,15 @@ describe('U-06 · підпис заповненості в каталозі', ()
     expect(text).toContain('{total}');
   });
 
+  // ✎ 12.11 (U3): підпис несе й таблиці з даними, а підказка пояснює, що означає «повністю».
+  // ⛔ Червоне без фіксу: у тексті немає {withData}, ключа підказки в сіді немає.
+  it('U3: підпис несе {withData}; підказка document.tablesFilledHint є й пояснює необовʼязкові комірки', () => {
+    expect(tablesFilledInDocumentText()).toContain('{withData}');
+    const hint = /\(N'document\.tablesFilledHint',\s*N'en',\s*N'((?:[^']|'')*)'/.exec(seedMergeBlock());
+    expect(hint, 'у сіді немає document.tablesFilledHint (en)').not.toBeNull();
+    expect(hint?.[1]?.toLowerCase()).toContain('optional');
+  });
+
   it('текст називає САМЕ те, що рахується: таблиці, заповнені повністю', () => {
     const text = tablesFilledInDocumentText().toLowerCase();
 
