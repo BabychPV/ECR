@@ -154,11 +154,11 @@ internal static class TableValidation
     /// послідовності: правило рівня рядка читало комірку ЧУЖОГО рядка, а
     /// частіше не знаходило нічого і мовчки бачило <c>null</c>.
     /// </remarks>
-    private sealed class SliceContext(
-        TableDef table,
-        IReadOnlyList<CellRecord> cells,
-        IReadOnlyDictionary<string, long> rowIds) : IValidationContext
+    private sealed class SliceContext : IValidationContext
     {
+        private readonly TableDef _table;
+        private readonly IReadOnlyDictionary<string, long> _rowIds;
+
         // ⛔ Розгортання — СПІЛЬНЕ (`CellValueMapping.ToRuleValue`), а не
         // ad-hoc `ValueNumeric ?? ValueString` (аудит 2026-09-16, §3.2). Стара
         // форма давала `null` для КОЖНОЇ Bool- і Date-колонки, тож правила
@@ -167,16 +167,41 @@ internal static class TableValidation
         // незалежно від реального значення. Рівно той дефект, від якого
         // застерігає власний коментар цього файлу: «подання зобов'язане
         // рахувати РІВНО те саме, що показує кнопка "Перевірити"».
-        private readonly Dictionary<(long Row, int Column), object?> _values =
-            cells.ToDictionary(
+        //
+        // ⛔ P-3 (аудит 2026-11-10): словник будується ОДИН раз на зріз і ДІЛИТЬСЯ контекстами рядків. Доти `ForRow`
+        // перебудовував його з усіх комірок на кожен рядок — O(рядки × комірки) на «Перевірити» й подання.
+        private readonly Dictionary<(long Row, int Column), object?> _values;
+
+        /// <summary>Перше значення кожної колонки в порядку зрізу — те, що віддавав лінійний `FirstOrDefault`.</summary>
+        private readonly Dictionary<int, object?> _firstByColumn;
+
+        private readonly string? _currentRowKey;
+
+        public SliceContext(TableDef table, IReadOnlyList<CellRecord> cells, IReadOnlyDictionary<string, long> rowIds)
+        {
+            _table = table;
+            _rowIds = rowIds;
+            _values = cells.ToDictionary(
                 c => (c.Address.TableRowId, c.Address.ColumnDefId),
                 c => Ecr.Expressions.Evaluation.CellValueMapping.ToRuleValue(c.Value));
+            _firstByColumn = new Dictionary<int, object?>();
+            foreach (var cell in cells)
+            {
+                _firstByColumn.TryAdd(cell.Address.ColumnDefId, _values[(cell.Address.TableRowId, cell.Address.ColumnDefId)]);
+            }
+        }
 
-        private string? _currentRowKey;
+        private SliceContext(SliceContext shared, string rowKey)
+        {
+            _table = shared._table;
+            _rowIds = shared._rowIds;
+            _values = shared._values;
+            _firstByColumn = shared._firstByColumn;
+            _currentRowKey = rowKey;
+        }
 
-        /// <summary>Той самий зріз, наведений на конкретний рядок.</summary>
-        public SliceContext ForRow(string rowKey)
-            => new SliceContext(table, cells, rowIds) { _currentRowKey = rowKey };
+        /// <summary>Той самий зріз, наведений на конкретний рядок (словник — спільний, лише читається).</summary>
+        public SliceContext ForRow(string rowKey) => new(this, rowKey);
 
         /// <inheritdoc />
         public object? GetCell(string columnCode)
@@ -191,18 +216,18 @@ internal static class TableValidation
             // Рівень таблиці й документа «поточного рядка» не має, тому
             // однойменний метод віддає перше значення колонки: правило,
             // написане без рядка, і має на увазі саме таблицю цілком.
-            var column = table.Columns.FirstOrDefault(c => c.Code == columnCode);
+            var column = _table.Columns.FirstOrDefault(c => c.Code == columnCode);
             return column is null
                 ? null
-                : _values.FirstOrDefault(v => v.Key.Column == column.Id).Value;
+                : _firstByColumn.GetValueOrDefault(column.Id);
         }
 
         /// <inheritdoc />
         public object? GetCell(string rowKey, string columnCode)
         {
-            var column = table.Columns.FirstOrDefault(c => c.Code == columnCode);
+            var column = _table.Columns.FirstOrDefault(c => c.Code == columnCode);
 
-            return column is null || !rowIds.TryGetValue(rowKey, out var rowId)
+            return column is null || !_rowIds.TryGetValue(rowKey, out var rowId)
                 ? null
                 : _values.GetValueOrDefault((rowId, column.Id));
         }
