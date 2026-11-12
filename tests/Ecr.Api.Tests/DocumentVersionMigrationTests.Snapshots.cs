@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Ecr.Api.Startup;
 using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Workflow;
@@ -13,6 +14,8 @@ using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -48,6 +51,7 @@ public sealed partial class DocumentVersionMigrationTests
 
         var migrate = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
         Assert.True(migrate.StatusCode == HttpStatusCode.OK, $"{migrate.StatusCode}: {app.ErrorsText}");
+        await RefreshMigrationMarkerAsync(app).ConfigureAwait(true);
 
         var id = s.Doc.DocumentId.ToString(CultureInfo.InvariantCulture);
 
@@ -125,6 +129,8 @@ public sealed partial class DocumentVersionMigrationTests
         var migrate = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
         Assert.True(migrate.StatusCode == HttpStatusCode.OK, $"{migrate.StatusCode}: {app.ErrorsText}");
 
+        await RefreshMigrationMarkerAsync(app).ConfigureAwait(true);
+
         using (var approve = await client.PostAsJsonAsync(
                    new Uri($"/api/v1/documents/{s.Doc.DocumentId.ToString(CultureInfo.InvariantCulture)}/approve", UriKind.Relative),
                    new { sheetDefId = s.TargetSheetDefId, periodKey = s.Doc.PeriodKey.Value, approved = true })
@@ -170,9 +176,21 @@ public sealed partial class DocumentVersionMigrationTests
 
     private static async Task<JsonElement> GetJsonAsync(HttpClient client, EcrApiFactory app, string url)
     {
-        var response = await client.GetAsync(new Uri(url, UriKind.Relative)).ConfigureAwait(false);
+        using var response = await client.GetAsync(new Uri(url, UriKind.Relative)).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
         Assert.True(response.StatusCode == HttpStatusCode.OK, $"{url} → {response.StatusCode}: {body} {app.ErrorsText}");
         return JsonDocument.Parse(body).RootElement.Clone();
+    }
+
+    /// <summary>
+    /// Після переносу маркер «проєкт переноситься» сходить із кешу фільтра лише з наступним оновленням
+    /// (<c>MigratingProjectsRefresher</c>, раз на 2 с): до того будь-який запит до документа — 409
+    /// <c>structureChanging</c>. Тест оновлює кеш сам (той самий <c>RefreshAsync</c>, що й фонова служба) —
+    /// детерміновано, без очікування за часом.
+    /// </summary>
+    private static async Task RefreshMigrationMarkerAsync(EcrApiFactory app)
+    {
+        var refresher = app.Services.GetServices<IHostedService>().OfType<MigratingProjectsRefresher>().Single();
+        await refresher.RefreshAsync(CancellationToken.None).ConfigureAwait(false);
     }
 }
