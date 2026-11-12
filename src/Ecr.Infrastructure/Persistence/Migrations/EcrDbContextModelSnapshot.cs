@@ -303,6 +303,91 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("CalculationStep", "calc");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.FormulaError", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("ColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ErrorCode")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<int>("FormulaDefId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("InputsJson")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<int>("PeriodKey")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RowKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<long?>("SheetCopyId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("Since")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("SourceColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SourcePeriodKey")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SourceRowKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int?>("SourceTableDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TableDefId")
+                        .HasColumnType("int");
+
+                    b.Property<long>("TableInstanceId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("TableRowId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PeriodKey", "TableInstanceId")
+                        .HasDatabaseName("IX_FormulaError_Instance");
+
+                    b.HasIndex("DocumentId", "PeriodKey", "SheetCopyId")
+                        .HasDatabaseName("IX_FormulaError_Document");
+
+                    b.HasIndex("PeriodKey", "TableRowId", "ColumnDefId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_FormulaError_Cell");
+
+                    b.ToTable("FormulaError", "calc", t =>
+                        {
+                            t.HasCheckConstraint("CK_FormulaError_Kind", "Kind IN (N'Error', N'Blocked')");
+                        });
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.Methodology", b =>
                 {
                     b.Property<int>("Id")
