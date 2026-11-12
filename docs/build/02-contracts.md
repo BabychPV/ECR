@@ -4417,6 +4417,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-TMPL-0422.migrateSameVersion` | 422 | цільова версія збігається з поточною |
 | `err.ECR-TMPL-0422.migrateTargetNotPublished` | 422 | цільова версія не опублікована |
 | `err.ECR-TMPL-0422.ordinalInvalid` | 422 | порядковий номер колонки (перестановка в конструкторі) поза допустимим діапазоном |
+| `err.ECR-TMPL-0422.columnTypeFamilyChanged` | 422 | ✎ R-3 (D-478): публікація версії, у якій код колонки (той самий аркуш і таблиця за кодом) має іншу родину типу зберігання, ніж в опублікованих/застарілих версіях шаблону (родини: String; Bool; Date; Lookup; Unit; число = Int/Decimal/Formula/Calculated); `columnPath`, `publishedTypes`, `newType`; іде в `diagnostics` загальної відмови `publishRejected` |
 | `err.ECR-INT-0404.eventMap` | 404 | мапінг подій PI (`source-event-maps`) не знайдено |
 | `err.ECR-INT-0404.rowWindowMap` | 404 | прив'язку вікна рядка (`row-window-maps`) не знайдено |
 | `err.ECR-INT-0405.registryEntry` | 404 | запис довідника, на який вказує ціль мапінгу, не існує |
