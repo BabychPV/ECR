@@ -55,7 +55,11 @@ public sealed class ExcelImporter(
 
     // ✎ Q-17: за прапора `Collection:MonthColumnRouting` аркуші з таблицями «місяці в колонках» блокуються на ВСІ місяці року
     // одним впорядкованим набором (див. `ApplyAsync`). `null` — поведінка до Q-17.
-    IMonthColumnRouter? monthRouter = null) : IExcelImporter
+    IMonthColumnRouter? monthRouter = null,
+
+    // ✎ B20: назви груп і копій аркушів — для назви аркуша-копії в рядках перегляду («Vessel 2»). `null` — без назв
+    // (ручні конструкції в тестах); у контейнері розв'язується завжди.
+    IDocumentSheetCopyStore? sheetCopies = null) : IExcelImporter
 {
     /// <summary>Порожній зріз — таблиця без жодного рядка чи непорожньої комірки.</summary>
     private static readonly IReadOnlyDictionary<string, long> EmptyRowIds =
@@ -294,6 +298,10 @@ public sealed class ExcelImporter(
         // шлях імпорту не змінюється.
         var permitLocked = await PermitLockedColumnsAsync(validBlocks.ConvertAll(v => v.Table.Id), ct).ConfigureAwait(false);
 
+        // ✎ B20 (F13 #829, C-3): у групі з копіями та сама таблиця стоїть на кожному аркуші, і рядок перегляду з лише
+        // назвою таблиці не казав, чий це рядок — «Vessel 1» чи «Vessel 2».
+        var sheetCopyNames = await SheetCopyNamesAsync(documentId, snapshot.Sheets, tables, instances, ct).ConfigureAwait(false);
+
         foreach (var (block, table) in validBlocks)
         {
             var worksheet = workbook.Worksheet(block.SheetName);
@@ -325,6 +333,10 @@ public sealed class ExcelImporter(
             {
                 diff = PermitBoundImportGuard.Apply(diff, lockedCodes);
             }
+
+            // ✎ B20/B27: кожен рядок перегляду — зі своїм екземпляром (перезапис позначає саме його) і, у групі з
+            // копіями, з назвою аркуша-копії.
+            diff = WithSource(diff, block.TableInstanceId, sheetCopyNames.GetValueOrDefault(block.TableInstanceId));
 
             diffs.Add(diff);
             changes.AddRange(diff.Changes);
@@ -364,6 +376,69 @@ public sealed class ExcelImporter(
         return new ImportPreview(
             token, changes, rejected, [], overwritable, OutdatedWorkbook(map) ? [ImportMessageKeys.OutdatedWorkbook] : null);
     }
+
+    /// <summary>
+    /// ✎ B20: показувана назва аркуша кожного екземпляра таблиці, чия група аркуша має копії («&lt;Назва&gt; N»,
+    /// <see cref="SheetCopyNaming"/> — те саме правило, що вкладки API й аркуші книги). Екземпляри аркушів без копій
+    /// сюди не потрапляють: там досить назви таблиці.
+    /// </summary>
+    private async Task<Dictionary<long, LocalizedText>> SheetCopyNamesAsync(
+        long documentId,
+        IReadOnlyList<SheetDef> sheets,
+        Dictionary<int, TableDef> tables,
+        IReadOnlyList<TableInstanceRef> instances,
+        CancellationToken ct)
+    {
+        var names = new Dictionary<long, LocalizedText>();
+        if (sheetCopies is null || !instances.Any(i => i.SheetCopyId is not null))
+        {
+            return names;
+        }
+
+        var groups = (await sheetCopies.ListGroupsAsync(documentId, ct).ConfigureAwait(false))
+            .Where(g => g.Copies.Count > 0)
+            .GroupBy(g => g.SheetDefId)
+            .ToDictionary(g => g.Key, g => g.First());
+        if (groups.Count == 0)
+        {
+            return names;
+        }
+
+        var sheetsById = sheets.ToDictionary(s => s.Id);
+        foreach (var instance in instances)
+        {
+            if (!tables.TryGetValue(instance.TableDefId, out var table)
+                || !groups.TryGetValue(table.SheetDefId, out var group)
+                || !sheetsById.TryGetValue(table.SheetDefId, out var sheet))
+            {
+                continue;
+            }
+
+            var ordinal = instance.SheetCopyId is { } copyId
+                ? group.Copies.FirstOrDefault(c => c.SheetCopyId == copyId)?.Ordinal
+                  ?? (short)(Ecr.Domain.Entities.Documents.DocumentSheet.OriginalOrdinal + 1)
+                : Ecr.Domain.Entities.Documents.DocumentSheet.OriginalOrdinal;
+
+            names[instance.TableInstanceId] = SheetCopyNaming.Display(
+                SheetCopyNaming.Effective(sheet.NameL10n, group.NameOverride), ordinal, groupHasCopies: true);
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// ✎ B20/B27: кожен рядок diff таблиці (зміни, відмови, перезаписувані) несе свій екземпляр таблиці і назву
+    /// аркуша-копії (<c>null</c> — аркуш без копій).
+    /// </summary>
+    private static TableDiff WithSource(TableDiff diff, long tableInstanceId, LocalizedText? sheetName) => diff with
+    {
+        Changes = diff.Changes
+            .Select(c => c with { TableInstanceId = tableInstanceId, SheetNameL10n = sheetName }).ToList(),
+        Rejected = diff.Rejected
+            .Select(r => r with { TableInstanceId = tableInstanceId, SheetNameL10n = sheetName }).ToList(),
+        Overwritable = diff.Overwritable?
+            .Select(c => c with { TableInstanceId = tableInstanceId, SheetNameL10n = sheetName }).ToList(),
+    };
 
     /// <summary>Таблиця → коди її зіставлених колонок, для таблиць із чинною прив'язкою «рядки з дозволу».</summary>
     private async Task<IReadOnlyDictionary<int, IReadOnlySet<string>>> PermitLockedColumnsAsync(
@@ -766,7 +841,10 @@ public sealed class ExcelImporter(
             return (plan, null);
         }
 
-        var wanted = new HashSet<(string TableCode, string RowKey)>();
+        // ✎ B27: позначка — на (таблиця, рядок, ЕКЗЕМПЛЯР): та сама таблиця з тим самим ключем рядка стоїть на кожному
+        // аркуші-копії, і без екземпляра позначка рядка «Vessel 2» перезаписувала й «Vessel 1». Екземпляр `null` —
+        // клієнт до B27: колишня поведінка (усі екземпляри з цими таблицею й рядком).
+        var wanted = new HashSet<(string TableCode, string RowKey, long? TableInstanceId)>();
         foreach (var row in overwriteRows)
         {
             if (row?.TableCode is null || row.RowKey is null)
@@ -774,17 +852,19 @@ public sealed class ExcelImporter(
                 throw OverwriteNotConflict(row?.TableCode, row?.RowKey);
             }
 
-            wanted.Add((row.TableCode, row.RowKey));
+            wanted.Add((row.TableCode, row.RowKey, row.TableInstanceId));
         }
 
-        var matched = new HashSet<(string TableCode, string RowKey)>();
+        var matched = new HashSet<(string TableCode, string RowKey, long? TableInstanceId)>();
         var overwritten = new Dictionary<long, IReadOnlySet<string>>();
         var tables = new List<TableDiff>(plan.Tables.Count);
 
         foreach (var diff in plan.Tables)
         {
             var taken = (diff.Overwritable ?? [])
-                .Where(c => c.TableCode is not null && wanted.Contains((c.TableCode, c.RowKey)))
+                .Where(c => c.TableCode is not null
+                            && (wanted.Contains((c.TableCode, c.RowKey, diff.TableInstanceId))
+                                || wanted.Contains((c.TableCode, c.RowKey, null))))
                 .ToList();
 
             if (taken.Count == 0)
@@ -795,7 +875,8 @@ public sealed class ExcelImporter(
 
             foreach (var change in taken)
             {
-                matched.Add((change.TableCode!, change.RowKey));
+                matched.Add((change.TableCode!, change.RowKey, diff.TableInstanceId));
+                matched.Add((change.TableCode!, change.RowKey, null));
             }
 
             overwritten[diff.TableInstanceId] = taken.Select(c => c.RowKey).ToHashSet(StringComparer.Ordinal);

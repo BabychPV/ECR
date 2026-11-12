@@ -32797,11 +32797,18 @@ export interface components {
             roundedFrom?: unknown;
             /** @description Рядок. */
             rowKey: string;
+            sheetNameL10n?: null | components["schemas"]["LocalizedText"];
             /** @description Таблиця зміни. ⛔ `V-10`: у 91 таблиці шаблону ключі рядків і коди колонок
              *     ОДНАКОВІ (`R1`/`C1`), тож без таблиці рядок переліку не каже,
              *     ДЕ саме зміниться число. `null` лише в плані, збереженому до цієї
              *     правки. */
             tableCode?: null | string;
+            /**
+             * Format: int64
+             * @description ✎ B27: екземпляр таблиці рядка — його клієнт повертає в long? ImportOverwriteRow.TableInstanceId, щоб
+             *     перезапис зачепив лише позначений аркуш-копію. `null` — план до цієї правки.
+             */
+            tableInstanceId?: null | number;
             tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
         /** @description Counts of the diff between the file and the stored rows of the owner. */
@@ -32963,6 +32970,14 @@ export interface components {
             rowKey: string;
             /** @description Таблиця (як `tableCode` відмови-конфлікту перегляду). */
             tableCode: string;
+            /**
+             * Format: int64
+             * @description ✎ B27: екземпляр таблиці (як `tableInstanceId` відмови-конфлікту перегляду) — ЯКИЙ аркуш-копія
+             *     перезаписується. Та сама таблиця з тим самим ключем рядка стоїть на «Vessel 1» і «Vessel 2», і без екземпляра
+             *     позначка одного рядка перезаписувала всі копії. `null` — клієнт до B27: колишня поведінка (усі екземпляри
+             *     з цими таблицею й рядком), щоб застосування не ламалося посеред оновлення.
+             */
+            tableInstanceId?: null | number;
         };
         /**
          * @description Cell parsers.
@@ -33051,8 +33066,15 @@ export interface components {
             reasonCode: string;
             /** @description Рядок; `—` — причина не про рядок. */
             rowKey: string;
+            sheetNameL10n?: null | components["schemas"]["LocalizedText"];
             /** @description Таблиця відмови (`V-10`, як і в ImportChange). */
             tableCode?: null | string;
+            /**
+             * Format: int64
+             * @description ✎ B27: екземпляр таблиці відмови; для конфлікту «змінено після експорту» клієнт повертає його в
+             *     long? ImportOverwriteRow.TableInstanceId. `null` — відмова поза таблицею книги (екземпляра немає).
+             */
+            tableInstanceId?: null | number;
             tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
         /**

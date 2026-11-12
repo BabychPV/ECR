@@ -154,6 +154,41 @@ public sealed class ExcelSheetCopiesTests
         Assert.Equal(5m, Convert.ToDecimal(originalChange.OldValue, System.Globalization.CultureInfo.InvariantCulture));
     }
 
+    /// <summary>
+    /// ✎ B20 (F13 #829, C-3, P3): у групі з копіями рядок перегляду імпорту несе назву СВОГО аркуша («Stacks 1» /
+    /// «Stacks 2»), а не лише назву таблиці, однакову на обох.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Червоне без фіксу: <c>SheetNameL10n</c> — <c>null</c> і в зміні, і у відмові (поля не заповнював ніхто);
+    /// мутація «ordinal завжди 1» дає «Stacks 1» на копії — червоне на першій перевірці.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "RS-1103")]
+    public async Task Рядки_перегляду_копії_й_оригіналу_несуть_назву_свого_аркуша()
+    {
+        using var edited = await ExportAsync();
+        edited.Worksheet("Stacks 2").Cell(3, 1).Value = 51;
+        edited.Worksheet("Stacks 2").Cell(4, 1).Value = "abc";
+        edited.Worksheet("Stacks 1").Cell(3, 1).Value = 7;
+
+        var preview = await ImportAsync(edited);
+
+        var copyChange = Assert.Single(preview.Changes, c => Convert.ToDecimal(c.NewValue, System.Globalization.CultureInfo.InvariantCulture) == 51m);
+        Assert.Equal("Stacks 2", copyChange.SheetNameL10n?.Get("en"));
+
+        // ✎ B27: і свій екземпляр — клієнт повертає його в позначці перезапису.
+        Assert.Equal((long?)CopyInstance, copyChange.TableInstanceId);
+
+        var originalChange = Assert.Single(preview.Changes, c => Convert.ToDecimal(c.NewValue, System.Globalization.CultureInfo.InvariantCulture) == 7m);
+        Assert.Equal("Stacks 1", originalChange.SheetNameL10n?.Get("en"));
+
+        // Відмова (текст у числовій колонці копії) — так само з назвою аркуша-копії.
+        var rejection = Assert.Single(preview.Rejected);
+        Assert.Equal(("R2", "Stacks 2"), (rejection.RowKey, rejection.SheetNameL10n?.Get("en")));
+        Assert.Equal((long?)CopyInstance, rejection.TableInstanceId);
+    }
+
     private async Task<XLWorkbook> ExportAsync()
     {
         var exporter = new ExcelExporter(
@@ -213,7 +248,7 @@ public sealed class ExcelSheetCopiesTests
                 Substitute.For<IUnitCatalog>()),
             new ImportDiffBuilder(), _cells, _rows,
             Substitute.For<IUnitOfWork>(), Substitute.For<IBackgroundJobScheduler>(), Substitute.For<ISheetEditGate>(),
-            Substitute.For<IMethodologyStore>(), Substitute.For<ICalculationResultStore>());
+            Substitute.For<IMethodologyStore>(), Substitute.For<ICalculationResultStore>(), sheetCopies: _copies);
 
         return await importer.PreviewAsync(DocumentId, stream, CancellationToken.None);
     }
