@@ -188,16 +188,31 @@ public sealed class EditPathWarmerTests : IAsyncLifetime
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
-    public async Task Незапущений_Quartz_пропускається_без_очікування_й_без_винятку()
+    public async Task Незапущений_Quartz_пропускається_після_обмеженого_очікування_старту_без_винятку()
     {
         var factory = await QuartzAsync(start: false);
-        var warmer = Warmer((_, _, _) => Task.FromResult<IReadOnlyList<int>>([]));
+        var warmer = new EditPathWarmer(Scopes(), NullLogger<EditPathWarmer>.Instance) { QuartzStartWait = TimeSpan.FromMilliseconds(300) };
 
-        // Таймаут більший за запобіжник тесту: якби прогрів чекав на задачу, яку ніхто не виконає, тест упав би.
+        // Таймаут задачі більший за запобіжник тесту: якби прогрів поставив задачу, яку ніхто не виконає, тест упав би.
         var warmed = await warmer.WarmQuartzAsync(factory, TimeSpan.FromMinutes(5), CancellationToken.None).WaitAsync(Safety);
 
         Assert.False(warmed);
         Assert.Empty(await quartz!.GetJobKeys(GroupMatcher<JobKey>.GroupEquals(EditPathWarmer.QuartzGroup)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    public async Task Quartz_що_стартує_після_ApplicationStarted_все_одно_прогрівається()
+    {
+        // Так у застосунку: QuartzHostedService запускає планувальник після ApplicationStarted, де стартує й прогрів.
+        var factory = await QuartzAsync(start: false);
+        var warmer = new EditPathWarmer(Scopes(), NullLogger<EditPathWarmer>.Instance);
+
+        var warming = warmer.WarmQuartzAsync(factory, Safety, CancellationToken.None);
+        await Task.Delay(200);
+        await quartz!.Start();
+
+        Assert.True(await warming.WaitAsync(Safety));
     }
 
     [Fact]
@@ -299,6 +314,12 @@ public sealed class EditPathWarmerTests : IAsyncLifetime
         {
             ListVersions = list,
         };
+    }
+
+    private IServiceScopeFactory Scopes()
+    {
+        provider = Services().BuildServiceProvider();
+        return provider.GetRequiredService<IServiceScopeFactory>();
     }
 
     private ServiceCollection Services()

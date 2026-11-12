@@ -55,6 +55,9 @@ public sealed partial class EditPathWarmer(IServiceScopeFactory scopes, ILogger<
     /// <summary>Скільки чекати на прогін задачі Quartz, перш ніж визнати прогрів Quartz невдалим.</summary>
     public static readonly TimeSpan QuartzTimeout = TimeSpan.FromSeconds(30);
 
+    /// <summary>Скільки чекати, поки QuartzHostedService запустить планувальник (тести зменшують).</summary>
+    public TimeSpan QuartzStartWait { get; init; } = TimeSpan.FromSeconds(15);
+
     /// <summary>Група ключів задач прогріву Quartz.</summary>
     public const string QuartzGroup = "ecr.warmup";
 
@@ -196,6 +199,27 @@ public sealed partial class EditPathWarmer(IServiceScopeFactory scopes, ILogger<
         try
         {
             var scheduler = await factory.GetScheduler(ct).ConfigureAwait(false);
+
+            // ⚠ QuartzHostedService запускає планувальник уже ПІСЛЯ ApplicationStarted (там само, де й цей прогрів),
+            // тож на мить старту він ще може стояти: чекаємо обмежено (замір AN-190: без очікування прогрів Quartz
+            // пропускався в кожному з трьох стартів).
+            using (var wait = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                wait.CancelAfter(QuartzStartWait);
+                while (!scheduler.IsStarted && !scheduler.IsShutdown && !wait.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromMilliseconds(100), wait.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        // Вичерпано очікування старту — рішення нижче.
+                    }
+                }
+            }
+
+            ct.ThrowIfCancellationRequested();
 
             // ⛔ Не запущений (дочірній воркер, де Quartz лише зареєстровано) або вже зупинений — задача ніколи б не
             // спрацювала, і прогрів чекав би до таймауту.
