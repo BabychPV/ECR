@@ -11,3 +11,22 @@ SELECT v.[Key], v.Lang, v.OldVal, v.NewVal
 OPTION (RECOMPILE);
 GO
 -- XLS:header-sheet ── кінець секції ──
+-- XLS:header-period ── ru/kz аудит 2026-11 X-4: рядок звітного періоду в аркуші шапки xlsx; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'export.header.period', N'ru', N'Отчётный период'),
+    (N'export.header.period', N'kz', N'Есепті кезең')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- XLS:header-period ── кінець секції ──
+-- XLS:header-period ── аудит 2026-11 X-4: рядок звітного періоду в аркуші шапки xlsx (File Number / Version беруть ключі document.header.contract.*); ru/kz — порцією XLS:header-period вище ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'export.header.period', N'en', N'Reporting period', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- XLS:header-period ── кінець секції ──

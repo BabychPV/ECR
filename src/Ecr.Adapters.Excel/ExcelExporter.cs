@@ -325,8 +325,8 @@ public sealed class ExcelExporter(
     /// Перша й активна вкладка книги (X-2). Без полів шапки в шаблоні аркуша нема.
     /// </summary>
     /// <remarks>
-    /// Службові рядки File Number / Version / «Reporting period» (X-4) додадуться другим аргументом
-    /// <see cref="Ecr.Application.Documents.HeaderSheetLayout.Order"/> після X-1 — зараз їх немає.
+    /// X-4: службові рядки File Number / Version (з <see cref="ExcelExportOptions"/>; без значення — рядка немає) і
+    /// «Reporting period» (завжди, останнім) — другим аргументом <see cref="Ecr.Application.Documents.HeaderSheetLayout.Order"/>.
     /// </remarks>
     private async Task WriteHeaderSheetAsync(
         XLWorkbook workbook, TemplateVersionSnapshot snapshot, long documentId, ExcelExportOptions options,
@@ -344,7 +344,7 @@ public sealed class ExcelExporter(
         var labels = await Ecr.Application.Documents.HeaderExportLabels
             .ResolveAsync(catalog, options.Language, ct).ConfigureAwait(false);
 
-        var rows = Ecr.Application.Documents.HeaderSheetLayout.Order(fields, []);
+        var rows = Ecr.Application.Documents.HeaderSheetLayout.Order(fields, ServiceRows(options, labels));
 
         var fallbackName = Ecr.Application.Documents.HeaderExportLabels.Fallback.Sheet;
         var sheet = workbook.Worksheets.Add(UniqueName(CleanSheetName(labels.Sheet, fallbackName), usedNames));
@@ -402,7 +402,10 @@ public sealed class ExcelExporter(
         }
 
         sheet.Column(1).Width = Math.Min(labelWidth + ContentPadding, MaxHeaderLabelWidth);
-        sheet.Column(2).Width = Math.Min(valueWidth + ContentPadding, MaxHeaderValueWidth);
+
+        // ✎ Приймання F13 (P3, L24): стовпець значень не вужчий за MinHeaderValueWidth — короткі значення давали ширину
+        // 7.7, і значення, дописане людиною в книзі, не читалося.
+        sheet.Column(2).Width = Math.Clamp(valueWidth + ContentPadding, MinHeaderValueWidth, MaxHeaderValueWidth);
         sheet.Column(1).Style.Alignment.WrapText = true;
         sheet.Column(2).Style.Alignment.WrapText = true;
         sheet.Column(3).Hide();
@@ -415,6 +418,34 @@ public sealed class ExcelExporter(
 
     /// <summary>X-5: найбільша ширина стовпця значень аркуша шапки, символів (далі — перенос, а не обріз).</summary>
     private const double MaxHeaderValueWidth = 80;
+
+    /// <summary>Приймання F13 (P3): найменша ширина стовпця значень аркуша шапки, символів.</summary>
+    private const double MinHeaderValueWidth = 30;
+
+    /// <summary>
+    /// X-4 (рішення PO 11.11): службові рядки форми Contract — File Number і Version (ті самі підписи, що в картці
+    /// документа) — і звітний період вивантаження. Порядок у аркуші ставить <see cref="Ecr.Application.Documents.HeaderSheetLayout.Order"/>.
+    /// </summary>
+    private static List<Ecr.Application.Documents.HeaderExportRow> ServiceRows(
+        ExcelExportOptions options, Ecr.Application.Documents.HeaderExportLabels labels)
+    {
+        var rows = new List<Ecr.Application.Documents.HeaderExportRow>(3);
+        if (!string.IsNullOrWhiteSpace(options.DocumentBusinessKey))
+        {
+            rows.Add(new(
+                "FileNumber", labels.FileNumber, options.DocumentBusinessKey, options.DocumentBusinessKey, false, "fileNumber"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.TemplateVersionLabel))
+        {
+            rows.Add(new(
+                "Version", labels.Version, options.TemplateVersionLabel, options.TemplateVersionLabel, false, "version"));
+        }
+
+        var period = Ecr.Application.Documents.HeaderSheetLayout.PeriodLabel(options.PeriodKey, options.PeriodKind);
+        rows.Add(new("Period", labels.Period, period, period, false));
+        return rows;
+    }
 
     /// <summary>Порожній файл, який видаляє сам себе при закритті потоку.</summary>
     private static FileStream TemporaryFile()

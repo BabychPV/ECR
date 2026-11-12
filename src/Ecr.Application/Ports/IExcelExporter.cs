@@ -41,6 +41,15 @@ public interface IExcelExporter
 /// </remarks>
 /// <param name="HiddenTableDefIds">Таблиці, яких немає в книзі.</param>
 /// <param name="HiddenColumnDefIds">Колонки, яких немає в книзі.</param>
+/// <param name="DocumentBusinessKey">
+/// Аудит 2026-11 X-4: File Number (<c>BusinessKey</c>) документа для аркуша шапки; <c>null</c> — рядка немає
+/// (завдання до X-4 у черзі). Заповнює <c>ExportDocumentHandler</c>, не тіло запиту.
+/// </param>
+/// <param name="TemplateVersionLabel">X-4: версія шаблону документа за період; <c>null</c> — рядка немає.</param>
+/// <param name="PeriodKind">
+/// X-4: періодичність проєкту (<c>PeriodKind.ToString()</c>) — для підпису періоду в аркуші шапки; <c>null</c> — як місячний.
+/// </param>
 public sealed record ExcelExportOptions(
     bool IncludeFormulas, bool IncludeStyles, string Language, int PeriodKey,
-    IReadOnlyList<int>? HiddenTableDefIds = null, IReadOnlyList<int>? HiddenColumnDefIds = null);
+    IReadOnlyList<int>? HiddenTableDefIds = null, IReadOnlyList<int>? HiddenColumnDefIds = null,
+    string? DocumentBusinessKey = null, string? TemplateVersionLabel = null, string? PeriodKind = null);

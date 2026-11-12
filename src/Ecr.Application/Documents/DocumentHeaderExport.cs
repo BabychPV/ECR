@@ -42,6 +42,24 @@ public sealed record HeaderExportLabels(string Sheet, string Field, string Value
     /// <summary>Ключ заголовка стовпця «код».</summary>
     public const string CodeKey = "export.header.code";
 
+    /// <summary>X-4: ключ підпису рядка File Number (той самий, що в картці документа).</summary>
+    public const string FileNumberKey = "document.header.contract.fileNumber";
+
+    /// <summary>X-4: ключ підпису рядка версії шаблону (той самий, що в картці документа).</summary>
+    public const string VersionKey = "document.header.contract.version";
+
+    /// <summary>X-4: ключ підпису рядка звітного періоду вивантаження.</summary>
+    public const string PeriodLabelKey = "export.header.period";
+
+    /// <summary>X-4: підпис рядка File Number.</summary>
+    public string FileNumber { get; init; } = "File Number";
+
+    /// <summary>X-4: підпис рядка версії шаблону.</summary>
+    public string Version { get; init; } = "Version";
+
+    /// <summary>X-4: підпис рядка звітного періоду.</summary>
+    public string Period { get; init; } = "Reporting period";
+
     /// <summary>Запасні підписи, коли каталогу нема (тести, що збирають експортер вручну).</summary>
     /// <remarks>✎ D-477 (X-5): назва вкладки — «Document header», як заголовок панелі шапки в UI.</remarks>
     public static HeaderExportLabels Fallback { get; } = new("Document header", "Field", "Value", "Code");
@@ -63,7 +81,12 @@ public sealed record HeaderExportLabels(string Sheet, string Field, string Value
 
         return new HeaderExportLabels(
             Pick(SheetKey, Fallback.Sheet), Pick(FieldKey, Fallback.Field),
-            Pick(ValueKey, Fallback.Value), Pick(CodeKey, Fallback.Code));
+            Pick(ValueKey, Fallback.Value), Pick(CodeKey, Fallback.Code))
+        {
+            FileNumber = Pick(FileNumberKey, Fallback.FileNumber),
+            Version = Pick(VersionKey, Fallback.Version),
+            Period = Pick(PeriodLabelKey, Fallback.Period),
+        };
     }
 }
 
@@ -129,8 +152,9 @@ public static class DocumentHeaderExport
                 .ToDictionary(g => g.Key, g => Permits.Groups.LookupTargetEntries.Label(g.First().Entry.Code, g.First().TypeCode));
 
             // X-3: людині в книзі — НАЗВА запису (як у картці документа); група дозволів — «номер — тип», як і була.
+            // ✎ Приймання F13 (P3, L24): у книзі — двомовна назва «EN - RU», як стовпець NAME довідників Land.
             names[registryId] = entries.GroupBy(e => e.Entry.Id)
-                .ToDictionary(g => g.Key, g => DisplayOf(g.First(), lang));
+                .ToDictionary(g => g.Key, g => DisplayOf(g.First(), lang, bilingual: contractLayout));
         }
 
         var rows = new List<HeaderExportRow>(fields.Count);
@@ -159,8 +183,11 @@ public static class DocumentHeaderExport
         return rows;
     }
 
-    /// <summary>Назва запису мовою вивантаження; порожня — код. Член групи дозволів — «номер — тип» (X-3).</summary>
-    private static string DisplayOf(Permits.Groups.LookupTargetEntry entry, string language)
+    /// <summary>
+    /// Назва запису мовою вивантаження; порожня — код. Член групи дозволів — «номер — тип» (X-3). Для книги
+    /// (<paramref name="bilingual"/>) — «EN - RU», коли запис має обидві назви (<see cref="HeaderSheetLayout.BilingualValue"/>).
+    /// </summary>
+    private static string DisplayOf(Permits.Groups.LookupTargetEntry entry, string language, bool bilingual)
     {
         if (entry.TypeCode is not null)
         {
@@ -168,7 +195,8 @@ public static class DocumentHeaderExport
         }
 
         var display = entry.Entry.DisplayL10n?.Get(language);
-        return string.IsNullOrWhiteSpace(display) ? entry.Entry.Code : display;
+        var shown = string.IsNullOrWhiteSpace(display) ? entry.Entry.Code : display;
+        return bilingual && entry.Entry.DisplayL10n is { } names ? HeaderSheetLayout.BilingualValue(names, shown) : shown;
     }
 
     private static HeaderExportRow Row(
