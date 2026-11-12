@@ -23,6 +23,12 @@ public sealed class CalculationIssue : Entity<long>
     /// </summary>
     public const string CategoryRuleRejectedKind = "CategoryRuleRejected";
 
+    /// <summary>
+    /// Вид (AN-164): правило методології рядок закрило, але формулам бракує аргументів — жодного результату. Колонки, які
+    /// треба заповнити, виводить читання (<c>CalculationRejectionReasons</c>), у рядку їх немає (без міграції).
+    /// </summary>
+    public const string MissingInputsKind = "MissingInputs";
+
     /// <summary>Стеля колонки <see cref="RowKey"/>.</summary>
     public const int MaxRowKeyLength = 100;
 

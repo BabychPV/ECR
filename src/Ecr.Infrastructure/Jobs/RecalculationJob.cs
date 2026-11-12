@@ -210,6 +210,9 @@ public sealed partial class RecalculationJob(
         var unmatchedRows = new List<UnmatchedRow>();
         var rejectedRows = new List<RejectedRow>();
 
+        // AN-164/AN-180: рядки, закриті правилом, без жодного значення через відсутні входи формул.
+        var missingInputRows = new List<RejectedRow>();
+
         // G14: методології без опублікованих версій — привʼязки пропущено, прогін не падає.
         var skippedUnpublished = new SortedSet<int>();
 
@@ -485,6 +488,7 @@ public sealed partial class RecalculationJob(
                     runProfile.Merge(profile);
                     unmatchedRows.AddRange(profile.UnmatchedRows);
                     rejectedRows.AddRange(profile.RejectedRows);
+                    missingInputRows.AddRange(profile.MissingInputRows);
                     skippedUnpublished.UnionWith(profile.SkippedUnpublishedMethodologies);
                 }
             }
@@ -558,6 +562,15 @@ public sealed partial class RecalculationJob(
             {
                 await progress
                     .ReportAsync(100, JobProgressMessageCodec.Encode(CategoryRuleRejectedEnvelope(rejectedRows)), ct)
+                    .ConfigureAwait(false);
+            }
+
+            // AN-180: рядки без значення через відсутні входи формул (проблема MissingInputs) - номери рядків у
+            // повідомленні задачі, щоб тихого нуля не було й тут; колонки до заповнення - у банері над сіткою.
+            if (missingInputRows.Count > 0)
+            {
+                await progress
+                    .ReportAsync(100, JobProgressMessageCodec.Encode(MissingInputsEnvelope(missingInputRows)), ct)
                     .ConfigureAwait(false);
             }
 
@@ -1754,6 +1767,26 @@ public sealed partial class RecalculationJob(
             {
                 ["count"] = rejected.Count.ToString(CultureInfo.InvariantCulture),
                 ["rows"] = rejected.Count > NoMatchingRuleRowsShown ? shown + ", …" : shown,
+            });
+    }
+
+    /// <summary>
+    /// Конверт «рядкам бракує входів формул» (<c>jobs.recalcMissingInputs</c>, AN-180): кількість і перші номери.
+    /// Ключів рядків, назв колонок і значень комірок тут немає навмисно — колонки називає банер над сіткою.
+    /// </summary>
+    /// <param name="rows">Рядки без значення через відсутні входи за весь прогін.</param>
+    private static JobProgressMessageEnvelope MissingInputsEnvelope(List<RejectedRow> rows)
+    {
+        var shown = string.Join(
+            ", ",
+            rows.Take(NoMatchingRuleRowsShown).Select(r => r.RowNumber.ToString(CultureInfo.InvariantCulture)));
+
+        return new JobProgressMessageEnvelope(
+            "jobs.recalcMissingInputs",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["count"] = rows.Count.ToString(CultureInfo.InvariantCulture),
+                ["rows"] = rows.Count > NoMatchingRuleRowsShown ? shown + ", …" : shown,
             });
     }
 

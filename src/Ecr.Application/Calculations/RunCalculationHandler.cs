@@ -382,6 +382,12 @@ public sealed class RunCalculationHandler(
                             .Select(r => new CalculationIssueInput(
                                 r.TableInstanceId, r.RowNumber, r.RowKey, r.MethodologyId,
                                 ICalculationIssueStore.CategoryRuleRejected)),
+                        // AN-164: рядок без значення через відсутні аргументи формул — проблема рядка, а не тихий нуль.
+                        .. profile.MissingInputRows
+                            .DistinctBy(r => (r.TableInstanceId, r.RowKey, r.MethodologyId))
+                            .Select(r => new CalculationIssueInput(
+                                r.TableInstanceId, r.RowNumber, r.RowKey, r.MethodologyId,
+                                ICalculationIssueStore.MissingInputs)),
                     ],
                     ct)
                 .ConfigureAwait(false);

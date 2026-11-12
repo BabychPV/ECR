@@ -13,10 +13,37 @@ export const UnmatchedRowsBannerSelector = '[data-testid="document-unmatched-row
 /** Вид проблеми рядка, що його відхилило правило категорії (✎ 10.11, doc 95). */
 export const CategoryRuleRejectedKind = 'CategoryRuleRejected';
 
+/** Вид проблеми рядка, який правило закрило, але формулам бракує входів — жодного результату (AN-164). */
+export const MissingInputsKind = 'MissingInputs';
+
 /** Колонка, яку треба заповнити, щоб рядок порахувався. */
 export interface MissingColumnRef {
   readonly code: string;
   readonly name: string;
+  /**
+   * AN-164b: `false` — це не колонка таблиці, а вхід формули, якого серед колонок немає (сервер дає порожній заголовок);
+   * підпис — «вхідні дані «код»», переходу на комірку немає.
+   */
+  readonly column: boolean;
+}
+
+/** AN-164b: колонки до заповнення без повторів коду; вхід поза колонками — підписом каталогу, а не кодом. */
+function missingColumnsOf(columns: CalculationIssue['columns']): readonly MissingColumnRef[] {
+  const seen = new Set<string>();
+  const result: MissingColumnRef[] = [];
+  for (const column of columns ?? []) {
+    const key = column.code.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const name = localized(column.nameL10n);
+    result.push(
+      name === ''
+        ? { code: column.code, name: t('document.missingInputRows.argument', { code: column.code }), column: false }
+        : { code: column.code, name, column: true },
+    );
+  }
+
+  return result;
 }
 
 /** Один рядок без правила (або відхилений правилом категорії) в групі таблиці. */
@@ -57,8 +84,13 @@ export interface UnmatchedTableGroup {
   readonly hint: UnmatchedTableHint | null;
   /** Рядки за зростанням номера, без повторів ключа. */
   readonly rows: readonly UnmatchedRowRef[];
-  /** ✎ 10.11: рядки ВІДХИЛЕНІ правилом категорії (правило підійшло, ключа категорії немає), а не «без правила». */
+  /**
+   * ✎ 10.11: рядкам правило підійшло, але їх не пораховано (відхилені правилом категорії або, з AN-164, без входів
+   * формул), а не «без правила»: причина — правило й колонки, які треба заповнити.
+   */
   readonly rejected: boolean;
+  /** AN-164: правило підійшло, але формулам бракує входів (`MissingInputs`); `rejected` теж `true`. */
+  readonly missingInputs: boolean;
 }
 
 /**
@@ -90,6 +122,7 @@ export function groupUnmatchedRows(
       code: string;
       methodology: string | null;
       rejected: boolean;
+      missingInputs: boolean;
       tableKey: string;
       rows: Map<string, UnmatchedRowRef>;
     }
@@ -97,11 +130,21 @@ export function groupUnmatchedRows(
   for (const issue of issues) {
     const tableKey = groupKey(issue.tableCode, issue.sheetCopyId ?? null);
     // ✎ 10.11: відхилені правилом категорії — окремою групою тієї ж таблиці: причина й дія інші, ніж у «без правила».
-    const rejected = issue.kind === CategoryRuleRejectedKind;
-    const key = rejected ? `${tableKey}!rejected` : tableKey;
+    // AN-164: рядки без входів формул — своєю групою з тією ж формою рядка (правило й колонки, які треба заповнити).
+    const missingInputs = issue.kind === MissingInputsKind;
+    const rejected = missingInputs || issue.kind === CategoryRuleRejectedKind;
+    const key = missingInputs ? `${tableKey}!inputs` : rejected ? `${tableKey}!rejected` : tableKey;
     let group = byKey.get(key);
     if (group === undefined) {
-      group = { table: tableOf.get(tableKey), code: issue.tableCode, methodology: null, rejected, tableKey, rows: new Map() };
+      group = {
+        table: tableOf.get(tableKey),
+        code: issue.tableCode,
+        methodology: null,
+        rejected,
+        missingInputs,
+        tableKey,
+        rows: new Map(),
+      };
       byKey.set(key, group);
     }
     group.methodology ??= issue.methodologyCode ?? null;
@@ -111,9 +154,7 @@ export function groupUnmatchedRows(
         rowNumber: issue.rowNumber,
         currentValues: rejected ? null : (issue.currentValues ?? null),
         ruleCode: rejected ? (issue.ruleCode ?? null) : null,
-        missingColumns: rejected
-          ? (issue.columns ?? []).map((column) => ({ code: column.code, name: localized(column.nameL10n) || column.code }))
-          : [],
+        missingColumns: rejected ? missingColumnsOf(issue.columns) : [],
       });
     }
   }
@@ -144,6 +185,7 @@ export function groupUnmatchedRows(
           .map((row) => (hint === undefined ? { ...row, currentValues: null } : row))
           .sort((a, b) => a.rowNumber - b.rowNumber),
         rejected: group.rejected,
+        missingInputs: group.missingInputs,
       };
     });
 }
