@@ -301,6 +301,12 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
     private async Task<List<YearResult>> AggregateResultsAsync(
         long documentId, List<(List<int> Keys, List<long> Runs)> groups, List<long> instanceIds, CancellationToken ct)
     {
+        // Рік без жодного прогону (груп немає) — порожньо, а не First() на порожній послідовності нижче (e2e: 500).
+        if (groups.Count == 0)
+        {
+            return [];
+        }
+
         var lines = new Dictionary<(long Instance, int Version, string? Row, string Output, long? Substance, int Unit), int>();
         var legacy = new List<YearResult>();
         foreach (var (groupKeys, groupRuns) in groups)
