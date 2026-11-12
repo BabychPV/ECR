@@ -60,7 +60,8 @@ public sealed class PreviewPermitBindingHandler(
     IUnitStore units,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IMonthColumnRouter? monthRouter = null)
 {
     /// <summary>Право на читання прив'язок (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.View";
@@ -232,18 +233,26 @@ public sealed class PreviewPermitBindingHandler(
         // формул у відповіді PATCH: схована таблиця, колонка під забороною чи поза періодом ролі (D-214) і прихована
         // колонка не накладаються. Інакше перегляд прив'язки ставав оракулом значень повз межі читання.
         var reader = await access.BuildProfileAsync(currentUser.UserId!.Value, ct).ConfigureAwait(false);
-        var readable = (await access.ReadScopeAsync(reader, documentId, ct).ConfigureAwait(false)).InPeriod(periodKey);
+        var anyPeriod = await access.ReadScopeAsync(reader, documentId, ct).ConfigureAwait(false);
+        var readable = anyPeriod.InPeriod(periodKey);
         if (!readable.CanReadTable(sheetTable.Id))
         {
             return result;
         }
+
+        // ⛔ B44 (Q-17): `cells` за прапора віддає логічний зріз — у колонці з іншим власником значення ЕКЗЕМПЛЯРА-ВЛАСНИКА.
+        // Тож, як і зріз, колонка, період власника якої поза областю ролі, не накладається (інакше перегляд показував би
+        // місяць, який зріз маскує). Прапор вимкнено / таблиця поза маршрутизацією — порожньо, без звернень до бази.
+        var ownerBlocked = await MonthOwnerReadScope
+            .BlockedColumnsAsync(monthRouter, documentId, sheetTable, periodKey.Value, anyPeriod, ct)
+            .ConfigureAwait(false);
 
         var rowIds = (await rows.GetRowsAsync(instance.TableInstanceId, periodKey, ct).ConfigureAwait(false))
             .ToDictionary(r => r.RowKey, r => r.Id, StringComparer.Ordinal);
         var slice = (await cells.ReadSliceAsync(instance.TableInstanceId, periodKey, ct).ConfigureAwait(false))
             .ToLookup(c => c.Address.TableRowId);
         var columnsById = sheetTable.Columns
-            .Where(c => !c.IsDeleted && !c.IsHidden && readable.CanReadColumn(c.Id))
+            .Where(c => !c.IsDeleted && !c.IsHidden && readable.CanReadColumn(c.Id) && !ownerBlocked.Contains(c.Id))
             .ToDictionary(c => c.Id);
 
         foreach (var row in result)

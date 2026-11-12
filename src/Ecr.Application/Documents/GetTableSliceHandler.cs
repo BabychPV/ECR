@@ -95,42 +95,13 @@ public sealed class GetTableSliceHandler(
     /// <summary>
     /// Q-17: колонки таблиці з іншим власником, період якого НЕ в області ролі читача (<c>InPeriod(власник)</c>).
     /// </summary>
-    /// <remarks>Прапор вимкнено, таблиця поза маршрутизацією або власників нема — порожньо БЕЗ звернень до бази.</remarks>
-    private async Task<HashSet<int>> OwnerBlockedColumnsAsync(
+    /// <remarks>
+    /// Правило спільне з переглядом прив'язки дозволу (B44) — <see cref="MonthOwnerReadScope"/>. Прапор вимкнено, таблиця
+    /// поза маршрутизацією або власників нема — порожньо БЕЗ звернень до бази.
+    /// </remarks>
+    private Task<HashSet<int>> OwnerBlockedColumnsAsync(
         long documentId, Domain.Entities.Configuration.TableDef table, int viewPeriod, DocumentReadScope anyPeriod, CancellationToken ct)
-    {
-        var blocked = new HashSet<int>();
-        if (monthRouter is not { Enabled: true } || !monthRouter.AppliesToTable(table))
-        {
-            return blocked;
-        }
-
-        var document = await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false);
-        if (document is null)
-        {
-            return blocked;
-        }
-
-        // ⚠ Q-17 перф: InPeriod будує НОВУ область (індекси по всій версії шаблону) — на кожну чужу колонку
-        // (до сотень) це ~70 мс на зріз. Область на період-власник одна, колонки — з її власним кешем.
-        var scopeByOwner = new Dictionary<Domain.ValueObjects.PeriodKey, DocumentReadScope>();
-        foreach (var foreign in await monthRouter
-                     .ForeignColumnsAsync(document, table, new Domain.ValueObjects.PeriodKey(viewPeriod), ct)
-                     .ConfigureAwait(false))
-        {
-            if (!scopeByOwner.TryGetValue(foreign.OwnerPeriod, out var ownerScope))
-            {
-                scopeByOwner[foreign.OwnerPeriod] = ownerScope = anyPeriod.InPeriod(foreign.OwnerPeriod);
-            }
-
-            if (!ownerScope.CanReadColumn(foreign.Column.Id))
-            {
-                blocked.Add(foreign.Column.Id);
-            }
-        }
-
-        return blocked;
-    }
+        => MonthOwnerReadScope.BlockedColumnsAsync(monthRouter, documentId, table, viewPeriod, anyPeriod, ct);
 
     private readonly MethodologyRequiredColumnsCache _required = new(memory);
 

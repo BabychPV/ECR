@@ -29,7 +29,7 @@ namespace Ecr.Api.Tests;
 /// «факт схований» (значення 7.25 у відповіді).
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class PermitBindingPreviewReadScopeTests(SqlServerFixture sql)
+public sealed partial class PermitBindingPreviewReadScopeTests(SqlServerFixture sql)
 {
     private const string Password = "Permit-Preview-S1-2026!";
     private const decimal Fact = 7.25m;
