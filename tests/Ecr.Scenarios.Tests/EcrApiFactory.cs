@@ -85,6 +85,8 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
         // виконував би справжній NotificationJob/PeriodStateJob проти бази. ⚠ Другий (після
         // SqlServerFixture) тип із Ecr.TestKit тут — обв'язка хоста, а не шлях до обробників:
         // Правило 1 він не обходить (сценарій і далі ходить лише через HTTP).
+        // Наздоганяння нічних задач вимкнено з тієї ж причини, що й cron (`NightlyCatchUp`, як у EcrApiFactory).
+        builder.UseSetting("Jobs:NightlyCatchUp:Enabled", "false");
         builder.ConfigureTestServices(RecurringTriggerVeto.Register);
     }
 

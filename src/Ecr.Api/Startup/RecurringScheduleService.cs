@@ -422,6 +422,10 @@ public sealed partial class RecurringScheduleService(
 
         var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
 
+        // ⛔ Аудит live 12.11: cron не має пам'яті — ніч, коли застосунок не працював о 02:15, просто зникала
+        // (`NightlyCatchUp`). Невдача тут старт НЕ валить: розклади вже стоять, наступна ніч усе одно пройде.
+        await CatchUpNightlyAsync(db, scheduler, scope.ServiceProvider).ConfigureAwait(false);
+
         // ⛔ Прогалини 4+5 директиви паритету зі старою системою (Q-327 →
         // Q-331): нічний повний перерахунок — ОПЦІЯ, вимкнена за
         // замовчуванням (`NightlyRecalculationScheduling.EnabledKey`), не
@@ -461,6 +465,46 @@ public sealed partial class RecurringScheduleService(
 
         LogSchedulesDone(logger, applied, nightlyRecalcCount);
     }
+
+    /// <summary>Ставить у чергу нічні задачі, пропущені, поки застосунок не працював (<see cref="NightlyCatchUp"/>).</summary>
+    private async Task CatchUpNightlyAsync(EcrDbContext db, IBackgroundJobScheduler scheduler, IServiceProvider provider)
+    {
+        if (!NightlyCatchUp.IsEnabled(configuration))
+        {
+            return;
+        }
+
+        try
+        {
+            var lastRuns = await NightlyCatchUp.LastRunsAsync(db, CancellationToken.None).ConfigureAwait(false);
+            var missed = await NightlyCatchUp
+                .EnqueueMissedAsync(
+                    lastRuns,
+                    scheduler,
+                    provider.GetRequiredService<Domain.Abstractions.IClock>().UtcNow,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+
+            if (missed.Count > 0)
+            {
+                LogNightlyCaughtUp(logger, string.Join(", ", missed));
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogNightlyCatchUpFailed(logger, ex.Message);
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Старт: нічні задачі пропущено (застосунок не працював о 02:15) — поставлено в чергу зараз: {Codes}.")]
+    private static partial void LogNightlyCaughtUp(ILogger logger, string codes);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Старт: наздогнати пропущені нічні задачі не вдалося ({Reason}); наступна ніч пройде за розкладом.")]
+    private static partial void LogNightlyCatchUpFailed(ILogger logger, string reason);
 
     /// <summary>
     /// Зберігає стан постановки (<c>LastError</c>), який лишив цикл.
