@@ -18,8 +18,11 @@ namespace Ecr.Application.Ports;
 /// екземпляр періоду <c>PeriodKey(рік, m)</c>;</item>
 /// <item>введений не-місячний стовпець — власник «якір року»: найменший ключ календаря проєкту
 /// (<c>doc.Period</c>) у цьому році;</item>
-/// <item>обчислювані стовпці (<c>ColumnDef.IsComputed</c>) і комірки з <c>IsCalculated = 1</c> — завжди
-/// в екземплярі перегляду.</item>
+/// <item>обчислювані стовпці (<c>ColumnDef.IsComputed</c>) і комірки з <c>IsCalculated = 1</c> — в екземплярі
+/// перегляду; ✎ LAND-YEAR L1 (D-474 варіант A): лише для версій з розкладкою <c>YearWithMonthColumns</c>
+/// (<see cref="RoutesComputedVersion"/>) обчислюваний стовпець має того самого власника, що й введений: місячний
+/// <c>m</c> — період <c>m</c>, не-місячний — якір року. Комірки з <c>IsCalculated = 1</c> введених стовпців (формула
+/// рівня комірки) — як і раніше, в екземплярі перегляду.</item>
 /// </list>
 /// <para>
 /// Застосовується лише коли разом: прапор <c>Collection:MonthColumnRouting</c> увімкнено, проєкт
@@ -45,6 +48,15 @@ public interface IMonthColumnRouter
     /// <c>YearWithMonthColumns</c>.
     /// </summary>
     public bool AllVersions => Enabled;
+
+    /// <summary>
+    /// ✎ LAND-YEAR L1: чи маршрутизуються ОБЧИСЛЮВАНІ стовпці версії — лише розкладка <c>YearWithMonthColumns</c>
+    /// (реєстр у пам'яті, без звернення до бази). Спадковий прапор <c>Collection:MonthColumnRouting</c> сам по собі
+    /// цього НЕ вмикає: версії <c>PerMonthCopies</c> (зокрема Land 1.0.16.0) пишуть і читають обчислене в екземплярі
+    /// перегляду, як до L1.
+    /// </summary>
+    /// <param name="templateVersionId">Версія шаблону.</param>
+    public bool RoutesComputedVersion(int templateVersionId) => false;
 
     /// <summary>Таблиця підпадає під маршрутизацію: <c>LayoutKind = MonthsInColumns</c> і не видалена.</summary>
     /// <param name="table">Опис таблиці зі знімка метаданих.</param>
@@ -87,8 +99,9 @@ public interface IMonthColumnRouter
     /// <param name="viewPeriod">Період екземпляра перегляду.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>
-    /// Місячний <c>m</c> → <c>PeriodKey(рік, m)</c>; введений не-місячний → якір року; обчислюваний, таблиця поза
-    /// маршрутизацією, перегляд поза календарем або власника немає в календарі → <paramref name="viewPeriod"/>.
+    /// Місячний <c>m</c> → <c>PeriodKey(рік, m)</c>; введений не-місячний → якір року; обчислюваний (крім версій
+    /// <see cref="RoutesComputedVersion"/>, де правило те саме, що для введеного), таблиця поза маршрутизацією, перегляд
+    /// поза календарем або власника немає в календарі → <paramref name="viewPeriod"/>.
     /// </returns>
     public Task<PeriodKey> OwnerPeriodAsync(
         MonthRoutingDocument document, TableDef table, ColumnDef column, PeriodKey viewPeriod, CancellationToken ct);
