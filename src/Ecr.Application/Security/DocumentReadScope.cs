@@ -308,6 +308,13 @@ public sealed class DocumentReadScope
            && (columnCode is null
                || (_columnByCode.TryGetValue((tableDefId, columnCode), out var columnDefId) && CanReadColumn(columnDefId)));
 
+    /// <summary>Чи бачить профіль колонку <paramref name="columnCode"/> таблиці з кодом <paramref name="tableCode"/> у періоді (D-214).</summary>
+    /// <param name="tableCode">Код таблиці; невідомий знімку — невидима.</param>
+    /// <param name="columnCode">Код колонки.</param>
+    /// <param name="period">Період даних.</param>
+    public bool CanReadColumnCodeIn(string tableCode, string columnCode, PeriodKey period)
+        => TableIdOf(tableCode) is { } tableDefId && InPeriod(period).CanReadAt(tableDefId, columnCode);
+
     /// <summary>Усі таблиці структури (для пошуку прив'язок результатів методологій).</summary>
     public IReadOnlyList<int> TableIds() => [.. _sheetOfTable.Keys.Order()];
 

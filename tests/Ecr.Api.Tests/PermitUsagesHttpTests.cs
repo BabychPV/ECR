@@ -230,6 +230,92 @@ public sealed class PermitUsagesHttpTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.UnprocessableEntity, foreign.StatusCode);
     }
 
+    /// <summary>
+    /// ⛔ S-4 (аудит 2026-11-10): комірка поза межами читання документа (заборона на таблицю чи колонку, S6; роль, звужена
+    /// періодами, D-214) у «де використано» не називається; поле шапки лишається. Диференційно: той самий запит, контроль —
+    /// writer без заборон бачить обидві комірки; відрізняється лише грант (або область ролі).
+    /// </summary>
+    [Theory]
+    [InlineData("table")]
+    [InlineData("column")]
+    [InlineData("period")]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Комірки_схованої_таблиці_не_називаються_у_використанні(string restriction)
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var reader = await RestrictedReaderAsync(s, restriction).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+
+        using var writer = await SignedInAsync(app, s.Writer).ConfigureAwait(true);
+        var control = await GetAsync(writer, app, $"/api/v1/permits/{s.Active}/usages").ConfigureAwait(true);
+        Assert.Equal(["header", "cell", "cell"], Kinds(control));
+
+        using var restricted = await SignedInAsync(app, reader).ConfigureAwait(true);
+        var usages = await GetAsync(restricted, app, $"/api/v1/permits/{s.Active}/usages").ConfigureAwait(true);
+        var cells = usages.GetProperty("items").EnumerateArray().Where(i => i.GetProperty("kind").GetString() == "cell").ToList();
+
+        if (restriction == "period")
+        {
+            // Роль бачить лише поточний період: комірка попереднього не називається.
+            Assert.Equal([s.Period], cells.Select(c => c.GetProperty("periodKey").GetInt32()).ToList());
+            Assert.Equal(2, usages.GetProperty("linkCount").GetInt32());
+        }
+        else
+        {
+            Assert.Empty(cells);
+            Assert.Equal(1, usages.GetProperty("linkCount").GetInt32());
+            Assert.DoesNotContain(s.TableCode, usages.GetRawText(), StringComparison.Ordinal);
+        }
+
+        Assert.Equal("header", Kinds(usages)[0]);
+    }
+
+    private static List<string?> Kinds(JsonElement usages)
+        => [.. usages.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("kind").GetString())];
+
+    /// <summary>
+    /// Читач з <c>Registry.View</c> (окрема роль), <c>Document.View</c> і грантом <c>Read</c> на проєкт документа; плюс заборона на
+    /// таблицю (<c>table</c>), на колонку дозволу (<c>column</c>) або область ролі з поточного періоду (<c>period</c>).
+    /// </summary>
+    private async Task<string> RestrictedReaderAsync(Scenario s, string restriction)
+    {
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var user = NewUser(db, "pu_r", out var name);
+        // Registry.View — окремою роллю без області: право звуженої ролі (D-214) глобальним не стає.
+        var catalog = new Role(EcrCode.Create($"PUC_{Guid.NewGuid():N}"), Text("Permit usage catalog"));
+        var role = new Role(EcrCode.Create($"PUR_{Guid.NewGuid():N}"), Text("Permit usage restricted"));
+        db.Roles.AddRange(catalog, role);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        db.RolePermissions.AddRange(new RolePermission(catalog.Id, "Registry.View"), new RolePermission(role.Id, "Document.View"));
+        db.RoleAssignments.Add(new RoleAssignment(catalog.Id, user.Id, null));
+        db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, s.Document.ProjectId, GrantLevel.Read));
+        if (restriction == "table")
+        {
+            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Table, s.Document.TableDefId, GrantLevel.Read, isDeny: true));
+        }
+        else if (restriction == "column")
+        {
+            var columnId = await db.ColumnDefs.AsNoTracking()
+                .Where(c => c.TableDefId == s.Document.TableDefId && c.Code == s.PermitColumnCode).Select(c => c.Id).SingleAsync().ConfigureAwait(false);
+            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Column, columnId, GrantLevel.Read, isDeny: true));
+        }
+
+        var assignment = new RoleAssignment(role.Id, user.Id, null);
+        db.RoleAssignments.Add(assignment);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        if (restriction == "period")
+        {
+            var scope = RoleAssignmentScope.Create([s.Document.ProjectId], null, new PeriodKey(s.Period), null).ToJson();
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE sec.RoleAssignment SET ScopeJson = {scope} WHERE Id = {assignment.Id}").ConfigureAwait(false);
+        }
+
+        return name;
+    }
+
     // ── помічники ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private static async Task<JsonElement> GetAsync(HttpClient client, EcrApiFactory app, string url)

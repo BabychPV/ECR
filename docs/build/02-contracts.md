@@ -4972,7 +4972,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/permits?type=&status=&q=&asOf=&limit=&cursor=` | `Registry.View` | 8 |
 | `POST` | `/api/v1/permits` | `Registry.EditData` | 8 |
 | `GET` | `/api/v1/permits/{id}?asOf=` | `Registry.View` | 8 |
-| `GET` | `/api/v1/permits/{id}/usages?periodKey=&limit=` | `Registry.View` (+ `Document.View` у проєкті документа: чужі документи не рахуються) | 8 |
+| `GET` | `/api/v1/permits/{id}/usages?periodKey=&limit=` | `Registry.View` (+ `Document.View` у проєкті документа: чужі документи не рахуються); комірки поза межами читання документа (S6, D-214) не віддаються, `linkCount` зменшується на сховані з поточної сторінки (S-4) | 8 |
 | `PUT` | `/api/v1/permits/{id}` | `Registry.EditData` | 8 |
 | `DELETE` | `/api/v1/permits/{id}` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/permits/{id}/activate` | `Registry.EditData` | 8 |
