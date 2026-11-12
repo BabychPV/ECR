@@ -158,6 +158,41 @@ describe('SheetCopyBar: додати копію', () => {
     expect(alert.textContent).toContain('cid-add');
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  // W-4 (аудит 2026-11): POST неідемпотентний (копія в КОЖНОМУ періоді); `loading` блокує кнопку лише через 100 мс.
+  it('W-4: подвійний клік до відповіді — рівно один POST', async () => {
+    mockServer({
+      'POST /api/v1/documents/42/sheets/10/copies': { status: 201, body: { sheetCopyId: 78, ordinal: 3 } },
+    });
+    const { onSelect } = show(Original);
+
+    const button = screen.getByTestId('sheet-copy-add');
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(onSelect).toHaveBeenCalledWith('GEN~78');
+    });
+    expect(sent.filter((request) => request.method === 'POST')).toHaveLength(1);
+  });
+
+  it('W-4: після відповіді кнопка знову працює — друга дія дає другий POST', async () => {
+    mockServer({
+      'POST /api/v1/documents/42/sheets/10/copies': { status: 201, body: { sheetCopyId: 78, ordinal: 3 } },
+    });
+    const { onSelect } = show(Original);
+
+    fireEvent.click(screen.getByTestId('sheet-copy-add'));
+    await waitFor(() => {
+      expect(onSelect).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByTestId('sheet-copy-add'));
+    await waitFor(() => {
+      expect(onSelect).toHaveBeenCalledTimes(2);
+    });
+    expect(sent.filter((request) => request.method === 'POST')).toHaveLength(2);
+  });
 });
 
 describe('SheetCopyBar: перейменувати групу', () => {
