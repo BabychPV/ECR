@@ -106,6 +106,26 @@ public static class CellChangeOrigins
     /// </remarks>
     public const string FormulaRestored = "FormulaRestored";
 
+    /// <summary>✎ C-1 (D-475): формула комірки дала помилку; значення НЕ змінено (OldValue = NewValue), код і входи — у Reason.</summary>
+    /// <remarks>Система (не в <see cref="HumanOriginsSql"/>/<see cref="IsHuman"/>); клієнт заявити не може.</remarks>
+    public const string CalcError = "CalcError";
+
+    /// <summary>✎ C-1 (D-475): помилку формули усунуто (успішний перерахунок); у Reason — колишній код.</summary>
+    public const string CalcErrorResolved = "CalcErrorResolved";
+
+    /// <summary>
+    /// ✎ C-1: походження, які НЕ є правкою значення людиною чи машиною-джерелом: перерахунок і події помилки
+    /// розрахунку. Готовий перелік для <c>NOT IN (…)</c> у сирому SQL над <c>aud.CellChange</c>.
+    /// </summary>
+    public const string NotInputOriginsSql = "N'" + Recalculation + "', N'" + CalcError + "', N'" + CalcErrorResolved + "'";
+
+    /// <summary>✎ C-1: те саме для C# (<see cref="NotInputOriginsSql"/>).</summary>
+    /// <param name="origin">Походження з <c>aud.CellChange.Origin</c>.</param>
+    public static bool IsNotInput(string? origin) =>
+        string.Equals(origin, Recalculation, StringComparison.Ordinal)
+        || string.Equals(origin, CalcError, StringComparison.Ordinal)
+        || string.Equals(origin, CalcErrorResolved, StringComparison.Ordinal);
+
     /// <summary>
     /// Походження, які сторожі інтеграції вважають рішенням людини, — готовим
     /// списком для <c>IN (…)</c> у сирому SQL над <c>aud.CellChange</c> (журнал
