@@ -70,6 +70,26 @@ export function resolvePage(table: CalculationYearTable, page: CalculationYearRo
   });
 }
 
+/**
+ * Курсори сторінок таблиці підряд від початку: перша — `null`, кожна наступна — `nextCursor` попередньої. Сторінка
+ * `i` запитується, лише коли сторінку `i − 1` прочитано і вона не остання (курсор знає лише сервер; зсуву немає —
+ * він пропускав би рядки на змінному наборі). `want` — скільки сторінок хоче екран, `loaded(i)` — прочитана сторінка.
+ */
+export function pageCursors(
+  want: number,
+  loaded: (index: number) => Pick<CalculationYearRows, 'nextCursor'> | undefined,
+): (string | null)[] {
+  const cursors: (string | null)[] = [];
+  let cursor: string | null = null;
+  for (let i = 0; i < want; i++) {
+    cursors.push(cursor);
+    const next = loaded(i)?.nextCursor;
+    if (next === undefined || next === null) break;
+    cursor = next;
+  }
+  return cursors;
+}
+
 /** Ключ смуги аркуша. */
 export function sheetKey(table: CalculationYearTable): string {
   return `s${String(table.sheetDefId)}~${String(table.sheetCopyId ?? '')}`;

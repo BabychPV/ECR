@@ -93,7 +93,10 @@ public sealed class CalculationYearPerfTests(ITestOutputHelper output)
         Assert.Equal(tables[0].GetProperty("rows").GetInt32(), rows.GetProperty("total").GetInt32());
         Assert.True(page.Bytes <= 200 * 1024, $"сторінка {page.Bytes} Б > 200 КБ");
         var last = tables[^1].GetProperty("key").GetString();
-        await MeasureGetAsync(app, client, reader, $"{root}/rows?year=2026&table={last}&offset=1000&limit=200", "rows page 6").ConfigureAwait(true);
+        var seed = await MeasureGetAsync(app, client, reader, $"{root}/rows?year=2026&table={last}&limit=800", "rows 800").ConfigureAwait(true);
+        var after = JsonDocument.Parse(seed.Body).RootElement.GetProperty("nextCursor").GetString();
+        Assert.NotNull(after);
+        await MeasureGetAsync(app, client, reader, $"{root}/rows?year=2026&table={last}&cursor={Uri.EscapeDataString(after)}&limit=200", "rows page 5 (cursor)").ConfigureAwait(true);
         await MeasureGetAsync(app, client, reader, $"{root}/rows?year=2026&table={key}&q=_77&limit=200", "rows search").ConfigureAwait(true);
 
         // Для порівняння: огляд усього документа зі значеннями (те, що будує задача експорту).

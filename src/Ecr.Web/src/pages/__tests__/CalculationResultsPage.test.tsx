@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { CalculationResultsPage } from '@/pages/CalculationResultsPage';
+import type { CalculationYearRows } from '@/features/calcResults/api';
 import { yearFixtureFor } from '@/features/calcResults/__tests__/fixture';
 import { testTheme } from '@/test/render';
 
@@ -31,6 +32,42 @@ function serve(templateLayout: string | null): void {
       const year = yearFixtureFor(url);
       if (year !== null) return json(year);
       if (/\/api\/v1\/documents\/7$/.test(url)) return json({ id: 7, businessKey: 'DOC-7', templateLayout });
+      return json(null);
+    }),
+  );
+}
+
+/**
+ * «Сервер» сторінками по 2 рядки таблиці 10 за курсором (`c<позиція>`); `staleOnce` — перший запит із курсором
+ * відхиляється 422, як курсор, виданий до перерахунку.
+ */
+function servePaged(staleOnce: boolean): void {
+  requests.length = 0;
+  let stale = staleOnce;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.includes('/calculation-results/year/rows')) {
+        const params = new URL(url, 'http://localhost').searchParams;
+        const page = yearFixtureFor(url) as CalculationYearRows;
+        const cursor = params.get('cursor');
+        if (cursor !== null && stale) {
+          stale = false;
+          return new Response(
+            JSON.stringify({ title: 'Invalid', status: 422, errorCode: 'ECR-REQ-0422', correlationId: 'x' }),
+            { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+          );
+        }
+        const start = cursor === null ? 0 : Number(cursor.slice(1));
+        const rows = page.rows.slice(start, start + 2);
+        const end = start + rows.length;
+        return json({ ...page, rows, nextCursor: end < page.rows.length ? `c${String(end)}` : null });
+      }
+      const year = yearFixtureFor(url);
+      if (year !== null) return json(year);
+      if (/\/api\/v1\/documents\/7$/.test(url)) return json({ id: 7, businessKey: 'DOC-7', templateLayout: null });
       return json(null);
     }),
   );
@@ -73,7 +110,9 @@ describe('CalculationResultsPage', () => {
     expect(requests.filter((u) => u.includes('/calculation-results/year/summary?year=2026'))).toHaveLength(1);
     expect(rowsRequests()).toHaveLength(1);
     expect(rowsRequests()[0]).toContain('table=10');
-    expect(rowsRequests()[0]).toContain('offset=0');
+    // Перша сторінка — без курсора; зсуву в контракті немає.
+    expect(rowsRequests()[0]).not.toContain('cursor=');
+    expect(rowsRequests()[0]).not.toContain('offset');
     const co2 = grid.querySelector('[data-cr-row="r-co2"]')!;
     expect(within(co2 as HTMLElement).getByText('1.5')).toBeTruthy();
     expect(co2.textContent).toContain('2/12');
@@ -111,6 +150,38 @@ describe('CalculationResultsPage', () => {
     await waitFor(() =>
       expect(screen.getByTestId('where').textContent).toBe('/documents/7?periodKey=202602&sheet=AIR&table=T1_2'),
     );
+  });
+
+  it('наступна сторінка — за nextCursor попередньої; кожен рядок рівно раз', async () => {
+    servePaged(false);
+    show();
+    const grid = await screen.findByTestId('calc-results-grid');
+    await waitFor(() => expect(grid.querySelector('[data-cr-row="r-flare"]')).not.toBeNull());
+
+    const table10 = rowsRequests().filter((u) => u.includes('table=10'));
+    expect(table10[0]).not.toContain('cursor=');
+    expect(table10.some((u) => u.includes('cursor=c2'))).toBe(true);
+    expect(table10.every((u) => !u.includes('offset'))).toBe(true);
+    for (const id of ['r-co2', 'r-rate', 'r-flare']) {
+      expect(grid.querySelectorAll(`[data-cr-row="${id}"]`)).toHaveLength(1);
+    }
+    expect(grid.querySelector('[data-cr-more="10"]')).toBeNull();
+  });
+
+  it('курсор відхилено 422 (перерахунок) — таблиця читається з першої сторінки, а не показує помилку', async () => {
+    servePaged(true);
+    show();
+    const grid = await screen.findByTestId('calc-results-grid');
+    await waitFor(() => expect(grid.querySelector('[data-cr-row="r-flare"]')).not.toBeNull());
+
+    const table10 = rowsRequests().filter((u) => u.includes('table=10'));
+    const rejected = table10.findIndex((u) => u.includes('cursor=c2'));
+    expect(rejected).toBeGreaterThan(0);
+    // Після відмови — знову перша сторінка (без курсора), далі — курсор нової першої сторінки.
+    expect(table10.slice(rejected + 1).some((u) => !u.includes('cursor='))).toBe(true);
+    for (const id of ['r-co2', 'r-rate', 'r-flare']) {
+      expect(grid.querySelectorAll(`[data-cr-row="${id}"]`)).toHaveLength(1);
+    }
   });
 
   it('помісячні копії: заголовок місяця відкриває документ на цьому місяці', async () => {

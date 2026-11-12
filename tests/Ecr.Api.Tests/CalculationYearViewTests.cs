@@ -139,18 +139,29 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         var formulas = JsonDocument.Parse(await GetOkAsync(app, client, $"{root}/summary?year=2026&methodology=formula").ConfigureAwait(true)).RootElement;
         Assert.Equal(2, formulas.GetProperty("matchedRows").GetInt32());
 
-        // Сторінки по 1: послідовні, без перекриття, разом — уся таблиця; ідентифікатори виходів ті самі, що й у повній сторінці.
+        // Сторінки по 1 за nextCursor: послідовні, без перекриття й пропусків, разом — уся таблиця (кожен вихід рівно
+        // раз); ідентифікатори ті самі, що й у повній сторінці, а на останній сторінці nextCursor = null.
         var all = JsonDocument.Parse(await GetOkAsync(app, client, $"{root}/rows?year=2026&table={s.TableAKey}").ConfigureAwait(true)).RootElement;
+        Assert.Equal(JsonValueKind.Null, all.GetProperty("nextCursor").ValueKind);
         var ids = all.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("id").GetString()).ToList();
         var paged = new List<string?>();
-        for (var offset = 0; offset < ids.Count; offset++)
+        string? cursor = null;
+        for (var guard = 0; guard <= ids.Count; guard++)
         {
-            var one = JsonDocument.Parse(await GetOkAsync(app, client, $"{root}/rows?year=2026&table={s.TableAKey}&offset={offset}&limit=1").ConfigureAwait(true)).RootElement;
+            var after = cursor is null ? "" : $"&cursor={Uri.EscapeDataString(cursor)}";
+            var one = JsonDocument.Parse(await GetOkAsync(app, client, $"{root}/rows?year=2026&table={s.TableAKey}&limit=1{after}").ConfigureAwait(true)).RootElement;
             Assert.Equal(ids.Count, one.GetProperty("total").GetInt32());
             paged.AddRange(one.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("id").GetString()));
+            cursor = one.GetProperty("nextCursor").GetString();
+            if (cursor is null)
+            {
+                break;
+            }
         }
 
+        Assert.Null(cursor);
         Assert.Equal(ids, paged);
+        Assert.Equal(ids.Count, paged.Distinct().Count());
         Assert.True(ids.Count >= 3, string.Join(", ", ids));
     }
 
@@ -283,12 +294,26 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.Forbidden, (await YearAsync(noCalc, plain.DocumentId, 2026).ConfigureAwait(true)).Status);
         Assert.Equal((HttpStatusCode)422, (await YearAsync(client, s.DocumentId, 1999).ConfigureAwait(true)).Status);
 
-        // Сторінка: невідомий ключ таблиці чи розмір поза 1…1000 — 422, а не 500 і не порожньо.
+        // Сторінка: невідомий ключ таблиці, розмір поза 1…1000, зіпсований курсор чи курсор, виданий для іншої таблиці
+        // або інших фільтрів, — 422, а не 500 і не порожньо (і не тихий пропуск рядків).
         var root = $"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/calculation-results/year";
-        foreach (var bad in new[] { "&table=abc", "&table=1~", $"&table={s.TableAKey}&limit=0", $"&table={s.TableAKey}&limit=1001", $"&table={s.TableAKey}&offset=-1" })
+        var first = JsonDocument.Parse(await GetOkAsync(app, client, $"{root}/rows?year=2026&table={s.TableAKey}&limit=1").ConfigureAwait(true)).RootElement;
+        var issued = Uri.EscapeDataString(first.GetProperty("nextCursor").GetString()!);
+
+        // Контроль: той самий курсор із тими самими таблицею й фільтрами — 200 (інакше 422 нижче нічого не доводить).
+        await GetOkAsync(app, client, $"{root}/rows?year=2026&table={s.TableAKey}&limit=1&cursor={issued}").ConfigureAwait(true);
+        foreach (var bad in new[]
+                 {
+                     "&table=abc", "&table=1~", $"&table={s.TableAKey}&limit=0", $"&table={s.TableAKey}&limit=1001",
+                     $"&table={s.TableAKey}&cursor=abc", $"&table={s.TableAKey}&cursor=%21%21%21",
+                     $"&table={s.TableAKey}&cursor={new string('A', 200)}",
+                     $"&table={s.TableBKey}&limit=1&cursor={issued}",
+                     $"&table={s.TableAKey}&limit=1&methodology=formula&cursor={issued}",
+                 })
         {
             using var response = await client.GetAsync(new Uri($"{root}/rows?year=2026{bad}", UriKind.Relative)).ConfigureAwait(true);
-            Assert.True(response.StatusCode == (HttpStatusCode)422, $"{bad}: {response.StatusCode}");
+            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(response.StatusCode == (HttpStatusCode)422, $"{bad}: {response.StatusCode}: {body}\n{app.ErrorsText}");
         }
 
         using (var noCalcRows = await noCalc.GetAsync(new Uri($"/api/v1/documents/{plain.DocumentId.ToString(CultureInfo.InvariantCulture)}/calculation-results/year/rows?year=2026&table=1", UriKind.Relative)).ConfigureAwait(true))
@@ -359,7 +384,7 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         return body;
     }
 
-    /// <summary>Зведення і всі сторінки всіх його таблиць (по 1000) — те, що екран бачить, розгорнувши все.</summary>
+    /// <summary>Зведення і всі сторінки всіх його таблиць (по 1000, за nextCursor) — те, що екран бачить, розгорнувши все.</summary>
     private sealed record YearResponse(
         HttpStatusCode Status, string SummaryBody, JsonElement Summary, IReadOnlyList<(string Table, JsonElement Page)> Pages, string Body);
 
@@ -388,11 +413,19 @@ public sealed class CalculationYearViewTests(SqlServerFixture sql)
         var bodies = new List<string> { summaryBody };
         foreach (var key in TableKeys(summary))
         {
-            using var page = await client.GetAsync(new Uri($"{root}/rows?year={y}&table={key}&limit=1000", UriKind.Relative)).ConfigureAwait(false);
-            var body = await page.Content.ReadAsStringAsync().ConfigureAwait(false);
-            Assert.True(page.StatusCode == HttpStatusCode.OK, $"{key}: {page.StatusCode}: {body}");
-            bodies.Add(body);
-            pages.Add((key!, JsonDocument.Parse(body).RootElement));
+            string? cursor = null;
+            do
+            {
+                var after = cursor is null ? "" : $"&cursor={Uri.EscapeDataString(cursor)}";
+                using var page = await client.GetAsync(new Uri($"{root}/rows?year={y}&table={key}&limit=1000{after}", UriKind.Relative)).ConfigureAwait(false);
+                var body = await page.Content.ReadAsStringAsync().ConfigureAwait(false);
+                Assert.True(page.StatusCode == HttpStatusCode.OK, $"{key}: {page.StatusCode}: {body}");
+                bodies.Add(body);
+                var element = JsonDocument.Parse(body).RootElement;
+                pages.Add((key!, element));
+                cursor = element.GetProperty("nextCursor").GetString();
+            }
+            while (cursor is not null);
         }
 
         return new YearResponse(response.StatusCode, summaryBody, summary, pages, string.Join('\n', bodies));

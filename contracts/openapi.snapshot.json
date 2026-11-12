@@ -2363,10 +2363,12 @@
             },
             "type": "array"
           },
-          "offset": {
-            "description": "Зсув першого рядка сторінки.",
-            "format": "int32",
-            "type": "integer"
+          "nextCursor": {
+            "description": "Курсор наступної сторінки (CalculationYearCursor); `null` — сторінка остання. Курсор, виданий до\nперерахунку чи зміни фільтра, сервер відхиляє 422 — клієнт читає таблицю з першої сторінки.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "rows": {
             "description": "Виходи сторінки в порядку показу; індекси — у переліки цієї сторінки.",
@@ -2402,7 +2404,7 @@
         "required": [
           "table",
           "total",
-          "offset",
+          "nextCursor",
           "equipment",
           "methodologies",
           "substances",
@@ -40418,12 +40420,11 @@
             }
           },
           {
-            "description": "Зсув (≥ 0).",
+            "description": "Курсор наступної сторінки (`nextCursor` попередньої); порожньо — перша. Зіпсований або виданий до\nперерахунку чи з іншими фільтрами — 422, клієнт читає таблицю з початку.",
             "in": "query",
-            "name": "offset",
+            "name": "cursor",
             "schema": {
-              "format": "int32",
-              "type": "integer"
+              "type": "string"
             }
           },
           {
