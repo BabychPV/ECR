@@ -105,7 +105,9 @@ public sealed class RecallSheetHandler(
 
         var projectId = await documents.FindProjectIdAsync(documentId, ct).ConfigureAwait(false);
 
-        if (!HasSubmitGrant(profile, projectId, sheetDefId))
+        // ⛔ C-7: повний контекст рішення (код аркуша, період, участь) — як у поданні.
+        if (projectId is null
+            || !await access.HasSubmitGrantAsync(profile, documentId, sheetDefId, key, sheetCopyId, ct).ConfigureAwait(false))
         {
             throw new AccessDeniedException(
                 "ECR-ACCS-0403",
@@ -208,7 +210,8 @@ public sealed class RecallSheetHandler(
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var projectId = await documents.FindProjectIdAsync(documentId, ct).ConfigureAwait(false);
 
-        if (!HasSubmitGrant(profile, projectId, sheetDefId))
+        if (projectId is null
+            || !await access.HasSubmitGrantAsync(profile, documentId, sheetDefId, key, sheetCopyId, ct).ConfigureAwait(false))
         {
             return new RecallAvailabilityDto(false);
         }
@@ -226,16 +229,6 @@ public sealed class RecallSheetHandler(
 
         return new RecallAvailabilityDto(state.IsRecallable(firstStepId));
     }
-
-    // ✎ D-285: «подавав би» = ті самі повноваження, що й подання
-    // (`EditRules.MeetsSubmit`): рівень Submit АБО Write + `Document.Submit`.
-    private static bool HasSubmitGrant(AccessProfile profile, int? projectId, int sheetDefId)
-        => !profile.IsSimulation
-           && projectId is { } project
-           && EditRules.MeetsSubmit(
-               profile,
-               project,
-               EditRules.Effective(profile, new CellAccessContext { ProjectId = project, SheetDefId = sheetDefId }));
 
     /// <summary>Перший крок ЧИННОГО маршруту — той самий вибір, що в <c>CurrentApprovalStepAsync</c>.</summary>
     private async Task<int?> FirstStepIdAsync(long documentId, int? projectId, CancellationToken ct)

@@ -23,7 +23,8 @@ namespace Ecr.Api.Tests;
 /// ⛔ Мутаційні докази: прибрати гілку права в <c>EditRules.CanSubmit</c> —
 /// червоніє «Write + право → 204»; зробити <c>Write</c> достатнім без права —
 /// червоніє «Write без права → 403»; прибрати право з
-/// <c>RecallSheetHandler.HasSubmitGrant</c> — червоніє «відкликання Write + право».
+/// <c>AccessDecisionService.HasSubmitGrantAsync</c> (C-7; доти — <c>RecallSheetHandler.HasSubmitGrant</c>) —
+/// червоніє «відкликання Write + право».
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class SubmitRightApiTests(SqlServerFixture sql)

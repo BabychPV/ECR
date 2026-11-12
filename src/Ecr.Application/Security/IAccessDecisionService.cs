@@ -310,6 +310,24 @@ public interface IAccessDecisionService
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
+    /// C-7 / D-285: чи має користувач повноваження подання цього аркуша (рівень Submit або Write + <c>Document.Submit</c>)
+    /// у ПОВНОМУ контексті рішення — проєкт, код аркуша, період, участь (D-443, D-214) — без перевірки стану аркуша.
+    /// </summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія аркуша (RS); <c>null</c> — оригінал.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Для відкликання (<c>RecallSheetHandler</c>): <c>CanSubmitAsync</c> відмовляє на поданому аркуші ще до гранта,
+    /// а контекст без коду аркуша, періоду й участі не бачив звужених ролей і учасників — «відкликання не має
+    /// вимагати від автора більше, ніж подання».
+    /// </remarks>
+    public Task<bool> HasSubmitGrantAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct);
+
+    /// <summary>
     /// AN-59: профілі кількох користувачів одним пакетом (стала кількість звернень до бази, а не за користувача). Профіль
     /// той самий, що й <see cref="BuildProfileAsync"/>; вимкнений чи відсутній користувач у результаті відсутній.
     /// </summary>
