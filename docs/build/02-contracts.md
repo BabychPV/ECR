@@ -1940,9 +1940,18 @@ public interface ICalculationYearReader
 > (PeriodKey, TableInstanceId), `PK_CellValue` (PeriodKey, TableRowId), `UQ_TableInstance` (PeriodKey, DocumentId) +
 > `LOOP JOIN`: ціна від розміру документа/таблиці, а не партиції (без підказки оптимізатор переглядав усі рядки
 > партиції). Ведуча таблиця кожного запиту несе `PeriodKey IN (…)`, вкладені пошуки — рівність PeriodKey.
-> Індексів не змінено. ⚠ Відкрите: `IsCalculated` не в ключі жодного індексу комірок — рядок читає всі свої комірки;
+> ~~Індексів не змінено. ⚠ Відкрите: `IsCalculated` не в ключі жодного індексу комірок — рядок читає всі свої комірки;
 > `IX_CalculationResult_DocRun` не має `Kind` і `TableInstanceId` у ключі — сторінка таблиці читає всі числа документа
-> (агрегат ~40 мс, значення ~250 мс на 240 тис. чисел). Обидва — кандидати на індекс за окремим рішенням (міграція).
+> (агрегат ~40 мс, значення ~250 мс на 240 тис. чисел). Обидва — кандидати на індекс за окремим рішенням (міграція).~~
+> ✎ 2026-11-12, CRY01 (індекси дозволені рішенням людини 28.10 «перф — індекси дозволені»): ключ
+> `IX_CalculationResult_DocRun` — `(PeriodKey, DocumentId, CalculationRunId, Kind, TableInstanceId)`
+> (`07-partition-tables.sql`); числа сторінки — LOOP-пошук від пар (період, прогін) до екземплярів сторінки (синтетика:
+> 3 671 → 768 читань). Ключі й числа — сирим SQL з переліками-літералами: параметризовані `IN (@p…)` EF давали пошук
+> лише за `PeriodKey` по всіх партиціях із `DocumentId` залишковим фільтром. Рядки комірок формул і підписів —
+> `IX_TableRow_Live` (без key lookup за `IsDeleted`: читання `doc.TableRow` в агрегаті 498 тис. → 2.7 тис.).
+> ⚠ Відкрите: `IsCalculated` у ключі комірок — фільтрований `IX_CellValue_Calc (PeriodKey, TableDefId, TableRowId,
+> ColumnDefId) INCLUDE (ValueNumeric, IsEmpty) WHERE IsCalculated = 1` дає агрегату 1.01 млн → 5.1 тис. читань, але
+> запис розрахованих комірок дорожчає на 21–25 % (заміри CRY01) — чекає рішення координатора.
 >
 > **API (замість одного `GET …/calculation-results/year`, що на документі Land важив 9.17 МБ):**
 > `GET …/year/summary?year=&q=&sheet=&methodology=&substance=&problems=` — місяці, таблиці (`key`, аркуш, `rows`,

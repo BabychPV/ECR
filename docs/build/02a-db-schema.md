@@ -1987,6 +1987,16 @@ CREATE INDEX IX_CalculationResult_Lookup
     INCLUDE (Value, UnitId, SubstanceEntryId, SourceRowKey) ON ps_ByPeriodKey(PeriodKey);
 GO
 
+-- Результати прогонів документа (ReadCurrentAsync, перенос, rpt.*, огляд за рік). Будує 07-partition-tables.sql,
+-- а не міграція (поза моделлю EF). ✎ 2026-11-12 CRY01: Kind і TableInstanceId — у КЛЮЧІ (раніше Kind не було,
+-- TableInstanceId — в INCLUDE, D-401): сторінка огляду за рік шукає до виходів однієї таблиці (синтетика:
+-- 3 671 → 768 читань), а не читає всі числа документа. Перебудова наявного індексу — DROP_EXISTING, офлайн.
+CREATE INDEX IX_CalculationResult_DocRun
+    ON calc.CalculationResult (PeriodKey, DocumentId, CalculationRunId, Kind, TableInstanceId)
+    INCLUDE (MethodologyVersionId, OutputCode, SourceRowKey, Value, UnitId, SubstanceEntryId)
+    ON ps_ByPeriodKey(PeriodKey);
+GO
+
 -- HSE301 U1 (аудит C6 п.3), міграція U1UnitForeignKeys: індекс під FK_CRes_Unit.
 -- Без нього і перевірка ключа при видаленні одиниці, і «де використовується»
 -- (UnitStore) сканують усю таблицю. Вирівняний зі схемою партиціонування.

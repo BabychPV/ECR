@@ -206,39 +206,47 @@ GO
 -- ⚠ `Value` в INCLUDE: міграція, що змінює тип `calc.CalculationResult.Value`, мусить зняти
 -- й поставити назад і цей індекс (помилка 5074), як уже робить з `IX_CalculationResult_Lookup`.
 -- На заповненій базі — офлайн-побудова (Standard без ONLINE), у `-Upgrade` це вікно обслуговування.
+-- ✎ CRY01: ключ продовжено `Kind, TableInstanceId` (форма — у блоці «CRY01» нижче, він же перебудовує наявні бази).
 IF OBJECT_ID(N'calc.CalculationResult', N'U') IS NOT NULL
    AND NOT EXISTS (SELECT 1 FROM sys.indexes
                    WHERE object_id = OBJECT_ID(N'calc.CalculationResult')
                      AND name = N'IX_CalculationResult_DocRun')
     CREATE NONCLUSTERED INDEX IX_CalculationResult_DocRun
-        ON calc.CalculationResult (PeriodKey, DocumentId, CalculationRunId)
-        INCLUDE (MethodologyVersionId, OutputCode, SourceRowKey, Value, UnitId, SubstanceEntryId, TableInstanceId)
+        ON calc.CalculationResult (PeriodKey, DocumentId, CalculationRunId, Kind, TableInstanceId)
+        INCLUDE (MethodologyVersionId, OutputCode, SourceRowKey, Value, UnitId, SubstanceEntryId)
         ON ps_ByPeriodKey (PeriodKey);
 GO
 
--- ── D-401: `TableInstanceId` у INCLUDE `IX_CalculationResult_DocRun` для наявних баз ──
+-- ── CRY01 (замінює блок D-401): `Kind, TableInstanceId` у КЛЮЧІ `IX_CalculationResult_DocRun` для наявних баз ──
 --
--- Проєкція `ReadCurrentAsync` читає `TableInstanceId`; без колонки в INCLUDE кожен GET зрізу з
--- колонкою `Calculated` платив би key lookup на кожен результат (регресія R5-Q1-02). Індекс, створений
--- до D-401, колонки не має — перебудовуємо `DROP_EXISTING` ідемпотентно (умова — відсутність included-колонки).
+-- Огляд «Calculation results» за рік (`CalculationResultStore.Year`) читає лише виходи (`Kind = 0`) і сторінкою —
+-- лише екземпляри однієї таблиці. `Kind` не було в індексі взагалі, `TableInstanceId` — лише в INCLUDE, тож кожна
+-- сторінка читала ВСІ числа документа за рік (синтетика 240 тис. чисел: 3 671 читання на сторінку → 768).
+-- Префікс ключа (PeriodKey, DocumentId, CalculationRunId) і покриття проєкції `ReadCurrentAsync` (D-401,
+-- R5-Q1-02) — без змін: нові стовпці лише в кінці ключа, `TableInstanceId` переїхав з INCLUDE у ключ.
+-- Умова — індекс є, але `Kind` не 4-й ключовий стовпець або `TableInstanceId` не 5-й: перебудовує і базу до
+-- D-401 (без `TableInstanceId`), і базу з INCLUDE (D-401); повторний прохід нічого не робить.
 -- ⚠ `ON ps_ByPeriodKey (PeriodKey)` обов'язково: без нього індекс упав би на PRIMARY (50031 нижче).
--- Standard без ONLINE: офлайн-побудова, у `-Upgrade` це вікно обслуговування.
+-- Standard без ONLINE: офлайн-побудова (`DROP_EXISTING` читає й пише весь індекс), у `-Upgrade` це вікно
+-- обслуговування (runbook §8.2).
 IF OBJECT_ID(N'calc.CalculationResult', N'U') IS NOT NULL
    AND COL_LENGTH(N'calc.CalculationResult', N'TableInstanceId') IS NOT NULL
+   AND COL_LENGTH(N'calc.CalculationResult', N'Kind') IS NOT NULL
    AND EXISTS (SELECT 1 FROM sys.indexes
                WHERE object_id = OBJECT_ID(N'calc.CalculationResult')
                  AND name = N'IX_CalculationResult_DocRun')
-   AND NOT EXISTS (SELECT 1
-                   FROM sys.indexes AS i
-                   JOIN sys.index_columns AS ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
-                   JOIN sys.columns AS c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
-                   WHERE i.object_id = OBJECT_ID(N'calc.CalculationResult')
-                     AND i.name = N'IX_CalculationResult_DocRun'
-                     AND ic.is_included_column = 1
-                     AND c.name = N'TableInstanceId')
+   AND (SELECT COUNT(*)
+          FROM sys.indexes AS i
+          JOIN sys.index_columns AS ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+          JOIN sys.columns AS c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+         WHERE i.object_id = OBJECT_ID(N'calc.CalculationResult')
+           AND i.name = N'IX_CalculationResult_DocRun'
+           AND ic.is_included_column = 0
+           AND ((c.name = N'Kind' AND ic.key_ordinal = 4)
+                OR (c.name = N'TableInstanceId' AND ic.key_ordinal = 5))) < 2
     CREATE NONCLUSTERED INDEX IX_CalculationResult_DocRun
-        ON calc.CalculationResult (PeriodKey, DocumentId, CalculationRunId)
-        INCLUDE (MethodologyVersionId, OutputCode, SourceRowKey, Value, UnitId, SubstanceEntryId, TableInstanceId)
+        ON calc.CalculationResult (PeriodKey, DocumentId, CalculationRunId, Kind, TableInstanceId)
+        INCLUDE (MethodologyVersionId, OutputCode, SourceRowKey, Value, UnitId, SubstanceEntryId)
         WITH (DROP_EXISTING = ON, SORT_IN_TEMPDB = ON)
         ON ps_ByPeriodKey (PeriodKey);
 GO

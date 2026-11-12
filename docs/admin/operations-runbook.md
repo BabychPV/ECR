@@ -1552,6 +1552,7 @@ Enterprise; Standard і Express переписують таблицю. Коже�
 | Індекс | Де виконується | Що робить | Enterprise/Developer | Standard/Express |
 |---|---|---|---|---|
 | `IX_CalculationResult_DocRun` (R5-Q1-02, `47e92166`, після RC16) | `07-partition-tables.sql` | `(PeriodKey, DocumentId, CalculationRunId)` з INCLUDE (`MethodologyVersionId`, `OutputCode`, `SourceRowKey`, `Value`, `UnitId`, `SubstanceEntryId`), вирівняний по `ps_ByPeriodKey`: за обсягом близький до самої таблиці | **офлайн** (гілки `ONLINE` у скрипті немає) | офлайн |
+| `IX_CalculationResult_DocRun`, ключ CRY01 (✎ 2026-11-12) | `07-partition-tables.sql` | `DROP_EXISTING` у `(PeriodKey, DocumentId, CalculationRunId, Kind, TableInstanceId)`, INCLUDE без `TableInstanceId`: **перебудова** наявного індексу — один раз на кожній базі, оновлюваній з версії до CRY01 (заміняє перебудову D-401) | **офлайн** | офлайн |
 | `IX_CalculationResult_Version` (`f7eda9da`, є в RC16) | `07-partition-tables.sql` | `(MethodologyVersionId, PeriodKey)` з INCLUDE (`CalculationRunId`, `DocumentId`), вирівняний по `ps_ByPeriodKey` | **офлайн** | офлайн |
 
 На відміну від U1, B18 і `IX_CellChange_LateEdit`, `07-partition-tables.sql` редакції сервера не
