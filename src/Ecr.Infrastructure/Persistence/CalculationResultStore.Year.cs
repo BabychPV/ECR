@@ -50,28 +50,33 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
             .Select(g => (Keys: g.Select(kv => kv.Key).ToList(), Runs: g.First().Value.ToList()))
             .ToList();
 
+        // CRY03: числова частина зведення (ключі, агрегат виходів, числа без екземпляра) — з кешу, якщо актуальні прогони
+        // й екземпляри документа ті самі. Сторінка й експорт (значення) читають наживо.
+        YearResultsEntry? cached = null;
+        string? cacheKey = null;
+        if (request.Aggregate && yearCache is not null)
+        {
+            cacheKey = await YearResultsKeyAsync(documentId, keys, effective, ct).ConfigureAwait(false);
+            cached = yearCache.Get(cacheKey);
+        }
+
         // 1. Ключі чисел УСЬОГО документа (агрегат, без значень): прогін місяця, стеля і звуження для вузького читача
         //    не залежать від того, яку таблицю читає запит.
-        // ⚠ Сирим SQL з переліками-літералами, а не LINQ: параметризовані `IN (@p…)` EF давали пошук лише за PeriodKey
-        //   по ВСІХ партиціях, а DocumentId — залишковим фільтром (CRY01, план): на базі з багатьма документами це
-        //   читання чисел усіх документів року. Літерали дають пошук (PeriodKey, DocumentId, CalculationRunId, Kind).
-        var keyRows = new List<YearKeyRow>();
-        foreach (var (groupKeys, groupRuns) in groups)
-        {
-            var sql = $"""
-                SELECT r.PeriodKey, r.CalculationRunId, r.TableInstanceId, r.MethodologyVersionId, r.OutputCode, COUNT(*) AS Count
-                  FROM calc.CalculationResult AS r
-                 WHERE {OutputsOf(groupKeys, groupRuns)}
-                 GROUP BY r.PeriodKey, r.CalculationRunId, r.TableInstanceId, r.MethodologyVersionId, r.OutputCode
-                """;
-            keyRows.AddRange(await db.Database
-                .SqlQueryRaw<YearKeyRow>(sql, new SqlParameter("@documentId", documentId))
-                .ToListAsync(ct)
-                .ConfigureAwait(false));
-        }
+        var keyRows = cached?.Keys ?? await KeyRowsAsync(documentId, groups, ct).ConfigureAwait(false);
 
         // ⛔ Стеля рахує лише рядки (період, прогін цього періоду) — як і раніше, до читання значень.
         ThrowIfOverCeiling(keyRows.Sum(k => (long)k.Count), limit, documentId, keys[0]);
+
+        if (request.Aggregate && cached is null)
+        {
+            var (lines, legacyRows) = await LoadAggregateResultsAsync(documentId, groups, ct).ConfigureAwait(false);
+            cached = new YearResultsEntry(keyRows, lines, legacyRows);
+            if (cacheKey is not null)
+            {
+                yearCache!.Set(cacheKey, cached);
+            }
+        }
+
         var runs = RunsOf(keyRows, current);
         var resultKeys = keyRows
             .Select(k => new YearResultKey(k.PeriodKey, k.TableInstanceId, k.MethodologyVersionId, k.OutputCode))
@@ -80,7 +85,7 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
 
         var instanceIds = request.TableInstanceIds.Distinct().ToList();
         var results = request.Aggregate
-            ? await AggregateResultsAsync(documentId, groups, instanceIds, ct).ConfigureAwait(false)
+            ? ExpandAggregateResults(cached!, keys[0] / 100, instanceIds)
             : await ResultValuesAsync(documentId, groups, request.SliceResults ? instanceIds : null, ct).ConfigureAwait(false);
 
         var formulaCells = new List<YearFormulaCell>();
@@ -293,26 +298,84 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
     }
 
     /// <summary>
-    /// Зведення: числа методологій, згруповані в SQL до виходу таблиці (визначення + копія аркуша) з маскою місяців.
-    /// Факти розгортаються по місяцях маски зі значенням 0 і екземпляром-представником тієї ж таблиці (звуження доступу
-    /// залежить від таблиці, не від екземпляра). Числа без екземпляра (до D-401) — сирими: їхній господар залежить від
-    /// місяця.
+    /// Ключі чисел документа (агрегат, без значень). ⚠ Сирим SQL з переліками-літералами, а не LINQ: параметризовані
+    /// <c>IN (@p…)</c> EF давали пошук лише за PeriodKey по ВСІХ партиціях, а DocumentId — залишковим фільтром (CRY01).
     /// </summary>
-    private async Task<List<YearResult>> AggregateResultsAsync(
-        long documentId, List<(List<int> Keys, List<long> Runs)> groups, List<long> instanceIds, CancellationToken ct)
+    private async Task<List<YearKeyRow>> KeyRowsAsync(
+        long documentId, List<(List<int> Keys, List<long> Runs)> groups, CancellationToken ct)
     {
-        // Рік без жодного прогону (груп немає) — порожньо, а не First() на порожній послідовності нижче (e2e: 500).
-        if (groups.Count == 0)
+        var keyRows = new List<YearKeyRow>();
+        foreach (var (groupKeys, groupRuns) in groups)
         {
-            return [];
+            var sql = $"""
+                SELECT r.PeriodKey, r.CalculationRunId, r.TableInstanceId, r.MethodologyVersionId, r.OutputCode, COUNT(*) AS Count
+                  FROM calc.CalculationResult AS r
+                 WHERE {OutputsOf(groupKeys, groupRuns)}
+                 GROUP BY r.PeriodKey, r.CalculationRunId, r.TableInstanceId, r.MethodologyVersionId, r.OutputCode
+                """;
+            keyRows.AddRange(await db.Database
+                .SqlQueryRaw<YearKeyRow>(sql, new SqlParameter("@documentId", documentId))
+                .ToListAsync(ct)
+                .ConfigureAwait(false));
         }
 
-        var lines = new Dictionary<(long Instance, int Version, string? Row, string Output, long? Substance, int Unit), int>();
+        return keyRows;
+    }
+
+    /// <summary>
+    /// Ключ запису <see cref="CalculationYearResultsCache"/> (CRY03): документ, періоди, актуальні прогони КОЖНОГО періоду
+    /// і відбиток екземплярів документа за ці періоди (PeriodKey, Id, TableDefId, SheetCopyId).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Від чого залежить числова частина зведення: рядки <c>calc.CalculationResult</c> актуальних прогонів (незмінні
+    /// після того, як прогін став актуальним — нові числа дає новий прогін з новим Id) і з'єднання з
+    /// <c>doc.TableInstance</c> (група = таблиця + копія аркуша; перелік відомих екземплярів). Перенесення версії міняє
+    /// TableDefId екземпляра, склад аркушів — екземпляри; обидва — у відбитку. Відбиток — один пошук
+    /// <c>UQ_TableInstance</c> (сотні рядків), SHA-256 замість тексту ключа на кілобайти.
+    /// </remarks>
+    private async Task<string> YearResultsKeyAsync(
+        long documentId, List<int> keys, Dictionary<int, HashSet<long>> effective, CancellationToken ct)
+    {
+        var sql = $"""
+            SELECT ti.PeriodKey, ti.Id, ti.TableDefId, ti.SheetCopyId
+              FROM doc.TableInstance AS ti {InstanceSeek}
+             WHERE ti.PeriodKey IN ({List(keys)}) AND ti.DocumentId = @documentId
+            """;
+        var instances = await db.Database
+            .SqlQueryRaw<InstanceFingerprintRow>(sql, new SqlParameter("@documentId", documentId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var text = new System.Text.StringBuilder();
+        text.Append(CultureInfo.InvariantCulture, $"d{documentId}");
+        foreach (var key in keys)
+        {
+            text.Append(CultureInfo.InvariantCulture, $"|p{key}:{string.Join(',', effective[key].Order())}");
+        }
+
+        foreach (var i in instances.OrderBy(i => i.PeriodKey).ThenBy(i => i.Id))
+        {
+            text.Append(CultureInfo.InvariantCulture, $"|i{i.PeriodKey}.{i.Id}.{i.TableDefId}.{i.SheetCopyId}");
+        }
+
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text.ToString()));
+        return "cry:" + documentId.ToString(CultureInfo.InvariantCulture) + ":" + Convert.ToHexString(hash);
+    }
+
+    /// <summary>
+    /// Зведення: числа методологій, згруповані в SQL до виходу таблиці (визначення + копія аркуша) з маскою місяців, і
+    /// числа без екземпляра (до D-401) — сирими: їхній господар залежить від місяця. Без звуження й без переліку
+    /// екземплярів читача — це те, що кешується (CRY03).
+    /// </summary>
+    private async Task<(List<AggregateResultRow> Lines, List<YearResult> Legacy)> LoadAggregateResultsAsync(
+        long documentId, List<(List<int> Keys, List<long> Runs)> groups, CancellationToken ct)
+    {
+        var lines = new List<AggregateResultRow>();
         var legacy = new List<YearResult>();
         foreach (var (groupKeys, groupRuns) in groups)
         {
             // ⚠ Лише цілі числа сервера (періоди, прогони) — у тексті запиту, щоб партиції відсікалися статично;
-            // документ і екземпляри — параметрами.
+            // документ — параметром.
             var sql = $"""
                 SELECT MIN(r.TableInstanceId) AS TableInstanceId, r.MethodologyVersionId, r.SourceRowKey, r.OutputCode,
                        CAST(r.SubstanceEntryId AS bigint) AS SubstanceEntryId, r.UnitId,
@@ -329,15 +392,10 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
                  GROUP BY ti.TableDefId, ti.SheetCopyId, r.MethodologyVersionId, r.SourceRowKey, r.OutputCode,
                           r.SubstanceEntryId, r.UnitId
                 """;
-            var rows = await db.Database
+            lines.AddRange(await db.Database
                 .SqlQueryRaw<AggregateResultRow>(sql, new SqlParameter("@documentId", documentId))
                 .ToListAsync(ct)
-                .ConfigureAwait(false);
-            foreach (var row in rows)
-            {
-                var key = (row.TableInstanceId, row.MethodologyVersionId, row.SourceRowKey, row.OutputCode, row.SubstanceEntryId, row.UnitId);
-                lines[key] = lines.GetValueOrDefault(key) | row.Months;
-            }
+                .ConfigureAwait(false));
 
             // Числа без екземпляра: пошук по ключу DocRun до TableInstanceId IS NULL (CRY01) — літералами, як ключі вище.
             var legacySql = $"""
@@ -353,9 +411,24 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
                 .ConfigureAwait(false));
         }
 
-        var year = groups.SelectMany(g => g.Keys).First() / 100;
+        return (lines, legacy);
+    }
+
+    /// <summary>
+    /// Розгортає агрегат зведення по місяцях маски зі значенням 0 і екземпляром-представником тієї ж таблиці (звуження
+    /// доступу залежить від таблиці, не від екземпляра). Живе, не кешується: залежить від переліку екземплярів запиту.
+    /// </summary>
+    private static List<YearResult> ExpandAggregateResults(YearResultsEntry entry, int year, List<long> instanceIds)
+    {
+        var lines = new Dictionary<(long Instance, int Version, string? Row, string Output, long? Substance, int Unit), int>();
+        foreach (var row in entry.Lines)
+        {
+            var key = (row.TableInstanceId, row.MethodologyVersionId, row.SourceRowKey, row.OutputCode, row.SubstanceEntryId, row.UnitId);
+            lines[key] = lines.GetValueOrDefault(key) | row.Months;
+        }
+
         var known = instanceIds.ToHashSet();
-        var expanded = new List<YearResult>(lines.Count * 4 + legacy.Count);
+        var expanded = new List<YearResult>(lines.Count * 4 + entry.Legacy.Count);
         foreach (var ((instance, version, row, output, substance, unit), months) in lines)
         {
             for (var m = 1; m <= 12; m++)
@@ -368,7 +441,7 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
             }
         }
 
-        expanded.AddRange(legacy);
+        expanded.AddRange(entry.Legacy);
         return [.. expanded.OrderBy(r => r.PeriodKey)];
     }
 
@@ -454,12 +527,22 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
 
     private static string List(IEnumerable<long> values) => string.Join(',', values.Select(v => v.ToString(CultureInfo.InvariantCulture)));
 
+    /// <summary>Запис <see cref="CalculationYearResultsCache"/>: сирі (до звуження) числові факти зведення документа.</summary>
+    internal sealed record YearResultsEntry(List<YearKeyRow> Keys, List<AggregateResultRow> Lines, List<YearResult> Legacy)
+    {
+        /// <summary>Розмір запису для стелі кешу — число рядків фактів.</summary>
+        public long Size => (long)Keys.Count + Lines.Count + Legacy.Count;
+    }
+
+    /// <summary>Екземпляр документа для відбитка ключа кешу.</summary>
+    private sealed record InstanceFingerprintRow(int PeriodKey, long Id, int TableDefId, long? SheetCopyId);
+
     /// <summary>Ключ чисел (агрегат).</summary>
-    private sealed record YearKeyRow(
+    internal sealed record YearKeyRow(
         int PeriodKey, long CalculationRunId, long? TableInstanceId, int MethodologyVersionId, string OutputCode, int Count);
 
     /// <summary>Вихід методології з маскою місяців (агрегат зведення).</summary>
-    private sealed record AggregateResultRow(
+    internal sealed record AggregateResultRow(
         long TableInstanceId, int MethodologyVersionId, string? SourceRowKey, string OutputCode, long? SubstanceEntryId,
         int UnitId, int Months);
 

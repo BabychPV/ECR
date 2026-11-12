@@ -23,7 +23,8 @@ public sealed partial class CalculationResultStore(
     int? readCeiling = null,
     IConfiguration? configuration = null,
     SupersededPurgeOptions? purgeOptions = null,
-    ILogger<CalculationResultStore>? logger = null)
+    ILogger<CalculationResultStore>? logger = null,
+    CalculationYearResultsCache? yearCache = null)
     : ICalculationResultStore, ICurrentResultFilterReader
 {
     /// <summary>Прибирання рядків неактуальних прогонів: явні налаштування (тести) або з конфігурації (вимкнено за замовчуванням).</summary>
