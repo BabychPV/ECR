@@ -56,6 +56,36 @@ public sealed class ReportViewsHealthTests
         Assert.Equal(HealthStatus.Healthy, (await CheckAsync(status)).Status);
     }
 
+    /// <summary>
+    /// ✎ P-4b (D-479): вʼюхи після публікації будуються у фоні — картка каже «оновлюються» (зелена, з шаблонами), а збій
+    /// важливіший за «оновлюються». Мутація: прибрати гілку pending — перше твердження про текст червоне.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Вʼюхи_у_фоні_оновлюються_зелений_з_шаблонами_а_збій_важливіший()
+    {
+        var status = new ReportViewStatus();
+        status.Pending(41);
+        status.Pending(7);
+
+        var updating = await CheckAsync(status);
+
+        Assert.Equal(HealthStatus.Healthy, updating.Status);
+        Assert.Contains("being updated in the background", updating.Description, StringComparison.Ordinal);
+        Assert.Contains("7, 41", updating.Description, StringComparison.Ordinal);
+        Assert.Equal("7, 41", updating.Data["pendingTemplates"]);
+
+        status.Failed(new ReportViewFailure(12, 50422, "шаблон WATER, версія 3: таблиця 7 має 251 колонок"));
+        Assert.Equal(HealthStatus.Degraded, (await CheckAsync(status)).Status);
+
+        status.Succeeded(12);
+        status.Settled(7);
+        status.Settled(41);
+        var done = await CheckAsync(status);
+        Assert.Equal(HealthStatus.Healthy, done.Status);
+        Assert.DoesNotContain("being updated", done.Description, StringComparison.Ordinal);
+    }
+
     private static Task<HealthCheckResult> CheckAsync(IReportViewStatus status)
     {
         var user = Substitute.For<ICurrentUser>();

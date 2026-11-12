@@ -37,6 +37,8 @@ const KindKeys: Record<string, string> = {
   IOutboxFlushJob: 'jobs.kind.outboxFlush',
   // D-476: синк складу газу FLERT — «Синхронізувати зараз» (маркер) і щоденний (конкретний клас).
   IFlertCompositionSyncJob: 'jobs.kind.flertCompositionSync',
+  // ✎ P-4b (D-479): вʼюхи SSRS після публікації версії шаблону — у фоні.
+  IReportViewsJob: 'jobs.kind.reportViews',
   // ⛔ FP-7 (прохід «від першого обличчя» 2026-10-11): повторювані задачі реєструються КОНКРЕТНИМ
   // класом, а не маркером-інтерфейсом (`typeof(TJob).FullName`), тож у переліку `/admin/jobs`
   // стояли `NotificationJob`, `PeriodStateJob`, `RowWindowRefetchJob` поряд з «Recalculation».
