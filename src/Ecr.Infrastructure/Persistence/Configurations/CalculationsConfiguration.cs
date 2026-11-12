@@ -599,6 +599,39 @@ public sealed class CalculationIssueConfiguration : IEntityTypeConfiguration<Cal
     }
 }
 
+/// <summary>✎ C-1 / D-475: конфігурація <see cref="FormulaError"/> — поточний стан помилок формул (без партицій, без FK).</summary>
+public sealed class FormulaErrorConfiguration : IEntityTypeConfiguration<FormulaError>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<FormulaError> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("FormulaError", "calc", t =>
+            t.HasCheckConstraint("CK_FormulaError_Kind", "Kind IN (N'Error', N'Blocked')"));
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.RowKey).HasMaxLength(FormulaError.MaxRowKeyLength).IsRequired();
+        builder.Property(x => x.SourceRowKey).HasMaxLength(FormulaError.MaxRowKeyLength);
+        builder.Property(x => x.Kind).HasMaxLength(16).IsRequired();
+        builder.Property(x => x.ErrorCode).HasMaxLength(FormulaError.MaxErrorCodeLength).IsRequired();
+        builder.Property(x => x.InputsJson).HasMaxLength(FormulaError.MaxInputsLength);
+        builder.Property(x => x.Since).HasColumnType("datetime2(3)").IsRequired();
+
+        // Один стан на комірку; пошук і заміна — за адресою комірки.
+        builder.HasIndex(x => new { x.PeriodKey, x.TableRowId, x.ColumnDefId })
+               .IsUnique()
+               .HasDatabaseName("UX_FormulaError_Cell");
+
+        // EXISTS у запиті екземплярів (RowStore) і читання зрізу — за екземпляром.
+        builder.HasIndex(x => new { x.PeriodKey, x.TableInstanceId })
+               .HasDatabaseName("IX_FormulaError_Instance");
+
+        // Панель проблем і «Перевірити» — документ × період × копія.
+        builder.HasIndex(x => new { x.DocumentId, x.PeriodKey, x.SheetCopyId })
+               .HasDatabaseName("IX_FormulaError_Document");
+    }
+}
+
 /// <summary>Конфігурація <see cref="CalculationResult"/> — партиційованої таблиці.</summary>
 /// <remarks>
 /// ⚠ Ключ складений із <c>PeriodKey</c> і <c>Id</c>: партиційна функція
