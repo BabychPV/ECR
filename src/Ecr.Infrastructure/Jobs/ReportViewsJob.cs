@@ -12,12 +12,13 @@ namespace Ecr.Infrastructure.Jobs;
 /// </summary>
 /// <remarks>
 /// ⛔ Ставиться ЗЛИТТЯМ на шаблон (<see cref="ReportViewsTarget"/>), тож payload визначається ціллю: задача бере ВСІ
-/// опубліковані версії шаблону, а не версію, що її поставила, — злиття двох публікацій не губить вʼюх жодної з них.
+/// опубліковані й застарілі версії шаблону, а не версію, що її поставила, — злиття двох публікацій не губить вʼюх жодної.
 /// ⚠ Блоку версії задача не бере й нічого не пише в <c>cfg.*</c>: публікація, правка чернетки чи друга публікація
 /// того самого шаблону під час прогону не чекають на неї.
 /// ⚠ Збій видно двічі: генератор фіксує причину для картки <c>reportviews</c> (<see cref="IReportViewStatus"/>), а
 /// задача кидає далі — у черзі вона <c>Failed</c> з причиною, і її можна повторити («Restart»). Картка «оновлюються»
-/// знімається в будь-якому разі (<see cref="IReportViewStatus.Settled"/>).
+/// знімається в будь-якому разі (<see cref="IReportViewStatus.Settled"/>) — якщо за прогін не з'явилась новіша
+/// позначка (тоді чекає злитий повтор, і знімає вже він).
 /// </remarks>
 public sealed class ReportViewsJob(
     EcrDbContext db,
@@ -32,11 +33,19 @@ public sealed class ReportViewsJob(
         ArgumentNullException.ThrowIfNull(progress);
 
         var task = Parse(payload);
+
+        // ⚠ Покоління позначки — ДО запиту версій: публікація, що закомітилась після цього рядка, ставить новіше
+        // покоління і злитий повтор, тож Settled нижче картку «оновлюються» не зніме, доки повтор не відпрацює.
+        var generation = status?.PendingGeneration(task.TemplateId) ?? 0;
         try
         {
             var versionIds = await db.TemplateVersions
                 .AsNoTracking()
-                .Where(v => v.TemplateId == task.TemplateId && v.Status == TemplateVersionStatus.Published)
+                // ⚠ Published і Deprecated — ті самі статуси, що бере процедура (05-rpt-views.sql: Status IN (1, 2), «застаріла
+                // версія вʼюх НЕ втрачає»): версія, яку наступна публікація встигла зробити Deprecated до старту задачі, свої
+                // вʼюхи однаково отримує. Процедура ідемпотентна (однаковий текст — без ALTER), тож повтор для старих версій дешевий.
+                .Where(v => v.TemplateId == task.TemplateId
+                    && (v.Status == TemplateVersionStatus.Published || v.Status == TemplateVersionStatus.Deprecated))
                 .OrderBy(v => v.Id)
                 .Select(v => v.Id)
                 .ToListAsync(ct)
@@ -71,7 +80,7 @@ public sealed class ReportViewsJob(
         }
         finally
         {
-            status?.Settled(task.TemplateId);
+            status?.Settled(task.TemplateId, generation);
         }
     }
 
