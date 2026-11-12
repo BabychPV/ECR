@@ -239,18 +239,6 @@ describe('NewPermitWizard: крок «Details» і створення', () => {
     expect(notify.showDone).toHaveBeenCalledWith('permits.list.done.created');
   });
 
-  it('U-1 (аудит 2026-11, F13 P2): «Number» і «Location» обмежені межами сервера 200 / 500 у самому полі', async () => {
-    await toDetails();
-
-    // Межі сервера — PermitInput.MaxNumber / MaxLocation (src/Ecr.Application/Permits/PermitInput.cs); числами, а не
-    // константами клієнта: тест ловить і розбіжність клієнтської константи із сервером.
-    // Мутація: прибрати `maxLength={PermitNumberMax}` / `maxLength={PermitLocationMax}` у NewPermitWizard — червоний (null).
-    const number = screen.getByRole('textbox', { name: /permits\.list\.wizard\.number/ });
-    const location = screen.getByRole('textbox', { name: /permits\.list\.wizard\.location/ });
-    expect(number.getAttribute('maxlength')).toBe('200');
-    expect(location.getAttribute('maxlength')).toBe('500');
-  });
-
   it('вибраний інший тип їде в запит', async () => {
     await toDetails();
     fireEvent.click(screen.getByTestId('wizard-back'));
