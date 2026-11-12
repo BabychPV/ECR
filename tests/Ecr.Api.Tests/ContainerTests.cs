@@ -179,6 +179,8 @@ public sealed class ContainerTests(SqlServerFixture sql)
             typeof(Ecr.Calculations.CalculationOrchestrator),
             typeof(Ecr.Adapters.PiAf.CollectionRunner),
             typeof(Ecr.Adapters.Excel.ExcelExporter),
+            // IExternalTableSource (FLERT) реалізує лише SqlDataSource.
+            typeof(Ecr.Adapters.Sql.SqlDataSource),
             typeof(Ecr.Api.Auth.CurrentUser),
         ];
 
