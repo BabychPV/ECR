@@ -31,16 +31,21 @@ const Own: FormulaErrorIssue = {
   ],
   source: null,
   since: '2026-11-11T10:00:00Z',
+  rowLabelL10n: null,
+  dependentCount: 1,
 };
 
+/** Залежні, чий корінь у переліку не показаний (інший період): один запис на джерело з кількістю. */
 const Blocked: FormulaErrorIssue = {
   ...Own,
   columnCode: 'D',
   columnHeaderL10n: { values: { en: 'Doubled' } },
+  rowLabelL10n: { values: { en: 'Boiler 1' } },
   kind: 'Blocked',
   formula: '[C] * 2',
   inputs: null,
-  source: { tableCode: 'T1', rowKey: 'R7', columnCode: 'C', periodKey: null },
+  source: { tableCode: 'T1', rowKey: 'R7', columnCode: 'C', periodKey: 202512 },
+  dependentCount: 3,
 };
 
 function show(errors: FormulaErrorIssue[], onOpenCell = vi.fn()) {
@@ -66,8 +71,14 @@ describe('FormulaErrorsBanner (C-1)', () => {
     expect(own!.textContent).toContain('⟦grid.calcError.cause.divideByZero⟧');
     expect(own!.textContent).toContain('formula=[A] / [B]');
     expect(own!.textContent).toContain('inputs=A=10; B=0');
+    // Корінь — один раз, залежні — кількістю, а не переліком.
+    expect(own!.textContent).toContain('document.formulaErrors.dependents (count=1)');
+    expect(own!.textContent).toContain('document.formulaErrors.cell (column=Ratio, row=7)');
     expect(blocked!.getAttribute('data-kind')).toBe('Blocked');
     expect(blocked!.textContent).toContain('document.formulaErrors.blockedBy (source=T1 · C (R7))');
+    // Фіксований рядок — назвою шаблону; «не оновлено» — з кількістю комірок.
+    expect(blocked!.textContent).toContain('document.formulaErrors.cellNamed (column=Doubled, row=Boiler 1)');
+    expect(blocked!.textContent).toContain('count=3');
     expect(screen.getByTestId('document-formula-errors-summary').textContent).toContain('count=2');
   });
 

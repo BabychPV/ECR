@@ -1868,7 +1868,7 @@
         "description": "Поточні проблеми розрахунку документа за період (AN-69).",
         "properties": {
           "formulaErrorTotal": {
-            "description": "✎ C-1: скільки видимих комірок з помилкою всього; `null` — помилок немає.",
+            "description": "✎ C-1: скільки видимих комірок з помилкою (корені й залежні) всього; `null` — помилок немає.",
             "format": "int32",
             "type": [
               "null",
@@ -1876,7 +1876,7 @@
             ]
           },
           "formulaErrors": {
-            "description": "✎ C-1 (D-475): група «Помилки формул» — власні помилки першими, далі «не оновлено»; не більше\nint CalculationIssuesDto.MaxFormulaErrors (одна помилка в колонці, яку читає колонкова формула, дає «не оновлено» в кожному\nрядку великої таблиці); `null` — помилок немає.",
+            "description": "✎ C-1 (D-475): група «Помилки формул» — ОДИН запис на КОРІНЬ помилки (власна помилка комірки) з кількістю\nзалежних комірок, «не оновлених» через нього (самі залежні позначає сітка, не панель). Залежні, чий корінь у\nпереліку не показаний (закритий читачеві, інший період чи копія), — один запис на таке джерело. Не більше\nint CalculationIssuesDto.MaxFormulaErrors записів; `null` — помилок немає.",
             "items": {
               "$ref": "#/components/schemas/FormulaErrorIssueDto"
             },
@@ -8489,7 +8489,7 @@
         "type": "object"
       },
       "FormulaErrorIssueDto": {
-        "description": "✎ C-1 (D-475): рядок групи «Помилки формул».",
+        "description": "✎ C-1 (D-475): запис групи «Помилки формул» — корінь помилки (або джерело «не оновлено», якого не видно).",
         "properties": {
           "columnCode": {
             "description": "Код колонки.",
@@ -8499,8 +8499,13 @@
             "$ref": "#/components/schemas/LocalizedText",
             "description": "Заголовок колонки."
           },
+          "dependentCount": {
+            "description": "Error — скільки видимих комірок не оновлено через цей корінь; Blocked — скільки видимих комірок не оновлено через\nSource (включно з адресою запису).",
+            "format": "int32",
+            "type": "integer"
+          },
           "errorCode": {
-            "description": "Код помилки.",
+            "description": "Код помилки (для Blocked — код кореня).",
             "type": "string"
           },
           "formula": {
@@ -8521,12 +8526,23 @@
             ]
           },
           "kind": {
-            "description": "`Error` — власна помилка; `Blocked` — не оновлено через помилку в Source.",
+            "description": "`Error` — власна помилка комірки (корінь); `Blocked` — комірки, не оновлені через помилку в\n        Source, корінь якої в переліку не показаний (адреса — перша з таких комірок).",
             "type": "string"
           },
           "rowKey": {
             "description": "Ключ рядка.",
             "type": "string"
+          },
+          "rowLabelL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва фіксованого рядка шаблону; `null` — динамічний рядок (підпис «Рядок N»)."
+              }
+            ]
           },
           "rowNumber": {
             "description": "Порядковий номер рядка (`doc.TableRow.Ordinal`) — для підпису «Рядок N».",
@@ -8567,6 +8583,7 @@
           "sheetCopyId",
           "rowKey",
           "rowNumber",
+          "rowLabelL10n",
           "columnCode",
           "columnHeaderL10n",
           "kind",
@@ -8574,7 +8591,8 @@
           "formula",
           "inputs",
           "source",
-          "since"
+          "since",
+          "dependentCount"
         ],
         "type": "object"
       },

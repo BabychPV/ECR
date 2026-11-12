@@ -88,6 +88,8 @@ public sealed class FormulaErrorStore(EcrDbContext db) : IFormulaErrorStore
                 from st in sts.DefaultIfEmpty()
                 join sc in db.ColumnDefs.AsNoTracking() on e.SourceColumnDefId equals (int?)sc.Id into scs
                 from sc in scs.DefaultIfEmpty()
+                join rd in db.RowDefs.AsNoTracking() on r.RowDefId equals (int?)rd.Id into rds
+                from rd in rds.DefaultIfEmpty()
                 orderby t.Id, r.Ordinal, c.Ordinal
                 select new FormulaErrorView(
                     new FormulaErrorRow(
@@ -97,7 +99,8 @@ public sealed class FormulaErrorStore(EcrDbContext db) : IFormulaErrorStore
                     t.Code, c.Code, c.HeaderL10n, r.Ordinal,
                     f == null ? null : f.Expression,
                     st == null ? null : st.Code,
-                    sc == null ? null : sc.Code))
+                    sc == null ? null : sc.Code,
+                    rd == null ? null : rd.LabelL10n))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 }

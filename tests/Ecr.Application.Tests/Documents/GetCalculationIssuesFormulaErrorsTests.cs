@@ -43,6 +43,10 @@ public sealed class GetCalculationIssuesFormulaErrorsTests
         Assert.Null(blocked.Inputs);
         Assert.Equal("T2", blocked.Source!.TableCode);
         Assert.Equal("X", blocked.Source.ColumnCode);
+        Assert.Equal(1, blocked.DependentCount);
+
+        // Назва фіксованого рядка шаблону — у записі (підпис рядка, як в інших групах проблем).
+        Assert.Equal("Row seven", own.RowLabelL10n!.Get("en"));
     }
 
     [Fact]
@@ -67,19 +71,22 @@ public sealed class GetCalculationIssuesFormulaErrorsTests
     }
 
     /// <summary>
-    /// Payload: одна помилка, яку читає колонкова формула кожного рядка великої таблиці, дає тисячі «не оновлено» —
-    /// у відповіді не більше 500, корінь (власна помилка) першим, `formulaErrorTotal` — усі видимі.
+    /// ✎ Зручність (координатор 12.11): одна помилка, яку читає колонкова формула кожного рядка великої таблиці, дає
+    /// тисячі «не оновлено» — у панелі це ОДИН запис кореня з кількістю залежних, а не тисяча рядків;
+    /// `formulaErrorTotal` — усі видимі комірки.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    public async Task Група_обмежена_стелею_корінь_першим_усього_названо()
+    public async Task Залежні_згортаються_в_запис_кореня_з_кількістю()
     {
         var handler = Arrange(deny: false, blockedRows: 2_000);
 
         var result = await handler.HandleAsync(Document, Period, null, CancellationToken.None);
 
-        Assert.Equal(Ecr.Application.Calculations.Dto.CalculationIssuesDto.MaxFormulaErrors, result.FormulaErrors!.Count);
-        Assert.Equal(FormulaError.ErrorKind, result.FormulaErrors[0].Kind);
+        Assert.Equal(3, result.FormulaErrors!.Count);
+        var root = Assert.Single(result.FormulaErrors, e => e.ColumnCode == "C");
+        Assert.Equal(FormulaError.ErrorKind, root.Kind);
+        Assert.Equal(2_000, root.DependentCount);
         Assert.Equal(2_003, result.FormulaErrorTotal);
     }
 
@@ -124,7 +131,8 @@ public sealed class GetCalculationIssuesFormulaErrorsTests
         IReadOnlyList<FormulaErrorView> views =
         [
             .. Enumerable.Range(0, blockedRows).Select(_ =>
-                View(Row(t1.Id, d.Id, FormulaError.BlockedKind, null, t1.Id, c.Id), "T1", "D", "[C] * 2", "T1", "C")),
+                View(Row(t1.Id, d.Id, FormulaError.BlockedKind, null, t1.Id, c.Id) with { SourceRowKey = "R7" },
+                    "T1", "D", "[C] * 2", "T1", "C")),
             View(Row(t1.Id, c.Id, FormulaError.ErrorKind, inputs, null, null), "T1", "C", "[A] / [B] + [T2].[R1].[X]", null, null),
             View(Row(t1.Id, d.Id, FormulaError.BlockedKind, null, t2.Id, x.Id), "T1", "D", "[C] * 2", "T2", "X"),
             View(Row(t2.Id, x.Id, FormulaError.ErrorKind, null, null, null), "T2", "X", "1/0", null, null),
@@ -144,5 +152,5 @@ public sealed class GetCalculationIssuesFormulaErrorsTests
     private static FormulaErrorView View(
         FormulaErrorRow row, string table, string column, string formula, string? sourceTable, string? sourceColumn)
         => new(row, table, column, new LocalizedText(new Dictionary<string, string> { ["en"] = column }), 7, formula,
-            sourceTable, sourceColumn);
+            sourceTable, sourceColumn, new LocalizedText(new Dictionary<string, string> { ["en"] = "Row seven" }));
 }
