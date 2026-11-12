@@ -448,6 +448,28 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     }
 
     /// <inheritdoc />
+    /// <remarks>⚠ Без PayloadJson у проєкції: лише Id і версія зрізу; копія — та сама (RS).</remarks>
+    public async Task<(long Id, int TemplateVersionId)?> FindLatestSnapshotOfSheetCodeAsync(
+        long documentId, string sheetCode, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(sheetCode);
+
+        var row = await (
+                from s in db.SubmissionSnapshots.AsNoTracking()
+                join sd in db.SheetDefs.AsNoTracking() on s.SheetDefId equals sd.Id
+                where s.DocumentId == documentId
+                      && s.PeriodKey == periodKey.Value
+                      && s.SheetCopyId == sheetCopyId
+                      && sd.Code == sheetCode
+                orderby s.SubmittedAt descending, s.Id descending
+                select new { s.Id, s.TemplateVersionId })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return row is null ? null : (row.Id, row.TemplateVersionId);
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⛔ PERF (AN-135): НЕ через EF <c>FirstOrDefaultAsync</c>. Асинхронне читання ~10 МБ <c>nvarchar(max)</c>
     /// у звичайному (не послідовному) режимі SqlClient коштувало 11–12 с проти ~0,15 с синхронного: кожен

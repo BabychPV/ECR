@@ -115,7 +115,7 @@ public sealed class ApprovalSnapshotRefresh(
 
         var latest = latestKey is { } found
             ? await workflow.GetSnapshotPayloadAsync(found.Id, ct).ConfigureAwait(false)
-            : null;
+            : await MigratedSheetPayloadAsync(documentId, sheetDefId, periodKey, sheetCopyId, snapshot, ct).ConfigureAwait(false);
 
         if (!SheetChanged(latest, live, sheetColumns))
         {
@@ -234,5 +234,29 @@ public sealed class ApprovalSnapshotRefresh(
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// ⛔ V-3 (аудит 2026-11): зрізу на поточному <c>SheetDefId</c> немає, бо перенос проєкту (LP-32) перемапив стан
+    /// аркуша на нову версію, а зріз лишив на старій (доказ). Шукаємо зріз за КОДОМ аркуша й перекладаємо його колонки
+    /// на версію документа — інакше перше затвердження після переносу знімало б «правку погоджувача», якої не було.
+    /// </summary>
+    /// <returns>Payload (лише клітинки) у колонках поточної версії; <c>null</c> — зрізу немає (як і доти).</returns>
+    private async Task<string?> MigratedSheetPayloadAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId,
+        Domain.Entities.Configuration.TemplateVersionSnapshot snapshot, CancellationToken ct)
+    {
+        if (snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId) is not { } sheetDef
+            || await workflow.FindLatestSnapshotOfSheetCodeAsync(documentId, sheetDef.Code, periodKey, sheetCopyId, ct)
+                .ConfigureAwait(false) is not { } foreign
+            || foreign.TemplateVersionId == snapshot.TemplateVersionId
+            || await workflow.GetSnapshotPayloadAsync(foreign.Id, ct).ConfigureAwait(false) is not { } foreignPayload)
+        {
+            return null;
+        }
+
+        var source = await metadata.GetAsync(foreign.TemplateVersionId, ct).ConfigureAwait(false);
+        return JsonSerializer.Serialize(
+            SubmissionSnapshotTranslation.Cells(SubmissionPayload.Read(foreignPayload), source, snapshot));
     }
 }

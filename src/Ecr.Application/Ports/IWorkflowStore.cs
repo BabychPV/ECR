@@ -249,6 +249,20 @@ public interface IWorkflowStore
         long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
         => throw new NotSupportedException("Зрізи копії аркуша не реалізовано цим сховищем.");
 
+    /// <summary>
+    /// V-3 (аудит 2026-11): найновіший зріз аркуша з тим самим КОДОМ (оригінал чи копія) за період — зокрема знятий на
+    /// іншій версії шаблону до переносу проєкту (перенос стан перемаплює, а зріз — ні); <c>null</c> — немає.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetCode">Код аркуша.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>⚠ Типова реалізація (тестові підміни) зрізів не знає — <c>null</c>; справжня — <c>WorkflowStore</c>.</remarks>
+    public Task<(long Id, int TemplateVersionId)?> FindLatestSnapshotOfSheetCodeAsync(
+        long documentId, string sheetCode, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
+        => Task.FromResult<(long Id, int TemplateVersionId)?>(null);
+
     /// <summary><see cref="GetSnapshotsAsync"/> для КОПІЇ аркуша (RS).</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="sheetDefId">Аркуш.</param>
