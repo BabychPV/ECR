@@ -167,6 +167,11 @@ public sealed record StructureChangeView(
 /// після того, як сервер віддав сторінку.
 /// </param>
 /// <param name="Sort">Порядок сторінок; типово найновіші першими (раніше загальний журнал ішов від найстаріших).</param>
+/// <param name="ColumnLineage">
+/// V-4: Id тієї самої колонки в інших версіях шаблону (<c>IColumnPathMapper.LineageAsync</c>); з <paramref name="ColumnDefId"/>
+/// фільтр — <c>IN</c> по цьому переліку, бо журнал до переносу проєкту лишається на Id старої версії. <c>null</c> або
+/// один елемент — звичайна рівність.
+/// </param>
 public sealed record CellChangeFilter(
     DateTime From,
     DateTime To,
@@ -180,7 +185,8 @@ public sealed record CellChangeFilter(
     IReadOnlyList<int>? VisibleColumnIds = null,
     int? PeriodKey = null,
     bool HumanOnly = false,
-    AuditSort Sort = AuditSort.ChangedAtDesc)
+    AuditSort Sort = AuditSort.ChangedAtDesc,
+    IReadOnlyList<int>? ColumnLineage = null)
 {
     /// <summary>Фільтр адресує РІВНО ОДНУ комірку — документ, рядок і колонку.</summary>
     /// <remarks>

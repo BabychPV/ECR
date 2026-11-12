@@ -423,7 +423,18 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
 
         if (filter.ColumnDefId is { } columnDefId)
         {
-            And("ColumnDefId = @columnDefId", "@columnDefId", columnDefId, SqlDbType.Int);
+            if (filter.ColumnLineage is { Count: > 1 } lineage)
+            {
+                // ⛔ V-4: та сама комірка на колонках інших версій шаблону (перенос проєкту) — історія не обривається.
+                // Перелік обмежений кількістю версій шаблону; той самий вид умови, що й `@visibleColumns` нижче.
+                where.Append("\n                   AND ColumnDefId IN (SELECT CAST([value] AS int) FROM OPENJSON(@columnLineage))");
+                command.Parameters.Add("@columnLineage", SqlDbType.NVarChar, -1).Value =
+                    "[" + string.Join(",", lineage.Select(v => v.ToString(CultureInfo.InvariantCulture))) + "]";
+            }
+            else
+            {
+                And("ColumnDefId = @columnDefId", "@columnDefId", columnDefId, SqlDbType.Int);
+            }
         }
 
         if (filter.ChangedByUserId is { } changedBy)

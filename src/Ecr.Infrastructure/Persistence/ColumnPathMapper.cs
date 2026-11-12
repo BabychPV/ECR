@@ -1,5 +1,8 @@
 // src/Ecr.Infrastructure/Persistence/ColumnPathMapper.cs
+using System.Data;
+using System.Globalization;
 using Ecr.Application.Ports;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -93,4 +96,89 @@ public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
 
         return result;
     }
+
+    /// <summary>Найбільше раундів розгортання ланцюжка перейменувань (A@v1 → B@v2 → C@v3 …).</summary>
+    /// <remarks>Ланцюжок обмежений кількістю версій шаблону; межа — запобіжник від циклу в даних, а не бізнес-правило.</remarks>
+    internal const int MaxLineageRounds = 8;
+
+    /// <summary>
+    /// V-4: ОДИН запит на раунд — шлях кожної названої колонки й Id того самого шляху в усіх версіях її шаблону,
+    /// разом із джерелом перейменування (<c>cfg.ColumnRename</c>), що веде в будь-який із них.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Перелік Id — ОДИН JSON-параметр (<c>OPENJSON</c>), як <c>@visibleColumns</c> в <c>AuditReader</c>: видимих колонок
+    /// документа Land тисячі, а окремий параметр на кожен Id упирається в стелю 2100 параметрів SQL Server.
+    /// Усі з'єднання — пошуки за унікальними індексами: <c>UQ_SheetDef (TemplateVersionId, Code)</c>,
+    /// <c>UQ_TableDef (SheetDefId, Code)</c>, <c>UQ_ColumnDef (TableDefId, Code)</c>, <c>IX_ColumnRename_To</c>,
+    /// версії шаблону — за <c>(TemplateId, Version)</c>. Розмір виходу — колонки × версії шаблону.
+    /// </remarks>
+    private const string LineageSql = """
+        SELECT c.Id AS SourceId, c2.Id AS LinkedId, r.FromColumnDefId AS RenamedFromId
+          FROM OPENJSON(@ids) AS j
+          JOIN cfg.ColumnDef AS c ON c.Id = CAST(j.[value] AS int)
+          JOIN cfg.TableDef AS t ON t.Id = c.TableDefId
+          JOIN cfg.SheetDef AS s ON s.Id = t.SheetDefId
+          JOIN cfg.TemplateVersion AS v ON v.Id = s.TemplateVersionId
+          JOIN cfg.TemplateVersion AS v2 ON v2.TemplateId = v.TemplateId
+          JOIN cfg.SheetDef AS s2 ON s2.TemplateVersionId = v2.Id AND s2.Code = s.Code
+          JOIN cfg.TableDef AS t2 ON t2.SheetDefId = s2.Id AND t2.Code = t.Code
+          JOIN cfg.ColumnDef AS c2 ON c2.TableDefId = t2.Id AND c2.Code = c.Code
+          LEFT JOIN cfg.ColumnRename AS r ON r.ToColumnDefId = c2.Id
+        """;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Звичайний випадок (перейменувань немає) — один запит. Кожна пара перейменування додає раунд для джерела пари:
+    /// його власний шлях у інших версіях і перейменування, що ведуть у нього.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> LineageAsync(
+        IReadOnlyCollection<int> columnIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(columnIds);
+
+        var result = new Dictionary<int, HashSet<int>>();
+        foreach (var id in columnIds)
+        {
+            result.TryAdd(id, [id]);
+        }
+
+        // Межа розгортання: Id, які ще треба розгорнути, → колонки-запитувачі, до чиїх родоводів вони належать.
+        var frontier = result.Keys.ToDictionary(id => id, id => new HashSet<int> { id });
+        for (var round = 0; round < MaxLineageRounds && frontier.Count > 0; round++)
+        {
+            var json = "[" + string.Join(",", frontier.Keys.Select(v => v.ToString(CultureInfo.InvariantCulture))) + "]";
+            var rows = await db.Database
+                .SqlQueryRaw<LineageRow>(LineageSql, new SqlParameter("@ids", SqlDbType.NVarChar, -1) { Value = json })
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            var next = new Dictionary<int, HashSet<int>>();
+            foreach (var row in rows)
+            {
+                foreach (var owner in frontier[row.SourceId])
+                {
+                    result[owner].Add(row.LinkedId);
+                    if (row.RenamedFromId is { } from && result[owner].Add(from))
+                    {
+                        if (!next.TryGetValue(from, out var owners))
+                        {
+                            next[from] = owners = [];
+                        }
+
+                        owners.Add(owner);
+                    }
+                }
+            }
+
+            frontier = next;
+        }
+
+        return result.ToDictionary(p => p.Key, p => (IReadOnlyList<int>)[.. p.Value.Order()]);
+    }
+
+    /// <summary>Рядок <see cref="LineageSql"/>; імена колонок — імена властивостей.</summary>
+    /// <param name="SourceId">Названа (або розгортувана) колонка.</param>
+    /// <param name="LinkedId">Колонка того самого шляху в одній з версій шаблону (включно з нею самою).</param>
+    /// <param name="RenamedFromId">Джерело перейменування, що веде в <paramref name="LinkedId"/>; <c>null</c> — немає.</param>
+    public sealed record LineageRow(int SourceId, int LinkedId, int? RenamedFromId);
 }
