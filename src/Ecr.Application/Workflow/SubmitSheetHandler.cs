@@ -456,8 +456,10 @@ public sealed class SubmitSheetHandler(
         // двох подань, що читають одне одного (X(A)+S(B) проти X(B)+S(A)).
         // ⛔ RS: рахується «вид» ЦІЄЇ копії (її таблиці — зі своїх екземплярів, решта — оригінал), а не оригінал: інакше
         // під блокуванням копії писалися б комірки оригіналу без його блокування.
-        await recalculation
-            .RecalculateSheetUnderSubmitLockAsync(documentId, sheetDefId, key, ct, sheetCopyId)
+        // ✎ C-1 (D-475): прогін повертає комірки аркуша з помилкою формули — вони блокують подання нижче, разом із
+        // валідацією (як PERMIT-SPLIT). Нуль нових звернень: це результат того самого прогону.
+        var formulaErrorCells = await recalculation
+            .RecalculateSheetForSubmitAsync(documentId, sheetDefId, key, ct, sheetCopyId)
             .ConfigureAwait(false);
 
         // ⛔ ВАЛІДАЦІЯ АРКУША, який подають (`ФВ-5.4`, директива №09 `W8` п.5).
@@ -623,6 +625,14 @@ public sealed class SubmitSheetHandler(
             // Only uncovered months with entered/imported data block; the partial-month note and the calculated-months
             // Warning (human 08.11, «Попередження») are for Issues — never a Submit block or a submit confirmation.
             blocking.AddRange(permitMessages.Where(m => m.Severity == ValidationSeverity.Error));
+        }
+
+        // ✎ C-1 (рішення PO 11.11 п. 5): помилка формули блокує подання так само, як PERMIT-SPLIT.
+        // Таблиці — усього знімка: джерело «не оновлено» може лежати на іншому аркуші (цілі прогін уже звузив до аркуша).
+        if (formulaErrorCells.Count > 0)
+        {
+            blocking.AddRange(Validation.FormulaErrorIssues.Messages(
+                formulaErrorCells, snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id), currentUser.Language));
         }
 
         if (blocking.Count > 0)

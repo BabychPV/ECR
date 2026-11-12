@@ -33,7 +33,10 @@ public sealed class ValidateDocumentHandler(
     IPermitDataMonthsReader? dataMonths = null,
 
     // ✎ Feature (j) P2: permit history of rows (history-aware rule, PERMIT-SPLIT). `null` (tests) — no history.
-    IPermitHistoryStore? permitHistory = null)
+    IPermitHistoryStore? permitHistory = null,
+
+    // ✎ C-1 (D-475): збережений стан помилок формул — «Перевірити» показує те, що заблокує подання. `null` (тести) — вимкнено.
+    IFormulaErrorStore? formulaErrors = null)
 {
     /// <summary>Виконує валідацію всіх аркушів документа за період.</summary>
     /// <param name="documentId">Документ.</param>
@@ -170,6 +173,20 @@ public sealed class ValidateDocumentHandler(
                 .RunAsync(permitTargets, registries, cellStore, rowStore, periods, headers, dataMonths,
                     permitSnapshot, documentId, instances, periodKey, currentUser.Language, ct, permitHistory)
                 .ConfigureAwait(false));
+        }
+
+        // ✎ C-1 (D-475): «Перевірити» показує те, що заблокує подання, — збережений стан помилок формул. Читання — лише
+        // коли хоч один екземпляр його має (прапорець із того самого запиту екземплярів). Оригінали — `sheetCopyId: null`.
+        if (formulaErrors is not null && instances.Any(i => i.HasFormulaErrors))
+        {
+            var errorSnapshot = await metadata.GetAsync(instances[0].TemplateVersionId, ct).ConfigureAwait(false);
+            var errorRows = await formulaErrors.ListAsync(documentId, periodKey.Value, sheetCopyId: null, ct).ConfigureAwait(false);
+            messages.AddRange(FormulaErrorIssues.Messages(
+                [.. errorRows.Select(v => new Recalculation.FormulaErrorCell(
+                    v.Row.TableDefId, v.Row.SheetCopyId, v.Row.RowKey, v.Row.ColumnDefId, v.Row.Kind, v.Row.ErrorCode,
+                    v.Row.SourcePeriodKey, v.Row.SourceTableDefId, v.Row.SourceRowKey, v.Row.SourceColumnDefId))],
+                errorSnapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id),
+                currentUser.Language));
         }
 
         var summary = new ValidationSummary(
