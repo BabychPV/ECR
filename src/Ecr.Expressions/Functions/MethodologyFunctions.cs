@@ -208,8 +208,14 @@ public static class MethodologyFunctions
     ///
     /// Порядок відповідей: помилка аргументу → вона; текст <c>NULL</c> або порожній → <c>FALSE</c>
     /// (незаповнений аргумент нічого не містить; у легасі відсутній аргумент — <c>string.Empty</c>);
-    /// нетекстовий текст чи фрагмент (число, булеве, <c>NULL</c>-фрагмент) → <c>#VALUE</c>, як у решти
-    /// функцій діалекту: число мовчки в текст не перетворюється.
+    /// булеве, дата чи <c>NULL</c>-фрагмент → <c>#VALUE</c>.
+    ///
+    /// ✎ C11_01 live (12.11, run 10096): ЧИСЛО — текст свого інваріантного запису. У <c>Legacy</c>
+    /// <c>GenericCalculationModule.ToValue</c> подає числовий текст комірки числом (C1-05: <c>"6362"</c> → 6362,
+    /// <c>"452"</c> → 452), тож ворота <c>CONTAINS(@Land_NAE, '6646')</c> отримували число і давали <c>#VALUE</c>
+    /// на КОЖНОМУ кроці рядка (0 результатів замість 8). Легасі C# порівнював рядок комірки, тому тут число
+    /// повертається до тексту: ціле — без <c>".0"</c> (<c>6362</c>), дробове — найкоротший інваріантний запис
+    /// (<c>double</c> — <c>"R"</c>, <c>decimal</c> — <c>"G29"</c>). NaN/∞ — <c>#VALUE</c> (тексту комірки за ними немає).
     ///
     /// ⚠ Порожній ФРАГМЕНТ у непорожньому тексті — <c>TRUE</c>, як у <c>string.Contains("")</c>.
     /// </remarks>
@@ -228,7 +234,7 @@ public static class MethodologyFunctions
             }
         }
 
-        if (args[1].Value is not string fragment)
+        if (AsText(args[1]) is not { } fragment)
         {
             return ExpressionValue.Error(ExpressionErrors.BadValue);
         }
@@ -238,13 +244,26 @@ public static class MethodologyFunctions
             return ExpressionValue.Boolean(false);
         }
 
-        if (args[0].Value is not string text)
+        if (AsText(args[0]) is not { } text)
         {
             return ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
         return ExpressionValue.Boolean(text.Length > 0 && text.Contains(fragment, StringComparison.Ordinal));
     }
+
+    /// <summary>Текст для текстової функції: рядок як є, число — інваріантним записом; решта — <c>null</c>.</summary>
+    /// <remarks>
+    /// Ціле число — без дробової частини (<c>6362</c>, не <c>6362.0</c>): <c>decimal</c> через <c>"G29"</c>
+    /// (відкидає хвостові нулі масштабу), <c>double</c> через <c>"R"</c> (найкоротший точний запис).
+    /// </remarks>
+    private static string? AsText(ExpressionValue value) => value.Value switch
+    {
+        string s => s,
+        decimal d => d.ToString("G29", System.Globalization.CultureInfo.InvariantCulture),
+        double v when double.IsFinite(v) => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+        _ => null,
+    };
 
     /// <summary>Значення для конкретної речовини в контексті методології.</summary>
     /// <param name="args">Код речовини.</param>

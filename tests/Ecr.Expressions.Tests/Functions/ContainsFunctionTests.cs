@@ -18,8 +18,10 @@ namespace Ecr.Expressions.Tests.Functions;
 /// Мутаційні докази (лише цей клас): <c>StringComparison.OrdinalIgnoreCase</c> замість <c>Ordinal</c> —
 /// червоніє <see cref="Регістр_значущий_як_у_string_Contains"/>; прибрати гілку <c>IsNull → FALSE</c>
 /// (віддати NULL у загальне правило) — <see cref="NULL_і_порожній_текст_дають_FALSE"/>; прибрати
-/// <c>text.Length &gt; 0</c> — той самий тест (порожній текст із порожнім фрагментом); приймати число
-/// (<c>ToString</c>) замість #VALUE — <see cref="Нетекстовий_аргумент_дає_VALUE"/>; прибрати поширення
+/// <c>text.Length &gt; 0</c> — той самий тест (порожній текст із порожнім фрагментом); повернути #VALUE для
+/// числа (C11_01 live 12.11) — <see cref="Число_у_тексті_порівнюється_інваріантним_записом"/> і
+/// <see cref="Числовий_текст_або_фрагмент_не_дає_VALUE"/>; <c>ToString()</c> поточної культури замість
+/// інваріантного <c>R</c>/<c>G29</c> — випадки <c>1.5</c> і <c>6646.000m</c>; прибрати поширення
 /// помилки аргументу — <see cref="Помилка_аргументу_поширюється"/>; прибрати «CONTAINS» з
 /// <c>LegacyCompatibleRegistryFunctions</c> або змінити арність —
 /// <see cref="Каталог_знає_функцію_як_розширення_з_булевим_результатом_і_двома_аргументами"/>.
@@ -103,18 +105,76 @@ public sealed class ContainsFunctionTests
     }
 
     [Theory]
-    [InlineData("CONTAINS(6646, '66')")]     // число замість тексту
-    [InlineData("CONTAINS(@N, '66')")]       // числовий аргумент
-    [InlineData("CONTAINS('6646', 66)")]     // число замість фрагмента
     [InlineData("CONTAINS('6646', NULL)")]   // фрагмент обов'язковий
     [InlineData("CONTAINS(1 = 1, 'True')")]  // булеве замість тексту
+    [InlineData("CONTAINS('True', 1 = 1)")]  // булеве замість фрагмента
+    [InlineData("CONTAINS(@Inf, '1')")]      // нескінченність Legacy — тексту комірки за нею немає
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public void Нетекстовий_аргумент_дає_VALUE(string expression)
     {
         var context = new TestEvaluationContext();
-        context.Arguments["N"] = ExpressionValue.Number(6646m);
+        context.Arguments["Inf"] = ExpressionValue.LegacyNumber(double.PositiveInfinity);
 
         Assert.Equal(ExpressionErrors.BadValue, Eval(expression, context).ErrorCode);
+    }
+
+    /// <summary>
+    /// C11_01 live (12.11, run 10096): у <c>Legacy</c> числовий текст комірки приходить ЧИСЛОМ (<c>"6362"</c> → 6362.0
+    /// <c>double</c>), і ворота гілок давали <c>#VALUE</c>. Число — текст свого інваріантного запису: ціле без
+    /// <c>".0"</c>, дробове — найкоротшим записом.
+    /// </summary>
+    [Theory]
+    [InlineData("legacy", 6362d, "6646", false)]
+    [InlineData("legacy", 6646d, "6646", true)]
+    [InlineData("legacy", 452d, "452", true)]
+    [InlineData("legacy", 6362d, ".0", false)]   // ціле — без дробової частини
+    [InlineData("legacy", 6362d, "36", true)]
+    [InlineData("legacy", 1.5d, "1.5", true)]    // дробове — інваріантна крапка, не кома культури
+    [InlineData("legacy", 0.1d, "0.1", true)]    // найкоротший запис "R", не 0.1000000000000000055…
+    [InlineData("strict", 6646.000d, "6646", true)]
+    [InlineData("strict", 6362d, ".0", false)]   // decimal із масштабом: G29 відкидає хвостові нулі
+    [InlineData("strict", 2.50d, "2.5", true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Число_у_тексті_порівнюється_інваріантним_записом(string kind, double number, string fragment, bool expected)
+    {
+        var context = new TestEvaluationContext();
+        context.Arguments["N"] = kind == "legacy"
+            ? ExpressionValue.LegacyNumber(number)
+            : ExpressionValue.Number(decimal.Parse(
+                number.ToString("F3", System.Globalization.CultureInfo.InvariantCulture),
+                System.Globalization.CultureInfo.InvariantCulture)); // масштаб 3: 6646.000m
+        context.Arguments["F"] = ExpressionValue.Text(fragment);
+
+        var previous = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("uk-UA"); // кома — роздільник
+        try
+        {
+            var value = Eval("CONTAINS(@N, @F)", context);
+
+            Assert.Equal(ExpressionValueType.Boolean, value.Type);
+            Assert.Equal(expected, value.Value);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
+    }
+
+    [Theory]
+    [InlineData("CONTAINS(6646, '66')", true)]      // числовий літерал як текст
+    [InlineData("CONTAINS('6646(001)', 6646)", true)] // числовий фрагмент
+    [InlineData("CONTAINS('6646', 66.5)", false)]
+    [InlineData("CONTAINS(@N, '66')", true)]       // числовий аргумент
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Числовий_текст_або_фрагмент_не_дає_VALUE(string expression, bool expected)
+    {
+        var context = new TestEvaluationContext();
+        context.Arguments["N"] = ExpressionValue.Number(6646m);
+
+        var value = Eval(expression, context);
+
+        Assert.Equal(ExpressionValueType.Boolean, value.Type);
+        Assert.Equal(expected, value.Value);
     }
 
     [Fact]
