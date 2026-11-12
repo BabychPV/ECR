@@ -1,3 +1,4 @@
+import { todayDateOnly } from '@/shared/format/dateOnly';
 import type { NaeTreeNode } from '../airTypes';
 
 /** Рівень самого джерела (НАЕ) у дереві: під ним нових вузлів не створюють. */
@@ -20,8 +21,10 @@ export interface NodeOption {
  * Вузли дерева, під якими можна створити відсутній НАЕ (усі, крім самих джерел), з підписом-шляхом
  * «Atyrau › Offshore › Barges». Дерево плоске: шлях збирається за `parentEntryId`; цикл чи сирота не зациклюють —
  * довжина шляху обмежена глибиною дерева.
+ *
+ * ✎ W-7 (аудит 2026-11): типове «сьогодні» — календарний день людини (`todayDateOnly`), а не UTC.
  */
-export function nodeOptions(nodes: readonly NaeTreeNode[], today: string = new Date().toISOString().slice(0, 10)): readonly NodeOption[] {
+export function nodeOptions(nodes: readonly NaeTreeNode[], today: string = todayDateOnly()): readonly NodeOption[] {
   const byId = new Map(nodes.map((node) => [node.id, node] as const));
 
   const pathOf = (node: NaeTreeNode): string => {

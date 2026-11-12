@@ -33,7 +33,7 @@ export function HeaderPermitSection(props: HeaderPermitSectionProps): JSX.Elemen
   const permits = item?.permits ?? [];
   const canUndo = permits.some((permit) => permit.segmentId !== null);
 
-  const undo = useUndoHeaderPermit(documentId);
+  const undo = useUndoHeaderPermit(documentId, periodKey);
   const undoLoading = usePendingLoading(undo.isPending);
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState<string | null>(null);

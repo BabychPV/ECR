@@ -643,7 +643,8 @@ async function apiFetchRaw(
   // отримував шансу спрацювати до навігації). Ендпоінти входу відповідають
   // за власний `401` самі — тут перенаправляти нема куди й нема чого.
   if (response.status === 401 && !(await isFormAnswer401(path, response))) {
-    const from = typeof window === 'undefined' ? path : window.location.pathname;
+    // ✎ W-6 (аудит 2026-11): разом із рядком запиту (період, аркуш, фільтри) — як `signOutForIdle`/`recordBeforeSignOut`.
+    const from = typeof window === 'undefined' ? path : window.location.pathname + window.location.search;
     const cause = await loginCauseOf(response);
     runBeforeLoginRedirect(from);
     // ✎ D-471: сервер завершив сеанс через бездіяльність — сусідні вкладки йдуть на вхід разом із цією.

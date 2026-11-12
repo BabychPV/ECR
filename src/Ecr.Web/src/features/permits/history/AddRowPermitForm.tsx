@@ -68,7 +68,7 @@ export function AddRowPermitForm(props: AddRowPermitFormProps): JSX.Element {
     staleTime: LookupEntriesStaleTimeMs,
   });
   const header = props.target.kind === 'header';
-  const addRow = useAddRowPermit(documentId);
+  const addRow = useAddRowPermit(documentId, periodKey);
   const addHeader = useAddHeaderPermit(documentId);
   const add = header ? addHeader : addRow;
   const addLoading = usePendingLoading(add.isPending);

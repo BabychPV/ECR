@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { useRef, useState, type JSX } from 'react';
 import { Button, Group, Modal, Stack } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
@@ -47,6 +47,10 @@ export function SheetCopyBar({ documentId, target, canAdd, onSelect }: SheetCopy
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState<LocalizedValue>({});
+  // ⛔ W-4 (аудит 2026-11): «Add copy» — неідемпотентний POST (копія в КОЖНОМУ періоді). `loading` блокує кнопку лише
+  // після 100 мс (`usePendingLoading`), а `isPending` оновлюється після перерендеру: подвійний клік давав дві копії.
+  // Ref — синхронно.
+  const adding = useRef(false);
 
   const refresh = async (): Promise<void> => {
     // ⚠ Префікси ключів: `['document-tables', id, period]` залежить від періоду, який тут не потрібен.
@@ -114,8 +118,14 @@ export function SheetCopyBar({ documentId, target, canAdd, onSelect }: SheetCopy
           loading={addLoading}
           data-testid="sheet-copy-add"
           onClick={() => {
+            if (adding.current) return;
+            adding.current = true;
             remove.reset();
-            add.mutate();
+            add.mutate(undefined, {
+              onSettled: () => {
+                adding.current = false;
+              },
+            });
           }}
         >
           {t('documents.sheetCopies.add')}
