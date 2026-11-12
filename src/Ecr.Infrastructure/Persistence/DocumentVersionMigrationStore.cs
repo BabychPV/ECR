@@ -1891,6 +1891,43 @@ public sealed partial class DocumentVersionMigrationStore(
         FROM   doc.DocumentSheet s
         JOIN   @docs d     ON d.Id = s.DocumentId
         JOIN   @sheetMap m ON m.o = s.SheetDefId;
+
+        -- ⛔ D-7: історія дозволів (J01) адресована Id таблиці/колонки/поля шапки ВЕРСІЇ — переїжджає за тими самими
+        -- мапами, що й комірки та шапка. Таблиця/колонка/поле без відповідника: історія йде разом із їхніми значеннями.
+        -- @columnMap (o, n, t) несе цільову таблицю, тож TableDefId береться з неї (вірно й для таблиці, перейменованої
+        -- мапою). Частини місяця партиціоновані — лише періоди переносу (@periods, як екземпляри): у режимі «з місяця»
+        -- частини періодів до X лишаються на старих Id разом зі своїми екземплярами. Сегменти й шапка не періодні — як
+        -- HeaderSql, вони переїжджають і в режимі «з місяця» (та сама межа, що вже діє для шапки).
+        DELETE p
+        FROM   doc.CellPermitPart p
+        JOIN   @docs d ON d.Id = p.DocumentId
+        WHERE  p.PeriodKey IN (SELECT PeriodKey FROM @periods)
+          AND  NOT EXISTS (SELECT 1 FROM @columnMap c WHERE c.o = p.ColumnDefId);
+
+        UPDATE p
+        SET    p.TableDefId = c.t, p.ColumnDefId = c.n
+        FROM   doc.CellPermitPart p
+        JOIN   @docs d      ON d.Id = p.DocumentId
+        JOIN   @columnMap c ON c.o = p.ColumnDefId
+        WHERE  p.PeriodKey IN (SELECT PeriodKey FROM @periods);
+
+        DELETE g
+        FROM   doc.PermitSegment g
+        JOIN   @docs d ON d.Id = g.DocumentId
+        WHERE  (g.ColumnDefId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM @columnMap c WHERE c.o = g.ColumnDefId))
+           OR  (g.HeaderFieldDefId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM @headerMap h WHERE h.o = g.HeaderFieldDefId));
+
+        UPDATE g
+        SET    g.TableDefId = c.t, g.ColumnDefId = c.n
+        FROM   doc.PermitSegment g
+        JOIN   @docs d      ON d.Id = g.DocumentId
+        JOIN   @columnMap c ON c.o = g.ColumnDefId;
+
+        UPDATE g
+        SET    g.HeaderFieldDefId = h.n
+        FROM   doc.PermitSegment g
+        JOIN   @docs d      ON d.Id = g.DocumentId
+        JOIN   @headerMap h ON h.o = g.HeaderFieldDefId;
         """;
 
     /// <summary>6a. Гранти, версія проєкту, прибирання #-таблиць.</summary>
