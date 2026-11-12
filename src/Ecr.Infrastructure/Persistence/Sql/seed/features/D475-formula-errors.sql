@@ -6,7 +6,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'validation.formula.error', N'ru', N'{column}: ошибка формулы {code} — значение не пересчитано (оставлено последнее правильное). Подача заблокирована, пока формула не рассчитается.'),
     (N'validation.formula.error', N'kz', N'{column}: формула қатесі {code} — мән қайта есептелмеді (соңғы дұрыс мән қалдырылды). Формула есептелмейінше тапсыру бұғатталған.'),
     (N'validation.formula.blocked', N'ru', N'{column}: не обновлено из-за ошибки формулы в {source}. Подача заблокирована до исправления.'),
-    (N'validation.formula.blocked', N'kz', N'{column}: {source} ішіндегі формула қатесіне байланысты жаңартылмады. Түзетілгенше тапсыру бұғатталған.')
+    (N'validation.formula.blocked', N'kz', N'{column}: {source} ішіндегі формула қатесіне байланысты жаңартылмады. Түзетілгенше тапсыру бұғатталған.'),
+    (N'audit.originLabel.CalcError', N'ru', N'Ошибка расчёта'),
+    (N'audit.originLabel.CalcError', N'kz', N'Есептеу қатесі'),
+    (N'audit.originLabel.CalcErrorResolved', N'ru', N'Ошибка расчёта устранена'),
+    (N'audit.originLabel.CalcErrorResolved', N'kz', N'Есептеу қатесі жойылды')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -16,7 +20,9 @@ INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
     (N'validation.formula.error', N'en', N'{column}: formula error {code} — the value was not recalculated (the last correct value is kept). Submit is blocked until the formula calculates.', 1),
-    (N'validation.formula.blocked', N'en', N'{column}: not updated because of a formula error in {source}. Submit is blocked until it is fixed.', 1)
+    (N'validation.formula.blocked', N'en', N'{column}: not updated because of a formula error in {source}. Submit is blocked until it is fixed.', 1),
+    (N'audit.originLabel.CalcError', N'en', N'Calculation error', 1),
+    (N'audit.originLabel.CalcErrorResolved', N'en', N'Calculation error resolved', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO
