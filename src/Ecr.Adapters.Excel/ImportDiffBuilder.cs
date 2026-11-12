@@ -202,7 +202,7 @@ public sealed class ImportDiffBuilder
                 // (нижче) лише тоді, коли користувач їх ЗМІНИВ. Незмінена
                 // обчислювана комірка експортованої книги пропускається мовчки:
                 // вона не правка, а копія того, що система й так тримає.
-                if (Same(incoming, existing, definition))
+                if (Same(incoming, existing, definition, culture))
                 {
                     continue;
                 }
@@ -244,6 +244,9 @@ public sealed class ImportDiffBuilder
                     && overrideDecision.ViaFormulaOverride
                     && (incoming is null || overridePolicy.Allows(row.RowKey, definition));
 
+                // ✎ P1 12.11 (рішення координатора): запис у перелік лишається (людина бачить, що значення з книги не
+                // ляже), але це ПОПЕРЕДЖЕННЯ — `ExcelImporter.EnsureAllOrNothing` і клієнт (`ImportPanel.isCalculatedSkip`)
+                // не рахують його відмовою, тож решта книги застосовується. Змін для цієї комірки в плані немає.
                 if (IsCalculated(definition) && !replacesFormula)
                 {
                     var stale = CalculatedCellFingerprint.Unchanged(row, block.Columns, column, cell);
@@ -310,7 +313,7 @@ public sealed class ImportDiffBuilder
                     ? fromFile
                     : null;
 
-                if (Same(incoming, existing, definition))
+                if (Same(incoming, existing, definition, culture))
                 {
                     continue;
                 }
@@ -854,7 +857,7 @@ public sealed class ImportDiffBuilder
     /// колонці дати), давала «зміну» на незміненій книзі — фантом
     /// <c>R4 C1 '' → —</c> на DOC-000001.
     /// </remarks>
-    private static bool Same(object? incoming, CellValueData? existing, ColumnDef definition)
+    private static bool Same(object? incoming, CellValueData? existing, ColumnDef definition, CultureInfo culture)
     {
         var current = Current(existing, definition);
 
@@ -885,9 +888,15 @@ public sealed class ImportDiffBuilder
             CellDataType.Int =>
                 current is decimal intNumber
                 && (incoming is decimal di ? intNumber == di : incoming is int ii && intNumber == ii),
+            // ⛔ P1 (Аудит-2, doc 96, 12.11): текстовий результат формули, що ВИГЛЯДАЄ числом («6975» з REGFIELD,
+            // «720» з місячної String-колонки `OperatingTimeReleaseOnColdVentYesNo_Mnn`), експорт пише текстом, а
+            // `Read` для числової колонки розбирає текст у `decimal` — і рядок проти числа давав «не те саме» на
+            // незміненій книзі (`importCalculatedStale` на всю книгу). Той самий розбір збереженого тексту тим самим
+            // читачем (`CultureNumberReader`, культура користувача, масштаб сховища) — рівність незміненої книги.
             CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated =>
                 current is string calculatedText
                     ? string.Equals(calculatedText, incoming as string, StringComparison.Ordinal) // AN-144
+                      || (incoming is decimal fromText && TextAsNumber(calculatedText, culture) == fromText)
                     : current is decimal number
                       && (incoming is decimal d ? number == d || RoundSignificant(number) == RoundSignificant(d)
                           : incoming is int i && number == i),
@@ -910,6 +919,15 @@ public sealed class ImportDiffBuilder
             _ => string.Equals(current as string, incoming as string, StringComparison.Ordinal),
         };
     }
+
+    /// <summary>
+    /// Збережений текстовий результат формули, прочитаний як число ТИМ САМИМ правилом, що текстова комірка книги в
+    /// <see cref="Read"/> (обрізка, <see cref="CultureNumberReader"/>, масштаб сховища); <c>null</c> — не число.
+    /// </summary>
+    private static decimal? TextAsNumber(string text, CultureInfo culture)
+        => CultureNumberReader.Read(text.Trim(), culture) is { Kind: NumberTextKind.Number, Value: var parsed }
+            ? decimal.Round(parsed, CellValueReader.StorageScale, MidpointRounding.AwayFromZero)
+            : null;
 
     /// <summary>
     /// Поточне значення комірки в тій формі, у якій його бачить книга: поле за
@@ -1033,6 +1051,16 @@ public static class ImportMessageKeys
     /// експорту — книга застаріла (P3).
     /// </summary>
     public const string CalculatedStale = "err.ECR-CELL-4221.importCalculatedStale";
+
+    /// <summary>
+    /// ✎ P1 12.11: обчислювана комірка (<see cref="Calculated"/>, <see cref="CalculatedStale"/>) — попередження
+    /// перегляду: значення з книги не застосовується, але застосування решти книги не зупиняє.
+    /// </summary>
+    /// <param name="messageKey">Ключ відмови перегляду.</param>
+    /// <returns><c>true</c> — попередження обчислюваної комірки.</returns>
+    public static bool IsCalculatedSkip(string? messageKey)
+        => string.Equals(messageKey, Calculated, StringComparison.Ordinal)
+           || string.Equals(messageKey, CalculatedStale, StringComparison.Ordinal);
 
     /// <summary>
     /// Рядок змінено в базі після експорту книги, і людина в книзі задала в
