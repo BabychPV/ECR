@@ -6,6 +6,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// <summary>Налаштування синку складу газу FLERT → дзеркало ECR (<c>D-476</c>, план FLERT F2).</summary>
 /// <param name="Enabled">Чи синхронізувати. Вимкнено — прогін лише пише в журнал, що вимкнено.</param>
 /// <param name="DataSourceCode">Код джерела <c>ext.DataSource</c> (транспорт <c>Sql</c>) — з'єднання з FLERT.</param>
+/// <param name="MaxDeactivatePercent">Частка чинних кейсів (0–100 %), яку один прогін може вимкнути (<see cref="DeactivationLimit"/>).</param>
 /// <remarks>
 /// ⚠ Ключі — ЛІТЕРАЛАМИ (сторож <c>ConfigurationKeysTests</c> шукає повний рядок ключа).
 /// <para>
@@ -15,8 +16,31 @@ namespace Ecr.Infrastructure.Jobs;
 /// (<c>Secrets:Sql:…</c>), як і решта запитів SQL-джерела; типового тексту немає.
 /// </para>
 /// </remarks>
-public sealed record FlertCompositionSyncOptions(bool Enabled, string DataSourceCode)
+public sealed record FlertCompositionSyncOptions(
+    bool Enabled,
+    string DataSourceCode,
+    int MaxDeactivatePercent = FlertCompositionSyncOptions.DefaultMaxDeactivatePercent)
 {
+    /// <summary>
+    /// Ключ: яку частку (0–100 %) ЧИННИХ кейсів дзеркала один прогін може вимкнути. Більше — знімок вважається
+    /// неповним (частковий результат FLERT), і прогін не пише НІЧОГО (<c>Degraded</c>, <c>deactivationLimit</c>).
+    /// </summary>
+    public const string MaxDeactivatePercentKey = "Flert:Sync:MaxDeactivatePercent";
+
+    /// <summary>Дефолт частки вимкнення: 10 %.</summary>
+    public const int DefaultMaxDeactivatePercent = 10;
+
+    /// <summary>
+    /// Нижня межа в штуках: до стількох кейсів вимикається завжди, хоч би яким малим було дзеркало (інакше на
+    /// дзеркалі з 20 кейсів 10 % не дозволили б прибрати й двох).
+    /// </summary>
+    public const int DeactivateFloor = 5;
+
+    /// <summary>Скільки кейсів дозволено вимкнути за прогін при <paramref name="activeCases"/> чинних.</summary>
+    /// <param name="activeCases">Живих увімкнених кейсів у дзеркалі до прогону.</param>
+    public int DeactivationLimit(int activeCases)
+        => Math.Max(DeactivateFloor, (int)((long)activeCases * Math.Clamp(MaxDeactivatePercent, 0, 100) / 100));
+
     /// <summary>Ключ: чи синхронізувати.</summary>
     public const string EnabledKey = "Flert:Sync:Enabled";
 
@@ -48,6 +72,13 @@ public sealed record FlertCompositionSyncOptions(bool Enabled, string DataSource
             Enabled: bool.TryParse(configuration[EnabledKey], out var enabled) && enabled,
             DataSourceCode: configuration[DataSourceCodeKey] is { Length: > 0 } code && !string.IsNullOrWhiteSpace(code)
                 ? code.Trim()
-                : DefaultDataSourceCode);
+                : DefaultDataSourceCode,
+            MaxDeactivatePercent: int.TryParse(
+                configuration[MaxDeactivatePercentKey],
+                System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var percent)
+                ? Math.Clamp(percent, 0, 100)
+                : DefaultMaxDeactivatePercent);
     }
 }

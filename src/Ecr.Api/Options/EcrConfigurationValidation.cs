@@ -134,6 +134,9 @@ public static partial class EcrConfigurationValidation
         // R2: поріг рядків ext.RawDataPoint у картці db; 0 вимикає перевірку, від'ємне — помилка.
         (RawDataPointHealthKey, 0),
 
+        // D-476: частка кейсів FLERT, яку один синк може вимкнути; від'ємне — помилка (верхня межа 100 — нижче).
+        (Ecr.Infrastructure.Jobs.FlertCompositionSyncOptions.MaxDeactivatePercentKey, 0),
+
         // U17: частіше за 5 с експорт лише навантажує сервер і колектор.
         (Ecr.Api.Observability.TelemetrySetup.ExportIntervalKey, Ecr.Api.Observability.TelemetrySetup.MinExportIntervalSeconds),
     ];
@@ -302,6 +305,15 @@ public static partial class EcrConfigurationValidation
             && !Application.Integration.RegistrySync.RegistrySyncValidity.TryResolveTimeZone(zone, out _))
         {
             problems.Add(Describe(zoneKey, zone, "очікується ідентифікатор часового поясу Windows чи IANA, напр. FLE Standard Time або Europe/Kyiv"));
+        }
+
+        // D-476: частка понад 100 % — не «без межі», а описка; синк інакше мовчки обрізав би її до 100.
+        var flertPercentKey = Ecr.Infrastructure.Jobs.FlertCompositionSyncOptions.MaxDeactivatePercentKey;
+        if (Value(configuration, flertPercentKey) is { } flertPercent
+            && int.TryParse(flertPercent, NumberStyles.Integer, CultureInfo.InvariantCulture, out var flertPercentValue)
+            && flertPercentValue > 100)
+        {
+            problems.Add(Describe(flertPercentKey, flertPercent, "очікується ціле число від 0 до 100 (відсотків)"));
         }
 
         // ⛔ U17: увімкнений експорт без адреси колектора — не «експорт кудись за

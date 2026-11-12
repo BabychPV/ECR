@@ -251,6 +251,58 @@ public sealed class FlertCompositionSyncJobTests(SqlServerFixture sql)
         Assert.False(await check.RegistryDefs.AnyAsync(d => d.Code == Codes.Case || d.Code == Codes.Component));
     }
 
+    /// <remarks>
+    /// Мутаційний доказ (локально, не в коміті): <c>DeactivationRefusalAsync</c> завжди повертає <c>null</c> → цей тест
+    /// червоний (20 кейсів вимкнено, зміна складу записана).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-476")]
+    public async Task Частковий_знімок_понад_межу_вимкнення_не_пише_нічого_а_в_межах_застосовується()
+    {
+        var source = new FakeFlert(ManyCases(100, missing: 0, methane: 100m));
+        var dataSource = await ArrangeSourceAsync();
+        await using var provider = BuildProvider();
+        var first = await RunAsync(provider, source, dataSource);
+        Assert.Equal(100, first.Counts!.Added["cases"]);
+        var before = await ActiveCountsAsync();
+        var revisions = await RevisionsAsync();
+
+        // 20 зі 100 зникли (межа max(5, 10 %) = 10) і заразом змінився склад решти — не пишеться НІЧОГО.
+        source.Table = ManyCases(100, missing: 20, methane: 99m);
+        var refused = await RunAsync(provider, source, dataSource);
+
+        Assert.Equal(FlertCompositionSyncJob.Degraded, refused.Status);
+        Assert.Equal("deactivationLimit", refused.Reason);
+        Assert.Null(refused.Counts);
+        var issue = Assert.Single(refused.Issues, i => i.Kind == "deactivationLimit");
+        Assert.Contains("20 з 100", issue.Detail, StringComparison.Ordinal);
+        Assert.Contains("дозволено 10", issue.Detail, StringComparison.Ordinal);
+        Assert.Equal(before, await ActiveCountsAsync());
+        Assert.Equal(revisions, await RevisionsAsync());
+        Assert.Equal(100m, await DecimalAsync(Codes.Composition, "C1000_20220101_Methane", FlertCompositionSchema.RowMolPct));
+
+        // 5 зі 100 — у межах: застосовується.
+        source.Table = ManyCases(100, missing: 5, methane: 100m);
+        var applied = await RunAsync(provider, source, dataSource);
+        Assert.Equal(FlertCompositionSyncJob.Succeeded, applied.Status);
+        Assert.Equal(5, applied.Counts!.Deactivated["cases"]);
+    }
+
+    /// <summary><paramref name="total"/> кейсів одного потоку (C1000…), останні <paramref name="missing"/> — відсутні.</summary>
+    private static ExternalTable ManyCases(int total, int missing, decimal methane)
+    {
+        var full = Snapshot();
+        var rows = Enumerable.Range(0, total - missing)
+            .Select(i => Row(7, 1000 + i, $"Case {i}", "7D-1", new() { ["Methane"] = methane, ["H2S"] = 100m - methane }))
+            .ToList();
+        return new ExternalTable(
+            full.Columns,
+            [.. rows.Select(r => (IReadOnlyList<object?>)[.. full.Columns.Select(c => r.TryGetValue(c, out var v) ? v : null)])],
+            Truncated: false);
+    }
+
     // ─── Стенд ──────────────────────────────────────────────────────────────
 
     /// <summary>
