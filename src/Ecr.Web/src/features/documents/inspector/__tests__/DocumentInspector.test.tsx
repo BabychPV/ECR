@@ -396,6 +396,54 @@ describe('інспектор документа (UI-25)', () => {
     expect(await screen.findByText('⟦audit.systemAuthor⟧')).toBeTruthy();
   });
 
+  it('Q-17: історія з періоду-власника (сервер прочитав якір) показується з приміткою, а не «історії немає»', async () => {
+    // Дефект 12.11 (doc 96, T3_00): правку не-місячної колонки з жовтня PATCH пише в якір 202601, і сервер віддає
+    // історію саме з нього. До фіксу клієнт відсіював усе, що не 202609, і писав «No history».
+    const owner = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/api/v1/audit/cells')) {
+        return jsonResponse({
+          items: [
+            {
+              changedAt: '2026-10-12T08:12:00Z', changedByUserId: 5, changedByDisplayName: 'Anchor editor', columnDefId: 33,
+              documentId: 1, isLateEdit: false, isOutOfWindow: false, newValue: '7', oldValue: '4582', origin: 'UserEdit',
+              periodKey: 202601, rowKey: 'R4',
+            },
+          ],
+          nextCursor: null,
+        });
+      }
+
+      return fetchMock(input);
+    });
+    vi.stubGlobal('fetch', owner);
+    render(<Harness entry="/documents/1?panel=history" />);
+    act(() => publishInspectedCell(Cell));
+    const cellRadio = screen.getByRole('radio', { name: '⟦inspector.history.modeCell⟧' }) as HTMLInputElement;
+    await waitFor(() => expect(cellRadio.disabled).toBe(false));
+    fireEvent.click(cellRadio);
+
+    expect(await screen.findByText('Anchor editor')).toBeTruthy();
+    expect(screen.queryByText('⟦inspector.noHistoryTitle⟧')).toBeNull();
+    const note = document.querySelector('[data-inspector-owner-period]');
+    expect(note?.getAttribute('data-inspector-owner-period')).toBe('202601');
+    expect(note?.textContent).toContain('inspector.history.ownerPeriodNote');
+    // Примітка — поза списком змін: у `role="list"` лише `listitem`.
+    expect(note?.closest('[role="list"]')).toBeNull();
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+  });
+
+  it('Q-17: зміни з періоду перегляду — без примітки про власника', async () => {
+    vi.stubGlobal('fetch', fetchMock);
+    render(<Harness entry="/documents/1?panel=history" />);
+    act(() => publishInspectedCell(Cell));
+    const cellRadio = screen.getByRole('radio', { name: '⟦inspector.history.modeCell⟧' }) as HTMLInputElement;
+    await waitFor(() => expect(cellRadio.disabled).toBe(false));
+    fireEvent.click(cellRadio);
+
+    expect(await screen.findByText('M. Petrenko')).toBeTruthy();
+    expect(document.querySelector('[data-inspector-owner-period]')).toBeNull();
+  });
+
   it('N3-02: зміна документа скидає комірку під курсором', () => {
     vi.stubGlobal('fetch', fetchMock);
     const { rerender } = render(<Harness documentId={1} />);

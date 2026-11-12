@@ -3,6 +3,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Errors;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Audit;
 
@@ -17,7 +18,12 @@ namespace Ecr.Application.Audit;
 /// однаково — окремого «архівного» шляху з власною, слабшою перевіркою тут немає й бути не повинно.
 /// </remarks>
 public sealed class GetCellChangesHandler(
-    IAuditReader audit, IAccessDecisionService access, ICurrentUser currentUser, TimeProvider? clock = null)
+    IAuditReader audit,
+    IAccessDecisionService access,
+    ICurrentUser currentUser,
+    TimeProvider? clock = null,
+    IMonthColumnRouter? monthRouter = null,
+    IMetadataCache? metadata = null)
 {
     /// <summary>Право, без якого ЗАГАЛЬНИЙ журнал не віддається.</summary>
     public const string Permission = "Security.ViewAudit";
@@ -107,6 +113,14 @@ public sealed class GetCellChangesHandler(
             filter = filter with { VisibleColumnIds = readable.VisibleColumnIds() };
         }
 
+        // Q-17: історія комірки, якою володіє інший екземпляр (не-місячна колонка — якір року), читається там,
+        // куди PATCH її пише (`RouteForeignOwnersAsync`). Лише звужує: межі читання вище вже застосовані.
+        (filter, empty) = await RouteToOwnerPeriodAsync(filter, readable, ct).ConfigureAwait(false);
+        if (empty)
+        {
+            return new PagedResult<CellChangeView>([], null, firstPage ? 0 : null);
+        }
+
         var result = await audit.ReadCellChangesAsync(filter, page, ct).ConfigureAwait(false);
         int? total = null;
         if (firstPage)
@@ -148,6 +162,12 @@ public sealed class GetCellChangesHandler(
             filter = filter with { VisibleColumnIds = readable.VisibleColumnIds() };
         }
 
+        (filter, empty) = await RouteToOwnerPeriodAsync(filter, readable, ct).ConfigureAwait(false);
+        if (empty)
+        {
+            return new CellChangeSummaryView(0, 0, 0, 0);
+        }
+
         var counts = await audit.CountCellChangesByColumnAsync(filter, TodayStart(), ct).ConfigureAwait(false);
         var seen = counts.Where(c => readable is null || readable.CanReadColumn(c.ColumnDefId)).ToList();
 
@@ -174,6 +194,76 @@ public sealed class GetCellChangesHandler(
     }
 
     private DateTime TodayStart() => (clock ?? TimeProvider.System).GetUtcNow().UtcDateTime.Date;
+
+    /// <summary>
+    /// Q-17: історія ОДНІЄЇ комірки таблиці «місяці в колонках», переглянутої в періоді, що не володіє колонкою, —
+    /// з періоду ВЛАСНИКА (введений не-місячний стовпець — якір року; місячний <c>m</c> — період <c>m</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ⛔ Дефект 12.11 (doc 96, T3_00, LTD-A01): правку не-місячної колонки з жовтня PATCH пише в екземпляр-якір
+    /// (<c>PatchCellsHandler.RouteForeignOwnersAsync</c>), тож <c>aud.CellChange.PeriodKey = 202601</c>, а History
+    /// питала 202610 і казала «історії немає». Власника дає ТОЙ САМИЙ <see cref="IMonthColumnRouter.OwnerPeriodAsync"/>,
+    /// що й запис: другого правила власності тут немає. Рядок власника — той самий <c>RowKey</c> (журнал зберігає
+    /// ключ, а не <c>TableRow.Id</c>), тож змінюється лише період фільтра.
+    /// </para>
+    /// <para>
+    /// ⛔ Лише ЗВУЖУЄ доступ: межі читання логічної адреси (документ, Deny колонки) уже застосовані викликачем, а тут
+    /// додається межа періоду власника (D-214), як у зрізі й вивантаженні (<c>OwnerScopeMask</c>): чий період читач не
+    /// бачить — порожньо, а не 403 (не виказує, що щось приховано).
+    /// </para>
+    /// <para>
+    /// Маршрутизація вимкнена, не одна комірка, без періоду, таблиця поза Q-17 або власник — сам період перегляду: фільтр
+    /// без змін і без звернень до бази.
+    /// </para>
+    /// </remarks>
+    private async Task<(CellChangeFilter Filter, bool Empty)> RouteToOwnerPeriodAsync(
+        CellChangeFilter filter, DocumentReadScope? readable, CancellationToken ct)
+    {
+        if (monthRouter is not { Enabled: true } || metadata is null || !filter.IsSingleCell
+            || filter.PeriodKey is not { } viewedKey || filter.DocumentId is not { } documentId
+            || filter.ColumnDefId is not { } columnId)
+        {
+            return (filter, false);
+        }
+
+        var viewed = new PeriodKey(viewedKey);
+        if (!viewed.IsValid)
+        {
+            return (filter, false);
+        }
+
+        var document = await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false);
+        if (document is null)
+        {
+            return (filter, false);
+        }
+
+        var snapshot = await metadata.GetAsync(document.TemplateVersionId, ct).ConfigureAwait(false);
+        if (!snapshot.ColumnsById.TryGetValue(columnId, out var column))
+        {
+            return (filter, false);
+        }
+
+        var table = snapshot.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == column.TableDefId);
+        if (table is null || !monthRouter.AppliesToTable(table))
+        {
+            return (filter, false);
+        }
+
+        var owner = await monthRouter.OwnerPeriodAsync(document, table, column, viewed, ct).ConfigureAwait(false);
+        if (owner == viewed)
+        {
+            return (filter, false);
+        }
+
+        if (readable is not null && !readable.InPeriod(owner).CanReadColumn(columnId))
+        {
+            return (filter, true);
+        }
+
+        return (filter with { PeriodKey = owner.Value }, false);
+    }
 
     /// <summary>
     /// Право, вікно й доступ до документа; повертає межі читання документа (<c>null</c> — наскрізний

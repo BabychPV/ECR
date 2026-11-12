@@ -78,6 +78,47 @@ test.describe('інспектор документа', () => {
     await aside.getByRole('tab').nth(2).click();
     await expect(aside.locator('[data-inspector-info]')).toBeVisible();
   });
+
+  /**
+   * Q-17 (дефект 12.11, doc 96 T3_00): правку не-місячної колонки з місяця PATCH пише в якір року, і сервер віддає
+   * історію з нього. Чи є на стенді маршрутизована таблиця — залежить від стенда, тому справжню відповідь
+   * `GET /audit/cells` доповнено (`route.fetch` + `fulfill`): усі зміни — з періоду-власника. Решта шляху (сітка,
+   * інспектор, перемикач, ключ UiString у браузері) — справжня. Серверну частину доводить
+   * `CellHistoryMonthRoutedTests` (Infrastructure, справжні PATCH і журнал).
+   */
+  test('інспектор: History комірки з періоду-власника (Q-17) — примітка замість «історії немає»', async ({ page }) => {
+    test.slow();
+    const year = PeriodKey.slice(0, 4);
+    const owner = PeriodKey.endsWith('01') ? `${year}02` : `${year}01`;
+    await page.route(/\/api\/v1\/audit\/cells\?/, async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('rowKey') === null) return route.fallback();
+      const response = await route.fetch();
+      const json = (await response.json()) as { items: unknown[]; nextCursor: string | null };
+      const change = {
+        changedAt: new Date().toISOString(), changedByUserId: 1, changedByDisplayName: 'Anchor editor (e2e)',
+        columnDefId: Number(url.searchParams.get('columnDefId')), documentId: Number(DocumentId),
+        isLateEdit: false, isOutOfWindow: false, oldValue: '4582', newValue: '7', origin: 'UserEdit',
+        periodKey: Number(owner), rowKey: url.searchParams.get('rowKey'),
+      };
+      return route.fulfill({ response, json: { ...json, items: [change], nextCursor: null } });
+    });
+
+    await signIn(page);
+    await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
+    const grid = page.locator('revo-grid').first();
+    await expect(grid).toBeVisible({ timeout: 60_000 });
+    await firstDataCell(grid).click();
+    await page.locator('[data-inspector-triggers]').getByRole('button', { name: /History/i }).click();
+
+    const aside = page.getByRole('complementary');
+    await aside.locator('label', { hasText: 'This cell' }).click();
+    await expect(aside.getByText('Anchor editor (e2e)')).toBeVisible({ timeout: 30_000 });
+    const note = aside.locator('[data-inspector-owner-period]');
+    await expect(note).toHaveAttribute('data-inspector-owner-period', owner);
+    await expect(note).toContainText(/shared by all months/i);
+    await expect(aside.getByText(/No history/i)).toHaveCount(0);
+  });
 });
 
 /**
