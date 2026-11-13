@@ -112,7 +112,7 @@ describe('DocumentsPage: «Load more» дописує сторінку (B36)', (
       const user = userEvent.setup();
 
       await screen.findByText('DOC-000001', {}, { timeout: SlowEnvTimeout });
-      await user.click(screen.getByRole('button', { name: '⟦documents.more⟧' }));
+      await user.click(await screen.findByRole('button', { name: '⟦documents.more⟧' }, { timeout: SlowEnvTimeout }));
 
       await screen.findByText('DOC-000002', {}, { timeout: SlowEnvTimeout });
       expect(screen.getByText('DOC-000001')).toBeTruthy();
@@ -130,7 +130,7 @@ describe('DocumentsPage: «Load more» дописує сторінку (B36)', (
       const user = userEvent.setup();
 
       await screen.findByText('DOC-000001', {}, { timeout: SlowEnvTimeout });
-      await user.click(screen.getByRole('button', { name: '⟦documents.more⟧' }));
+      await user.click(await screen.findByRole('button', { name: '⟦documents.more⟧' }, { timeout: SlowEnvTimeout }));
       await screen.findByText('DOC-000002', {}, { timeout: SlowEnvTimeout });
 
       await user.click(screen.getByRole('switch', { name: '⟦documents.filterReopenedMonths⟧' }));
@@ -201,7 +201,7 @@ describe('DocumentsPage: «Load more» дописує сторінку (B36)', (
       const user = userEvent.setup();
 
       await screen.findByText('DOC-000001', {}, { timeout: SlowEnvTimeout });
-      await user.click(screen.getByRole('button', { name: '⟦documents.more⟧' }));
+      await user.click(await screen.findByRole('button', { name: '⟦documents.more⟧' }, { timeout: SlowEnvTimeout }));
 
       await screen.findByText('DOC-000002', {}, { timeout: SlowEnvTimeout });
       expect(screen.getAllByText('DOC-000001')).toHaveLength(1);

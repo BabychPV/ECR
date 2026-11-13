@@ -25,11 +25,9 @@ import { DocumentVersionCell, DocumentVersionTh } from '@/features/documents/Doc
 import { parseDocumentsView } from '@/features/documents/documentsBoardModel';
 import '@/features/documents/documentsList.css';
 import { LateEditsMark } from '@/features/documents/LateEditsMark';
-import { StaleResultsMark, StaleResultsUndeterminedMark } from '@/features/documents/StaleResultsMark';
 import { DocumentYearStrip, DocumentYearStripHeader, DocumentYearStripLegend } from '@/features/documents/DocumentYearStrip';
 import { calendarYears, yearsWithProjects } from '@/features/projects/projectYear';
 import { CollapsibleNote } from '@/features/common/CollapsibleNote';
-import { InfiniteListFooter } from '@/features/common/infiniteList/InfiniteListFooter';
 import { mergePages, nextCursorOf } from '@/features/common/infiniteList/mergePages';
 import type { PeriodCalendarDto } from '@/api/types';
 import { useCalendarsOf } from '@/features/projects/projectCalendars';
@@ -59,6 +57,24 @@ import { DisabledReason } from '@/features/common/DisabledReason';
  * перелік документів нести форму, валідацію проєкту й вибір локалізованої
  * назви, яких переважна більшість відкриттів сторінки не торкається.
  */
+/**
+ * Позначки застарілих результатів — за `import()` з тієї ж причини, що й шторка (`D-132`): їх має меншість рядків,
+ * а більшість відкриттів переліку не має жодного. Поки чанк летить, позначки немає — рядок уже показано.
+ */
+const loadStaleMarks = () => import('@/features/documents/StaleResultsMark');
+const StaleResultsMark = lazy(async () => ({ default: (await loadStaleMarks()).StaleResultsMark }));
+const StaleResultsUndeterminedMark = lazy(async () => ({
+  default: (await loadStaleMarks()).StaleResultsUndeterminedMark,
+}));
+
+/**
+ * Підвал нескінченної прокрутки (W-3) — за `import()`: бюджет маршруту (`D-132`) був на межі, а підвал потрібен
+ * лише ПІСЛЯ першої сторінки рядків. Поки чанк летить, під переліком нічого немає — рядки вже показано.
+ */
+const InfiniteListFooter = lazy(async () => ({
+  default: (await import('@/features/common/infiniteList/InfiniteListFooter')).InfiniteListFooter,
+}));
+
 const loadCreateDocumentModal = () => import('@/features/documents/CreateDocumentModal');
 const CreateDocumentModal = lazy(async () => ({
   default: (await loadCreateDocumentModal()).CreateDocumentModal,
@@ -660,9 +676,13 @@ export function DocumentsPage(): JSX.Element {
                                 {/* `BE-09b`: пізні правки за період (без періоду — за будь-який). */}
                                 {document.hasLateEdits && <LateEditsMark />}
                                 {/* RC14-D: результати методологій застаріли (лише `true`; `null` — доступ звужено). */}
-                                {document.resultsStale === true && <StaleResultsMark since={document.resultsStaleSince} />}
+                                {document.resultsStale === true && (
+                                  <Suspense fallback={null}><StaleResultsMark since={document.resultsStaleSince} /></Suspense>
+                                )}
                                 {/* ✎ D-446: чому застарілість не визначена — частину документа читачеві закрито. */}
-                                {document.resultsStaleUndetermined === 'PartiallyHidden' && <StaleResultsUndeterminedMark />}
+                                {document.resultsStaleUndetermined === 'PartiallyHidden' && (
+                                  <Suspense fallback={null}><StaleResultsUndeterminedMark /></Suspense>
+                                )}
                               </Group>
                             </Box>
                           </Table.Td>
@@ -697,12 +717,14 @@ export function DocumentsPage(): JSX.Element {
                 документів, і сторінка 200 через OFFSET сканує все, що до неї. */}
             {/* ✎ W-3a: наступна сторінка ДОПИСУЄТЬСЯ — сама при прокрутці до кінця або коли рядки не заповнюють вікно;
                 кнопка лишається для клавіатури й середовищ без `IntersectionObserver`. */}
-            <InfiniteListFooter
-              key={JSON.stringify(listKey)}
-              pager={query}
-              shown={page.items.length}
-              total={page.totalCount}
-            />
+            <Suspense fallback={null}>
+              <InfiniteListFooter
+                key={JSON.stringify(listKey)}
+                pager={query}
+                shown={page.items.length}
+                total={page.totalCount}
+              />
+            </Suspense>
           </>
           );
         }}
