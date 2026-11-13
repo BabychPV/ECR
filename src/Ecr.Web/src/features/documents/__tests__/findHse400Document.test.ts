@@ -96,6 +96,25 @@ describe('findHse400Document (B78 F13 P3-2)', () => {
     expect(listDocuments).toHaveBeenCalledWith({ periodKey: null, year: 2026, projectId: 3 });
   });
 
+  // ✎ B93 (c): кілька документів року в проєкті — явне правило, а не порядок переліку.
+  it('кілька документів року: спершу з періодом панелі, далі найменший Id', async () => {
+    fetchAllProjects.mockResolvedValue({ items: [{ id: 5 }], nextCursor: null, totalCount: 1 });
+    apiFetch.mockResolvedValue(timeline(5, 'HSE400'));
+    listDocuments.mockResolvedValueOnce({
+      items: [
+        { id: 96, periodStates: [{ periodKey: 202605, state: 'Draft' }] },
+        { id: 40, periodStates: [{ periodKey: 202601, state: 'Draft' }] },
+        { id: 70, periodStates: [{ periodKey: 202605, state: 'Draft' }] },
+      ],
+      nextCursor: null,
+      totalCount: 3,
+    });
+    await expect(findHse400Document(5, 2026, 96, 202605)).resolves.toBe(70);
+
+    listDocuments.mockResolvedValueOnce(page(90, 96, 40));
+    await expect(findHse400Document(5, 2026, 96, 202605)).resolves.toBe(40);
+  });
+
   it('відмова API (не 403/404) — виняток для панелі', async () => {
     fetchAllProjects.mockResolvedValue({ items: [{ id: 2 }], nextCursor: null, totalCount: 1 });
     apiFetch.mockRejectedValue(new EcrApiError({ status: 500, title: 'Boom' } as never));

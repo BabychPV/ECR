@@ -7,6 +7,7 @@ import { fetchAllProjects } from '@/features/projects/allProjects';
 export const Hse400TemplateCode = 'HSE400';
 
 type TemplateTimeline = components['schemas']['ProjectTemplateTimelineDto'];
+type DocumentSummary = components['schemas']['DocumentSummary'];
 
 /**
  * Чи діє в проєкті шаблон HSE400 у році `year` (часова шкала версій шаблону проєкту).
@@ -39,19 +40,43 @@ async function timelineOf(projectId: number): Promise<TemplateTimeline | null> {
 }
 
 /**
+ * ✎ B93 (c): який документ року відкрити в проєкті, коли їх кілька, — явне правило, а не порядок переліку:
+ * 1) не сам поточний документ; 2) спершу документ, що має період панелі (`periodStates` містить `periodKey` — перехід
+ * відкриває саме цей період); 3) далі найменший Id (найстаріший документ року). Проєкт поточного документа перевіряється
+ * першим ще до цього правила (див. `findHse400Document`), рік — фільтр сервера `year`.
+ */
+function pickDocument(
+  items: readonly Pick<DocumentSummary, 'id' | 'periodStates'>[],
+  currentDocumentId: number,
+  periodKey: number | null,
+): number | null {
+  const candidates = items.filter((item) => item.id !== currentDocumentId);
+  if (candidates.length === 0) return null;
+
+  const withPeriod = periodKey === null
+    ? []
+    : candidates.filter((item) => (item.periodStates ?? []).some((state) => state.periodKey === periodKey));
+  const pool = withPeriod.length > 0 ? withPeriod : candidates;
+
+  return Math.min(...pool.map((item) => item.id));
+}
+
+/**
  * ✎ B78 F13 P3-2: документ HSE400 для «Відкрити HSE400» — за КОДОМ ШАБЛОНУ проєкту, а не першим збігом пошуку «HSE400».
  *
  * Проєкти (`GET /projects`, право `Document.View`) → часова шкала версій шаблону кожного
  * (`GET /projects/{id}/template-versions`, те саме право) → проєкти, де в році діє шаблон `HSE400` (спершу проєкт
- * поточного документа) → перший документ року в такому проєкті (`GET /documents?year=&projectId=`). Контракт не змінено:
- * перелік документів коду шаблону не несе, тому шаблон береться з проєкту.
+ * поточного документа) → документ року в такому проєкті (`GET /documents?year=&projectId=`, правило вибору —
+ * `pickDocument`). Контракт не змінено: перелік документів коду шаблону не несе, тому шаблон береться з проєкту.
  *
+ * @param periodKey Період панелі — перевага документу з цим періодом (`pickDocument`); `null` — без переваги.
  * @returns Id документа; `null` — такого документа немає (або він читачеві невидимий). Відмова API — виняток.
  */
 export async function findHse400Document(
   currentProjectId: number | null,
   year: number,
   currentDocumentId: number,
+  periodKey: number | null = null,
 ): Promise<number | null> {
   const projects = await fetchAllProjects();
   const ids = projects.items.map((project) => project.id);
@@ -64,8 +89,8 @@ export async function findHse400Document(
     if (!runsHse400(timelines[index] ?? null, year)) continue;
 
     const page = await listDocuments({ periodKey: null, year, projectId });
-    const found = page.items.find((item) => item.id !== currentDocumentId);
-    if (found !== undefined) return found.id;
+    const found = pickDocument(page.items, currentDocumentId, periodKey);
+    if (found !== null) return found;
   }
 
   return null;

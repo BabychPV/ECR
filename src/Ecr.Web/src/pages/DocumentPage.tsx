@@ -586,7 +586,7 @@ export function DocumentPage(): JSX.Element {
   // (панель так і каже), відмова API — виняток (панель показує помилку). За `import()` — бюджет маршруту D-132.
   const openHse400 = useCallback(async (): Promise<boolean> => {
     const { findHse400Document } = await import('@/features/documents/findHse400Document');
-    const found = await findHse400Document(projectId, Math.trunc(periodKey / 100), documentId);
+    const found = await findHse400Document(projectId, Math.trunc(periodKey / 100), documentId, periodKey);
     if (found === null) return false;
     void navigate(`/documents/${String(found)}?periodKey=${String(periodKey)}`);
 
