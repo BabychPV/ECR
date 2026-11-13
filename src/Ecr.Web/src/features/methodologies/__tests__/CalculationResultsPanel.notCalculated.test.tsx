@@ -44,9 +44,10 @@ function show(items: unknown[]): void {
 
   render(
     <MantineProvider theme={testTheme}>
-      {/* Банер над сіткою (`UnmatchedRowsBanner`) — лише його `data-testid` і перемикач, на який панель переводить фокус. */}
-      <div data-testid="document-unmatched-rows">
-        <button type="button" aria-controls="document-unmatched-rows-body" data-testid="banner-toggle">
+      {/* ✎ B78: панель «Проблеми розрахунку» над сіткою — лише її `data-testid` і перемикач деталей, на який панель
+          результатів переводить фокус. */}
+      <div data-testid="document-calc-issues">
+        <button type="button" aria-controls="document-calc-issues-details" data-testid="banner-toggle">
           show
         </button>
       </div>

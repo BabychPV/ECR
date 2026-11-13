@@ -6,7 +6,7 @@ import { validationCheckedAt } from '@/features/documents/inspector/validationCh
 import { Alert, Button, Code, Group, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ServiceStatePage } from '@/app/ServiceStatePage';
 import { problemText } from '@/shared/ui/problemText';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
@@ -157,12 +157,10 @@ const DocumentActionBar = lazy(async () => ({ default: (await loadDocumentAction
 const ExecutorStrip = lazy(async () => ({
   default: (await import('@/features/editAssignments/ExecutorStrip')).ExecutorStrip,
 }));
-const UnmatchedRowsBanner = lazy(async () => ({
-  default: (await import('@/features/documents/UnmatchedRowsBanner')).UnmatchedRowsBanner,
-}));
-// ✎ C-1 (D-475): лінивий, як банер рядків без правила — бюджет маршруту 250 КБ (D-132).
-const FormulaErrorsBanner = lazy(async () => ({
-  default: (await import('@/features/documents/FormulaErrorsBanner')).FormulaErrorsBanner,
+// ✎ B78: ОДНА панель «Проблеми розрахунку» замість банерів «Formula errors» і «Some rows are not included» — лінива,
+// як були вони (бюджет маршруту 250 КБ, D-132).
+const CalculationIssuesPanel = lazy(async () => ({
+  default: (await import('@/features/documents/CalculationIssuesPanel')).CalculationIssuesPanel,
 }));
 
 // Місце банера перерахунку проєкту (lane A) — за `import()`, як на Documents: хук опитування задач і модель
@@ -518,6 +516,17 @@ export function DocumentPage(): JSX.Element {
       revealRow(tableInstanceId, rowKey, columnCode),
     [revealRow],
   );
+  const navigate = useNavigate();
+  // ✎ B78: «Відкрити HSE400» — документ HSE400 того ж року (пошук переліку за «HSE400»); немає — панель каже про це.
+  const openHse400 = useCallback(async (): Promise<boolean> => {
+    const { listDocuments } = await import('@/features/documents/api');
+    const page = await listDocuments({ periodKey: null, year: Math.trunc(periodKey / 100), q: 'HSE400' });
+    const found = page.items.find((item) => item.id !== documentId);
+    if (found === undefined) return false;
+    void navigate(`/documents/${String(found.id)}?periodKey=${String(periodKey)}`);
+
+    return true;
+  }, [documentId, navigate, periodKey]);
 
   useEffect(
     () =>
@@ -933,26 +942,16 @@ export function DocumentPage(): JSX.Element {
         </Suspense>
       )}
 
-      {/* ✎ C-1 (D-475): помилки формул — ПЕРЕД рядками без правила: вони блокують подання. */}
-      {unmatchedRows.formulaErrors.length > 0 && (
+      {/* ✎ B78: помилки формул (C-1, блокують подання) і рядки поза розрахунком — одна панель, рядок на причину. */}
+      {(unmatchedRows.formulaErrors.length > 0 || unmatchedRows.issues.length > 0) && (
         <Suspense fallback={null}>
-          <FormulaErrorsBanner
+          <CalculationIssuesPanel
             userId={session.data?.userId}
-            errors={unmatchedRows.formulaErrors}
-            total={unmatchedRows.formulaErrorTotal}
-            tables={tables.data ?? []}
-            onOpenCell={openUnmatchedRow}
-          />
-        </Suspense>
-      )}
-
-      {unmatchedRows.issues.length > 0 && (
-        <Suspense fallback={null}>
-          <UnmatchedRowsBanner
-            userId={session.data?.userId}
+            periodKey={periodKey}
             rows={unmatchedRows}
             tables={tables.data ?? []}
-            onOpenRow={openUnmatchedRow}
+            onOpenCell={openUnmatchedRow}
+            onOpenHse400={openHse400}
             narrow={narrow}
           />
         </Suspense>
