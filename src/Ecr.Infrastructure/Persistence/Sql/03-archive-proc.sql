@@ -194,7 +194,14 @@ BEGIN
 
     -- Позначка «архівується» — теж на всіх: дані сусіда зараз переїжджають
     -- так само, як і свої.
-    UPDATE doc.Project SET IsArchiving = 1 WHERE Id IN (SELECT ProjectId FROM @Runs);
+    --
+    -- ⚠ B81 (F13 #877): але НЕ на активних (Status = 1). Активний сусід у діапазоні архівації неможливий —
+    --    ЗАПОБІЖНИК 1 вище відмовляє (50012) ще до цього рядка, — тож фільтр тут захист у глибину: позначка
+    --    «архівується» на активному проєкті хибно показувала б «проєкт архівований» і блокувала правки, поки
+    --    триває прогін. Звужувати до одного @ProjectId не можна: дані неактивних сусідів спільної партиції
+    --    переїжджають так само, і правка в них посеред переносу загубилася б.
+    UPDATE doc.Project SET IsArchiving = 1
+     WHERE Id IN (SELECT ProjectId FROM @Runs) AND Status <> 1;
 
     BEGIN TRY
 
@@ -794,7 +801,13 @@ BEGIN
            WHERE t.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey) AS x
     WHERE x.ProjectId <> @ProjectId;
 
-    UPDATE doc.Project SET IsArchiving = 1 WHERE Id IN (SELECT ProjectId FROM @Runs);
+    -- ⛔ B81 (F13 #877): позначка «архівується» — лише на НЕактивних проєктах (Status <> 1). Журнал вище свідомо пише
+    --    всіх із `doc.Period` діапазону, а запобіжника, як у `usp_ArchiveYear`, тут немає: активний сусід, що завів
+    --    документи в той самий ключ періоду, отримував хибне «проєкт архівований» і блокування правок на весь прогін, хоча
+    --    його гарячі рядки повернення не чіпає (вставки — лише ключів, яких у `doc.*` немає). Неактивних не звужуємо до
+    --    @ProjectId: їхні дані повертаються так само, і правка посеред повернення загубилася б.
+    UPDATE doc.Project SET IsArchiving = 1
+     WHERE Id IN (SELECT ProjectId FROM @Runs) AND Status <> 1;
 
     BEGIN TRY
 
