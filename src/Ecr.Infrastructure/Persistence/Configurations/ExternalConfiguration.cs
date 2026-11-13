@@ -587,6 +587,7 @@ public sealed class NotificationOutboxConfiguration : IEntityTypeConfiguration<N
         builder.Property(x => x.State).HasMaxLength(20).IsRequired();
         builder.Property(x => x.Error).HasMaxLength(NotificationOutboxItem.ErrorMaxLength);
         builder.Property(x => x.ClaimedAt);
+        builder.Property(x => x.NextAttemptAt);
         builder.Property(x => x.ClaimToken);
 
         builder.HasIndex(x => new { x.State, x.CreatedAt }).HasDatabaseName("IX_Outbox_State");

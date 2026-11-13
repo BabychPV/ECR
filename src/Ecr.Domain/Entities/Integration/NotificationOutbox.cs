@@ -71,6 +71,9 @@ public sealed class NotificationOutboxItem : Entity<long>
     /// </remarks>
     public DateTime? ClaimedAt { get; private set; }
 
+    /// <summary>D-9: не раніше якого моменту (UTC) повторювати невдалу спробу; <c>null</c> — будь-коли.</summary>
+    public DateTime? NextAttemptAt { get; private set; }
+
     /// <summary>Токен, що однозначно ідентифікує ЦЕЙ виклик захоплення.</summary>
     /// <remarks>
     /// ⚠ Не часова позначка: <c>datetime2(3)</c> округлює значення при
@@ -89,6 +92,7 @@ public sealed class NotificationOutboxItem : Entity<long>
         SentAt = utcNow;
         Error = null;
         Attempts++;
+        NextAttemptAt = null;
         ClaimedAt = null;
         ClaimToken = null;
     }
@@ -116,6 +120,7 @@ public sealed class NotificationOutboxItem : Entity<long>
     /// </summary>
     /// <param name="error">Причина; без стека.</param>
     /// <param name="maxAttempts">Після скількох спроб перестати пробувати.</param>
+    /// <param name="retryNotBefore">D-9: не раніше якого моменту (UTC) повторювати; <c>null</c> — одразу.</param>
     /// <remarks>
     /// ⚠ Невдала відправка — <b>не втрата</b>: подія лишається в черзі й
     /// повторюється. Але й не вічно: після межі вона позначається невдалою,
@@ -127,11 +132,12 @@ public sealed class NotificationOutboxItem : Entity<long>
     /// він застряг би в захопленні до спливання таймауту захоплення, хоча
     /// процес живий і просто не зміг надіслати САМЕ ЦЮ спробу.
     /// </remarks>
-    public void MarkFailed(string error, int maxAttempts)
+    public void MarkFailed(string error, int maxAttempts, DateTime? retryNotBefore = null)
     {
         Attempts++;
         Error = error;
         State = Attempts >= maxAttempts ? "Failed" : "Pending";
+        NextAttemptAt = State == "Pending" ? retryNotBefore : null;
         ClaimedAt = null;
         ClaimToken = null;
     }
