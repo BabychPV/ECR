@@ -27,7 +27,9 @@ namespace Ecr.Adapters.Tests.Excel;
 /// покласти блок шапки в аркуш даних (рядки таблиці зсуваються) — тести імпорту червоні;
 /// прибрати <c>sheet.Position = 1</c> / <c>SetTabActive()</c> — тест порядку червоний (X-2);
 /// записати значення <c>cell.Value = text</c> замість <c>WriteText</c> — тест апострофа червоний (X-6);
-/// значення списку кодом замість назви — тест списку червоний (X-3); підпис одномовний — тест Contract червоний (X-5).
+/// значення списку кодом замість назви — тест списку червоний (X-3); підпис одномовний — тест Contract червоний (X-5);
+/// <c>Order(fields, [])</c> замість <c>ServiceRows</c> — тести службових рядків червоні (X-4); <c>Math.Min</c> без
+/// мінімуму ширини — тест ширини червоний; <c>bilingual: false</c> у <c>DisplayOf</c> — тест списку червоний (приймання F13 P3).
 /// </remarks>
 public sealed class ExcelExporterHeaderSheetTests
 {
@@ -146,9 +148,105 @@ public sealed class ExcelExporterHeaderSheetTests
         // Порожнє поле — рядок є, значення порожнє; видалене поле (зі значенням) — не експортується.
         Assert.Equal("Note", header.Cell(5, 1).GetString());
         Assert.True(header.Cell(5, 2).IsEmpty());
-        Assert.True(header.Cell(6, 1).IsEmpty());
+
+        // X-4: останній рядок — звітний період (завжди); File Number / Version без значень в опціях — рядків немає.
+        Assert.Equal("Reporting period", header.Cell(6, 1).GetString());
+        Assert.Equal("2026-09", header.Cell(6, 2).GetString());
+        Assert.True(header.Cell(7, 1).IsEmpty());
         Assert.DoesNotContain("stale", header.CellsUsed().Select(c => c.GetString()));
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Стовпець_значень_шапки_не_вужчий_за_мінімум_навіть_для_коротких_значень()
+    {
+        // Приймання F13 (P3): короткі значення давали стовпець B шириною 7.7 — значення не читалося.
+        // Без Math.Clamp з MinHeaderValueWidth ширина тут = len("I. Petrenko") + 2 = 13 → червоний.
+        using var workbook = await ExportAsync("en");
+
+        var width = workbook.Worksheet("Document header").Column(2).Width;
+        Assert.True(width >= 30, $"Ширина стовпця значень {width} < 30.");
+        Assert.True(width <= 81, $"Ширина стовпця значень {width} > межі 80.");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Службові_рядки_File_Number_і_Version_на_місці_форми_Contract_а_період_останнім()
+    {
+        // X-4 (рішення PO 11.11): File Number (BusinessKey) і Version — у секції Contract за порядком Land
+        // (Area … File Number, Permit Number, Version), період — останнім. Без ServiceRows рядків немає — червоний.
+        var area = Field(26, "AREA", 1, CellDataType.String, "Area", "Район работ", "Аудан");
+        var permit = Field(27, "PERMIT", 12, CellDataType.String, "Permit Number", "Номер разрешения", "Рұқсат нөмірі");
+        UseHeaderFields([area, permit], new Dictionary<int, DocumentHeaderValueData>());
+
+        using var workbook = await ExportAsync("en", options: Options("en") with
+        {
+            DocumentBusinessKey = "LAND-0007", TemplateVersionLabel = "1.0.14.0", PeriodKind = "Monthly",
+        });
+
+        var header = workbook.Worksheet("Document header");
+        Assert.Equal(
+            ["Area — Район работ", "File Number", "Permit Number — Номер разрешения", "Version", "Reporting period"],
+            [.. Enumerable.Range(2, 5).Select(r => header.Cell(r, 1).GetString())]);
+        Assert.Equal("LAND-0007", header.Cell(3, 2).GetString());
+        Assert.Equal("1.0.14.0", header.Cell(5, 2).GetString());
+        Assert.Equal("2026-09", header.Cell(6, 2).GetString());
+        Assert.Equal(["FileNumber", "Version", "Period"], [header.Cell(3, 3).GetString(), header.Cell(5, 3).GetString(), header.Cell(6, 3).GetString()]);
+        Assert.True(header.Cell(7, 1).IsEmpty());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Без_секції_Contract_File_Number_і_Version_ідуть_перед_періодом()
+    {
+        // X-4: шаблон без полів Contract — File Number і Version однаково є (PO: «завжди»), у хвості перед періодом.
+        using var workbook = await ExportAsync("en", options: Options("en") with
+        {
+            DocumentBusinessKey = "DOC-12", TemplateVersionLabel = "2.0.0.0",
+        });
+
+        var header = workbook.Worksheet("Document header");
+        Assert.Equal(
+            ["Note", "File Number", "Version", "Reporting period"],
+            [.. Enumerable.Range(5, 4).Select(r => header.Cell(r, 1).GetString())]);
+        Assert.Equal(["DOC-12", "2.0.0.0", "2026-09"], [.. Enumerable.Range(6, 3).Select(r => header.Cell(r, 2).GetString())]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Підписи_службових_рядків_з_каталогу_як_у_картці_документа()
+    {
+        // X-4: File Number / Version — ті самі ключі каталогу, що в картці документа; період — export.header.period.
+        var catalog = Substitute.For<IUiStringCatalog>();
+        catalog.GetAsync("ru", Arg.Any<CancellationToken>()).Returns(new UiStringCatalog(
+            "ru", 1,
+            new Dictionary<string, string>
+            {
+                [HeaderExportLabels.FileNumberKey] = "File Number — Номер файла",
+                [HeaderExportLabels.VersionKey] = "Version — Версия",
+                [HeaderExportLabels.PeriodLabelKey] = "Отчётный период",
+            }));
+
+        using var workbook = await ExportAsync("ru", catalog, Options("ru") with
+        {
+            DocumentBusinessKey = "DOC-12", TemplateVersionLabel = "2.0.0.0",
+        });
+
+        var header = workbook.Worksheet("Document header");
+        Assert.Equal(
+            ["File Number — Номер файла", "Version — Версия", "Отчётный период"],
+            [.. Enumerable.Range(6, 3).Select(r => header.Cell(r, 1).GetString())]);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [InlineData(202611, "Monthly", "2026-11")]
+    [InlineData(202611, null, "2026-11")]
+    [InlineData(202602, "Quarterly", "Q2 2026")]
+    [InlineData(202601, "Yearly", "2026")]
+    [InlineData(202603, "Custom", "2026-03")]
+    public void Період_вивантаження_підписується_за_періодичністю_проєкту(int periodKey, string? kind, string expected)
+        => Assert.Equal(expected, HeaderSheetLayout.PeriodLabel(periodKey, kind));
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -168,11 +266,14 @@ public sealed class ExcelExporterHeaderSheetTests
 
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [InlineData("en", "1 BCMA")]
-    [InlineData("ru", "Строительство")]
+    [InlineData("en", "1 BCMA - Строительство")]
+    [InlineData("ru", "1 BCMA - Строительство")]
+    [InlineData("kz", "1 BCMA - Строительство")]
     public async Task Поле_списку_шапки_пишеться_назвою_запису_а_не_кодом(string language, string expected)
     {
-        // X-3: у книзі — назва запису мовою вивантаження (як у картці документа); код лишається для CSV/JSON.
+        // X-3: у книзі — назва запису (як у картці документа); код лишається для CSV/JSON.
+        // ✎ Приймання F13 (P3): назва двомовна «EN - RU», як NAME довідників Land («Offshore - На море»), для будь-якої
+        // мови вивантаження. До фіксу en давав «1 BCMA», ru — «Строительство» → червоний.
         var area = Field(26, "AREA", 1, CellDataType.Lookup, "Area", "Район работ", "Аудан");
         area.SetLookup(40);
         var entry = new RegistryEntry(
@@ -187,6 +288,32 @@ public sealed class ExcelExporterHeaderSheetTests
         var header = workbook.Worksheet("Document header");
         Assert.Equal(expected, header.Cell(2, 2).GetString());
         Assert.Equal("AREA", header.Cell(2, 3).GetString());
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [InlineData("Shtokprom", null, "Shtokprom")]
+    [InlineData("Offshore - На море", "На море", "Offshore - На море")]
+    [InlineData("Same", "Same", "Same")]
+    public async Task Двомовна_назва_списку_не_вигадує_і_не_дублює_другу_мову(string en, string? ru, string expected)
+    {
+        // Без російської назви (підрядник Land) — лише англійська; англійська вже у формі NAME («EN - RU») — без повтору.
+        var contractor = Field(26, "CONTRACTOR", 1, CellDataType.Lookup, "Contractor", "Подрядчик", "Мердігер");
+        contractor.SetLookup(41);
+        var names = new Dictionary<string, string> { ["en"] = en };
+        if (ru is not null)
+        {
+            names["ru"] = ru;
+        }
+
+        var entry = new RegistryEntry(41, EcrCode.Create("CTR_001"), new LocalizedText(names));
+        typeof(Entity<long>).GetProperty("Id")!.SetValue(entry, 601L);
+        _registries.ListEntriesAsync(41, Arg.Any<CancellationToken>()).Returns([entry]);
+        UseHeaderFields([contractor], new Dictionary<int, DocumentHeaderValueData> { [26] = new() { ValueRegistryEntryId = 601 } });
+
+        using var workbook = await ExportAsync("en");
+
+        Assert.Equal(expected, workbook.Worksheet("Document header").Cell(2, 2).GetString());
     }
 
     [Fact]
@@ -286,7 +413,11 @@ public sealed class ExcelExporterHeaderSheetTests
         Assert.Empty(preview.Rejected);
     }
 
-    private async Task<XLWorkbook> ExportAsync(string language, IUiStringCatalog? catalog = null)
+    private static ExcelExportOptions Options(string language)
+        => new(IncludeFormulas: false, IncludeStyles: false, Language: language, PeriodKey: PeriodKeyValue);
+
+    private async Task<XLWorkbook> ExportAsync(
+        string language, IUiStringCatalog? catalog = null, ExcelExportOptions? options = null)
     {
         var exporter = new ExcelExporter(
             _cells, _rows, _metadata, Substitute.For<IStyleCatalog>(), _registries,
@@ -294,7 +425,7 @@ public sealed class ExcelExporterHeaderSheetTests
 
         await using var output = await exporter.ExportAsync(
             DocumentId,
-            new ExcelExportOptions(IncludeFormulas: false, IncludeStyles: false, Language: language, PeriodKey: PeriodKeyValue),
+            options ?? Options(language),
             CancellationToken.None);
 
         var copy = new MemoryStream();

@@ -50,6 +50,43 @@ public static class HeaderSheetLayout
     }
 
     /// <summary>
+    /// Значення підстановки в книзі «EN - RU» — формат стовпця NAME довідників Land
+    /// (`docs/delivery/reference-data/land-contract/*.csv`: «Offshore - На море»), приймання F13 P3. Якщо однієї з мов
+    /// немає, вони збігаються або англійська назва вже містить « - RU» (запис імпортовано з NAME) — <paramref name="fallback"/>.
+    /// </summary>
+    public static string BilingualValue(LocalizedText names, string fallback)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        var en = names.Values.GetValueOrDefault("en")?.Trim() ?? string.Empty;
+        var ru = names.Values.GetValueOrDefault("ru")?.Trim() ?? string.Empty;
+        if (en.Length == 0 || ru.Length == 0 || string.Equals(en, ru, StringComparison.Ordinal))
+        {
+            return fallback;
+        }
+
+        return en.EndsWith(" - " + ru, StringComparison.Ordinal) ? en : $"{en} - {ru}";
+    }
+
+    /// <summary>
+    /// X-4: звітний період вивантаження для аркуша шапки: <c>2026-11</c> (місячний і невідомий), <c>Q2 2026</c>
+    /// (квартальний), <c>2026</c> (річний), <c>2026-03</c> (власний календар — рік і номер періоду).
+    /// </summary>
+    /// <param name="periodKey">Ключ періоду <c>Рік*100 + Номер</c>.</param>
+    /// <param name="periodKind">Ім'я <c>PeriodKind</c> проєкту; <c>null</c> — як місячний.</param>
+    public static string PeriodLabel(int periodKey, string? periodKind)
+    {
+        var period = new PeriodKey(periodKey);
+        var year = period.Year.ToString("D4", System.Globalization.CultureInfo.InvariantCulture);
+        var sequence = period.Sequence.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return periodKind switch
+        {
+            nameof(Ecr.Domain.Enums.PeriodKind.Quarterly) => $"Q{sequence} {year}",
+            nameof(Ecr.Domain.Enums.PeriodKind.Yearly) => year,
+            _ => $"{year}-{period.Sequence.ToString("D2", System.Globalization.CultureInfo.InvariantCulture)}",
+        };
+    }
+
+    /// <summary>
     /// Рядки секції Contract за порядком Land (службові File Number/Version — на своєму місці, якщо секція є), далі решта
     /// полів у порядку шаблону, далі службові рядки, що не стали в секцію (File Number/Version без секції, період).
     /// Дубль ключа секції — серед решти, як у картці документа.
