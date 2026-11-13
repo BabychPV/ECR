@@ -54,11 +54,16 @@ public static class SourceEventAttributeValueWriter
              WHERE v.LinkId IN (SELECT l.id FROM OPENJSON(@links) WITH (id bigint '$') AS l)
         )
         MERGE target AS t
-        USING (SELECT j.l, j.s, j.a, j.n, j.x, j.tr, j.u, CONVERT(binary(32), j.h, 1) AS h, j.m
-                 FROM OPENJSON(@values) WITH (
-                        l bigint '$.l', s tinyint '$.s', a nvarchar(200) '$.a', n decimal(34,16) '$.n',
-                        x nvarchar(4000) '$.x', tr bit '$.tr', u nvarchar(64) '$.u', h varchar(66) '$.h',
-                        m datetime2(3) '$.m') AS j) AS s
+        USING (SELECT d.l, d.s, d.a, d.n, d.x, d.tr, d.u, d.h, d.m
+                 FROM (SELECT j.l, j.s, j.a, j.n, j.x, j.tr, j.u, CONVERT(binary(32), j.h, 1) AS h, j.m,
+                              -- ⛔ D-4: один рядок на ключ у КОЛАЦІЇ БАЗИ (як PK цілі) — перший за порядком джерела.
+                              ROW_NUMBER() OVER (PARTITION BY j.l, j.s, j.a ORDER BY j.o) AS rn
+                         FROM OPENJSON(@values) WITH (
+                                o int '$.o',
+                                l bigint '$.l', s tinyint '$.s', a nvarchar(200) '$.a', n decimal(34,16) '$.n',
+                                x nvarchar(4000) '$.x', tr bit '$.tr', u nvarchar(64) '$.u', h varchar(66) '$.h',
+                                m datetime2(3) '$.m') AS j) AS d
+                WHERE d.rn = 1) AS s
            ON t.LinkId = s.l AND t.Scope = s.s AND t.Attribute = s.a
         WHEN MATCHED AND t.ValueHash <> s.h THEN
             UPDATE SET ValueNumeric = s.n, ValueText = s.x, IsTruncated = s.tr, SourceUnit = s.u, ValueHash = s.h,
@@ -147,6 +152,7 @@ public static class SourceEventAttributeValueWriter
                 {
                     values.Add(new
                     {
+                        o = values.Count,
                         l = linkId,
                         s = (byte)row.Scope,
                         a = row.Attribute,
