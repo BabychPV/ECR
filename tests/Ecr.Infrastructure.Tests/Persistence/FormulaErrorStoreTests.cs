@@ -115,6 +115,61 @@ public sealed class FormulaErrorStoreTests(SqlServerFixture sql)
         Assert.True(resolved.HasFormulaErrors);
     }
 
+    /// <summary>
+    /// ✎ B78 (живий прохід W15t, doc 96 Land): динамічна таблиця — у всіх рядків <c>doc.TableRow.Ordinal = 0</c> і
+    /// немає опису рядка шаблону; банер показував «рядок 0» на кожній із 19 комірок. Номер — позиція в сітці з 1.
+    /// </summary>
+    /// <remarks>Червоне до фіксу: <c>RowOrdinal</c> брався з <c>r.Ordinal</c> → 0 і 0 замість 1 і 3.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Номер_рядка_динамічної_таблиці_позиція_в_сітці_а_не_Ordinal()
+    {
+        var doc = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: 202702);
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            await new FormulaErrorStore(db).ApplyAsync(
+                [Row(doc, 2, FormulaError.ErrorKind, "#N/A"), Row(doc, 0, FormulaError.ErrorKind, "#N/A")], [], CancellationToken.None);
+            await db.SaveChangesAsync();
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE doc.TableRow SET Ordinal = 0 WHERE PeriodKey = {doc.PeriodKey.Value} AND TableInstanceId = {doc.TableInstanceId};");
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE cfg.RowDef SET IsDeleted = 1 WHERE TableDefId = {doc.TableDefId};");
+        }
+
+        await using var reader = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var rows = await new FormulaErrorStore(reader).ListAsync(doc.DocumentId, doc.PeriodKey.Value, null, CancellationToken.None);
+
+        Assert.Equal([(doc.RowIds[0], 1), (doc.RowIds[2], 3)], rows.Select(r => (r.Row.TableRowId, r.RowOrdinal)));
+    }
+
+    /// <summary>
+    /// ✎ B78: порядок той самий, що в зрізі сітки (<c>GetTableSliceHandler</c>): Ordinal опису рядка шаблону за RowKey,
+    /// далі <c>TableRow.Id</c> — а не Id сам по собі.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Номер_рядка_за_порядком_опису_рядка_шаблону()
+    {
+        var doc = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: 202703);
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            await new FormulaErrorStore(db).ApplyAsync(
+                [Row(doc, 0, FormulaError.ErrorKind, "#N/A"), Row(doc, 3, FormulaError.ErrorKind, "#N/A")], [], CancellationToken.None);
+            await db.SaveChangesAsync();
+
+            // Шаблон перевертає порядок: R4 перший, R1 останній.
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE cfg.RowDef SET Ordinal = 10 - Ordinal WHERE TableDefId = {doc.TableDefId};");
+        }
+
+        await using var reader = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var rows = await new FormulaErrorStore(reader).ListAsync(doc.DocumentId, doc.PeriodKey.Value, null, CancellationToken.None);
+
+        Assert.Equal([(doc.RowIds[3], 1), (doc.RowIds[0], 4)], rows.Select(r => (r.Row.TableRowId, r.RowOrdinal)));
+    }
+
     private static FormulaErrorRow Row(TestDocument doc, int row, string kind, string code)
         => new(
             doc.DocumentId, doc.PeriodKey.Value, doc.TableInstanceId, doc.TableDefId, null, doc.RowIds[row], $"R{row + 1}",

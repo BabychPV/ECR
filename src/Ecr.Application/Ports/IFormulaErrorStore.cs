@@ -66,7 +66,10 @@ public sealed record FormulaErrorRow(
 /// <param name="TableCode">Код таблиці.</param>
 /// <param name="ColumnCode">Код колонки.</param>
 /// <param name="ColumnHeaderL10n">Заголовок колонки.</param>
-/// <param name="RowOrdinal">Порядковий номер рядка (<c>doc.TableRow.Ordinal</c>).</param>
+/// <param name="RowOrdinal">
+/// Номер рядка, як його бачить сітка: позиція з 1 у порядку зрізу (Ordinal опису рядка шаблону, далі
+/// <c>TableRow.Id</c>). ✎ B78: не <c>doc.TableRow.Ordinal</c> — у динамічних таблицях він однаковий (0) у всіх рядків.
+/// </param>
 /// <param name="Formula">Вираз формули; <c>null</c> — формули вже немає.</param>
 /// <param name="SourceTableCode">Код таблиці джерела (Blocked).</param>
 /// <param name="SourceColumnCode">Код колонки джерела (Blocked).</param>

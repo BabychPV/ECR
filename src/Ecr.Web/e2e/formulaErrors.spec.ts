@@ -241,7 +241,14 @@ test('C-1 formula errors (помилка формули): value kept, dependents
   const issuesUrl = `${documentUrl}/calculation-issues?periodKey=${String(arranged.periodKey)}`;
   const issues = await ok<{
     formulaErrors:
-      | { columnCode: string; kind: string; formula: string | null; dependentCount: number; inputs: { columnCode: string; value: string | null }[] | null }[]
+      | {
+          columnCode: string;
+          rowNumber: number;
+          kind: string;
+          formula: string | null;
+          dependentCount: number;
+          inputs: { columnCode: string; value: string | null }[] | null;
+        }[]
       | null;
     formulaErrorTotal: number | null;
   }>(await page.request.get(issuesUrl), 'проблеми розрахунку');
@@ -251,6 +258,8 @@ test('C-1 formula errors (помилка формули): value kept, dependents
   const own = issues.formulaErrors?.find((error) => error.columnCode === 'C');
   expect(own?.kind).toBe('Error');
   expect(own?.dependentCount).toBe(1);
+  // ✎ B78: номер рядка — позиція в сітці (перший рядок динамічної таблиці — 1), а не `TableRow.Ordinal` (0 у Land).
+  expect(own?.rowNumber, 'номер рядка — позиція в сітці').toBe(1);
   expect(own?.formula).toBe('[A] / [B]');
   expect(own?.inputs?.map((input) => `${input.columnCode}=${String(input.value)}`)).toEqual(
     expect.arrayContaining(['A=10', 'B=0']),
@@ -277,6 +286,7 @@ test('C-1 formula errors (помилка формули): value kept, dependents
   await expect(banner).toContainText('Formula errors');
   await expect(page.getByTestId('document-formula-error')).toHaveCount(1);
   await expect(page.getByTestId('document-formula-error')).toContainText('1 dependent cell(s) not updated');
+  await expect(page.getByTestId('document-formula-error')).toContainText('C, row 1');
   await expect(page.locator('[data-calc-error="Error"]')).toHaveCount(1, { timeout: 60_000 });
   await expect(page.locator('[data-calc-error="Blocked"]')).toHaveCount(1);
   // Знімок банера й сітки — вкладення звіту Playwright (артефакт CI e2e-stand) для огляду зручності.
