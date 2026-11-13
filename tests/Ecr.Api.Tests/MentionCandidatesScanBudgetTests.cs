@@ -89,9 +89,13 @@ public sealed class MentionCandidatesScanBudgetTests(SqlServerFixture sql)
     /// <summary>Активні користувачі БЕЗ жодної ролі: збігаються з пошуком, але таблиці не бачать.</summary>
     private static async Task InvisibleAsync(EcrDbContext db, string tag, int count)
     {
+        // Локальний запис без пароля забороняє CK_User_Provider; хеш один на всіх — PBKDF2 не рахується 80 разів.
+        var hash = new PasswordHasher().Hash(Password);
         for (var i = 0; i < count; i++)
         {
-            db.Users.Add(new User($"{tag}{i.ToString("D3", CultureInfo.InvariantCulture)}", Name(tag, i), AuthProvider.Local));
+            var user = new User($"{tag}{i.ToString("D3", CultureInfo.InvariantCulture)}", Name(tag, i), AuthProvider.Local);
+            user.SetPassword(hash);
+            db.Users.Add(user);
         }
 
         await db.SaveChangesAsync().ConfigureAwait(false);
