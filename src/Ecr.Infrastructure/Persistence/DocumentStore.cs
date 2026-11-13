@@ -1342,7 +1342,10 @@ public sealed class DocumentStore(
         var found = await db.Documents
             .AsNoTracking()
             .Where(d => d.Id == documentId)
-            .Select(d => (int?)EcrDbContext.VersionOf(d.ProjectId, periodKey))
+            // ✎ B74 P2: шкала шаблону документа напряму; NULL TemplateId — основний шаблон (як досі).
+            .Select(d => (int?)(d.TemplateId == null
+                ? EcrDbContext.VersionOf(d.ProjectId, periodKey)
+                : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, periodKey)))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 

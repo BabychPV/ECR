@@ -35,7 +35,10 @@ public sealed class StepApproverStore(EcrDbContext db, IClock clock, IWorkflowSt
                     s.CurrentStepId,
                     sd.Code,
                     d.ProjectId,
-                    TemplateVersionId = EcrDbContext.VersionOf(d.ProjectId, periodKey),
+                    // ✎ B74 P2: шкала шаблону документа напряму; NULL TemplateId — основний шаблон (як досі).
+                    TemplateVersionId = d.TemplateId == null
+                        ? EcrDbContext.VersionOf(d.ProjectId, periodKey)
+                        : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, periodKey),
                 })
             .ToListAsync(ct).ConfigureAwait(false);
         if (states.Count == 0)

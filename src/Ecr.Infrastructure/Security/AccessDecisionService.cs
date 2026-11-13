@@ -3065,7 +3065,14 @@ public sealed class AccessDecisionService(
             .AsNoTracking()
             .Where(d => d.Id == documentId)
             // ✎ RPT-STABLE B2: маршрут - версії ПЕРІОДУ аркуша (шкала), не чинної версії проєкту.
-            .Select(d => new { Id = d.ProjectId, TemplateVersionId = EcrDbContext.VersionOf(d.ProjectId, periodKey.Value) })
+            // ✎ B74 P2: шкала шаблону документа напряму; NULL TemplateId — основний шаблон (як досі).
+            .Select(d => new
+            {
+                Id = d.ProjectId,
+                TemplateVersionId = d.TemplateId == null
+                    ? EcrDbContext.VersionOf(d.ProjectId, periodKey.Value)
+                    : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, periodKey.Value),
+            })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -3154,7 +3161,10 @@ public sealed class AccessDecisionService(
                     p.IsArchiving,
 
                     // ✎ RPT-STABLE Part B: структура рішення - версія ПЕРІОДУ (шкала), не чинна версія проєкту.
-                    TemplateVersionId = EcrDbContext.VersionOf(p.Id, periodValue),
+                    // ✎ B74 P2: шкала шаблону документа напряму; NULL TemplateId — основний шаблон (як досі).
+                    TemplateVersionId = d.TemplateId == null
+                        ? EcrDbContext.VersionOf(d.ProjectId, periodValue)
+                        : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, periodValue),
 
                     // ⚠ ФВ-1.8: річне вікно — з того самого рядка проєкту, без
                     // окремого звернення (храповик `PatchCellsQueryCountTests`).

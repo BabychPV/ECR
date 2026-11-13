@@ -308,7 +308,10 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
         => await db.Database
             .SqlQuery<TableInstanceRef>($"""
                 SELECT t.Id AS TableInstanceId, t.DocumentId, t.TableDefId,
-                       doc.fn_VersionOf(d.ProjectId, t.PeriodKey) AS TemplateVersionId, t.PeriodKey, t.SheetCopyId,
+                       -- ✎ B74 P2: версія шкали ШАБЛОНУ документа напряму; NULL TemplateId — основний шаблон (як досі).
+                       CASE WHEN d.TemplateId IS NULL THEN doc.fn_VersionOf(d.ProjectId, t.PeriodKey)
+                            ELSE doc.fn_TemplateVersionOf(d.ProjectId, d.TemplateId, t.PeriodKey) END AS TemplateVersionId,
+                       t.PeriodKey, t.SheetCopyId,
                        -- ✎ C-1: архівний період стану помилок формул не має (затверджений аркуш помилок не тримає).
                        CAST(0 AS bit) AS HasFormulaErrors
                 FROM arc.TableInstance t

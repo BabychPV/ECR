@@ -30,7 +30,10 @@ public sealed class DocumentPeriodReopenStore(EcrDbContext db) : IDocumentPeriod
                     project.Status,
                     project.IsArchiving,
                     // Версія ПЕРІОДУ (шкала версій проєкту), а не чинна: журнал описує зміну саме цього місяця.
-                    TemplateVersionId = EcrDbContext.VersionOf(project.Id, periodKey),
+                    // ✎ B74 P2: шкала шаблону документа напряму; NULL TemplateId — основний шаблон (як досі).
+                    TemplateVersionId = document.TemplateId == null
+                        ? EcrDbContext.VersionOf(document.ProjectId, periodKey)
+                        : EcrDbContext.TemplateVersionOf(document.ProjectId, document.TemplateId.Value, periodKey),
                     project.TimeZoneId,
                     project.PeriodEnd,
                     project.YearGraceOffsetDays,
