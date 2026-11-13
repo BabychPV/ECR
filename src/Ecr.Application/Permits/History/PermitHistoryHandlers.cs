@@ -122,6 +122,12 @@ public sealed class AddRowPermitHandler(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ D-1: та сама шкала, на якій рахувались дата й розрив, — під UPDLOCK+HOLDLOCK до коміту.
+            PermitHistoryRules.EnsureUnchanged(
+                segments.Select(s => s.Id),
+                await store.LockRowSegmentsAsync(
+                        documentId, row.Table.Id, row.Instance.SheetCopyId, row.RowKey, row.Column.Id, innerCt)
+                    .ConfigureAwait(false));
             store.Add(segment);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             await audit.WriteStructureChangeAsync(
@@ -185,6 +191,20 @@ public sealed class UndoRowPermitHandler(
         var now = clock.UtcNow;
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            PermitHistoryRules.EnsureUnchanged(
+                segments.Select(s => s.Id),
+                await store.LockRowSegmentsAsync(
+                        documentId, row.Table.Id, row.Instance.SheetCopyId, row.RowKey, row.Column.Id, innerCt)
+                    .ConfigureAwait(false));
+
+            // ⛔ D-1: частини місяця — повторно ПІД замком (поділ бере той самий замок, див. SaveCellSplitsHandler).
+            if (await store.RowHasPartsOfAsync(
+                    documentId, row.Table.Id, row.Instance.SheetCopyId, row.RowKey, last.RegistryEntryId, innerCt)
+                    .ConfigureAwait(false))
+            {
+                throw PermitHistoryRules.NothingToUndo();
+            }
+
             store.Remove(last);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             await audit.WriteStructureChangeAsync(
@@ -300,6 +320,10 @@ public sealed class AddHeaderPermitHandler(
         var segment = PermitSegment.ForHeader(documentId, header.Field.Id, request.ValidFrom, next.Id, header.Profile.UserId, now);
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ D-1: та сама шкала шапки, на якій рахувались дата й розрив, — під UPDLOCK+HOLDLOCK до коміту.
+            PermitHistoryRules.EnsureUnchanged(
+                segments.Select(s => s.Id),
+                await store.LockHeaderSegmentsAsync(documentId, header.Field.Id, innerCt).ConfigureAwait(false));
             store.Add(segment);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             await audit.WriteStructureChangeAsync(
@@ -369,6 +393,15 @@ public sealed class UndoHeaderPermitHandler(
         }
 
         var last = segments[^1];
+
+        // ⛔ C-9: як для рядка (`RowHasPartsOfAsync`) — місяць, уже поділений із цим дозволом, не скасовується мовчки:
+        // частини лишилися б і зарахувалися б як поділ для наступного дозволу того самого місяця.
+        var monthKey = (last.ValidFrom.Year * 100) + last.ValidFrom.Month;
+        if (await HasPartsOfAsync(store, documentId, monthKey, last.RegistryEntryId, ct).ConfigureAwait(false))
+        {
+            throw PermitHistoryRules.NothingToUndo();
+        }
+
         var previousId = segments.Count > 1 ? segments[^2].RegistryEntryId : header.BaseEntryId;
         var entries = (await registries.FindEntriesByIdsAsync([previousId, last.RegistryEntryId], ct).ConfigureAwait(false))
             .ToDictionary(e => e.Id);
@@ -376,6 +409,16 @@ public sealed class UndoHeaderPermitHandler(
         var now = clock.UtcNow;
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            PermitHistoryRules.EnsureUnchanged(
+                segments.Select(s => s.Id),
+                await store.LockHeaderSegmentsAsync(documentId, header.Field.Id, innerCt).ConfigureAwait(false));
+
+            // C-9 + D-1: частини — повторно ПІД замком шапки (поділ бере той самий замок, див. SaveCellSplitsHandler).
+            if (await HasPartsOfAsync(store, documentId, monthKey, last.RegistryEntryId, innerCt).ConfigureAwait(false))
+            {
+                throw PermitHistoryRules.NothingToUndo();
+            }
+
             store.Remove(last);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             await audit.WriteStructureChangeAsync(
@@ -390,6 +433,11 @@ public sealed class UndoHeaderPermitHandler(
         return await PermitHistoryReader.HeaderAsync(store, registries, documentId, header.Field, header.BaseEntryId, currentUser.Language, ct)
             .ConfigureAwait(false);
     }
+
+    private static async Task<bool> HasPartsOfAsync(
+        IPermitHistoryStore store, long documentId, int monthKey, long registryEntryId, CancellationToken ct)
+        => (await store.PartsAsync(documentId, [monthKey], ct).ConfigureAwait(false))
+            .Any(p => p.RegistryEntryId == registryEntryId);
 }
 
 /// <summary>

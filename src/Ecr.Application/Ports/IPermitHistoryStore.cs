@@ -23,6 +23,13 @@ public interface IPermitHistoryStore
     /// <summary>Segments of one header field, TRACKED, in date order.</summary>
     public Task<IReadOnlyList<PermitSegment>> HeaderSegmentsAsync(long documentId, int headerFieldDefId, CancellationToken ct);
 
+    /// <summary>D-1: сегменти рядка під UPDLOCK+HOLDLOCK до кінця транзакції (викликати лише в транзакції).</summary>
+    public Task<IReadOnlyList<PermitSegment>> LockRowSegmentsAsync(
+        long documentId, int tableDefId, long? sheetCopyId, string rowKey, int columnDefId, CancellationToken ct);
+
+    /// <summary>D-1: сегменти поля шапки під UPDLOCK+HOLDLOCK до кінця транзакції.</summary>
+    public Task<IReadOnlyList<PermitSegment>> LockHeaderSegmentsAsync(long documentId, int headerFieldDefId, CancellationToken ct);
+
     /// <summary>Parts of the document's months, not tracked (months of <paramref name="periodKeys"/>).</summary>
     public Task<IReadOnlyList<CellPermitPart>> PartsAsync(long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct);
 

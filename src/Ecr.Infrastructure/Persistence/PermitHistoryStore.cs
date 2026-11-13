@@ -38,6 +38,38 @@ public sealed class PermitHistoryStore(EcrDbContext db) : IPermitHistoryStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Дві гілки замість <c>SheetCopyId = @p OR …</c> — щоб діапазонне блокування сіло на seek фільтрованого
+    /// <c>UQ_PermitSegment_Row</c>.
+    /// </remarks>
+    public async Task<IReadOnlyList<PermitSegment>> LockRowSegmentsAsync(
+        long documentId, int tableDefId, long? sheetCopyId, string rowKey, int columnDefId, CancellationToken ct)
+        => await (sheetCopyId is { } copy
+                ? db.PermitSegments.FromSql($"""
+                    SELECT * FROM doc.PermitSegment WITH (UPDLOCK, HOLDLOCK)
+                     WHERE DocumentId = {documentId} AND TableDefId = {tableDefId} AND SheetCopyId = {copy}
+                       AND RowKey = {rowKey} AND ColumnDefId = {columnDefId}
+                    """)
+                : db.PermitSegments.FromSql($"""
+                    SELECT * FROM doc.PermitSegment WITH (UPDLOCK, HOLDLOCK)
+                     WHERE DocumentId = {documentId} AND TableDefId = {tableDefId} AND SheetCopyId IS NULL
+                       AND RowKey = {rowKey} AND ColumnDefId = {columnDefId}
+                    """))
+            .OrderBy(s => s.ValidFrom)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<PermitSegment>> LockHeaderSegmentsAsync(long documentId, int headerFieldDefId, CancellationToken ct)
+        => await db.PermitSegments.FromSql($"""
+                SELECT * FROM doc.PermitSegment WITH (UPDLOCK, HOLDLOCK)
+                 WHERE DocumentId = {documentId} AND HeaderFieldDefId = {headerFieldDefId}
+                """)
+            .OrderBy(s => s.ValidFrom)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<CellPermitPart>> PartsAsync(
         long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
     {
