@@ -242,6 +242,43 @@ Step 'Тести інструментів (Pester)' {
     & $psExe @pesterArgs
 }
 
+# ✎ 2026-11-13 (PLAN B62): Python-тести інструментів (unittest, стандартна бібліотека, без мережі й ECR):
+# tools/hse30x/test_flert_bridges.py (мости FLERT), tools/land/test_contract_dicts.py (довідники Land «2. Contract»).
+# Беремо КОЖЕН каталог tools/** з test_*.py — новий тест-файл потрапляє в крок сам. `-I` ігнорує cwd і змінні Python,
+# тож модуль береться з каталогу тесту (так їх і задумано запускати); `-B` — без __pycache__ у дереві. Іде в завданні
+# `client` (python3 є на раннері ubuntu-24.04).
+Step 'Тести інструментів (Python)' {
+    $py = $null
+    foreach ($candidate in @(@('python3'), @('py', '-3'), @('python'))) {
+        if (-not (Get-Command $candidate[0] -ErrorAction SilentlyContinue)) { continue }
+        # ⚠ У Windows `python3`/`python` може бути заглушкою Microsoft Store: вона пише в stderr і повертає 9009, а
+        # під $ErrorActionPreference='Stop' stderr рідної програми кидає виняток — тому проба в try, а не 2>$null.
+        try {
+            $ver = & $candidate[0] @($candidate | Select-Object -Skip 1) -c 'import sys; print(sys.version_info[0])' 2>&1 |
+                Select-Object -Last 1
+            if ($LASTEXITCODE -eq 0 -and "$ver".Trim() -eq '3') { $py = $candidate; break }
+        }
+        catch {
+            continue
+        }
+    }
+    if (-not $py) { throw 'Python 3 не знайдено (python3 / py -3 / python)' }
+
+    $dirs = @(Get-ChildItem -Path (Join-Path $root 'tools') -Recurse -File -Filter 'test_*.py' |
+            Where-Object { $_.FullName -notmatch '[\\/](node_modules|__pycache__)[\\/]' } |
+            ForEach-Object { $_.DirectoryName } | Sort-Object -Unique)
+    if ($dirs.Count -eq 0) { throw 'у tools/ не знайдено жодного test_*.py — крок нічого не перевіряє' }
+
+    $failed = @()
+    foreach ($dir in $dirs) {
+        Write-Host "   $dir"
+        & $py[0] @($py | Select-Object -Skip 1) -I -B -m unittest discover -s $dir -t $dir -p 'test_*.py' -v
+        if ($LASTEXITCODE -ne 0) { $failed += $dir }
+    }
+    if ($failed.Count -gt 0) { throw "впали: $($failed -join ', ')" }
+    $global:LASTEXITCODE = 0
+}
+
 Step 'Складання' {
     & dotnet build (Join-Path $root 'Ecr.sln') -v q --nologo
 }
