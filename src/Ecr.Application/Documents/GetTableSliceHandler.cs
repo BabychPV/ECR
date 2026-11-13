@@ -263,6 +263,23 @@ public sealed class GetTableSliceHandler(
 
             cells = overlaid[tableInstanceId];
         }
+
+        // ✎ HSE400: рядки `F_<X>` таблиці «місяці в колонках» отримують число місячного модуля в колонці місяця —
+        // тим самим посиланням (`D-69`). Таблиця іншої розкладки або без таких рядків — жодного запиту.
+        var monthColumns = Calculations.MonthRowResultOverlay.MonthColumns(table);
+        if (monthColumns.Count > 0)
+        {
+            if (results is not null)
+            {
+                cells = await new Calculations.MonthRowResultOverlay(methodologies, results)
+                    .ApplyAsync(documentId, instance.PeriodKey, tableInstanceId, table.Id, rowIds, cells, monthColumns, ct)
+                    .ConfigureAwait(false);
+            }
+
+            // Сітка показує ці комірки розрахунковими (`CalculatedCell`), а не просто заблокованим рядком.
+            decisions = Calculations.MonthRowResultOverlay.MarkCalculated(decisions, rowIds, monthColumns);
+        }
+
         var orphans = await rowStore.GetOrphanFlagsAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
                                     .ConfigureAwait(false);
 

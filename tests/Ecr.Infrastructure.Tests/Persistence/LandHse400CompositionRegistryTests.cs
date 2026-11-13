@@ -34,7 +34,7 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// префікси - червоніють усі, що читають значення потоку.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class LandHse400CompositionRegistryTests(SqlServerFixture sql)
+public sealed partial class LandHse400CompositionRegistryTests(SqlServerFixture sql)
 {
     private const string FuelGasInternal = "Fuel gas (Internal) - Топливный газ (Внутренний)";
     private const string LpgHmb = "LPG (HMB) - СУГ (МТБ)";

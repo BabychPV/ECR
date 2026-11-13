@@ -67,24 +67,45 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
             registryDefId, db.Documents.AsNoTracking().Where(d => ids.Contains(d.Id)), limit: null, ct);
     }
 
-    /// <summary>Спільне тіло обох вибірок: документи — з <paramref name="documents"/>.</summary>
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Той самий запит (<see cref="QueryAsync"/>), лише без умови «прогін до <c>DataChangedAt</c>» і в межах року.
+    /// </remarks>
+    public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedForYearAsync(int registryDefId, int year, CancellationToken ct)
+        => QueryAsync(registryDefId, db.Documents.AsNoTracking(), limit: null, ct, (year * 100, (year * 100) + 99));
+
+    /// <summary>Спільне тіло вибірок: документи — з <paramref name="documents"/>.</summary>
     /// <param name="registryDefId">Довідник.</param>
     /// <param name="documents">Документи, серед яких шукати.</param>
     /// <param name="limit">Стеля рядків; <c>null</c> — без стелі (межа — сам <paramref name="documents"/>).</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="sourcePeriods">
+    /// Зміна документа-джерела (HSE400 3b): межі ключів періодів результатів (включно), без умови
+    /// <c>DataChangedAt</c>; <c>null</c> — правка самого довідника.
+    /// </param>
     private async Task<IReadOnlyList<RegistryImpactRow>> QueryAsync(
-        int registryDefId, IQueryable<Ecr.Domain.Entities.Documents.Document> documents, int? limit, CancellationToken ct)
+        int registryDefId,
+        IQueryable<Ecr.Domain.Entities.Documents.Document> documents,
+        int? limit,
+        CancellationToken ct,
+        (int From, int To)? sourcePeriods = null)
     {
-        var changedAt = await db.RegistryDefs.AsNoTracking()
-            .Where(r => r.Id == registryDefId)
-            .Select(r => r.DataChangedAt)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
+        var anyRun = sourcePeriods is not null;
+        var changedAt = anyRun
+            ? null
+            : await db.RegistryDefs.AsNoTracking()
+                .Where(r => r.Id == registryDefId)
+                .Select(r => r.DataChangedAt)
+                .FirstOrDefaultAsync(ct)
+                .ConfigureAwait(false);
 
-        if (changedAt is null)
+        if (!anyRun && changedAt is null)
         {
             return [];
         }
+
+        var firstPeriod = sourcePeriods?.From ?? int.MinValue;
+        var lastPeriod = sourcePeriods?.To ?? int.MaxValue;
 
         var query =
             from use in db.RegistryUses.AsNoTracking()
@@ -93,7 +114,8 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
                 on use.SourceId equals result.MethodologyVersionId
             join run in db.CalculationRuns.AsNoTracking() on result.CalculationRunId equals run.Id
             where run.Status == CalculationRun.CurrentStatus
-                  && (run.InputsAsOfUtc ?? run.StartedAt) < changedAt
+                  && (anyRun || (run.InputsAsOfUtc ?? run.StartedAt) < changedAt)
+                  && result.PeriodKey >= firstPeriod && result.PeriodKey <= lastPeriod
             join document in documents on result.DocumentId equals document.Id
             join period in db.Periods.AsNoTracking()
                 on new { document.ProjectId, result.PeriodKey }

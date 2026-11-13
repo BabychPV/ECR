@@ -433,6 +433,7 @@ public static class DependencyInjection
         services.AddSingleton(Jobs.RecalculationBudgetOptions.Read(configuration));
         services.AddSingleton<Jobs.RecalculationBudgetMonitor>();
         services.AddScoped<IRecalculationJob, Jobs.RecalculationJob>();
+        services.AddScoped<Jobs.IRecalculationCompletionHook>(sp => ActivatorUtilities.CreateInstance<Jobs.Hse400LandDependentsTrigger>(sp, Jobs.Hse400LandDependentsTrigger.IsEnabled(configuration))); // HSE400 3b
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
         // WW-03: постановка перерахунку в періоди-читачі (міжперіодні посилання).
         services.AddScoped<Jobs.CrossPeriodFanOut>();
@@ -605,7 +606,13 @@ public static class DependencyInjection
         services.AddScoped<IRegistryRowsQuery, RegistryRowsQuery>(); // RT-13
 
         // RT: expressions
-        services.AddScoped<IRegistrySnapshotLoader, RegistrySnapshotLoader>(); // RT-22
+        // RT-22; HSE400: склад газу LAND_HSE400_COMPOSITION за прапором читається з документа, а не з довідника.
+        services.AddScoped<RegistrySnapshotLoader>();
+        services.AddScoped<IRegistrySnapshotLoader>(sp => new Hse400CompositionSnapshotLoader(
+            sp.GetRequiredService<RegistrySnapshotLoader>(),
+            sp.GetRequiredService<EcrDbContext>(),
+            sp.GetRequiredService<ICalculationResultStore>(),
+            Hse400CompositionSnapshotLoader.IsEnabled(configuration)));
 
         // PERMITS: types — типи дозволів над реєстрами (PM-03)
         services.AddScoped<IPermitTypeStore, PermitTypeStore>();
