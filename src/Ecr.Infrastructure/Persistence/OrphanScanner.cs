@@ -269,9 +269,16 @@ public sealed class OrphanScanner : IOrphanScanner
         // was open never clears after the data or the permit is fixed (live case: LAND-FULL doc 2, Water Report
         // R7001000, January, flagged 28.10 and frozen since the month was locked). Only Scheduled is skipped: nothing
         // there yet.
+        //
+        // ⛔ B69 (G2): періоди АРХІВОВАНОГО (чи того, що архівується) проєкту — поза проходом. Закриті місяці тепер у
+        // скоупі, і без цієї умови нічний прохід переписував `IsOrphaned` рядків архівованого проєкту: архівні дані
+        // застосунок не змінює (слово людини). Та сама умова стоїть і на кандидатах (`NextBatchAsync`).
         var keys = await _db.Periods
             .AsNoTracking()
             .Where(p => p.State == PeriodState.Open || p.State == PeriodState.Grace || p.State == PeriodState.Closed)
+            .Where(p => _db.Projects.Any(pr => pr.Id == p.ProjectId
+                                               && pr.Status != ProjectStatus.Archived
+                                               && !pr.IsArchiving))
             .Select(p => p.PeriodKeyValue)
             .Distinct()
             .OrderBy(k => k)
@@ -352,7 +359,14 @@ public sealed class OrphanScanner : IOrphanScanner
             join period in _db.Periods.AsNoTracking()
                 on new { P = row.PeriodKeyValue, Pr = doc.ProjectId }
                 equals new { P = period.PeriodKeyValue, Pr = period.ProjectId }
+
+            // ⛔ B69 (G2): рядки архівованого (чи того, що архівується) проєкту не чіпаються — навіть коли інший
+            // проєкт тримає той самий ключ періоду відкритим (фільтр ключів вище — лише грубий).
+            join project in _db.Projects.AsNoTracking()
+                on doc.ProjectId equals project.Id
             where !row.IsDeleted
+                  && project.Status != ProjectStatus.Archived
+                  && !project.IsArchiving
                   && periodKeys.Contains(row.PeriodKeyValue)
                   && (period.State == PeriodState.Open || period.State == PeriodState.Grace
                       || period.State == PeriodState.Closed)
