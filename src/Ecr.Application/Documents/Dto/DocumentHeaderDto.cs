@@ -44,7 +44,25 @@ public sealed record DocumentHeaderFieldDto(
 /// <c>doc.DocumentHeaderValue</c> немає власного <c>rowversion</c>, а
 /// <c>doc.Document.RowVersion</c> змінюється й від правки будь-якої комірки.
 /// </param>
-public sealed record DocumentHeaderDto(IReadOnlyList<DocumentHeaderFieldDto> Fields, string Version);
+/// <param name="RecalculationJobs">
+/// B35 W-2: задачі перерахунку, поставлені ЦІЄЮ правкою шапки (<c>PATCH</c>) — по одній на кожен період, куди
+/// перерахунок має право писати (річний документ HSE401 — до 12). Порожньо — правка нічого не змінила або писати
+/// нікуди; <c>null</c> — відповідь <c>GET</c> (читання задач не ставить).
+/// </param>
+/// <remarks>
+/// ⛔ Без цього поля клієнт не знав, коли формули над <c>HDR.*</c> перераховано: відповідь казала «збережено», а
+/// обчислені комірки на екрані лишалися старими до F9. Тепер шапка стежить за кожною задачею тим самим слідкувачем,
+/// що й сітка за <see cref="PatchCellsResponse.RecalculationJobId"/> (<c>followRecalculation</c>).
+/// </remarks>
+public sealed record DocumentHeaderDto(
+    IReadOnlyList<DocumentHeaderFieldDto> Fields,
+    string Version,
+    IReadOnlyList<HeaderRecalculationJobDto>? RecalculationJobs = null);
+
+/// <summary>Задача перерахунку, поставлена правкою шапки (B35 W-2).</summary>
+/// <param name="JobId">Задача: <c>GET /jobs/{jobId}</c> (у шляху — <c>encodeURIComponent</c>, id містить <c>#</c>).</param>
+/// <param name="PeriodKey">Період задачі (<c>yyyyMM</c>); перерахунок адресує пару документ × період.</param>
+public sealed record HeaderRecalculationJobDto(string JobId, int PeriodKey);
 
 /// <summary>Пакетна зміна шапки документа.</summary>
 /// <param name="Fields">Зміни полів; поле, якого немає в списку, не чіпається.</param>

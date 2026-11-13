@@ -1011,4 +1011,137 @@ public sealed class DocumentHeaderHandlersTests
 
         Assert.True(failedInTransaction, "Збій постановки стався поза транзакцією — шапка лишилась би без перерахунку.");
     }
+
+    /// <summary>
+    /// B35 W-2: відповідь <c>PATCH</c> шапки несе КОЖНУ поставлену задачу перерахунку з її періодом — річний документ
+    /// (12 відкритих місяців) дає 12 задач. Доти задачі відкидалися, і клієнт не знав, коли перечитати формули над
+    /// <c>HDR.*</c> (старі значення до F9). В обох режимах черги (у транзакції і після коміту).
+    /// </summary>
+    /// <remarks>
+    /// Мутації: не повертати id з <c>EnqueueRecalculationAsync</c> (порожній перелік) — червоний; узяти період не тієї
+    /// задачі — червоний; у режимі бази не скинути перелік на повторі тіла транзакції — див. окремий тест нижче.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task B35_PATCH_повертає_задачу_перерахунку_на_кожен_період_річного_документа(bool enlists)
+    {
+        _jobs.EnlistsInCallerTransaction.Returns(enlists);
+        for (var month = 1; month <= 12; month++)
+        {
+            AddPeriod(202600 + month, PeriodState.Open);
+        }
+
+        var version = await VersionOfAsync([]);
+        Values([], new() { [_area.Id] = new() { ValueString = "Tengiz" } });
+        _jobs.EnqueueCoalescedAsync<IRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns(call => "IRecalculationJob#" + call.ArgAt<string>(0));
+
+        var result = await Patch().HandleAsync(
+            DocumentId, Request(version, new PatchHeaderField("Area", "Tengiz", false)), CancellationToken.None);
+
+        var expected = Enumerable.Range(1, 12)
+            .Select(month => new HeaderRecalculationJobDto(
+                "IRecalculationJob#" + RecalculateDocumentHandler.TargetOf(DocumentId, new PeriodKey(202600 + month)),
+                202600 + month))
+            .ToList();
+        Assert.NotNull(result.RecalculationJobs);
+        Assert.Equal(expected, result.RecalculationJobs);
+    }
+
+    /// <summary>
+    /// B35 W-2: задачі лише для періодів, куди перерахунок має право писати (закритий і запланований — без задачі);
+    /// витіснення (Exclusive) повертає id так само, як Coalesced.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task B35_PATCH_повертає_задачі_лише_відкритих_періодів_і_для_Exclusive()
+    {
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }
+                .Permission("Document.View").Permission("Registry.View")
+                .Permission("Calculation.Recalculate")
+                .Grant(ResourceKind.Project, ProjectId, GrantLevel.Write)
+                .Build());
+        AddPeriod(202601, PeriodState.Closed);
+        AddPeriod(202602, PeriodState.Grace);
+        AddPeriod(202603, PeriodState.Open);
+        AddPeriod(202604, PeriodState.Scheduled);
+
+        var version = await VersionOfAsync([]);
+        Values([], new() { [_area.Id] = new() { ValueString = "Tengiz" } });
+        _jobs.EnqueueExclusiveAsync<IRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns("IRecalculationJob#41", "IRecalculationJob#42");
+
+        var result = await Patch().HandleAsync(
+            DocumentId, Request(version, new PatchHeaderField("Area", "Tengiz", false)), CancellationToken.None);
+
+        Assert.NotNull(result.RecalculationJobs);
+        Assert.Equal(
+            [new HeaderRecalculationJobDto("IRecalculationJob#41", 202602),new HeaderRecalculationJobDto("IRecalculationJob#42", 202603)],
+            result.RecalculationJobs);
+    }
+
+    /// <summary>
+    /// B35 W-2: правка без змін нічого не ставить — перелік ПОРОЖНІЙ (не <c>null</c>: <c>null</c> лишається за
+    /// <c>GET</c>, який задач не ставить узагалі).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task B35_PATCH_без_змін_повертає_порожній_перелік_задач_а_GET_null()
+    {
+        AddPeriod(202601, PeriodState.Open);
+        var before = new Dictionary<int, DocumentHeaderValueData> { [_area.Id] = new() { ValueString = "Kashagan" } };
+        var version = await VersionOfAsync(before);
+        Values(before, before);
+
+        var result = await Patch().HandleAsync(
+            DocumentId, Request(version, new PatchHeaderField("Area", "Kashagan", false)), CancellationToken.None);
+
+        Assert.NotNull(result.RecalculationJobs);
+        Assert.Empty(result.RecalculationJobs);
+
+        _headers.GetValuesAsync(DocumentId, Arg.Any<CancellationToken>()).Returns(before);
+        Assert.Null((await Get().HandleAsync(DocumentId, CancellationToken.None)).RecalculationJobs);
+    }
+
+    /// <summary>
+    /// B35 W-2: стратегія виконання може повторити тіло транзакції — задачі відкоченої спроби (їхні рядки черги
+    /// відкотилися разом із нею) не потрапляють у відповідь, лише задачі зафіксованої спроби.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task B35_повтор_тіла_транзакції_не_дублює_задачі_у_відповіді()
+    {
+        _jobs.EnlistsInCallerTransaction.Returns(true);
+        AddPeriod(202603, PeriodState.Open);
+
+        var version = await VersionOfAsync([]);
+        // Обидві спроби читають шапку ДО правки (перша відкотилася), відповідь — після.
+        _headers.GetValuesAsync(DocumentId, Arg.Any<CancellationToken>()).Returns(
+            new Dictionary<int, DocumentHeaderValueData>(),
+            new Dictionary<int, DocumentHeaderValueData>(),
+            new Dictionary<int, DocumentHeaderValueData> { [_area.Id] = new() { ValueString = "Tengiz" } });
+        _jobs.EnqueueCoalescedAsync<IRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns("IRecalculationJob#1", "IRecalculationJob#2");
+
+        // Тіло виконується двічі, як за повтору SqlServerRetryingExecutionStrategy.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(async call =>
+            {
+                var body = call.ArgAt<Func<CancellationToken, Task>>(0);
+                await body(call.ArgAt<CancellationToken>(1));
+                await body(call.ArgAt<CancellationToken>(1));
+            });
+
+        var result = await Patch().HandleAsync(
+            DocumentId, Request(version, new PatchHeaderField("Area", "Tengiz", false)), CancellationToken.None);
+
+        Assert.NotNull(result.RecalculationJobs);
+        Assert.Equal([new HeaderRecalculationJobDto("IRecalculationJob#2", 202603)], result.RecalculationJobs);
+    }
 }

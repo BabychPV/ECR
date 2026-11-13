@@ -368,8 +368,14 @@ public sealed class PatchDocumentHeaderHandler(
         // прочитає). Quartz у пам'яті — ПІСЛЯ коміту, як і досі: до коміту його задача прочитала б стару шапку.
         var enlist = jobs.EnlistsInCallerTransaction;
 
+        // B35 W-2: поставлені задачі йдуть у відповідь — клієнт стежить за ними й перечитує зрізи після перерахунку.
+        IReadOnlyList<HeaderRecalculationJobDto> queued = [];
+
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⚠ Повтор тіла транзакції (стратегія виконання) не має лишити задач відкоченої спроби.
+            queued = [];
+
             // ⛔ L6-02 / L6-06: першими діями — структура документа (спільно; перенос
             // версії прибирає й переносить поля шапки) і шапка (винятково: подання
             // бере її спільно, валідує й кладе у зріз). Без цього правка, що
@@ -388,19 +394,20 @@ public sealed class PatchDocumentHeaderHandler(
 
             if (enlist && changed > 0)
             {
-                await EnqueueRecalculationAsync(documentId, project, userId, mayPreempt, innerCt).ConfigureAwait(false);
+                queued = await EnqueueRecalculationAsync(documentId, project, userId, mayPreempt, innerCt).ConfigureAwait(false);
             }
         }, ct).ConfigureAwait(false);
 
         // ⚠ Quartz: після коміту й поза транзакцією — задача, поставлена до коміту, під RCSI прочитала б стару шапку.
         if (!enlist && changed > 0)
         {
-            await EnqueueRecalculationAsync(documentId, project, userId, mayPreempt, ct).ConfigureAwait(false);
+            queued = await EnqueueRecalculationAsync(documentId, project, userId, mayPreempt, ct).ConfigureAwait(false);
         }
 
         var values = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);
         return HeaderVersion.ToDto(
-            snapshot, values, registryDefId => Registries.RegistryAccess.IsDeniedIn(profile, registryDefId, document.ProjectId));
+            snapshot, values, registryDefId => Registries.RegistryAccess.IsDeniedIn(profile, registryDefId, document.ProjectId))
+            with { RecalculationJobs = queued };
     }
 
     /// <summary>
@@ -802,9 +809,11 @@ public sealed class PatchDocumentHeaderHandler(
     /// <see cref="RecalculateDocumentHandler"/>: дві задачі над тим самим
     /// перемикали б актуальність прогону навперегін.
     /// </remarks>
-    private async Task EnqueueRecalculationAsync(
+    /// <returns>Поставлені задачі з їхніми періодами (B35 W-2) — у порядку періодів.</returns>
+    private async Task<IReadOnlyList<HeaderRecalculationJobDto>> EnqueueRecalculationAsync(
         long documentId, Domain.Entities.Documents.Project project, int userId, bool mayPreempt, CancellationToken ct)
     {
+        var queued = new List<HeaderRecalculationJobDto>();
         foreach (var period in project.Periods.OrderBy(p => p.PeriodKeyValue))
         {
             if (period.State == PeriodState.Scheduled
@@ -824,14 +833,17 @@ public sealed class PatchDocumentHeaderHandler(
                 SheetDefId = (int?)null,
             };
 
-            if (mayPreempt)
+            var jobId = mayPreempt
+                ? await jobs.EnqueueExclusiveAsync<IRecalculationJob>(target, payload, ct, userId).ConfigureAwait(false)
+                : await jobs.EnqueueCoalescedAsync<IRecalculationJob>(target, payload, ct, userId).ConfigureAwait(false);
+
+            // ⚠ Порожній id адресував би `GET /jobs/` (перелік під System.ViewHealth) — такого клієнту не віддаємо.
+            if (!string.IsNullOrEmpty(jobId))
             {
-                await jobs.EnqueueExclusiveAsync<IRecalculationJob>(target, payload, ct, userId).ConfigureAwait(false);
-            }
-            else
-            {
-                await jobs.EnqueueCoalescedAsync<IRecalculationJob>(target, payload, ct, userId).ConfigureAwait(false);
+                queued.Add(new HeaderRecalculationJobDto(jobId, period.PeriodKeyValue));
             }
         }
+
+        return queued;
     }
 }

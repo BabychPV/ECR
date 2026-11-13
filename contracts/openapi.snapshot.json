@@ -6110,6 +6110,16 @@
             },
             "type": "array"
           },
+          "recalculationJobs": {
+            "description": "B35 W-2: задачі перерахунку, поставлені ЦІЄЮ правкою шапки (`PATCH`) — по одній на кожен період, куди\nперерахунок має право писати (річний документ HSE401 — до 12). Порожньо — правка нічого не змінила або писати\nнікуди; `null` — відповідь `GET` (читання задач не ставить).",
+            "items": {
+              "$ref": "#/components/schemas/HeaderRecalculationJobDto"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "version": {
             "description": "Версія значень шапки — її клієнт повертає в `baseVersion` наступного\n`PATCH`. Виводиться зі ЗНАЧЕНЬ (хеш), а не з колонки: у\n`doc.DocumentHeaderValue` немає власного `rowversion`, а\n`doc.Document.RowVersion` змінюється й від правки будь-якої комірки.",
             "type": "string"
@@ -9246,6 +9256,25 @@
         "required": [
           "fieldCode",
           "permits"
+        ],
+        "type": "object"
+      },
+      "HeaderRecalculationJobDto": {
+        "description": "Задача перерахунку, поставлена правкою шапки (B35 W-2).",
+        "properties": {
+          "jobId": {
+            "description": "Задача: `GET /jobs/{jobId}` (у шляху — `encodeURIComponent`, id містить `#`).",
+            "type": "string"
+          },
+          "periodKey": {
+            "description": "Період задачі (`yyyyMM`); перерахунок адресує пару документ × період.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "jobId",
+          "periodKey"
         ],
         "type": "object"
       },
