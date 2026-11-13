@@ -219,6 +219,56 @@ public sealed class VersionMigrationCellFormulaTests
             "structural", formula.RefusalsFor(VersionMigrationMode.Presentation, acceptGuardedOverwrite: true));
     }
 
+    // ── V-1: формула РЯДКА пише у вхідні комірки так само, як комірочна ──
+
+    [Fact]
+    [Trait("Requirement", "ACC-OW")]
+    public void Нова_формула_рядка_на_рядку_зі_значенням_дає_guardedWithData_і_перелік_ACC_OW()
+    {
+        var plan = Plan(
+            source: Version(1, cellFormula: false),
+            target: Version(2, cellFormula: false, rowFormula: true),
+            values: [new VersionMigrationCellUsage(SourceColumn, SourceRow, 5)]);
+
+        var item = Assert.Single(plan.Items, i => i.Field == "CellFormula");
+        Assert.Equal(("Modified", ChangeClass.Guarded, 5L, $"{Sheet}.T02#R1.A"), (item.Kind, item.ChangeClass, item.Values, item.Path));
+        Assert.Equal(5, plan.GuardedValues);
+        Assert.Equal(5, plan.GuardedOverwritableValues);
+        Assert.Contains("guardedWithData", plan.RefusalsFor(VersionMigrationMode.Safe));
+        Assert.Empty(plan.RefusalsFor(VersionMigrationMode.Safe, acceptGuardedOverwrite: true));
+
+        var overwrite = Assert.Single(plan.GuardedOverwrites);
+        Assert.Equal((Sheet, "T02", "R1", "A", 5L), (overwrite.SheetCode, overwrite.TableCode, overwrite.RowKey, overwrite.ColumnCode, overwrite.Values));
+        Assert.Contains(1 * 10, plan.TouchedSheets);
+    }
+
+    [Fact]
+    [Trait("Requirement", "ACC-OW")]
+    public void Формула_рядка_на_порожньому_рядку_безпечна()
+    {
+        var plan = Plan(source: Version(1, cellFormula: false), target: Version(2, cellFormula: false, rowFormula: true), values: []);
+
+        Assert.Equal(0, plan.GuardedValues);
+        Assert.Empty(plan.RefusalsFor(VersionMigrationMode.Safe));
+        var added = Assert.Single(plan.Items, i => i.Field == "CellFormulas");
+        Assert.Equal(("Added", ChangeClass.Safe, "2"), (added.Kind, added.ChangeClass, added.NewValue)); // R1×A і R1×B
+        Assert.DoesNotContain(plan.Items, i => i.Kind == "Modified");
+    }
+
+    [Fact]
+    [Trait("Requirement", "ACC-OW")]
+    public void Формула_рядка_і_комірки_на_ту_саму_комірку_рахують_значення_один_раз()
+    {
+        var plan = Plan(
+            source: Version(1, cellFormula: false),
+            target: Version(2, cellFormula: true, rowFormula: true),
+            values: [new VersionMigrationCellUsage(SourceColumn, SourceRow, 5)]);
+
+        Assert.Equal(5, plan.GuardedValues);
+        Assert.Single(plan.Items, i => i.Field == "CellFormula");
+        Assert.Single(plan.GuardedOverwrites);
+    }
+
     private static VersionMigrationPlan Plan(
         TemplateVersionSnapshot source, TemplateVersionSnapshot target, IReadOnlyList<VersionMigrationCellUsage> values)
         => VersionMigrationPlanner.Plan(source, target, values, new Dictionary<int, long>());
@@ -226,7 +276,7 @@ public sealed class VersionMigrationCellFormulaTests
     /// <summary>Версія: аркуш S02 → таблиця T02 → колонки A (інпут) і B; рядки R1 і R2; опційно формула комірки R1×A.</summary>
     private static TemplateVersionSnapshot Version(
         int versionId, bool cellFormula, bool rowReadOnly = false, CellDataType sourceColumnType = CellDataType.Decimal,
-        byte? columnBScale = null)
+        byte? columnBScale = null, bool rowFormula = false)
     {
         var baseId = versionId * 100;
         var sheet = new SheetDef(versionId, EcrCode.Create(Sheet), Name("Sheet"), 1);
@@ -260,6 +310,14 @@ public sealed class VersionMigrationCellFormulaTests
         {
             var formula = new FormulaDef(table.Id, FormulaScope.Cell, "[B]", ExpressionDialect.Template);
             formula.AssignCell(row1.Id, columnA.Id);
+            table.AddFormula(formula);
+        }
+
+        if (rowFormula)
+        {
+            // V-1: формула рядка R1 без колонки — перерахунок пише в кожну числову колонку рядка (A і B).
+            var formula = new FormulaDef(table.Id, FormulaScope.Row, "[B]", ExpressionDialect.Template);
+            formula.AssignRow(row1.Id);
             table.AddFormula(formula);
         }
 

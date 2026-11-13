@@ -604,6 +604,10 @@ public static class VersionMigrationPlanner
             Guarded(items, path, values, nameof(ColumnDef.UnitId), column.UnitId, other.UnitId);
             Guarded(items, path, values, nameof(ColumnDef.LookupRegistryDefId), column.LookupRegistryDefId, other.LookupRegistryDefId);
 
+            // ⛔ V-6: місце колонки в році визначає період-власник введеного значення (MonthColumnRouter.OwnerOf,
+            // стабільні вʼюхи); перенос періодів не міняє — інша позиція = значення в іншому місяці.
+            Guarded(items, path, values, "MonthPlacement", MonthPlacement(column), MonthPlacement(other));
+
             // Обов'язковість лише ЗНЯТА нічого не ламає; додана — робить
             // порожні комірки наявних документів помилкою валідації.
             if (!column.IsRequired && other.IsRequired)
@@ -668,7 +672,7 @@ public static class VersionMigrationPlanner
     }
 
     /// <summary>
-    /// WW-02: комірочні формули цільової таблиці, яких у вихідній версії не було. Така комірка стає обчислюваною:
+    /// WW-02, V-1: комірочні і рядкові формули цільової таблиці, яких у вихідній версії не було. Така комірка стає обчислюваною:
     /// перший перерахунок перезапише введене, а редагування закрите. Тому нова комірочна формула на комірці з
     /// непорожнім значенням — <c>Modified</c>/Guarded зі скількістю значень (відмова <c>guardedWithData</c>, аркуш
     /// «зачеплений» для LP-32); на порожній — безпечне додавання (одним підсумковим рядком на таблицю).
@@ -682,8 +686,12 @@ public static class VersionMigrationPlanner
         string tablePath, TableDef from, TableDef to,
         IReadOnlyDictionary<(int ColumnDefId, int RowDefId), long> valuesByCell)
     {
+        // ⛔ V-1: формула РЯДКА пише у вхідні комірки так само, як комірочна (RecalculationService.Targets: з колонкою —
+        // одна комірка, без колонки — кожна колонка рядка, що приймає результат), тож для плану це ті самі нові формули
+        // на комірках: Guarded зі значеннями, перелік ACC-OW.
         var targetFormulas = to.Formulas
-            .Where(f => !f.IsDeleted && f.Scope == FormulaScope.Cell && f.RowDefId is not null && f.ColumnDefId is not null)
+            .Where(f => !f.IsDeleted && f.RowDefId is not null
+                        && ((f.Scope == FormulaScope.Cell && f.ColumnDefId is not null) || f.Scope == FormulaScope.Row))
             .ToList();
 
         if (targetFormulas.Count == 0)
@@ -698,44 +706,55 @@ public static class VersionMigrationPlanner
         var sourceFormulas = from.Formulas.Where(f => !f.IsDeleted).ToList();
 
         var added = 0;
+
+        // V-1: формула рядка й комірочна формула (чи дві формули рядка) можуть цілити в ту саму комірку — комірка
+        // рахується один раз, щоб значення не подвоювались у GuardedValues і переліку ACC-OW.
+        var seen = new HashSet<(int RowDefId, int ColumnDefId)>();
         foreach (var formula in targetFormulas)
         {
-            if (!targetRows.TryGetValue(formula.RowDefId!.Value, out var targetRow)
-                || !targetColumns.TryGetValue(formula.ColumnDefId!.Value, out var targetColumn))
+            if (!targetRows.TryGetValue(formula.RowDefId!.Value, out var targetRow))
             {
                 continue;
             }
 
-            if (!sourceRows.TryGetValue(targetRow.RowKeyValue, out var sourceRow)
-                || !sourceColumns.TryGetValue(targetColumn.Code, out var sourceColumn))
+            foreach (var targetColumn in TargetColumnsOf(formula, targetColumns))
             {
-                // Комірки у вихідній версії не було — значень там бути не може.
+                if (!seen.Add((targetRow.Id, targetColumn.Id)))
+                {
+                    continue;
+                }
+
+                if (!sourceRows.TryGetValue(targetRow.RowKeyValue, out var sourceRow)
+                    || !sourceColumns.TryGetValue(targetColumn.Code, out var sourceColumn))
+                {
+                    // Комірки у вихідній версії не було — значень там бути не може.
+                    added++;
+                    continue;
+                }
+
+                var alreadyComputed = sourceColumn.IsComputed
+                    || sourceFormulas.Any(f =>
+                        (f.Scope == FormulaScope.Column && f.ColumnDefId == sourceColumn.Id)
+                        || (f.Scope == FormulaScope.Cell && f.RowDefId == sourceRow.Id && f.ColumnDefId == sourceColumn.Id)
+                        || (f.Scope == FormulaScope.Row && f.RowDefId == sourceRow.Id
+                            && (f.ColumnDefId is null || f.ColumnDefId == sourceColumn.Id)));
+
+                if (alreadyComputed)
+                {
+                    continue;
+                }
+
                 added++;
-                continue;
-            }
+                var values = valuesByCell.GetValueOrDefault((sourceColumn.Id, sourceRow.Id));
+                if (values > 0)
+                {
+                    items.Add(new($"{tablePath}#{targetRow.RowKeyValue}.{targetColumn.Code}", "Modified",
+                        ChangeClass.Guarded, values, "CellFormula", "input", "formula"));
 
-            var alreadyComputed = sourceColumn.IsComputed
-                || sourceFormulas.Any(f =>
-                    (f.Scope == FormulaScope.Column && f.ColumnDefId == sourceColumn.Id)
-                    || (f.Scope == FormulaScope.Cell && f.RowDefId == sourceRow.Id && f.ColumnDefId == sourceColumn.Id)
-                    || (f.Scope == FormulaScope.Row && f.RowDefId == sourceRow.Id
-                        && (f.ColumnDefId is null || f.ColumnDefId == sourceColumn.Id)));
-
-            if (alreadyComputed)
-            {
-                continue;
-            }
-
-            added++;
-            var values = valuesByCell.GetValueOrDefault((sourceColumn.Id, sourceRow.Id));
-            if (values > 0)
-            {
-                items.Add(new($"{tablePath}#{targetRow.RowKeyValue}.{targetColumn.Code}", "Modified",
-                    ChangeClass.Guarded, values, "CellFormula", "input", "formula"));
-
-                // ACC-OW: той самий пункт, але структурно — для переліку «що перезапише формула».
-                overwrites.Add(new GuardedOverwriteItem(
-                    sheetCode, tableCode, targetRow.RowKeyValue, targetColumn.Code.ToString(), values));
+                    // ACC-OW: той самий пункт, але структурно — для переліку «що перезапише формула».
+                    overwrites.Add(new GuardedOverwriteItem(
+                        sheetCode, tableCode, targetRow.RowKeyValue, targetColumn.Code.ToString(), values));
+                }
             }
         }
 
@@ -744,6 +763,23 @@ public static class VersionMigrationPlanner
             items.Add(new(tablePath, "Added", ChangeClass.Safe, 0, "CellFormulas", null, added.ToString(
                 System.Globalization.CultureInfo.InvariantCulture)));
         }
+    }
+
+    /// <summary>V-1: колонки цільової таблиці, у які пише формула комірки чи рядка (як <c>RecalculationService.Targets</c>).</summary>
+    /// <remarks>
+    /// Рядкова формула без колонки — лише колонки вводу, що приймають число (<c>FormulaTargetTypes</c>): рядкові формули
+    /// шаблонів — числові підсумки, а колонку іншого типу перерахунок пропускає. Обчислювані колонки рахувала й стара
+    /// версія (або це окрема зміна типу — Guarded у <c>CompareColumns</c>).
+    /// </remarks>
+    private static IEnumerable<ColumnDef> TargetColumnsOf(FormulaDef formula, IReadOnlyDictionary<int, ColumnDef> targetColumns)
+    {
+        if (formula.ColumnDefId is { } single)
+        {
+            return targetColumns.TryGetValue(single, out var column) ? [column] : [];
+        }
+
+        return targetColumns.Values.Where(c => !c.IsComputed
+            && Ecr.Application.Recalculation.FormulaTargetTypes.Accepts(c.DataType, Ecr.Expressions.Ast.ExpressionValueType.Number));
     }
 
     private static Dictionary<int, int> CompareHeader(
@@ -944,6 +980,12 @@ public static class VersionMigrationPlanner
 
         items.Add(new(path, "Modified", ChangeClass.Guarded, values, field, Text(from), Text(to)));
     }
+
+    /// <summary>V-6: місце колонки в році для порівняння: <c>none</c> або номер місяця.</summary>
+    private static string MonthPlacement(ColumnDef column)
+        => column.IsMonthColumn
+            ? (column.MonthNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "?")
+            : "none";
 
     private static void PresentationDiff<T>(List<VersionMigrationItem> items, string path, string field, T from, T to)
     {
