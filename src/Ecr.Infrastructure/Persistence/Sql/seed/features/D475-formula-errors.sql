@@ -101,6 +101,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.calcIssues.hse400NotFound', N'kz', N'{year} жылға HSE400 құжаты табылмады.'),
     (N'document.calcIssues.hse400OpenFailed', N'ru', N'Не удалось открыть документ HSE400. Повторите попытку.'),
     (N'document.calcIssues.hse400OpenFailed', N'kz', N'HSE400 құжатын ашу мүмкін болмады. Қайталап көріңіз.'),
+    (N'document.calcIssues.fillMarked', N'ru', N'заполните отмеченные ячейки'),
+    (N'document.calcIssues.fillMarked', N'kz', N'белгіленген ұяшықтарды толтырыңыз'),
     (N'err.ECR-SUB-4221.formulaErrorsApprove', N'ru', N'Лист нельзя утвердить: есть ошибки формул (ячеек: {messageCount}). Верните лист на исправление или исправьте входные данные.'),
     (N'err.ECR-SUB-4221.formulaErrorsApprove', N'kz', N'Парақты бекітуге болмайды: формула қателері бар ({messageCount} ұяшық). Парақты түзетуге қайтарыңыз немесе кіріс мәндерін түзетіңіз.')
        ) AS v ([Key], Lang, Val)
@@ -160,6 +162,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'document.calcIssues.details', N'en', N'Technical details (formulas, codes)', 1),
     (N'document.calcIssues.hse400NotFound', N'en', N'No HSE400 document for {year} was found.', 1),
     (N'document.calcIssues.hse400OpenFailed', N'en', N'The HSE400 document could not be opened. Try again.', 1),
+    (N'document.calcIssues.fillMarked', N'en', N'fill the marked cells', 1),
     (N'err.ECR-SUB-4221.formulaErrorsApprove', N'en', N'The sheet cannot be approved: there are formula errors ({messageCount} cell(s)). Return the sheet for correction or fix the inputs.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);

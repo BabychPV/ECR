@@ -90,6 +90,9 @@ function causeDetail(cause: IssueCause): string {
         : t('document.calcIssues.inTables', { tables: plural('document.unmatchedRows.tables', cause.tables.length) }),
     );
   }
+  // ✎ F13 P3-4 (макет: «заповніть позначені клітинки»): що зробити — лише там, де дія в самій сітці (бракує входів,
+  // категорію не визначено). Для HSE400 дія — «Open HSE400», для рядків без правила — змінити код (у деталях).
+  if (cause.kind === 'missingInputs' || cause.kind === 'rejected') parts.push(t('document.calcIssues.fillMarked'));
 
   return parts.join(' · ');
 }

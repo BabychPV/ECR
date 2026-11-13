@@ -198,6 +198,16 @@ describe('CalculationIssuesPanel (B78)', () => {
     expect(badge.textContent).toContain('(count=3)');
   });
 
+  it('✎ F13 P3-4: «бракує входів» — підказка «заповніть позначені клітинки» в рядку причини; «без правила» — ні', () => {
+    show(rowsOf({ issues: [issue(1, 2, { kind: 'MissingInputs' }), issue(2, 1)] }));
+
+    const [missing, unmatched] = screen.getAllByTestId('document-calc-issue');
+    expect(missing!.getAttribute('data-kind')).toBe('missingInputs');
+    expect(missing!.textContent).toContain('document.calcIssues.fillMarked');
+    expect(unmatched!.getAttribute('data-kind')).toBe('unmatched');
+    expect(unmatched!.textContent).not.toContain('document.calcIssues.fillMarked');
+  });
+
   it('рядки поза розрахунком — причина «рядки», інформаційний тон, «Показати рядки» відкриває перший', async () => {
     const onOpenCell = show(rowsOf({ issues: [issue(1, 2), issue(1, 5)] }));
 
