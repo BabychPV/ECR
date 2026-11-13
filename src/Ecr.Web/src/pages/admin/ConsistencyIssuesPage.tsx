@@ -1,6 +1,6 @@
-import { lazy, Suspense, useState, type JSX } from 'react';
-import { Badge, Button, Group, Text, UnstyledButton } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
+import { lazy, Suspense, useMemo, useState, type JSX } from 'react';
+import { Badge, Group, Text, UnstyledButton } from '@mantine/core';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { ConsistencyIssue, ConsistencyIssuePage } from '@/api/types';
 import type { components } from '@/api/schema';
@@ -22,7 +22,9 @@ import type { StatItem, StatStripItems } from '@/shared/ui/StatStrip';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { TwoLine } from '@/shared/ui/TwoLine';
-import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
+import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
+import { InfiniteListFooter } from '@/features/common/infiniteList/InfiniteListFooter';
+import { mergePages, nextCursorOf } from '@/features/common/infiniteList/mergePages';
 import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -95,10 +97,7 @@ export function ConsistencyIssuesPage(): JSX.Element {
   // кожну літеру (той самий дефект, що в журналі змін, `useDebouncedFilter`).
   // Саме поле (з власною чернеткою, `useFieldDraft`) — пошук `FilterBar`.
   const appliedRule = useDebouncedFilter(rule);
-  // ⛔ Курсор — від застосованого фільтра, не від сирого поля (`useFilterCursor`).
-  // ⛔ Курсор — від застосованого фільтра, не від сирого поля (`useFilterCursor`).
-  // Вага — теж фільтр СЕРВЕРА (LS-E), тож входить у ключ курсора.
-  const [cursor, setCursor] = useFilterCursor(`${appliedRule}|${String(openOnly)}|${severity ?? ''}`);
+  // ✎ W-3c: курсор — параметр сторінки `useInfiniteQuery`; ключ — застосовані фільтри (вага — теж фільтр СЕРВЕРА, LS-E).
 
   // ⚠ Дія «перевірити зараз» — лише з правом, яке вимагає сам ендпоінт
   // (`System.RunJob`), а не тим, яким відкрито екран: інакше кнопка обіцяла б
@@ -110,15 +109,20 @@ export function ConsistencyIssuesPage(): JSX.Element {
 
   const severityCode = severity === null ? null : SeverityCodes[severity];
 
-  const issues = useQuery({
-    queryKey: [...ConsistencyIssuesKey, appliedRule, openOnly, severityCode ?? null, cursor],
-    queryFn: () =>
+  const listKey = [...ConsistencyIssuesKey, 'pages', appliedRule, openOnly, severityCode ?? null] as const;
+  const issues = useInfiniteQuery({
+    queryKey: listKey,
+    queryFn: ({ pageParam }) =>
       apiFetch<ConsistencyIssuePage>(
         `/api/v1/consistency/issues?limit=100&openOnly=${String(openOnly)}` +
           (appliedRule.length === 0 ? '' : `&ruleCode=${encodeURIComponent(appliedRule)}`) +
           (severityCode === undefined || severityCode === null ? '' : `&severity=${String(severityCode)}`) +
-          (cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`),
+          (pageParam === null ? '' : `&cursor=${encodeURIComponent(pageParam)}`),
       ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last, _pages, lastParam) => nextCursorOf(last, lastParam),
+    // ⚠ Нові знахідки приносить «Run now» (інвалідація `ConsistencyIssuesKey`, `useConsistencyRun.ts:127`), а не фокус вкладки.
+    refetchOnWindowFocus: false,
   });
 
   /*
@@ -130,7 +134,8 @@ export function ConsistencyIssuesPage(): JSX.Element {
     queryFn: () => apiFetch<ConsistencySummary>(`/api/v1/consistency/summary?openOnly=${String(openOnly)}`),
   });
 
-  const page = issues.data;
+  // Довантажені сторінки як одна (без дублів за `id`); `totals`/`nextCursor` — останньої, `totalCount` — першої.
+  const page = useMemo(() => mergePages(issues.data?.pages, (issue) => issue.id), [issues.data]);
   const items = page?.items;
 
   /*
@@ -260,7 +265,7 @@ export function ConsistencyIssuesPage(): JSX.Element {
             rows={shown}
             rowKey={(issue) => String(issue.id)}
             isPending={issues.isPending}
-            error={issues.error}
+            error={issues.isFetchNextPageError ? null : issues.error}
             onRetry={() => void issues.refetch()}
             emptyTitle={t('consistency.empty')}
             emptyHint={t('consistency.emptyHint')}
@@ -301,12 +306,14 @@ export function ConsistencyIssuesPage(): JSX.Element {
 
       {/* ⚠ Курсорна пагінація: журнал росте від кожного нічного прогону,
           і стеля одного проходу — тисяча знахідок. */}
-      {page !== undefined && page.nextCursor !== null && (
-        <Group>
-          <Button variant="default" onClick={() => setCursor(page.nextCursor)}>
-            {t('documents.more')}
-          </Button>
-        </Group>
+      {/* ✎ W-3c: сторінки дописуються прокруткою; лічильник у шапці — `summary` (весь журнал), у підвалі — завантажені. */}
+      {page !== undefined && (
+        <InfiniteListFooter
+          key={JSON.stringify(listKey)}
+          pager={issues}
+          shown={page.items.length}
+          total={page.totalCount}
+        />
       )}
 
       <Suspense fallback={null}>

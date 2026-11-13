@@ -106,7 +106,7 @@ describe('AuditPage: вкладка подій безпеки', () => {
         'code: ECR-AUTH-0403 · method: GET · route: api/v1/audit/security',
       );
 
-      // ⛔ Мутація: у `AuditPage` замінити `!other` на `!structure` в `useCellChanges(filter, !other)` —
+      // ⛔ Мутація: у `AuditPage` замінити `!other` на `!structure` в `useCellChangePages(applied, !other)` —
       // з'явиться другий запит (по партиціях `aud.CellChange`) заради невидимої таблиці.
       expect(seen).toHaveLength(1);
       expect(seen[0]).toContain('/api/v1/audit/security?');

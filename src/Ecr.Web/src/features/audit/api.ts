@@ -452,16 +452,6 @@ export function workflowEventsQuery(filter: WorkflowEventFilter): string {
   return params.toString();
 }
 
-/** Сторінка журналу подій погодження. */
-export function useWorkflowEvents(filter: WorkflowEventFilter): UseQueryResult<WorkflowEventPage> {
-  const query = workflowEventsQuery(filter);
-
-  return useQuery({
-    queryKey: ['audit-workflow', query],
-    queryFn: () => apiFetch<WorkflowEventPage>(`/api/v1/audit/workflow?${query}`),
-  });
-}
-
 /** CSV журналу подій погодження. */
 export async function fetchWorkflowExport(filter: WorkflowEventFilter): Promise<StructureExportFile> {
   const params = new URLSearchParams(workflowEventsQuery({ ...filter, cursor: null }));
@@ -512,27 +502,7 @@ export function securityEventsQuery(filter: SecurityEventFilter): string {
   return params.toString();
 }
 
-/** Сторінка журналу подій безпеки (ФВ-5.24: відмови в доступі, зміни прав). */
-export function useSecurityEvents(filter: SecurityEventFilter): UseQueryResult<SecurityEventPage> {
-  const query = securityEventsQuery(filter);
-
-  return useQuery({
-    queryKey: ['audit-security', query],
-    queryFn: () => apiFetch<SecurityEventPage>(`/api/v1/audit/security?${query}`),
-  });
-}
-
-/** Сторінка загального журналу структурних змін (`BE-16`). */
-export function useStructureChanges(
-  filter: StructureChangeFilter,
-): UseQueryResult<StructureChangePage> {
-  const query = structureChangesQuery(filter);
-
-  return useQuery({
-    queryKey: ['audit-structure', query],
-    queryFn: () => apiFetch<StructureChangePage>(`/api/v1/audit/structure?${query}`),
-  });
-}
+// ✎ W-3: журнали безпеки, структури й погодження читаються сторінками — `journalPages.ts`.
 
 /**
  * Сторінка журналу змін комірок.

@@ -1,18 +1,20 @@
-import type { JSX } from 'react';
-import { Button, Select, Table, Text, TextInput } from '@mantine/core';
+import { useMemo, type JSX } from 'react';
+import { Select, Table, Text, TextInput } from '@mantine/core';
 import {
   fetchSecurityExport,
   securityEventsQuery,
-  useSecurityEvents,
   type SecurityEventPage,
 } from '@/features/audit/api';
+import { useSecurityEventPages } from '@/features/audit/journalPages';
+import { InfiniteListFooter } from '@/features/common/infiniteList/InfiniteListFooter';
+import { mergePages } from '@/features/common/infiniteList/mergePages';
 import { AuditExportButton } from '@/features/audit/AuditExportButton';
 import { authorName, useAuthorOptions } from '@/features/audit/authorOptions';
 import { useAuditSort } from '@/features/audit/auditSort';
 import { SortableTh } from '@/features/audit/SortableTh';
 import { FilterHints, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
-import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
+import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
 import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
@@ -38,10 +40,11 @@ export function SecurityEventsPanel({ from, to }: { from: string; to: string }):
   const [sort, setSort] = useAuditSort();
 
   const applied = { from, to, eventType: appliedEventType, changedByUserId: appliedChangedBy, sort, limit: 100 };
-  const [cursor, setCursor] = useFilterCursor(securityEventsQuery(applied));
-
-  const events = useSecurityEvents({ ...applied, cursor });
-  const authorOptions = useAuthorOptions(events.data?.items, changedBy);
+  // ✎ W-3d: курсор — параметр сторінки `useInfiniteQuery`; ключ — застосований фільтр без курсора.
+  const listKey = securityEventsQuery(applied);
+  const events = useSecurityEventPages(applied);
+  const eventPage = useMemo(() => mergePages(events.data?.pages), [events.data]);
+  const authorOptions = useAuthorOptions(eventPage?.items, changedBy);
 
   return (
     <>
@@ -87,8 +90,8 @@ export function SecurityEventsPanel({ from, to }: { from: string; to: string }):
 
       <AsyncBoundary<SecurityEventPage>
         isPending={events.isPending}
-        error={events.error}
-        data={events.data}
+        error={events.isFetchNextPageError ? null : events.error}
+        data={eventPage}
         isEmpty={(page) => page.items.length === 0}
         emptyTitle={t('audit.securityEmpty')}
         emptyHint={t('audit.emptyHint')}
@@ -138,11 +141,8 @@ export function SecurityEventsPanel({ from, to }: { from: string; to: string }):
               </Table.Tbody>
             </Table>
 
-            {page.nextCursor !== null && (
-              <Button mt="md" variant="default" onClick={() => setCursor(page.nextCursor)}>
-                {t('documents.more')}
-              </Button>
-            )}
+            {/* ✎ W-3d: сторінки ДОПИСУЮТЬСЯ прокруткою (`InfiniteListFooter`). */}
+            <InfiniteListFooter key={listKey} pager={events} shown={page.items.length} total={page.totalCount} />
           </>
         )}
       </AsyncBoundary>

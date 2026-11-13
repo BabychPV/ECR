@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { JSX } from 'react';
 import { DocumentsPage } from '@/pages/DocumentsPage';
 import { testTheme } from '@/test/render';
+import { installIntersection } from '@/features/common/infiniteList/__tests__/fakeIntersection';
 
 /**
  * B36 (аудит W-3, Q8 дефолт A): «Load more» ДОПИСУЄ наступну сторінку під уже показані рядки, а не замінює їх.
@@ -28,7 +29,9 @@ function doc(id: number): Record<string, unknown> {
   };
 }
 
-function mockFetch(): void {
+type ListMode = 'plain' | 'overlap' | 'failSecond' | 'emptyFirst';
+
+function mockFetch(mode: ListMode = 'plain'): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -42,9 +45,20 @@ function mockFetch(): void {
       if (url.includes('/api/v1/documents/summary')) return json({ draft: 2, submitted: 0, approved: 0, rejected: 0, withIssues: 0 });
       if (url.includes('/api/v1/documents/template-versions')) return json({ versions: [] });
       if (url.includes('/api/v1/documents?')) {
-        return url.includes('cursor=c2')
-          ? json({ items: [doc(2)], nextCursor: null, totalCount: 2 })
-          : json({ items: [doc(1)], nextCursor: 'c2', totalCount: 2 });
+        if (url.includes('cursor=c2')) {
+          if (mode === 'failSecond') {
+            return new Response(JSON.stringify({ status: 500, title: 'Server error', errorCode: 'ECR-SYS-0500' }), {
+              status: 500,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+
+          // `overlap`: документ 1 перейшов на другу сторінку (інша група версії) — клієнт не дублює його.
+          return json({ items: mode === 'overlap' ? [doc(1), doc(2)] : [doc(2)], nextCursor: null, totalCount: null });
+        }
+
+        // `emptyFirst`: після відсіву видимості перша сторінка порожня, але `nextCursor` є.
+        return json({ items: mode === 'emptyFirst' ? [] : [doc(1)], nextCursor: 'c2', totalCount: 2 });
       }
       if (url.includes('/api/v1/projects')) return json({ items: [{ id: 1, code: 'ATR', status: 'Active' }], nextCursor: null, totalCount: 1 });
 
@@ -84,6 +98,10 @@ function documentCalls(): string[] {
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+function cursorsRequested(): string[] {
+  return documentCalls().map((url) => new URL(url, 'http://x').searchParams.get('cursor') ?? '');
+}
 
 describe('DocumentsPage: «Load more» дописує сторінку (B36)', () => {
   it(
@@ -139,6 +157,82 @@ describe('DocumentsPage: «Load more» дописує сторінку (B36)', (
       expect(screen.queryByText('DOC-000002')).toBeNull();
       expect(screen.getByText('DOC-000001')).toBeTruthy();
       expect(documentCalls().every((url) => !url.includes('cursor='))).toBe(true);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'W-3a: сторож у вікні — друга сторінка довантажується сама, кожен курсор рівно один раз, рядок стану',
+    async () => {
+      installIntersection(true);
+      mockFetch();
+      show('/?year=2026');
+
+      await screen.findByText('DOC-000002', {}, { timeout: SlowEnvTimeout });
+      expect(screen.getByText('DOC-000001')).toBeTruthy();
+      await waitFor(() => expect(document.querySelector('[data-infinite-status]')?.textContent).toContain('⟦list.allShown'));
+      expect(cursorsRequested()).toEqual(['', 'c2']);
+      expect(screen.queryByRole('button', { name: '⟦documents.more⟧' })).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'W-3a: сторож поза вікном — лише перша сторінка, рядок «показано N з M» і кнопка',
+    async () => {
+      installIntersection(false);
+      mockFetch();
+      show('/?year=2026');
+
+      await screen.findByText('DOC-000001', {}, { timeout: SlowEnvTimeout });
+      expect(screen.queryByText('DOC-000002')).toBeNull();
+      expect(cursorsRequested()).toEqual(['']);
+      expect(document.querySelector('[data-infinite-status]')?.textContent).toContain('⟦common.shownOf');
+      expect(screen.getByRole('button', { name: '⟦documents.more⟧' })).toBeTruthy();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'W-3a: документ, що перейшов на другу сторінку, — один рядок (дубль за id)',
+    async () => {
+      mockFetch('overlap');
+      show('/?year=2026');
+      const user = userEvent.setup();
+
+      await screen.findByText('DOC-000001', {}, { timeout: SlowEnvTimeout });
+      await user.click(screen.getByRole('button', { name: '⟦documents.more⟧' }));
+
+      await screen.findByText('DOC-000002', {}, { timeout: SlowEnvTimeout });
+      expect(screen.getAllByText('DOC-000001')).toHaveLength(1);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'W-3a: відмова другої сторінки — перша лишається, «Повторити» замість автоповтору',
+    async () => {
+      installIntersection(true);
+      mockFetch('failSecond');
+      show('/?year=2026');
+
+      await screen.findByRole('button', { name: '⟦common.retry⟧' }, { timeout: SlowEnvTimeout });
+      expect(screen.getByText('DOC-000001')).toBeTruthy();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(cursorsRequested().filter((cursor) => cursor === 'c2')).toHaveLength(1);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'W-3a: порожня перша сторінка при nextCursor — не «документів немає», підвал добирає наступну',
+    async () => {
+      installIntersection(true);
+      mockFetch('emptyFirst');
+      show('/?year=2026');
+
+      await screen.findByText('DOC-000002', {}, { timeout: SlowEnvTimeout });
+      expect(screen.queryByText('⟦documents.emptyYear⟧')).toBeNull();
     },
     SlowEnvTimeout,
   );

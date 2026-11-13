@@ -53,6 +53,22 @@ interface Recorder {
   jobUrls: string[];
 }
 
+/*
+ * ✎ W-3c: підвал переліку теж несе `role="status"` (live-регіон «показано N»), тож рядок стану прогону шукаємо за
+ * `data-outcome`, а не за роллю.
+ */
+function runStatus(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-outcome]');
+}
+
+async function findRunStatus(): Promise<HTMLElement> {
+  return waitFor(() => {
+    const node = runStatus();
+    if (node === null) throw new Error('рядка стану прогону ще немає');
+    return node;
+  });
+}
+
 function problem(status: number, errorCode: string): unknown {
   return {
     type: 'about:blank',
@@ -211,7 +227,7 @@ describe('ConsistencyIssuesPage: «перевірити зараз»', () => {
     expect(JSON.parse(api.sentBodies[0]!)).toEqual({ reason: 'Полагодили довідник' });
 
     // Спершу — «виконується», таким, яким його каже сервер.
-    const status = await screen.findByRole('status');
+    const status = await findRunStatus();
     await waitFor(() => expect(status.getAttribute('data-outcome')).toBe('running'));
     expect(within(status).getByText('⟦consistency.runRunning⟧')).toBeTruthy();
 
@@ -220,7 +236,7 @@ describe('ConsistencyIssuesPage: «перевірити зараз»', () => {
 
     // Далі спільне опитування (`pollInterval`, 1.5 с) доводить до кінцевого стану.
     await waitFor(
-      () => expect(screen.getByRole('status').getAttribute('data-outcome')).toBe('succeeded'),
+      () => expect(runStatus()?.getAttribute('data-outcome')).toBe('succeeded'),
       { timeout: 5000 },
     );
     expect(screen.getByText('⟦consistency.runSucceeded⟧')).toBeTruthy();
@@ -241,7 +257,7 @@ describe('ConsistencyIssuesPage: «перевірити зараз»', () => {
     await screen.findByText(Finding.message);
     await runWithReason('Полагодили довідник');
 
-    const status = await screen.findByRole('status');
+    const status = await findRunStatus();
     await waitFor(() => expect(status.getAttribute('data-outcome')).toBe('failed'));
     expect(within(status).getByText('⟦consistency.runFailed⟧')).toBeTruthy();
     expect(within(status).getByText('Партиція 202601 недоступна.')).toBeTruthy();
@@ -264,7 +280,7 @@ describe('ConsistencyIssuesPage: «перевірити зараз»', () => {
     expect(within(alert).getByText('ECR-AUTH-0403')).toBeTruthy();
 
     // Задачі немає — стежити нема за чим, і рядка стану теж немає.
-    expect(screen.queryByRole('status')).toBeNull();
+    expect(runStatus()).toBeNull();
     expect(api.jobUrls).toHaveLength(0);
 
     // Перелік не підмінено ні порожнечею, ні відмовою.
@@ -285,7 +301,7 @@ describe('ConsistencyIssuesPage: «перевірити зараз»', () => {
     await runWithReason('Полагодили довідник');
 
     // Стан — «виконується», і рядок пояснює, чому ми стежимо за чужою задачею.
-    const status = await screen.findByRole('status');
+    const status = await findRunStatus();
     await waitFor(() => expect(status.getAttribute('data-outcome')).toBe('running'));
     expect(within(status).getByText('⟦consistency.runJoined⟧')).toBeTruthy();
 
@@ -296,7 +312,7 @@ describe('ConsistencyIssuesPage: «перевірити зараз»', () => {
     expect(screen.queryByRole('alert')).toBeNull();
 
     await waitFor(
-      () => expect(screen.getByRole('status').getAttribute('data-outcome')).toBe('succeeded'),
+      () => expect(runStatus()?.getAttribute('data-outcome')).toBe('succeeded'),
       { timeout: 5000 },
     );
 
@@ -319,7 +335,7 @@ describe('ConsistencyIssuesPage: «перевірити зараз»', () => {
     const alert = await screen.findByRole('alert');
     expect(within(alert).getByText('ECR-JOB-0409')).toBeTruthy();
 
-    expect(screen.queryByRole('status')).toBeNull();
+    expect(runStatus()).toBeNull();
     expect(screen.queryByText('⟦consistency.runJoined⟧')).toBeNull();
     expect(api.jobUrls).toHaveLength(0);
     expect(screen.getByText(Finding.message)).toBeTruthy();
@@ -335,7 +351,7 @@ describe('ConsistencyIssuesPage: «перевірити зараз»', () => {
     await screen.findByText(Finding.message);
     await runWithReason('Полагодили довідник');
 
-    const status = await screen.findByRole('status');
+    const status = await findRunStatus();
     await waitFor(() => expect(status.getAttribute('data-outcome')).toBe('unknown'));
     expect(within(status).getByText('⟦consistency.runUnknown⟧')).toBeTruthy();
     expect(within(status).queryByText('⟦consistency.runRunning⟧')).toBeNull();
