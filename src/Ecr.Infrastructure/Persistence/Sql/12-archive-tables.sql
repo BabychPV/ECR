@@ -535,6 +535,7 @@ SELECT CAST(3 AS tinyint),
            CONVERT(nvarchar(30), t.ModifiedAt, 126), N'|',
            ISNULL(CONVERT(nvarchar(20), t.SheetCopyId), N'~'))), 1, 8) AS bigint)
   FROM arc.TableInstance AS t;
+GO
 
 -- R-1 (audit 2026-11, D-498): the SSRS views (05-rpt-views.sql) read archived years from arc.* with the same per-row
 -- shape as the hot branch. arc.CellValue / arc.TableRow are clustered columnstores: without a B-tree every query of a
