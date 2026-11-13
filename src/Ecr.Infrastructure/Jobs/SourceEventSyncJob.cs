@@ -1562,6 +1562,12 @@ public sealed partial class SourceEventSyncJob(
         await using var delete = connection.CreateCommand();
         delete.Transaction = tx;
         delete.CommandText = """
+            -- ⛔ D-11: позначки «ручне замість формули» (D-461) рядка — без FK на рядок, як і стилі.
+            DELETE o
+              FROM doc.CellFormulaOverride AS o
+             WHERE o.PeriodKey = @period
+               AND o.TableRowId IN (SELECT r.Id FROM doc.TableRow AS r
+                                     WHERE r.PeriodKey = @period AND r.TableInstanceId = @instance AND r.RowKey = @rowKey);
             -- CELL-STYLE L3b: користувацьке оформлення комірок рядка (без FK на рядок — див. CellStyle).
             DELETE s
               FROM doc.CellStyle AS s
