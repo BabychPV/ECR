@@ -87,9 +87,16 @@ public sealed partial class DocumentStaleResultsStoreTests
 
     private sealed record WarmRig(MapRig R, MovableClock Clock, WarmProbe Probe, ServiceProvider Provider, StaleMapWarmer Warmer);
 
+    /// <summary>
+    /// B86: період стенда прогріву - календарний місяць годинника прогріву (<c>Now + 2 год</c> = 202605). Його
+    /// <see cref="StaleMapWarmer"/> бере завжди; «два найновіші періоди з актуальним прогоном» - зі СПІЛЬНОЇ бази, і
+    /// чужий прогін новішого періоду (202602, 202603...) витісняв звідти 202601 - тест залежав від порядку класів.
+    /// </summary>
+    private static int WarmPeriod => (Now.AddHours(2).Year * 100) + Now.AddHours(2).Month;
+
     private async Task<WarmRig> WarmRigAsync()
     {
-        var r = await RigAsync();
+        var r = await RigAsync(WarmPeriod);
         var probe = new WarmProbe();
         var clock = new MovableClock(Now.AddHours(2));
         var services = new ServiceCollection();
@@ -129,6 +136,30 @@ public sealed partial class DocumentStaleResultsStoreTests
         // Другий прохід у межах TTL - лише попадання.
         _ = await w.Warmer.WarmOnceAsync(CancellationToken.None);
         Assert.Equal(warmed.Count, w.Probe.Maps);
+    }
+
+    /// <summary>
+    /// B86: спільна тестова база несе чужі актуальні прогони новіших періодів (DocumentYearStaleResultsStoreTests - 202602,
+    /// перерахунки - 202603 тощо), і «два найновіші періоди з прогоном» їх і беруть. Період стенда прогріву закріплено
+    /// за календарним місяцем годинника прогріву - його прогрівач бере завжди, незалежно від чужих прогонів.
+    /// Доказ: два новіші актуальні прогони в arrange; з періодом стенда 202601 (як до B86) - червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Прогрів_гріє_період_стенда_навіть_коли_в_базі_є_новіші_актуальні_прогони()
+    {
+        var w = await WarmRigAsync();
+        using var cacheLease = w.R.Cache;
+        await using var providerLease = w.Provider;
+        _ = await SeedCurrentPeriodsAsync(w, 202606, 2);
+
+        var warmed = await w.Warmer.WarmOnceAsync(CancellationToken.None);
+
+        Assert.Contains(w.R.Period, warmed);
+        var maps = w.Probe.Maps;
+        Assert.Equal([w.R.A, w.R.B], (await WarmPageAsync(w)).Order());
+        Assert.Equal(maps, w.Probe.Maps);
     }
 
     [Fact]
@@ -530,7 +561,7 @@ public sealed partial class DocumentStaleResultsStoreTests
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Прогрів_виконує_запит_карти_під_стелею_таймауту_перерахунку()
     {
-        var r = await RigAsync();
+        var r = await RigAsync(WarmPeriod);
         using var cacheLease = r.Cache;
         var probe = new MapTimeoutProbe();
         var services = new ServiceCollection();
