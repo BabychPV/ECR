@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -32,15 +33,19 @@ public sealed class DocumentReadScope
     private readonly PeriodKey? _period;
     private readonly TemplateVersionSnapshot _snapshot;
     private readonly IReadOnlyList<ParticipationGrant> _grants;
-    private readonly Dictionary<int, string> _tableCodes = [];
-    private readonly Dictionary<int, string> _sheetCodes = [];
-    private readonly Dictionary<int, int> _sheetOfTable = [];
-    private readonly Dictionary<int, List<int>> _tablesOfSheet = [];
-    private readonly Dictionary<int, int> _tableOfColumn = [];
-    private readonly Dictionary<int, List<int>> _columnsOfTable = [];
+    // ⛔ P-6 (аудит 2026-11-10): сім структурних мап — СПІЛЬНІ між запитами й користувачами (кеш за знімком,
+    // `Structure.For`). Їх можна лише ЧИТАТИ: запис сюди змінив би межі читання іншого користувача.
+    private readonly Dictionary<int, string> _tableCodes;
+    private readonly Dictionary<int, string> _sheetCodes;
+    private readonly Dictionary<int, int> _sheetOfTable;
+    private readonly Dictionary<int, List<int>> _tablesOfSheet;
+    private readonly Dictionary<int, int> _tableOfColumn;
+    private readonly Dictionary<int, List<int>> _columnsOfTable;
+    private readonly Dictionary<(int TableDefId, string Code), int> _columnByCode;
+
+    // Пам'ять рішень — власна в кожних меж: залежить від профілю, періоду й надань.
     private readonly Dictionary<int, bool> _tables = [];
     private readonly Dictionary<int, bool> _columns = [];
-    private readonly Dictionary<(int TableDefId, string Code), int> _columnByCode = [];
 
     private DocumentReadScope(
         AccessProfile profile, int projectId, TemplateVersionSnapshot snapshot, PeriodKey? period,
@@ -52,26 +57,100 @@ public sealed class DocumentReadScope
         _snapshot = snapshot;
         _grants = grants;
 
-        foreach (var sheet in snapshot.Sheets)
+        // ⛔ P-6 (аудит 2026-11-10): структура залежить лише від знімка — береться з кешу за знімком, а не
+        // будується на кожне створення меж (і на кожен `InPeriod`). Мапи лише читаються.
+        var structure = Structure.For(snapshot);
+        _tableCodes = structure.TableCodes;
+        _sheetCodes = structure.SheetCodes;
+        _sheetOfTable = structure.SheetOfTable;
+        _tablesOfSheet = structure.TablesOfSheet;
+        _tableOfColumn = structure.TableOfColumn;
+        _columnsOfTable = structure.ColumnsOfTable;
+        _columnByCode = structure.ColumnByCode;
+    }
+
+    /// <summary>
+    /// Структурні мапи знімка; кеш за посиланням на знімок з підписом (як <c>RecalculationPlanBuilder.SnapshotIndex</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>MetadataCache</c> віддає той самий екземпляр знімка, доки ревізія не змінилась; нова ревізія — новий
+    /// екземпляр, тож інвалідація не потрібна, а запис зникає разом зі знімком (<see cref="ConditionalWeakTable{TKey,TValue}"/>).
+    /// Підпис — страховка від знімка, добудованого після першого виклику (так роблять тести).
+    /// </remarks>
+    private sealed class Structure
+    {
+        private static readonly ConditionalWeakTable<TemplateVersionSnapshot, Structure> Cache = new();
+
+        public required long Signature { get; init; }
+
+        public Dictionary<int, string> TableCodes { get; } = [];
+
+        public Dictionary<int, string> SheetCodes { get; } = [];
+
+        public Dictionary<int, int> SheetOfTable { get; } = [];
+
+        public Dictionary<int, List<int>> TablesOfSheet { get; } = [];
+
+        public Dictionary<int, int> TableOfColumn { get; } = [];
+
+        public Dictionary<int, List<int>> ColumnsOfTable { get; } = [];
+
+        public Dictionary<(int TableDefId, string Code), int> ColumnByCode { get; } = [];
+
+        public static Structure For(TemplateVersionSnapshot snapshot)
         {
-            _sheetCodes[sheet.Id] = sheet.Code;
-            _tablesOfSheet[sheet.Id] = [.. sheet.Tables.Select(t => t.Id)];
-
-            foreach (var table in sheet.Tables)
+            var signature = SignatureOf(snapshot);
+            if (Cache.TryGetValue(snapshot, out var known) && known.Signature == signature)
             {
-                _sheetOfTable[table.Id] = sheet.Id;
-                _tableCodes[table.Id] = table.Code;
-                var columns = new List<int>(table.Columns.Count);
-
-                foreach (var column in table.Columns)
-                {
-                    _tableOfColumn[column.Id] = table.Id;
-                    _columnByCode[(table.Id, column.Code)] = column.Id;
-                    columns.Add(column.Id);
-                }
-
-                _columnsOfTable[table.Id] = columns;
+                return known;
             }
+
+            var built = new Structure { Signature = signature };
+            foreach (var sheet in snapshot.Sheets)
+            {
+                built.SheetCodes[sheet.Id] = sheet.Code;
+                built.TablesOfSheet[sheet.Id] = [.. sheet.Tables.Select(t => t.Id)];
+
+                foreach (var table in sheet.Tables)
+                {
+                    built.SheetOfTable[table.Id] = sheet.Id;
+                    built.TableCodes[table.Id] = table.Code;
+                    var columns = new List<int>(table.Columns.Count);
+
+                    foreach (var column in table.Columns)
+                    {
+                        built.TableOfColumn[column.Id] = table.Id;
+                        built.ColumnByCode[(table.Id, column.Code)] = column.Id;
+                        columns.Add(column.Id);
+                    }
+
+                    built.ColumnsOfTable[table.Id] = columns;
+                }
+            }
+
+            Cache.AddOrUpdate(snapshot, built);
+            return built;
+        }
+
+        /// <summary>Аркуші й таблиці з кодами та кількість колонок: без алокацій, O(таблиць).</summary>
+        private static long SignatureOf(TemplateVersionSnapshot snapshot)
+        {
+            long signature = 17;
+            foreach (var sheet in snapshot.Sheets)
+            {
+                string sheetCode = sheet.Code;
+                signature = (signature * 31) + sheet.Id;
+                signature = (signature * 31) + StringComparer.Ordinal.GetHashCode(sheetCode);
+                foreach (var table in sheet.Tables)
+                {
+                    string tableCode = table.Code;
+                    signature = (signature * 31) + table.Id;
+                    signature = (signature * 31) + StringComparer.Ordinal.GetHashCode(tableCode);
+                    signature = (signature * 31) + table.Columns.Count;
+                }
+            }
+
+            return signature;
         }
     }
 
