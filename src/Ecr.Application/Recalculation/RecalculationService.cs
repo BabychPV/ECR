@@ -360,10 +360,20 @@ public sealed class RecalculationService(
     /// навпаки, рахуються ОДРАЗУ — цей прогін уже фоновий, і відкласти
     /// означало б не порахувати ніколи.
     /// </remarks>
+    /// <param name="annualPeriods">
+    /// ✎ LAND-YEAR B24 (D-NEW-3): прогін ЯКОРЯ року річної розкладки, чий місяць закритий, а рік — ні
+    /// (<see cref="Security.AnnualPeriodRule.AnchorWritesAnnualTargets"/>; вирішує <c>RecalculationJob</c>). Значення — ключі
+    /// всіх місяців календаря року: прогін пише лише НЕ-МІСЯЧНІ колонки маршрутизованих таблиць (власник — якір), а стан
+    /// аркуша для запису — агрегат за цими місяцями (<see cref="Security.AnnualPeriodRule.AggregateStatus"/>). Місячні
+    /// цілі (<c>C_M01</c>), таблиці поза маршрутизацією, копії аркушів і Rollup/Check закритого місяця не пишуться.
+    /// <c>null</c> — звичайний прогін періоду.
+    /// </param>
     public Task<int> RecalculateAllAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct, int? sheetDefId = null,
-        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null, bool writeSubmitted = false)
-        => RecalculateDocumentAsync(documentId, periodKey, sheetDefId, heldSheet: null, ScopeFilter.All, ct, changedColumns, writeSubmitted);
+        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null, bool writeSubmitted = false,
+        IReadOnlyList<int>? annualPeriods = null)
+        => RecalculateDocumentAsync(
+            documentId, periodKey, sheetDefId, heldSheet: null, ScopeFilter.All, ct, changedColumns, writeSubmitted, annualPeriods);
 
     /// <inheritdoc />
     /// <remarks>
@@ -383,7 +393,8 @@ public sealed class RecalculationService(
     private async Task<int> RecalculateDocumentAsync(
         long documentId, PeriodKey periodKey, int? sheetDefId, (int SheetDefId, long? CopyId)? heldSheet,
         ScopeFilter scopes, CancellationToken ct,
-        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null, bool writeSubmitted = false)
+        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null, bool writeSubmitted = false,
+        IReadOnlyList<int>? annualPeriods = null)
     {
         var instances = await rowStore
             .GetTableInstancesAsync(documentId, periodKey, ct)
@@ -402,7 +413,8 @@ public sealed class RecalculationService(
         foreach (var (representative, _) in ScopeRepresentatives(instances, scopes))
         {
             written += await RunAsync(
-                    representative, dirty: null, ct, sheetDefId, heldSheet, instances, changedColumns, writeSubmitted: writeSubmitted)
+                    representative, dirty: null, ct, sheetDefId, heldSheet, instances, changedColumns, writeSubmitted: writeSubmitted,
+                    annualPeriods: annualPeriods)
                 .ConfigureAwait(false);
         }
 
@@ -439,6 +451,7 @@ public sealed class RecalculationService(
     /// <param name="inputColumns">Q-17: куди скласти колонки насіння (введені, не похідні); <c>null</c> — не збирати.</param>
     /// <param name="shared">L2: спільні читання проходу (екземпляри, залежності); <c>null</c> — читати напряму.</param>
     /// <param name="writeSubmitted">✎ UAT-recalc-ux: писати й ПОДАНІ аркуші (ручний перерахунок, <c>RecalculationJob.WritesSubmitted</c>); затверджені — ніколи.</param>
+    /// <param name="annualPeriods">✎ LAND-YEAR B24: прогін закритого якоря під агрегатом року (див. <see cref="RecalculateAllAsync"/>).</param>
     private async Task<int> RunAsync(
         TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null,
         (int SheetDefId, long? CopyId)? heldSheet = null, IReadOnlyList<TableInstanceRef>? knownInstances = null,
@@ -446,8 +459,15 @@ public sealed class RecalculationService(
         IReadOnlyCollection<CrossPeriodSource>? crossPeriodSources = null,
         IReadOnlySet<int>? approverEditSheets = null,
         HashSet<(int TableDefId, int ColumnDefId)>? inputColumns = null,
-        RecalculationSharedLoad? shared = null, bool writeSubmitted = false)
+        RecalculationSharedLoad? shared = null, bool writeSubmitted = false,
+        IReadOnlyList<int>? annualPeriods = null)
     {
+        // ✎ LAND-YEAR B24: копії аркушів Q-17 не маршрутизуються — у закритому місяці їм писати нічого.
+        if (annualPeriods is not null && instance.SheetCopyId is not null)
+        {
+            return 0;
+        }
+
         var periodKey = new PeriodKey(instance.PeriodKey);
 
         // Q-17.4: власники введених комірок читаються один раз на ЦЮ задачу (≤ 13 партицій), а не на кожен період
@@ -570,6 +590,13 @@ public sealed class RecalculationService(
             : await ForeignColumnsByTableAsync(instance.DocumentId, instances, tables, periodKey, ct)
                 .ConfigureAwait(false);
 
+        // ✎ LAND-YEAR B24: закритий якір пише лише не-місячні колонки маршрутизованих таблиць — решта (місячні C_M01,
+        // таблиці поза маршрутизацією) «чужі» для цього прогону тим самим механізмом, що й колонки інших власників (L1).
+        if (annualPeriods is not null)
+        {
+            ownedElsewhere = AnnualOnlyBlocked(ownedElsewhere, instances, tables);
+        }
+
         List<int> targets;
 
         if (crossPeriodSources is not null)
@@ -629,7 +656,8 @@ public sealed class RecalculationService(
 
         // D-230: версія з активним Rollup/Check не виходить тут, навіть коли формул немає: джерело Rollup
         // могло змінитися без жодної залежної формули. Прапор — з наявного знімка (0 нових запитів).
-        var relationsActive = relationRecalculator is not null && snapshot.HasActiveRollupOrCheck;
+        // ✎ LAND-YEAR B24: Rollup/Check закритого якоря не рахуються (їхні цілі — не лише не-місячні колонки).
+        var relationsActive = relationRecalculator is not null && snapshot.HasActiveRollupOrCheck && annualPeriods is null;
 
         if (targets.Count == 0 && !relationsActive)
         {
@@ -1071,7 +1099,8 @@ public sealed class RecalculationService(
                 instance.DocumentId);
 
             var writable = await EnterSheetsAsync(
-                    instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheet, token, approverEditSheets, writeSubmitted)
+                    instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheet, token, approverEditSheets, writeSubmitted,
+                    annualPeriods)
                 .ConfigureAwait(false);
 
             // ⛔ O2 (ФВ-9.8, замір I2). Доти тіло нижче виконувалося НА КОЖЕН
@@ -1303,10 +1332,17 @@ public sealed class RecalculationService(
     /// перераховує аркуш саме, <c>ApprovalSnapshotRefresh</c>); інші подані аркуші — так само пропускаються.
     /// </param>
     /// <param name="writeSubmitted">✎ UAT-recalc-ux: писати й ПОДАНІ аркуші (ручний перерахунок, <c>RecalculationJob.WritesSubmitted</c>); затверджені — ніколи.</param>
+    /// <param name="annualPeriods">
+    /// ✎ LAND-YEAR B24: місяці року — прогін закритого якоря пише не-місячне, тож стан аркуша — АГРЕГАТ за місяцями
+    /// (<see cref="Security.AnnualPeriodRule.AggregateStatus"/>, те саме правило, що в <c>PatchCellsHandler</c> для
+    /// не-місячних колонок), під спільними блокуваннями ВСІХ місяців аркуша за зростанням ключа (як у PATCH);
+    /// <c>null</c> — стан аркуша періоду прогону, як доти.
+    /// </param>
     private async Task<IReadOnlySet<(int SheetDefId, long? CopyId)>> EnterSheetsAsync(
         long documentId, PeriodKey periodKey, IEnumerable<(int SheetDefId, long? CopyId)> sheets,
         (int SheetDefId, long? CopyId)? heldSheet, CancellationToken ct,
-        IReadOnlySet<int>? approverEditSheets = null, bool writeSubmitted = false)
+        IReadOnlySet<int>? approverEditSheets = null, bool writeSubmitted = false,
+        IReadOnlyList<int>? annualPeriods = null)
     {
         var writable = new HashSet<(int SheetDefId, long? CopyId)>();
         var holdsAny = false;
@@ -1325,13 +1361,32 @@ public sealed class RecalculationService(
                 continue;
             }
 
-            var status = (holdsAny, copyId) switch
+            Domain.Enums.DocumentStatus status;
+            if (annualPeriods is { Count: > 0 } && copyId is null)
             {
-                (true, null) => await sheetGate.EnterEditNoWaitAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false),
-                (false, null) => await sheetGate.EnterEditAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false),
-                (true, { } c) => await sheetGate.EnterCopyEditNoWaitAsync(documentId, sheetDefId, periodKey, c, ct).ConfigureAwait(false),
-                (false, { } c) => await sheetGate.EnterCopyEditAsync(documentId, sheetDefId, periodKey, c, ct).ConfigureAwait(false),
-            };
+                // ⛔ X6-02: чекати — лише перше блокування прогону; далі без черги (відмова відкочує запис).
+                var statuses = new List<Domain.Enums.DocumentStatus>(annualPeriods.Count);
+                foreach (var month in annualPeriods.Distinct().Order())
+                {
+                    statuses.Add(holdsAny
+                        ? await sheetGate.EnterEditNoWaitAsync(documentId, sheetDefId, new PeriodKey(month), ct).ConfigureAwait(false)
+                        : await sheetGate.EnterEditAsync(documentId, sheetDefId, new PeriodKey(month), ct).ConfigureAwait(false));
+                    holdsAny = true;
+                }
+
+                status = Security.AnnualPeriodRule.AggregateStatus(statuses);
+            }
+            else
+            {
+                status = (holdsAny, copyId) switch
+                {
+                    (true, null) => await sheetGate.EnterEditNoWaitAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false),
+                    (false, null) => await sheetGate.EnterEditAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false),
+                    (true, { } c) => await sheetGate.EnterCopyEditNoWaitAsync(documentId, sheetDefId, periodKey, c, ct).ConfigureAwait(false),
+                    (false, { } c) => await sheetGate.EnterCopyEditAsync(documentId, sheetDefId, periodKey, c, ct).ConfigureAwait(false),
+                };
+            }
+
             holdsAny = true;
 
             // ✎ UAT-recalc-ux (слово людини 07.11: «тільки погоджені не мають перераховуватися»): ЯВНИЙ повний
@@ -1693,6 +1748,37 @@ public sealed class RecalculationService(
         }
 
         return (result, computed);
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR B24: колонки, яких НЕ пише прогін закритого якоря під агрегатом року: у маршрутизованій таблиці —
+    /// місячні (їх власник — місяць, і для якоря це закритий січень) плюс колонки інших власників (L1); у таблиці поза
+    /// маршрутизацією (власник — сам закритий місяць) — усі.
+    /// </summary>
+    private Dictionary<int, HashSet<int>> AnnualOnlyBlocked(
+        Dictionary<int, HashSet<int>>? ownedElsewhere,
+        IReadOnlyList<TableInstanceRef> instances,
+        Dictionary<int, Domain.Entities.Configuration.TableDef> tables)
+    {
+        var blocked = new Dictionary<int, HashSet<int>>();
+        foreach (var tableDefId in instances.Select(i => i.TableDefId).Distinct())
+        {
+            if (!tables.TryGetValue(tableDefId, out var table))
+            {
+                continue;
+            }
+
+            var routed = monthRouter is { Enabled: true } && monthRouter.AppliesToTable(table);
+            var set = table.Columns.Where(c => !routed || c.IsMonthColumn).Select(c => c.Id).ToHashSet();
+            if (ownedElsewhere is not null && ownedElsewhere.TryGetValue(tableDefId, out var elsewhere))
+            {
+                set.UnionWith(elsewhere);
+            }
+
+            blocked[tableDefId] = set;
+        }
+
+        return blocked;
     }
 
     /// <summary>Комірки, які обчислює формула.</summary>

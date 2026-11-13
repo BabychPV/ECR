@@ -1,5 +1,6 @@
 // tests/Ecr.Infrastructure.Tests/Jobs/YearLayoutCalculatedRoutingSqlTests.cs
 using System.Globalization;
+using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
 using Ecr.Domain.Abstractions;
@@ -207,6 +208,169 @@ public sealed class YearLayoutCalculatedRoutingSqlTests(SqlServerFixture sql)
         Assert.Equal(90m, await PhysicalAsync(world, Anchor, world.CalcMonth[9]));
         Assert.Equal(90m, await PhysicalAsync(world, 9, world.CalcMonth[9]));
         Assert.Equal([Period(Anchor), Period(9)], await PeriodsHoldingAsync(world, world.CalcMonth[4]));
+    }
+
+    // ── B24 / L1b (D-NEW-3): закритий січень, відкритий рік ──────────────
+
+    /// <summary>
+    /// B24: річна розкладка, якір (січень) Closed, решта року Open. Перерахунок якоря не відмовляє через закритий січень,
+    /// а пише НЕ-МІСЯЧНІ цілі (підсумок <c>TOT</c> = CM9 власника) під агрегатним станом року; місячна <c>CM1</c> січня
+    /// лишається недоторканою, а прогону методологій за закритий січень немає.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація (локально, не комітити): у <c>RecalculationJob.AnnualOnlyAnchorsAsync</c> повернути порожньо одразу —
+    /// задача відмовляє <c>ECR-CALC-4221 periodClosed</c>, тест червоніє; контролі зелені.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    public async Task B24_річна_розкладка_закритий_січень_якір_пише_неmісячний_підсумок_під_агрегатом_року()
+    {
+        var world = await ArrangeAsync();
+        await SeedInputsAsync(world);
+        await SetCellAsync(world, 9, world.CalcMonth[9], 9 * Input, calculated: true);   // CM9 власника
+        await SetCellAsync(world, Anchor, world.Total, 0m, calculated: true);             // застарілий підсумок
+        await SetCellAsync(world, Anchor, world.CalcMonth[Anchor], -1m, calculated: true); // CM1 закритого січня
+        await SetLayoutAsync(world, TemplateLayout.YearWithMonthColumns);
+        await CloseAsync(world, Anchor);
+
+        await RunJobAsync(world, periodKey: Period(Anchor));
+
+        Assert.Equal(9 * Input, await PhysicalAsync(world, Anchor, world.Total));
+        Assert.Equal(-1m, await PhysicalAsync(world, Anchor, world.CalcMonth[Anchor]));
+        Assert.Equal(0, await RunsOfPeriodAsync(world, Period(Anchor)));
+    }
+
+    /// <summary>
+    /// B24, нічний прогін (весь рік): закритий якір у скоупі лише заради не-місячних цілей; відкриті місяці рахуються як
+    /// завжди (CM9 = 9 × IN у власнику), підсумок якоря — під агрегатом. CM9 власника вже порахований попереднім
+    /// прогоном: якір іде першим (за зростанням), а пізнішого читача підхоплює fan-out (тут його немає).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    public async Task B24_річний_нічний_прогін_рахує_відкриті_місяці_і_підсумок_закритого_якоря()
+    {
+        var world = await ArrangeAsync();
+        await SeedInputsAsync(world);
+        await SetCellAsync(world, 9, world.CalcMonth[9], 9 * Input, calculated: true);
+        await SetCellAsync(world, 4, world.CalcMonth[4], -4m, calculated: true);          // застаріле у відкритому квітні
+        await SetCellAsync(world, Anchor, world.CalcMonth[Anchor], -1m, calculated: true);
+        await SetLayoutAsync(world, TemplateLayout.YearWithMonthColumns);
+        await CloseAsync(world, Anchor);
+
+        await RunJobAsync(world, periodKey: null);
+
+        Assert.Equal(4 * Input, await PhysicalAsync(world, 4, world.CalcMonth[4]));
+        Assert.Equal(9 * Input, await PhysicalAsync(world, 9, world.CalcMonth[9]));
+        Assert.Equal(9 * Input, await PhysicalAsync(world, Anchor, world.Total));
+        Assert.Equal(-1m, await PhysicalAsync(world, Anchor, world.CalcMonth[Anchor]));
+        Assert.Equal(0, await RunsOfPeriodAsync(world, Period(Anchor)));
+    }
+
+    /// <summary>Контроль: версія <c>PerMonthCopies</c> — закритий січень відмовляє, як до B24; підсумок не пишеться.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    public async Task B24_контроль_PerMonthCopies_закритий_січень_відмовляє_як_доти()
+    {
+        var world = await ArrangeAsync();
+        await SeedInputsAsync(world);
+        await SetCellAsync(world, Anchor, world.Total, 0m, calculated: true);
+        await CloseAsync(world, Anchor);
+
+        var error = await Assert.ThrowsAsync<Ecr.Application.Errors.BusinessRuleException>(
+            () => RunJobAsync(world, periodKey: Period(Anchor), yearRegistry: false));
+
+        Assert.Equal("ECR-CALC-4221", error.ErrorCode);
+        Assert.Equal(0m, await PhysicalAsync(world, Anchor, world.Total));
+    }
+
+    /// <summary>Контроль: річна розкладка, але закритий ВЕСЬ рік (агрегат Closed) — відмова, як доти.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    public async Task B24_контроль_закритий_увесь_рік_відмовляє()
+    {
+        var world = await ArrangeAsync();
+        await SeedInputsAsync(world);
+        await SetCellAsync(world, Anchor, world.Total, 0m, calculated: true);
+        await SetLayoutAsync(world, TemplateLayout.YearWithMonthColumns);
+        for (var m = 1; m <= 12; m++)
+        {
+            await CloseAsync(world, m);
+        }
+
+        var error = await Assert.ThrowsAsync<Ecr.Application.Errors.BusinessRuleException>(
+            () => RunJobAsync(world, periodKey: Period(Anchor)));
+
+        Assert.Equal("ECR-CALC-4221", error.ErrorCode);
+        Assert.Equal(0m, await PhysicalAsync(world, Anchor, world.Total));
+    }
+
+    private async Task RunJobAsync(World world, int? periodKey, bool yearRegistry = true)
+    {
+        await using var db = world.Builder.CreateContext();
+        var router = new MonthColumnRouter(db, Flag(!yearRegistry), yearRegistry ? YearRegistry(world) : OtherYearRegistry());
+        var store = new MonthRoutedCellStore(new NormalizedCellStore(db), router, world.Metadata, db);
+        var job = new RecalculationJob(
+            db, new NoBindingsRunner(), RunHandler(), Formulas(db, world, store, router), new TestClock(JobNow));
+
+        await job.ExecuteAsync(
+            new RecalculationRequest(world.Doc.ProjectId, world.Doc.DocumentId, periodKey, TriggeredByUserId: null),
+            new CapturingJobProgress(),
+            CancellationToken.None);
+    }
+
+    /// <summary>Мить задачі — до кінця січня: ефективний стан відкритих місяців не просувається датами.</summary>
+    private static readonly DateTime JobNow = new(Year, 1, 15, 12, 0, 0, DateTimeKind.Utc);
+
+    private static RunCalculationHandler RunHandler()
+        => new(
+            Substitute.For<IPeriodStore>(),
+            Substitute.For<IWorkflowStore>(),
+            Substitute.For<ICalculationResultStore>(),
+            Substitute.For<IBackgroundJobScheduler>(),
+            Substitute.For<IUnitOfWork>(),
+            Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
+            Substitute.For<Ecr.Application.Common.ICurrentUser>(),
+            new TestClock(JobNow),
+            Substitute.For<IAuditWriter>());
+
+    private async Task SetLayoutAsync(World world, TemplateLayout layout)
+        => await ExecuteAsync(
+            $"UPDATE cfg.TemplateVersion SET Layout = {(int)layout} WHERE Id = {world.Doc.TemplateVersionId};");
+
+    private static async Task CloseAsync(World world, int month)
+    {
+        await using var setup = world.Builder.CreateContext();
+        var period = await setup.Periods.SingleAsync(p => p.ProjectId == world.Doc.ProjectId && p.PeriodKeyValue == Period(month));
+        period.AdvanceTo(PeriodState.Grace, DateTime.UtcNow);
+        period.AdvanceTo(PeriodState.Closed, DateTime.UtcNow);
+        await setup.SaveChangesAsync();
+    }
+
+    private async Task<int> RunsOfPeriodAsync(World world, int periodKey)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            $"SELECT COUNT(*) FROM calc.CalculationRun WHERE ProjectId = {world.Doc.ProjectId} AND PeriodKey = {periodKey}";
+        return (int)(await command.ExecuteScalarAsync())!;
+    }
+
+    /// <summary>Оркестратор без прив'язок: тест про фазу формул і скоуп періодів.</summary>
+    private sealed class NoBindingsRunner : ICalculationRunner
+    {
+        public Task<ModuleProfile> RunAsync(
+            long calculationRunId, long documentId, PeriodKey periodKey,
+            IReadOnlyList<CalculationBindingRef> bindings, IJobProgress progress, CancellationToken ct)
+            => Task.FromResult(new ModuleProfile());
     }
 
     // ── допоміжне ────────────────────────────────────────────────────────

@@ -184,7 +184,13 @@ public sealed class DocumentStore(
         var included = await IncludedCodesBatchAsync([documentId], period, ct).ConfigureAwait(false);
         // ⛔ Картка одного документа - ВУЗЬКИЙ запит по одному id тією самою плоскою формою, а НЕ карта періоду:
         // після кожного PATCH кеш карти холодний, і повний запит періоду заради одного документа - зайвий.
-        var stale = await StaleResultsDirectAsync([documentId], period, ct).ConfigureAwait(false);
+        // ✎ LAND-YEAR B24: річна розкладка — картка показує рік (перегляд = якір), а результати методологій і правки
+        // місячних входів лежать у місяцях-власниках: застарілість — АБО за 12 місяцями, «відколи» — найраніший момент.
+        var stale = document.TemplateLayout == TemplateLayout.YearWithMonthColumns
+                    && document.ProjectPeriodKind == PeriodKind.Monthly
+                    && period.Value is { } viewKey
+            ? await StaleResultsYearCardAsync(documentId, document.ProjectId, viewKey / 100, ct).ConfigureAwait(false)
+            : await StaleResultsDirectAsync([documentId], period, ct).ConfigureAwait(false);
 
         return new DocumentSummary(
             document.Id, document.ProjectId, document.BusinessKey, document.CreatedAt, sheetCount,
@@ -2171,6 +2177,42 @@ public sealed class DocumentStore(
         return rows.ToDictionary(
             r => r.DocumentId,
             r => r.Since is { } since ? (DateTime?)DateTime.SpecifyKind(since, DateTimeKind.Utc) : null);
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR B24: застарілість картки документа річної розкладки — хоч в одному місяці року (АБО), «відколи» —
+    /// найраніший момент. Предикат той самий (<see cref="StaleResultsQuery.Documents"/>), лише по місяцях року з
+    /// актуальним прогоном проєкту (<see cref="StaleResultsYear.PeriodKeysAsync"/>): 2 запити на картку незалежно від
+    /// кількості місяців (ключі + одне об'єднання). Інші розкладки сюди не потрапляють.
+    /// </summary>
+    private async Task<Dictionary<long, DateTime?>> StaleResultsYearCardAsync(
+        long documentId, int projectId, int year, CancellationToken ct)
+    {
+        var keys = await StaleResultsYear.PeriodKeysAsync(db, year, projectId, ct).ConfigureAwait(false);
+        var found = new Dictionary<long, DateTime?>();
+        if (keys.Length == 0)
+        {
+            return found;
+        }
+
+        var rows = await keys
+            .Select(k => StaleResultsQuery.Documents(db, k).Where(r => r.DocumentId == documentId))
+            .Aggregate(Queryable.Concat)
+            .OrderBy(r => r.Since)
+            .Take(keys.Length)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Рядок на місяць; «відколи» — найраніший (Merge). Kind::Unspecified з datetime2 — журнал пише UTC (L3-01).
+        foreach (var row in rows)
+        {
+            StaleResultsYear.Merge(found, new Dictionary<long, DateTime?>
+            {
+                [row.DocumentId] = row.Since is { } since ? DateTime.SpecifyKind(since, DateTimeKind.Utc) : null,
+            });
+        }
+
+        return found;
     }
 
     /// <summary>Лічильники останньої перевірки одного документа.</summary>
