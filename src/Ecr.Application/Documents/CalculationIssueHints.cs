@@ -40,6 +40,10 @@ internal sealed record CalculationIssueHintSet(
 /// ⛔ Безпека: хоч одна колонка підказки прихована від читача — підказки для таблиці немає зовсім (ні варіантів, ні
 /// поточних значень): значення прихованої колонки не повинні витікати ні з комірки, ні з правила.
 /// </para>
+/// <para>
+/// ⛔ Поточні значення — логічний зріз (<see cref="ICellStore.ReadSlicesAsync(IReadOnlyList{long}, PeriodKey, CancellationToken)"/>),
+/// а не фізичне <c>ReadCellsAsync</c>: у таблицях «місяці в колонках» значення власника видно і в не-власному місяці (B10).
+/// </para>
 /// </remarks>
 internal sealed class CalculationIssueHints(
     IRowStore rowStore,
@@ -250,13 +254,28 @@ internal sealed class CalculationIssueHints(
             }
         }
 
-        var addresses = wanted
-            .SelectMany(w => columnsOf[w.TableDefId].Select(c => new CellAddress(period, w.RowId, c.Id)))
-            .Distinct()
-            .ToList();
-        var cells = addresses.Count == 0
-            ? new Dictionary<CellAddress, CellValueData>()
-            : await cellStore.ReadCellsAsync(addresses, ct).ConfigureAwait(false);
+        // B10 (клас RI1-B / Q-17): ЛОГІЧНИЙ зріз періоду — той самий ReadSlicesAsync(ids, period), що читає прогін
+        // (RecalculationService) і класифікація проблем. У таблицях «місяці в колонках» значення колонки з чужим
+        // власником (якір року / місяць M{m}) живе в екземплярі-власнику; фізичне ReadCellsAsync за адресою перегляду
+        // його не бачить (MonthRoutedCellStore лишає ReadCellsAsync фізичним за задумом), і підказка в не-власному
+        // місяці показувала порожнечу замість значення, за яким правило й не збіглося. Немаршрутизована таблиця —
+        // той самий фізичний зріз, тож значення ті самі.
+        var cells = new Dictionary<CellAddress, CellValueData>();
+        if (wanted.Count > 0)
+        {
+            var wantedRows = wanted.Select(w => w.RowId).ToHashSet();
+            var wantedColumns = columnsOf.Values.SelectMany(c => c).Select(c => c.Id).ToHashSet();
+            var slices = await cellStore
+                .ReadSlicesAsync([.. wanted.Select(w => instances[w.TableDefId].TableInstanceId).Distinct()], period, ct)
+                .ConfigureAwait(false);
+            foreach (var record in slices.Values.SelectMany(s => s))
+            {
+                if (wantedRows.Contains(record.Address.TableRowId) && wantedColumns.Contains(record.Address.ColumnDefId))
+                {
+                    cells[record.Address] = record.Value;
+                }
+            }
+        }
 
         var result = new Dictionary<(int, string), IReadOnlyList<string>>();
         foreach (var (tableDefId, rowKey, rowId) in wanted)

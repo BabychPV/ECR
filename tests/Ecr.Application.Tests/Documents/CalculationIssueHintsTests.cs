@@ -213,10 +213,15 @@ public sealed class CalculationIssueHintsTests
                     });
 
             var cells = Substitute.For<ICellStore>();
-            cells.ReadCellsAsync(Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
-                 .Returns(new Dictionary<CellAddress, CellValueData>
+            // B10: поточні значення — логічний зріз періоду (ReadSlicesAsync), не фізичне ReadCellsAsync.
+            cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), new PeriodKey(Period), Arg.Any<CancellationToken>())
+                 .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
                  {
-                     [new CellAddress(new PeriodKey(Period), RowId, code.Id)] = new() { ValueString = "Sample A-0" },
+                     [Instance] =
+                     [
+                         new CellRecord(new CellAddress(new PeriodKey(Period), RowId, code.Id), table.Id, new CellValueData { ValueString = "Sample A-0" }),
+                         new CellRecord(new CellAddress(new PeriodKey(Period), RowId + 1, code.Id), table.Id, new CellValueData { ValueString = "other row" }),
+                     ],
                  });
 
             var metadata = Substitute.For<IMetadataCache>();
