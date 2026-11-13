@@ -19,8 +19,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// <remarks>
 /// ⚠ Задача — та сама <see cref="IRegistryImpactRecalculationJob"/>, що й у HSE400 3b (<see cref="Hse400LandDependentsTrigger"/>):
 /// той самий пошук залежних (<see cref="IRegistryImpactStore.ListImpactedForYearAsync"/>: <c>cfg.RegistryUse</c>, лише
-/// <c>Open</c>/<c>Grace</c>) і та сама постановка (<see cref="ICalculationTrigger"/> вирішує, що робити з поданим і
-/// затвердженим аркушем). Тут — лише які роки: ті, де актуальний прогін методології, що читає довідник, лежить у
+/// <c>Open</c>/<c>Grace</c>) і та сама постановка (<see cref="ICalculationTrigger.RequestDependentsAsync"/>: ✎ B63 —
+/// пропускається лише затверджений аркуш, поданий перераховується з позначкою). Тут — лише які роки: ті, де актуальний прогін методології, що читає довідник, лежить у
 /// відкритому періоді. Закритий період не дає року взагалі.
 /// <para>
 /// ⛔ Лише <c>EnqueueCoalescedAsync</c> з ціллю <see cref="RegistryImpactRecalculationTarget.ForYear"/>: кілька синків

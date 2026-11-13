@@ -1500,8 +1500,14 @@ public sealed partial class RecalculationJob(
     /// <remarks>
     /// ⚠ Нічний розклад і автотригери (<c>TriggeredByUserId = null</c>) поданих аркушів не чіпають: інакше кожна ніч
     /// ставила б позначку «перераховано після подання» на всі подані аркуші, і позначка перестала б щось означати.
+    /// <para>
+    /// ⛔ B63: перерахунок ЗАЛЕЖНИХ від зміненого довідника чи документа-джерела (<c>RecalculateSubmitted</c>, ставить
+    /// <c>CalculationTrigger.RequestDependentsAsync</c>) — теж пише подані, з тим самим журналом і позначкою: їхні числа
+    /// справді змінилися, і погоджувач мусить це бачити (слово людини 07.11: «тільки погоджені не мають перераховуватися»).
+    /// </para>
     /// </remarks>
-    internal static bool WritesSubmitted(RecalculationRequest request) => request.TriggeredByUserId is > 0;
+    internal static bool WritesSubmitted(RecalculationRequest request)
+        => request.TriggeredByUserId is > 0 || request.RecalculateSubmitted;
 
     /// <summary>
     /// Екземплярні скоупи (період, аркуш, копія; <c>0</c> — оригінал), які прогін ПРОПУСКАЄ: затверджені, а без людини —
@@ -2025,10 +2031,15 @@ public sealed partial class RecalculationJob(
 /// Батьківська задача-розклад (P4): кладе <c>FanOutAsync</c> у дочірні, щоб статус
 /// батька рахував їх (<c>IJobProgressStore.GetFanOutAsync</c>, JSON <c>fanOutParentJobId</c>).
 /// </param>
+/// <param name="RecalculateSubmitted">
+/// ✎ B63: системний перерахунок залежних (RT-25, HSE400 3b, FLERT F6) пише й подані аркуші (журнал + позначка);
+/// затверджені — ніколи. <c>false</c> — без людини подані не чіпаються (нічний розклад, автоперерахунок збору).
+/// </param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
     int? PeriodKey,
     int? TriggeredByUserId,
     int? SheetDefId = null,
-    string? FanOutParentJobId = null);
+    string? FanOutParentJobId = null,
+    bool RecalculateSubmitted = false);

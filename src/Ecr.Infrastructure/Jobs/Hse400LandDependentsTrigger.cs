@@ -26,7 +26,8 @@ public interface IRecalculationCompletionHook
 /// <remarks>
 /// ⚠ Задача — та сама <see cref="IRegistryImpactRecalculationJob"/>, що й у <c>recalculate-impacted</c>: той самий
 /// пошук залежних (<see cref="IRegistryImpactStore"/>: <c>cfg.RegistryUse</c>, лише <c>Open</c>/<c>Grace</c>) і та сама
-/// постановка (<see cref="ICalculationTrigger"/>: закритий період і поданий/затверджений аркуш — не ставляться).
+/// постановка (<see cref="ICalculationTrigger.RequestDependentsAsync"/>: закритий період не ставиться; ✎ B63 — пропускаються
+/// лише затверджені аркуші, подані перераховуються з позначкою).
 /// Відрізняється лише «застарілий»: кожен актуальний прогін року на момент виконання, а не прогін до <c>DataChangedAt</c>.
 /// <para>
 /// ⛔ Лише <c>EnqueueCoalescedAsync</c> з ціллю «довідник × рік» (<see cref="RegistryImpactRecalculationTarget.ForYear"/>):

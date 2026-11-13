@@ -14,7 +14,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// ⛔ Набір звіряється з ПОТОЧНИМ станом <see cref="IRegistryImpactStore"/>, а не береться з payload
 /// як є: між постановкою й виконанням період міг закритись, а прогін — втратити залежність. Закритий
 /// період сюди не потрапить навіть з payload (<c>D-39</c>), і <see cref="ICalculationTrigger"/>
-/// повторно перевіряє політику запису (закритий період, поданий аркуш).
+/// повторно перевіряє політику запису (закритий період; ✎ B63 — пропуск лише затверджених аркушів,
+/// <see cref="ICalculationTrigger.RequestDependentsAsync"/>).
 /// <para>
 /// ⚠ Право перевірено ПРИ ПОСТАНОВЦІ (<c>RecalculateImpactedHandler</c>); тут задача працює від імені
 /// системи, як і будь-який автоперерахунок. Завершення — «поставлено», не «перераховано»: кожен
@@ -86,7 +87,8 @@ public sealed partial class RegistryImpactRecalculationJob(
             // решту все одно ставимо, а про збої — гучно в кінці. Скасування не ковтаємо.
             try
             {
-                var jobId = await trigger.RequestAsync(documentId, new PeriodKey(periodKey), ct).ConfigureAwait(false);
+                // ⛔ B63: залежні — по аркушу (пропуск лише затверджених), а не «будь-який поданий знімає документ».
+                var jobId = await trigger.RequestDependentsAsync(documentId, new PeriodKey(periodKey), ct).ConfigureAwait(false);
                 if (jobId is not null)
                 {
                     queued++;
@@ -109,7 +111,7 @@ public sealed partial class RegistryImpactRecalculationJob(
                 new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["queued"] = queued.ToString(CultureInfo.InvariantCulture),
-                    // Провалені — окремо: «пропущено» означає закритий період чи поданий аркуш, а не збій.
+                    // Провалені — окремо: «пропущено» означає закритий період чи затверджені всі аркуші, а не збій.
                     ["skipped"] = (targets.Count - queued - failed).ToString(CultureInfo.InvariantCulture),
                     ["failed"] = failed.ToString(CultureInfo.InvariantCulture),
                     ["gone"] = (wanted.Count - targets.Select(t => t.DocumentId).Distinct().Count())
