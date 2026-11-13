@@ -108,7 +108,8 @@ export function CalculationIssuesPanel({
 }: CalculationIssuesPanelProps): JSX.Element | null {
   const causes = useMemo(() => buildIssueCauses(rows, tables), [rows, tables]);
   const [details, setDetails] = useState(false);
-  const [hse400Missing, setHse400Missing] = useState(false);
+  // ✎ F13 P3-2: підсумок «Відкрити HSE400» — документа немає або відкрити не вдалося (відмова API).
+  const [hse400State, setHse400State] = useState<'idle' | 'pending' | 'notFound' | 'failed'>('idle');
 
   if (causes.length === 0) return null;
 
@@ -123,8 +124,12 @@ export function CalculationIssuesPanel({
 
   const openHse400 = async (): Promise<void> => {
     if (onOpenHse400 === undefined) return;
-    const found = await onOpenHse400();
-    setHse400Missing(!found);
+    setHse400State('pending');
+    try {
+      setHse400State((await onOpenHse400()) ? 'idle' : 'notFound');
+    } catch {
+      setHse400State('failed');
+    }
   };
 
   return (
@@ -184,9 +189,14 @@ export function CalculationIssuesPanel({
                     {detail}
                   </Text>
                 )}
-                {cause.kind === 'hse400' && hse400Missing && (
+                {cause.kind === 'hse400' && hse400State === 'notFound' && (
                   <Text size="xs" data-testid="document-calc-issue-hse400-missing">
                     {t('document.calcIssues.hse400NotFound', { year: String(Math.trunc(periodKey / 100)) })}
+                  </Text>
+                )}
+                {cause.kind === 'hse400' && hse400State === 'failed' && (
+                  <Text size="xs" fw={600} role="alert" data-testid="document-calc-issue-hse400-failed">
+                    {t('document.calcIssues.hse400OpenFailed')}
                   </Text>
                 )}
               </div>
@@ -196,6 +206,7 @@ export function CalculationIssuesPanel({
                     size="xs"
                     variant="light"
                     data-testid="document-calc-issue-open-hse400"
+                    loading={hse400State === 'pending'}
                     aria-label={`${title} · ${t('document.calcIssues.openHse400')}`}
                     onClick={() => void openHse400()}
                   >

@@ -517,16 +517,6 @@ export function DocumentPage(): JSX.Element {
     [revealRow],
   );
   const navigate = useNavigate();
-  // ✎ B78: «Відкрити HSE400» — документ HSE400 того ж року (пошук переліку за «HSE400»); немає — панель каже про це.
-  const openHse400 = useCallback(async (): Promise<boolean> => {
-    const { listDocuments } = await import('@/features/documents/api');
-    const page = await listDocuments({ periodKey: null, year: Math.trunc(periodKey / 100), q: 'HSE400' });
-    const found = page.items.find((item) => item.id !== documentId);
-    if (found === undefined) return false;
-    void navigate(`/documents/${String(found.id)}?periodKey=${String(periodKey)}`);
-
-    return true;
-  }, [documentId, navigate, periodKey]);
 
   useEffect(
     () =>
@@ -591,6 +581,17 @@ export function DocumentPage(): JSX.Element {
   const loadedProjectId = summary.data?.projectId ?? baseSummary.data?.projectId;
   if (loadedProjectId !== undefined) knownProject.current = { documentId, projectId: loadedProjectId };
   const projectId = knownProject.current?.documentId === documentId ? knownProject.current.projectId : null;
+
+  // ✎ B78 F13 P3-2: «Відкрити HSE400» — документ року в проєкті з шаблоном HSE400 (спершу цей проєкт); немає — `false`
+  // (панель так і каже), відмова API — виняток (панель показує помилку). За `import()` — бюджет маршруту D-132.
+  const openHse400 = useCallback(async (): Promise<boolean> => {
+    const { findHse400Document } = await import('@/features/documents/findHse400Document');
+    const found = await findHse400Document(projectId, Math.trunc(periodKey / 100), documentId);
+    if (found === null) return false;
+    void navigate(`/documents/${String(found)}?periodKey=${String(periodKey)}`);
+
+    return true;
+  }, [documentId, navigate, periodKey, projectId]);
 
   const projects = useQuery({
     queryKey: queryKeys.projects.all(),

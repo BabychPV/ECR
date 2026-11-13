@@ -158,6 +158,20 @@ describe('CalculationIssuesPanel (B78)', () => {
     });
   });
 
+  it('✎ F13 P3-2: «Відкрити HSE400» не вдалося (відмова API) — панель показує помилку', async () => {
+    const open = vi.fn(() => Promise.reject(new Error('503')));
+    show(rowsOf({ formulaErrors: [hse400(1, 'Density', 'Gas density', 'Diesel')] }), open);
+
+    await userEvent.click(screen.getByTestId('document-calc-issue-open-hse400'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('document-calc-issue-hse400-failed').textContent).toContain(
+        'document.calcIssues.hse400OpenFailed',
+      );
+    });
+    expect(screen.queryByTestId('document-calc-issue-hse400-missing')).toBeNull();
+  });
+
   it('рядки поза розрахунком — причина «рядки», інформаційний тон, «Показати рядки» відкриває перший', async () => {
     const onOpenCell = show(rowsOf({ issues: [issue(1, 2), issue(1, 5)] }));
 
