@@ -8,14 +8,24 @@ export const Hse400TemplateCode = 'HSE400';
 
 type TemplateTimeline = components['schemas']['ProjectTemplateTimelineDto'];
 
-/** Чи діє в проєкті шаблон HSE400 у році `year` (часова шкала версій шаблону проєкту). */
+/**
+ * Чи діє в проєкті шаблон HSE400 у році `year` (часова шкала версій шаблону проєкту).
+ *
+ * ✎ B93 (a): дивиться версію, ЧИННУ в році, — останній елемент шкали з `fromPeriodKey` ≤ кінця року, — а не «будь-коли
+ * була HSE400»: пізніший шаблон (напр. Land), що замінив HSE400 до кінця року, означає, що документ року — не HSE400.
+ */
 function runsHse400(timeline: TemplateTimeline | null, year: number): boolean {
   if (timeline === null) return false;
   const yearEnd = year * 100 + 99;
 
-  return timeline.items.some(
-    (item) => (item.templateCode ?? '').toUpperCase() === Hse400TemplateCode && item.fromPeriodKey <= yearEnd,
-  );
+  let effective: TemplateTimeline['items'][number] | null = null;
+  for (const item of timeline.items) {
+    if (item.fromPeriodKey <= yearEnd && (effective === null || item.fromPeriodKey >= effective.fromPeriodKey)) {
+      effective = item;
+    }
+  }
+
+  return (effective?.templateCode ?? '').toUpperCase() === Hse400TemplateCode;
 }
 
 /** Шкала версій проєкту; невидимий/недоступний проєкт (403/404) — `null`, інша відмова — далі. */

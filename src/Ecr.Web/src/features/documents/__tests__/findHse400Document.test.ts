@@ -71,6 +71,31 @@ describe('findHse400Document (B78 F13 P3-2)', () => {
     expect(listDocuments).not.toHaveBeenCalled();
   });
 
+  // ✎ B93 (a): діє версія, ЧИННА в році (остання з `fromPeriodKey` ≤ кінця року), а не «будь-коли була HSE400».
+  it('HSE400, яку пізніший шаблон замінив до кінця року, — не HSE400 у цьому році', async () => {
+    fetchAllProjects.mockResolvedValue({ items: [{ id: 2 }, { id: 3 }], nextCursor: null, totalCount: 2 });
+    apiFetch.mockImplementation((path: string) => {
+      if (path.endsWith('/2/template-versions')) {
+        return Promise.resolve({
+          projectId: 2,
+          currentVersionId: 9,
+          items: [
+            { fromPeriodKey: 202501, templateCode: 'HSE400', templateVersionId: 1, version: '1.0' },
+            { fromPeriodKey: 202601, templateCode: 'LAND_UI', templateVersionId: 9, version: '1.0' },
+          ],
+        });
+      }
+      return Promise.resolve(timeline(3, 'HSE400', 202501));
+    });
+    listDocuments.mockImplementation((params: { projectId: number }) =>
+      Promise.resolve(params.projectId === 2 ? page(22) : page(33)),
+    );
+
+    await expect(findHse400Document(null, 2026, 96)).resolves.toBe(33);
+    expect(listDocuments).toHaveBeenCalledTimes(1);
+    expect(listDocuments).toHaveBeenCalledWith({ periodKey: null, year: 2026, projectId: 3 });
+  });
+
   it('відмова API (не 403/404) — виняток для панелі', async () => {
     fetchAllProjects.mockResolvedValue({ items: [{ id: 2 }], nextCursor: null, totalCount: 1 });
     apiFetch.mockRejectedValue(new EcrApiError({ status: 500, title: 'Boom' } as never));
