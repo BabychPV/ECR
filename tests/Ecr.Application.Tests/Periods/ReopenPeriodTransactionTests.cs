@@ -515,6 +515,12 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
         public Task<bool> HasReopenedSheetAsync(
             long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKey, CancellationToken ct)
             => inner.HasReopenedSheetAsync(documentId, sheetDefIds, periodKey, ct);
+
+        public Task<bool> IsProjectArchivedOrArchivingAsync(int projectId, CancellationToken ct)
+            => inner.IsProjectArchivedOrArchivingAsync(projectId, ct);
+
+        public Task<bool> IsDocumentProjectArchivedOrArchivingAsync(long documentId, CancellationToken ct)
+            => inner.IsDocumentProjectArchivedOrArchivingAsync(documentId, ct);
     }
 
     /// <summary>

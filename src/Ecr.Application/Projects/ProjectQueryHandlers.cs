@@ -919,7 +919,10 @@ public sealed class ArchiveProjectHandler(
     IAccessDecisionService access,
     ICurrentUser currentUser,
     IUnitOfWork uow,
-    IClock clock)
+    IClock clock,
+
+    // B69: діючі винятки «місяць відкрито для документа»; `null` — тестові фабрики обробника (без винятків, як доти).
+    IDocumentPeriodReopenStore? documentReopens = null)
 {
     /// <summary>Право на архівацію.</summary>
     public const string Permission = "Project.Manage";
@@ -1005,6 +1008,33 @@ public sealed class ArchiveProjectHandler(
                     ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["periodKeys"] = open,
                 });
+        }
+
+        // ⛔ B69 (G1): діючий виняток «місяць відкрито для документа» переживав архівацію — період лишався Closed, тож
+        // перевірка вище його не бачила, а виняток далі піднімав місяць до Grace для перерахунку й Recall в АРХІВОВАНОМУ
+        // проєкті. Відмова, а не тихе закриття винятків: їх відкрили свідомо (з причиною) під виправлення даних, і
+        // архівація посеред виправлення — рішення людини, яка спершу закриває винятки чи чекає їхнього строку.
+        if (documentReopens is not null)
+        {
+            var reopens = await documentReopens.ListActiveForProjectAsync(projectId, now, ct).ConfigureAwait(false);
+            if (reopens.Count > 0)
+            {
+                var reopenedPeriods = reopens.Select(r => r.PeriodKey).Distinct().Order().ToList();
+                throw new ConcurrencyConflictException(
+                    "ECR-PRD-0409",
+                    $"Проєкт {projectId} має діючі відкриття місяців для документів: архівація неможлива.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-PRD-0409.openDocumentReopens",
+                        ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["periodKeys"] = reopenedPeriods,
+                        ["periods"] = string.Join(
+                            ", ",
+                            reopenedPeriods.Select(k => k.ToString(System.Globalization.CultureInfo.InvariantCulture))),
+                        ["documentCount"] = reopens.Select(r => r.DocumentId).Distinct().Count()
+                            .ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
+            }
         }
 
         project.Archive(now);

@@ -36,6 +36,20 @@ internal static class ClosedPeriodGuard
     {
         var period = await workflow.LockPeriodAsync(documentId, key, ct).ConfigureAwait(false);
 
+        // ⛔ B69: в архівованому (чи тому, що архівується) проєкті аркуш у Draft не повертається НІКОЛИ — і виняток
+        // «місяць відкрито для документа» нижче цього не змінює. Виняток, що пережив архівацію, інакше пускав Recall.
+        if (await workflow.IsDocumentProjectArchivedOrArchivingAsync(documentId, ct).ConfigureAwait(false))
+        {
+            throw new BusinessRuleException(
+                "ECR-PRD-4223",
+                $"Проєкт документа {documentId.ToString(CultureInfo.InvariantCulture)} архівований: аркуші в ньому в роботу не повертаються.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-4223.projectArchived",
+                    ["periodKey"] = key.Value.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+
         // ⚠ Збережений `Closed` — закрито без запиту: ефективний стан назад не
         // повертається ніколи (`PeriodStateCalculator.Effective`).
         var state = period.State == PeriodState.Closed

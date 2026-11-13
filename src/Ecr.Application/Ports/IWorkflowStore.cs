@@ -100,6 +100,15 @@ public interface IWorkflowStore
         long documentId, PeriodKey periodKey, DateTime utcNow, CancellationToken ct)
         => Task.FromResult(false);
 
+    /// <summary>
+    /// B69: чи проєкт документа архівований або архівується — тоді жоден виняток (<see cref="HasDocumentPeriodReopenAsync"/>)
+    /// не повертає аркуш у роботу.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>⚠ Без типової реалізації: сторож архіву не має вимикатися мовчки в новому сховищі.</remarks>
+    public Task<bool> IsDocumentProjectArchivedOrArchivingAsync(long documentId, CancellationToken ct);
+
     /// <summary>Зберігає іммутабельний зріз поданих даних (ФВ-5.7).</summary>
     /// <returns>Ідентифікатор зрізу.</returns>
     public Task<long> SaveSnapshotAsync(SubmissionSnapshotRecord snapshot, CancellationToken ct);

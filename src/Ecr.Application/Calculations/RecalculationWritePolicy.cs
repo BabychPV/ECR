@@ -15,6 +15,9 @@ public enum RecalculationWriteDenial
 
     /// <summary>У періоді є поданий або затверджений аркуш (ФВ-9.17).</summary>
     SheetsSubmitted = 2,
+
+    /// <summary>Проєкт архівований або архівується (B69): архівні дані не змінюються, жоден виняток не діє.</summary>
+    ProjectArchived = 3,
 }
 
 /// <summary>
@@ -78,6 +81,21 @@ public static class RecalculationWritePolicy
             : RecalculationWriteDenial.None;
     }
 
+    /// <summary>Чи можна писати перерахунок у проєкт із таким станом (B69).</summary>
+    /// <param name="status">Стан проєкту.</param>
+    /// <param name="isArchiving">Чи триває архівація.</param>
+    /// <returns><see cref="RecalculationWriteDenial.ProjectArchived"/> — проєкт архівований чи архівується.</returns>
+    /// <remarks>
+    /// ⛔ B69 (слово людини: «заархівовані дані не мають змінюватися»). Окремо від <see cref="Check"/> навмисно: виняток
+    /// «місяць відкрито для документа» (<c>doc.DocumentPeriodReopen</c>) піднімає ЗАКРИТИЙ період до <c>Grace</c> ще до
+    /// <see cref="Check"/>, і виняток, що пережив архівацію, пускав ручний перерахунок в архівований проєкт. Стан
+    /// ПРОЄКТУ цим винятком не підміняється.
+    /// </remarks>
+    public static RecalculationWriteDenial CheckProject(ProjectStatus status, bool isArchiving)
+        => status == ProjectStatus.Archived || isArchiving
+            ? RecalculationWriteDenial.ProjectArchived
+            : RecalculationWriteDenial.None;
+
     /// <summary>Пояснення відмови для людини; містить ключ періоду.</summary>
     /// <param name="denial">Причина відмови.</param>
     /// <param name="periodKey">Період, якого стосується відмова.</param>
@@ -100,6 +118,9 @@ public static class RecalculationWritePolicy
                 $"Період {key} має подані аркуші: перерахунок змінив би числа, "
                 + "які вже пішли на погодження. Штатний шлях — Reopen (ФВ-9.17).",
 
+            RecalculationWriteDenial.ProjectArchived =>
+                $"Проєкт архівований або архівується: його дані (період {key}) не перераховуються (B69).",
+
             _ => $"Період {key} перераховувати можна.",
         };
     }
@@ -110,6 +131,7 @@ public static class RecalculationWritePolicy
     {
         RecalculationWriteDenial.PeriodClosed => "err.ECR-CALC-4221.periodClosed",
         RecalculationWriteDenial.SheetsSubmitted => "err.ECR-CALC-4221.sheetsSubmitted",
+        RecalculationWriteDenial.ProjectArchived => "err.ECR-CALC-4221.projectArchived",
         _ => throw new ArgumentOutOfRangeException(nameof(denial), denial, "Відмови немає."),
     };
 

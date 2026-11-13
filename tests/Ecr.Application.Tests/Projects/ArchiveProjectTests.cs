@@ -148,4 +148,43 @@ public sealed class ArchiveProjectTests
         // І перехід зафіксовано: архівний проєкт задача станів не обробляє.
         Assert.Equal(PeriodState.Closed, reopened.State);
     }
+
+    /// <remarks>
+    /// B69 (G1): діючий виняток «місяць відкрито для документа» блокує архівацію — інакше він переживав її й пускав
+    /// перерахунок і Recall в архівований проєкт. Червоне без фіксу: прибрати перевірку винятків в
+    /// <c>ArchiveProjectHandler</c> — проєкт архівується (Archived). Контроль: без винятків той самий проєкт архівується.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "B69-G1")]
+    public async Task Діючий_виняток_документа_блокує_архівацію()
+    {
+        var project = ArrangeClosed();
+        IReadOnlyList<ProjectDocumentReopenItem> active =
+        [
+            new(1, 501, "DOC-501", 202602, Now.AddDays(1), "виправлення", "Оператор"),
+            new(2, 502, "DOC-502", 202601, Now.AddDays(1), "виправлення", null),
+        ];
+        var reopens = Substitute.For<IDocumentPeriodReopenStore>();
+        reopens.ListActiveForProjectAsync(project.Id, Now, Arg.Any<CancellationToken>()).Returns(active);
+
+        var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => new ArchiveProjectHandler(_periods, _access, _user, _uow, _clock, reopens)
+                .HandleAsync(project.Id, CancellationToken.None));
+
+        Assert.Equal("ECR-PRD-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-PRD-0409.openDocumentReopens", error.Details!["messageKey"]);
+        Assert.Equal("202601, 202602", error.Details!["periods"]);
+        Assert.Equal(ProjectStatus.Active, project.Status);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+
+        // Контроль: винятків немає — той самий проєкт архівується.
+        IReadOnlyList<ProjectDocumentReopenItem> empty = [];
+        var none = Substitute.For<IDocumentPeriodReopenStore>();
+        none.ListActiveForProjectAsync(project.Id, Now, Arg.Any<CancellationToken>()).Returns(empty);
+        await new ArchiveProjectHandler(_periods, _access, _user, _uow, _clock, none)
+            .HandleAsync(project.Id, CancellationToken.None);
+
+        Assert.Equal(ProjectStatus.Archived, project.Status);
+    }
 }

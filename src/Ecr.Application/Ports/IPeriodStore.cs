@@ -144,6 +144,22 @@ public interface IPeriodStore
     public Task<bool> HasReopenedSheetCopyAsync(
         long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKey, long sheetCopyId, CancellationToken ct)
         => Task.FromResult(false);
+
+    /// <summary>
+    /// B69: чи проєкт архівований або архівується (<c>Status = Archived</c> чи <c>IsArchiving</c>); проєкту немає — ні.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Без типової реалізації навмисно: сторож архіву, який «за замовчуванням ні», мовчки вимикався б у кожному
+    /// новому сховищі-декораторі.
+    /// </remarks>
+    public Task<bool> IsProjectArchivedOrArchivingAsync(int projectId, CancellationToken ct);
+
+    /// <summary>B69: те саме, що <see cref="IsProjectArchivedOrArchivingAsync"/>, для проєкту документа.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<bool> IsDocumentProjectArchivedOrArchivingAsync(long documentId, CancellationToken ct);
 }
 
 /// <summary>Стан одного періоду.</summary>
