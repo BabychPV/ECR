@@ -21,7 +21,7 @@ import { cellChangeReasonText } from '@/features/audit/cellChangeReason';
 import { useTableStatus } from '@/features/documents/api';
 import {
   attentionForPeriod,
-  attentionRowCount,
+  attentionSectionCount,
   rowLabelsOf,
   useAttentionFocus,
   useTableAttention,
@@ -175,7 +175,9 @@ export function DocumentInspector({
   const attentionRows = attention.reduce((sum, table) => sum + table.rows.length, 0);
   // ✎ debt-1109: заголовок розділу «увага» — те саме число, що рядок стану (`DocumentSaveState`): ОДНА функція
   // `attentionRowCount` з попередженнями включно (вони перелічені пунктами перевірки нижче). Було «0» проти «1».
-  const attentionTotal = attentionRowCount(allAttention, periodKey);
+  // Без закритих місяців обидва числа рівні; з ними заголовок більший (рядок стану їх не рахує — див. `attentionSectionCount`).
+  // ✎ B51 (2): і рядки з закритими місяцями (пункти `LockedRows` цього ж розділу) — без повторів; було «0» над ними.
+  const attentionTotal = attentionSectionCount(allAttention, periodKey);
   // Назви рядків, відомі сіткам: адреса знахідки в Issues — «Sea Water Intake», а не «R7001000».
   const rowLabels = useMemo(() => rowLabelsOf(allAttention), [allAttention]);
 
