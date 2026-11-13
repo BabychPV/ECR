@@ -1,3 +1,4 @@
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Microsoft.Extensions.Logging;
 
@@ -25,11 +26,12 @@ public static partial class MigrationReportViews
     /// <param name="targetVersionId">Цільова версія переносу.</param>
     /// <param name="columnRenames">Скільки пар перейменувань колонок зберіг перенос.</param>
     /// <param name="userId">Ініціатор переносу (автор задачі).</param>
+    /// <param name="correlationId">Кореляція запиту; <c>null</c> — нова (<see cref="SafeErrorText.NewCorrelationId"/>).</param>
     /// <param name="ct">Токен скасування (викликач після коміту передає <see cref="CancellationToken.None"/>).</param>
     /// <returns><c>true</c> — задачу поставлено.</returns>
     public static async Task<bool> EnqueueAsync(
         IBackgroundJobScheduler jobs, IReportViewStatus? status, ILogger log, int templateId, int targetVersionId,
-        int columnRenames, int userId, CancellationToken ct)
+        int columnRenames, int userId, string? correlationId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(jobs);
         ArgumentNullException.ThrowIfNull(log);
@@ -51,16 +53,47 @@ public static partial class MigrationReportViews
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            // ⛔ SEC (TIER2, F13 #872 delta P2): картка `reportviews` іде в АНОНІМНИЙ /health/ready — сирий ex.Message
+            // (SqlException: ім'я сервера, обʼєкти, значення) туди не потрапляє. Як ReportViewGenerator.SafeMessage:
+            // фіксований англійський текст + кореляція; повний виняток — у журнал під тією самою кореляцією.
+            var correlation = string.IsNullOrWhiteSpace(correlationId) ? SafeErrorText.NewCorrelationId() : correlationId;
             status?.Settled(templateId, generation);
-            status?.Failed(new ReportViewFailure(targetVersionId, 0, "Report view regeneration after version migration was not queued: " + ex.Message));
-            LogFailed(log, ex, targetVersionId);
+            status?.Failed(new ReportViewFailure(targetVersionId, FailureCode(ex), SafeText(ex, correlation)));
+            LogFailed(log, ex, targetVersionId, correlation);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Текст картки: «не поставлено» + безпечний текст <see cref="SafeErrorText.For"/> (власний виняток продукту — його
+    /// текст; збій БД чи інший — лише код каталогу й кореляція).
+    /// </summary>
+    internal static string SafeText(Exception error, string correlationId)
+        => "Report view regeneration after version migration was not queued. "
+           + SafeErrorText.For(error, correlationId, "the queueing of the report view regeneration");
+
+    /// <summary>
+    /// Код картки (<c>[код]</c>), як у <c>ReportViewGenerator</c>: номер помилки SQL Server, коли в ланцюгу є помилка
+    /// бази з числовим <c>Number</c> (<c>SqlException</c>); інакше <see cref="Exception.HResult"/> винятку — не <c>0</c>.
+    /// </summary>
+    internal static int FailureCode(Exception error)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        for (var current = error; current is not null; current = current.InnerException)
+        {
+            if (current is System.Data.Common.DbException db
+                && db.GetType().GetProperty("Number")?.GetValue(db) is int number and not 0)
+            {
+                return number;
+            }
+        }
+
+        return error.HResult;
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Перенос версії: нові аліаси колонок ({Renames}); поставлено перегенерацію вʼюх rpt.* шаблону {TemplateId}, версія {TemplateVersionId}.")]
     private static partial void LogQueued(ILogger log, int templateId, int templateVersionId, int renames);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Перенос версії: перегенерацію вʼюх rpt.* шаблону версії {TemplateVersionId} не поставлено після нових аліасів cfg.ColumnRename; повтор — EXEC rpt.usp_GenerateStableViews або перезапуск застосунку.")]
-    private static partial void LogFailed(ILogger log, Exception ex, int templateVersionId);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Перенос версії: перегенерацію вʼюх rpt.* шаблону версії {TemplateVersionId} не поставлено після нових аліасів cfg.ColumnRename; кореляція {CorrelationId}; повтор — EXEC rpt.usp_GenerateStableViews або перезапуск застосунку.")]
+    private static partial void LogFailed(ILogger log, Exception ex, int templateVersionId, string correlationId);
 }
