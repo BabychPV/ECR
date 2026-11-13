@@ -18,14 +18,13 @@ namespace Ecr.Expressions.Tests.Functions;
 /// згенеровані в моделі Land (<c>land-template.model.json</c>); склад - синтетичні числа.
 /// </summary>
 /// <remarks>
-/// Межа фіксу: порожнім стає лише промах словника потоків (паливо - не потік HSE400). Газ зі складом дає значення;
-/// газ БЕЗ запису складу за місяць лишається <c>#N/A</c> (C05_05 без складу не рахує - справжня прогалина даних);
-/// помилка самого Lookup палива (невидимий запис - <c>#REF</c>) теж не ховається.
-/// Мутаційний доказ (лише цей клас): прибрати в <c>hse400_bridges.py</c> IFERROR навколо REGFIND словника потоків і
-/// перегенерувати модель - червоніє <see cref="Рідке_паливо_дає_порожньо_без_помилки"/> (#N/A); замінити охорону
-/// <c>… = NULL ? NULL :</c> на IFERROR навколо всього виразу - червоніють
-/// <see cref="Газ_без_запису_складу_лишається_NA"/> і <see cref="Помилка_Lookup_палива_не_ховається"/>; лише прибрати
-/// охорону - червоніє <see cref="Помилка_Lookup_палива_не_ховається"/> (обидва прогнано на моделі 13.11).
+/// Межа фіксу (✎ B98(3), F13 AU): порожнім стає лише паливо з кодами liquidFuels (у виразі - їхні назви: діалект
+/// шаблонів коду запису не читає). Газ зі складом дає значення; газ БЕЗ запису складу за місяць і газ, чий запис
+/// словника потоків видалено, - <c>#N/A</c> (справжня прогалина даних, не тиха порожнеча); помилка самого Lookup палива
+/// (невидимий запис - <c>#REF</c>) теж не ховається.
+/// Доказ B98(3): на моделі з IFERROR навколо REGFIND словника потоків (d8d6665e3) червоніли
+/// <see cref="Газ_без_запису_у_словнику_потоків_дає_NA"/> ×2 і <see cref="Невідоме_паливо_поза_словником_потоків_дає_NA"/>
+/// (null замість #N/A). Мутаційні докази B89 (модель 13.11) - історія коміту d8d6665e3.
 /// </remarks>
 public sealed class StationaryFuelHse400BridgesTests
 {
@@ -103,6 +102,46 @@ public sealed class StationaryFuelHse400BridgesTests
         }
     }
 
+    /// <summary>
+    /// B98(3), F13 AU: адміністратор видалив запис газового потоку зі словника LAND_HSE400_STREAM - рядок газу мав би
+    /// показати прогалину (#N/A), а не стати тихо порожнім, як рідке паливо.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [InlineData("FUELGASHMB")]
+    [InlineData("MAKATGAS")]
+    public void Газ_без_запису_у_словнику_потоків_дає_NA(string fuel)
+    {
+        var (snapshot, ids) = Arrange(dropStreamOf: fuel);
+
+        foreach (var column in Bridges)
+        {
+            // ⛔ RED до B98(3): IFERROR навколо REGFIND словника потоків давав NULL (порожньо) і для газу.
+            Assert.Equal(
+                ExpressionErrors.NotAvailable,
+                Eval(Bridge(column), snapshot, ExpressionValue.Number(ids[fuel])).ErrorCode);
+        }
+    }
+
+    /// <summary>
+    /// B98(3): «рідке» визначається кодом запису (DIESEL/GASOLINE/KEROSENEJETFUEL), який генератор перетворює на назву
+    /// (діалект шаблонів коду запису не читає - REGFIELD бачить лише поля, у довідника палива поле одне - NAME).
+    /// Перейменований запис рідкого палива не стає «газом без складу» тихо: він видно дає #N/A (а не порожньо).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Невідоме_паливо_поза_словником_потоків_дає_NA()
+    {
+        var (snapshot, ids) = Arrange();
+
+        foreach (var column in Bridges)
+        {
+            Assert.Equal(
+                ExpressionErrors.NotAvailable,
+                Eval(Bridge(column), snapshot, ExpressionValue.Number(ids["RENAMED"])).ErrorCode);
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public void Порожнє_паливо_порожньо()
@@ -134,8 +173,8 @@ public sealed class StationaryFuelHse400BridgesTests
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public void Поза_словником_потоків_рівно_рідке_паливо_списку_T3_00()
     {
-        // Порожнеча = промах словника потоків, тому список палива T3_00 мусить мати поза словником рівно рідке паливо:
-        // новий газ без потоку в моделі був би тихо порожнім - цей тест його зупиняє (генератор - теж).
+        // Список палива T3_00 мусить мати поза словником потоків рівно рідке паливо: новий газ без потоку в моделі дав би
+        // #N/A на кожному рядку (з B98(3) - не тиха порожнеча) - цей тест і генератор зупиняють модель раніше.
         // Ключ словника потоків - без регістру (ignoreCase): «Fuel gas (Internal)» списку = «Fuel Gas (Internal)» словника.
         // Знімок прода шукає за канонічним ключем RegistryKeyNormalizer, тому членство звіряється саме ним.
         string? Canon(string s) => RegistryKeyNormalizer.Canonical([new RegistryKeyPart(CellDataType.String, s)]);
@@ -195,8 +234,11 @@ public sealed class StationaryFuelHse400BridgesTests
             .First(c => c.GetProperty("code").GetString() == column).GetProperty("expression").GetString()!;
     }
 
-    /// <summary>Словник потоків і список палива T3_00 - з моделі Land; склад - лютий 2026, FG_HMB і FG_Makat.</summary>
-    private static (InMemoryRegistrySnapshot Snapshot, Dictionary<string, long> Ids) Arrange()
+    /// <summary>
+    /// Словник потоків і список палива T3_00 - з моделі Land; склад - лютий 2026, FG_HMB і FG_Makat.
+    /// <paramref name="dropStreamOf"/> - код палива, чий запис словника потоків (за назвою, без регістру) «видалено».
+    /// </summary>
+    private static (InMemoryRegistrySnapshot Snapshot, Dictionary<string, long> Ids) Arrange(string? dropStreamOf = null)
     {
         var snapshot = new InMemoryRegistrySnapshot()
             .AddRegistry("LAND_HSE400_STREAM", ["TEXT", "PREFIX"], primaryKey: ["TEXT"])
@@ -205,6 +247,13 @@ public sealed class StationaryFuelHse400BridgesTests
         var ids = new Dictionary<string, long>(StringComparer.Ordinal);
 
         using var model = LoadModel();
+        var dropText = dropStreamOf is null
+            ? null
+            : model.RootElement.GetProperty("registries").EnumerateArray()
+                .Single(r => r.GetProperty("code").GetString() == FuelRegistry)
+                .GetProperty("entries").EnumerateArray()
+                .Single(e => e.GetProperty("code").GetString() == dropStreamOf)
+                .GetProperty("name").GetString();
         long id = 100;
         foreach (var registry in model.RootElement.GetProperty("registries").EnumerateArray())
         {
@@ -214,6 +263,11 @@ public sealed class StationaryFuelHse400BridgesTests
                 var entryCode = entry.GetProperty("code").GetString()!;
                 if (code == "LAND_HSE400_STREAM")
                 {
+                    if (string.Equals(entry.GetProperty("fields").GetProperty("TEXT").GetString(), dropText, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
                     var values = entry.GetProperty("fields").EnumerateObject()
                         .ToDictionary(f => f.Name, f => ExpressionValue.Text(f.Value.GetString()!));
                     snapshot.AddEntry(code, ++id, entryCode, values, ordinal: (int)id);
@@ -230,6 +284,8 @@ public sealed class StationaryFuelHse400BridgesTests
         Assert.Equal(8, ids.Count);
         snapshot.AddEntry(FuelRegistry, ++id, "HIDDEN", new() { ["NAME"] = ExpressionValue.Text("Diesel - Дизель") }, ordinal: (int)id, visible: false);
         ids["HIDDEN"] = id;
+        snapshot.AddEntry(FuelRegistry, ++id, "RENAMED", new() { ["NAME"] = ExpressionValue.Text("Diesel (renamed)") }, ordinal: (int)id);
+        ids["RENAMED"] = id;
 
         foreach (var stream in new[] { "FG_HMB", "FG_Makat" })
         {

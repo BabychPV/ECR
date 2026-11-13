@@ -483,7 +483,10 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 нових колонок немає, аргументи методології зв'язуються за кодом. У клоні шаблону перетип робить `-Stage Template`
 (рядок «колонок переведено в обчислюваний тип», `Decimal/Int -> Formula/Calculated`); значень 0, тож `guardedWithData`
 не спрацьовує. Сторож: LandHse400BridgesModelTests (`Чотири_аргументи_C05_05_на_T3_00_…`). ✎ B89 (людина 13.11): рідке
-паливо (DIESEL/GASOLINE/KEROSENEJETFUEL - поза `LAND_HSE400_STREAM`) - порожньо без `#N/A` (`IFERROR` лише навколо REGFIND потоку + охорона назви), газ без складу - `#N/A`; StationaryFuelHse400BridgesTests.
+паливо (DIESEL/GASOLINE/KEROSENEJETFUEL - поза `LAND_HSE400_STREAM`) - порожньо без `#N/A`, газ без складу - `#N/A`;
+StationaryFuelHse400BridgesTests. ✎ B98(3): порожньо - ЛИШЕ ці три записи (коди -> назви генератором, у виразі
+`<назва> = '…' OR …`: діалект шаблонів коду запису не читає), без `IFERROR`; газ, чий запис потоку видалено, і
+перейменоване паливо - `#N/A` (видно), а не тиха порожнеча.
 
 ### CompositionMass: склад по речовині
 

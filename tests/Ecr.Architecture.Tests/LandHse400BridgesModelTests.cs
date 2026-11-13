@@ -163,14 +163,20 @@ public sealed class LandHse400BridgesModelTests
             var c = cols[arg];
             Assert.Equal("Formula", c.GetProperty("dataType").GetString());
             Assert.True(c.GetProperty("readOnly").GetBoolean(), arg);
-            // B89 (рішення людини 13.11): рідке паливо (поза словником потоків) - порожньо без #N/A; перехоплено лише
-            // промах словника потоків, назва Lookup обчислюється поза IFERROR (охорона), склад газу без запису - #N/A.
+            // B89 (рішення людини 13.11): рідке паливо - порожньо без #N/A. ✎ B98(3) (F13 AU): лише записи з кодами
+            // liquidFuels (у виразі - їхні назви з моделі: діалект шаблонів коду запису не читає), без IFERROR; будь-яке
+            // інше паливо - строгий міст (газ без запису потоку чи складу - #N/A), охорона порожнього Lookup - як була.
+            const string Name = "REGFIELD([Land_TypeFuel], 'NAME')";
             Assert.Equal(
-                "REGFIELD([Land_TypeFuel], 'NAME') = NULL ? NULL : "
+                Name + " = NULL ? NULL : (("
+                + Name + " = 'Diesel - Дизель' OR "
+                + Name + " = 'Gasoline - Бензин' OR "
+                + Name + " = 'Kerosene (Jet fuel) - Керосин') ? NULL : "
                 + "REGFIELD(REGFIND('LAND_HSE400_COMPOSITION', [Period].Year, [Period].Sequence, "
-                + "REGFIELD(IFERROR(REGFIND('LAND_HSE400_STREAM', REGFIELD([Land_TypeFuel], 'NAME')), NULL), 'PREFIX'), '"
-                + indicator + "'), 'VALUE')",
+                + "REGFIELD(REGFIND('LAND_HSE400_STREAM', " + Name + "), 'PREFIX'), '"
+                + indicator + "'), 'VALUE'))",
                 c.GetProperty("expression").GetString());
+            Assert.DoesNotContain("IFERROR", c.GetProperty("expression").GetString()!, StringComparison.Ordinal);
             Assert.Equal(34, c.GetProperty("precision").GetInt32());
             Assert.Equal(16, c.GetProperty("scale").GetInt32());
             Assert.Contains(
@@ -190,6 +196,15 @@ public sealed class LandHse400BridgesModelTests
         Assert.Equal(
             ["DIESEL", "GASOLINE", "KEROSENEJETFUEL"],
             na.GetProperty("liquidFuels").EnumerateArray().Select(x => x.GetString()!).ToArray());
+
+        // B98(3): назви у виразі - саме записів цих кодів довідника палива моделі (не вигадані літерали).
+        var fuelNames = model.RootElement.GetProperty("registries").EnumerateArray()
+            .Single(r => r.GetProperty("code").GetString() == "LAND_STATIONARY_TYPE_OF_FUEL")
+            .GetProperty("entries").EnumerateArray()
+            .ToDictionary(e => e.GetProperty("code").GetString()!, e => e.GetProperty("name").GetString()!);
+        Assert.Equal(
+            ["Diesel - Дизель", "Gasoline - Бензин", "Kerosene (Jet fuel) - Керосин"],
+            na.GetProperty("liquidFuels").EnumerateArray().Select(x => fuelNames[x.GetString()!]).ToArray());
     }
 
     [Fact]

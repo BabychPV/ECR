@@ -297,11 +297,12 @@ def _apply_stream_aliases(out, sources, af_attrs):
 # ✎ B89 (рішення людини 13.11, відповідь старої системи): ці чотири властивості читає ЛИШЕ C05_05 «Boilers – Gas»; рідке
 # паливо (дизель, гас, бензин) потоку HSE400 не має і в C05_05 не потрапляє (правило застосовності ECW_C05_05 -
 # лише газові палива, Build-LandTemplate.ps1 $rules). Для нього клітинки «не застосовується» - ПОРОЖНЬО без #N/A, подання
-# не блокують. Тому для T3_00 перехоплюється лише промах СЛОВНИКА ПОТОКІВ (паливо - не потік HSE400 -> NULL, а
-# REGFIND складу з NULL-частиною ключа дає NULL); газ без запису складу за місяць лишається #N/A. Охорона
-# `<назва палива> = NULL ? NULL :` обчислює назву Lookup ПОЗА IFERROR: її помилка (#REF невидимого запису) не ховається.
+# не блокують. ✎ B98(3) (F13 AU): порожньо - ЛИШЕ для записів із кодами 'liquidFuels' (у виразі - їхні назви: діалект
+# шаблонів коду запису не читає); будь-яке інше паливо - строгий міст: промах словника потоків (газ, чий запис потоку
+# видалив адміністратор) чи складу за місяць - #N/A, а не тиха порожнеча (раніше IFERROR навколо REGFIND потоків ховав
+# і це). Охорона `<назва палива> = NULL ? NULL :` - порожній Lookup порожній, #REF невидимого запису не ховається.
 # 'liquidFuels' - коди записів списку палива, яких немає в словнику потоків; генератор звіряє цей список (новий газ без
-# потоку був би тихо порожнім - зупиняємося).
+# потоку в моделі - зупиняємося).
 EXISTING_INPUT_BRIDGES = {
     'T3_00': {
         'source': ('Land_TypeFuel', 'Lookup'),
@@ -318,11 +319,28 @@ def _key(text):
     return ' '.join((text or '').split()).upper()
 
 
-def not_applicable_composition_expression(stream_expr, indicator):
-    """B89: міст складу, де паливо поза словником потоків HSE400 дає NULL («не застосовується»), а не #N/A."""
-    stream = "REGFIELD(IFERROR(REGFIND('%s', %s), NULL), 'PREFIX')" % (STREAM_REGISTRY, stream_expr)
-    return "%s = NULL ? NULL : REGFIELD(REGFIND('%s', [Period].Year, [Period].Sequence, %s, '%s'), 'VALUE')" % (
-        stream_expr, COMPOSITION_REGISTRY, stream, indicator)
+def not_applicable_composition_expression(stream_expr, indicator, liquid_names):
+    """B89/B98(3): міст складу, де РІДКЕ паливо дає NULL («не застосовується»), а решта - строгий міст (#N/A на промах).
+
+    Рідке паливо - записи списку палива з кодами 'liquidFuels'; у виразі - їхні назви (liquid_names), бо діалект
+    шаблонів коду запису не читає (REGFIELD бачить лише поля, у довідника палива поле одне - NAME). Промах словника
+    потоків чи складу для будь-якого іншого палива (газ, чий запис потоку видалили; перейменоване паливо) - #N/A, не
+    тиха порожнеча. Охорона `<назва> = NULL ? NULL :` - як і раніше: порожній Lookup порожній, #REF не ховається.
+    """
+    for n in liquid_names:
+        if "'" in n:
+            raise SystemExit("hse400: назва палива з апострофом у літералі виразу: %r" % n)
+    liquid = ' OR '.join("%s = '%s'" % (stream_expr, n) for n in liquid_names)
+    return '%s = NULL ? NULL : ((%s) ? NULL : %s)' % (
+        stream_expr, liquid, composition_expression(stream_expr, indicator))
+
+
+def _liquid_fuel_names(registries, spec):
+    by_code = {e['code']: e['name'] for e in registries.get(spec['fuelRegistry'], {}).get('entries', [])}
+    missing = [c for c in spec['liquidFuels'] if c not in by_code]
+    if missing:
+        raise SystemExit('hse400: у %s немає записів рідкого палива %s' % (spec['fuelRegistry'], missing))
+    return [by_code[c] for c in spec['liquidFuels']]
 
 
 def _check_liquid_fuels(registries, tcode, spec):
@@ -338,7 +356,7 @@ def apply_existing_inputs(out, registries):
     """Перетипує наявні ручні Decimal-колонки в мости HSE400 (EXISTING_INPUT_BRIDGES). Повертає кількість колонок.
 
     Викликається ПІСЛЯ apply() (довідники LAND_HSE400_* уже в registries) і ДО округлення precision/scale 34/16.
-    B89: для таблиць із 'liquidFuels' міст - not_applicable_composition_expression (рідке паливо - порожньо).
+    B89/B98(3): для таблиць із 'liquidFuels' міст - not_applicable_composition_expression (порожньо лише рідке паливо).
     """
     by_code = {}
     for s_ in out['sheets']:
@@ -353,17 +371,18 @@ def apply_existing_inputs(out, registries):
         if name not in cols or cols[name]['dataType'] != kind:
             raise SystemExit('hse400: %s: колонка-джерело потоку %s (%s) відсутня' % (tcode, name, kind))
         stream_expr = '[%s]' % name if kind == 'String' else "REGFIELD([%s], 'NAME')" % name
-        liquid = 'liquidFuels' in spec
-        if liquid:
+        liquid_names = None
+        if 'liquidFuels' in spec:
             _check_liquid_fuels(registries, tcode, spec)
-        build = not_applicable_composition_expression if liquid else composition_expression
+            liquid_names = _liquid_fuel_names(registries, spec)
         for arg in spec['args']:
             c = cols.get(arg)
             if c is None or c['dataType'] != 'Decimal':
                 raise SystemExit('hse400: %s: очікувалась ручна Decimal-колонка %s' % (tcode, arg))
             c['dataType'] = 'Formula'
             c['readOnly'] = True
-            c['expression'] = build(stream_expr, INDICATOR_OF_ARG[arg])
+            c['expression'] = (not_applicable_composition_expression(stream_expr, INDICATOR_OF_ARG[arg], liquid_names)
+                               if liquid_names else composition_expression(stream_expr, INDICATOR_OF_ARG[arg]))
             c['headerEn'] = '%s (argument bridge: HSE400 composition)' % arg
             c['ecrAdded'] = ('bridge: methodology argument %s = %s[%s] by period and stream (HSE400, %s)'
                              % (arg, COMPOSITION_REGISTRY, INDICATOR_OF_ARG[arg], spec['evidence']))
@@ -382,10 +401,12 @@ def apply_existing_inputs(out, registries):
                                             'evidence': s['evidence']},
                                            **({'notApplicable': {
                                                'fuelRegistry': s['fuelRegistry'], 'liquidFuels': s['liquidFuels'],
-                                               'rule': 'B89 (human 13.11): fuel not in ' + STREAM_REGISTRY + ' (liquid: '
-                                                       'diesel, kerosene, gasoline) -> empty without error, does not '
-                                                       'block submit (only ECW_C05_05 reads these, gas fuels only); gas '
-                                                       'stream without a composition record -> #N/A as before'}}
+                                               'rule': 'B89 (human 13.11), narrowed B98(3): liquid fuel (entry codes '
+                                                       'liquidFuels: diesel, kerosene, gasoline; matched by entry NAME, '
+                                                       'the template dialect has no entry code) -> empty without error, '
+                                                       'does not block submit (only ECW_C05_05 reads these, gas fuels '
+                                                       'only); any other fuel without a ' + STREAM_REGISTRY + ' entry '
+                                                       'or without a composition record -> #N/A'}}
                                               if 'liquidFuels' in s else {}))
                                    for t, s in sorted(EXISTING_INPUT_BRIDGES.items())}
     print('hse400 existing-input bridges: columns %d' % changed)
