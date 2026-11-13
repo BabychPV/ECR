@@ -152,14 +152,35 @@ public sealed partial class DocumentStaleResultsStoreTests
         var w = await WarmRigAsync();
         using var cacheLease = w.R.Cache;
         await using var providerLease = w.Provider;
-        _ = await SeedCurrentPeriodsAsync(w, 202606, 2);
+        var seeded = await SeedCurrentPeriodsAsync(w, 202606, 2);
+        try
+        {
+            var warmed = await w.Warmer.WarmOnceAsync(CancellationToken.None);
 
-        var warmed = await w.Warmer.WarmOnceAsync(CancellationToken.None);
+            Assert.Contains(w.R.Period, warmed);
+            var maps = w.Probe.Maps;
+            Assert.Equal([w.R.A, w.R.B], (await WarmPageAsync(w)).Order());
+            Assert.Equal(maps, w.Probe.Maps);
+        }
+        finally
+        {
+            // Ретро 375 (F13 AU, P3): новіші Current-прогони цього тесту не лишаються в спільній базі - інакше вони
+            // так само витісняли б період інших тестів «N найновіших» (саме той дефект, який лагодить B86).
+            await SupersedeSeededAsync(w.R.Chain.ProjectId, seeded);
+        }
+    }
 
-        Assert.Contains(w.R.Period, warmed);
-        var maps = w.Probe.Maps;
-        Assert.Equal([w.R.A, w.R.B], (await WarmPageAsync(w)).Order());
-        Assert.Equal(maps, w.Probe.Maps);
+    private async Task SupersedeSeededAsync(int projectId, IReadOnlyList<int> periods)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "UPDATE calc.CalculationRun SET Status = N'Superseded' "
+            + "WHERE ProjectId = @project AND Status = N'Current' AND PeriodKey IN (SELECT value FROM OPENJSON(@periods))";
+        command.Parameters.AddWithValue("@project", projectId);
+        command.Parameters.AddWithValue("@periods", "[" + string.Join(",", periods) + "]");
+        _ = await command.ExecuteNonQueryAsync();
     }
 
     [Fact]
