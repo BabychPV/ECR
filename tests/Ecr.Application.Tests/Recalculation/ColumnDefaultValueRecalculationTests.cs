@@ -260,14 +260,17 @@ public sealed class ColumnDefaultValueRecalculationTests
                         id => id, id => (IReadOnlyList<CellRecord>)[.. slice.Select(c => c with { Address = c.Address with { PeriodKey = period } })]);
             });
 
-        // Граф: колонкові читання Qty і Factor (зсув — для міжперіодного посилання).
-        _versions.ListFormulaDependenciesAsync(Version, Arg.Any<CancellationToken>())
-            .Returns(
+        // Граф: колонкові читання Qty і Factor (зсув — для міжперіодного посилання). Діапазон `[R1:R2]` — без
+        // збереженого графа (чернетка): формула читає документ, діапазон розкривається за поточним порядком.
+        IReadOnlyList<FormulaDependency> graph = expression.Contains("[R1:R2]", StringComparison.Ordinal)
+            ? []
+            :
             [
                 FormulaDependency.ForFormula(formula.Id, 0, _table.Id, null, _qty.Id, null, 0, 0),
                 FormulaDependency.ForFormula(
                     formula.Id, crossPeriod ? (byte)3 : (byte)0, _table.Id, null, _factor.Id, null,
-                    crossPeriod ? (short)-1 : (short)0, 0),
-            ]);
+                    crossPeriod ? (short)-1 : (short)0, 1),
+            ];
+        _versions.ListFormulaDependenciesAsync(Version, Arg.Any<CancellationToken>()).Returns(graph);
     }
 }
