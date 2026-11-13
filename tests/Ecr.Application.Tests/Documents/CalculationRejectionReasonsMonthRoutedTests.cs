@@ -110,11 +110,54 @@ public sealed class CalculationRejectionReasonsMonthRoutedTests
             Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// ✎ LAND-YEAR L1 (#850): у версії YearWithMonthColumns обчислювана колонка (тут — ключ правила Land_TypeFuel) має
+    /// власника, як введена; застаріла обчислена копія перегляду («38») затінена цілком, значення — з якоря («36»), як у сітці.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ МУТАЦІЙНИЙ ДОКАЗ (локально, не в коміті): <c>FullyShadowed</c> завжди порожній — червоніє (правило R_C05_01_02).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "Q-17")]
+    [Trait("Decision", "D-474")]
+    public async Task Річна_розкладка_обчислюваний_ключ_правила_з_власника_а_не_застаріла_копія_перегляду()
+    {
+        var world = new World { ComputedFuel = true, YearLayout = true };
+
+        var item = Assert.Single((await world.Handler().HandleAsync(Document, Oct, null, CancellationToken.None)).Items);
+
+        Assert.Equal("R_C05_01_01", item.RuleCode);
+        _ = world.Router.Received().RoutesComputedVersion(9);
+    }
+
+    /// <summary>
+    /// Контроль: версія НЕ річної розкладки (<c>RoutesComputedVersion = false</c>) — як до L1: обчислена копія перегляду зі
+    /// значенням лишається й приховує власника.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "Q-17")]
+    public async Task Не_річна_розкладка_обчислена_копія_перегляду_лишається_як_було()
+    {
+        var world = new World { ComputedFuel = true, YearLayout = false };
+
+        var item = Assert.Single((await world.Handler().HandleAsync(Document, Oct, null, CancellationToken.None)).Items);
+
+        Assert.Equal("R_C05_01_02", item.RuleCode);
+    }
+
     private sealed class World
     {
         public bool Routing { get; init; } = true;
 
         public bool DenyFuel { get; init; }
+
+        /// <summary>Land_TypeFuel — обчислювана колонка (<c>Calculated</c>): у жовтні й у якорі — обчислені значення.</summary>
+        public bool ComputedFuel { get; init; }
+
+        /// <summary>Версія YearWithMonthColumns (<see cref="IMonthColumnRouter.RoutesComputedVersion"/>).</summary>
+        public bool YearLayout { get; init; }
 
         public ICellStore Cells { get; } = Substitute.For<ICellStore>();
 
@@ -128,7 +171,7 @@ public sealed class CalculationRejectionReasonsMonthRoutedTests
             var sheet = template.Sheet("S03_STATIONARY_EQUIPMENT");
             var table = template.Table(sheet, "T3_00", TableRowMode.Dynamic, TableLayoutKind.MonthsInColumns);
             var status = template.Column(table, "Land_Status", CellDataType.String);
-            var fuel = template.Column(table, "Land_TypeFuel", CellDataType.String);
+            var fuel = template.Column(table, "Land_TypeFuel", ComputedFuel ? CellDataType.Calculated : CellDataType.String);
             var power = template.Column(table, "Land_Power");
             var overhauledRef = template.Column(table, "Land_OverhauledEnginesRef", CellDataType.String);
             var overhauled = template.Column(table, "Land_OverhauledEngines", CellDataType.String);
@@ -208,6 +251,7 @@ public sealed class CalculationRejectionReasonsMonthRoutedTests
             // обчислювана (Land_OverhauledEngines) — у перегляді.
             Router.Enabled.Returns(Routing);
             Router.AppliesToTable(Arg.Any<TableDef>()).Returns(true);
+            Router.RoutesComputedVersion(9).Returns(YearLayout);
             Router.GetDocumentAsync(Document, Arg.Any<CancellationToken>())
                   .Returns(new MonthRoutingDocument(Document, AccessBuilder.ProjectId, 9));
             Router.ForeignColumnsAsync(Arg.Any<MonthRoutingDocument>(), Arg.Any<TableDef>(), oct, Arg.Any<CancellationToken>())
@@ -218,10 +262,10 @@ public sealed class CalculationRejectionReasonsMonthRoutedTests
             var values = new Dictionary<CellAddress, CellValueData>
             {
                 [new CellAddress(jan, JanRow, status.Id)] = new() { ValueString = "1" },
-                [new CellAddress(jan, JanRow, fuel.Id)] = new() { ValueString = "36" },
+                [new CellAddress(jan, JanRow, fuel.Id)] = new() { ValueString = "36", IsCalculated = ComputedFuel },
                 [new CellAddress(jan, JanRow, power.Id)] = new() { ValueNumeric = 22m },
                 [new CellAddress(oct, OctRow, status.Id)] = new() { ValueString = "1" },
-                [new CellAddress(oct, OctRow, fuel.Id)] = new() { ValueString = "38" },
+                [new CellAddress(oct, OctRow, fuel.Id)] = new() { ValueString = "38", IsCalculated = ComputedFuel },
             };
 
             Cells.ReadCellsAsync(Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
