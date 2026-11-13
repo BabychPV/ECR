@@ -31,10 +31,10 @@ namespace Ecr.Infrastructure.Tests.Security;
 [Collection("SqlServer")]
 public sealed class AccessWindowWorkflowTests(SqlServerFixture sql) : IDisposable
 {
-    /// <summary>Період (номер 3); не 2026-05…07 — їх архівують <c>ArchiveJobTests</c>.</summary>
-    private const int PeriodKeyValue = 202603;
+    /// <summary>Період (номер 3) у 2099 — далеко від реальних періодів (ретро 382).</summary>
+    private const int PeriodKeyValue = 209903;
 
-    private static readonly DateTime Now = new(2026, 3, 15, 10, 0, 0, DateTimeKind.Utc);
+    private static readonly DateTime Now = new(2099, 3, 15, 10, 0, 0, DateTimeKind.Utc);
 
     private readonly MemoryCache _memory = new(new MemoryCacheOptions());
 
