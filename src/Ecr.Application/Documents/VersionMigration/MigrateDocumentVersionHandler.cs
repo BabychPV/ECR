@@ -234,9 +234,9 @@ public sealed class MigrateDocumentVersionHandler(
     // ✎ RPT-STABLE Part B: прапор «з місяця». `null` (прямий конструктор у тестах) - вимкнено, як і типова конфігурація.
     VersionMigrationOptions? migrationOptions = null,
 
-    // ✎ V-5: нові аліаси колонок (cfg.ColumnRename) діють у стабільних вʼюхах SSRS лише після генерації.
-    // `null` (прямий конструктор у тестах) - вʼюхи не перегенеровуються.
-    IReportViewGenerator? reportViews = null)
+    // ✎ V-5: нові аліаси колонок (cfg.ColumnRename) діють у стабільних вʼюхах SSRS лише після генерації — її ставить
+    // фонова задача ReportViewsTask; стан картки `reportviews` («оновлюються», збій постановки). `null` - картки немає.
+    IReportViewStatus? reportViewStatus = null)
 {
     private readonly bool _fromMonthEnabled = migrationOptions?.FromMonthEnabled ?? false;
 
@@ -1141,14 +1141,9 @@ public sealed class MigrateDocumentVersionHandler(
         // RPT-STABLE Part B: шкала версій змінилась - скидаємо кеш (інші вузли побачать за TTL; писарі читають свіжо).
         timeline?.Invalidate(projectId);
 
-        // ⛔ V-5: нові аліаси колонок (cfg.ColumnRename) діють у стабільних вʼюхах лише після генерації; без неї
-        // звіти SSRS на старому коді колонки для перенесеного проєкту порожні до перезапуску чи наступної публікації.
-        if (result is not null)
-        {
-            await MigrationReportViews
-                .RefreshAsync(reportViews, log, target.Id, planned.Plan.ColumnRenames.Count, ct)
-                .ConfigureAwait(false);
-        }
+        // ⛔ Перенос уже закомічено: хвіст після коміту НЕ бере токена запиту (обрив з'єднання чи зупинка процесу не мають
+        // пропустити перерахунок чи вʼюхи вже перенесеного проєкту; F13 RC #872 P2-2). Порядок — спершу перерахунок
+        // (дані), потім вʼюхи SSRS (другорядний шар).
 
         // ⛔ LP-41: нова/змінена формула без перерахунку лишається порожньою до явної дії людини (інкрементний
         // шлях не бере формул поза зміненими комірками). Один coalesced перерахунок проєкту — лише коли план
@@ -1156,7 +1151,19 @@ public sealed class MigrateDocumentVersionHandler(
         if (result is not null && formulaTables > 0)
         {
             await MigrationRecalculation
-                .EnqueueAsync(jobs, log, clock.UtcNow, projectId, formulaTables, ct)
+                .EnqueueAsync(jobs, log, clock.UtcNow, projectId, formulaTables, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+
+        // ⛔ V-5: нові аліаси колонок (cfg.ColumnRename) діють у стабільних вʼюхах лише після генерації; без неї
+        // звіти SSRS на старому коді колонки для перенесеного проєкту порожні до перезапуску чи наступної публікації.
+        // Генерація — фоновою задачею ReportViewsTask (P-4b), не в запиті: на Land вона триває хвилини (F13 P2-1).
+        if (result is not null)
+        {
+            await MigrationReportViews
+                .EnqueueAsync(
+                    jobs, reportViewStatus, log, target.TemplateId, target.Id, planned.Plan.ColumnRenames.Count,
+                    profile.UserId, CancellationToken.None)
                 .ConfigureAwait(false);
         }
 

@@ -10,12 +10,13 @@ namespace Ecr.Api.Tests;
 /// <summary>
 /// V-5 (аудит 2026-11-10): перенос із мапою перейменування колонки (<c>C2 → C2X</c>) зберігає пару в
 /// <c>cfg.ColumnRename</c>, а аліаси вшиваються в текст стабільної вʼюхи <c>rpt.v_&lt;шаблон&gt;_&lt;аркуш&gt;_&lt;таблиця&gt;</c>
-/// лише при генерації. Тому після коміту перенос мусить перегенерувати вʼюхи — інакше колонка зі старим кодом для
-/// перенесеного проєкту NULL до перезапуску застосунку чи наступної публікації.
+/// лише при генерації. Тому після коміту перенос ставить фонову задачу <c>ReportViewsTask</c> (F13 RC #872 P2-1: не
+/// в запиті) — інакше колонка зі старим кодом для перенесеного проєкту NULL до перезапуску чи наступної публікації.
 /// </summary>
 /// <remarks>
-/// Червоне до фіксу (виклик <c>MigrationReportViews.RefreshAsync</c> у <c>MigrateDocumentVersionHandler</c> прибрано):
+/// Червоне до фіксу (виклик <c>MigrationReportViews.EnqueueAsync</c> у <c>MigrateDocumentVersionHandler</c> прибрано):
 /// <c>[C2_…]</c> після переносу — NULL (вʼюха читає лише Id колонки старої версії, а значення вже на новому Id).
+/// Постановку й порядок (після перерахунку) перевіряє <c>DocumentVersionMigrationTests.PostCommitTail</c>.
 /// </remarks>
 public sealed partial class DocumentVersionMigrationTests
 {
@@ -51,22 +52,24 @@ public sealed partial class DocumentVersionMigrationTests
 
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
-        var renames = new[]
-        {
-            new
-            {
-                fromTableCode = s.SourceTableCode,
-                toTableCode = s.SourceTableCode,
-                sheetCode = (string?)null,
-                columns = new[] { new { fromColumnCode = $"C2_{s.Tag}", toColumnCode = $"C2X_{s.Tag}" } },
-            },
-        };
-        var response = await PostWithRenamesAsync(client, s, dryRun: false, renames).ConfigureAwait(true);
+        var response = await PostWithRenamesAsync(client, s, dryRun: false, ColumnOnlyRenames(s)).ConfigureAwait(true);
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
         Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {body} {app.ErrorsText}");
 
-        // ⛔ Предмет тесту: звіт SSRS на старому коді колонки бачить перенесене значення одразу, без перезапуску.
-        Assert.Equal(42m, await StableValueAsync(stable, $"C2_{s.Tag}", s.Doc.ProjectId).ConfigureAwait(true));
+        // ⛔ Предмет тесту: фонова задача ReportViewsTask (поставлена переносом) перегенерувала вʼюхи — звіт SSRS на старому
+        // коді колонки бачить перенесене значення без перезапуску застосунку. Задачу виконує справжня черга тестового хоста.
+        decimal? oldCode = null;
+        var deadline = DateTime.UtcNow.AddSeconds(180);
+        while (DateTime.UtcNow < deadline && oldCode != 42m)
+        {
+            oldCode = await StableValueAsync(stable, $"C2_{s.Tag}", s.Doc.ProjectId).ConfigureAwait(true);
+            if (oldCode != 42m)
+            {
+                await Task.Delay(500).ConfigureAwait(true);
+            }
+        }
+
+        Assert.True(oldCode == 42m, $"[C2_{s.Tag}] після переносу: {oldCode?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"}; {app.ErrorsText}");
         Assert.Equal(42m, await StableValueAsync(stable, $"C2X_{s.Tag}", s.Doc.ProjectId).ConfigureAwait(true));
     }
 
