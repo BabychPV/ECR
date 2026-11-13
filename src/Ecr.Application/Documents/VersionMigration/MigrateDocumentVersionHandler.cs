@@ -944,7 +944,9 @@ public sealed class MigrateDocumentVersionHandler(
                 documentId, projectId, current, target, mode, archived, dryRun: false, renames,
                 acceptGuardedOverwrite, lookupRemaps, allowLockedDocuments, innerCt).ConfigureAwait(false);
             var (dto, plan, foreignKeys) = (planned.Dto, planned.Plan, planned.ForeignKeys);
-            ThrowIfRefused(dto, foreignKeys, plan.RenameConflicts, acceptGuardedOverwrite, plan.LookupGuardedValues);
+            ThrowIfRefused(
+                dto, foreignKeys, plan.RenameConflicts, acceptGuardedOverwrite, plan.LookupGuardedValues,
+                planned.AssignmentConflicts);
 
             // ⛔ Без підтвердженого бекапу великий перенос не стартує: частина комірок фіксується діапазонами, відкат -
             // лише відновленням з копії. Перевіряється ДО маркера - відмова нічого не залишає.
@@ -1379,7 +1381,8 @@ public sealed class MigrateDocumentVersionHandler(
         VersionMigrationPlan Plan,
         IReadOnlyList<string> ForeignKeys,
         ExtendedMappingRemap Extended,
-        IReadOnlyList<HeaderLookupValueRow> LookupRows);
+        IReadOnlyList<HeaderLookupValueRow> LookupRows,
+        int AssignmentConflicts = 0);
 
     /// <summary>Підготовлені мапи Lookup: вхід планувальника, прочитані значення, цілі поза парою версій.</summary>
     private sealed record LookupPrepared(
@@ -1483,6 +1486,15 @@ public sealed class MigrateDocumentVersionHandler(
             && await store.CountSheetCopiesAsync(projectId, removedSheets, ct).ConfigureAwait(false) > 0)
         {
             refusals.Add("sheetCopiesNotMapped");
+        }
+
+        // ⛔ D-10-b: мапа перейменовує таблицю X → Y, а передача зрізу під Y у документі вже є. Перейменування передачі
+        // X дало б той самий ключ зрізу — 2601 на UQ_EditAssignment ПІСЛЯ маркера, відкат усього переносу із загальною
+        // помилкою. Відмова — тут, на етапі плану: спершу зняти одну з двох передач.
+        var assignmentConflicts = await store.CountAssignmentRenameConflictsAsync(projectId, plan, ct).ConfigureAwait(false);
+        if (assignmentConflicts > 0)
+        {
+            refusals.Add("assignmentsConflict");
         }
 
         // ⛔ D-13: активна прив'язка методології до колонки вихідної версії, якої нема в цільовій, після
@@ -1592,7 +1604,8 @@ public sealed class MigrateDocumentVersionHandler(
             Warnings: range.Warnings);
 
         return new PlannedMigration(
-            dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds }, lookup.Rows);
+            dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds }, lookup.Rows,
+            assignmentConflicts);
     }
 
     /// <summary>
@@ -1831,7 +1844,7 @@ public sealed class MigrateDocumentVersionHandler(
 
     private static void ThrowIfRefused(
         DocumentVersionMigrationDto dto, IReadOnlyList<string> foreignKeys, IReadOnlyList<string>? renameConflicts = null,
-        bool acceptGuardedOverwrite = false, long lookupGuardedValues = 0)
+        bool acceptGuardedOverwrite = false, long lookupGuardedValues = 0, int assignmentConflicts = 0)
     {
         // ACC-OW: значення під новою формулою за згодою не «змінюють тлумачення» — у відмові лишається решта.
         var guardedValues = acceptGuardedOverwrite ? dto.GuardedValues - (dto.GuardedOverwritable ?? 0L) : dto.GuardedValues;
@@ -1904,7 +1917,9 @@ public sealed class MigrateDocumentVersionHandler(
                                     ? "err.ECR-SCHM-0422.migrateMappingsNotMapped"
                                     : dto.Refusals.Contains("sheetCopiesNotMapped")
                                         ? "err.ECR-SCHM-0422.migrateSheetCopiesNotMapped"
-                                        : "err.ECR-SCHM-0422.migrateDataLoss",
+                                        : dto.Refusals.Contains("assignmentsConflict")
+                                            ? "err.ECR-SCHM-0422.migrateAssignmentsConflict"
+                                            : "err.ECR-SCHM-0422.migrateDataLoss",
                 ["lostValues"] = dto.LostValues.ToString(CultureInfo.InvariantCulture),
                 ["lockedDocumentCount"] = dto.LockedDocumentCount > 0
                     ? dto.LockedDocumentCount.Value.ToString(CultureInfo.InvariantCulture)
@@ -1920,6 +1935,10 @@ public sealed class MigrateDocumentVersionHandler(
                 ["mappingColumns"] = dto.MappingsUnmappedKeys is { Count: > 0 } ? dto.MappingsUnmappedKeys : null,
                 // ⚠ Лише коди шаблону (шлях → цільовий код); значень і документів тут немає.
                 ["renameConflicts"] = renameConflicts is { Count: > 0 } ? renameConflicts : null,
+                // D-10-b: лише КІЛЬКІСТЬ передач, що зіткнулися б із наявними (без виконавців і зрізів).
+                ["assignmentConflicts"] = assignmentConflicts > 0
+                    ? assignmentConflicts.ToString(CultureInfo.InvariantCulture)
+                    : null,
             });
     }
 }
