@@ -53,12 +53,18 @@ public interface IExcelImporter
 /// </summary>
 /// <param name="TableCode">Таблиця (як <c>tableCode</c> відмови-конфлікту перегляду).</param>
 /// <param name="RowKey">Рядок (як <c>rowKey</c> відмови-конфлікту перегляду).</param>
+/// <param name="TableInstanceId">
+/// ✎ B27: екземпляр таблиці (як <c>tableInstanceId</c> відмови-конфлікту перегляду) — ЯКИЙ аркуш-копія
+/// перезаписується. Та сама таблиця з тим самим ключем рядка стоїть на «Vessel 1» і «Vessel 2», і без екземпляра
+/// позначка одного рядка перезаписувала всі копії. <c>null</c> — клієнт до B27: колишня поведінка (усі екземпляри
+/// з цими таблицею й рядком), щоб застосування не ламалося посеред оновлення.
+/// </param>
 /// <remarks>
 /// ⚠ Перелік рядків, а не прапорець на весь імпорт: згода дається на ТЕ, що
 /// людина бачила й позначила, а не «на все, що там буде». Рядок, а не комірка:
 /// конфлікт визначає версія рядка, тож усі його змінені комірки — один конфлікт.
 /// </remarks>
-public sealed record ImportOverwriteRow(string TableCode, string RowKey);
+public sealed record ImportOverwriteRow(string TableCode, string RowKey, long? TableInstanceId = null);
 
 /// <summary>Результат попереднього перегляду імпорту.</summary>
 /// <param name="PreviewToken">Токен для застосування; діє обмежений час.</param>
@@ -121,6 +127,19 @@ public sealed record ImportChange(
     /// такій комірці — повернення формули.
     /// </summary>
     public bool ReplacesFormula { get; init; }
+
+    /// <summary>
+    /// ✎ B20 (F13 #829, C-3): показувана назва аркуша-копії мовами каталогу («Vessel 1», «Vessel 2» —
+    /// <c>SheetCopyNaming</c>), коли в групі аркуша є копії: та сама таблиця лежить на кожній копії, і назва таблиці
+    /// сама не каже, ЯКИЙ аркуш зміниться. <c>null</c> — аркуш без копій (досить назви таблиці).
+    /// </summary>
+    public Ecr.Domain.ValueObjects.LocalizedText? SheetNameL10n { get; init; }
+
+    /// <summary>
+    /// ✎ B27: екземпляр таблиці рядка — його клієнт повертає в <see cref="ImportOverwriteRow.TableInstanceId"/>, щоб
+    /// перезапис зачепив лише позначений аркуш-копію. <c>null</c> — план до цієї правки.
+    /// </summary>
+    public long? TableInstanceId { get; init; }
 }
 
 /// <summary>Відхилена комірка з причиною — користувач має бачити, які саме (ФВ-4.4).</summary>
@@ -150,4 +169,17 @@ public sealed record ImportRejection(
     string? TableCode = null,
     Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null,
     string? MessageKey = null,
-    string? ExcelCell = null);
+    string? ExcelCell = null)
+{
+    /// <summary>
+    /// ✎ B20 (F13 #829, C-3): показувана назва аркуша-копії, як у <see cref="ImportChange.SheetNameL10n"/> — людина
+    /// бачить, ЯКИЙ аркуш відхилено («Vessel 2» поданий, «Vessel 1» — ні). <c>null</c> — аркуш без копій.
+    /// </summary>
+    public Ecr.Domain.ValueObjects.LocalizedText? SheetNameL10n { get; init; }
+
+    /// <summary>
+    /// ✎ B27: екземпляр таблиці відмови; для конфлікту «змінено після експорту» клієнт повертає його в
+    /// <see cref="ImportOverwriteRow.TableInstanceId"/>. <c>null</c> — відмова поза таблицею книги (екземпляра немає).
+    /// </summary>
+    public long? TableInstanceId { get; init; }
+}
