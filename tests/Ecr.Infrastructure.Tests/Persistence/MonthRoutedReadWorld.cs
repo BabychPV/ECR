@@ -130,6 +130,63 @@ internal sealed class MonthRoutedReadWorld : IDisposable
     }
 
     /// <summary>
+    /// D-214: профіль <paramref name="reader"/> плюс шар ролі, звужений ОДНИМ періодом <paramref name="narrowedTo"/>, із
+    /// забороною колонки <paramref name="columnId"/> (як призначення ролі з періодом у <c>AccessDecisionService</c>): у
+    /// періоді шару колонка закрита, поза ним — видима, як була. Профіль не змінює жодного фільтра доступу, лише дані.
+    /// </summary>
+    public AccessProfile DeniedInPeriod(AccessBuilder reader, int columnId, int narrowedTo)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        var own = reader.Build();
+        var layer = new NarrowedAccess(
+            SheetCodes: null,
+            new PeriodKey(narrowedTo),
+            new PeriodKey(narrowedTo),
+            new Dictionary<string, GrantLevel>(StringComparer.Ordinal),
+            new HashSet<string>(StringComparer.Ordinal) { $"{ResourceKind.Column}:{columnId}" },
+            new HashSet<int>(),
+            new HashSet<string>(StringComparer.Ordinal));
+
+        return new AccessProfile
+        {
+            CacheKey = $"{own.CacheKey}|d214:{columnId}@{narrowedTo}",
+            UserId = own.UserId,
+            SecurityStamp = own.SecurityStamp,
+            Permissions = own.Permissions,
+            Grants = own.Grants,
+            Denies = own.Denies,
+            RoleIds = own.RoleIds,
+            UnscopedRoleIds = own.UnscopedRoleIds,
+            Scoped = new Dictionary<int, ScopedProjectAccess>
+            {
+                [Doc.ProjectId] = new(
+                    new Dictionary<string, GrantLevel>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal),
+                    new HashSet<int>(), new HashSet<string>(StringComparer.Ordinal))
+                {
+                    Narrowed = [layer],
+                },
+            },
+        };
+    }
+
+    /// <summary>
+    /// Передумова диференційних тестів D-214: чи бачить <paramref name="profile"/> колонку в періоді перегляду і в
+    /// періоді-власнику — за справжніми межами читання <see cref="AccessDecisionService"/>.
+    /// </summary>
+    public async Task<(bool InView, bool InOwner)> ColumnReadableAsync(
+        AccessProfile profile, int columnId, int viewPeriod, int ownerPeriod)
+    {
+        await using var db = CreateContext();
+        var router = Router(db);
+        var metadata = Metadata(db);
+        var scope = await Access(db, profile, metadata, router)
+            .ReadScopeAsync(profile, Doc.DocumentId, CancellationToken.None);
+        return (
+            scope.InPeriod(new PeriodKey(viewPeriod)).CanReadColumn(columnId),
+            scope.InPeriod(new PeriodKey(ownerPeriod)).CanReadColumn(columnId));
+    }
+
+    /// <summary>
     /// Правка справжнім <see cref="PatchCellsHandler"/> з екземпляра періоду <paramref name="viewPeriod"/> (як клієнт),
     /// від імені <paramref name="userId"/>. Аліаси: <c>PLAIN</c>, <c>M1</c>…<c>M12</c>.
     /// </summary>
