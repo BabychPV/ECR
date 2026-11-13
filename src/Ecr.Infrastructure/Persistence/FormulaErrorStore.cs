@@ -155,6 +155,12 @@ public sealed class FormulaErrorStore(EcrDbContext db) : IFormulaErrorStore
     /// ✎ F13 P3-1: позиції рядків екземплярів із помилками документа за період — один прохід <c>ROW_NUMBER()</c> у порядку
     /// зрізу сітки (Ordinal опису рядка шаблону за RowKey, немає — у кінець; далі Id). Ключ партиції — в обох таблицях.
     /// </summary>
+    /// <remarks>
+    /// ✎ B93 (d): RowKey порівнюється ТОЧНО, як у сітці (<c>GetTableSliceHandler</c>: словник описів рядків зі
+    /// <c>StringComparer.Ordinal</c>), а не за collation бази (CI_AS): <c>Latin1_General_BIN2</c> — регістр і наголоси,
+    /// <c>DATALENGTH</c> — хвостові пробіли, які <c>=</c> у SQL Server ігнорує навіть у BIN2. Інакше ключ, що відрізняється
+    /// лише регістром, дав би в деталях інший номер рядка, ніж у сітці. Предикат TableDefId лишається пошуковим.
+    /// </remarks>
     private const string RowPositionsSql = """
         SELECT r.PeriodKey AS PeriodKey, r.Id AS RowId,
                CAST(ROW_NUMBER() OVER (PARTITION BY r.TableInstanceId
@@ -166,7 +172,9 @@ public sealed class FormulaErrorStore(EcrDbContext db) : IFormulaErrorStore
             ON i.TableInstanceId = r.TableInstanceId
          OUTER APPLY (SELECT MIN(rd.Ordinal) AS Ordinal
                         FROM cfg.RowDef AS rd
-                       WHERE rd.TableDefId = i.TableDefId AND rd.RowKey = r.RowKey AND rd.IsDeleted = 0) AS d
+                       WHERE rd.TableDefId = i.TableDefId AND rd.IsDeleted = 0
+                         AND rd.RowKey COLLATE Latin1_General_BIN2 = r.RowKey COLLATE Latin1_General_BIN2
+                         AND DATALENGTH(rd.RowKey) = DATALENGTH(r.RowKey)) AS d
          WHERE r.PeriodKey = @positionsPeriodKey AND r.IsDeleted = 0
         """;
 
