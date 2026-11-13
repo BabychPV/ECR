@@ -394,6 +394,12 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         /// <summary>Інший код таблиці (<c>…_NEW</c>) і інший код колонки C2 (<c>C2X_…</c>).</summary>
         TableAndColumnRenamed,
 
+        /// <summary>V-5: та сама таблиця (код не змінюється), лише колонка C2 має інший код (<c>C2X_…</c>).</summary>
+        ColumnRenamed,
+
+        /// <summary>F13 #872: як <see cref="ColumnRenamed"/> і ще нова колонка C4 типу Formula (2 * 21) — є і перерахунок, і вʼюхи.</summary>
+        ColumnRenamedAddsFormula,
+
         /// <summary>LP-29: C2 була Decimal 28/12, у цілі — 34/16 (розширення).</summary>
         C2PrecisionWidened,
 
@@ -566,7 +572,7 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         void Column(string code, int ordinal, CellDataType type)
         {
             // ⚠ Ключ словника — логічне ім'я (C2); код у цільовій версії може відрізнятися (C2X_…).
-            var codePrefix = code == "C2" && target == Target.TableAndColumnRenamed ? "C2X" : code;
+            var codePrefix = code == "C2" && (target is Target.TableAndColumnRenamed or Target.ColumnRenamed or Target.ColumnRenamedAddsFormula) ? "C2X" : code;
             var column = new ColumnDef(table.Id, EcrCode.Create($"{codePrefix}_{tag}"), Name($"{code} relabelled"), ordinal, type);
             columns[code] = column;
             db.ColumnDefs.Add(column);
@@ -597,7 +603,7 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
             Column("C4", 4, CellDataType.Decimal);
         }
 
-        if (target == Target.AddsFormulaColumn)
+        if (target is Target.AddsFormulaColumn or Target.ColumnRenamedAddsFormula)
         {
             Column("C4", 4, CellDataType.Formula);
         }
@@ -609,7 +615,7 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         db.RowDefs.AddRange(rowDefs);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        if (target == Target.AddsFormulaColumn)
+        if (target is Target.AddsFormulaColumn or Target.ColumnRenamedAddsFormula)
         {
             // LP-41: константна формула — залежностей від комірок немає, тож перерахунок її рахує без публікації графа.
             var formula = new FormulaDef(table.Id, FormulaScope.Column, "2 * 21", ExpressionDialect.Template);

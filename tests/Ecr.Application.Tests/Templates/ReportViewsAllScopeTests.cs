@@ -78,7 +78,11 @@ public sealed class ReportViewsAllScopeTests
         Assert.Empty(other.ReceivedCalls());
         var failure = Assert.Single(status.Snapshot());
         Assert.Null(failure.TemplateVersionId);
-        Assert.Contains("queue down", failure.Message, StringComparison.Ordinal);
+
+        // ✎ F13 #872 delta P2 (SEC): сирий текст винятку на картку (анонімний /health/ready) не йде — лише заголовок і
+        // кореляція (ReportViewSitesSafeTextTests).
+        Assert.Contains("not queued at startup", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("queue down", failure.Message, StringComparison.Ordinal);
     }
 
     [Theory]

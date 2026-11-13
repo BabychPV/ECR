@@ -128,11 +128,15 @@ public sealed partial class PublishTemplateVersionHandler(
 #pragma warning restore CA1031
         {
             // Лише власна позначка: новішу (паралельна публікація з поставленою задачею) не знімати.
+            // ⛔ SEC (TIER2, F13 #872 delta P2): картку читає анонімний /health/ready — сирий ex.Message туди не йде
+            // (ReportViewQueueFailure); повний виняток — у Warning під тією самою кореляцією.
+            var correlation = ReportViewQueueFailure.Correlation(currentUser.CorrelationId);
             viewStatus?.Settled(templateId, generation);
-            viewStatus?.Failed(new ReportViewFailure(templateVersionId, 0, "Report view regeneration was not queued: " + ex.Message));
+            viewStatus?.Failed(ReportViewQueueFailure.Of(
+                templateVersionId, ex, "Report view regeneration was not queued.", correlation));
             if (logger is not null)
             {
-                LogViewsFailed(logger, templateVersionId, null, ex.Message);
+                LogViewsNotQueued(logger, ex, templateVersionId, correlation);
             }
         }
     }
@@ -381,6 +385,12 @@ public sealed partial class PublishTemplateVersionHandler(
         Message = "Публікація версії {TemplateVersionId} збережена, але вʼюхи rpt.v_* не створено (код {Code}): {Reason}. "
             + "SSRS не бачить цієї версії, доки причину не усунуто; повтор — старт застосунку чи EXEC rpt.usp_GenerateTemplateViews.")]
     private static partial void LogViewsFailed(ILogger logger, int templateVersionId, int? code, string reason);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Публікація версії {TemplateVersionId} збережена, але перегенерацію вʼюх rpt.v_* не поставлено; кореляція {CorrelationId}. "
+            + "Повтор — старт застосунку чи EXEC rpt.usp_GenerateTemplateViews.")]
+    private static partial void LogViewsNotQueued(ILogger logger, Exception exception, int templateVersionId, string correlationId);
 
     [LoggerMessage(
         Level = LogLevel.Warning,

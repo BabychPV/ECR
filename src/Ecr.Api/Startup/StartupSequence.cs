@@ -229,6 +229,7 @@ public static partial class StartupSequence
                     scheduler,
                     scope.ServiceProvider.GetRequiredService<IReportViewGenerator>(),
                     scope.ServiceProvider.GetService<IReportViewStatus>(),
+                    logger,
                     CancellationToken.None)
                 .ConfigureAwait(false);
             if (!queued && scheduler is not null)

@@ -48,6 +48,8 @@ export function refusalText(reason: string): string {
       return t('documents.migrateRefusalMappingsNotMapped');
     case 'sheetCopiesNotMapped':
       return t('documents.migrateRefusalSheetCopiesNotMapped');
+    case 'assignmentsConflict':
+      return t('documents.migrateRefusalAssignmentsConflict');
     default:
       return reason;
   }
