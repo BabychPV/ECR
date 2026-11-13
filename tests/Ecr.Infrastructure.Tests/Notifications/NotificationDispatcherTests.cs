@@ -81,7 +81,7 @@ public sealed class NotificationDispatcherTests(SqlServerFixture sql)
         // не йде — лише код і кореляція. Мутація: повернути `error.Message` — тест червоний.
         Assert.Contains("ECR-SYS-0500", failed.Error!, StringComparison.Ordinal);
         Assert.Contains("correlation", failed.Error!, StringComparison.Ordinal);
-        foreach (var secret in new[] { "Secret123", "db01", "pi01.internal", "вебхук" })
+        foreach (var secret in new[] { "Secret123", "sqlq-db01", "pi01.internal", "вебхук" })
         {
             Assert.DoesNotContain(secret, failed.Error!, StringComparison.Ordinal);
         }
@@ -359,7 +359,7 @@ public sealed class NotificationDispatcherTests(SqlServerFixture sql)
 
             return fails
                 ? Task.FromException(new InvalidOperationException(
-                    "Канал «boom»: вебхук https://pi01.internal:5450/hook відповів 500. Server=db01;Password=Secret123"))
+                    "Канал «boom»: вебхук https://pi01.internal:5450/hook відповів 500. Server=sqlq-db01;Password=Secret123"))
                 : Task.CompletedTask;
         }
     }

@@ -152,7 +152,7 @@ public sealed class CollectionRunnerRefusalEventSqlTests(SqlServerFixture sql)
         try
         {
             var source = Source(request => request.FromUtc >= FromUtc
-                ? throw new HttpRequestException("AF is down: https://pi01.internal:5450/piwebapi Server=db01;Password=Secret123")
+                ? throw new HttpRequestException("AF is down: https://pi01.internal:5450/piwebapi Server=sqlq-db01;Password=Secret123")
                 : Task.FromResult(new CollectionResult([], [], null)));
 
             await RunAsync(source, stand.SourceEntityId);
@@ -171,7 +171,7 @@ public sealed class CollectionRunnerRefusalEventSqlTests(SqlServerFixture sql)
                 "ECR-SYS-0500",
                 CollectionRunnerMessageEnvelopeTests.Decode(run.ErrorMessage).Inner!.Params!["detail"],
                 StringComparison.Ordinal);
-            foreach (var secret in new[] { "AF is down", "pi01.internal", "db01", "Secret123" })
+            foreach (var secret in new[] { "AF is down", "pi01.internal", "sqlq-db01", "Secret123" })
             {
                 Assert.DoesNotContain(secret, run.ErrorMessage!, StringComparison.Ordinal);
             }

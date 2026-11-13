@@ -79,7 +79,7 @@ public sealed class CollectionRunnerMessageEnvelopeTests
         world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
             .Returns<Task<CollectionResult>>(_ => throw new HttpRequestException(
                 "No connection could be made (pi01.internal:5450) https://pi01.internal:5450/piwebapi "
-                + "Server=db01;Password=Secret123 C:\\Users\\svc\\app\\secret.cfg SELECT * FROM sec.User"));
+                + "Server=sqlq-db01;Password=Secret123 C:\\Users\\svc\\app\\secret.cfg SELECT * FROM sec.User"));
 
         await world.Runner.RunAsync(SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None);
 
@@ -92,7 +92,7 @@ public sealed class CollectionRunnerMessageEnvelopeTests
         var detail = reason.Inner.Params!["detail"];
         Assert.Contains("ECR-SYS-0500", detail, StringComparison.Ordinal);
         Assert.Contains("correlation", detail, StringComparison.Ordinal);
-        foreach (var secret in new[] { "Secret123", "db01", "secret.cfg", "sec.User", "pi01.internal" })
+        foreach (var secret in new[] { "Secret123", "sqlq-db01", "secret.cfg", "sec.User", "pi01.internal" })
         {
             Assert.DoesNotContain(secret, raw!, StringComparison.Ordinal);
         }

@@ -27,13 +27,15 @@ namespace Ecr.Adapters.Tests;
 /// </remarks>
 public sealed class SourceConnectFailureTextTests
 {
-    private static readonly string[] Secrets = ["Secret123", "db01", "pi01.internal"];
+    // B52: ім'я сервера з не-hex символами («sqlq-»): id кореляції в повідомленні — випадкові hex-цифри, і голе
+    // «db01» траплялось у ньому (напр. «642bbdb01a…») — червоне без жодного витоку.
+    private static readonly string[] Secrets =["Secret123", "sqlq-db01", "pi01.internal"];
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Sql_джерело_зі_зіпсованим_рядком_не_віддає_текст_розбору()
     {
-        const string endpoint = "Server=db01;User Id=svc;Password=Secret123;Connect Timeout=abc";
+        const string endpoint = "Server=sqlq-db01;User Id=svc;Password=Secret123;Connect Timeout=abc";
         var parseText = Assert.Throws<FormatException>(() => new SqlConnectionStringBuilder(endpoint)).Message;
         var log = new CapturingLogger<SqlDataSource>();
         var adapter = new SqlDataSource(

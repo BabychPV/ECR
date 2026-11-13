@@ -275,7 +275,11 @@ public sealed partial class OutboxDispatcher(
             // двохсот подій обривало вбиття процесу — і всі вже ДОСТАВЛЕНІ
             // листи лишалися в базі як `Sending`, тобто наступний прогін
             // надсилав їх удруге.
-            if (!await PersistAsync(item, claim.Token, ct).ConfigureAwait(false))
+            // ⛔ D-13: результат уже прийнятого SMTP листа фіксується НЕскасовуваним токеном. Зі
+            // скасовуваним штатна зупинка служби одразу після відправки кидала OperationCanceledException
+            // ще до UPDATE: рядок лишався `Sending`, ReclaimStaleAsync повертав його в чергу — і лист ішов
+            // удруге. UPDATE — один рядок, мілісекунди; перевірка `deadline`/`ct` на наступній ітерації лишається.
+            if (!await PersistAsync(item, claim.Token, CancellationToken.None).ConfigureAwait(false))
             {
                 // ⛔ Нуль оновлених рядків = захоплення вже не наше (інший
                 // відправник забрав протухлий рядок). Решта партії теж більше

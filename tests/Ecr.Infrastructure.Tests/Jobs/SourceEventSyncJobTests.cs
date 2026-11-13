@@ -1342,6 +1342,45 @@ public sealed partial class SourceEventSyncJobTests(SqlServerFixture sql)
         Assert.Equal(1, Convert.ToInt32(await ScalarAsync(StyleCountSql(stand)), CultureInfo.InvariantCulture));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-11")]
+    public async Task Full_reconcile_removing_row_also_removes_formula_overrides()
+    {
+        // ⛔ D-11 (аудит 2026-11): doc.CellFormulaOverride (D-461) без FK на рядок — повна звірка видаляла рядок події,
+        // а позначка «ручне замість формули» лишалась сиротою (зайва адреса в ReadKeysAsync, хибний OverrideLost у плані
+        // переносу версії). Мутація: прибрати DELETE doc.CellFormulaOverride у JournalAndDeleteAsync — 2 замість 1.
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        await ExecuteAsync($"""
+            INSERT INTO doc.CellFormulaOverride (PeriodKey, TableRowId, ColumnDefId, TableInstanceId, Reason, SetByUserId, SetAt)
+            SELECT r.PeriodKey, r.Id,
+                   (SELECT TOP 1 c.Id FROM cfg.ColumnDef c WHERE c.TableDefId = ti.TableDefId ORDER BY c.Id),
+                   ti.Id, N'D-11 test', 1, SYSUTCDATETIME()
+            FROM doc.TableRow r JOIN doc.TableInstance ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
+            WHERE ti.DocumentId = {stand.DocumentId} AND r.RowKey IN (N'EF-E1', N'EF-E2');
+            """);
+        Assert.Equal(2, Convert.ToInt32(await ScalarAsync(OverrideCountSql(stand)), CultureInfo.InvariantCulture));
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source);
+
+        Assert.Equal(["EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey));
+
+        // Лишилась рівно позначка живого рядка EF-E2; позначки видаленого EF-E1 немає.
+        Assert.Equal(1, Convert.ToInt32(await ScalarAsync(OverrideCountSql(stand)), CultureInfo.InvariantCulture));
+        Assert.Equal(1, Convert.ToInt32(await ScalarAsync(
+            OverrideCountSql(stand) + " AND EXISTS (SELECT 1 FROM doc.TableRow r WHERE r.PeriodKey = o.PeriodKey "
+            + "AND r.Id = o.TableRowId AND r.RowKey = N'EF-E2')"), CultureInfo.InvariantCulture));
+    }
+
+    private static string OverrideCountSql(dynamic stand)
+        => $"SELECT COUNT(*) FROM doc.CellFormulaOverride o WHERE o.TableInstanceId IN " +
+           $"(SELECT ti.Id FROM doc.TableInstance ti WHERE ti.DocumentId = {stand.DocumentId})";
+
     private static string StyleCountSql(dynamic stand)
         => $"SELECT COUNT(*) FROM doc.CellStyle s JOIN doc.TableRow r ON r.PeriodKey = s.PeriodKey AND r.Id = s.TableRowId " +
            $"JOIN doc.TableInstance ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId WHERE ti.DocumentId = {stand.DocumentId}";

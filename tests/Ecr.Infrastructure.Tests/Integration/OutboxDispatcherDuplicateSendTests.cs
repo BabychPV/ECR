@@ -223,6 +223,79 @@ public sealed class OutboxDispatcherDuplicateSendTests(SqlServerFixture sql)
         Assert.Equal(1, DeliveredCount(sender, third));
     }
 
+    /// <summary>
+    /// Відправник, що «зупиняє службу» одразу після того, як SMTP прийняв ПЕРШИЙ лист: скасовує
+    /// токен і повертається успішно; далі, як справжній транспорт, кидає на скасованому токені.
+    /// </summary>
+    private sealed class StopAfterFirstSendSender(CancellationTokenSource stop) : INotificationSender
+    {
+        public List<string> Delivered { get; } = [];
+
+        public bool IsConfigured => true;
+
+        public Task SendAsync(
+            IReadOnlyList<string> recipients, string subject, string body, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            Delivered.Add(subject);
+
+            if (Delivered.Count == 1)
+            {
+                stop.Cancel();
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-13")]
+    public async Task Cancellation_right_after_send_still_persists_sent()
+    {
+        var start = new DateTime(2035, 4, 4, 0, 0, 0, DateTimeKind.Utc);
+        var clock = new TestClock(start);
+        var (first, second, _) = await SeedThreeAsync(start).ConfigureAwait(true);
+
+        using var stop = new CancellationTokenSource();
+        var sender = new StopAfterFirstSendSender(stop);
+
+        await using (var db = CreateContext())
+        {
+            // ⚠ Штатна зупинка служби: FlushAsync сам вирішує, чи завершитися OCE на наступному
+            // кроці, — тест не прив'язується до того, де саме вона спливе.
+            try
+            {
+                await new OutboxDispatcher(db, clock, sender).FlushAsync(stop.Token).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
+        Assert.Single(sender.Delivered);
+        Assert.Contains(first, sender.Delivered[0], StringComparison.Ordinal);
+
+        // ⛔ D-13: лист, прийнятий SMTP до зупинки, — `Sent` і без захоплення. Без фіксу UPDATE
+        // кидав OCE на скасованому токені, рядок лишався `Sending`, і через ClaimTimeout
+        // ReclaimStaleAsync повертав його в чергу — дубль листа.
+        await AssertStateAsync(first, "Sent").ConfigureAwait(true);
+        await AssertUnclaimedAsync(first).ConfigureAwait(true);
+
+        // Наступний прогін після спливання оренди не надсилає перший лист удруге.
+        clock.Set(start + OutboxDispatcher.ClaimTimeout + TimeSpan.FromMinutes(1));
+        using var unused = new CancellationTokenSource();
+        var resumed = new StopAfterFirstSendSender(unused);
+        await using (var db = CreateContext())
+        {
+            await new OutboxDispatcher(db, clock, resumed).FlushAsync(CancellationToken.None).ConfigureAwait(true);
+        }
+
+        Assert.DoesNotContain(resumed.Delivered, s => s.Contains(first, StringComparison.Ordinal));
+        Assert.Contains(resumed.Delivered, s => s.Contains(second, StringComparison.Ordinal));
+    }
+
     private static int DeliveredCount(ScriptedSender sender, string marker)
         => sender.Delivered.Count(d => d.Subject.Contains(marker, StringComparison.Ordinal));
 
