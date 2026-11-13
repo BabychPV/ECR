@@ -1244,8 +1244,8 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
             """;
     }
 
-    /// <inheritdoc />
-    public async Task<IReadOnlyCollection<(long TableRowId, int ColumnDefId)>> ReadOutOfWindowCellsAsync(
+    /// <summary>Комірки з останньою зміною поза вікном рівно за <c>ColumnDefId</c> журналу (B49: родовід — <see cref="ReadOutOfWindowCellsAsync"/>).</summary>
+    private async Task<IReadOnlyCollection<(long TableRowId, int ColumnDefId)>> ReadOutOfWindowCellsExactAsync(
         long documentId, int periodKey, CancellationToken ct)
     {
         await using var connection = new SqlConnection(db.Database.GetConnectionString());
