@@ -53,6 +53,26 @@ export function registryOf(formula: string | null | undefined): string | null {
   return match?.[1] ?? null;
 }
 
+/**
+ * ✎ B78 F13 P2: колонки-довідники, з яких формула бере ПОЛЕ запису (`REGFIELD([Land_TypeFuel], 'NAME')`): лише їхні
+ * значення сервер підставляє назвою запису («Diesel»). Текстові колонки-ключі пошуку (`REGFIND('…', [TypeOfStreams])`,
+ * «Makat Gas - Макатский газ») — не довідникові, у перелік палива не йдуть.
+ */
+export function lookupColumnsOf(formula: string | null | undefined): ReadonlySet<string> {
+  const columns = new Set<string>();
+  if (formula === null || formula === undefined) return columns;
+  for (const match of formula.matchAll(/REGFIELD\(\s*\[([^\]]+)\]\s*,/gi)) {
+    if (match[1] !== undefined) columns.add(match[1].trim().toLowerCase());
+  }
+
+  return columns;
+}
+
+/** Значення входу — назва запису довідника (не Id, який сервер не зміг назвати). */
+function isLookupName(value: string | null | undefined): value is string {
+  return value !== null && value !== undefined && value.trim() !== '' && !/^\d+$/.test(value.trim());
+}
+
 function tableKey(tableCode: string, copy: number | null): string {
   return copy === null ? tableCode : `${tableCode}#${String(copy)}`;
 }
@@ -144,8 +164,11 @@ export function buildIssueCauses(rows: UnmatchedRows, tables: readonly DocumentT
     }
 
     if (error.kind === 'Error') {
+      // ✎ B78 F13 P2: «паливо» — лише входи з довідникових колонок формули, назвою запису; текстові входи пошуку
+      // (Stream / TypeOfFuel / TypeOfStreams) не рахуються й не показуються.
+      const lookups = lookupColumnsOf(error.formula);
       for (const input of error.inputs ?? []) {
-        if (input.value !== null && input.value !== undefined && input.value !== '') cause.subjects.add(input.value);
+        if (lookups.has(input.columnCode.toLowerCase()) && isLookupName(input.value)) cause.subjects.add(input.value);
       }
     }
     cause.indicators.add(localized(error.columnHeaderL10n) || error.columnCode);

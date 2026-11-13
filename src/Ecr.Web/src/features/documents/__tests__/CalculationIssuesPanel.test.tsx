@@ -99,6 +99,42 @@ describe('CalculationIssuesPanel (B78)', () => {
     expect(screen.getByTestId('document-calc-issue-open-hse400')).toBeDefined();
   });
 
+  it('✎ F13 P2 (doc 96, жовтень): «паливо» — лише назви записів довідника, без текстових входів пошуку', () => {
+    // Форма doc 96: T3_00 читає довідникову [Land_TypeFuel] (назвою — сервер), інші таблиці — текстову [TypeOfStreams].
+    const streams = (row: number, stream: string): FormulaErrorIssue => ({
+      ...hse400(row, 'Density0', 'Gas density at 0', stream),
+      formula:
+        "REGFIELD(REGFIND('LAND_HSE400_COMPOSITION', [Period].Year, [Period].Sequence, REGFIELD(REGFIND('LAND_HSE400_STREAM', [TypeOfStreams]), 'PREFIX'), 'Density0'), 'VALUE')",
+      inputs: [{ tableCode: 'T1', rowKey: `S${String(row)}`, columnCode: 'TypeOfStreams', periodOffset: 0, value: stream }],
+    });
+    show(
+      rowsOf({
+        formulaErrors: [
+          hse400(1, 'Density', 'Gas density', 'Diesel'),
+          hse400(2, 'Density', 'Gas density', 'Gasoline'),
+          // Довідниковий Id, який сервер назвою не підтвердив, — не «паливо».
+          hse400(3, 'Density', 'Gas density', '39'),
+          streams(4, 'Makat Gas - Макатский газ'),
+          streams(5, 'Fuel Gas - Топливный газ'),
+          {
+            ...hse400(6, 'Density', 'Gas density', 'Diesel'),
+            inputs: [
+              { tableCode: 'T1', rowKey: 'LTD-A06', columnCode: 'Land_TypeFuel', periodOffset: 0, value: 'Diesel' },
+              { tableCode: 'T1', rowKey: 'LTD-A06', columnCode: 'Stream', periodOffset: 0, value: 'Diesel - Дизель' },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(screen.getByTestId('document-calc-issue-title').textContent).toContain('document.calcIssues.hse400.title (count=2)');
+    const detail = screen.getByTestId('document-calc-issue-detail').textContent ?? '';
+    expect(detail).toContain('Diesel, Gasoline');
+    expect(detail).not.toContain('Makat');
+    expect(detail).not.toContain('Дизель');
+    expect(detail).not.toContain('39');
+  });
+
   it('«Показати клітинки» відкриває першу комірку причини і розгортає деталі', async () => {
     const onOpenCell = show(rowsOf({ formulaErrors: [hse400(2, 'Density', 'Gas density', 'Diesel')] }));
 
