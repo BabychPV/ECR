@@ -34,12 +34,14 @@ public abstract class UserPerMinuteRateLimitPolicy : IRateLimiterPolicy<string>
     /// <param name="permitKey">Ключ конфігурації межі.</param>
     /// <param name="detailKey">Ключ каталогу подробиці відмови.</param>
     /// <param name="detailFallback">Запасна подробиця — коли каталог недоступний.</param>
+    /// <param name="defaultPermit">Межа, коли конфігурація мовчить; типово <see cref="DefaultPermitPerMinute"/>.</param>
     protected UserPerMinuteRateLimitPolicy(
-        IConfiguration configuration, string permitKey, string detailKey, string detailFallback)
+        IConfiguration configuration, string permitKey, string detailKey, string detailFallback,
+        int defaultPermit = DefaultPermitPerMinute)
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
-        _permit = configuration.GetValue(permitKey, DefaultPermitPerMinute);
+        _permit = configuration.GetValue(permitKey, defaultPermit);
         _detailKey = detailKey;
         _detailFallback = detailFallback;
     }

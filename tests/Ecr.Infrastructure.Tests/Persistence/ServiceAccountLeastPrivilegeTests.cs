@@ -201,6 +201,36 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
     }
 
     /// <summary>
+    /// R-5 (аудит 2026-11-10; D-66, D-71): служба не змінює <c>arc.*</c> напряму — архів пишуть лише процедури
+    /// <c>WITH EXECUTE AS OWNER</c> (їх шлях — <see cref="Нічна_перевірка_партицій_виконує_процедури_аудиту_під_службою"/>).
+    /// На колонсторі тригерів незмінності немає, тож без <c>DENY</c> <c>db_datawriter</c> дозволяв би стерти архівний рік.
+    /// Мутація: прибрати <c>"arc"</c> з <see cref="ServiceAccountGrants.DeniedWriteSchemas"/> — команди проходять (0 рядків),
+    /// тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Служба_не_може_змінювати_архів_напряму()
+    {
+        await using var db = database.LowPrivContext();
+
+        foreach (var statement in new[]
+                 {
+                     "DELETE FROM arc.CellValue WHERE 1 = 0;",
+                     "UPDATE arc.TableRow SET RowKey = RowKey WHERE 1 = 0;",
+                     "INSERT INTO arc.TableRow (PeriodKey, Id, TableInstanceId, RowKey, Ordinal, IsDeleted, IsOrphaned, ModifiedAt) "
+                     + "SELECT TOP (0) PeriodKey, Id, TableInstanceId, RowKey, Ordinal, IsDeleted, IsOrphaned, ModifiedAt FROM arc.TableRow;",
+                 })
+        {
+            var denied = await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlRawAsync(statement));
+            Assert.True(denied.Number == 229, $"{statement} → {denied.Number}: {denied.Message}");
+        }
+
+        // DENY — лише на запис: читання архіву (журнал змін, AuditReader) лишається.
+        Assert.Equal(0, await ScalarAsync<int>(db, "SELECT COUNT(*) AS Value FROM (SELECT TOP (0) 1 AS X FROM arc.CellValue) t"));
+    }
+
+    /// <summary>
     /// Без EXECUTE на процедуру <c>rpt.*</c> перевірка старту не бачить її (OBJECT_ID = NULL) — попередження мусить назвати
     /// і цю причину, а не лише «базу оновлено без кроку схеми». Мутація: повернути старий текст у
     /// <c>SchemaValidator.ValidateSqlOnlyProceduresAsync</c> — тест червоний.

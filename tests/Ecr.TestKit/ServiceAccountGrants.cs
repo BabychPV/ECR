@@ -35,6 +35,12 @@ public static class ServiceAccountGrants
     /// <summary>Скалярні функції, які застосунок викликає у власних запитах (не через вʼюху) — право <c>EXECUTE</c>.</summary>
     public static readonly IReadOnlyList<string> Functions = ["doc.fn_VersionOf"];
 
+    /// <summary>
+    /// R-5: схеми, запис у які службі ЗАБОРОНЕНО поверх <c>db_datawriter</c>: архів пишуть лише процедури
+    /// <c>WITH EXECUTE AS OWNER</c> (D-66, D-71); DENY на викликача на них не діє.
+    /// </summary>
+    public static readonly IReadOnlyList<string> DeniedWriteSchemas = ["arc"];
+
     /// <summary>Скрипт видачі прав користувачу бази <paramref name="principal"/> — без будь-чого понад перелік.</summary>
     /// <param name="principal">Ім'я користувача бази (без дужок).</param>
     /// <param name="except">Об'єкт, право на який пропустити (для доказу «без цього права шлях падає»).</param>
@@ -62,6 +68,11 @@ public static class ServiceAccountGrants
         foreach (var procedure in Procedures.Concat(Functions).Where(p => p != except))
         {
             sql.Append("GRANT EXECUTE ON OBJECT::").Append(procedure).Append(" TO ").Append(who).AppendLine(";");
+        }
+
+        foreach (var schema in DeniedWriteSchemas)
+        {
+            sql.Append("DENY INSERT, UPDATE, DELETE ON SCHEMA::").Append(schema).Append(" TO ").Append(who).AppendLine(";");
         }
 
         return sql.ToString();

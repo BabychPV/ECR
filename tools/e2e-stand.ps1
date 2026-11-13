@@ -546,6 +546,9 @@ $env:ECR_Auth__IdleTimeout__MinimumMinutes = '1'
 $env:ECR_Collection__MonthColumnRouting = 'true'
 # RPT-STABLE Part B: перенос версії «з місяця» (на живому стенді прапор увімкнено; типово false) - потрібен versionMigrationRange.spec.ts.
 $env:ECR_Documents__VersionMigration__FromMonthEnabled = 'true'
+# S-6: межа запису в чат (20/хв на користувача). `tableChatLiveRefresh.spec.ts` пише 25 повідомлень поспіль від
+# адміністратора, і інші специ чату пишуть від того самого користувача. Лише на одноразовому стенді; типове значення не змінюється.
+$env:ECR_Security__RateLimit__DiscussionPostPermitPerMinute = '1000'
 
 Step 'старт застосунку'
 $startArgs = @{

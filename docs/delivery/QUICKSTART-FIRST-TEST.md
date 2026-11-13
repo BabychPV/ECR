@@ -87,6 +87,7 @@ GRANT EXECUTE ON OBJECT::arc.usp_ArchiveAudit TO [<SERVICE_ACCOUNT>];
 GRANT EXECUTE ON OBJECT::rpt.usp_GenerateTemplateViews TO [<SERVICE_ACCOUNT>];
 GRANT EXECUTE ON OBJECT::rpt.usp_GenerateStableViews TO [<SERVICE_ACCOUNT>];
 GRANT EXECUTE ON OBJECT::doc.fn_VersionOf TO [<SERVICE_ACCOUNT>];
+DENY INSERT, UPDATE, DELETE ON SCHEMA::arc TO [<SERVICE_ACCOUNT>];
 ```
 <!-- /generated:grants -->
 
