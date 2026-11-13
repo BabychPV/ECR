@@ -141,7 +141,7 @@ public sealed class FormulaErrorRecalculationTests
         return dirty;
     }
 
-    private RecalculationService Service(bool withStore = true)
+    private RecalculationService Service(bool withStore = true, IMonthColumnRouter? router = null)
     {
         var units = Substitute.For<IUnitCatalog>();
         units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
@@ -162,7 +162,90 @@ public sealed class FormulaErrorRecalculationTests
             Substitute.For<IRegistryStore>(), headers, _audit,
             new TestClock(new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc)),
             _uow, Substitute.For<ISheetEditGate>(),
-            formulaErrors: withStore ? _errors : null);
+            formulaErrors: withStore ? _errors : null,
+            monthRouter: router);
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR B24 × C-1b(2): прогін ЗАКРИТОГО якоря річної розкладки (<c>annualPeriods</c>) пише лише не-місячні
+    /// колонки маршрутизованої таблиці. Рядкова формула (цілі — усі колонки рядка) лишається ціллю, але місячну колонку
+    /// не відвідує — збережена помилка формули на ній належить закритому місяцю і НЕ знімається як «застаріла»
+    /// (ні рядок <c>calc.FormulaError</c>, ні подія «усунено» в журналі).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація (локально, не комітити): прибрати фільтр Deletes/Events за <c>ownedElsewhere</c> у
+    /// <c>RecalculationService.RunAsync</c> (блок «LAND-YEAR B24 × C-1b(2)») — помилка M знімається, тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Requirement", "D-474")]
+    public async Task B24_закритий_якір_не_знімає_збережену_помилку_на_місячній_колонці()
+    {
+        var since = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var builder = new TemplateBuilder { TemplateVersionId = Version };
+        var sheet = builder.Sheet("S");
+        var table = builder.Table(sheet, "T", TableRowMode.Fixed, TableLayoutKind.MonthsInColumns);
+        var total = builder.Column(table, "TOT", CellDataType.Formula);
+        var month = builder.Column(table, "M", CellDataType.Formula, isMonthColumn: true);
+        var row = builder.Row(table, RowKeyValue, 1);
+        var formula = builder.Formula(table, "1 + 1", FormulaScope.Row, row: row);
+        formula.SetEvaluationOrder(0);
+        var snapshot = builder.Build();
+        _metadata.GetAsync(Version, Arg.Any<CancellationToken>()).Returns(snapshot);
+
+        var instance = new TableInstanceRef(TableInstance, DocumentId, table.Id, Version, Period.Value, HasFormulaErrors: true);
+        _rows.ResolveTableInstanceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns(instance);
+        _rows.GetTableInstancesAsync(DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns([instance]);
+        _rows.GetRowIdsBatchAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyDictionary<string, long>>
+            {
+                [TableInstance] = new Dictionary<string, long> { [RowKeyValue] = RowId },
+            });
+        IReadOnlyList<CellRecord> slice =
+        [
+            new(new CellAddress(Period, RowId, total.Id), table.Id, new CellValueData { ValueNumeric = 0m, IsCalculated = true }),
+            new(new CellAddress(Period, RowId, month.Id), table.Id, new CellValueData { ValueNumeric = 5m, IsCalculated = true }),
+        ];
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyList<CellRecord>> { [TableInstance] = slice });
+        _versions.ListFormulaDependenciesAsync(Version, Arg.Any<CancellationToken>()).Returns([]);
+
+        // Збережена помилка рядкової формули на МІСЯЧНІЙ колонці закритого січня.
+        _errors.ReadInstancesAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new List<FormulaErrorRow>
+            {
+                new(DocumentId, Period.Value, TableInstance, table.Id, null, RowId, RowKeyValue, month.Id, formula.Id,
+                    FormulaError.ErrorKind, "#DIV/0", null, null, null, null, null, since),
+            });
+
+        // Маршрутизована таблиця річної розкладки; у якоря чужих колонок немає (усе місячне тут — січень).
+        var router = Substitute.For<IMonthColumnRouter>();
+        router.Enabled.Returns(true);
+        router.GetDocumentAsync(DocumentId, Arg.Any<CancellationToken>()).Returns(new MonthRoutingDocument(DocumentId, 1, Version));
+        router.AppliesToTable(Arg.Any<TableDef>()).Returns(true);
+        router.ForeignColumnsAsync(
+                Arg.Any<MonthRoutingDocument>(), Arg.Any<TableDef>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns((IReadOnlyList<ForeignColumn>)[]);
+
+        var annualPeriods = Enumerable.Range(1, 12).Select(m => (Period.Year * 100) + m).ToList();
+        var written = await Service(router: router)
+            .RecalculateAllAsync(DocumentId, Period, CancellationToken.None, annualPeriods: annualPeriods);
+
+        // Прогін відбувся: не-місячна TOT = 2 записана, місячна M — ні.
+        Assert.Equal(1, written);
+        await _cells.Received(1).ApplyBatchAsync(
+            Arg.Is<IReadOnlyCollection<CellChangeSet>>(sets => sets.Any(s =>
+                s.Upserts.Any(u => u.Address.ColumnDefId == total.Id && u.Value.ValueNumeric == 2m)
+                && s.Upserts.All(u => u.Address.ColumnDefId != month.Id))),
+            Arg.Any<CancellationToken>());
+
+        // Помилка на M не знята: жодного видалення її адреси і жодної події «усунено».
+        foreach (var apply in _errors.ReceivedCalls().Where(c => c.GetMethodInfo().Name == nameof(IFormulaErrorStore.ApplyAsync)))
+        {
+            Assert.DoesNotContain((IReadOnlyCollection<CellAddress>)apply.GetArguments()[1]!, a => a.ColumnDefId == month.Id);
+        }
+
+        Assert.DoesNotContain(Events(), e => e.Address.ColumnDefId == month.Id);
     }
 
     /// <summary>Таблиця A, B, E (входи), C = [A]/[B], D = [C]*2 + [E]; збережено C=5, D=11 (обчислені).</summary>
