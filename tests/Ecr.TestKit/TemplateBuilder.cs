@@ -29,6 +29,9 @@ public sealed class TemplateBuilder
     /// <summary>Версія шаблону, яку описує знімок.</summary>
     public int TemplateVersionId { get; init; } = 1;
 
+    /// <summary>Перший Id сутностей знімка: щоб знімки кількох версій (окремі будівники) не перетиналися за Id.</summary>
+    public int NextId { init => _nextId = value; }
+
     /// <summary>Додає аркуш.</summary>
     public SheetDef Sheet(string code)
     {
