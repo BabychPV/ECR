@@ -370,6 +370,10 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
         var substances = await db.MethodologySubstances
             .CountAsync(m => m.SubstanceEntryId == registryEntryId, ct).ConfigureAwait(false);
 
+        // ⛔ C-13: історія дозволів (j) тримає запис так само, як комірка (див. purge у FindHardReferencesAsync).
+        cells += await db.PermitSegments.CountAsync(s => s.RegistryEntryId == registryEntryId, ct).ConfigureAwait(false)
+                 + await db.CellPermitParts.CountAsync(p => p.RegistryEntryId == registryEntryId, ct).ConfigureAwait(false);
+
         return new RegistryEntryReferences(cells, headers, values, children, links, constants, substances);
     }
 
@@ -430,6 +434,10 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
 
         var substances = await db.MethodologySubstances
             .CountAsync(m => ids.Contains(m.SubstanceEntryId), ct).ConfigureAwait(false);
+
+        // ⛔ C-13: історія дозволів (j) — як комірки (сегменти й частини документа набору не належать).
+        cells += await db.PermitSegments.CountAsync(s => ids.Contains(s.RegistryEntryId), ct).ConfigureAwait(false)
+                 + await db.CellPermitParts.CountAsync(p => ids.Contains(p.RegistryEntryId), ct).ConfigureAwait(false);
 
         return new RegistryEntryReferences(cells, headers, values, children, links, constants, substances);
     }
@@ -976,11 +984,16 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             .Where(v => v.ValueRegistryEntryId == registryEntryId)
             .Select(v => v.DocumentId);
 
+        // ⛔ C-13: пізніший дозвіл з історії рядка/шапки (j) — теж використання документом, хоч у комірці його немає.
+        var fromPermitHistory = db.PermitSegments.AsNoTracking()
+            .Where(s => s.RegistryEntryId == registryEntryId)
+            .Select(s => s.DocumentId);
+
         // ⛔ Множина Id — ОКРЕМИМ запитом, без з'єднання з Document. Щойно Document (93 рядки на Land) стоїть у
         // тому ж запиті, оптимізатор робить його зовнішнім і проштовхує з'єднання в обидві гілки UNION — знову
         // корельований прохід по комірках на кожен документ: на копії Land 7525 — 8.7 с, 576 841 скан TableInstance.
         // UNION (не Concat) — дедуплікація ще в SQL; документів, а не комірок, тож список малий.
-        var ids = await fromCells.Union(fromHeader).ToListAsync(ct).ConfigureAwait(false);
+        var ids = await fromCells.Union(fromHeader).Union(fromPermitHistory).ToListAsync(ct).ConfigureAwait(false);
         if (ids.Count == 0)
         {
             return new UsageResponse(0, []);
