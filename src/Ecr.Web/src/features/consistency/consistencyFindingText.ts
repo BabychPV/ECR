@@ -62,6 +62,8 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('consistency.finding.BROKEN_FK', params);
     case 'consistency.finding.ARCHIVE_CHECKSUM':
       return t('consistency.finding.ARCHIVE_CHECKSUM', params);
+    case 'consistency.finding.ARCHIVE_TAMPER':
+      return t('consistency.finding.ARCHIVE_TAMPER', params);
     case 'consistency.finding.UNBOUND_CALCULATED_COLUMN':
       return t('consistency.finding.UNBOUND_CALCULATED_COLUMN', params);
     case 'consistency.finding.UNSOURCED_FORMULA_COLUMN':
