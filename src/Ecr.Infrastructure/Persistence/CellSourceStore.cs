@@ -46,6 +46,25 @@ public sealed class CellSourceStore(EcrDbContext db, Ecr.Application.Ports.IUnit
         ORDER BY c.ChangedAt DESC, c.Id DESC;
         """;
 
+    /// <summary>
+    /// B49 (борг V-4): <see cref="LastWriteSql"/> по всіх Id родоводу колонки (<c>@columns</c> — JSON-масив,
+    /// <see cref="ColumnPathMapper.LineageAsync"/>): після переносу версії журнал до переносу лежить на Id старої версії.
+    /// </summary>
+    /// <remarks>Решта — дослівно <see cref="LastWriteSql"/>; засічка <c>IX_CellChange_Cell</c> на кожен Id родоводу.</remarks>
+    public const string LastWriteLineageSql = """
+        SELECT TOP (1) c.Origin, c.NewValue, c.ChangedAt
+        FROM doc.TableInstance AS i
+        JOIN doc.TableRow AS r ON r.PeriodKey = i.PeriodKey AND r.TableInstanceId = i.Id AND r.RowKey = @rowKey
+        CROSS APPLY (SELECT TOP (1) cc.Origin, cc.NewValue, cc.ChangedAt, cc.Id
+                     FROM aud.CellChange AS cc
+                     WHERE cc.DocumentId = @document AND cc.TableRowId = r.Id
+                       AND cc.ColumnDefId IN (SELECT CAST(j.[value] AS int) FROM OPENJSON(@columns) AS j)
+                     ORDER BY cc.ChangedAt DESC, cc.Id DESC) AS c
+        WHERE i.DocumentId = @document AND i.TableDefId = @table AND i.PeriodKey IN (@period, @owner)
+          AND ((@copy IS NULL AND i.SheetCopyId IS NULL) OR i.SheetCopyId = @copy)
+        ORDER BY c.ChangedAt DESC, c.Id DESC;
+        """;
+
     /// <inheritdoc />
     public async Task<CellFold> FoldAsync(CellSourceMap map, RawSeriesKey window, int maxPoints, CancellationToken ct)
     {
@@ -112,11 +131,24 @@ public sealed class CellSourceStore(EcrDbContext db, Ecr.Application.Ports.IUnit
     {
         ArgumentNullException.ThrowIfNull(periodKeys);
 
-        await using var command = await CommandAsync(LastWriteSql, ct).ConfigureAwait(false);
+        // B49: родовід колонки — та сама логіка, що в History інспектора (V-4). Інших версій немає — запит як доти.
+        var lineage = (await new ColumnPathMapper(db).LineageAsync([columnDefId], ct).ConfigureAwait(false))
+            .GetValueOrDefault(columnDefId) ?? [columnDefId];
+
+        await using var command = await CommandAsync(lineage.Count > 1 ? LastWriteLineageSql : LastWriteSql, ct).ConfigureAwait(false);
         command.Parameters.Add("@document", SqlDbType.BigInt).Value = documentId;
         command.Parameters.Add("@table", SqlDbType.Int).Value = tableDefId;
         command.Parameters.Add("@rowKey", SqlDbType.NVarChar, 100).Value = rowKey;
-        command.Parameters.Add("@column", SqlDbType.Int).Value = columnDefId;
+        if (lineage.Count > 1)
+        {
+            command.Parameters.Add("@columns", SqlDbType.NVarChar, -1).Value =
+                "[" + string.Join(",", lineage.Select(id => id.ToString(System.Globalization.CultureInfo.InvariantCulture))) + "]";
+        }
+        else
+        {
+            command.Parameters.Add("@column", SqlDbType.Int).Value = columnDefId;
+        }
+
         command.Parameters.Add("@period", SqlDbType.Int).Value = periodKeys[0];
         command.Parameters.Add("@owner", SqlDbType.Int).Value = periodKeys[^1];
         command.Parameters.Add("@copy", SqlDbType.BigInt).Value = (object?)sheetCopyId ?? DBNull.Value;

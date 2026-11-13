@@ -108,6 +108,8 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Persistence/AuditReader.cs"] = "журнал переходів несе SheetCopyId події",
         ["src/Ecr.Infrastructure/Persistence/AuditReader.PermitLabels.cs"] =
             "(j6) назва рядка в підписі зміни дозволу/поділу — з екземпляра копії, яку несе запис (sheetCopyId; NULL — оригінал)",
+        ["src/Ecr.Infrastructure/Persistence/AuditReader.Lineage.cs"] =
+            "(B49) поточні колонки — з екземпляра САМОГО рядка журналу (r.TableInstanceId): копія чи оригінал, таблиця та сама",
 
         // ── склад документа, видалення, перенос версії (RS6) ──
         ["src/Ecr.Infrastructure/Persistence/DocumentSheetCopyStore.cs"] =
