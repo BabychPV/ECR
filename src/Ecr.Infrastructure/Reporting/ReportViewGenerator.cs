@@ -271,10 +271,20 @@ public sealed partial class ReportViewGenerator(
         => ex.Number >= FirstUserDefinedError
             ? ex.Message
             : $"SQL Server error {ex.Number.ToString(System.Globalization.CultureInfo.InvariantCulture)}; the details are in the server log (correlation {correlationId})."
-              + (ex.Number == MissingProcedureError ? MissingProcedureHint : string.Empty);
+              + (ex.Number == MissingProcedureError ? MissingProcedureHint
+                 : ex.Number == MissingObjectError ? MissingObjectHint : string.Empty);
 
     /// <summary>SQL Server 2812: «Could not find stored procedure».</summary>
     private const int MissingProcedureError = 2812;
+
+    /// <summary>✎ R-1: SQL Server 208 «Invalid object name» — вʼюхи читають таблицю, якої в базі немає (архів <c>arc.*</c>).</summary>
+    private const int MissingObjectError = 208;
+
+    /// <summary>✎ R-1: без імен обʼєктів бази (SEC TIER2) — що виконати оператору.</summary>
+    private const string MissingObjectHint =
+        " A table the report views read is missing from this database (archive tables from 12-archive-tables.sql): "
+        + "the Sql scripts of this release were not applied in order. Run deploy-ecr.ps1 with the schema step "
+        + "(without -SkipSchema, runbook section 8) and restart the application.";
 
     /// <summary>
     /// ✎ Upgrade gap (RPT-STABLE): <c>Sql/*.sql</c> reach a customer database only through step 2 of <c>deploy-ecr.ps1</c>
