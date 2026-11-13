@@ -1125,8 +1125,8 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         return zones;
     }
 
-    /// <inheritdoc />
-    public async Task<IReadOnlyDictionary<(long TableRowId, int ColumnDefId), LastCellChange>> ReadLastChangesAsync(
+    /// <summary>Остання зміна кожної адреси рівно за її <c>ColumnDefId</c> (B49: родовід — <see cref="ReadLastChangesAsync"/>).</summary>
+    private async Task<IReadOnlyDictionary<(long TableRowId, int ColumnDefId), LastCellChange>> ReadLastChangesExactAsync(
         long documentId,
         IReadOnlyCollection<(long TableRowId, int ColumnDefId)> cells,
         DateTime since,
