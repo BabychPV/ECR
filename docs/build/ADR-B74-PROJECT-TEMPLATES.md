@@ -55,11 +55,16 @@ UI only; does not meet the requirement).
 - **Q3 L0 alias write path**: a bulk `PUT /template-versions/{id}/month-input-aliases`, for draft versions only. This is a
   contract change, so it ships in the separate L0 code step with the `openapi.snapshot.json`/`schema.d.ts` regen, not in the
   PT01 migration commit. PT01 only creates the `cfg.MonthInputAlias` table.
-- **Q1 PeriodKind per template**: OPEN (the human is being asked). PT01 does NOT add `ProjectTemplate.PeriodKind`.
+- **Q1 PeriodKind per template**: ANSWERED by the human (13.11). HSE400 is monthly too (it has month columns like Land),
+  so a shared project has ONE period kind (`Project.PeriodKind`). Every template attached to a project must match it,
+  and P3 enforces that when a template is attached. PT01 has no `PeriodKind` on `doc.ProjectTemplate`.
+- **B75 heads-up** (HSE401 «no workflow + owner row locks», being analysed by the coordinator): PT01 stays as approved. Settings that
+  belong to a template within a project (for example a per-template workflow flag) are columns of `doc.ProjectTemplate`,
+  keyed by its surrogate `Id` + `UQ_ProjectTemplate`. Nothing in PT01 hard-codes «workflow per project».
 
-### PeriodKind extensibility (so that Q1 needs no re-keying)
+### PeriodKind extensibility (kept as a record; not needed after the Q1 answer)
 
-If the answer is «per template», it is additive:
+If a per-template period kind were ever wanted, it would be additive:
 - **Column**: `doc.ProjectTemplate.PeriodKind tinyint NULL` (NULL = `Project.PeriodKind`). `doc.ProjectTemplate` is keyed by a
   surrogate `Id` plus `UQ_ProjectTemplate (ProjectId, TemplateId)`, so the column changes no key.
 - **Timeline**: `doc.ProjectTemplateVersion` is keyed `(ProjectId, TemplateId, FromPeriodKey)`. `FromPeriodKey` is then
