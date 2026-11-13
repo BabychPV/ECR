@@ -1660,6 +1660,44 @@ WHERE cv.IsEmpty = 0 AND cv.ValueNumeric IS NOT NULL
   AND (rp.ColumnDefId IS NOT NULL OR hp.HeaderFieldDefId IS NOT NULL);
 GO
 
+-- R-4 (аудит 2026-11): розшифрування Id для SSRS (rpt_reader бачить лише rpt.*): записи довідників, одиниці, підписи
+-- колонок опублікованих версій. Мови — ключі LocalizedText (en/ru/kz, як у сіді); логічно видалені записи довідників
+-- НЕ відсіюються (на них можуть посилатися старі комірки), а віддаються колонкою IsDeleted.
+CREATE OR ALTER VIEW rpt.v_RegistryEntry
+AS
+SELECT e.Id AS EntryId, d.Code AS RegistryCode, e.Code AS EntryCode,
+       JSON_VALUE(e.DisplayL10n, N'$.en') AS Name_en,
+       JSON_VALUE(e.DisplayL10n, N'$.ru') AS Name_ru,
+       JSON_VALUE(e.DisplayL10n, N'$.kz') AS Name_kz,
+       e.ParentEntryId, e.ValidFrom, e.ValidTo, e.IsActive, e.IsDeleted
+  FROM dic.RegistryEntry AS e
+  JOIN cfg.RegistryDef   AS d ON d.Id = e.RegistryDefId;
+GO
+CREATE OR ALTER VIEW rpt.v_Unit
+AS
+SELECT u.Id AS UnitId, u.Code AS UnitCode,
+       JSON_VALUE(u.SymbolL10n, N'$.en') AS Symbol_en, JSON_VALUE(u.SymbolL10n, N'$.ru') AS Symbol_ru,
+       JSON_VALUE(u.SymbolL10n, N'$.kz') AS Symbol_kz,
+       JSON_VALUE(u.NameL10n, N'$.en') AS Name_en, JSON_VALUE(u.NameL10n, N'$.ru') AS Name_ru,
+       JSON_VALUE(u.NameL10n, N'$.kz') AS Name_kz
+  FROM uom.Unit AS u;
+GO
+CREATE OR ALTER VIEW rpt.v_TemplateColumn
+AS
+SELECT t.Code AS TemplateCode, tv.[Version] AS TemplateVersion, sd.Code AS SheetCode, td.Code AS TableCode,
+       cd.Code AS ColumnCode, cd.DataType, cd.Ordinal, cd.LookupRegistryDefId, cd.UnitId,
+       JSON_VALUE(sd.NameL10n, N'$.en') AS SheetName_en, JSON_VALUE(sd.NameL10n, N'$.ru') AS SheetName_ru,
+       JSON_VALUE(sd.NameL10n, N'$.kz') AS SheetName_kz,
+       JSON_VALUE(cd.HeaderL10n, N'$.en') AS Header_en, JSON_VALUE(cd.HeaderL10n, N'$.ru') AS Header_ru,
+       JSON_VALUE(cd.HeaderL10n, N'$.kz') AS Header_kz
+  FROM cfg.ColumnDef       AS cd
+  JOIN cfg.TableDef        AS td ON td.Id = cd.TableDefId AND td.IsDeleted = 0
+  JOIN cfg.SheetDef        AS sd ON sd.Id = td.SheetDefId AND sd.IsDeleted = 0
+  JOIN cfg.TemplateVersion AS tv ON tv.Id = sd.TemplateVersionId AND tv.Status IN (1, 2)
+  JOIN cfg.Template        AS t  ON t.Id = tv.TemplateId
+ WHERE cd.IsDeleted = 0;
+GO
+
 -- ⛔ Право читання для ОБЛІКОВОГО ЗАПИСУ SSRS — роль бази `rpt_reader`:
 -- SELECT на всю схему `rpt` і нічого більше. Вʼюхи й таблиці `doc`/`cfg`/`wf`/
 -- `uom` належать тому самому власнику (dbo), тож ланцюг власності не

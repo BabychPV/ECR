@@ -1,6 +1,7 @@
 // tests/Ecr.Infrastructure.Tests/Reporting/ReportViewGeneratorTests.cs
 using System.Text.RegularExpressions;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -166,6 +167,72 @@ public sealed partial class ReportViewGeneratorTests(SqlServerFixture sql)
             var denied = await Assert.ThrowsAsync<SqlException>(
                 () => ScalarAsync(connection, "SELECT COUNT(*) FROM doc.CellValue"));
             Assert.Equal(229, denied.Number);
+        }
+        finally
+        {
+            await ExecuteAsync(connection, "REVERT;");
+        }
+    }
+
+    /// <summary>
+    /// R-4 (аудит 2026-11): обліковий запис SSRS (<c>rpt_reader</c>) розшифровує Id довідника, одиниці й підписи колонок
+    /// через вʼюхи <c>rpt.v_RegistryEntry</c> / <c>rpt.v_Unit</c> / <c>rpt.v_TemplateColumn</c>, а самих таблиць
+    /// <c>dic.*</c>, <c>uom.*</c>, <c>cfg.*</c> і далі не читає (найменші права).
+    /// </summary>
+    /// <remarks>Без вʼюх у <c>05-rpt-views.sql</c> перший запит падає з 208 («Invalid object name»).</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    [Trait("Finding", "R-4")]
+    public async Task Роль_rpt_reader_розшифровує_довідник_через_rpt_v_RegistryEntry()
+    {
+        await PublishedDocumentAsync();
+
+        var tag = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        long entryId;
+        await using (var db = sql.CreateContext())
+        {
+            var def = new RegistryDef(EcrCode.Create($"R4_{tag}"), Name("R-4 substances"), isTemporal: false);
+            db.RegistryDefs.Add(def);
+            await db.SaveChangesAsync();
+            var entry = new RegistryEntry(
+                def.Id,
+                EcrCode.Create($"S_{tag}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Sulphur", ["ru"] = "Сера", ["kz"] = "Күкірт" }),
+                1,
+                Now);
+            db.RegistryEntries.Add(entry);
+            await db.SaveChangesAsync();
+            entryId = entry.Id;
+        }
+
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await ExecuteAsync(connection, """
+            IF USER_ID(N'rpt_probe') IS NULL CREATE USER rpt_probe WITHOUT LOGIN;
+            ALTER ROLE rpt_reader ADD MEMBER rpt_probe;
+            """);
+
+        await ExecuteAsync(connection, "EXECUTE AS USER = N'rpt_probe';");
+        try
+        {
+            Assert.Equal(1, await ScalarAsync(connection, $"""
+                SELECT COUNT(*) FROM rpt.v_RegistryEntry
+                WHERE EntryId = {entryId} AND RegistryCode = N'R4_{tag}' AND EntryCode = N'S_{tag}'
+                  AND Name_en = N'Sulphur' AND Name_ru = N'Сера' AND Name_kz = N'Күкірт' AND IsDeleted = 0
+                """));
+
+            // Одиниці й підписи колонок опублікованих версій — теж через rpt.* (сід одиниць і шаблон тесту).
+            Assert.True(await ScalarAsync(connection, "SELECT COUNT(*) FROM rpt.v_Unit WHERE UnitCode IS NOT NULL") > 0);
+            Assert.True(await ScalarAsync(connection, "SELECT COUNT(*) FROM rpt.v_TemplateColumn WHERE Header_en IS NOT NULL") > 0);
+
+            foreach (var table in new[] { "dic.RegistryEntry", "uom.Unit", "cfg.ColumnDef" })
+            {
+                var denied = await Assert.ThrowsAsync<SqlException>(
+                    () => ScalarAsync(connection, $"SELECT COUNT(*) FROM {table}"));
+                Assert.Equal(229, denied.Number);
+            }
         }
         finally
         {
