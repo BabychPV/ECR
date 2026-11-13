@@ -168,6 +168,7 @@ public static class DependencyInjection
         services.AddScoped<Calculations.IRelationRecalculator, Calculations.RelationRecalculator>(); // D-230
         services.AddScoped<Recalculation.RecalculationService>();
         services.AddScoped<Recalculation.IRowLocalPreview, Recalculation.RowLocalPreview>(); // HSE401
+        services.AddScoped<Recalculation.ColumnDefaultValues>(); // ✎ C-5: дефолти колонок у методологіях
 
         // ⚠ Той самий екземпляр у межах скоупу: подання мусить рахувати ТИМ
         // САМИМ `EcrDbContext`, у транзакції якого воно тримає блокування.

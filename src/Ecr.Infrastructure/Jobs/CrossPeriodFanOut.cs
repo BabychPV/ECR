@@ -107,6 +107,38 @@ public sealed class CrossPeriodFanOut(
     }
 
     /// <summary>
+    /// D-8: ставить у чергу період-читач із ВЖЕ знайденими джерелами — задача документа, що відкладається, не може
+    /// віддати їх у власний payload (повтор бачить лише насіння). Той самий формат елемента, що
+    /// <see cref="EnqueueReadersAsync"/>.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="reader">Період-читач.</param>
+    /// <param name="sources">Джерела зміни, які він має врахувати.</param>
+    /// <param name="hops">Номер ланки ланцюжка.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task EnqueueSourcesAsync(
+        long documentId, PeriodKey reader, IReadOnlyCollection<CrossPeriodSource> sources, int hops, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(sources);
+        if (sources.Count == 0)
+        {
+            return;
+        }
+
+        var cells = sources
+            .Select(s => new DirtyCell(
+                0, s.ColumnDefId, s.TableDefId, s.SourceSequence, hops,
+                OwnerInput: s.OwnerInput ? true : null, PeriodKey: reader.Value))
+            .ToList();
+
+        await jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                FormulaRecalculationTarget.Of(documentId, reader.Value, createdByUserId: null),
+                new { DocumentId = documentId, TableInstanceId = 0L, PeriodKey = reader.Value, Cells = cells },
+                ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// L2: ті самі читачі, що їх ставить <see cref="EnqueueReadersAsync"/>, але БЕЗ постановки — задача документа
     /// дописує їх у власний перелік періодів і обробляє в тому самому проході.
     /// </summary>

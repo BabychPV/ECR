@@ -111,6 +111,23 @@ public sealed class RowLocalPreviewTests
         Assert.Equal(2m, ValueOf(computed!, "Rate"));
     }
 
+    /// <summary>
+    /// ✎ C-5 (рішення PO 11.11): незаповнена B бере дефолт колонки і в перегляді — як фоновий перерахунок; інакше
+    /// перегляд показав би 62 / 31 = 2, а сервер після перерахунку — 62 / 2 = 31. Мутація: прибрати доповнення
+    /// дефолтами в <c>RowLocalPreview</c> — червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "C-5")]
+    public async Task Перегляд_рахує_з_дефолтом_незаповненої_колонки()
+    {
+        _table.Columns.Single(c => c.Code == "B").SetPresentation("2", null, null);
+
+        var computed = await PreviewAsync();
+
+        Assert.Equal(31m, ValueOf(computed!, "Rate"));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public async Task Нелокальна_формула_і_ті_що_її_читають_у_перегляд_не_потрапляють()

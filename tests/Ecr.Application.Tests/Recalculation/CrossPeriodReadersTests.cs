@@ -68,6 +68,28 @@ public sealed class CrossPeriodReadersTests
         Assert.Equal([expectedReader], readers.ToArray());
     }
 
+    /// <summary>
+    /// ✎ C-11: предикатне ребро <c>[Period:-1].[T].[WHERE [Kind] = 'A'].[Qty]</c> (рядка немає, є FilterJson) читає
+    /// рядки за умовою, колонок якої в графі немає: зміна Kind у джерелі будить читача. Звичайне ребро на ту саму
+    /// колонку значення — ні (контроль точності). Мутація: прибрати гілку FilterJson у <c>ReadsColumn</c> — червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "C-11")]
+    public void Зміна_колонки_умови_будить_читача_предиката_зі_зсувом()
+    {
+        const int kind = March + 1;
+        var predicate = FormulaDependency.ForFormula(10, CrossPeriod, WaterReport, null, March, "{\"where\":\"Kind\"}", -1, 0);
+
+        var readers = CrossPeriodReaders.ReaderSequences([predicate], [(WaterReport, kind)], sourceSequence: 3, Year);
+        var relevant = CrossPeriodReaders.ReadAcrossPeriods([predicate], [(WaterReport, kind)]);
+
+        Assert.Equal([4], readers.ToArray());
+        Assert.Equal([(WaterReport, kind)], relevant);
+        Assert.Empty(CrossPeriodReaders.ReaderSequences(
+            [Edge(10, CrossPeriod, -1)], [(WaterReport, kind)], sourceSequence: 3, Year));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Читач_якого_в_документі_немає_відкидається()

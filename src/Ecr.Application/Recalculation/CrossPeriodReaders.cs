@@ -278,7 +278,7 @@ public static class CrossPeriodReaders
 
                 if (readsSource
                     && dependency.TableDefId == source.TableDefId
-                    && (dependency.ColumnDefId is null || dependency.ColumnDefId == source.ColumnDefId))
+                    && ReadsColumn(dependency, source.ColumnDefId))
                 {
                     affected.Add(formulaId);
                     break;
@@ -312,7 +312,7 @@ public static class CrossPeriodReaders
                     && dependency.DependsOnKind is CrossPeriodKind or AbsoluteKind
                     && dependency.PeriodOffset is not null and not 0
                     && dependency.TableDefId == column.TableDefId
-                    && (dependency.ColumnDefId is null || dependency.ColumnDefId == column.ColumnDefId))
+                    && ReadsColumn(dependency, column.ColumnDefId))
                 {
                     result.Add(column);
                     break;
@@ -362,8 +362,7 @@ public static class CrossPeriodReaders
     {
         foreach (var (tableDefId, columnDefId) in changed)
         {
-            if (dependency.TableDefId == tableDefId
-                && (dependency.ColumnDefId is null || dependency.ColumnDefId == columnDefId))
+            if (dependency.TableDefId == tableDefId && ReadsColumn(dependency, columnDefId))
             {
                 return true;
             }
@@ -371,4 +370,14 @@ public static class CrossPeriodReaders
 
         return false;
     }
+
+    /// <summary>
+    /// ✎ C-11: чи читає ребро колонку. Предикатне посилання (<c>RowKey = null</c>, <c>FilterJson</c>) читає рядки за
+    /// УМОВОЮ, колонок якої в графі немає (<c>RecalculationReadScope</c>), — тож його будить будь-яка колонка його
+    /// таблиці (зайвий перерахунок дешевший за пропущений).
+    /// </summary>
+    private static bool ReadsColumn(FormulaDependency dependency, int columnDefId)
+        => dependency.ColumnDefId is null
+           || dependency.ColumnDefId == columnDefId
+           || (dependency.RowKey is null && dependency.FilterJson is not null);
 }

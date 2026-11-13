@@ -320,6 +320,20 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
     /// <summary>Колонка, яку підставляє плейсхолдер <c>{Month}</c>.</summary>
     public int? CurrentColumnDefId { get; set; }
 
+    /// <summary>
+    /// ✎ C-11 (рішення PO 11.11): рядки СУСІДНІХ періодів (зсув, таблиця) → (ключ → id) — джерело рядків предиката
+    /// <c>[Period:-n].[T].[WHERE …]</c>: умова й значення беруться з рядків того періоду. <c>null</c> чи пари немає —
+    /// у того періоду екземпляра немає (порожня група, 02b §3.2).
+    /// </summary>
+    internal IReadOnlyDictionary<(int PeriodOffset, int TableDefId), IReadOnlyDictionary<string, long>>? OtherPeriodRows
+    {
+        get;
+        init;
+    }
+
+    /// <summary>✎ C-11: зсув періоду, на рядках якого зараз обчислюється умова предиката (0 — поточний).</summary>
+    private int _predicatePeriodOffset;
+
     /// <summary>✎ C-1: комірки, яким прогін не довіряє (помилка формули або «не оновлено через помилку»).</summary>
     internal IReadOnlyDictionary<CellKey, FormulaErrorSource>? Blocked { get; set; }
 
@@ -352,9 +366,11 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
 
         // WW-03: `[Period:#k]` читається як зсув відносно періоду, який ЗАРАЗ рахується: завантажувач
         // (`RecalculationService.LoadValuesAsync`) кладе значення сусідніх періодів під ключем зсуву.
-        var periodOffset = reference.AbsolutePeriod is { } absolute
+        // ✎ C-11: усередині умови предиката зі зсувом посилання (лише `[Current]`, зсув 0 — PredicateValidator) читає
+        // рядок ЗСУНУТОГО періоду: до власного зсуву додається зсув предиката.
+        var periodOffset = (reference.AbsolutePeriod is { } absolute
             ? absolute - Period.Sequence
-            : reference.PeriodOffset;
+            : reference.PeriodOffset) + _predicatePeriodOffset;
 
         // ⛔ Нерезолвлене в рантаймі посилання — це `#REF`, а не порожнє
         // значення. Порожнє мовчки перетворило б суму на суму без доданка, і
@@ -435,7 +451,13 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
     private List<ExpressionValue> EvaluatePredicate(
         int tableDefId, AstNode condition, int columnDefId, int periodOffset)
     {
-        if (!_rowsByTable.TryGetValue(tableDefId, out var rows))
+        // ✎ C-11 (рішення PO 11.11): рядки — того періоду, на який вказує посилання. Раніше бралися рядки ПОТОЧНОГО
+        // періоду, умова — з поточного, а значення — з іншого періоду за чужим ключем (динамічні рядки: 0; фіксовані —
+        // умова з не того місяця). Періоду без екземпляра → порожня група (SUM = 0, AVERAGE = null — 02b §3.2, §6.1).
+        IReadOnlyDictionary<string, long>? rows = null;
+        if (periodOffset == 0
+                ? !_rowsByTable.TryGetValue(tableDefId, out rows)
+                : OtherPeriodRows is null || !OtherPeriodRows.TryGetValue((periodOffset, tableDefId), out rows))
         {
             return [];
         }
@@ -443,14 +465,16 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
         var matched = new List<ExpressionValue>();
         var savedTable = CurrentTableDefId;
         var savedRow = CurrentRowKey;
+        var savedOffset = _predicatePeriodOffset;
         try
         {
             CurrentTableDefId = tableDefId;
+            _predicatePeriodOffset = periodOffset;
 
             // ⚠ Порядок обходу — детермінований (Ordinal), а не порядок
             // словника: два прогони на тих самих даних мають дати той самий
             // список, інакше звірка з еталоном (ФВ-9.5) стає неможливою.
-            foreach (var rowKey in rows.Keys.OrderBy(k => k, StringComparer.Ordinal))
+            foreach (var rowKey in rows!.Keys.OrderBy(k => k, StringComparer.Ordinal))
             {
                 CurrentRowKey = rowKey;
                 var verdict = PredicateEvaluator.Evaluate(
@@ -465,6 +489,7 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
         {
             CurrentTableDefId = savedTable;
             CurrentRowKey = savedRow;
+            _predicatePeriodOffset = savedOffset;
         }
 
         return matched;

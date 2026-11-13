@@ -158,6 +158,71 @@ public sealed class FormulaRecalculationDocumentPassSqlTests(SqlServerFixture sq
         Assert.Equal([world.Doc.DocumentId], acquisitions);
     }
 
+    // ── відкладення (D-8) ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// ⛔ D-8: період-читач 4, знайдений у прогоні (C березня змінилась), відкладено (його аркуш подається). Повтор
+    /// виконує ПОЧАТКОВИЙ payload — лише насіння березня, де вже все записано, — тож читач квітня мусить піти окремою
+    /// постановкою з уже знайденим джерелом. Мутація: прибрати <c>RequeueSourcesAsync</c> перед <c>throw deferral</c> —
+    /// постановки немає, квітень лишається застарілим (червоне).
+    /// </summary>
+    [Fact]
+    [Trait("Finding", "D-8")]
+    public async Task Відкладений_період_читач_ставиться_окремо_зі_знайденими_джерелами()
+    {
+        var world = await ArrangeAsync(Chain);
+        await SetInputAsync(world, 3, 100m);
+        var request = new FormulaRecalculationRequest(
+            world.Instance(3).InstanceId, Period(3), [Seed(world, 3)], world.Doc.DocumentId);
+
+        var busy = true;
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+
+        // Аркуш квітня подається: стан періоду-читача під час прогону кидає ту саму відмову, що SheetEditGate.
+        var periods = Periods(world);
+        periods.FindPeriodStateAsync(world.Doc.DocumentId, Period(4), Arg.Any<CancellationToken>())
+            .Returns(_ => busy
+                ? Task.FromException<PeriodState?>(new Ecr.Application.Errors.ConcurrencyConflictException(
+                    "ECR-DOC-4091", "busy",
+                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-4091.sheetBeingSubmitted" }))
+                : Task.FromResult<PeriodState?>(PeriodState.Open));
+
+        await using (var db = world.Builder.CreateContext())
+        {
+            var job = Job(db, world, jobs, periods);
+            await Assert.ThrowsAsync<JobDeferredException>(
+                () => job.ExecuteAsync(request, new CapturingJobProgress(), CancellationToken.None));
+        }
+
+        var april = Assert.Single(
+                jobs.ReceivedCalls(), c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync))
+            .GetArguments()[1]!;
+        Assert.Contains($"\"PeriodKey\":{Period(4)}", System.Text.Json.JsonSerializer.Serialize(april), StringComparison.Ordinal);
+
+        // Подання завершилось: виконавець повторює початкову задачу і виконує нову постановку.
+        busy = false;
+        foreach (var payload in new object[] { request, april })
+        {
+            await using var db = world.Builder.CreateContext();
+            await Job(db, world, Substitute.For<IBackgroundJobScheduler>(), periods)
+                .ExecuteAsync(payload, new CapturingJobProgress(), CancellationToken.None);
+        }
+
+        // Еталон: вихід квітня = вихід березня + власний вхід квітня (40).
+        Assert.Equal(await OutputAsync(world, 3) + 40m, await OutputAsync(world, 4));
+    }
+
+    private FormulaRecalculationJob Job(EcrDbContext db, World world, IBackgroundJobScheduler jobs, IPeriodStore periods)
+    {
+        var bulk = new BulkCellLoader(sql.ConnectionString, 1000);
+        // Віяло бачить звичайні стани періодів (подається лише АРКУШ квітня, період не закрито): «зайнятість» кидає тільки
+        // перевірка стану періоду-читача в самій задачі.
+        var fanOut = new CrossPeriodFanOut(
+            new RowStore(db, bulk, new TestClock(Now)), Versions(world), Periods(world), jobs, db);
+
+        return new FormulaRecalculationJob(Formulas(db, world, new RecordingAuditWriter()), db, fanOut, periods);
+    }
+
     // ── завершення ───────────────────────────────────────────────────────────
 
     [Fact]

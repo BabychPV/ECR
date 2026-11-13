@@ -4,7 +4,13 @@ using Ecr.Domain.ValueObjects;
 namespace Ecr.Calculations;
 
 /// <summary>Готує аргументи для методології з даних документа.</summary>
-public sealed class CalculationInputBuilder(ICellStore cellStore, IMetadataCache metadata, IRowStore rows)
+public sealed class CalculationInputBuilder(
+    ICellStore cellStore,
+    IMetadataCache metadata,
+    IRowStore rows,
+
+    // ✎ C-5 (рішення PO 11.11): дефолти колонок для незаповнених комірок (власне читання; зріз зіставлення вже доповнено).
+    Application.Recalculation.ColumnDefaultValues? defaults = null)
 {
     /// <summary>Будує входи для набору рядків одним пакетом.</summary>
     /// <param name="tableInstanceId">Екземпляр таблиці.</param>
@@ -49,6 +55,12 @@ public sealed class CalculationInputBuilder(ICellStore cellStore, IMetadataCache
         var rowIds = reusable && read!.PeriodKey == periodKey
             ? read.RowIds
             : await rows.GetRowIdsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
+        if (!reusable && defaults is not null)
+        {
+            // ✎ C-5: аргумент `@Col` незаповненої комірки — дефолт колонки, як у правилі й формулах (02b §6.3).
+            slice = (await defaults.ForVersionAsync(instance.TemplateVersionId, ct).ConfigureAwait(false))
+                .Complete(slice, instance.TableDefId, rowIds, instancePeriod);
+        }
 
         // ⚠ Ім'я аргументу — це КОД колонки, а не її ідентифікатор: формула
         // методології пише `@Jan`, і зіставлення за числом зробило б її

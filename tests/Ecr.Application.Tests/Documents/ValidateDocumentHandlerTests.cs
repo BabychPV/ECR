@@ -353,6 +353,53 @@ public sealed class ValidateDocumentHandlerTests
         Assert.Contains("\"R1\"", saved.MessagesJson);
     }
 
+    /// <summary>
+    /// ✎ C-5 (рішення PO 11.11, 02b §6.3): обов'язкова колонка з придатним дефолтом і без запису комірки — заповнена
+    /// (сітка показує дефолт); явна порожнеча (<c>IsEmpty = 1</c>) — ні. Мутація: прибрати <c>Complete</c> з
+    /// <c>ValidateDocumentHandler</c> — перший випадок червоніє (ErrorCount 1).
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "C-5")]
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    public async Task Обовязкова_колонка_з_дефолтом_заповнена_явна_порожнеча_ні(bool explicitEmpty, int errors)
+    {
+        var snapshot = await _metadata.GetAsync(TemplateVersionId, CancellationToken.None);
+        var noRules = snapshot.Sheets.SelectMany(s => s.Tables).Single(t => t.Id == 5);
+        var column = noRules.Columns.Single();
+        column.SetRequired(true);
+        column.SetPresentation("12.5", null, null);
+
+        _rows.GetRowIdsBatchAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyDictionary<string, long>>
+            {
+                [InstanceNoRules] = new Dictionary<string, long>(StringComparer.Ordinal) { ["R1"] = 7 },
+            });
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
+            {
+                [InstanceNoRules] = explicitEmpty
+                    ? [new CellRecord(new CellAddress(new PeriodKey(Period), 7, column.Id), 5, new CellValueData { IsEmpty = true })]
+                    : [],
+            });
+
+        ValidationSummary? saved = null;
+        await _results.SaveAsync(Arg.Do<ValidationSummary>(s => saved = s), Arg.Any<CancellationToken>());
+
+        try
+        {
+            await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+        }
+        catch (NullReferenceException)
+        {
+            // ReadScopeAsync не налаштовано в цьому файлі — див. тест D-230 вище.
+        }
+
+        Assert.NotNull(saved);
+        Assert.Equal(errors, saved!.ErrorCount);
+    }
+
     private static HeaderFieldDef RequiredHeader(int id, string code)
     {
         var field = new HeaderFieldDef(TemplateVersionId, EcrCode.Create(code), Text(code), 1, CellDataType.String);

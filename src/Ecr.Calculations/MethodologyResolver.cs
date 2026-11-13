@@ -21,12 +21,14 @@ namespace Ecr.Calculations;
 /// D-425: фільтр активності рядків методології («лише Running» для Land). <c>null</c> — фільтра немає
 /// (прямий конструктор у тестах; контейнер передає завжди).
 /// </param>
+/// <param name="defaults">✎ C-5: дефолти колонок для незаповнених комірок; <c>null</c> — без них (тести).</param>
 public sealed class MethodologyResolver(
     IMethodologyStore store,
     ICellStore cells,
     IRowStore rows,
     IColumnPathMapper? columnMapper = null,
-    IRowActivityFilterSource? rowActivity = null)
+    IRowActivityFilterSource? rowActivity = null,
+    Application.Recalculation.ColumnDefaultValues? defaults = null)
 {
     /// <summary>Знаходить чинну версію методології на дату.</summary>
     /// <param name="methodologyId">Методологія.</param>
@@ -227,6 +229,14 @@ public sealed class MethodologyResolver(
 
         // O3c: період екземпляра вже відомий — ключ партиції замість пошуку по всіх.
         var slice = await cells.ReadSliceAsync(tableInstanceId, period, ct).ConfigureAwait(false);
+
+        // ✎ C-5 (рішення PO 11.11, 02b §6.3): правило бачить дефолт незаповненої комірки; той самий доповнений зріз іде
+        // у входи (`Read` нижче → CalculationInputBuilder), тож зіставлення й аргументи не розходяться.
+        if (defaults is not null)
+        {
+            slice = (await defaults.ForVersionAsync(instance.TemplateVersionId, ct).ConfigureAwait(false))
+                .Complete(slice, instance.TableDefId, rowIds, period);
+        }
 
         // Значення рядка: колонка → рядкове подання. Порівняння в предикаті
         // текстове навмисно — MatchJson описує коди довідників і ознаки, а не

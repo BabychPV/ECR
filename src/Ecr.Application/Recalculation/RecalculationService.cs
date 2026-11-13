@@ -74,6 +74,9 @@ public sealed class RecalculationService(
     /// </summary>
     private readonly TemplateRegistrySnapshots _templateSnapshots = new();
 
+    /// <summary>✎ C-5: дефолти колонок версії як значення незаповнених комірок (02b §6.3).</summary>
+    private readonly ColumnDefaultValues _columnDefaults = new(metadata, registryStore);
+
     /// <summary>Автор обчислених значень: їх ставить система, а не людина.</summary>
     /// <remarks>
     /// ⚠ Нуль тут не «невідомо хто», а «не людина». Підставити сюди того, хто
@@ -555,8 +558,7 @@ public sealed class RecalculationService(
                 {
                     changedColumns?.Add((seedTable, seed.ColumnDefId));
                     inputColumns?.Add((seedTable, seed.ColumnDefId));
-                }
-            }
+                }            }
         }
 
         // ⛔ Q-2xx (аудит фази 3, звітність): аудит записується за КЛЮЧЕМ
@@ -745,7 +747,11 @@ public sealed class RecalculationService(
             ? await formulaErrors.ReadInstancesAsync(flagged, periodKey, ct).ConfigureAwait(false)
             : [];
         errors.Seed(persisted, offset: 0);
-        var loadExtras = new PeriodLoadExtras();
+        var loadExtras = new PeriodLoadExtras
+        {
+            // ✎ C-5 (рішення PO 11.11): дефолти колонок версії — для комірок, яких немає (02b §6.3).
+            Defaults = await _columnDefaults.ForVersionAsync(instance.TemplateVersionId, ct).ConfigureAwait(false),
+        };
 
         var (values, stored) = await LoadValuesAsync(
             instance, scope, (instances, rowIdsBatch), periodReads, ct, copyScope, loadExtras).ConfigureAwait(false);
@@ -820,6 +826,9 @@ public sealed class RecalculationService(
             {
                 // ✎ C-1: недовірені комірки прогону — читання такої комірки не дає цілі перерахуватися.
                 Blocked = errors.Blocked,
+
+                // ✎ C-11: рядки сусідніх періодів для предиката зі зсувом.
+                OtherPeriodRows = loadExtras.OtherPeriodRows,
             };
 
         var context = NewContext(registryFields);
@@ -1197,6 +1206,15 @@ public sealed class RecalculationService(
     {
         /// <summary>C-1: екземпляри ІНШИХ періодів (зсув ≠ 0) з тієї самої версії, що мають стан помилок формул.</summary>
         public List<(int Offset, long TableInstanceId)> ErrorInstances { get; } = [];
+
+        /// <summary>✎ C-5: дефолти колонок версії прогону — значення комірок, яких немає (поточний і сусідні періоди).</summary>
+        public ColumnDefaultSet Defaults { get; init; } = ColumnDefaultSet.Empty;
+
+        /// <summary>
+        /// ✎ C-11: рядки сусідніх періодів (зсув, таблиця версії прогону) — джерело рядків предиката зі зсувом.
+        /// Посилання на вже прочитані словники, без копій; каскад Rollup доповнює той самий об'єкт.
+        /// </summary>
+        public Dictionary<(int PeriodOffset, int TableDefId), IReadOnlyDictionary<string, long>> OtherPeriodRows { get; } = [];
     }
 
     /// <summary>
@@ -1980,7 +1998,7 @@ public sealed class RecalculationService(
 
         await LoadPeriodAsync(
                 values, stored, instance.DocumentId, periodKey, offset: 0, scope.TableDefIds, ct, current,
-                copyScope: copyScope)
+                copyScope: copyScope, extras: extras)
             .ConfigureAwait(false);
 
         // ⛔ Попередній період завантажується, коли він існує. `[Period:-1]` у
@@ -2198,6 +2216,13 @@ public sealed class RecalculationService(
                 : new Dictionary<string, long>(StringComparer.Ordinal);
             var byId = keys.ToDictionary(pair => pair.Value, pair => pair.Key);
 
+            // ✎ C-11 (рішення PO 11.11): рядки ЗСУНУТОГО періоду — джерело рядків предиката `[Period:-n].[T].[WHERE …]`
+            // (умова й значення — на рядках того періоду). Нуль нових звернень: ключі вже прочитано вище для значень.
+            if (offset != 0 && extras is not null)
+            {
+                extras.OtherPeriodRows[(offset, table.TableDefId)] = keys;
+            }
+
             var cells = cellsBatch.TryGetValue(table.TableInstanceId, out var foundCells)
                 ? foundCells
                 : [];
@@ -2223,6 +2248,22 @@ public sealed class RecalculationService(
                 if (stored is not null)
                 {
                     stored[key] = cell.Value;
+                }
+            }
+
+            // ✎ C-5 (рішення PO 11.11, 02b §6.3): рядок є, запису комірки немає → дефолт колонки (версії, що рахується:
+            // `table.TableDefId` уже перекладено на неї для сусіднього періоду іншої версії). Наявна комірка, зокрема
+            // явна порожнеча `IsEmpty = 1`, уже лежить у `values` як `Null` і дефолту не отримує. У `stored` не йде:
+            // дефолт не пишеться (D-283), а дефолтні колонки — входи, перерахунок їх не пише.
+            if (extras is not null)
+            {
+                foreach (var (columnId, value) in extras.Defaults.Of(table.TableDefId))
+                {
+                    var asValue = FromCellValue(value);
+                    foreach (var rowKey in keys.Keys)
+                    {
+                        values.TryAdd(new CellKey(offset, table.TableDefId, rowKey, columnId), asValue);
+                    }
                 }
             }
         }
