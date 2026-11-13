@@ -6,16 +6,32 @@ import type { LockedRowItem } from '@/features/grid/rowAttentionStore';
 import { getDocumentPeriodReopen, periodReopenKey } from '@/features/documents/periodReopen/api';
 import { formatMonthName } from '@/shared/format/period';
 import { formatPeriodKey } from '@/shared/format/periodKey';
-import { t } from '@/shared/i18n';
+import { language, t } from '@/shared/i18n';
 
 /** Діалог відкриття місяця для документа — окремим чанком, як у банері закритого періоду (`D-132`). */
 const DocumentPeriodReopenDialog = lazy(async () => ({
   default: (await import('@/features/documents/periodReopen/DocumentPeriodReopenDialog')).DocumentPeriodReopenDialog,
 }));
 
+/**
+ * ✎ B51 (1): мови, у яких назва місяця в тексті — з малої літери («закрытые месяцы (январь, …)», «Открыть январь
+ * 2026 …»). Каталог (`periods.month.N`) тримає її з великої, бо вона ж — підпис періоду («Январь 2026»), тож каталог
+ * не змінюємо, а знижуємо регістр там, де назву вставлено в речення. `Intl` — ні: у браузері немає ICU `kk` (див.
+ * `formatMonthYear`).
+ */
+const LowercaseMonthLanguages: ReadonlySet<string> = new Set(['ru', 'kz', 'kk', 'uk']);
+
+/** Назва місяця (або «Январь 2026») всередині речення: мала перша літера там, де так пишуть. */
+function inSentence(name: string): string {
+  const lang = language();
+  if (!LowercaseMonthLanguages.has(lang) || name === '') return name;
+
+  return name.charAt(0).toLocaleLowerCase(lang === 'kz' ? 'kk' : lang) + name.slice(1);
+}
+
 /** «January», «January and April», «January, April and July» — назви з каталогу місяців, сполучник — з каталогу. */
 export function monthsText(months: readonly number[]): string {
-  const names = months.map(formatMonthName).filter((name) => name !== '');
+  const names = months.map(formatMonthName).filter((name) => name !== '').map(inSentence);
   const last = names[names.length - 1];
   if (last === undefined) return '';
   if (names.length === 1) return last;
@@ -40,6 +56,18 @@ export function lockedRowSentence(item: LockedRowItem): string {
   return item.months.length === 1
     ? t('inspector.attention.lockedRowOne', params)
     : t('inspector.attention.lockedRowMany', params);
+}
+
+/**
+ * «Reopen January 2026 for this document…» / «Открыть январь 2026 для этого документа…». Місяць, що ПОЧИНАЄ речення
+ * (kz «{period} осы құжат үшін ашу…»), лишає велику літеру.
+ */
+export function reopenLabel(periodKey: number): string {
+  const Probe = '\u0000';
+  const period = formatPeriodKey(periodKey);
+  const leading = t('document.reopen.action', { period: Probe }).startsWith(Probe);
+
+  return t('document.reopen.action', { period: leading ? period : inSentence(period) });
 }
 
 export interface LockedRowsProps {
@@ -125,7 +153,7 @@ export function LockedRows({ documentId, tableDefId, rows, onSelect }: LockedRow
               data-inspector-reopen={month.periodKey}
               onClick={() => setReopening(month)}
             >
-              {t('document.reopen.action', { period: formatPeriodKey(month.periodKey) })}
+              {reopenLabel(month.periodKey)}
             </Button>
           ))}
         </Group>
