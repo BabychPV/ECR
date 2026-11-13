@@ -110,6 +110,15 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// Попередження (не відмови): <c>effectiveFromShiftedToJanuary</c> (ключ <c>documents.migrateWarnEffectiveFromJanuary</c>,
 /// параметри <c>requested</c>, <c>effective</c>); <c>null</c> — немає.
 /// </param>
+/// <param name="LockedOverridesLost">
+/// ✎ V-7 (рішення PO 11.11): скільки ручних значень замість формул (D-461), яких формула цільової версії не дозволяє,
+/// лежить на ПОДАНИХ або ЗАТВЕРДЖЕНИХ аркушах. Більше нуля — відмова <c>lockedOverridesLost</c> (<c>409 ECR-DOC-0409</c>,
+/// <c>migrateLockedOverrides</c>), доки аркуші не повернуть у роботу. <c>null</c> — таких немає.
+/// </param>
+/// <param name="LockedOverrideItems">
+/// ✎ V-7: ці подані/затверджені пари «аркуш × період» (<see cref="LockedSheetItem.Affected"/> = <c>true</c>), не більше
+/// <c>MaxLockedItems</c>; <c>null</c> — таких немає. ⛔ Лише коди аркушів, періоди й статуси.
+/// </param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
     int ProjectId,
@@ -150,7 +159,9 @@ public sealed record DocumentVersionMigrationDto(
     VersionMigrationRange? Range = null,
     int? FromPeriodKey = null,
     int? EffectiveFromPeriodKey = null,
-    IReadOnlyList<VersionMigrationWarning>? Warnings = null);
+    IReadOnlyList<VersionMigrationWarning>? Warnings = null,
+    int? LockedOverridesLost = null,
+    IReadOnlyList<LockedSheetItem>? LockedOverrideItems = null);
 
 /// <summary>Комірка, значення якої перезапише нова комірочна формула (ACC-OW).</summary>
 /// <param name="SheetCode">Код аркуша вихідної версії.</param>
@@ -1457,6 +1468,16 @@ public sealed class MigrateDocumentVersionHandler(
             refusals.Add("sheetsLocked");
         }
 
+        // ✎ V-7 (рішення PO 11.11, варіант А): ручне значення (D-461), яке перенос зняв би (`lostOverrides`), на
+        // поданому/затвердженому аркуші змінює його дані (позначка, IsCalculated, журнал FormulaRestored), а перерахунок
+        // такий аркуш не пише. Тому — відмова, доки аркуш не повернуть у роботу, як решта LP-32. Окрема причина: план
+        // структури цей аркуш може й не зачіпати.
+        var lockedOverrides = LockedOverrideTouches(lostOverrides, from, scope.LockedSheetRefs);
+        if (lockedOverrides.Marks > 0)
+        {
+            refusals.Add("lockedOverridesLost");
+        }
+
         // ⛔ Шапка закритого документа (є подані/затверджені аркуші) мігрується лише з явною згодою
         // (`allowLockedDocuments`, рішення людини 21.10): подане стосується значень шапки в тому вигляді, в якому його
         // подали. Рахуються документи, значення шапки яких справді перепише мапа.
@@ -1621,7 +1642,9 @@ public sealed class MigrateDocumentVersionHandler(
             Range: Range,
             FromPeriodKey: Range == VersionMigrationRange.FromMonth ? FromPeriodKey : null,
             EffectiveFromPeriodKey: range.Effective,
-            Warnings: range.Warnings);
+            Warnings: range.Warnings,
+            LockedOverridesLost: lockedOverrides.Marks == 0 ? null : lockedOverrides.Marks,
+            LockedOverrideItems: lockedOverrides.Items.Count == 0 ? null : lockedOverrides.Items);
 
         return new PlannedMigration(
             dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds }, lookup.Rows,
@@ -1803,6 +1826,68 @@ public sealed class MigrateDocumentVersionHandler(
         return new LockedClassification(items.Count - affected, affected, listed, items.Count > MaxLockedItems);
     }
 
+    /// <summary>✎ V-7: ручні значення (D-461), що зникли б, на поданих/затверджених парах «документ × аркуш × період».</summary>
+    /// <param name="Marks">Скільки позначок лежить на таких парах.</param>
+    /// <param name="Items">Самі пари (≤ <c>MaxLockedItems</c>), <c>Affected = true</c>.</param>
+    internal sealed record LockedOverrideClassification(int Marks, IReadOnlyList<LockedSheetItem> Items);
+
+    /// <summary>
+    /// ✎ V-7: які з позначок <paramref name="lost"/> (колонки ВИХІДНОЇ версії) лежать на поданих/затверджених парах
+    /// <paramref name="lockedRefs"/>. Копії аркуша зараховуються разом з оригіналом: <see cref="VersionMigrationLockedSheet"/>
+    /// не несе <c>SheetCopyId</c> (консервативно, як <see cref="ClassifyLocked"/>).
+    /// </summary>
+    internal static LockedOverrideClassification LockedOverrideTouches(
+        IReadOnlyList<ProjectFormulaOverride> lost, TemplateVersionSnapshot from,
+        IReadOnlyList<VersionMigrationLockedSheet>? lockedRefs)
+    {
+        if (lost.Count == 0 || lockedRefs is not { Count: > 0 })
+        {
+            return new LockedOverrideClassification(0, []);
+        }
+
+        var lockedStatus = lockedRefs
+            .GroupBy(l => (l.DocumentId, l.SheetDefId, l.PeriodKey))
+            .ToDictionary(g => g.Key, g => g.First().Status);
+        var sheetOfTable = from.Sheets
+            .SelectMany(s => s.Tables.Select(t => (TableId: t.Id, SheetId: s.Id)))
+            .ToDictionary(x => x.TableId, x => x.SheetId);
+        var codes = from.Sheets.ToDictionary(s => s.Id, s => s.Code.ToString());
+
+        var marks = 0;
+        var pairs = new Dictionary<(long DocumentId, int SheetDefId, int PeriodKey), string>();
+        foreach (var mark in lost)
+        {
+            if (!from.ColumnsById.TryGetValue(mark.Address.ColumnDefId, out var column)
+                || !sheetOfTable.TryGetValue(column.TableDefId, out var sheetId))
+            {
+                continue;
+            }
+
+            var key = (mark.DocumentId, sheetId, mark.Address.PeriodKey.Value);
+            if (lockedStatus.TryGetValue(key, out var status))
+            {
+                marks++;
+                pairs.TryAdd(key, status);
+            }
+        }
+
+        var items = pairs
+            .Select(p => new LockedSheetItem(
+                p.Key.DocumentId,
+                codes.GetValueOrDefault(p.Key.SheetDefId)
+                    ?? string.Create(CultureInfo.InvariantCulture, $"#{p.Key.SheetDefId}"),
+                p.Key.PeriodKey,
+                p.Value,
+                Affected: true))
+            .OrderBy(i => i.SheetCode, StringComparer.Ordinal)
+            .ThenBy(i => i.PeriodKey)
+            .ThenBy(i => i.DocumentId)
+            .Take(MaxLockedItems)
+            .ToList();
+
+        return new LockedOverrideClassification(marks, items);
+    }
+
     private async Task<TemplateVersion> RequireTargetAsync(
         int sourceVersionId, int targetVersionId, bool tolerateSame, CancellationToken ct)
     {
@@ -1872,21 +1957,32 @@ public sealed class MigrateDocumentVersionHandler(
         // Частина guarded, що лишилась через мапу Lookup без повного покриття: її називає окрема причина.
         var otherGuardedValues = guardedValues - lookupGuardedValues;
 
-        if (dto.Refusals.Contains("projectArchived") || dto.Refusals.Contains("sheetsLocked"))
+        if (dto.Refusals.Contains("projectArchived") || dto.Refusals.Contains("sheetsLocked")
+            || dto.Refusals.Contains("lockedOverridesLost"))
         {
             // Подане чи затверджене стосувалося СТАРОЇ структури, і зачепити його
             // переносом означало б видати чуже затвердження за нове. Спершу
             // повернути аркуші в роботу. (LP-32: незачеплені переносяться без змін.)
+            // ✎ V-7: те саме для ручних значень (D-461), які перенос зняв би на поданому/затвердженому аркуші.
+            // Пріоритет ключа: архів > структура (sheetsLocked) > ручні значення; `refusals` несе всі причини.
+            var messageKey = dto.Refusals.Contains("projectArchived")
+                ? "err.ECR-DOC-0409.migrateProjectArchived"
+                : dto.Refusals.Contains("sheetsLocked")
+                    ? "err.ECR-DOC-0409.migrateSheetsLocked"
+                    : "err.ECR-DOC-0409.migrateLockedOverrides";
             throw new ConcurrencyConflictException(
                 ErrorCodes.DocumentSubmitted,
-                dto.Refusals.Contains("projectArchived")
-                    ? "Проєкт архівовано: документи архівного проєкту не переносяться."
-                    : $"Перенос зачепив би подані або затверджені аркуші: {dto.LockedSheetsAffected}. Спершу поверніть їх у роботу.",
+                messageKey switch
+                {
+                    "err.ECR-DOC-0409.migrateProjectArchived" => "Проєкт архівовано: документи архівного проєкту не переносяться.",
+                    "err.ECR-DOC-0409.migrateSheetsLocked" =>
+                        $"Перенос зачепив би подані або затверджені аркуші: {dto.LockedSheetsAffected}. Спершу поверніть їх у роботу.",
+                    _ => "Перенос зняв би ручні значення замість формул на поданих або затверджених аркушах: значень "
+                         + $"{dto.LockedOverridesLost}, аркушів {dto.LockedOverrideItems?.Count ?? 0}. Спершу поверніть їх у роботу.",
+                },
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = dto.Refusals.Contains("projectArchived")
-                        ? "err.ECR-DOC-0409.migrateProjectArchived"
-                        : "err.ECR-DOC-0409.migrateSheetsLocked",
+                    ["messageKey"] = messageKey,
 
                     // ⚠ `lockedSheets` — параметр тексту повідомлення: з LP-32 це кількість ЗАЧЕПЛЕНИХ аркушів
                     // (раніше — усіх поданих); перенесені без змін у відмову не входять.
@@ -1898,6 +1994,15 @@ public sealed class MigrateDocumentVersionHandler(
                     // ⚠ Лише коди аркушів, періоди й статуси: без імен користувачів і значень.
                     ["lockedSheetItems"] = dto.LockedSheetItems is { Count: > 0 } lockedItems
                         ? lockedItems.Where(i => i.Affected).Take(MaxLockedItems)
+                            .Select(i => string.Create(CultureInfo.InvariantCulture, $"{i.SheetCode}|{i.PeriodKey}|{i.Status}"))
+                            .ToList()
+                        : null,
+
+                    // ✎ V-7: лише кількість і коди аркушів / періоди / статуси, без значень.
+                    ["lockedOverrides"] = dto.LockedOverridesLost?.ToString(CultureInfo.InvariantCulture),
+                    ["lockedOverrideSheets"] = (dto.LockedOverrideItems?.Count ?? 0).ToString(CultureInfo.InvariantCulture),
+                    ["lockedOverrideItems"] = dto.LockedOverrideItems is { Count: > 0 } overrideItems
+                        ? overrideItems
                             .Select(i => string.Create(CultureInfo.InvariantCulture, $"{i.SheetCode}|{i.PeriodKey}|{i.Status}"))
                             .ToList()
                         : null,

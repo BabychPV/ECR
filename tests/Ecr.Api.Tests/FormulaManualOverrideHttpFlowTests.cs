@@ -247,6 +247,140 @@ public sealed class FormulaManualOverrideHttpFlowTests(SqlServerFixture sql)
             i => i.GetProperty("kind").GetString() == "OverrideLost" && i.GetProperty("values").GetInt64() == 2);
     }
 
+    /// <summary>
+    /// ✎ V-7 (аудит 2026-11, рішення PO 11.11, варіант А): ручне значення замість формули (D-461), якого формула цільової
+    /// версії не дозволяє, на ЗАТВЕРДЖЕНОМУ аркуші блокує перенос версії (<c>lockedOverridesLost</c>, <c>409 ECR-DOC-0409</c>,
+    /// <c>migrateLockedOverrides</c>); після повернення аркуша в роботу той самий перенос проходить і знімає позначку
+    /// шляхом D-461 (журнал <c>FormulaRestored</c>, причина <c>Version migration</c>).
+    /// </summary>
+    /// <remarks>
+    /// Без виправлення червоний: сухий прогін дає <c>canApply = true</c>, застосування — 200, а позначка на затвердженому
+    /// аркуші зникає (<c>IsCalculated = 1</c>, рядок журналу <c>FormulaRestored</c>).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-461")]
+    [Trait("Finding", "V-7")]
+    public async Task Ручне_значення_на_затвердженому_аркуші_блокує_перенос_до_повернення_в_роботу()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var admin = await NewUserAsync(s, GrantLevel.Manage,
+            "Template.View", "Template.Edit", "Template.Publish", EditRules.OverrideFormulaPermission, "Document.Reopen")
+            .ConfigureAwait(true);
+        var author = await NewUserAsync(s, GrantLevel.Submit, EditRules.OverrideFormulaPermission).ConfigureAwait(true);
+        var approver = await NewUserAsync(s, GrantLevel.Approve, EditRules.OverrideFormulaPermission).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var adminClient = await SignInAsync(app, admin).ConfigureAwait(true);
+        using var authorClient = await SignInAsync(app, author).ConfigureAwait(true);
+        using var approverClient = await SignInAsync(app, approver).ConfigureAwait(true);
+
+        // ── Шаблон: F = [A] * 2, S = SUM(F); публікація; дозвіл ручного значення ──
+        await ExpectAsync(app, HttpStatusCode.OK, SaveFormulaAsync(adminClient, s.VersionId, s.TableA, s.FColumnId,
+            $"[{s.ACode}] * 2")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.OK, SaveFormulaAsync(adminClient, s.VersionId, s.TableB, s.SColumnId,
+            $"SUM([{s.SheetA}].[{s.TableACode}].[{s.Rows[0]}:{s.Rows[4]}].[{s.FCode}])")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, PublishAsync(adminClient, s.VersionId)).ConfigureAwait(true);
+
+        var formulaId = await FormulaIdAsync(s, s.FColumnId).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.OK, ToggleAsync(adminClient, s.VersionId, formulaId, true, false)).ConfigureAwait(true);
+
+        for (var i = 0; i < 5; i++)
+        {
+            await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(adminClient, s, s.Rows[i], s.ACode,
+                (i + 1).ToString(CultureInfo.InvariantCulture), null,
+                await VersionAsync(adminClient, s, s.Rows[i]).ConfigureAwait(true))).ConfigureAwait(true);
+        }
+
+        await WaitAsync(app, adminClient, s, f: [2m, 4m, 6m, 8m, 10m], sum: 30m).ConfigureAwait(true);
+
+        // ── Ручне R4 = 100 ──
+        await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(adminClient, s, s.Rows[3], s.FCode, "100", "ручна r4",
+            await VersionAsync(adminClient, s, s.Rows[3]).ConfigureAwait(true))).ConfigureAwait(true);
+        await WaitAsync(app, adminClient, s, f: [2m, 4m, 6m, 100m, 10m], sum: 122m).ConfigureAwait(true);
+        Assert.Equal(1, await MarksAsync(s).ConfigureAwait(true));
+
+        // ── Подання й затвердження аркуша ──
+        await ExpectAsync(app, HttpStatusCode.NoContent, authorClient.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.Document.DocumentId}/submit", UriKind.Relative),
+            new { sheetDefId = s.Document.SheetDefId, periodKey = s.PeriodKey })).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, approverClient.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.Document.DocumentId}/approve", UriKind.Relative),
+            new { sheetDefId = s.Document.SheetDefId, periodKey = s.PeriodKey, approved = true })).ConfigureAwait(true);
+
+        // ── Клон, де формула НЕ дозволяє ручне значення ──
+        var clone = Json(await ExpectAsync(app, HttpStatusCode.Created, adminClient.PostAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{s.VersionId}/clone", UriKind.Relative),
+            new { newVersion = $"2.0.0.{Random.Shared.Next(1000, 999999)}" })).ConfigureAwait(true)).GetProperty("versionId").GetInt32();
+        var cloneFormula = await FormulaIdInVersionAsync(s, clone, s.FCode).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.OK, ToggleAsync(adminClient, clone, cloneFormula, false, false)).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, PublishAsync(adminClient, clone)).ConfigureAwait(true);
+
+        var migrate = new Uri($"/api/v1/documents/{s.Document.DocumentId}/migrate-version", UriKind.Relative);
+
+        // ── Сухий прогін: відмова саме через ручне значення, а не через структуру ──
+        var dryRun = Json(await ExpectAsync(app, HttpStatusCode.OK, adminClient.PostAsJsonAsync(
+            migrate, new { targetVersionId = clone, mode = "Safe", dryRun = true })).ConfigureAwait(true));
+        Assert.False(dryRun.GetProperty("canApply").GetBoolean());
+        var refusals = dryRun.GetProperty("refusals").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains("lockedOverridesLost", refusals);
+        Assert.DoesNotContain("sheetsLocked", refusals);
+        Assert.Equal(1, dryRun.GetProperty("lockedOverridesLost").GetInt32());
+        Assert.Equal(1, dryRun.GetProperty("lostFormulaOverrides").GetInt64());
+        var lockedItem = Assert.Single(dryRun.GetProperty("lockedOverrideItems").EnumerateArray());
+        Assert.Equal("Approved", lockedItem.GetProperty("status").GetString());
+        Assert.True(lockedItem.GetProperty("affected").GetBoolean());
+        Assert.Equal(s.PeriodKey, lockedItem.GetProperty("periodKey").GetInt32());
+
+        // ── Застосування: 409, нічого не змінено ──
+        var refused = Json(await ExpectAsync(app, HttpStatusCode.Conflict, adminClient.PostAsJsonAsync(
+            migrate, new { targetVersionId = clone, mode = "Safe", dryRun = false })).ConfigureAwait(true));
+        Assert.Equal("ECR-DOC-0409", refused.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-DOC-0409.migrateLockedOverrides", refused.GetProperty("messageKey").GetString());
+        Assert.Equal("1", refused.GetProperty("lockedOverrides").GetString());
+        Assert.Equal("1", refused.GetProperty("lockedOverrideSheets").GetString());
+        Assert.Equal(1, await MarksAsync(s).ConfigureAwait(true));
+        Assert.Equal((false, true), await StoredFlagsAsync(s, s.Rows[3]).ConfigureAwait(true));
+        Assert.Equal(s.VersionId, await ProjectVersionAsync(s).ConfigureAwait(true));
+
+        // ── Повернення аркуша в роботу → той самий перенос проходить і знімає позначку шляхом D-461 ──
+        await ExpectAsync(app, HttpStatusCode.NoContent, adminClient.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.Document.DocumentId}/reopen", UriKind.Relative),
+            new { sheetDefId = s.Document.SheetDefId, periodKey = s.PeriodKey, reason = "V-7" })).ConfigureAwait(true);
+
+        var applied = Json(await ExpectAsync(app, HttpStatusCode.OK, adminClient.PostAsJsonAsync(
+            migrate, new { targetVersionId = clone, mode = "Safe", dryRun = false })).ConfigureAwait(true));
+        Assert.True(applied.GetProperty("applied").GetBoolean());
+        Assert.Equal(clone, await ProjectVersionAsync(s).ConfigureAwait(true));
+        Assert.Equal(0, await MarksAsync(s).ConfigureAwait(true));
+
+        var targetF = await ColumnIdInVersionAsync(s, clone, s.FCode).ConfigureAwait(true);
+        Assert.Equal(
+            (CellChangeOrigins.FormulaRestored, (string?)"Version migration"),
+            await LastChangeAsync(s, s.Rows[3], columnId: targetF).ConfigureAwait(true));
+    }
+
+    private static async Task<int> ProjectVersionAsync(Scenario s)
+    {
+        await using var db = s.Builder.CreateContext();
+        return await db.Projects.AsNoTracking().Where(p => p.Id == s.Document.ProjectId).Select(p => p.TemplateVersionId)
+            .SingleAsync().ConfigureAwait(false);
+    }
+
+    private static async Task<int> ColumnIdInVersionAsync(Scenario s, int versionId, string columnCode)
+    {
+        await using var db = s.Builder.CreateContext();
+        var columns = await (
+                from c in db.ColumnDefs.AsNoTracking()
+                join t in db.TableDefs.AsNoTracking() on c.TableDefId equals t.Id
+                join sh in db.SheetDefs.AsNoTracking() on t.SheetDefId equals sh.Id
+                where sh.TemplateVersionId == versionId
+                select new { c.Id, c.Code })
+            .ToListAsync().ConfigureAwait(false);
+        return columns.Single(x => x.Code == columnCode).Id;
+    }
+
     /// <remarks>
     /// P1 06.11 (живий тест людини, HSE401 P4-V11-0001, H_COMPONENT = <c>REGFIELD([H_POLL], 'COMPONENT')</c>): після
     /// повернення формули (видалення ручного значення) числові формули рахувались знову, а текстова лишалась порожньою.
