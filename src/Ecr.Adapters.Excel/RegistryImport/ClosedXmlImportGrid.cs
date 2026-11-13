@@ -47,10 +47,16 @@ public sealed class ClosedXmlImportGrid : IImportGrid
     public int ColumnCount { get; }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ B23: a formula cell is read by its SAVED result (<c>CachedValue</c>), never evaluated. <c>IXLCell.Value</c> evaluates a
+    /// formula that has no saved result, and a workbook written by a program (our own document export: 51,440 formulas without
+    /// <c>&lt;v&gt;</c> in a 2.3 MB file) made one analyse of the header block take ~4 minutes. The import reads what is in the
+    /// file; a formula without a saved result reads as empty (Excel and LibreOffice always save the result).
+    /// </remarks>
     public ImportCell Get(int row, int column)
     {
         var cell = _sheet.Cell(row, column);
-        var value = cell.Value;
+        var value = cell.HasFormula ? cell.CachedValue : cell.Value;
 
         object? raw = value.Type switch
         {

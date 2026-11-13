@@ -10,8 +10,8 @@ import { signIn } from './multiSheet';
  *
  * Живий стенд: шаблон із колонками вводу A (Decimal), S (String) і формулами F1 = [A]*2 та T — текстовий міст над S
  * через `[Period].Sequence` (як у Land; у книгу такий вираз не транслюється — комірка лишається значенням).
- * (1) експорт → перегляд імпорту без правок: 0 відмов і 0 змін; (2) правка входу A в книзі → імпорт через діалог не
- * заблоковано, Apply записує A, сервер перераховує F1.
+ * (1) експорт → перегляд імпорту без правок: 0 відмов і 0 змін; (2) W-1: правка входу A в книзі → імпорт через діалог →
+ * F1 у сітці оновлюється без F9 і без перезавантаження.
  *
  * Без стенда — пропуск. Стенд: `tools/e2e-stand.ps1`.
  */
@@ -331,6 +331,20 @@ function replaceNumber(book: Buffer, from: string, to: string): Buffer {
   return zip(parts);
 }
 
+const cellAt = (page: Page, col: number, row: number) =>
+  page.locator(`revo-grid revogr-data[type="rgRow"] .rgCell[data-rgcol="${String(col)}"][data-rgrow="${String(row)}"]`);
+
+function columnIndex(slice: Slice, code: string): number {
+  const offset = slice.rows.some((row) => row.label !== null && row.label.length > 0) ? 1 : 0;
+  const index = slice.columns.findIndex((candidate) => candidate.code === code);
+  expect(index, `колонка ${code}`).toBeGreaterThanOrEqual(0);
+  return index + offset;
+}
+
+/** Число в комірці сітки: формат показу має роздільник тисяч («2,469.00», «2 469,00») — він допускається. */
+const shows = (value: number): RegExp =>
+  new RegExp(`^\\s*${String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '[,\\s\\u00a0\\u202f]?')}([.,]0+)?\\s*$`);
+
 test.describe('Excel import round trip', () => {
   test.skip(PeriodKey === '', 'ECR_E2E_OPTIONAL: стенда немає, перевіряти нічого. Стенд: tools/e2e-stand.ps1.');
 
@@ -346,7 +360,7 @@ test.describe('Excel import round trip', () => {
     expect(result.changes, JSON.stringify(result.changes)).toEqual([]);
   });
 
-  test('excelImportRoundTrip: changed input applies through the import dialog (not blocked)', async ({ page }) => {
+  test('excelImportRoundTrip W-1: changed input via the import dialog updates the computed column without F9', async ({ page }) => {
     test.slow();
     await signIn(page);
     const arranged = await arrange(page);
@@ -354,6 +368,8 @@ test.describe('Excel import round trip', () => {
 
     await page.goto(`/documents/${String(arranged.documentId)}?periodKey=${String(arranged.periodKey)}`);
     await expect(page.locator('revo-grid:visible').first()).toBeVisible({ timeout: 60_000 });
+    const colF1 = columnIndex(await sliceOf(page, arranged), 'F1');
+    await expect(cellAt(page, colF1, 0)).toHaveText(shows(2469), { timeout: 30_000 });
 
     const picker = page.locator('input[type="file"][accept=".xlsx"]');
     await expect(picker).toBeAttached({ timeout: 30_000 });
@@ -363,7 +379,6 @@ test.describe('Excel import round trip', () => {
       buffer: book,
     });
 
-    // ⛔ До фіксу: незмінені T-комірки → відмови → «This file cannot be applied as it is», Apply вимкнено.
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: 60_000 });
     await expect(dialog.getByText('This file cannot be applied as it is')).toHaveCount(0);
@@ -372,12 +387,10 @@ test.describe('Excel import round trip', () => {
     await apply.click();
     await expect(dialog).toBeHidden({ timeout: 60_000 });
 
-    // Записано вхід A; формула F1 перерахована сервером. (Оновлення сітки без F9 — W-1, окрема lane L3.)
+    // W-1: задача формул після застосування → сітка сама перечитує зріз (без F9 і перезавантаження).
+    await expect(cellAt(page, colF1, 0)).toHaveText(shows(3001), { timeout: 60_000 });
     await expect
-      .poll(async () => {
-        const row = (await sliceOf(page, arranged)).rows[0];
-        return [Number(row?.cells['A']), Number(row?.cells['F1'])];
-      }, { timeout: 120_000 })
-      .toEqual([1500.5, 3001]);
+      .poll(async () => Number((await sliceOf(page, arranged)).rows[0]?.cells['F1']), { timeout: 30_000 })
+      .toBe(3001);
   });
 });
