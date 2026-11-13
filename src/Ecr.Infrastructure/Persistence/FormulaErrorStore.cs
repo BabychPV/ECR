@@ -90,13 +90,33 @@ public sealed class FormulaErrorStore(EcrDbContext db) : IFormulaErrorStore
                 from sc in scs.DefaultIfEmpty()
                 join rd in db.RowDefs.AsNoTracking() on r.RowDefId equals (int?)rd.Id into rds
                 from rd in rds.DefaultIfEmpty()
-                orderby t.Id, r.Ordinal, c.Ordinal
+
+                // ✎ B78: номер рядка — ПОЗИЦІЯ в сітці (з 1), а не `doc.TableRow.Ordinal`: у динамічних таблицях (Land
+                // T3_00) Ordinal у всіх рядків однаковий (0), і банер показував «рядок 0» на кожній комірці. Порядок —
+                // той самий, що в `GetTableSliceHandler`: Ordinal опису рядка шаблону за RowKey (немає — у кінець),
+                // далі `TableRow.Id`. Корельований підзапит у тій самій команді (помилок на документ — одиниці–сотні).
+                let ordinal = db.RowDefs
+                    .Where(d => d.TableDefId == e.TableDefId && d.RowKeyValue == r.RowKeyValue && !d.IsDeleted)
+                    .Select(d => (int?)d.Ordinal)
+                    .Min() ?? int.MaxValue
+                let position = 1 + db.TableRows.Count(o =>
+                    o.PeriodKeyValue == r.PeriodKeyValue && o.TableInstanceId == r.TableInstanceId && !o.IsDeleted
+                    && ((db.RowDefs
+                             .Where(d => d.TableDefId == e.TableDefId && d.RowKeyValue == o.RowKeyValue && !d.IsDeleted)
+                             .Select(d => (int?)d.Ordinal)
+                             .Min() ?? int.MaxValue) < ordinal
+                        || ((db.RowDefs
+                                 .Where(d => d.TableDefId == e.TableDefId && d.RowKeyValue == o.RowKeyValue && !d.IsDeleted)
+                                 .Select(d => (int?)d.Ordinal)
+                                 .Min() ?? int.MaxValue) == ordinal
+                            && o.Id < r.Id)))
+                orderby t.Id, position, c.Ordinal
                 select new FormulaErrorView(
                     new FormulaErrorRow(
                         e.DocumentId, e.PeriodKey, e.TableInstanceId, e.TableDefId, e.SheetCopyId, e.TableRowId, e.RowKey,
                         e.ColumnDefId, e.FormulaDefId, e.Kind, e.ErrorCode, e.InputsJson, e.SourcePeriodKey,
                         e.SourceTableDefId, e.SourceRowKey, e.SourceColumnDefId, e.Since),
-                    t.Code, c.Code, c.HeaderL10n, r.Ordinal,
+                    t.Code, c.Code, c.HeaderL10n, position,
                     f == null ? null : f.Expression,
                     st == null ? null : st.Code,
                     sc == null ? null : sc.Code,
