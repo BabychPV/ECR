@@ -527,7 +527,16 @@ public sealed partial class TableDiscussionApiTests(SqlServerFixture sql)
     {
         var s = await ArrangeAsync().ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
-        using var alice = await SignedInAsync(app, s.Writer.UserName).ConfigureAwait(true);
+
+        // S-6: 60 POST від одного користувача — понад межу запису в чат (20/хв); тест про гонку, не про межу
+        // (межу тримає Security/TableDiscussionRateLimitTests), тому межу піднято лише тут.
+        using var unlimited = app.WithWebHostBuilder(builder => builder.UseSetting(
+            Ecr.Api.Security.TableDiscussionPostRateLimitPolicy.PermitKey, "1000"));
+        using var alice = unlimited.CreateClient();
+        var login = await alice.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = s.Writer.UserName, password = Password }).ConfigureAwait(true);
+        Assert.True(login.IsSuccessStatusCode, $"Вхід: {login.StatusCode}: {app.ErrorsText}");
 
         for (var round = 1; round <= 20; round++)
         {
