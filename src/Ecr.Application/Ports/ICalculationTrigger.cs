@@ -50,4 +50,18 @@ public interface ICalculationTrigger
     /// (<c>RecalculationWritePolicy</c>).
     /// </returns>
     public Task<string?> RequestAsync(long documentId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// B63: ставить перерахунок документа, ЗАЛЕЖНОГО від зміненого довідника чи документа-джерела (RT-25, HSE400 3b,
+    /// FLERT F6) — пропускаються лише затверджені аркуші, подані перераховуються з позначкою для погоджувача.
+    /// </summary>
+    /// <param name="documentId">Залежний документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Ідентифікатор задачі; <c>null</c> — період не знайдено, <c>Scheduled</c>, закритий або затверджено всі аркуші.
+    /// </returns>
+    /// <remarks>Типова реалізація — як <see cref="RequestAsync"/> (для фейків тестів); справжня — <c>CalculationTrigger</c>.</remarks>
+    public Task<string?> RequestDependentsAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+        => RequestAsync(documentId, periodKey, ct);
 }

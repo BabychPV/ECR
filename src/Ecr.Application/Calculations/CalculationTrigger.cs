@@ -36,7 +36,9 @@ namespace Ecr.Application.Calculations;
 public sealed class CalculationTrigger(
     IBackgroundJobScheduler jobs,
     IPeriodStore periods,
-    IWorkflowStore workflow) : ICalculationTrigger
+    IWorkflowStore workflow,
+    IDocumentStore? documents = null,
+    IDocumentSheetCopyStore? sheetCopies = null) : ICalculationTrigger
 {
     /// <inheritdoc />
     public bool EnlistsInCallerTransaction => jobs.EnlistsInCallerTransaction;
@@ -68,6 +70,87 @@ public sealed class CalculationTrigger(
         }
 
         return await EnqueueAsync(documentId, periodKey, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ B63 (слово людини 07.11: «тільки погоджені не мають перераховуватися»): залежні від довідника чи
+    /// документа-джерела (RT-25, HSE400 3b, FLERT F6) перераховуються ПО АРКУШУ — пропускається лише затверджений;
+    /// чернетка, повернутий і поданий перераховуються, поданий — із записом журналу й позначкою
+    /// «перераховано після подання» (той самий механізм, що в ручного перерахунку: <c>RecalculationJob</c>
+    /// з <c>RecalculateSubmitted</c>). Доти один поданий чи затверджений аркуш знімав із перерахунку ВЕСЬ документ.
+    /// <para>
+    /// ⚠ «Рахувати нічого» — затверджено КОЖЕН аркуш складу (оригінал і кожна копія, RS), те саме правило, що в
+    /// <c>RecalculateDocumentHandler</c>; інакше задача відмовила б 4221 і лишила проваленого перерахунку в журналі.
+    /// Склад невідомий — «нічого», лише коли всі наявні стани аркушів затверджені.
+    /// </para>
+    /// <para>
+    /// ⚠ Ціль — своя (<see cref="DependentsTargetOf"/>), а не <c>TargetOf</c>: черга зливає постановку з тією, що
+    /// чекає, і payload залежних без позначки поданих загубився б в автоперерахунку збору. Два прогони одного
+    /// документа однаково не йдуть разом — лок документа бере сама задача.
+    /// </para>
+    /// </remarks>
+    public async Task<string?> RequestDependentsAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    {
+        var state = await periods.FindPeriodStateAsync(documentId, periodKey.Value, ct).ConfigureAwait(false);
+        if (state is not { } periodState || periodState == PeriodState.Scheduled
+            || RecalculationWritePolicy.Check(periodState, hasSubmittedSheets: false) != RecalculationWriteDenial.None)
+        {
+            return null;
+        }
+
+        var sheets = await workflow.GetSheetsAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        if (await AllApprovedAsync(documentId, sheets, ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return await jobs.EnqueueCoalescedAsync<IRecalculationJob>(
+                DependentsTargetOf(documentId, periodKey),
+                new
+                {
+                    DocumentId = documentId,
+                    PeriodKey = periodKey.Value,
+                    TriggeredByUserId = (int?)null,
+                    SheetDefId = (int?)null,
+                    RecalculateSubmitted = true,
+                },
+                ct,
+                createdByUserId: null)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Ціль перерахунку залежних: окрема від автоперерахунку збору й кнопки (див. <see cref="RequestDependentsAsync"/>).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <returns><c>doc{id}-p{період}-dependents</c>.</returns>
+    public static string DependentsTargetOf(long documentId, PeriodKey periodKey)
+        => string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"{RecalculateDocumentHandler.TargetOf(documentId, periodKey)}-dependents");
+
+    private async Task<bool> AllApprovedAsync(
+        long documentId, IReadOnlyList<Domain.Entities.Workflow.ApprovalState> sheets, CancellationToken ct)
+    {
+        bool Approved(int sheetId, long? copyId) => sheets.Any(s =>
+            s.SheetDefId == sheetId && s.SheetCopyId == copyId && s.Status == DocumentStatus.Approved);
+
+        var included = documents is null
+            ? []
+            : await documents.GetIncludedSheetIdsAsync(documentId, ct).ConfigureAwait(false);
+
+        if (included.Count == 0)
+        {
+            return sheets.Count > 0 && sheets.All(s => s.Status == DocumentStatus.Approved);
+        }
+
+        var copiesBySheet = sheetCopies is null
+            ? new Dictionary<int, IReadOnlyList<SheetCopyOrdinal>>()
+            : (await sheetCopies.ListGroupsAsync(documentId, ct).ConfigureAwait(false))
+                .ToDictionary(g => g.SheetDefId, g => g.Copies);
+
+        return included.All(sheetId => Approved(sheetId, null)
+            && (copiesBySheet.GetValueOrDefault(sheetId) ?? []).All(c => Approved(sheetId, c.SheetCopyId)));
     }
 
     /// <summary>Єдина точка постановки автоперерахунку.</summary>

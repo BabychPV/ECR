@@ -23,6 +23,7 @@ public sealed class CalculationTriggerTests
 {
     private const long DocumentId = 4501;
     private static readonly PeriodKey Period = new(202601);
+    private static readonly int[] IncludedThree = [1, 2, 3];
 
     private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
     private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
@@ -128,5 +129,101 @@ public sealed class CalculationTriggerTests
         Assert.Null(jobId);
         await _jobs.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<IRecalculationJob>(
             default!, default, default, default);
+    }
+
+    /// <summary>
+    /// ⛔ B63 (слово людини 07.11: «тільки погоджені не мають перераховуватися»): залежний документ із затвердженим,
+    /// поданим і чернетковим аркушем ставиться на перерахунок — з позначкою поданих і своєю ціллю.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ДОКАЗ (локально): тіло <c>RequestDependentsAsync</c> → <c>RequestAsync</c> (як доти) — <c>null</c>, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "B63")]
+    public async Task Залежний_із_затвердженим_поданим_і_чернеткою_ставиться_з_позначкою_поданих()
+    {
+        State(PeriodState.Open);
+        Sheets(Approved(1), Submitted(2), Draft(3));
+        object? payload = null;
+        _jobs.EnqueueCoalescedAsync<IRecalculationJob>(
+                Arg.Any<string>(), Arg.Do<object?>(p => payload = p), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns("IRecalculationJob~dep");
+
+        var jobId = await Trigger().RequestDependentsAsync(DocumentId, Period, CancellationToken.None);
+
+        Assert.Equal("IRecalculationJob~dep", jobId);
+        await _jobs.Received(1).EnqueueCoalescedAsync<IRecalculationJob>(
+            CalculationTrigger.DependentsTargetOf(DocumentId, Period),
+            Arg.Any<object?>(), Arg.Any<CancellationToken>(), null);
+        var json = System.Text.Json.JsonSerializer.Serialize(payload, System.Text.Json.JsonSerializerOptions.Web);
+        Assert.Equal(
+            $$"""{"documentId":{{DocumentId}},"periodKey":{{Period.Value}},"triggeredByUserId":null,"sheetDefId":null,"recalculateSubmitted":true}""",
+            json);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "B63")]
+    public async Task Залежний_де_затверджено_все_нуль_задач()
+    {
+        State(PeriodState.Open);
+        Sheets(Approved(1), Approved(2));
+
+        Assert.Null(await Trigger().RequestDependentsAsync(DocumentId, Period, CancellationToken.None));
+        await _jobs.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<IRecalculationJob>(
+            default!, default, default, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "B63")]
+    public async Task Залежний_зі_складом_затверджені_стани_але_аркуш_складу_без_стану_ставиться()
+    {
+        // Аркуш 3 складу ще не подавався (стану немає) — він чернетка, його треба рахувати.
+        State(PeriodState.Open);
+        Sheets(Approved(1), Approved(2));
+        var documents = Substitute.For<IDocumentStore>();
+        documents.GetIncludedSheetIdsAsync(DocumentId, Arg.Any<CancellationToken>()).Returns(IncludedThree);
+
+        var jobId = await new CalculationTrigger(_jobs, _periods, _workflow, documents)
+            .RequestDependentsAsync(DocumentId, Period, CancellationToken.None);
+
+        Assert.Equal("IRecalculationJob~auto", jobId);
+    }
+
+    [Theory]
+    [InlineData(PeriodState.Closed)]
+    [InlineData(PeriodState.Scheduled)]
+    [InlineData(null)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "B63")]
+    public async Task Залежний_у_закритому_чи_не_відкритому_періоді_нуль_задач(PeriodState? state)
+    {
+        State(state);
+        Sheets(Draft(1));
+
+        Assert.Null(await Trigger().RequestDependentsAsync(DocumentId, Period, CancellationToken.None));
+        await _jobs.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<IRecalculationJob>(
+            default!, default, default, default);
+    }
+
+    private void Sheets(params ApprovalState[] states)
+        => _workflow.GetSheetsAsync(DocumentId, Period, Arg.Any<CancellationToken>()).Returns(states);
+
+    private static ApprovalState Draft(int sheetDefId) => new(DocumentId, sheetDefId, Period.Value);
+
+    private static ApprovalState Submitted(int sheetDefId)
+    {
+        var state = Draft(sheetDefId);
+        state.Submit(userId: 9, new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc));
+        return state;
+    }
+
+    private static ApprovalState Approved(int sheetDefId)
+    {
+        var state = Submitted(sheetDefId);
+        state.Approve(userId: 10, new DateTime(2026, 2, 2, 0, 0, 0, DateTimeKind.Utc));
+        return state;
     }
 }

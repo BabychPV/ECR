@@ -130,8 +130,17 @@ public sealed class Hse400LandDependentsTriggerTests(SqlServerFixture sql) : DbJ
         Assert.Equal(0, await QueuedAsync(registryId));
     }
 
+    /// <summary>
+    /// ⛔ B63 (слово людини 07.11: «тільки погоджені не мають перераховуватися»): зміна джерела ставить перерахунок
+    /// чернетки І ПОДАНОГО залежного (з позначкою поданих, <c>RecalculateSubmitted</c>), а затверджений, закритий і
+    /// інший рік — ні.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ДОКАЗ (локально): <c>RegistryImpactRecalculationJob</c> → <c>trigger.RequestAsync</c> (як доти) — поданий
+    /// залежний не ставиться, червоний.
+    /// </remarks>
     [Fact]
-    public async Task Задача_року_ставить_лише_відкриті_й_неподані_залежні()
+    public async Task Задача_року_ставить_чернетку_й_поданий_залежний_а_затверджений_ні()
     {
         // ⚠ DataChangedAt довідника порожній навмисно: рядки dic.* не змінюються, зміну дає документ HSE400.
         var (registryId, _) = await NewRegistryAsync();
@@ -142,9 +151,15 @@ public sealed class Hse400LandDependentsTriggerTests(SqlServerFixture sql) : DbJ
         var otherYear = await ArrangeDependentAsync(registryId, PeriodState.Open, periodKey: 202501);
 
         var jobs = Substitute.For<IBackgroundJobScheduler>();
+        var payloads = new Dictionary<string, string>(StringComparer.Ordinal);
         jobs.EnqueueCoalescedAsync<IRecalculationJob>(
                 Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
-            .Returns("recalc-1");
+            .Returns(call =>
+            {
+                payloads[call.ArgAt<string>(0)] = System.Text.Json.JsonSerializer.Serialize(
+                    call.ArgAt<object?>(1), System.Text.Json.JsonSerializerOptions.Web);
+                return "recalc-1";
+            });
 
         await using (var db = Sql.CreateContext())
         {
@@ -157,16 +172,18 @@ public sealed class Hse400LandDependentsTriggerTests(SqlServerFixture sql) : DbJ
                 CancellationToken.None);
         }
 
-        await jobs.Received(1).EnqueueCoalescedAsync<IRecalculationJob>(
-            RecalculateDocumentHandler.TargetOf(open.DocumentId, open.PeriodKey),
-            Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
-        await jobs.Received(1).EnqueueCoalescedAsync<IRecalculationJob>(
-            Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
-        foreach (var skipped in new[] { closed, submitted, approved, otherYear })
+        // Рівно два: чернетка й поданий; обидва — з позначкою поданих (задача пише журнал і позначку погоджувачу).
+        Assert.Equal(
+            new[]
+            {
+                CalculationTrigger.DependentsTargetOf(open.DocumentId, open.PeriodKey),
+                CalculationTrigger.DependentsTargetOf(submitted.DocumentId, submitted.PeriodKey),
+            }.Order(StringComparer.Ordinal),
+            payloads.Keys.Order(StringComparer.Ordinal));
+        Assert.All(payloads.Values, json => Assert.Contains("\"recalculateSubmitted\":true", json, StringComparison.Ordinal));
+        foreach (var skipped in new[] { closed, approved, otherYear })
         {
-            await jobs.DidNotReceive().EnqueueCoalescedAsync<IRecalculationJob>(
-                RecalculateDocumentHandler.TargetOf(skipped.DocumentId, skipped.PeriodKey),
-                Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+            Assert.DoesNotContain(CalculationTrigger.DependentsTargetOf(skipped.DocumentId, skipped.PeriodKey), payloads.Keys);
         }
 
         await jobs.DidNotReceiveWithAnyArgs().EnqueueExclusiveAsync<IRecalculationJob>(default!, default, default, default);
